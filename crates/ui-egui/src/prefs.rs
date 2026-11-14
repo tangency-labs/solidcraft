@@ -1797,8 +1797,10 @@ preference_settings! {
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;
-    /// In the web viewport, a pen tap toggles an item or clears the selection on empty space.
-    pen_tap_toggles_selection: bool = false, PAGE_SKETCH;
+    /// Web app Pencil mode: pen taps toggle items and a pen double-tap takes the whole body or
+    /// sketch; finger touches in the view only navigate, and a finger double-tap on a flat face
+    /// starts a sketch on it. Off (the default): pens and fingers act as the mouse does.
+    pencil_mode: bool = false, PAGE_SKETCH;
     /// Prefer movable sketch points on exact selection ties; off keeps point insertion order.
     prefer_free_sketch_points: bool = true, PAGE_SKETCH;
     /// Opt in to displaying and selecting drawn 3D curve nodes as construction references.

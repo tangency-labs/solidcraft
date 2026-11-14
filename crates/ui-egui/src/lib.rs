@@ -222,6 +222,7 @@ pub(crate) mod open_meshing;
 pub mod operations;
 pub mod panel_runtime;
 pub mod params_dialog;
+pub mod pencil;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
@@ -3625,6 +3626,13 @@ impl SolveApp {
     /// capture hides the report waits for it (the control channel's typing too).
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
         self.raw_input_hook_with_pen(raw, None);
+    }
+
+    /// Process a frame with what the platform says about its taps (a pen tip lifted, a finger
+    /// down): Pencil mode first keeps a finger in the view from clicking there.
+    pub fn raw_input_hook_with_taps(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput, taps: pencil::PlatformTaps) {
+        pencil::filter(self, ctx, raw, taps.finger_down);
+        self.raw_input_hook_with_pen(raw, taps.pen_release);
     }
 
     /// Process a frame with a platform-identified pen-tip release in egui coordinates.

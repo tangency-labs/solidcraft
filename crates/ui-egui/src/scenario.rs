@@ -207,6 +207,11 @@ impl Harness {
 
     /// One frame with a release identified as a pen tip by the platform.
     pub fn frame_with_pen(&mut self, events: Vec<egui::Event>, pen_release: Option<egui::Pos2>) {
+        self.frame_with_taps(events, crate::pencil::PlatformTaps { pen_release, finger_down: None });
+    }
+
+    /// One frame with what the platform says about its taps (a pen tip lifted, a finger down).
+    pub fn frame_with_taps(&mut self, events: Vec<egui::Event>, taps: crate::pencil::PlatformTaps) {
         self.tick();
         let mut raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
@@ -215,7 +220,7 @@ impl Harness {
             events,
             ..Default::default()
         };
-        self.app.raw_input_hook_with_pen(&mut raw, pen_release);
+        self.app.raw_input_hook_with_taps(&self.ctx, &mut raw, taps);
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| {
             app.logic(ui.ctx());

@@ -310,6 +310,12 @@ pub struct ViewportState {
     /// The plane the grid was last drawn on while Preferences ▸ Grid follows the view is on
     /// (#1470), kept so the choice is hysteretic near the thresholds (#1993).
     pub(crate) grid_plane: std::sync::Mutex<GridPlane>,
+    /// Pencil mode's fingers on the view (`pencil::filter`).
+    pub(crate) fingers: crate::pencil::Fingers,
+    /// The layer the view was drawn in last frame, and its axes: a finger elsewhere is on
+    /// something over the view, which takes the tap.
+    pub(crate) layer: Option<egui::LayerId>,
+    pub(crate) axes: Option<Rect>,
 }
 
 /// Something under the cursor. The control channel reports it in the selection's own form
@@ -5666,6 +5672,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let hover_frozen = crate::navigation::hover_is_frozen(&input, app);
     let CameraInput { hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, inside, axes, pinch, pan, primary_nav, mode } =
         input;
+    app.viewport.layer = Some(ui.layer_id());
+    app.viewport.axes = Some(axes);
     app.viewport.physical_scale = ui.ctx().pixels_per_point();
     // Suppress-snap chord and manipulator-free prefs; Shift midpoint targeting while sketching.
     // Preview reselect uses Primary but is skipped while a manipulator drag is under way.
@@ -5876,6 +5884,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::frame_rate::paint(app, ui, &painter, overlay_rect);
 
     // ---- interaction ----
+    // Pencil mode: a finger double-tap on a planar face sketches on it (`pencil`).
+    if let Some(p) = app.viewport.fingers.double_tap.take()
+        && app.preferences.pencil_mode
+    {
+        crate::pencil::finger_double_tap(app, &proj, p);
+    }
     // A tool's click that moved on the way (#2448) clicks where the button is let go.
     if app.viewport.tool_click && resp.drag_stopped() {
         app.viewport.tool_click = false;
@@ -5982,7 +5996,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::tools::on_click(app, &proj, p, mods.shift);
     }
     if let Some(p) = hover.filter(|_| inside) {
-        let pen_select = app.preferences.pen_tap_toggles_selection && resp.clicked_by(egui::PointerButton::Primary) && app.pen_release == Some(p);
+        let pen_select = app.preferences.pencil_mode && resp.clicked_by(egui::PointerButton::Primary) && app.pen_release == Some(p);
         if app.tool.is_some() {
             crate::tools::on_hover(app, &proj, p, mods.shift);
         }
@@ -6101,6 +6115,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 }
             }
+        }
+        // A pen double-tap takes the whole body or sketch under it. Its two taps toggled the
+        // item there and back, so the selection before them gains the whole.
+        if pen_select
+            && resp.double_clicked()
+            && !held
+            && app.tool.is_none()
+            && app.dialog.is_none()
+            && let Some(items) = app.viewport.hover.as_ref().and_then(|hit| crate::pencil::whole(app, hit))
+        {
+            let _ = app.run("select.set", json!({ "items": items, "add": true }));
         }
         // Double-click a dimension: edit its value in place (a finished sketch's shown dimension
         // too, without editing the sketch).
@@ -8195,6 +8220,8 @@ mod tests {
             let button = |pressed| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers };
             h.frame_with(vec![Event::ModifiersChanged(modifiers), Event::PointerMoved(pos), button(true)]);
             h.frame_with_pen(vec![button(false)], pen.then_some(pos));
+            // Out of the double-tap window: a quick second tap is a double-tap.
+            h.frames(30);
         };
 
         tap(&mut h, a, true, Modifiers::NONE);
@@ -8202,7 +8229,7 @@ mod tests {
         assert_eq!(h.app.session.selection.len(), 1, "pen replaces the selection by default");
         let only_b = h.app.session.selection.clone();
 
-        h.app.preferences.pen_tap_toggles_selection = true;
+        h.app.preferences.pencil_mode = true;
         tap(&mut h, a, true, Modifiers::NONE);
         assert_eq!(h.app.session.selection.len(), 2);
         tap(&mut h, a, true, Modifiers::NONE);
@@ -8217,6 +8244,148 @@ mod tests {
         assert_eq!(h.app.session.selection, only_b, "the following mouse click replaces the selection");
         tap(&mut h, a, false, Modifiers::SHIFT);
         assert_eq!(h.app.session.selection.len(), 2, "Shift-click still adds a pick");
+    }
+
+    /// A 10 mm box in view, with Pencil mode on.
+    fn pencil_box() -> crate::scenario::Harness {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]})).unwrap();
+        h.app.animate_fit_all();
+        h.frames(30);
+        h.app.preferences.pencil_mode = true;
+        h
+    }
+
+    fn screen(h: &mut crate::scenario::Harness, world: [f64; 3]) -> Pos2 {
+        let [x, y] = h.at(&json!({ "world": world })).unwrap();
+        pos2(x as f32, y as f32)
+    }
+
+    /// A pen tap at `pos`: the press, then the release the platform names a pen tip's.
+    fn pen_tap(h: &mut crate::scenario::Harness, pos: Pos2) {
+        let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        h.frame_with(vec![egui::Event::PointerMoved(pos), button(true)]);
+        h.frame_with_pen(vec![button(false)], Some(pos));
+    }
+
+    /// A finger tap at `pos` as eframe's web runner reports it: `pointerdown` makes a press and
+    /// runs a frame at once (the platform reports a finger down), `touchstart` makes another
+    /// press with the touch, and `touchend` the release, the pointer gone and the touch's end.
+    fn finger_tap(h: &mut crate::scenario::Harness, pos: Pos2, id: u64) {
+        let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(id), phase, pos, force: None };
+        h.frame_with_taps(vec![egui::Event::PointerMoved(pos), button(true)], crate::pencil::PlatformTaps { pen_release: None, finger_down: Some(pos) });
+        h.frame_with(vec![button(true), touch(egui::TouchPhase::Start)]);
+        h.frame_with(vec![button(false), egui::Event::PointerGone, touch(egui::TouchPhase::End)]);
+    }
+
+    /// Pencil mode: a finger tap in the view selects nothing (fingers move the view); with the
+    /// preference off it selects as a click does, as before.
+    #[test]
+    fn pencil_mode_finger_taps_in_the_view_do_not_select() {
+        let mut h = pencil_box();
+        let top = screen(&mut h, [5.0, 5.0, 10.0]);
+        finger_tap(&mut h, top, 1);
+        h.frames(30);
+        assert!(h.app.session.selection.is_empty(), "{:?}", h.app.session.selection);
+        assert!(h.app.session.active_sketch.is_none());
+
+        h.app.preferences.pencil_mode = false;
+        finger_tap(&mut h, top, 2);
+        h.frames(30);
+        assert!(matches!(h.app.session.selection.as_slice(), [solidcraft_engine::Sel::Face { .. }]), "{:?}", h.app.session.selection);
+    }
+
+    /// Pencil mode: a finger double-tap on a flat face selects it and starts a sketch on it; one
+    /// on empty space, or two taps too far apart in time, do nothing.
+    #[test]
+    fn pencil_mode_finger_double_tap_on_a_face_sketches_on_it() {
+        let mut h = pencil_box();
+        let empty = h.app.viewport.rect.map(|r| r.left_top() + egui::vec2(r.width() * 0.85, r.height() * 0.8)).unwrap();
+        finger_tap(&mut h, empty, 1);
+        finger_tap(&mut h, empty, 2);
+        h.frames(30);
+        assert!(h.app.session.active_sketch.is_none(), "empty space starts no sketch");
+
+        let top = screen(&mut h, [5.0, 5.0, 10.0]);
+        finger_tap(&mut h, top, 3);
+        h.frames(40);
+        finger_tap(&mut h, top, 4);
+        h.frames(30);
+        assert!(h.app.session.active_sketch.is_none(), "two slow taps are not a double-tap");
+
+        finger_tap(&mut h, top, 5);
+        finger_tap(&mut h, top, 6);
+        h.frames(30);
+        assert!(h.app.session.active_sketch.is_some(), "a double-tap on the top face sketches on it");
+    }
+
+    /// Pencil mode: a pen double-tap selects the whole body under it, and keeps what was
+    /// selected before; on the sketch being edited it selects every curve of the sketch.
+    #[test]
+    fn pencil_mode_pen_double_tap_selects_the_whole_body_or_sketch() {
+        let mut h = pencil_box();
+        let top = screen(&mut h, [5.0, 5.0, 10.0]);
+        let side = screen(&mut h, [10.0, 5.0, 5.0]);
+        pen_tap(&mut h, top);
+        h.frames(30);
+        let top_face = h.app.session.selection.clone();
+        assert_eq!(top_face.len(), 1);
+        pen_tap(&mut h, side);
+        pen_tap(&mut h, side);
+        h.frames(30);
+        let mut want = top_face.clone();
+        want.push(solidcraft_engine::Sel::Body { name: "Body1".into() });
+        assert_eq!(h.app.session.selection, want);
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[0, 0], [20, 0]], "infer": false})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[0, 10], [20, 10]], "infer": false})).unwrap();
+        h.app.cam.distance = 80.0;
+        h.frames(4);
+        h.app.preferences.pencil_mode = true;
+        let line = screen(&mut h, [10.0, 0.0, 0.0]);
+        pen_tap(&mut h, line);
+        pen_tap(&mut h, line);
+        h.frames(30);
+        assert_eq!(h.app.session.selection.len(), 2, "both lines: {:?}", h.app.session.selection);
+        assert!(h.app.session.selection.iter().all(|s| matches!(s, solidcraft_engine::Sel::SketchCurve { .. })));
+    }
+
+    /// Pencil mode keeps a finger's presses where the finger is not on the open view (a panel,
+    /// the ribbon, a window over it), drops them while it is, and survives hostile positions.
+    #[test]
+    fn pencil_mode_filter_keeps_presses_off_the_view() {
+        let mut h = pencil_box();
+        let ctx = h.ctx.clone();
+        let press = |pos| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE };
+        let frame = |events| egui::RawInput { time: Some(100.0), events, ..Default::default() };
+        let presses = |raw: &egui::RawInput| raw.events.iter().filter(|e| matches!(e, egui::Event::PointerButton { .. })).count();
+
+        let ribbon = pos2(5.0, 5.0);
+        let mut raw = frame(vec![press(ribbon)]);
+        crate::pencil::filter(&mut h.app, &ctx, &mut raw, Some(ribbon));
+        assert_eq!(presses(&raw), 1, "a finger on the ribbon clicks it");
+
+        let top = screen(&mut h, [5.0, 5.0, 10.0]);
+        let mut raw = frame(vec![press(top)]);
+        crate::pencil::filter(&mut h.app, &ctx, &mut raw, Some(top));
+        assert_eq!(presses(&raw), 0, "a finger on the view does not");
+        // Its touch events never came: presses are the pointer's again after a while.
+        let mut raw = egui::RawInput { time: Some(102.0), events: vec![press(top)], ..Default::default() };
+        crate::pencil::filter(&mut h.app, &ctx, &mut raw, None);
+        let mut raw = egui::RawInput { time: Some(102.1), events: vec![press(top)], ..Default::default() };
+        crate::pencil::filter(&mut h.app, &ctx, &mut raw, None);
+        assert_eq!(presses(&raw), 1);
+
+        for bad in [pos2(f32::NAN, 0.0), pos2(f32::INFINITY, f32::NEG_INFINITY)] {
+            let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(9), phase, pos: bad, force: None };
+            let mut raw = frame(vec![press(bad), touch(egui::TouchPhase::Start), touch(egui::TouchPhase::Move), touch(egui::TouchPhase::End)]);
+            crate::pencil::filter(&mut h.app, &ctx, &mut raw, Some(bad));
+        }
     }
 
     /// A component dragged with its Move triad is drawn as a layer: its bodies' scene is built

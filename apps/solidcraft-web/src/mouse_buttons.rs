@@ -62,6 +62,9 @@ pub struct Tracker {
     pen_contact: Option<i32>,
     /// Position of a completed pen press, for matching eframe's primary release.
     pen_release: Option<Pos2>,
+    /// Where a finger last went down on the canvas, for the next frame. eframe runs a frame on
+    /// `pointerdown` before the touch events arrive, so the app learns of a finger from here.
+    finger_down: Option<Pos2>,
 }
 
 impl Tracker {
@@ -73,6 +76,18 @@ impl Tracker {
             self.pen_contact = None;
             self.pen_release = Some(pos);
         }
+    }
+
+    /// A finger went down on the canvas.
+    fn note_finger(&mut self, on_canvas: bool, pos: Pos2) {
+        if on_canvas {
+            self.finger_down = Some(pos);
+        }
+    }
+
+    /// Where a finger went down since the last frame, once.
+    fn take_finger_down(&mut self) -> Option<Pos2> {
+        self.finger_down.take()
     }
 
     /// A lost or cancelled contact must never be interpreted as a pen tap.
@@ -157,11 +172,12 @@ pub fn egui_down(ctx: &egui::Context) -> [bool; NUM_POINTER_BUTTONS] {
 }
 
 #[cfg(target_arch = "wasm32")]
-/// Add missing button events and return the position of a pen-tip release, if any.
-pub fn reconcile(tracker: &std::cell::RefCell<Tracker>, ctx: &egui::Context, raw: &mut egui::RawInput) -> Option<Pos2> {
+/// Add missing button events and return what the platform says about this frame's taps: where a
+/// pen tip was lifted and where a finger went down.
+pub fn reconcile(tracker: &std::cell::RefCell<Tracker>, ctx: &egui::Context, raw: &mut egui::RawInput) -> solidcraft_ui_egui::pencil::PlatformTaps {
     let mut tracker = tracker.borrow_mut();
-    let pen_release = tracker.take_pen_release(&raw.events);
-    let Some(observed) = tracker.take() else { return pen_release };
+    let taps = solidcraft_ui_egui::pencil::PlatformTaps { pen_release: tracker.take_pen_release(&raw.events), finger_down: tracker.take_finger_down() };
+    let Some(observed) = tracker.take() else { return taps };
     let pos = ctx.input(|i| i.pointer.interact_pos().or(i.pointer.latest_pos())).unwrap_or_default();
     let modifiers = ctx.input(|i| i.modifiers);
     let fixes = corrections(egui_down(ctx), &raw.events, observed, pos, modifiers);
@@ -169,7 +185,7 @@ pub fn reconcile(tracker: &std::cell::RefCell<Tracker>, ctx: &egui::Context, raw
         log::debug!("mouse buttons: {fixes:?} to match the browser's {:#07b}", observed.buttons);
     }
     raw.events.extend(fixes);
-    pen_release
+    taps
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -201,9 +217,21 @@ mod web {
                 name,
                 Box::new(move |e: web_sys::Event| {
                     let Some(e) = e.dyn_ref::<web_sys::PointerEvent>() else { return };
+                    // The canvas fills the page without padding. Match eframe's points at the
+                    // current UI zoom, with room for the browser's coordinate rounding.
+                    let at = || {
+                        let rect = canvas.get_bounding_client_rect();
+                        let zoom = ctx.zoom_factor();
+                        egui::pos2((e.client_x() as f32 - rect.left() as f32) / zoom, (e.client_y() as f32 - rect.top() as f32) / zoom)
+                    };
                     // Touches reach egui through touch events; their buttons aren't tracked here.
+                    // A finger going down on the canvas is noted for Pencil mode.
                     let source = e.pointer_type();
                     if source == "touch" {
+                        if name == "pointerdown" {
+                            let on_canvas = e.target().is_some_and(|t| canvas.is_same_node(t.dyn_ref::<web_sys::Node>()));
+                            tracker.borrow_mut().note_finger(on_canvas, at());
+                        }
                         return;
                     }
                     let mut down_on_canvas = false;
@@ -214,12 +242,7 @@ mod web {
                     }
                     let mut tracker = tracker.borrow_mut();
                     if source == "pen" && e.button() == 0 && name != "pointermove" {
-                        // The canvas fills the page without padding. Match eframe's points at
-                        // the current UI zoom, with room for the browser's coordinate rounding.
-                        let rect = canvas.get_bounding_client_rect();
-                        let zoom = ctx.zoom_factor();
-                        let pos = egui::pos2((e.client_x() as f32 - rect.left() as f32) / zoom, (e.client_y() as f32 - rect.top() as f32) / zoom);
-                        tracker.note_pen(e.pointer_id(), name == "pointerdown", down_on_canvas, pos);
+                        tracker.note_pen(e.pointer_id(), name == "pointerdown", down_on_canvas, at());
                     }
                     if tracker.note(Happened::Pointer { buttons: e.buttons(), down_on_canvas }) {
                         ctx.request_repaint();
@@ -318,6 +341,18 @@ mod tests {
 
     fn pointer(buttons: u16, down_on_canvas: bool) -> Happened {
         Happened::Pointer { buttons, down_on_canvas }
+    }
+
+    /// A finger down on the canvas is reported to the next frame once; one down elsewhere on the
+    /// page is not reported at all.
+    #[test]
+    fn finger_down_is_reported_once_and_only_on_the_canvas() {
+        let mut tracker = Tracker::default();
+        tracker.note_finger(false, P);
+        assert_eq!(tracker.take_finger_down(), None);
+        tracker.note_finger(true, P);
+        assert_eq!(tracker.take_finger_down(), Some(P));
+        assert_eq!(tracker.take_finger_down(), None);
     }
 
     /// A pen tap is matched once, and only after the same canvas contact releases.

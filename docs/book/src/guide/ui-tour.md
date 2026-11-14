@@ -83,8 +83,11 @@ view.
   off: scroll zooms like the wheel); mouse wheels zoom and the thumb wheel pans sideways.
   On Linux, pinch needs the native Wayland window system
   (see [Troubleshooting](troubleshooting.md)).
-  In the web app, turn on **Pen taps toggle selection** in **Preferences › Sketch** to add or
-  remove an item by tapping it with a pen such as Apple Pencil. Tap empty space to clear the selection.
+  In the web app, turn on **Pencil mode** in **Preferences › Sketch** to work with a pen such as
+  Apple Pencil and your fingers. A pen tap adds an item to the selection or removes it. A pen
+  double-tap selects the item's whole body, or its whole sketch. A pen tap on empty space clears
+  the selection. Fingers in the view only move the view, and a finger double-tap on a flat face
+  starts a sketch on it. Buttons and panels take finger taps as usual.
   To zoom with vertical two-finger scroll while holding a key, choose the key in Navigation › Zoom with two-finger scroll while holding (Cmd on macOS or Ctrl on Windows/Linux, Alt, or Control). It is off until you choose one.
   With the **Fusion** preset and two-finger pan enabled, hold **Shift** while scrolling with
   two fingers to orbit freely instead of panning. No click is needed. Releasing Shift returns
