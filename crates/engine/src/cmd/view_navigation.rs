@@ -6,11 +6,11 @@ use solidcraft_viewport::{Camera, StandardView};
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::schema::view_navigation::{
-    AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, DisplayToggleParams, DisplayToggleResult, GraphicsPreset, GraphicsPresetParams,
-    GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams, LayoutResult, NavigateParams,
-    NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool, NavigatorParams, NormalToParams, PresetQuality, RenderBrowser,
-    RenderFocus, RenderLive, RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams, TabStep, TabStepParams, ToolParams, ToolResult,
-    VisualStyle, VisualStyleParams, VisualStyleResult, ZoomTool,
+    AmbientOcclusionParams, AmbientOcclusionResult, BrowserTreeParams, BrowserTreeResult, CameraReply, DisplayToggleParams, DisplayToggleResult,
+    GraphicsPreset, GraphicsPresetParams, GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams,
+    LayoutResult, NavigateParams, NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool, NavigatorParams, NormalToParams,
+    PresetQuality, RenderBrowser, RenderFocus, RenderLive, RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams, TabStep,
+    TabStepParams, ToolParams, ToolResult, VisualStyle, VisualStyleParams, VisualStyleResult, ZoomTool,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
@@ -26,6 +26,7 @@ const TAB_STEP_CONTRACT: TypedContract<TabStepParams> = TypedContract::new();
 const STANDARD_VIEW_CONTRACT: TypedContract<StandardViewParams> = TypedContract::new();
 const NORMAL_TO_CONTRACT: TypedContract<NormalToParams> = TypedContract::new();
 const RIBBON_TABS_ONLY_CONTRACT: TypedContract<RibbonTabsOnlyParams> = TypedContract::new();
+const BROWSER_TREE_CONTRACT: TypedContract<BrowserTreeParams> = TypedContract::new();
 const LAYOUT_CONTRACT: TypedContract<LayoutParams> = TypedContract::new();
 const HISTORY_LAYOUT_CONTRACT: TypedContract<HistoryLayoutParams> = TypedContract::new();
 const GRAPHICS_PRESET_CONTRACT: TypedContract<GraphicsPresetParams> = TypedContract::new();
@@ -66,6 +67,10 @@ CommandSpec::new("view.status_items", "Viewport Status Items", crate::checked!("
     .icon("list").noundo().doc_only()
     .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_items::StatusItems>)
     .params("no parameters → {items}; persistent viewport effects, oldest slot first, with structured settings and executable clear requests; read-only, no model evaluation"),
+CommandSpec::new("view.browser", "Browser Tree", crate::checked!("view.browser", browser_tree))
+    .icon("list").noundo().doc_only()
+    .contract(&BROWSER_TREE_CONTRACT).output(output_schema_for::<BrowserTreeResult>)
+    .params("visible?: bool (omitted: toggle) → visible?; show or hide the Browser tree panel, the design's tree of components, bodies and sketches (window setting)"),
 CommandSpec::new("view.fit", "Fit", fit)
     .icon("fit").key("F6").noundo().doc_only().params("no parameters → frame the active canvas or selection; display only"),
 CommandSpec::new("view.home", "Home View", home)
@@ -379,6 +384,14 @@ fn ground_shadow(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.navigation_bar", "visible")
+}
+
+/// `view.browser`: the Browser tree panel is a window setting, so the engine only checks the
+/// request and echoes it. The window opens or closes the panel; the design is not changed.
+fn browser_tree(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.browser";
+    let request: BrowserTreeParams = serde_json::from_value(if p.is_null() { json!({}) } else { p.clone() }).map_err(|e| bad(cmd, e.to_string()))?;
+    serde_json::to_value(BrowserTreeResult { visible: request.visible, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn ribbon_tabs_only(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -752,6 +765,30 @@ mod tests {
         }
         for params in [json!({"on":0}), json!({"on":"true"}), json!({"on":[]}), json!({"unexpected":true}), json!(true), json!([])] {
             assert!(s.execute("view.ribbon_tabs_only", &params).is_err(), "{params}");
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
+    }
+
+    #[test]
+    fn browser_tree_echoes_the_request_without_editing_the_design() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        assert_eq!(s.execute("view.browser", &json!({})).unwrap(), json!({}));
+        assert_eq!(s.execute("view.browser", &Value::Null).unwrap(), json!({}));
+        for visible in [false, true] {
+            assert_eq!(s.execute("view.browser", &json!({"visible":visible})).unwrap(), json!({"visible":visible}));
+        }
+        for params in [
+            json!({"visible":0}),
+            json!({"visible":"true"}),
+            json!({"visible":null}),
+            json!({"visible":[]}),
+            json!({"unexpected":true}),
+            json!(true),
+            json!([]),
+        ] {
+            assert!(s.execute("view.browser", &params).is_err(), "{params}");
         }
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());
