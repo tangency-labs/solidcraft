@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer};
 
 /// The container folder plugin data lives in.
 pub const PREFIX: &str = "plugins/";
-/// At most this many files of plugin data in one design; past it the rest is left out.
+/// At most this many files of plugin data in one design; larger namespaces are refused.
 pub const MAX_FILES: usize = 1024;
 
 /// A plugin data key, `<plugin-id>/<path>`: a plugin id (1–64 lowercase letters, digits and
@@ -28,9 +28,13 @@ pub fn valid_key(key: &str) -> bool {
         })
 }
 
-/// Reads a design's `plugin_data`, leaving out keys that are not [`valid_key`] and anything past
-/// [`MAX_FILES`], so a hand-edited design still opens.
+/// Reads a design's `plugin_data`, leaving out keys that are not [`valid_key`]. More than
+/// [`MAX_FILES`] valid files is an error, so opening cannot silently lose plugin data.
 pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<BTreeMap<String, String>, D::Error> {
     let all = BTreeMap::<String, String>::deserialize(deserializer)?;
-    Ok(all.into_iter().filter(|(key, _)| valid_key(key)).take(MAX_FILES).collect())
+    let files: BTreeMap<_, _> = all.into_iter().filter(|(key, _)| valid_key(key)).take(MAX_FILES + 1).collect();
+    if files.len() > MAX_FILES {
+        return Err(serde::de::Error::custom(format!("plugin data exceeds {MAX_FILES} files")));
+    }
+    Ok(files)
 }

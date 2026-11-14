@@ -40,7 +40,11 @@ version is 0.x, a minor version may break the one before it.
 A plugin can call every command in the MCP catalog that its manifest lists. Commands that reach
 past the open design are grouped (`file`, `doc`, `app`, `plugin`) and refused unless the
 manifest asks for the group in `permissions.command_groups` and the user grants it.
-File access requires approved folder grants. The reserved `net` permission is
+File access requires matching manifest permissions and approved folder grants. Native commands
+in the `file` and `doc` groups stay within both those folders and any caller file scope.
+Approved plugin folders cannot widen that caller scope. Automatic design-folder scopes and
+default plugin file scopes exclude hidden children; explicit caller approvals remain effective
+where the plugin's folder grant also allows access. The reserved `net` permission is
 refused with a typed error. Traps, missing permissions, failed commands, limits
 and invalid manifest fields return structured errors. Later phases add
 import/export, author tooling and browser execution after the
@@ -60,6 +64,18 @@ resolve at once, with no restart. Installing runs no plugin code.
 
 ## Plugin data in a design
 
-A design container reserves `plugins/<plugin-id>/` for a plugin's own files. They are kept and
-saved back untouched when the plugin is missing, and opening a design never fails because a plugin
-is missing. The `storage` capability will let plugins read and write them.
+A design container reserves `plugins/<plugin-id>/` for a plugin's own files. A supported key is
+`<plugin-id>/<relative-path>`, at most 255 bytes including the id and separators. The id has
+1..64 lowercase ASCII letters, digits or internal hyphens. Each path component contains ASCII
+letters, digits, `.`, `_` or `-`; it must be nonempty and cannot start with `.`. Unsupported names
+are ignored.
+
+A design may hold at most 1024 valid, unique plugin files in total, across all plugins.
+Current-format data exceeding this limit is refused rather than truncated. An unreadable
+supported container part also causes an error rather than being omitted. Saving checks the
+file count before writing the container. Within these limits, valid, readable plugin files are
+kept and saved back byte for byte when the plugin is missing. A missing plugin itself never
+prevents a design from opening.
+
+The `storage` capability will let plugins read and write this data; this version exposes no
+plugin storage interface.

@@ -152,9 +152,10 @@ pub use imp::*;
 /// refuses paths outside it; without one (the user's own file dialogs, the CLI) nothing changes.
 ///
 /// Two kinds of folder: those named on purpose (`--allow-path`, the app's own recovery folder),
-/// where everything is reachable, and design folders (the open design's, and those an agent
-/// opened or saved a design in, #7181), which count only when [`design_folder_refusal`] has
-/// nothing against them and never reach hidden files or folders (`.env`, `.git`) inside them.
+/// where everything is reachable, and folders whose descendants must have visible names.
+/// Design folders (the open design's, and those an agent opened or saved a design in, #7181)
+/// count only when [`design_folder_refusal`] has nothing against them. Explicitly approved
+/// folders can also exclude hidden descendants through [`PathScope::new_visible_descendants`].
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PathScope {
     roots: Vec<std::path::PathBuf>,
@@ -241,6 +242,35 @@ impl PathScope {
         out
     }
 
+    /// Explicitly approved folders whose descendants must have visible names. The roots
+    /// themselves may be hidden or inside AppData: they were approved, not inferred from a design.
+    pub fn new_visible_descendants(roots: impl IntoIterator<Item = std::path::PathBuf>) -> PathScope {
+        let mut out = PathScope::default();
+        for r in roots.into_iter().filter_map(|r| canonical(&r)) {
+            if !out.design_roots.contains(&r) {
+                out.design_roots.push(r);
+            }
+        }
+        out
+    }
+
+    /// Confine access to paths accepted by both scopes, retaining hidden-name restrictions.
+    pub fn intersect(&self, other: &PathScope) -> PathScope {
+        let mut out = PathScope::default();
+        for root in self.roots.iter().chain(&self.design_roots).chain(&other.roots).chain(&other.design_roots) {
+            if !self.contains(root) || !other.contains(root) {
+                continue;
+            }
+            // All descendants count only when both scopes have an explicit ancestor.
+            let explicit = self.roots.iter().any(|r| root.starts_with(r)) && other.roots.iter().any(|r| root.starts_with(r));
+            let roots = if explicit { &mut out.roots } else { &mut out.design_roots };
+            if !roots.contains(root) {
+                roots.push(root.clone());
+            }
+        }
+        out
+    }
+
     /// Also the folder of the design at `path` (the open design), when
     /// [`design_folder_refusal`] allows it; hidden entries inside it stay out of reach. It is the
     /// folder of the file as [`PathScope::check`] resolves it: a link to a design elsewhere puts
@@ -290,7 +320,7 @@ impl PathScope {
         &self.roots
     }
 
-    /// The design folders that count.
+    /// The folders whose descendants must have visible names.
     pub fn design_roots(&self) -> &[std::path::PathBuf] {
         &self.design_roots
     }
@@ -1049,6 +1079,85 @@ mod tests {
         assert!(scope.check(&file(&dirs[0])).is_err(), "the oldest gave way");
         assert!(scope.check(&file(&base.join(".hidden"))).is_err(), "a hidden folder never counts");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn path_scope_intersections_preserve_explicit_and_visible_descendant_permissions() {
+        use super::PathScope;
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let base = (0_u64..)
+            .find_map(|n| {
+                let path = super::temp_dir().join(format!("solidcraft-vfs-intersection-{}-{n}", std::process::id()));
+                match std::fs::create_dir(&path) {
+                    Ok(()) => Some(path),
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => None,
+                    Err(e) => panic!("create fixture {}: {e}", path.display()),
+                }
+            })
+            .unwrap();
+        let _cleanup = Cleanup(base.clone());
+        let root = base.join("project");
+        let nested = root.join("nested");
+        let hidden = root.join(".hidden");
+        let other = base.join("other");
+        let approved = base.join(".settings/AppData/granted");
+        for dir in [&nested.join(".private"), &hidden.join(".private"), &root.join(".other"), &other, &approved.join(".private")] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let check = |scope: &PathScope, path: std::path::PathBuf, allowed: bool| {
+            assert_eq!(scope.check(&path.to_string_lossy()).is_ok(), allowed, "{} in {scope:?}", path.display());
+        };
+        let explicit = PathScope::new([root.clone()]);
+        let automatic = PathScope::default().with_design_folder(&root);
+        assert!(!automatic.design_roots().is_empty(), "fixture is an eligible automatic design folder");
+
+        let disjoint = explicit.intersect(&PathScope::new([other.clone()]));
+        check(&disjoint, root.join("new.sc"), false);
+        check(&disjoint, other.join("new.sc"), false);
+
+        let overlap = explicit.intersect(&PathScope::new([nested.clone()]));
+        check(&overlap, nested.join("new.sc"), true);
+        check(&overlap, nested.join(".private/new.sc"), true);
+        check(&overlap, root.join("new.sc"), false);
+
+        let restricted = explicit.intersect(&automatic);
+        check(&restricted, root.join("new.sc"), true);
+        check(&restricted, hidden.join("new.sc"), false);
+        check(&restricted, root.join(".env"), false);
+        let reverse = automatic.intersect(&explicit);
+        check(&reverse, root.join("new.sc"), true);
+        check(&reverse, hidden.join("new.sc"), false);
+
+        let narrow_visible = PathScope::new([nested.clone()]).intersect(&automatic);
+        check(&narrow_visible, nested.join("new.sc"), true);
+        check(&narrow_visible, nested.join(".private/new.sc"), false);
+        check(&narrow_visible, root.join("new.sc"), false);
+
+        // A grant cannot override an automatic caller's hidden-folder refusal.
+        let hidden_grant = PathScope::new([hidden.clone()]).intersect(&automatic);
+        check(&hidden_grant, hidden.join("new.sc"), false);
+
+        // An explicit caller exception survives intersection with a broader approved grant.
+        let exception = PathScope::new([hidden.clone()]).with_design_folder(&root).intersect(&explicit);
+        check(&exception, root.join("new.sc"), true);
+        check(&exception, hidden.join("new.sc"), true);
+        check(&exception, hidden.join(".private/new.sc"), true);
+        check(&exception, root.join(".other/new.sc"), false);
+
+        // Inferred design-folder eligibility must not reject an explicitly approved hidden root.
+        let visible = PathScope::new_visible_descendants([approved.clone()]);
+        check(&visible, approved.join("new.sc"), true);
+        check(&visible, approved.join(".private/new.sc"), false);
+        check(&visible, base.join("other/new.sc"), false);
+        let explicit_approved = PathScope::new([approved.clone()]);
+        let approved_intersection = explicit_approved.intersect(&visible);
+        check(&approved_intersection, approved.join("new.sc"), true);
+        check(&approved_intersection, approved.join(".private/new.sc"), false);
     }
 
     /// A save follows a symbolic link to the file it points to (#845), so the link's target is

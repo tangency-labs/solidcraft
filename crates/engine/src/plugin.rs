@@ -232,7 +232,13 @@ impl PluginHost for SolidCraftHost {
         }
         // Only a granted `file` or `doc` command reaches files, and only the folders granted for it.
         let scope = match group {
-            Some("file" | "doc") => solidcraft_io::vfs::PathScope::new(self.file_folders.iter().cloned()),
+            Some("file" | "doc") => {
+                let folders = self.file_folders.iter().cloned();
+                match solidcraft_io::vfs::current_scope() {
+                    Some(caller) => solidcraft_io::vfs::PathScope::new(folders).intersect(&caller),
+                    None => solidcraft_io::vfs::PathScope::new_visible_descendants(folders),
+                }
+            }
             _ => Default::default(),
         };
         let s = self.transaction.as_mut().ok_or_else(|| HostError::CommandFailed { command: name.into(), reason: "no active transaction".into() })?;

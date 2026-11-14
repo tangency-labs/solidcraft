@@ -233,6 +233,11 @@ fn write_container(
     budget: usize,
     provenance: Option<&ProvenanceSave<'_>>,
 ) -> Result<Vec<u8>> {
+    if doc.plugin_data.keys().filter(|key| solidcraft_doc::plugin_data::valid_key(key)).take(solidcraft_doc::plugin_data::MAX_FILES + 1).count()
+        > solidcraft_doc::plugin_data::MAX_FILES
+    {
+        return Err(invalid(format!("plugin data exceeds {} files", solidcraft_doc::plugin_data::MAX_FILES)));
+    }
     doc.render.validate().map_err(invalid)?;
     let mut writer = PackageWriter::new();
     if provenance.is_some() {
@@ -929,18 +934,18 @@ fn plugin_part(name: &str) -> Option<&str> {
     name.strip_prefix(solidcraft_doc::plugin_data::PREFIX).filter(|key| solidcraft_doc::plugin_data::valid_key(key))
 }
 
-/// Plugin data: each `plugins/<plugin-id>/` part, kept as it is whether or not the plugin is
-/// installed. One that does not read is left out; the design opens all the same.
-fn hydrate_plugin_data<R: Read + Seek>(doc: &mut Document, reader: &mut PackageReader<R>) {
+/// Plugin data: each valid `plugins/<plugin-id>/` part, kept whether or not the plugin is
+/// installed. Refuse an unreadable or oversized namespace rather than opening a partial one.
+fn hydrate_plugin_data<R: Read + Seek>(doc: &mut Document, reader: &mut PackageReader<R>) -> Result<()> {
     for name in reader.part_names() {
         let Some(key) = plugin_part(&name) else { continue };
         if doc.plugin_data.len() >= solidcraft_doc::plugin_data::MAX_FILES && !doc.plugin_data.contains_key(key) {
-            break;
+            return Err(invalid(format!("plugin data exceeds {} files", solidcraft_doc::plugin_data::MAX_FILES)));
         }
-        if let Ok(bytes) = reader.limited_part(&name, part_limit(&name)) {
-            doc.plugin_data.insert(key.to_string(), solidcraft_doc::canvas::base64_encode(&bytes));
-        }
+        let bytes = reader.limited_part(&name, part_limit(&name))?;
+        doc.plugin_data.insert(key.to_string(), solidcraft_doc::canvas::base64_encode(&bytes));
     }
+    Ok(())
 }
 
 /// A `container.json` that says only a format this build writes or wrote.
@@ -1030,10 +1035,21 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         });
         doc.newer_file = Some(Arc::new(file));
     }
+    // A newer file can keep an oversized JSON namespace opaque. Hydrating parts would edit
+    // its empty typed map and prevent that raw section from being restored by a JSON save.
+    if doc.newer_file.is_some()
+        && metadata.get("plugin_data").and_then(Value::as_object).is_some_and(|files| {
+            files.keys().filter(|key| solidcraft_doc::plugin_data::valid_key(key)).take(solidcraft_doc::plugin_data::MAX_FILES + 1).count()
+                > solidcraft_doc::plugin_data::MAX_FILES
+        })
+        && reader.part_names().iter().any(|name| plugin_part(name).is_some())
+    {
+        return Err(invalid("plugin data cannot combine an oversized opaque JSON namespace with container parts"));
+    }
     if doc.newer_file.is_some() {
         hydrate_newer(&mut doc, &metadata, container, reader)?;
     }
-    hydrate_plugin_data(&mut doc, reader);
+    hydrate_plugin_data(&mut doc, reader)?;
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let value = metadata.get("features").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing feature metadata"))?;
         match &mut feature.kind {
@@ -2274,6 +2290,84 @@ mod tests {
         let from_json = Document::from_json(&json).unwrap();
         assert_eq!(from_json.plugin_data, opened.plugin_data);
         assert_eq!(parts(&write_design_container(&from_json).unwrap())["plugins/gear-maker/cache/table.bin"], binary);
+    }
+
+    #[test]
+    fn plugin_data_container_preserves_every_file_at_the_limit() {
+        let mut doc = Document::new("Plugin files without an installed plugin");
+        for i in 0..solidcraft_doc::plugin_data::MAX_FILES {
+            doc.plugin_data.insert(format!("uninstalled-plugin/file-{i:04}.bin"), solidcraft_doc::canvas::base64_encode(&i.to_le_bytes()));
+        }
+        let input = write_design_container(&doc).unwrap();
+        let opened = crate::read_design(&input).unwrap();
+        assert_eq!(opened.plugin_data, doc.plugin_data);
+        let resaved = parts(&write_design_container(&opened).unwrap());
+        assert_eq!(resaved.keys().filter(|name| name.starts_with("plugins/")).count(), solidcraft_doc::plugin_data::MAX_FILES);
+        for (key, encoded) in &doc.plugin_data {
+            assert_eq!(resaved[&format!("plugins/{key}")], solidcraft_doc::canvas::base64_decode(encoded).unwrap());
+        }
+    }
+
+    #[test]
+    fn plugin_data_container_refuses_excess_valid_files() {
+        let doc = Document::new("Too many opaque plugin files");
+        let mut entries = parts(&write_design_container(&doc).unwrap());
+        // Build the input independently of the writer's own policy check.
+        for i in 0..=solidcraft_doc::plugin_data::MAX_FILES {
+            entries.insert(format!("plugins/uninstalled-plugin/file-{i:04}.bin"), i.to_le_bytes().to_vec());
+        }
+        assert!(
+            matches!(crate::read_design(&package(&entries)), Err(IoError::Invalid(message)) if message.contains("plugin")),
+            "a valid excess container part must not be silently omitted from an opened design"
+        );
+    }
+
+    #[test]
+    fn plugin_data_container_writer_refuses_excess_valid_files() {
+        let mut doc = Document::new("Too many opaque plugin files");
+        for i in 0..=solidcraft_doc::plugin_data::MAX_FILES {
+            doc.plugin_data.insert(format!("uninstalled-plugin/file-{i:04}.bin"), solidcraft_doc::canvas::base64_encode(&i.to_le_bytes()));
+        }
+        assert!(
+            matches!(write_design_container(&doc), Err(IoError::Invalid(message)) if message.contains("plugin")),
+            "saving must not create a container whose valid plugin files this build cannot reopen without loss"
+        );
+    }
+
+    #[test]
+    fn plugin_data_container_refuses_an_unreadable_valid_part() {
+        let doc = Document::new("Unreadable opaque plugin file");
+        let mut entries = parts(&write_design_container(&doc).unwrap());
+        let name = "plugins/uninstalled-plugin/state.bin";
+        entries.insert(name.into(), b"opaque plugin sentinel".to_vec());
+        let mut bytes = package(&entries);
+        assert!(crate::read_design(&bytes).unwrap().plugin_data.contains_key("uninstalled-plugin/state.bin"));
+        let offset = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap().by_name(name).unwrap().data_start().unwrap() as usize;
+        bytes[offset] ^= 0xff;
+        let mut probe = PackageReader::new(Cursor::new(&bytes)).unwrap();
+        assert!(probe.limited_part(name, part_limit(name)).is_err(), "the fixture must fail while reading a valid plugin part");
+        assert!(matches!(crate::read_design(&bytes), Err(IoError::Invalid(_))), "an unreadable plugin part must refuse the document");
+    }
+
+    #[test]
+    fn plugin_data_newer_container_refuses_opaque_overflow_with_parts() {
+        let mut doc = Document::new("Newer opaque plugin files");
+        for i in 0..=solidcraft_doc::plugin_data::MAX_FILES {
+            doc.plugin_data.insert(format!("uninstalled-plugin/file-{i:04}.bin"), solidcraft_doc::canvas::base64_encode(&i.to_le_bytes()));
+        }
+        let mut raw: Value = serde_json::from_str(&doc.to_json()).unwrap();
+        raw["format"] = json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1));
+        let mut entries = parts(&write_design_container(&Document::new("Container shell")).unwrap());
+        entries.insert("document.json".into(), serde_json::to_vec(&raw).unwrap());
+        // The opaque section alone remains readable and is preserved by the existing newer-file path.
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        let saved: Value = serde_json::from_str(&opened.to_json()).unwrap();
+        assert_eq!(saved["plugin_data"], raw["plugin_data"]);
+        entries.insert("plugins/uninstalled-plugin/from-container.bin".into(), b"separate opaque part".to_vec());
+        assert!(
+            matches!(crate::read_design(&package(&entries)), Err(IoError::Invalid(message)) if message.contains("plugin")),
+            "hydrating a separate part must not replace the opaque namespace's preservation witness"
+        );
     }
 
     /// A newer build's point cloud with numbers, an edge and a face (#14572): a field this build
