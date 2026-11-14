@@ -1425,6 +1425,39 @@ fn fold_through_cut_outs() {
     assert!((volume(&mut c) - want).abs() < 0.05, "{} vs {want}", volume(&mut c));
 }
 
+/// A concentric hole reaching the bend zone must keep its curved boundary on the bend's
+/// spline side face. At diameter 45 mm the fold used to fail while sewing its pcurve (#16278).
+#[test]
+fn fold_annular_disk_when_the_hole_reaches_the_bend() {
+    for diameter in [44.0_f64, 45.0, 46.0] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 50}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": diameter / 2.0}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": "2.5 mm", "operation": "new", "profiles": [0]}));
+        let want_flat = PI * (50.0_f64.powi(2) - (diameter / 2.0).powi(2)) * 2.5;
+        let before = volume(&mut s);
+        assert!((before - want_flat).abs() < 0.05, "diameter {diameter}: {before} vs {want_flat}");
+        run(&mut s, "sheet.convert", json!({"body": "Body1", "face": [0, 45, 2.5]}));
+        run(&mut s, "sheet.fold", json!({"points": [[-60, -25, 2.5], [60, -25, 2.5]], "angle": "90 deg", "fixed": [0, 40, 2.5]}));
+        assert_eq!(s.model.state().bodies.len(), 1, "diameter {diameter}");
+        let body = &s.model.state().bodies[0].body;
+        assert!(body.validity().is_empty(), "diameter {diameter}: {:?}", body.validity());
+        assert_eq!(body.shell_count(), 1, "diameter {diameter}");
+        // The farthest point of the moving leg starts 25 mm from the line. The centred
+        // bend consumes half its allowance before the leg extends past the outer tangent;
+        // the total Z span includes the fixed panel's thickness, whichever way it turns.
+        let want_height = 2.5 + 2.5 + 25.0 - FRAC_PI_2 * (2.5 + 0.44 * 2.5) / 2.0;
+        let bounds = bbox(&mut s);
+        let height = bounds["max"][2].as_f64().unwrap_or(f64::NAN) - bounds["min"][2].as_f64().unwrap_or(f64::NAN);
+        assert!((height - want_height).abs() < 0.05, "diameter {diameter}: {height} vs {want_height}");
+        run(&mut s, "sheet.unfold", json!({}));
+        let unfolded = volume(&mut s);
+        assert!((unfolded - want_flat).abs() < 0.05, "diameter {diameter}: unfolded {unfolded} vs {want_flat}");
+    }
+}
+
 #[test]
 fn flange_edges_are_named_and_follow_the_base_sketch() {
     let mut s = Session::default();

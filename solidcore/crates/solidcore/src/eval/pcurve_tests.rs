@@ -1224,9 +1224,9 @@ fn an_edge_along_the_rim_of_a_band_winding_close_to_itself_stays_on_its_turn() {
 
 /// A curve weaving across a thread flank, smooth through a knot of full multiplicity (one smooth
 /// curve with the knot inserted three times, as SMLib's intersection curves come), has no
-/// closed-form pcurve on the flank: it is refused, never fitted (SMLib gives its own trims).
+/// closed-form pcurve on the flank: the exact-only API leaves it unresolved.
 #[test]
-fn a_curve_weaving_across_a_thread_flank_is_refused() {
+fn a_curve_weaving_across_a_thread_flank_has_no_exact_pcurve() {
     let (surface, _) = thread_flank();
     let s = SurfaceEval::new(&surface).unwrap();
     // Along the flank as it winds, a third of a turn (u = t), weaving a little across it.
@@ -1256,10 +1256,7 @@ fn a_curve_weaving_across_a_thread_flank_is_refused() {
             .map(|h| [h[0] / h[3], h[1] / h[3], h[2] / h[3]])
             .collect(),
     };
-    // A curve weaving across the flank has no closed-form pcurve there: refused, never fitted.
-    assert!(
-        matches!(pcurves(&surface, &one(&weave, [a, b]), 1e-3), Err(Error::Failed(m)) if m.contains("no exact pcurve"))
-    );
+    assert!(exact_pcurves(&surface, &one(&weave, [a, b]), 1e-3, None).unwrap()[0][0].is_none());
 }
 
 /// The B-spline of degree `p` through `points` at `params` (knots by averaging, NURBS Book §9.2.1).
@@ -1736,4 +1733,129 @@ fn restarting_a_curve_returns_typed_errors_with_its_operation() {
             ..
         }
     ));
+}
+
+/// A quarter-circle trace whose height is t² has the curved pcurve (t, t²) on the
+/// cylinder's rational spline form. The degree-four edge is synthetic: its x, y and weight
+/// are the degree-elevated quadratic circle, and its z numerator is t² times that weight.
+#[test]
+fn nonlinear_spline_pcurves_on_a_rational_cylinder_are_certified() {
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let choose2 = [1., 2., 1.];
+    let choose4 = [1., 4., 6., 4., 1.];
+    for origin in [[0., 0., 0.], [13., -7., 19.]] {
+        let (surface, _) = form::surface(
+            &Surface::Cylinder {
+                frame: about_z(origin, false),
+                radius: 3.,
+            },
+            [[0., FRAC_PI_2], [0., 2.]],
+        )
+        .unwrap();
+        let circle = [[3., 0., 1.], [3. * w, 3. * w, w], [0., 3., 1.]];
+        let mut homogeneous = Vec::new();
+        for (i, denominator) in choose4.iter().copied().enumerate() {
+            let mut h = [0.; 4];
+            for (j, point) in circle.iter().enumerate() {
+                if i >= j && i - j <= 2 {
+                    let factor = choose2[j] * choose2[i - j] / denominator;
+                    h[0] += factor * point[0];
+                    h[1] += factor * point[1];
+                    h[3] += factor * point[2];
+                    if i - j == 2 {
+                        h[2] += factor * point[2];
+                    }
+                }
+            }
+            for axis in 0..3 {
+                h[axis] += origin[axis] * h[3];
+            }
+            homogeneous.push(h);
+        }
+        let curve = Curve::RationalSpline {
+            knots: vec![0., 0., 0., 0., 0., 1., 1., 1., 1., 1.],
+            homogeneous: homogeneous.clone(),
+        };
+        for interval in [[0., 1.], [0.13, 0.87]] {
+            let uses = one(&curve, interval);
+            assert!(exact_pcurves(&surface, &uses, 1e-6, None).unwrap()[0][0].is_none());
+            let pc = &pcurves(&surface, &uses, 1e-6).unwrap()[0][0];
+            assert!(lift_error(&surface, &curve, interval, pc) <= 0.5e-6);
+            for t in [interval[0], 0.5, interval[1]] {
+                let uv = eval(pc, t).unwrap();
+                assert!((uv[0] - t).abs() < 1e-6, "{t}: {uv:?}");
+                // Cylinder form v is height in mm, independent of the chosen v extent.
+                assert!((uv[1] - t * t).abs() < 1e-6, "{t}: {uv:?}");
+            }
+        }
+        // Move the entire curve outside the cylinder: no amount of fitting in parameters
+        // can certify a pcurve within 1 µm of an edge at least 0.1 mm from the surface.
+        for h in &mut homogeneous {
+            h[0] = origin[0] * h[3] + (h[0] - origin[0] * h[3]) * 1.1;
+            h[1] = origin[1] * h[3] + (h[1] - origin[1] * h[3]) * 1.1;
+        }
+        let off = Curve::RationalSpline {
+            knots: vec![0., 0., 0., 0., 0., 1., 1., 1., 1., 1.],
+            homogeneous,
+        };
+        assert!(pcurves(&surface, &one(&off, [0., 1.]), 1e-6).is_err());
+    }
+}
+
+/// On the polynomial parabolic cylinder S(u,v)=(u,v,u²), C(t)=(t,t²,t²) has
+/// pcurve (t,t²). This also exercises nonrational surfaces and edges.
+#[test]
+fn nonlinear_spline_pcurves_on_a_polynomial_surface_are_certified() {
+    let surface = Surface::Spline {
+        u_knots: vec![0., 0., 0., 1., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: vec![
+            vec![[0., 0., 0.], [0., 1., 0.]],
+            vec![[0.5, 0., 0.], [0.5, 1., 0.]],
+            vec![[1., 0., 1.], [1., 1., 1.]],
+        ],
+    };
+    let curve = Curve::Spline {
+        knots: vec![0., 0., 0., 1., 1., 1.],
+        points: vec![[0., 0., 0.], [0.5, 0., 0.], [1., 1., 1.]],
+    };
+    let uses = one(&curve, [0., 1.]);
+    assert!(exact_pcurves(&surface, &uses, 1e-6, None).unwrap()[0][0].is_none());
+    let pc = &pcurves(&surface, &uses, 1e-6).unwrap()[0][0];
+    assert!(lift_error(&surface, &curve, [0., 1.], pc) <= 0.5e-6);
+}
+
+/// A polynomial edge on a bend is an approximation to its circular definition. This
+/// quadratic parabola crosses the rational cylinder's quarter knot at t=1/2, while its
+/// radius differs from 3 mm by at most 3 a⁴/8 = 3.75e-9 mm (well inside the tolerance).
+#[test]
+fn nonlinear_spline_pcurves_cross_a_rational_cylinders_quarter_knot() {
+    let (surface, _) = form::surface(
+        &Surface::Cylinder {
+            frame: about_z([0.; 3], false),
+            radius: 3.,
+        },
+        [[-0.5, 0.5], [0., 2.]],
+    )
+    .unwrap();
+    let (r, a) = (3., 0.01);
+    let curve = Curve::Spline {
+        knots: vec![0., 0., 0., 1., 1., 1.],
+        points: vec![
+            [r * (1. - 0.5 * a * a), -r * a, 1.],
+            [r * (1. + 0.5 * a * a), 0., -1.],
+            [r * (1. - 0.5 * a * a), r * a, 1.],
+        ],
+    };
+    let uses = one(&curve, [0., 1.]);
+    assert!(exact_pcurves(&surface, &uses, 1e-6, None).unwrap()[0][0].is_none());
+    let pc = &pcurves(&surface, &uses, 1e-6).unwrap()[0][0];
+    assert!(lift_error(&surface, &curve, [0., 1.], pc) <= 0.5e-6);
+    for t in [0., 0.25, 0.5, 0.75, 1.] {
+        let uv = eval(pc, t).unwrap();
+        assert!(
+            (uv[1] - (2.0_f64 * t - 1.).powi(2)).abs() < 1e-6,
+            "{t}: {uv:?}"
+        );
+    }
 }
