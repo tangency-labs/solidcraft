@@ -297,7 +297,9 @@ fn a_hinge_gap_is_measured_on_the_trimmed_faces_at_every_angle() {
     for deg in 30..=80 {
         run(&mut s, "solid.move", json!({"bodies": ["Temple"], "axis": [0, 0, 1], "angle": "1 deg"}));
         let r = run(&mut s, "inspect.clearance", json!({"bodies": ["Temple"], "against": ["Frame"], "clearance": 0.5, "nearest": 1}));
+        assert_eq!(r["unchecked"], json!([]), "{deg}°: {r}");
         let near = &r["near"][0];
+        assert!(near.get("exact").is_none(), "{deg}°: measured on the exact faces: {r}");
         assert!((f(&near["distance_mm"]) - 0.2).abs() < 1e-4, "{deg}°: {r}");
         assert!((f(&r["nearest"]["Temple"][0]["distance_mm"]) - 0.2).abs() < 1e-4, "{deg}°: {r}");
         // The witness points lie on the bodies: the frame's at a band end, the knuckle's at one

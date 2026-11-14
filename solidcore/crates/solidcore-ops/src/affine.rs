@@ -51,6 +51,53 @@ pub fn rotation(point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix> {
     taken(Transform::rotation(vec3(point), vec3(axis), angle))
 }
 
+/// The orthonormal axes along `x` and in the plane of `x` and `y` (on `y`'s side),
+/// using the kernel's [`Vec3::make_unit_ortho_vectors`]. If `y` is parallel to `x` or has
+/// no length, the kernel chooses a perpendicular direction. This restores a unit frame after
+/// carrying its axes through a rigid motion.
+///
+/// # Errors
+/// [`Error::Argument`] for non-finite axes or an axis the kernel refuses.
+pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2]> {
+    if !finite(&x) || !finite(&y) {
+        return Err(Error::Argument);
+    }
+    let [x, y, _] = vec3(x)
+        .make_unit_ortho_vectors(Some(vec3(y)))
+        .map_err(|_| Error::Argument)?;
+    Ok([[x.x, x.y, x.z], [y.x, y.y, y.z]])
+}
+
+/// Carry planar axes by a rigid `matrix`, keeping UV scales and keeping square source
+/// axes square, through [`Transform::rigid_plane_axes`]. The caller establishes that the
+/// matrix is a rigid motion; skew source axes retain their parametrisation.
+///
+/// # Errors
+/// [`Error::Argument`] for axes or a map the kernel refuses.
+pub fn rigid_plane_axes(matrix: &Matrix, u: [f64; 3], v: [f64; 3]) -> Result<[[f64; 3]; 2]> {
+    let [u, v] = Transform { m: *matrix }
+        .rigid_plane_axes(vec3(u), vec3(v))
+        .map_err(|_| Error::Argument)?;
+    Ok([[u.x, u.y, u.z], [v.x, v.y, v.z]])
+}
+
+/// Carry a plane given by its origin and two points through a rigid motion, as an origin
+/// and axes, through [`Transform::rigid_plane_through`]. The caller establishes a rigid map.
+///
+/// # Errors
+/// [`Error::Argument`] for coordinates or a map the kernel refuses.
+pub fn rigid_plane_through(
+    matrix: &Matrix,
+    origin: [f64; 3],
+    u: [f64; 3],
+    v: [f64; 3],
+) -> Result<([f64; 3], [[f64; 3]; 2])> {
+    let (o, [u, v]) = Transform { m: *matrix }
+        .rigid_plane_through(vec3(origin), vec3(u), vec3(v))
+        .map_err(|_| Error::Argument)?;
+    Ok(([o.x, o.y, o.z], [[u.x, u.y, u.z], [v.x, v.y, v.z]]))
+}
+
 /// The scale by `factor` in every direction about `centre`, which it keeps.
 ///
 /// # Errors
