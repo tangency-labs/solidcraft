@@ -236,6 +236,10 @@ pub struct ViewportState {
     /// The origin or construction plane whose browser row is under the cursor: lit as if the
     /// pointer were on it in the view.
     pub hover_plane: Option<String>,
+    /// The Origin item whose Browser row is under the cursor (`O`, `X`, `XY` for the design's,
+    /// `o:<ids>/origin/<item>` for a placement's): shown in the view, hidden or not (#15658). Only
+    /// an Origin row sets it, so a feature that has an item's name is never taken for it.
+    pub hover_origin: Option<String>,
     /// Joint whose browser row is under the cursor: its glyph is drawn in the hover colour.
     pub hover_joint: Option<u64>,
     /// The point the orbit under way turns around (Preferences: orbit around the cursor, or the
@@ -2690,17 +2694,12 @@ pub(crate) fn component_origin_item<'a>(app: &SolveApp, name: &'a str) -> Option
 
 /// The Origin item whose Browser row is under the pointer, when the view shows it on hover
 /// (#15658): its name (`O`, `X` or `XY` for the design's Origin, `o:<ids>/origin/<item>` for a
-/// placement's) and the item. `None` with the preference off, for any other row (a construction
-/// plane's), and for a feature that has an origin item's name.
-fn browser_hovered_origin<'a>(app: &'a SolveApp, features: &FeatureNames) -> Option<(&'a str, &'static str)> {
+/// placement's) and the item. `None` with the preference off and for any other row.
+fn browser_hovered_origin(app: &SolveApp) -> Option<(&str, &'static str)> {
     if !app.preferences.browser_hover_shows_origin {
         return None;
     }
-    let name = app.viewport.hover_plane.as_deref()?;
-    if features.holds(name) {
-        return None;
-    }
-    // `holds` above already left out a feature of that name, as `component_origin_item_with` does.
+    let name = app.viewport.hover_origin.as_deref()?;
     let item = solidcraft_engine::origins::ITEMS
         .iter()
         .copied()
@@ -2722,17 +2721,10 @@ pub(crate) enum HoveredOrigin {
 
 /// The hovered Origin row's item when the view does not draw it already: hidden one by one, with
 /// its Origin, or a part's Origin left off (the default). The view adds it for the hover only; it
-/// is not in the pick lists, and its eye and saved visibility stay as they are (#15658). The draw
-/// passes ask [`hovered_hidden_origin_with`] with the names they already built; this one-shot
-/// form is for the tests.
-#[cfg(test)]
+/// is not in the pick lists, and its eye and saved visibility stay as they are (#15658).
 pub(crate) fn hovered_hidden_origin(app: &SolveApp) -> Option<(String, HoveredOrigin)> {
-    hovered_hidden_origin_with(app, &FeatureNames::build(app))
-}
-
-fn hovered_hidden_origin_with(app: &SolveApp, features: &FeatureNames) -> Option<(String, HoveredOrigin)> {
     use solidcraft_engine::doc::construct::ConstructGeom;
-    let (name, item) = browser_hovered_origin(app, features)?;
+    let (name, item) = browser_hovered_origin(app)?;
     let size = origin_size(app.cam.half_height());
     let hidden = if solidcraft_engine::origins::item(name).is_some() {
         let geom = app.session.origin_geometry(name)?;
@@ -2762,20 +2754,6 @@ fn hovered_hidden_origin_with(app: &SolveApp, features: &FeatureNames) -> Option
         }
     };
     Some((name.to_string(), hidden))
-}
-
-/// Whether `name` is an Origin axis or point (the design's or a placement's) rather than a plane:
-/// a Browser hover on one shows it, but it is no plane to sketch on (#15658).
-fn origin_axis_or_point(app: &SolveApp, name: &str) -> bool {
-    if app.session.doc.find_feature(name).is_some() {
-        return false;
-    }
-    let item = solidcraft_engine::origins::ITEMS
-        .iter()
-        .copied()
-        .find(|item| *item == name)
-        .or_else(|| solidcraft_engine::origins::item(name).map(|(_, item)| item));
-    item.is_some_and(|item| item.len() == 1)
 }
 
 /// A placement's origin plane drawn like the design Origin's square: a quarter of it, from its
@@ -2816,9 +2794,7 @@ pub fn previewed_sketch_plane(app: &SolveApp) -> Option<Plane> {
         return None;
     }
     if app.picking_sketch_plane() {
-        // An Origin axis or point row under the pointer shows its item, but is no plane (#15658).
-        let row = app.viewport.hover_plane.as_ref().filter(|name| !origin_axis_or_point(app, name));
-        let name = match (row, &app.viewport.hover) {
+        let name = match (&app.viewport.hover_plane, &app.viewport.hover) {
             (Some(name), _) | (None, Some(Hit::Plane { name, .. })) => name,
             _ => return selected_plane(app),
         };
@@ -2910,6 +2886,11 @@ pub(crate) fn axis_point_nearest_ray(a: Vec3, o: Vec3, d: Vec3) -> Vec3 {
     a * s
 }
 
+/// A placement's origin axis as the view draws it: from its origin, the origin axes' length.
+fn component_axis_segment(name: String, origin: Vec3, dir: Vec3, size: f64) -> (String, Vec3, Vec3) {
+    (name, origin, origin + dir * (size * AXIS_LEN))
+}
+
 /// Construction axes shown, as segments: across the model where the axis passes it (a little
 /// past it either side), at least the origin axes' length around the axis's origin; a
 /// component's origin axis one arm long from its origin instead, like the design Origin's
@@ -2921,7 +2902,7 @@ pub fn construction_axis_segments(app: &SolveApp) -> Vec<(String, Vec3, Vec3)> {
         .into_iter()
         .filter_map(|(name, g)| match g {
             solidcraft_engine::doc::construct::ConstructGeom::Axis { origin, dir } => {
-                Some((name, origin, origin + dir * (origin_size(app.cam.half_height()) * AXIS_LEN)))
+                Some(component_axis_segment(name, origin, dir, origin_size(app.cam.half_height())))
             }
             _ => None,
         })
@@ -4849,6 +4830,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.viewport.hover_feature.hash(&mut h);
     app.viewport.hover_bodies.hash(&mut h);
     app.viewport.hover_plane.hash(&mut h);
+    app.viewport.hover_origin.hash(&mut h);
     app.preferences.browser_hover_shows_origin.hash(&mut h);
     app.dialog.as_ref().and_then(|d| d.list_hover.as_ref()).map(|(_, item)| format!("{item:?}")).hash(&mut h);
     // Which mesh lights a face follows how the model draws its body (see `shown_mesh`), and at
@@ -5329,28 +5311,17 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         }
         // The Origin item whose Browser row is under the pointer (#15658): a drawn one lights up
         // below; a hidden one is drawn lit for the hover only, and stays out of the pick lists.
-        let browser_lit = browser_hovered_origin(app, &feature_names).map(|(n, _)| n);
-        let hidden_lit = hovered_hidden_origin_with(app, &feature_names);
-        match hidden_lit.as_ref() {
-            Some((_, HoveredOrigin::Plane(q))) => quad(&mut sc, q, t.origin_plane_hover, t.origin_plane_edge, through),
+        // A hidden axis joins the drawn ones below and is drawn as they are, lit.
+        let browser_lit = browser_hovered_origin(app).map(|(n, _)| n);
+        let hidden_lit = hovered_hidden_origin(app);
+        let (mut hidden_axis, mut hidden_part_axis) = (None, None);
+        match hidden_lit {
+            Some((_, HoveredOrigin::Plane(q))) => quad(&mut sc, &q, t.origin_plane_hover, t.origin_plane_edge, through),
             Some((name, HoveredOrigin::Axis { item, origin, dir })) => {
-                // Lit as the drawn axes below light: a placement's in the selection edge colour,
-                // the design's in its own axis colour.
-                let col = c4(if solidcraft_engine::origins::item(name).is_some() {
-                    t.sel_edge
+                if solidcraft_engine::origins::item(&name).is_some() {
+                    hidden_part_axis = Some(component_axis_segment(name, origin, dir, size));
                 } else {
-                    match *item {
-                        "X" => t.axis_x,
-                        "Y" => t.axis_y,
-                        _ => t.axis_z,
-                    }
-                });
-                reference_line(&mut sc, origin.to_f32(), (*origin + *dir * size).to_f32(), col, 4.0, through);
-                let dash = size * 0.08;
-                let mut a = size + dash;
-                while a < size * AXIS_LEN {
-                    reference_line(&mut sc, (*origin + *dir * a).to_f32(), (*origin + *dir * (a + dash)).to_f32(), col, 3.0, through);
-                    a += dash * 2.0;
+                    hidden_axis = Some((item, dir));
                 }
             }
             // Points are screen-space dots (`points_2d`).
@@ -5358,7 +5329,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         }
         // Origin axes: solid near the origin, then either one thinner line on both sides to the
         // edges of the view (#11123), or dashed a little beyond (the preference off).
-        let axes = origin_axes(app);
+        let axes: Vec<_> = origin_axes(app).into_iter().chain(hidden_axis).collect();
         let across = (app.preferences.origin_axes_across_view && !axes.is_empty()).then(projection);
         for (name, dir) in axes {
             let col = match name {
@@ -5391,7 +5362,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         // Construction axes (dashed, the length of the origin axes either side) and points (a
         // small star), in the construction colour. A component's origin axis instead reads like
         // the design Origin's: solid beside its origin, dashed beyond, in the axis's own colour.
-        for (name, a, b) in construction_axis_segments(app) {
+        for (name, a, b) in construction_axis_segments(app).into_iter().chain(hidden_part_axis) {
             let on = sel.iter().any(|x| matches!(x, Sel::Axis { name: n } if *n == name))
                 || matches!(hover, Some(Hit::Axis { name: n }) if *n == name)
                 || browser_lit == Some(name.as_str());
@@ -7912,7 +7883,7 @@ fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let feature_names = FeatureNames::build(app);
     // An Origin point whose Browser row is under the pointer: lit like a hovered dot, and drawn
     // for the hover only when it is hidden (#15658).
-    let browser_lit = browser_hovered_origin(app, &feature_names).map(|(n, _)| n);
+    let browser_lit = browser_hovered_origin(app).map(|(n, _)| n);
     let lit_dot = (t.hover_edge_halo, Stroke::new(1.5, t.hover_edge));
     let design_lit = browser_lit == Some("O");
     if (origin_point_shown(app) || design_lit)
@@ -7922,7 +7893,7 @@ fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         let (fill, stroke) = if design_lit { lit_dot } else { (t.origin_point, Stroke::new(1.0, Color32::from_gray(110))) };
         painter.circle(o, 4.5, fill, stroke);
     }
-    if let Some((name, HoveredOrigin::Point(p))) = hovered_hidden_origin_with(app, &feature_names)
+    if let Some((name, HoveredOrigin::Point(p))) = hovered_hidden_origin(app)
         && solidcraft_engine::origins::item(&name).is_some()
         && let Some(sp) = proj.to_screen(p)
     {
@@ -16763,8 +16734,8 @@ mod grid_plane_tests {
 
     /// #15658: an Origin plane, axis or point row under the pointer in the Browser shows its item:
     /// a drawn one lights up, a hidden one is drawn for the hover only and stays hidden and out of
-    /// the pick lists. With the preference off, only a drawn plane lights, as before. An axis row
-    /// is no plane: Create Sketch keeps previewing the selected plane under it.
+    /// the pick lists. With the preference off, nothing is shown, as before. A feature with an
+    /// item's name does not stand in the way: the hover names the Origin row, not a name.
     #[test]
     fn a_browser_origin_row_hover_shows_its_item_also_when_hidden() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
@@ -16782,7 +16753,7 @@ mod grid_plane_tests {
             ("O", HoveredOrigin::Point(Vec3::ZERO)),
             ("XZ", HoveredOrigin::Plane(origin_quads(origin_size(app.cam.half_height())).into_iter().find(|(n, _, _)| *n == "XZ").unwrap().2)),
         ] {
-            app.viewport.hover_plane = Some(row.into());
+            app.viewport.hover_origin = Some(row.into());
             assert_eq!(hovered_hidden_origin(&app), Some((row.to_string(), want)), "{row}: drawn for the hover");
             if row != "O" {
                 assert_ne!(drawn(&app), plain, "{row}: the hidden item is in the scene while hovered");
@@ -16791,27 +16762,25 @@ mod grid_plane_tests {
             assert_eq!(app.session.visibility.hidden_origin.len(), 3, "{row}: visibility is unchanged");
         }
         // A shown axis is drawn already: it lights up, nothing is added.
-        app.viewport.hover_plane = Some("Y".into());
+        app.viewport.hover_origin = Some("Y".into());
         assert_eq!(hovered_hidden_origin(&app), None);
         assert_ne!(drawn(&app), plain, "the shown Y axis is lit");
-        app.viewport.hover_plane = None;
+        app.viewport.hover_origin = None;
         assert_eq!(drawn(&app), plain, "the hover gone, the hidden items are gone");
-        // Preference off: an axis or hidden plane hover adds nothing, as before.
+        // A feature called X: the Origin's X row still shows the X axis.
+        app.run("solid.box", serde_json::json!({"length": 1, "width": 1, "height": 1, "name": "X"})).expect("a box called X");
+        assert!(app.session.doc.find_feature("X").is_some(), "a feature has the axis's name");
+        let plain = drawn(&app);
+        app.viewport.hover_origin = Some("X".into());
+        assert_eq!(hovered_hidden_origin(&app), Some(("X".to_string(), HoveredOrigin::Axis { item: "X", origin: Vec3::ZERO, dir: Vec3::X })));
+        assert_ne!(drawn(&app), plain, "the hidden X axis is drawn for its row");
+        // Preference off: nothing is shown, as before.
         app.preferences.browser_hover_shows_origin = false;
         for row in ["X", "Y", "XZ"] {
-            app.viewport.hover_plane = Some(row.into());
+            app.viewport.hover_origin = Some(row.into());
             assert_eq!(hovered_hidden_origin(&app), None, "{row}");
             assert_eq!(drawn(&app), plain, "{row}: nothing drawn or lit");
         }
-        // Create Sketch: an axis row under the pointer is no plane, so the plane under the
-        // pointer in the view is still the one previewed.
-        app.preferences.browser_hover_shows_origin = true;
-        app.session.visibility.hidden_origin.clear();
-        app.start("sketch.create");
-        app.viewport.hover = Some(Hit::Plane { name: "YZ".into(), point: Vec3::ZERO });
-        app.viewport.hover_plane = Some("X".into());
-        let preview = previewed_sketch_plane(&app).expect("the plane under the pointer");
-        assert!(preview.normal().dot(Vec3::X).abs() > 0.999, "YZ is still previewed");
     }
 
     /// #6975: New Sketch shows the origin planes; the plane under the pointer, in the view or as

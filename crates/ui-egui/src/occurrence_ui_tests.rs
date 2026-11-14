@@ -77,7 +77,6 @@ fn new_component_has_its_own_origin_folder() {
 fn hovering_a_parts_hidden_origin_rows_shows_them_where_the_part_is() {
     use crate::viewport::HoveredOrigin;
     use solidcore_record::Vec3;
-    use solidcraft_engine::geom::prelude::*;
     let mut h = Harness::new();
     let created = h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
     let occurrence = created["occurrence"].as_u64().unwrap();
@@ -92,13 +91,17 @@ fn hovering_a_parts_hidden_origin_rows_shows_them_where_the_part_is() {
         let key = solidcraft_engine::origins::key(&[occurrence], item);
         let row = crate::scenario::handle_at(&format!("row:{key}")).expect("the origin row");
         h.call("ui.move", json!({"x": row.x, "y": row.y}));
-        assert_eq!(h.app.viewport.hover_plane.as_deref(), Some(key.as_str()), "{item}: its row is hovered");
+        assert_eq!(h.app.viewport.hover_origin.as_deref(), Some(key.as_str()), "{item}: its row is hovered");
         let (name, shown_item) = crate::viewport::hovered_hidden_origin(&h.app).expect("drawn for the hover");
         assert_eq!(name, key);
+        // The placement only moves the part, so its Origin's items are the design's, moved.
         match (item, shown_item) {
-            ("O", HoveredOrigin::Point(p)) => assert!(p.dist(at) < 1e-9, "{p:?}"),
-            ("X", HoveredOrigin::Axis { origin, dir, .. }) => assert!(origin.dist(at) < 1e-9 && dir.dot(Vec3::X) > 0.999, "{origin:?} {dir:?}"),
-            ("XY", HoveredOrigin::Plane(q)) => assert!(q[0].dist(at) < 1e-9 && q.iter().all(|c| c.z.abs() < 1e-9), "{q:?}"),
+            ("O", HoveredOrigin::Point(p)) => assert_eq!(p, at),
+            ("X", HoveredOrigin::Axis { origin, dir, .. }) => assert_eq!((origin, dir), (at, Vec3::X)),
+            ("XY", HoveredOrigin::Plane(q)) => {
+                assert_eq!(q[0], at, "{q:?}");
+                assert!(q.iter().all(|c| c.z == 0.0), "in the XY plane: {q:?}");
+            }
             (item, other) => panic!("{item}: {other:?}"),
         }
         assert_eq!(h.app.session.visibility.shown_component_origins, shown, "{item}: the folder stays off");
@@ -112,7 +115,8 @@ fn hovering_a_parts_hidden_origin_rows_shows_them_where_the_part_is() {
     let key = solidcraft_engine::origins::key(&[occurrence], "X");
     let row = crate::scenario::handle_at(&format!("row:{key}")).expect("the X row");
     h.call("ui.move", json!({"x": row.x, "y": row.y}));
-    assert_eq!(h.app.viewport.hover_plane, None);
+    assert_eq!(h.app.viewport.hover_origin, None);
+    assert_eq!(h.app.viewport.hover_plane, None, "an axis row lights no plane");
 }
 
 /// A sketch started on a shown component origin plane follows the component: after an
