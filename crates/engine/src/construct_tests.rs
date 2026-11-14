@@ -842,6 +842,44 @@ fn plane_at_angle_direction_only_projects_the_axis_and_pivots() {
     assert!(near(plane(&reopened, "Pivoted").origin, Vec3::new(5.0, 0.0, 5.0)));
 }
 
+/// Plane at Angle about `{origin, dir}` with length expressions in the origin: the plane is where
+/// the same numbers put it, and it follows the parameters as they change, are renamed and reopen.
+#[test]
+fn plane_at_angle_axis_origin_expressions_follow_their_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "r", "expression": "12 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "5 mm"}));
+    let axis = |origin: Value| json!({"origin": origin, "dir": [0, 1, 0]});
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": axis(json!(["r", "0 mm", "h"])), "angle": "30 deg", "name": "Expr"}));
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": axis(json!([12, 0, 5])), "angle": "30 deg", "name": "Numbers"}));
+    let same = |a: Plane, b: Plane| near(a.origin, b.origin) && near(a.x, b.x) && near(a.y, b.y);
+    assert!(same(plane(&s, "Expr"), plane(&s, "Numbers")), "{:?} {:?}", plane(&s, "Expr"), plane(&s, "Numbers"));
+    // XY turned 30 deg about the line through (r, 0, h) along Y: its origin, which is (-r, 0, -h)
+    // from that point, turns about the line.
+    let expected = |r: f64, h: f64| {
+        let (c, sn) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+        // Turning (x, z) counterclockwise about +Y: x' = x cos + z sin, z' = -x sin + z cos.
+        Vec3::new(r + (-r * c + -h * sn), 0.0, h + (r * sn + -h * c))
+    };
+    assert!(near(plane(&s, "Expr").origin, expected(12.0, 5.0)), "{:?}", plane(&s, "Expr"));
+    // The saved origin keeps the expressions; plain numbers stay numbers.
+    let saved = |s: &Session, name: &str| {
+        let f = s.doc.features.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("no {name}"));
+        serde_json::to_value(&f.kind).unwrap()["plane"]["axis_origin"].clone()
+    };
+    assert_eq!(saved(&s, "Expr"), json!(["r", "0 mm", "h"]));
+    assert_eq!(saved(&s, "Numbers"), json!([12.0, 0.0, 5.0]));
+    run(&mut s, "parameters.change", json!({"name": "r", "expression": "20 mm"}));
+    assert!(near(plane(&s, "Expr").origin, expected(20.0, 5.0)), "{:?}", plane(&s, "Expr"));
+    assert!(near(plane(&s, "Numbers").origin, expected(12.0, 5.0)), "{:?}", plane(&s, "Numbers"));
+    run(&mut s, "parameters.rename", json!({"name": "h", "new_name": "height"}));
+    run(&mut s, "parameters.change", json!({"name": "height", "expression": "8 mm"}));
+    assert!(near(plane(&s, "Expr").origin, expected(20.0, 8.0)), "{:?}", plane(&s, "Expr"));
+    assert_eq!(saved(&s, "Expr"), json!(["r", "0 mm", "height"]));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(near(plane(&reopened, "Expr").origin, expected(20.0, 8.0)), "{:?}", plane(&reopened, "Expr"));
+}
+
 /// A construction plane named like an origin plane, as an older saved design can hold.
 fn legacy_plane_name(s: &mut Session, id: u64, name: &str) {
     s.doc_mut().feature_mut(id).unwrap().name = name.to_string();
