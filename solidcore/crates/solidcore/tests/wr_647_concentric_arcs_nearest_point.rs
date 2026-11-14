@@ -113,59 +113,46 @@ fn wr_647_the_same_arc_twice_stays_a_range() {
 /// An arc against a copy of itself that stops 4.8e-6 short of each end (an edge against
 /// its coincident copy in a body cut by itself): the curves lie on each other, yet the end
 /// pairs' separations run along the curves, forward at one end and back at the other. With
-/// `simple_coincidence_crossing_is_point` alone that reads as a crossing: one point (where
+/// `simple_coincidence_crossing_is_point` upstream read that as a crossing: one point (where
 /// the curves cannot cross, they lie on each other), or a failure where no crossing is
-/// found; with `simple_coincidence_side_across_the_curve` the side is taken across the
-/// curve, nothing changes sides, and the answer is the coincidence range over the shorter
-/// arc.
+/// found. The side is taken across the curve, nothing changes sides, and the answer is the
+/// coincidence range over the shorter arc.
 #[test]
 fn an_arc_and_its_shorter_copy_coincide_over_the_copy() {
     let shortfall_deg = (4.8e-6 / 5.0_f64).to_degrees();
-    for across in [false, true] {
-        let mut k = kernel(true);
-        k.fixes.simple_coincidence_side_across_the_curve = across;
-        let a = arc(5.0);
-        let b = Curve::from(
-            create_arc(
-                Point3::new(0.0, 0.0, 0.0),
-                5.0,
-                shortfall_deg,
-                90.0 - shortfall_deg,
-            )
-            .unwrap(),
+    let k = kernel(true);
+    let a = arc(5.0);
+    let b = Curve::from(
+        create_arc(
+            Point3::new(0.0, 0.0, 0.0),
+            5.0,
+            shortfall_deg,
+            90.0 - shortfall_deg,
+        )
+        .unwrap(),
+    );
+    let (ia, ib) = (a.natural_interval(), b.natural_interval());
+    let sols = a
+        .simple_coincidence_checker(&k, &ia, &b, &ib, TOL, None, None, [Some(0u8), Some(1u8)])
+        .unwrap();
+    assert_eq!(sols.len(), 1, "{sols:?}");
+    let s = &sols[0];
+    assert_eq!(s.solution_type, SolutionType::RangeOfValues, "{s:?}");
+    // the range covers the copy, end to end
+    assert!((s.start.parameters[1] - ib.min()).abs() < 1e-9, "{s:?}");
+    assert!((s.end.parameters[1] - ib.max()).abs() < 1e-9, "{s:?}");
+    for (t, u) in [
+        (s.start.parameters[0], ib.min()),
+        (s.end.parameters[0], ib.max()),
+    ] {
+        let gap = a
+            .evaluate_point(&k, t)
+            .unwrap()
+            .distance(b.evaluate_point(&k, u).unwrap());
+        // the range's ends pair points within the tolerance (the shortfall, 4.8e-6)
+        assert!(
+            gap <= 4.8e-6 + 1e-12,
+            "the range's ends lie on each other: {gap}"
         );
-        let (ia, ib) = (a.natural_interval(), b.natural_interval());
-        let sols = a
-            .simple_coincidence_checker(&k, &ia, &b, &ib, TOL, None, None, [Some(0u8), Some(1u8)])
-            .unwrap();
-        if !across {
-            assert_eq!(sols.len(), 1, "{sols:?}");
-            assert_eq!(
-                sols[0].solution_type,
-                SolutionType::SingleValue,
-                "taken for a crossing"
-            );
-            continue;
-        }
-        assert_eq!(sols.len(), 1, "{sols:?}");
-        let s = &sols[0];
-        assert_eq!(s.solution_type, SolutionType::RangeOfValues, "{s:?}");
-        // the range covers the copy, end to end
-        assert!((s.start.parameters[1] - ib.min()).abs() < 1e-9, "{s:?}");
-        assert!((s.end.parameters[1] - ib.max()).abs() < 1e-9, "{s:?}");
-        for (t, u) in [
-            (s.start.parameters[0], ib.min()),
-            (s.end.parameters[0], ib.max()),
-        ] {
-            let gap = a
-                .evaluate_point(&k, t)
-                .unwrap()
-                .distance(b.evaluate_point(&k, u).unwrap());
-            // the range's ends pair points within the tolerance (the shortfall, 4.8e-6)
-            assert!(
-                gap <= 4.8e-6 + 1e-12,
-                "the range's ends lie on each other: {gap}"
-            );
-        }
     }
 }

@@ -7,7 +7,7 @@
 //! | Rust                                         | Upstream                                  |
 //! |----------------------------------------------|-------------------------------------------|
 //! | [`compute_loop_orientation`], [`compute_loop_orientation_3d`] | `SmFace::ComputeLoopOrientation` |
-//! | [`create_composites`]                        | `SmFace::CreateComposites`                |
+//! | [`create_composites`], [`create_composites_with_edges`] | `SmFace::CreateComposites` |
 //! | [`create_uv_trim_curves`], [`create_uv_trim_curves_notified`], [`UvTrimCurveGaps`] | `SmFace::CreateUVTrimCurves` |
 //! | [`face_intersect`], [`FaceIntersectOptions`], [`FaceIntersection`], [`IntersectObject`] | `SmFace::FaceIntersect` |
 //! | [`notify`]                                   | `SmFace::Notify`                          |
@@ -34,8 +34,14 @@
 //!   `topology_traverser::face_edges`; `GetEdges(.., TRUE)` (outer loop only),
 //!   `GetUpwardLoopuses`, `GetUpwardEdgeuses`, `GetUpwardVertexuses` (default arguments)
 //!   and `GetBrep` call `topology::face::p4`.
-//! - **Statuses.** `ComputeProjectedLoopOrientation`'s status is checked as upstream (a
-//!   failure falls through to the 3D walk); `sm_AreConnected` and `IsDegenerate` of a
+//! - **The UV loop's orientation** (not upstream; #15107). `ComputeLoopOrientation`'s
+//!   UV path decides from the sign of the trims' loop's certified signed area
+//!   ([`crate::mass::loop_area`]), not from `ComputeProjectedLoopOrientation`'s sampled
+//!   polygon area against its box (a thin loop far from the origin, whose area is far
+//!   below its box's, came out zero area). An undecided sign, a failure, or a trim with
+//!   no NURBS form falls through to the 3D walk, as upstream's `Unknown` and failures
+//!   do; on this path `uv_bounds` still receives the samples of upstream's walk.
+//! - **Statuses.** `sm_AreConnected` and `IsDegenerate` of a
 //!   curve return values; ignored as upstream: the `Trim`, `EvaluatePoint` and
 //!   `Point3DClassify` calls of `FaceIntersect`, the `NormalizedEvaluate` /
 //!   `Evaluate1stDerivatives` / `PointClassify` of the quick check and the
@@ -96,12 +102,14 @@
 //!   (upstream's own bound) within a budget of 65536 samples; every other loop is over
 //!   B-rep arrays or a fixed sample count.
 
+use crate::blend::fillet_section::certificate::NurbsCurve;
 use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::curve::p2::CRV_ON_SURF_TYPE;
 use crate::curve::curve::Curve;
 use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
+use crate::geom::extent3d::Extent3d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, MAX_TREES};
 use crate::geom::tol::xsect_tol_3d_from_zones;
@@ -114,6 +122,7 @@ use crate::intersect::point_class::{
     ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
 };
 use crate::kernel::Kernel;
+use crate::mass::loop_area::{loop_area_sign, LoopAreaSign};
 use crate::math::{Point3, Vec3, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -545,18 +554,37 @@ pub fn notify(
 /// edge loops); [`SolidError::InvalidInput`] when the loop counts exceed the curves or
 /// orientations returned (upstream reads past them).
 pub fn create_composites(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<CompositeCurve>> {
+    Ok(create_composites_with_edges(k, b, f)?
+        .into_iter()
+        .map(|(composite, _)| composite)
+        .collect())
+}
+
+/// [`create_composites`], each composite with the edge of each of its segments, in
+/// segment order (not upstream: the skin's face sources, tangency-labs/solidcore#3139).
+///
+/// # Errors
+///
+/// Those of [`create_composites`].
+pub fn create_composites_with_edges(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+) -> Result<Vec<(CompositeCurve, Vec<EdgeId>)>> {
     // init output
     let mut composites = Vec::new();
 
     // Create List of Curves from Face Loops
     let fc = face2::create_curves_from_face(k, b, f, OrientType::Same, true, false)?;
     let mut curves = fc.curves_3d.unwrap_or_default().into_iter();
+    let mut edges = fc.edges.into_iter();
 
     // for every loop
     let mut count = 0usize;
     for &num_crv in &fc.curve_loops {
         let mut senses = Vec::new();
         let mut loop_curves = Vec::new();
+        let mut loop_edges = Vec::new();
 
         // for every edge in the loop
         for _ in 0..num_crv {
@@ -573,16 +601,15 @@ pub fn create_composites(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<Comp
             // build Curve and Senses array
             loop_curves.push(curve);
             senses.push(orient != OrientType::Opposite);
+            // (the edges add no failure: a caller checks there is one per segment)
+            loop_edges.extend(edges.next());
         }
 
         // build CompositeCurve
-        composites.push(CompositeCurve::with_curves(
-            3,
-            loop_curves,
-            true,
-            Some(&senses),
-            None,
-        )?);
+        composites.push((
+            CompositeCurve::with_curves(3, loop_curves, true, Some(&senses), None)?,
+            loop_edges,
+        ));
     }
 
     // all done
@@ -792,10 +819,56 @@ impl LoopOrientationSampler<'_> {
     }
 }
 
+/// The orientation of the closed UV loop of `uv_curves` (curve `i` taken backwards where
+/// `senses[i]` is false) from the sign of its certified signed area
+/// ([`loop_area_sign`]): `Same` above 0, `Opposite` below, `Unknown` where the enclosure
+/// holds 0 or a curve has no NURBS form. With `bounds`, it receives the samples of
+/// upstream's `ComputeProjectedLoopOrientation` walk, as before (the box only; its
+/// orientation is not used).
+fn uv_loop_orientation(
+    k: &Kernel,
+    uv_curves: &[Curve],
+    senses: &[bool],
+    bounds: Option<&mut Extent2d>,
+) -> Result<OrientType> {
+    if let Some(b) = bounds {
+        let normal = Vec3::new(0.0, 0.0, 1.0);
+        match CompositeCurve::compute_projected_loop_orientation(
+            k,
+            uv_curves,
+            senses,
+            normal,
+            Some(b),
+        ) {
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            _ => {}
+        }
+    }
+    let mut nurbs = Vec::new();
+    for c in uv_curves {
+        let Some(bs) = c.b_spline_base() else {
+            return Ok(OrientType::Unknown);
+        };
+        nurbs.push(NurbsCurve::of(bs)?);
+    }
+    if senses.len() < nurbs.len() {
+        return Err(null("ComputeLoopOrientation: fewer senses than curves"));
+    }
+    let lp: Vec<(&NurbsCurve, bool)> = nurbs.iter().zip(senses.iter().copied()).collect();
+    Ok(match loop_area_sign(k, &lp)? {
+        LoopAreaSign::Positive(_) => OrientType::Same,
+        LoopAreaSign::Negative(_) => OrientType::Opposite,
+        LoopAreaSign::Undecided(_) => OrientType::Unknown,
+    })
+}
+
 /// `ComputeLoopOrientation`: the orientation of loop `l` on the face: `Same` (counter-
 /// clockwise in UV), `Opposite` (clockwise) or `Unknown`. A vertex loop is `Opposite`
 /// without measuring an area. Without `do_3d_loop_computation`, the edge uses' existing
-/// or generated UV trim curves decide when they form a connected loop. Otherwise (or
+/// or generated UV trim curves decide when they form a connected loop, by the sign of the
+/// loop's certified signed area (not upstream: upstream compares a sampled polygon's area
+/// with its box's, which takes a thin loop far from the origin for zero area; #15107);
+/// an undecided sign goes on to the 3D walk. Otherwise (or
 /// when they do not decide) the defining 3D curves are sampled in passes of decreasing
 /// angle tolerance (10, 1, 0.1 degrees), keeping every knot and tessellating each span
 /// separately; the samples are dropped onto a copy of the surface and their signed UV
@@ -886,18 +959,13 @@ pub fn compute_loop_orientation(
 
     // when all the UVTrimCurves are available, connected, and form a closed loop
     if uv_curves_ok {
-        // walk all UVTrimCurves to determine if this is a CCW or CW loop
-        let normal = Vec3::new(0.0, 0.0, 1.0);
-        match CompositeCurve::compute_projected_loop_orientation(
-            k,
-            &uv_curves,
-            &senses,
-            normal,
-            uv_bounds.as_deref_mut(),
-        ) {
+        // Not upstream (#15107): the sign of the loop's certified signed area, not a
+        // sampled polygon's area against its box (a thin loop far from the origin has an
+        // area far below its box's and came out zero area).
+        match uv_loop_orientation(k, &uv_curves, &senses, uv_bounds.as_deref_mut()) {
             Ok(o) if o != OrientType::Unknown => return Ok(o),
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            // a failure or an unknown orientation falls through to the 3D walk
+            // a failure or an undecided sign falls through to the 3D walk
             _ => {}
         }
     }
@@ -2530,8 +2598,26 @@ pub fn face_intersect_breps_cached(
     let mut have_curves = false;
     if are_coincident && coinc_dist < approx_tol_3d {
         have_curves = true;
-        'faces: for (fb, face) in [(b, f), (ob, other)] {
+        // (not upstream) an edge whose box lies apart from the other face's box lies inside
+        // no part of it, and its classification on both faces keeps nothing: it is left out.
+        // Upstream classifies every edge of each face on both, the other face's edges again
+        // for each face it is paired with, so a 2D boolean of one face of n edges against m
+        // small faces classified n·m curves, each against all n edges. A box that cannot be
+        // computed, or holds nothing, rules nothing out.
+        let reach = smos_max(approx_tol_3d, zone_tol);
+        let face_box = |fb: &Brep, face: FaceId| {
+            crate::query::face::p1::calculate_bounding_box(k, fb, face, false)
+                .ok()
+                .filter(|x| !x.has_negative_volume())
+        };
+        let boxes = [face_box(ob, other), face_box(b, f)];
+        'faces: for ((fb, face), apart_from) in [(b, f), (ob, other)].into_iter().zip(boxes) {
             for e in face_edges(fb, face)? {
+                if let Some(far) = &apart_from {
+                    if edge_box(k, fb, e).is_some_and(|x| x.are_disjoint(far, reach)) {
+                        continue;
+                    }
+                }
                 let edge_crv = edge_curve(fb, e)?;
                 if edge_crv.is_degenerate(k, EFF_ZERO, None)? {
                     continue;
@@ -2551,6 +2637,7 @@ pub fn face_intersect_breps_cached(
                 uv_curves1.push(None);
                 uv_curves2.push(None);
                 curve_types.push(TsectCurveType::RegionBoundary);
+                k.work_counters.add_coincident_curve_classified();
             }
         }
     }
@@ -2781,6 +2868,22 @@ pub fn face_intersect_breps_cached(
         out.cc_other_uv_curves = Some(uv_curves2);
     }
     Ok(out)
+}
+
+/// The axis aligned box of edge `e`'s curve over its interval, grown by the edge's tolerance;
+/// `None` when it cannot be computed or holds nothing.
+fn edge_box(k: &Kernel, b: &Brep, e: EdgeId) -> Option<Extent3d> {
+    let request = crate::nurbs::b_spline_curve::p2::BoundingBoxRequest {
+        normal: true,
+        pseudo: false,
+        polar: false,
+    };
+    let mut x = crate::query::edge::calculate_bounding_box(k, b, e, request, false)
+        .ok()?
+        .normal
+        .filter(|x| !x.has_negative_volume())?;
+    x.expand_absolute(edge::tolerance(b, e).ok()?);
+    Some(x)
 }
 
 #[cfg(test)]

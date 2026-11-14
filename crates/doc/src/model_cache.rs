@@ -234,6 +234,17 @@ impl Writer {
         if let Some(look) = &b.imported {
             let faces: Vec<Json> = look.faces.iter().map(|(name, (color, opacity))| json!([name, color, opacity])).collect();
             r["imported"] = json!({"color": look.color, "opacity": look.opacity, "faces": faces});
+            if look.name.is_some() || !look.face_names.is_empty() {
+                r["imported"]["name"] = json!(look.name);
+                r["imported"]["face_names"] = json!(look.face_names);
+            }
+        }
+        // The kernel body's own encoding keeps no colour names: the file's names for its paint.
+        if let Some(paint) = b.body.paint() {
+            let faces: Vec<Json> = paint.faces.iter().filter_map(|f| Some(json!([f.face, f.name.as_ref()?]))).collect();
+            if paint.name.is_some() || !faces.is_empty() {
+                r["paint_names"] = json!({"body": paint.name, "faces": faces});
+            }
         }
         r["body"] = json!(self.body(&b.body));
         self.model_bodies.push(r);
@@ -447,11 +458,33 @@ impl SavedModel {
             b.bytes = b.body.retained_bytes();
             if let Some(look) = r.get("imported") {
                 let faces: Vec<(String, [f32; 3], f32)> = serde_json::from_value(parse(look.get("faces"))?).map_err(|_| bad("saved model: look"))?;
+                let colour_name = |v: Option<&Json>| -> Result<Option<String>> {
+                    let name: Option<String> = serde_json::from_value(v.cloned().unwrap_or(Json::Null)).map_err(|_| bad("saved model: look"))?;
+                    Ok(name.as_deref().and_then(solidcraft_kernel::colour_name))
+                };
+                let face_names: BTreeMap<String, String> =
+                    serde_json::from_value(look.get("face_names").cloned().unwrap_or_else(|| json!({}))).map_err(|_| bad("saved model: look"))?;
                 b.imported = Some(Arc::new(crate::appearance::ImportedLook {
                     color: serde_json::from_value(parse(look.get("color"))?).map_err(|_| bad("saved model: look"))?,
                     opacity: serde_json::from_value(parse(look.get("opacity"))?).map_err(|_| bad("saved model: look"))?,
                     faces: faces.into_iter().map(|(name, color, opacity)| (name, (color, opacity))).collect(),
+                    name: colour_name(look.get("name"))?,
+                    face_names: face_names.into_iter().filter_map(|(face, name)| Some((face, solidcraft_kernel::colour_name(&name)?))).collect(),
                 }));
+            }
+            if let Some(names) = r.get("paint_names")
+                && let Some(paint) = b.body.paint()
+            {
+                let body: Option<String> =
+                    serde_json::from_value(names.get("body").cloned().unwrap_or(Json::Null)).map_err(|_| bad("saved model: paint"))?;
+                let faces: Vec<(usize, String)> =
+                    serde_json::from_value(names.get("faces").cloned().unwrap_or_else(|| json!([]))).map_err(|_| bad("saved model: paint"))?;
+                let mut paint = paint.clone();
+                paint.name = body.as_deref().and_then(solidcraft_kernel::colour_name);
+                for f in &mut paint.faces {
+                    f.name = faces.iter().rfind(|(face, _)| *face == f.face).and_then(|(_, name)| solidcraft_kernel::colour_name(name));
+                }
+                b.body = b.body.clone().with_paint(Some(paint));
             }
             model_bodies.push(b);
         }

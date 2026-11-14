@@ -498,6 +498,20 @@ a standard size.
 - **Elsewhere:** standard part, library part, fastener, catalogue part.
 - **For translators:** see *Words with more than one meaning*, "part".
 
+### standard steel size
+
+A named steel section from a published standard, such as the channel `RSC 203x89` or the hollow
+section `SHS 100x100x5`, that a frame member can be made of without typing its dimensions.
+
+Its frame profile carries the standard's dimensions; a taper flange channel's flanges slope by its
+flange slope.
+
+- **In SolidCraft:** `frame.profile.list` (`sizes`), `profile: {"size": …}` in `frame.member`,
+  `frame.profile.properties` and `frame.profile.insert`; a channel's `flange_slope`.
+- **Don't use:** catalogue profile, library profile (for the size).
+- **Elsewhere:** standard section, section size, section designation.
+- **For translators:** a steel section's size by name, not a dimension and not a standard part.
+
 ### thin-film interference
 
 Interference between coherent optical waves reflected at the interfaces of a thin layer.
@@ -574,6 +588,9 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs |
+| | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
+| Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
+| | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |
 | | a hem that lies flat on the sheet | flat hem | the Hem dialog's type |
 | Round | a round relief or corner shape | round (shape) | relief shapes, plastic rests, ruled surface corners |

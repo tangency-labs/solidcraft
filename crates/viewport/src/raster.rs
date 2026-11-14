@@ -453,6 +453,7 @@ mod tests {
             opacity: front_opacity,
             closed: true,
             hatch: Default::default(),
+            values: None,
         };
         let scene = Scene {
             meshes: vec![SceneMesh::solid(Arc::new(panel(5.0)), Rgb(0, 255, 0)), glass],

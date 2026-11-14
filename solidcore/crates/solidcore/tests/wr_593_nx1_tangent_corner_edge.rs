@@ -114,7 +114,7 @@ fn expected_volume() -> f64 {
 #[test]
 fn residue_round_fails_without_the_fix() {
     let err = fillet(false, RESIDUE).unwrap_err();
-    assert!(err.to_string().contains("1001"), "{err}");
+    assert_eq!(solidcore::error::upstream_status(&err), Some(1001), "{err}");
 }
 
 #[test]

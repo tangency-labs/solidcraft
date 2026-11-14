@@ -6,15 +6,17 @@ use solidcraft_viewport::{Camera, StandardView};
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::schema::view_navigation::{
-    AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, GraphicsPreset, GraphicsPresetParams, GraphicsPresetResult, HistoryDock,
-    HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams, LayoutResult, NavigateParams, NavigateResult, NavigatorParams,
-    NormalToParams, PresetQuality, RenderBrowser, RenderFocus, RenderLive, RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams,
-    TabStep, TabStepParams, ZoomTool,
+    AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, DisplayToggleParams, DisplayToggleResult, GraphicsPreset, GraphicsPresetParams,
+    GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams, LayoutResult, NavigateParams,
+    NavigateResult, NavigationBarParams, NavigationBarResult, NavigatorParams, NormalToParams, PresetQuality, RenderBrowser, RenderFocus, RenderLive,
+    RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams, TabStep, TabStepParams, ZoomTool,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
 
 const ZOOM_TOOL_CONTRACT: TypedContract<ZoomTool> = TypedContract::new();
+const DISPLAY_TOGGLE_CONTRACT: TypedContract<DisplayToggleParams> = TypedContract::new();
+const NAVIGATION_BAR_CONTRACT: TypedContract<NavigationBarParams> = TypedContract::new();
 const FOCUS_CONTRACT: TypedContract<RenderFocus> = TypedContract::new();
 const NAVIGATOR_CONTRACT: TypedContract<NavigatorParams> = TypedContract::new();
 const RENDER_LIVE_CONTRACT: TypedContract<RenderLive> = TypedContract::new();
@@ -28,6 +30,7 @@ const HISTORY_LAYOUT_CONTRACT: TypedContract<HistoryLayoutParams> = TypedContrac
 const GRAPHICS_PRESET_CONTRACT: TypedContract<GraphicsPresetParams> = TypedContract::new();
 const AMBIENT_OCCLUSION_CONTRACT: TypedContract<AmbientOcclusionParams> = TypedContract::new();
 const NAVIGATE_CONTRACT: TypedContract<NavigateParams> = TypedContract::new();
+const ORIGIN_AXES_ACROSS_VIEW_CONTRACT: TypedContract<crate::schema::view_navigation::OriginAxesAcrossViewParams> = TypedContract::new();
 
 // Both existing request forms share the Browser command and its published schema.
 #[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -70,16 +73,24 @@ CommandSpec::new("view.tool.zoom", "Drag to Zoom", crate::checked!("view.tool.zo
     .icon("zoom").noundo().doc_only()
     .contract(&ZOOM_TOOL_CONTRACT).output(output_schema_for::<ZoomTool>)
     .params("on?: bool (omitted: toggle) → on?; latch the Zoom tool for left-button drags. A shortcut assigned in the UI zooms while held"),
-CommandSpec::new("view.spin", "Continuous Orbit", spin)
-    .icon("spin").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; continuous orbit until the next click or key"),
+CommandSpec::new("view.spin", "Continuous Orbit", crate::checked!("view.spin", spin))
+    .icon("spin").noundo().doc_only()
+    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
+    .params("on?: bool (omitted: toggle) → on?; continuous orbit until the next click or key"),
 CommandSpec::new("view.visual_style", "Visual Style", visual_style)
     .icon("style").noundo().doc_only().params("style: shaded_with_edges|shaded|wireframe|shaded_with_hidden_edges → style, index (0..3 in that order)"),
-CommandSpec::new("view.grid", "Grid", grid)
-    .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the viewport grid"),
-CommandSpec::new("view.ground_shadow", "Ground Shadow", ground_shadow)
-    .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the ground shadow"),
-CommandSpec::new("view.navigation_bar", "Navigation Bar", navigation_bar)
-    .icon("pan").noundo().doc_only().params("visible?: bool (omitted: toggle) → visible?; show the navigation bar (window setting)"),
+CommandSpec::new("view.grid", "Grid", crate::checked!("view.grid", grid))
+    .icon("style").noundo().doc_only()
+    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
+    .params("on?: bool (omitted: toggle) → on?; show the viewport grid"),
+CommandSpec::new("view.ground_shadow", "Ground Shadow", crate::checked!("view.ground_shadow", ground_shadow))
+    .icon("style").noundo().doc_only()
+    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
+    .params("on?: bool (omitted: toggle) → on?; show the ground shadow"),
+CommandSpec::new("view.navigation_bar", "Navigation Bar", crate::checked!("view.navigation_bar", navigation_bar))
+    .icon("pan").noundo().doc_only()
+    .contract(&NAVIGATION_BAR_CONTRACT).output(output_schema_for::<NavigationBarResult>)
+    .params("visible?: bool (omitted: toggle) → visible?; show the navigation bar (window setting)"),
 CommandSpec::new("view.navigator", "Custom View Navigator", crate::checked!("view.navigator", navigator))
     .icon("nav_settings").noundo().doc_only()
     .contract(&NAVIGATOR_CONTRACT).output(output_schema_for::<NavigatorParams>)
@@ -130,6 +141,8 @@ CommandSpec::new("view.graphics_preset", "Graphics Preset", crate::checked!("vie
     .icon("settings").noundo().doc_only().contract(&GRAPHICS_PRESET_CONTRACT).output(output_schema_for::<GraphicsPresetResult>).params("preset: performance|quality → preset, enabled, display_quality, supersampling, supersampling_adaptive; Quality: AO, Fine, adaptive 2x SSAA; Performance: no AO, Normal, no SSAA"),
 CommandSpec::new("view.ambient_occlusion", "Ambient Occlusion", crate::checked!("view.ambient_occlusion", ambient_occlusion))
     .icon("settings").noundo().doc_only().contract(&AMBIENT_OCCLUSION_CONTRACT).output(output_schema_for::<AmbientOcclusionResult>).params("enabled: bool → enabled; apply soft contact shading in the GPU viewport"),
+CommandSpec::new("view.origin_axes_across_view", "Origin Axes Across the Whole View", crate::checked!("view.origin_axes_across_view", origin_axes_across_view))
+    .icon("origin").noundo().doc_only().contract(&ORIGIN_AXES_ACROSS_VIEW_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::OriginAxesAcrossViewResult>).params("enabled: bool → enabled; extend the origin axes across the view, or keep the short axes when false; display only, never opens a dialog"),
 CommandSpec::new("view.perspective", "Perspective view", perspective)
     .icon("perspective").noundo().doc_only().params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
 CommandSpec::new("view.angle_readout", "View Angles", crate::checked!("view.angle_readout", angle_readout))
@@ -1106,6 +1119,13 @@ fn angle_readout(_s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
+/// Origin-axis display is an application preference, not a design edit.
+fn origin_axes_across_view(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.origin_axes_across_view";
+    let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad(cmd, "`enabled` must be a boolean"))?;
+    typed_reply(cmd, crate::schema::view_navigation::OriginAxesAcrossViewResult { enabled, param_warnings: Vec::new() })
+}
+
 fn next_tab(_s: &mut Session, _p: &Value) -> Result<Value> {
     tab_step(1)
 }
@@ -1122,6 +1142,22 @@ fn tab_step(step: i8) -> Result<Value> {
 #[cfg(test)]
 mod ambient_occlusion_tests {
     use super::*;
+
+    #[test]
+    fn origin_axes_across_view_validates_without_editing_design_history_or_camera() {
+        for param_check in crate::schema::ParamCheck::ALL {
+            let mut s = Session { param_check, ..Session::default() };
+            let design = s.doc.to_json();
+            for enabled in [true, false] {
+                assert_eq!(s.execute("view.origin_axes_across_view", &json!({"enabled": enabled})).unwrap(), json!({"enabled": enabled}));
+            }
+            for params in [json!({}), json!({"enabled": 1}), json!({"enabled": "true"}), json!({"enabled": null})] {
+                assert!(s.execute("view.origin_axes_across_view", &params).is_err(), "{param_check:?}: {params}");
+            }
+            assert_eq!(s.doc.to_json(), design);
+            assert!(s.undo.is_empty() && s.camera.is_none());
+        }
+    }
 
     #[test]
     fn angle_readout_validates_display_setting_without_editing_design_or_history() {

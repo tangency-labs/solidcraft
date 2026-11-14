@@ -298,6 +298,12 @@ impl Quat {
         ])
     }
 
+    /// The opposite turn.
+    fn conj(self) -> Quat {
+        let [w, x, y, z] = self.0;
+        Quat([w, -x, -y, -z])
+    }
+
     /// The turn by the rotation vector `w`: |w| radians about its direction.
     fn exp([x, y, z]: [f64; 3]) -> Quat {
         let t = (x * x + y * y + z * z).sqrt();
@@ -344,19 +350,26 @@ impl Quat {
     }
 }
 
+/// How far (radians) a ball joint turns from the (yaw, pitch, roll) `a` to `b`: near pitch 0 a
+/// small turn changes its yaw and roll a lot.
+pub(super) fn ball_turn_between(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let [w, x, y, z] = Quat::zyz(a).conj().mul(Quat::zyz(b)).0;
+    2.0 * (x * x + y * y + z * z).sqrt().atan2(w.abs())
+}
+
 /// `t` moved by whole turns to lie nearest `near`.
 fn wrap(t: f64, near: f64) -> f64 {
     t + TAU * ((near - t) / TAU).round()
 }
 
-/// A ball joint whose three values all move in a reach. It is solved over a small turn from where
-/// it starts (a rotation vector in its own frame, radians) instead of its Euler angles, which lock
-/// at pitch 0: there yaw and roll turn about the same axis, and nothing tilts it the other way
-/// (#12873).
-struct BallTurn {
+/// A ball joint whose three values all move in a reach or a loop solve. It is solved over a small
+/// turn from where it starts (a rotation vector in its own frame, radians) instead of its Euler
+/// angles, which lock at pitch 0: there yaw and roll turn about the same axis, and nothing tilts it
+/// the other way (#12873, #14852).
+pub(super) struct BallTurn {
     id: u64,
     /// Where its yaw is in the solve's values; pitch and roll follow.
-    at: usize,
+    pub(super) at: usize,
     from: Quat,
     start: [f64; 3],
     bounds: [(f64, f64); 3],
@@ -365,7 +378,7 @@ struct BallTurn {
 impl BallTurn {
     /// Its (yaw, pitch, roll) for the turn in `x`, each held within its limits (pitch is the
     /// angle between the joint's z axes, so its limits hold it in a cone, its yaw still free).
-    fn values(&self, x: &[f64]) -> Option<[f64; 3]> {
+    pub(super) fn values(&self, x: &[f64]) -> Option<[f64; 3]> {
         let w = x.get(self.at..self.at + 3)?;
         let v = self.from.mul(Quat::exp([*w.first()?, *w.get(1)?, *w.get(2)?])).to_zyz(self.start);
         let mut out = [0.0; 3];
@@ -377,7 +390,7 @@ impl BallTurn {
 }
 
 /// The ball joints among `vars` with all three values there, in order.
-fn ball_turns(tree: &Tree, vars: &[(u64, usize)], start: &[f64], bounds: &[(f64, f64)]) -> Vec<BallTurn> {
+pub(super) fn ball_turns(tree: &Tree, vars: &[(u64, usize)], start: &[f64], bounds: &[(f64, f64)]) -> Vec<BallTurn> {
     vars.windows(3)
         .enumerate()
         .filter_map(|(at, w)| {
@@ -633,6 +646,10 @@ mod tests {
         // A small turn off pitch 0 tilts it whichever way it points.
         let tilted = Quat::zyz([0.0; 3]).mul(Quat::exp([0.05, 0.0, 0.0])).to_zyz([0.0; 3]);
         assert!((tilted[1].abs() - 0.05).abs() < 1e-9, "{tilted:?}");
+        // That tilt is a turn of 0.05, though its yaw and roll moved a quarter turn each; and a
+        // turn is as far either way.
+        assert!((ball_turn_between([0.0; 3], tilted) - 0.05).abs() < 1e-9, "{tilted:?}");
+        assert!((ball_turn_between([0.3, 0.4, -1.2], [-2.0, -0.5, 0.7]) - ball_turn_between([-2.0, -0.5, 0.7], [0.3, 0.4, -1.2])).abs() < 1e-12);
     }
 
     /// Exercise the IK callback itself: removing sharing at this call site must fail even if

@@ -1,0 +1,1 @@
+| solidcore/crates/solidcore-step/tests/fixtures/closed-spline-cylinder.step | SolidCraft contributors | Original synthetic cylinder from issue #16118; exact rational quadratic circles, no third-party geometry | MIT OR Apache-2.0 |

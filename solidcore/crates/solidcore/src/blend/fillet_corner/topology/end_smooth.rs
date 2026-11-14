@@ -78,7 +78,7 @@ impl FilletCorner {
             solvers,
             solver_eu_solver,
         } = env;
-        let nul = || SolidError::null_pointer(OP);
+        let nul = |what: &'static str| SolidError::blend_missing(OP, what);
         let fil_eu = need(
             self.solver_eus
                 .as_deref()
@@ -90,19 +90,20 @@ impl FilletCorner {
             .and_then(|id| solvers.get(id.0 as usize))
             .and_then(Option::as_ref)
             .map(SolverObject::base)
-            .ok_or_else(nul)?;
+            .ok_or_else(|| nul("the blended edge's solver"))?;
         let geom = solver.first_fillet_geom()?;
         let faces = [
-            eu1::face(target, fil_eu)?.ok_or_else(nul)?,
-            eu1::face(target, radial(target, fil_eu)?)?.ok_or_else(nul)?,
+            eu1::face(target, fil_eu)?.ok_or_else(|| nul("the blended edge use's face"))?,
+            eu1::face(target, radial(target, fil_eu)?)?
+                .ok_or_else(|| nul("the blended edge's other face"))?,
         ];
         let corner_vertex = need(self.vertex, "corner without vertex")?;
 
         // P: through the vertex, square to the edge
-        let e = eu1::edge(target, fil_eu)?.ok_or_else(nul)?;
+        let e = eu1::edge(target, fil_eu)?.ok_or_else(|| nul("the blended edge use's edge"))?;
         let ivl = edge::interval(target, e)?;
         let at_start = edge::start_vertex(target, e)? == Some(corner_vertex);
-        let curve = edge::curve(target, e)?.ok_or_else(nul)?;
+        let curve = edge::curve(target, e)?.ok_or_else(|| nul("the blended edge's curve"))?;
         let pv = curve.evaluate(
             k,
             if at_start { ivl.min() } else { ivl.max() },
@@ -111,7 +112,11 @@ impl FilletCorner {
             true,
         )?;
         let origin = vertex::point(target, corner_vertex)?;
-        let normal = pv.get(1).copied().ok_or_else(nul)?.unitize()?;
+        let normal = pv
+            .get(1)
+            .copied()
+            .ok_or_else(|| nul("the edge curve's tangent"))?
+            .unitize()?;
         let mut x = if normal.x.abs() < 0.9 {
             Vec3::new(1.0, 0.0, 0.0)
         } else {
@@ -144,7 +149,10 @@ impl FilletCorner {
             self.vertices.push(fv);
             let rail = solver.find_index_of_rail_on_face(target, Some(face))?;
             if rail > 1 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the blend has no rail on a face beside its edge",
+                ));
             }
             pseudo.make_rail_edgeuse_on(
                 geom,
@@ -164,7 +172,10 @@ impl FilletCorner {
             }
         }
         let [Some(end0), Some(end1)] = ends else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the rails' ends on the end cap were not made",
+            ));
         };
         let on_vertex = new_corner_vertex(k, pseudo, corner)?;
         let v = pseudo.fillet_vertex_mut(on_vertex)?;

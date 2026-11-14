@@ -1550,3 +1550,17 @@ fn the_overlap_depth_of_pins_in_each_other_is_the_scan_of_every_triangle() {
     // meets the block at some.
     assert!(overlapping > 9, "{overlapping}");
 }
+
+#[test]
+fn occurrence_centres_use_exact_body_bounds() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "component.from_bodies", json!({"bodies": ["Plate"]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Lid"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 0]}));
+    let c = super::centres(&s);
+    assert_eq!(c.len(), 2);
+    assert!((c[0].1.x - 5.0).abs() < 1e-4);
+    assert!((c[1].1.x - 35.0).abs() < 1e-4);
+}

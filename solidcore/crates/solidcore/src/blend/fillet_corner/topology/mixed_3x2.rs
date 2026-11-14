@@ -153,7 +153,10 @@ impl FilletCorner {
             .clone()
             .ok_or_else(|| invalid("corner without outward edge uses"))?;
         if all.len() != 3 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the corner does not have exactly three edge uses",
+            ));
         }
         let (mut convex_eu, mut concave_eu) = match self.solver_eus.as_deref() {
             Some([first, second, ..]) => (*first, *second),
@@ -180,7 +183,8 @@ impl FilletCorner {
         // edge's convexity, as tangency-labs/smlib@1255993: that fork resolves the
         // in-between edge use and its convexity before the solvers.
         let (cross_eu, ext_eu, cross_id, ext_id) = if k.fixes.fillet_3x2_mixed_concave_side_edge {
-            let curr_eu = curr_eu_found.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let curr_eu = curr_eu_found
+                .ok_or_else(|| SolidError::blend_missing(OP, "the corner's unfilleted edge use"))?;
             if cross_uses_convex_fillet(
                 k,
                 target,
@@ -204,7 +208,8 @@ impl FilletCorner {
             let ext_fg = ext_solver.first_fillet_geom()?;
             let cross_fg = cross_solver.first_fillet_geom()?;
 
-            let curr_eu = curr_eu_found.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let curr_eu = curr_eu_found
+                .ok_or_else(|| SolidError::blend_missing(OP, "the corner's unfilleted edge use"))?;
 
             // This edgeuse is 'in-between' two filletted edgeuses
             let fv0 = new_corner_vertex(k, pseudo, corner)?;
@@ -350,7 +355,7 @@ impl FilletCorner {
             .iter()
             .copied()
             .find(|&eu| eu != convex_eu && eu != concave_eu)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the corner's unfilleted edge use"))?;
         let orig_face1 = need(
             face_by_two_edgeuses(target, Some(curr_eu), Some(cross_eu), None)?,
             "no concave side face",
@@ -359,7 +364,7 @@ impl FilletCorner {
             .face(orig_face1)?
             .surface
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the concave side face's surface"))?;
         let new_surface = surface
             .extended_sides(
                 k,

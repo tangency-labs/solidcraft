@@ -393,3 +393,20 @@ pub fn nlib_number(error: &crate::SolidError) -> Option<i32> {
 
 /// [`super::upstream_status`], kept at the path the goldens runners first read it from.
 pub use super::upstream_status;
+
+#[cfg(test)]
+mod tests {
+    /// The NURBS routines describe their failures: their library code builds no bare
+    /// `Upstream` status, except the files listed (with the bare sites each may still hold)
+    /// whose conversion waits on other open work.
+    #[test]
+    fn the_nurbs_routines_build_no_bare_statuses() {
+        assert_eq!(
+            super::super::query::tests::bare_statuses_in("nurbs", 60),
+            [
+                ("nurbs/b_spline_curve/p1.rs".to_owned(), 23),
+                ("nurbs/b_spline_curve/p3.rs".to_owned(), 5),
+            ]
+        );
+    }
+}

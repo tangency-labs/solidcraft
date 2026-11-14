@@ -7,22 +7,23 @@
 //! for it (crate-private `comparison_status`, read through
 //! [`crate::SolidError::sm_status`]).
 //!
-//! | Rust                                 | Status difftest compares      |
-//! |--------------------------------------|-------------------------------|
-//! | [`PrimitiveFailure::Failed`]         | `SM_ERR`                      |
-//! | [`PrimitiveFailure::Missing`]        | `SM_ERR_NULL_POINTER`         |
-//! | [`PrimitiveFailure::HelixDeviates`]  | `SM_ERR_NOT_WITHIN_TOLERANCE` |
-//! | [`PrimitiveFailure::AxisInsideFace`] | `SM_ERR_AXIS_INSIDE_FACE`     |
+//! | Rust                                   | Status difftest compares      |
+//! |----------------------------------------|-------------------------------|
+//! | [`PrimitiveFailure::Failed`]           | `SM_ERR`                      |
+//! | [`PrimitiveFailure::Missing`]          | `SM_ERR_NULL_POINTER`         |
+//! | [`PrimitiveFailure::HelixDeviates`]    | `SM_ERR_NOT_WITHIN_TOLERANCE` |
+//! | [`PrimitiveFailure::AxisInsideFace`]   | `SM_ERR_AXIS_INSIDE_FACE`     |
+//! | [`PrimitiveFailure::PlaneCannotCover`] | `SM_ERR_INVALID_INPUT`        |
 //!
 //! Deviations: not upstream. A failure says in a phrase (or its data) what went wrong;
 //! the failure's `operation` path says which routine. No failure names an entity: the
 //! sites they replace named none. The failures that are checks of a caller's arguments
-//! stay [`crate::SolidError::InvalidInput`]. `primitive_creation/p1/primitives.rs` does
-//! not use these yet.
+//! stay [`crate::SolidError::InvalidInput`]. [`PrimitiveFailure::PlaneCannotCover`] is
+//! not upstream: it is the refusal of the opt-in `boolean2d_plane_covers_far_faces` fix.
 
 use super::{
-    ErrorKind, Failure, Reason, SM_ERR, SM_ERR_AXIS_INSIDE_FACE, SM_ERR_NOT_WITHIN_TOLERANCE,
-    SM_ERR_NULL_POINTER,
+    ErrorKind, Failure, Reason, SM_ERR, SM_ERR_AXIS_INSIDE_FACE, SM_ERR_INVALID_INPUT,
+    SM_ERR_NOT_WITHIN_TOLERANCE, SM_ERR_NULL_POINTER,
 };
 
 /// Why a primitive, extrusion, revolution, skin or taper fails.
@@ -46,6 +47,10 @@ pub enum PrimitiveFailure {
     /// A revolution's axis runs inside the face it would turn, so the revolved solid
     /// would cross itself.
     AxisInsideFace,
+    /// A planar 2D boolean's face lies on a plane that cannot be grown to cover the
+    /// other faces, so the faces rebuilt on it would carry edges far off their surface
+    /// (not upstream: the opt-in `boolean2d_plane_covers_far_faces` fix refuses these).
+    PlaneCannotCover,
 }
 
 impl PrimitiveFailure {
@@ -56,12 +61,14 @@ impl PrimitiveFailure {
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::HelixDeviates { .. } => SM_ERR_NOT_WITHIN_TOLERANCE,
             Self::AxisInsideFace => SM_ERR_AXIS_INSIDE_FACE,
+            Self::PlaneCannotCover => SM_ERR_INVALID_INPUT,
         }
     }
 
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
     /// [`PrimitiveFailure::Missing`], [`ErrorKind::NotWithinTolerance`] for
-    /// [`PrimitiveFailure::HelixDeviates`], [`ErrorKind::Failed`] otherwise.
+    /// [`PrimitiveFailure::HelixDeviates`], [`ErrorKind::InvalidInput`] for
+    /// [`PrimitiveFailure::PlaneCannotCover`], [`ErrorKind::Failed`] otherwise.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         ErrorKind::of_status(self.comparison_status())
@@ -82,6 +89,9 @@ impl core::fmt::Display for PrimitiveFailure {
             ),
             Self::AxisInsideFace => {
                 f.write_str("the revolution axis runs inside the face it would turn")
+            }
+            Self::PlaneCannotCover => {
+                f.write_str("a face's plane cannot be grown to cover the other faces")
             }
         }
     }
@@ -143,6 +153,7 @@ mod tests {
                 SM_ERR_NOT_WITHIN_TOLERANCE,
             ),
             (PrimitiveFailure::AxisInsideFace, SM_ERR_AXIS_INSIDE_FACE),
+            (PrimitiveFailure::PlaneCannotCover, SM_ERR_INVALID_INPUT),
         ];
         for (failure, code) in cases {
             let typed = SolidError::primitive("primitive::op", failure);
@@ -195,51 +206,13 @@ mod tests {
         );
     }
 
-    /// The primitive-creation routines that describe their failures build no bare
-    /// `Upstream` status in their library code (the count is the bare sites a file may
-    /// still hold while a site waits on other work).
+    /// The primitive-creation routines describe their failures: their library code builds
+    /// no bare `Upstream` status.
     #[test]
-    fn the_described_primitive_routines_build_no_bare_statuses() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/primitive");
-        let files = [
-            ("api_curve_ops.rs", 0),
-            ("api_curves.rs", 0),
-            ("api_primitives.rs", 0),
-            ("api_surface_ops.rs", 0),
-            ("primitive_creation/model.rs", 0),
-            ("primitive_creation/model/merge.rs", 0),
-            ("primitive_creation/p1.rs", 0),
-            ("primitive_creation/p1/boolean.rs", 0),
-            ("primitive_creation/p1/offset_profile.rs", 0),
-            ("primitive_creation/p2/access.rs", 0),
-            ("primitive_creation/p2/curve_sweeps.rs", 0),
-            ("primitive_creation/p2/planar_path.rs", 0),
-            ("primitive_creation/p2/rotational.rs", 0),
-            ("primitive_creation/p2/skin.rs", 0),
-            ("primitive_creation/p2/taper.rs", 0),
-            ("primitive_creation/p2/taper_walls.rs", 0),
-            ("primitive_creation/p3/access.rs", 0),
-            ("primitive_creation/p3/construct.rs", 0),
-            ("primitive_creation/p3/geometry.rs", 0),
-            ("primitive_creation/p3/ruled.rs", 0),
-            ("primitive_creation/p3/sweeps.rs", 0),
-        ];
-        for (rel, held) in files {
-            let text = std::fs::read_to_string(src.join(rel))
-                .expect("read")
-                .replace("\r\n", "\n");
-            let library = text
-                .find("\n#[cfg(test)]\n")
-                .map_or(text.as_str(), |at| &text[..at]);
-            let bare: usize = [
-                "SolidError::sm_err(",
-                "SolidError::null_pointer(",
-                "SolidError::Upstream {",
-            ]
-            .iter()
-            .map(|needle| library.matches(needle).count())
-            .sum();
-            assert_eq!(bare, held, "bare statuses in {rel}");
-        }
+    fn the_primitive_routines_build_no_bare_statuses() {
+        assert_eq!(
+            super::super::query::tests::bare_statuses_in("primitive", 25),
+            Vec::<(String, usize)>::new()
+        );
     }
 }

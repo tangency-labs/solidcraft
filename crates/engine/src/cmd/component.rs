@@ -244,7 +244,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("move")
         .contract(&MOVE_CONTRACT)
         .output(output_schema_for::<MoveResult>)
-        .params("occurrence; path?: exact placement; space?: local|world (default local); translate?: [x,y,z]; axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; to?: {position: [x,y,z], axis?: [x,y,z], angle?} or to_matrix?: [12 or 16 numbers] (absolute placement: where it goes in space, not a move; not with translate/axis/angle/origin/matrix); matrix?: [12 or 16 numbers] (instead of translate/axis/angle/origin: a rigid move as a row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows; one that is a rotation only up to rounding is orthonormalised, a scale, shear or mirror is refused); tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); capture?: bool (default true; false keeps it pending until Capture Position); move_grounded?: bool (default false: a grounded occurrence refuses; true moves it and it stays grounded). Nested occurrence definitions remain shared. Replies {occurrence, transform, pending}; when joints hold it to something fixed and put it back, transform is where it is and the reply adds reverted: true and a warning naming the joint"),
+        .params("occurrence; path?: exact placement; space?: local|world (default local); translate?: [x,y,z] (numbers or length expressions: an occurrence moved by expressions that name parameters keeps them and moves with them when the parameters change, along the axes the move was given in; other moves of it stay; a parameter they use can't be deleted, and a renamed one carries into them); axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; to?: {position: [x,y,z], axis?: [x,y,z], angle?} or to_matrix?: [12 or 16 numbers] (absolute placement: where it goes in space, not a move; not with translate/axis/angle/origin/matrix); matrix?: [12 or 16 numbers] (instead of translate/axis/angle/origin: a rigid move as a row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows; one that is a rotation only up to rounding is orthonormalised, a scale, shear or mirror is refused); tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); capture?: bool (default true; false keeps it pending until Capture Position); move_grounded?: bool (default false: a grounded occurrence refuses; true moves it and it stays grounded). Nested occurrence definitions remain shared. Replies {occurrence, transform, pending}; when joints hold it to something fixed and put it back, transform is where it is and the reply adds reverted: true and a warning naming the joint"),
     CommandSpec::new("occurrence.drag", "Drag Occurrence", crate::checked!("occurrence.drag", drag::drag))
         .icon("move")
         .contract(&DRAG_CONTRACT)
@@ -329,6 +329,51 @@ pub(crate) fn move_vector(p: &Value, key: &str, default: Vec3, coordinate: bool,
         return Err(bad(cmd, format!("{key} exceeds supported numeric range")));
     }
     Ok(v)
+}
+
+/// `translate` given with length expressions (`["0 mm", "dy", 0]`, #8192): what it works out to
+/// now, and per axis the expression to keep, for those that name a parameter (text that names
+/// none, such as `"5 mm"`, is kept as its number).
+fn expressed_translate(s: &Session, entries: &[Value], cmd: &str) -> Result<(Vec3, [Option<String>; 3])> {
+    let mut v = [0.0; 3];
+    let mut kept: [Option<String>; 3] = Default::default();
+    for ((entry, slot), keep) in entries.iter().zip(v.iter_mut()).zip(kept.iter_mut()) {
+        *slot = match entry {
+            Value::Number(n) => n.as_f64().ok_or_else(|| bad(cmd, "translate entries must be numbers or length expressions"))?,
+            Value::String(e) => {
+                let x = s.doc.eval(e, solidcraft_doc::expr::Kind::Length).map_err(|err| bad(cmd, format!("translate: {err}")))?;
+                if !solidcraft_doc::expr::references(e).is_empty() {
+                    *keep = Some(e.trim().to_string());
+                }
+                x
+            }
+            _ => return Err(bad(cmd, "translate entries must be numbers or length expressions")),
+        };
+    }
+    if v.iter().any(|x| !x.is_finite() || x.abs() > 1e9) {
+        return Err(bad(cmd, "translate exceeds supported numeric range"));
+    }
+    Ok((Vec3::new(v[0], v[1], v[2]), kept))
+}
+
+/// Move the occurrences whose expressed moves a parameter change moved (#8192), pending moves of
+/// them included. True when one moved.
+pub(crate) fn follow_expressed_moves(s: &mut Session) -> bool {
+    let shifts = s.doc.expressed_move_shifts();
+    if shifts.is_empty() {
+        return false;
+    }
+    for shift in shifts.iter().filter(|x| x.shift != Vec3::ZERO) {
+        if let Some(m) = s.pending_moves.get_mut(&shift.occurrence) {
+            *m = solidcraft_doc::mat_mul(&translation(shift.shift), m);
+        }
+        // The exploded view's entry is what makes a pending move display only: it moves with it.
+        if let Some(m) = s.exploded.get_mut(&shift.occurrence) {
+            *m = solidcraft_doc::mat_mul(&translation(shift.shift), m);
+        }
+    }
+    s.doc_mut().apply_expressed_shifts(&shifts);
+    shifts.iter().any(|x| x.shift != Vec3::ZERO)
 }
 
 pub(super) fn valid_position(m: &Mat) -> bool {
@@ -800,6 +845,8 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, format!("{} is held in {name} by a rigid group: move {name}, or Unlock Contents (component.unlock) first", o.name)));
     }
     let target = absolute_target(s, p, cmd)?;
+    // Expressions in `translate` that name parameters: the occurrence keeps them and follows them.
+    let mut expressed = None;
     let delta = if target.is_some() {
         solidcraft_doc::IDENTITY
     } else if let Some(m) = p.get("matrix") {
@@ -808,7 +855,14 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         }
         matrix::rigid(m, matrix::tolerance(p, cmd)?, cmd)?
     } else {
-        let t = move_vector(p, "translate", Vec3::ZERO, true, cmd)?;
+        let t = match p.get("translate") {
+            Some(Value::Array(a)) if a.len() == 3 && a.iter().any(Value::is_string) => {
+                let (t, kept) = expressed_translate(s, a, cmd)?;
+                expressed = kept.iter().any(Option::is_some).then_some((kept, [t.x, t.y, t.z]));
+                t
+            }
+            _ => move_vector(p, "translate", Vec3::ZERO, true, cmd)?,
+        };
         let axis = move_vector(p, "axis", Vec3::Z, false, cmd)?;
         let angle = match p.get("angle") {
             Some(Value::String(e)) => s.doc.eval(e, solidcraft_doc::expr::Kind::Angle).map_err(|e| bad(cmd, e.to_string()))?,
@@ -832,6 +886,15 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
     if !matches!(space, "local" | "world") {
         return Err(bad(cmd, "space must be local or world"));
     }
+    let capture = bool_(p, "capture").unwrap_or(true);
+    if expressed.is_some() {
+        if !capture {
+            return Err(bad(cmd, "a move by expressions is captured: leave out `capture: false`, or give numbers"));
+        }
+        if o.expressed_moves.len() >= solidcraft_doc::MAX_EXPRESSED_MOVES {
+            return Err(bad(cmd, format!("{} already follows {} moves by expressions", o.name, solidcraft_doc::MAX_EXPRESSED_MOVES)));
+        }
+    }
     let path = if p.get("path").is_some() || space == "world" { Some(occurrence_path(s, p, id, cmd)?) } else { None };
     if let Some(target) = target {
         let local = if space == "world" {
@@ -841,11 +904,15 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         } else {
             target
         };
-        return place_occurrence(s, p, id, local, cmd);
+        return place_occurrence(s, p, id, local, None, cmd);
     }
+    // Takes a translation along the axes it was given in into the parent's frame.
+    let mut frame = solidcraft_doc::IDENTITY;
     let delta = if space == "world" {
         let placement = s.occurrence_placement_with(path.as_deref().unwrap_or(&[]), &s.uncaptured_moves())?;
         let inverse = solidcraft_doc::mat_inverse(&placement.parent_world).ok_or_else(|| bad(cmd, "parent frame is singular"))?;
+        frame = inverse;
+        frame[3] = [0.0, 0.0, 0.0, 1.0];
         solidcraft_doc::mat_mul(&solidcraft_doc::mat_mul(&inverse, &delta), &placement.parent_world)
     } else {
         delta
@@ -856,7 +923,8 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         s.uncaptured_moves().get(&id).copied().unwrap_or(o.transform)
     };
     let next = solidcraft_doc::mat_mul(&delta, &cur);
-    place_occurrence(s, p, id, next, cmd)
+    let kept = expressed.map(|(translate, at)| solidcraft_doc::ExpressedMove { translate, at, frame, world: space == "world" });
+    place_occurrence(s, p, id, next, kept, cmd)
 }
 
 /// `occurrence.move`'s target pose in `space` (#12150): `to: {position, axis?, angle?}` or
@@ -901,31 +969,35 @@ fn absolute_target(s: &Session, p: &Value, cmd: &str) -> Result<Option<Mat>> {
 }
 
 /// Make `next` the occurrence's placement in its parent: captured (and the joints solved) or
-/// pending, as `capture` says.
-fn place_occurrence(s: &mut Session, p: &Value, id: u64, next: Mat, cmd: &str) -> Result<Value> {
+/// pending, as `capture` says. `expressed` is the move's expressions (#8192), kept on the
+/// occurrence with a captured move.
+fn place_occurrence(s: &mut Session, p: &Value, id: u64, next: Mat, expressed: Option<solidcraft_doc::ExpressedMove>, cmd: &str) -> Result<Value> {
     if !valid_position(&next) {
         return Err(bad(cmd, "move transform exceeds supported numeric range"));
     }
-    if bool_(p, "capture").unwrap_or(true) {
+    let capture = bool_(p, "capture").unwrap_or(true);
+    if capture {
         s.pending_moves.remove(&id);
+        let kept = expressed.is_some();
         if let Some(x) = s.doc_mut().occurrences.iter_mut().find(|x| x.id == id) {
             x.transform = next;
+            x.expressed_moves.extend(expressed);
         }
         if !s.doc.assembly.joints.is_empty() {
-            return reply(after_joints(s, p, id, next, cmd));
+            let result = after_joints(s, p, id, next, cmd);
+            if kept && result.reverted {
+                // The joints put it back: the move doesn't hold, so nothing follows it.
+                if let Some(x) = s.doc_mut().occurrences.iter_mut().find(|x| x.id == id) {
+                    x.expressed_moves.pop();
+                }
+            }
+            return reply(result);
         }
     } else {
         s.pending_moves.insert(id, next);
         s.revision += 1;
     }
-    reply(MoveResult {
-        occurrence: id,
-        transform: next,
-        pending: !bool_(p, "capture").unwrap_or(true),
-        reverted: false,
-        warning: None,
-        param_warnings: Vec::new(),
-    })
+    reply(MoveResult { occurrence: id, transform: next, pending: !capture, reverted: false, warning: None, param_warnings: Vec::new() })
 }
 
 /// A move's `base_transform`: a 4×4 matrix that is finite, affine and invertible, or what is

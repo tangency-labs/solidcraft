@@ -1056,19 +1056,19 @@ fn inspect_design_gives_a_timeline_summary_and_body_names_when_asked() {
         let gone = tool(&mut s, "inspect_design", with(json!({"timeline": false, "bodies": false})));
         assert!(gone.get("timeline").is_none() && gone.get("bodies").is_none(), "{opts:?}: {gone}");
 
-        // A value the tool doesn't take is refused before anything is sent.
-        for bad in [json!({"timeline": "full"}), json!({"timeline": 1})] {
-            let r = raw_tool(&mut s, "inspect_design", bad.clone());
-            assert_eq!(r["error"]["code"], -32602, "{opts:?} {bad}: {r}");
-        }
-        // `bodies` takes a list with compact output, so its check names every form.
-        let r = raw_tool(&mut s, "inspect_design", json!({"bodies": "all"}));
-        if opts.compact {
-            assert_eq!(r["result"]["isError"], json!(true), "{r}");
-            assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("list of body names, true, false or \"names\""), "{r}");
-        } else {
-            assert_eq!(r["error"]["code"], -32602, "{r}");
-        }
+        // A value the tool doesn't take is refused before anything is sent: a wrong type by the
+        // argument check, a word it doesn't know by the tool, which names every form (#15306).
+        let r = raw_tool(&mut s, "inspect_design", json!({"timeline": 1}));
+        assert_eq!(r["error"]["code"], -32602, "{opts:?}: {r}");
+        let refused = |s: &mut Server, args: Value, forms: &str| {
+            let r = raw_tool(s, "inspect_design", args);
+            assert_eq!(r["result"]["isError"], json!(true), "{opts:?}: {r}");
+            assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains(forms), "{opts:?}: {r}");
+        };
+        refused(&mut s, json!({"timeline": "full"}), "`timeline` must be true, false or \"summary\"");
+        // `bodies` takes a list with compact output, so its check names that form too.
+        let forms = if opts.compact { "list of body names, true, false or \"names\"" } else { "`bodies` must be true, false or \"names\"" };
+        refused(&mut s, json!({"bodies": "all"}), forms);
 
         // As a batch step.
         let r = tool(
@@ -1281,6 +1281,44 @@ fn batch_stops_at_first_error_and_rolls_back() {
     assert_eq!(tool(&mut s, "measure", json!({"names_only": true, "summary": true})), n, "summary has nothing to narrow in a names list");
     let r = tool(&mut s, "batch", json!({"commands": [{"command": "measure", "params": {"names_only": true, "summary": true}}]}));
     assert!(r.to_string().contains("\"definition\""), "{r}");
+}
+
+/// Regression (#15865): a batch that went through forgot its own rollback checkpoint and every
+/// later one with it, so the id an `edit.checkpoint` step returned was gone when the reply came.
+#[test]
+fn a_checkpoint_taken_by_a_batch_step_outlives_the_batch() {
+    let mut s = server();
+    let r = tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}},
+            {"command": "edit.checkpoint", "params": {}},
+        ]}),
+    );
+    let id = r["results"][1]["checkpoint"].clone();
+    assert!(id.is_u64(), "{r}");
+    tool(&mut s, "batch", json!({"commands": [{"command": "solid.cylinder", "params": {"radius": 3, "height": 20, "operation": "cut"}}]}));
+    assert!(volume(&mut s) < 999.0);
+    let back = tool(&mut s, "execute", json!({"command": "edit.restore_checkpoint", "params": {"checkpoint": id}}));
+    assert_eq!(back["restored"], true, "{back}");
+    assert!(rel(volume(&mut s), 1000.0) < 1e-9);
+    // A batch that fails and rolls back uses up the checkpoint its step took.
+    let r = raw_tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "edit.checkpoint", "params": {}},
+            {"command": "solid.extrude", "params": {"distance": "bogus +"}},
+        ]}),
+    );
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["rolled_back"], true, "{body}");
+    let id = body["results"][0]["checkpoint"].clone();
+    assert!(id.is_u64(), "{body}");
+    let gone = raw_tool(&mut s, "execute", json!({"command": "edit.restore_checkpoint", "params": {"checkpoint": id}}));
+    assert_eq!(gone["result"]["isError"], true, "{gone}");
+    assert!(rel(volume(&mut s), 1000.0) < 1e-9);
 }
 
 /// #5853: a misspelled command, however late in the batch, refuses the batch before its first
@@ -2570,6 +2608,38 @@ fn compact_batch_reply_keeps_changed_bodies_and_created_ids() {
     assert!(rect["sides"].is_object(), "results that are not repeated stay: {r}");
 }
 
+/// A drawing of hundreds of curves comes back with hundreds of ids: a compact reply leaves each
+/// long `created` list out and counts it, the full reply has every id; 20 ids are still a list.
+#[test]
+fn compact_reply_counts_long_created_lists() {
+    let mut s = server();
+    let polyline = |n: usize| {
+        let points: Vec<String> = (0..=n).map(|i| format!("{i},{}", i % 2)).collect();
+        format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 10"><polyline points="{}"/></svg>"#, points.join(" "))
+    };
+    tool(&mut s, "execute", json!({"command": "sketch.create", "params": {"plane": "XY"}}));
+    let full = tool(&mut s, "execute", json!({"command": "sketch.insert_svg", "params": {"text": polyline(30)}}));
+    assert_eq!(full["created"]["curves"].as_array().map(Vec::len), Some(30), "{full}");
+    assert_eq!(full["created"]["points"].as_array().map(Vec::len), Some(31), "{full}");
+    tool(&mut s, "execute", json!({"command": "sketch.create", "params": {"plane": "XY"}}));
+    let short = tool(&mut s, "execute", json!({"command": "sketch.insert_svg", "params": {"text": polyline(30)}, "verbose": false}));
+    assert!(short["created"].get("curves").is_none() && short["created"].get("points").is_none(), "{short}");
+    assert_eq!((&short["created"]["curve_count"], &short["created"]["point_count"]), (&json!(30), &json!(31)), "{short}");
+    assert_eq!(short["curves"], json!(30), "the count outside `created` stays: {short}");
+    // Twenty curves are still listed.
+    tool(&mut s, "execute", json!({"command": "sketch.create", "params": {"plane": "XY"}}));
+    let twenty = tool(&mut s, "execute", json!({"command": "sketch.insert_svg", "params": {"text": polyline(20)}, "verbose": false}));
+    assert_eq!(twenty["created"]["curves"].as_array().map(Vec::len), Some(20), "{twenty}");
+    // The same in a batch.
+    let b = tool(
+        &mut s,
+        "batch",
+        json!({"commands": [{"command": "sketch.create", "params": {"plane": "XY"}}, {"command": "sketch.insert_svg", "params": {"text": polyline(30)}}], "verbose": false}),
+    );
+    let step = &b["results"][1];
+    assert!(step["created"].get("curves").is_none() && step["created"]["curve_count"] == json!(30), "{b}");
+}
+
 /// #531: a product model keeps an optional variant hidden in its default presentation. Hiding
 /// it must survive saving and reopening the design (suppressing it would change the design).
 #[test]
@@ -2670,6 +2740,36 @@ fn compact_sketch_replies_count_spline_poles() {
     let rectangle =
         tool(&mut s, "execute", json!({"command": "sketch.rectangle.two_point", "params": {"p0": [0, 20], "p1": [10, 30]}, "verbose": false}));
     assert_eq!(rectangle["created"]["points"].as_array().map(Vec::len), Some(4), "{rectangle}");
+}
+
+/// #15864: a compact `sketch.move_points` reply counts the moves and lists only the ones that
+/// missed their targets; the full reply still lists every move.
+#[test]
+fn compact_move_points_reply_lists_only_missed_moves() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "sketch.create", "params": {"plane": "XY", "name": "A"}}));
+    tool(
+        &mut s,
+        "execute",
+        json!({"command": "sketch.spline.fit_point", "params": {"points": [[10, 0], [0, 10], [-10, 0], [0, -10]], "periodic": true}}),
+    );
+    let moves =
+        json!([{"point": "p1", "to": [12, 0]}, {"point": "p2", "to": [0, 12]}, {"point": "p3", "to": [-12, 0]}, {"point": "p4", "to": [0, -12]}]);
+    let full = tool(&mut s, "execute", json!({"command": "sketch.move_points", "params": {"moves": moves}}));
+    assert_eq!(full["moved"].as_array().map(Vec::len), Some(4), "{full}");
+    let compact = tool(&mut s, "execute", json!({"command": "sketch.move_points", "params": {"moves": moves}, "verbose": false}));
+    assert_eq!((&compact["moved_count"], &compact["reached"]), (&json!(4), &json!(true)), "{compact}");
+    assert!(compact.get("moved").is_none() && compact.get("not_reached").is_none() && compact.get("created").is_none(), "{compact}");
+    assert!(compact.to_string().len() * 3 < full.to_string().len(), "compact is far smaller: {compact}");
+    // A point held by a fixed constraint cannot reach its target: only that move is listed.
+    tool(&mut s, "execute", json!({"command": "sketch.constraint.fix", "params": {"entities": ["p1"]}}));
+    let held = json!([{"point": "p1", "to": [20, 0]}, {"point": "p2", "to": [0, 14]}]);
+    let compact = tool(&mut s, "execute", json!({"command": "sketch.move_points", "params": {"moves": held}, "verbose": false}));
+    assert_eq!((&compact["moved_count"], &compact["reached"]), (&json!(2), &json!(false)), "{compact}");
+    let missed = compact["not_reached"].as_array().cloned().unwrap_or_default();
+    assert_eq!(missed.len(), 1, "{compact}");
+    assert_eq!((&missed[0]["point"], &missed[0]["to"]), (&json!("p1"), &json!([20.0, 0.0])), "{compact}");
+    assert!(missed[0]["at"].is_array() && missed[0].get("reached").is_none(), "{compact}");
 }
 
 /// A connected app sees exactly one engine call; no inventory inspection is needed.
@@ -4198,6 +4298,39 @@ fn inspect_text(s: &mut Server, args: Value) -> (bool, String) {
     (r["result"]["isError"] == json!(true), r["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string())
 }
 
+/// No tool schema has a list of types, and no argument of several types has an `enum`. Gemini
+/// refuses a list of types (#16257); some OpenAI-compatible endpoints (Moonshot) refuse every
+/// tool when an argument of several types has an `enum` (#15306), so the agent chat could not
+/// start a turn. Several types are an `anyOf`; the tool itself checks the words it takes.
+#[test]
+fn no_tool_schema_has_a_list_of_types() {
+    fn mixed(path: &str, schema: &Value, found: &mut Vec<String>) {
+        match schema {
+            Value::Object(o) => {
+                if o.get("type").is_some_and(Value::is_array) || (o.contains_key("anyOf") && o.contains_key("enum")) {
+                    found.push(path.to_string());
+                }
+                for (k, v) in o {
+                    mixed(&format!("{path}.{k}"), v, found);
+                }
+            }
+            Value::Array(items) => {
+                for (i, v) in items.iter().enumerate() {
+                    mixed(&format!("{path}[{i}]"), v, found);
+                }
+            }
+            _ => {}
+        }
+    }
+    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+        let mut found = Vec::new();
+        for def in crate::tool_definitions_with(opts) {
+            mixed(def["name"].as_str().unwrap_or("?"), &def["inputSchema"], &mut found);
+        }
+        assert!(found.is_empty(), "{opts:?}: {found:?}");
+    }
+}
+
 /// Off by default: `inspect_design` has its old arguments and returns every sketch in full,
 /// pretty-printed; `document.inspect` adds no sketch counts unless asked.
 #[test]
@@ -4206,7 +4339,7 @@ fn inspect_design_is_unchanged_without_compact_output() {
     let defs = tool_definitions();
     let def = defs.iter().find(|d| d["name"] == "inspect_design").unwrap();
     assert_eq!(def["inputSchema"]["properties"]["sketches"]["type"], "boolean", "{def}");
-    assert_eq!(def["inputSchema"]["properties"]["bodies"]["type"], json!(["boolean", "string"]), "no list of names: {def}");
+    assert_eq!(def["inputSchema"]["properties"]["bodies"]["anyOf"], json!([{"type": "boolean"}, {"type": "string"}]), "no list of names: {def}");
     let listed = call(&mut s, 1, "tools/list", json!({}));
     assert!(listed["result"]["tools"].as_array().unwrap().iter().any(|t| t == def), "tools/list serves the default definition");
 
@@ -4301,7 +4434,7 @@ impl crate::Backend for AppWithPrefs {
 fn inspect_design_is_compact(s: &mut Server) -> bool {
     let listed = call(s, 1, "tools/list", json!({}));
     let def = listed["result"]["tools"].as_array().and_then(|t| t.iter().find(|d| d["name"] == "inspect_design")).cloned().unwrap_or_default();
-    def["inputSchema"]["properties"]["bodies"]["type"].as_array().is_some_and(|t| t.contains(&json!("array")))
+    def["inputSchema"]["properties"]["bodies"]["anyOf"].as_array().is_some_and(|t| t.iter().any(|alt| alt["type"] == "array"))
 }
 
 /// The app's Preferences turn compact output on for a bridged server; it asks until the app

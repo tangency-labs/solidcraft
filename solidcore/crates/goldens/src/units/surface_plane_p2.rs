@@ -715,7 +715,10 @@ fn rust_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                     }
                 };
                 let other_ref = other.as_ref().unwrap_or(&a);
-                let r = a.intersect_with_plane(k, &ext(*da), other_ref, &ext(*db), tol);
+                // (the warning is recorded as the status upstream returns for it)
+                let r = a
+                    .intersect_with_plane(k, &ext(*da), other_ref, &ext(*db), tol)
+                    .and_then(solidcore::surface::plane::p2::stop_on_warning);
                 if let Some((more, x)) = st(o, r)? {
                     o.push(fl(more));
                     put_intersection(o, &x)?;

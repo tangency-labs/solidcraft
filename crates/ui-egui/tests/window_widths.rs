@@ -12,12 +12,7 @@ fn window_widths(h: &Harness) -> Vec<(egui::Id, f32)> {
         m.areas()
             .visible_layer_ids()
             .into_iter()
-            // Workspace hosts are not command windows; Shots has wide expanded and small collapsed forms.
-            .filter(|l| {
-                l.order == egui::Order::Middle
-                    && ![egui::Id::unique("sc_browser_card"), egui::Id::unique("sc_render_shots_strip"), egui::Id::unique("sc_render_shots_pill")]
-                        .contains(&l.id)
-            })
+            .filter(|l| l.order == egui::Order::Middle)
             .filter_map(|l| m.area_rect(l.id).map(|r| (l.id, r.width())))
             .collect()
     })
@@ -54,20 +49,26 @@ fn render_strip_is_excluded_while_real_windows_are_still_measured() {
     assert_eq!(h.call("ui.workspace", json!({"workspace":"render"}))["ok"], true);
     h.app.help.about = true;
     h.frames(6);
-    let strip = egui::Id::unique("sc_render_shots_strip");
-    let width = h.ctx.memory(|m| m.area_rect(strip)).expect("visible Shots strip").width();
+    let shots_width = |h: &Harness| {
+        h.app
+            .universal_panel_frame()
+            .unwrap()
+            .layout
+            .sections
+            .iter()
+            .find(|section| section.instance.0 == "render-shots")
+            .map(|section| section.outer.size.width)
+    };
+    let width = shots_width(&h).expect("visible Shots strip");
     assert!(width > DIALOG_MAX_W, "the workspace strip should span the canvas: {width}");
     let windows = window_widths(&h);
-    assert!(!windows.iter().any(|(id, _)| *id == strip));
+    assert!(windows.iter().all(|(_, window_width)| *window_width < width), "the strip is not a dialog: {windows:?}");
     assert!(windows.iter().any(|(id, _)| *id == egui::Id::unique("sc_about")), "real About window is still measured: {windows:?}");
     assert_eq!(h.call("engine.execute", json!({"command":"view.shots_strip","params":{"visible":false}}))["ok"], true);
     h.frames(6);
-    let pill = egui::Id::unique("sc_render_shots_pill");
-    let width = h.ctx.memory(|m| m.area_rect(pill)).expect("visible Shots restore control").width();
-    assert!(width < DIALOG_MIN_W, "the restore control is intentionally smaller than a dialog: {width}");
+    assert!(shots_width(&h).is_none(), "the shared strip is hidden");
     let windows = window_widths(&h);
-    assert!(!windows.iter().any(|(id, _)| *id == pill));
-    assert!(windows.iter().any(|(id, _)| *id == egui::Id::unique("sc_about")), "real window remains measured with Shots collapsed: {windows:?}");
+    assert!(windows.iter().any(|(id, _)| *id == egui::Id::unique("sc_about")), "real window remains measured with Shots hidden: {windows:?}");
     assert_eq!(h.call("ui.start", json!({"command":"file.export_view_dxf"}))["ok"], true);
     h.frames(6);
     let dialog = solidcraft_ui_egui::scenario::rect_of("dialog:outer").expect("DXF dialog has an outer rectangle");

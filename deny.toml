@@ -3,6 +3,14 @@
 # The nightly command downgrades only this diagnostic with --warn unmaintained.
 unmaintained = "all"
 yanked = "warn"
+ignore = [
+  # rsa and crypto-bigint are used only to verify OpenPGP signatures with public keys. The
+  # advisories concern private-key operations (Marvin timing on decryption, constant-time
+  # arithmetic on secrets), which SolidCraft never performs: it signs through GnuPG and never
+  # gives these crates a private key.
+  { id = "RUSTSEC-2023-0071", reason = "rsa here verifies public-key OpenPGP signatures only; no private-key operations" },
+  { id = "RUSTSEC-2026-0387", reason = "crypto-bigint here is used for public-key signature verification only; no secret-key arithmetic" },
+]
 
 [bans]
 multiple-versions = "warn"

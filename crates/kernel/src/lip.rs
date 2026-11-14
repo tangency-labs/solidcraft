@@ -188,6 +188,25 @@ fn rim_loops(asm: &Assembly, fi: usize, n: Vec3) -> Result<(Vec<AUse>, Vec<AUse>
 }
 
 fn profile(pieces: &[Piece], plane: &Plane) -> Result<Loop2> {
+    let mut pieces = pieces.to_vec();
+    // A source edge's vertex may be within its own tolerance of the circle rather than on it.
+    // An extruded tool has fresh, tighter tolerances, so join the following piece to the
+    // circle's evaluated end instead of carrying that source vertex into the tool profile.
+    for i in 0..pieces.len() {
+        let j = (i + 1) % pieces.len();
+        let Some(piece) = pieces.get(i).copied() else { return Err(fail("piece")) };
+        if piece.arc.is_some() {
+            let end = piece.at(plane.normal(), 1.0);
+            if let Some(current) = pieces.get_mut(i) {
+                current.b = end;
+            }
+            if i != j
+                && let Some(next) = pieces.get_mut(j)
+            {
+                next.a = end;
+            }
+        }
+    }
     let segs = pieces
         .iter()
         .map(|p| {
