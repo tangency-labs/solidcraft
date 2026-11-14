@@ -6,7 +6,7 @@
 //! Two planes crossing at a small angle θ meet in a line fixed only to `tol / sin θ`.
 //! The signed distance to a plane is affine in the point: zero on the crossing line,
 //! growing linearly to either side. The rule is for a crossing through both faces: each
-//! has a vertex strictly on either side of it. Two faces that meet only along their
+//! has an edge end strictly on either side of it, beyond the end's slack (below). Two faces that meet only along their
 //! boundaries (a shared edge, from opposite sides, at any angle) have no pieces beside the
 //! line to pair, and are intersected as upstream does. Take each side of the crossing.
 //! When on both sides one of the two faces lies, over the whole face, within the
@@ -116,11 +116,12 @@ pub(crate) fn crossing_inside_coincident_pair<O: ClassObject>(
     if !crossing {
         return Ok(false);
     }
-    // Each face crosses the line: one of its vertices lies strictly above the other face's
-    // plane and one strictly below (beyond their rounding). Faces that only meet the line
+    // Each face crosses the line: a point of the face near one of its edge ends lies
+    // strictly above the other face's plane and one strictly below (beyond the end's
+    // `boundary_slack` and the distance's rounding). Faces that only meet the line
     // along their boundary, as two faces meeting along a shared edge from opposite sides,
     // have no piece on both sides of it: there is no coincident pair, whatever the angle.
-    if !crosses_plane(k, brep, fa, pb)? || !crosses_plane(k, brep, fb, pa)? {
+    if !crosses_plane(k, brep, fa, pa, pb, sine)? || !crosses_plane(k, brep, fb, pb, pa, sine)? {
         return Ok(false);
     }
     let tol = xsect_tol_3d_from_zones(
@@ -219,14 +220,25 @@ fn hull_within_band_on_side(hull: &[(Point3, f64)], plane: PlanePos, sense: f64,
     })
 }
 
-/// Whether `face` has an edge end strictly above `plane` and one strictly below, each
-/// beyond the rounding of its signed distance. The ends are points of the face, so its
-/// interior, which is connected, reaches both sides and the crossing line runs through it.
+/// Whether `face` (on its own plane `own`) reaches strictly above `plane` and strictly
+/// below it, judged at its edge ends ([`beside`]): each end is a point of the edge curve,
+/// which the face's own boundary follows only to the edge's zone tolerance and the end's
+/// offset from `own`, so an end counts on a side only past that slack ([`boundary_slack`],
+/// `sine` being the sine of the planes' angle) and the distance's rounding. An edge end
+/// that lies on the other plane within its own tolerance, as along an edge two faces
+/// share, counts on neither side. The face points so found lie on both sides, and the
+/// face's interior, which is connected, reaches both: the crossing line runs through it.
+///
+/// # Errors
+///
+/// Those of the topology walk, the zone tolerances and the end evaluations.
 fn crosses_plane<O: ClassObject>(
     k: &Kernel,
     brep: &impl IntersectorBrepP2<O>,
     face: O,
+    own: PlanePos,
     plane: PlanePos,
+    sine: f64,
 ) -> Result<bool> {
     let (mut above, mut below) = (false, false);
     for edge in brep.face_edges(face)? {
@@ -236,16 +248,29 @@ fn crosses_plane<O: ClassObject>(
         ) else {
             continue;
         };
+        let edge_zone = object_zone_tol_3d(k, brep, Some(edge))?;
         for t in [ivl.min(), ivl.max()] {
-            let (g, rounding) = plane.signed_distance(curve.evaluate_point(k, t)?);
-            above |= g > rounding;
-            below |= g < -rounding;
+            let q = curve.evaluate_point(k, t)?;
+            let (up, down) = beside(own, plane, sine, edge_zone, q);
+            above |= up;
+            below |= down;
         }
         if above && below {
             return Ok(true);
         }
     }
     Ok(false)
+}
+
+/// Whether the face near its edge end `q` (an edge of zone tolerance `edge_zone`, the face
+/// on plane `own`) lies strictly above `plane`, and whether strictly below: the signed
+/// distance must pass the end's [`boundary_slack`] (with the evaluated point's error,
+/// a few units in the last place of `|q|`) and the distance's rounding. NaN counts on
+/// neither side.
+fn beside(own: PlanePos, plane: PlanePos, sine: f64, edge_zone: f64, q: Point3) -> (bool, bool) {
+    let (g, rounding) = plane.signed_distance(q);
+    let margin = boundary_slack(own, sine, edge_zone, q, gamma(8) * q.length()) + rounding;
+    (g > margin, g < -margin)
 }
 
 /// The plane of `face` when its surface is planar with a valid normal.
@@ -385,6 +410,40 @@ mod tests {
     /// lies on its face's plane with the default tolerance, but not when the edge sits
     /// 1.5e-5 off its face's plane, nor when its tolerance has grown to 1e-4 across a
     /// crossing of sine 0.1. Either may hide a real crossing.
+    /// An edge end on the other plane within the edge's own tolerance, as along an edge two
+    /// faces share, counts on neither side; past the edge's tolerance (times the planes'
+    /// sine) and its offset from the face's own plane, it counts on its side. The rounding
+    /// alone, as before, counted the first.
+    #[test]
+    fn an_edge_end_within_its_tolerance_of_the_other_plane_is_on_neither_side() {
+        let other = PlanePos {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            unit_normal: Vec3::new(0.0, 1.0, 0.0),
+        };
+        let own = |off: f64| PlanePos {
+            origin: Point3::new(0.0, 0.0, off),
+            unit_normal: Vec3::new(0.0, 0.0, 1.0),
+        };
+        let q = |y: f64| Point3::new(1.0, y, 0.0);
+        let (sine, zone) = (1.0, 1e-7);
+        assert_eq!(beside(own(0.0), other, sine, zone, q(5e-8)), (false, false));
+        assert_eq!(
+            beside(own(0.0), other, sine, zone, q(-5e-8)),
+            (false, false)
+        );
+        assert_eq!(beside(own(0.0), other, sine, zone, q(2e-7)), (true, false));
+        assert_eq!(beside(own(0.0), other, sine, zone, q(-2e-7)), (false, true));
+        // the end 2e-7 off the face's own plane: its 2e-7 above no longer counts
+        assert_eq!(
+            beside(own(2e-7), other, sine, zone, q(2e-7)),
+            (false, false)
+        );
+        assert_eq!(
+            beside(own(0.0), other, sine, f64::NAN, q(1.0)),
+            (false, false)
+        );
+    }
+
     #[test]
     fn an_edge_off_its_plane_or_with_a_grown_tolerance_widens_the_bound() {
         let other = PlanePos {

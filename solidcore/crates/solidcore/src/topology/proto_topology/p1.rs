@@ -613,6 +613,55 @@ mod tests {
         }
     }
 
+    /// Whether the two line definitions `l1` and `l2` (of one proto edge from (0,0,0) to
+    /// (2,0,0), each with tolerance 1e-5, on the face pair (20, 21) and (20, edge 22)) can
+    /// combine at `factor` times their summed tolerances.
+    fn combine_lines(k: &Kernel, l1: Curve, l2: Curve, factor: f64) -> u64 {
+        let geo = GeoEdgeOnFace(Geo(vec![l1, l2]));
+        let mut m = manager();
+        let ivl = geo.0 .0[0].natural_interval();
+        let v0 = m
+            .new_proto_vertex(Point3::new(0.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let v1 = m
+            .new_proto_vertex(Point3::new(2.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        m.add_proto_vertex(v0);
+        m.add_proto_vertex(v1);
+        let pe = m.new_proto_edge(k, Some(v0), Some(v1), ivl).unwrap();
+        m.add_proto_edge(pe);
+        let fa = H(20, ClassObjectKind::Face);
+        let fb = H(21, ClassObjectKind::Face);
+        let eb = H(22, ClassObjectKind::Edge);
+        let c1 = H(1, ClassObjectKind::Curve);
+        let ed1 = m
+            .insert_edge_definition(EdgeDefinition::new(
+                Some(C0),
+                ivl,
+                fa,
+                fb,
+                1e-5,
+                None,
+                None,
+                Some(pe),
+            ))
+            .unwrap();
+        let ed2 = m
+            .insert_edge_definition(EdgeDefinition::new(
+                Some(c1),
+                ivl,
+                fa,
+                eb,
+                1e-5,
+                None,
+                None,
+                Some(pe),
+            ))
+            .unwrap();
+        m.can_combine_edge_definitions_within(k, &geo, ed1, ed2, factor)
+            .unwrap()
+    }
+
     /// #15718: at the exact radius (factor 1) two line definitions of one proto edge
     /// combine only when each lies within the summed tolerances of the other over its
     /// whole piece. Here they cross at the first one's midpoint at an angle: the midpoint
@@ -677,6 +726,28 @@ mod tests {
                 .can_combine_edge_definitions_within(&k, &geo, ed1, ed2, 5.0)
                 .unwrap();
             assert_eq!(five, 1, "ends {:e} apart, factor 5", 2.0 * a);
+        }
+    }
+
+    /// #15718: two collinear line definitions shifted along their line combine at the
+    /// exact radius only when each piece lies within the summed tolerances (2e-5) of the
+    /// other piece, not merely of its line: shifted by 3e-5 they are two pieces and are
+    /// kept (the line distance is 0 at every end, and the first piece's end at x = 0 is
+    /// 3e-5 from the second piece); shifted by 4e-6 they are one and combine. Upstream's
+    /// factor-5 midpoint path combines both, as before.
+    #[test]
+    fn collinear_line_definitions_shifted_along_the_line_combine_only_within_tolerance() {
+        let k = Kernel::default();
+        for (shift, want) in [(3e-5, 0), (4e-6, 1)] {
+            let l1 = line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]);
+            let l2 = line([shift, 0.0, 0.0], [2.0 + shift, 0.0, 0.0]);
+            let got = combine_lines(&k, l1.clone(), l2.clone(), 1.0);
+            assert_eq!(got, want, "shifted by {shift:e}");
+            assert_eq!(
+                combine_lines(&k, l1, l2, 5.0),
+                1,
+                "shifted by {shift:e}, factor 5"
+            );
         }
     }
 

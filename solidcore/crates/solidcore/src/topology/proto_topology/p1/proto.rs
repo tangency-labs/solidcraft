@@ -15,7 +15,6 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::geom::tol::{xsect_tol3d, zone_tol3d};
-use crate::intersect::curve_class::p3::straight_run_on_line;
 use crate::intersect::curve_class::{src_zone_tol_3d_of, CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
     object_zone_tol_3d, ClassGeometry, ClassObject, ClassObjectKind, PointClassType,
@@ -517,14 +516,17 @@ pub fn are_same_curve<O: Copy + PartialEq>(
 }
 
 /// Not upstream (#15718): whether two edge definitions on lines are one piece within
-/// `tol`, decided over both whole pieces. Each end of the first definition's interval lies
-/// within `tol` of the second's line, and each end of the second's interval within `tol`
-/// of the first's line ([`straight_run_on_line`], rounding counted). The distance from a
-/// point to a line is the norm of an affine function of the point, so it is convex along a
-/// segment and its maximum over a piece is reached at one of the piece's ends: the four end
-/// checks bound every point of both pieces, a certificate where upstream's
-/// [`are_same_curve`] drops one midpoint. `false` when either curve is not a line or either
-/// piece has zero length (nothing combined: the definitions are kept).
+/// `tol`, decided over both whole pieces: each end of the first definition's interval lies
+/// within `tol` of the second's segment (the piece itself, not its infinite line), and
+/// each end of the second's within `tol` of the first's ([`end_within_segment`], rounding
+/// counted). The distance from a point to a segment is convex in the point (a segment is
+/// convex), so along a piece its maximum is reached at one of the piece's ends: the four
+/// end checks bound every point of each piece within `tol` of the other piece, in both
+/// directions (their Hausdorff distance). Two pieces of one line shifted along it by more
+/// than `tol` are therefore two pieces, as two crossing pieces are; upstream's
+/// [`are_same_curve`] drops one midpoint onto the other's curve instead. `false` when either
+/// curve is not a line or either piece has zero length (nothing combined: the definitions
+/// are kept).
 ///
 /// # Errors
 ///
@@ -536,12 +538,52 @@ fn exact_lines_coincide<O: Copy>(
     d2: &EdgeDefinition<O>,
     tol: f64,
 ) -> Result<bool> {
+    use crate::curve::curve::CurveKind;
     let c1 = curve_of(geometry, d1.xsect_curve_3d)?;
     let c2 = curve_of(geometry, d2.xsect_curve_3d)?;
-    Ok(
-        straight_run_on_line(k, c1, &d1.xsect_interval, c2, &d2.xsect_interval, tol)?
-            && straight_run_on_line(k, c2, &d2.xsect_interval, c1, &d1.xsect_interval, tol)?,
-    )
+    let line = |c: &Curve| matches!(c.kind(), CurveKind::Line(_));
+    if !line(c1) || !line(c2) {
+        return Ok(false);
+    }
+    let ends = |c: &Curve, ivl: &Extent1d| -> Result<[Point3; 2]> {
+        Ok([
+            c.evaluate_point(k, ivl.min())?,
+            c.evaluate_point(k, ivl.max())?,
+        ])
+    };
+    let p1 = ends(c1, &d1.xsect_interval)?;
+    let p2 = ends(c2, &d2.xsect_interval)?;
+    Ok(p1.iter().all(|&p| end_within_segment(p, p2, tol))
+        && p2.iter().all(|&p| end_within_segment(p, p1, tol)))
+}
+
+/// Not upstream (#15718): whether `p` lies within `tol` of the segment `seg`, with an upper
+/// bound of the distance: the distance to the nearer end when the computed foot falls
+/// outside the segment (an end is a point of the segment, so that bounds the distance
+/// whatever the foot's rounding), and otherwise the distance to the segment's line plus the
+/// rounding of the foot and the line distance (the differences carry a few units in the
+/// last place of the coordinates, amplified by `|p - a| / |b - a|`). `false` for a segment
+/// of zero length and for any NaN.
+fn end_within_segment(p: Point3, seg: [Point3; 2], tol: f64) -> bool {
+    use crate::nurbs::math::gamma;
+    let [a, b] = seg;
+    let along = b - a;
+    let length = along.length();
+    let usable = length > 0.0;
+    if !usable {
+        return false;
+    }
+    let w = p - a;
+    let s = w.dot(along) / (length * length);
+    let scale = p.length() + a.length() + b.length();
+    let bound = if s <= 0.0 {
+        p.distance(a) + gamma(8) * (p.length() + a.length())
+    } else if s >= 1.0 {
+        p.distance(b) + gamma(8) * (p.length() + b.length())
+    } else {
+        w.cross(along).length() / length + gamma(16) * scale * (1.0 + w.length() / length)
+    };
+    bound < tol
 }
 
 /// `sm_AreConnected(const SmVertex*, const SmFace*)`.

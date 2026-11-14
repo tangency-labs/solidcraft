@@ -1031,9 +1031,11 @@ pub(crate) fn delete_topological_vertex_joining(
 ///
 /// [`TopologyFailure::JoinedVertexReaches`](crate::error::topology::TopologyFailure::JoinedVertexReaches)
 /// at the vertex when a grown vertex tolerance would reach the far vertex of one of its
-/// edges (a tube may not reach an entity it does not bound), naming the tolerance needed and
-/// the one that fits; those of the topology walks and the curve evaluations.
+/// edges (a tube may not reach an entity it does not bound), that vertex taken at its own
+/// grown tolerance when it grows too, naming the tolerance needed and the one that fits;
+/// nothing is grown then; those of the topology walks and the curve evaluations.
 pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
+    use crate::boolean::topology_intersector::p1::{first_reaching, Growth};
     use crate::curve::curve::CurveKind;
     use crate::nurbs::math::gamma;
     if !b.edge_list().contains(&e) {
@@ -1076,6 +1078,7 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
     if !gapped && grow.is_empty() {
         return Ok(());
     }
+    let mut growths = Vec::new();
     for &(v, point, tolerance) in &grow {
         let mut reach = Vec::new();
         for other in vertex::edges(b, v, None)? {
@@ -1085,23 +1088,23 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
                 // the distance less its rounding: a lower bound
                 let apart =
                     point.distance(f.point) - gamma(8) * (point.length() + f.point.length());
-                reach.push((apart, f.tolerance));
+                reach.push((Some(far), apart, f.tolerance));
             }
         }
-        // (a NaN distance passes no test and refuses)
-        let clear = reach
-            .iter()
-            .all(|&(apart, far_tol)| tolerance + far_tol < apart);
-        if !clear {
-            return Err(SolidError::topology_at(
-                OP,
-                crate::error::topology::TopologyFailure::JoinedVertexReaches {
-                    needed: tolerance,
-                    fits_below: crate::boolean::topology_intersector::p1::room_left(&reach),
-                },
-                crate::EntityRef::Vertex(v),
-            ));
-        }
+        growths.push(Growth {
+            vertex: v,
+            tolerance,
+            reach,
+        });
+    }
+    // both ends may grow: each is judged against the other's grown tolerance, and both
+    // apply or neither (a NaN distance passes no test and refuses)
+    if let Some((v, needed, fits_below)) = first_reaching(&growths) {
+        return Err(SolidError::topology_at(
+            OP,
+            crate::error::topology::TopologyFailure::JoinedVertexReaches { needed, fits_below },
+            crate::EntityRef::Vertex(v),
+        ));
     }
     crate::topology::edge::set_tolerance(b, e, edge_gap, true, false)?;
     for (v, _, tolerance) in grow {
@@ -3730,6 +3733,58 @@ mod tests {
     fn status_box(k: &mut Kernel) -> Brep {
         crate::primitive::api_primitives::create_box(k, Point3::new(0.0, 0.0, 0.0), 1.0, 2.0, 3.0)
             .expect("box")
+    }
+
+    /// #15718: when both ends of a joined line edge grow, each is judged against the
+    /// other's grown tolerance. The box's 3-long edge on x = y = 0 has both vertices moved
+    /// 0.8 off it, away from the box: each needs a tolerance of 1.6 to cover its gap, which
+    /// fits beside the other's old tolerance (1.6 < 3) and beside its other neighbours
+    /// (1.66 and 2.63 away), but the two grown balls overlap (1.6 + 1.6 > 3). The cover is
+    /// refused at the first end and grows nothing.
+    #[test]
+    fn a_joined_edge_whose_two_grown_ends_overlap_is_refused() {
+        let mut k = Kernel::default();
+        let mut b = status_box(&mut k);
+        let mut found = None;
+        for &e in b.edge_list() {
+            let ed = b.edge(e).expect("edge");
+            let c = ed.curve.as_ref().expect("curve");
+            let p = c.evaluate_point(&k, ed.interval.min()).expect("start");
+            let q = c.evaluate_point(&k, ed.interval.max()).expect("end");
+            if p.x == 0.0 && p.y == 0.0 && q.x == 0.0 && q.y == 0.0 {
+                found = Some(e);
+            }
+        }
+        let e = found.expect("the edge on x = y = 0");
+        let ends = [
+            crate::topology::edge::start_vertex(&b, e).unwrap().unwrap(),
+            crate::topology::edge::end_vertex(&b, e).unwrap().unwrap(),
+        ];
+        let off = 0.8 / std::f64::consts::SQRT_2;
+        let before: Vec<f64> = ends
+            .iter()
+            .map(|&v| {
+                let vx = b.vertex_mut(v).unwrap();
+                vx.point = Point3::new(-off, -off, vx.point.z);
+                vx.tolerance
+            })
+            .collect();
+        let r = cover_joined_line_gaps(&k, &mut b, e);
+        let Err(SolidError::Failed(f)) = &r else {
+            panic!("a refusal, got {r:?}");
+        };
+        let crate::error::Reason::Topology(
+            crate::error::topology::TopologyFailure::JoinedVertexReaches { needed, fits_below },
+        ) = f.reason
+        else {
+            panic!("a joined vertex that reaches, got {r:?}");
+        };
+        assert!((needed - 1.6).abs() < 1e-9, "needed {needed}");
+        let fits = fits_below.expect("a tolerance fits");
+        assert!(fits > 1.3 && fits < 1.5, "fits below {fits}");
+        for (&v, t) in ends.iter().zip(before) {
+            assert_eq!(b.vertex(v).unwrap().tolerance, t, "nothing grown");
+        }
     }
 
     /// fork 60a8a51 (`SmBrep::StitchAndOrient`, `SER(this->StitchFaces(..))`): an edge

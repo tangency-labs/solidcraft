@@ -1214,22 +1214,21 @@ pub struct TopologyIntersector<O> {
 /// gap; and `v`, with twice its largest gap, when that passes its tolerance (`AssertValid`
 /// checks a vertex's gaps against half of it). A curve end is the end of the edge's
 /// interval nearer `v` (the farther for a closed edge): for an edge longer than twice the
-/// gap that is the end at its vertex.
+/// gap that is the end at its vertex. The vertex's growth comes with its reach (the far
+/// vertex of each of the edges, a lower bound of its distance and its tolerance), which
+/// the caller checks once every growth is known ([`first_reaching`]).
 ///
 /// # Errors
 ///
-/// [`BooleanFailure::MergedVertexReaches`] when a grown vertex tolerance would reach the far
-/// vertex of one of the edges (a tube may not reach an entity it does not bound), naming the
-/// tolerance needed and the tolerance that fits; those of the topology walks and the curve
-/// evaluations.
+/// Those of the topology walks and the curve evaluations.
 fn certified_vertex_gaps<O: ClassObject>(
     k: &Kernel,
     brep: &impl IntersectorBrep<O>,
     v: O,
     mates: &[O],
-) -> Result<Vec<(O, f64)>> {
+) -> Result<CertifiedGaps<O>> {
     let Some((b, EntityRef::Vertex(vid))) = ClassGeometry::topology_entity(brep, v) else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), None));
     };
     let point = b.vertex(vid)?.point;
     let own_tolerance = b.vertex(vid)?.tolerance;
@@ -1268,7 +1267,8 @@ fn certified_vertex_gaps<O: ClassObject>(
                 // the distance less its rounding: a lower bound
                 let apart =
                     point.distance(f.point) - gamma(8) * (point.length() + f.point.length());
-                reach.push((apart, f.tolerance));
+                let handle = brep.topology_handle_in(ob, EntityRef::Vertex(far));
+                reach.push((handle, apart, f.tolerance));
             }
         }
         for f in vertex::faces(ob, ovid)? {
@@ -1290,25 +1290,59 @@ fn certified_vertex_gaps<O: ClassObject>(
         }
     }
     let tolerance = zone_tol3d(k, 2.0 * gap);
-    if tolerance > own_tolerance {
-        // (a NaN distance passes no test and refuses)
+    let growth = (tolerance > own_tolerance).then_some(Growth {
+        vertex: v,
+        tolerance,
+        reach,
+    });
+    Ok((out, growth))
+}
+
+/// What [`certified_vertex_gaps`] returns: the edges to grow, each with its tolerance, and
+/// the vertex's own growth, if any.
+type CertifiedGaps<O> = (Vec<(O, f64)>, Option<Growth<O>>);
+
+/// Not upstream (#15718): a vertex tolerance to grow, with the vertices its ball must not
+/// reach: for each, its handle (`None` when it has none), a lower bound of its distance
+/// and its stored tolerance.
+pub(crate) struct Growth<K> {
+    /// The vertex.
+    pub(crate) vertex: K,
+    /// Its grown tolerance.
+    pub(crate) tolerance: f64,
+    /// `(far vertex, distance lower bound, stored tolerance)` per far vertex.
+    pub(crate) reach: Vec<(Option<K>, f64, f64)>,
+}
+
+/// Not upstream (#15718): the first of `growths` whose grown ball would reach one of its far
+/// vertices, judged against every growth at once, with the tolerance below which it would
+/// fit ([`room_left`]); `None` when all fit. A far vertex that grows too is taken at its
+/// grown tolerance (the larger of it and its stored one), so two growths that each fit
+/// beside the other's old ball but overlap together are refused, and the growths are
+/// applied all or none. A NaN distance passes no test and refuses.
+pub(crate) fn first_reaching<K: Copy + PartialEq>(
+    growths: &[Growth<K>],
+) -> Option<(K, f64, Option<f64>)> {
+    for g in growths {
+        let reach: Vec<(f64, f64)> = g
+            .reach
+            .iter()
+            .map(|&(far, apart, stored)| {
+                let grown = growths
+                    .iter()
+                    .filter(|h| far == Some(h.vertex))
+                    .fold(stored, |t, h| t.max(h.tolerance));
+                (apart, grown)
+            })
+            .collect();
         if !reach
             .iter()
-            .all(|&(apart, far_tol)| tolerance + far_tol < apart)
+            .all(|&(apart, far_tol)| g.tolerance + far_tol < apart)
         {
-            let fits_below = room_left(&reach);
-            return Err(Failure::new(
-                OP_CERTIFIED_GAPS,
-                BooleanFailure::MergedVertexReaches {
-                    needed: tolerance,
-                    fits_below,
-                },
-            )
-            .into_error());
+            return Some((g.vertex, g.tolerance, room_left(&reach)));
         }
-        out.push((v, tolerance));
     }
-    Ok(out)
+    None
 }
 
 /// Not upstream (#15718): the tolerance a vertex's ball may have without reaching any of
@@ -2343,8 +2377,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // exact to rounding (`docs/validity-and-tolerances.md` §8, a construction's
         // bound). The vertex's tolerance grows to twice its largest gap (`AssertValid`
         // checks half of it), an edge's to its own curve end's gap, and a growth whose
-        // ball would reach the far vertex of one of its edges is refused.
+        // ball would reach the far vertex of one of its edges, at that vertex's grown
+        // tolerance when it grows too, is refused before any is applied.
         let mut grow: Vec<(O, f64)> = Vec::new();
+        let mut growths: Vec<Growth<O>> = Vec::new();
         let pvs = mgr.proto_vertices().to_vec();
         for pv in pvs {
             let Some(proto_vertex) = mgr.proto_vertex(pv) else {
@@ -2370,9 +2406,21 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 }
                 for &v in &finals {
                     let mates: Vec<O> = finals.iter().copied().filter(|&m| m != v).collect();
-                    grow.extend(certified_vertex_gaps(k, &*brep, v, &mates)?);
+                    let (edges, growth) = certified_vertex_gaps(k, &*brep, v, &mates)?;
+                    grow.extend(edges);
+                    if let Some(g) = &growth {
+                        grow.push((g.vertex, g.tolerance));
+                    }
+                    growths.extend(growth);
                 }
             }
+        }
+        if let Some((_, needed, fits_below)) = first_reaching(&growths) {
+            return Err(Failure::new(
+                OP_CERTIFIED_GAPS,
+                BooleanFailure::MergedVertexReaches { needed, fits_below },
+            )
+            .into_error());
         }
         for (o, tolerance) in grow {
             brep.set_topology_tolerance(k, o, tolerance, true, true)?;
@@ -5685,6 +5733,33 @@ mod tests {
         assert_eq!(trim_owner_face(&candidates[1..2], on_b, eu), None);
     }
     use super::*;
+
+    /// #15718: two merged vertices 3 apart that each grow to 1.6 fit beside each other's
+    /// old tolerance (1.6 + 1e-6 < 3) but not beside each other's grown one (3.2 > 3):
+    /// judged together, the first is refused with 3 - 1.6 = 1.4 as the tolerance that
+    /// fits. Alone, either fits.
+    #[test]
+    fn growths_are_judged_against_each_other_s_grown_tolerance() {
+        let g = |vertex: u8, far: u8| Growth {
+            vertex,
+            tolerance: 1.6,
+            reach: vec![(Some(far), 3.0, 1e-6), (None, 5.0, 1e-6)],
+        };
+        let both = [g(1, 2), g(2, 1)];
+        let Some((v, needed, fits)) = first_reaching(&both) else {
+            panic!("the overlapping growths are refused");
+        };
+        assert_eq!((v, needed), (1, 1.6));
+        assert!((fits.unwrap() - 1.4).abs() < 1e-12, "{fits:?}");
+        assert!(first_reaching(&both[..1]).is_none());
+        assert!(first_reaching(&both[1..]).is_none());
+        let nan = [Growth {
+            vertex: 1u8,
+            tolerance: 1.0,
+            reach: vec![(None, f64::NAN, 0.0)],
+        }];
+        assert_eq!(first_reaching(&nan), Some((1, 1.0, None)));
+    }
     use crate::geom::extent1d::Extent1d;
     use crate::geom::solution_array::{Solution, SolutionArray};
     use crate::math::Vec3;

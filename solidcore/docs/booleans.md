@@ -210,14 +210,20 @@ definitions (two quadrics by their coefficients, a definition against its own co
 B-spline pair from the composed implicit field as `ssi/src/coincide.rs` does) is open work. Only the merge gate decides from definitions: `faces_coincide` (`merge/p1.rs`) decides cone (a cylinder is a cone of semi-angle 0), sphere and torus pairs by `Surface::same_analytic_surface`. Two cones or two spheres that are not one surface (axes or centres apart) still count as one over the two faces' boxes when an enclosed bound keeps them within the tolerance there: the box is halved across the axes until a Lipschitz bound on their separation decides each part that can hold either surface (`revolved_within`, `surface/surface/p8.rs`; two arcs through the same corners about centres 8.4e-5 apart stay within 1e-10 over the sliver they share). The intersector's coincidence check is still the sampled one. The sector test also tells two planes apart from their faces (`faces_on_other_surfaces`, `query/face/p1.rs`): two planes closer than 0.001° at a common edge are not coincident when a point of either face is proved to lie farther than the two faces' tolerance band from the other's plane (walls through a common edge at a tiny angle, within tolerance near it and apart beyond). The gap is read on each edge curve dropped onto its face's own plane, since the exact edge lies on the plane within the edge's tolerance τ_e of the curve while the curve may stand τ_e + τ_f off it; the band grows by τ_e times the sine of the planes' angle for that. The proof is an enclosure, never samples: a line's ends, and on a B-spline or conic edge the ends of its Bézier pieces, halved by de Casteljau while their hull leaves the band. Two planes, two different kinds (tangent, they can stay within the tolerance over a patch) and any pair with an offset, B-spline, extrusion or revolution keep the sector's answer.
 
 **Near-coincident strips.** Two planar faces crossing at a small angle θ meet in a line fixed only
-to tol / sin θ. When on both sides of the crossing a straight boundary edge of either face spans the
-crossing, faces back toward it and lies within the intersection tolerance of the other face's plane,
-the two faces lie within that tolerance of each other wherever both exist beside the crossing (their
-distance is affine across it): one coincident pair, and the crossing is no event. The rule needs each
-face to cross the line (a vertex strictly on either side of the other plane); two faces meeting only
-along their boundaries, as at a shared edge, are intersected as upstream does. Upstream still makes
+to tol / sin θ. The crossing is no event when, on each side of it, one of the two faces lies over its
+whole boundary within the intersection tolerance of the other face's plane. Then the two faces lie
+within that tolerance of each other wherever both exist beside the crossing (the distance to a plane
+is affine, and its maximum over a compact face is reached on the boundary): one coincident pair. The
+certificate takes every edge of the face, inner loops included, through its hull points (a line's
+ends, a B-spline's control points, with their coordinate errors). Each hull point's slack adds its
+offset from the face's own plane and the edge's tolerance times the planes' sine (`boundary_slack`),
+since the face is the region its trims bound in its own plane. A boundary that bows outside the band,
+a hole or notch edge past it, or an edge with no certain hull, so no face bounds that side, keeps the
+crossing as an exit. The rule needs each face to cross the line: an edge end strictly on either side
+of the other plane, beyond the same slack. Two faces meeting only along their boundaries, as at a
+shared edge, are intersected as upstream does. Upstream still makes
 the crossing an edge, whose ends are picked per body and never related, and `make_faceuse` then fails
-(`SM_ERR`). The port decides the rule from the planes and the bound edges before the face pair is
+(`SM_ERR`). The port decides the rule from the planes and the faces' boundaries before the face pair is
 intersected, and makes no curve, edge definition or vertex definition for such a crossing
 (`topology_intersector/coincident_strip.rs`, `crossing_inside_coincident_pair`; test
 `solidcore/tests/wr_614_coincident_strip_crossing.rs`). The rule is for planes only and the default.
