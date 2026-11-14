@@ -12,6 +12,9 @@
 //!
 //! A refusal is the kernel's typed [`Refusal`]: the panel or joint and the cause. An application
 //! words it.
+//!
+//! [`hermite`] follows a record curve carried into the flat by cubic pieces, each proved within a
+//! tolerance of it (the kernel's [`solidcore::develop::hermite`]).
 
 use solidcore::develop as k;
 use solidcore_convert::develop as cv;
@@ -318,5 +321,96 @@ pub trait LapOps {
 impl LapOps for Lap {
     fn cuts(&self, turn: f64, thickness: f64) -> (f64, f64) {
         cv::lap(*self).cuts(turn, thickness)
+    }
+}
+
+/// Following a record curve carried into the flat by cubic pieces, each proved within a tolerance
+/// of it ([`solidcore::develop::hermite`]): the pieces of its parameter over which it is smooth,
+/// with bounds on its derivatives, the bound on a piece's distance from the curve, the nodes
+/// between which pieces stand within the tolerance, and each piece. Each call converts through
+/// `solidcore-convert` and runs the kernel's; nothing here computes.
+pub mod hermite {
+    use solidcore::develop::hermite as k;
+    use solidcore_convert::{record_pair, record_seg2, vec2};
+    use solidcore_record::brep::Curve;
+    use solidcore_record::{Seg2, Vec2, Vec3};
+
+    pub use solidcore::develop::hermite::ROUNDING;
+
+    /// A piece of a curve's parameter over which the curve is smooth ([`smooth_pieces`]), kept in
+    /// the kernel's form.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Smooth(k::Smooth);
+
+    impl Smooth {
+        /// The piece of the parameter.
+        #[must_use]
+        pub fn span(&self) -> [f64; 2] {
+            self.0.span()
+        }
+
+        /// At least the length of each of the curve's first four derivatives anywhere on the
+        /// piece.
+        #[must_use]
+        pub fn rates(&self) -> [f64; 4] {
+            self.0.rates()
+        }
+
+        /// At most how far a point of the piece, as [`Smooth::at`] reads it, lies from the curve
+        /// the record holds at the same parameter.
+        #[must_use]
+        pub fn slack(&self) -> f64 {
+            self.0.slack()
+        }
+
+        /// The curve's point and first derivative at `t`, from the piece's own form: at an end of
+        /// the piece, the rate from its side.
+        #[must_use]
+        pub fn at(&self, t: f64) -> Option<(Vec3, Vec3)> {
+            self.0.at(t).map(record_pair)
+        }
+    }
+
+    /// The pieces of `curve` from parameter `a` to `b` over which it is smooth, in order, each
+    /// with bounds on its first four derivatives ([`solidcore::develop::hermite::smooth_pieces`]).
+    /// `None` for a traced intersection, a spline whose pieces can't be had, a parameter range
+    /// the curve doesn't cover, and a curve the conversion refuses (geometry too deep).
+    #[must_use]
+    pub fn smooth_pieces(curve: &Curve, span: [f64; 2]) -> Option<Vec<Smooth>> {
+        let curve = solidcore_convert::curve(curve).ok()?;
+        k::smooth_pieces(&curve, span).map(|pieces| pieces.into_iter().map(Smooth).collect())
+    }
+
+    /// A bound on the length of the fourth derivative of a map of a curve, from bounds on the
+    /// curve's first four derivatives and the map's ([`solidcore::develop::hermite::fourth`]).
+    #[must_use]
+    pub fn fourth(c: [f64; 4], g: [f64; 4]) -> f64 {
+        k::fourth(c, g)
+    }
+
+    /// How far a cubic piece over a step `h` lies at most from the carried curve it follows,
+    /// where the curve's fourth derivative is at most `fourth` long over the step
+    /// ([`solidcore::develop::hermite::remainder`]).
+    #[must_use]
+    pub fn remainder(h: f64, fourth: f64) -> f64 {
+        k::remainder(h, fourth)
+    }
+
+    /// The parameters from `a` to `b`, in order, between which cubic pieces stand proved within
+    /// `tol` of the curve they follow, `off(t₀, t₁)` bounding how far the piece from `t₀` to `t₁`
+    /// lies from it ([`solidcore::develop::hermite::nodes`]).
+    pub fn nodes(
+        off: impl Fn(f64, f64) -> Option<f64>,
+        span: [f64; 2],
+        tol: f64,
+    ) -> Option<Vec<f64>> {
+        k::nodes(off, span, tol)
+    }
+
+    /// The cubic from `p0`, leaving it at the rate `d0`, to `p3`, reaching it at the rate `d3`,
+    /// over a step `h` of the parameter ([`solidcore::develop::hermite::cubic`]).
+    #[must_use]
+    pub fn cubic(p0: Vec2, d0: Vec2, p3: Vec2, d3: Vec2, h: f64) -> Seg2 {
+        record_seg2(&k::cubic(vec2(p0), vec2(d0), vec2(p3), vec2(d3), h))
     }
 }

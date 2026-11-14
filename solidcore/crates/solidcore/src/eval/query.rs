@@ -59,6 +59,10 @@ type Hom = [f64; 4];
 /// A curve's Bézier pieces, each its homogeneous control points.
 type Pieces = Vec<Vec<Hom>>;
 
+/// A curve's Bézier pieces, each with the span of the parameter it covers and its homogeneous
+/// control points `[x w, y w, z w, w]`.
+pub(crate) type Spans = Vec<([f64; 2], Vec<[f64; 4]>)>;
+
 /// An edge of a [`Record`]: the curve its interval is on (`None` where it could not be read), its
 /// interval, and the faces it bounds, once for each time a loop uses it.
 #[derive(Clone, Debug, PartialEq)]
@@ -542,10 +546,21 @@ fn spline_shape(knots: &[f64], ctrl: &[Hom]) -> Option<(usize, f64, f64)> {
 }
 
 /// The Bézier pieces over `[a, b]` of the B-spline on `knots` with homogeneous control points
-/// `ctrl`: the curve's segment over the part of `[a, b]` within its domain, by knot insertion,
-/// decomposed into its Bézier pieces, one per span of some length, in order. `None` for a curve
-/// that is not a valid B-spline ([`spline_shape`]).
-fn bezier_pieces(knots: &[f64], ctrl: &[Hom], [a, b]: [f64; 2]) -> Option<Pieces> {
+/// `ctrl` ([`bezier_spans`]), without their spans.
+fn bezier_pieces(knots: &[f64], ctrl: &[Hom], ab: [f64; 2]) -> Option<Pieces> {
+    Some(
+        bezier_spans(knots, ctrl, ab)?
+            .into_iter()
+            .map(|(_, piece)| piece)
+            .collect(),
+    )
+}
+
+/// The Bézier pieces over `[a, b]` of the B-spline on `knots` with homogeneous control points
+/// `ctrl`, each with the span of the parameter it covers: the curve's segment over the part of
+/// `[a, b]` within its domain, by knot insertion, decomposed into its Bézier pieces, one per span
+/// of some length, in order. `None` for a curve that is not a valid B-spline ([`spline_shape`]).
+pub(crate) fn bezier_spans(knots: &[f64], ctrl: &[[f64; 4]], [a, b]: [f64; 2]) -> Option<Spans> {
     let (p, lo, hi) = spline_shape(knots, ctrl)?;
     let (from, to) = (a.max(lo), b.min(hi));
     if !(from < to) {
@@ -582,12 +597,16 @@ fn bezier_pieces(knots: &[f64], ctrl: &[Hom], [a, b]: [f64; 2]) -> Option<Pieces
             [c.x, c.y, z, c.w]
         }
     };
-    let out: Pieces = pieces
+    // A piece's knots are its span's two ends, each `p + 1` times.
+    let out: Spans = pieces
         .iter()
-        .map(|piece| piece.cpts().iter().map(hom).collect())
+        .map(|piece| {
+            let (s0, s1) = piece.param_bounds();
+            ([s0, s1], piece.cpts().iter().map(hom).collect())
+        })
         .collect();
     out.iter()
-        .flatten()
+        .flat_map(|(_, piece)| piece)
         .all(|h| h.iter().all(|x| x.is_finite()) && h[3] > 0.0)
         .then_some(out)
 }

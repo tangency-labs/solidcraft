@@ -11,11 +11,15 @@
 //! [`Query`] answers exact questions of a B-rep record, as reading a sheet off a body asks them:
 //! where a point lies on the record's faces and which way they face there, how far it is from an
 //! edge, and which faces a ray meets (solidcore's, `solidcore_ops::query`).
+//!
+//! [`hermite`] follows a curve carried into the flat by cubic pieces, each proved within a
+//! tolerance of it from bounds on the curve's derivatives and the map's (solidcore's,
+//! `solidcore_ops::develop::hermite`).
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-pub use solidcore_ops::develop::{Bent, Fold, crossings, curve_through};
+pub use solidcore_ops::develop::{Bent, Fold, crossings, curve_through, hermite};
 pub use solidcore_ops::query::Query;
 pub use solidcore_record::develop::{
     Anchor, Bend, Corner, CornerRelief, Cut, Datum, Development, EdgeFrom, FlatPanel, Joint, JointKind, Lap, Mismatch, Panel, Relief, Rigid2, Rigid3,

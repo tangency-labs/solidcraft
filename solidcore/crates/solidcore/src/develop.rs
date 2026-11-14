@@ -35,6 +35,10 @@
 //!   any other curve on a cone by chords; a rip's edge given only as points by a cubic spline
 //!   through them; a torn end of a zone by a cubic spline checked against its curve at samples.
 //!   None of these is a certificate.
+//! - Proved within a tolerance, not exactly: a curve carried into the flat by a map of closed
+//!   form (a cut's outline read off its walls, in the application), by cubic pieces each proved
+//!   within the tolerance of it from bounds on the curve's derivatives and the map's, every bound
+//!   rounded outward ([`hermite`]).
 //!
 //! The data has a record twin (`solidcore-record`'s `develop`), copied field by field by
 //! `solidcore-convert`; `solidcore-ops`' `develop` is the call applications make.
@@ -60,6 +64,7 @@
 mod chart;
 mod flat;
 mod fold;
+pub mod hermite;
 mod layout;
 pub(crate) mod plane;
 mod refusal;
