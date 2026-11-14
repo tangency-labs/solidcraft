@@ -1409,7 +1409,7 @@ impl crate::SolveApp {
             });
         // After the Browser, so the sheet strip can hug its measured edge.
         if crate::drawing_workspace::active(self) {
-            crate::drawing_workspace::chrome(self, ui);
+            crate::drawing_workspace::chrome(self, ui, render_domain);
         }
         if self.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some()) && !self.preferences.agent_chat_popped {
             crate::agent_chat::finish_shared(self, ui.ctx());

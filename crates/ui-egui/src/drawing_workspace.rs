@@ -457,17 +457,19 @@ fn icon_action(ui: &mut egui::Ui, id: &str, icon: &str, label: &str, enabled: bo
 }
 
 /// Draw after Browser, so the strip can hug its measured right or bottom edge.
-pub fn chrome(app: &mut SolveApp, ui: &mut egui::Ui) {
+pub fn chrome(app: &mut SolveApp, ui: &mut egui::Ui, domain: Rect) {
     app.drawing_workspace.strip = None;
     if !active(app) || app.preferences.drawing_sheets_visibility != "legacy" {
         return;
     }
-    let mut available = crate::agent_chat::tool_space(app, ui.available_rect_before_wrap());
-    if Container::for_layout(app.ui.layout, Surface::Panel).floating()
-        && app.preferences.drawing_panel_side != "left"
-        && let Some(settings) = settings_rect(app)
-    {
-        available.max.x = available.right().min(settings.left() - Tokens::get().space_8).max(available.left());
+    let mut available = crate::agent_chat::tool_space(app, domain);
+    if let Some(settings) = settings_rect(app) {
+        let gap = Tokens::get().space_8;
+        if app.preferences.drawing_panel_side == "left" {
+            available.min.x = available.left().max(settings.right() + gap).min(available.right());
+        } else {
+            available.max.x = available.right().min(settings.left() - gap).max(available.left());
+        }
     }
     if let Some(bottom) = app.shell.cards.iter().map(Rect::bottom).max_by(f32::total_cmp) {
         available.min.y = available.min.y.max(bottom + Tokens::get().space_8);
