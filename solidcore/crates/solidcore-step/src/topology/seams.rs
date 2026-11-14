@@ -1228,17 +1228,10 @@ impl Builder<'_, '_> {
                         if *li == from && ((ui == k && pi == 0) || (ui == before && pi == last)) {
                             continue;
                         }
-                        if (Blocked { arcs: vec![piece.blocked()] }).clear(theta) {
-                            continue;
-                        }
-                        let crossing = match (piece.runs, &w.form) {
-                            (Some(_), Some(c)) => ruling_crossing(&frame, c, piece.on, theta)?,
-                            _ => None,
-                        };
-                        match crossing {
-                            Some((true, p, x)) if *li == onto => {
+                        match meets(&frame, &w.form, piece, theta, height, along, self.tol)? {
+                            Meets::Clear => {}
+                            Meets::Once { d, p, x } if *li == onto => {
                                 // Behind the vertex it is no matter, unless it touches it.
-                                let d = along(height(p));
                                 if d > 0.0 {
                                     if nearest.is_none_or(|(n, ..)| d < n) {
                                         nearest = Some((d, w.edge, p, x));
@@ -1247,19 +1240,11 @@ impl Builder<'_, '_> {
                                     other = 0.0;
                                 }
                             }
-                            // Another loop's crossing, at its one point (a monotone piece under
-                            // half a turn meets the ruling once).
-                            Some((true, p, _)) => {
-                                let d = along(height(p));
+                            // Another loop's crossing, at its one point.
+                            Meets::Once { d, .. } => {
                                 other = other.min(if d > -self.tol { d.max(0.0) } else { f64::INFINITY });
                             }
-                            // A near miss (within the pad, no crossing between the ends) or a piece
-                            // whose angle is not monotone: anywhere over its hull's heights.
-                            Some((false, ..)) | None => {
-                                if let Some(reach) = hull_reach(piece, along, self.tol) {
-                                    other = other.min(reach);
-                                }
-                            }
+                            Meets::Hull(reach) => other = other.min(reach.unwrap_or(f64::INFINITY)),
                         }
                     }
                 }
@@ -1684,13 +1669,48 @@ impl Perpendicular {
     }
 }
 
-/// How near along the ruling (from the vertex, `along` the height's distance on it) a piece that
-/// the ruling may meet anywhere over its hull's heights comes: the hull's lowest point, none where
-/// the whole hull lies behind the vertex by more than `tol`.
-pub(super) fn hull_reach(piece: &Piece, along: impl Fn(f64) -> f64, tol: f64) -> Option<f64> {
-    let [lo, hi] = piece.heights.map(along);
-    let (lo, hi) = (lo.min(hi), lo.max(hi));
-    (hi > -tol).then_some(lo.max(0.0))
+/// How a Bézier piece of a loop meets the ruling at angle `theta` that a seam would run along
+/// ([`Builder::wound_band_seam`]).
+pub(super) enum Meets {
+    /// Not at all: the ruling's angle is clear of the piece's, padded.
+    Clear,
+    /// At one point, `d` along the ruling from the vertex: `p`, at parameter `x` of the edge's form.
+    Once { d: f64, p: Vec3, x: f64 },
+    /// Anywhere over the piece's hull's heights, from this far along the ruling (none where the
+    /// whole hull lies behind the vertex by more than the tolerance).
+    Hull(Option<f64>),
+}
+
+/// How `piece`, with its use's NURBS `form`, meets the ruling at angle `theta`, `height` giving a
+/// point's height along the axis and `along` a height's distance along the ruling. A monotone
+/// piece under half a turn meets it once where its angle reaches `theta` between its ends. One
+/// within its pad of the ruling's angle without crossing it between its ends (a near miss), and
+/// one whose angle is not monotone, may meet it anywhere over the heights of their hull: the
+/// angle of the nearer end says nothing of where in between the piece comes near.
+pub(super) fn meets(
+    frame: &Perpendicular,
+    form: &Option<CurveEval>,
+    piece: &Piece,
+    theta: f64,
+    height: impl Fn(Vec3) -> f64,
+    along: impl Fn(f64) -> f64,
+    tol: f64,
+) -> R<Meets> {
+    if (Blocked { arcs: vec![piece.blocked()] }).clear(theta) {
+        return Ok(Meets::Clear);
+    }
+    let crossing = match (piece.runs, form) {
+        (Some(_), Some(c)) => ruling_crossing(frame, c, piece.on, theta)?,
+        _ => None,
+    };
+    Ok(match crossing {
+        Some((true, p, x)) => Meets::Once { d: along(height(p)), p, x },
+        Some((false, ..)) | None => {
+            let [lo, hi] = piece.heights.map(along);
+            let (lo, hi) = (lo.min(hi), lo.max(hi));
+            Meets::Hull((hi > -tol).then_some(lo.max(0.0)))
+        }
+    })
 }
 
 /// A use of a loop round a wound band ([`Builder::wound_band_seam`]): its edge and way, its

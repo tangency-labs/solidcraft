@@ -753,8 +753,10 @@ fn a_band_whose_vertices_line_up_across_a_hole_gets_its_seam_clear_of_it() {
 
 /// A piece of a thread's edge that comes within its pad of a ruling's angle without crossing it
 /// (a near miss) may meet the ruling anywhere over its hull's heights, not only at the end nearer
-/// in angle: here both ends are below the ruling's vertex and the middle rises 6 mm above it, so
-/// a seam up the ruling is blocked from the vertex on (#16930).
+/// in angle (`wound_band_seam` asks `seams::meets` of every piece of every loop): here both ends
+/// are below the ruling's vertex and the middle rises above it, so a seam up the ruling is blocked
+/// from the vertex on. Read at its nearer end, the piece lies behind the vertex and is no matter
+/// (#16930).
 #[test]
 fn a_near_miss_piece_blocks_a_seam_over_its_whole_height_range() {
     let tol = 1e-3;
@@ -766,18 +768,23 @@ fn a_near_miss_piece_blocks_a_seam_over_its_whole_height_range() {
         knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
         points: vec![at(-4e-5, -2.0), at(-3e-5, 6.0), at(-2e-5, 6.0), at(-1e-5, -2.0)],
     };
+    let form = Some(CurveEval::new(&arch).unwrap());
     let pieces = frame.pieces(&arch, [0.0, 1.0], tol);
     let [piece] = pieces.as_slice() else { panic!("{} pieces", pieces.len()) };
-    let blocked = seams::Blocked { arcs: vec![piece.blocked()] };
-    assert!(!blocked.clear(0.0), "the ruling passes within the piece's pad");
+    let height = |p: Vec3| p.z;
+    let reach = |along: &dyn Fn(f64) -> f64| match seams::meets(&frame, &form, piece, 0.0, height, along, tol).unwrap() {
+        seams::Meets::Hull(reach) => reach,
+        seams::Meets::Clear => panic!("the ruling passes within the piece's pad"),
+        seams::Meets::Once { d, .. } => panic!("a crossing at {d}: the angle never reaches the ruling's"),
+    };
     // From a vertex at height 0 up: the hull's lowest point is behind it, so the piece is on the
     // seam from the vertex.
-    assert_eq!(seams::hull_reach(piece, |h| h, tol), Some(0.0));
+    assert_eq!(reach(&|h| h), Some(0.0));
     // From a vertex at height -3 up: the whole hull is ahead, its lowest point 1 mm along.
-    assert_eq!(seams::hull_reach(piece, |h| h + 3.0, tol), Some(1.0));
+    assert_eq!(reach(&|h| h + 3.0), Some(1.0));
     // From a vertex at height 7: up, the hull is behind it; down, its lowest point is 1 mm along.
-    assert_eq!(seams::hull_reach(piece, |h| h - 7.0, tol), None);
-    assert_eq!(seams::hull_reach(piece, |h| 7.0 - h, tol), Some(1.0));
+    assert_eq!(reach(&|h| h - 7.0), None);
+    assert_eq!(reach(&|h| 7.0 - h), Some(1.0));
 }
 
 /// A seam's angle test (`seams::angular_sign`): a ruling's angular speed is 0, and rounding

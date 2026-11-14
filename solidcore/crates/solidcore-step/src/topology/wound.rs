@@ -37,6 +37,8 @@ const KINK_SLACK: f64 = 1e-9;
 const BOUND_ROUNDING: f64 = 1.000_001;
 /// Pieces one pcurve may have.
 const MAX_PIECES: usize = 4000;
+// The piece count's least bound (`hermite_pieces`) is at most its greatest.
+const _: () = assert!(16 <= MAX_PIECES / 4);
 /// Times a piece may be halved.
 const MAX_HALVINGS: u32 = 30;
 /// Cells of a use's parameter in which a crossing of a ray is looked for, and the bisections that
@@ -210,7 +212,7 @@ fn hermite_pieces(label: &BSurface, curve: &BCurve, [a, b]: [f64; 2], tol: f64) 
         total += 0.5 * (last.abs() + now.abs()) * (b - a) / 64.0;
         last = now;
     }
-    let n = ((total / FRAC_PI_8).ceil() as usize).max(16).min(MAX_PIECES >> 2);
+    let n = ((total / FRAC_PI_8).ceil() as usize).clamp(16, MAX_PIECES / 4);
     // ... and each knot span of the edge's curve its own pieces (a short span between two grid
     // points would otherwise lie wholly between a piece's probes).
     let mut stops: Vec<f64> = (1..=n).map(|i| a + (b - a) * i as f64 / n as f64).collect();
