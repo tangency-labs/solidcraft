@@ -675,6 +675,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           FULL: ${{ needs.changes.outputs.full }}
           PACKAGES: ${{ needs.changes.outputs.packages }}
+          GPU_SHARDS: ${{ needs.changes.outputs.gpu }}
         run: |
           # Pull requests skip the heavy tests (default-filter in .config/nextest.toml); `default()`
           # below is that filter, so a pull request still runs only what it ran before.
@@ -696,13 +697,19 @@ jobs:
           if [ "$FULL" != true ]; then scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done; fi
           # The GPU path tracer's tests run in their own job (GPU path tests): one at a time, they
           # took about 36 of this job's 45 minutes.
+          excluded='package(=solidcraft-gpu) & test(/^path::/)'
+          # Preserve render-only shard activation. When those shards do not run, native tests
+          # still cover the UI renderer; its gpu-path group keeps pipeline creation serial.
+          if [ "$GPU_SHARDS" = true ]; then
+            excluded="($excluded) | (package(=solidcraft-ui-egui) & test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host))"
+          fi
           # A failed test does not fail the step by itself: the tests known to fail today
           # (tests/KNOWN_FAILING_TESTS) may fail, any other fails it, and so does a listed test
           # that passes. nextest's exit code 100 is "tests failed"; any other is its own error
           # (a build error, a bad filter) and fails the step at once.
           status=0
           cargo nextest run "${scope[@]}" --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E "($base) & not (package(=solidcraft-gpu) & test(/^path::/))" || status=$?
+            --ignore-default-filter -E "($base) & not ($excluded)" || status=$?
           if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
           cargo xtask known-failing --junit "$junit"
       # Every command label needs an English catalog entry (#8542). The label table is the CLI's
@@ -835,6 +842,8 @@ jobs:
       - name: Run one shard of the GPU path tests
         env:
           SHARD: ${{ matrix.shard }}
+          FULL: ${{ needs.changes.outputs.full }}
+          PACKAGES: ${{ needs.changes.outputs.packages }}
         run: |
           # None of these is in the default filter (the heavy tests), so pull requests, the merge
           # queue, main and nightly all run every one of them, as before. `count` deals the tests
@@ -842,9 +851,17 @@ jobs:
           # Graded against tests/KNOWN_FAILING_TESTS, as in Native Linux tests.
           junit=${CARGO_TARGET_DIR:-target}/nextest/ci/junit.xml
           rm -f "$junit"
+          # A UI-only change needs its progressive renderer, not the unrelated GPU crate tests.
+          scope=(-p solidcraft-gpu -p solidcraft-ui-egui)
+          if [ "$FULL" != true ]; then
+            scope=()
+            for p in $PACKAGES; do
+              case "$p" in solidcraft-gpu|solidcraft-ui-egui) scope+=(-p "$p") ;; esac
+            done
+          fi
           status=0
-          cargo nextest run -p solidcraft-gpu --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E 'test(/^path::/)' --partition "count:$SHARD/4" || status=$?
+          cargo nextest run "${scope[@]}" --lib --cargo-profile ci --locked --profile ci --no-tests=pass \
+            --ignore-default-filter -E '(package(=solidcraft-gpu) & test(/^path::/)) | (package(=solidcraft-ui-egui) & test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host))' --partition "count:$SHARD/4" || status=$?
           if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
           cargo xtask known-failing --junit "$junit"
       - name: Compiler cache statistics
