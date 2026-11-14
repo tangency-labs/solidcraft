@@ -1897,6 +1897,39 @@ fn listing_a_subtree_makes_the_name_index_once() {
     assert_eq!(unique.len(), 131, "each placement's body has its own world name");
 }
 
+/// Finding the bodies a hidden placement hides looks at each placed body once, not at every
+/// body of the design for every placement: with anything hidden, each design change and each
+/// joint drag frame paid the placements times the bodies.
+#[test]
+fn bodies_hidden_by_a_placement_look_at_each_placed_body_once() {
+    let mut s = Session::default();
+    let (assembly_component, assembly) = created(&mut s, "Assembly");
+    let mut copies = Vec::new();
+    for p in 0..8 {
+        run(&mut s, "component.activate", json!({"component": assembly_component}));
+        let (part, _) = created(&mut s, &format!("Part{p}"));
+        run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": format!("Part{p}")}));
+        for i in 1..8 {
+            let o = run(&mut s, "occurrence.copy", json!({"component": part, "translate": [i as f64 * 10.0, p as f64 * 10.0, 0.0]}));
+            copies.push(o["occurrence"].as_u64().unwrap());
+        }
+    }
+    let hidden = vec![assembly, copies[0]];
+    let shown = vec![assembly, copies[1]];
+    run(&mut s, "browser.visibility", json!({"paths": [hidden], "visible": false}));
+    let hidden_body = s.occurrence_bodies(&hidden, false).unwrap();
+    let shown_body = s.occurrence_bodies(&shown, false).unwrap();
+    assert_eq!((hidden_body.len(), shown_body.len()), (1, 1));
+    // A design change: the hidden bodies are found again.
+    s.revision += 1;
+    crate::occurrences::HIDDEN_BY_PARENTS_CHECKS.with(|n| n.set(0));
+    assert!(!s.body_visible(&hidden_body[0]), "the hidden placement's body is hidden");
+    assert!(s.body_visible(&shown_body[0]), "another placement of the same part stays shown");
+    // 8 parts placed 8 times each, one body apiece; asking every body at every placement was about 8 times this.
+    let checks = crate::occurrences::HIDDEN_BY_PARENTS_CHECKS.with(std::cell::Cell::get);
+    assert_eq!(checks, 64, "each placed body is looked at once");
+}
+
 /// A connector's boss extruded To Object up to the shell of another component joins the
 /// connector only: the shell it runs to stays its own body in its own component, and the PCB
 /// sketched on the shell afterwards is still made (a Join extrude to an object joined the body
