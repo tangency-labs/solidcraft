@@ -1,6 +1,6 @@
 //! What the user does with a design's views from the tab strip: the menus' rows, the handler for
 //! the strip's view actions, and the notices a sheet view shows. The views themselves are
-//! [`crate::design_views`]; this file only maps a chosen row to a `documents::view_*` call.
+//! [`solidcraft_views`]; this file only maps a chosen row to a `documents::view_*` call.
 //!
 //! Plug-in point for sheets: when a sheet view exists, call [`deleted_sheet_notice`] while its
 //! sheet is gone and [`stale_source_notice`] while its design has unsaved changes, draw the result
@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use crate::app_bar::{TabAction, TabMenuRow};
-use crate::design_views::ViewKind;
+use solidcraft_views::ViewKind;
 use crate::{SolveApp, documents, new_window, ui_kit};
 
 /// Menu row ids of a view's right-click menu ([`VIEW_MENU`]).
