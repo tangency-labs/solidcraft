@@ -73,7 +73,14 @@ impl Mcp {
     fn start(server: &Value) -> Option<Mcp> {
         let program = server.get("command")?.as_str()?;
         let args: Vec<String> = server.get("args")?.as_array()?.iter().filter_map(|a| a.as_str().map(str::to_string)).collect();
-        let mut child = Command::new(program).args(&args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+        let env: Vec<(String, String)> = server
+            .get("env")?
+            .as_array()?
+            .iter()
+            .filter_map(|entry| Some((entry.get("name")?.as_str()?.to_string(), entry.get("value")?.as_str()?.to_string())))
+            .collect();
+        let mut child =
+            Command::new(program).args(&args).envs(env).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
         let stdin = child.stdin.take()?;
         let stdout = BufReader::new(child.stdout.take()?);
         let mut m = Mcp { child, stdin, stdout, next: 0 };
