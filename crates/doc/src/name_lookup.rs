@@ -1090,8 +1090,10 @@ fn recover_renumbered_round_face(body: &ModelBody, name: &str, pick: Vec3) -> Op
     let names = naming::names(body);
     let mut found = None;
     for (face, face_name) in names.faces.iter().enumerate() {
-        let Some((other, n)) = face_name.rsplit_once(':') else { continue };
-        if other != stem || n.is_empty() || !n.bytes().all(|digit| digit.is_ascii_digit()) {
+        // Every face of the stem counts, split pieces (`:1#2`) included: only a stem with one
+        // face left can stand for the missing index.
+        let Some((other, _)) = face_name.rsplit_once(':') else { continue };
+        if other != stem {
             continue;
         }
         if found.replace(face).is_some() {
