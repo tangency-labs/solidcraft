@@ -2148,7 +2148,7 @@ mod tests {
 
     /// `IsInnerShellOf`'s ray (`ray_brep_solve`) along a face of a hollow box: the
     /// overlap on the cavity's floor is classified on the live B-rep, where it was
-    /// "unported: SmFace::CurveOnClassify" (tangency-labs/solidcraft#15895, STEP solids
+    /// "unported: `SmFace::CurveOnClassify`" (tangency-labs/solidcraft#15895, STEP solids
     /// with voids).
     #[test]
     fn ray_along_a_cavity_floor_classifies_its_overlap() {
@@ -2161,7 +2161,7 @@ mod tests {
         use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
         use crate::math::{Point3, Vec3};
         use crate::primitive::api_primitives::create_box;
-        use crate::query::api_queries::face_bounding_box;
+        use crate::query::api_queries::{edge_bounding_box, face_bounding_box};
         use crate::topology::brep::p1;
         use crate::topology::brep_cache::CacheObject;
 
@@ -2212,15 +2212,43 @@ mod tests {
         let floor_box = face_bounding_box(&k, &b, floor, true).unwrap();
         assert!(near(floor_box.min.z, 5.0) && near(floor_box.max.z, 5.0));
         assert!(near(floor_box.min.x, 5.0) && near(floor_box.max.x, 15.0));
-        // and the outer box's walls at x = 0 and x = 20
-        for t in [1.0, 21.0] {
+        // the single crossings: the outer box's walls x = 0 and x = 20 at t = 1 and 21,
+        // and at t = 6 and 16 the cavity's walls x = 5 and x = 15 and their edges on
+        // the floor, where the ray enters and leaves the floor
+        assert_eq!(solutions.len(), 7, "{solutions:?}");
+        let mut crossings: Vec<(f64, &str)> = Vec::new();
+        for s in solutions.as_slice() {
+            if s.solution_type == SolutionType::RangeOfValues {
+                continue;
+            }
+            assert_eq!(s.solution_type, SolutionType::SingleValue, "{s:?}");
+            let t = s.start.param(0).unwrap();
+            let (kind, extent) = match s.objects[1] {
+                Some(CacheObject::Face(f)) => ("face", face_bounding_box(&k, &b, f, true).unwrap()),
+                Some(CacheObject::Edge(e)) => ("edge", edge_bounding_box(&k, &b, e, true).unwrap()),
+                _ => panic!("a crossing names no face or edge: {s:?}"),
+            };
+            // each lies in the plane x = t - 1 the ray crosses there
             assert!(
-                solutions.as_slice().iter().any(|s| {
-                    s.solution_type != SolutionType::RangeOfValues
-                        && near(s.start.param(0).unwrap(), t)
-                }),
-                "no crossing at {t}: {solutions:?}"
+                near(extent.min.x, t - 1.0) && near(extent.max.x, t - 1.0),
+                "{s:?}"
             );
+            if kind == "edge" {
+                assert!(near(extent.min.z, 5.0) && near(extent.max.z, 5.0), "{s:?}");
+            }
+            crossings.push((t, kind));
         }
+        crossings.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(b.1)));
+        assert_eq!(
+            crossings,
+            [
+                (1.0, "face"),
+                (6.0, "edge"),
+                (6.0, "face"),
+                (16.0, "edge"),
+                (16.0, "face"),
+                (21.0, "face")
+            ]
+        );
     }
 }
