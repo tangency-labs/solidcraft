@@ -159,8 +159,8 @@ angular placement when opened, edited or copied; creating another revolve uses t
 To Object follows that same direction for each selected profile, including curved target faces.
 Pick a target away from the axis so its angular position is defined.
 
-For cylindrical **Emboss**, select a supported exterior cylinder face and a tangent sketch
-profile. **Deboss** cuts radially into the wall. Orthogonal line profiles, including holes and
+For cylindrical **Emboss**, select a supported cylinder face (outside, or a bore) and a tangent sketch
+profile. **Deboss** cuts radially into the wall (outwards from a bore, which an Emboss raises towards the axis; a Deboss that would break through the outer wall is refused). Orthogonal line profiles, including holes and
 concave outlines, wrap with exact radial walls; the profile must stay clear of seams and ends.
 Complete cylinders and coaxial sleeves are supported. Capture pending component positions
 before applying. The feature stores the selected target and author occurrence paths, so edits
