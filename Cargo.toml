@@ -196,6 +196,8 @@ debug = "line-tables-only"
 
 # Vendored crates with SolidCraft fixes (see vendor/README.md and ATTRIBUTION.md).
 [patch.crates-io]
+# Serve control requests without waiting for a compositor frame (#743).
+eframe = { path = "vendor/eframe" }
 # Keep OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.
 egui-wgpu = { path = "vendor/egui-wgpu" }
 

@@ -952,6 +952,8 @@ copied into SolidCraft.
 
 | Directory | Source | Licence | Changes |
 |---|---|---|---|
+| vendor/eframe | eframe 0.37.0, https://github.com/emilk/egui (Emil Ernerfeldt and contributors) | MIT OR Apache-2.0 | event-loop proxy and immediate logic-only control-request wake (vendor/README.md) |
+| vendor/eframe/data/icon.png | eframe 0.37.0, https://github.com/emilk/egui (Emil Ernerfeldt and contributors) | MIT OR Apache-2.0 | unchanged default window icon |
 
 ## Vendored renderer compatibility fix
 

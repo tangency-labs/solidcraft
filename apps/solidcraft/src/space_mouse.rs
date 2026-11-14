@@ -1056,6 +1056,8 @@ fn start_driver_client(ctx: &Context, shared: &Arc<Mutex<Reading>>) {
 }
 
 pub struct SpaceMouse {
+    #[cfg(test)]
+    inactive: bool,
     shared: Arc<Mutex<Reading>>,
     #[cfg(target_os = "linux")]
     drivers: Arc<Drivers>,
@@ -1071,6 +1073,24 @@ pub struct SpaceMouse {
 }
 
 impl SpaceMouse {
+    /// Headless lifecycle tests neither start a reader nor load the user's driver profile.
+    #[cfg(test)]
+    pub fn inactive() -> Self {
+        let now = Instant::now();
+        Self {
+            inactive: true,
+            shared: Arc::new(Mutex::new(Reading::new(now))),
+            #[cfg(target_os = "linux")]
+            drivers: Arc::new(Drivers::default()),
+            last_frame: now,
+            driver_mapping: without_profile(),
+            mapping_checked_at: now,
+            wheel: WheelGuard::default(),
+            started: now,
+            calibration: None,
+        }
+    }
+
     /// Starts the reader. A device that `bridge` says its own app reads is left to that app.
     pub fn start(ctx: &Context, bridge: crate::nav_bridge::Claim) -> Self {
         let now = Instant::now();
@@ -1096,6 +1116,8 @@ impl SpaceMouse {
         #[cfg(target_os = "macos")]
         start_driver_client(ctx, &shared);
         Self {
+            #[cfg(test)]
+            inactive: false,
             shared,
             #[cfg(target_os = "linux")]
             drivers,
@@ -1146,6 +1168,10 @@ impl SpaceMouse {
     }
 
     pub fn tick(&mut self, app: &mut SolveApp, ctx: &Context) {
+        #[cfg(test)]
+        if self.inactive {
+            return;
+        }
         self.tick_at(app, ctx, Instant::now());
     }
 
@@ -1892,6 +1918,7 @@ mod tests {
         let mut reading = Reading::new(now);
         reading.axes.rotation = [0, 350, 0];
         let mut mouse = SpaceMouse {
+            inactive: false,
             shared: Arc::new(Mutex::new(reading)),
             #[cfg(target_os = "linux")]
             drivers: Arc::default(),
@@ -1924,6 +1951,7 @@ mod tests {
 
     fn mouse(reading: Reading, now: Instant) -> SpaceMouse {
         SpaceMouse {
+            inactive: false,
             shared: Arc::new(Mutex::new(reading)),
             #[cfg(target_os = "linux")]
             drivers: Arc::default(),
@@ -2353,6 +2381,7 @@ mod tests {
         reader.reads("spacenavd");
         let now = Instant::now();
         let mouse = SpaceMouse {
+            inactive: false,
             shared: Arc::clone(&reader.shared),
             drivers: Arc::clone(&reader.drivers),
             last_frame: now,
@@ -2406,6 +2435,7 @@ mod tests {
             app.home.open = false;
             let start = Instant::now();
             let mut mouse = SpaceMouse {
+                inactive: false,
                 shared: Arc::clone(&reader.shared),
                 drivers: Arc::clone(&reader.drivers),
                 last_frame: start,
@@ -2490,6 +2520,7 @@ mod tests {
         ctx.run_ui(egui::RawInput { focused: true, ..Default::default() }, |_| {}).textures_delta.clear();
         let shared = Arc::new(Mutex::new(Reading::new(Instant::now())));
         let mouse = SpaceMouse {
+            inactive: false,
             shared: Arc::clone(&shared),
             #[cfg(target_os = "linux")]
             drivers: Arc::default(),
@@ -2638,6 +2669,7 @@ mod tests {
             }
             let now = Instant::now();
             let mut mouse = SpaceMouse {
+                inactive: false,
                 shared: Arc::clone(&reader.shared),
                 drivers: Arc::clone(&reader.drivers),
                 last_frame: now,
