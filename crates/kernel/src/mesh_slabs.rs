@@ -196,7 +196,8 @@ pub struct SlabStack {
     pub triangles: usize,
     /// The scan's total area (mm^2).
     pub area: f64,
-    /// The part's size along the sketch's own x, y and the build axis (mm).
+    /// The rebuilt part's size along the sketch's own x, y and the build axis (mm), after the
+    /// outlines have been rounded to the grid, so it is the part's size and not the scan's.
     pub size: [f64; 3],
     pub deviation: Option<Deviation>,
 }
@@ -518,9 +519,12 @@ fn plan_in(mesh: &TriMesh, f: &Facets, frame: &Frame, o: &SlabOptions) -> Result
     let origin = frame.origin + frame.u * datum[0] + frame.v * datum[1] + frame.w * base;
     let moved = Frame { origin, u: frame.u, v: frame.v, w: frame.w };
     let deviation = deviation(&local, datum, base, &slabs);
+    // The rebuilt part's size, not the scan's: the outlines have been rounded to the grid by now,
+    // and a report that gave the scan's 60.01 beside a part that is 60 would only confuse.
+    let outlines: Vec<[f64; 2]> = slabs.iter().flat_map(|slab| slab.loops.iter()).flat_map(flatten).collect();
     let size = [
-        spread(local.iter().map(|p| p[0])),
-        spread(local.iter().map(|p| p[1])),
+        spread(outlines.iter().map(|p| p[0])),
+        spread(outlines.iter().map(|p| p[1])),
         slabs.last().map(|s| s.to).unwrap_or(0.) - slabs.first().map(|s| s.from).unwrap_or(0.),
     ];
     Ok(SlabStack {

@@ -291,7 +291,8 @@ pub struct MeshReconstructResult {
     pub y_dir: [f64; 3],
     /// The heights the part steps between, from the sketch plane (mm).
     pub levels: Vec<f64>,
-    /// The part's size along `x_dir`, `y_dir` and `axis` (mm).
+    /// The rebuilt part's size along `x_dir`, `y_dir` and `axis` (mm), after rounding to the
+    /// grid: the part's size, not the scan's.
     pub size: [f64; 3],
     pub slabs: Vec<MeshSlab>,
     /// The mirror planes the part was found symmetric about, and made exactly symmetric across.
