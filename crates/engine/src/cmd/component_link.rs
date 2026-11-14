@@ -139,6 +139,9 @@ pub fn resolve_design_links(doc: &mut Document, from: Option<&str>) {
     for link in doc.links.values_mut() {
         link.path = absolute(&resolve(from, &link.path)).to_string_lossy().into_owned();
     }
+    for copy in &mut doc.geometry_copies {
+        copy.file = absolute(&resolve(from, &copy.file)).to_string_lossy().into_owned();
+    }
 }
 
 /// The bodies of a linked design: its name, the Import feature that holds them and the names
@@ -255,12 +258,9 @@ pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
     Some(digest)
 }
 
-/// The solid bodies of `bytes`, the design at `file`, as an Import feature. The model the file
-/// keeps is its evaluation when this build saved it for exactly that design, as when it is opened.
-fn design_bodies(file: &Path, bytes: &[u8], validation: solidcraft_kernel::Validation) -> Result<Linked> {
-    #[cfg(test)]
-    EVALUATED.with(|n| n.set(n.get() + 1));
-    let shown = file.display().to_string();
+/// The design in `bytes`, the file shown as `shown`, opened as the app opens it: the model the
+/// file keeps is its evaluation when this build saved it for exactly that design.
+pub(super) fn linked_session(shown: &str, bytes: &[u8], validation: solidcraft_kernel::Validation) -> Result<Session> {
     let fail = |e: solidcraft_io::IoError| EngineError::Other(format!("{shown}: {e}"));
     let (doc, saved) = if solidcraft_io::is_design_container(bytes) {
         let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).map_err(fail)?;
@@ -269,8 +269,16 @@ fn design_bodies(file: &Path, bytes: &[u8], validation: solidcraft_kernel::Valid
     } else {
         (solidcraft_io::read_design(bytes).map_err(fail)?, None)
     };
-    let (name, feature, faces, metadata, properties) =
-        session_bodies(&Session::opened_at_validating(doc, saved.as_ref(), Some(&shown), validation), &shown)?;
+    Ok(Session::opened_at_validating(doc, saved.as_ref(), Some(shown), validation))
+}
+
+/// The solid bodies of `bytes`, the design at `file`, as an Import feature. The model the file
+/// keeps is its evaluation when this build saved it for exactly that design, as when it is opened.
+fn design_bodies(file: &Path, bytes: &[u8], validation: solidcraft_kernel::Validation) -> Result<Linked> {
+    #[cfg(test)]
+    EVALUATED.with(|n| n.set(n.get() + 1));
+    let shown = file.display().to_string();
+    let (name, feature, faces, metadata, properties) = session_bodies(&linked_session(&shown, bytes, validation)?, &shown)?;
     remember_read(file, digest(bytes), &feature, &faces, &properties);
     Ok((name, feature, faces, metadata, properties))
 }

@@ -2604,6 +2604,71 @@ pub struct Component {
     /// whose features only exist to rebuild the copy can carry this flag.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub history_hidden: bool,
+    /// Normal, or a skeleton: a reference component that holds no solid bodies.
+    #[serde(default, skip_serializing_if = "ComponentKind::is_normal")]
+    pub kind: ComponentKind,
+}
+
+/// What a component is for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComponentKind {
+    /// An ordinary part or assembly.
+    #[default]
+    Normal,
+    /// A reference component: sketches and construction geometry only, never solid bodies.
+    Skeleton,
+}
+
+impl ComponentKind {
+    pub fn is_normal(&self) -> bool {
+        *self == Self::Normal
+    }
+}
+
+/// A public geometry: reference elements of a skeleton component (sketches, construction planes,
+/// axes and points) shared as one named group.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicGeometry {
+    pub name: String,
+    pub items: Vec<PublishedItem>,
+}
+
+/// One element of a public geometry. `name` is the name it is shared under; `feature` only says
+/// which element it is, so renaming the feature changes nothing here.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublishedItem {
+    pub name: String,
+    pub feature: u64,
+}
+
+/// A geometry copy: the elements of a public geometry of another design file, held here as
+/// construction features with fixed geometry. The file is read again only when the copy is
+/// updated, so the copy keeps what it last took.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeometryCopy {
+    /// The copy's own name in this design.
+    pub name: String,
+    /// The source design, as a link keeps its file: relative to this design's folder once this
+    /// design is saved.
+    pub file: String,
+    /// The public geometry it takes from that file.
+    pub publication: String,
+    /// The digest of the file when the copy last read it ([`DesignLink::file_digest`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_sha256: Option<String>,
+    /// The component its features are in (0 is the design).
+    #[serde(default)]
+    pub component: u64,
+    /// The copied elements: the published name, and the construction feature here that holds it.
+    pub items: Vec<PublishedItem>,
+}
+
+impl Document {
+    /// Whether `id` is a skeleton component.
+    pub fn is_skeleton(&self, id: u64) -> bool {
+        self.components.iter().any(|c| c.id == id && c.kind == ComponentKind::Skeleton)
+    }
 }
 
 /// One loft section: profiles of a sketch.
@@ -2856,6 +2921,18 @@ mod opt_point_expr {
 }
 
 impl FeatureKind {
+    /// Whether this feature makes no solid body (sketches and construction geometry): the only
+    /// kind a skeleton component may hold.
+    pub fn is_reference(&self) -> bool {
+        matches!(
+            self,
+            FeatureKind::Sketch { .. }
+                | FeatureKind::ConstructionPlane { .. }
+                | FeatureKind::ConstructionAxis { .. }
+                | FeatureKind::ConstructionPoint { .. }
+        )
+    }
+
     /// A plastic part feature: a boss, lip, snap fit or rest (its result depends on the plastic
     /// rules).
     pub fn is_plastic(&self) -> bool {
@@ -3564,6 +3641,13 @@ pub struct Document {
     /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<crate::notes::Note>,
+    /// Public geometries: named groups of a skeleton component's reference elements, shared
+    /// for other parts to build from.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub public_geometry: Vec<PublicGeometry>,
+    /// Geometry copied from the public geometry of other design files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub geometry_copies: Vec<GeometryCopy>,
     /// What was hidden when the design was saved. A session takes it from here when the design
     /// opens and keeps the live state itself (`browser.visibility`: saved, and undone like any
     /// other change), so a document in a session leaves this empty; the session puts it back when
@@ -3865,6 +3949,8 @@ impl Document {
             param_comments: Default::default(),
             browser_groups: Vec::new(),
             timeline_groups: Vec::new(),
+            public_geometry: Vec::new(),
+            geometry_copies: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
             notes: Vec::new(),
@@ -4575,6 +4661,16 @@ impl Document {
             .rules
             .retain(|rule| !rule.references_features(&gone) && !rule.parameter_references().iter().any(|name| gone_params.contains(name)));
         self.features.retain(|f| !gone.contains(&f.id));
+        // A deleted feature leaves its public geometry; a public geometry left empty goes too.
+        for group in &mut self.public_geometry {
+            group.items.retain(|item| !gone.contains(&item.feature));
+        }
+        self.public_geometry.retain(|group| !group.items.is_empty());
+        // The same for a geometry copy: it lets go of a deleted feature, and goes with its last.
+        for copy in &mut self.geometry_copies {
+            copy.items.retain(|item| !gone.contains(&item.feature));
+        }
+        self.geometry_copies.retain(|copy| !copy.items.is_empty());
         for group in &mut self.timeline_groups {
             group.features.retain(|feature| !gone.contains(feature));
         }

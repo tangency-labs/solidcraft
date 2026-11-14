@@ -1,0 +1,47 @@
+{
+  "en": {
+    "cmd.component_create_skeleton": "New Skeleton Component",
+    "cmd.component_set_kind": "Set Component Kind",
+    "help.component.create_skeleton": "Adds a skeleton: a component that holds only sketches and construction geometry, never solid bodies. Use it to lay out the planes, axes and sketches that several parts of an assembly are built from."
+  },
+  "ar": {
+    "cmd.component_create_skeleton": "مكوّن هيكلي جديد",
+    "cmd.component_set_kind": "تعيين نوع المكوّن",
+    "help.component.create_skeleton": "يضيف هيكلًا: مكوّنًا يحتوي على الرسوم وهندسة الإنشاء فقط، ولا يحتوي على أجسام صلبة أبدًا. استخدمه لوضع المستويات والمحاور والرسوم التي تُبنى منها عدة قطع في تجميع."
+  },
+  "de": {
+    "cmd.component_create_skeleton": "Neue Skelettkomponente",
+    "cmd.component_set_kind": "Komponentenart festlegen",
+    "help.component.create_skeleton": "Fügt ein Skelett hinzu: eine Komponente, die nur Skizzen und Konstruktionsgeometrie enthält, niemals Volumenkörper. Damit legen Sie die Ebenen, Achsen und Skizzen an, aus denen mehrere Teile einer Baugruppe aufgebaut werden."
+  },
+  "fr": {
+    "cmd.component_create_skeleton": "Nouveau composant squelette",
+    "cmd.component_set_kind": "Définir le type de composant",
+    "help.component.create_skeleton": "Ajoute un squelette : un composant qui ne contient que des esquisses et de la géométrie de construction, jamais de corps solides. Utilisez-le pour poser les plans, les axes et les esquisses à partir desquels plusieurs pièces d'un assemblage sont construites."
+  },
+  "he": {
+    "cmd.component_create_skeleton": "רכיב שלד חדש",
+    "cmd.component_set_kind": "הגדרת סוג הרכיב",
+    "help.component.create_skeleton": "הוספת שלד: רכיב שמכיל רק סקיצות וגאומטריית עזר, ולעולם לא גופים מוצקים. כך ממקמים את המישורים, הצירים והסקיצות שמהם נבנים כמה חלקים בהרכבה."
+  },
+  "ja": {
+    "cmd.component_create_skeleton": "新規スケルトンコンポーネント",
+    "cmd.component_set_kind": "コンポーネントの種類を設定",
+    "help.component.create_skeleton": "スケルトンを追加します。スケルトンは、スケッチとコンストラクションジオメトリだけを持ち、ソリッドボディを持たないコンポーネントです。アセンブリの複数の部品の基準になる平面、軸、スケッチを配置するときに使います。"
+  },
+  "ko": {
+    "cmd.component_create_skeleton": "새 스켈레톤 구성 요소",
+    "cmd.component_set_kind": "구성 요소 종류 설정",
+    "help.component.create_skeleton": "스켈레톤을 추가합니다. 스켈레톤은 스케치와 구성 형상만 담고 솔리드 바디는 담지 않는 구성 요소입니다. 어셈블리의 여러 부품이 기준으로 삼는 평면, 축, 스케치를 배치할 때 사용합니다."
+  },
+  "vi": {
+    "cmd.component_create_skeleton": "Tạo mới Cụm chi tiết khung",
+    "cmd.component_set_kind": "Đặt loại cụm chi tiết",
+    "help.component.create_skeleton": "Thêm một khung: một cụm chi tiết chỉ chứa phác thảo và hình học dựng, không bao giờ chứa thân khối đặc. Dùng để bố trí các mặt phẳng, trục và phác thảo mà nhiều chi tiết của cụm lắp ráp được dựng từ đó."
+  },
+  "zh": {
+    "cmd.component_create_skeleton": "新建骨架组件",
+    "cmd.component_set_kind": "设置组件类型",
+    "help.component.create_skeleton": "添加一个骨架：只包含草图和构造几何、从不包含实体的组件。用于布置装配中多个零件共同依据的平面、轴和草图。"
+  }
+}

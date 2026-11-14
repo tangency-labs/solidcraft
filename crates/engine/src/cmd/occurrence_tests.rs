@@ -2611,3 +2611,97 @@ fn a_joint_wins_over_an_expressed_move_when_a_parameter_changes() {
     run(&mut s, "parameters.change", json!({"name": "dy", "expression": "25 mm"}));
     at(centre(&mut s, block), held);
 }
+
+#[test]
+fn skeleton_components_get_numbered_names_and_round_trip() {
+    use solidcraft_doc::ComponentKind;
+    let mut s = Session::default();
+    let a = run(&mut s, "component.create_skeleton", json!({}));
+    assert_eq!(a["name"], "Skeleton1");
+    let b = run(&mut s, "component.create_skeleton", json!({}));
+    assert_eq!(b["name"], "Skeleton2");
+    let named = run(&mut s, "component.create_skeleton", json!({"name": "Layout"}));
+    let id = |v: &Value| v["component"].as_u64().unwrap();
+    assert!(s.doc.is_skeleton(id(&a)) && s.doc.is_skeleton(id(&named)));
+    let (plain, _) = created(&mut s, "Part");
+    assert!(!s.doc.is_skeleton(plain));
+    let saved = solidcraft_io::write_design(&s.doc);
+    let text = String::from_utf8_lossy(&saved).into_owned();
+    assert_eq!(text.matches("\"skeleton\"").count(), 3, "only skeletons save a kind");
+    let reopened = solidcraft_io::read_design(&saved).unwrap();
+    let kinds: Vec<_> = reopened.components.iter().map(|c| (c.name.clone(), c.kind)).collect();
+    assert!(kinds.contains(&("Skeleton2".into(), ComponentKind::Skeleton)));
+    assert!(kinds.contains(&("Part".into(), ComponentKind::Normal)));
+}
+
+#[test]
+fn old_component_without_kind_reads_as_normal() {
+    let c: solidcraft_doc::Component = serde_json::from_value(json!({"id": 5, "name": "Old"})).unwrap();
+    assert_eq!(c.kind, solidcraft_doc::ComponentKind::Normal);
+    assert!(!serde_json::to_string(&c).unwrap().contains("kind"));
+}
+
+#[test]
+fn skeleton_refuses_solid_bodies_and_set_kind_checks() {
+    let mut s = Session::default();
+    run(&mut s, "component.create_skeleton", json!({}));
+    let before = s.doc.clone();
+    let e = s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap_err().to_string();
+    assert!(e.contains("not supported yet") && e.contains("skeleton"), "{e}");
+    assert_eq!(s.doc, before);
+    // A component with a box cannot become a skeleton; an empty one can, and back.
+    let (part, _) = created(&mut s, "Part");
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10}));
+    let e = s.execute("component.set_kind", &json!({"component": part, "kind": "skeleton"})).unwrap_err().to_string();
+    assert!(e.contains("not supported yet"), "{e}");
+    assert!(s.execute("component.set_kind", &json!({"component": part, "kind": "bogus"})).is_err());
+    let (empty, _) = created(&mut s, "Empty");
+    run(&mut s, "component.set_kind", json!({"component": empty, "kind": "skeleton"}));
+    assert!(s.doc.is_skeleton(empty));
+    run(&mut s, "component.set_kind", json!({"component": empty, "kind": "normal"}));
+    assert!(!s.doc.is_skeleton(empty));
+}
+
+#[test]
+fn public_geometry_groups_a_skeletons_references_and_follows_deletes() {
+    let mut s = Session::default();
+    let (part, _) = created(&mut s, "Part");
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "InPart"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let skeleton = run(&mut s, "component.create_skeleton", json!({}))["component"].as_u64().unwrap();
+    let top = run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 40, "name": "Deck"}))["feature"].as_u64().unwrap();
+    run(&mut s, "construct.plane.offset", json!({"base": "XZ", "offset": 10, "name": "Side"}));
+
+    let made = run(&mut s, "geometry.publish", json!({"name": "Layout", "items": [top, "side"]}));
+    assert_eq!(made["items"].as_array().unwrap().len(), 2);
+    assert_eq!(made["items"][1]["name"], "Side", "published under the feature's own name: {made}");
+    let refused = |s: &mut Session, p: Value| s.execute("geometry.publish", &p).unwrap_err().to_string();
+    assert!(refused(&mut s, json!({"name": "layout", "items": ["Deck"]})).contains("already exists"));
+    assert!(refused(&mut s, json!({"name": "Again", "items": ["Deck"]})).contains("already published"));
+    assert!(refused(&mut s, json!({"name": "Other", "items": ["InPart"]})).contains("not in a skeleton"));
+    assert!(refused(&mut s, json!({"name": "Other", "items": ["Nowhere"]})).contains("no feature"));
+    assert!(refused(&mut s, json!({"name": "Other", "items": []})).contains("items"));
+    assert_eq!(s.doc.public_geometry.len(), 1, "a refusal publishes nothing");
+
+    // It is saved and read back, and a skeleton that shares geometry stays a skeleton.
+    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design(&s.doc)).unwrap();
+    assert_eq!(reopened.public_geometry, s.doc.public_geometry);
+    assert!(s.execute("component.set_kind", &json!({"component": skeleton, "kind": "normal"})).is_err());
+    assert!(!s.doc.is_skeleton(part));
+
+    // Deleting a published feature takes it out; the last one takes the group with it.
+    run(&mut s, "timeline.delete", json!({"feature": top}));
+    let list = run(&mut s, "geometry.publications", json!({}));
+    assert_eq!(list["publications"][0]["items"].as_array().unwrap().len(), 1, "{list}");
+    assert_eq!(list["publications"][0]["items"][0]["name"], "Side");
+    run(&mut s, "timeline.delete", json!({"feature": "Side"}));
+    assert!(s.doc.public_geometry.is_empty());
+
+    // Unpublishing removes the group and keeps the feature.
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 3, "name": "Nose"}));
+    run(&mut s, "geometry.publish", json!({"name": "Faces", "items": ["Nose"]}));
+    let gone = run(&mut s, "geometry.unpublish", json!({"name": "FACES"}));
+    assert_eq!(gone["removed"], 1);
+    assert!(s.doc.public_geometry.is_empty() && s.doc.features.iter().any(|f| f.name == "Nose"));
+    assert!(s.execute("geometry.unpublish", &json!({"name": "Faces"})).is_err());
+}
