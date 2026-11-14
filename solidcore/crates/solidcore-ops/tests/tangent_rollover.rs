@@ -740,12 +740,15 @@ fn a_rim_round_partly_on_the_top_rolls_onto_the_foot_round_partway() {
 /// apart at r4 = 9), so its floor is the top reaching under the ball's contact x = -38. At every
 /// section the contact lies off the top and the foot round carries the ball, and the rail is
 /// rolled onto the foot round; in the slot the foot round is cut away, and the rail rolled onto
-/// it crosses the slot's edges. It is not proved on the foot round
-/// ([`RoomReason::RailLeavesFace`]'s refusal, which without the corpus's fixes reads as a rail
-/// leaving its face without the cliff overflow fix). Without that proof the blend failed later,
-/// in the trace's rollover, with status 1001; with the corpus's fixes it fails before the trim.
+/// it crosses the slot's edges. The rail on the top crosses the slot's rims, cliffs: the cliff
+/// overflow (the only path since tangency-labs/solidcraft#13841, as it was with the corpus's
+/// fixes) takes it before the trim, and its construction over the slot fails with status 1001.
+/// The blend is not built. Before the cliff overflow was the only path, the kernel without the
+/// corpus's fixes reached the trim, which refuses it as a rail not proved on the foot round
+/// ([`RoomReason::RailLeavesFace`]); without that proof it failed later, in the trace's
+/// rollover, also with status 1001.
 #[test]
-fn a_rim_round_whose_top_reaches_the_contact_between_sections_is_refused() {
+fn a_rim_round_whose_top_reaches_the_contact_between_sections_is_not_built() {
     let r4 = 9.0;
     let d = 2.0;
     let (v, w) = (-65.0 - r4, top_end_on_side());
@@ -763,7 +766,7 @@ fn a_rim_round_whose_top_reaches_the_contact_between_sections_is_refused() {
     let result = blend(&b, Blend::Round, &rim, &[d], &[], Corners::Filled);
     fixes();
     match result {
-        Err(Error::Unsupported(reason)) if reason.contains("rail leaves its face") => {}
+        Err(Error::Status(1001)) => {}
         other => panic!("the slot between the sections: {other:?}"),
     }
 }

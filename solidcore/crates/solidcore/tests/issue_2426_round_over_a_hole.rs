@@ -33,8 +33,8 @@ fn pick(k: &Kernel, b: &Brep, q: Point3) -> EdgeId {
 const VOLUME: f64 = 7580.287315387334;
 
 /// The fix set the round needs: keep features trims it in place only once the rails and the
-/// overflow are the blend's (the cliff overflow); on the default kernel it is still refused
-/// with status 1001.
+/// overflow are the blend's (the cliff overflow). The default kernel builds it the same way
+/// since the cliff overflow is the only path (`issue_422_round_over_through_hole`).
 #[test]
 fn the_hole_stays_with_every_fix() {
     let mut k = Kernel {

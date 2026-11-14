@@ -1,7 +1,7 @@
-//! Fixes of the fork's fillet defects. WR-300 (#1023, #421), WR-302 (#841, #1024), WR-303
-//! (#841) and WR-320 (#879) are opt-in (`Kernel::fixes`): their cases run with the field off
-//! (SMLib's behaviour) and on. WR-301 (#485) is the default: its cases run on the default
-//! kernel.
+//! Fixes of the fork's fillet defects. WR-300 (#1023, #421), WR-303 (#841) and WR-320
+//! (#879) are opt-in (`Kernel::fixes`): their cases run with the field off (SMLib's
+//! behaviour) and on. WR-301 (#485) and WR-302 (#841, #1024, with the cliff overflow,
+//! WR-631) are the default: their cases run on the default kernel.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -19,6 +19,7 @@ use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::edge;
 use solidcore::topology::EdgeId;
 use solidcore::{Brep, Kernel};
@@ -162,24 +163,56 @@ fn rail_clear_of_the_rim_builds_to_the_closed_form() {
 /// `FilletErrorType::NoRoom`, the fork's error type for a blend larger than its faces.
 const NO_ROOM: i32 = FilletErrorType::NoRoom as i32;
 
+/// The section a blend of `size` (`xsect` 0 chamfer, 1 round) takes off the holed cube's
+/// top front edge, clipped to the body, in closed form. In the section plane, `y` from the
+/// front face and `w` down from the top, the blend's section is the triangle `y + w <= d`
+/// or the round's spandrel outside the circle of radius `r` about `(r, r)`. Outside the
+/// openings' 10 wide span along the edge, the opening along x takes `y >= 5, w >= 5`,
+/// which no section of size under 10 reaches; across it, the openings along y and z take
+/// `w >= 5` and `y >= 5`, leaving the section's part in the square `[0, 5)^2`.
+fn holed_cube_removed(size: f64, xsect: u32) -> f64 {
+    let (whole, past) = if xsect == 0 {
+        // the triangle's part at `y >= 5`: the triangle of legs `size - 5`
+        let p = (size - 5.0).max(0.0);
+        (size * size / 2.0, p * p / 2.0)
+    } else {
+        // the spandrel's part at `y >= 5`: the integral over `t = r - y` in `0..r - 5` of
+        // `r - sqrt(r^2 - t^2)`
+        let r = size;
+        let a = (r - 5.0).max(0.0);
+        let f = (a * (r * r - a * a).sqrt() + r * r * (a / r).asin()) / 2.0;
+        (r * r * (1.0 - std::f64::consts::FRAC_PI_4), r * a - f)
+    };
+    10.0 * whole + 10.0 * (whole - 2.0 * past)
+}
+
 /// Blends of 6 and 9 run across the openings: SMLib builds a body that is no manifold
-/// solid. With `fillet_refuse_rails_leaving_faces` they are refused (`NoRoom`);
-/// the sizes that fit are unchanged.
+/// solid, and the fork's first check refused them (`NoRoom`, WR-302). Their rails leave
+/// the top and front faces across the openings' rims (cliffs), so each is built as a cliff
+/// overflow (WR-631): the holed cube (4000) less the blend's section clipped to the body
+/// ([`holed_cube_removed`]).
 #[test]
-fn blends_larger_than_their_faces_are_refused() {
+fn blends_across_the_openings_are_cliff_overflows() {
     for xsect in [0, 1] {
         for size in [6.0, 9.0] {
             let mut k = Kernel::default();
-            assert_eq!(
-                holed_cube_blend(&mut k, size, xsect),
-                Outcome::Refused { code: NO_ROOM },
-                "xsect {xsect} size {size}"
+            let expected = 4000.0 - holed_cube_removed(size, xsect);
+            let mut b = holed_cube(&mut k);
+            let e = edge_between(&k, &b, [0.0, 0.0, 20.0], [20.0, 0.0, 20.0]);
+            let Outcome::Built { volume, manifold } = fillet(&mut k, &mut b, &[e], size, xsect)
+            else {
+                panic!("xsect {xsect} size {size}: refused");
+            };
+            let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+                .unwrap()
+                .lines();
+            assert!(lines.is_empty(), "xsect {xsect} size {size}: {lines:?}");
+            assert!(
+                manifold && near(volume, expected, 1e-9 * expected),
+                "xsect {xsect} size {size}: {volume} against {expected} ({:e})",
+                (volume - expected).abs() / expected
             );
         }
-        let mut k = Kernel::default();
-        let off = holed_cube_blend(&mut k, 4.0, xsect);
-        let mut k = Kernel::default();
-        assert_eq!(holed_cube_blend(&mut k, 4.0, xsect), off);
     }
 }
 
@@ -260,20 +293,14 @@ fn no_room_reason(
     session.error_info().no_room_reason()
 }
 
-/// The `NoRoom` refusals name themselves (#960): a rail leaving its face (the holed cube's
-/// blend of 6) and a blend taking a whole face (the cylinder's chamfer of 10), where the
-/// comment was the only difference; a refusal under another code names none. The holed
-/// cube's chamfer of 5, once refused under another code (WR-301's rollover), builds.
+/// The `NoRoom` refusals name themselves (#960): a blend taking a whole face (the
+/// cylinder's chamfer of 10), where the comment was the only difference; a refusal under
+/// another code names none. The holed cube's chamfer of 5, once refused under another code
+/// (WR-301's rollover), builds. (The holed cube's blend of 6, once named as a rail leaving
+/// its face, and its chamfer of 25, once refused under another code, are now cliff
+/// overflows: `blends_across_the_openings_are_cliff_overflows` and below.)
 #[test]
 fn no_room_refusals_are_named() {
-    let mut k = Kernel::default();
-    let mut b = holed_cube(&mut k);
-    let e = edge_between(&k, &b, [0.0, 0.0, 20.0], [20.0, 0.0, 20.0]);
-    assert_eq!(
-        no_room_reason(&mut k, &mut b, &[e], 6.0),
-        Some(NoRoomReason::RailLeavesFace)
-    );
-
     let mut k = kernel(|f| f.fillet_refuse_face_consuming_blends = true);
     let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0).unwrap();
     let rim = *b
@@ -299,9 +326,25 @@ fn no_room_refusals_are_named() {
     };
     assert!(manifold && near(volume, 3750.0, 1e-4), "size 5: {volume}");
 
-    // a chamfer of 25 on the cube of 20 (SM_FILERR_BAD_INT)
+    // a chamfer of 25 on the cube of 20, once refused under another code
+    // (SM_FILERR_BAD_INT), is a cliff overflow: the plane y + w = 25 (y from the front, w
+    // down from the top) cuts the body. Outside the openings' span (10 along x) the section
+    // is the 20 square less the opening along x, [5, 15]^2: the triangle takes
+    // 312.5 - 2 * 12.5 of the square and 100 - 12.5 of the opening, 200. Across the span the
+    // section is the square's four 5 x 5 corners: the triangle takes the three nearest the
+    // edge, 75. 4000 - 10 * 200 - 10 * 75 = 1250.
     let mut k = Kernel::default();
     let mut b = holed_cube(&mut k);
     let e = edge_between(&k, &b, [0.0, 0.0, 20.0], [20.0, 0.0, 20.0]);
-    assert_eq!(no_room_reason(&mut k, &mut b, &[e], 25.0), None);
+    let Outcome::Built { volume, manifold } = fillet(&mut k, &mut b, &[e], 25.0, 0) else {
+        panic!("size 25: refused");
+    };
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "size 25: {lines:?}");
+    assert!(
+        manifold && near(volume, 1250.0, 1e-9 * 1250.0),
+        "size 25: {volume}"
+    );
 }

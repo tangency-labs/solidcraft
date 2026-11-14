@@ -9,7 +9,7 @@
 //! on the front top edge (y = 2), extended past x = 40, runs off the top, back onto it
 //! through the spur (x 54.57 to 55.43) and off again. A middle run that leaves the face
 //! between the edge's ends (a V notch in the top reaching down to y = 1.5 at x = 20)
-//! is still refused.
+//! is still judged: it leaves across cliffs, so the round is a cliff overflow.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -17,7 +17,6 @@
     clippy::indexing_slicing
 )] // test helpers
 use solidcore::blend::fillet_executive::session::FilletSession;
-use solidcore::blend::fillet_geom::p1::FilletErrorType;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
@@ -26,6 +25,7 @@ use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::sweep::api_brep::create_taper_extrude;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::edge;
 use solidcore::topology::EdgeId;
 use solidcore::{Brep, Kernel};
@@ -105,8 +105,14 @@ fn front_top_edge(k: &Kernel, b: &Brep) -> EdgeId {
 
 #[derive(Debug, PartialEq)]
 enum Outcome {
-    Built { removed: f64, manifold: bool },
-    Refused { code: i32 },
+    Built {
+        removed: f64,
+        manifold: bool,
+        level2: Vec<String>,
+    },
+    Refused {
+        code: i32,
+    },
 }
 
 /// The front top edge of the body `make` builds rounded 2.
@@ -128,9 +134,13 @@ fn round_front_edge(make: fn(&mut Kernel) -> Brep) -> Outcome {
         return Outcome::Refused { code };
     }
     stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default()).unwrap();
+    let level2 = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
     Outcome::Built {
         removed: before - volume(&k, &mut b),
         manifold: is_manifold_solid(&b).unwrap(),
+        level2,
     }
 }
 
@@ -142,9 +152,15 @@ fn middle_off_face_run_past_the_edge_end_is_not_refused() {
     let analytic = (1.0 - std::f64::consts::FRAC_PI_4) * 4.0 * 40.0;
     assert!((analytic - 34.336294).abs() < 1e-6);
     let outcome = round_front_edge(|k| spur_prism(k, 1.5));
-    let Outcome::Built { removed, manifold } = outcome else {
+    let Outcome::Built {
+        removed,
+        manifold,
+        level2,
+    } = outcome
+    else {
         panic!("{outcome:?}");
     };
+    assert!(level2.is_empty(), "{level2:?}");
     assert!(
         manifold && (removed - analytic).abs() <= 1e-6,
         "removed {removed}, expected {analytic}"
@@ -152,13 +168,32 @@ fn middle_off_face_run_past_the_edge_end_is_not_refused() {
 }
 
 /// A middle off-face run that leaves the face between the edge's ends (the rail y = 2
-/// crosses the notch at x = 20) is still refused.
+/// crosses the notch at x = 20) is not skipped: the rail leaves the top across the notch's
+/// rims, cliffs, so the round is a cliff overflow (WR-631; refused with `NoRoom` before
+/// it was the only path). It removes its spandrel, (4 - pi) 40, less the part in the
+/// notch: at `t = 2 - y` in `0..1/2` the notch is `6 (1/2 - t) / 18.5` wide and the
+/// spandrel `2 - sqrt(4 - t^2)` tall, so the part is
+/// `6 / 18.5 (a^2 - a G(a) + H(a))` with `a = 1/2`,
+/// `G(a) = (a sqrt(4 - a^2) + 4 asin(a / 2)) / 2` and `H(a) = (8 - (4 - a^2)^(3/2)) / 3`.
 #[test]
-fn middle_off_face_run_inside_the_edge_span_is_refused() {
-    assert_eq!(
-        round_front_edge(|k| notched_block(k, 1.5)),
-        Outcome::Refused {
-            code: FilletErrorType::NoRoom as i32
-        }
+fn middle_off_face_run_inside_the_edge_span_is_a_cliff_overflow() {
+    let a: f64 = 0.5;
+    let g = (a * (4.0 - a * a).sqrt() + 4.0 * (a / 2.0).asin()) / 2.0;
+    let h = (8.0 - (4.0 - a * a).powf(1.5)) / 3.0;
+    let in_notch = 6.0 / 18.5 * (a * a - a * g + h);
+    let analytic = (4.0 - std::f64::consts::PI) * 40.0 - in_notch;
+    let outcome = round_front_edge(|k| notched_block(k, 1.5));
+    let Outcome::Built {
+        removed,
+        manifold,
+        level2,
+    } = outcome
+    else {
+        panic!("{outcome:?}");
+    };
+    assert!(level2.is_empty(), "{level2:?}");
+    assert!(
+        manifold && (removed - analytic).abs() <= 1e-6,
+        "removed {removed}, expected {analytic}"
     );
 }
