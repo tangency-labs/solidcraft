@@ -15,6 +15,7 @@
 //! - **Paint:** strokes at their width `w` (the walk never gives 0, which 8.4.3.2 says is a device
 //!   pixel and shouldn't be used), butt caps, miter joins and a miter limit of 4, dashed by `d`;
 //!   fills black, even-odd (`f*`). Black on no background, as SVG.
+//! - **Geometry only:** the scene's text runs and pictures are passed over; text follows with P2.
 //! - **Layers:** nonempty groups share one PDF optional-content group for each
 //!   distinct paper object kind. Group order remains the original paint order,
 //!   and each kind's PDF layer uses ObjectKind::layer, as in DXF. Empty
@@ -32,8 +33,9 @@ use std::io::Write as _;
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
 use pdf_writer::{Date, Filter, Name, Pdf, Rect, Ref, TextStr};
+use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::paper::{Grid, GridDashes, GridGroup, GridItem, GridPath, GridPoint, GridReport, ObjectKind, Piece, Prepared};
-use solidcraft_geom::{Seg2, Vec2};
+use solidcraft_geom::prelude::*;
 
 use super::push_mm;
 use crate::{IoError, MAX_DRAWING_BYTES, Result};
@@ -160,7 +162,7 @@ struct Layer {
 
 fn collect_layers(groups: &[GridGroup]) -> Result<Vec<Layer>> {
     let mut layers: Vec<Layer> = Vec::new();
-    for group in groups.iter().filter(|group| !group.items.is_empty()) {
+    for group in groups.iter().filter(|group| painted(group)) {
         if layers.iter().any(|layer| layer.kind == group.kind) {
             continue;
         }
@@ -169,6 +171,12 @@ fn collect_layers(groups: &[GridGroup]) -> Result<Vec<Layer>> {
         layers.push(Layer { kind: group.kind, reference: Ref::new(index), tag: format!("L{}", layers.len()) });
     }
     Ok(layers)
+}
+
+/// Whether `group` puts any mark on this PDF's page: a stroke or a fill (text and pictures are
+/// passed over). A group with none invents no layer and doesn't interrupt a run.
+fn painted(group: &GridGroup) -> bool {
+    group.items.iter().any(|item| matches!(item, GridItem::Stroke { .. } | GridItem::Fill { .. }))
 }
 
 /// The page's content stream: the scene in millimetres, scaled to points once.
@@ -188,7 +196,7 @@ fn content_with_limit_and_layers(groups: &[GridGroup], layers: Option<&[Layer]>,
     let mut w = Content::new(max_bytes)?;
     w.append(&format!("q {PT_PER_MM:.9} 0 0 {PT_PER_MM:.9} 0 0 cm 0 J 0 j 4 M\n"))?;
     let mut active_kind = None;
-    for group in groups.iter().filter(|group| !group.items.is_empty()) {
+    for group in groups.iter().filter(|group| painted(group)) {
         if let Some(layers) = layers {
             let layer = layers.iter().find(|layer| layer.kind == group.kind).ok_or_else(|| IoError::Invalid("missing paper PDF layer".into()))?;
             if active_kind != Some(group.kind) {
@@ -224,6 +232,7 @@ fn content_with_limit_and_layers(groups: &[GridGroup], layers: Option<&[Layer]>,
                     }
                     w.append("f*\n")?;
                 }
+                GridItem::Text { .. } | GridItem::Picture { .. } => {}
             }
         }
     }

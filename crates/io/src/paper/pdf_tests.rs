@@ -1,8 +1,8 @@
 use std::f64::consts::{FRAC_PI_2, TAU};
 use std::io::Read;
 
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind, Scene};
-use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
 
 use super::*;
 
@@ -11,7 +11,7 @@ fn p(x: f64, y: f64) -> Vec2 {
 }
 
 fn scene(size: Vec2, items: Vec<Item>) -> Scene {
-    Scene { size_mm: size, groups: vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items }] }
+    Scene::new(size, vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items }])
 }
 
 fn stroke(path: Vec<Seg2>, closed: bool, width_mm: f64, pattern: Option<Dashes>) -> Item {
@@ -358,13 +358,13 @@ fn content_budget_stops_inside_one_arcs_cubic_expansion() {
 #[test]
 fn content_budget_is_cumulative_over_groups_and_fill_loops() {
     let square = Loop2::polygon(&[p(0.0, 0.0), p(2.0, 0.0), p(2.0, 2.0), p(0.0, 2.0)]);
-    let source = Scene {
-        size_mm: p(20.0, 20.0),
-        groups: vec![
+    let source = Scene::new(
+        p(20.0, 20.0),
+        vec![
             Group { object: 1, kind: ObjectKind::DrawingBorder, items: vec![stroke(square.segs.clone(), true, 0.35, None)] },
             Group { object: 2, kind: ObjectKind::TitleBlock, items: vec![Item::Fill { region: Region2 { outer: square, holes: vec![] } }] },
         ],
-    };
+    );
     let on = source.prepare().unwrap().on_grid(Grid::TEN_NANOMETRES).unwrap();
     let complete = super::content(&on.groups).unwrap();
     assert_eq!(super::content_with_limit(&on.groups, complete.len()).unwrap(), complete);
@@ -411,15 +411,15 @@ fn content_budget_reuses_the_original_formatter_at_integer_extremes() {
 #[test]
 fn pdf_layers_share_object_kinds_and_keep_noncontiguous_paint_order() {
     let path = |y: f64| vec![Seg2::Line { a: p(10.0, y), b: p(100.0, y) }];
-    let sheet = Scene {
-        size_mm: p(210.0, 297.0),
-        groups: vec![
+    let sheet = Scene::new(
+        p(210.0, 297.0),
+        vec![
             Group { object: 10, kind: ObjectKind::TitleBlock, items: vec![stroke(path(10.0), false, 0.35, None)] },
             Group { object: 20, kind: ObjectKind::DrawingBorder, items: vec![stroke(path(20.0), false, 0.35, None)] },
             Group { object: 11, kind: ObjectKind::TitleBlock, items: vec![stroke(path(30.0), false, 0.35, None)] },
             Group { object: 30, kind: ObjectKind::SheetBorder, items: vec![] },
         ],
-    };
+    );
     let bytes = pdf(&sheet, &NONE);
     assert!(check_xref(&bytes).is_ok(), "{:?}", check_xref(&bytes));
     assert_eq!(pdf(&sheet, &NONE), bytes, "layer order and object ids must be deterministic");
@@ -446,9 +446,9 @@ fn pdf_layers_cover_all_five_kinds_and_preserve_paint_and_styles() {
     let line = |y: f64| vec![Seg2::Line { a: p(10.0, y), b: p(100.0, y) }];
     let dashed = Some(Dashes { lengths_mm: vec![4.0, 2.0], phase_mm: 0.0 });
     let square = Loop2::polygon(&[p(10.0, 30.0), p(20.0, 30.0), p(20.0, 40.0), p(10.0, 40.0)]);
-    let sheet = Scene {
-        size_mm: p(210.0, 297.0),
-        groups: vec![
+    let sheet = Scene::new(
+        p(210.0, 297.0),
+        vec![
             Group { object: 10, kind: ObjectKind::TitleBlock, items: vec![stroke(line(10.0), false, 0.35, None)] },
             Group { object: 20, kind: ObjectKind::DrawingBorder, items: vec![stroke(line(20.0), false, 0.7, dashed.clone())] },
             Group { object: 30, kind: ObjectKind::PartsList, items: vec![Item::Fill { region: Region2 { outer: square, holes: vec![] } }] },
@@ -457,7 +457,7 @@ fn pdf_layers_cover_all_five_kinds_and_preserve_paint_and_styles() {
             Group { object: 11, kind: ObjectKind::TitleBlock, items: vec![stroke(line(70.0), false, 0.35, None)] },
             Group { object: 60, kind: ObjectKind::DrawingBorder, items: vec![] },
         ],
-    };
+    );
     let bytes = pdf(&sheet, &NONE);
     assert_eq!(pdf(&sheet, &NONE), bytes);
     assert!(check_xref(&bytes).is_ok(), "{:?}", check_xref(&bytes));
@@ -513,13 +513,38 @@ fn pdf_layers_obey_content_budget_and_skip_empty_groups() {
     assert!(super::content_with_limit(&grid.groups, full.len() - 1).is_err());
 }
 
+/// A group of pictures (or text runs) puts no mark on this geometry-only page: it invents no layer
+/// and doesn't break a run of the kind around it.
+#[test]
+fn pdf_layers_skip_groups_with_nothing_this_writer_draws() {
+    use solidcraft_geom::Aabb2;
+    use solidcraft_geom::paper::Picture;
+    let line = |y: f64| stroke(vec![Seg2::Line { a: p(10.0, y), b: p(100.0, y) }], false, 0.35, None);
+    let picture = Item::Picture(Picture { source: 3, rect: Aabb2 { min: p(20.0, 20.0), max: p(60.0, 50.0) }, opacity: 1.0 });
+    let sheet = Scene::new(
+        p(210.0, 297.0),
+        vec![
+            Group { object: 1, kind: ObjectKind::View, items: vec![line(10.0)] },
+            Group { object: 2, kind: ObjectKind::SheetImage, items: vec![picture] },
+            Group { object: 3, kind: ObjectKind::View, items: vec![line(20.0)] },
+        ],
+    );
+    let bytes = pdf(&sheet, &NONE);
+    let file = text(&bytes);
+    assert!(file.contains("/OCGs [6 0 R]"), "only the view's layer: {file}");
+    assert!(!file.contains(ObjectKind::SheetImage.layer()), "{file}");
+    let page = content(&bytes);
+    assert_eq!(page.matches(" BDC").count(), 1, "the two views share one run: {page}");
+    assert!(!page.contains(" Do"), "no picture is drawn: {page}");
+}
+
 /// Flat PDF is the same ordered vector paint, not a hidden or rasterized layer.
 #[test]
 fn flat_pdf_omits_optional_content_and_preserves_vector_paint() {
     let line = |y| vec![Seg2::Line { a: p(10.0, y), b: p(100.0, y) }];
-    let sheet = Scene {
-        size_mm: p(210.0, 297.0),
-        groups: vec![
+    let sheet = Scene::new(
+        p(210.0, 297.0),
+        vec![
             Group { object: 1, kind: ObjectKind::TitleBlock, items: vec![stroke(line(10.0), false, 0.35, None)] },
             Group {
                 object: 2,
@@ -541,7 +566,7 @@ fn flat_pdf_omits_optional_content_and_preserves_vector_paint() {
                 items: vec![stroke(vec![Seg2::Arc { center: p(50.0, 70.0), radius: 10.0, start: 0.0, sweep: FRAC_PI_2 }], false, 0.35, None)],
             },
         ],
-    };
+    );
     let layered_options = PdfOptions { title: Some("Flat Ç sheet".into()), output_time: Some(0), ..PdfOptions::default() };
     assert!(layered_options.layers && PdfOptions::default().layers);
     let flat_options = PdfOptions { layers: false, ..layered_options.clone() };
@@ -625,9 +650,9 @@ fn flat_pdf_reproduces_the_original_p1_a3_sample_bytes() {
         (0..4).map(|i| Seg2::Line { a: c[i], b: c[(i + 1) % 4] }).collect()
     };
     let centre = Some(Dashes { lengths_mm: vec![12.0, 3.0, 1.0, 3.0], phase_mm: 0.0 });
-    let sheet = Scene {
-        size_mm: p(420.0, 297.0),
-        groups: vec![
+    let sheet = Scene::new(
+        p(420.0, 297.0),
+        vec![
             Group {
                 object: 1,
                 kind: ObjectKind::DrawingBorder,
@@ -649,11 +674,16 @@ fn flat_pdf_reproduces_the_original_p1_a3_sample_bytes() {
                 ],
             },
         ],
-    };
+    );
     let options = PdfOptions { title: Some("A3 sample".into()), output_time: Some(1_800_000_000), layers: false };
     let bytes = pdf(&sheet, &options);
-    assert_eq!(bytes.len(), 1063);
-    assert_eq!(format!("{:x}", sha2::Sha256::digest(&bytes)), "0de09bc342566206514754fc2ed7836156fbe10ba444e8ebb66427b10dd89c02");
+    // The Info dictionary names the build ("SolidCraft <version>"), so the pin is every byte before it:
+    // the header, catalog, page tree, page and content stream. Taken at 0.19.0 as the whole file (1063
+    // bytes, SHA-256 0de09bc3...); those 721 bytes are unchanged since.
+    let info = bytes.windows(7).position(|w| w == b"5 0 obj").unwrap();
+    assert_eq!(info, 721);
+    assert_eq!(format!("{:x}", sha2::Sha256::digest(&bytes[..info])), "4ed2ee8f77b5317f9306492b1880cd2a25b0d1f04931b0fa82d0cfdd4b75e241");
+    assert!(text(&bytes[info..]).contains(concat!("/Producer (SolidCraft ", env!("CARGO_PKG_VERSION"), ")")));
     assert_eq!(pdf(&sheet, &options), bytes);
     assert!(check_xref(&bytes).is_ok());
 }
@@ -669,7 +699,7 @@ fn adjacent_pdf_groups_share_one_run_without_reordering_noncontiguous_layers() {
     .into_iter()
     .map(|(object, kind, y)| Group { object, kind, items: vec![stroke(vec![Seg2::Line { a: p(10.0, y), b: p(20.0, y) }], false, 0.35, None)] })
     .collect();
-    let sheet = Scene { size_mm: p(210.0, 297.0), groups };
+    let sheet = Scene::new(p(210.0, 297.0), groups);
     let bytes = pdf(&sheet, &NONE);
     assert_eq!(pdf(&sheet, &NONE), bytes);
     assert!(check_xref(&bytes).is_ok());
@@ -711,7 +741,7 @@ fn empty_pdf_groups_do_not_break_adjacent_painted_runs_or_invent_layers() {
             });
         }
         groups.push(Group { object: 200, kind: ObjectKind::RevisionTable, items: vec![] });
-        let sheet = Scene { size_mm: p(210.0, 297.0), groups };
+        let sheet = Scene::new(p(210.0, 297.0), groups);
         let bytes = pdf(&sheet, &NONE);
         let file = text(&bytes);
         assert_eq!(file.matches("/Type /OCG\n").count(), 1);
@@ -737,10 +767,10 @@ fn a_merged_pdf_run_keeps_all_paint_and_shared_width_and_dash_state() {
         stroke(line(50.0), false, 0.7, dashed),
         stroke(line(60.0), false, 0.7, None),
     ];
-    let sheet = Scene {
-        size_mm: p(210.0, 297.0),
-        groups: items.into_iter().enumerate().map(|(i, item)| Group { object: i as u64, kind: ObjectKind::TitleBlock, items: vec![item] }).collect(),
-    };
+    let sheet = Scene::new(
+        p(210.0, 297.0),
+        items.into_iter().enumerate().map(|(i, item)| Group { object: i as u64, kind: ObjectKind::TitleBlock, items: vec![item] }).collect(),
+    );
     let before = sheet.clone();
     let prepared = sheet.prepare().unwrap();
     let (bytes, report) = paper_pdf(&prepared, &NONE).unwrap();
@@ -769,7 +799,7 @@ fn merged_pdf_run_limits_charge_transitions_and_the_final_close() {
         .into_iter()
         .map(|(object, kind, y)| Group { object, kind, items: vec![stroke(vec![Seg2::Line { a: p(10.0, y), b: p(20.0, y) }], false, 0.35, None)] })
         .collect();
-    let sheet = Scene { size_mm: p(210.0, 297.0), groups };
+    let sheet = Scene::new(p(210.0, 297.0), groups);
     let prepared = sheet.prepare().unwrap();
     let grid = prepared.on_grid(Grid::TEN_NANOMETRES).unwrap();
     // Literal independent stream: adjacent objects retain two strokes within
