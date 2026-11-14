@@ -17,6 +17,7 @@ use solidcore::query::api_queries::{
     edge_face_gap_samples, face_normal_at_edge,
 };
 use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects};
+use solidcore::query::face::p1 as face_p1;
 use solidcore::topology::brep::outward_solid_failure;
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
 use solidcore::topology::{edge, face};
@@ -677,6 +678,32 @@ impl Body {
             return Err(Error::Status(crate::error::INVALID_INPUT));
         }
         Ok(a)
+    }
+
+    /// The point of record face `face`'s surface nearest `p`, when `p` lies on that face itself
+    /// within `tolerance` (on its trimmed area, an edge or a vertex of it), else `None`: the
+    /// kernel drops `p` onto the surface and classifies it against the face's own trim loops
+    /// (`query::face::p1::point_on_face`), so a point on another face of the same surface is
+    /// not on this one.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces, a coordinate that is not finite or a
+    /// tolerance that is not finite and positive; the kernel's error.
+    pub fn point_on_face(
+        &self,
+        order: &Order,
+        face: usize,
+        p: [f64; 3],
+        tolerance: f64,
+    ) -> Result<Option<[f64; 3]>> {
+        let f = order::face(order, face)?;
+        let p = point(p)?;
+        if !(tolerance.is_finite() && tolerance > 0.0) {
+            return Err(Error::Argument);
+        }
+        with_body("point_on_face", self, |k, b| {
+            face_p1::point_on_face(k, b, f, p, tolerance).map(|n| Ok(n.map(|n| [n.x, n.y, n.z])))
+        })?
     }
 
     /// The area of record face `face` and the centroid of that area

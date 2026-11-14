@@ -44,6 +44,7 @@ pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 mod dialogs_hole;
+pub mod dialogs_insert_airfoil;
 pub mod dialogs_insert_drawing;
 pub mod dialogs_library;
 pub mod dialogs_motion;
@@ -2198,6 +2199,15 @@ impl SolveApp {
         }
         if id == "component.finish_edit" {
             edit_in_place::finish(self);
+            return;
+        }
+        // The picked section is placed (chord, pivot, position, angle, previewed) before OK adds it.
+        if id == "sketch.insert_airfoil" {
+            self.pick_file(solidcraft_ui_text::tr("insert_airfoil.filter"), &["dat"], |app, path| {
+                if let Some(path) = path {
+                    dialogs_insert_airfoil::open(app, path);
+                }
+            });
             return;
         }
         // The picked drawing is placed (position and scale, previewed) before OK adds it.

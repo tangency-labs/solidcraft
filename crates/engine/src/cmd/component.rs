@@ -14,12 +14,13 @@ use super::CommandSpec;
 use crate::params::{bad, bool_, name_or_id_values, str_, string_list, vec3};
 use crate::schema::component::{
     ActivateParams, ActivateResult, CapturePositionParams, CapturePositionResult, ChildEntry, CompactPlacement, ComponentNode, CopyParams,
-    CopyResult, CreateParams, CreateResult, DeleteParams, DeleteResult, DragParams, DragResult, EditInPlaceParams, EditInPlaceResult,
-    FinishEditParams, FinishEditResult, FromBodiesParams, FromBodiesResult, GroundParams, GroundResult, ListParams, ListResult, MoveBodiesParams,
-    MoveBodiesResult, MoveFeaturesParams, MoveFeaturesResult, MoveParams, MoveResult, MoveSketchesParams, MoveSketchesResult,
-    MoveSketchesToPartsParams, MoveSketchesToPartsResult, NamesOrCount, OccurrenceAlignParams, OccurrenceAlignResult, OccurrencePropertiesParams,
-    OccurrencePropertiesResult, PasteNewParams, PasteNewResult, PlacementEntry, PlacementInfo, PropertiesParams, PropertiesResult, RenameParams,
-    RenameResult, ReparentItemsParams, ReparentItemsResult, RevertPositionParams, RevertPositionResult, UnlockParams, UnlockResult,
+    CopyResult, CreateParams, CreateResult, CycleColorParams, CycleColorResult, DeleteParams, DeleteResult, DragParams, DragResult,
+    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, FromBodiesParams, FromBodiesResult, GroundParams, GroundResult,
+    HistoryVisibilityParams, HistoryVisibilityResult, ListParams, ListResult, MoveBodiesParams, MoveBodiesResult, MoveFeaturesParams,
+    MoveFeaturesResult, MoveParams, MoveResult, MoveSketchesParams, MoveSketchesResult, MoveSketchesToPartsParams, MoveSketchesToPartsResult,
+    NamesOrCount, OccurrenceAlignParams, OccurrenceAlignResult, OccurrencePropertiesParams, OccurrencePropertiesResult, PasteNewParams,
+    PasteNewResult, PlacementEntry, PlacementInfo, PropertiesParams, PropertiesResult, RenameParams, RenameResult, ReparentItemsParams,
+    ReparentItemsResult, RevertPositionParams, RevertPositionResult, UnlockParams, UnlockResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -32,6 +33,8 @@ const LIST_CONTRACT: TypedContract<ListParams> = TypedContract::new();
 const PROPERTIES_CONTRACT: TypedContract<PropertiesParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<RenameParams> = TypedContract::new();
 const UNLOCK_CONTRACT: TypedContract<UnlockParams> = TypedContract::new();
+const HISTORY_VISIBILITY_CONTRACT: TypedContract<HistoryVisibilityParams> = TypedContract::new();
+const CYCLE_COLOR_CONTRACT: TypedContract<CycleColorParams> = TypedContract::new();
 const EDIT_IN_PLACE_CONTRACT: TypedContract<EditInPlaceParams> = TypedContract::new();
 const FINISH_EDIT_CONTRACT: TypedContract<FinishEditParams> = TypedContract::new();
 const MOVE_FEATURES_CONTRACT: TypedContract<MoveFeaturesParams> = TypedContract::new();
@@ -81,14 +84,14 @@ mod history_tests;
 mod occurrence_tests;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("component.cycle_color", "Cycle Component Color", cycle_color)
-        .icon("colored_components").doc_only()
+    CommandSpec::new("component.cycle_color", "Cycle Component Color", crate::checked!("component.cycle_color", cycle_color))
+        .icon("colored_components").doc_only().contract(&CYCLE_COLOR_CONTRACT).output(output_schema_for::<CycleColorResult>)
         .params("component: id or name; saves the next identification colour and turns Component Colors on; shared by every instance, separate from appearances"),
-    CommandSpec::new("component.hide_history", "Hide Component History", hide_history)
-        .icon("eye").doc_only()
+    CommandSpec::new("component.hide_history", "Hide Component History", crate::checked!("component.hide_history", hide_history))
+        .icon("eye").doc_only().contract(&HISTORY_VISIBILITY_CONTRACT).output(output_schema_for::<HistoryVisibilityResult>)
         .params("component: id or name; keeps the component's features in the design but leaves them out of the History bar (#10393)"),
-    CommandSpec::new("component.show_history", "Show Component History", show_history)
-        .icon("eye").doc_only()
+    CommandSpec::new("component.show_history", "Show Component History", crate::checked!("component.show_history", show_history))
+        .icon("eye").doc_only().contract(&HISTORY_VISIBILITY_CONTRACT).output(output_schema_for::<HistoryVisibilityResult>)
         .params("component: id or name; puts a component's features back in the History bar after Hide Component History (#10393)"),
     CommandSpec::new("component.create", "New Component", crate::checked!("component.create", new_component))
         .at("SOLID", "ASSEMBLE")
@@ -991,8 +994,10 @@ fn place_occurrence(s: &mut Session, p: &Value, id: u64, next: Mat, expressed: O
                     x.expressed_moves.pop();
                 }
             }
+            repin_after_move(s, id);
             return reply(result);
         }
+        repin_after_move(s, id);
     } else {
         s.pending_moves.insert(id, next);
         s.revision += 1;
@@ -1124,6 +1129,60 @@ pub fn to_active_frame(s: &Session, kind: &mut FeatureKind) {
     }
 }
 
+/// Pins where each component with bodies stands, relative to the active one, on an extrude that
+/// ends To Object or starts From Object (#16732). The pick was made against the model as shown,
+/// so the extrude keeps measuring against that: a joint that slides the drawer must not
+/// stretch a body that was built to the frame's face.
+pub fn pin_picked_placements(s: &Session, kind: &mut FeatureKind) {
+    let state = s.model.state();
+    pin_picked_placements_in(s, kind, s.active_component, &state);
+}
+
+/// [`pin_picked_placements`] for a feature of `own`, with the bodies of `state` (the model
+/// before the feature when an edit picks again). Placements are the design's as shown: the
+/// uncaptured moves count, the exploded view does not.
+pub fn pin_picked_placements_in(s: &Session, kind: &mut FeatureKind, own: u64, state: &solidcraft_doc::ModelState) {
+    let FeatureKind::Extrude { extent, .. } = kind else { return };
+    extent.picked_placements.clear();
+    if (extent.to.is_none() && extent.from.is_none()) || s.doc.occurrences.is_empty() {
+        return;
+    }
+    let doc = s.design_document();
+    let Some(inverse) = solidcraft_doc::mat_inverse(&doc.component_transform(own)) else { return };
+    let mut owners = s.doc.model_body_components(state);
+    owners.sort_unstable();
+    owners.dedup();
+    for component in owners.into_iter().filter(|c| *c != own) {
+        let placement = solidcraft_doc::mat_mul(&inverse, &doc.component_transform(component));
+        extent.picked_placements.push(solidcraft_doc::PickedPlacement { component, placement });
+    }
+}
+
+/// A move the user makes (not a joint's) changes where a component stands for good, so each
+/// To / From Object extrude that keeps placements ([`pin_picked_placements`]) with that component
+/// as its own or as a pinned one picks again against the placements shown now (#16732): a face in
+/// a component that was moved is followed, as it always was.
+fn repin_after_move(s: &mut Session, occurrence: u64) {
+    let Some(component) = s.doc.occurrences.iter().find(|o| o.id == occurrence).map(|o| o.component) else { return };
+    let affected: Vec<u64> = s
+        .doc
+        .features
+        .iter()
+        .filter(|f| matches!(&f.kind, FeatureKind::Extrude { extent, .. }
+            if !extent.picked_placements.is_empty() && (f.component == component || extent.picked_placements.iter().any(|p| p.component == component))))
+        .map(|f| f.id)
+        .collect();
+    for id in affected {
+        let Some(feature) = s.doc.feature(id) else { continue };
+        let (own, mut kind) = (feature.component, feature.kind.clone());
+        let before = s.model.state_before(id);
+        pin_picked_placements_in(s, &mut kind, own, &before);
+        if let Some(f) = s.doc_mut().feature_mut(id) {
+            f.kind = kind;
+        }
+    }
+}
+
 fn cycle_color(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.cycle_color";
     let id = component(s, p, "component", cmd)?;
@@ -1131,7 +1190,7 @@ fn cycle_color(s: &mut Session, p: &Value) -> Result<Value> {
     let c = s.doc_mut().components.iter_mut().find(|c| c.id == id).ok_or_else(|| bad(cmd, "choose a component below the design root"))?;
     c.identification_color = Some(next);
     s.colored_components = Some(());
-    Ok(json!({"component": id, "color": next}))
+    reply(CycleColorResult { component: id, color: next, param_warnings: Vec::new() })
 }
 
 /// Mark a component's features out of the History bar, or back in (#10393). The features still
@@ -1141,7 +1200,7 @@ fn set_history_hidden(s: &mut Session, p: &Value, hidden: bool) -> Result<Value>
     let id = component(s, p, "component", cmd)?;
     let c = s.doc_mut().components.iter_mut().find(|c| c.id == id).ok_or_else(|| bad(cmd, "choose a component below the design root"))?;
     c.history_hidden = hidden;
-    Ok(json!({"component": id, "history_hidden": hidden}))
+    reply(HistoryVisibilityResult { component: id, history_hidden: hidden, param_warnings: Vec::new() })
 }
 
 fn hide_history(s: &mut Session, p: &Value) -> Result<Value> {

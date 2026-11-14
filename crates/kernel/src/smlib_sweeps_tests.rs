@@ -494,3 +494,124 @@ fn an_extrusion_of_a_cubic_whose_control_points_fold_back_passes_the_check() {
     want.sort();
     assert_eq!(origins(&b), want);
 }
+
+/// A wedge section of chord c whose trailing edge at (c, 0) is `edge` radians: x = c u²,
+/// y = c a u (1 - u²) with a = tan(edge / 2), from u = 1 round to u = -1, in `n` cubic pieces
+/// which hold that cubic exactly; its area is 8 a c² / 15.
+fn wedge_section(c: f64, edge: f64, n: usize) -> (Loop2, f64) {
+    let a = (edge / 2.0).tan();
+    let at = |i: usize| {
+        let u = 1.0 - 2.0 * i as f64 / n as f64;
+        (Vec2::new(c * u * u, c * a * u * (1.0 - u * u)), Vec2::new(2.0 * c * u, c * a * (1.0 - 3.0 * u * u)) * (-2.0 / n as f64 / 3.0))
+    };
+    let segs = (0..n)
+        .map(|i| {
+            let ((p0, d0), (p3, d3)) = (at(i), at(i + 1));
+            Seg2::Cubic { p0, p1: p0 + d0, p2: p3 - d3, p3 }
+        })
+        .collect();
+    (Loop2 { segs }, 8.0 * a * c * c / 15.0)
+}
+
+/// A section of chord c with a cusp (an edge of 0 degrees) at (c, 0), as the `n` cubic pieces of
+/// one uniform cubic B-spline, curvature continuous through every joint as a fit-point spline
+/// is: its control points on x = c u², y = 0.3 c u (1 - u²) from u = 1 round to u = -1, the two
+/// beside the edge moved onto the chord line, and one mirrored past each end so the curve starts
+/// and ends at the edge, leaving and coming back along the chord line.
+fn cusp_section(c: f64, n: usize) -> Loop2 {
+    let mut q: Vec<Vec2> = (0..=n)
+        .map(|i| {
+            let u = 1.0 - 2.0 * i as f64 / n as f64;
+            Vec2::new(c * u * u, 0.3 * c * u * (1.0 - u * u))
+        })
+        .collect();
+    q[1].y = 0.0;
+    q[n - 1].y = 0.0;
+    let edge = q[0];
+    q.insert(0, edge * 2.0 - q[1]);
+    q.push(edge * 2.0 - q[n]);
+    let mut segs: Vec<Seg2> = q
+        .windows(4)
+        .map(|w| Seg2::Cubic {
+            p0: (w[0] + w[1] * 4.0 + w[2]) * (1.0 / 6.0),
+            p1: (w[1] * 2.0 + w[2]) * (1.0 / 3.0),
+            p2: (w[1] + w[2] * 2.0) * (1.0 / 3.0),
+            p3: (w[1] + w[2] * 4.0 + w[3]) * (1.0 / 6.0),
+        })
+        .collect();
+    // On the edge exactly, not to rounding.
+    if let Some(Seg2::Cubic { p0, .. }) = segs.first_mut() {
+        *p0 = edge;
+    }
+    if let Some(Seg2::Cubic { p3, .. }) = segs.last_mut() {
+        *p3 = edge;
+    }
+    Loop2 { segs }
+}
+
+#[test]
+fn an_extrusion_of_one_closed_curve_with_a_sharp_seam_passes_the_check() {
+    // A section with a sharp trailing edge drawn as one closed spline: cubic pieces tangent
+    // through every joint but the one where the curve closes on itself, which the extrusion
+    // takes as one curve. Its wall's control net turns back there by 180 degrees less the edge's
+    // angle, and with the edge sharper than 10 degrees SMLib's check refused the extrusion ("Bad
+    // NonMonotonic CPts", the fold #13243 unfolds within a piece). Such a curve goes in as two
+    // walls, split half-way round; a blunter edge keeps its one wall. The pieces' area is exact
+    // (Green's theorem on the cubics) and the volume is measured on the exact faces, so the two
+    // agree to rounding: 1e-6.
+    let (c, n, depth) = (100.0, 24usize, 10.0);
+    let (wedge, wedge_area) = wedge_section(c, 6f64.to_radians(), n);
+    let (blunt, blunt_area) = wedge_section(c, 10.5f64.to_radians(), n);
+    for (what, section, analytic, walls) in
+        [("6 degree wedge", wedge, Some(wedge_area), 2), ("cusp", cusp_section(c, n), None, 2), ("10.5 degree wedge", blunt, Some(blunt_area), 1)]
+    {
+        let area = section.signed_area();
+        if let Some(want) = analytic {
+            close(area, want, 1e-12, what);
+        }
+        let r = region(section);
+        let body = crate::extrude_whole_sides(&Plane::XY, std::slice::from_ref(&r), 0.0, depth, &|_, _| true).unwrap().remove(0);
+        assert_eq!(body.validity(), Vec::<String>::new(), "{what}");
+        close(volume(&body), area * depth, 1e-6, what);
+        assert_eq!(body.face_count(), 2 + walls, "{what}");
+        let h = body.history().unwrap();
+        crate::history::BodyHistory::check(h, &body, &[]).unwrap();
+        let mut named: Vec<usize> = h
+            .faces
+            .iter()
+            .flat_map(|f| f.origins.iter().filter_map(|o| if let FaceOrigin::Profile { segment } = o { Some(*segment) } else { None }))
+            .collect();
+        named.sort();
+        assert_eq!(named, (0..n).collect::<Vec<_>>(), "{what}: each piece names one wall");
+        // Each wall named as the extrusion's side by the first piece of its run.
+        let sides = body.face_sources().expect("sources").iter().filter(|s| matches!(s, Some(FaceSource::ExtrudeSide { .. }))).count();
+        assert_eq!(sides, walls, "{what}");
+    }
+}
+
+#[test]
+fn an_extrusion_of_one_closed_curve_turning_back_mid_run_passes_the_check_as_it_is() {
+    // The same sharp section with its pieces starting a third of the way round, so the curve
+    // closes where it is smooth and turns back at the trailing edge between two of its pieces.
+    // SMLib takes that turn (only the one across a closed wall's seam is refused), so the run is
+    // not broken (half-way round would not be at the edge): the extrusion is valid as it is,
+    // its walls meeting at the edge.
+    let (c, n, depth) = (100.0, 24usize, 10.0);
+    let (wedge, area) = wedge_section(c, 6f64.to_radians(), n);
+    let mut segs = wedge.segs;
+    segs.rotate_left(n / 3);
+    let section = Loop2 { segs };
+    close(section.signed_area(), area, 1e-12, "rotated wedge");
+    let r = region(section);
+    let body = crate::extrude_whole_sides(&Plane::XY, std::slice::from_ref(&r), 0.0, depth, &|_, _| true).unwrap().remove(0);
+    assert_eq!(body.validity(), Vec::<String>::new());
+    close(volume(&body), area * depth, 1e-6, "rotated wedge");
+    assert_eq!(body.face_count(), 2 + 2);
+    let h = body.history().unwrap();
+    crate::history::BodyHistory::check(h, &body, &[]).unwrap();
+    // One wall runs from the leading edge to the trailing edge, the other back: the trailing
+    // edge, at (c, 0), is a vertex of the body.
+    let edge = Vec3::new(c, 0.0, 0.0);
+    let vertices = crate::native::brep_record(&body).unwrap().vertices;
+    assert!(vertices.iter().any(|v| Vec3::new(v.point[0], v.point[1], v.point[2]).dist(edge) < 1e-9), "the trailing edge is where the walls meet");
+}

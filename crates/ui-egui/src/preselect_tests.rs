@@ -4491,3 +4491,36 @@ fn split_face_dialog_keeps_a_sketch_split_and_its_loops() {
     let (_, p) = commands_for("ByPlane");
     assert!(p.get("sketch").is_none() && p.get("loops").is_none(), "{p}");
 }
+
+/// #16400: Plane Through Three Points takes a point on a mesh body's surface, the exact point of
+/// the triangle under the pointer.
+#[test]
+fn three_point_plane_dialog_takes_points_on_a_mesh_body() {
+    let mut h = crate::scenario::Harness::new();
+    let path = h.dir.join("box.stl");
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0]})).unwrap();
+    h.app.run("file.save_mesh", json!({"path": path})).unwrap();
+    h.app.run("file.new", json!({})).unwrap();
+    h.app.run("file.insert_mesh", json!({"path": path})).unwrap();
+    h.app.fit_view();
+    h.app.start("construct.plane.three_points");
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0));
+    let proj = crate::viewport::projection(&h.app, rect);
+    for point in [[20.0, 15.0, 20.0], [10.0, 5.0, 20.0], [30.0, 5.0, 20.0]] {
+        let pos = proj.to_screen(Vec3::new(point[0], point[1], point[2])).unwrap();
+        let hits = crate::viewport::pick(&h.app, &proj, pos);
+        let mut d = h.app.dialog.take().unwrap();
+        let sel = hits.iter().find_map(|hit| d.candidate(&h.app.session, hit)).expect("a point on the mesh is accepted");
+        d.pick(&h.app.session, sel);
+        h.app.dialog = Some(d);
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    for key in ["a", "b", "c"] {
+        let p = commands[0].1[key]["point"].as_array().unwrap_or_else(|| panic!("{key} is a free point: {:?}", commands[0].1[key]));
+        assert!((p[2].as_f64().unwrap() - 20.0).abs() < 1e-6, "{key} lies on the top triangles: {p:?}");
+    }
+    for (cmd, params) in commands {
+        h.app.run(&cmd, params).unwrap();
+    }
+    assert_eq!(solidcraft_engine::view::construction_planes(&h.app.session).len(), 1);
+}

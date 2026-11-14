@@ -2416,13 +2416,12 @@ impl FilletBrep {
             }
         }
 
-        // With `fillet_split_edge_keeps_near_half` (WR-612, fork ceb3272): looking for both
+        // WR-612 (fork ceb3272): looking for both
         // edges of a fillet edge split in two, one half's midpoint can lie on the curve to
         // scaled zero while the other's lies on it only to the edges' tolerance. The close
         // one is the other half: kept as the second edge, not dropped, when its ends lie on
         // the curve too (a different curve passing near the midpoint [B332] is not taken).
-        if k.fixes.fillet_split_edge_keeps_near_half
-            && find_multiple_edges
+        if find_multiple_edges
             && record.fillet_brep_edge1.is_some()
             && record.fillet_brep_edge2.is_none()
         {
@@ -5268,17 +5267,15 @@ mod tests {
 
     /// WR-612 (fork ceb3272): a fillet edge along the x axis from 0 to 10, split in two in
     /// the fillet B-rep. The first half lies on its curve exactly; the second half only to
-    /// its tolerance (1e-8 off, a different evaluation of the same curve). With
-    /// `fillet_split_edge_keeps_near_half` both halves are found; upstream keeps only the
-    /// first. A near edge whose ends are off the curve (a different curve crossing near its
+    /// its tolerance (1e-8 off, a different evaluation of the same curve). Both halves are
+    /// found; upstream keeps only the first. A near edge whose ends are off the curve (a different curve crossing near its
     /// midpoint) is never taken.
     #[test]
     fn wr_612_split_fillet_edge_keeps_its_near_half() {
         let line =
             |a: Point3, b: Point3| Curve::from(BSplineCurve::create_line_segment(3, a, b).unwrap());
-        let found = |near_half: bool, second: (Point3, Point3)| {
-            let mut k = Kernel::default();
-            k.fixes.fillet_split_edge_keeps_near_half = near_half;
+        let found = |second: (Point3, Point3)| {
+            let k = Kernel::default();
             let mut fb = FilletBrep::new();
             let start = fb
                 .brep_mut()
@@ -5314,13 +5311,11 @@ mod tests {
             (fb.fillet_edge(e).unwrap().fillet_brep_edges(), first, other)
         };
         let near = (Point3::new(5.0, 1e-8, 0.0), Point3::new(10.0, 1e-8, 0.0));
-        let (edges, first, other) = found(true, near);
+        let (edges, first, other) = found(near);
         assert_eq!(edges, vec![first, other], "both halves");
-        let (edges, first, _) = found(false, near);
-        assert_eq!(edges, vec![first], "upstream: the near half is dropped");
         // a curve crossing near the midpoint of the second half, its ends off the curve
         let crossing = (Point3::new(5.0, -1.0, 1e-8), Point3::new(10.0, 1.0, 1e-8));
-        let (edges, first, _) = found(true, crossing);
+        let (edges, first, _) = found(crossing);
         assert_eq!(edges, vec![first], "a crossing curve is not taken");
     }
 }

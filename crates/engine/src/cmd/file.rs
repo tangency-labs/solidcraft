@@ -1144,7 +1144,7 @@ fn installed_kicad_3dmodel_dir() -> Option<std::path::PathBuf> {
         }
     }
     #[cfg(target_os = "macos")]
-    candidates.push(((0, 0), std::path::PathBuf::from("/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels")));
+    candidates.extend([((0, 0), std::path::PathBuf::from("/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels"))]);
     #[cfg(all(unix, not(target_os = "macos")))]
     candidates.extend([
         ((0, 0), std::path::PathBuf::from("/usr/share/kicad/3dmodels")),

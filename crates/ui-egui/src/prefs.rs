@@ -13722,6 +13722,32 @@ mod settings_search_tests {
             }
         }
     }
+
+    /// A search draws every page twice in one frame (an invisible probe, then the pages that
+    /// match). No widget may take the same id in both draws: egui then paints its duplicate-id
+    /// warning over the window, and the two copies share hover, focus and click state (#15902).
+    #[test]
+    fn searching_the_preferences_gives_no_widget_the_same_id_twice() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.ctx.options_mut(|options| options.warn_on_id_clash = true);
+        h.call("ui.prefs", serde_json::json!({"language":"en"}));
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+        h.frames(2);
+        for query in ["sta", "f", "view", "e", "a"] {
+            h.app.prefs_window.shell.filter = query.into();
+            h.frames(4);
+            let warnings: Vec<String> = h
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) if text.galley.text().contains("use of widget ID") => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
+            assert!(warnings.is_empty(), "search `{query}`: {warnings:?}");
+        }
+    }
 }
 
 // SolidCraft's Preferences window on the kit's window, footer and colour components.
