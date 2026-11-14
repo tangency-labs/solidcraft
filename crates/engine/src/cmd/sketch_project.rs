@@ -197,10 +197,14 @@ fn point_source(s: &Session, name: &str, cmd: &str) -> Result<LinkSource> {
     }
 }
 
-/// An origin axis (`X`, `Y` or `Z`, in any case), or a construction axis by its name (#9324).
+/// An origin axis (`X`, `Y` or `Z`, in any case), a construction axis by its name (#9324), or the
+/// origin axis of a component by its Browser key (`o:2/origin/Z`, #15086).
 fn axis_source(s: &Session, name: &str, cmd: &str) -> Result<LinkSource> {
     if ["X", "Y", "Z"].iter().any(|axis| name.eq_ignore_ascii_case(axis)) {
         return Ok(LinkSource::Axis { name: name.to_ascii_uppercase() });
+    }
+    if s.origin_axis(name).is_some() {
+        return Ok(LinkSource::Axis { name: name.to_string() });
     }
     match s.doc.find_feature(name) {
         Some(f) if matches!(f.kind, FeatureKind::ConstructionAxis { .. }) => Ok(LinkSource::Axis { name: f.name.clone() }),

@@ -57,6 +57,116 @@ fn body_count(path: &Path) -> Value {
 }
 
 #[test]
+fn script_relative_keeps_script_files_beside_the_script_and_cli_files_in_the_callers_folder() {
+    for (relative_input, reporting) in
+        [(false, vec![]), (true, vec!["--results"]), (false, vec!["--timings"]), (true, vec!["--results", "--timings"])]
+    {
+        let dir = Scratch::new();
+        let scripts = dir.0.join("scripts");
+        std::fs::create_dir(&scripts).unwrap();
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder.step");
+        std::fs::copy(&fixture, scripts.join("cap.step")).unwrap();
+        std::fs::copy(&fixture, dir.0.join("base.step")).unwrap();
+        let script = scripts.join("part.json");
+        std::fs::write(
+            &script,
+            json!({"commands": [
+                {"command": "file.insert_step", "params": {"path": "cap.step", "name": "cap"}},
+                {"command": "file.export", "params": {"path": "script-out.stl"}}
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+        let input = if relative_input { Path::new("scripts/part.json") } else { script.as_path() };
+        let output = cli()
+            .current_dir(&dir.0)
+            .args(["run", "--script-relative"])
+            .arg(input)
+            .args(["--in", "base.step", "--out", "cli-out.stl", "--out", "cli-out.step", "--save", "cli-save.sc", "--json-out", "report.json"])
+            .args(&reporting)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{reporting:?}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stdout.is_empty());
+        assert!(scripts.join("script-out.stl").is_file());
+        assert!(!dir.0.join("script-out.stl").exists());
+        for name in ["cli-out.stl", "cli-out.step", "cli-save.sc", "report.json"] {
+            assert!(dir.0.join(name).is_file(), "{name}");
+            assert!(!scripts.join(name).exists(), "{name}");
+        }
+        assert_eq!(body_count(&dir.0.join("cli-save.sc")), 2);
+        let report: Value = serde_json::from_slice(&std::fs::read(dir.0.join("report.json")).unwrap()).unwrap();
+        if reporting.contains(&"--timings") {
+            assert_eq!(report["timings"].as_array().unwrap().len(), 2);
+        } else if reporting.contains(&"--results") {
+            assert_eq!(report.as_array().unwrap().len(), 2);
+        } else {
+            assert_eq!(report["body_count"], 2);
+        }
+    }
+}
+
+#[test]
+fn script_relative_preserves_the_default_and_accepts_absolute_command_paths() {
+    let dir = Scratch::new();
+    let scripts = dir.0.join("scripts");
+    std::fs::create_dir(&scripts).unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder.step");
+    let source = scripts.join("cap.step");
+    std::fs::copy(fixture, &source).unwrap();
+    let script = scripts.join("part.json");
+    let write_script = |path: &Path| {
+        std::fs::write(&script, json!({"commands": [{"command": "file.insert_step", "params": {"path": path}}]}).to_string()).unwrap();
+    };
+    write_script(Path::new("cap.step"));
+    let output = cli().current_dir(&dir.0).arg("run").arg(&script).output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cap.step"));
+    assert_eq!(json_output(cli().current_dir(&scripts).args(["run", "part.json"]).output().unwrap())["body_count"], 1);
+    write_script(&source);
+    assert_eq!(json_output(cli().current_dir(&dir.0).arg("run").arg(&script).arg("--script-relative").output().unwrap())["body_count"], 1);
+}
+
+#[test]
+fn script_relative_requires_a_positional_script_before_writing_outputs() {
+    let dir = Scratch::new();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder.step");
+    std::fs::copy(fixture, dir.0.join("base.step")).unwrap();
+    for args in [vec![], vec!["--in", "base.step"], vec!["base.step"], vec!["missing.json"]] {
+        let output = cli()
+            .current_dir(&dir.0)
+            .args(["run", "--script-relative"])
+            .args(&args)
+            .args(["--out", "out.stl", "--save", "out.sc", "--json-out", "report.json"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{args:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--script-relative needs a positional command script"));
+        for name in ["out.stl", "out.sc", "report.json"] {
+            assert!(!dir.0.join(name).exists());
+        }
+    }
+}
+
+#[cfg(feature = "profile")]
+#[test]
+fn script_relative_restores_the_callers_folder_for_profiling_even_after_an_error() {
+    for fails in [false, true] {
+        let dir = Scratch::new();
+        let scripts = dir.0.join("scripts");
+        std::fs::create_dir(&scripts).unwrap();
+        let script = scripts.join("part.json");
+        let command = if fails { "not.a.command" } else { "solid.box" };
+        std::fs::write(&script, json!({"commands": [{"command": command, "params": {"length": 2, "width": 3, "height": 4}}]}).to_string()).unwrap();
+        let output =
+            cli().current_dir(&dir.0).args(["run", "--script-relative"]).arg(&script).args(["--profile-out", "trace.json"]).output().unwrap();
+        assert_eq!(output.status.success(), !fails, "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(dir.0.join("trace.json").is_file());
+        assert!(!scripts.join("trace.json").exists());
+    }
+}
+
+#[test]
 fn run_rejects_invalid_options_before_script_execution_or_output_writes() {
     let dir = Scratch::new();
     let (script, script_saved) = dir.saving_script();
@@ -897,4 +1007,36 @@ fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_p
         let o = cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.run", &run]).output().unwrap();
         assert!(!o.status.success());
     }
+}
+
+/// `run --save` over a design another SolidCraft has open (#16199): the save still happens, and
+/// stderr names who has it open. A stale lock (its app is gone) and no lock say nothing.
+#[test]
+fn run_save_warns_when_another_solidcraft_has_the_design_open() {
+    let scratch = Scratch::new();
+    let script = scratch.script();
+    let design = scratch.0.join("b.sc");
+    let lock = scratch.0.join(".~b.sc.lock");
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let save = || cli().arg("run").arg(&script).arg("--save").arg(&design).arg("--quiet").output().unwrap();
+
+    let none = save();
+    assert!(none.status.success(), "{}", String::from_utf8_lossy(&none.stderr));
+    assert!(none.stderr.is_empty(), "no lock: {}", String::from_utf8_lossy(&none.stderr));
+
+    let held = |refreshed: u64| {
+        let other = json!({"host": "WORKSHOP-PC", "user": "ada", "app": "0.41.0", "pid": 1, "opened": refreshed, "refreshed": refreshed});
+        std::fs::write(&lock, other.to_string()).unwrap();
+    };
+    held(now);
+    std::fs::remove_file(&design).unwrap();
+    let open = save();
+    assert!(open.status.success(), "{}", String::from_utf8_lossy(&open.stderr));
+    assert!(design.exists(), "saved all the same");
+    let warning = String::from_utf8_lossy(&open.stderr);
+    assert!(warning.contains("warning") && warning.contains("ada") && warning.contains("WORKSHOP-PC") && warning.contains("0.41.0"), "{warning}");
+
+    held(now - 3600);
+    let stale = save();
+    assert!(stale.status.success() && stale.stderr.is_empty(), "a stale lock: {}", String::from_utf8_lossy(&stale.stderr));
 }

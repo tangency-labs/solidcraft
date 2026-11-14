@@ -13,6 +13,15 @@ pub const INVALID_INPUT: i32 = solidcore::error::SM_ERR_INVALID_INPUT;
 pub enum Error {
     /// The kernel's own status (1001 `SM_ERR`, 1007 `SM_ERR_INVALID_INPUT`, …).
     Status(i32),
+    /// Input the kernel refuses, in its words (its `SolidError::InvalidInput`): the routine that
+    /// refused it and what was wrong, as the kernel states them. Displays as
+    /// `"{operation}: {reason}"`.
+    Refused {
+        /// The kernel routine that refused the input.
+        operation: &'static str,
+        /// What was wrong with it.
+        reason: &'static str,
+    },
     /// An argument refused before the kernel saw it: not finite, out of range, or an index
     /// past its list.
     Argument,
@@ -56,7 +65,8 @@ pub enum Error {
     /// A blend's edges meet at a vertex of a kind no blend corner handles yet.
     CornerUnsupported,
     /// The kernel does not set back corner `corner` (an index into the call's corners): it sets
-    /// back a corner only where every edge meeting it is blended, all convex or all concave.
+    /// back a corner only where every edge meeting it is blended, all convex or all concave, or
+    /// of mixed convexity with curvature-continuous rounds between planes.
     CornerRefused {
         /// The corner's index among the call's corners.
         corner: usize,
@@ -92,6 +102,10 @@ pub enum Error {
     /// The kernel reported success but the operation did nothing: a blend that made no face, a
     /// face move or draft that moved no face, an extension shorter than the side can carry.
     NoEffect,
+    /// Curves on a face that do not divide it into regions ([`crate::trim`]): an open curve
+    /// whose ends reach neither the face's boundary nor another curve leaves a slit, and curves
+    /// off the face cut nothing.
+    CurveDoesNotCut,
     /// The answer is not exact in the input's geometry.
     NotExact,
     /// A planar profile the kernel refuses, and why (`solidcore::prism::profile::check_regions`).
@@ -174,6 +188,14 @@ pub enum Error {
     TooFar {
         /// The longest distance that works.
         largest: Option<f64>,
+    },
+    /// An offset whose distance from its curve, measured at stations along it, strays from the
+    /// distance asked by more than the tolerance: the tolerance and the worst found.
+    OffsetPastTolerance {
+        /// The tolerance asked.
+        tolerance: f64,
+        /// The largest difference found between a station's distance and the distance asked.
+        worst: f64,
     },
     /// A loft guided by rails whose guided edges were asked within `asked` of their rails: at
     /// the most wires asked, `wires`, the bound the kernel proved was still `reached`
@@ -495,6 +517,9 @@ pub enum RoomReason {
     CornersTakeWholeEdge,
     /// A blend past its faces runs off a face into the material.
     RunsIntoMaterial,
+    /// A blend past its faces keeps none of its edge, no corner taking any of it: a knife
+    /// edge's chamfer wider than the part takes all of it.
+    OverflowKeepsNothing,
 }
 
 /// What the largest size that builds a refused blend ([`Error::TooLarge`]) sizes.
@@ -532,6 +557,9 @@ impl RoomReason {
             }
             RoomReason::CornersTakeWholeEdge => "its corners take the whole of the edge",
             RoomReason::RunsIntoMaterial => "the blend runs off a face into the material",
+            RoomReason::OverflowKeepsNothing => {
+                "the round or chamfer runs past its faces and keeps none of its edge"
+            }
         }
     }
 }
@@ -556,6 +584,7 @@ impl std::fmt::Display for Error {
                 write!(f, "solidcore rejected the input (SM_ERR_INVALID_INPUT)")
             }
             Error::Status(s) => write!(f, "solidcore failed (status {s})"),
+            Error::Refused { operation, reason } => write!(f, "{operation}: {reason}"),
             Error::Argument => write!(f, "invalid argument"),
             Error::Empty => write!(f, "the result is empty"),
             Error::NotSolid => write!(f, "the result is not a closed solid"),
@@ -570,6 +599,10 @@ impl std::fmt::Display for Error {
             } => write!(
                 f,
                 "the loft's guided edges were asked within {asked} of their rails; at {wires} wires the bound proved is {reached}"
+            ),
+            Error::OffsetPastTolerance { tolerance, worst } => write!(
+                f,
+                "the offset strays up to {worst} from the distance asked, past the tolerance {tolerance}"
             ),
             Error::WallsTouch => write!(f, "the offset's walls meet"),
             Error::DefinitionNotCertified { face, eps } => {
@@ -599,6 +632,7 @@ impl std::fmt::Display for Error {
                 "the room runs out at {at} along the edge (largest radius there {largest})"
             ),
             Error::NoEffect => write!(f, "the operation did nothing"),
+            Error::CurveDoesNotCut => write!(f, "the curves do not divide the face into regions"),
             Error::NotExact => write!(f, "not exact in the input's geometry"),
             Error::Profile(r) => write!(
                 f,
@@ -729,15 +763,16 @@ impl std::error::Error for Error {}
 /// An operation's result.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// A kernel error as the operation's, by its type: a kernel status where it stands for one
-/// (input refused, not converged, the kernel's other failures), a refusal of what the kernel does
+/// A kernel error as the operation's, by its type: input it refuses in its words
+/// ([`Error::Refused`]), a kernel status where it stands for one (not converged, the kernel's
+/// other failures), a refusal of what the kernel does
 /// not support or has not ported, a cancellation, a broken invariant of the kernel's
 /// ([`Error::Invariant`]), or a call made before the preparation it needs.
 #[must_use]
 pub(crate) fn status(e: SolidError) -> Error {
-    use solidcore::error::{SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NOT_CONVERGING};
+    use solidcore::error::{SM_ERR, SM_ERR_NOT_CONVERGING};
     match e {
-        SolidError::InvalidInput { .. } => Error::Status(SM_ERR_INVALID_INPUT),
+        SolidError::InvalidInput { operation, reason } => Error::Refused { operation, reason },
         SolidError::NotConverged { .. } => Error::Status(SM_ERR_NOT_CONVERGING),
         SolidError::NotFound { .. } => Error::Status(SM_ERR),
         SolidError::Degenerate { .. } => Error::Degenerate,

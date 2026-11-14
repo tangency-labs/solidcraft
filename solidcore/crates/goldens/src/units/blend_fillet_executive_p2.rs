@@ -1222,9 +1222,6 @@ impl ExecutiveAccess<Handle> for Access {
         }
         Ok(b.edges().ids().map(Handle::Edge).collect())
     }
-    fn edge_is_manifold(&self, _: Handle) -> SolidResult<bool> {
-        missing()
-    }
     fn vertices(&self, handle: Handle) -> SolidResult<Vec<Handle>> {
         if !self.brep(handle)?.vertices().is_empty() {
             return missing();
@@ -1589,6 +1586,7 @@ fn executive(target: Option<Handle>) -> FilletExecutive<Handle> {
         fit_edge: None,
         fit_kind: solidcore::blend::fillet_executive::FitKind::Radius,
         fit_setback: -1.0,
+        rollover_adjusting: false,
     };
     executive.intersector.ignore_tangency = true;
     executive

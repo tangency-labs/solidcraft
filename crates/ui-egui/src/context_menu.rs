@@ -88,6 +88,10 @@ pub enum Target {
     Joint {
         id: u64,
     },
+    /// A motion link under the browser's Joints folder, as `joint.list` numbers them (#6825).
+    Link {
+        index: usize,
+    },
     /// A command (toolbar button, panel drop-down row, S box row).
     ToolbarCommand {
         id: String,
@@ -374,6 +378,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::ViewGizmo => crate::view_gizmo::menu_items(app),
         Target::Section => crate::browser::section_items(app),
         Target::Joint { id } => joint_items(app, *id),
+        Target::Link { index } => link_items(app, *index),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
         Target::HistoryControls => crate::timeline::transport_items(app),
@@ -962,6 +967,19 @@ fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::sep(),
         // Hiding a joint hides only its glyph: it still constrains and moves the parts.
         act("browser.visibility", "Show/Hide", "eye").key("V").with(json!({ "joints": joints, "visible": hidden })),
+    ]
+}
+
+/// The menu of a motion link's browser row: the Edit dialog opens on the link's kind with its
+/// current values, and Delete runs `joint.delete` with the link's number (#6825).
+fn link_items(app: &SolveApp, index: usize) -> Vec<Item> {
+    if index >= app.session.doc.assembly.links.len() {
+        return Vec::new();
+    }
+    vec![
+        act("ui.editLink", "Edit Link", "edit").with(json!({ "link": index })),
+        Item::sep(),
+        cmd(app, "joint.delete", "Delete").key("Del").with(json!({ "link": index })),
     ]
 }
 
@@ -1757,6 +1775,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 }
                 let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": f}]}));
                 crate::browser::request_timeline_reveal(app, f);
+                let panel = if app.preferences.history_in_browser { "browser" } else { "history" };
+                crate::browser::reveal_shared_panel(app, panel);
             }
         }
         "ui.tangentChain" => tangent_chain(app),
@@ -1914,6 +1934,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                     app.tool = None;
                     app.dialog = Some(d);
                 }
+            }
+        }
+        "ui.editLink" => {
+            if let Some(index) = p.get("link").and_then(Value::as_u64).and_then(|i| usize::try_from(i).ok())
+                && let Some(d) = crate::dialogs_assembly::edit_link(app, index)
+            {
+                app.tool = None;
+                app.dialog = Some(d);
             }
         }
         "ui.newView" => drop(crate::browser::save_view(app, None)),
@@ -2195,6 +2223,12 @@ pub fn rename_selection(app: &mut SolveApp, at: Pos2) -> bool {
         start_rename(app, RenameWhat::Group(g), at);
         return true;
     }
+    // A clicked History folder too, as a double-click on it does: folders are not in the
+    // selection either (#16213).
+    if let ([], [g]) = (app.session.selection.as_slice(), app.tree.picked_timeline_groups.as_slice()) {
+        start_rename(app, RenameWhat::TimelineGroup(*g), at);
+        return true;
+    }
     let what = match (app.session.selection.as_slice(), app.tree.picked_components.as_slice(), app.tree.picked_canvases.as_slice()) {
         ([Sel::Body { name }], [], []) => RenameWhat::Body(name.clone()),
         // F2 on several selected bodies renames them all, numbered after the first (#12341).
@@ -2453,9 +2487,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
             doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
         }
         // Construction geometry, as the browser's Construction folder lists it.
-        Target::Plane { id } => doc.feature(*id).is_some_and(|f| {
-            matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
-        }),
+        Target::Plane { id } => doc.feature(*id).is_some_and(|f| f.kind.is_construction()),
         Target::Feature { id } => feature(*id),
         // The browser lists History while it is docked there and the design has features.
         Target::HistoryFolder => app.preferences.history_in_browser && !doc.features.is_empty(),
@@ -2470,6 +2502,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
             component(*id) && ["bodies", "sketches", "construction"].contains(&folder.as_str()) && crate::browser::scope_shows(app, scope, *id)
         }
         Target::Joint { id } => doc.assembly.joints.iter().any(|j| j.id == *id),
+        Target::Link { index } => *index < doc.assembly.links.len(),
         Target::ToolbarCommand { id } => solidcraft_engine::find_command(id).is_some(),
         Target::NamedView { name } => {
             doc.named_views.iter().any(|v| v.name == *name) || crate::browser::STANDARD_VIEWS.iter().any(|(label, _)| label == name)

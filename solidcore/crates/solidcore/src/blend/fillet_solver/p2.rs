@@ -88,6 +88,10 @@
 //!   other's not ([`crate::blend::fillet_exact::classify_ball_on_collapsed_offset`]) is
 //!   [`FilletSolver::calc_ball_triangle_fillet_geom`]: the blend
 //!   corner's Ball patch (`sm_BallTrianglePatch`) on the ball's sphere.
+//! - **Planar rail crossings.** Constant offsets of analytic planes give an affine
+//!   rail/rail system on their exact continuations. It is solved without patch-domain
+//!   bounds: a corner's rails can meet farther past a short edge than half its span.
+//!   The later rail classification and trimming still use the faces' boundaries.
 
 use crate::blend::fillet_custom_solver::OffsetSurface;
 use crate::blend::fillet_exact::{BlendQuadric, ExactBlend, QuadricKind};
@@ -207,6 +211,28 @@ fn invalid(reason: &'static str) -> SolidError {
 
 fn sm_err() -> SolidError {
     SolidError::blend_failed(OP, "the solver has no fillet geometry for this case")
+}
+
+/// Whether this solver's offset equations are affine over the whole parameter plane.
+/// Analytic planes retain their affine parameterization on their exact extensions.
+fn planar_constant_offsets(ops: &dyn FilletSolverOps) -> Result<bool> {
+    if !ops.uses_constant_offset_equations() {
+        return Ok(false);
+    }
+    for rail in 0..2 {
+        let Some(slot) = ops.solver().surface(rail)? else {
+            return Ok(false);
+        };
+        if !slot.surface.surface.allow_extension()
+            || !matches!(
+                slot.surface.base_surface().kind(),
+                crate::surface::surface::SurfaceKind::Plane(_)
+            )
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// The analytic fillet geometry a `Calc*FilletGeom` method builds before storing it into
@@ -2247,9 +2273,8 @@ impl FilletSolver {
     /// Returns `rbFoundIntersection`; when found, both tsect points get their UV points
     /// and further solution values. `hold_end_radii` is the fork's `bHoldEndRadii`
     /// (tangency-labs/smlib@465b62b): the variable radii are held at their end values
-    /// (`SmTemporaryRadiusChange`) only when it is set; upstream always holds them, so
-    /// callers pass `true` unless `fixes.fillet_retry_radius_as_first` is on and their
-    /// corner is not calculated as constant radius.
+    /// (`SmTemporaryRadiusChange`) only when it is set; upstream always holds them, and
+    /// callers pass it only at a corner calculated as constant radius (WR-300).
     ///
     /// # Errors
     ///
@@ -2281,6 +2306,8 @@ impl FilletSolver {
         {
             return Err(sm_err());
         }
+
+        let affine = planar_constant_offsets(ops)? && planar_constant_offsets(other)?;
 
         // Set up Solver Size
         let jacobian_size = ops.jacobian_size()?;
@@ -2321,9 +2348,9 @@ impl FilletSolver {
         // Temporarily replace the variable-radius functions with a constant. [Reg Iter:306]
         // `SmTemporaryRadiusChange::SetUp` does nothing unless the solver is an
         // `SmVariableRadiusFS` (`SM_CAST_PTR`), first for this solver, then the other.
-        // Fork tangency-labs/smlib@465b62b (`fixes.fillet_retry_radius_as_first`, WR-300):
-        // only where `hold_end_radii` (a corner calculated as constant radius, as the
-        // callers decide); `SmTemporaryRadiusChange(NULL, ..)` does nothing.
+        // WR-300 (the fork's tangency-labs/smlib@465b62b): only where `hold_end_radii`
+        // (a corner calculated as constant radius, as the callers decide);
+        // `SmTemporaryRadiusChange(NULL, ..)` does nothing.
         let other_side_eu = other.solver().edgeuse(other_rail_index)?;
         let this_side_eu = ops.solver().edgeuse(rail_index)?;
         let temp_this = match (ops.variable_radius_mut(), other_side_eu) {
@@ -2406,7 +2433,12 @@ impl FilletSolver {
                 RailRailIntersectEnfo::new(rail_index, ops, other_rail_index, other),
                 k,
             );
-            let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
+            // A planar corner's contacts can lie on the supports' continuations.
+            // Half a patch's span bounds neither its plane nor the rails' crossing.
+            // The affine system needs no search bounds; face containment is checked
+            // when the resulting rails are classified and trimmed.
+            let bounds = (!affine).then_some(&intervals);
+            let mut ls = LocalSolveNd::new(&mut eval, bounds, Some(&periodicities));
             ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
             ls.set_desired_accuracy(EFF_ZERO_SQ);
             ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);

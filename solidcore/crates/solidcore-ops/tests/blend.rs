@@ -227,6 +227,85 @@ fn blends_turn_round_a_shallow_sharp_corner() {
     }
 }
 
+/// A sketch outline with a near-tangent corner, the whole top rim rounded: a four-sided plate 5
+/// thick, its top outline 40 along x, then 40 on at 3.8 degrees off it (two lines meeting at
+/// 176.2 degrees), then back to (0, -30) and up to the start. All four top edges rounded r 1.5
+/// and r 3, one closed chain through the 3.8 degree corner and the three sharp ones. Every corner
+/// is convex and mitred: as in [`blends_turn_round_a_shallow_sharp_corner`], the rim loses
+/// A = (1 - pi/4) r^2 along its perimeter P, less 2 M tan(theta / 2) at each corner turning
+/// theta, M = (5/6 - pi/4) r^3. The rounds become 4 faces on the plate's 6. Before the shallow
+/// corner was mitred, the two rounds meeting at it were given one shared section and the blend
+/// failed with status 1001.
+#[test]
+fn a_rim_round_runs_through_a_near_tangent_corner() {
+    all_fixes();
+    let t = (-3.8_f64).to_radians();
+    let p = [
+        [0.0, 0.0],
+        [40.0, 0.0],
+        [40.0 + 40.0 * t.cos(), 40.0 * t.sin()],
+        [0.0, -30.0],
+    ];
+    let side = |i: usize| {
+        let (a, b) = (p[i], p[(i + 1) % 4]);
+        [b[0] - a[0], b[1] - a[1]]
+    };
+    let len = |v: [f64; 2]| (v[0] * v[0] + v[1] * v[1]).sqrt();
+    let perimeter: f64 = (0..4).map(|i| len(side(i))).sum();
+    // tan of half the turn at each corner, from the sides into and out of it
+    let half_turns: f64 = (0..4)
+        .map(|i| {
+            let (a, b) = (side((i + 3) % 4), side(i));
+            let cos = (a[0] * b[0] + a[1] * b[1]) / (len(a) * len(b));
+            (cos.acos() / 2.0).tan()
+        })
+        .sum();
+    let area = 0.5
+        * (0..4)
+            .map(|i| {
+                let (a, b) = (p[i], p[(i + 1) % 4]);
+                a[0] * b[1] - b[0] * a[1]
+            })
+            .sum::<f64>()
+            .abs();
+    for r in [1.5, 3.0] {
+        let profile: Vec<Curve> = (0..4)
+            .map(|i| {
+                let (a, b) = (p[i], p[(i + 1) % 4]);
+                Curve::Line {
+                    start: [a[0], a[1], 0.0],
+                    end: [b[0], b[1], 0.0],
+                }
+            })
+            .collect();
+        let b = extrude(
+            &profile,
+            [0.0, 0.0, 1.0],
+            5.0,
+            0.0,
+            DraftCorner::default(),
+            true,
+        )
+        .unwrap();
+        let before = b.volume(1e-10).unwrap();
+        assert!(rel(before, 5.0 * area) < 1e-12, "r {r}: plate {before}");
+        let edges: Vec<usize> = (0..4)
+            .map(|i| {
+                let (a, c) = (p[i], p[(i + 1) % 4]);
+                edge_at(&b, [(a[0] + c[0]) / 2.0, (a[1] + c[1]) / 2.0, 5.0])
+            })
+            .collect();
+        blend(&b, Blend::Round, &edges, &[r], &[], Corners::Filled)
+            .unwrap_or_else(|e| panic!("r {r}: {e:?}"));
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
+        assert_eq!(b.counts().unwrap()[0], 10, "r {r}");
+        let want = (1.0 - PI / 4.0) * r * r * perimeter
+            - 2.0 * (5.0 / 6.0 - PI / 4.0) * r.powi(3) * half_turns;
+        let off = before - b.volume(1e-10).unwrap();
+        assert!(rel(off, want) < 1e-9, "r {r}: {off} off, want {want}");
+    }
+}
+
 /// A 40 x 30 x 10 plate with a 10 x 10 x 5 boss on it (x 15..25, y 10..20), the boss's four
 /// base edges rounded r 1: at each upright boss edge two concave rounds turn round the sharp
 /// convex edge. Each base edge gains the spandrel A = (1 - pi/4) r^2 along its 10, and each
@@ -1433,4 +1512,65 @@ fn a_kernel_unsupported_after_a_no_room_note_is_its_own_cause() {
             "corner {corner}"
         );
     }
+}
+
+/// An L of legs 40 and width 20, 10 high: its inner upright edge at (20, 20) is concave between
+/// two flat faces and ends on the flat top and bottom, so a round can be carried on past
+/// either face: each is named by its index, with the slab's frame at the edge's start, the
+/// edge's 10 along it, and `along` × `across` the face's outward normal (+x or +y). A convex
+/// edge has none; an index past the edges and a radius that is not positive are refused before
+/// the kernel.
+#[test]
+fn the_faces_a_round_is_carried_on_past_are_the_kernels() {
+    all_fixes();
+    let l = [
+        (0.0, 0.0),
+        (40.0, 0.0),
+        (40.0, 20.0),
+        (20.0, 20.0),
+        (20.0, 40.0),
+        (0.0, 40.0),
+    ];
+    let profile: Vec<_> = (0..l.len())
+        .map(|i| segment(l[i], l[(i + 1) % l.len()]))
+        .collect();
+    let b = swept(&profile, 10.0);
+    let inner = nearest_edge(&b, [20.0, 20.0, 5.0]);
+    let found = solidcore_ops::carried_faces(&b, inner, 6.0).unwrap();
+    assert_eq!(found.len(), 2);
+    assert_ne!(found[0].face, found[1].face);
+    let mut normals = Vec::new();
+    for c in &found {
+        assert!(c.face < b.to_record().unwrap().0.faces.len());
+        assert!((c.origin[0] - 20.0).abs() < 1e-9 && (c.origin[1] - 20.0).abs() < 1e-9);
+        assert_eq!(
+            c.outline,
+            [
+                [0.0, -c.reach],
+                [10.0, -c.reach],
+                [10.0, c.reach],
+                [0.0, c.reach]
+            ]
+        );
+        assert_eq!(c.depth, [-c.reach, 0.0]);
+        let (a, x) = (
+            Vec3::new(c.along[0], c.along[1], c.along[2]),
+            Vec3::new(c.across[0], c.across[1], c.across[2]),
+        );
+        normals.push(a.cross(x));
+    }
+    let is = |n: Vec3, x: f64, y: f64| (n - Vec3::new(x, y, 0.0)).length() < 1e-9;
+    assert!(normals.iter().any(|&n| is(n, 1.0, 0.0)) && normals.iter().any(|&n| is(n, 0.0, 1.0)));
+    let convex = nearest_edge(&b, [40.0, 0.0, 5.0]);
+    assert!(solidcore_ops::carried_faces(&b, convex, 6.0)
+        .unwrap()
+        .is_empty());
+    assert!(matches!(
+        solidcore_ops::carried_faces(&b, 999, 6.0),
+        Err(Error::Argument)
+    ));
+    assert!(matches!(
+        solidcore_ops::carried_faces(&b, inner, 0.0),
+        Err(Error::Argument)
+    ));
 }

@@ -16,6 +16,7 @@
 //! | [`bands_meet_at`]             | `SmFilletSolver::BandsMeetAt`                    |
 //! | [`polygon_fit`]               | one face of `SmFilletExecutive::NoteFitOfPolygonsTakenWhole` |
 //! | [`circle_top_fit`]            | the circle-top fit after `FacesOutlastTheirBlends` in `CreateFilletBrep` |
+//! | [`knife_chamfer_keeps_nothing`], [`knife_chamfer_distance_through`] | not the fork's: a knife edge's chamfer that keeps nothing |
 //!
 //! Deviations: the fork's out-params are returned (`None` for not found). The executive's
 //! loops over solvers and faces run in the session (`creation_*` in `session.rs`) and hand
@@ -23,7 +24,8 @@
 //! fork's map of faces is keyed by face pointer; the port visits faces in id order (the
 //! least size is noted either way; ties keep the first face's solver). Every loop is bounded by fixed counts (32 steps, 60 bisections,
 //! 60 or 40 golden-section steps, halvings down to a millionth of the radius); there is no
-//! recursion.
+//! recursion. The knife chamfer's limit is a closed form over the body's vertices, line ends
+//! and circle points, one pass over its faces and edges.
 
 // the fork's NaN-safe tests (`!(a > b)`) are kept as written
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
@@ -32,7 +34,7 @@ use crate::blend::fillet_executive::session::ball_regular::{
 };
 use crate::blend::fillet_executive::session::SolverObject;
 use crate::blend::fillet_executive::FitKind;
-use crate::blend::fillet_solver::p1::FilletSolverType;
+use crate::blend::fillet_solver::p1::{test_manifold_tangent_rollover, FilletSolverType};
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
@@ -133,6 +135,20 @@ pub fn ball_through(
     max: f64,
     ratio: Option<[f64; 2]>,
 ) -> Result<Option<(f64, f64)>> {
+    Ok(ball_through_at(k, target, solver, lk, q, max, ratio)?.map(|(rho, chord, _)| (rho, chord)))
+}
+
+/// [`ball_through`], with the filleted edge's parameter where the ball's centre lies square
+/// to it.
+fn ball_through_at(
+    k: &Kernel,
+    target: &Brep,
+    solver: &mut SolverObject,
+    lk: usize,
+    q: Point3,
+    max: f64,
+    ratio: Option<[f64; 2]>,
+) -> Result<Option<(f64, f64, f64)>> {
     let ratio = ratio.unwrap_or([1.0, 1.0]);
     let (bases, radii) = {
         let base = solver.base();
@@ -269,7 +285,7 @@ pub fn ball_through(
         let found = dropped.success
             && (edge::is_closed(target, e)?
                 || (dropped.parameter > ivl.min() + ends && dropped.parameter < ivl.max() - ends));
-        return Ok(found.then_some((rho, chord)));
+        return Ok(found.then_some((rho, chord, dropped.parameter)));
     }
     Ok(None)
 }
@@ -280,12 +296,22 @@ pub fn ball_through(
 /// face's boundary (an edge not the filleted one nor at its ends) and the other face, with
 /// what it sizes. `None` where no boundary point bounds it, or for a radius law.
 ///
+/// Not the fork's (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): a rail rolled
+/// over a smooth far edge of its face, the whole length, rolls on the face beyond, and its
+/// face's boundary is that face's: less the edges it rolled over, and with the edges at their
+/// ends taken as the side edges the rail ends on (as those at the filleted edge's ends). The
+/// face it rolled off lies inside the band and does not bound it. Each boundary point of a
+/// solver with a rolled rail sizes it only where the solver's own ball of that size touches
+/// that point, or where that cannot be told ([`rolls_through`]): the ball through it may lie
+/// on another sheet of the rolled-onto face's surface (beyond a boss, against the extension
+/// of the other face). Such a solver of another kind than a constant ball is not sized.
+///
 /// # Errors
 ///
-/// Those of [`ball_through`] and the topology lookups.
+/// Those of [`ball_through`], [`rolls_through`] and the topology lookups.
 pub fn largest_size_on_its_faces(
     k: &Kernel,
-    target: &Brep,
+    target: &mut Brep,
     solver: &mut SolverObject,
     only: Option<FaceId>,
 ) -> Result<Option<(f64, FitKind)>> {
@@ -325,15 +351,41 @@ pub fn largest_size_on_its_faces(
         .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     let v0 = edge::vertex(target, blended)?;
     let ends = [v0, edge::other_vertex(target, blended, v0)?];
+    let rolled = solver.base().rolled_faces;
+    let tangency = solver.base().tangency_tolerance;
+    let confirm = rolled.iter().any(Option::is_some);
+    if confirm && kind != FitKind::Radius {
+        // the confirmation rolls the solver's ball: a rolled rail of another kind is not
+        // sized (the rollover rolls only constant balls)
+        return Ok(None);
+    }
     for (rail, edgeuse) in [eu0, eu1].into_iter().enumerate() {
-        let Some(face) = eu::face(target, edgeuse)? else {
+        let Some(own) = eu::face(target, edgeuse)? else {
             continue;
         };
+        // the face the rail rolls on: its own, or the face beyond the smooth edge it rolled
+        // over; that edge, and the vertices it ends the rail at
+        let onto = rolled.get(rail).copied().flatten();
+        let face = onto.unwrap_or(own);
         if only.is_some_and(|f| f != face) {
             continue;
         }
+        let mut over: Vec<EdgeId> = Vec::new();
+        let mut rail_ends: Vec<Option<VertexId>> = ends.to_vec();
+        if onto.is_some() {
+            for e in crate::topology::face::p4::edges(target, face, None, false, None)? {
+                if edge::faces(target, e, None)?.contains(&own)
+                    && test_manifold_tangent_rollover(k, target, e, tangency)?.0
+                {
+                    let p0 = edge::vertex(target, e)?;
+                    let p1 = edge::other_vertex(target, e, p0)?;
+                    rail_ends.extend([p0, p1].into_iter().flatten().map(Some));
+                    over.push(e);
+                }
+            }
+        }
         for e in crate::topology::face::p4::edges(target, face, None, false, None)? {
-            if e == blended {
+            if e == blended || over.contains(&e) {
                 continue;
             }
             let Some(curve) = edge::evaluation_curve(target, e)? else {
@@ -341,15 +393,27 @@ pub fn largest_size_on_its_faces(
             };
             let p0 = edge::vertex(target, e)?;
             let p1 = edge::other_vertex(target, e, p0)?;
-            if ends.contains(&p0) || ends.contains(&p1) {
-                continue; // a side edge at an end of the blended edge: the rail ends on it
+            if rail_ends.contains(&p0) || rail_ends.contains(&p1) {
+                continue; // a side edge at an end of the rail: the rail ends on it
             }
             let curve = curve.clone();
             let ivl = edge::interval(target, e)?;
-            let rho_at = |solver: &mut SolverObject, t: f64| -> Result<f64> {
+            let mut rho_at = |solver: &mut SolverObject, t: f64| -> Result<f64> {
                 let q = curve.evaluate_point(k, ivl.evaluate(smos_max(0.0, smos_min(1.0, t))))?;
+                if confirm {
+                    // a ball of a solver with a rolled rail (a constant ball): no bound where
+                    // the solver does not roll it, kept where its section is not found
+                    let through = ball_through_at(k, &*target, solver, rail, q, max, Some(ratio))?;
+                    let Some((rho, _, at)) = through else {
+                        return Ok(BIG_DOUBLE);
+                    };
+                    return Ok(match rolls_through(k, target, solver, rail, q, rho, at)? {
+                        Some(false) => BIG_DOUBLE,
+                        Some(true) | None => rho,
+                    });
+                }
                 Ok(
-                    match ball_through(k, target, solver, rail, q, max, Some(ratio))? {
+                    match ball_through(k, &*target, solver, rail, q, max, Some(ratio))? {
                         Some((rho, chord)) => {
                             if kind == FitKind::Chord {
                                 chord
@@ -402,6 +466,68 @@ pub fn largest_size_on_its_faces(
         }
     }
     Ok(found.map(|r| (r, kind)))
+}
+
+/// Not the fork's (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): whether the
+/// ball of radius `rho` that `solver` rolls, in its section at its filleted edge's `t`,
+/// touches its face `rail` at `q`, within the solver's 3D tolerance; `None` where that cannot
+/// be told (no single ball, or no section found). A ball through a boundary
+/// point that touches the other face's surface ([`ball_through`]) is not always the solver's:
+/// past a boss a rail rolled onto, it may touch that surface on the boss's far side and the
+/// other face's surface extended beyond the face, where the solver's ball never rolls. The
+/// solver's radius is its own again after.
+///
+/// # Errors
+///
+/// Those of the section solve and the evaluations.
+fn rolls_through(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &mut SolverObject,
+    rail: usize,
+    q: Point3,
+    rho: f64,
+    t: f64,
+) -> Result<Option<bool>> {
+    let base = solver.base();
+    let tol = base.approx_tol_3d;
+    // without its offset surface, edge use or edge curve, it cannot be told
+    let Some(own) = base.surface(0)?.map(|s| s.surface.offset_distance().abs()) else {
+        return Ok(None);
+    };
+    let Some(edgeuse) = base.edgeuse(0)? else {
+        return Ok(None);
+    };
+    let Some(e) = eu::edge(target, edgeuse)? else {
+        return Ok(None);
+    };
+    let Some(curve) = edge::evaluation_curve(target, e)? else {
+        return Ok(None);
+    };
+    let side = if rail == 0 {
+        SrfIndex::First
+    } else {
+        SrfIndex::Second
+    };
+    if !set_ball_radius(solver, rho)? {
+        return Ok(None); // no single ball
+    }
+    let contact = (|| -> Result<Option<Point3>> {
+        let Some(pnt) = ball_section_at(k, target, solver, &curve, t, None)? else {
+            return Ok(None);
+        };
+        let Some(slot) = solver.base().surface(rail)? else {
+            return Ok(None);
+        };
+        Ok(Some(
+            slot.surface
+                .base_surface()
+                .evaluate_point(k, pnt.uv_pos(side))?,
+        ))
+    })();
+    set_ball_radius(solver, own)?;
+    let contact = contact?;
+    Ok(contact.map(|on| on.distance(q) <= tol))
 }
 
 /// `SmFilletSolver::BandsMeetAt(rOther, lMine, lTheirs, ...)`: the radius at which this
@@ -902,4 +1028,445 @@ pub fn corner_takes_per_radius(
     }
     let u = (b.cross(c) + c.cross(a) + a.cross(b)) * (-1.0 / det);
     Ok(smos_max(0.0, u.dot(along)))
+}
+
+/// The distance `d` of a knife edge's equal chamfer whose chord passes through the profile
+/// point `(x, y)` (not the fork's, #15250). The profile frame puts the tip at the origin, the
+/// plane along `y = 0` with the body on `x < 0`, and the tangent circle of radius `r` about
+/// `(0, -r)`. The chamfer of distance `d` is the chord between the contacts of the ball of
+/// radius `d` that touches both faces: with `s = sqrt(r d)` they are `(-2s, 0)` on the plane
+/// and `(-2r²s / (r² + s²), -2rs² / (r² + s²))` on the circle. Every such chord passes through
+/// `A = (0, -2r)`, the circle's point opposite the tip, so the chord through `(x, y)` (with
+/// `y > -2r`) has `s = -r x / (2r + y)`, and `d = s² / r = r (x / (2r + y))²`.
+#[must_use]
+pub fn knife_chamfer_distance_through(r: f64, x: f64, y: f64) -> f64 {
+    let s = x / (2.0 * r + y);
+    r * s * s
+}
+
+/// A face's surface, as [`knife_chamfer_keeps_nothing`] needs it: a plane (a point and its
+/// normal) or a circular cylinder (a point of its axis, the axis and the radius).
+#[derive(Clone, Copy)]
+enum Support {
+    Plane(Point3, Vec3),
+    Cylinder(Point3, Vec3, f64),
+}
+
+/// A circle's centre, unit normal and radius when `curve` is one (an `SmCircle`, or an
+/// ellipse whose radii agree); `None` for any other kind.
+fn circle_of(curve: &crate::curve::curve::Curve) -> Option<(Point3, Vec3, f64)> {
+    match curve.kind() {
+        crate::curve::curve::CurveKind::Ellipse(c) if c.is_circle() => {
+            let at = c.position();
+            Some((at.origin(), at.z_axis(), c.x_radius()))
+        }
+        _ => None,
+    }
+}
+
+/// The face's surface when it is a plane or a circular cylinder (a cone that is a cylinder,
+/// or a circle extruded along its normal); `None` for any other kind or no surface.
+fn support_of(target: &Brep, f: FaceId) -> Result<Option<Support>> {
+    let Some(surface) = crate::topology::face::p2::surface(target, f)? else {
+        return Ok(None);
+    };
+    Ok(match surface.kind() {
+        SurfaceKind::Plane(p) => {
+            let (point, normal, _) = p.is_planar();
+            Some(Support::Plane(point, normal))
+        }
+        SurfaceKind::Cone(c) if c.is_cylinder() => {
+            let canonical = c.canonical();
+            Some(Support::Cylinder(
+                canonical.origin.origin(),
+                canonical.origin.z_axis(),
+                canonical.radius,
+            ))
+        }
+        SurfaceKind::SurfOfExtrusion(s) => {
+            s.gen_curve
+                .as_ref()
+                .and_then(circle_of)
+                .and_then(|(centre, normal, radius)| {
+                    let v = s.extrusion_vector();
+                    let n = v.length();
+                    (n > EFF_ZERO && v.cross(normal).length() <= EFF_ZERO * n)
+                        .then_some(Support::Cylinder(centre, normal, radius))
+                })
+        }
+        _ => None,
+    })
+}
+
+/// The profile frame of a knife edge between a plane and a circular cylinder tangent to it
+/// along the edge ([`knife_chamfer_keeps_nothing`]): the tip, the edge's direction and
+/// length, the unit vector from the edge toward the cylinder's axis, the radius and the
+/// edge's tolerance.
+struct KnifeFrame {
+    tip: Point3,
+    along: Vec3,
+    length: f64,
+    toward_axis: Vec3,
+    radius: f64,
+    tol: f64,
+}
+
+impl KnifeFrame {
+    /// A point's height along the edge from the tip and its two profile components: along
+    /// the plane (square to the edge, one way) and up out of the plane, away from the axis.
+    fn profile(&self, p: Point3) -> (f64, f64, f64) {
+        let q = p - self.tip;
+        let up = -self.toward_axis;
+        (q.dot(self.along), q.dot(self.along.cross(up)), q.dot(up))
+    }
+
+    /// Whether a direction is parallel to the edge, to the edge's tolerance over its length.
+    fn parallel(&self, v: Vec3) -> bool {
+        let n = v.length();
+        n > EFF_ZERO && v.cross(self.along).length() <= n * self.tol / self.length
+    }
+
+    /// Whether a direction is square to the edge, to the edge's tolerance over its length.
+    fn square(&self, v: Vec3) -> bool {
+        let n = v.length();
+        n > EFF_ZERO && v.dot(self.along).abs() <= n * self.tol / self.length
+    }
+}
+
+/// The knife edge `e`'s frame when it lies between a plane and a circular cylinder tangent
+/// to the plane along it (the plane parallel to the axis, at the radius from it, the edge on
+/// both); `None` otherwise.
+fn knife_frame(k: &Kernel, target: &Brep, e: EdgeId) -> Result<Option<KnifeFrame>> {
+    let Some(curve) = edge::curve(target, e)? else {
+        return Ok(None);
+    };
+    let ivl = edge::interval(target, e)?;
+    let p0 = curve.evaluate_point(k, ivl.min())?;
+    let p1 = curve.evaluate_point(k, ivl.max())?;
+    let tol = edge::tolerance(target, e)?;
+    let faces = edge::faces(target, e, None)?;
+    let (Some(&f0), Some(&f1), 2) = (faces.first(), faces.get(1), faces.len()) else {
+        return Ok(None);
+    };
+    let ((plane_point, normal), (axis_point, axis, radius)) =
+        match (support_of(target, f0)?, support_of(target, f1)?) {
+            (Some(Support::Plane(p, n)), Some(Support::Cylinder(a, t, r)))
+            | (Some(Support::Cylinder(a, t, r)), Some(Support::Plane(p, n))) => ((p, n), (a, t, r)),
+            _ => return Ok(None),
+        };
+    let (n, t) = (normal.length(), axis.length());
+    if !(n > EFF_ZERO && t > EFF_ZERO && radius > tol) {
+        return Ok(None);
+    }
+    let (normal, mut along) = (normal / n, axis / t);
+    let length = (p1 - p0).dot(along);
+    if length < 0.0 {
+        along = -along;
+    }
+    let length = length.abs();
+    if !(length > tol) {
+        return Ok(None);
+    }
+    // the plane's side the axis lies on, at the radius
+    let height = (axis_point - plane_point).dot(normal);
+    if (height.abs() - radius).abs() > tol {
+        return Ok(None);
+    }
+    let frame = KnifeFrame {
+        tip: p0,
+        along,
+        length,
+        toward_axis: if height > 0.0 { normal } else { -normal },
+        radius,
+        tol,
+    };
+    // the plane parallel to the axis; the edge's ends on the plane and on the cylinder
+    let off_axis = |p: Point3| {
+        let w = p - axis_point;
+        (w - along * w.dot(along)).length()
+    };
+    if !frame.square(normal)
+        || [p0, p1].iter().any(|&p| {
+            (p - plane_point).dot(normal).abs() > tol || (off_axis(p) - radius).abs() > tol
+        })
+    {
+        return Ok(None);
+    }
+    Ok(Some(frame))
+}
+
+/// The points of an arc of the circle about `(ox, oy)` of radius `radius` in the knife's
+/// profile, from `ends[0]` through `ends[1]` to `ends[2]` (profile points), whose
+/// components are extreme for the conditions of [`knife_chamfer_keeps_nothing`]: the tangent
+/// points from `A` (where the chord's distance is extreme on the circle), the points
+/// farthest each way along and out of the plane, and the point nearest the knife's axis;
+/// those on the arc.
+fn arc_candidates(
+    frame: &KnifeFrame,
+    (ox, oy): (f64, f64),
+    radius: f64,
+    ends: [(f64, f64); 3],
+) -> Vec<(f64, f64)> {
+    let angle = |(x, y): (f64, f64)| (y - oy).atan2(x - ox);
+    let turn = |a: f64, from: f64| (a - from).rem_euclid(crate::math::TWO_PI);
+    let [s, m, f] = ends.map(angle);
+    let [(sx, sy), _, (fx, fy)] = ends;
+    let closed = ((sx - fx) * (sx - fx) + (sy - fy) * (sy - fy)).sqrt() <= frame.tol;
+    let (to_mid, to_end) = (turn(m, s), turn(f, s));
+    let on_arc = |a: f64| {
+        closed || {
+            let t = turn(a, s);
+            if to_mid <= to_end {
+                t <= to_end
+            } else {
+                t >= to_end || t == 0.0
+            }
+        }
+    };
+    let r = frame.radius;
+    let mut points = vec![
+        (ox + radius, oy),
+        (ox - radius, oy),
+        (ox, oy + radius),
+        (ox, oy - radius),
+    ];
+    // the point nearest the axis, at (0, -r)
+    let (cx, cy) = (-ox, -r - oy);
+    let to_axis = (cx * cx + cy * cy).sqrt();
+    if to_axis > EFF_ZERO {
+        points.push((ox + radius * cx / to_axis, oy + radius * cy / to_axis));
+    }
+    // the tangent points from A = (0, -2r)
+    let (vx, vy) = (-ox, -2.0 * r - oy);
+    let l = (vx * vx + vy * vy).sqrt();
+    if l > radius {
+        let phi = (radius / l).acos();
+        let (ux, uy) = (vx / l, vy / l);
+        for sign in [1.0, -1.0] {
+            let (sn, cs) = (sign * phi).sin_cos();
+            points.push((
+                ox + radius * (ux * cs - uy * sn),
+                oy + radius * (ux * sn + uy * cs),
+            ));
+        }
+    }
+    points.retain(|&p| on_arc(angle(p)));
+    points
+}
+
+/// The distance beyond which a knife edge's equal chamfer keeps nothing of the body (not
+/// the fork's, #15250), computed from the geometry: `None` unless `e` lies between a plane
+/// and a circular cylinder tangent to it along `e` ([`knife_chamfer_distance_through`]'s
+/// profile), and the body is one the chord's sweep covers whole. The chord pivots about the
+/// cylinder's line opposite the edge, so the largest distance is the largest
+/// [`knife_chamfer_distance_through`] over the body, a quotient of linear functions of the
+/// profile point: reached on the body's boundary, and on a planar face on its edges.
+///
+/// Every face must be a plane or a cylinder along the edge. Each edge then lies where its
+/// faces' surfaces meet, whatever its curve's representation: between two planes, or a
+/// plane along the axis and a cylinder, or two cylinders (or two faces of one cylinder at a
+/// seam along its axis), a line, whose extremes are its ends; between a plane square to the
+/// axis and a cylinder, or two faces of one cylinder split across its axis, an arc of the
+/// cylinder's circle, whose extremes are its ends and its points where the chord through `A` is
+/// tangent to it. Any other plane, face or edge gives `None`, never a guess.
+///
+/// The body must lie within the edge's length along it, on the material side of the plane,
+/// outside the cylinder, above `A` and on one side of the edge: then the chord of the
+/// largest distance takes all of it. Open: the distance itself keeps a point. The caller
+/// notes it less the fit margin.
+///
+/// # Errors
+///
+/// Those of the evaluations and topology lookups.
+pub fn knife_chamfer_keeps_nothing(k: &Kernel, target: &Brep, e: EdgeId) -> Result<Option<f64>> {
+    let Some(frame) = knife_frame(k, target, e)? else {
+        return Ok(None);
+    };
+    let mut supports = std::collections::BTreeMap::new();
+    for &f in target.face_list() {
+        let fits = match support_of(target, f)? {
+            Some(p @ Support::Plane(..)) => Some(p),
+            Some(c @ Support::Cylinder(_, axis, _)) => frame.parallel(axis).then_some(c),
+            None => None,
+        };
+        let Some(support) = fits else {
+            return Ok(None);
+        };
+        supports.insert(f, support);
+    }
+    let (r, tol) = (frame.radius, frame.tol);
+    // profile points (height, x, y) and the profile segments of the line edges
+    let mut points: Vec<(f64, f64, f64)> = Vec::new();
+    let mut segments: Vec<[(f64, f64); 2]> = Vec::new();
+    for &v in target.vertex_list() {
+        points.push(frame.profile(crate::topology::vertex::point(target, v)?));
+    }
+    for &ei in target.edge_list() {
+        let Some(curve) = edge::curve(target, ei)? else {
+            return Ok(None);
+        };
+        let ivl = edge::interval(target, ei)?;
+        let ends = [
+            frame.profile(curve.evaluate_point(k, ivl.min())?),
+            frame.profile(curve.evaluate_point(k, ivl.evaluate(0.5))?),
+            frame.profile(curve.evaluate_point(k, ivl.max())?),
+        ];
+        points.extend([ends[0], ends[2]]);
+        let mut planes = Vec::new();
+        let mut cylinders = Vec::new();
+        for f in edge::faces(target, ei, None)? {
+            match supports.get(&f) {
+                Some(Support::Plane(_, n)) => planes.push(*n),
+                Some(&Support::Cylinder(a, _, rho)) => cylinders.push((a, rho)),
+                None => return Ok(None),
+            }
+        }
+        // a plane across the axis (its normal along it), or neither along nor across it
+        let plane_across = planes.iter().any(|&n| frame.parallel(n));
+        let plane_oblique = planes
+            .iter()
+            .any(|&n| !frame.parallel(n) && !frame.square(n));
+        let line = || [(ends[0].1, ends[0].2), (ends[2].1, ends[2].2)];
+        match (planes.len(), cylinders.as_slice()) {
+            (2, []) => segments.push(line()),
+            (1, [_]) if !plane_across && !plane_oblique => segments.push(line()),
+            (0, [_, _] | [_]) => {
+                let (a, rho) = cylinders.first().copied().unwrap_or((Point3::UNDEF, 0.0));
+                let same = cylinders.iter().all(|&(b, s)| {
+                    (s - rho).abs() <= tol && {
+                        let w = b - a;
+                        (w - frame.along * w.dot(frame.along)).length() <= tol
+                    }
+                });
+                // an edge whose three points share one profile point runs along the axis:
+                // a seam between two faces of one cylinder split along its length, a line
+                let along_axis = ends.iter().all(|&(_, x, y)| {
+                    let (dx, dy) = (x - ends[0].1, y - ends[0].2);
+                    (dx * dx + dy * dy).sqrt() <= tol
+                });
+                if same && !along_axis {
+                    // on one cylinder, across its axis: an arc of its circle
+                    let (_, ox, oy) = frame.profile(a);
+                    let arc = ends.map(|(_, x, y)| (x, y));
+                    points.extend(
+                        arc_candidates(&frame, (ox, oy), rho, arc)
+                            .into_iter()
+                            .map(|(x, y)| (ends[0].0, x, y)),
+                    );
+                } else {
+                    // two cylinders along the axis meet in lines along it, and so do two
+                    // faces of one cylinder at a seam along it
+                    segments.push(line());
+                }
+            }
+            (1, [(a, rho)]) if plane_across => {
+                let (_, ox, oy) = frame.profile(*a);
+                let arc = ends.map(|(_, x, y)| (x, y));
+                points.extend(
+                    arc_candidates(&frame, (ox, oy), *rho, arc)
+                        .into_iter()
+                        .map(|(x, y)| (ends[0].0, x, y)),
+                );
+            }
+            _ => return Ok(None),
+        }
+    }
+    // the side of the edge the body lies on
+    let sign = if points.iter().all(|&(_, x, _)| x <= tol) {
+        1.0
+    } else if points.iter().all(|&(_, x, _)| x >= -tol) {
+        -1.0
+    } else {
+        return Ok(None);
+    };
+    // no line edge runs into the cylinder (an arc's nearest point is among its points)
+    for [(x0, y0), (x1, y1)] in segments {
+        let (dx, dy) = (x1 - x0, y1 - y0);
+        let len2 = dx * dx + dy * dy;
+        let t = if len2 > 0.0 {
+            smos_max(0.0, smos_min(1.0, (-x0 * dx + (-r - y0) * dy) / len2))
+        } else {
+            0.0
+        };
+        let (px, py) = (x0 + t * dx, y0 + t * dy);
+        if (px * px + (py + r) * (py + r)).sqrt() < r - tol {
+            return Ok(None);
+        }
+    }
+    let mut most = 0.0_f64;
+    for &(z, x, y) in &points {
+        let off_axis = (x * x + (y + r) * (y + r)).sqrt();
+        if z < -tol
+            || z > frame.length + tol
+            || y > tol
+            || !(y + 2.0 * r > tol)
+            || off_axis < r - tol
+        {
+            return Ok(None);
+        }
+        most = smos_max(most, knife_chamfer_distance_through(r, sign * x, y));
+    }
+    Ok((most > 0.0).then_some(most))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing)]
+    use super::knife_chamfer_distance_through;
+
+    /// The contacts of the ball of radius `d` touching the plane `y = 0` from below and the
+    /// circle of radius `r` about `(0, -r)` from outside: its centre `(-b, -d)` with
+    /// `b² + (r - d)² = (r + d)²`, the plane contact above it, the circle contact on the
+    /// line between the two centres. Built from the ball, not from the chord's closed form.
+    fn contacts(r: f64, d: f64) -> ([f64; 2], [f64; 2]) {
+        let b = ((r + d) * (r + d) - (r - d) * (r - d)).sqrt();
+        let centre = [-b, -d];
+        let to = [centre[0], centre[1] + r];
+        let n = (to[0] * to[0] + to[1] * to[1]).sqrt();
+        ([-b, 0.0], [r * to[0] / n, -r + r * to[1] / n])
+    }
+
+    /// Every chord passes through `A = (0, -2r)`, the circle's point opposite the tip, and
+    /// the distance through any point of it, `r (x / (2r + y))²`, is the chord's own.
+    #[test]
+    fn the_chord_pivots_about_the_point_opposite_the_tip() {
+        for r in [0.5, 21.0, 1000.0] {
+            for d in [1e-3 * r, 0.3 * r, r, 4.0 * r, 9.0 * r] {
+                let (flat, wall) = contacts(r, d);
+                let a = [0.0, -2.0 * r];
+                let u = [flat[0] - a[0], flat[1] - a[1]];
+                let v = [wall[0] - a[0], wall[1] - a[1]];
+                let cross = u[0] * v[1] - u[1] * v[0];
+                let scale = (u[0] * u[0] + u[1] * u[1]).sqrt() * (v[0] * v[0] + v[1] * v[1]).sqrt();
+                assert!(cross.abs() <= 1e-12 * scale, "r {r} d {d}: {cross}");
+                // the closed form of the contacts, s = sqrt(r d)
+                let s = (r * d).sqrt();
+                assert!((flat[0] + 2.0 * s).abs() <= 1e-12 * s);
+                let q = r * r + s * s;
+                assert!((wall[0] + 2.0 * r * r * s / q).abs() <= 1e-12 * r);
+                assert!((wall[1] + 2.0 * r * s * s / q).abs() <= 1e-12 * r);
+                for t in [0.0, 0.25, 0.5, 1.0] {
+                    let p = [
+                        flat[0] + t * (wall[0] - flat[0]),
+                        flat[1] + t * (wall[1] - flat[1]),
+                    ];
+                    let got = knife_chamfer_distance_through(r, p[0], p[1]);
+                    assert!((got - d).abs() <= 1e-12 * d, "r {r} d {d} t {t}: {got}");
+                }
+            }
+        }
+    }
+
+    /// The issue's part (#15250): R 21, tip 62 1/6 from the far side. Its far bottom corner
+    /// is reached at TIP² / R, its far top corner at TIP² / 4R, the arc's foot at R.
+    #[test]
+    fn the_issue_parts_corners_are_reached_in_closed_form() {
+        const R: f64 = 21.0;
+        const TIP: f64 = 62.0 + 1.0 / 6.0;
+        let at = |x: f64, y: f64| knife_chamfer_distance_through(R, x, y);
+        assert!((at(-TIP, -R) - TIP * TIP / R).abs() <= 1e-12 * TIP * TIP / R);
+        assert!((at(-TIP, 0.0) - TIP * TIP / (4.0 * R)).abs() <= 1e-12 * TIP * TIP);
+        assert!((at(-R, -R) - R).abs() <= 1e-12 * R);
+        assert!((at(-TIP, -R) - 184.033_068_783_068_8).abs() < 1e-9);
+    }
 }

@@ -4,11 +4,21 @@ mod raster;
 
 use egui::{ColorImage, Rect, TextureId};
 use serde_json::json;
+use solidcraft_engine::panels::LogicalRect;
 use solidcraft_ui_egui::{
+    panel_runtime::HostSection,
     scenario::{self, Harness},
     ui_kit::LayoutMode,
 };
 use std::collections::HashMap;
+
+fn panel<'a>(h: &'a Harness, id: &str) -> &'a HostSection {
+    h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|section| section.instance.0 == id).unwrap()
+}
+
+fn rect(value: LogicalRect) -> Rect {
+    Rect::from_min_size(egui::pos2(value.origin.x, value.origin.y), egui::vec2(value.size.width, value.size.height))
+}
 
 #[test]
 fn appearance_and_browser_folds_keep_handles_and_render_both_states() {
@@ -28,10 +38,11 @@ fn appearance_and_browser_folds_keep_handles_and_render_both_states() {
         for open in [true, false] {
             if !open {
                 h.step(&json!({"click":{"handle":"dialog:collapse"}})).unwrap();
-                h.step(&json!({"click":{"handle":"browser:header"}})).unwrap();
+                let at = rect(panel(&h, "browser").collapse.unwrap()).center();
+                h.step(&json!({"click":[at.x,at.y]})).unwrap();
             }
             assert_eq!(h.app.dialog.as_ref().unwrap().collapsed, !open);
-            assert_eq!(h.app.preferences.browser_collapsed, !open);
+            assert_eq!(panel(&h, "browser").collapsed, !open);
             assert_eq!(scenario::handle_at("fold:Bodies").is_some(), open);
             assert_eq!(scenario::handle_at("appearance:search").is_some(), open);
             // Fresh context transfers all textures to the software renderer, including fonts.
@@ -47,9 +58,7 @@ fn appearance_and_browser_folds_keep_handles_and_render_both_states() {
             let mode = if dark { "dark" } else { "light" };
             let state = if open { "open" } else { "closed" };
             screenshot.save(dir.join(format!("{mode}-{state}.png"))).unwrap();
-            for (name, rect) in
-                [("appearance", scenario::rect_of("dialog:header").unwrap()), ("browser", scenario::rect_of("browser:header").unwrap())]
-            {
+            for (name, rect) in [("appearance", scenario::rect_of("dialog:header").unwrap()), ("browser", rect(panel(&h, "browser").header))] {
                 let bounds = rect.intersect(Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(screenshot.width() as f32, screenshot.height() as f32)));
                 image::imageops::crop_imm(&screenshot, bounds.left() as u32, bounds.top() as u32, bounds.width() as u32, bounds.height() as u32)
                     .to_image()
@@ -94,7 +103,7 @@ fn render_browser_uses_shared_rows_in_both_lenses_and_themes() {
         }
         for lens in ["object", "look"] {
             if lens == "look" {
-                let at = scenario::rect_of("render:tree:by-look").unwrap().center();
+                let at = rect(panel(&h, "render-browser").actions.iter().find(|(id, _)| id.0 == "by-look").unwrap().1).center();
                 // Capture texture uploads from the input frames too: the look rows may
                 // introduce glyphs that were absent from the object lens.
                 for pressed in [true, false] {
@@ -120,7 +129,7 @@ fn render_browser_uses_shared_rows_in_both_lenses_and_themes() {
             }
             assert_eq!(solidcraft_theme::is_dark(), dark);
             assert_eq!(scenario::rect_of("render:tree:look:0").is_some(), lens == "look");
-            let browser = scenario::rect_of("browser:card").unwrap();
+            let browser = rect(panel(&h, "render-browser").outer);
             let screenshot = raster::raster(&mut h, &textures, output);
             let ppp = h.ctx.pixels_per_point();
             image::imageops::crop_imm(

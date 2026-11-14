@@ -120,6 +120,7 @@ foreach ($exe in 'solidcraft-cli.exe', 'solvecraft-cli.exe') {
   }
   Write-Output "ok ${exe}: no opengl32.dll import ($($imports.Count) DLLs)"
 }
+& (Join-Path $PSScriptRoot 'check-shortcuts.ps1') -Path (Join-Path $Root 'assets/platforms/windows/solidcraft.wxs')
 if ($Phase -ne 'package') {
   Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force -Path $Stage | Out-Null
