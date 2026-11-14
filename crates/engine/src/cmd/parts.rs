@@ -1130,7 +1130,8 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
         let found = hole_wall(s, a);
         // From the other side: the same hole, seated at its far end, which must come out of the part.
         let found = if other_side {
-            let far = found.as_ref().and_then(|near| far_end(s, near)).filter(|far| far.open);
+            // Both ends must open onto air: a blind hole picked at its floor has no other side either.
+            let far = found.as_ref().filter(|near| near.open).and_then(|near| far_end(s, near)).filter(|far| far.open);
             Some(far.ok_or_else(|| bad(cmd, "`other_side` needs a hole that goes through the part: this pick is on a blind hole or not on a hole"))?)
         } else {
             found
@@ -2236,10 +2237,13 @@ mod tests {
         assert_eq!(far["directions"], json!([[0.0, 0.0, -1.0]]));
         let at = origin(&s, &far);
         assert!((at[0] - 15.0).abs() < 1e-6 && (at[1] - 15.0).abs() < 1e-6 && at[2].abs() < 1e-6, "{at:?}");
-        // A blind hole, a flat face and no pick at all have no other side.
+        // A blind hole, picked at its mouth or its floor, a flat face and no pick at all have no
+        // other side.
         let made = s.doc.components.len();
         for p in [
             screw(45.0, true),
+            // The same blind hole picked at the rim of its floor, 6 mm down.
+            json!({"family": "socket_head_cap_screw", "size": "M6", "at": [48.2, 15, 4], "other_side": true}),
             json!({"family": "socket_head_cap_screw", "size": "M6", "at": [30, 5, 10], "other_side": true}),
             json!({"family": "socket_head_cap_screw", "size": "M6", "point": [0, 0, 0], "other_side": true}),
             json!({"family": "socket_head_cap_screw", "size": "M6", "at": [18.2, 15, 10], "other_side": "yes"}),
