@@ -7013,7 +7013,7 @@ fn feature_tools_with_constructor(
             // The face names follow `face_points`: To, then From.
             let name = |k: usize| f.face_names.get(k).map(String::as_str);
             let (to_name, from_name) = if extent.to.is_some() { (name(0), name(1)) } else { (None, name(0)) };
-            let to_face = extent.to.and_then(|p| object_face(&tst, to_name, p.0, Some(n)));
+            let to_face = extent.to.and_then(|p| object_face_at_level(&tst, to_name, p.0, &ss.plane));
             // The body the extent runs to: a Join to it joins that body too (#6424), unless the
             // design was built before it did (#8151).
             *to_body = to_face.filter(|_| !extent.to_body_apart).and_then(|(bi, _)| tst.bodies.get(bi)).map(|b| b.name.clone());
@@ -7023,7 +7023,7 @@ fn feature_tools_with_constructor(
                 ss.plane.to_world(c)
             };
             let from = match extent.from {
-                Some(p) => height_at(&tst, object_face(&tst, from_name, p.0, Some(n)), &ss.plane, centre, p.0),
+                Some(p) => height_at(&tst, object_face_at_level(&tst, from_name, p.0, &ss.plane), &ss.plane, centre, p.0),
                 None => 0.0,
             };
             // Whether the extrusion runs toward the To object: false when a To offset carries the
@@ -9098,18 +9098,25 @@ pub fn object_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3) -> f
     height_at(st, face_at(st, p, Some(plane.normal())), plane, centre, p)
 }
 
+/// How far `q` lies along `plane`'s normal from its origin.
+fn level_along(plane: &Plane, q: Vec3) -> f64 {
+    (q - plane.origin).dot(plane.normal())
+}
+
+/// The level along `plane`'s normal of face `(body, face)` when it is a plane square to the
+/// normal, and the face's own tolerance, from solidcore ([`Body::face_square_level`]).
+fn square_face_level(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane) -> Option<solidcore_ops::SquareFaceLevel> {
+    st.bodies.get(bi)?.body.face_square_level(fi, plane.normal(), plane.origin).ok()?
+}
+
 /// [`object_height`] of the point `p` on `face` (`(body index, face index)`, see [`object_face`]).
 fn height_at(st: &ModelState, face: Option<(usize, usize)>, plane: &Plane, centre: Vec3, p: Vec3) -> f64 {
     let n = plane.normal();
-    let h = |q: Vec3| (q - plane.origin).dot(n);
+    let h = |q: Vec3| level_along(plane, q);
     let Some((bi, fi)) = face else { return h(p) };
     let Some(b) = st.bodies.get(bi) else { return h(p) };
-    let tol = (b.body.size() * 1e-3).max(1e-3);
-    let Ok(faces) = b.body.faces(tol) else { return h(p) };
-    if let Some(f) = faces.iter().find(|f| f.index == fi)
-        && f.plane_normal.is_some_and(|fnrm| fnrm.cross(n).len() < 1e-6)
-    {
-        return h(f.centroid);
+    if let Some(square) = square_face_level(st, (bi, fi), plane) {
+        return square.level;
     }
     // A curved or slanted face: where the profile's middle meets it.
     let m = b.mesh();
@@ -9184,6 +9191,19 @@ fn object_face(st: &ModelState, name: Option<&str>, p: Vec3, normal: Option<Vec3
         return Some((hit.body, hit.face));
     }
     face_at(st, p, normal)
+}
+
+/// The face a From / To Object point stands for ([`object_face`]), unless that face is a plane
+/// square to the extrude direction that lies at another level than the point: then the point is
+/// on a plane of its own (a construction plane near a face, within the pick tolerance of it), and
+/// its level, not the face's, is where the extent starts or ends.
+fn object_face_at_level(st: &ModelState, name: Option<&str>, p: Vec3, plane: &Plane) -> Option<(usize, usize)> {
+    let face = object_face(st, name, p, Some(plane.normal()))?;
+    match square_face_level(st, face, plane) {
+        // At the face's own tolerance: the one the kernel takes a point for on that face.
+        Some(square) if (square.level - level_along(plane, p)).abs() > square.tolerance => None,
+        _ => Some(face),
+    }
 }
 
 /// The body of `face` when that face is not a plane (with `n`: not a plane square to `n`), so To
@@ -10427,6 +10447,21 @@ fn eval_feature(
                 let Some(name) = name else { continue };
                 let carried = f.link_faces.get(k).map_or(&[][..], Vec::as_slice);
                 let b = crate::lineage::linked_tool(b.body.clone().with_import_certificate(&digest, f.id)?, f.id, carried);
+                for record in f.link_threads.get(k).into_iter().flatten() {
+                    if !record.axis_point.is_finite()
+                        || !record.start.is_finite()
+                        || !record.end.is_finite()
+                        || record.end <= record.start
+                        || !(1..=8).contains(&record.starts)
+                        || [record.major_diameter, record.radius, record.pitch].iter().any(|v| !v.is_finite() || *v <= 0.0)
+                    {
+                        return Err(DocError::Invalid("invalid cosmetic thread record in linked body".into()));
+                    }
+                    let mut thread = record.clone();
+                    thread.feature = f.id;
+                    thread.body.clone_from(&name);
+                    st.threads.push(thread);
+                }
                 st.bodies.push(ModelBody::traced_new(name, b, f.id));
             }
             if !imp.warnings.is_empty() {

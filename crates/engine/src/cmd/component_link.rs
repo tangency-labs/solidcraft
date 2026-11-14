@@ -152,6 +152,7 @@ struct SourceProperties {
     appearance: Option<solidcraft_doc::appearance::Look>,
     /// Resolved authored overrides, by the face index in this imported body.
     faces: Vec<(usize, solidcraft_doc::appearance::Look)>,
+    threads: Vec<solidcraft_doc::ThreadInfo>,
 }
 
 /// What a linked file last gave, by the file: digests of its bytes, of the STEP text it gave and
@@ -295,7 +296,8 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
     // The STEP text keeps no face names: carry the design's own, so references into the linked
     // bodies follow them as they do inside the design (#3330).
     let faces = solidcraft_doc::naming::carried_face_names(&world, &feature.import.bodies);
-    let properties = feature
+    let mut sources = Vec::new();
+    let mut properties = feature
         .import
         .bodies
         .iter()
@@ -321,6 +323,7 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
                         .map(|(_, b)| b)
                 })
                 .ok_or_else(|| EngineError::Other(format!("{shown}: cannot match linked body {} to its source properties", read.name)))?;
+            sources.push(source);
             let key = source.definition_name();
             let material = part.doc.body_material(key);
             let definition = if solidcraft_doc::material_density(&material).is_none() { part.doc.user_material(&material).cloned() } else { None };
@@ -339,9 +342,29 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
                 .filter_map(|(index, look)| names.get(index).map(|name| (name.clone(), look)))
                 .collect();
             let faces = carried.iter().enumerate().filter_map(|(index, name)| authored.get(name).map(|look| (index, look.clone()))).collect();
-            Ok(SourceProperties { material, definition, appearance, faces })
+            Ok(SourceProperties { material, definition, appearance, faces, threads: Vec::new() })
         })
         .collect::<Result<Vec<_>>>()?;
+    let mut counts = std::collections::HashMap::new();
+    for source in &sources {
+        counts.entry(source.name.as_str()).and_modify(|n: &mut usize| *n = n.saturating_add(1)).or_insert(1);
+    }
+    let mut threads: std::collections::HashMap<&str, Vec<solidcraft_doc::ThreadInfo>> = std::collections::HashMap::new();
+    for thread in &world.threads {
+        threads.entry(&thread.body).or_default().push(thread.clone());
+    }
+    for (source, properties) in sources.iter().zip(&mut properties) {
+        let Some(records) = threads.remove(source.name.as_str()) else { continue };
+        if counts.get(source.name.as_str()) == Some(&1) {
+            properties.threads = records;
+        } else {
+            // A record names its source body, not a face. Assigning it to every imported
+            // lump would invent threads on unrelated bodies. Keep the solids and report it.
+            feature
+                .warnings
+                .push(format!("cosmetic threads on {} are not linked because the source body was split into several bodies", source.name));
+        }
+    }
     Ok((name, feature, faces, part.doc.metadata.clone(), properties))
 }
 
@@ -489,6 +512,17 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
     let mut inherited = link.inherited.clone();
     inherited.resize(sources.len(), LinkedBodyProperties::default());
     let mut changed = false;
+    let threads = if sources.iter().any(|source| !source.threads.is_empty()) {
+        sources.iter().map(|source| source.threads.clone()).collect()
+    } else {
+        Vec::new()
+    };
+    if let Some(feature) = s.doc_mut().feature_mut(link.feature)
+        && feature.link_threads != threads
+    {
+        feature.link_threads = threads;
+        changed = true;
+    }
     for (name, slot) in names.iter().zip(slots) {
         let Some(source) = sources.get(slot) else { continue };
         let old = link.inherited.get(slot);

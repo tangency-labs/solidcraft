@@ -88,7 +88,7 @@ pub use error::{
 };
 pub use measure::{
     point_distance, Distance, EdgePoint, EdgeRayPoint, FaceCentroid, GapSample,
-    MassPropertiesEstimate, Normal, PointClass,
+    MassPropertiesEstimate, Normal, PointClass, SquareFaceLevel,
 };
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;

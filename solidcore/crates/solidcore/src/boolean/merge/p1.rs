@@ -49,6 +49,12 @@
 //! all the same, and the kept-faces test needs two faces. Not the fork's (#15768): a face a
 //! merge makes of a kept face is kept, whichever of the two ids it keeps, and the fillet
 //! passes as kept edges only the input edges it left whole (`kept_edges`).
+//! Not upstream (#15418): `boolean_post_process` merges two faces on different surfaces only
+//! where no tolerance has to grow (`edge::is_topological_without_growth`: a plane covers
+//! within upstream's plane tolerance, anything else within a tenth of the smaller face
+//! tolerance, upstream's threshold for raising none), so no tolerance is raised; upstream
+//! lets a curved face cover within five times it and raises only the kept face's, leaving
+//! the other face's vertices off the merged face.
 //! Opt-in `Kernel::fixes.cover_wraps_across_closed_seam` (WR-599, the fork's
 //! tangency-labs/smlib@16bf1cb): after each face merge `boolean_post_process` runs
 //! `HasSeamProblem` on the merged face and `SplitAtSeam` when a seam is crossed or missing.
@@ -553,12 +559,6 @@ fn brep_shells(k: &mut Kernel, brep: &Brep) -> Result<Vec<ShellId>> {
     crate::topology::brep::p1::shells(k, brep, None)
 }
 
-/// `pFace->SetTolerance(tol)` with the upstream defaults (update only if larger, cascade
-/// to the boundaries).
-fn set_face_tolerance(brep: &mut Brep, face: FaceId, tolerance: f64) -> Result<()> {
-    crate::topology::face::p3::set_tolerance(brep, face, tolerance, true, true)
-}
-
 /// WR-599 (`Kernel::fixes.cover_wraps_across_closed_seam`): `pMerged->HasSeamProblem(..)`
 /// (its classification status propagated, as the fork's `SER`), then, when a seam is
 /// crossed or missing (the fork's static `SmFace::HasSeamProblem(eCrossed, eMissing)`),
@@ -669,7 +669,15 @@ pub(crate) fn boolean_post_process_with_notifications(
                 continue;
             }
         }
-        let topological = edge::is_topological(k, brep, e, 10.0)?;
+        // Not upstream (#15418): faces on different surfaces merge only where neither face's
+        // tolerance has to grow (`is_topological_without_growth`: a plane covers within
+        // upstream's plane tolerance, anything else within a tenth of the smaller face
+        // tolerance). Upstream lets a curved surface cover within five times that tolerance
+        // and raises only the kept face's: the vertices and edges brought over from the other
+        // face keep theirs and lie that far off the merged face (a vertex-face gap the check
+        // refuses), and the shape moves by as much (two rounds a ten-thousandth of a degree
+        // apart became one cylinder, its far end 50 times the angle off).
+        let topological = edge::is_topological_without_growth(k, brep, e)?;
         if !topological.is_topological {
             continue;
         }
@@ -691,6 +699,8 @@ pub(crate) fn boolean_post_process_with_notifications(
             .ok_or_else(|| SolidError::entity_missing(OP, "the edge use has no face"))?;
         // Surface identity is represented by its owning face in this arena model.
         if f0 != f1 {
+            // (upstream raises the kept face's tolerance by the distance past a tenth of it:
+            // the cover's gain keeps the distance within that, so nothing is raised)
             let domain = brep
                 .face(keep)?
                 .surface
@@ -698,10 +708,6 @@ pub(crate) fn boolean_post_process_with_notifications(
                 .ok_or_else(|| SolidError::entity_missing(OP, "the face to keep has no surface"))?
                 .natural_uv_domain_with_nurb(k)?;
             crate::topology::face::p2::set_uv_domain(brep, keep, &domain)?;
-            let tolerance = crate::topology::face::p2::tolerance(brep, keep)?;
-            if topological.dist_between > tolerance / 10.0 {
-                set_face_tolerance(brep, keep, tolerance + topological.dist_between)?;
-            }
         }
         let a = edge::vertex(brep, e)?;
         let b = edge::other_vertex(brep, e, a)?;
@@ -876,23 +882,24 @@ pub(crate) fn boolean_post_process_with_notifications(
     Ok(())
 }
 
-/// Not upstream (#3090): where `v` should stand when it lies more than the B-rep's
-/// intersection tolerance (`xsect_tol`) off one of its faces: the corner its faces define
+/// Not upstream (#3090, #16532): where `v` should stand when it lies more than the B-rep's
+/// intersection tolerance (`xsect_tol`) off one of its faces: the point that minimises the
+/// largest gap to its faces ([`min_max_gap_point`]; the corner its faces define
 /// ([`calc_corner_from_faces`](crate::topology::vertex::corner::calc_corner_from_faces): the
-/// midpoint of two parallel faces that part, else the faces' surface intersection), or `None`
-/// to leave the vertex where it is. Left alone: a vertex whose tolerance is not past
-/// `xsect_tol` (it cannot hold such a gap), one already within `xsect_tol` of its faces,
-/// one whose faces define no corner (not found: unchanged), and one whose corner
+/// midpoint of two parallel faces that part, else the faces' surface intersection) when every
+/// face holds it), or `None` to leave the vertex where it is. Left alone: a vertex whose
+/// tolerance is not past `xsect_tol` (it cannot hold such a gap), one already within `xsect_tol`
+/// of its faces, and one whose point
 ///
 /// - lies more than half the vertex's tolerance from it. The vertex's edge curves keep ending
 ///   at its old point (`vertex::set_point` moves the point only), so the move is their new
 ///   vertex/edge gap, and `docs/validity-and-tolerances.md` (the `SmBrep` list 2 invariants)
-///   asks vertex/edge and vertex/face gaps of at most half the vertex's tolerance. The move
-///   is measured here, `best_point.distance(old)`: `calc_corner_from_faces`'s `max_gap_3d` is
-///   that distance in all its branches but the parallel faces', where it is the residual.
+///   asks vertex/edge and vertex/face gaps of at most half the vertex's tolerance. Only the
+///   point's own displacement is limited, not the corner's: the corner may lie farther than
+///   the point.
 /// - leaves a gap of `xsect_tol` or more to any of its faces, or of more than half the vertex's
 ///   tolerance to the end of any incident edge curve (both measured with the vertex put
-///   at the corner for the measurement only): a partial move would stay invalid.
+///   at the point for the measurement only): a partial move would stay invalid.
 ///
 /// # Errors
 /// Those of the vertex/face gap and corner calculations.
@@ -909,17 +916,194 @@ fn face_corner_to_move_to(
     }
     let at = corner::calc_corner_from_faces(k, brep, v)?;
     let old = brep.vertex(v)?.point;
-    let moved = at.best_point.distance(old);
-    // an undefined corner point (NaN) stays out as well
-    if !at.found_point || moved.is_nan() || moved > tolerance / 2.0 {
+    // Faces that define no corner (a round and the flat face it is tangent to, with a third
+    // face a hair off) still have a least-largest-gap point: start from where the vertex is.
+    let start = if at.found_point && !at.best_point.distance(old).is_nan() {
+        at.best_point
+    } else {
+        old
+    };
+    // one construction: the point that minimises the largest gap to the vertex's faces
+    let target = min_max_gap_point(k, brep, v, start)?;
+    if target.distance(old) > tolerance / 2.0 {
         return Ok(None);
     }
-    brep.vertex_mut(v)?.point = at.best_point;
+    brep.vertex_mut(v)?.point = target;
     let cured = corner_cures_gaps(k, brep, v, tolerance / 2.0);
     brep.vertex_mut(v)?.point = old;
     let cured = cured?;
     reset_vertex_face_gaps(brep, v)?;
-    Ok(cured.then_some(at.best_point))
+    Ok(cured.then_some(target))
+}
+
+/// Not upstream (#16532): the point that minimises the largest gap to the faces of `v`, from
+/// `corner` where its faces meet. A face's gap is the distance to its nearest point, so the
+/// optimum `x` is where the vectors to the nearest points of the active faces balance: `x` is
+/// the centre of the smallest ball holding them (the midpoint for two faces, the circumcentre for
+/// three). [`minimax_centre`] iterates that map from the corner, with the nearest
+/// points of each face to the vertex put at `x` ([`nearest_face_points`]).
+///
+/// # Errors
+/// Those of the gap and surface evaluations.
+fn min_max_gap_point(k: &Kernel, brep: &mut Brep, v: VertexId, corner: Point3) -> Result<Point3> {
+    let old = brep.vertex(v)?.point;
+    // Nearest points closer than a millionth of the intersection tolerance are the same point
+    // rounded differently (coordinates of order 1e3 carry rounding of 1e-13).
+    let merge = 1e-6 * vertex::corner::xsect_tol_3d_of_brep(k, brep);
+    let found = minimax_centre(corner, merge, |x| nearest_face_points(k, brep, v, x));
+    brep.vertex_mut(v)?.point = old;
+    reset_vertex_face_gaps(brep, v)?;
+    found
+}
+
+/// The nearest point of each face of `v` to `x` (the vertex is left at `x`).
+fn nearest_face_points(k: &Kernel, brep: &mut Brep, v: VertexId, x: Point3) -> Result<Vec<Point3>> {
+    use crate::topology::vertexuse;
+    brep.vertex_mut(v)?.point = x;
+    let mut points = Vec::new();
+    for vu in vertex::vertexuses(brep, v)? {
+        let Some(gap) = vertexuse::vertex_face_gap(k, brep, vu, true)? else {
+            continue;
+        };
+        let face = match gap.vertexuse {
+            Some(gvu) => vertexuse::faceuse(brep, gvu)?
+                .map(|fu| brep.faceuse(fu).map(|f| f.face))
+                .transpose()?
+                .flatten(),
+            None => None,
+        };
+        let Some(surface) = face
+            .and_then(|f| brep.face(f).ok())
+            .and_then(|f| f.surface.as_ref())
+        else {
+            continue;
+        };
+        let p = surface.evaluate_point(k, gap.face_uv)?;
+        if p.x.is_finite() && p.y.is_finite() && p.z.is_finite() {
+            points.push(p);
+        }
+    }
+    Ok(points)
+}
+
+/// The most steps [`minimax_centre`] takes. The map has no proved rate: for two faces meeting at
+/// a shallow angle each step keeps nearly all of the distance to the optimum (about 99.97 % at
+/// 1 degree), so the result after this many steps is an approximation of the optimum, never a
+/// certified one. That is safe because the point is only a candidate: `face_corner_to_move_to`
+/// moves the vertex only when `corner_cures_gaps` measures every face and edge gap at it
+/// within bounds, and otherwise leaves the vertex alone. A start on the corner of faces that
+/// all hold it is already the optimum, so the common case never iterates.
+const MINIMAX_STEPS: usize = 64;
+
+/// The point minimising the largest distance to a set of faces, from `start`: with
+/// `nearest(x)` the nearest point of each face to `x`, repeatedly moves `x` to the centre of
+/// the smallest ball holding them ([`enclosing_ball_centre`]), until it stops. At the optimum
+/// the vectors from `x` to the nearest points of the active faces balance (`x` is the centre of
+/// their smallest ball), so it is the fixed point; the part of `x` along a direction every face
+/// holds (an edge they share) never changes. For a corner on every face the nearest points
+/// are `x` itself and `x` stays.
+fn minimax_centre(
+    start: Point3,
+    merge: f64,
+    mut nearest: impl FnMut(Point3) -> Result<Vec<Point3>>,
+) -> Result<Point3> {
+    let mut x = start;
+    for _ in 0..MINIMAX_STEPS {
+        let points = nearest(x)?;
+        let Some(next) = enclosing_ball_centre(&points, merge) else {
+            break;
+        };
+        let step = next.distance(x);
+        let scale = 1.0 + x.length();
+        x = next;
+        if step <= 1e-12 * scale {
+            break;
+        }
+    }
+    Ok(x)
+}
+
+/// The centre of the smallest ball holding `points` (`None` for none, or for more than
+/// [`MAX_WELZL_POINTS`] distinct ones). Points within `merge` of one another count once: every
+/// vertex use of a face gives that face's nearest point again, the same point up to rounding,
+/// and taking the noise between them as separate points makes Welzl's support sets nearly
+/// degenerate. The ball of the distinct points is then exact, by Welzl's algorithm in the order
+/// the points come (no randomness).
+fn enclosing_ball_centre(points: &[Point3], merge: f64) -> Option<Point3> {
+    let mut distinct: Vec<Point3> = Vec::new();
+    for &p in points {
+        if !distinct.iter().any(|q| q.distance(p) <= merge) {
+            distinct.push(p);
+        }
+    }
+    if distinct.len() > MAX_WELZL_POINTS {
+        return None;
+    }
+    let mut support = Vec::with_capacity(4);
+    welzl(&distinct, distinct.len(), &mut support).map(|(_, c)| c)
+}
+
+/// The most points [`enclosing_ball_centre`] takes: Welzl's recursion is one level per point.
+const MAX_WELZL_POINTS: usize = 4096;
+
+/// The smallest ball (radius, centre) holding `points[..n]` with `support` on its surface.
+/// Recursion depth is at most `n`, bounded by [`MAX_WELZL_POINTS`] at the entry.
+fn welzl(points: &[Point3], n: usize, support: &mut Vec<Point3>) -> Option<(f64, Point3)> {
+    let Some(last) = n.checked_sub(1).and_then(|i| points.get(i)).copied() else {
+        return ball_on(support);
+    };
+    if support.len() == 4 {
+        return ball_on(support);
+    }
+    let ball = welzl(points, n - 1, support)?;
+    if last.distance(ball.1) <= ball.0 * (1.0 + 1e-12) {
+        return Some(ball);
+    }
+    support.push(last);
+    let with = welzl(points, n - 1, support);
+    support.pop();
+    with
+}
+
+/// The smallest ball with all of `support` (at most four points) on its surface.
+fn ball_on(support: &[Point3]) -> Option<(f64, Point3)> {
+    let centre = match support {
+        [] => return Some((0.0, Point3::new(0.0, 0.0, 0.0))),
+        [a] => *a,
+        [a, b] => 0.5 * (*a + *b),
+        [a, b, c] => circumcentre3(*a, *b, *c)?,
+        [a, b, c, d] => circumcentre4(*a, *b, *c, *d)?,
+        _ => return None,
+    };
+    let radius = support.first().map_or(0.0, |p| p.distance(centre));
+    Some((radius, centre))
+}
+
+/// The centre of the circle through three points (`None` when they are on a line).
+fn circumcentre3(a: Point3, b: Point3, c: Point3) -> Option<Point3> {
+    let u = b - a;
+    let w = c - a;
+    let n = u.cross(w);
+    let n2 = n.dot(n);
+    if n2 <= 1e-24 * u.dot(u) * w.dot(w) || n2 == 0.0 {
+        return None;
+    }
+    let offset = (0.5 / n2) * (w.dot(w) * n.cross(u) + u.dot(u) * w.cross(n));
+    Some(a + offset)
+}
+
+/// The centre of the sphere through four points (`None` when they are in a plane).
+fn circumcentre4(a: Point3, b: Point3, c: Point3, d: Point3) -> Option<Point3> {
+    let u = b - a;
+    let w = c - a;
+    let t = d - a;
+    let det = u.dot(w.cross(t));
+    if det.abs() <= 1e-12 * u.length() * w.length() * t.length() || det == 0.0 {
+        return None;
+    }
+    let offset =
+        (u.dot(u) * w.cross(t) + w.dot(w) * t.cross(u) + t.dot(t) * u.cross(w)) * (0.5 / det);
+    Some(a + offset)
 }
 
 /// With `v` at the point under test: every vertex/face gap is under the intersection tolerance
@@ -960,7 +1144,8 @@ fn reset_vertex_face_gaps(brep: &mut Brep, v: VertexId) -> Result<()> {
 /// faces it keeps, and the vertices the cleanup deletes are not moved first.
 ///
 /// # Errors
-/// Those of [`face_corner_to_move_to`] and of `SmVertex::SetPoint`; a vertex the cleanup
+/// Those of [`face_corner_to_move_to`] and of `SmVertex::SetPoint`; a body that is not a closed
+/// manifold solid is left as it is (#16532: moving its vertices only hides its defect); a vertex the cleanup
 /// deleted ([`SolidError::NotFound`]) is skipped.
 pub(crate) fn place_vertices_on_face_corners(
     k: &mut Kernel,
@@ -968,6 +1153,12 @@ pub(crate) fn place_vertices_on_face_corners(
     vertices: &[VertexId],
     notifications: &mut edge::NotifyEnv<'_>,
 ) -> Result<()> {
+    // Only a closed manifold solid is placed: a body that is not one (the #1979 ring-lip union
+    // at 1e-3 has one region and no solid) is defective beyond a vertex gap, and moving its
+    // vertices only hides the defect from the validity check.
+    if !crate::topology::brep::p2::is_manifold_solid(brep)? {
+        return Ok(());
+    }
     let xsect_tol = vertex::corner::xsect_tol_3d_of_brep(k, brep);
     for &v in vertices {
         match brep.vertex(v) {
@@ -1238,6 +1429,104 @@ mod tests {
         r.point = Vec3::new(d, 0.0, 0.0);
         r.tolerance = tolerance;
         (k, b, v)
+    }
+
+    // CodeRabbit on #16538: the midpoint of the nearest points to the corner is not the point
+    // of least largest gap. A face y = x through the corner and one on y = 0 from x = d: the
+    // midpoint (d / 2, 0) is d / 2 from the second, (3d / 4, d / 4) is d / (2 sqrt 2) from both.
+    #[test]
+    fn the_least_largest_gap_point_balances_the_faces() {
+        let d = 5.0e-5;
+        let nearest = |x: Point3| -> Result<Vec<Point3>> {
+            let on_line = 0.5 * (x.x + x.y);
+            Ok(vec![
+                Vec3::new(on_line, on_line, x.z),
+                Vec3::new(x.x.max(d), 0.0, x.z),
+            ])
+        };
+        let at = minimax_centre(Vec3::ZERO, 1e-12, nearest).unwrap();
+        let want = Vec3::new(0.75 * d, 0.25 * d, 0.0);
+        assert!(at.distance(want) < 1e-12, "{at:?}");
+        let gap = |p: Point3| {
+            let to_line = (p.x - p.y).abs() / 2.0_f64.sqrt();
+            let to_ray = Vec3::new(p.x - p.x.max(d), p.y, 0.0).length();
+            to_line.max(to_ray)
+        };
+        assert!(gap(at) < 0.4 * d, "{}", gap(at));
+        assert!(gap(at) < gap(Vec3::new(0.5 * d, 0.0, 0.0)));
+        // a corner every face holds stays where it is
+        let held = |x: Point3| -> Result<Vec<Point3>> { Ok(vec![x, x]) };
+        assert_eq!(minimax_centre(Vec3::ZERO, 1e-12, held).unwrap(), Vec3::ZERO);
+    }
+
+    // CodeRabbit on #16538: three faces whose nearest points are the corners of an equilateral
+    // triangle of side 3e-5: the midpoint of a side is 2.6e-5 from the third, the centroid
+    // 1.73e-5 from each.
+    #[test]
+    fn the_least_largest_gap_point_of_three_faces_is_the_centroid() {
+        let s = 3.0e-5;
+        let corners = [
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(s, 0.0, 0.0),
+            Vec3::new(0.5 * s, 0.5 * s * 3.0_f64.sqrt(), 0.0),
+        ];
+        let nearest = |_: Point3| -> Result<Vec<Point3>> { Ok(corners.to_vec()) };
+        let at = minimax_centre(Vec3::ZERO, 1e-12, nearest).unwrap();
+        let want = Vec3::new(0.5 * s, s / (2.0 * 3.0_f64.sqrt()), 0.0);
+        assert!(at.distance(want) < 1e-12, "{at:?}");
+        // an obtuse triangle: the midpoint of its longest side
+        let flat = [
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(s, 0.0, 0.0),
+            Vec3::new(0.5 * s, 0.1 * s, 0.0),
+        ];
+        let at = minimax_centre(Vec3::ZERO, 1e-12, |_| Ok(flat.to_vec())).unwrap();
+        assert!(at.distance(Vec3::new(0.5 * s, 0.0, 0.0)) < 1e-12, "{at:?}");
+    }
+
+    // A vertex with many faces (a cone apex): more points than the exhaustive search takes go to
+    // Welzl's algorithm, which gives the same ball. Twenty points on a circle of radius 2 about
+    // (1, 2, 3), with interior points among them: the centre of the circle.
+    #[test]
+    fn the_smallest_ball_of_many_points_is_found_without_the_exhaustive_search() {
+        let centre = Vec3::new(1.0, 2.0, 3.0);
+        let mut points: Vec<Point3> = (0..20)
+            .map(|i| {
+                let a = f64::from(i) * std::f64::consts::TAU / 20.0;
+                centre + Vec3::new(2.0 * a.cos(), 2.0 * a.sin(), 0.0)
+            })
+            .collect();
+        points.push(centre + Vec3::new(0.3, -0.2, 0.0));
+        points.push(centre + Vec3::new(-1.0, 0.5, 0.0));
+        let at = enclosing_ball_centre(&points, 1e-12).unwrap();
+        assert!(at.distance(centre) < 1e-9, "{at:?}");
+    }
+
+    // The case that broke the slab and ring-and-lip joins: each face's nearest point comes once
+    // per vertex use, equal up to rounding. Repeating the points of a triangle 1e-5 across with
+    // noise of 1e-15 gives the centre of the triangle's smallest ball.
+    #[test]
+    fn near_duplicate_points_give_the_ball_of_the_distinct_ones() {
+        let s = 1.0e-5;
+        let base = Vec3::new(10.0, 20.0, 30.0);
+        let distinct = [
+            base,
+            base + Vec3::new(s, 0.0, 0.0),
+            base + Vec3::new(0.5 * s, 0.5 * s * 3.0_f64.sqrt(), 0.0),
+        ];
+        let want = enclosing_ball_centre(&distinct, 1e-11).unwrap();
+        let mut noisy = Vec::new();
+        let mut count = 0.0;
+        for _ in 0..6 {
+            for p in &distinct {
+                count += 1.0;
+                let n = 1e-15 * count;
+                noisy.push(*p + Vec3::new(n, -n, n));
+            }
+        }
+        let at = enclosing_ball_centre(&noisy, 1e-11).unwrap();
+        assert!(at.distance(want) < 1e-13, "{at:?} {want:?}");
+        assert!(at.distance(base + Vec3::new(0.5 * s, s / (2.0 * 3.0_f64.sqrt()), 0.0)) < 1e-13);
     }
 
     #[test]

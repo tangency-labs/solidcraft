@@ -3306,6 +3306,10 @@ pub struct Feature {
     /// its faces are named after them and references follow them through Update Links (#3330).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link_faces: Vec<Vec<String>>,
+    /// Cosmetic threads carried with a linked Import, by the file's body index. Their
+    /// coordinates are in the imported geometry's frame; evaluation assigns local identities.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub link_threads: Vec<Vec<crate::ThreadInfo>>,
     /// What a join of this feature makes of pieces that share no face: those that touch along an
     /// edge or at a point become separate bodies and those that touch nothing stay one body (the
     /// default), or every piece stays one body.
@@ -4457,6 +4461,7 @@ impl Document {
             pattern_names_in_order: false,
             inserted: false,
             link_faces: Vec::new(),
+            link_threads: Vec::new(),
             touching: Touching::Separate,
             kind,
         };
