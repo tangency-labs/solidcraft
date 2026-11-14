@@ -1095,6 +1095,7 @@ impl PanelController for ProductionController {
             extent: snapshot.panels.iter().find(|panel| panel.product == self.product).and_then(|panel| panel.extent),
             inset: solidcraft_theme::Tokens::get().space_2 * 2.0,
             policy: spec.side_height_policy,
+            fill_at_narrow_width: self.product == Product::History,
         }))
     }
     fn prepare_lifecycle(&self, event: &LifecycleEvent) -> PanelResult<()> {
@@ -1134,6 +1135,7 @@ impl PanelController for ProductionController {
 
 #[derive(Debug)]
 struct ProductionMetrics {
+    fill_at_narrow_width: bool,
     extent: Option<ContentExtent>,
     inset: f32,
     policy: SideHeightPolicy,
@@ -1146,7 +1148,8 @@ impl HostContentMetrics for ProductionMetrics {
             .extent
             .filter(|extent| extent.width_independent || (extent.flow == Flow::Tall && (extent.width - request.width).abs() < 0.5))
             .map_or(MAX_LOGICAL, |extent| (request.chrome_height + extent.height + self.inset).min(MAX_LOGICAL));
-        Ok(SideContentMeasure { request: request.clone(), needed_height, policy: self.policy })
+        let policy = if self.fill_at_narrow_width && request.width - self.inset < 240.0 { SideHeightPolicy::Fill } else { self.policy };
+        Ok(SideContentMeasure { request: request.clone(), needed_height, policy })
     }
     fn revision(&self) -> u64 {
         use std::hash::{Hash, Hasher};
@@ -1163,6 +1166,7 @@ impl HostContentMetrics for ProductionMetrics {
             })
             .hash(&mut hash);
         self.inset.to_bits().hash(&mut hash);
+        self.fill_at_narrow_width.hash(&mut hash);
         matches!(self.policy, SideHeightPolicy::Fill).hash(&mut hash);
         hash.finish()
     }
