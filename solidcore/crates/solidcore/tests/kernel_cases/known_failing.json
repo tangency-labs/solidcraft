@@ -71,10 +71,5 @@
     "issue": "tangency-labs/solidcore#2849",
     "reason": "the Mixed corner's chamfer face stands 7.2e-4 out of the front face y = 0 (its bilinear Coons patch bulges past the plane), past the case's 4e-5 box",
     "fails": "volume 9383.450962465247 (rig 9383.4506602363)"
-  },
-  {
-    "case": "fillets/15437-fillet-round-ends-at-crease-beside-drafted-side",
-    "issue": "tangency-labs/solidcraft#15437",
-    "reason": "status 1001 (the faces the rails enclose reach past the rails): the round ends at the crease vertex, an End at a smooth vertex, capped by the plane through the vertex square to the edge; beside the drafted side face that plane crosses the bottom past the crease, so the rail on the bottom ends on the tilted piece beyond, which the round does not touch, and the trim leaks"
   }
 ]

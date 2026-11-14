@@ -301,11 +301,13 @@
       }
     },
     {
-      "error": "the blend failed (status 1001): the faces the rails enclose reach past the rails",
       "inputs": [
         "b16"
       ],
       "op": "blend_dropping",
+      "outputs": [
+        "b17"
+      ],
       "params": {
         "edges": {
           "kind": "edge",
@@ -366,15 +368,21 @@
       "tangency-labs/solidcraft#15212"
     ],
     "tolerance": {
-      "rel": 1e-7
+      "rel": 1e-9
     },
     "volume_mm3": 459.948909,
     "what": "a round R2.6 on the long piece of a block's bottom side edge, ending at the 3 deg crease where the bottom changes plane, the side face beside it drafted 3 deg in plan; the short piece across the crease left sharp (an End at a smooth vertex beside a drafted face)"
   },
   "expressible": true,
+  "gallery_note": "the round ends at the crease vertex, its cap the plane through the vertex that holds the crease (the bottom's rail reaches its face's end there first), turned from square to the edge by the drafted side",
   "operation_expressible": true,
   "records": "15437-fillet-round-ends-at-crease-beside-drafted-side.bodies.json.gz",
-  "result": [],
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b17"
+    }
+  ],
   "sources": [
     "tangency-labs/solidcraft#15437",
     "tangency-labs/solidcraft#15212"
