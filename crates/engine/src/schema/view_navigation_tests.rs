@@ -3,7 +3,8 @@ use serde_json::{Value, json};
 use super::{
     AmbientOcclusionParams, AmbientOcclusionResult, AngleReadoutParams, CameraReply, DisplayToggleParams, GraphicsPresetParams, GraphicsPresetResult,
     HistoryLayoutParams, HistoryLayoutResult, LayoutParams, LayoutResult, NavigateParams, NavigateResult, NavigationBarParams, NormalToParams,
-    StandardViewParams, TabStep, TabStepParams, ToolParams, ToolResult, VisualStyleParams, VisualStyleResult,
+    RenderPanelVisibilityParams, RenderPanelVisibilityResult, StandardViewParams, TabStep, TabStepParams, ToolParams, ToolResult, VisualStyleParams,
+    VisualStyleResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -796,3 +797,74 @@ fn mode_commands_keep_todays_errors() {
         ("view.visual_style", json!({"style": null})),
     ]);
 }
+
+/// The Render window's two panels take the same required flag and answer with it, so one contract
+/// and one result type describe both calls. Neither has a toggle form: `visible` is required, and
+/// the reply is the flag, which is the object both handlers have always returned.
+#[test]
+fn the_render_panels_answer_with_their_own_schemas() {
+    assert_keys(input_schema_for::<RenderPanelVisibilityParams>(), &["visible"]);
+    let mut s = Session::default();
+    for id in ["view.render_inspector", "view.shots_strip"] {
+        let spec = crate::find_command(id).unwrap();
+        assert!(spec.contract.is_some() && spec.output.is_some() && !spec.undoable, "{id}");
+        let described = s.execute("engine.describe", &json!({"command": id})).unwrap();
+        let (input, out) = (&described["input"], &described["output"]);
+        assert_eq!(input["required"], json!(["visible"]), "{id}: the flag has no toggle form");
+        assert_eq!(input["additionalProperties"], false, "{id}");
+        assert_eq!(input["properties"]["visible"]["type"], "boolean", "{id}: a null flag is not an omitted one");
+        for value in [true, false] {
+            let p = call([("visible", json!(value))]);
+            let reply = s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+            assert_eq!(reply, json!({"visible": value}), "{id} {p}");
+            assert!(conforms(out, out, &reply), "{id} {p}: {reply} doesn't match {out}");
+            assert!(reply.get("param_warnings").is_none(), "{id} {p}: {reply}");
+        }
+    }
+    // The published output type is that object, plus the warnings only the warn mode adds.
+    let out = output_schema_for::<RenderPanelVisibilityResult>();
+    let out = out.as_value();
+    assert!(conforms(out, out, &json!({"visible": true, "param_warnings": ["a key the command doesn't take"]})), "{out}");
+}
+
+/// A flag that isn't a boolean and a key the command doesn't take keep the messages the handler has
+/// always used with the check off and in warn; in strict the contract speaks first and names them
+/// the way the published schema does.
+#[test]
+fn render_panel_refusals_stay_the_handlers_below_strict() {
+    for id in ["view.render_inspector", "view.shots_strip"] {
+        // The flag is required: no level lets a call without one through. The message is the one the
+        // handler's private struct gave before these types, because the parameters are read the same
+        // way; in strict the contract speaks first and names the key the way the schema does.
+        for level in [ParamCheck::Off, ParamCheck::Warn] {
+            let mut s = Session { param_check: level, ..Session::default() };
+            let e = s.execute(id, &json!({})).err().unwrap_or_else(|| panic!("{id} with no flag runs with the check {level:?}"));
+            assert_eq!(e.to_string(), format!("invalid parameters for `{id}`: missing field `visible`"), "{id}");
+        }
+        let strict = Session { param_check: ParamCheck::Strict, ..Session::default() }.execute(id, &json!({}));
+        let e = strict.err().unwrap_or_else(|| panic!("{id} with no flag runs in strict"));
+        assert!(e.to_string().contains("`visible`"), "{id}: {e}");
+        let bad_flag = call([("visible", json!("false"))]);
+        let handler = format!(r#"invalid parameters for `{id}`: invalid type: string "false", expected a boolean"#);
+        for level in [ParamCheck::Off, ParamCheck::Warn] {
+            let mut s = Session { param_check: level, ..Session::default() };
+            let e = s.execute(id, &bad_flag).err().unwrap_or_else(|| panic!("{id} {bad_flag} runs with the check {level:?}"));
+            assert_eq!(e.to_string(), handler, "{id}");
+        }
+        let strict = Session { param_check: ParamCheck::Strict, ..Session::default() }.execute(id, &bad_flag);
+        let e = strict.err().unwrap_or_else(|| panic!("{id} {bad_flag} runs in strict"));
+        assert!(e.to_string().contains("`visible` must be true or false"), "{id}: {e}");
+        // A key the command doesn't take: the handler has always refused it, and strict names it
+        // from the schema instead.
+        let hostile = call([("visible", json!(true)), ("off", json!(true))]);
+        for level in [ParamCheck::Off, ParamCheck::Warn] {
+            let mut s = Session { param_check: level, ..Session::default() };
+            let e = s.execute(id, &hostile).err().unwrap_or_else(|| panic!("{id} {hostile} runs with the check {level:?}"));
+            assert_eq!(e.to_string(), format!("invalid parameters for `{id}`: unknown field `off`, expected `visible`"), "{id}");
+        }
+        let strict = Session { param_check: ParamCheck::Strict, ..Session::default() }.execute(id, &hostile);
+        let e = strict.err().unwrap_or_else(|| panic!("{id} {hostile} runs in strict"));
+        assert!(e.to_string().contains("unknown key `off`"), "{id}: {e}");
+    }
+}
+
