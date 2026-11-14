@@ -1853,6 +1853,42 @@ fn slotted_tray_round_trip(shape: &str, two: bool, slots: &[[f64; 4]]) -> (Sessi
     (s, picks, a)
 }
 
+/// A bent sheet converts from either skin of its base, and without a fixed face (the largest flat
+/// one is fixed; the base's two skins are as large as each other). Picked on its outer skin (the
+/// bottom, z 0), the plate check traced no outline for the base under a flange bent at 45 degrees,
+/// and that was an error instead of no plate.
+#[test]
+fn a_bent_sheet_converts_from_either_skin_or_without_a_fixed_face() {
+    let rule = json!({"name": "T", "thickness": "1 mm", "k_factor": "0.5", "bend_radius": "1 mm", "gap": "0.6 mm", "active": true});
+    let mut a = Session::default();
+    run(&mut a, "sheet.manage_rules", rule.clone());
+    run(&mut a, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut a, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [120, 60]}));
+    run(&mut a, "sketch.finish", json!({}));
+    run(&mut a, "sheet.flange", json!({"type": "base", "sketch": "Base", "rule": "T"}));
+    run(&mut a, "sheet.flange", json!({"edges": [[60, 60, 1]], "height": 20, "angle": 45}));
+    let path = std::env::temp_dir().join(format!("solidcraft-l-round-trip-{}.step", std::process::id()));
+    run(&mut a, "file.export", json!({"path": path.to_string_lossy()}));
+    let v = volume(&mut a);
+    for face in [None, Some([30.0, 20.0, 0.0]), Some([30.0, 20.0, 1.0])] {
+        let mut s = Session::default();
+        run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
+        run(&mut s, "sheet.manage_rules", rule.clone());
+        let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
+        let mut p = json!({"body": body, "rule": "T"});
+        if let Some(face) = face {
+            p["face"] = json!(face);
+        }
+        let out = s.execute("sheet.convert", &p);
+        let warning = out.as_ref().map(|v| v["warning"].as_str().unwrap_or_default().to_string()).unwrap_or_default();
+        assert!(out.is_ok(), "face {face:?}: {}", out.err().map(|e| e.to_string()).unwrap_or_default());
+        assert!(warning.contains("1 bend found by itself: 1.000 thick, inside radius 1.000"), "face {face:?}: {warning}");
+        assert!((volume(&mut s) - v).abs() < 1e-6 * v, "face {face:?}: {} vs {v}", volume(&mut s));
+        assert!(same_size(flat_size(&mut s), flat_size(&mut a), 1e-6), "face {face:?}: {:?} vs {:?}", flat_size(&mut s), flat_size(&mut a));
+    }
+    let _ = std::fs::remove_file(&path);
+}
+
 /// The flat's outline area and its bends' lengths, longest first.
 fn flat_area_and_bends(s: &mut Session) -> (f64, Vec<f64>) {
     let f = flat(s);
@@ -1924,6 +1960,55 @@ fn a_bend_split_by_slots_across_it_converts_as_one_bend() {
                 "{what}: {got_bends:?} vs {bends:?}"
             );
             assert_eq!(flat(&mut s)["cutouts"].as_array().map(Vec::len), cutouts, "{what}");
+        }
+    }
+}
+
+/// Without bend points the bends are found by themselves (#1325): every bend cylinder of the
+/// outer skin, bent with the radius and thickness the body is modelled with (the rule gives the
+/// K-factor), so the trays above come back as they were, slots across their bends too, under a
+/// rule of another radius as well; the reply says what was found. Without a fixed face the
+/// largest flat one is fixed (the tray's outer bottom).
+#[test]
+fn a_tray_converts_with_its_bends_found_by_themselves() {
+    let slots = [[30.0, -6.0, 40.0, 8.0], [70.0, -6.0, 80.0, 8.0], [112.0, 55.0, 126.0, 65.0]];
+    let cases: [(&str, bool, &[[f64; 4]], bool, bool); 6] = [
+        ("notch", false, &[], true, true),
+        ("notch", true, &[], true, true),
+        ("round", false, &[], true, true),
+        ("tear", false, &slots, true, true),
+        ("notch", false, &[], false, true),
+        ("tear", false, &slots, true, false),
+    ];
+    for (shape, two, slots, own_rule, face) in cases {
+        let what = format!("{shape}, two features {two}, {} slots, own rule {own_rule}, face given {face}", slots.len());
+        let (mut s, _, mut source) = slotted_tray_round_trip(shape, two, slots);
+        let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
+        let mut p = json!({"body": body});
+        if face {
+            p["face"] = json!([60, 45, 0]);
+        }
+        if own_rule {
+            p["rule"] = json!("T");
+        } else {
+            let wide = json!({"name": "Wide", "thickness": "1 mm", "k_factor": "0.5", "bend_radius": "3 mm", "gap": "0.6 mm", "corner_relief_shape": shape, "corner_relief": "3 mm", "active": true});
+            run(&mut s, "sheet.manage_rules", wide);
+            p["rule"] = json!("Wide");
+        }
+        let out = s.execute("sheet.convert", &p);
+        let warning = out.as_ref().map(|v| v["warning"].as_str().unwrap_or_default().to_string()).unwrap_or_default();
+        assert!(out.is_ok(), "{what}: {}", out.err().map(|e| e.to_string()).unwrap_or_default());
+        assert!(warning.contains("4 bends found by themselves: 1.000 thick, inside radius 1.000"), "{what}: {warning}");
+        let (v, (area, bends)) = (volume(&mut source), flat_area_and_bends(&mut source));
+        assert!((volume(&mut s) - v).abs() < 1e-6 * v, "{what}: {} vs {v}", volume(&mut s));
+        let (got_area, got_bends) = flat_area_and_bends(&mut s);
+        if own_rule {
+            assert!(same_size(flat_size(&mut s), flat_size(&mut source), 1e-6), "{what}: {:?}", flat_size(&mut s));
+            assert!((got_area - area).abs() < 1e-6 * area, "{what}: {got_area} vs {area}");
+            assert!(
+                got_bends.len() == bends.len() && got_bends.iter().zip(&bends).all(|(x, y)| (x - y).abs() < 1e-6),
+                "{what}: {got_bends:?} vs {bends:?}"
+            );
         }
     }
 }
