@@ -237,16 +237,27 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     command(&|v| v["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":60000}), "deadline_ms");
 }
 
+fn empty_item() -> LossItem {
+    LossItem { severity: LossSeverity::Info, title: String::new(), subject: String::new(), message: String::new(), code: String::new() }
+}
+
 #[test]
 fn a_loss_report_is_bounded_printable_text() {
     let report: LossReport = serde_json::from_value(json!({"summary":"12 of 14 features","items":[
-        {"severity":"degraded","subject":"Fillet3","message":"kept as geometry"}],"details":{"any":"thing"}}))
+        {"severity":"degraded","subject":"Fillet3","message":"kept as geometry"},
+        {"severity":"info","title":"Parts of the file kept as they are","code":"f3d/source.unindexed-records-retained","message":"14 records"}],
+        "details":{"any":"thing"}}))
     .unwrap();
     report.validate().unwrap();
+    assert_eq!(report.items[1].title, "Parts of the file kept as they are");
+    let long_title = json!({"items":[{"severity":"info","title":"t".repeat(121),"message":"x"}]});
+    assert!(serde_json::from_value::<LossReport>(long_title).unwrap().validate().is_err());
     assert!(serde_json::from_value::<LossReport>(json!({"items":[{"severity":"lost","message":"x"}]})).is_err());
     let control = LossReport { summary: "bad\nline".into(), ..LossReport::default() };
     assert!(matches!(control.validate(), Err(HostError::InvalidInput { field, .. }) if field == "loss_report.summary"));
-    let empty =
-        LossReport { items: vec![LossItem { severity: LossSeverity::Info, subject: String::new(), message: " ".into() }], ..LossReport::default() };
+    let empty = LossReport {
+        items: vec![LossItem { severity: LossSeverity::Info, subject: String::new(), message: " ".into(), ..empty_item() }],
+        ..LossReport::default()
+    };
     assert!(empty.validate().is_err());
 }

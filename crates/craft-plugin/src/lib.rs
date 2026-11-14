@@ -513,10 +513,18 @@ pub enum LossSeverity {
 #[serde(deny_unknown_fields)]
 pub struct LossItem {
     pub severity: LossSeverity,
+    /// What kind of loss it is, in the user's words, the same for every item of that kind
+    /// ("Parts of the file kept as they are"): the host shows one line per title with its count.
+    /// May be empty; the item then stands on its own.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
     /// What it is about: a feature, body or part name. May be empty.
     #[serde(default)]
     pub subject: String,
     pub message: String,
+    /// The importer's stable code for this kind of loss, for bug reports. Shown under Details.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub code: String,
 }
 
 /// What an importer returns besides the design: what it could not carry over. The host shows
@@ -538,10 +546,12 @@ impl LossReport {
         if !text(&self.summary, 240) {
             return Err(HostError::InvalidInput { field: "loss_report.summary".into(), reason: "at most 240 printable characters".into() });
         }
-        if self.items.len() > MAX_LOSS_ITEMS || !self.items.iter().all(|i| text(&i.subject, 256) && plain(&i.message, 1024)) {
+        if self.items.len() > MAX_LOSS_ITEMS
+            || !self.items.iter().all(|i| text(&i.subject, 256) && plain(&i.message, 1024) && text(&i.title, 120) && text(&i.code, 128))
+        {
             return Err(HostError::InvalidInput {
                 field: "loss_report.items".into(),
-                reason: "at most 4096 items, each a printable message of at most 1024 characters and a subject of at most 256".into(),
+                reason: "at most 4096 items, each a printable message of at most 1024 characters, a subject of at most 256, a title of at most 120 and a code of at most 128".into(),
             });
         }
         Ok(())
