@@ -723,66 +723,76 @@ impl<O: ClassObject> CurveClassification<O> {
         let near_miss_dist_3d = EFF_ZERO * 1000.0;
         // Only a potentially missed vertex needs the whole-span evidence for
         // its own-edge tolerance; ordinary endpoints require no extra drops.
-        let vertex_misses =
-            |pc: &PointClassification<O>, t: f64, end: bool, own_edge: bool| -> Result<bool> {
-                if pc.point_class() != PointClassType::Vertex
-                    || pc.gap_3d(k, geometry, surface)? < near_miss_dist_3d
-                {
-                    return Ok(false);
+        let vertex_misses = |pc: &PointClassification<O>,
+                             t: f64,
+                             end: bool,
+                             own: Option<&CurveInterval<O>>|
+         -> Result<bool> {
+            if pc.point_class() != PointClassType::Vertex
+                || pc.gap_3d(k, geometry, surface)? < near_miss_dist_3d
+            {
+                return Ok(false);
+            }
+            let across = match self.surface1().and_then(|s| geometry.surface(s)) {
+                Some(s) => self.gap_across_curve(k, geometry, pc, t, end, s)?,
+                None => None,
+            };
+            if across.is_some_and(|gap| gap < near_miss_dist_3d) {
+                return Ok(false);
+            }
+            // A shared classification boundary is the same vertex from
+            // either neighboring interval. Its coincident edge may be on
+            // the other side of the interval being visited.
+            // The interval's own coincident edge keeps the relief it had unless its
+            // control polygon provably leaves the strip beside the seam; a shared
+            // boundary's other side is relieved only by the whole-definition proof.
+            let mut on_curve = match own {
+                Some(ivl) => {
+                    self.coincident_span_lies_on_curve(k, geometry, ivl, near_miss_dist_3d)?
+                        != Some(false)
                 }
-                let across = match self.surface1().and_then(|s| geometry.surface(s)) {
-                    Some(s) => self.gap_across_curve(k, geometry, pc, t, end, s)?,
-                    None => None,
-                };
-                if across.is_some_and(|gap| gap < near_miss_dist_3d) {
-                    return Ok(false);
-                }
-                // A shared classification boundary is the same vertex from
-                // either neighboring interval. Its coincident edge may be on
-                // the other side of the interval being visited.
-                // The interval's own coincident edge keeps the relief it had; a shared
-                // boundary's other side is relieved only by the whole-definition proof.
-                let mut on_curve = own_edge;
-                if !on_curve && pc.object().is_some() {
-                    for adjacent in self.intervals() {
-                        let shared_start =
-                            adjacent.interval.min() == t && adjacent.start.object() == pc.object();
-                        let shared_end =
-                            adjacent.interval.max() == t && adjacent.end.object() == pc.object();
-                        if (shared_start || shared_end)
-                            && adjacent.mid.point_class() == PointClassType::Edge
-                            && adjacent.mid.gap_3d(k, geometry, surface)? < near_miss_dist_3d
-                            && self.coincident_span_lies_on_curve(
-                                k,
-                                geometry,
-                                adjacent,
-                                near_miss_dist_3d,
-                            )?
-                        {
-                            on_curve = true;
-                            break;
-                        }
+                None => false,
+            };
+            if !on_curve && pc.object().is_some() {
+                for adjacent in self.intervals() {
+                    let shared_start =
+                        adjacent.interval.min() == t && adjacent.start.object() == pc.object();
+                    let shared_end =
+                        adjacent.interval.max() == t && adjacent.end.object() == pc.object();
+                    if (shared_start || shared_end)
+                        && adjacent.mid.point_class() == PointClassType::Edge
+                        && adjacent.mid.gap_3d(k, geometry, surface)? < near_miss_dist_3d
+                        && self.coincident_span_lies_on_curve(
+                            k,
+                            geometry,
+                            adjacent,
+                            near_miss_dist_3d,
+                        )?
+                    {
+                        on_curve = true;
+                        break;
                     }
                 }
-                let threshold = if on_curve && !self.edge_runs_beside(k, geometry, pc)? {
-                    max2(
-                        near_miss_dist_3d,
-                        object_zone_tol_3d(k, geometry, pc.object())?,
-                    )
-                } else {
-                    near_miss_dist_3d
-                };
-                Ok(across.is_none_or(|gap| gap >= threshold))
+            }
+            let threshold = if on_curve && !self.edge_runs_beside(k, geometry, pc)? {
+                max2(
+                    near_miss_dist_3d,
+                    object_zone_tol_3d(k, geometry, pc.object())?,
+                )
+            } else {
+                near_miss_dist_3d
             };
+            Ok(across.is_none_or(|gap| gap >= threshold))
+        };
 
         for ivl in self.intervals() {
             let mid = &ivl.mid;
             let coincident = mid.point_class() == PointClassType::Edge;
             let beside = coincident && mid.gap_3d(k, geometry, surface)? >= near_miss_dist_3d;
-            let own_edge = coincident && !beside;
-            if vertex_misses(&ivl.start, ivl.interval.min(), false, own_edge)?
+            let own = (coincident && !beside).then_some(ivl);
+            if vertex_misses(&ivl.start, ivl.interval.min(), false, own)?
                 || beside
-                || vertex_misses(&ivl.end, ivl.interval.max(), true, own_edge)?
+                || vertex_misses(&ivl.end, ivl.interval.max(), true, own)?
             {
                 return Ok(true);
             }
@@ -802,29 +812,30 @@ impl<O: ClassObject> CurveClassification<O> {
     /// the seam. A derivative remainder must additionally bound the actual stored
     /// 3D edge's across-seam separation over every native knot span. This uses the
     /// same native surface definition, never a cached approximation. Unproved
-    /// definitions receive no endpoint tolerance relief.
+    /// definitions receive no endpoint tolerance relief. `Some(false)` means a control
+    /// point of the edge provably lies beyond the strip; `None` means no proof either way.
     fn coincident_span_lies_on_curve(
         &self,
         k: &Kernel,
         geometry: &impl ClassGeometry<O>,
         interval: &CurveInterval<O>,
         threshold: f64,
-    ) -> Result<bool> {
+    ) -> Result<Option<bool>> {
         let (Some(curve), Some(surface), Some(object)) = (
             self.curve().and_then(|c| geometry.curve(c)),
             self.surface1().and_then(|s| geometry.surface(s)),
             interval.mid.object(),
         ) else {
-            return Ok(false);
+            return Ok(None);
         };
         let other = if let Some((b, EntityRef::Edge(e))) = geometry.topology_entity(object) {
             let edge = b.edge(e)?;
             let Some(other) = edge.curve.as_ref() else {
-                return Ok(false);
+                return Ok(None);
             };
             // Identity is a proof even for definitions with no polynomial form.
             if std::ptr::eq(curve, other) {
-                return Ok(true);
+                return Ok(Some(true));
             }
             match curve.kind() {
                 CurveKind::CrvOnSurf(source) if same_native_surface(source.surface(), surface) => {
@@ -848,7 +859,7 @@ impl<O: ClassObject> CurveClassification<O> {
                             edge.interval,
                             threshold,
                         )? {
-                            return Ok(true);
+                            return Ok(Some(true));
                         }
                     }
                 }
@@ -857,18 +868,18 @@ impl<O: ClassObject> CurveClassification<O> {
             other
         } else {
             let Some(other) = geometry.curve(object) else {
-                return Ok(false);
+                return Ok(None);
             };
             other
         };
         if surface.procedural_definition().is_some() {
-            return Ok(false);
+            return Ok(None);
         }
         k.check_cancelled(OP_GEOM)?;
         let (origin, across) = match surface.kind() {
             SurfaceKind::Plane(plane) => {
                 let Some(line) = of_line(curve, interval.interval) else {
-                    return Ok(false);
+                    return Ok(None);
                 };
                 let (origin, tangent) = line.jet_over(Ivl::from(interval.interval.min()));
                 let axes = plane.position();
@@ -878,15 +889,15 @@ impl<O: ClassObject> CurveClassification<O> {
             }
             SurfaceKind::Cone(_) => {
                 let Some(uv_curve) = self.uv_curve1().and_then(|c| geometry.curve(c)) else {
-                    return Ok(false);
+                    return Ok(None);
                 };
                 let Some(frame) = ruling_frame(k, curve, uv_curve, surface, interval.interval)?
                 else {
-                    return Ok(false);
+                    return Ok(None);
                 };
                 frame
             }
-            _ => return Ok(false),
+            _ => return Ok(None),
         };
         Ok(native_curve_in_strip(other, origin, across, threshold))
     }
@@ -3557,29 +3568,43 @@ fn native_curve_in_strip(
     origin: [Ivl; 3],
     across: [Ivl; 3],
     threshold: f64,
-) -> bool {
+) -> Option<bool> {
     let length = interval_dot(across, across).sqrt();
     if !(length.lo > 0.0 && length.hi.is_finite()) {
-        return false;
+        return None;
     }
+    // `Some(true)` inside, `Some(false)` provably outside, `None` undecided.
     let in_strip = |point: [Ivl; 3]| {
         let [px, py, pz] = point;
         let [ox, oy, oz] = origin;
         let offset = [px - ox, py - oy, pz - oz];
-        (interval_dot(offset, across) / length).mag() < threshold
+        let distance = (interval_dot(offset, across) / length).mag();
+        if distance < threshold {
+            Some(true)
+        } else if distance.lo >= threshold {
+            Some(false)
+        } else {
+            None
+        }
     };
     match curve.kind() {
         CurveKind::Line(_) => {
-            let Some(line) = of_line(curve, curve.natural_interval()) else {
-                return false;
-            };
-            in_strip(line.jet_over(Ivl::from(curve.natural_interval().min())).0)
-                && in_strip(line.jet_over(Ivl::from(curve.natural_interval().max())).0)
+            let line = of_line(curve, curve.natural_interval())?;
+            let ends = [
+                in_strip(line.jet_over(Ivl::from(curve.natural_interval().min())).0),
+                in_strip(line.jet_over(Ivl::from(curve.natural_interval().max())).0),
+            ];
+            if ends.contains(&Some(false)) {
+                Some(false)
+            } else if ends == [Some(true); 2] {
+                Some(true)
+            } else {
+                None
+            }
         }
         CurveKind::BSpline(spline) => {
-            let Some(net) = convex_native_net(spline) else {
-                return false;
-            };
+            let net = convex_native_net(spline)?;
+            let mut proved = !net.cpts().is_empty();
             for cp in net.cpts() {
                 let w = if cp.w == crate::nurbs::math::NOW {
                     1.0
@@ -3587,20 +3612,22 @@ fn native_curve_in_strip(
                     cp.w
                 };
                 if !(w > 0.0 && w.is_finite()) {
-                    return false;
+                    return None;
                 }
                 let z = if cp.z == crate::nurbs::math::NOZ {
                     0.0
                 } else {
                     cp.z
                 };
-                if !in_strip([cp.x, cp.y, z].map(|v| Ivl::from(v) / Ivl::from(w))) {
-                    return false;
+                match in_strip([cp.x, cp.y, z].map(|v| Ivl::from(v) / Ivl::from(w))) {
+                    Some(true) => {}
+                    Some(false) => return Some(false),
+                    None => proved = false,
                 }
             }
-            !net.cpts().is_empty()
+            proved.then_some(true)
         }
-        _ => false,
+        _ => None,
     }
 }
 
@@ -3787,10 +3814,14 @@ mod tests {
         // The same infinite isoparametric support does not prove coincidence
         // with this finite source: the last endpoint extends beyond its image.
         assert!(!same_iso_support(&source, &rational(1.25)));
-        assert!(!same_iso_support(
-            &source,
-            &line([2.0, 0.0, 0.0], [2.0, 1.25, 0.0]),
+        // `Line::bounded` unitizes its vector, so the longer image is its domain.
+        let longer = Curve::from(Line::bounded(
+            Vec3::from_array([2.0, 0.0, 0.0]),
+            Vec3::from_array([0.0, 1.0, 0.0]),
+            &Extent1d::from_min_max(0.0, 1.25),
+            &BoundedLineOptions::default(),
         ));
+        assert!(!same_iso_support(&source, &longer));
     }
 
     #[test]

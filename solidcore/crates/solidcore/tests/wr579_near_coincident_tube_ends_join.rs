@@ -243,11 +243,13 @@ fn wr575_tube_ends_join_adds_no_check_failure_at_any_gap() {
     // circle's half-turn knot, so both pieces' short end spans fail `SmEllipse` #1/#2
     // (1.8e-6 and 1.2e-6; one piece, 1.5e-6, before): WR-575's defect, which its flag
     // clears, as the flag-on rows show.
+    // The `SmBrep` #0/#2 gap pairs at 1e-5 are gone too: a vertex or edge gap is valid
+    // within the sum of the incident local zones (#16357), not half the vertex's own.
     // Face test 36 is gone from every row since #13295: it named the joined tube's seam
     // edge ending at a vertex a few micrometres across the seam, inside the vertex's own
     // tolerance, with no edge beside the seam there: a corner, not a sliver.
     let rows = [
-        (1e-5, false, report(2, 2, 0)),
+        (1e-5, false, report(0, 2, 0)),
         (1e-6, false, report(0, 1, 0)),
         (1e-7, false, report(0, 0, 0)),
         (1e-5, true, report(0, 2, 0)),

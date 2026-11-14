@@ -702,6 +702,9 @@ fn locally_tolerant_sheets(k: &mut Kernel, gap: f64) -> Brep {
     let outcome = stitch_faces(k, &mut b, 1e-4, None, false).unwrap();
     assert_eq!(outcome.stitched_edges, 1);
     b.refresh_cached_topology();
+    // `add_square` names each surface's owner by its arena identity, while `new_brep`
+    // checks under the notification scheme: relabel so the check sees the owners.
+    b.use_arena_naming().unwrap();
     assert_eq!(b.edge_list().len(), 7);
     assert_eq!(b.vertex_list().len(), 6);
     b
