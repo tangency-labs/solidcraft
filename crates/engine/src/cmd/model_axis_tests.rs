@@ -157,6 +157,69 @@ fn plane_at_angle_on_a_face_about_an_edge_follows_both() {
     assert!((pl.normal().z.abs() - half).abs() < 1e-9, "{pl:?}");
 }
 
+/// A box `h` high with a construction axis "Rim" on its top front edge (y = 0, along X), and a
+/// plane "Slanted" turned 45 degrees about that axis, given by the axis's name.
+fn slanted_about_a_named_axis() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "20 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": "h", "name": "Base"}));
+    run(&mut s, "construct.axis.edge", json!({"edge": {"edge": [20, 0, 20]}, "name": "Rim"}));
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": "Rim", "angle": "45 deg", "name": "Slanted"}));
+    s
+}
+
+fn slanted(s: &Session) -> Plane {
+    construction_planes(s).into_iter().find(|p| p.1 == "Slanted").map(|p| p.2).unwrap()
+}
+
+#[test]
+fn plane_at_angle_about_a_named_axis_follows_the_axis() {
+    let mut s = slanted_about_a_named_axis();
+    let feature = s.doc.find_feature("Slanted").unwrap();
+    let solidcraft_doc::FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::AtAngle { line, .. } } = &feature.kind else {
+        panic!("at_angle plane: {:?}", feature.kind)
+    };
+    assert!(matches!(line.as_deref(), Some(solidcraft_doc::construct::GeoRef::Axis { name }) if *name == "Rim"), "{line:?}");
+    let half = 0.5_f64.sqrt();
+    let pl = slanted(&s);
+    assert!(pl.height(Vec3::new(0.0, 0.0, 20.0)).abs() < 1e-6, "through the rim: {pl:?}");
+    assert!((pl.normal().z.abs() - half).abs() < 1e-9 && pl.normal().x.abs() < 1e-9, "45 degrees to XY: {pl:?}");
+    // A taller box moves the edge, so the axis and the plane move with it.
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "50 mm"}));
+    let pl = slanted(&s);
+    assert!(pl.height(Vec3::new(0.0, 0.0, 50.0)).abs() < 1e-6, "follows the axis: {pl:?}");
+    assert!(pl.height(Vec3::new(0.0, 0.0, 20.0)).abs() > 1.0, "not where it was: {pl:?}");
+    assert!((pl.normal().z.abs() - half).abs() < 1e-9 && pl.normal().x.abs() < 1e-9, "{pl:?}");
+    // Saved and opened again it still follows.
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    run(&mut reopened, "parameters.change", json!({"name": "h", "expression": "35 mm"}));
+    assert!(slanted(&reopened).height(Vec3::new(0.0, 0.0, 35.0)).abs() < 1e-6);
+}
+
+#[test]
+fn a_plane_at_angle_saved_with_a_fixed_axis_stays_fixed() {
+    let s = slanted_about_a_named_axis();
+    // As older designs hold it: the axis as numbers only, no reference.
+    let mut json: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let mut stripped = 0;
+    if let Some(Value::Array(features)) = json.get_mut("features") {
+        for f in features {
+            let line = f.pointer_mut("/plane/line").filter(|_| f.get("name").and_then(Value::as_str) == Some("Slanted"));
+            if line.is_some() {
+                if let Some(Value::Object(plane)) = f.get_mut("plane") {
+                    plane.remove("line");
+                    stripped += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(stripped, 1, "the reference is saved in the plane: {json}");
+    let mut old = Session::new(solidcraft_doc::Document::from_json(&json.to_string()).unwrap());
+    run(&mut old, "parameters.change", json!({"name": "h", "expression": "50 mm"}));
+    let pl = slanted(&old);
+    assert!(pl.height(Vec3::new(0.0, 0.0, 20.0)).abs() < 1e-6, "fixed where it was saved: {pl:?}");
+}
+
 #[test]
 fn the_axis_keeps_its_turn_whichever_way_the_edge_runs() {
     // The top and bottom rims run opposite ways round the shaft; a quarter turn about either
