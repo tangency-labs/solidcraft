@@ -270,6 +270,11 @@ pub(super) fn validate_and_update(
     result
 }
 
+/// How far past `LARGE_SMALL_SIZE_RATIO` times the body's tolerance a boolean may grow a vertex's
+/// tolerance to cover a computed gap (an imported corner needs 1.14 times the limit; a corner
+/// half a millimetre off its edges in a 10 mm box needs 50 times).
+const GROWTH_PAST_RATIO: f64 = 2.0;
+
 fn validate_and_update_body(
     k: &mut Kernel,
     b: &mut Brep,
@@ -370,10 +375,16 @@ fn validate_and_update_body(
                     out.violated_or_updated = true;
                     if !validate_only {
                         let gap = 2.0 * edge_gap.unwrap_or(0.0).max(face_gap.unwrap_or(0.0));
-                        // A vertex grown past the large/small size ratio of the body is not
-                        // refused here: the pointer check keeps it only if its ball reaches no
-                        // topology it does not bound (Test #82, validity rule 7).
-                        tvertex::set_tolerance(b, v, tol::zone_tol3d(k, gap), true, true)?;
+                        // A tolerance grows to absorb a rounding or intersection gap, not a
+                        // misplaced vertex: growth may pass the large/small size ratio of the
+                        // body (Test #82) only up to `GROWTH_PAST_RATIO` times it, and the
+                        // pointer check then keeps the vertex only if its ball reaches no
+                        // topology it does not bound (validity rule 7). A gap needing more is
+                        // left over its vertex for the check to report.
+                        let grown = tol::zone_tol3d(k, gap);
+                        if grown < GROWTH_PAST_RATIO * tol::LARGE_SMALL_SIZE_RATIO * b.tolerance() {
+                            tvertex::set_tolerance(b, v, grown, true, true)?;
+                        }
                     }
                 }
             }
