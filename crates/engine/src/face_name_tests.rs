@@ -453,11 +453,13 @@ fn a_chamfer_saved_under_numbered_side_pieces_of_a_peg_is_found_at_its_pick() {
     let result = reopened.model.result(reopened.doc.features[lead_in].id).unwrap();
     assert!(!result.skipped && result.error.is_none(), "{:?}", result.error);
     assert!((volume(&mut reopened, "Plate") - chamfered).abs() < 1e-6);
-    let reopened_faces = faces(&mut reopened, "Plate");
-    assert_eq!(reopened_faces.len(), chamfered_faces.len(), "{reopened_faces:?}");
-    for face in &chamfered_faces {
-        assert!(reopened_faces.iter().any(|f| vec(&f["point"]).dist(vec(&face["point"])) < 1e-6), "{face} is not in {reopened_faces:?}");
-    }
+    let names = |all: Vec<Value>| {
+        let mut n: Vec<String> = all.iter().filter_map(|f| f["name"].as_str().map(str::to_owned)).collect();
+        n.sort();
+        n
+    };
+    // The same faces by name: the chamfer's two cone faces and everything around them.
+    assert_eq!(names(faces(&mut reopened, "Plate")), names(chamfered_faces));
 
     // The first name with its pick on the other peg's top edge is not that peg's edge: it asks again.
     let mut off = saved;
