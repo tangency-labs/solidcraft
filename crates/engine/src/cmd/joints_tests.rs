@@ -3573,3 +3573,45 @@ fn driving_a_joint_moves_the_ungrounded_side() {
     assert_eq!(r["moved"], false, "{r}");
     assert_eq!(r["reason"], "both sides are held by grounded parts: Base:1, Post:1", "{r}");
 }
+
+/// A rigid joint whose origin face is gone (its sketch circle replaced) still holds its part at
+/// the pose it had, the error stays on the rigid joint, and a revolute from that part to a leaf
+/// turns only the leaf: the part is not cut from the grounded base (#16139).
+#[test]
+fn a_rigid_joint_with_a_lost_origin_still_holds_its_part() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0]}));
+    let base = occ(&s, "Base");
+    run(&mut s, "occurrence.ground", json!({"occurrence": base, "grounded": true}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Pin"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "PinSketch"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [100, 0], "radius": 5, "id": "c1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 20}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "name": "Fix", "a": {"occurrence": "Base", "face": [20, 20, 10]}, "b": {"occurrence": "Pin", "circle": [105, 0, 20]}}),
+    );
+    part(&mut s, "Leaf", [300.0, 0.0, 0.0]);
+    // The face the rigid joint is made from goes: its name no longer resolves.
+    run(&mut s, "sketch.edit", json!({"sketch": "PinSketch"}));
+    run(&mut s, "sketch.delete", json!({"entities": ["c1"]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [100, 0], "radius": 5, "id": "c2"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let fix = run(&mut s, "joint.inspect", json!({"joint": "Fix"}))["joints"][0].clone();
+    assert!(!fix["errors"].as_array().is_none_or(Vec::is_empty), "the error stays on the rigid joint: {fix}");
+    let (at, leaf_at) = (Vec3::new(100.0, 0.0, 0.0), Vec3::new(301.0, 1.0, 1.0));
+    let (pin0, leaf0) = (place(&s, "Pin", at), place(&s, "Leaf", leaf_at));
+    pin(&mut s, "revolute", "Turn", "Pin", "Leaf", pin0 + Vec3::new(0.0, 0.0, 30.0), Vec3::Y);
+    // The part keeps its relative pose to the base, and the revolute turns only the leaf.
+    let r = run(&mut s, "joint.drive", json!({"joint": "Turn", "value": 40, "quiet": true}));
+    assert_eq!(r["moved"], true, "{r}");
+    assert!(r["reason"].is_null(), "{r}");
+    assert!(near(place(&s, "Pin", at), pin0), "the held part stays: {:?} {pin0:?}", place(&s, "Pin", at));
+    assert!(!near(place(&s, "Leaf", leaf_at), leaf0), "the leaf turns");
+    let fix = run(&mut s, "joint.inspect", json!({"joint": "Fix"}))["joints"][0].clone();
+    assert!(!fix["errors"].as_array().is_none_or(Vec::is_empty), "{fix}");
+}
