@@ -676,3 +676,54 @@ fn sphere_box_edge_cutting_a_shallow_cap() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+/// tangency-labs/solidcraft#16532: a 10 mm box with its edge at (0, 0) rounded with r 2, joined
+/// by a slab whose x-face stands a hair past the round's tangent line x = 2 (where the round
+/// meets the flat face), is one closed manifold solid that checks clean at Level2. The
+/// offsets 2e-5 and 2.5e-5 are where the vertex the join leaves at the tangent line used to
+/// stand off the slab's face by more than the intersection tolerance; 1e-5 and 1e-4 are
+/// either side of them and joined before.
+#[test]
+fn a_slab_a_hair_past_a_fillets_tangent_line_joins_valid() {
+    use solidcore::blend::fillet_executive::api::fillet_edges;
+    use solidcore::topology::{edge, vertex};
+
+    let mut failures = Vec::new();
+    for dx in [1e-5, 2e-5, 2.5e-5, 1e-4] {
+        let mut k = Kernel::default();
+        let mut block =
+            api::create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let corner_edge = block
+            .edges()
+            .ids()
+            .find(|&e| {
+                let Ok((Some(s), Some(t))) = edge::start_end_vertices(&block, e) else {
+                    return false;
+                };
+                let (p, q) = (
+                    vertex::point(&block, s).unwrap(),
+                    vertex::point(&block, t).unwrap(),
+                );
+                p.x.abs() < 1e-9 && p.y.abs() < 1e-9 && q.x.abs() < 1e-9 && q.y.abs() < 1e-9
+            })
+            .unwrap();
+        fillet_edges(&mut k, &mut block, &[corner_edge], 2.0, 1, 1, 1.0).unwrap();
+        let slab =
+            api::create_box(&mut k, Point3::new(2.0 + dx, -5.0, 0.0), 6.0, 10.0, 5.0).unwrap();
+        let mut brep = match boolean_union(&mut k, block, slab) {
+            Ok(b) => b,
+            Err(e) => {
+                failures.push(format!("dx {dx:e}: join refused: {e}"));
+                continue;
+            }
+        };
+        let check = check_brep(&mut k, &mut brep, CheckLevel::Level2).unwrap();
+        if !check.is_valid() {
+            failures.push(format!("dx {dx:e}: Level2 {:?}", check.lines()));
+        }
+        if !solidcore::topology::brep::p2::is_manifold_solid(&brep).unwrap() {
+            failures.push(format!("dx {dx:e}: not a closed manifold solid"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
