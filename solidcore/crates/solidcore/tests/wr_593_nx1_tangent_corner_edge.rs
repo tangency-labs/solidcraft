@@ -8,8 +8,8 @@
 //! bar's flat side meeting its round end, as the corner's edge when it has the arc's
 //! convexity. That edge is G1, so its convexity is only the sign of rounding residues:
 //! with a sketch residue of 1e-10 in the bar's outline one end reads "opposite" and the
-//! round fails with status 1001. The opt-in `fillet_nx1_tangent_corner_edge` takes a
-//! tangential edge there as the corner's edge, as the exact geometry already has it.
+//! round failed with status 1001. A tangential edge there is now taken as the corner's
+//! edge, as the exact geometry already has it.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -85,10 +85,9 @@ fn concave_arc(b: &Brep) -> EdgeId {
     arcs[0]
 }
 
-fn fillet(corner_edge_fix: bool, residue: f64) -> solidcore::Result<f64> {
+fn fillet(residue: f64) -> solidcore::Result<f64> {
     let mut k = Kernel::default();
     k.fixes.fillet_nx1_tangent_side_edge = true;
-    k.fixes.fillet_nx1_tangent_corner_edge = corner_edge_fix;
     let mut body = peg(&mut k, residue);
     let e = concave_arc(&body);
     fillet_edges(&mut k, &mut body, &[e], RADIUS, 1, 1, 1.0)?;
@@ -112,23 +111,21 @@ fn expected_volume() -> f64 {
 }
 
 #[test]
-fn residue_round_fails_without_the_fix() {
-    let err = fillet(false, RESIDUE).unwrap_err();
-    assert_eq!(solidcore::error::upstream_status(&err), Some(1001), "{err}");
-}
-
-#[test]
 fn residue_round_with_the_fix() {
-    let v = fillet(true, RESIDUE).unwrap();
+    let v = fillet(RESIDUE).unwrap();
     let want = expected_volume();
     assert!((v - want).abs() < 1e-3 * want, "{v} vs {want}");
 }
 
 #[test]
-fn exact_round_is_unchanged_by_the_fix() {
-    let off = fillet(false, 0.0).unwrap();
-    let on = fillet(true, 0.0).unwrap();
-    assert_eq!(off.to_bits(), on.to_bits());
+fn exact_round_builds() {
+    // main's volume, bit-identical with the flag on and off there; the closed form holds
+    // to the round's approximation, as for the residue round
+    let v = fillet(0.0).unwrap();
+    let pinned = 3_581.983_727_673_527_5_f64;
+    assert_eq!(v.to_bits(), pinned.to_bits(), "{v} vs {pinned}");
+    let want = expected_volume();
+    assert!((v - want).abs() < 1e-3 * want, "{v} vs {want}");
 }
 
 #[test]

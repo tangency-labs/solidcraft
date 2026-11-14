@@ -1767,9 +1767,7 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "ssi_low_angle_start_on_probation" => &mut k.fixes.ssi_low_angle_start_on_probation,
         "fillet_rails_meet_at_one_end_point" => &mut k.fixes.fillet_rails_meet_at_one_end_point,
         "fillet_nx1_tangent_side_edge" => &mut k.fixes.fillet_nx1_tangent_side_edge,
-        "fillet_nx1_tangent_corner_edge" => &mut k.fixes.fillet_nx1_tangent_corner_edge,
         "fillet_3x2_mixed_concave_side_edge" => &mut k.fixes.fillet_3x2_mixed_concave_side_edge,
-        "fillet_3x2_tangent_side_edge_roles" => &mut k.fixes.fillet_3x2_tangent_side_edge_roles,
         "fillet_mitre_concave_face_corners" => &mut k.fixes.fillet_mitre_concave_face_corners,
         "fillet_mitre_gap_patch" => &mut k.fixes.fillet_mitre_gap_patch,
         "fillet_corner_per_vertex_fan" => &mut k.fixes.fillet_corner_per_vertex_fan,
@@ -1777,7 +1775,6 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "fillet_rail_end_on_continued_surface" => &mut k.fixes.fillet_rail_end_on_continued_surface,
         "fillet_cliff_overflow" => &mut k.fixes.fillet_cliff_overflow,
         "offset_extension_as_itself" => &mut k.fixes.offset_extension_as_itself,
-        "fillet_run_on_past_far_end_only" => &mut k.fixes.fillet_run_on_past_far_end_only,
         _ => k
             .fixes
             .flag_mut(name)

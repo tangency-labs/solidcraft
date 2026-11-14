@@ -142,6 +142,8 @@ mod tests {
         assert!(name.right() < home.left());
     }
 
+    /// Report a bug and the link pills are not in this list: they are flat brand-coloured capsules
+    /// whose hover is a slightly lighter fill of their own colour, not the bar's translucent chrome.
     #[test]
     fn every_bar_control_uses_translucent_hover_chrome() {
         let previous = solidcraft_theme::is_dark();
@@ -163,7 +165,6 @@ mod tests {
                 "titlebar:assistant",
                 "titlebar:preferences",
                 "appbar:help",
-                "titlebar:report",
             ]
             .into_iter()
             .map(|name| crate::scenario::rect_of(name).unwrap_or_else(|| panic!("{name}")))
@@ -205,6 +206,62 @@ mod tests {
             for (t, r) in &texts {
                 assert!(r.right() <= min.left() || r.top() >= min.bottom(), "`{t}` runs under the caption buttons at {width}");
             }
+        }
+    }
+
+    #[test]
+    fn the_link_pills_leave_the_caption_buttons_and_the_controls_alone() {
+        for width in [1280.0, 1600.0] {
+            let mut w = Win::new(width);
+            w.app.home.open = false;
+            w.frame(vec![]);
+            let out = w.frame(vec![]);
+            let [min, ..] = CAPTIONS.map(|c| w.caption(c));
+            let rect = |name: &str| crate::scenario::rect_of(name).unwrap_or_else(|| panic!("{name} at {width}"));
+            let (donate, discord, report) = (rect("titlebar:kofi"), rect("titlebar:discord"), rect("titlebar:report"));
+            assert_eq!(donate.height().max(discord.height()), solidcraft_ui_kit::app_bar::PILL_HEIGHT, "{width}");
+            assert!(
+                donate.right() < discord.left() && discord.right() < report.left() && report.right() <= min.left(),
+                "{width}: {donate:?} {discord:?} {report:?} {min:?}"
+            );
+            for hide in ["titlebar:kofi:hide", "titlebar:discord:hide"] {
+                let x = rect(hide);
+                assert!(x.right() <= report.left() && x.left() >= donate.left(), "{width}: {hide} inside its pill");
+            }
+            // The pills sit left of the assistant and the other controls, which keep their places.
+            if let Some(a) = crate::scenario::rect_of("titlebar:assistant") {
+                assert!(discord.right() <= a.left(), "{width}: the pills overlap the assistant: {discord:?} {a:?}");
+            }
+            for (t, r) in &texts(&out) {
+                assert!(r.right() <= min.left() || r.top() >= min.bottom(), "`{t}` runs under the caption buttons at {width}");
+            }
+            let tabs = crate::scenario::rect_of("tab:design:0");
+            if let Some(tabs) = tabs {
+                assert!(tabs.right() <= donate.left(), "{width}: tabs {tabs:?} run under the pills {donate:?}");
+            }
+            // Donate carries its name on a wide bar and drops it on a narrow one.
+            let named = texts(&out).iter().any(|(t, r)| t == "Donate" && donate.contains_rect(*r));
+            assert_eq!(named, width >= solidcraft_ui_kit::app_bar::PILL_LABEL_MIN, "{width}");
+        }
+    }
+
+    /// On a narrow bar the pills give way to the document tabs: they are left out, and where they
+    /// stay they clear the tabs and the caption buttons.
+    #[test]
+    fn narrow_bars_leave_the_pills_out_before_they_crowd_the_tabs() {
+        for width in [700.0, 900.0, 960.0, 1100.0] {
+            let mut w = Win::new(width);
+            w.app.home.open = false;
+            w.frame(vec![]);
+            w.frame(vec![]);
+            let [min, ..] = CAPTIONS.map(|c| w.caption(c));
+            let tabs = crate::scenario::rect_of("tab:design:0").expect("a tab");
+            for name in ["titlebar:kofi", "titlebar:discord"] {
+                if let Some(r) = crate::scenario::rect_of(name) {
+                    assert!(r.left() >= tabs.right() && r.right() <= min.left(), "{width}: {name} {r:?} crowds the tab {tabs:?}");
+                }
+            }
+            assert!(crate::scenario::rect_of("titlebar:report").is_some(), "{width}: Report a bug stays");
         }
     }
 

@@ -64,6 +64,12 @@
 //!   fail; the port releases it explicitly and reports a release failure (a mark
 //!   bookkeeping fault) as an error. An `OrientTrimmedSurfaces` that fails returns no
 //!   `rbMaybeNotClosedSolid` (upstream may have set it before the failure).
+//! - **Shell walk.** `DeleteFace` marks everything its shell joins to the first vertex
+//!   of the deleted face, then reads the marks of that face's vertices. With a table of
+//!   marks ([`delete_face`]) the port's walk ends when the last of those vertices is
+//!   marked: the same answer, and the same marks as far as the walk goes. With the
+//!   caller's records ([`delete_face_with_body_identity`]), which keep the marks after
+//!   the call as upstream's objects do, the walk is upstream's.
 //! - **Use notifications.** As elsewhere in the crate, the destructors and
 //!   constructors of uses, loops, shells and regions do not notify
 //!   (`SM_NO_DESTRUCTION` / `SM_NO_CONSTRUCTION` at `SmObject` level; `new_brep`'s own
@@ -411,7 +417,10 @@ fn normalized_evaluate(
 
 /// The mark authority used by a deletion's shared traversal body.
 pub(super) enum DeletionMarks<'a> {
+    /// A table of marks: the deletion's working state, read for its own questions only.
     Indexed(&'a mut Marks),
+    /// The caller's notification records, which keep every mark after the call (upstream
+    /// keeps them in the objects).
     Retained,
 }
 
@@ -2832,6 +2841,11 @@ impl Default for DeleteFaceOptions {
 /// vertices that became shell vertices are deleted too; they are returned
 /// (`pOptDeletedEdgesVertices`, stale upstream).
 ///
+/// `marks` is the deletion's working table. The walk that asks whether `f`'s vertices are
+/// still joined to the shell ends when the last of them is marked (not upstream, which
+/// walks on over the shell), so afterwards the table holds the marks that question
+/// needed, not a marking of the shell.
+///
 /// # Errors
 ///
 /// `SM_ERR` when editing is disabled, the face is not in the B-rep, or the topology is
@@ -2863,7 +2877,8 @@ pub fn delete_face(
 }
 
 /// Delete a face using the actual notification records for traversal marks and
-/// an explicitly issued B-rep notification identity.
+/// an explicitly issued B-rep notification identity. The records keep the marks of the
+/// walk over what is left of the shell, so that walk is upstream's whole one.
 ///
 /// # Errors
 /// Those of [`delete_face`]. Earlier edits and retained marks remain on failure.
@@ -3306,8 +3321,24 @@ fn delete_face_nesting(
                 continue;
             }
             if need_traversal {
+                // The walk answers one question: which of the face's vertices the shell
+                // still joins to `v`. A table of marks is read for those vertices and
+                // nothing else, so there the walk ends at the last of them (not upstream).
+                // The caller's records keep every mark after the call, as upstream's
+                // objects do, so there the walk marks everything joined to `v`.
+                let mut asked = match marks {
+                    // (a vertex whose test fails stays asked about, so the loop reports
+                    // the failure after the walk, as before)
+                    DeletionMarks::Indexed(_) => verts
+                        .iter()
+                        .flatten()
+                        .copied()
+                        .filter(|&x| !vertex::is_shell_vertex(b, x).unwrap_or(false))
+                        .collect(),
+                    DeletionMarks::Retained => std::collections::BTreeSet::new(),
+                };
                 marks.with_marks(env.records, env.key_of, |marks| {
-                    tt::shell_traversal_with_marks(k, b, marks, v, shell, None, None, lock)
+                    tt::shell_traversal_to_vertices(k, b, marks, v, shell, &mut asked, lock)
                 })?;
                 need_traversal = false;
             }
@@ -5156,6 +5187,10 @@ mod tests {
                 assert!(records
                     .values()
                     .any(|record| record.get_mark(MarkType::Mark2) > 0));
+                // the records keep the whole walk: every face left in the shell
+                assert!(b.face_list().iter().all(|&f| {
+                    records[&key_of(EntityRef::Face(f)).key].is_marked(&k.context, MarkType::Mark2)
+                }));
             }
             outer
                 .release(core::slice::from_mut(&mut k.context))

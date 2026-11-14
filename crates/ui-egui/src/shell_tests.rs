@@ -1900,6 +1900,72 @@ fn status_bar_units_open_the_units_menu_above_the_bar_and_change_units_in_one_un
     assert!(h.app.viewport.context_menu.is_none());
 }
 
+/// The URL the last frame asked the platform to open.
+fn opened_url(h: &mut Harness) -> Option<String> {
+    h.take_opened().pop()
+}
+
+#[test]
+fn title_bar_pills_open_their_pages_and_the_x_turns_off_only_that_pill() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1280,"height":720}));
+    h.app.home.open = false;
+    h.settle();
+    let report = rect_of("titlebar:report").unwrap();
+    let (donate, discord) = (rect_of("titlebar:kofi").unwrap(), rect_of("titlebar:discord").unwrap());
+    assert!(donate.right() < discord.left() && discord.right() < report.left(), "{donate:?} {discord:?} {report:?}");
+    assert!(h.app.preferences.show_donate_button && h.app.preferences.show_discord_button, "both on by default");
+    for (handle, url) in [("titlebar:kofi", "https://ko-fi.com/bherbruck"), ("titlebar:discord", "https://discord.gg/FtU4NQNVDH")] {
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        assert_eq!(opened_url(&mut h).as_deref(), Some(url), "{handle}");
+    }
+    h.frames(3);
+    assert_eq!(opened_url(&mut h), None, "nothing opens by itself");
+    h.step(&json!({"click":{"handle":"titlebar:kofi:hide"}})).unwrap();
+    h.settle();
+    assert_eq!(opened_url(&mut h), None, "the x only hides");
+    assert!(!h.app.preferences.show_donate_button && h.app.preferences.show_discord_button);
+    assert!(rect_of("titlebar:kofi").is_none() && rect_of("titlebar:discord").is_some() && rect_of("titlebar:report").is_some());
+    h.step(&json!({"click":{"handle":"titlebar:discord:hide"}})).unwrap();
+    h.settle();
+    assert!(!h.app.preferences.show_discord_button && rect_of("titlebar:discord").is_none());
+    h.call("ui.prefs", json!({"show_donate_button": true, "show_discord_button": true}));
+    h.settle();
+    assert!(rect_of("titlebar:kofi").is_some() && rect_of("titlebar:discord").is_some());
+}
+
+#[test]
+fn the_links_stay_in_help_about_and_home_when_the_pills_are_off() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1280,"height":720}));
+    h.call("ui.prefs", json!({"show_donate_button": false, "show_discord_button": false}));
+    h.app.home.open = false;
+    h.settle();
+    assert!(rect_of("titlebar:kofi").is_none() && rect_of("titlebar:discord").is_none());
+    for (label, url) in [("Support SolidCraft on Ko-fi…", "https://ko-fi.com/bherbruck"), ("Join the Discord…", "https://discord.gg/FtU4NQNVDH")]
+    {
+        h.app.help.menu = true;
+        h.frames(2);
+        let [x, y] = h.widget(label).unwrap_or_else(|| panic!("the Help menu lists {label}"));
+        h.call("ui.click", json!({"x": x, "y": y}));
+        assert_eq!(opened_url(&mut h).as_deref(), Some(url), "{label}");
+        assert!(!h.app.help.menu, "the menu closes");
+    }
+    h.app.help.about = true;
+    h.frames(3);
+    for (handle, url) in [("about:kofi", "https://ko-fi.com/bherbruck"), ("about:discord", "https://discord.gg/FtU4NQNVDH")] {
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        assert_eq!(opened_url(&mut h).as_deref(), Some(url), "{handle}");
+    }
+    h.app.help.about = false;
+    h.app.home.open = true;
+    h.frames(3);
+    for (handle, url) in [("home:kofi", "https://ko-fi.com/bherbruck"), ("home:discord", "https://discord.gg/FtU4NQNVDH")] {
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        assert_eq!(opened_url(&mut h).as_deref(), Some(url), "{handle}");
+    }
+}
+
 #[test]
 fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_page_does() {
     use crate::context_menu::Target;

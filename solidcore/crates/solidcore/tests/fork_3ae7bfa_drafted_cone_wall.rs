@@ -639,3 +639,100 @@ fn a_large_arcs_drafted_wall_keeps_its_seams() {
         );
     }
 }
+
+/// A horn whose tip is where its line touches its arc builds (tangency-labs/solidcraft#16003).
+///
+/// The issue's window: the arc of radius r = 746.6148 about c = (-340.6148, 0) touches the
+/// line x = 406 at t = (c + r, 0), and the app splits the region there into two horns. The
+/// lower one, as the app passes it: the arc clockwise from t to s = (371.9150, -223.0132), the
+/// line from s to (406, s.y) and up to t, leaning by k = (t.x - 406) / -s.y (-7e-11, the
+/// tip's rounding), drafted 15 degrees inward over 10. At the tip the curves touch at 0
+/// degrees; drafted, the line's wall x = 406 + k (y - s.y) - z tan 15 cuts the cone
+/// R = r + z tan 15 near y = -sqrt(R^2 - (r - z tan 15)^2) = -2 sqrt(r z tan 15), so the tip's
+/// seam rises from t into the horn. The section at the fraction f of the height,
+/// e = 10 f tan 15, runs from y0 = s.y + e to that crossing y1, between the circle and the
+/// line: `w (y1 - y0) + k ((y1 - s.y)^2 - (y0 - s.y)^2) / 2 - [G]_y0^y1`, w = 406 - e - c,
+/// G(y) = (y sqrt(R^2 - y^2) + R^2 asin(y / R)) / 2, and the volume is `10 int_0^1 S(f) df`,
+/// taken over f = q^2 (the crossing goes as the square root of f). Before, the line and the
+/// circle crossed at the tip with a discriminant of -2.2e-11 against terms of 5e4, rounding's
+/// sign, so the draft was refused (`Apart`) at (406, -223.0132).
+#[test]
+fn a_horn_drafted_from_its_touching_tip_builds() {
+    let c = Point3::new(-340.614_824_473_321_73, 0.0, 0.0);
+    let r = 746.614_824_457_444_7;
+    let t = Point3::new(405.999_999_984_122_95, 0.0, 0.0);
+    let s = Point3::new(371.915_036_667_901_5, -223.013_212_796_215_44, 0.0);
+    let corner = Point3::new(406.0, s.y, 0.0);
+    let mut k = Kernel::default();
+    // as the app builds the arc: from x about -Z over its sweep in degrees
+    let sweep = 0.303_329_283_634_688_53 * 180.0 / PI;
+    let cs = [
+        arc_in(&k, c, r, Vec3::X, Vec3::new(0.0, -1.0, 0.0), sweep),
+        line(s, corner),
+        line(corner, t),
+    ];
+    let mut b = match draft(&mut k, &cs, 15.0) {
+        TaperExtrude::Solid(b) => b,
+        TaperExtrude::Refused(r) => panic!("the lower horn's draft is refused: {r:?}"),
+    };
+    assert_eq!(counts(&b), (5, 9, 6));
+    check(&mut k, &mut b);
+    let cones = get_faces(&b)
+        .unwrap()
+        .into_iter()
+        .filter(|&f| {
+            matches!(
+                face::surface(&b, f).unwrap().unwrap().kind(),
+                SurfaceKind::Cone(_)
+            )
+        })
+        .count();
+    assert_eq!(cones, 1);
+    // the tip keeps its vertex, where the bottom arc, the bottom line and the seam meet
+    assert_eq!(edges_at(&b, t), Some(3));
+    let tan = 15.0_f64.to_radians().tan();
+    let lean = (t.x - 406.0) / -s.y;
+    let area = |f: f64| {
+        let e = 10.0 * f * tan;
+        let big = r + e;
+        let w = 406.0 - e - c.x;
+        let y0 = s.y + e;
+        // the crossing with the upright line, then with the leaning one
+        let y = -(big * big - w * w).max(0.0).sqrt();
+        let x1 = w + lean * (y - s.y);
+        let y1 = -(big * big - x1 * x1).max(0.0).sqrt();
+        let g = |y: f64| 0.5 * (y * (big * big - y * y).sqrt() + big * big * (y / big).asin());
+        let strip = w * (y1 - y0) + 0.5 * lean * ((y1 - s.y).powi(2) - (y0 - s.y).powi(2));
+        strip - (g(y1) - g(y0))
+    };
+    let want = 10.0 * simpson(|q| 2.0 * q * area(q * q));
+    let v = volume(&k, &mut b, 1e-10);
+    assert!((v - want).abs() <= 1e-11 * want, "volume {v} want {want}");
+}
+
+/// The upper half of a crescent between two circles touching inside each other at
+/// (1e8, 0), radii 1e8 and 1e8 - 1 with centres 1 apart, drafted 5 degrees inward over 1e-3:
+/// the tip's seam has parallel end tangents and a middle off its chord, which no conic fits,
+/// so the draft is refused rather than failing on the tangents' crossing.
+#[test]
+fn a_large_crescent_drafted_from_its_touching_tip_is_refused() {
+    let mut k = Kernel::default();
+    let (ra, rb) = (1e8, 99_999_999.0);
+    let a = Point3::new(-ra, 0.0, 0.0);
+    let b = Point3::new(1.0 - rb, 0.0, 0.0);
+    let cs = [
+        arc_in(&k, Point3::new(0.0, 0.0, 0.0), ra, Vec3::X, Vec3::Y, 180.0),
+        line(a, b),
+        arc_in(&k, Point3::new(1.0, 0.0, 0.0), rb, -Vec3::X, Vec3::Y, 180.0),
+    ];
+    let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+    let out = create_taper_extrude_with_corner(
+        &mut k,
+        &refs,
+        1e-3,
+        5.0,
+        3,
+        OffsetCornerType::CurveExtension,
+    );
+    assert!(matches!(out, Ok(TaperExtrude::Refused(_))), "{out:?}");
+}
