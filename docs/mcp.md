@@ -112,10 +112,11 @@ Tool calls read, write and delete files only inside the server's folders:
   folder), where `screenshot` without a `path` goes;
 - every `--allow-path DIR` (repeat it for more). A folder named here is reached in full,
   hidden files included. A folder that does not exist (or can't be resolved) is left out and
-  stderr says so (`allow-path DIR ignored: it doesn't exist`); a refused path under it names that
-  `--allow-path` in the error. A folder that does not exist yet is not accepted: create it, then
-  name it. If every `--allow-path` is unusable the server refuses to start;
-  `--keep-missing-allow-path` starts it anyway with the other folders.
+  stderr says so (`allow-path DIR ignored: it doesn't exist`); the server still starts. In a
+  server that decides paths itself (not bridged to the app with `--connect`), a refused path
+  under it names that `--allow-path` in the error. A folder that does not exist yet is not
+  accepted: create it, then name it. `--require-allow-path` makes the server refuse to start
+  when every `--allow-path` is unusable.
 
 The CLI removes its own scratch folder if it is empty when the MCP command returns, including
 after a startup error. A nonempty scratch folder is kept, so saved files are not deleted.

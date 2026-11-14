@@ -358,7 +358,14 @@ impl PathScope {
     pub fn check(&self, path: &str) -> Result<()> {
         let refused = || {
             let roots: Vec<String> = self.roots.iter().chain(&self.design_roots).map(|r| r.display().to_string()).collect();
-            if let Some(r) = self.rejected.iter().find(|r| std::path::Path::new(path).starts_with(&r.path)) {
+            // A rejected folder is named by its supplied spelling and by its absolute one, so
+            // `exports` given relative also matches a request for `/work/exports/x.sc`.
+            let request = std::path::absolute(path).ok();
+            let names_root = |r: &RejectedRoot| {
+                std::path::Path::new(path).starts_with(&r.path)
+                    || matches!((&request, std::path::absolute(&r.path).ok()), (Some(q), Some(a)) if q.starts_with(a))
+            };
+            if let Some(r) = self.rejected.iter().find(|r| names_root(r)) {
                 return Error::new(
                     ErrorKind::PermissionDenied,
                     format!(
@@ -884,6 +891,11 @@ mod tests {
         assert!(scope.check(&s(root.join("sub/a.txt"))).is_ok());
         let err = scope.check(&s(missing.join("x.txt"))).unwrap_err().to_string();
         assert!(err.contains("--allow-path") && err.contains("doesn't exist") && err.contains("nonexistent"), "{err}");
+        // A relative rejected folder is also named for an absolute request under it.
+        let cwd = std::env::current_dir().unwrap();
+        let rel = PathScope::new_reporting([std::path::PathBuf::from("no-such-exports-16662")]).0;
+        let err = rel.check(&s(cwd.join("no-such-exports-16662/x.sc"))).unwrap_err().to_string();
+        assert!(err.contains("no-such-exports-16662 was named") && err.contains("doesn't exist"), "{err}");
         // All given folders invalid: strict fails with every reason; none given is fine.
         assert_eq!(PathScope::new_strict([missing.clone()]).unwrap_err().len(), 1);
         assert!(PathScope::new_strict([missing.clone(), root.clone()]).is_ok());
