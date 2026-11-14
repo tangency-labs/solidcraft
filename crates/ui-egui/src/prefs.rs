@@ -1331,6 +1331,9 @@ preference_settings! {
     theme: String = "dark".into(), PAGE_APPEARANCE;
     /// A picture behind the model in place of the view's background; empty for none.
     background_image: String = String::new(), PAGE_APPEARANCE;
+    /// A light follows the pointer (`pointer_light`): what reads it (background patterns, a glass
+    /// theme's streaks, a theme's own effects) drifts with it. Off: nothing moves.
+    background_motion: bool = false, PAGE_APPEARANCE;
     /// Theme used when the operating system is light; unknown ids resolve to Light.
     theme_day: String = "light".into(), PAGE_APPEARANCE;
     /// Theme used when the operating system is dark; unknown ids resolve to Dark.
@@ -2535,6 +2538,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     if solidcraft_theme::set_logo_accent(app.preferences.logo_accent) {
         app.styled = false;
     }
+    crate::pointer_light::update(ctx, app.preferences.background_motion);
     // egui's end-of-frame shortcuts only change its context; the saved preference would
     // overwrite that change next frame. Consume the desktop shortcuts into the preference.
     if ctx.options(|o| o.zoom_with_keyboard) && !crate::keymap::capturing(app) {

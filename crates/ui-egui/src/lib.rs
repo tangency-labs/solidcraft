@@ -230,6 +230,7 @@ pub mod plugin_install;
 pub(crate) mod plugin_menu;
 pub(crate) mod plugins;
 pub mod point_clouds;
+pub mod pointer_light;
 pub mod prefs;
 pub mod prefs_notice;
 pub use solidcraft_ui_kit::prefs_window;

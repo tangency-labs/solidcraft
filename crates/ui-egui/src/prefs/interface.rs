@@ -88,6 +88,11 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         }
                     }
                 });
+                // A light that follows the pointer, for what drifts with it.
+                ui_kit::row(ui, "", |ui| {
+                    let response = ui_kit::checkbox(ui, app.tr("prefs.background_motion"), &mut app.preferences.background_motion);
+                    crate::scenario::publish_target("prefs:background_motion", response.rect);
+                });
                 // A picture of the user's behind the model.
                 let label = app.tr("prefs.background_image");
                 ui_kit::row(ui, label, |ui| {
