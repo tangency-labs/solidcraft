@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.pen_tap_toggles_selection": "Pen taps toggle selection",
+    "prefs.pen_tap_toggles_selection_tip": "In the web app, tap an item with a pen to add or remove it from the selection. Tap empty space to clear the selection."
+  },
+  "ar": {
+    "prefs.pen_tap_toggles_selection": "النقر بالقلم يبدّل التحديد",
+    "prefs.pen_tap_toggles_selection_tip": "في تطبيق الويب، انقر على عنصر بالقلم لإضافته إلى التحديد أو إزالته منه. انقر على مساحة فارغة لمسح التحديد."
+  },
+  "de": {
+    "prefs.pen_tap_toggles_selection": "Antippen mit dem Stift schaltet die Auswahl um",
+    "prefs.pen_tap_toggles_selection_tip": "Tippe in der Web-App mit dem Stift auf ein Element, um es zur Auswahl hinzuzufügen oder daraus zu entfernen. Tippe auf eine freie Stelle, um die Auswahl aufzuheben."
+  },
+  "he": {
+    "prefs.pen_tap_toggles_selection": "הקשה בעט משנה את הבחירה",
+    "prefs.pen_tap_toggles_selection_tip": "ביישום האינטרנט, יש להקיש בעט על פריט כדי להוסיף אותו לבחירה או להסיר אותו ממנה. הקשה על שטח ריק מנקה את הבחירה."
+  },
+  "ja": {
+    "prefs.pen_tap_toggles_selection": "ペンのタップで選択を切り替える",
+    "prefs.pen_tap_toggles_selection_tip": "Webアプリで項目をペンでタップすると、選択に追加または選択から除外します。何もない場所をタップすると選択を解除します。"
+  },
+  "ko": {
+    "prefs.pen_tap_toggles_selection": "펜으로 탭하여 선택 전환",
+    "prefs.pen_tap_toggles_selection_tip": "웹 앱에서 펜으로 항목을 탭하면 선택에 추가하거나 선택에서 제거합니다. 빈 공간을 탭하면 선택이 해제됩니다."
+  },
+  "vi": {
+    "prefs.pen_tap_toggles_selection": "Chạm bút để bật hoặc tắt lựa chọn",
+    "prefs.pen_tap_toggles_selection_tip": "Trong ứng dụng web, chạm bút vào một mục để thêm hoặc bỏ mục đó khỏi vùng chọn. Chạm vào chỗ trống để bỏ chọn tất cả."
+  },
+  "zh": {
+    "prefs.pen_tap_toggles_selection": "用触控笔轻点以切换选择",
+    "prefs.pen_tap_toggles_selection_tip": "在网页应用中，用触控笔轻点一个项目可将其加入或移出选区。轻点空白处可清除选区。"
+  }
+}

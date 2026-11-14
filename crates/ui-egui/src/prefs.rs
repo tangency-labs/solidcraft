@@ -1802,6 +1802,8 @@ preference_settings! {
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;
+    /// In the web viewport, a pen tap toggles an item or clears the selection on empty space.
+    pen_tap_toggles_selection: bool = false, PAGE_SKETCH;
     /// Prefer movable sketch points on exact selection ties; off keeps point insertion order.
     prefer_free_sketch_points: bool = true, PAGE_SKETCH;
     /// Opt in to displaying and selecting drawn 3D curve nodes as construction references.

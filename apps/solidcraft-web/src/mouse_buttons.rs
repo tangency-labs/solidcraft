@@ -58,9 +58,44 @@ pub struct Tracker {
     /// The buttons held now went down on the canvas.
     on_canvas: bool,
     pending: Option<Observed>,
+    /// The active pen tip began a primary press on the canvas.
+    pen_contact: Option<i32>,
+    /// Position of a completed pen press, for matching eframe's primary release.
+    pen_release: Option<Pos2>,
 }
 
 impl Tracker {
+    /// Track the pen tip independently of mouse chords and other pointer contacts.
+    fn note_pen(&mut self, id: i32, pressed: bool, on_canvas: bool, pos: Pos2) {
+        if pressed && on_canvas {
+            self.pen_contact = Some(id);
+        } else if !pressed && self.pen_contact == Some(id) {
+            self.pen_contact = None;
+            self.pen_release = Some(pos);
+        }
+    }
+
+    /// A lost or cancelled contact must never be interpreted as a pen tap.
+    fn cancel_pen(&mut self, id: Option<i32>) {
+        if id.is_none() || self.pen_contact == id {
+            self.pen_contact = None;
+            self.pen_release = None;
+        }
+    }
+
+    /// Match the actual release before adding any button corrections or synthetic input.
+    fn take_pen_release(&mut self, events: &[Event]) -> Option<Pos2> {
+        let at = self.pen_release.take()?;
+        events
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, .. } => Some(*pos),
+                _ => None,
+            })
+            .filter(|pos| pos.distance(at) <= 1.0)
+    }
+
     /// Note what happened. Returns true when the held buttons changed, so a frame should run.
     pub fn note(&mut self, happened: Happened) -> bool {
         let before = self.pending.map(|o| o.buttons);
@@ -122,9 +157,11 @@ pub fn egui_down(ctx: &egui::Context) -> [bool; NUM_POINTER_BUTTONS] {
 }
 
 #[cfg(target_arch = "wasm32")]
-/// Add the button events this frame needs (see [`corrections`]).
-pub fn reconcile(tracker: &std::cell::RefCell<Tracker>, ctx: &egui::Context, raw: &mut egui::RawInput) {
-    let Some(observed) = tracker.borrow_mut().take() else { return };
+/// Add missing button events and return the position of a pen-tip release, if any.
+pub fn reconcile(tracker: &std::cell::RefCell<Tracker>, ctx: &egui::Context, raw: &mut egui::RawInput) -> Option<Pos2> {
+    let mut tracker = tracker.borrow_mut();
+    let pen_release = tracker.take_pen_release(&raw.events);
+    let Some(observed) = tracker.take() else { return pen_release };
     let pos = ctx.input(|i| i.pointer.interact_pos().or(i.pointer.latest_pos())).unwrap_or_default();
     let modifiers = ctx.input(|i| i.modifiers);
     let fixes = corrections(egui_down(ctx), &raw.events, observed, pos, modifiers);
@@ -132,6 +169,7 @@ pub fn reconcile(tracker: &std::cell::RefCell<Tracker>, ctx: &egui::Context, raw
         log::debug!("mouse buttons: {fixes:?} to match the browser's {:#07b}", observed.buttons);
     }
     raw.events.extend(fixes);
+    pen_release
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -164,7 +202,8 @@ mod web {
                 Box::new(move |e: web_sys::Event| {
                     let Some(e) = e.dyn_ref::<web_sys::PointerEvent>() else { return };
                     // Touches reach egui through touch events; their buttons aren't tracked here.
-                    if e.pointer_type() == "touch" {
+                    let source = e.pointer_type();
+                    if source == "touch" {
                         return;
                     }
                     let mut down_on_canvas = false;
@@ -173,7 +212,16 @@ mod web {
                         // The release then comes here wherever it happens, even outside the window.
                         let _ = canvas.set_pointer_capture(e.pointer_id());
                     }
-                    if tracker.borrow_mut().note(Happened::Pointer { buttons: e.buttons(), down_on_canvas }) {
+                    let mut tracker = tracker.borrow_mut();
+                    if source == "pen" && e.button() == 0 && name != "pointermove" {
+                        // The canvas fills the page without padding. Match eframe's points at
+                        // the current UI zoom, with room for the browser's coordinate rounding.
+                        let rect = canvas.get_bounding_client_rect();
+                        let zoom = ctx.zoom_factor();
+                        let pos = egui::pos2((e.client_x() as f32 - rect.left() as f32) / zoom, (e.client_y() as f32 - rect.top() as f32) / zoom);
+                        tracker.note_pen(e.pointer_id(), name == "pointerdown", down_on_canvas, pos);
+                    }
+                    if tracker.note(Happened::Pointer { buttons: e.buttons(), down_on_canvas }) {
                         ctx.request_repaint();
                     }
                 }),
@@ -181,15 +229,17 @@ mod web {
         }
         let lost = {
             let (tracker, ctx) = (tracker.clone(), ctx.clone());
-            move || {
-                if tracker.borrow_mut().note(Happened::Lost) {
+            move |id| {
+                let mut tracker = tracker.borrow_mut();
+                tracker.cancel_pen(id);
+                if tracker.note(Happened::Lost) {
                     ctx.request_repaint();
                 }
             }
         };
         for name in ["pointercancel", "lostpointercapture"] {
             let lost = lost.clone();
-            listen(name, Box::new(move |_| lost()));
+            listen(name, Box::new(move |e| lost(e.dyn_ref::<web_sys::PointerEvent>().map(web_sys::PointerEvent::pointer_id))));
         }
         // `blur` doesn't bubble, but a capture listener on the window hears every element's on
         // its way down, not only the window's own.
@@ -199,7 +249,12 @@ mod web {
                 "blur",
                 Box::new(move |e: web_sys::Event| {
                     let of_window = e.target().is_some_and(|t| t.dyn_ref::<web_sys::Window>().is_some());
-                    if tracker.borrow_mut().note(Happened::Blur { of_window }) {
+                    let mut tracker = tracker.borrow_mut();
+                    // A pen tip held while the window loses the focus is never heard lifted.
+                    if of_window {
+                        tracker.cancel_pen(None);
+                    }
+                    if tracker.note(Happened::Blur { of_window }) {
                         ctx.request_repaint();
                     }
                 }),
@@ -210,7 +265,7 @@ mod web {
             "visibilitychange",
             Box::new(move |_| {
                 if document.as_ref().is_some_and(|d| d.visibility_state() == web_sys::VisibilityState::Hidden) {
-                    lost();
+                    lost(None);
                 }
             }),
         );
@@ -263,6 +318,52 @@ mod tests {
 
     fn pointer(buttons: u16, down_on_canvas: bool) -> Happened {
         Happened::Pointer { buttons, down_on_canvas }
+    }
+
+    /// A pen tap is matched once, and only after the same canvas contact releases.
+    #[test]
+    fn pen_release_matches_only_the_canvas_contact() {
+        let mut tracker = Tracker::default();
+        let release = [press(PointerButton::Primary, false)];
+        tracker.note_pen(7, true, false, P);
+        tracker.note_pen(7, false, false, P);
+        assert_eq!(tracker.take_pen_release(&release), None);
+
+        tracker.note_pen(7, true, true, P);
+        tracker.note_pen(8, false, true, P);
+        assert_eq!(tracker.take_pen_release(&release), None);
+        tracker.note_pen(7, false, true, P);
+        assert_eq!(tracker.take_pen_release(&release), Some(P));
+        assert_eq!(tracker.take_pen_release(&release), None);
+    }
+
+    /// Lost, unmatched and cancelled contacts cannot mark a later mouse click as a pen tap.
+    #[test]
+    fn cancelled_or_unmatched_pen_release_is_discarded() {
+        let mut tracker = Tracker::default();
+        let release = [press(PointerButton::Primary, false)];
+        tracker.note_pen(7, true, true, P);
+        tracker.cancel_pen(Some(8));
+        tracker.note_pen(7, false, false, P);
+        assert_eq!(tracker.take_pen_release(&release), Some(P));
+
+        tracker.note_pen(7, true, true, P);
+        tracker.cancel_pen(Some(7));
+        tracker.note_pen(7, false, false, P);
+        assert_eq!(tracker.take_pen_release(&release), None);
+
+        tracker.note_pen(7, true, true, P);
+        tracker.note_pen(7, false, false, P + egui::vec2(10.0, 0.0));
+        assert_eq!(tracker.take_pen_release(&release), None);
+        assert_eq!(tracker.take_pen_release(&release), None);
+
+        tracker.note_pen(7, true, true, P);
+        tracker.note_pen(7, false, false, P);
+        let mut later = press(PointerButton::Primary, false);
+        if let Event::PointerButton { pos, .. } = &mut later {
+            *pos += egui::vec2(10.0, 0.0);
+        }
+        assert_eq!(tracker.take_pen_release(&[release[0].clone(), later]), None);
     }
 
     /// Right, then left, held together; right let go, then left. The browser fires pointerdown
