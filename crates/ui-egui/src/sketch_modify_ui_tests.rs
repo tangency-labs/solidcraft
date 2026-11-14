@@ -663,6 +663,52 @@ fn two_sided_offset_shows_a_dimension_for_each_distance() {
     assert!(first.distance(second) > 20.0, "the two dimensions sit on opposite sides: {first:?} {second:?}");
 }
 
+/// #11908: Finish Sketch or Cancel Sketch closes an Offset window that was never confirmed,
+/// and takes its distance dimension with it. The offset is not applied.
+#[test]
+fn leaving_a_sketch_closes_its_offset_window() {
+    for leave in ["finish", "cancel"] {
+        let (mut h, id) = open("sketch.offset");
+        h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
+        h.frames(2);
+        assert!(crate::scenario::handle_at("arrow").is_some(), "{leave}: the offset distance is on the sketch");
+        let curves_before = {
+            let sid = h.app.session.active_sketch.unwrap();
+            h.app.session.model.state().sketch(sid).unwrap().sketch.curves.len()
+        };
+        if leave == "finish" {
+            h.app.finish_sketch();
+        } else {
+            h.app.cancel_sketch();
+        }
+        h.frames(2);
+        assert!(h.app.dialog.is_none(), "{leave} leaves the offset window open");
+        assert!(h.app.session.active_sketch.is_none(), "{leave}");
+        assert!(crate::scenario::handle_at("arrow").is_none(), "{leave} leaves the offset dimension");
+        let message = h.app.status.as_ref().map(|(text, _, _)| text.as_str()).unwrap_or("");
+        assert!(!message.contains("not available"), "{leave}: {message}");
+        if leave == "finish" {
+            let n: usize = h.app.session.model.state().sketches.iter().map(|s| s.sketch.curves.len()).sum();
+            assert_eq!(n, curves_before, "finishing does not apply the unconfirmed offset");
+        }
+    }
+}
+
+/// A window that is not a sketch command stays open when the sketch ends.
+#[test]
+fn leaving_a_sketch_keeps_a_window_that_is_not_a_sketch_tool() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.start("inspect.measure");
+    h.settle();
+    assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("inspect.measure"));
+    h.app.finish_sketch();
+    h.frames(1);
+    assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("inspect.measure"), "Measure stays open");
+    assert!(h.app.session.active_sketch.is_none());
+}
+
 #[test]
 fn rectangular_pattern_window_opens_instead_of_a_click_tool() {
     let (h, _) = open("sketch.pattern.rectangular");
