@@ -675,11 +675,7 @@ fn a_ridge_along_a_face_is_divided_only_across_it() {
     k.work_counters.reset();
     let bx = calculate_tight_bounding_box(&k, &b, f).unwrap();
     let read = k.work_counters.face_extreme_control_points();
-    assert!(
-        (bx.max().x - 10.0).abs() <= 1e-6,
-        "x max {}",
-        bx.max().x
-    );
+    assert!((bx.max().x - 10.0).abs() <= 1e-6, "x max {}", bx.max().x);
     assert!((bx.min().x - 5.0).abs() <= 1e-6, "x min {}", bx.min().x);
     assert!((bx.min().y + 5.0).abs() <= 1e-6, "y min {}", bx.min().y);
     assert!(
