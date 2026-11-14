@@ -478,9 +478,8 @@ fn thicken_hood_corner(d: f64) -> (Kernel, Brep) {
     (k, out)
 }
 
-/// The thickened sheet is a manifold solid of ten faces (the two faces, their offsets and
-/// the six side walls) whose volume lies in the enclosure and matches the point estimate
-/// to the accuracy the volume is integrated at (1e-6).
+/// The thickened sheet's volume lies in the enclosure and matches the point estimate to
+/// 1e-6 relative, the volume integrated to 1e-10.
 fn assert_hood_corner_volume(k: &Kernel, b: &mut Brep, d: f64) {
     let (a, bb) = (hood_a(), hood_b());
     let s = a.steiner(d, 40) + bb.steiner(d, 40);
@@ -490,7 +489,13 @@ fn assert_hood_corner_volume(k: &Kernel, b: &mut Brep, d: f64) {
     } else {
         (s, s + 2.0 * c, s + c)
     };
-    let v = volume(k, b).unwrap();
+    // integrated to 1e-10, far inside the 1e-6 the estimate is checked to
+    let store = solidcore::geom::attribute::AttributeStore::default();
+    let attrs = solidcore::mass::integrator::properties::PropertyAttributes {
+        store: &store,
+        key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
+    };
+    let v = solidcore::mass::integrator::properties::brep_volume(k, b, 1e-10, &attrs).unwrap();
     assert!(lo <= v && v <= hi, "d {d}: volume {v} outside [{lo}, {hi}]");
     assert!(
         (v - estimate).abs() <= 1e-6 * estimate,
@@ -499,18 +504,13 @@ fn assert_hood_corner_volume(k: &Kernel, b: &mut Brep, d: f64) {
     );
 }
 
-#[test]
-fn hood_corner_thickened_out_is_a_solid() {
-    let (_k, b) = thicken_hood_corner(2.0);
-    assert!(brep_is_manifold_solid(&b).unwrap());
-    assert_eq!(b.face_list().len(), 10);
-}
-
-#[test]
-fn hood_corner_thickened_in_is_a_checked_solid_of_its_volume() {
-    let (mut k, mut b) = thicken_hood_corner(-2.0);
-    assert!(brep_is_manifold_solid(&b).unwrap());
-    assert_eq!(b.face_list().len(), 10);
+/// The thickened sheet is a manifold solid of ten faces (the two faces, their offsets and
+/// the six side walls), Level 2 check-clean, no edge tolerance past twice the drops' 2e-5,
+/// whose volume lies in the enclosure.
+fn assert_checked_hood_corner(d: f64) {
+    let (mut k, mut b) = thicken_hood_corner(d);
+    assert!(brep_is_manifold_solid(&b).unwrap(), "d {d}");
+    assert_eq!(b.face_list().len(), 10, "d {d}");
     let lines = solidcore::topology::brep::validation::check_brep(
         &mut k,
         &mut b,
@@ -518,6 +518,72 @@ fn hood_corner_thickened_in_is_a_checked_solid_of_its_volume() {
     )
     .unwrap()
     .lines();
-    assert!(lines.is_empty(), "{lines:?}");
-    assert_hood_corner_volume(&k, &mut b, -2.0);
+    assert!(lines.is_empty(), "d {d}: {lines:?}");
+    // the trims flattened onto the boundary raised it to 1.03e-3; a drop's reported
+    // deviation (its measured one plus the bound of its boundary moves) can raise it to
+    // twice that deviation, within the drop's 2e-5 tolerance
+    let tol = max_edge_tolerance(&b);
+    assert!(tol <= 4e-5, "d {d}: edge tolerance {tol}");
+    assert_hood_corner_volume(&k, &mut b, d);
+}
+
+/// The largest edge tolerance of the body.
+fn max_edge_tolerance(b: &Brep) -> f64 {
+    b.edge_list()
+        .iter()
+        .map(|&e| b.edge(e).unwrap().tolerance)
+        .fold(0.0, f64::max)
+}
+
+/// Outwards the offset faces overlap at the crease; their mated edge runs into the
+/// domain corner of each face's shrunk surface at a shallow angle, so its UV trims
+/// must not be flattened onto the boundary (`intersect::surface_drop_lib::boundary_moves`).
+#[test]
+fn hood_corner_thickened_out_is_a_checked_solid_of_its_volume() {
+    assert_checked_hood_corner(2.0);
+}
+
+#[test]
+fn hood_corner_thickened_in_is_a_checked_solid_of_its_volume() {
+    assert_checked_hood_corner(-2.0);
+}
+
+/// Thickened in by 0.1, the sheet is a manifold solid of ten faces, check-clean at both
+/// geometry levels, whose volume is within its area times its largest edge tolerance of
+/// the estimate (Steiner's volume plus the crease kites): a tolerance-scale difference.
+#[test]
+fn hood_corner_thickened_in_a_little_is_a_checked_solid_within_tolerance_of_its_volume() {
+    let d = -0.1;
+    let (mut k, mut b) = thicken_hood_corner(d);
+    assert!(brep_is_manifold_solid(&b).unwrap());
+    assert_eq!(b.face_list().len(), 10);
+    for level in [
+        solidcore::topology::brep::validation::CheckLevel::Level1,
+        solidcore::topology::brep::validation::CheckLevel::Level2,
+    ] {
+        let lines = solidcore::topology::brep::validation::check_brep(&mut k, &mut b, level)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "{level:?}: {lines:?}");
+    }
+    let (a, bb) = (hood_a(), hood_b());
+    let estimate = a.steiner(d, 40) + bb.steiner(d, 40) + crease_kites(&a, &bb, d, 40);
+    let area: f64 = b
+        .face_list()
+        .to_vec()
+        .into_iter()
+        .map(|f| solidcore::mass::integrator::properties::face_area(&k, &mut b, f, 1e-9).unwrap())
+        .sum();
+    let tol = max_edge_tolerance(&b);
+    let store = solidcore::geom::attribute::AttributeStore::default();
+    let attrs = solidcore::mass::integrator::properties::PropertyAttributes {
+        store: &store,
+        key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
+    };
+    let v =
+        solidcore::mass::integrator::properties::brep_volume(&k, &mut b, 1e-10, &attrs).unwrap();
+    assert!(
+        (v - estimate).abs() <= area * tol,
+        "volume {v}, estimate {estimate}, area {area} x tolerance {tol}"
+    );
 }

@@ -78,6 +78,7 @@ use crate::surface::surface::p7::drop_vectors_at;
 use crate::surface::surface::Surface;
 use crate::topology::ObjectHandle;
 
+use super::boundary_moves::{fix_boundary_curves_bounded, MoveBound};
 use super::p1::{fix_boundary_curves, DropPt, SM_ERR_OUTSIDE_OF_DOMAIN, SM_SUCCESS};
 
 /// `SM_ERR_INVALID_INPUT` (`SmMessages.h`).
@@ -938,14 +939,48 @@ pub fn flush_curve(
     curves: &mut Vec<BSplineCurve>,
     fix_bc_change: &mut bool,
 ) -> Result<()> {
+    flush_curve_bounded(
+        uv_domain,
+        ctrl_poly,
+        knots,
+        uv_tol_x,
+        uv_tol_y,
+        curves,
+        fix_bc_change,
+        None,
+    )
+}
+
+/// [`flush_curve`] with the polygon fixed up by
+/// [`super::boundary_moves::fix_boundary_curves_bounded`] where `bound` is given (not
+/// upstream: a B-spline surface's drop), by [`fix_boundary_curves`] otherwise.
+///
+/// # Errors
+///
+/// As [`flush_curve`]; those of [`super::boundary_moves::fix_boundary_curves_bounded`].
+#[allow(clippy::too_many_arguments)] // `sm_FlushCrv` and the bound
+pub fn flush_curve_bounded(
+    uv_domain: &Extent2d,
+    ctrl_poly: &mut Vec<Point3>,
+    knots: &mut Vec<f64>,
+    uv_tol_x: f64,
+    uv_tol_y: f64,
+    curves: &mut Vec<BSplineCurve>,
+    fix_bc_change: &mut bool,
+    bound: Option<&MoveBound>,
+) -> Result<()> {
     // no work: no knots
     let num_knots = knots.len();
     if num_knots == 0 {
         return Ok(());
     }
 
-    // postprocess the curve
-    if fix_boundary_curves(ctrl_poly, uv_domain, uv_tol_x, uv_tol_y)? {
+    // postprocess the curve (not upstream: bounded moves where the surface allows it)
+    let fixed = match bound {
+        Some(b) => fix_boundary_curves_bounded(ctrl_poly, knots, uv_domain, uv_tol_x, uv_tol_y, b)?,
+        None => fix_boundary_curves(ctrl_poly, uv_domain, uv_tol_x, uv_tol_y)?,
+    };
+    if fixed {
         *fix_bc_change = true;
     }
 
@@ -1007,6 +1042,45 @@ pub fn add_to_curve(
     curves: &mut Vec<BSplineCurve>,
     fix_bc_change: &mut bool,
 ) -> Result<()> {
+    add_to_curve_bounded(
+        k,
+        surface,
+        uv_domain,
+        start,
+        end,
+        ctrl_poly,
+        knots,
+        approx_tol_3d,
+        uv_tol_x,
+        uv_tol_y,
+        curves,
+        fix_bc_change,
+        None,
+    )
+}
+
+/// [`add_to_curve`] whose flush fixes the polygon up as [`flush_curve_bounded`] does with
+/// `bound` (not upstream).
+///
+/// # Errors
+///
+/// As [`add_to_curve`].
+#[allow(clippy::too_many_arguments)] // `sm_AddToCurve` and the bound
+pub fn add_to_curve_bounded(
+    k: &Kernel,
+    surface: &Surface,
+    uv_domain: &Extent2d,
+    start: &DropPt,
+    end: &DropPt,
+    ctrl_poly: &mut Vec<Point3>,
+    knots: &mut Vec<f64>,
+    approx_tol_3d: f64,
+    uv_tol_x: f64,
+    uv_tol_y: f64,
+    curves: &mut Vec<BSplineCurve>,
+    fix_bc_change: &mut bool,
+    bound: Option<&MoveBound>,
+) -> Result<()> {
     // locals for hermite curve segment
     let scale = end.t - start.t;
     let mut p1 = start.uv_pd[0];
@@ -1066,7 +1140,7 @@ pub fn add_to_curve(
         {
             // span is notC0 or zeroLength - create current curve, restart lists, and
             // carry on.
-            flush_curve(
+            flush_curve_bounded(
                 uv_domain,
                 ctrl_poly,
                 knots,
@@ -1074,6 +1148,7 @@ pub fn add_to_curve(
                 uv_tol_y,
                 curves,
                 fix_bc_change,
+                bound,
             )?;
         }
     } else if !knots.is_empty() {
