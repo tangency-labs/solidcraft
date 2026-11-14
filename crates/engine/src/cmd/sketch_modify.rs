@@ -129,7 +129,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_scale")
         .enabled(in_sketch)
-        .params("entities: [curve/point ids], base: [x,y] or point ref, factor: number; the driving length and radius dimensions wholly inside the selection scale too (a formula becomes `(formula) * factor`)"),
+        .params("entities: [curve/point ids], base: [x,y] or point ref, factor: number; the driving length and radius dimensions wholly inside the selection scale too (a formula becomes `(formula) * factor`); a hold tying the selection to a point that stays is let go when the scale moves away from it"),
     CommandSpec::new("sketch.transform", "Transform", crate::checked!("sketch.transform", transform))
         .contract(&TRANSFORM_CONTRACT)
         .output(output_schema_for::<TransformResult>)
@@ -4159,10 +4159,15 @@ fn scale(s: &mut Session, p: &Value) -> Result<Value> {
         with_ellipse_axes(sk, &mut cs);
         let b = if p.get("base").is_some() { point_or_ref(sk, p, "base", cmd)? } else { Vec2::ZERO };
         let f = move |q: Vec2| b + (q - b) * k;
+        // A constraint tying the selection to a point that stays (a fillet's virtual corner on
+        // the curves' extensions, the sketch origin) is let go when the scale moves the selection
+        // away from it, else the solve bends the profile back toward it (#16611).
+        let held = holding(sk, &involved_points(sk, &cs, &ps));
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
         // The dimensions go with the geometry, else the solve pulls it back to the old sizes (#14411).
         let moved = involved_points(sk, &cs, &ps);
         scale_dimensions(sk, doc, &cs, &moved, k)?;
+        release_broken(sk, &held);
         Ok(ids_of(sk, &cs))
     })?;
     s.doc_mut().prune_model_params();
