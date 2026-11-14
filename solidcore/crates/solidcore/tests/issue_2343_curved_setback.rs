@@ -1851,11 +1851,9 @@ fn hip_roof(k: &mut Kernel, curved: bool) -> Brep {
 /// planar twin's slope), that and z = 6 - x, and z = 6 - x and the first slope. The case
 /// grades the curved roof (its faces' closed forms and a point on each round, the round's
 /// ball at z = 2, the cylinder's axis height, r inside both its faces). Faces: the part's 5,
-/// 4 rounds, 8 patches (17). `fillet_setback_beside_curved_faces` is set here, not left to
-/// the kernel's default.
+/// 4 rounds, 8 patches (17).
 fn hip_roof_case(radii: [f64; 4], curved: bool) -> (Kernel, Brep, Vec<EdgeId>, Case) {
     let mut k = all_fixes();
-    k.fixes.fillet_setback_beside_curved_faces = true;
     let b = hip_roof(&mut k, curved);
     let yc = if curved { -3.0 + 24.0f64.sqrt() } else { 4.0 };
     let edges = [
@@ -1969,7 +1967,6 @@ const CONE_ASKED: f64 = 1.715_475_624_592_318_2;
             degree 9); cone_frustum_named_and_twice_asked_setbacks_build builds what it names"]
 fn cone_frustum_asked_too_short_names_the_grown_setback() {
     let (mut k, mut b, edges, radii, case) = cone_frustum_case();
-    k.fixes.fillet_setback_beside_curved_faces = true;
     let v = vertex_at(&b, case.v);
     let r = round_asked(&mut k, &mut b, &edges, &radii, case.v, Some(CONE_ASKED));
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
@@ -2020,7 +2017,6 @@ fn cone_frustum_named_and_twice_asked_setbacks_build() {
     for placed in [named, 2.0 * CONE_ASKED] {
         let (mut k, mut b, edges, radii, mut case) = cone_frustum_case();
         case.on_rounds.clone_from(&far);
-        k.fixes.fillet_setback_beside_curved_faces = true;
         let r = round_asked(&mut k, &mut b, &edges, &radii, case.v, Some(placed));
         assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
         assert!(r.ok, "asked {placed}: {}", r.reason);
