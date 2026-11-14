@@ -266,6 +266,7 @@ pub mod scenario;
 pub(crate) mod scene_palette;
 pub mod select_other;
 pub mod selection;
+mod selection_length;
 pub mod semantic_content;
 pub mod settings_profiles;
 #[cfg(test)]
