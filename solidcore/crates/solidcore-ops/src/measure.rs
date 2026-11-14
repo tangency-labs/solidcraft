@@ -39,6 +39,15 @@ impl Answer for Vec<Option<f64>> {}
 impl Answer for Vec<Vec<Option<f64>>> {}
 impl Answer for Vec<Result<PointClass>> {}
 
+/// A planar face square to a direction ([`Body::face_square_level`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SquareFaceLevel {
+    /// The signed distance from the origin to the face's plane, along the direction.
+    pub level: f64,
+    /// The face's own tolerance: levels closer than this are the same level on the face.
+    pub tolerance: f64,
+}
+
 fn array(v: Vec3) -> [f64; 3] {
     [v.x, v.y, v.z]
 }
@@ -774,6 +783,50 @@ impl Body {
         }))
     }
 
+    /// Where record face `face` lies along `direction`, when it is a plane square to it: the
+    /// signed distance from `origin` to the face's plane measured along `direction` (a point of
+    /// the face, its centroid, dotted with the unit `direction`), and the face's own tolerance
+    /// (`SmFace::GetTolerance`), the distance within which the kernel takes a point for being on
+    /// the face. `None` for a face that is not planar ([`Body::face_plane_normal`]) or whose
+    /// normal is not parallel to `direction`: the normal's cross with the unit `direction` is
+    /// longer than the normal's proved bound plus the kernel's model tolerance
+    /// (`NL_MTOL`, `nurbs::math::MODEL_TOL`), the tilt below which the kernel takes two
+    /// directions for the same.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces, a `direction` or `origin` that is not
+    /// finite, or input the kernel's query refuses (a `direction` of no length); the errors of
+    /// [`Body::face_plane_normal`] and [`Body::face_centroid`].
+    pub fn face_square_level(
+        &self,
+        order: &Order,
+        face: usize,
+        direction: [f64; 3],
+        origin: [f64; 3],
+    ) -> Result<Option<SquareFaceLevel>> {
+        let f = order::face(order, face)?;
+        let direction = point(direction)?;
+        let origin = point(origin)?;
+        let Some(n) = self.face_plane_normal(order, face)? else {
+            return Ok(None);
+        };
+        let on_face = point(self.face_centroid(order, face, 1e-8)?.centroid)?;
+        let Some(level) =
+            q::face_square_level(point(n.value)?, n.bound, on_face, direction, origin).map_err(
+                |e| match e {
+                    solidcore::SolidError::InvalidInput { .. } => Error::Argument,
+                    e => status(e),
+                },
+            )?
+        else {
+            return Ok(None);
+        };
+        let tolerance = with_body("face_tolerance", self, |_k, b| {
+            Ok(Ok::<f64, Error>(face::tolerance(b, f)?))
+        })??;
+        Ok(Some(SquareFaceLevel { level, tolerance }))
+    }
+
     /// The length of record edge `edge` (`SmApiEdgeComputeLength`) at `relative_accuracy`, as
     /// the kernel's contract takes it (ops passes it on as given).
     ///
@@ -1315,6 +1368,50 @@ pub(crate) mod tests {
             area += ball.face_area(&o, f, 1e-8).unwrap();
         }
         assert!(rel(area, 36.0 * PI), "{area}");
+    }
+
+    /// A box's faces square to +Z: the top and the bottom, at their closed-form levels measured
+    /// from an origin off the box; the four sides are not square to it, and nor is a direction
+    /// tilted past the model tolerance; a sphere has no planar face.
+    #[test]
+    fn a_box_face_square_to_a_direction_is_found_at_its_level() {
+        all_fixes();
+        let b = make_box([0.0, 0.0, 1.0], [2.0, 3.0, 4.0]).unwrap();
+        let o = kernel_order(&b);
+        let mut levels = Vec::new();
+        for f in 0..o.faces.len() {
+            if let Some(s) = b
+                .face_square_level(&o, f, [0.0, 0.0, 2.0], [5.0, 5.0, 0.5])
+                .unwrap()
+            {
+                assert!(s.tolerance > 0.0 && s.tolerance < 1e-3, "{s:?}");
+                levels.push(s.level);
+            }
+        }
+        levels.sort_by(f64::total_cmp);
+        assert_eq!(levels.len(), 2, "{levels:?}");
+        assert!(
+            (levels[0] - 0.5).abs() < 1e-9 && (levels[1] - 4.5).abs() < 1e-9,
+            "{levels:?}"
+        );
+        for f in 0..o.faces.len() {
+            assert_eq!(
+                b.face_square_level(&o, f, [0.0, 0.01, 1.0], [0.0; 3])
+                    .unwrap(),
+                None
+            );
+        }
+        let ball = crate::make_sphere([0.0, 0.0, 0.0], 3.0).unwrap();
+        let ob = kernel_order(&ball);
+        assert_eq!(
+            ball.face_square_level(&ob, 0, [0.0, 0.0, 1.0], [0.0; 3])
+                .unwrap(),
+            None
+        );
+        assert!(matches!(
+            b.face_square_level(&o, 0, [0.0; 3], [0.0; 3]),
+            Err(Error::Argument)
+        ));
     }
 
     /// The partition of two merged boxes: its plane normal refused (no side faces out), as

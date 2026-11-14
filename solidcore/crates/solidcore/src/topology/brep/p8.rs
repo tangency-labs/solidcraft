@@ -25,6 +25,14 @@
 //! - **Notifications.** The Euler operators notify through the caller's [`NotifyEnv`];
 //!   the new face's surface owner is named by the caller's `this_face`, as in
 //!   [`p7::make_face_with_curves`].
+//! - **Exact natural trims (WR-722, opt-in `keep_exact_pcurves`).** Faces made on a
+//!   surface's parameter rectangle keep its given iso-line pcurves. Reprojecting a
+//!   closed section at a collapsed horn rail can choose a different singular parameter.
+//! - **Pole partitions.** After continuity splitting, a B-spline patch is also split
+//!   at interior knot iso curves whose positive-weight control points coincide within
+//!   the B-rep tolerance. A horn sweep's collapsed rail then lies on face boundaries,
+//!   independently of the closed profile's seam. A patch whose isos collapse at every
+//!   knot in a direction is thinner than the tolerance there and is not split.
 //! - **Dead code.** `CreateFaceInRegionFromSurface`'s "new algorithm" branch is not
 //!   ported: `sbUseOldAlgorithm` is a `static constexpr TRUE`, so it is unreachable.
 //! - **Null dereferences** upstream are [`SolidError::InvalidInput`]: a null surface
@@ -83,7 +91,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::query::face::p1 as qf1;
 use crate::surface::surface::p5::DropPointOptions;
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p3::{self, DeleteFaceOptions};
 use crate::topology::brep::p5::{self, EdgeInFace};
 use crate::topology::brep::p7::{self, FaceCurvesInput};
@@ -251,6 +259,7 @@ pub fn create_face_in_region_from_surface(
             orientations: natural.orients,
             loop_points: Vec::new(),
         };
+        let keep = k.fixes.keep_exact_pcurves.then_some(true);
         let made = p7::make_face_with_curves(
             k,
             b,
@@ -259,7 +268,7 @@ pub fn create_face_in_region_from_surface(
             surface,
             uv_domain,
             OrientType::Same,
-            None,
+            keep,
             fenv.this_face,
             fenv.env,
         )
@@ -362,16 +371,84 @@ pub fn create_faces_from_surface(
             }
         }
 
-        // for every subpatch - create face
+        // A pole can be internal to an otherwise G1 patch. Keep that collapsed
+        // rail on a face boundary, even when the profile's seam is elsewhere.
         for srf in sub_patches {
-            let dom = srf.natural_uv_domain_with_nurb(k)?;
-            let region = b.infinite_region();
-            let made = create_face_in_region_from_surface(k, b, region, Some(srf), &dom, fenv)?;
-            new_faces.push(made.face);
+            for part in split_pole_lines(k, srf, b.tolerance())? {
+                let dom = part.natural_uv_domain_with_nurb(k)?;
+                let region = b.infinite_region();
+                let made =
+                    create_face_in_region_from_surface(k, b, region, Some(part), &dom, fenv)?;
+                new_faces.push(made.face);
+            }
         }
         Ok(())
     })?;
     Ok(new_faces)
+}
+
+/// Split collapsed interior knot iso curves after the ordinary continuity splits.
+/// On the whole sweep a rail may move along lines and collapse only at a bend.
+/// A patch whose iso curves collapse at every knot in a direction, its first and
+/// last included, is thinner than the tolerance across that direction: it has no
+/// pole there to keep on a boundary, and it is left whole.
+fn split_pole_lines(k: &Kernel, surface: Surface, tolerance: f64) -> Result<Vec<Surface>> {
+    let mut parts = vec![surface];
+    for direction in [SurfParamType::U, SurfParamType::V] {
+        let mut split = Vec::new();
+        for mut part in parts {
+            let mut poles = Vec::new();
+            if let SurfaceKind::BSpline(net) = part.kind() {
+                let (knots, _) = net.knots(direction, None)?;
+                let mut collapsed = Vec::new();
+                for &parameter in &knots {
+                    collapsed.push(iso_collapses(k, net, direction, parameter, tolerance)?);
+                }
+                if !collapsed.iter().all(|&c| c) {
+                    let last = knots.len().saturating_sub(1);
+                    for (index, (&parameter, &c)) in knots.iter().zip(&collapsed).enumerate() {
+                        if c && index > 0 && index < last {
+                            poles.push(parameter);
+                        }
+                    }
+                }
+            }
+            for parameter in poles {
+                let (left, right) = part.split_at(k, parameter, direction)?;
+                split.push(left);
+                part = right;
+            }
+            split.push(part);
+        }
+        parts = split;
+    }
+    Ok(parts)
+}
+
+/// Whether the iso curve of `net` at `parameter` in `direction` lies within `tolerance`
+/// of one point. Positive rational basis functions sum to one, so the control points
+/// bound the entire iso curve, including between knots.
+fn iso_collapses(
+    k: &Kernel,
+    net: &crate::nurbs::b_spline_surface::BSplineSurface,
+    direction: SurfParamType,
+    parameter: f64,
+    tolerance: f64,
+) -> Result<bool> {
+    use crate::nurbs::b_spline_surface::p2::IsoCurveOptions;
+
+    let iso = net
+        .create_iso_parametric_curve(k, direction, parameter, IsoCurveOptions::default())?
+        .curve
+        .canonical()?;
+    let Some(anchor) = iso.control_points.first() else {
+        return Ok(false);
+    };
+    Ok(iso.weights.iter().all(|w| w.is_finite() && *w > 0.0)
+        && iso.control_points.iter().all(|p| {
+            let gap = anchor.distance(*p);
+            gap.is_finite() && gap <= tolerance
+        }))
 }
 
 // ---- CreatePlanarFaceWith3DCurves -----------------------------------------------------
@@ -1452,6 +1529,55 @@ mod tests {
             )
             .unwrap(),
         )
+    }
+
+    #[test]
+    fn horn_faces_keep_the_internal_pole_on_the_boundary() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::b_spline_curve::NurbCircleParam;
+        use crate::surface::procedural_sweep::ProceduralSweep;
+
+        with_brep(|k, b, fenv| {
+            k.fixes.internal_pole_row_through_knot = true;
+            k.fixes.keep_exact_pcurves = true;
+            let circle = |frame: Axis2Placement, start, end| {
+                BSplineCurve::create_circle_segment(
+                    3,
+                    &frame,
+                    2.0,
+                    start,
+                    end,
+                    NurbCircleParam::Quadratic,
+                )
+                .unwrap()
+            };
+            let profile = circle(
+                Axis2Placement::new(Vec3::ZERO, Vec3::Y, Vec3::Z),
+                -270.0,
+                90.0,
+            );
+            let path = circle(Axis2Placement::IDENTITY, -90.0, 0.0);
+            let (definition, net) =
+                ProceduralSweep::create_path_exact(&profile, &path, Vec3::Z).unwrap();
+            let domain = net.natural_uv_domain();
+            let mut surface = Surface::from(net);
+            surface.set_sweep_definition(definition);
+            let faces =
+                create_faces_from_surface(k, b, Some(surface), &domain, ContinuityType::G1, fenv)
+                    .unwrap();
+            assert_eq!(faces.len(), 2);
+            let mut area = 0.0;
+            for face in faces {
+                let wall = face2::surface(b, face).unwrap().unwrap();
+                assert!(wall
+                    .assert_valid(k, None, 0, crate::geom::assert_array::ObjectKey(0))
+                    .unwrap());
+                area += crate::mass::integrator::properties::face_area(k, b, face, 1e-6).unwrap();
+            }
+            let expected = 4.0 * std::f64::consts::PI.powi(2);
+            eprintln!("horn quarter area {area}, expected {expected}");
+            assert!((area - expected).abs() < 1e-3, "{area}");
+        });
     }
 
     #[test]

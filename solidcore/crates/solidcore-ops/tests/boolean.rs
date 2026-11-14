@@ -1,14 +1,18 @@
 //! The boolean family on bodies whose answers are known.
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // test
 
+mod common;
+
 use std::f64::consts::{PI, TAU};
 use std::io::Read as _;
 
 use serde_json::Value;
+use solidcore::topology::vertex::corner;
 use solidcore_ops::boolean::{boolean, imprint, union_all};
 use solidcore_ops::sweep::{extrude, revolve, Curve, DraftCorner};
 use solidcore_ops::{
-    make_box, make_cone, make_sphere, session, Body, BooleanOp, CheckLevel, Error,
+    blend, make_box, make_cone, make_sphere, session, Blend, Body, BooleanOp, CheckLevel, Corners,
+    Error,
 };
 use solidcore_record::brep::Brep as Record;
 
@@ -1511,4 +1515,90 @@ fn a_traced_cut_meeting_an_earlier_cut_removes_its_tool() {
         .unwrap()
         .unwrap();
     one_valid_solid_of_volume(&r, [46, 132, 88], want, 1e-9);
+}
+
+/// A 10 mm cube with the vertical edge at x = 0, y = 0 rounded to radius 2.
+fn filleted_cube() -> Body {
+    let block = make_box([0.0; 3], [10.0, 10.0, 10.0]).unwrap();
+    let edge = common::edge_at(&block, [0.0, 0.0, 5.0]);
+    blend(&block, Blend::Round, &[edge], &[2.0], &[], Corners::Filled).unwrap();
+    block
+}
+
+/// A 6 x 10 x 5 slab through the cube's front, its near face `dx` past the fillet spring at x = 2.
+fn slab_past_spring(dx: f64) -> Body {
+    make_box([2.0 + dx, -5.0, 0.0], [6.0, 10.0, 5.0]).unwrap()
+}
+
+/// Every vertex under the intersection tolerance of each of its faces, none wider than `max_tol`.
+fn vertex_gaps_within_xsect(body: &Body, max_tol: f64) {
+    let (k, mut brep) = common::kernel_copy(body);
+    let xsect = corner::xsect_tol_3d_of_brep(&k, &brep);
+    for v in brep.vertices().ids().collect::<Vec<_>>() {
+        let (_, gap, _) = corner::is_within_xsect_tol_3d_of_faces(&k, &mut brep, v, true).unwrap();
+        assert!(gap < xsect, "vertex gap {gap} vs {xsect}");
+        let tol = brep.vertex(v).unwrap().tolerance;
+        assert!(tol <= max_tol, "vertex tolerance {tol}");
+    }
+}
+
+/// #16532: a slab whose near face is `dx` past a fillet spring. The cube less one rounded edge is
+/// `960 + 10 PI`; the overlap is the slab's 6 by 5 section over the 5 mm both bodies share, 150
+/// (the offset keeps both of the slab's x faces inside the cube). The result must check valid and
+/// no vertex may grow past 5e-5.
+///
+/// The volume bound is derived from the move. The join places the vertex between the round and
+/// the slab face within `dx` of the slab face (the round meets the flat face at x = 2, the slab
+/// face stands at x = 2 + dx), so the notch's near face is displaced by at most `dx`, and
+/// displacing a face by `d` changes the volume by at most `d` times its area. That face is the
+/// slab's x face inside the cube: `width` (the slab's y extent -5..5 cut to the cube's 0..10,
+/// so 5) by `height` (z 0..5, so 5). The bound is that, plus the file's `near` tolerance for the
+/// volume integral itself.
+fn slab_past_spring_case(dx: f64, op: BooleanOp) {
+    all_fixes();
+    let block = filleted_cube();
+    let report = block.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    let fillet = 960.0 + 10.0 * PI;
+    let expected = match op {
+        BooleanOp::Union => fillet + 300.0 - 150.0,
+        BooleanOp::Subtract => fillet - 150.0,
+        BooleanOp::Intersect => 150.0,
+    };
+    let built = boolean(filleted_cube(), slab_past_spring(dx), op);
+    assert!(built.is_ok(), "{op:?} dx {dx}: {:?}", built.as_ref().err());
+    let result = built.ok().flatten();
+    assert!(result.is_some(), "{op:?} dx {dx}: the boolean left no body");
+    let result = result.unwrap();
+    let report = result.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{op:?} dx {dx}: {}", report.text);
+    let got = volume(&result);
+    let (width, height) = (5.0, 5.0);
+    let moved_volume = dx * width * height;
+    assert!(
+        near(got, expected) || (got - expected).abs() <= moved_volume + 1e-7 * expected.abs(),
+        "{op:?} dx {dx}: {got} vs {expected}, bound {moved_volume}"
+    );
+    vertex_gaps_within_xsect(&result, 5e-5 + 1e-12);
+}
+
+macro_rules! slab_past_spring_cases {
+    ($($name:ident: $dx:expr, $op:ident;)*) => {$(
+        #[test]
+        fn $name() {
+            slab_past_spring_case($dx, BooleanOp::$op);
+        }
+    )*};
+}
+
+slab_past_spring_cases! {
+    issue_16532_union_slab_on_the_spring: 0.0, Union;
+    issue_16532_union_slab_2e5_past_the_spring: 2e-5, Union;
+    issue_16532_union_slab_2_5e5_past_the_spring: 2.5e-5, Union;
+    issue_16532_subtract_slab_on_the_spring: 0.0, Subtract;
+    issue_16532_subtract_slab_2e5_past_the_spring: 2e-5, Subtract;
+    issue_16532_subtract_slab_2_5e5_past_the_spring: 2.5e-5, Subtract;
+    issue_16532_intersect_slab_on_the_spring: 0.0, Intersect;
+    issue_16532_intersect_slab_2e5_past_the_spring: 2e-5, Intersect;
+    issue_16532_intersect_slab_2_5e5_past_the_spring: 2.5e-5, Intersect;
 }

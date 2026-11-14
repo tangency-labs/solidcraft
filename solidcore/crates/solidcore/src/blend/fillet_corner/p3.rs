@@ -561,8 +561,14 @@ pub(super) fn primary_eu(pseudo: &FilletBrep, e: EdgeId, op: &'static str) -> Re
         .ok_or_else(|| SolidError::blend_missing(op, "the edge's primary edge use"))
 }
 
-/// The largest offset of `solver`'s surfaces (a round's radius, a chamfer's setback): how far
-/// its ball's centre stands off the faces. `0` where it has no offset surface yet.
+/// The largest offset of `solver`'s surfaces: how far its section's centre (a round's ball
+/// centre, the corner of a chamfer's offset planes) stands off each face, a round's radius
+/// and a chamfer's `(d' - d cos w) / sin w` off the face with setback `d` (`d'` on the other,
+/// wedge angle `w`), not its setbacks. #16627: the centre lies on its side face's offset at
+/// this distance, so where the side faces meet at an angle `a` the shared section of a Join
+/// stands at most `2 size tan(a / 2)` off the blends
+/// (`blend_corner::join_within_xsect_tolerance_deg` derives it). `0` where it has no offset
+/// surface yet.
 ///
 /// # Errors
 ///
@@ -1130,12 +1136,16 @@ impl FilletCorner {
                                 // one convexity among three or four edges are the blend
                                 // corner's (SmBlendCorner::Classify: a Turn or a Join), built
                                 // by the two-blend construction moved from SmFilletNx2Corner
-                                // the blends join only where their balls are one within
-                                // the corner's tolerance (`blend_corner::join_tolerance_deg`)
+                                // the blends join only where their sections at the joint
+                                // vertex stand strictly within the B-rep's intersection
+                                // tolerance, which the check holds every vertex to (#16627;
+                                // `blend_corner::join_within_xsect_tolerance_deg`)
                                 let mut size = 0.0_f64;
                                 for &eu in solver_eus {
                                     size = size.max(round_size(solver_of(eu)?)?);
                                 }
+                                let xsect_tol =
+                                    crate::topology::vertex::corner::xsect_tol_3d_of_brep(k, b);
                                 let blend = crate::blend::blend_corner::classify(
                                     k,
                                     b,
@@ -1143,9 +1153,9 @@ impl FilletCorner {
                                     solver_eus,
                                     &all_eus,
                                     tan_tol_deg,
-                                    crate::blend::blend_corner::join_tolerance_deg(
+                                    crate::blend::blend_corner::join_within_xsect_tolerance_deg(
                                         size,
-                                        approx_tol_3d,
+                                        xsect_tol,
                                         tan_tol_deg,
                                     ),
                                 )?;

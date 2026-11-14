@@ -277,6 +277,9 @@ pub(crate) fn realign_import(f: &mut solidcraft_doc::Feature, imp: &StepImport) 
     if !f.link_faces.is_empty() {
         f.link_faces = by_new_index(&matched, &f.link_faces);
     }
+    if !f.link_threads.is_empty() {
+        f.link_threads = by_new_index(&matched, &f.link_threads);
+    }
     if let FeatureKind::Import { components, skip: stored, .. } = &mut f.kind {
         components.clone_from(&imp.tree);
         *stored = skip;

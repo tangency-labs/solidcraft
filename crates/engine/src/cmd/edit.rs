@@ -2174,6 +2174,17 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("old_surface_start").or_insert_with(|| json!(true));
     }
+    // The Hole window sends no tolerance class: an edit that gives none keeps the hole's while its
+    // new thread takes it, and drops it with a size that doesn't (#16336).
+    if let FeatureKind::Hole { thread_class: Some(class), .. } = &old.kind
+        && cid == "solid.hole"
+        && let Some(parameters) = params.as_object_mut()
+        && !parameters.contains_key("thread_class")
+        && let Some(tapped) = parameters.get("thread").and_then(Value::as_str).and_then(solidcraft_doc::parse_tapped_thread)
+        && tapped.check_class(class).is_ok()
+    {
+        parameters.insert("thread_class".into(), json!(class));
+    }
     // Members keep their names through an edit, unless it gives them another name.
     if let FeatureKind::FrameMember { names, body_name, .. } = &old.kind
         && cid == "frame.member"
