@@ -57,7 +57,7 @@ pub(crate) fn edge_section(
     // extended as the trace extends it, so the solve can cross the seam.
     let mut domains = *domains;
     for (rail, (domain, seed)) in domains.iter_mut().zip(&seeds).enumerate() {
-        if seed.seam_side.is_none() {
+        if !seed.rolled {
             continue;
         }
         let Some(slot) = ops.solver().surface(rail)? else {

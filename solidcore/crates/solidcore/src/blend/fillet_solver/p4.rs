@@ -1973,11 +1973,8 @@ fn c3_try_analytic(
         Err(_) => {}
     }
 
-    // WR-420 (fork addition, opt-in): where the centre line collapses to a point, the
-    // corner ball's patch
-    if !cx.k.fixes.fillet_corner_ball_patch {
-        return Ok(false);
-    }
+    // WR-420 (fork addition): where the centre line collapses to a point, the corner
+    // ball's patch
     let tsects = st.store.snapshot(cx.fillets, &st.tsect_pnts)?;
     match FilletSolver::calc_sphere_fillet_geom(ops, cx.k, cx.target, cx.fillets, &tsects, None) {
         Ok(()) => Ok(true),

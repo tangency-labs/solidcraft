@@ -62,16 +62,16 @@ The interaction states (drag onto the bar, drop targets, reorder) stay as in `Na
 | Label | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
 | Preview as | Tabs: Design / Render | previews the shared bar as Design or Render | Design | none | none | Preview modes use the Design or Render capabilities; edits affect the one shared bar in both workspaces. |
-| Preview strip | The bar drawn as it will look, with the slots in order | `navigation_bar.slots` (plus `slot_options`) | orbit, pan, zoom, separator, fit, look_at, home, separator, visual_style, display | none | none | Slot icons on the board are stand-ins; use the app's icons. |
 | Show navigation bar | Checkbox | `app.ui.show_navigation_bar` (session; in the Snapshot) | per session | none | none | |
 | Reset to default | Button | resets `navigation_bar` | n/a | none | none | |
+| When idle | Segmented: Always visible / Fade / Hide until hovered | `navigation_bar.idle` (`Idle`: Always, Fade, Hide) | Fade | none | none | Directly below the header containing Show navigation bar, before the preview strip. Fade dims the bar; Hide until hovered hides it until the pointer is over it. |
+| Preview strip | The bar drawn as it will look, with the slots in order | `navigation_bar.slots` (plus `slot_options`) | orbit, pan, zoom, separator, fit, look_at, home, separator, visual_style, display | none | none | Slot icons on the board are stand-ins; use the app's icons. |
 | 10 of 16 slots | Count text | none | n/a | none | none | Sample numbers; the count is slots on the bar of all available slots. |
 | Available | Row of slot chips, e.g. Faces and edges, Spin, Projection, Ground shadow, Ambient occlusion | none (drag source) | n/a | "Drag onto the bar" on each chip and on the label | none | Slot names and icons are sample content. |
 | Position | Segmented: Left / Centre / Right | `navigation_bar.position` (`Position`) | Centre | none | none | |
 | Edge | Segmented: Bottom / Top | `navigation_bar.edge` (`Edge`) | Bottom | none | none | |
 | Size | Segmented: Compact / Regular | `navigation_bar.size` (`Size`) | Regular | none | none | |
 | Buttons | Segmented: Icons / Icons + labels | `navigation_bar.labels` (`Labels`) | Icons (`Labels::Icons`) | none | none | |
-| When idle | Segmented: Always / Fade / Hover | `navigation_bar.idle` (`Idle`: Always, Fade, Hide) | Fade | none | none | The third option reads "Hover" on the board and `Hide` in the code. |
 
 ## Mismatches
 

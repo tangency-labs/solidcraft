@@ -189,7 +189,7 @@ named size an estimate in the sense of definitions-and-certificates.md §7, inva
 certifying it is open.
 
 **The analytic kinds** never reach these tests: a closed-form radius moved to zero or past it gives
-no surface (§3; `Surface::offset_collapses`), an `SM_ERR` with `offset_missing_surface_fails`, not
+no surface (§3; `Surface::offset_collapses`), an `SM_ERR`, not
 a refusal by name. `SheetClass` (`Regular`, `Inverted`, `Spine`, `sheets.rs`) names the three cases
 but nothing outside its tests calls it yet.
 
@@ -200,9 +200,11 @@ away, as upstream does (`offset_face_prefix`, `p2.rs`).
 **In ops**, `Folds` becomes `Error::WallFolds { largest }` (`solidcore-ops/src/offset.rs`,
 `offset_refused`), the touching walls and the vanishing edge their own errors, and every other
 named reason a named `OffsetRefusal` with the face it names: `Collapses` passes on the distance
-and the radius. `OffsetFailure` is `#[non_exhaustive]`, so ops matches it with a wildcard: a
-reason ops does not name yet takes the error of its class where that has one (walls that touch,
-a fold, a vanishing edge); it and the routines' phrase causes (`OffsetFailure::is_phrase`)
+and the radius, and `Unsound` becomes ops' own `Unsoundness`, the input's entity its check
+names given by its index in the call's record `Order` (`RecordEntity`; a call without an order
+names a face by its place among the body's faces, and no edge or vertex). `OffsetFailure` is
+`#[non_exhaustive]`, so ops matches it with a wildcard: a reason ops does not name yet takes the
+error of its class where that has one (walls that touch, a fold, a vanishing edge); it and the routines' phrase causes (`OffsetFailure::is_phrase`)
 otherwise arrive as the transitional `OffsetRefusal::Phrase`, with the kernel's class, whether it
 is a defect (`OffsetFailure::is_defect`) and the kernel's words. In the sheet offset and the
 symmetric thicken, a refusal `offset_brep` returns before its executive runs (such as
