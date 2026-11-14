@@ -625,14 +625,14 @@ fn stretch_clears_on_surface(
             .iter()
             .copied()
             .find(|&x| x > t_end && x < domain.max())
-            .unwrap_or(domain.max())
+            .unwrap_or_else(|| domain.max())
     } else {
         knots
             .iter()
             .rev()
             .copied()
             .find(|&x| x < t_end && x > domain.min())
-            .unwrap_or(domain.min())
+            .unwrap_or_else(|| domain.min())
     };
     let cap = (knot - t_end).abs();
     // the positive root of `|c''| t² / 2 + |c'| t = L / 4`, in the form that does not cancel
