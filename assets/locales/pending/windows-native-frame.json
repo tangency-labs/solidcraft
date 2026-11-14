@@ -1,41 +1,41 @@
 {
   "en": {
     "prefs.windows_native_frame": "Title bar and window edges behave as in other Windows apps",
-    "prefs.windows_native_frame_help": "Windows moves the window from the title bar, shows snap layouts on Maximize and resizes from just outside the edges. Off keeps SolidCraft's earlier title bar and resize edges. Applies after a restart."
+    "prefs.windows_native_frame_help": "Windows moves the window from the title bar, shows snap layouts on Maximize and resizes from just outside the edges. Off, SolidCraft handles its title bar and resize edges itself. Applies after a restart."
   },
   "en-GB": {
-    "prefs.windows_native_frame_help": "Windows moves the window from the title bar, shows snap layouts on Maximise and resizes from just outside the edges. Off keeps SolidCraft's earlier title bar and resize edges. Applies after a restart."
+    "prefs.windows_native_frame_help": "Windows moves the window from the title bar, shows snap layouts on Maximise and resizes from just outside the edges. Off, SolidCraft handles its title bar and resize edges itself. Applies after a restart."
   },
   "ar": {
     "prefs.windows_native_frame": "شريط العنوان وحواف النافذة تعمل كما في تطبيقات Windows الأخرى",
-    "prefs.windows_native_frame_help": "ينقل Windows النافذة من شريط العنوان، ويعرض تخطيطات المحاذاة على زر تكبير، ويغيّر الحجم من خارج الحواف مباشرة. يحافظ التعطيل على شريط العنوان وحواف تغيير الحجم السابقة في SolidCraft. يُطبَّق بعد إعادة التشغيل."
+    "prefs.windows_native_frame_help": "ينقل Windows النافذة من شريط العنوان، ويعرض تخطيطات المحاذاة على زر تكبير، ويغيّر الحجم من خارج الحواف مباشرة. عند التعطيل، يتولى SolidCraft شريط العنوان وحواف تغيير الحجم بنفسه. يُطبَّق بعد إعادة التشغيل."
   },
   "de": {
     "prefs.windows_native_frame": "Titelleiste und Fensterränder verhalten sich wie in anderen Windows-Apps",
-    "prefs.windows_native_frame_help": "Windows verschiebt das Fenster über die Titelleiste, zeigt bei „Maximieren“ die Andocklayouts und ändert die Größe direkt außerhalb der Ränder. Aus: SolidCraft behält seine frühere Titelleiste und seine früheren Ränder zum Ändern der Größe. Gilt nach einem Neustart."
+    "prefs.windows_native_frame_help": "Windows verschiebt das Fenster über die Titelleiste, zeigt bei „Maximieren“ die Andocklayouts und ändert die Größe direkt außerhalb der Ränder. Aus: SolidCraft steuert seine Titelleiste und die Ränder zum Ändern der Größe selbst. Gilt nach einem Neustart."
   },
   "he": {
     "prefs.windows_native_frame": "שורת הכותרת וקצוות החלון מתנהגים כמו ביישומי Windows אחרים",
-    "prefs.windows_native_frame_help": "Windows מזיז את החלון משורת הכותרת, מציג פריסות הצמדה בלחצן הגדלה ומשנה את הגודל מעט מחוץ לקצוות. כיבוי שומר על שורת הכותרת ועל קצוות שינוי הגודל הקודמים של SolidCraft. ייכנס לתוקף לאחר הפעלה מחדש."
+    "prefs.windows_native_frame_help": "Windows מזיז את החלון משורת הכותרת, מציג פריסות הצמדה בלחצן הגדלה ומשנה את הגודל מעט מחוץ לקצוות. כשהאפשרות כבויה, SolidCraft מטפל בעצמו בשורת הכותרת ובקצוות שינוי הגודל. ייכנס לתוקף לאחר הפעלה מחדש."
   },
   "ja": {
     "prefs.windows_native_frame": "タイトル バーとウィンドウの端を他の Windows アプリと同じ動作にする",
-    "prefs.windows_native_frame_help": "Windows がタイトル バーからウィンドウを移動し、[最大化] でスナップ レイアウトを表示し、端のすぐ外側からサイズを変更します。オフにすると、SolidCraft の以前のタイトル バーとサイズ変更の端を使います。再起動後に適用されます。"
+    "prefs.windows_native_frame_help": "Windows がタイトル バーからウィンドウを移動し、[最大化] でスナップ レイアウトを表示し、端のすぐ外側からサイズを変更します。オフにすると、SolidCraft がタイトル バーとサイズ変更の端を自ら処理します。再起動後に適用されます。"
   },
   "ko": {
     "prefs.windows_native_frame": "제목 표시줄과 창 가장자리가 다른 Windows 앱처럼 동작",
-    "prefs.windows_native_frame_help": "Windows가 제목 표시줄에서 창을 이동하고, 최대화 단추에 스냅 레이아웃을 표시하며, 가장자리 바로 바깥에서 크기를 조정합니다. 끄면 SolidCraft의 이전 제목 표시줄과 크기 조정 가장자리를 유지합니다. 다시 시작한 후 적용됩니다."
+    "prefs.windows_native_frame_help": "Windows가 제목 표시줄에서 창을 이동하고, 최대화 단추에 스냅 레이아웃을 표시하며, 가장자리 바로 바깥에서 크기를 조정합니다. 끄면 SolidCraft가 제목 표시줄과 크기 조정 가장자리를 직접 처리합니다. 다시 시작한 후 적용됩니다."
   },
   "vi": {
     "prefs.windows_native_frame": "Thanh tiêu đề và cạnh cửa sổ hoạt động như trong các ứng dụng Windows khác",
-    "prefs.windows_native_frame_help": "Windows di chuyển cửa sổ từ thanh tiêu đề, hiện bố cục chụp ở nút Phóng to và đổi kích thước từ ngay bên ngoài các cạnh. Tắt để giữ thanh tiêu đề và các cạnh đổi kích thước trước đây của SolidCraft. Áp dụng sau khi khởi động lại."
+    "prefs.windows_native_frame_help": "Windows di chuyển cửa sổ từ thanh tiêu đề, hiện bố cục chụp ở nút Phóng to và đổi kích thước từ ngay bên ngoài các cạnh. Khi tắt, SolidCraft tự xử lý thanh tiêu đề và các cạnh đổi kích thước. Áp dụng sau khi khởi động lại."
   },
   "zh": {
     "prefs.windows_native_frame": "标题栏和窗口边缘的行为与其他 Windows 应用相同",
-    "prefs.windows_native_frame_help": "由 Windows 从标题栏移动窗口、在“最大化”上显示贴靠布局，并从边缘外侧调整大小。关闭时保留 SolidCraft 以前的标题栏和调整大小的边缘。重启后生效。"
+    "prefs.windows_native_frame_help": "由 Windows 从标题栏移动窗口、在“最大化”上显示贴靠布局，并从边缘外侧调整大小。关闭时，由 SolidCraft 自行处理标题栏和调整大小的边缘。重启后生效。"
   },
   "zh-TW": {
     "prefs.windows_native_frame": "標題列和視窗邊緣的行為與其他 Windows 應用程式相同",
-    "prefs.windows_native_frame_help": "由 Windows 從標題列移動視窗、在「最大化」上顯示貼齊版面配置，並從邊緣外側調整大小。關閉時保留 SolidCraft 先前的標題列和調整大小的邊緣。重新啟動後生效。"
+    "prefs.windows_native_frame_help": "由 Windows 從標題列移動視窗、在「最大化」上顯示貼齊版面配置，並從邊緣外側調整大小。關閉時，由 SolidCraft 自行處理標題列和調整大小的邊緣。重新啟動後生效。"
   }
 }

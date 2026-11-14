@@ -541,14 +541,14 @@ pub fn system_title_bar(windows: bool, backends: eframe::wgpu::Backends) -> bool
 }
 
 /// Windows: Preferences > Layout's `windows_native_frame` as `graphics.json` keeps it (read before
-/// the window opens: which part of the window is Windows' is fixed when it is created). On unless
-/// it is saved as `false`; a missing or unreadable value is the default.
+/// the window opens: which part of the window is Windows' is fixed when it is created). Off unless
+/// it is saved as `true`; a missing or unreadable value is the default, off.
 pub fn windows_native_frame(saved: Option<&serde_json::Value>) -> bool {
-    saved.and_then(|v| v.get("windows_native_frame")).and_then(serde_json::Value::as_bool).unwrap_or(true)
+    saved.and_then(|v| v.get("windows_native_frame")).and_then(serde_json::Value::as_bool).unwrap_or(false)
 }
 
-/// Windows: the frame the window opens with. Safe mode starts with the default, as it does with
-/// the other start-up settings it reads from `graphics.json` (anti-aliasing).
+/// Windows: the frame the window opens with. Safe mode starts with the default (off), as it does
+/// with the other start-up settings it reads from `graphics.json` (anti-aliasing).
 #[cfg(any(target_os = "windows", test))]
 pub fn windows_native_frame_at_start(saved: Option<&serde_json::Value>, safe_mode: bool) -> bool {
     windows_native_frame(saved.filter(|_| !safe_mode))
@@ -585,24 +585,26 @@ mod tests {
     }
 
     /// Windows' frame (Preferences > Layout) is read from `graphics.json` before the window opens:
-    /// on unless saved off, and safe mode starts with the default.
+    /// off unless saved on, and safe mode starts with the default (off).
     #[test]
     fn the_window_frame_is_chosen_from_graphics_json_before_the_window_opens() {
         use serde_json::json;
-        let off = json!({"windows_native_frame": false});
+        let on = json!({"windows_native_frame": true});
         for (saved, safe_mode, native) in [
-            (None, false, true),
-            (Some(json!({})), false, true),
-            (Some(json!(null)), false, true),
-            (Some(json!({"windows_native_frame": "no"})), false, true),
-            (Some(json!({"windows_native_frame": true})), false, true),
-            (Some(off.clone()), false, false),
-            (Some(off.clone()), true, true),
+            (None, false, false),
+            (Some(json!({})), false, false),
+            (Some(json!(null)), false, false),
+            (Some(json!({"windows_native_frame": "yes"})), false, false),
+            (Some(json!({"windows_native_frame": 1})), false, false),
+            (Some(json!({"windows_native_frame": false})), false, false),
+            (Some(on.clone()), false, true),
+            (Some(on.clone()), true, false),
+            (None, true, false),
         ] {
             assert_eq!(windows_native_frame_at_start(saved.as_ref(), safe_mode), native, "{saved:?}, safe mode {safe_mode}");
         }
         // Preferences shows the saved choice, also when safe mode did not use it.
-        assert!(!windows_native_frame(Some(&off)));
+        assert!(windows_native_frame(Some(&on)));
     }
 
     #[test]

@@ -1405,10 +1405,10 @@ preference_settings! {
     /// After a ribbon panel menu is open, hover another panel to switch to its menu.
     ribbon_menus_follow_hover: bool = false, PAGE_LAYOUT;
     /// Windows only: the title bar and window edges are Windows' own (a drag from the first pixel,
-    /// snap layouts on Maximize, resize borders just outside the window). Off keeps the title bar
-    /// and resize edges SolidCraft had before. Kept in `graphics.json` and read before the window
-    /// opens, so it applies at the next start ([`WINDOWS_NATIVE_FRAME_AVAILABLE`]).
-    windows_native_frame: bool = true, PAGE_LAYOUT;
+    /// snap layouts on Maximize, resize borders just outside the window). Off, the default,
+    /// SolidCraft handles its title bar and resize edges itself. Kept in `graphics.json` and read
+    /// before the window opens, so it applies at the next start ([`WINDOWS_NATIVE_FRAME_AVAILABLE`]).
+    windows_native_frame: bool = false, PAGE_LAYOUT;
     /// Leave the commands the ribbon shows as buttons (pinned ones) out of its panel drop-downs,
     /// which then list only the rest (#4739).
     ribbon_menus_skip_pinned: bool = false, PAGE_LAYOUT;
@@ -10997,13 +10997,13 @@ mod tests {
         assert!(!h.app.preferences.construct_menu_groups);
     }
 
-    /// Windows' own title bar and window edges: on by default, kept in `graphics.json` for the
+    /// Windows' own title bar and window edges: off by default, kept in `graphics.json` for the
     /// next start (the window's frame is fixed when it opens), set by `ui.prefs`, and put back by
     /// Layout's reset. On other systems the preference doesn't exist for scripts or the file.
     #[test]
     fn windows_native_frame_is_saved_for_the_next_start_and_reset_with_layout_on_windows_only() {
-        assert!(Prefs::default().windows_native_frame);
-        assert!(lenient(&json!({"theme":"light"})).windows_native_frame);
+        assert!(!Prefs::default().windows_native_frame);
+        assert!(!lenient(&json!({"theme":"light"})).windows_native_frame);
         let dir = std::env::temp_dir().join(format!("sc_windows_native_frame_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("graphics.json");
@@ -11013,27 +11013,27 @@ mod tests {
         h.app.services.graphics_path = Some(path.to_string_lossy().into_owned());
         let listed = h.call("ui.prefs", json!({}));
         assert_eq!(listed["result"].get("windows_native_frame").is_some(), WINDOWS_NATIVE_FRAME_AVAILABLE, "{listed}");
-        let out = h.call("ui.prefs", json!({"windows_native_frame": false}));
+        let out = h.call("ui.prefs", json!({"windows_native_frame": true}));
         if WINDOWS_NATIVE_FRAME_AVAILABLE {
-            assert_eq!(out["result"]["windows_native_frame"], false, "{out}");
-            assert!(!h.app.preferences.windows_native_frame);
-            assert_eq!(saved()["windows_native_frame"], false, "kept for the next start");
+            assert_eq!(out["result"]["windows_native_frame"], true, "{out}");
+            assert!(h.app.preferences.windows_native_frame);
+            assert_eq!(saved()["windows_native_frame"], true, "kept for the next start");
             assert_eq!((saved()["backend"].as_str(), saved()["msaa"].as_u64()), (Some("vulkan"), Some(4)), "the other settings stay");
             let mut restored = SolveApp::new(Default::default(), Default::default());
             restored.load_prefs(&h.app.prefs());
-            assert!(!restored.preferences.windows_native_frame);
+            assert!(restored.preferences.windows_native_frame);
             h.call("ui.prefs", json!({"open": "Layout", "button": "defaults"}));
-            assert!(h.app.preferences.windows_native_frame, "Layout's reset turns it back on");
-            assert_eq!(saved()["windows_native_frame"], true, "and the file with it");
-            h.call("ui.prefs", json!({"button": "cancel"}));
-            assert!(!h.app.preferences.windows_native_frame, "Cancel takes the reset back");
+            assert!(!h.app.preferences.windows_native_frame, "Layout's reset turns it back off");
             assert_eq!(saved()["windows_native_frame"], false, "and the file with it");
+            h.call("ui.prefs", json!({"button": "cancel"}));
+            assert!(h.app.preferences.windows_native_frame, "Cancel takes the reset back");
+            assert_eq!(saved()["windows_native_frame"], true, "and the file with it");
             assert!(h.call("ui.prefs", json!({"windows_native_frame": "off"}))["error"].as_str().is_some(), "a refused value");
-            assert!(!h.app.preferences.windows_native_frame, "changes nothing");
+            assert!(h.app.preferences.windows_native_frame, "changes nothing");
         } else {
             let error = out["error"].as_str().unwrap_or_default();
             assert!(error.contains("windows_native_frame") && error.contains("Windows only"), "{out}");
-            assert!(h.app.preferences.windows_native_frame, "a refused value changes nothing");
+            assert!(!h.app.preferences.windows_native_frame, "a refused value changes nothing");
             assert!(saved().get("windows_native_frame").is_none(), "the file has no such setting");
             h.call("ui.prefs", json!({"open": "Layout", "button": "defaults"}));
             assert!(saved().get("windows_native_frame").is_none());
@@ -11045,16 +11045,16 @@ mod tests {
     /// both sides run on every system: the refusal, the reply, the file, and the row.
     #[test]
     fn windows_native_frame_exists_where_available_for_scripts_the_file_and_the_row() {
-        let set = json!({"windows_native_frame": false});
+        let set = json!({"windows_native_frame": true});
         // `ui.prefs` sets it where it exists and refuses it elsewhere, with a message that says so.
         assert_eq!(refuse_unavailable_preferences(&set, true), Ok(()));
         let refused = refuse_unavailable_preferences(&set, false).unwrap_err();
         assert!(refused.contains("windows_native_frame") && refused.contains("Windows only"), "{refused}");
         assert_eq!(refuse_unavailable_preferences(&json!({"msaa": 4}), false), Ok(()), "other keys are not refused");
         // Replies list it where it exists only, and nothing else changes.
-        let p = Prefs { windows_native_frame: false, ..Prefs::default() };
+        let p = Prefs { windows_native_frame: true, ..Prefs::default() };
         let (listed, stripped) = (preferences_reply_where(&p, true).unwrap(), preferences_reply_where(&p, false).unwrap());
-        assert_eq!(listed["windows_native_frame"], false);
+        assert_eq!(listed["windows_native_frame"], true);
         assert!(stripped.get("windows_native_frame").is_none(), "{stripped}");
         let mut without = listed.clone();
         if let Some(o) = without.as_object_mut() {
@@ -11065,14 +11065,14 @@ mod tests {
         let base = json!({"backend": "vulkan", "msaa": 4});
         let mut written = base.clone();
         set_startup_settings(&mut written, &p, true);
-        assert_eq!(written["windows_native_frame"], false, "{written}");
+        assert_eq!(written["windows_native_frame"], true, "{written}");
         assert_eq!((written["backend"].as_str(), written["msaa"].as_u64()), (Some("vulkan"), Some(u64::from(p.msaa))), "{written}");
         let mut elsewhere = base.clone();
         set_startup_settings(&mut elsewhere, &p, false);
         assert!(elsewhere.get("windows_native_frame").is_none(), "{elsewhere}");
-        let mut kept = json!({"windows_native_frame": true});
+        let mut kept = json!({"windows_native_frame": false});
         set_startup_settings(&mut kept, &p, false);
-        assert_eq!(kept["windows_native_frame"], true, "a key it has is left alone");
+        assert_eq!(kept["windows_native_frame"], false, "a key it has is left alone");
         // The row: only where the preference exists and SolidCraft's own title bar is in use.
         assert!(windows_native_frame_row_shown(true, true));
         assert!(!windows_native_frame_row_shown(true, false), "the system title bar: the choice changes nothing");
@@ -11101,9 +11101,9 @@ mod tests {
         super::reveal_preference(&mut h, "prefs:windows_native_frame");
         let checkbox = crate::scenario::handle_at("prefs:windows_native_frame").unwrap();
         h.call("ui.click", json!({"x": checkbox.x, "y": checkbox.y}));
-        assert!(!h.app.preferences.windows_native_frame, "the row turns it off");
+        assert!(h.app.preferences.windows_native_frame, "the row turns it on");
         h.call("ui.click", json!({"x": checkbox.x, "y": checkbox.y}));
-        assert!(h.app.preferences.windows_native_frame, "and on");
+        assert!(!h.app.preferences.windows_native_frame, "and off");
     }
 
     #[test]

@@ -2195,7 +2195,7 @@ mod msaa_tests {
             let mut expected = json!({"window_system": choice, "adapter": "Selected GPU", "backend": "vulkan", "msaa": 1});
             if cfg!(target_os = "windows") {
                 // Windows keeps the window's frame there too (Preferences > Layout), unchanged here.
-                expected["windows_native_frame"] = json!(true);
+                expected["windows_native_frame"] = json!(false);
             }
             assert_eq!(after, expected);
 
@@ -2212,13 +2212,13 @@ mod msaa_tests {
     #[test]
     fn preferences_show_the_saved_window_frame() {
         use serde_json::json;
-        let off = json!({"windows_native_frame": false});
+        let on = json!({"windows_native_frame": true});
         let mut app = super::SolveApp::new(super::Session::default(), super::Services::default());
-        assert!(app.preferences.windows_native_frame, "on by default");
-        super::restore_graphics_preferences(&mut app, Some(&off));
-        assert!(!app.preferences.windows_native_frame, "Preferences shows the saved choice");
+        assert!(!app.preferences.windows_native_frame, "off by default");
+        super::restore_graphics_preferences(&mut app, Some(&on));
+        assert!(app.preferences.windows_native_frame, "Preferences shows the saved choice");
         super::restore_graphics_preferences(&mut app, None);
-        assert!(app.preferences.windows_native_frame);
+        assert!(!app.preferences.windows_native_frame, "a missing value is the default, off");
     }
 
     #[test]

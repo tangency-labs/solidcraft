@@ -5,18 +5,18 @@
 //! the window is created (Preferences > Layout, `windows_native_frame`; [`Frame`], [`choose`]),
 //! and [`install`] puts the matching window procedure in place:
 //!
-//! - [`Frame::Native`] ([`caption_proc`]): restored, winit's `WM_NCCALCSIZE` (vendored) keeps the
-//!   system frame on the left, right and bottom and makes the top client area, where the UI draws
-//!   its title bar. The procedure answers `WM_NCHITTEST` there from the first message on, before
-//!   any frame: the band along the top edge resizes, the bare title bar is `HTCAPTION` and the
-//!   maximize button `HTMAXBUTTON` (Windows 11's snap layouts). egui never sees the presses
-//!   Windows takes there or on the frame, so they are reported to the UI, whose open menus close
-//!   as for a press outside.
-//! - [`Frame::Earlier`] ([`border_proc`]): winit's own `WM_NCCALCSIZE` makes the whole window
-//!   client area, and every point then hit-tests as `HTCLIENT`. The procedure puts the resize
-//!   border back by answering `WM_NCHITTEST` itself: within Windows' resize-border width for the
-//!   window's current DPI from each edge (`solidcraft_ui_egui::titlebar::resize_hit`; 8 px at
+//! - [`Frame::Client`] ([`border_proc`]; the default): winit's own `WM_NCCALCSIZE` makes the whole
+//!   window client area, and every point then hit-tests as `HTCLIENT`. The procedure puts the
+//!   resize border back by answering `WM_NCHITTEST` itself: within Windows' resize-border width for
+//!   the window's current DPI from each edge (`solidcraft_ui_egui::titlebar::resize_hit`; 8 px at
 //!   100 %, corners win), it returns `HTLEFT`, `HTTOPRIGHT`, … The title bar is egui's.
+//! - [`Frame::Native`] ([`caption_proc`]; turned on in Preferences): restored, winit's
+//!   `WM_NCCALCSIZE` (vendored) keeps the system frame on the left, right and bottom and makes the
+//!   top client area, where the UI draws its title bar. The procedure answers `WM_NCHITTEST` there
+//!   from the first message on, before any frame: the band along the top edge resizes, the bare
+//!   title bar is `HTCAPTION` and the maximize button `HTMAXBUTTON` (Windows 11's snap layouts).
+//!   egui never sees the presses Windows takes there or on the frame, so they are reported to the
+//!   UI, whose open menus close as for a press outside.
 //!
 //! Both answer `WM_GETDPISCALEDSIZE` with the size the window will really have at the new DPI, so
 //! a window dragged onto a monitor with another scale rescales once and stays under the pointer.
@@ -124,17 +124,18 @@ static PREVIOUS: AtomicIsize = AtomicIsize::new(0);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Frame {
     /// Windows' own title-bar drag, snap layouts on Maximize, resize borders just outside the
-    /// window, and presses there reported to the UI ([`caption_proc`]). The default.
+    /// window, and presses there reported to the UI ([`caption_proc`]). Turned on in Preferences.
     Native,
-    /// SolidCraft's earlier frame: the title bar is egui's, the resize zones are just inside the
-    /// window, and winit's own non-client calculation applies ([`border_proc`]).
-    Earlier,
+    /// The default frame: the whole window is client area, the title bar is egui's, the resize
+    /// zones are just inside the window, and winit's own non-client calculation applies
+    /// ([`border_proc`]).
+    Client,
 }
 
 impl Frame {
     /// The frame for the preference's value (`windows_native_frame`).
     pub fn from_preference(native: bool) -> Self {
-        if native { Self::Native } else { Self::Earlier }
+        if native { Self::Native } else { Self::Client }
     }
 }
 
@@ -157,7 +158,7 @@ struct Choice {
 fn choice(frame: Frame) -> Choice {
     match frame {
         Frame::Native => Choice { side_frame: true, procedure: caption_proc, window_menu: true },
-        Frame::Earlier => Choice { side_frame: false, procedure: border_proc, window_menu: false },
+        Frame::Client => Choice { side_frame: false, procedure: border_proc, window_menu: false },
     }
 }
 
@@ -322,8 +323,8 @@ unsafe extern "system" fn caption_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpa
     }
 }
 
-/// [`Frame::Earlier`]: the procedure before the native caption (#1381). The whole window is client
-/// area; the resize border along every edge is answered here and the title bar is egui's.
+/// [`Frame::Client`], the default: the whole window is client area; the resize border along every
+/// edge is answered here (#1381) and the title bar is egui's.
 unsafe extern "system" fn border_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let prev = previous();
     // SAFETY: the arguments are the message as Windows delivered it to this window.
@@ -458,7 +459,7 @@ fn resizable(hwnd: HWND) -> bool {
     }
 }
 
-/// The client area's size in pixels (with [`Frame::Earlier`], the whole window).
+/// The client area's size in pixels (with [`Frame::Client`], the whole window).
 fn client_size(hwnd: HWND) -> Option<(i32, i32)> {
     let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
     // SAFETY: `r` is a valid RECT to fill.
@@ -477,7 +478,7 @@ fn border_px(hwnd: HWND) -> f32 {
     if metric > 0 { metric as f32 } else { titlebar::resize_border_px(scale) }
 }
 
-/// [`Frame::Earlier`]: the `HT*` resize code at screen point (`x`, `y`), if it is on the border.
+/// [`Frame::Client`]: the `HT*` resize code at screen point (`x`, `y`), if it is on the border.
 fn border_hit(hwnd: HWND, x: i32, y: i32) -> Option<u32> {
     if !resizable(hwnd) {
         return None;
@@ -490,7 +491,7 @@ fn border_hit(hwnd: HWND, x: i32, y: i32) -> Option<u32> {
     border_code(r, x, y, border_px(hwnd))
 }
 
-/// [`Frame::Earlier`]: the resize code at screen point (`x`, `y`) of window rect `r`, whose
+/// [`Frame::Client`]: the resize code at screen point (`x`, `y`) of window rect `r`, whose
 /// borders along every edge are `edge` wide.
 fn border_code(r: RECT, x: i32, y: i32, edge: f32) -> Option<u32> {
     let w = egui::Rect::from_min_max(egui::pos2(r.left as f32, r.top as f32), egui::pos2(r.right as f32, r.bottom as f32));
@@ -556,11 +557,11 @@ mod tests {
     }
 
     #[test]
-    fn the_earlier_frame_resizes_from_every_edge_just_inside_the_window_as_before() {
-        // As the hit test did before the native caption: every edge and corner, from inside.
-        let earlier: Vec<Option<u32>> = probes().into_iter().map(|(x, y)| border_code(WINDOW, x, y, EDGE)).collect();
+    fn the_client_frame_resizes_from_every_edge_just_inside_the_window() {
+        // The default frame's hit test: every edge and corner, from inside.
+        let client: Vec<Option<u32>> = probes().into_iter().map(|(x, y)| border_code(WINDOW, x, y, EDGE)).collect();
         assert_eq!(
-            earlier,
+            client,
             vec![
                 Some(HTLEFT),
                 Some(HTRIGHT),
@@ -607,16 +608,16 @@ mod tests {
     #[test]
     fn the_preference_picks_the_frame_winit_s_side_frame_the_procedure_and_the_window_menu() {
         assert_eq!(Frame::from_preference(true), Frame::Native);
-        assert_eq!(Frame::from_preference(false), Frame::Earlier);
+        assert_eq!(Frame::from_preference(false), Frame::Client);
         // What `choose` tells winit and what `install` puts in place, for each frame.
         let native = choice(Frame::Native);
         assert!(native.side_frame, "the native frame keeps the system frame on the left, right and bottom");
         assert_eq!(address(native.procedure), address(caption_proc), "the native frame answers the caption");
         assert!(native.window_menu, "the native caption's right-click opens the window menu, with Move and Size");
-        let earlier = choice(Frame::Earlier);
-        assert!(!earlier.side_frame, "the earlier frame keeps winit's own non-client area");
-        assert_eq!(address(earlier.procedure), address(border_proc), "the earlier frame answers only the border");
-        assert!(!earlier.window_menu, "no window handle kept, no Move and Size, as before");
+        let client = choice(Frame::Client);
+        assert!(!client.side_frame, "the client frame keeps winit's own non-client area");
+        assert_eq!(address(client.procedure), address(border_proc), "the client frame answers only the border");
+        assert!(!client.window_menu, "no window handle kept, no Move and Size");
         assert_ne!(address(caption_proc), address(border_proc));
     }
 }

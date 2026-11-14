@@ -817,7 +817,7 @@ pub struct SolveApp {
     pub native_resize_border: bool,
     /// Windows owns the title bar's caption and maximize button, and the frame's presses are
     /// reported ([`titlebar::publish_caption`]; the Windows desktop app with Preferences > Layout's
-    /// `windows_native_frame` on when it started). Off, the bar is egui's, as before.
+    /// `windows_native_frame` on when it started). Off, the default, the bar is egui's.
     pub native_caption: bool,
     /// Tests: the title bar layout the latest frame published for Windows' hit test
     /// ([`titlebar::publish_caption`]), `None` when it published none. The published map itself is

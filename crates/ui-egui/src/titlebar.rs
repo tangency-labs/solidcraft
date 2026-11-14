@@ -443,8 +443,8 @@ mod tests {
         assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::BeginResize(_))), "{cmds:?}");
     }
 
-    /// Windows with Preferences > Layout's `windows_native_frame` off: the window procedure still
-    /// answers the resize border, but the title bar is egui's, as before the native caption. No
+    /// Windows with Preferences > Layout's `windows_native_frame` off, the default: the window
+    /// procedure answers the resize border, and the title bar is egui's. No
     /// layout is published for Windows' hit test (so nothing is `HTCAPTION` or `HTMAXBUTTON`, and
     /// the window procedure has no caption press to report), and a drag on the bare bar moves the
     /// window through egui, once past its drag threshold. The same window with the native caption
@@ -454,7 +454,7 @@ mod tests {
     /// What a frame published is read from the app (`caption_published`), not from the caption
     /// map: that is one per process, and under `cargo test` the frames of every other test clear it.
     #[test]
-    fn with_the_earlier_frame_the_title_bar_stays_egui_s() {
+    fn with_the_default_frame_the_title_bar_stays_egui_s() {
         let starts = |cmds: &[ViewportCommand]| cmds.iter().filter(|c| matches!(c, ViewportCommand::StartDrag)).count();
         let window = |native_caption: bool| {
             let mut w = Win::new(1600.0);
@@ -480,7 +480,7 @@ mod tests {
             assert!(layout.maximize.as_ref().is_some_and(|r| r.contains(mx, my)), "the maximize button is Windows': {layout:?}");
             assert!(!layout.interactive.iter().any(|r| r.contains(bx, by) || r.contains(mx, my)), "{layout:?}");
         }
-        // The earlier frame, frame after frame: nothing is published, so Windows' hit test finds
+        // The default frame, frame after frame: nothing is published, so Windows' hit test finds
         // no caption and no maximize button anywhere.
         let mut w = window(false);
         for _ in 0..3 {
