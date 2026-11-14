@@ -43,7 +43,9 @@ pub fn claim_typed_length(app: &SolveApp, ctx: &egui::Context) {
         return;
     }
     // The first box: X, Y order for a horizontal or vertical line, the distance for a parallel one.
-    let Some(index) = (!t.dims.is_empty()).then_some(0) else { return };
+    // The classic tools (`construction_line_classic`) give it to the Length box, as before.
+    let index = if t.classic { t.dims.iter().position(|b| b.label == "Length") } else { (!t.dims.is_empty()).then_some(0) };
+    let Some(index) = index else { return };
     let digit = ctx.input(|i| {
         !i.modifiers.command
             && !i.modifiers.alt
@@ -360,6 +362,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     // them (#15618); not while a typed value draws the sketch at it. Horizontal and vertical lines
     // show theirs with their value boxes (`sketch_dims`), as they can be typed.
     if t.pts.is_empty()
+        && !t.classic
         && !matches!(mode, "horizontal" | "vertical")
         && crate::dim_view::preview_world(app).is_none()
         && let Some(sketch) =
@@ -408,6 +411,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     // After a segment's first click, its end's coordinates in grey beside the pointer, as the Line
     // tool shows them (#15618).
     if !t.pts.is_empty()
+        && !t.classic
         && let Some(&end) = ends.get(1)
         && crate::dim_view::preview_world(app).is_none()
         && let Some(at) = proj.to_screen(ss.plane.to_world(pointer.0))
