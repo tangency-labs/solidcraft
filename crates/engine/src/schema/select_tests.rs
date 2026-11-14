@@ -268,14 +268,15 @@ fn same_look_selects_the_objects_with_that_appearance() {
         s.param_check = ParamCheck::Warn;
         assert_eq!(strict, off, "{p}");
     }
-    // A key the command doesn't take is refused at every level, as the handler's own
-    // `deny_unknown_fields` already refused it; both name the key the caller wrote.
+    // A key the command doesn't take is refused at every level: with the check off by the handler's
+    // own `deny_unknown_fields`, in warn after the warning, in strict by the contract. Each names
+    // the key the caller wrote.
     let p = json!({"bodyy": "Box1"});
-    let off = s.execute("select.same_look", &p).err().map(|e| e.to_string()).unwrap_or_default();
-    assert!(off.contains("bodyy"), "{off}");
-    s.param_check = ParamCheck::Strict;
-    let strict = s.execute("select.same_look", &p).err().map(|e| e.to_string()).unwrap_or_default();
-    assert!(strict.contains("`bodyy`"), "{strict}");
+    for (level, name) in [(ParamCheck::Off, "off"), (ParamCheck::Warn, "warn"), (ParamCheck::Strict, "strict")] {
+        s.param_check = level;
+        let e = s.execute("select.same_look", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("bodyy"), "{name}: {e}");
+    }
 }
 
 /// One item of every `Sel` variant, as `Sel` serializes it (and the forms it also reads): each is
