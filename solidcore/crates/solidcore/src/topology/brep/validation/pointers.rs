@@ -494,7 +494,7 @@ pub(crate) fn validate_pointers_excluding(
         }
         let Some(fu) = face.faceuse else {
             r.check(b, 12, false, EntityRef::Face(f))?;
-            return Ok(0);
+            return Ok((0, false));
         };
         r.check(b, 13, true, EntityRef::Faceuse(fu))?;
         r.check(
@@ -505,7 +505,7 @@ pub(crate) fn validate_pointers_excluding(
         )?;
         let Some(fum) = b.faceuse(fu)?.mate else {
             r.check(b, 15, false, EntityRef::Faceuse(fu))?;
-            return Ok(0);
+            return Ok((0, false));
         };
         for (i, ok, owner) in [
             (16, true, EntityRef::Faceuse(fum)),
@@ -528,11 +528,11 @@ pub(crate) fn validate_pointers_excluding(
         }
         let Some(s1) = b.faceuse(fu)?.shell else {
             r.check(b, 23, false, EntityRef::Faceuse(fu))?;
-            return Ok(0);
+            return Ok((0, false));
         };
         let Some(s2) = b.faceuse(fum)?.shell else {
             r.check(b, 24, false, EntityRef::Faceuse(fum))?;
-            return Ok(0);
+            return Ok((0, false));
         };
         for (i, ok, s) in [
             (25, true, s1),
@@ -551,11 +551,11 @@ pub(crate) fn validate_pointers_excluding(
             r.check(b, 29, loop_face == f, EntityRef::Loop(l))?;
             let Some(lu) = b.loop_(l)?.loopuse else {
                 r.check(b, 30, false, EntityRef::Loop(l))?;
-                return Ok(0);
+                return Ok((0, false));
             };
             let Some(lum) = b.loopuse(lu)?.mate else {
                 r.check(b, 31, false, EntityRef::Loop(l))?;
-                return Ok(0);
+                return Ok((0, false));
             };
             for (i, owner) in [
                 (32, EntityRef::Loop(l)),
@@ -620,7 +620,7 @@ pub(crate) fn validate_pointers_excluding(
                 }
                 if !matches!(b.loopuse(this)?.start, LoopuseStart::Edgeuse(Some(_))) {
                     r.check(b, missing, false, EntityRef::Loopuse(this))?;
-                    return Ok(0);
+                    return Ok((0, false));
                 }
                 for eu in cache.walk(b, this)? {
                     r.check(b, offset, true, EntityRef::Edgeuse(eu))?;
@@ -739,7 +739,7 @@ pub(crate) fn validate_pointers_excluding(
             let list = &b.faceuse(this)?.loopuses;
             let Some(&first) = list.first() else {
                 r.check(b, missing, false, EntityRef::Faceuse(this))?;
-                return Ok(0);
+                return Ok((0, false));
             };
             r.check(
                 b,
