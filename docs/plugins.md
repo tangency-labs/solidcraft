@@ -220,6 +220,17 @@ extensions it claims, lowercase without the dot:
   the plugin's other grants for that exact package; a plugin copied in by hand, or one whose grant
   is for another package, reads only the file itself. Hidden names, links and paths
   outside the folder are refused; an import reads at most 1 GiB and writes a design of at most 256 MiB.
+- **Checking the result** (capability `evaluate@0.1`, beside `formats@0.1`). A converter that
+  rebuilds a design's history can check it the way it would with the app's command line: it stages
+  a design file it made with `evaluate.stage` (1 MiB per call, 256 MiB in all), and `evaluate.run`
+  opens that design in a private session, apart from every open design and every file, and runs one
+  of `document.inspect`, `inspect.measure`, `model.edges`, `model.faces` or `timeline.roll_to` on
+  it, returning the command's JSON reply (or `{"error": "..."}` when the command fails). Staging
+  again starts a new design; `evaluate.reset` discards it, and nothing outlives the import. The
+  session reads no files, not even fonts or linked designs, and runs no command that writes; its
+  time counts against the import's deadline, and Cancel stops the import between commands. A
+  design the app can't open, a command outside the list or a reply over 1 MiB is an error for that
+  call only, so the importer can report its history as unchecked instead of failing.
 - **Failures.** A trap fails that one import ("Sample failed on bracket.smp: ...") and the next
   one gets a fresh instance. The compiled component stays in memory, so the next file opens
   without compiling again; nothing compiled is written to disk.

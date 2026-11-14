@@ -219,7 +219,8 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
         let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&grants.command_groups).cloned().collect();
         let mut scratch = session.scratch();
         scratch.plugin_state.file_grants = grants.folders;
-        let host = SolidCraftHost { session: scratch, transaction: None, sketch_exits: Vec::new(), groups, file_folders: Vec::new() };
+        let host =
+            SolidCraftHost { session: scratch, transaction: None, sketch_exits: Vec::new(), groups, file_folders: Vec::new(), evaluation: None };
         let file_folders = host
             .granted_folders()
             .into_iter()
@@ -267,8 +268,33 @@ pub struct SolidCraftHost {
     groups: BTreeSet<String>,
     /// The file scope of a granted `file` command; every other command has none.
     file_folders: Vec<PathBuf>,
+    /// An importer's own design, opened to check it (`evaluate@0.1`), apart from every open design.
+    evaluation: Option<Box<Session>>,
 }
+
+/// The commands an importer may run on its own design to check it: they read the model, and
+/// `timeline.roll_to` moves only that private session's marker.
+pub const EVALUATE_COMMANDS: &[&str] = &["document.inspect", "inspect.measure", "model.edges", "model.faces", "timeline.roll_to"];
 impl PluginHost for SolidCraftHost {
+    fn evaluate_open(&mut self, design: &[u8]) -> craft_plugin::Result<()> {
+        let doc = solidcraft_io::read_design(design)
+            .map_err(|e| HostError::InvalidInput { field: "design".into(), reason: format!("SolidCraft can't read this design: {e}") })?;
+        let validation = self.session.validation();
+        // No file reaches this session: not a font, not a linked design.
+        let opened = solidcraft_io::vfs::scoped(Some(Default::default()), || Session::opened_at_validating(doc, None, None, validation));
+        self.evaluation = Some(Box::new(opened));
+        Ok(())
+    }
+    fn evaluate_run(&mut self, command: &str, args: &Value) -> craft_plugin::Result<Value> {
+        if !EVALUATE_COMMANDS.contains(&command) {
+            return Err(HostError::PermissionDenied { permission: format!("evaluate: {command} is not one of {}", EVALUATE_COMMANDS.join(", ")) });
+        }
+        let s = self.evaluation.as_mut().ok_or_else(|| HostError::InvalidInput { field: "evaluate".into(), reason: "no design is open".into() })?;
+        Ok(solidcraft_io::vfs::scoped(Some(Default::default()), || s.execute(command, args)).unwrap_or_else(|e| json!({"error": e.to_string()})))
+    }
+    fn evaluate_close(&mut self) {
+        self.evaluation = None;
+    }
     fn command_catalog(&self) -> Vec<CommandSchema> {
         crate::command_specs()
             .iter()

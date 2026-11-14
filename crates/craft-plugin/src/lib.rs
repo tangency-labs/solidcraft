@@ -59,7 +59,7 @@ pub enum HostError {
 /// The capabilities this host serves, as name and `major.minor`. Each is a set of WIT interfaces
 /// a plugin names in its manifest's `capabilities` list. While a major version is 0, a minor
 /// version may break the one before it, so 0.x matches only the same minor.
-pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("formats", (0, 1))];
+pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
 
 fn capability_version(text: &str) -> Option<(u32, u32)> {
     let mut parts = text.split('.');
@@ -179,6 +179,19 @@ pub trait PluginHost {
     fn is_cancelled(&self) -> bool {
         false
     }
+    /// Opens `design`, a design file an importer made, in a private session apart from every open
+    /// design and every file, for [`PluginHost::evaluate_run`] (capability `evaluate@0.1`). An app
+    /// that doesn't check designs refuses, as here.
+    fn evaluate_open(&mut self, _design: &[u8]) -> Result<()> {
+        Err(HostError::PermissionDenied { permission: "evaluate: this app does not check imported designs".into() })
+    }
+    /// Runs one of the app's read-only commands on the design [`PluginHost::evaluate_open`] opened.
+    /// A command that fails is an answer (`{"error": ...}`), not an error.
+    fn evaluate_run(&mut self, command: &str, _args: &Value) -> Result<Value> {
+        Err(HostError::PermissionDenied { permission: format!("evaluate: {command} is not available") })
+    }
+    /// Discards the session [`PluginHost::evaluate_open`] opened.
+    fn evaluate_close(&mut self) {}
 }
 
 /// User-owned ceilings, separate from the package's exact content-approved request.
@@ -632,6 +645,8 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
             if !manifest.capabilities.iter().any(|capability| capability.starts_with("formats@")) {
                 return Err(invalid("capabilities", "an importer needs the formats capability: \"capabilities\": [\"formats@0.1\"]"));
             }
+        } else if manifest.capabilities.iter().any(|capability| capability.starts_with("evaluate@")) {
+            return Err(invalid("capabilities", "evaluate checks an importer's result: only an importer (formats) asks for it"));
         } else if !manifest.capabilities.iter().any(|capability| capability.starts_with("commands@")) {
             return Err(invalid("capabilities", "a plugin with a runtime needs the commands capability: \"capabilities\": [\"commands@0.1\"]"));
         }
