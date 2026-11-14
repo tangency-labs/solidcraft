@@ -6,8 +6,9 @@
 //! is concave and runs down from the vertex: a 3x2 mixed-convexity corner whose
 //! unfilleted edge is concave. `SmFillet3x2MixedConvexityCorner::MakeCornerTopology`
 //! gives the fillets the roles of an L-shaped box (convex unfilleted edge) and fails
-//! with status 1001. The opt-in `Kernel::fixes.fillet_3x2_mixed_concave_side_edge`
-//! lets the roles follow the unfilleted edge's convexity, as tangency-labs/smlib@1255993.
+//! with status 1001. solidcore lets the roles follow the unfilleted edge's convexity, as
+//! tangency-labs/smlib@1255993 (once the opt-in `fillet_3x2_mixed_concave_side_edge`,
+//! now the only path).
 //!
 //! The operand is the C++ union's body as SolidCraft hands it over (its flat arrays,
 //! written with `BrepData::write_to_file`), read back with SolidCraft's `BrepFromFlat`
@@ -113,9 +114,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 /// Rounds the bar's top front edge and both halves of the boss's base arc as
 /// `SmApiFilletEdgesPerEdge` does; `Err` carries the fillet error info code.
-fn round(fix: bool, radius: f64) -> (Kernel, Brep, Result<(), (solidcore::SolidError, i32)>) {
+fn round(radius: f64) -> (Kernel, Brep, Result<(), (solidcore::SolidError, i32)>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_3x2_mixed_concave_side_edge = fix;
     let mut b = load(&mut k);
     let edges: Vec<EdgeId> = [
         [56.614_378_277_661_47, -15.0, 10.0],
@@ -167,20 +167,9 @@ fn operand_is_the_bar_and_boss() {
 }
 
 #[test]
-fn corner_fails_with_upstream_behaviour() {
-    for radius in [1.0, 2.0] {
-        let (_, _, r) = round(false, radius);
-        let (e, code) = r.unwrap_err();
-        assert!(solidcore::error::upstream_status(&e) == Some(1001), "{e:?}");
-        // SM_FILERR_VERTEX_PROBLEM: "Corner Geometry Computation Failure"
-        assert_eq!(code, 3);
-    }
-}
-
-#[test]
 fn corner_builds_with_the_fix() {
     for radius in [1.0, 2.0] {
-        let (k, mut b, r) = round(true, radius);
+        let (k, mut b, r) = round(radius);
         r.unwrap();
         assert!(is_manifold_solid(&b).unwrap());
         // One closed shell: V - E + F = 16 - 25 + 11 = 2.
