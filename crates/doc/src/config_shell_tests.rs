@@ -299,7 +299,7 @@ fn saved_former_strip_projection_asks_for_its_face_again_without_expanding_healt
 }
 
 #[test]
-fn saved_curved_strip_projection_asks_for_its_face_again_after_exact_wall_coalescence() {
+fn saved_curved_strip_projection_is_named_lost_after_exact_wall_coalescence() {
     use solidcraft_sketch::{LinkKind, LinkSource, Sketch};
     let mut doc = Document::new("saved curved strip");
     doc.set_param("width", "80", Some("mm"), None).unwrap();
@@ -379,9 +379,11 @@ fn saved_curved_strip_projection_asks_for_its_face_again_after_exact_wall_coales
         cold.evaluate(&loaded);
         for current in [&model, &cold] {
             // No face is the piece any more, and the whole wall is not it: the sketch fails,
-            // asking for its face again, and so does the material made from it. The case builds.
+            // naming its lost projection, and so does the material made from it. The case builds.
             let result = current.results.iter().find(|r| r.id == sk).unwrap();
-            assert_eq!(result.error.as_deref().and_then(crate::reselect_parts), Some(("Saved corner strip", reference.as_str())), "{result:?}");
+            let error = result.error.as_deref().unwrap_or_default();
+            assert_eq!(crate::lost_projection_parts(error).map(|t| (t.feature, t.count)), Some(("Saved corner strip", 1)), "{result:?}");
+            assert!(!error.contains(reference.as_str()), "{error}");
             assert!(current.results.iter().find(|r| r.id == boss).unwrap().error.is_some());
             assert!(current.results.iter().filter(|r| r.id != sk && r.id != boss).all(|r| r.error.is_none()), "{:?}", current.results);
             let state = current.state();
@@ -392,7 +394,7 @@ fn saved_curved_strip_projection_asks_for_its_face_again_after_exact_wall_coales
 }
 
 #[test]
-fn saved_stepped_tab_cut_piece_projection_asks_for_its_face_again_without_expanding_material() {
+fn saved_stepped_tab_cut_piece_projection_is_named_lost_without_expanding_material() {
     use solidcraft_sketch::{LinkKind, LinkSource, Sketch};
     let mut doc = Document::new("public stepped tab case");
     doc.set_param("length", "40", Some("mm"), None).unwrap();
@@ -480,9 +482,11 @@ fn saved_stepped_tab_cut_piece_projection_asks_for_its_face_again_without_expand
         cold.evaluate(&reopened);
         for current in [&model, &cold] {
             // No face is the patch any more, and the whole wall is not it: the sketch fails,
-            // asking for its face again, and so does the stock made from it.
+            // naming its lost projection, and so does the stock made from it.
             let result = current.results.iter().find(|r| r.id == sk).unwrap();
-            assert_eq!(result.error.as_deref().and_then(crate::reselect_parts), Some(("Saved wall patch", former.as_str())), "{result:?}");
+            let error = result.error.as_deref().unwrap_or_default();
+            assert_eq!(crate::lost_projection_parts(error).map(|t| (t.feature, t.count)), Some(("Saved wall patch", 1)), "{result:?}");
+            assert!(!error.contains(former.as_str()), "{error}");
             assert!(current.results.iter().find(|r| r.id == material).unwrap().error.is_some());
             let state = current.state();
             assert!(state.bodies.iter().all(|b| b.feature != material), "saved 10 x 20 patch must not become the 30 x 20 wall");

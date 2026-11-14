@@ -1590,6 +1590,21 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
     Ok(BodyRenamed { body: old, name: name.to_string(), renamed: Vec::new(), param_warnings: Vec::new() })
 }
 
+/// Whether sketch `id` fails on its new plane (`trial`) only for projections it lost, so the
+/// plane is no reason to refuse: a lost projection fails a sketch on any plane, and a name is
+/// looked up on its body, not on the plane, so no plane loses one more. On its old plane (`before`,
+/// the design with the old plane up to the sketch) it failed for the same projections or a subset
+/// of them, or it failed before reaching them (its own plane was lost).
+pub(crate) fn only_lost_before(before: &solidcraft_doc::Model, trial: &Session, id: u64) -> bool {
+    let Some(now) = trial.model.result(id).and_then(|r| r.lost_projections.clone()) else { return false };
+    let earlier = match before.result(id) {
+        Some(r) if r.error.is_some() && r.lost_projections.is_none() => true,
+        Some(r) => r.lost_projections.as_ref().is_some_and(|was| now.iter().all(|l| was.iter().any(|w| w.link == l.link))),
+        None => false,
+    };
+    earlier && trial.model.failed_sketch_shown(&trial.doc, id).is_some()
+}
+
 fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.redefine";
     let key = match p.get("sketch") {
@@ -1677,7 +1692,9 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     }
     trial.doc_mut().marker = Some(index + 1);
     trial.refresh();
-    if let Some(error) = trial.model.result(id).and_then(|result| result.error.as_ref()) {
+    if let Some(error) = trial.model.result(id).and_then(|result| result.error.as_ref())
+        && !only_lost_before(&baseline.model, &trial, id)
+    {
         return Err(bad(cmd, error.clone()));
     }
     trial.doc_mut().marker = marker;

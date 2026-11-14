@@ -962,6 +962,7 @@ struct CachedEval<S> {
     warning: Option<String>,
     import_report: Option<Arc<kernel::ImportReport>>,
     repair: Option<Arc<kernel::RepairReport>>,
+    lost_projections: Option<Arc<Vec<crate::LostProjection>>>,
     ms: f64,
     state: S,
 }
@@ -1127,6 +1128,7 @@ impl<S> CachedEval<S> {
             warning: self.warning.clone(),
             import_report: self.import_report.clone(),
             repair: self.repair.clone(),
+            lost_projections: self.lost_projections.clone(),
             ms: self.ms,
             state,
         }
@@ -1313,6 +1315,10 @@ pub struct FeatureResult {
     /// What a Repair Part feature changed, face by face (the command's reply says it).
     #[serde(skip)]
     pub repair: Option<Arc<kernel::RepairReport>>,
+    /// A sketch that failed for projections kept by names that find nothing: which
+    /// ([`crate::DocError::LostProjections`]; `error` is their message).
+    #[serde(skip)]
+    pub lost_projections: Option<Arc<Vec<crate::LostProjection>>>,
     pub ms: f64,
     pub skipped: bool,
     /// Not evaluated on the document's current inputs: a feature at or after a sketch shown live
@@ -2925,13 +2931,10 @@ impl Model {
         self.results.iter().rev().find(|r| !r.skipped).map(|r| r.state.clone()).unwrap_or_else(|| self.empty.clone())
     }
 
-    /// Show the sketch `feature` while it is edited although it failed (#12085): a link whose
-    /// named face or edge is gone fails the sketch, so the evaluation keeps no sketch for it, and
-    /// its editor had nothing to show or repair. Here the sketch is built as it is evaluated, but
-    /// with such a link marked lost and kept where it was (no other face or edge is taken for
-    /// it), and added to the final state only: the sketch's result keeps its error and the
-    /// features after it still fail. `None`, a sketch that did not fail, or one that fails for
-    /// another reason too, shows nothing more. Returns whether a held sketch is shown.
+    /// Show the sketch `feature` while it is edited although it failed (#12085), as
+    /// [`Model::failed_sketch_shown`] builds it, in the final state only: the sketch's result
+    /// keeps its error and the features after it still fail. `None`, or a sketch that shows
+    /// nothing, shows nothing more. Returns whether a held sketch is shown.
     pub fn hold_failed_sketch(&mut self, doc: &Document, feature: Option<u64>) -> bool {
         let Some(id) = feature else {
             self.held = None;
@@ -2942,11 +2945,29 @@ impl Model {
             return true;
         }
         self.held = None;
-        if base.sketch(id).is_some() || !self.result(id).is_some_and(|r| r.error.is_some() && !r.skipped && !r.stale) {
+        if base.sketch(id).is_some() {
             return false;
         }
-        let Some(f) = doc.feature(id) else { return false };
-        let FeatureKind::Sketch { plane, sketch } = &f.kind else { return false };
+        let Some(solved) = self.failed_sketch_shown(doc, id) else { return false };
+        let mut shown = (*base).clone();
+        shown.sketches.retain(|s| s.feature != id);
+        shown.sketches.push(solved);
+        self.held = Some(HeldSketch { feature: id, base, shown: Arc::new(shown) });
+        true
+    }
+
+    /// The sketch `id` that failed because links lost their named face or edge (#12085): the
+    /// evaluation keeps no sketch for it, so it would show nothing to repair. Built here as it is
+    /// evaluated, on the model before it, but with each such link marked lost and kept where it
+    /// was (no other face or edge is taken for it). `None` for a sketch that did not fail that
+    /// way, or that fails for another reason too. For showing the sketch and telling that lost
+    /// projections are its only failure (Redefine Sketch Plane); no feature builds from it.
+    pub fn failed_sketch_shown(&self, doc: &Document, id: u64) -> Option<Arc<SolvedSketch>> {
+        if !self.result(id).is_some_and(|r| r.lost_projections.is_some() && !r.skipped && !r.stale) {
+            return None;
+        }
+        let f = doc.feature(id)?;
+        let FeatureKind::Sketch { plane, sketch } = &f.kind else { return None };
         let mut next = (*self.state_before(id)).clone();
         let vals = evaluation_values(doc).0;
         let mut warning = None;
@@ -2955,12 +2976,7 @@ impl Model {
             eval_sketch(doc, &vals, f, plane, sketch, &mut next, &mut warning, crate::project::LostNames::Mark)
                 .map_err(|e| kernel::KernelError::Failed(e.to_string()))
         });
-        let Some(solved) = built.ok().and_then(|()| next.sketches.iter().find(|s| s.feature == id).cloned()) else { return false };
-        let mut shown = (*base).clone();
-        shown.sketches.retain(|s| s.feature != id);
-        shown.sketches.push(solved);
-        self.held = Some(HeldSketch { feature: id, base, shown: Arc::new(shown) });
-        true
+        built.ok().and_then(|()| next.sketches.iter().find(|s| s.feature == id).cloned())
     }
 
     /// State just before the feature with this id (for editing a sketch in context).
@@ -3272,6 +3288,7 @@ impl Model {
                         warning: None,
                         import_report: None,
                         repair: None,
+                        lost_projections: None,
                         ms: 0.0,
                         skipped: true,
                         stale: false,
@@ -3306,6 +3323,7 @@ impl Model {
                         warning: None,
                         import_report: None,
                         repair: None,
+                        lost_projections: None,
                         ms: 0.0,
                         skipped: false,
                         stale: false,
@@ -3352,6 +3370,7 @@ impl Model {
                         warning: c.warning,
                         import_report: c.import_report,
                         repair: c.repair,
+                        lost_projections: c.lost_projections,
                         ms: c.ms,
                         skipped: false,
                         stale: false,
@@ -3410,6 +3429,7 @@ impl Model {
                 let mut warning = cached.as_ref().and_then(|c| c.warning.clone());
                 let mut import_report = cached.as_ref().and_then(|c| c.import_report.clone());
                 let mut repair = cached.as_ref().and_then(|c| c.repair.clone());
+                let mut lost_projections = cached.as_ref().and_then(|c| c.lost_projections.clone());
                 // Face references by name: move each face point onto its named face (on the body the
                 // feature names, when it names one and the face is there).
                 let renamed;
@@ -3453,7 +3473,12 @@ impl Model {
                         r.map_err(|e| match e {
                             // A panic the kernel caught stays one.
                             crate::DocError::Kernel(kernel::KernelError::Internal(m)) => kernel::KernelError::Internal(m),
-                            e => kernel::KernelError::Failed(e.in_feature(&f.name).to_string()),
+                            e => {
+                                if let crate::DocError::LostProjections { links, .. } = &e {
+                                    lost_projections = Some(Arc::new(links.clone()));
+                                }
+                                kernel::KernelError::Failed(e.in_feature(&f.name).to_string())
+                            }
                         })?;
                         // The checks the feature's steps left to its end: the bodies it keeps.
                         if !deferred {
@@ -3571,6 +3596,7 @@ impl Model {
                     }
                     Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
                 };
+                let lost_projections = lost_projections.filter(|_| error.is_some());
                 // A panic is no result to reuse: the kernel was replaced after it. Work its watcher
                 // stopped may have been cut short (a boolean that gave up): it is not kept either.
                 if !self.no_cache && !watched.cancelled() && !internal {
@@ -3579,6 +3605,7 @@ impl Model {
                         warning: warning.clone(),
                         import_report: import_report.clone(),
                         repair: repair.clone(),
+                        lost_projections: lost_projections.clone(),
                         ms,
                         state: state.clone(),
                     };
@@ -3604,6 +3631,7 @@ impl Model {
                     warning,
                     import_report,
                     repair,
+                    lost_projections,
                     ms,
                     skipped: false,
                     stale: false,

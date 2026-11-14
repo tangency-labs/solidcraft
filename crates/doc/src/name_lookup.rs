@@ -7,12 +7,13 @@
 //! face, when only a face of the same stem is left, when the name is on several bodies, or when
 //! the name was saved before format 14 ([`LEGACY_MARK`]), the name finds nothing and the feature
 //! that uses it fails, asking for the reference to be picked again
-//! ([`crate::DocError::Reselect`]). An edge name has two more ways: when no edge's faces answer
-//! to it, and one of its faces is gone from a feature still on the body, the reference's point
-//! decides (see [`renamed_edge`]); so it does when a face of it is named after neighbours it no
-//! longer has, or answers to several faces, and the point lies on one edge between them (see
-//! [`resuffixed_edge`]). A face whose name was worked out from geometry, found where
-//! the reference's point no longer lies, is reported: only geometry decided.
+//! ([`crate::DocError::Reselect`]), or, for a sketch's projection, the sketch fails naming the
+//! projections it lost ([`crate::DocError::LostProjections`]). An edge name has two more ways:
+//! when no edge's faces answer to it, and one of its faces is gone from a feature still on the
+//! body, the reference's point decides (see [`renamed_edge`]); so it does when a face of it is
+//! named after neighbours it no longer has, or answers to several faces, and the point lies on
+//! one edge between them (see [`resuffixed_edge`]). A face whose name was worked out from
+//! geometry, found where the reference's point no longer lies, is reported: only geometry decided.
 //! Saved numbered Project links also have a compatibility check for a whole face that
 //! contains the saved pick and comes directly from its original construction feature.
 //! This check is local to manual sketch projection.
@@ -31,7 +32,7 @@ use crate::{FeatureKind, ModelBody, ModelState, Operation};
 /// geometry, and some of them name a face that exact history names differently (a tube's outer
 /// wall was named after the nearest sketch curve to its centre, its inner circle): such a name
 /// finds no face, and the feature using it asks for the face to be picked again, which stores
-/// its exact name.
+/// its exact name (a sketch names the projection it lost; repairing it stores the exact name).
 pub const LEGACY_MARK: char = '?';
 
 /// A name saved before format 14, without its mark (`None`: an exact name).

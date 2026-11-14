@@ -260,12 +260,24 @@ design unchanged. Projected geometry remains protected from ordinary dragging.
 **Project** (P) and **Intersect** bring model edges into the sketch as linked geometry that
 follows later changes. Sketching on a face projects its edges automatically.
 A projected edge stays the edge that was picked, wherever a later change moves it; when that
-edge no longer exists, the projection keeps its last shape and the sketch says it was lost.
+edge no longer exists, the sketch fails and names the projection it lost (see below).
 For Project, select visible source curves or points from another sketch, model edges,
 faces, vertices or bodies, or axes and planes, then press P. The entire supported selection
 is projected in one undo step. A rejected projection keeps the selection for correction;
 an empty or mixed selection starts the ordinary picking tool. External sketch selections
 retain their source sketch, even when the active sketch uses the same point or curve names.
+
+A projection kept by the name of a face or edge that no longer has that name (a change before
+the sketch removed it or made it again) fails the sketch, and the features built on it fail too.
+The sketch's message names each such projection by its source and its curves: `Outline:
+projected face of Block (curves l5, l6, l7, l8) is lost; delete the projection or project it
+again`. When several are lost it gives their number and lists the first three. In its editor
+the sketch shows its last geometry, the lost projections in the lost colour; deleting a lost
+projection's curves there removes it. **Redefine Sketch Plane** still moves the sketch to
+another plane, where it fails for the same projections, and so it does when the sketch's own
+plane was lost as well: it then names the projections it lost. Shown in the browser or at the
+timeline marker, the sketch draws its last geometry too; its profiles and edges can't be picked
+or used by a new feature until it builds again.
 
 A sketch on a construction plane built from the model (through a sketch line, through three
 points, midway between two faces…) projects, intersects, includes and holds text like a sketch
