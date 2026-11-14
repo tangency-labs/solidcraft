@@ -1,7 +1,8 @@
 //! Guide rails on lofts (#201), checked against analytic solids: a rail bulging out from a loft
 //! between two equal circles makes the solid of revolution of the rail, a stretching rail widens
 //! squares one way only, two rails carry the sections between them, a sheet loft of lines follows
-//! its rail; and rails the loft cannot follow are refused.
+//! its rail, six rails around a cylinder make their solid of revolution, six rails carry a square
+//! into a slot; and rails the loft cannot follow are refused.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -27,6 +28,11 @@ fn square(h: f64) -> Loop2 {
 /// The bulge of the rails: 0 at both ends, 1 halfway up the 40 mm loft.
 fn bulge(z: f64) -> f64 {
     (PI * z / 40.0).sin()
+}
+
+/// A rail at angle `a` about the z axis, `r(z)` out from it, from z = 0 to z = 40.
+fn around(a: f64, r: impl Fn(f64) -> f64) -> Vec<Vec3> {
+    (0..=80).map(|i| f64::from(i) * 0.5).map(|z| Vec3::new(r(z) * a.cos(), r(z) * a.sin(), z)).collect()
 }
 
 /// A rail in the XZ plane at `x(z)`, from z = 0 to z = 40.
@@ -149,7 +155,8 @@ fn a_sheet_loft_of_lines_follows_its_rail() {
 }
 
 /// Rails the loft cannot follow are refused, saying why: one that starts off the first section,
-/// one that stops short of the last, three rails, and one up the middle of a sheet loft's lines.
+/// one that stops short of the last, two of three rails on one point, seventeen rails, a third
+/// rail off a section, and one up the middle of a sheet loft's lines.
 #[test]
 fn rails_the_loft_cannot_follow_are_refused() {
     let sections = [(at(0.0), circle(10.0)), (at(40.0), circle(10.0))];
@@ -161,11 +168,74 @@ fn rails_the_loft_cannot_follow_are_refused() {
     let short: Vec<Vec3> = rail(|_| 10.0).into_iter().filter(|p| p.z <= 30.0).collect();
     let m = refused(&[short]);
     assert!(m.contains("does not reach section 2"), "{m}");
-    assert!(refused(&[rail(|_| 10.0), rail(|_| -10.0), rail(|_| 10.0)]).contains("one or two"));
+    let m = refused(&[rail(|_| 10.0), rail(|_| -10.0), rail(|_| 10.0)]);
+    assert!(m.contains("guide rails 1 and 3 meet section 1 at the same point"), "{m}");
+    let many: Vec<Vec<Vec3>> = (0..17).map(|k| around(f64::from(k) * 2.0 * PI / 17.0, |_| 10.0)).collect();
+    let m = refused(&many);
+    assert!(m.contains("1…16"), "{m}");
+    // With three or more, an error names the rail, and where it misses.
+    let m = refused(&[around(0.0, |_| 10.0), around(2.0, |_| 10.0), around(4.0, |_| 12.0)]);
+    assert!(m.contains("guide rail 3") && m.contains("2.000 mm") && m.contains(" at ["), "{m}");
     let line = vec![Seg2::Line { a: Vec2::new(-10.0, 0.0), b: Vec2::new(10.0, 0.0) }];
     match loft_sheet_with_rails(&[(at(0.0), line.clone()), (at(40.0), line)], &[rail(|_| 0.0)], RailFit::Scale) {
         Err(KernelError::Invalid(m)) => assert!(m.contains("middle"), "{m}"),
         other => panic!("{other:?}"),
+    }
+}
+
+/// Six rails around a loft between equal circles, all bulging out to radius 15 halfway up: the
+/// rails' solid of revolution (as one rail makes it), and every rail on the loft.
+#[test]
+fn six_rails_around_a_cylinder_make_their_solid_of_revolution() {
+    let want = 4500.0 * PI + 8000.0;
+    let sections = [(at(0.0), circle(10.0)), (at(40.0), circle(10.0))];
+    let rails: Vec<Vec<Vec3>> = (0..6).map(|k| around(f64::from(k) * PI / 3.0, |z| 10.0 + 5.0 * bulge(z))).collect();
+    let b = loft_with_rails(&sections, &rails, RailFit::Scale).unwrap();
+    assert!(close(volume(&b), want, 1e-3), "volume {} vs {want}", volume(&b));
+    for (k, r) in rails.iter().enumerate() {
+        let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+        assert!(worst < 1e-3, "rail {} is {worst} mm off the loft", k + 1);
+    }
+}
+
+/// A 40 mm square into an 18 × 6 mm slot, guided by six rails (from its corners and the middles
+/// of two sides, each bowing out 3 mm on the way): the loft is built within 2 s and passes within
+/// 0.01 mm of every rail.
+#[test]
+fn six_rails_carry_a_square_into_a_slot() {
+    let slot = Loop2::polygon(&[Vec2::new(-9.0, -3.0), Vec2::new(9.0, -3.0), Vec2::new(9.0, 3.0), Vec2::new(-9.0, 3.0)]);
+    let sections = [(at(0.0), square(20.0)), (at(40.0), slot)];
+    let ends = [
+        ((20.0, 20.0), (9.0, 3.0)),
+        ((-20.0, 20.0), (-9.0, 3.0)),
+        ((-20.0, -20.0), (-9.0, -3.0)),
+        ((20.0, -20.0), (9.0, -3.0)),
+        ((0.0, 20.0), (0.0, 3.0)),
+        ((0.0, -20.0), (0.0, -3.0)),
+    ];
+    let rails: Vec<Vec<Vec3>> = ends
+        .iter()
+        .map(|&((x0, y0), (x1, y1))| {
+            (0..=80)
+                .map(|i| {
+                    let z = f64::from(i) * 0.5;
+                    let f = z / 40.0;
+                    let (x, y) = (x0 + (x1 - x0) * f, y0 + (y1 - y0) * f);
+                    let out = Vec2::new(x, y).normalized().unwrap_or(Vec2::ZERO) * (3.0 * bulge(z));
+                    Vec3::new(x + out.x, y + out.y, z)
+                })
+                .collect()
+        })
+        .collect();
+    let t = std::time::Instant::now();
+    let b = loft_with_rails(&sections, &rails, RailFit::Scale).unwrap();
+    let took = t.elapsed().as_secs_f64();
+    assert!(took < 2.0, "the loft took {took:.2} s");
+    let m = measure(&b).unwrap();
+    assert!(m.volume > 0.0 && m.bbox.min.z.abs() < 1e-9 && (m.bbox.max.z - 40.0).abs() < 1e-9, "{m:?}");
+    for (k, r) in rails.iter().enumerate() {
+        let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+        assert!(worst < 0.01, "rail {} is {worst} mm off the loft", k + 1);
     }
 }
 

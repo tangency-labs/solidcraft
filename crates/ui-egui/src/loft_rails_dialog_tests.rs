@@ -280,6 +280,51 @@ fn an_unchanged_loft_edit_keeps_a_section_of_all_profiles() {
     assert_eq!(sections(&h), stored);
 }
 
+/// A loft of four rails (#201: up to 16 through the command) edits in the dialog with an input
+/// for each, and OK keeps all four: arcs bulging out from the circles at ±x and ±y.
+#[test]
+fn a_loft_of_four_rails_keeps_them_all_through_an_edit() {
+    for command in ["solid.loft", "surface.loft"] {
+        let mut h = Harness::new();
+        for (name, z) in [("Base", 0), ("Top", 40)] {
+            let plane = json!({"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]});
+            h.app.run("sketch.create", json!({"name": name, "plane": plane})).unwrap();
+            h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 10, "id": "c"})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        // Both sketches' y runs down world Z.
+        for (name, x_dir) in [("RX", [1, 0, 0]), ("RY", [0, 1, 0])] {
+            h.app.run("sketch.create", json!({"name": name, "plane": {"origin": [0, 0, 0], "x_dir": x_dir, "y_dir": [0, 0, -1]}})).unwrap();
+            h.app.run("sketch.arc.three_point", json!({"start": [10, 0], "end": [10, -40], "through": [13, -20], "id": "plus"})).unwrap();
+            h.app.run("sketch.arc.three_point", json!({"start": [-10, 0], "end": [-10, -40], "through": [-13, -20], "id": "minus"})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        let id = |h: &Harness, n: &str| h.app.session.doc.find_feature(n).unwrap().id;
+        let (rx, ry) = (id(&h, "RX"), id(&h, "RY"));
+        let rails: Vec<SweepRail> = [(rx, "plus"), (ry, "plus"), (rx, "minus"), (ry, "minus")]
+            .iter()
+            .map(|(sketch, c)| SweepRail { sketch: SketchId(*sketch), curves: vec![(*c).into()] })
+            .collect();
+        let given: Vec<_> = rails.iter().map(|r| json!({"sketch": r.sketch.0, "curves": r.curves})).collect();
+        let sections = json!([{"sketch": id(&h, "Base"), "curves": ["c"]}, {"sketch": id(&h, "Top"), "curves": ["c"]}]);
+        let sections = if command == "solid.loft" { json!([{"sketch": id(&h, "Base")}, {"sketch": id(&h, "Top")}]) } else { sections };
+        h.app.run(command, json!({"sections": sections, "rails": given})).unwrap();
+        let name = h.app.session.doc.features.last().unwrap().name.clone();
+        let stored = |h: &Harness| match &h.app.session.doc.find_feature(&name).unwrap().kind {
+            FeatureKind::Loft { rails, .. } | FeatureKind::SurfaceLoft { rails, .. } => rails.clone(),
+            k => panic!("{k:?}"),
+        };
+        assert_eq!(stored(&h), rails, "{command}");
+        h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
+        h.frames(8);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs.len(), 5, "{command}: {:?}", d.inputs.iter().map(|i| i.label).collect::<Vec<_>>());
+        assert!(h.widget("Rail 4").is_some(), "{command}");
+        ok(&mut h);
+        assert_eq!(stored(&h), rails, "{command}");
+    }
+}
+
 /// Surface Loft accepts body edge chains as sections (#11838): picking a body edge and a sketch
 /// curve produces valid sections parameters, and editing the feature round-trips correctly.
 #[test]
