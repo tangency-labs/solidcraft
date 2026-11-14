@@ -110,6 +110,12 @@ impl Files {
         self.wake();
     }
 
+    /// A file the host page opened (`?host=parent`, #16476): it comes in like one from the
+    /// computer.
+    pub fn open_from_host(&self, name: String, bytes: Vec<u8>) {
+        self.arrive(name, bytes, Intent::Open);
+    }
+
     /// Run a frame (the app sleeps until something happens).
     pub fn wake(&self) {
         if let Some(c) = self.ctx.borrow().as_ref() {
@@ -385,6 +391,12 @@ pub fn flush(files: &Rc<Files>) {
 
 /// Hand `bytes` to the user as a download named `name`.
 pub fn download(name: &str, bytes: &[u8]) -> Result<(), String> {
+    // In host mode the host keeps the files: a save goes back to it over postMessage (#16476).
+    // Save (a design under its name) writes back; Save As and an export set `saveAs`.
+    if crate::host::active() {
+        crate::host::save(name, bytes, !solidcraft_engine::io::is_design_path(name));
+        return Ok(());
+    }
     let doc = web_sys::window().and_then(|w| w.document()).ok_or("no document")?;
     let parts = Array::new();
     parts.push(&Uint8Array::from(bytes));
