@@ -529,6 +529,140 @@ fn pattern_on_path_spacing_extent_and_flip() {
     assert!(rel(volume(&mut s), PLATE - HOLE) < 1e-4);
 }
 
+/// The bounding boxes of the bodies, `[min, max]` each, in order of their lowest x, then y.
+fn body_boxes(s: &mut Session) -> Vec<[[f64; 3]; 2]> {
+    let m = run(s, "inspect.measure", json!({}));
+    let at = |b: &Value, k: &str| [0, 1, 2].map(|i| b["bbox"][k][i].as_f64().unwrap_or(f64::NAN));
+    let mut boxes: Vec<[[f64; 3]; 2]> = m["bodies"].as_array().unwrap().iter().map(|b| [at(b, "min"), at(b, "max")]).collect();
+    boxes.sort_by(|a, b| a[0][0].total_cmp(&b[0][0]).then(a[0][1].total_cmp(&b[0][1])));
+    boxes
+}
+
+fn assert_box(got: &[[f64; 3]; 2], want: [[f64; 3]; 2]) {
+    let off = (0..2).flat_map(|k| (0..3).map(move |i| (k, i))).map(|(k, i)| (got[k][i] - want[k][i]).abs()).fold(0.0, f64::max);
+    assert!(off < 1e-6, "{got:?} vs {want:?}");
+}
+
+/// #16084: Pattern on Path follows a chain of a body's edges. A 2 mm cube on the top front edge
+/// of a 100 long block, copied three times 20 apart along that edge: the path starts at the
+/// edge's end nearest the first point, so a point near x = 0 runs the copies to +x, a point near
+/// x = 100 runs them to -x, as Flip does.
+#[test]
+fn pattern_on_path_follows_a_bodys_edge_from_the_end_nearest_the_first_point() {
+    let start = |s: &mut Session| {
+        run(s, "solid.box", json!({"length": 100, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        run(s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-1, -1, 10], "body_name": "Pin"}));
+    };
+    let pin = |x: f64| [[x - 1.0, -1.0, 10.0], [x + 1.0, 1.0, 12.0]];
+    for (edge, flip, xs) in
+        [([5.0, 0.0, 10.0], false, [0.0, 20.0, 40.0]), ([95.0, 0.0, 10.0], false, [-40.0, -20.0, 0.0]), ([5.0, 0.0, 10.0], true, [-40.0, -20.0, 0.0])]
+    {
+        let mut s = Session::default();
+        start(&mut s);
+        run(
+            &mut s,
+            "solid.pattern.path",
+            json!({"bodies": ["Pin"], "path_body": "Block", "path_edges": [edge], "count": 3, "spacing": 20, "flip": flip}),
+        );
+        let boxes = body_boxes(&mut s);
+        assert_eq!(boxes.len(), 4, "{boxes:?}");
+        // The block is the box from x = 0 with y from 0; the pins are the three others.
+        let pins: Vec<_> = boxes.iter().filter(|b| b[0][1] < -0.5).collect();
+        assert_eq!(pins.len(), 3, "{boxes:?}");
+        for (got, x) in pins.iter().zip(xs) {
+            assert_box(got, pin(x));
+        }
+    }
+}
+
+/// #16084: a closed chain of edges starts where the first point picks it. A 2 mm cube centred
+/// on the front of the top outline of a 40 x 20 x 10 block with its upright edges rounded 4,
+/// picked there, is copied 10 or 20 along the outline: 10 stays on the 32 long front edge, at
+/// x = 20 ± 10, and 20 runs 16 to the corner and 4 round its radius 4 arc, a turn of 1 radian:
+/// at x = 20 ± (16 + 4 sin 1), y = 4 - 4 cos 1. The chain may run either way round.
+#[test]
+fn pattern_on_path_round_a_closed_outline_starts_at_the_first_point() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 0, 5], [40, 0, 5], [0, 20, 5], [40, 20, 5]], "radius": 4, "tangent_chain": false}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [19, -1, 11], "body_name": "Pin"}));
+    let c = 8.0 * std::f64::consts::FRAC_1_SQRT_2;
+    let outline = json!([
+        [20, 0, 10],
+        [36.0 + c / 2.0, 4.0 - c / 2.0, 10],
+        [40, 10, 10],
+        [36.0 + c / 2.0, 16.0 + c / 2.0, 10],
+        [20, 20, 10],
+        [4.0 - c / 2.0, 16.0 + c / 2.0, 10],
+        [0, 10, 10],
+        [4.0 - c / 2.0, 4.0 - c / 2.0, 10]
+    ]);
+    run(&mut s, "solid.pattern.path", json!({"bodies": ["Pin"], "path_body": "Block", "path_edges": outline, "count": 2, "spacing": 10}));
+    let pins: Vec<_> = body_boxes(&mut s).into_iter().filter(|b| b[1][2] > 12.5).collect();
+    assert_eq!(pins.len(), 2, "{pins:?}");
+    let centre = |b: &[[f64; 3]; 2]| [0, 1, 2].map(|i| (b[0][i] + b[1][i]) / 2.0);
+    let xs: Vec<f64> = pins.iter().map(|b| centre(b)[0]).collect();
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
+    assert!(pins.iter().all(|b| near(centre(b)[1], 0.0) && near(centre(b)[2], 12.0)), "{pins:?}");
+    assert!((near(xs[0], 10.0) && near(xs[1], 20.0)) || (near(xs[0], 20.0) && near(xs[1], 30.0)), "{xs:?}");
+    // One step of 20: past the end of the straight, 4 round the corner.
+    let mut s2 = Session::default();
+    run(&mut s2, "solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s2, "solid.fillet", json!({"edges": [[0, 0, 5], [40, 0, 5], [0, 20, 5], [40, 20, 5]], "radius": 4, "tangent_chain": false}));
+    run(&mut s2, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [19, -1, 11], "body_name": "Pin"}));
+    run(&mut s2, "solid.pattern.path", json!({"bodies": ["Pin"], "path_body": "Block", "path_edges": outline, "count": 2, "spacing": 20}));
+    let copy = body_boxes(&mut s2).into_iter().filter(|b| b[1][2] > 12.5).map(|b| centre(&b)).find(|p| !near(p[0], 20.0)).unwrap();
+    let dx = 16.0 + 4.0 * 1f64.sin();
+    assert!((near(copy[0], 20.0 + dx) || near(copy[0], 20.0 - dx)) && near(copy[1], 4.0 - 4.0 * 1f64.cos()) && near(copy[2], 12.0), "{copy:?}");
+}
+
+/// #16084: copies along a body's circular edge, turning with the path, go round its centre: a
+/// 4 x 2 x 2 bar lying across the top edge of a radius 20 cylinder, copied four times a quarter
+/// of the circle (10 pi) apart, stands across the edge at 90, 180 and 270 degrees. A chain that
+/// leaves every plane (three edges of a block's corner) cannot turn the copies, and says so.
+#[test]
+fn pattern_on_path_turns_copies_round_a_bodys_circular_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 10, "body_name": "Can"}));
+    run(&mut s, "solid.box", json!({"length": 4, "width": 2, "height": 2, "corner": [18, -1, 10], "body_name": "Bar"}));
+    run(
+        &mut s,
+        "solid.pattern.path",
+        json!({"bodies": ["Bar"], "path_body": "Can", "path_edges": [[20, 0, 10]], "count": 4, "spacing": format!("{} mm", 10.0 * PI), "orientation": "path"}),
+    );
+    let boxes = body_boxes(&mut s);
+    assert_eq!(boxes.len(), 5, "{boxes:?}");
+    let bars: Vec<_> = boxes.iter().filter(|b| b[1][2] > 11.0).collect();
+    assert_eq!(bars.len(), 4, "{boxes:?}");
+    let want = [
+        [[-22.0, -1.0, 10.0], [-18.0, 1.0, 12.0]],
+        [[-1.0, -22.0, 10.0], [1.0, -18.0, 12.0]],
+        [[-1.0, 18.0, 10.0], [1.0, 22.0, 12.0]],
+        [[18.0, -1.0, 10.0], [22.0, 1.0, 12.0]],
+    ];
+    for (got, want) in bars.iter().zip(want) {
+        assert_box(got, want);
+    }
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-1, -1, -1], "body_name": "Pin"}));
+    let corner = json!({"bodies": ["Pin"], "path_body": "Block", "path_edges": [[20, 0, 0], [40, 0, 5], [40, 10, 10]], "count": 2, "spacing": 30});
+    run(&mut s, "solid.pattern.path", corner.clone());
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    let mut turned = corner;
+    turned["orientation"] = json!("path");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-1, -1, -1], "body_name": "Pin"}));
+    let refused = s.execute("solid.pattern.path", &turned).map(|_| s.model.results.last().and_then(|r| r.error.clone()).unwrap_or_default());
+    let message = match refused {
+        Ok(error) => error,
+        Err(e) => e.to_string(),
+    };
+    assert!(message.contains("only along a path in one plane"), "{message}");
+}
+
 #[test]
 fn patterns_of_bodies() {
     let mut s = Session::default();

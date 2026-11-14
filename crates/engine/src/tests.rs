@@ -3691,6 +3691,47 @@ fn deleting_a_path_sketch_deletes_its_pipe() {
     assert!(s.model.results.iter().all(|r| r.error.is_none()));
 }
 
+/// #16084: a pipe follows a chain of a body's edges, as a sweep does. Along two edges of a
+/// 40 x 20 x 10 block meeting square at its corner (40 along X, then 10 up Z) a 4 mm pipe is
+/// pi * 2^2 * 50: the mitre at the corner adds as much as it takes. Its open ends are square to
+/// the edges, at x = 0 and z = 10, and its mitred corner reaches 2 past the block's corner.
+#[test]
+fn a_pipe_follows_a_chain_of_a_bodys_edges() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s, "solid.pipe", json!({"path_body": "Block", "path_edges": [[20, 0, 0], [40, 0, 5]], "diameter": 4, "body_name": "Tube"}));
+    let m = run(&mut s, "inspect.measure", json!({"bodies": ["Tube"]}));
+    let v = m["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(rel(v, PI * 4.0 * 50.0) < 1e-4, "{v} vs {}", PI * 200.0);
+    let bb = &m["bodies"][0]["bbox"];
+    let at = |k: &str, i: usize| bb[k][i].as_f64().unwrap();
+    for (got, want) in
+        [(at("min", 0), 0.0), (at("max", 0), 42.0), (at("min", 1), -2.0), (at("max", 1), 2.0), (at("min", 2), -2.0), (at("max", 2), 10.0)]
+    {
+        assert!((got - want).abs() < 1e-6, "{bb}");
+    }
+    // The path is saved as the body and its points, and comes back the same.
+    let saved = s.doc.to_json();
+    assert!(saved.contains("\"path_body\"") && saved.contains("\"path_edges\""), "{saved}");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    let v2 = run(&mut reopened, "inspect.measure", json!({"bodies": ["Tube"]}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(rel(v2, v) < 1e-9, "{v2} vs {v}");
+}
+
+/// #16084: a pipe round the closed circular edge of a cylinder is a torus: 2 pi^2 R r^2 with
+/// R = 10 and r = 2. The pipe uses the cylinder, so deleting the cylinder would fail the pipe.
+#[test]
+fn a_pipe_round_a_closed_edge_is_a_torus() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": 10, "height": 5, "body_name": "Can", "name": "Can"}));
+    run(&mut s, "solid.pipe", json!({"path_body": "Can", "path_edges": [[10, 0, 5]], "diameter": 4, "body_name": "Ring"}));
+    let v = run(&mut s, "inspect.measure", json!({"bodies": ["Ring"]}))["total"]["volume_mm3"].as_f64().unwrap();
+    let want = 2.0 * PI * PI * 10.0 * 4.0;
+    assert!(rel(v, want) < 1e-4, "{v} vs {want}");
+    let deps = run(&mut s, "timeline.dependents", json!({"feature": "Can"}));
+    assert_eq!(deps["would_fail"].as_array().map(Vec::len), Some(1), "{deps}");
+}
+
 /// Regression: batches were rolled back by undoing as many steps as the undo history grew,
 /// which is none once the history is full, leaving their sketches behind.
 #[test]

@@ -273,6 +273,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "features: [names] | bodies: [names]; ",
             "path_sketch: sketch; ",
             "path: [curve ids in order]; ",
+            "path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves, starting at the chain's end nearest the first point, or a closed chain at its point nearest the first point); ",
             "count; ",
             "spacing (between instances) | distance (first to last); ",
             "start?: expr (start point: how far along the path the original sits, the copies measured on from there; default 0, the path's start) | start_fraction?: expr (the start point as 0…1 of the path's length, kept as the path changes); ",
@@ -319,7 +320,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("pipe")
         .contract(&PIPE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("path_sketch: sketch; path: [curve ids in order]; diameter: expr; wall?: expr (hollow); operation?, targets?, name?, body_name?"),
+        .params("path_sketch: sketch; path: [curve ids in order]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); diameter: expr; wall?: expr (hollow); operation?, targets?, name?, body_name?"),
     CommandSpec::new("solid.bounding_solid", "Bounding Solid", crate::checked!("solid.bounding_solid", bounding_solid)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("bounding_solid")
@@ -3668,11 +3669,17 @@ fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
 fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.pattern.path";
     let (features, bodies) = pattern_sources(s, p, cmd)?;
-    let path_sketch = sketch_id(s, p.get("path_sketch").or_else(|| p.get("sketch")), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() || path.len() > 1000 {
-        return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
-    }
+    // The path is a chain of a body's edges (#16084) or the curves of a sketch.
+    let (path_sketch, path, path_body, path_edges) = if p.get("path_body").is_some_and(|b| !b.is_null()) {
+        sweep_path(s, p, cmd)?
+    } else {
+        let path_sketch = sketch_id(s, p.get("path_sketch").or_else(|| p.get("sketch")), cmd, "path_sketch")?;
+        let path = string_list(cmd, p, "path")?;
+        if path.is_empty() || path.len() > 1000 {
+            return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
+        }
+        (path_sketch, path, None, Vec::new())
+    };
     let count = req_expr(cmd, p, "count")?;
     check_count(s, &count, cmd, "count")?;
     let (spacing, extent) = match (expr(p, "spacing"), expr(p, "distance")) {
@@ -3709,6 +3716,8 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
     let pattern = solidcraft_doc::PatternKind::Path {
         path_sketch: SketchId(path_sketch),
         path,
+        path_body,
+        path_edges,
         count,
         spacing,
         extent,
@@ -5531,11 +5540,8 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.pipe";
-    let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() {
-        return Err(bad(cmd, "`path` must list curve ids"));
-    }
+    // The path is a chain of a body's edges (#16084) or the curves of a sketch, as a sweep's.
+    let (path_sketch, path, path_body, path_edges) = sweep_path(s, p, cmd)?;
     let diameter = req_expr(cmd, p, "diameter")?;
     check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
     let wall = expr(p, "wall");
@@ -5550,6 +5556,8 @@ fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
         FeatureKind::Pipe {
             path_sketch: SketchId(path_sketch),
             path,
+            path_body,
+            path_edges,
             diameter,
             wall,
             operation: operation(p, cmd)?,

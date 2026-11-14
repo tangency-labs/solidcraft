@@ -1502,6 +1502,40 @@ impl PathSeg {
             .collect()
     }
 
+    /// The unit normal of a plane the whole path lies in, within `tol` radians: the axis of its
+    /// first arc, or else the turn between its first two directions of travel that are not
+    /// parallel, checked against every segment (a line's direction and an arc's axis; a free-form
+    /// segment's directions at nine points evenly along it). A straight path lies in many planes
+    /// and gets one of them. `None` for a path that leaves every plane, or has no direction.
+    pub fn plane_normal(path: &[PathSeg], tol: f64) -> Option<Vec3> {
+        let directions = |s: &PathSeg| -> Vec<Vec3> {
+            match s {
+                PathSeg::Line { .. } | PathSeg::Arc { .. } => s.tangents().map(|(a, b)| vec![a, b]).unwrap_or_default(),
+                _ => (0..=8).filter_map(|i| s.along(f64::from(i) / 8.0).map(|(_, d)| d)).collect(),
+            }
+        };
+        let dirs: Vec<Vec3> = path.iter().flat_map(directions).collect();
+        let first = *dirs.first()?;
+        let arc = path.iter().find_map(|s| if let PathSeg::Arc { axis, .. } = *s { axis.normalized() } else { None });
+        let turn = || dirs.iter().find_map(|d| first.cross(*d).normalized().filter(|_| first.cross(*d).len() > tol.sin()));
+        let n = match arc.or_else(turn) {
+            Some(n) => n,
+            // A straight path: any plane through its line.
+            None => {
+                let other = if first.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+                first.cross(other).normalized()?
+            }
+        };
+        let flat = path.iter().all(|s| match *s {
+            PathSeg::Arc { axis, .. } => axis.normalized().is_some_and(|k| k.cross(n).len() <= tol.sin()),
+            _ => {
+                let d = directions(s);
+                !d.is_empty() && d.iter().all(|d| d.dot(n).abs() <= tol.sin())
+            }
+        });
+        flat.then_some(n)
+    }
+
     /// Points along the segment (an arc within `tol` of its chords), without its start.
     pub(crate) fn points_after_start(&self, tol: f64) -> Vec<Vec3> {
         match *self {

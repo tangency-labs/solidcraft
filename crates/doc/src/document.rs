@@ -1545,10 +1545,17 @@ pub enum FeatureKind {
         #[walk(length = ["-X margin", "+X margin", "-Y margin", "+Y margin", "-Z margin", "+Z margin"])]
         margins: Option<[Expr; 6]>,
     },
-    /// A tube along a chain of sketch curves (solid, or hollow with a wall thickness).
+    /// A tube along a chain of sketch curves, or along a chain of a body's edges (solid, or
+    /// hollow with a wall thickness).
     Pipe {
         path_sketch: SketchId,
         path: Vec<String>,
+        /// The path on a body's edges, instead of the curves of `path_sketch` (#16084): the body
+        /// and a point on each edge of the chain.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path_body: Option<BodyName>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        path_edges: Vec<Position>,
         #[walk(length = "Diameter")]
         diameter: Expr,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3562,11 +3569,19 @@ pub enum PatternKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axis_feature: Option<FeatureName>,
     },
-    /// Copies along a chain of sketch curves: instance k moves by path(s + k·spacing) − path(s),
-    /// measured along the path from its start, where s is the start point (0 by default).
+    /// Copies along a chain of sketch curves, or along a chain of a body's edges: instance k
+    /// moves by path(s + k·spacing) − path(s), measured along the path from its start, where s is
+    /// the start point (0 by default).
     Path {
         path_sketch: SketchId,
         path: Vec<String>,
+        /// The path on a body's edges, instead of the curves of `path_sketch` (#16084): the body
+        /// and a point on each edge of the chain. The path starts at the chain's end nearest
+        /// the first point; a closed chain starts at its point nearest the first point.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path_body: Option<BodyName>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        path_edges: Vec<Position>,
         #[walk(unitless = "Quantity")]
         count: Expr,
         /// Distance along the path between instances, or the whole extent when `extent`.

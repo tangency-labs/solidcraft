@@ -134,7 +134,20 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(
         input_schema_for::<PipeParams>(),
-        &["body_name", "body_names", "diameter", "name", "operation", "participants", "path", "path_sketch", "targets", "wall"],
+        &[
+            "body_name",
+            "body_names",
+            "diameter",
+            "name",
+            "operation",
+            "participants",
+            "path",
+            "path_body",
+            "path_edges",
+            "path_sketch",
+            "targets",
+            "wall",
+        ],
     );
     assert_keys(
         input_schema_for::<BoundingSolidParams>(),
@@ -531,6 +544,29 @@ fn sweep_path_on_a_body_is_accepted_and_unknown_keys_are_not() {
         assert_eq!(edges["type"], "array", "{schema}");
         assert_eq!(edges["minItems"], 1, "{schema}");
         assert_eq!(edges["maxItems"], 1000, "{schema}");
+    }
+}
+
+/// #16084: a pipe's path may be a chain of a body's edges, as a sweep's may, so its contract
+/// takes `path_body` and `path_edges` with the sweep's checks, and still refuses a key that is
+/// not one of the command's.
+#[test]
+fn pipe_path_on_a_body_is_accepted_and_unknown_keys_are_not() {
+    let pipe = crate::schema::TypedContract::<PipeParams>::new();
+    let p = json!({"path_body": "Body1", "path_edges": [[0, 0, 0], [10, 0, 0]], "diameter": 4});
+    assert!(crate::schema::Contract::check(&pipe, &p).is_empty(), "{p}");
+    let typo = json!({"path_body": "Body1", "path_edges": [[0, 0, 0]], "diameter": 4, "path_boddy": "Body1"});
+    let issues = crate::schema::Contract::check(&pipe, &typo);
+    assert_eq!(issues.len(), 1, "{typo}");
+    assert_eq!(issues[0].message, "unknown key `path_boddy`; did you mean `path_body`?", "{typo}");
+    for (p, key, message) in [
+        (json!({"path_body": 5, "diameter": 4}), "path_body", "`path_body` must be a body name"),
+        (json!({"path_edges": [], "diameter": 4}), "path_edges", "the path needs 1…1000 edges"),
+    ] {
+        let issues = crate::schema::Contract::check(&pipe, &p);
+        assert_eq!(issues.len(), 1, "{p}");
+        assert_eq!(issues[0].path, key, "{p}");
+        assert_eq!(issues[0].message, message, "{p}");
     }
 }
 
@@ -1431,6 +1467,8 @@ fn pattern_schemas_and_the_key_check_agree() {
             "orientation",
             "participants",
             "path",
+            "path_body",
+            "path_edges",
             "path_sketch",
             "sketch",
             "spacing",

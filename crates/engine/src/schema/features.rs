@@ -436,14 +436,25 @@ pub struct ConeParams {
     pub common: FeatureCommon,
 }
 
-/// Add a solid tube along a path of sketch curves.
+/// Add a solid tube along a path of sketch curves, or along a chain of a body's edges.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PipeParams {
-    /// The sketch holding the path, by id or name.
-    pub path_sketch: SketchRef,
-    /// The path's curve ids, in order along the path.
-    pub path: StringList,
+    /// The sketch holding the path, by id or name. Not needed when the path is a body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub path_sketch: Option<SketchRef>,
+    /// The path's curve ids, in order along the path. Not needed when the path is a body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "StringList")]
+    pub path: Option<StringList>,
+    /// The name of the body whose edges are the path, instead of a sketch's curves.
+    #[serde(default, deserialize_with = "path_body_opt", skip_serializing_if = "Option::is_none")]
+    pub path_body: Option<String>,
+    /// The points on that body's edges that are the path, 1 to 1000.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PathEdgePoints")]
+    pub path_edges: Option<PathEdgePoints>,
     /// The tube's outside diameter.
     pub diameter: LengthExpr,
     /// The wall thickness, for a hollow tube: above 0 and less than half `diameter`. Default:
@@ -1459,13 +1470,12 @@ impl JsonSchema for PathOrientationParam {
 }
 
 fn path_required(schema: &mut Schema) {
-    for key in ["path", "count"] {
-        require(schema, key);
-    }
+    require(schema, "count");
 }
 
-/// Copy features, bodies or components along a chain of sketch curves. Give one of `features`,
-/// `bodies` or `components`, and `spacing` or `distance`. One undo step.
+/// Copy features, bodies or components along a chain of sketch curves, or along a chain of a body's
+/// edges. Give one of `features`, `bodies` or `components`, the path (`path_sketch` and `path`, or
+/// `path_body` and `path_edges`), and `spacing` or `distance`. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = path_required)]
 pub struct PatternPathParams {
@@ -1478,7 +1488,8 @@ pub struct PatternPathParams {
     /// The components to place more of, by id or name. The reply then lists the new occurrences.
     #[serde(default)]
     pub components: Option<NameList>,
-    /// The sketch holding the path, by id or name. Required, unless given as `sketch`.
+    /// The sketch holding the path, by id or name, also given as `sketch`. Not needed when the
+    /// path is a body's edges.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "SketchRef")]
     pub path_sketch: Option<SketchRef>,
@@ -1486,11 +1497,18 @@ pub struct PatternPathParams {
     #[serde(default, deserialize_with = "path_sketch_alias")]
     #[schemars(with = "SketchRef")]
     pub sketch: Option<SketchRef>,
-    // Optional in the type, required in the schema: left out, `null` or empty, the handler
-    // refuses the call with its own message.
+    // Optional: the path is these curves or `path_edges`; with neither, the handler refuses the
+    // call with its own message.
     #[serde(default, deserialize_with = "path_curves")]
     #[schemars(schema_with = "path_curves_schema")]
     pub path: Option<NameList>,
+    /// The name of the body whose edges are the path, instead of a sketch's curves.
+    #[serde(default, deserialize_with = "path_body_opt", skip_serializing_if = "Option::is_none")]
+    pub path_body: Option<String>,
+    /// The points on that body's edges that are the path, 1 to 1000.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PathEdgePoints")]
+    pub path_edges: Option<PathEdgePoints>,
     // Optional in the type, required in the schema, for the handler's message (as `count1`).
     /// How many, the original included: a whole number or an expression that gives one.
     #[serde(default, deserialize_with = "present")]

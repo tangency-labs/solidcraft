@@ -186,7 +186,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::BoundingSolid { margin, .. }) {
             margin: String = "2 mm".into() => shown_expr(margin, ValueKind::Length),
         } => json!({"margin": margin});
-        Pipe("solid.pipe", "PIPE", [("Path", CURVES, true)],
+        Pipe("solid.pipe", "PIPE", [("Path", CURVES | EDGES, true)],
             FeatureKind::Pipe { diameter, wall, operation, .. }) {
             diameter: String = "5 mm".into() => shown_expr(diameter, ValueKind::Length),
             wall: String = String::new() => wall.as_deref().map(|e| shown_expr(e, ValueKind::Length)).unwrap_or_default(),
@@ -1085,6 +1085,11 @@ impl Dialog {
             ),
             "solid.fillet" => Dialog::new(fillet_kind(&fillet_radius_default(app), false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.chamfer" => Dialog::new(fillet_kind(&length_default(s, "1"), true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            // The path is a sketch's curves or a body's edges, with Tangent Chain (#16084).
+            "solid.pipe" => {
+                let (kind, inputs) = Kind::simple_start(id)?;
+                Dialog::new(crate::length_input::defaults(&s.doc, kind), inputs.into_iter().map(SelInput::chains).collect())
+            }
             "solid.shell" => {
                 let (kind, inputs) = Kind::simple_start(id)?;
                 let mut d = Dialog::new(crate::length_input::defaults(&s.doc, kind), inputs);
@@ -1131,7 +1136,7 @@ impl Dialog {
             "solid.remove" => Dialog::new(Kind::Remove, vec![SelInput::new("Bodies", BODIES, true)]),
             "solid.pattern.path" => Dialog::new(
                 Kind::PathPattern { count: "4".into(), spacing: length_default(s, "20"), start: String::new(), fraction: false },
-                vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
+                vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES | EDGES, true).chains()],
             ),
             "mesh.convert" => Dialog::new(
                 Kind::MeshConvert { tolerance: crate::length_input::model(&s.doc, 0.05) },
@@ -6913,6 +6918,34 @@ fn scale_pick(s: &Session, x: &Sel) -> Option<Value> {
     })
 }
 
+/// A Pipe's or a Pattern on Path's path into its command's parameters (#16084): a chain of a
+/// body's edges (`path_body`, `path_edges`), or the curves of one sketch (`path_sketch`, `path`).
+fn put_path(app: &SolveApp, picks: &[Sel], p: &mut Value) -> Result<(), String> {
+    if let Some((body, edges)) = crate::dialogs_sweep::edge_path(picks)? {
+        p["path_body"] = json!(body);
+        p["path_edges"] = json!(edges);
+    } else {
+        p["path_sketch"] = json!(picks_sketch(app, picks, None).ok_or("the path curves must be in one sketch")?);
+        p["path"] = json!(picks.curve_ids());
+    }
+    Ok(())
+}
+
+/// A stored path as the Path input's picks: the edges on the body the path was picked on, or
+/// the sketch's curves (#16084).
+fn path_sels(
+    s: &Session,
+    path_sketch: &solidcraft_engine::doc::SketchId,
+    path: &[String],
+    path_body: &Option<solidcraft_engine::doc::BodyName>,
+    path_edges: &[solidcraft_engine::doc::Position],
+) -> Vec<Sel> {
+    match path_body {
+        Some(body) => path_edges.iter().filter_map(|p| edge_sel_on(s, Some(body.0.as_str()), p.0)).collect(),
+        None => path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect(),
+    }
+}
+
 /// The commands (id, parameters) a dialog's OK runs.
 fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
@@ -7607,9 +7640,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::PathPattern { count, spacing, start, fraction } => {
             need(0, "objects")?;
             need(1, "the path")?;
-            let path = sels(d, 1).curve_ids();
-            let sketch = picks_sketch(app, sels(d, 1), None).ok_or("the path curves must be in one sketch")?;
-            let mut p = json!({"path_sketch": sketch, "path": path, "count": count});
+            let mut p = json!({"count": count});
+            put_path(app, sels(d, 1), &mut p)?;
             // A saved extent stays first-to-last distance when the quantity changes.
             p[if d.extra.contains_key("distance") { "distance" } else { "spacing" }] = json!(spacing);
             put(&mut p, &[(if *fraction { "start_fraction" } else { "start" }, start)]);
@@ -7618,9 +7650,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Pipe { wall, hollow, .. } => {
             need(0, "the path")?;
-            let path = sels(d, 0).curve_ids();
-            let sketch = picks_sketch(app, sels(d, 0), None).ok_or("the path curves must be in one sketch")?;
-            let mut p = json!({"path_sketch": sketch, "path": path});
+            let mut p = json!({});
+            put_path(app, sels(d, 0), &mut p)?;
             // A pipe is a solid rod or a hollow tube (#18344). A tube needs a wall, and the wall the
             // window holds is the pipe's wall: a thickness typed in it is never dropped.
             if *hollow == 1 && wall.trim().is_empty() {
@@ -10004,7 +10035,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     }
                     d
                 }
-                PatternKind::Path { path_sketch, path, count, spacing, extent, flip, orient, start: at, start_fraction, .. } => {
+                PatternKind::Path { path_sketch, path, path_body, path_edges, count, spacing, extent, flip, orient, start: at, start_fraction, .. } => {
                     let mut d = start("solid.pattern.path")?;
                     let (at, fraction) = match (start_fraction, at) {
                         (Some(f), _) => (f.to_string(), true),
@@ -10012,7 +10043,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     };
                     d.kind = Kind::PathPattern { count: count.to_string(), spacing: spacing.to_string(), start: at, fraction };
                     if let Some(inp) = d.inputs.get_mut(1) {
-                        inp.items = path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect();
+                        inp.items = path_sels(s, path_sketch, path, path_body, path_edges);
                     }
                     d.extra.insert("flip".into(), json!(flip));
                     d.extra.insert("orientation".into(), json!(if *orient { "path" } else { "identical" }));
@@ -10390,11 +10421,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Pipe { path_sketch, path, targets, .. } => {
+        FeatureKind::Pipe { path_sketch, path, path_body, path_edges, targets, .. } => {
             let mut d = start("solid.pipe")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
-                inp.items = path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect();
+                inp.items = path_sels(s, path_sketch, path, path_body, path_edges);
             }
             if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));

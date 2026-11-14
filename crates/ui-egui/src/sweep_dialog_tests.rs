@@ -403,6 +403,65 @@ fn tangent_chain_marquee_over_a_listed_edge_keeps_it_as_a_pick() {
     assert!(top(&h).is_empty(), "{:?}", top(&h));
 }
 
+/// #16084: Pipe and Pattern on Path take a body's edges as their path, as Sweep does: with
+/// Tangent Chain ticked, one pick of the rounded block's top front edge sends its whole top
+/// outline (eight edges) as `path_body` and `path_edges`, with no sketch anywhere in the design
+/// (none is drawn, projected or made), and editing the feature brings the eight edges back into
+/// the Path input.
+#[test]
+fn pipe_and_path_pattern_take_a_tangent_chain_of_body_edges() {
+    let mut h = Harness::new();
+    let (index, at) = rounded_block(&mut h);
+    h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [19, -1, 10], "body_name": "Pin"})).unwrap();
+    let pick = Sel::Edge { body: "B".into(), index, point: at };
+    for (command, path_input) in [("solid.pipe", 0), ("solid.pattern.path", 1)] {
+        h.step(&json!({"call":"ui.start","params":{"command":command}})).unwrap();
+        h.frames(3);
+        if path_input == 1 {
+            h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Body { name: "Pin".into() }];
+        }
+        h.app.dialog.as_mut().unwrap().active = path_input;
+        h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+        h.app.dialog.as_mut().unwrap().pick(&h.app.session, pick.clone());
+        h.frames(2);
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[path_input].items.len(), 8, "{command}");
+        h.step(&json!({"widget":"OK"})).unwrap();
+        let refused = h.app.dialog.as_ref().and_then(|d| d.error.clone());
+        assert!(refused.is_none(), "{command} was refused: {refused:?}");
+        assert!(h.app.dialog.is_none(), "{command}: {:?}", h.app.session.log);
+        let doc = &h.app.session.doc;
+        let f = doc
+            .features
+            .iter()
+            .rev()
+            .find(|f| matches!((command, &f.kind), ("solid.pipe", FeatureKind::Pipe { .. }) | ("solid.pattern.path", FeatureKind::Pattern { .. })))
+            .unwrap_or_else(|| panic!("{command}: {:?} {:?}", doc.features.iter().map(|f| &f.name).collect::<Vec<_>>(), h.app.session.log));
+        let (body, edges, curves) = match &f.kind {
+            FeatureKind::Pipe { path_body, path_edges, path, .. } => (path_body.clone(), path_edges.len(), path.len()),
+            FeatureKind::Pattern { pattern: solidcraft_engine::doc::PatternKind::Path { path_body, path_edges, path, .. }, .. } => {
+                (path_body.clone(), path_edges.len(), path.len())
+            }
+            other => panic!("{command}: {other:?}"),
+        };
+        // The edges are the path themselves: no sketch curve stands between them and the feature.
+        assert_eq!((body.map(|b| b.0), edges, curves), (Some("B".to_string()), 8, 0), "{command}");
+        assert!(!doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Sketch { .. })), "{command}: the design has a sketch");
+        assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{command}: {:?}", h.app.session.model.results.last());
+        let feature = f.name.clone();
+        h.step(&json!({"call":"ui.editFeature","params":{"feature":feature}})).unwrap();
+        h.frames(8);
+        let d = h.app.dialog.as_ref().unwrap();
+        let path = d
+            .inputs
+            .get(path_input)
+            .map(|i| i.items.clone())
+            .unwrap_or_else(|| panic!("{command} {feature}: {:?} {:?}", d.kind, d.inputs.iter().map(|i| &i.label).collect::<Vec<_>>()));
+        assert_eq!(path.len(), 8, "{command}: {path:?}");
+        assert!(path.iter().all(|x| matches!(x, Sel::Edge { body, .. } if body == "B")), "{command}: {path:?}");
+        h.app.dialog = None;
+    }
+}
+
 /// Every input that takes a chain of edges offers Tangent Chain, off: both Sweeps' Path, the
 /// Surface Loft's sections, Blend's two edge sets, Boundary's curves, Patch's boundary and
 /// Ruled's edges.
@@ -418,6 +477,8 @@ fn edge_chain_inputs_offer_tangent_chain() {
         ("surface.boundary", &["Curves", "Cross curves"][..]),
         ("surface.patch", &["Boundary"][..]),
         ("surface.ruled", &["Edges"][..]),
+        ("solid.pipe", &["Path"][..]),
+        ("solid.pattern.path", &["Path"][..]),
     ] {
         h.step(&json!({"call":"ui.start","params":{"command":command}})).unwrap();
         h.frames(2);
