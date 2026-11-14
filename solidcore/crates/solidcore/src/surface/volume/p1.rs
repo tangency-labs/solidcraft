@@ -3202,22 +3202,15 @@ mod tests {
 
     #[test]
     fn wr45_compound_volume_and_srf_in_volume_end_to_end() {
-        let k_def = Kernel::default();
-        assert!(!k_def.fixes.volume_lift_third_derivative_terms);
         assert!(UpstreamFixes::NAMES.contains(&"volume_lift_third_derivative_terms"));
 
-        let mut k_opt = Kernel::default();
-        *k_opt
-            .fixes
-            .flag_mut("volume_lift_third_derivative_terms")
-            .unwrap() = true;
+        let k_opt = Kernel::default();
         assert!(k_opt.fixes.volume_lift_third_derivative_terms);
         assert!(k_opt
             .fixes
             .flags()
             .any(|(name, on)| name == "volume_lift_third_derivative_terms" && on));
 
-        let opts_def = EvalOptions::default();
         let opts_opt = EvalOptions {
             fixes: k_opt.fixes,
             ..EvalOptions::default()
@@ -3289,8 +3282,6 @@ mod tests {
                     vol.evaluate(q, n, o).unwrap()
                 }
             };
-            assert_eq!(eval_at(p, 2, &opts_def), eval_at(p, 2, &opts_opt));
-            let d3_def = eval_at(p, 3, &opts_def);
             let d3_opt = eval_at(p, 3, &opts_opt);
             let d2_up = eval_at(v(p.x + h, p.y, p.z), 2, &opts_opt);
             let d2_um = eval_at(v(p.x - h, p.y, p.z), 2, &opts_opt);
@@ -3310,20 +3301,13 @@ mod tests {
                 (d2_vp[sv2(0, 0, 2)] - d2_vm[sv2(0, 0, 2)]) / (2.0 * h),
                 (d2_wp[sv2(0, 0, 2)] - d2_wm[sv2(0, 0, 2)]) / (2.0 * h),
             ];
-            let mut max_def_err = 0.0_f64;
             for (i, ((u, vv, w), fd_i)) in order3_slots.into_iter().zip(fd).enumerate() {
                 let got_opt = d3_opt[sv3(u, vv, w)];
-                let got_def = d3_def[sv3(u, vv, w)];
                 assert!(
                     (got_opt - fd_i).length() < 1e-7,
                     "{label} slot {i}: opt={got_opt:?} fd={fd_i:?}"
                 );
-                max_def_err = max_def_err.max((got_def - fd_i).length());
             }
-            assert!(
-                max_def_err > 1e-3,
-                "{label} expected default WR-45 mismatch, got max_def_err={max_def_err}"
-            );
         };
 
         check_vol(&twist_compound, v(1.3, -0.8, 0.5), false, "twist_eval");
@@ -3358,11 +3342,6 @@ mod tests {
             ..EvaluateFlags::default()
         };
         let check_siv = |siv: &SrfInVolume, uv: Point2, hu_step: f64, hv_step: f64, label: &str| {
-            assert_eq!(
-                siv.evaluate(&k_def, uv, 2, 2, flags).unwrap(),
-                siv.evaluate(&k_opt, uv, 2, 2, flags).unwrap()
-            );
-            let d3_def = siv.evaluate(&k_def, uv, 3, 3, flags).unwrap();
             let d3_opt = siv.evaluate(&k_opt, uv, 3, 3, flags).unwrap();
             let s2_up = siv
                 .evaluate(&k_opt, Point2::new(uv.x + hu_step, uv.y), 2, 2, flags)
@@ -3383,25 +3362,17 @@ mod tests {
                 (s2_vp[0][2] - s2_vm[0][2]) / (2.0 * hv_step),
             ];
             let got_opt = [d3_opt[3][0], d3_opt[2][1], d3_opt[1][2], d3_opt[0][3]];
-            let got_def = [d3_def[3][0], d3_def[2][1], d3_def[1][2], d3_def[0][3]];
-            let mut max_def_err = 0.0_f64;
-            for (i, ((opt_i, def_i), fd_i)) in got_opt.into_iter().zip(got_def).zip(fd).enumerate()
-            {
+            for (i, (opt_i, fd_i)) in got_opt.into_iter().zip(fd).enumerate() {
                 let tol = 1e-6 * (1.0 + fd_i.length());
                 assert!(
                     (opt_i - fd_i).length() <= tol,
                     "{label} srf3[{i}]: opt={opt_i:?} fd={fd_i:?}"
                 );
-                max_def_err = max_def_err.max((def_i - fd_i).length());
             }
-            assert!(
-                max_def_err > 1e-2,
-                "{label} expected default WR-45 mismatch, got max_def_err={max_def_err}"
-            );
         };
 
         let siv_single =
-            SrfInVolume::new(&k_def, tilted_plane.clone(), true, single_twist, 0, 0).unwrap();
+            SrfInVolume::new(&k_opt, tilted_plane.clone(), true, single_twist, 0, 0).unwrap();
         check_siv(
             &siv_single,
             Point2::new(0.3, 0.5),
@@ -3411,7 +3382,7 @@ mod tests {
         );
 
         let siv_compound_param = SrfInVolume::new(
-            &k_def,
+            &k_opt,
             tilted_plane.clone(),
             true,
             twist_compound.clone(),
@@ -3428,7 +3399,7 @@ mod tests {
         );
 
         let siv_compound_inspace =
-            SrfInVolume::new(&k_def, tilted_plane, false, bend_compound, 0, 0).unwrap();
+            SrfInVolume::new(&k_opt, tilted_plane, false, bend_compound, 0, 0).unwrap();
         check_siv(
             &siv_compound_inspace,
             Point2::new(0.3, 0.5),
@@ -3440,12 +3411,12 @@ mod tests {
         let sphere_frame =
             Axis2Placement::new(v(0.4, -0.2, 0.3), v(2.0, 2.0, 1.0), v(1.0, -2.0, 2.0));
         let sphere_srf =
-            Surface::from(Sphere::create_canonical(&k_def, &sphere_frame, 1.5).unwrap());
-        let dom = sphere_srf.natural_uv_domain_with_nurb(&k_def).unwrap();
+            Surface::from(Sphere::create_canonical(&k_opt, &sphere_frame, 1.5).unwrap());
+        let dom = sphere_srf.natural_uv_domain_with_nurb(&k_opt).unwrap();
         let (lo, hi) = (dom.min(), dom.max());
         let uv_s = Point2::new(lo.x + 0.37 * (hi.x - lo.x), lo.y + 0.41 * (hi.y - lo.y));
         let siv_sphere =
-            SrfInVolume::new(&k_def, sphere_srf, true, twist_compound.clone(), 0, 0).unwrap();
+            SrfInVolume::new(&k_opt, sphere_srf, true, twist_compound.clone(), 0, 0).unwrap();
         check_siv(
             &siv_sphere,
             uv_s,
@@ -3460,12 +3431,10 @@ mod tests {
         );
         let civ = CrvInVolume::new(seg, true, twist_compound, 0, 0).unwrap();
         let t_param = 0.4;
-        let c3_def = civ.evaluate(&k_def, t_param, 3, true, false).unwrap();
         let c3_opt = civ.evaluate(&k_opt, t_param, 3, true, false).unwrap();
         let c2_p = civ.evaluate(&k_opt, t_param + h, 2, true, false).unwrap()[2];
         let c2_m = civ.evaluate(&k_opt, t_param - h, 2, true, false).unwrap()[2];
         let c_fd3 = (c2_p - c2_m) / (2.0 * h);
         assert!((c3_opt[3] - c_fd3).length() < 1e-6 * (1.0 + c_fd3.length()));
-        assert!((c3_def[3] - c_fd3).length() > 1e-3);
     }
 }

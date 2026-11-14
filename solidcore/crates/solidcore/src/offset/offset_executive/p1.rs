@@ -4280,11 +4280,12 @@ mod tests {
         executive.set_shell_faces(&[]);
         // No result edge: the original's editing flag is not touched; the empty
         // deletion list still reaches RemoveFaces, whose editing-disabled refusal is
-        // ignored (cpp:2099-2102).
-        executive
+        // passed on (WR-658), where cpp:2099-2102 ignores it.
+        assert!(executive
             .remove_excess_faces(&mut kernel, &mut original, &mut result)
-            .unwrap();
+            .is_err());
         assert!(!original.editing_enabled());
+        result.set_editing_enabled(true);
         add_use(&mut result, 0.0, 1.0, 1.0);
         add_use(&mut result, 0.0, 1.0, 2.0);
         // The edges evaluate and solve against the empty original; no result face is
@@ -4507,10 +4508,11 @@ mod tests {
         let mut result = Brep::new_with_infinite_region().unwrap();
         let mut exec = executive();
         exec.set_merge_results(true);
-        // Native RemoveExcessFaces ignores the editing-disabled refusal from
-        // RemoveFaces. No traversal mark is acquired by that refused inner call.
-        exec.remove_excess_faces(&mut kernel, &mut original, &mut result)
-            .unwrap();
+        // RemoveFaces' editing-disabled refusal is passed on (WR-658), where native
+        // RemoveExcessFaces ignores it. No traversal mark is acquired by that refused call.
+        assert!(exec
+            .remove_excess_faces(&mut kernel, &mut original, &mut result)
+            .is_err());
         assert!(!result.editing_enabled());
         assert_eq!(kernel.context.current_mark(MarkType::Mark), 1);
         result.set_editing_enabled(true);
@@ -4892,17 +4894,15 @@ mod tests {
     }
 
     #[test]
-    fn uv_boolean_bounds_ignore_ordinary_failures_and_keep_conversion_side_effects() {
+    fn uv_boolean_bounds_pass_on_a_failed_conversion() {
         let kernel = Kernel::default();
         // Rust-only error-path input: upstream ConvertTo3D dereferences the missing NURB.
+        // The conversion's failure is passed on (WR-658), where cpp:3777-3780 ignores it
+        // and bounds the curve by the initialized extent.
         let mut curve = Curve::from(BSplineCurve::new(2));
-        let bbox = uv_curve_bounding_box(&kernel, &mut curve).unwrap();
-        assert_eq!(bbox.min(), Extent3d::new().min());
-        assert_eq!(bbox.max(), Extent3d::new().max());
-        let CurveKind::BSpline(curve) = curve.kind() else {
-            panic!("expected the original B-spline kind");
-        };
-        assert_eq!(curve.dim(), 3);
+        let err = uv_curve_bounding_box(&kernel, &mut curve).unwrap_err();
+        assert_eq!(err.sm_status(), Some(crate::error::SM_ERR), "{err:?}");
+        assert!(matches!(curve.kind(), CurveKind::BSpline(_)));
     }
 
     #[test]

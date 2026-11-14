@@ -697,13 +697,10 @@ mod tests {
         b.face_mut(f).unwrap().surface = Some(Surface::from(
             crate::nurbs::b_spline_surface::BSplineSurface::default(),
         ));
-        let off = has_parallel_faces(&k, &mut b, v, None).unwrap();
-        let mut on_k = Kernel::default();
-        on_k.fixes.query_statuses_pass_on = true;
+        let on_k = Kernel::default();
         let on = has_parallel_faces(&on_k, &mut b, v, None).unwrap();
         assert!(!on.parallel, "{on:?}");
         assert!((on.min_dihedral_ang_deg - 90.0).abs() < 1e-9, "{on:?}");
-        assert_ne!(off, on);
     }
 
     #[test]

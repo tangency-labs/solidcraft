@@ -1884,8 +1884,9 @@ mod tests {
         assert!(are_edges_tangent(&k, &b, v[1], e[0], e[1], 0.5).unwrap());
         assert!(are_edges_tangent(&k, &b, v[1], e[1], e[0], 0.5).unwrap());
         assert!(!are_edges_tangent(&k, &b, v[1], e[0], e[1], 0.0).unwrap());
-        // the parameters agree (0 and 0) and the angle test passes
-        assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
+        // the parameters agree (0 and 0), but without the angle between real tangents the
+        // curves are not shown to meet G1, so the vertex is kept (#2009, smlib 7a35f33)
+        assert!(!is_topological_vertex(&k, &mut b, v[1]).unwrap());
     }
 
     // tangency-labs/smlib 7a35f33 (SmVertex::IsTopologicalVertex): without the angle
@@ -1898,9 +1899,7 @@ mod tests {
         let e0 = b.edge_mut(e[0]).unwrap();
         e0.curve = Some(Curve::from(CompositeCurve::new(3)));
         e0.interval = Extent1d::from_min_max(-1.0, 0.0);
-        let mut k = Kernel::default();
-        assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
-        k.fixes.query_statuses_pass_on = true;
+        let k = Kernel::default();
         assert!(!is_topological_vertex(&k, &mut b, v[1]).unwrap());
     }
 

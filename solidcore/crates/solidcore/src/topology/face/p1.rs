@@ -3451,8 +3451,11 @@ mod tests {
         b.face_mut(f).unwrap().surface =
             Some(Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z)));
         shrink_geometry(&k, &mut b, f, &key_of).unwrap();
+        // a surface the face owns, on a face record with no face use to shrink it by: the
+        // failure is passed on (WR-658), where upstream ignores it
         let (mut b, f) = plane_face();
-        shrink_geometry(&k, &mut b, f, &key_of).unwrap();
+        let bare = shrink_geometry(&k, &mut b, f, &key_of).unwrap_err();
+        assert_eq!(bare.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
     #[test]

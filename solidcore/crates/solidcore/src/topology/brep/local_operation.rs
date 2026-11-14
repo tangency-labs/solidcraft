@@ -2279,6 +2279,33 @@ mod tests {
         assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
     }
 
+    /// `b`'s `faces` given `surfaces`, refused with `b` exactly as it came in (its `Debug`
+    /// form, every surface's cache included, the same before and after): the refusal.
+    fn refused_unchanged(
+        k: &mut Kernel,
+        b: &mut Brep,
+        faces: &[FaceId],
+        surfaces: Vec<Surface>,
+    ) -> SolidError {
+        let before = format!("{b:?}");
+        let r = with_notifications(b, |b, notes| local_operation(k, b, faces, surfaces, notes));
+        let e = r.expect_err("refused");
+        assert!(
+            format!("{b:?}") == before,
+            "refused ({e}), but the input changed"
+        );
+        e
+    }
+
+    /// A refusal of WR-530 (`local_operation_refuses_loose_tangent_edges`): a tangent edge's
+    /// lift onto a face's new surface, which keeps the old face's (u, v) only when it is the
+    /// face's own surface offset, does not land on its neighbour; `ExtendTrimEdges` passes
+    /// the failure on (`SM_ERR`).
+    fn assert_loose_tangent_edge_refusal(e: &SolidError) {
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{e}");
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "{e}");
+    }
+
     /// `b`'s `faces` given `surfaces`: the offset refusal (`Some`), `b` then exactly as it
     /// came in (its `Debug` form, every surface's cache included, the same before and
     /// after), or `None` when the body is returned. What a returned body is, each test
@@ -2326,35 +2353,21 @@ mod tests {
 
     /// A refusal leaves everything as it came in: `b` in its `Debug` form, the caches its
     /// surfaces had built before the call included (none dropped, none added), and the
-    /// caller's notification records and attributes. Refused while the offset's loop gaps
-    /// are closed — the straight bridge that would join a gap is not established on the
-    /// face's own surface within the operation's tolerance — a cube's round given a narrower
-    /// coaxial cylinder, and a side moved off its round (the edge between them apart:
-    /// `LocalReach::apart`, adding nothing to the reach); `b` carries an attribute of its
-    /// own, lent to the offset, and the caller's store one of the caller's.
+    /// caller's notification records and attributes. Refused in the offset's edges — a
+    /// cube's round given a narrower coaxial cylinder, its tangent edges lifted off it
+    /// (WR-530); `b` carries an attribute of its own, lent to the offset, and the caller's
+    /// store one of the caller's.
     #[test]
     fn a_refusal_leaves_the_input_its_caches_and_the_callers_stores_as_they_were() {
         use crate::geom::attribute::{Attribute, Behavior};
         use crate::primitive::api_primitives as ap;
-        type Make = fn(&mut Kernel) -> (Brep, FaceId, Surface, FaceId);
-        let cases: [(&str, Make); 2] = [
-            // the round is the face whose offset loop's gap the bridge would join
-            ("round", |k| {
-                let (b, round) = box_rounded_r2(k);
-                let s = ap::create_cylinder_surface(k, Point3::new(8.0, 8.0, -1.0), 1.8, 12.0);
-                (b, round, Surface::from(s.unwrap()), round)
-            }),
-            // the moved side is the face whose offset loop's gap the bridge would join
-            ("side", |k| {
-                let b = cube_rounded_r5(k);
-                let side = face_on_x(k, &b, 20.0);
-                let s = Plane::from_normal(Vec3::new(20.1, 0.0, 0.0), Vec3::X);
-                (b, side, Surface::from(s), side)
-            }),
-        ];
-        for (name, make) in cases {
+        let name = "round";
+        {
             let mut k = Kernel::default();
-            let (mut b, face, s, at) = make(&mut k);
+            let (mut b, face) = box_rounded_r2(&mut k);
+            let s = Surface::from(
+                ap::create_cylinder_surface(&k, Point3::new(8.0, 8.0, -1.0), 1.8, 12.0).unwrap(),
+            );
             b.add_attribute(EntityRef::Face(face), Attribute::long(7, 1, Behavior::Copy))
                 .unwrap();
             // caches built on `b`'s surfaces before the call (the copy shares their slots)
@@ -2375,20 +2388,7 @@ mod tests {
                 (r, (stores, after))
             });
             let e = r.expect_err(name);
-            assert_eq!(
-                e.kind(),
-                crate::error::ErrorKind::Unsupported,
-                "{name}: {e}"
-            );
-            assert!(
-                matches!(
-                    e.failure().map(|f| &f.reason),
-                    Some(crate::error::Reason::Offset(
-                        OffsetFailure::LoopGapUncertified { face: refused }
-                    )) if *refused == Some(at)
-                ),
-                "{name}: {e}"
-            );
+            assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "{name}: {e}");
             assert!(format!("{b:?}") == before, "{name}: the input changed");
             assert!(stores.0 .0 == stores.1 .0, "{name}: the records changed");
             assert!(stores.0 .1 == stores.1 .1, "{name}: the attributes changed");
@@ -2704,18 +2704,19 @@ mod tests {
     /// the input. (A wider cylinder is met on the corner's side:
     /// `tangent_edges_a_round_given_a_wider_coaxial_cylinder_meets_its_sides_on_the_corner_side`.)
     #[test]
-    fn a_round_given_a_narrower_coaxial_cylinder_is_refused_at_its_loop_gap() {
+    fn a_round_given_a_narrower_coaxial_cylinder_is_refused() {
+        // the round's tangent edges, lifted onto the narrower cylinder by the round's
+        // (u, v), leave its domain: refused as loose tangent edges (WR-530), the box as it
+        // came in, before the loop gaps the bridge would join (without WR-530,
+        // `LoopGapUncertified`)
         use crate::primitive::api_primitives as ap;
         let mut k = Kernel::default();
         let (mut b, round) = box_rounded_r2(&mut k);
         let s = Surface::from(
             ap::create_cylinder_surface(&k, Point3::new(8.0, 8.0, -1.0), 1.8, 12.0).unwrap(),
         );
-        let why = refused_unchanged_or_returned(&mut k, &mut b, &[round], vec![s]);
-        assert_eq!(
-            why,
-            Some(OffsetFailure::LoopGapUncertified { face: Some(round) })
-        );
+        let e = refused_unchanged(&mut k, &mut b, &[round], vec![s]);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "{e}");
     }
 
     /// The former flag-off refusal is no longer a default behaviour. With the same
@@ -3116,31 +3117,39 @@ mod tests {
 
     /// The same side moved out by 0.1: the plane x = 20.1 passes the round, which bends
     /// away from it, so no extension makes them meet: their edge is apart
-    /// (`LocalReach::apart`, adding nothing to the reach), and the straight bridge that
-    /// would join the offset loop's gap is not established on the side's own surface
-    /// within the operation's tolerance: refused before any body is checked, the cube as
-    /// it came in.
+    /// (`LocalReach::apart`, adding nothing to the reach). The step walls build the wall
+    /// between the side and its round (`local_operation_step_walls`, with WR-530), and the
+    /// body passes the operation's soundness gate: a manifold solid, the cube with the
+    /// side's 15 x 20 face moved out 0.1 (the wall, in the plane where the round meets
+    /// the side, adds nothing), 30 more.
+    /// (Without them, the straight bridge that would join the offset loop's gap is not
+    /// established on the side's own surface: `LoopGapUncertified`.)
     #[test]
-    fn a_side_moved_off_its_round_is_refused_before_its_gap_bridge_is_established() {
+    fn a_side_moved_off_its_round_takes_a_step_wall() {
         let mut k = Kernel::default();
         let mut b = cube_rounded_r5(&mut k);
+        let (input, _) = volume_and_manifold(&k, &mut b);
         let side = face_on_x(&k, &b, 20.0);
-        // the moved side is the face whose offset loop's gap the bridge would join
         let moved = Surface::from(Plane::from_normal(Vec3::new(20.1, 0.0, 0.0), Vec3::X));
         let why = refused_unchanged_or_returned(&mut k, &mut b, &[side], vec![moved]);
-        assert_eq!(
-            why,
-            Some(OffsetFailure::LoopGapUncertified { face: Some(side) })
+        assert_eq!(why, None);
+        let (v, manifold) = volume_and_manifold(&k, &mut b);
+        assert!(manifold);
+        assert!(
+            (v - (input + 30.0)).abs() <= 1e-6 * input,
+            "{v} vs {input} + 30"
         );
     }
 
     /// A tangent pair of equal curvature: a 60 x 40 x 20 block whose top is imprinted
     /// along x = 30, the piece x < 30 raised 1. The two pieces' planes stay parallel and
-    /// 1 apart: they meet nowhere, so their edge is apart (`LocalReach::apart`, adding
-    /// nothing to the reach), and without the step walls, which build the wall between
-    /// them (`wr_530_local_operation_step_walls`), the body built is refused as not sound.
+    /// 1 apart. Given a plane made afresh, not the piece's own surface offset (which the
+    /// step walls build the wall to, `wr_530_local_operation_step_walls`), the edge
+    /// between them lifts by the piece's (u, v) to where the plane's parameterization puts
+    /// it, off its twin: refused as a loose tangent edge (WR-530), the block as it came in.
+    /// (Without WR-530 the body built is refused as not sound.)
     #[test]
-    fn a_coplanar_neighbour_raised_off_its_twin_is_refused_as_not_sound() {
+    fn a_coplanar_neighbour_raised_off_its_twin_is_refused() {
         use crate::boolean::api_brep::boolean_with_options;
         use crate::boolean::merge::MergeOptions;
         use crate::geom::a_object::BooleanOperation;
@@ -3170,10 +3179,7 @@ mod tests {
             })
             .unwrap();
         let raised = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 21.0), Vec3::Z));
-        let why = refused_unchanged_or_returned(&mut k, &mut b, &[piece], vec![raised]);
-        assert!(
-            matches!(why, Some(OffsetFailure::Unsound { .. })),
-            "{why:?}"
-        );
+        let e = refused_unchanged(&mut k, &mut b, &[piece], vec![raised]);
+        assert_loose_tangent_edge_refusal(&e);
     }
 }

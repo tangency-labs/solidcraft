@@ -835,7 +835,8 @@ mod tests {
         assert_eq!(s.boundaries_3d().len(), 1);
         assert_eq!(s.boundaries_uv().len(), 1);
         assert_eq!(s.boundaries_uv()[0].dim(), 2);
-        assert!(!s.implicit_outer());
+        // the record's `1 implicit` is kept (WR-43)
+        assert!(s.implicit_outer());
         assert_eq!(s.basis().type_code(), BSplineSurface::TYPE);
 
         // through the surface dispatch
@@ -844,7 +845,7 @@ mod tests {
     }
 
     #[test]
-    fn read_uv_without_3d_uses_type_zero() {
+    fn read_uv_without_3d_reads_the_uv_type() {
         let k = Kernel::default();
         let text = format!(
             "0\n1\n0\n\nObject Type {}\n{}{}",
@@ -852,8 +853,12 @@ mod tests {
             surface_text(),
             curve_text(2)
         );
-        let e = CurveBoundedSurface::read_from_db(&k, &mut reader(&text), 30).unwrap_err();
-        assert!(!e.is_unported());
+        // the UV curve is read by its own type (WR-43), where upstream reads it by the
+        // 3D curves' type, 0 without any, and fails
+        let s = CurveBoundedSurface::read_from_db(&k, &mut reader(&text), 30).unwrap();
+        assert!(s.boundaries_3d().is_empty());
+        assert_eq!(s.boundaries_uv().len(), 1);
+        assert_eq!(s.boundaries_uv()[0].dim(), 2);
     }
 
     #[test]
@@ -871,9 +876,11 @@ mod tests {
     }
 
     fn kernel_with_wr43() -> Kernel {
-        let mut k = Kernel::default();
-        k.fixes
-            .curve_bounded_surface_read_uv_type_and_implicit_outer = true;
+        let k = Kernel::default();
+        assert!(
+            k.fixes
+                .curve_bounded_surface_read_uv_type_and_implicit_outer
+        );
         k
     }
 
@@ -937,7 +944,6 @@ mod tests {
 
     #[test]
     fn wr43_uv_only_and_implicit_outer_round_trip_ascii_and_binary() {
-        let k_def = Kernel::default();
         let k_opt = kernel_with_wr43();
         let uv_line = analytic_line_2d(Point3::new(0.25, 0.5, 0.0), Point3::new(0.75, 0.5, 0.0));
         let uv_bspline = quadratic_bspline_2d();
@@ -956,25 +962,9 @@ mod tests {
                     let raw = write_cbs_bytes(&orig, file_type, version);
                     let poly = write_polymorphic_surface_bytes(&orig, file_type, version);
 
-                    // Pinned C++ behaviour: 0 3D curves leaves `l3d_type == 0`, so UV
-                    // dispatch fails (`SM_ERR`).
-                    let err = CurveBoundedSurface::read_from_db(
-                        &k_def,
-                        &mut reader_bytes(&raw, file_type),
-                        version,
-                    )
-                    .unwrap_err();
-                    assert!(!err.is_unported());
-
-                    let mut poly_def_db = reader_bytes(&poly, file_type);
-                    let ty_def = poly_def_db.read_type(false).unwrap().type_code.unwrap();
-                    assert_eq!(ty_def, TYPE);
-                    assert!(
-                        Surface::read_from_db(&k_def, ty_def, &mut poly_def_db, version).is_err()
-                    );
-
-                    // Opt-in WR-43 fix: dispatches UV curve on `luv_type` and preserves
-                    // `implicit_outer == true`.
+                    // WR-43: the UV curve is dispatched on `luv_type` and
+                    // `implicit_outer == true` is kept, where upstream's 0 3D curves leave
+                    // `l3d_type == 0` and the UV dispatch fails (`SM_ERR`).
                     let got = CurveBoundedSurface::read_from_db(
                         &k_opt,
                         &mut reader_bytes(&raw, file_type),
@@ -1016,11 +1006,7 @@ mod tests {
 
     #[test]
     fn wr43_mismatched_3d_and_uv_curve_types_and_implicit_false() {
-        let mut fixes = UpstreamFixes::default();
-        assert!(!fixes.curve_bounded_surface_read_uv_type_and_implicit_outer);
-        *fixes
-            .flag_mut("curve_bounded_surface_read_uv_type_and_implicit_outer")
-            .unwrap() = true;
+        let fixes = UpstreamFixes::default();
         assert!(fixes.curve_bounded_surface_read_uv_type_and_implicit_outer);
         assert_eq!(
             fixes.flags().find(|&(name, _)| {
@@ -1032,7 +1018,6 @@ mod tests {
             ))
         );
 
-        let k_def = Kernel::default();
         let k_opt = kernel_with_wr43();
 
         // Case 1: 3D BSplineCurve + 2D Line UV boundary.
@@ -1050,13 +1035,8 @@ mod tests {
                 let raw = write_cbs_bytes(&orig, file_type, 30);
                 let poly = write_polymorphic_surface_bytes(&orig, file_type, 30);
 
-                // Default reads the 2D `Line` record as `BSPLINE_CURVE_TYPE` and fails.
-                assert!(CurveBoundedSurface::read_from_db(
-                    &k_def,
-                    &mut reader_bytes(&raw, file_type),
-                    30,
-                )
-                .is_err());
+                // The 2D `Line` record is read as a line, where upstream reads it as
+                // `BSPLINE_CURVE_TYPE` and fails.
 
                 let got = CurveBoundedSurface::read_from_db(
                     &k_opt,
@@ -1104,17 +1084,9 @@ mod tests {
                 let raw = write_cbs_bytes(&orig, file_type, 30);
                 let poly = write_polymorphic_surface_bytes(&orig, file_type, 30);
 
-                // Default misreads the 2D `BSplineCurve` record as `Line::TYPE` (leaving
-                // its failed base 3D) and drops `implicit_outer` (`false`).
-                let misread = CurveBoundedSurface::read_from_db(
-                    &k_def,
-                    &mut reader_bytes(&raw, file_type),
-                    30,
-                )
-                .unwrap();
-                assert_eq!(misread.boundaries_uv()[0].type_code(), Line::TYPE);
-                assert_eq!(misread.boundaries_uv()[0].dim(), 3);
-                assert!(!misread.implicit_outer());
+                // The 2D `BSplineCurve` record is read as one and `implicit_outer` kept,
+                // where upstream misreads it as `Line::TYPE` (leaving its failed base 3D)
+                // and drops `implicit_outer`.
 
                 let got = CurveBoundedSurface::read_from_db(
                     &k_opt,

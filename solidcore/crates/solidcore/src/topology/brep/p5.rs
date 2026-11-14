@@ -3822,11 +3822,13 @@ mod tests {
     #[test]
     fn failure_outputs_follow_native_lifecycle() {
         let mut b = Brep::new();
+        // open for editing, as the operations that combine vertices open it: the vertex's
+        // deletion's status is passed on (WR-658)
+        b.set_editing_enabled(true);
         let v = b.add_vertex_record(Vertex::default()).unwrap();
         let mut edge = Some(EdgeId::from_index(3));
         // With `SmBrep::DeleteVertex` (topology.brep_p4) and `Notify` ported, the
-        // isolated-vertex branch completes (upstream ignores both statuses); the
-        // deleted-edge output is still reset first.
+        // isolated-vertex branch completes; the deleted-edge output is still reset first.
         assert!(
             combine_coincident_vertices(&mut Kernel::default(), &mut b, v, v, &mut edge).is_ok()
         );

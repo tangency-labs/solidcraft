@@ -3450,19 +3450,22 @@ mod tests {
         // a region and a loop are not connected
         assert_eq!(m.can_combine_vertex_definitions(&k, &geo, a, c).unwrap(), 0);
 
-        // resolving a proto vertex with both keeps one
+        // resolving a proto vertex with them resolves each definition first, which needs
+        // its classifications' object points: these region classifications have none, and
+        // the failure is passed on (`ssi_proto_topology_statuses_pass_on`, fork bcc6f01),
+        // the definitions left as they were
         let pv = m.new_proto_vertex(p, 1e-5).unwrap();
         m.add_proto_vertex(pv);
         m.add_vertex_definition(pv, a).unwrap();
         m.add_vertex_definition(pv, b).unwrap();
         m.add_vertex_definition(pv, c).unwrap();
-        m.resolve_proto_vertex(&k, &geo, pv).unwrap();
-        assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions(), &[b, c]);
-        assert!(m.vertex_def(a).is_none());
+        assert!(m.resolve_proto_vertex(&k, &geo, pv).is_err());
+        assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions(), &[a, b, c]);
     }
 
-    /// A proto edge from a proto vertex back to itself along an open curve 5e-5 long
-    /// (longer than twice the 1e-5 tolerance, ends as far apart), the proto vertex
+    /// A proto edge from a proto vertex back to itself along an open curve 5e-3 long
+    /// (longer than the proto vertex's containment ball, its 1e-3 capture distance, is
+    /// wide, so WR-306 does not take it as the vertex; ends as far apart), the proto vertex
     /// holding one vertex definition with `pc1` and `pc2`, resolved with
     /// `split_self_loops_on_vertices` set to `split`. Returns the manager, the proto
     /// vertex and edge, and what `resolve_proto_edge` returned.
@@ -3478,7 +3481,7 @@ mod tests {
     ) {
         let k = Kernel::default();
         let mut geo = Geo::default();
-        geo.curves.push(line([0.0, 0.0, 0.0], [5e-5, 0.0, 0.0]));
+        geo.curves.push(line([0.0, 0.0, 0.0], [5e-3, 0.0, 0.0]));
         let c0 = H(0, ClassObjectKind::Curve);
         let mut m = manager();
         assert!(
@@ -3516,8 +3519,9 @@ mod tests {
 
     /// upstream: the proto vertex gets a second definition for the curve's end.
     /// These pool stand-ins have no surfaces or vertex records, so
-    /// `CreateVertexDefinition` stops (no position found, UB-115; or the unported
-    /// `SmVertex::GetPoint`): reaching it shows the split branch ran, edge kept.
+    /// `CreateVertexDefinition` stops (no position found, UB-115, or none to find from
+    /// classifications without parameters, the lookup's failure passed on; or the
+    /// unported `SmVertex::GetPoint`): reaching it shows the split branch ran, edge kept.
     fn assert_split_attempted(
         pc1: &PointClassification<H>,
         pc2: &PointClassification<H>,
@@ -3527,7 +3531,9 @@ mod tests {
         let err = result.unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("no position found") || msg.contains("SmVertex::GetPoint"),
+            msg.contains("no position found")
+                || msg.contains("neither point classification has its parameters set")
+                || msg.contains("SmVertex::GetPoint"),
             "{msg}"
         );
         assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 1);
@@ -3698,6 +3704,11 @@ mod tests {
         assert!(e2.is_empty());
         let pe3 = m.new_proto_edge(&k, Some(v0), Some(v1), ivl).unwrap();
         m.add_proto_edge(pe3);
+        // listed on its proto vertices, as `create_proto_edge` lists one: deleting it
+        // takes it off them, and a failure to is passed on
+        for v in [v0, v1] {
+            m.proto_vertex_mut(v).unwrap().add_proto_edge(pe3);
+        }
         let last = *m.proto_edge(pe).unwrap().edge_definitions().last().unwrap();
         m.add_edge_definition(&k, &mut geo, pe3, last).unwrap();
         assert_eq!(m.edge_def(last).unwrap().proto_edge(), Some(pe3));
@@ -3732,12 +3743,13 @@ mod tests {
             m.create_proto_vertex(&k, &geo, &mut pc1, &mut pc2).unwrap(),
             None
         );
-        // regions have no object point: undefined upstream
+        // regions have no object point (undefined upstream): the lookup's failure is
+        // passed on (`ssi_proto_topology_statuses_pass_on`)
         let mut pc1 = region_pc(R1);
-        assert!(matches!(
-            m.create_proto_vertex(&k, &geo, &mut pc1, &mut pc2),
-            Err(SolidError::InvalidInput { .. })
-        ));
+        let err = m
+            .create_proto_vertex(&k, &geo, &mut pc1, &mut pc2)
+            .unwrap_err();
+        assert!(err.topology_failure().is_some(), "{err:?}");
     }
 
     #[test]
@@ -3918,10 +3930,9 @@ mod tests {
     /// within the tolerance of an end is still refused.
     #[test]
     fn proto_edge_split_upper_interval_keeps_the_old_max() {
-        for fixed in [false, true] {
-            let mut k = Kernel::default();
-            assert!(!k.fixes.proto_edge_split_upper_keeps_the_old_max);
-            k.fixes.proto_edge_split_upper_keeps_the_old_max = fixed;
+        {
+            let k = Kernel::default();
+            assert!(k.fixes.proto_edge_split_upper_keeps_the_old_max);
             let mut geo = Geo::default();
             geo.curves.push(line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]));
             let c0 = H(0, ClassObjectKind::Curve);
@@ -3975,13 +3986,9 @@ mod tests {
 
             let lower = m.proto_edge(pe).unwrap().xsect_interval();
             assert_eq!((lower.min(), lower.max()), (old_min, dt));
+            // the upper child keeps the old max, where upstream leaves it (dt, dt)
             let upper = m.proto_edge(new_pe).unwrap().xsect_interval();
-            if fixed {
-                assert_eq!((upper.min(), upper.max()), (dt, old_max));
-            } else {
-                // pinned C++ parity: the documented wrong interval
-                assert_eq!((upper.min(), upper.max()), (dt, dt));
-            }
+            assert_eq!((upper.min(), upper.max()), (dt, old_max));
         }
     }
 

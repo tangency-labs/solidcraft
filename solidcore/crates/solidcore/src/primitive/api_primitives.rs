@@ -1059,9 +1059,20 @@ mod tests {
     }
 
     #[test]
-    fn blend_success_can_return_a_face_or_no_face() {
+    fn blend_success_returns_its_face() {
         let mut k = Kernel::default();
-        for (edge2_index, face2_index, has_face) in [(3, 2, false), (2, 2, true), (1, 1, true)] {
+        // edges 0 and 3 on faces 1 and 2 give no blend direction: that failure is passed on
+        // (WR-662), where upstream ignores it and reports success with no face
+        {
+            let mut brep = create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0).unwrap();
+            let edges = crate::topology::brep::p1::edges(&brep, None).unwrap();
+            let faces = crate::topology::brep::p1::faces(&brep, None).unwrap();
+            assert!(create_blend_primitive(
+                &mut k, &mut brep, edges[0], faces[1], edges[3], faces[2], true,
+            )
+            .is_err());
+        }
+        for (edge2_index, face2_index, has_face) in [(2, 2, true), (1, 1, true)] {
             let mut brep = create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0).unwrap();
             let edges = crate::topology::brep::p1::edges(&brep, None).unwrap();
             let faces = crate::topology::brep::p1::faces(&brep, None).unwrap();
@@ -1074,7 +1085,7 @@ mod tests {
                 faces[face2_index],
                 true,
             )
-            .unwrap();
+            .unwrap_or_else(|e| panic!("edges 0, {edge2_index}: {e}"));
             assert_eq!(blend.is_some(), has_face);
             let after_faces = crate::topology::brep::p1::faces(&brep, None).unwrap();
             assert_eq!(after_faces.len(), faces.len() + usize::from(has_face));

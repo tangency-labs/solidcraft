@@ -2890,23 +2890,7 @@ mod tests {
     fn wr41_plane_reparam_via_surface_dispatcher() {
         let domain = Extent2d::from_bounds(2.0, 3.0, 6.0, 7.0);
 
-        // Without fix
-        let mut s_default = Surface::from(Plane::new(
-            Point3::new(5.0, 5.0, 5.0),
-            Vec3::new(1.0, 0.0, 0.0),
-            Vec3::new(0.0, 1.0, 0.0),
-            Vec2::new(1.0, 1.0),
-            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
-        ));
-        let k_default = Kernel::default();
-        s_default.reparameterize(&k_default, &domain).unwrap();
-        if let SurfaceKind::Plane(plane) = s_default.kind() {
-            assert_eq!(plane.position().origin(), Point3::new(5.0, 5.0, 5.0));
-        } else {
-            panic!("expected SurfaceKind::Plane");
-        }
-
-        // With fix
+        // the origin moves with the domain (WR-41)
         let mut s_fixed = Surface::from(Plane::new(
             Point3::new(5.0, 5.0, 5.0),
             Vec3::new(1.0, 0.0, 0.0),
@@ -2914,8 +2898,7 @@ mod tests {
             Vec2::new(1.0, 1.0),
             &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
         ));
-        let mut k_fixed = Kernel::default();
-        k_fixed.fixes.plane_reparameterize_moves_origin = true;
+        let k_fixed = Kernel::default();
         s_fixed.reparameterize(&k_fixed, &domain).unwrap();
         if let SurfaceKind::Plane(plane) = s_fixed.kind() {
             assert_ne!(plane.position().origin(), Point3::new(5.0, 5.0, 5.0));

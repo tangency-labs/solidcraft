@@ -3376,25 +3376,6 @@ mod tests {
     }
 
     #[test]
-    fn issue_476_default_keeps_the_edge_only_gap_limit() {
-        // Default (SMLib): a gap the widened shared vertex would cover is closure 3.
-        let k = Kernel::default();
-        assert!(!k.fixes.check_loop_vertex_tolerance);
-        let surface = Surface::from(crate::surface::plane::Plane::from_normal(
-            Vec3::ZERO,
-            Vec3::Z,
-        ));
-        let (mut b, l) = vertex_gap_loop(1.3e-5, 2.6e-5, true);
-        assert_eq!(check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(), 3);
-        // The same loop with the field on is accepted.
-        let (mut b, l) = vertex_gap_loop(1.3e-5, 2.6e-5, true);
-        assert_eq!(
-            check_loop(&fixed_kernel(), &mut b, &surface, l, 1e-5, None).unwrap(),
-            0
-        );
-    }
-
-    #[test]
     fn issue_476_loop_junction_uses_previous_end_not_previous_start() {
         use crate::topology::{Edge, Edgeuse, VertexId, Vertexuse, VertexuseId};
         let k = fixed_kernel();
@@ -3660,47 +3641,6 @@ mod tests {
                 assert_mirror_rational_analytic(&k, side, low, high);
             }
         }
-    }
-
-    #[test]
-    fn mirror_rational_default_divides_by_weight_twice() {
-        // The pinned C++ (fix off) divides the reflected Euclidean control points by
-        // their weights again: the old wrong result is pinned by that rule, and the
-        // fixture's middle point is checked numerically.
-        let k = Kernel::default();
-        let mut c = mirror_rational_fixture_curve();
-        let before = bspline_of(&c).unwrap().canonical().unwrap();
-        mirror_curve(&k, &mut c, SurfParamType::U, 0.0, 2.0, 0.0).unwrap();
-        let after = bspline_of(&c).unwrap().canonical().unwrap();
-        for (index, ((old, &w), new)) in before
-            .control_points
-            .iter()
-            .zip(&before.weights)
-            .zip(&after.control_points)
-            .enumerate()
-        {
-            for i in 0..3 {
-                let reflected = if i == 0 {
-                    2.0 - old.component(i)
-                } else {
-                    old.component(i)
-                };
-                assert_close(
-                    new.component(i),
-                    reflected / w,
-                    &format!("control point {index} component {i}"),
-                );
-            }
-        }
-        // Canonical middle x is 0.5/w, so the double division gives
-        // (2 - 0.5/w)/w = 2/w - 0.5/w^2, and y gives 0.5/w^2 = 1.
-        assert_close(
-            after.control_points[1].x,
-            1.828_427_124_746_190_3,
-            "middle x",
-        );
-        assert_close(after.control_points[1].y, 1.0, "middle y");
-        assert!((after.control_points[1].x - 1.292_893_218_813_452_5).abs() > 0.5);
     }
 
     #[test]

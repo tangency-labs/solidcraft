@@ -3013,10 +3013,8 @@ mod tests {
         // #1529: a trim 1e-7 from the middle knot of a radius 16 half circle leaves an end
         // span of about 3.5e-6, shorter than the 3D zone tolerance
         let r = 16.0;
-        let mut fixed = Kernel::default();
-        fixed.fixes.bspline_trim_keeps_rational_end_spans = true;
-        let default = Kernel::default();
-        assert!(!default.fixes.bspline_trim_keeps_rational_end_spans);
+        let fixed = Kernel::default();
+        assert!(fixed.fixes.bspline_trim_keeps_rational_end_spans);
         for (min, max) in [(0.5 - 1e-7, 0.9), (0.1, 0.5 + 1e-7)] {
             let ivl = Extent1d::from_min_max(min, max);
             let mut kept = half_circle(r);
@@ -3025,14 +3023,6 @@ mod tests {
             assert_eq!(kept.knots(None).unwrap().0, vec![min, 0.5, max]);
             let off = off_circle(&kept, r);
             assert!(off < 1e-12 * r, "{ivl:?}: kept span {off} off the circle");
-
-            // upstream: the span is removed and the rest stretched off the circle
-            let mut old = half_circle(r);
-            let mut old_ivl = ivl;
-            old.trim(&default, &mut old_ivl, TrimMode::Notify).unwrap();
-            assert_ne!(old.knots(None).unwrap().0, vec![min, 0.5, max]);
-            let off = off_circle(&old, r);
-            assert!(off > 1e-9, "{ivl:?}: removed span {off} off the circle");
         }
     }
 
@@ -3100,15 +3090,6 @@ mod tests {
                 assert!(ok && !idx.contains(&15), "d {d}, head {head}: {idx:?}");
             }
         }
-
-        // flag off: upstream, the span removed and the rest stretched (valid)
-        let default = Kernel::default();
-        let mut c = half_circle(r);
-        let mut c_ivl = Extent1d::from_min_max(0.5 - 1e-8, 0.9);
-        c.trim(&default, &mut c_ivl, TrimMode::Notify).unwrap();
-        assert_eq!(c.knots(None).unwrap().0, vec![0.5 - 1e-8, 0.9]);
-        assert!(off_circle(&c, r) > 1e-9);
-        assert!(failed_checks(&default, &c).0);
     }
 
     #[test]
@@ -3202,35 +3183,6 @@ mod tests {
                 assert!(gap < 1e-12, "{mode:?}, {ivl:?}: lifted gap {gap}");
                 // The interior knot and both pieces must survive the trim.
                 assert_eq!(trimmed.knots(None).unwrap().0, vec![min, 0.5, max]);
-            }
-        }
-    }
-
-    #[test]
-    fn uv_trim_fix_preserves_default_and_model_space_cleanup() {
-        let default = Kernel::default();
-        assert!(!default.fixes.bspline_trim_preserves_uv_spans);
-        let mut fixed = Kernel::default();
-        fixed.fixes.bspline_trim_preserves_uv_spans = true;
-        for dim in [2, 3] {
-            for (min, max) in [(0.5 - 3.5e-6, 0.9), (0.1, 0.5 + 3.5e-6)] {
-                let original = short_span_arc(dim);
-                let ivl = Extent1d::from_min_max(min, max);
-                let mut old = original.clone();
-                let mut old_ivl = ivl;
-                old.trim(&default, &mut old_ivl, TrimMode::Notify).unwrap();
-                // This is the defect reproduced by the pinned reference: the
-                // removed UV piece becomes a gap larger than the edge tolerance.
-                let gap = lifted_trim_gap(&original, &old, ivl);
-                assert!(gap > default.tolerances.zone_tol_3d, "gap {gap}");
-                if dim == 3 {
-                    let mut model = original.clone();
-                    let mut model_ivl = ivl;
-                    model
-                        .trim(&fixed, &mut model_ivl, TrimMode::Notify)
-                        .unwrap();
-                    assert_eq!(old.nurb, model.nurb);
-                }
             }
         }
     }

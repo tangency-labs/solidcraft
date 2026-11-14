@@ -1130,8 +1130,15 @@ mod tests {
         let ok = [Some(&c), Some(&l)];
         let z = Vec3::new(0.0, 0.0, 1.0);
         let o = Point3::new(0.0, 0.0, 0.0);
-        // the copies are made and the sweep runs (topology.brep_p4 is ported)
-        let b = create_linear_sweep(&mut k, &ok, z, 10.0, true).expect("linear sweep");
+        // the copies are made and the sweep runs (topology.brep_p4 is ported); capped, the
+        // line leaves no plane through the profile to cap with, and that failure is passed on
+        // (WR-662), where upstream ignores it and leaves the sweep uncapped
+        let capped = create_linear_sweep(&mut k, &ok, z, 10.0, true);
+        assert!(
+            matches!(&capped, Err(e) if e.sm_status() == Some(crate::error::SM_ERR)),
+            "{capped:?}"
+        );
+        let b = create_linear_sweep(&mut k, &ok, z, 10.0, false).expect("linear sweep");
         assert_eq!(
             (
                 b.face_list().len(),
@@ -1140,8 +1147,10 @@ mod tests {
             ),
             (2, 7, 6)
         );
-        // no profile curves: a successful empty sweep, as upstream
-        let b = create_linear_sweep(&mut k, &[], z, 10.0, true).expect("empty sweep");
+        // no profile curves: an empty sweep; capped, there is no plane through no curves,
+        // and that failure is passed on (WR-662), where upstream reports success
+        assert!(create_linear_sweep(&mut k, &[], z, 10.0, true).is_err());
+        let b = create_linear_sweep(&mut k, &[], z, 10.0, false).expect("empty sweep");
         assert!(b.face_list().is_empty());
         assert!(b.edge_list().is_empty());
         assert!(b.vertex_list().is_empty());
@@ -1267,11 +1276,9 @@ mod tests {
         assert!(invalid(&create_pipe_sweep(&mut k, 1.0, None, true)));
         assert!(invalid(&create_pipe_sweep(&mut k, 0.0, Some(&p), true)));
         assert!(invalid(&create_pipe_sweep(&mut k, -1.0, Some(&p), false)));
-        // a NaN radius passes the API's validation; upstream returns an empty B-rep
-        let b = create_pipe_sweep(&mut k, f64::NAN, Some(&p), false).expect("nan pipe");
-        assert!(b.face_list().is_empty());
-        assert!(b.edge_list().is_empty());
-        assert!(b.vertex_list().is_empty());
+        // a NaN radius passes the API's validation; its circle cannot be made, and that
+        // failure is passed on (WR-662), where upstream returns an empty B-rep
+        assert!(create_pipe_sweep(&mut k, f64::NAN, Some(&p), false).is_err());
         let b = create_pipe_sweep(&mut k, 1.0, Some(&p), false).expect("pipe");
         assert_eq!(b.face_list().len(), 1);
         let capped = create_pipe_sweep(&mut k, 1.0, Some(&p), true).expect("capped pipe");

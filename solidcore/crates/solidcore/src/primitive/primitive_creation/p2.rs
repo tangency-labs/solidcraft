@@ -351,14 +351,15 @@ mod tests {
     }
 
     #[test]
-    fn a_curves_normal_that_cannot_be_computed_is_zero() -> Result<()> {
-        // ComputeCrvsNormal zeroes its output before failing on one linear curve, so
-        // a small normal given to be computed comes back zero
+    fn a_curves_normal_that_cannot_be_computed_is_refused() -> Result<()> {
+        // ComputeCrvsNormal fails on one linear curve: the failure is passed on (WR-662)
+        // and the small normal given to be computed is left as it was, where upstream
+        // zeroes it and carries on
         let mut a = Model::new()?;
         a.scratch = true;
         let line = BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X)?;
         let mut normal = Vec3::new(1e-3, 0.0, 0.0);
-        let _ = primitive().create_taper_extrude(
+        let made = primitive().create_taper_extrude(
             &mut a,
             B,
             vec![Curve::from(line)],
@@ -368,7 +369,8 @@ mod tests {
             &mut normal,
             OffsetCornerType::LinearExtension,
         );
-        assert_eq!(normal, Vec3::ZERO);
+        assert!(made.is_err());
+        assert_eq!(normal, Vec3::new(1e-3, 0.0, 0.0));
         Ok(())
     }
 

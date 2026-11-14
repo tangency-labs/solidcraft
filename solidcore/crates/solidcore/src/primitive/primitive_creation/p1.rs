@@ -613,9 +613,9 @@ mod tests {
             .collect()
     }
 
-    /// The pinned C++ ignores the placement statuses; the opt-in returns the first one
-    /// (`MakeUnitOrthoVectors`, after the two transforms that precede it) and leaves the
-    /// edits already made, including the caller's pre-existing output entries.
+    /// The first failed placement status is returned (`MakeUnitOrthoVectors`, after the two
+    /// transforms that precede it), where the pinned C++ ignores it; the edits already made,
+    /// including the caller's pre-existing output entries, are left.
     #[test]
     fn wr632_opt_in_returns_first_failed_placement_status_and_keeps_edits() {
         for (tol, start, end, centre, radius) in WR632_CASES {
@@ -624,17 +624,10 @@ mod tests {
             let before = samples(&Kernel::default(), &profiles[0]);
             let marker_before = samples(&Kernel::default(), &marker());
 
-            // Default: pinned C++ behaviour, which carries on with the partial frame.
-            let mut pinned = vec![marker()];
-            position_profile_curves(&Kernel::default(), &profiles, tol, &path, &mut pinned)
-                .expect("pinned C++ ignores the failed placement");
-            assert_eq!(pinned.len(), 2);
-
-            let mut k = Kernel::default();
-            k.fixes.planar_path_profile_placement_statuses = true;
+            let k = Kernel::default();
             let mut output = vec![marker()];
             let error = position_profile_curves(&k, &profiles, tol, &path, &mut output)
-                .expect_err("opt-in reports the failed placement");
+                .expect_err("the failed placement is reported");
             assert_eq!(
                 (error.operation(), error.sm_status()),
                 (

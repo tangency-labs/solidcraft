@@ -2934,25 +2934,21 @@ mod tests {
     }
 
     #[test]
-    fn wr58_flag_default_off_and_lookup_by_name() {
+    fn wr58_flag_default_on_and_lookup_by_name() {
         let mut k = Kernel::default();
-        assert!(!k.fixes.point_class_gap_3d_propagates_no_drop_error);
-        assert!(UpstreamFixes::all().point_class_gap_3d_propagates_no_drop_error);
-        assert!(UpstreamFixes::NAMES.contains(&"point_class_gap_3d_propagates_no_drop_error"));
-
-        let slot = k
-            .fixes
-            .flag_mut("point_class_gap_3d_propagates_no_drop_error")
-            .expect("flag should be registered in UpstreamFixes");
-        *slot = true;
         assert!(k.fixes.point_class_gap_3d_propagates_no_drop_error);
+        assert!(UpstreamFixes::NAMES.contains(&"point_class_gap_3d_propagates_no_drop_error"));
+        assert_eq!(
+            k.fixes
+                .flag_mut("point_class_gap_3d_propagates_no_drop_error")
+                .copied(),
+            Some(true)
+        );
     }
 
     #[test]
-    fn wr58_gap_3d_far_from_bounded_plane_and_bspline_propagates_sm_err_when_enabled() {
-        let k_default = Kernel::default();
-        let mut k_fixed = Kernel::default();
-        k_fixed.fixes.point_class_gap_3d_propagates_no_drop_error = true;
+    fn wr58_gap_3d_far_from_bounded_plane_and_bspline_propagates_sm_err() {
+        let k_fixed = Kernel::default();
 
         let p = classified_point();
         let plane = bounded_unit_plane();
@@ -2961,13 +2957,9 @@ mod tests {
         for surface in [&plane, &bspline] {
             for pt in [Point3::new(0.0, 0.0, 50.0), Point3::new(50.0, 0.5, 0.0)] {
                 let geo = PointGeo(pt);
-                assert_eq!(
-                    p.gap_3d(&k_default, &geo, Some(surface)).unwrap(),
-                    f64::from(SM_ERR),
-                );
                 let err = p
                     .gap_3d(&k_fixed, &geo, Some(surface))
-                    .expect_err("opt-in WR-58 should return Err(SM_ERR) instead of 1001.0");
+                    .expect_err("WR-58 should return Err(SM_ERR) instead of 1001.0");
                 assert_eq!(
                     err,
                     SolidError::intersect_failed(
@@ -2980,33 +2972,25 @@ mod tests {
     }
 
     #[test]
-    fn wr58_gap_3d_propagates_surface_solve_and_obj_point_errors_when_enabled() {
-        let k_default = Kernel::default();
-        let mut k_fixed = Kernel::default();
-        k_fixed.fixes.point_class_gap_3d_propagates_no_drop_error = true;
+    fn wr58_gap_3d_propagates_surface_solve_and_obj_point_errors() {
+        let k_fixed = Kernel::default();
 
         // 1. Failing surface drop (empty BSplineSurface without NURB -> SM_ERR from surface drop).
         let p = classified_point();
         let empty_bspline = Surface::from(BSplineSurface::new());
         let geo = PointGeo(Point3::new(0.5, 0.5, 0.0));
-        assert_eq!(
-            p.gap_3d(&k_default, &geo, Some(&empty_bspline)).unwrap(),
-            f64::from(SM_ERR),
-        );
         let solve_err = p
             .gap_3d(&k_fixed, &geo, Some(&empty_bspline))
-            .expect_err("opt-in WR-58 should propagate surface solve failure");
+            .expect_err("WR-58 should propagate surface solve failure");
         assert_eq!(solve_err.sm_status(), Some(SM_ERR));
 
-        // 2. Failing object-point lookup (unclassified PointClassification: default drops
-        // Vec3::UNDEF near (0, 0, 0) onto the unit plane, fabricating ~0.0; opt-in propagates
-        // find_obj_point_3d's SM_ERR).
+        // 2. Failing object-point lookup (unclassified PointClassification): find_obj_point_3d's
+        // SM_ERR is passed on, not dropped as Vec3::UNDEF near (0, 0, 0) onto the unit plane.
         let unset = pc();
         let plane = bounded_unit_plane();
-        assert!(unset.gap_3d(&k_default, &geo, Some(&plane)).unwrap() <= 1.0e-50);
         let obj_err = unset
             .gap_3d(&k_fixed, &geo, Some(&plane))
-            .expect_err("opt-in WR-58 should propagate find_obj_point_3d failure");
+            .expect_err("WR-58 should propagate find_obj_point_3d failure");
         assert_eq!(
             obj_err,
             SolidError::intersect_failed(

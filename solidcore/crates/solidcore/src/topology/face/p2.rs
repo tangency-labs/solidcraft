@@ -3743,8 +3743,9 @@ mod tests {
             true,
             &mut shift
         ));
-        // closed in neither direction: default returns SM_SUCCESS (true) for C++ parity
-        assert!(check_seam_crossing(
+        // closed in neither direction: no seam is crossed (false), where upstream returns
+        // SM_SUCCESS (true)
+        assert!(!check_seam_crossing(
             &k,
             &mut uv1,
             Point2::new(9.0, 9.0),
@@ -3860,7 +3861,9 @@ mod tests {
         let _ = s;
         let mut k = Kernel::default();
         let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
-        assert_eq!(r.uv, vec![Point2::new(1.0 / 3.0, 1.0)]);
+        // count 1 is the centre of the domain (`face_points_span_domain`), where upstream
+        // takes a third of its u length
+        assert_eq!(r.uv, vec![Point2::new(0.5, 1.0)]);
         assert_eq!(r.pv.len(), 2);
         assert_eq!(r.pv[1], Vec3::Z);
         let r = points_in_face(&mut k, &mut b, f, 7).unwrap();
@@ -3897,14 +3900,9 @@ mod tests {
         let bounds = (3.0, -7.0, 4.0, -6.5);
         let (mut b, f) = rectangular_face(bounds);
 
-        // the default stays pinned: fractions of the domain's lengths from zero
+        // count 1 is the centre of the domain, in u and v, where upstream takes fractions
+        // of the domain's lengths from zero
         let mut k = Kernel::default();
-        let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
-        assert_eq!(r.uv, vec![Point2::new(1.0 / 3.0, 0.25)]);
-
-        // opt-in: count 1 is the centre of the domain, in u and v
-        let mut k = Kernel::default();
-        k.fixes.face_points_span_domain = true;
         let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
         assert_eq!(r.uv, vec![Point2::new(3.5, -6.75)]);
         // The plane's frame gives the world point (-v, u, 0).

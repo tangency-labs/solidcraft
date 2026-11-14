@@ -3403,8 +3403,8 @@ mod tests {
     }
 
     /// #2521 (WR-725): at the poles `S_u` is exactly zero on both sides of the seam,
-    /// so upstream fails the angle with `NL_GEO_ERR`; by its limit `S_uv` the seam is
-    /// smooth there as everywhere else.
+    /// where upstream fails the angle with `NL_GEO_ERR`; by its limit `S_uv` the seam is
+    /// smooth there as everywhere else, by default and with the fix named.
     #[test]
     fn closed_smooth_pole_of_sphere_is_smooth() {
         for (net, tols) in [(&GEN0652, [0.001, 1.0]), (&GEN1542, [0.001, 0.5])] {
@@ -3413,11 +3413,10 @@ mod tests {
                 .derivs(0.0, 0.0, Side::Left, Side::Left, true, 1, 1)
                 .unwrap();
             assert_eq!(d[1][0], Vec3::ZERO);
-            let upstream = s.is_closed_smooth(1, &tols, Direction::U);
-            assert!(matches!(
-                upstream,
-                Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Geometry))
-            ));
+            assert_eq!(
+                s.is_closed_smooth(1, &tols, Direction::U).unwrap(),
+                Some(Direction::U)
+            );
             let fixed = s.is_closed_smooth_with_fixes(&pole_fix(), 1, &tols, Direction::U);
             assert_eq!(fixed.unwrap(), Some(Direction::U));
             let flag = s.is_closed_smooth_flag_with_fixes(&pole_fix(), 1, &tols, Direction::UV);
@@ -3426,7 +3425,7 @@ mod tests {
     }
 
     /// #2521 (WR-725): the gen1542 sphere turned about an axis leaves `S_u` at the pole
-    /// as rounding noise (1.8e-15, opposite on the two sides), so upstream measures 180
+    /// as rounding noise (1.8e-15, opposite on the two sides), where upstream measures 180
     /// degrees and reports the seam not smooth; by its limit it is smooth.
     #[test]
     fn closed_smooth_pole_noise_does_not_decide() {
@@ -3447,7 +3446,10 @@ mod tests {
         let (a, b) = (d1[1][0], d2[1][0]);
         assert!(a != Vec3::ZERO && a.length() < 1e-14 && b.length() < 1e-14);
         assert!(vectors_angle(a, b).unwrap() > 90.0);
-        assert_eq!(s.is_closed_smooth(1, &tols, Direction::U).unwrap(), None);
+        assert_eq!(
+            s.is_closed_smooth(1, &tols, Direction::U).unwrap(),
+            Some(Direction::U)
+        );
         let fixed = s.is_closed_smooth_with_fixes(&pole_fix(), 1, &tols, Direction::U);
         assert_eq!(fixed.unwrap(), Some(Direction::U));
     }

@@ -2201,12 +2201,9 @@ mod tests {
     #[test]
     fn issue_2009_curve_without_nurb_is_not_shown_degenerate() {
         // tangency-labs/smlib 8843967 (SmBSplineCurve::IsDegenerate): no NURB form, no
-        // degeneracy shown (FALSE); the port without the fix fails, where upstream
-        // reads a NULL NURB. Discriminating.
+        // degeneracy shown (FALSE), where upstream reads a NULL NURB.
         let c = BSplineCurve::new(3);
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        assert!(c.is_degenerate(&Kernel::default(), 1e-6, None).is_err());
+        let on = Kernel::default();
         assert!(!c.is_degenerate(&on, 1e-6, None).unwrap());
     }
 

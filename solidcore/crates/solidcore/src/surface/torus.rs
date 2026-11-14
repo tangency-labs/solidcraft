@@ -2487,9 +2487,7 @@ mod tests {
             .unwrap();
             let nurbs = plain(&t);
 
-            let mut k = Kernel::default();
-            k.fixes.torus_major_radius_from_origin = true;
-            k.fixes.torus_signed_gen_curve_interval = true;
+            let k = Kernel::default();
             let found = Torus::is_nurb_surface_torus(&k, &nurbs, 1.0)
                 .unwrap()
                 .expect("a torus");
@@ -2507,17 +2505,6 @@ mod tests {
             assert!(
                 (v.min() + 90.0).abs() < 1e-9 && (v.length() - 360.0).abs() < 1e-9,
                 "swap {swap}: tube interval {v:?}"
-            );
-
-            // flags off: upstream's R from the first sweep circle, sqrt(R^2 + (r sin -90)^2)
-            let off = Torus::is_nurb_surface_torus(&Kernel::default(), &nurbs, 1.0)
-                .unwrap()
-                .expect("a torus");
-            let upstream_major = (big * big + small * small).sqrt();
-            assert!(
-                (off.major_radius() - upstream_major).abs() < 1e-9 * upstream_major,
-                "swap {swap}: upstream major {}",
-                off.major_radius()
             );
         }
     }
@@ -2548,8 +2535,7 @@ mod tests {
         let domain = t.base.base.natural_uv_domain();
         let fixed = domain.u_interval().evaluate(0.25);
 
-        let mut k = Kernel::default();
-        k.fixes.torus_iso_circle_axis_from_midpoint = true;
+        let k = Kernel::default();
         let iso = t
             .create_iso_parametric_curve(&k, SurfParamType::U, fixed, None, false)
             .expect("minor iso circle");
@@ -2573,20 +2559,6 @@ mod tests {
         assert!(
             (start - frame.origin()).length() < 1e-9,
             "start {start:?} is not the torus origin"
-        );
-
-        // flag off (upstream): the start vector is zero on the axis, so the circle has
-        // no direction
-        let off = t
-            .create_iso_parametric_curve(&Kernel::default(), SurfParamType::U, fixed, None, false)
-            .expect("minor iso circle");
-        let CurveKind::Ellipse(off_circle) = off.curve.kind() else {
-            panic!("expected a circle");
-        };
-        assert!(
-            !off_circle.position().x_axis().x.is_finite(),
-            "upstream direction {:?}",
-            off_circle.position().x_axis()
         );
     }
 }

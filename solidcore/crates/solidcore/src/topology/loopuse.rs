@@ -60,8 +60,8 @@
 //! - **`IsClosed3d` (WR-93).** Upstream computes `dOverTol = XSectTol3d - Gap`, which
 //!   is negative for a gap over tolerance, and keeps it only when it exceeds `0.0`:
 //!   no gap ever counts as over tolerance, so the loop is always reported closed (with
-//!   the largest gap). The port matches that by default. With
-//!   `Kernel::fixes.loop_use_reports_open_gaps` it computes `Gap - XSectTol3d`, so an
+//!   the largest gap). With `Kernel::fixes.loop_use_reports_open_gaps` (a default
+//!   correction) the port computes `Gap - XSectTol3d`, so an
 //!   over-tolerance gap is reported open with its edge use, actual gap and tolerance;
 //!   `bCheckAllGaps == FALSE` still stops the scan at the first over-tolerance gap,
 //!   while `TRUE` keeps the largest tolerance exceedance (the first on a tie). The
@@ -1808,12 +1808,12 @@ mod tests {
         assert!(c.closed);
         assert_eq!(c.max_gap, 0.0);
         assert_eq!(c.edgeuse, None);
-        // a gap over tolerance still reports closed (module docs), with the gap
+        // a gap over tolerance reports the loop open, with the gap (WR-93)
         let b = square(0.5);
         let c = is_closed_3d(&k, &b, lu(0), false).unwrap();
-        assert!(c.closed);
+        assert!(!c.closed);
         assert_eq!(c.edgeuse, Some(eu(2)));
-        assert_eq!(c.max_gap, 0.5);
+        assert!((c.max_gap - 0.5).abs() <= 1e-9);
         assert_eq!(c.xsect_tol_3d, 2e-4);
         // a broken CCW chain
         let mut b = square(0.0);
@@ -1837,8 +1837,8 @@ mod tests {
     fn is_closed_3d_reports_open_gaps_with_opt_in() {
         // WR-93: upstream's `XSectTol3d - Gap` is negative for an over-tolerance gap,
         // so it never exceeds 0 and the loop is always reported closed.
-        let mut k = Kernel::default();
-        k.fixes.loop_use_reports_open_gaps = true;
+        let k = Kernel::default();
+        assert!(k.fixes.loop_use_reports_open_gaps);
 
         // A 0.5 gap over the edges' 2e-4 cross-section tolerance: open on both scans.
         let b = square(0.5);
@@ -1851,13 +1851,6 @@ mod tests {
             // The open output is `(gap - tol) + tol`, which need not be bit-exact.
             assert!((c.max_gap - gap).abs() <= 1e-9 * gap.max(c.max_gap));
         }
-
-        // Off (pinned C++): the same loop is closed, reporting the largest gap.
-        let c = is_closed_3d(&Kernel::default(), &b, lu(0), true).unwrap();
-        assert!(c.closed);
-        assert_eq!(c.edgeuse, Some(eu(2)));
-        assert!((c.max_gap - gap).abs() <= 1e-9 * gap.max(c.max_gap));
-        assert_eq!(c.xsect_tol_3d, 2e-4);
 
         // A gap under the tolerance stays closed (1e-4 < 2e-4).
         let b = square(1e-4);

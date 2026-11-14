@@ -1027,13 +1027,20 @@ mod tests {
         // heal sequence of heal_data_p3 runs past Fix_TolSizes (SmBrep::SetTolerance
         // raises the face's tolerance through SmFace::SetTolerance) past
         // Cache_DegenFaces (SmFace::GetEdges, topology.face_p4) and the SmLockBrepBox
-        // (query.brep) up to the SmStitch of heal.stitch_p1 (SmBrep::HealBrep passes
-        // Unported through, ignoring every other status)
+        // (query.brep); the bare face record has no surface, and `SmBrep::HealBrep` passes
+        // that failure of the face properties on (WR-658), where upstream ignores every
+        // status but Unported
         let mut b = Brep::default();
         let face = b
             .add_face_record(Face::new(ShellId::from_index(0)))
             .unwrap();
-        assert!(api_heal_brep(&mut k, Some(&mut b)).is_ok());
+        assert!(matches!(
+            api_heal_brep(&mut k, Some(&mut b)),
+            Err(SolidError::InvalidInput {
+                reason: "face without surface",
+                ..
+            })
+        ));
         let r = h.heal_brep(
             &mut k,
             Some(&mut b),

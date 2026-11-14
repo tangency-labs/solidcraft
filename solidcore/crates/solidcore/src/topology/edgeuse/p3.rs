@@ -2572,9 +2572,9 @@ mod tests {
         use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
         use crate::nurbs::b_spline_curve::BSplineCurve;
 
-        for enabled in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.bspline_trim_preserves_uv_spans = enabled;
+        {
+            let k = Kernel::default();
+            assert!(k.fixes.bspline_trim_preserves_uv_spans);
             let uv = BSplineCurve::create_circle_segment(
                 2,
                 &Axis2Placement::default(),
@@ -2620,11 +2620,7 @@ mod tests {
                     gap
                 })
                 .fold(0.0, f64::max);
-            if enabled {
-                assert!(gap < 1e-12, "enabled fix was lost: gap {gap}");
-            } else {
-                assert!(gap > k.tolerances.zone_tol_3d, "default gap {gap}");
-            }
+            assert!(gap < 1e-12, "the fix was lost: gap {gap}");
         }
     }
 

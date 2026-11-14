@@ -260,8 +260,8 @@ pub fn read_part_from_file(
     file_type: FileType,
     env: &mut PartEnv<'_>,
 ) -> Result<Part> {
-    // create databaseIO for operation
-    let mut db = DatabaseReader::new();
+    // create databaseIO for operation, reading as the kernel's fixes say (WR-47)
+    let mut db = DatabaseReader::new().with_fixes(&k.fixes);
     db.open_for_read(data, file_type);
 
     // pass the call along

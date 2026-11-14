@@ -2148,11 +2148,9 @@ mod tests {
     #[test]
     fn issue_2009_trim_gap_unfixed_without_end_points() {
         // tangency-labs/smlib 8843967 (SmBSplineCurve::TrimGap): an end point that
-        // cannot be evaluated leaves the gap unfixed (0); upstream measures the gap
+        // cannot be evaluated leaves the gap unfixed (0), where upstream measures the gap
         // between unset points, finds none and reports the curves joined.
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        let off = Kernel::default();
+        let on = Kernel::default();
         let mut a = BSplineCurve::new(3);
         assert!(a.evaluate_point(0.0).is_err());
         let mut b = curve(
@@ -2160,10 +2158,6 @@ mod tests {
             &[[0.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
             &[0.0, 0.0, 1.0, 1.0],
         );
-        assert!(a
-            .clone()
-            .trim_gap(&off, &mut b.clone(), GapFix::Both, 0.1)
-            .unwrap());
         assert!(!a.trim_gap(&on, &mut b, GapFix::Both, 0.1).unwrap());
     }
 
@@ -2679,13 +2673,10 @@ mod tests {
         // tangency-labs/smlib 8843967 (SmBSplineCurve::AssertValid, tests 5/6, WR-663):
         // two knots 1e-30 apart on a borrowed NURB (not spread by `sm_FixupKnotVector`)
         // count as one double knot in `GetKnots` (tolerance 1e-12), while `sm_BasisDerivs`
-        // rejects a span <= 1e-24. Without `query_statuses_pass_on` the failed evaluation
-        // leaves `Vec3::UNDEF` (`length = sqrt(3) * SM_UNDEF_DOUBLE`), reporting that
-        // length as the fault value; with the flag, test 5 (2D) / 6 (3D) fails with
-        // value `SM_UNDEF_DOUBLE`.
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        let off = Kernel::default();
+        // rejects a span <= 1e-24. The failed evaluation is passed on (WR-663): test 5
+        // (2D) / 6 (3D) fails with value `SM_UNDEF_DOUBLE`, not the length of the
+        // `Vec3::UNDEF` it left (`sqrt(3) * SM_UNDEF_DOUBLE`).
+        let on = Kernel::default();
 
         let borrowed = |dim: u64, p: usize, pts: &[[f64; 3]], knots: &[f64]| {
             let n = pts.len() - 1;
@@ -2714,16 +2705,6 @@ mod tests {
 
             for (dim, expected_test) in [(2_u64, 5_u64), (3, 6)] {
                 let c = borrowed(dim, 2, &pts, knots);
-                let mut list_off = AssertArray::new();
-                assert!(!c
-                    .assert_valid(&off, Some(&mut list_off), true, ObjectKey(1))
-                    .unwrap());
-                assert_eq!(list_off.len(), 1, "{list_off:?}");
-                let r_off = list_off.get(0).unwrap();
-                assert_eq!(r_off.test_index, expected_test);
-                assert_eq!(r_off.value, Vec3::UNDEF.length());
-                assert_ne!(r_off.value, UNDEF_DOUBLE);
-
                 let mut list_on = AssertArray::new();
                 assert!(!c
                     .assert_valid(&on, Some(&mut list_on), true, ObjectKey(1))
@@ -2742,13 +2723,10 @@ mod tests {
         // tangency-labs/smlib 8843967 (SmBSplineCurve::AssertValid, tests 11-14, WR-663):
         // a single-span Bezier of degree `GW_MAX_DEGREE` (32) passes the knot, endpoint
         // and pole checks and sizes from its control polygon, then fails both
-        // `GlobalPropertyAnalysis` calls in `sm_CreateBezSegments` (`NL_DEG_ERR`). Without
-        // `query_statuses_pass_on` both failed analyses are ignored as empty solution sets
-        // and the curve passes; with the flag, tests 11 & 13 (2D) or 12 & 14 (3D) fail
-        // with value `SM_UNDEF_DOUBLE`.
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        let off = Kernel::default();
+        // `GlobalPropertyAnalysis` calls in `sm_CreateBezSegments` (`NL_DEG_ERR`). The
+        // failed analyses are not taken as empty solution sets (WR-663): tests 11 & 13 (2D)
+        // or 12 & 14 (3D) fail with value `SM_UNDEF_DOUBLE`.
+        let on = Kernel::default();
 
         let deg = crate::nurbs::nurbs_crv::MAX_DEGREE;
         let mut knots = vec![0.0; deg + 1];
@@ -2762,12 +2740,6 @@ mod tests {
             }
             cur.knots_mut().copy_from_slice(&knots);
             let c = BSplineCurve::from_nurb(cur, dim, true);
-
-            let mut list_off = AssertArray::new();
-            assert!(c
-                .assert_valid(&off, Some(&mut list_off), true, ObjectKey(9))
-                .unwrap());
-            assert!(list_off.is_empty(), "{list_off:?}");
 
             let mut list_on = AssertArray::new();
             assert!(!c

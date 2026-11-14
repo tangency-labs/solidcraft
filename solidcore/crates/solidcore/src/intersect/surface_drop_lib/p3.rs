@@ -1818,25 +1818,4 @@ mod tests {
             )
         );
     }
-
-    /// Off by default the V-degenerate witness keeps the pinned C++ result (`1020 / 19`,
-    /// both flags 0): the V flag copies the U test, which passes.
-    #[test]
-    fn wr100_v_domain_degeneracy_is_off_by_default() {
-        let k = Kernel::default();
-        assert!(!k.fixes.drop_curve_v_domain_degeneracy);
-        let srf = wr100_surface(WR100_NORMAL_KNOTS, WR100_TINY_KNOTS);
-        let (r, fail) = wr100_drop(&k, &srf, [0.0, 1.0, 1.0, 1.0]);
-        // `FirstDropUncontainedFail` returns the (empty) output, not an error.
-        assert!(r
-            .expect("first drop failure returns the output")
-            .uv_curves
-            .is_empty());
-        assert_eq!(fail.fail_status, SM_ERR_OUTSIDE_OF_DOMAIN);
-        assert_eq!(
-            fail.create_path_type,
-            CreateUvTrimCurvePathType::FirstDropUncontainedFail
-        );
-        assert_eq!((fail.degen_surf_u, fail.degen_surf_v), (0, 0));
-    }
 }

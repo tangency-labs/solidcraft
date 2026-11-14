@@ -3455,6 +3455,9 @@ mod tests {
         // upstream no-op.
         let (mut k, events) = recording_kernel();
         let mut b = Brep::new();
+        // the B-rep is open for editing, as the stitch that glues opens it: the wire edge's
+        // deletion's status is passed on (WR-658)
+        b.set_editing_enabled(true);
         let shell = b.add_shell_record(Shell::default()).unwrap();
         let edges = edges_between(&mut b, EdgeuseOwner::Shell(Some(shell)), 2);
         let (e0, e1) = (edges[0], edges[1]);

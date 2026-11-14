@@ -2115,19 +2115,13 @@ mod tests {
     #[test]
     fn singular_start_uses_the_only_inside_direction_when_fixed() {
         // Only +x +y points into the plane's [0, 1] x [0, 1] domain, and it is the
-        // second stored direction: upstream leaves the result at the first (-x -y),
-        // which points into neither domain.
+        // second stored direction: it is taken, not the first (-x -y), which points into
+        // neither domain.
         let domain1 = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let inside = Vec3::new(SING, SING, 0.0);
-        let outside = Vec3::new(-SING, -SING, 0.0);
 
-        let off = singular_start(&Kernel::default(), domain1, inside);
-        assert_eq!(off.0, IntersectionPointType::Singularity);
-        assert!((off.1 - outside).length() < 1e-6, "upstream: {:?}", off.1);
-
-        let mut k = Kernel::default();
-        assert!(!k.fixes.ssi_singular_start_inside_direction);
-        k.fixes.ssi_singular_start_inside_direction = true;
+        let k = Kernel::default();
+        assert!(k.fixes.ssi_singular_start_inside_direction);
         let on = singular_start(&k, domain1, inside);
         assert_eq!(on.0, IntersectionPointType::Singularity);
         assert!((on.1 - inside).length() < 1e-6, "fixed: {:?}", on.1);
@@ -2139,13 +2133,8 @@ mod tests {
         // direction is +x +y and it is the nearest to the previous one.
         let domain1 = Extent2d::from_bounds(0.0, -1.0, 1.0, 1.0);
         let nearest = Vec3::new(SING, SING, 0.0);
-        let outside = Vec3::new(-SING, -SING, 0.0);
 
-        let off = singular_start(&Kernel::default(), domain1, nearest);
-        assert!((off.1 - outside).length() < 1e-6, "upstream: {:?}", off.1);
-
-        let mut k = Kernel::default();
-        k.fixes.ssi_singular_start_inside_direction = true;
+        let k = Kernel::default();
         let on = singular_start(&k, domain1, nearest);
         assert!((on.1 - nearest).length() < 1e-6, "fixed: {:?}", on.1);
     }

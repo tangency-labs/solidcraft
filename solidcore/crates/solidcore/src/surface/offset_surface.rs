@@ -4308,24 +4308,9 @@ mod tests {
         };
 
         for d in [0.4, -0.3] {
-            // Pinned C++: the extension and the base each negate, so the distance comes
-            // back and the swapped offset does not evaluate as `Offset(vu)`.
-            let k = Kernel::default();
-            let mut off = wr_164_offset(&k, d);
-            wr_164_extend(&off, &k);
-            let (_, before_swapped) = before_and_swapped(&off, &k);
-            off.swap_uv(&k).unwrap();
-            assert_eq!(off.offset_distance(), d, "pinned d {d} comes back");
-            assert!(off.extended_base_surface().is_some());
-            let differs = POINTS.iter().enumerate().any(|(i, &uv)| {
-                !same_point(off.evaluate_point(&k, uv).unwrap(), before_swapped[i])
-            });
-            assert!(differs, "pinned swap maps uv to vu for d {d}");
-
-            // WR-164 fix: one negation, the swapped offset is the pre-swap one with
+            // WR-164: one negation, the swapped offset is the pre-swap one with
             // its parameters exchanged, and a second swap restores both.
-            let mut k = Kernel::default();
-            k.fixes.offset_swap_uv_extended_distance = true;
+            let k = Kernel::default();
             let mut off = wr_164_offset(&k, d);
             wr_164_extend(&off, &k);
             let (before, before_swapped) = before_and_swapped(&off, &k);

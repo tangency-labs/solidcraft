@@ -800,8 +800,9 @@ mod tests {
         assert_eq!(l.loop_start_index(1).unwrap(), 3);
         assert!(l.loop_start_index(2).is_err());
         assert_eq!(l.loop_start_end(&Kernel::default(), 1).unwrap(), (0, 2));
-        // upstream's start of a later loop is the previous loop's last index
-        assert_eq!(l.loop_start_end(&Kernel::default(), 4).unwrap(), (2, 6));
+        // a later loop starts after the previous loop's last index (WR-96), where
+        // upstream's starts at it
+        assert_eq!(l.loop_start_end(&Kernel::default(), 4).unwrap(), (3, 6));
         assert!(l.loop_start_end(&Kernel::default(), 7).is_err());
     }
 

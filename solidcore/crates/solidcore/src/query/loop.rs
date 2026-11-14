@@ -1298,28 +1298,17 @@ mod tests {
     }
 
     #[test]
-    fn failed_trim_evaluation_keeps_the_previous_derivatives() {
+    fn a_failed_trim_evaluation_is_returned() {
+        // the failure is returned (SM_POC_UNKNOWN at the caller), where upstream keeps the
+        // previous point and derivative, or the SM_UNDEF_DOUBLE defaults on a first
+        // evaluation
         let k = Kernel::default();
         let trim = bad_trim();
         assert!(trim.evaluate(&k, 0.0, 1, false, true).is_err());
-        // first evaluation of an edge use: the SM_UNDEF_DOUBLE defaults
         let mut pt_der = [Vec3::UNDEF; 2];
-        let (pt, tan, len) =
-            eval_with_tangent(&k, &trim, 0.0, OrientType::Same, &mut pt_der).unwrap();
-        assert_eq!(pt, Vec3::UNDEF);
-        assert_eq!(tan, Vec3::UNDEF);
-        assert_eq!(len, 1.0);
-        // a later evaluation: the previous point and derivative
-        let mut pt_der = [Vec3::new(1.0, 2.0, 0.0), Vec3::new(0.0, 2.0, 0.0)];
-        let (pt, tan, len) =
-            eval_with_tangent(&k, &trim, 0.5, OrientType::Opposite, &mut pt_der).unwrap();
-        assert_eq!(pt, Vec3::new(1.0, 2.0, 0.0));
-        assert_eq!(tan, Vec3::new(0.0, -1.0, 0.0));
-        assert_eq!(len, 2.0);
-        // with the opt-in the failure is returned (SM_POC_UNKNOWN at the caller)
-        let mut k = Kernel::default();
-        k.fixes.query_statuses_pass_on = true;
         assert!(eval_with_tangent(&k, &trim, 0.0, OrientType::Same, &mut pt_der).is_err());
+        let mut pt_der = [Vec3::new(1.0, 2.0, 0.0), Vec3::new(0.0, 2.0, 0.0)];
+        assert!(eval_with_tangent(&k, &trim, 0.5, OrientType::Opposite, &mut pt_der).is_err());
     }
 
     fn plane() -> Surface {

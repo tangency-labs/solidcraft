@@ -1388,6 +1388,11 @@ mod tests {
                 operation,
                 BooleanOperation::Union | BooleanOperation::ExclusiveOr | BooleanOperation::Merge
             );
+            // the Intersection deletes the unrelated faces, which a bare face record cannot
+            // be deleted as, and the Difference turns B's over, which needs its face use: those
+            // failures are passed on (WR-658)
+            let deletes = operation == BooleanOperation::Intersection;
+            let turns = operation == BooleanOperation::Difference;
             if copies {
                 assert!(
                     matches!(
@@ -1396,6 +1401,26 @@ mod tests {
                             operation: "topology::face::p2",
                             ..
                         })
+                    ),
+                    "{operation:?}: {result:?}"
+                );
+            } else if deletes {
+                assert!(
+                    matches!(
+                        result,
+                        Err(SolidError::InvalidInput {
+                            operation: "boolean::topology_intersector::p2::delete_faces",
+                            ..
+                        })
+                    ),
+                    "{operation:?}: {result:?}"
+                );
+            } else if turns {
+                assert!(
+                    matches!(
+                        &result,
+                        Err(e) if e.operation() == "topology::brep::p3"
+                            && e.sm_status() == Some(crate::error::SM_ERR_NULL_POINTER)
                     ),
                     "{operation:?}: {result:?}"
                 );

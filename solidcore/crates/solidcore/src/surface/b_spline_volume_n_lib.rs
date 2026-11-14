@@ -437,16 +437,17 @@ mod tests {
             .unwrap();
         assert!(d.unaligned);
         assert_eq!(d.params, vec![0.0, 0.25, 0.5, 1.0]);
+        // the ends are discontinuous, not C0 and undefined (WR-49)
         assert_eq!(
             d.conts,
             vec![
-                ContinuityType::C0,
+                ContinuityType::Discontinuous,
                 ContinuityType::C1C2,
                 ContinuityType::C1,
-                ContinuityType::Undefined,
+                ContinuityType::Discontinuous,
             ]
         );
-        assert_eq!(d.min_cont, ContinuityType::C0);
+        assert_eq!(d.min_cont, ContinuityType::C1);
     }
 
     #[test]
@@ -489,8 +490,8 @@ mod tests {
         let k = &Kernel::default();
         let v = unit_cube();
         let mut d = Discontinuities3d::new();
-        // representational: the end knots are C0
-        assert!(v
+        // representational: the end knots are no discontinuity inside the volume (WR-49)
+        assert!(!v
             .has_discontinuities_simple(k, Some(&mut d), false)
             .unwrap());
         assert_eq!(d.u.conts.len(), 2);
@@ -537,31 +538,13 @@ mod tests {
 
     #[test]
     fn wr49_single_span_clamped_volume_ends_and_has_discontinuities() {
-        let k_def = Kernel::default();
-        let mut k_on = Kernel::default();
-        k_on.fixes.volume_representational_end_continuities = true;
+        let k_on = Kernel::default();
 
         let kc: &[f64] = &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
         let tricubic = volume([3, 3, 3], [kc, kc, kc]);
 
         for v in [unit_cube(), tricubic] {
             for dir in [VolumeParam::U, VolumeParam::V, VolumeParam::W] {
-                let mut out_def = DirectionDiscontinuities {
-                    unaligned: true,
-                    min_cont: ContinuityType::G1,
-                    params: vec![9.0],
-                    conts: vec![],
-                };
-                v.calculate_continuities_simple(&k_def, dir, &mut out_def, false)
-                    .unwrap();
-                assert!(out_def.unaligned);
-                assert_eq!(out_def.params, vec![0.0, 1.0]);
-                assert_eq!(
-                    out_def.conts,
-                    vec![ContinuityType::C0, ContinuityType::Undefined]
-                );
-                assert_eq!(out_def.min_cont, ContinuityType::C0);
-
                 let mut out_on = DirectionDiscontinuities {
                     unaligned: true,
                     min_cont: ContinuityType::G1,
@@ -578,11 +561,6 @@ mod tests {
                 );
                 assert_eq!(out_on.min_cont, ContinuityType::CInfinity);
             }
-
-            let mut disc_def = Discontinuities3d::new();
-            assert!(v
-                .has_discontinuities_simple(&k_def, Some(&mut disc_def), false)
-                .unwrap());
 
             let mut disc_on = Discontinuities3d::new();
             assert!(!v
@@ -601,9 +579,7 @@ mod tests {
 
     #[test]
     fn wr49_multi_span_cubic_interior_continuities() {
-        let k_def = Kernel::default();
-        let mut k_on = Kernel::default();
-        k_on.fixes.volume_representational_end_continuities = true;
+        let k_on = Kernel::default();
 
         let klin: &[f64] = &[0.0, 0.0, 1.0, 1.0];
         let ku_smooth: &[f64] = &[0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 3.0];
@@ -615,24 +591,6 @@ mod tests {
             params: vec![],
             conts: vec![],
         };
-        v_smooth
-            .calculate_continuities_simple(&k_def, VolumeParam::U, &mut out, false)
-            .unwrap();
-        assert_eq!(out.params, vec![0.0, 1.0, 2.0, 3.0]);
-        assert_eq!(
-            out.conts,
-            vec![
-                ContinuityType::C0,
-                ContinuityType::C1C2,
-                ContinuityType::C1,
-                ContinuityType::Undefined,
-            ]
-        );
-        assert_eq!(out.min_cont, ContinuityType::C0);
-        assert!(v_smooth
-            .has_discontinuities_simple(&k_def, None, false)
-            .unwrap());
-
         v_smooth
             .calculate_continuities_simple(&k_on, VolumeParam::U, &mut out, false)
             .unwrap();
@@ -676,14 +634,7 @@ mod tests {
 
     #[test]
     fn wr49_volume_wrapper_and_flag_lookup() {
-        let k_def = Kernel::default();
-        assert!(!k_def.fixes.volume_representational_end_continuities);
-
-        let mut k_on = Kernel::default();
-        *k_on
-            .fixes
-            .flag_mut("volume_representational_end_continuities")
-            .unwrap() = true;
+        let k_on = Kernel::default();
         assert!(k_on.fixes.volume_representational_end_continuities);
         assert!(k_on
             .fixes
@@ -717,20 +668,14 @@ mod tests {
         assert_eq!(out.min_cont, ContinuityType::C1);
 
         let mut disc = Discontinuities3d::new();
-        assert!(vol
-            .has_discontinuities_simple(&k_def, Some(&mut disc), false)
-            .unwrap());
         assert!(!vol
             .has_discontinuities_simple(&k_on, Some(&mut disc), false)
-            .unwrap());
-        assert!(vol
-            .has_discontinuities(&k_def, Some(&mut disc), false)
             .unwrap());
         assert!(!vol
             .has_discontinuities(&k_on, Some(&mut disc), false)
             .unwrap());
 
-        // Single unique knot in W still fails with SM_ERR under opt-in after writing params
+        // Single unique knot in W still fails with SM_ERR after writing params
         let kz: &[f64] = &[2.0, 2.0, 2.0, 2.0];
         let v_deg = volume([1, 1, 1], [klin, klin, kz]);
         let mut out_deg = DirectionDiscontinuities {

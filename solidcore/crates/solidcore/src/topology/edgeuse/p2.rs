@@ -1532,8 +1532,8 @@ mod tests {
     }
 
     fn kernel_with_wr84_fix() -> Kernel {
-        let mut k = Kernel::default();
-        k.fixes.edgeuse_convexity_propagates_step_off_failure = true;
+        let k = Kernel::default();
+        assert!(k.fixes.edgeuse_convexity_propagates_step_off_failure);
         k
     }
 
@@ -1560,16 +1560,14 @@ mod tests {
     }
 
     #[test]
-    fn wr84_flag_default_off_and_lookup_by_name() {
+    fn wr84_flag_default_on_and_lookup_by_name() {
         let mut k = Kernel::default();
-        assert!(!k.fixes.edgeuse_convexity_propagates_step_off_failure);
+        assert!(k.fixes.edgeuse_convexity_propagates_step_off_failure);
         let slot = k
             .fixes
             .flag_mut("edgeuse_convexity_propagates_step_off_failure")
             .unwrap();
-        assert!(!*slot);
-        *slot = true;
-        assert!(k.fixes.edgeuse_convexity_propagates_step_off_failure);
+        assert!(*slot);
     }
 
     #[test]
@@ -1629,12 +1627,10 @@ mod tests {
             ))
         );
 
-        // Default (`false`): `SER` inside `SmBoolean` falsely classifies the concave
-        // sector as convex (`Ok(true)`).
         let mut b_def = b0.clone_standing_for_self().unwrap();
-        assert!(is_convex_radial_sector(&default_k, &mut b_def, concave_eu, 3, true, 0.0).unwrap());
 
-        // Opt-in (`true`): propagates the step-off `Err` instead of reporting convex.
+        // The step-off `Err` is propagated, where upstream's `SER` inside `SmBoolean`
+        // falsely classifies the concave sector as convex (`Ok(true)`).
         let mut b_opt = b0;
         let err =
             is_convex_radial_sector(&opt_in_k, &mut b_opt, concave_eu, 3, true, 0.0).unwrap_err();
@@ -1717,15 +1713,7 @@ mod tests {
             ))
         );
 
-        assert!(is_convex_radial_sector(
-            &default_k,
-            &mut b0.clone_standing_for_self().unwrap(),
-            concave_eu,
-            1,
-            true,
-            2.0
-        )
-        .unwrap());
+        // propagated, where upstream reports the sector convex
         let err =
             is_convex_radial_sector(&opt_in_k, &mut b0, concave_eu, 1, true, 2.0).unwrap_err();
         assert_eq!(err.upstream_status(), Some(1001));
@@ -1770,34 +1758,18 @@ mod tests {
             crate::nurbs::b_spline_curve::BSplineCurve::from_nurb(nl, 3, false),
         ));
 
-        assert!(is_convex_radial_sector(
-            &default_k,
-            &mut b_const.clone_standing_for_self().unwrap(),
-            concave_eu,
-            1,
-            false,
-            0.0
-        )
-        .unwrap());
+        // propagated, where upstream reports the sector convex
         let err = is_convex_radial_sector(&opt_in_k, &mut b_const, concave_eu, 1, false, 0.0)
             .unwrap_err();
         assert_eq!(err.upstream_status(), Some(1001));
 
-        // Uninitialised 3D B-spline curve (`nurb == None` -> `SM_ERR` 1001) also masks as
-        // `Ok(true)` by default and propagates as `Err` under opt-in.
+        // Uninitialised 3D B-spline curve (`nurb == None` -> `SM_ERR` 1001) propagates as
+        // `Err`, where upstream masks it as `Ok(true)`.
         let mut b_uninit = b0;
         b_uninit.edge_mut(e).unwrap().curve = Some(Curve::from(
             crate::nurbs::b_spline_curve::BSplineCurve::new(3),
         ));
-        assert!(is_convex_radial_sector(
-            &default_k,
-            &mut b_uninit.clone_standing_for_self().unwrap(),
-            concave_eu,
-            1,
-            false,
-            0.0
-        )
-        .unwrap());
+
         let uninit_err =
             is_convex_radial_sector(&opt_in_k, &mut b_uninit, concave_eu, 1, false, 0.0)
                 .unwrap_err();
@@ -1806,10 +1778,9 @@ mod tests {
             SolidError::Upstream { code: 1001, .. }
         ));
 
-        // Loop-less edge use (`EvaluateBinormal` -> `SM_ERR_INVALID_INPUT` 1007): `Ok(true)`
-        // by default, `Err(Upstream { code: 1007 })` under opt-in.
+        // Loop-less edge use (`EvaluateBinormal` -> `SM_ERR_INVALID_INPUT` 1007):
+        // `Err(Upstream { code: 1007 })`, where upstream gives `Ok(true)`.
         let (mut lone_b, lone_eu) = lone_edgeuse();
-        assert!(is_convex_radial_sector(&default_k, &mut lone_b, lone_eu, 1, false, 0.0).unwrap());
         let lone_err =
             is_convex_radial_sector(&opt_in_k, &mut lone_b, lone_eu, 1, false, 0.0).unwrap_err();
         assert_eq!(lone_err.upstream_status(), Some(1007));

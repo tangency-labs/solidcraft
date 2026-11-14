@@ -4408,10 +4408,10 @@ mod tests {
         };
         // the empty offset merges into an empty result
         assert!(result.unwrap().faces().is_empty());
-        // RemoveFaces ran with the temporary's real editing flag before the
-        // piecewise merge, and again in RemoveExcessFaces on the merged result
-        // (cpp:1772), releasing its nested mark each time.
-        assert_eq!(kernel.context.current_mark(MarkType::Mark2), 5);
+        // RemoveFaces ran once, in RemoveExcessFaces on the merged result (cpp:1772),
+        // releasing its nested mark: the excess faces are found after the merge only
+        // (WR-341), where upstream also removes them before the piecewise merge.
+        assert_eq!(kernel.context.current_mark(MarkType::Mark2), 3);
         assert!(!kernel.context.is_mark_locked(MarkType::Mark2));
         assert_eq!(kernel.context.current_mark(MarkType::Mark), 3);
         assert!(!kernel.context.is_mark_locked(MarkType::Mark));
@@ -5389,19 +5389,14 @@ mod tests {
     /// tangency-labs/solidcore#855: a 40 x 40 x 10 plate with a 4 mm hole at (4.99, 20)
     /// shelled 1.5 inward open at the top: the hole's offset (r 3.5) crosses the offset
     /// side x = 1.5 only 0.01 mm deep. Upstream's `StitchIntoSolid` doubles its tolerance
-    /// until the cut-off rims of that crossing are welded, and the shell is no solid;
-    /// with the opt-in one pass at the body's tolerance leaves a solid whose volume is
-    /// the inner box less the hole's offset disk (cut by x = 1.5), over the height 8.5.
-    /// `contacts_at_ends` adds the other opt-in of #855 (a tangential contact is found at
-    /// a curve's end), which must not change this shell.
+    /// until the cut-off rims of that crossing are welded, and the shell is no solid; one
+    /// pass at the body's tolerance leaves a solid whose volume is the inner box less the
+    /// hole's offset disk (cut by x = 1.5), over the height 8.5.
     #[test]
     fn issue_855_offset_stitch_keeps_the_bodys_tolerance() {
-        let shell = |stitch: bool, contacts_at_ends: bool| -> Result<Option<f64>> {
+        let shell = || -> Result<Option<f64>> {
             use crate::primitive::api_primitives::{create_box, create_cylinder};
             let mut kernel = Kernel::default();
-            kernel.fixes.offset_resolve_crossing_loops = true;
-            kernel.fixes.offset_stitch_at_body_tolerance = stitch;
-            kernel.fixes.curve_contacts_at_curve_ends = contacts_at_ends;
             let plate =
                 create_box(&mut kernel, Vec3::new(0.0, 0.0, 0.0), 40.0, 40.0, 10.0).unwrap();
             let hole =
@@ -5444,21 +5439,15 @@ mod tests {
             )?;
             Ok(Some(volume))
         };
-        // The default path (the splits are the only path since #2981): the shell's
-        // stitch still welds the rims wrongly, the offset of the plate is no closed
-        // solid, and the WR-578 guard refuses it (1001)
-        assert_status(shell(false, false), 1001);
-        // the case's own opt-in (stitch at the body's tolerance) builds the closed form
-        // 40 x 40 x 10 less the hole, less the cavity: 8.5 high over the inner box (37 x 37)
-        // less the hole's offset disk (r 3.5, centre 3.49 from x = 1.5) cut by x = 1.5
+        // the closed form 40 x 40 x 10 less the hole, less the cavity: 8.5 high over the
+        // inner box (37 x 37) less the hole's offset disk (r 3.5, centre 3.49 from x = 1.5)
+        // cut by x = 1.5
         let expected = 4564.924657;
-        for contacts_at_ends in [false, true] {
-            let volume = shell(true, contacts_at_ends).unwrap().unwrap();
-            assert!(
-                (volume - expected).abs() < 1e-6 * expected,
-                "volume {volume}"
-            );
-        }
+        let volume = shell().unwrap().unwrap();
+        assert!(
+            (volume - expected).abs() < 1e-6 * expected,
+            "volume {volume}"
+        );
     }
 
     /// tangency-labs/solidcore#380: a closed inward shell of a box whose wall is as thick

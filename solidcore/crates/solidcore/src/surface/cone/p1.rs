@@ -2627,17 +2627,18 @@ mod tests {
         }
     }
 
-    /// `WR-63`: `SmCone::CreateCanonical` with a semi-angle and `Some(height)` drops
-    /// `inside_out` (`bInsideOut` passed as `bMakeNurbGenCurve` and `FALSE` passed for
-    /// `bInsideOut` at `SmCone.cpp:341-348`); the opt-in flag preserves `inside_out` and
-    /// sets `make_nurb_gen_curve` to `false`, matching the two-radius frustum overload.
+    /// `WR-63`: `SmCone::CreateCanonical` with a semi-angle and `Some(height)` keeps
+    /// `inside_out` and sets `make_nurb_gen_curve` to `false`, matching the two-radius
+    /// frustum overload, where upstream drops it (`bInsideOut` passed as
+    /// `bMakeNurbGenCurve` and `FALSE` passed for `bInsideOut` at `SmCone.cpp:341-348`).
     #[test]
-    fn wr63_semi_angle_with_height_preserves_inside_out_under_opt_in() {
-        let k_def = k();
-        let mut k_opt = k();
-        k_opt
-            .fixes
-            .cone_create_canonical_preserves_inside_out_and_checks_height = true;
+    fn wr63_semi_angle_with_height_preserves_inside_out() {
+        let k_opt = k();
+        assert!(
+            k_opt
+                .fixes
+                .cone_create_canonical_preserves_inside_out_and_checks_height
+        );
 
         let bot = 1.0;
         let semi_deg = 30.0;
@@ -2645,16 +2646,6 @@ mod tests {
         let expected_top = bot + deg2rad(semi_deg).tan() * h;
 
         for swap_uv in [false, true] {
-            let def_cone = Cone::create_canonical_with_semi_angle(
-                &k_def,
-                &std_placement(),
-                bot,
-                semi_deg,
-                Some(h),
-                swap_uv,
-                true,
-            )
-            .unwrap();
             let opt_cone = Cone::create_canonical_with_semi_angle(
                 &k_opt,
                 &std_placement(),
@@ -2676,17 +2667,7 @@ mod tests {
             )
             .unwrap();
 
-            // Default matches pinned C++ (`canonical_semi_with_height_inside_is_mngc`).
-            assert!(!def_cone.inside_out(), "swap_uv = {swap_uv}");
-            assert!(!def_cone.canonical().inside_out, "swap_uv = {swap_uv}");
-            assert!(def_cone.rev().make_nurb_gen_curve(), "swap_uv = {swap_uv}");
-            let CurveKind::Line(def_gen) = def_cone.gen().unwrap().kind() else {
-                panic!("expected line generator");
-            };
-            assert!(!def_gen.inside_out(), "swap_uv = {swap_uv}");
-            assert!(!def_cone.approx_eq(&two_radii), "swap_uv = {swap_uv}");
-
-            // Opt-in preserves `inside_out` and matches the bounded two-radius frustum.
+            // `inside_out` is kept and the cone is the bounded two-radius frustum.
             assert!(opt_cone.inside_out(), "swap_uv = {swap_uv}");
             assert!(opt_cone.canonical().inside_out, "swap_uv = {swap_uv}");
             assert!(!opt_cone.rev().make_nurb_gen_curve(), "swap_uv = {swap_uv}");
@@ -2696,42 +2677,12 @@ mod tests {
             assert!(opt_gen.inside_out(), "swap_uv = {swap_uv}");
             assert!(opt_cone.approx_eq(&two_radii), "swap_uv = {swap_uv}");
 
-            // NURBS domain start lies on the bottom circle under default (`inside_out ==
-            // false`) and on the top circle under opt-in (`inside_out == true`).
-            let def_dom = def_cone.rev().base().natural_uv_domain();
+            // The NURBS domain starts on the top circle (`inside_out == true`).
             let opt_dom = opt_cone.rev().base().natural_uv_domain();
-            let def_start = def_cone.evaluate_point(&k_def, def_dom.min()).unwrap();
             let opt_start = opt_cone.evaluate_point(&k_opt, opt_dom.min()).unwrap();
-            assert!(
-                close(def_start, Vec3::new(bot, 0.0, 0.0)),
-                "swap_uv = {swap_uv}: {def_start:?}"
-            );
             assert!(
                 close(opt_start, Vec3::new(expected_top, 0.0, h)),
                 "swap_uv = {swap_uv}: {opt_start:?}"
-            );
-
-            // At the midpoint of the NURBS domain, both cones evaluate to the same 3D
-            // point with opposite unit surface normals.
-            let def_mid = Point2::new(def_dom.u_interval().mid(), def_dom.v_interval().mid());
-            let opt_mid = Point2::new(opt_dom.u_interval().mid(), opt_dom.v_interval().mid());
-            let def_rows = def_cone
-                .evaluate_rows(&k_def, def_mid, 1, 1, EvaluateFlags::default())
-                .unwrap();
-            let opt_rows = opt_cone
-                .evaluate_rows(&k_opt, opt_mid, 1, 1, EvaluateFlags::default())
-                .unwrap();
-            assert!(
-                close(def_rows[0][0], opt_rows[0][0]),
-                "swap_uv = {swap_uv}: {:?} vs {:?}",
-                def_rows[0][0],
-                opt_rows[0][0]
-            );
-            let def_n = def_rows[1][0].cross(def_rows[0][1]).unitize().unwrap();
-            let opt_n = opt_rows[1][0].cross(opt_rows[0][1]).unitize().unwrap();
-            assert!(
-                (def_n + opt_n).length() < 1e-12,
-                "swap_uv = {swap_uv}: {def_n:?} vs {opt_n:?}"
             );
 
             // STEP <-> NURBS parameter conversions and evaluations remain consistent.
@@ -2750,39 +2701,16 @@ mod tests {
         }
     }
 
-    /// `WR-63`: `SmCone::CreateCanonical` with two radii and `height <= 0` passes
-    /// `top_radius` as the semi-angle in degrees of an unbounded cone
-    /// (`SmCone.cpp:392-400`); the opt-in flag rejects `height <= 0` with
-    /// [`SolidError::InvalidInput`].
+    /// `WR-63`: `SmCone::CreateCanonical` with two radii and `height <= 0` is refused with
+    /// [`SolidError::InvalidInput`], where upstream passes `top_radius` as the semi-angle
+    /// in degrees of an unbounded cone (`SmCone.cpp:392-400`).
     #[test]
-    fn wr63_two_radii_non_positive_height_rejected_under_opt_in() {
-        let k_def = k();
-        let mut k_opt = k();
-        k_opt
-            .fixes
-            .cone_create_canonical_preserves_inside_out_and_checks_height = true;
+    fn wr63_two_radii_non_positive_height_rejected() {
+        let k_opt = k();
 
         for (height, top_radius) in [(0.0, 30.0), (-0.0, 30.0), (-5.0, 30.0), (-1.0, -20.0)] {
             for swap_uv in [false, true] {
                 for inside_out in [false, true] {
-                    // Default matches pinned C++ (`canonical_height_zero_top_is_semi`
-                    // and `canonical_height_negative_top_is_semi`).
-                    let def_cone = Cone::create_canonical(
-                        &k_def,
-                        &std_placement(),
-                        1.0,
-                        top_radius,
-                        height,
-                        swap_uv,
-                        inside_out,
-                    )
-                    .unwrap();
-                    assert_eq!(def_cone.top_height(), INFINITE_PARAMETER);
-                    assert!((def_cone.semi_angle_deg() - top_radius).abs() < 1e-12);
-                    assert_eq!(def_cone.inside_out(), inside_out);
-
-                    // Opt-in rejects non-positive height instead of reinterpreting
-                    // `top_radius` as `semi_angle_deg`.
                     let err = Cone::create_canonical(
                         &k_opt,
                         &std_placement(),
@@ -2805,43 +2733,21 @@ mod tests {
         }
     }
 
-    /// `WR-63`: `UpstreamFixes` registers the flag, and valid cones (`None`-height or
-    /// `inside_out == false` in the semi-angle overload, and positive heights including
-    /// tiny positive heights in the two-radius overload) are identical across modes.
+    /// `WR-63`: `UpstreamFixes` registers the flag, on by default, and valid cones
+    /// (`None`-height or `inside_out == false` in the semi-angle overload, and positive
+    /// heights including tiny positive heights in the two-radius overload) are built as
+    /// asked.
     #[test]
-    fn wr63_valid_cones_and_flag_lookup_match_across_modes() {
+    fn wr63_valid_cones_and_flag_lookup() {
         use crate::kernel::UpstreamFixes;
 
         let flag_name = "cone_create_canonical_preserves_inside_out_and_checks_height";
-        let k_def = k();
-        assert!(
-            !k_def
-                .fixes
-                .cone_create_canonical_preserves_inside_out_and_checks_height
-        );
+        let k_opt = k();
         assert!(UpstreamFixes::NAMES.contains(&flag_name));
-
-        let mut k_opt = k();
-        *k_opt.fixes.flag_mut(flag_name).unwrap() = true;
-        assert!(
-            k_opt
-                .fixes
-                .cone_create_canonical_preserves_inside_out_and_checks_height
-        );
         assert!(k_opt.fixes.flags().any(|f| f == (flag_name, true)));
 
         for swap_uv in [false, true] {
-            // Bounded semi-angle cone with `inside_out == false` is unchanged.
-            let def_bounded = Cone::create_canonical_with_semi_angle(
-                &k_def,
-                &std_placement(),
-                1.5,
-                25.0,
-                Some(3.0),
-                swap_uv,
-                false,
-            )
-            .unwrap();
+            // Bounded semi-angle cone with `inside_out == false`.
             let opt_bounded = Cone::create_canonical_with_semi_angle(
                 &k_opt,
                 &std_placement(),
@@ -2852,22 +2758,11 @@ mod tests {
                 false,
             )
             .unwrap();
-            assert!(def_bounded.approx_eq(&opt_bounded));
             assert!(!opt_bounded.inside_out());
             assert!(!opt_bounded.rev().make_nurb_gen_curve());
 
             for inside_out in [false, true] {
-                // Unbounded semi-angle cone (`height: None`) is unchanged.
-                let def_unbounded = Cone::create_canonical_with_semi_angle(
-                    &k_def,
-                    &std_placement(),
-                    1.5,
-                    25.0,
-                    None,
-                    swap_uv,
-                    inside_out,
-                )
-                .unwrap();
+                // Unbounded semi-angle cone (`height: None`).
                 let opt_unbounded = Cone::create_canonical_with_semi_angle(
                     &k_opt,
                     &std_placement(),
@@ -2878,22 +2773,10 @@ mod tests {
                     inside_out,
                 )
                 .unwrap();
-                assert!(def_unbounded.approx_eq(&opt_unbounded));
                 assert_eq!(opt_unbounded.inside_out(), inside_out);
 
-                // Two-radius cones with any `height > 0.0` (including tiny `1e-9`) are
-                // unchanged.
+                // Two-radius cones with any `height > 0.0` (including tiny `1e-9`).
                 for height in [3.0, 1e-9] {
-                    let def_frustum = Cone::create_canonical(
-                        &k_def,
-                        &std_placement(),
-                        1.0,
-                        2.0,
-                        height,
-                        swap_uv,
-                        inside_out,
-                    )
-                    .unwrap();
                     let opt_frustum = Cone::create_canonical(
                         &k_opt,
                         &std_placement(),
@@ -2904,7 +2787,6 @@ mod tests {
                         inside_out,
                     )
                     .unwrap();
-                    assert!(def_frustum.approx_eq(&opt_frustum));
                     assert_eq!(opt_frustum.inside_out(), inside_out);
                 }
             }

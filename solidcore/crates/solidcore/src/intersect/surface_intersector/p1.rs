@@ -2710,7 +2710,7 @@ mod tests {
         let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         // The intersector's own tolerance: (|P(min) P(mid)| + |P(mid) P(max)|) / 1000.
         let tol = 2.0 * 0.05 * 2.0f64.sqrt() / 1000.0;
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let mut si = SurfaceIntersector::new(&k, &s1, &dom, &s1, &dom, false).unwrap();
         assert!((si.this_approx_tol_3d - tol).abs() < 1e-15);
 
@@ -2721,20 +2721,13 @@ mod tests {
         si.start_points.push(start_id);
 
         // 1e-3 from the start point on both surfaces: the squared distance 1e-6 is
-        // below the tolerance, so the pinned test accepts it, while the real distance
-        // 1e-3 is above it, so the fixed test refuses it.
+        // below the tolerance, but the real distance 1e-3 is above it, so it is refused.
         let off = 1.0e-3;
         let mut point = TsectPnt::new();
         *point.srf_pos_mut(SrfIndex::First) = Vec3::new(off, 0.0, 0.0);
         *point.srf_pos_mut(SrfIndex::Second) = Vec3::new(0.0, off, 0.0);
         let starts = si.start_points().to_vec();
 
-        // Pinned (default) path.
-        assert!(si
-            .is_point_on_start_point(&k, &point, &starts, None)
-            .unwrap());
-        // Correct distance-to-tolerance path.
-        k.fixes.point_on_start_point_squared_tolerance = true;
         assert!(!si
             .is_point_on_start_point(&k, &point, &starts, None)
             .unwrap());
@@ -2753,7 +2746,7 @@ mod tests {
             .is_point_on_start_point(&k, &second_only, &starts, None)
             .unwrap());
 
-        // A point on the start point stays accepted with the flag on.
+        // A point on the start point stays accepted.
         let mut on_start = TsectPnt::new();
         *on_start.srf_pos_mut(SrfIndex::First) = Vec3::new(0.0, 0.0, 0.0);
         *on_start.srf_pos_mut(SrfIndex::Second) = Vec3::new(0.0, 0.0, 0.0);
@@ -2810,10 +2803,10 @@ mod tests {
             Ok(false)
         );
 
-        // 2. Empty `OffsetCurve`: `IsDegenerate` is `true`, `EvaluatePoint` fails with
-        //    `SM_ERR_NULL_POINTER` (1006).
+        // 2. Empty `OffsetCurve`: it cannot be evaluated, so it is not shown degenerate
+        //    (#2009); its drop fails, and the failure is passed on.
         let bad_offset = Curve::from(OffsetCurve::empty());
-        assert!(bad_offset.is_degenerate(&k_fix, EFF_ZERO, None).unwrap());
+        assert!(!bad_offset.is_degenerate(&k_fix, EFF_ZERO, None).unwrap());
         let err = si
             .is_point_on_curve(&k_fix, far, core::slice::from_ref(&bad_offset), None)
             .unwrap_err();

@@ -1766,18 +1766,19 @@ mod tests {
         assert_eq!(access.mutable_calls, 0);
     }
     #[test]
-    fn ignored_collect_error_cannot_retry_an_unmarked_face_forever() {
+    fn a_collect_error_cannot_retry_an_unmarked_face_forever() {
+        // the collection's failure is passed on (WR-662), marked or not, where upstream
+        // ignores it and, unmarked, retries the same face forever
         let mut access = Access::new();
         let mut backs = Vec::new();
         let face = (BrepId::from_index(0), FaceId::from_index(0));
-        assert!(
-            TopologySweep::collect_back_faces(&mut access, face, MarkType::Mark, &mut backs)
-                .is_err()
-        );
-        assert!(backs.is_empty());
-        access.collect_marks = true;
-        TopologySweep::collect_back_faces(&mut access, face, MarkType::Mark, &mut backs).unwrap();
-        assert_eq!(backs, vec![face.1]);
+        for marks in [false, true] {
+            access.collect_marks = marks;
+            let r =
+                TopologySweep::collect_back_faces(&mut access, face, MarkType::Mark, &mut backs);
+            assert_eq!(r.unwrap_err().sm_status(), Some(crate::error::SM_ERR));
+            assert!(backs.is_empty());
+        }
     }
     #[test]
     fn consuming_union_is_not_deleted_twice_or_reused_on_next_repetition() {

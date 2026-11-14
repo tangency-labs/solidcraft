@@ -3949,8 +3949,15 @@ mod tests {
     #[test]
     fn brep_intersect_mut_empty_controls_and_point_options() {
         let mut k = Kernel::default();
-        // Native also returns no singular point for this exact tangency.
+        // The exact tangency at z = 0 is the one point (0.5, 0.5, 0) the surfaces touch
+        // (`ssi_tangent_contact_points`), where native returns no point; the plane below
+        // the paraboloid touches nothing.
         for z in [0.0, -0.125] {
+            let touch = if z == 0.0 {
+                vec![Point3::new(0.5, 0.5, 0.0)]
+            } else {
+                Vec::new()
+            };
             for reverse in [false, true] {
                 for want_points in [false, true] {
                     let (mut b, mut other) = cross_body_pair(&mut k, z);
@@ -3962,7 +3969,7 @@ mod tests {
                     let (curves, points) =
                         brep_intersect_mut(&k, first, second, 1e-6, 2.0, want_points).unwrap();
                     assert!(curves.is_empty());
-                    assert_eq!(points, want_points.then(Vec::new));
+                    assert_eq!(points, want_points.then(|| touch.clone()));
                 }
             }
         }
@@ -4131,6 +4138,8 @@ mod tests {
     fn seam_redistribution_preserves_trims_after_failed_projection() {
         use crate::surface::surface::p2::DropCurveFail;
 
+        // a neighbour whose projection failed leaves nothing to compare: nothing is swapped
+        // (fork 60a8a51, WR-658), where upstream asserts and the strict port refuses
         for failed_previous in 0..2 {
             let (mut b, edge, uses, previous) = seam_fixture();
             b.edgeuse_mut(previous[failed_previous])
@@ -4139,8 +4148,7 @@ mod tests {
                 fail_status: SM_ERR_INVALID_INPUT,
                 ..DropCurveFail::default()
             }));
-            assert!(redistribute_fixture(&mut b, edge)
-                .is_err_and(|e| e.upstream_status() == Some(SM_ERR_INVALID_INPUT)));
+            assert!(!redistribute_fixture(&mut b, edge).unwrap());
             assert_eq!(seam_sides(&b, uses), [0.0, 1.0]);
         }
     }
@@ -4148,15 +4156,17 @@ mod tests {
     #[test]
     fn seam_redistribution_requires_four_uses_and_usable_trims() {
         let (b, edge, uses, previous) = seam_fixture();
+        // without its four edge uses, or with a trim curve that cannot be evaluated, there is
+        // nothing to compare: nothing is swapped (fork 60a8a51, WR-658)
         for count in [0, 2, 6] {
             let mut bad = b.clone_standing_for_self().unwrap();
             bad.edge_mut(edge).unwrap().edgeuses = uses.into_iter().cycle().take(count).collect();
-            assert!(redistribute_fixture(&mut bad, edge).is_err());
+            assert!(!redistribute_fixture(&mut bad, edge).unwrap());
         }
         for eu in [uses[0], uses[2], previous[0], previous[1]] {
             let mut bad = b.clone_standing_for_self().unwrap();
             bad.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::default()));
-            assert!(redistribute_fixture(&mut bad, edge).is_err());
+            assert!(!redistribute_fixture(&mut bad, edge).unwrap());
         }
         for eu in [uses[0], uses[2]] {
             let mut bad = b.clone_standing_for_self().unwrap();

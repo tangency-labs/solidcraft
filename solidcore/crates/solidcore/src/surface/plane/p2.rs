@@ -1821,14 +1821,19 @@ mod tests {
             .is_none());
     }
 
+    /// The plane recognised from a sheared bilinear patch takes its origin after its
+    /// axes are made square, so it passes through the patch's lower corner, wherever the
+    /// domain lies (upstream's origin, taken before, is off by the shear times the
+    /// domain's lower v).
     #[test]
-    fn plane_origin_after_axes_fix_is_opt_in_and_domain_local() {
+    fn plane_origin_after_axes_is_domain_local() {
         const SHEAR: f64 = 3.2e-8;
         let domain_cases = [
             Extent2d::from_bounds(2.0, 4.0, 3.0, 5.0),
             Extent2d::from_bounds(2.0, -5.0, 3.0, -4.0),
         ];
-        assert!(!Kernel::default().fixes.plane_recognition_origin_after_axes);
+        let fixed_kernel = Kernel::default();
+        assert!(fixed_kernel.fixes.plane_recognition_origin_after_axes);
 
         for domain in domain_cases {
             let surface = skewed_bilinear(domain, SHEAR);
@@ -1837,27 +1842,13 @@ mod tests {
             let upper_uv = domain.max();
             let expected_lower = surface.evaluate_point(lower_uv).unwrap();
 
-            let default_kernel = Kernel::default();
-            let default_plane = Plane::is_nurb_surface_plane(&default_kernel, &surface, 1.0)
-                .unwrap()
-                .unwrap();
-            let default_lower_error = default_plane.evaluate_point(lower_uv) - expected_lower;
-            let expected_shift = -domain.min().y * 40.0 * SHEAR;
-            assert!((default_lower_error.x - expected_shift).abs() < 1.0e-12);
-            assert!(default_lower_error.y.abs() < 1.0e-12);
-            assert_eq!(default_plane.natural_uv_domain(), domain);
-            assert_eq!(default_plane.step_uv_domain(), domain);
-            assert!((default_plane.uv_scale().x - 2.0).abs() < 1.0e-12);
-            assert!((default_plane.uv_scale().y - 40.0).abs() < 1.0e-12);
-
-            let mut fixed_kernel = Kernel::default();
-            fixed_kernel.fixes.plane_recognition_origin_after_axes = true;
             let fixed_plane = Plane::is_nurb_surface_plane(&fixed_kernel, &surface, 1.0)
                 .unwrap()
                 .unwrap();
             assert_eq!(fixed_plane.natural_uv_domain(), domain);
             assert_eq!(fixed_plane.step_uv_domain(), domain);
-            assert_eq!(fixed_plane.uv_scale(), default_plane.uv_scale());
+            assert!((fixed_plane.uv_scale().x - 2.0).abs() < 1.0e-12);
+            assert!((fixed_plane.uv_scale().y - 40.0).abs() < 1.0e-12);
             assert!(
                 fixed_plane
                     .evaluate_point(lower_uv)
@@ -1875,42 +1866,6 @@ mod tests {
             let upper_residual = fixed_plane.evaluate_point(upper_uv) - expected_upper;
             assert!((upper_residual.x + 40.0 * SHEAR).abs() < 1.0e-12);
             assert!(upper_residual.y.abs() < 1.0e-12);
-        }
-
-        // With a zero minimum, recomputing the origin with the final axis is identical.
-        let zero_domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let surface = skewed_bilinear(zero_domain, SHEAR);
-        let baseline = Plane::is_nurb_surface_plane(&Kernel::default(), &surface, 1.0)
-            .unwrap()
-            .unwrap();
-        let mut fixed_kernel = Kernel::default();
-        fixed_kernel.fixes.plane_recognition_origin_after_axes = true;
-        let fixed = Plane::is_nurb_surface_plane(&fixed_kernel, &surface, 1.0)
-            .unwrap()
-            .unwrap();
-        assert_eq!(baseline.position(), fixed.position());
-        assert_eq!(baseline.uv_scale(), fixed.uv_scale());
-        assert_eq!(baseline.step_uv_domain(), fixed.step_uv_domain());
-        assert_eq!(baseline.natural_uv_domain(), fixed.natural_uv_domain());
-        for uv in [zero_domain.min(), zero_domain.max()] {
-            assert_eq!(baseline.evaluate_point(uv), fixed.evaluate_point(uv));
-        }
-
-        // An already orthogonal frame is also unaffected by enabling the correction.
-        let orthogonal_domain = Extent2d::from_bounds(2.0, 4.0, 3.0, 5.0);
-        let orthogonal = skewed_bilinear(orthogonal_domain, 0.0);
-        let baseline = Plane::is_nurb_surface_plane(&Kernel::default(), &orthogonal, 1.0)
-            .unwrap()
-            .unwrap();
-        let fixed = Plane::is_nurb_surface_plane(&fixed_kernel, &orthogonal, 1.0)
-            .unwrap()
-            .unwrap();
-        assert_eq!(baseline.position(), fixed.position());
-        assert_eq!(baseline.uv_scale(), fixed.uv_scale());
-        assert_eq!(baseline.step_uv_domain(), fixed.step_uv_domain());
-        assert_eq!(baseline.natural_uv_domain(), fixed.natural_uv_domain());
-        for uv in [orthogonal_domain.min(), orthogonal_domain.max()] {
-            assert_eq!(baseline.evaluate_point(uv), fixed.evaluate_point(uv));
         }
     }
 

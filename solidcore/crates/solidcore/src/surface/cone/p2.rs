@@ -2002,8 +2002,7 @@ mod tests {
 
     #[test]
     fn rebuild_cylinder_small_arc_clears_a_stale_semi_angle() {
-        let mut k = kernel();
-        k.fixes.cylinder_rebuild_mean_radius = true;
+        let k = kernel();
         for swap in [false, true] {
             for inside in [false, true] {
                 let mut c = Cone::new_cylinder_bounded(
@@ -2022,9 +2021,6 @@ mod tests {
                 // An earlier buggy rebuild can leave this angle even after the
                 // NURB is restored to an exact cylinder. Equal radii must reset it.
                 c.semi_angle_deg = -4.3550699142343645e-10;
-                let mut pinned = c.clone();
-                pinned.rebuild_step_from_nurb_parameters(&kernel()).unwrap();
-                assert_eq!(pinned.semi_angle_deg(), c.semi_angle_deg());
                 c.rebuild_step_from_nurb_parameters(&k).unwrap();
                 assert_eq!(c.semi_angle_deg(), 0.0);
                 assert!((c.base_radius() - 9.0).abs() < 1e-8);
@@ -2035,10 +2031,10 @@ mod tests {
 
     /// tangency-labs/solidcore#713 (WR-385): a cylinder whose NURB radii differ by
     /// 2.25e-11 (rounding, as after `SwapUV`) gets a semi-angle upstream, which its own
-    /// check forbids; with the opt-in the radii are its one radius.
+    /// check forbids; here the radii are its one radius.
     #[test]
     fn issue_713_cylinder_rebuild_keeps_zero_semi_angle() {
-        let mut k = kernel();
+        let k = kernel();
         let make = |k: &Kernel| {
             let mut c = Cone::create_canonical_cylinder(k, &Axis2Placement::IDENTITY, 9.0).unwrap();
             let linear_u = c.rev.base.degree(SurfParamType::U) == 1;
@@ -2055,11 +2051,6 @@ mod tests {
             }
             c
         };
-        let mut up = make(&k);
-        up.rebuild_step_from_nurb_parameters(&k).unwrap();
-        assert!(up.semi_angle_deg() != 0.0);
-
-        k.fixes.cylinder_rebuild_mean_radius = true;
         let mut fixed = make(&k);
         fixed.rebuild_step_from_nurb_parameters(&k).unwrap();
         assert_eq!(fixed.semi_angle_deg(), 0.0);

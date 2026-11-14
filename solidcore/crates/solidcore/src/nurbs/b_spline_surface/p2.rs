@@ -2376,8 +2376,9 @@ mod tests {
                 crate::surface::surface::SurfaceKind::SurfOfExtrusion(_)
             ));
             if let crate::surface::surface::SurfaceKind::SurfOfExtrusion(extrusion) = copy.kind() {
-                // Only swapped, unequal domains make Reparameterize build the NURB.
-                assert_eq!(extrusion.base().gw_nurb().is_some(), swap_uv);
+                // the parameterization check evaluates the analytic copy against the
+                // source (WR-450), which makes its NURB, swapped or not
+                assert!(extrusion.base().gw_nurb().is_some());
             }
             assert_eq!(copy.natural_uv_domain_if_built(), domain);
             for ((u, v), expected) in samples.into_iter().zip(before) {
@@ -2418,15 +2419,14 @@ mod tests {
         BSplineSurface::from_nurb(nurb, false)
     }
 
-    /// WR-450 (#387): the analytic copy of the rational half cylinder has SMLib's own
-    /// parameterization, so a face's UV trims no longer fit it. With
-    /// `analytic_copy_keeps_parameterization` the copy keeps the exact surface.
+    /// WR-450 (#387): the analytic copy of the rational half cylinder would have SMLib's
+    /// own parameterization, so a face's UV trims would no longer fit it: the copy keeps
+    /// the exact surface.
     #[test]
     fn rational_half_cylinder_copy_keeps_parameterization() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let s = rational_half_cylinder();
         let domain = s.natural_uv_domain();
-        let off = s.copy_and_add_analytics(&k).unwrap();
         let worst = |k: &Kernel, c: &crate::surface::surface::Surface| {
             let mut worst = 0.0_f64;
             for i in 0..=6 {
@@ -2438,14 +2438,6 @@ mod tests {
             }
             worst
         };
-        assert!(
-            !matches!(off.kind(), crate::surface::surface::SurfaceKind::BSpline(_)),
-            "recognised as analytic"
-        );
-        let off_gap = worst(&k, &off);
-        assert!(off_gap > 1e-3, "default copy is off by {off_gap}");
-
-        k.fixes.analytic_copy_keeps_parameterization = true;
         let on = s.copy_and_add_analytics(&k).unwrap();
         assert!(matches!(
             on.kind(),

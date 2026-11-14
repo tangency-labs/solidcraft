@@ -81,9 +81,9 @@ mod tests {
     use crate::primitive::api_primitives::create_box;
     use crate::topology::brep::p1::regions;
 
-    /// The cup and lid of WR-265 on the default kernel, which leaves the cavity's shell first
-    /// in the solid region's list: for either operand order, the solid's outer shell is the one
-    /// mated to the infinite region, not its list head, and the cavity's outer shell is the
+    /// The cup and lid of WR-265: for either operand order, and whichever of its shells the
+    /// solid region lists first, the solid's outer shell is the one mated to the infinite
+    /// region, not its list head, and the cavity's outer shell is the one mated to the
     /// solid's other shell.
     #[test]
     fn the_outer_shell_of_a_solid_whose_void_is_listed_first() {
@@ -115,17 +115,23 @@ mod tests {
             let outer = outer_shells(&r).unwrap();
             assert_eq!(outer.len(), 2, "lid first: {lid_first}");
             assert!(!outer.contains_key(&infinite));
-            // the solid's outer shell: its list's second, the one facing the infinite region
-            assert_eq!(
-                outer.get(&solid),
-                Some(&shells[1]),
-                "lid first: {lid_first}"
-            );
-            for m in mated_shells(&r, shells[1]).unwrap() {
-                assert_eq!(r.shell(m).unwrap().region, Some(infinite));
-            }
-            // the cavity's: the shell mated to the solid's first shell
-            let [cavity_shell] = mated_shells(&r, shells[0]).unwrap()[..] else {
+            // the solid's outer shell: the one facing the infinite region
+            let faces_infinite = |shell: ShellId| {
+                mated_shells(&r, shell)
+                    .unwrap()
+                    .iter()
+                    .all(|&m| r.shell(m).unwrap().region == Some(infinite))
+            };
+            let (outside, inside) = if faces_infinite(shells[0]) {
+                (shells[0], shells[1])
+            } else {
+                (shells[1], shells[0])
+            };
+            assert!(faces_infinite(outside), "lid first: {lid_first}");
+            assert!(!faces_infinite(inside), "lid first: {lid_first}");
+            assert_eq!(outer.get(&solid), Some(&outside), "lid first: {lid_first}");
+            // the cavity's: the shell mated to the solid's other shell
+            let [cavity_shell] = mated_shells(&r, inside).unwrap()[..] else {
                 panic!("one shell beyond the cavity's faces")
             };
             assert_eq!(outer.get(&cavity), Some(&cavity_shell));
