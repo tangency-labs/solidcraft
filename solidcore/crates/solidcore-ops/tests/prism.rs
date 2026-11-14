@@ -13,11 +13,11 @@
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
 use solidcore_ops::prism::{
-    extrude_planar_regions, loop_holds, planar_regions_boolean, prism_equivalent, prism_section,
-    region_area, PrismSection,
+    extrude_planar_regions, line_coords_2d, loop_holds, planar_regions_boolean, prism_equivalent,
+    prism_section, region_area, to_local_all, PrismSection,
 };
 use solidcore_ops::{make_box, make_cylinder, session, Body, BooleanOp, Error};
-use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 fn all_fixes() {
     session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
@@ -861,4 +861,39 @@ fn loop_holds_a_point_on_an_edge_line_off_the_loop() {
     assert_eq!(loop_holds(&sq, v(11.0, 10.0)), Some(false));
     assert_eq!(loop_holds(&sq, v(5.0, 5.0)), Some(true));
     assert_eq!(loop_holds(&sq, v(5.0, 0.0)), None);
+}
+
+/// A view's points in its plane through the record: the front plane reads x and -z, and a plane
+/// off orthonormal or a point not finite is an argument error.
+#[test]
+fn a_views_points_read_in_its_plane() {
+    let front = Plane::XZ;
+    let got = to_local_all(
+        &front,
+        &[Vec3::new(2.0, 5.0, -3.0), Vec3::new(0.0, 0.0, 0.0)],
+    )
+    .unwrap();
+    assert_eq!(got, [v(2.0, 3.0), v(0.0, 0.0)]);
+    let bent = Plane {
+        x: Vec3::new(1.1, 0.0, 0.0),
+        ..Plane::XY
+    };
+    assert!(matches!(to_local_all(&bent, &[]), Err(Error::Argument)));
+    assert!(matches!(
+        to_local_all(&Plane::XY, &[Vec3::new(f64::NAN, 0.0, 0.0)]),
+        Err(Error::Argument)
+    ));
+}
+
+/// Points along and across a line through the record, by hand; a zero direction is an argument
+/// error.
+#[test]
+fn points_read_along_and_across_a_line() {
+    let got = line_coords_2d(v(1.0, 0.0), v(0.0, 2.0), &[v(1.0, 5.0), v(4.0, 1.0)]).unwrap();
+    assert_eq!((got.unit, got.normal), (v(0.0, 1.0), v(-1.0, 0.0)));
+    assert_eq!(got.coords, [v(5.0, 0.0), v(1.0, -3.0)]);
+    assert!(matches!(
+        line_coords_2d(v(0.0, 0.0), v(0.0, 0.0), &[]),
+        Err(Error::Argument)
+    ));
 }
