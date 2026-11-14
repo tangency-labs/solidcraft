@@ -118,3 +118,139 @@ fn center_rectangle_draws_both_diagonals_like_fusion() {
         assert_eq!(si["curves"].as_array().map(Vec::len), Some(4), "{k}: {si}");
     }
 }
+
+// ---- Edge Center Rectangle -------------------------------------------------------------
+
+fn active(s: &Session) -> solidcraft_sketch::Sketch {
+    s.model.state().sketch(s.active_sketch.unwrap()).unwrap().sketch.clone()
+}
+
+/// The area of the sketch's one profile, and whether the sketch solved.
+fn profile(s: &Session) -> (usize, f64, bool) {
+    let st = s.model.state();
+    let sk = st.sketch(s.active_sketch.unwrap()).unwrap();
+    (sk.profiles.len(), sk.profiles.iter().map(|p| p.area).sum(), sk.report.ok())
+}
+
+/// The four corners of the rectangle drawn by `r` (the points of its sides), as (x, y).
+fn corners(s: &Session, r: &Value) -> Vec<(f64, f64)> {
+    let sk = active(s);
+    let mut out = Vec::new();
+    for key in ["anchor_start", "anchor_end", "far_end", "far_start"] {
+        let id = r["corners"][key].as_str().unwrap();
+        let p = sk.point(sk.resolve_point(id).unwrap()).unwrap();
+        out.push((p.x, p.y));
+    }
+    out
+}
+
+fn near(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-6
+}
+
+fn edge_rect(anchor: Value, corner: Value, direction: Value) -> (Session, Value) {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let r = run(&mut s, "sketch.rectangle.edge_center", json!({"anchor": anchor, "corner": corner, "direction": direction}));
+    (s, r)
+}
+
+#[test]
+fn edge_center_rectangle_axis_example_and_mirror() {
+    // Anchor (0,0), corner (4,3), vertical anchored edge: x = 0..4, y = -3..3.
+    let (s, r) = edge_rect(json!([0, 0]), json!([4, 3]), json!([0, 1]));
+    let c = corners(&s, &r);
+    let (xs, ys): (Vec<f64>, Vec<f64>) = c.iter().copied().unzip();
+    assert!(near(xs.iter().cloned().fold(f64::MAX, f64::min), 0.0) && near(xs.iter().cloned().fold(f64::MIN, f64::max), 4.0), "{c:?}");
+    assert!(near(ys.iter().cloned().fold(f64::MAX, f64::min), -3.0) && near(ys.iter().cloned().fold(f64::MIN, f64::max), 3.0), "{c:?}");
+    assert_eq!(ids(&r["curves"]).len(), 4);
+    let (n, area, ok) = profile(&s);
+    assert!(n == 1 && ok && near(area, 24.0), "{n} {area} {ok}");
+
+    // The other way: the corner on the other side extends the other way.
+    let (s, r) = edge_rect(json!([0, 0]), json!([-4, 3]), json!([0, 1]));
+    let c = corners(&s, &r);
+    assert!(c.iter().all(|p| p.0 <= 1e-9 && p.0 >= -4.0 - 1e-9 && p.1.abs() <= 3.0 + 1e-9), "{c:?}");
+    assert!(c.iter().any(|p| near(p.0, -4.0)));
+    assert!(near(profile(&s).1, 24.0));
+}
+
+#[test]
+fn edge_center_rectangle_horizontal_edge_and_positions() {
+    // Horizontal anchored edge: spans x = ax±h and extends in y toward the corner, up or down.
+    for (anchor, corner) in [([10.0_f64, 5.0], [13.0_f64, 9.0]), ([-7.5, 2.0], [-9.0, -6.0]), ([1e3, -2e3], [1e3 + 0.5, -2e3 + 0.25])] {
+        let (s, r) = edge_rect(json!(anchor), json!(corner), json!([1, 0]));
+        let (w, h) = ((corner[1] - anchor[1]).abs(), (corner[0] - anchor[0]).abs());
+        let c = corners(&s, &r);
+        let side = (corner[1] - anchor[1]).signum();
+        assert!(near(c[0].0, anchor[0] - h) && near(c[1].0, anchor[0] + h) && near(c[0].1, anchor[1]) && near(c[1].1, anchor[1]), "{c:?}");
+        assert!(near(c[2].1, anchor[1] + side * w) && near(c[3].1, anchor[1] + side * w), "{c:?}");
+        let (n, area, ok) = profile(&s);
+        assert!(n == 1 && ok && (area - 2.0 * h * w).abs() < 1e-6 * (1.0 + area), "{anchor:?} {area}");
+    }
+}
+
+#[test]
+fn edge_center_rectangle_rotated_edges() {
+    for deg in [30.0_f64, 135.0, -70.0, 210.0] {
+        let (sin, cos) = deg.to_radians().sin_cos();
+        let d = [cos, sin];
+        let n = [-sin, cos];
+        let (anchor, along, across) = ([4.0, -3.0], 2.5, 6.0);
+        for side in [1.0, -1.0] {
+            let corner = [anchor[0] + d[0] * along + n[0] * across * side, anchor[1] + d[1] * along + n[1] * across * side];
+            let (mut s, r) = edge_rect(json!(anchor), json!(corner), json!(d));
+            let c = corners(&s, &r);
+            let want = [
+                (anchor[0] - d[0] * along, anchor[1] - d[1] * along),
+                (anchor[0] + d[0] * along, anchor[1] + d[1] * along),
+                (anchor[0] + d[0] * along + n[0] * across * side, anchor[1] + d[1] * along + n[1] * across * side),
+                (anchor[0] - d[0] * along + n[0] * across * side, anchor[1] - d[1] * along + n[1] * across * side),
+            ];
+            for (g, w) in c.iter().zip(want) {
+                assert!(near(g.0, w.0) && near(g.1, w.1), "{deg} {side}: {c:?} vs {want:?}");
+            }
+            let (n, area, ok) = profile(&s);
+            assert!(n == 1 && ok && near(area, 2.0 * along * across), "{deg}: {area}");
+            // Still a rectangle after the solver has had its say, with a sane degree of freedom.
+            assert_eq!(healthy(&mut s, "edge center"), 5 - if deg.rem_euclid(90.0) == 0.0 { 1 } else { 0 });
+        }
+    }
+}
+
+#[test]
+fn edge_center_rectangle_snaps_to_a_line_midpoint() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let l = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 10]], "connect": false}));
+    let line = ids(&l["curves"])[0].clone();
+    // No direction given: it comes from the line the anchor snaps to.
+    let r = run(&mut s, "sketch.rectangle.edge_center", json!({"anchor": format!("mid:{line}"), "corner": [0, 12]}));
+    let c = corners(&s, &r);
+    let mid = (5.0, 5.0);
+    assert!(near((c[0].0 + c[1].0) / 2.0, mid.0) && near((c[0].1 + c[1].1) / 2.0, mid.1), "{c:?}");
+    // The anchored edge is parallel to the line: its direction is (1,1)/sqrt2.
+    assert!(near(c[1].0 - c[0].0, c[1].1 - c[0].1), "{c:?}");
+    assert_eq!(profile(&s).0, 1, "the rectangle is one closed profile");
+    let sk = active(&s);
+    assert_eq!(sk.curves.iter().filter(|c| matches!(c.kind, solidcraft_sketch::CurveKind::Line { .. })).count(), 5);
+    assert_ne!(run(&mut s, "sketch.inspect", json!({}))["status"], "conflict");
+}
+
+#[test]
+fn edge_center_rectangle_orientation_is_never_assumed() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let before = active(&s).curves.len();
+    for p in [
+        json!({"anchor": [0, 0], "corner": [4, 3]}),
+        json!({"anchor": [0, 0], "corner": [4, 3], "direction": [0, 0]}),
+        json!({"anchor": [0, 0], "corner": [4, 0], "direction": [0, 1]}),
+        json!({"anchor": [0, 0], "corner": [0, 3], "direction": [0, 1]}),
+        json!({"anchor": [0, 0], "corner": [4, 3], "direction": "x"}),
+        json!({"anchor": [0, 0], "corner": [4, 3], "line": "nope"}),
+    ] {
+        assert!(s.execute("sketch.rectangle.edge_center", &p).is_err(), "{p}");
+    }
+    assert_eq!(active(&s).curves.len(), before, "a rejected rectangle leaves nothing behind");
+}

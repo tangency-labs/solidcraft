@@ -498,6 +498,7 @@ fn sample(creator: &str) -> Option<Value> {
         "sketch.rectangle.center" => json!({"center":[0,0],"corner":[15,10]}),
         "sketch.rectangle.three_point" => json!({"p0":[0,0],"p1":[30,10],"p2":[25,25]}),
         "sketch.rectangle.rounded" => json!({"p0":[0,0],"p1":[30,20],"radius":3}),
+        "sketch.rectangle.edge_center" => json!({"anchor":[0,0],"corner":[10,6],"direction":[1,0]}),
         "sketch.circle.center" => json!({"center":[0,0],"radius":5}),
         "sketch.circle.two_point" => json!({"p0":[0,0],"p1":[10,0]}),
         "sketch.circle.three_point" => json!({"p0":[0,0],"p1":[10,0],"p2":[5,5]}),
