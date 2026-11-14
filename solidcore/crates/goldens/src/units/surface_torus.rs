@@ -1241,4 +1241,265 @@ mod tests {
             assert!(ok, "{op} never succeeds");
         }
     }
+
+    /// The 92 cases whose golden rows moved when the torus flags `torus_major_radius_from_origin`
+    /// (WR-501), `torus_signed_gen_curve_interval` (WR-408) and
+    /// `torus_iso_circle_axis_from_midpoint` (WR-504) became the only path.
+    const WR408_501_504_MOVED: [&str; 92] = [
+        "edge_swap_inside_offset", "edge_swap_inside_rebuild",
+        "gen0047", "gen0355", "gen0358", "gen0393", "gen0470", "gen0482", "gen0489",
+        "horn_half_minor_iso_from_axis_0.0", "horn_half_minor_iso_from_axis_0.5",
+        "issue1433_torus_far_below_s0_i0", "issue1433_torus_far_below_s0_i1",
+        "issue1433_torus_far_below_s1_i0", "issue1433_torus_far_below_s1_i1",
+        "issue1433_torus_far_full_s0_i0", "issue1433_torus_far_full_s0_i1",
+        "issue1433_torus_far_full_s1_i0", "issue1433_torus_far_full_s1_i1",
+        "issue1433_torus_far_inner_s0_i0", "issue1433_torus_far_inner_s0_i1",
+        "issue1433_torus_far_inner_s1_i0", "issue1433_torus_far_inner_s1_i1",
+        "issue1433_torus_far_offseam_s0_i0", "issue1433_torus_far_offseam_s0_i1",
+        "issue1433_torus_far_offseam_s1_i0", "issue1433_torus_far_offseam_s1_i1",
+        "issue1433_torus_far_past180_s0_i0", "issue1433_torus_far_past180_s0_i1",
+        "issue1433_torus_far_past180_s1_i0", "issue1433_torus_far_past180_s1_i1",
+        "issue1433_torus_far_quarter_s0_i1", "issue1433_torus_far_quarter_s1_i1",
+        "issue1433_torus_net_1_1_-1", "issue1433_torus_perturb_corner_1e-12",
+        "issue1433_torus_scaled_0.0001_swap", "issue1433_torus_scaled_0.01_swap",
+        "issue1433_torus_scaled_100000_swap", "issue1433_torus_scaled_100_swap",
+        "issue1433_torus_thin_tube",
+        "issue1433_torus_tilted_below_s0_i0", "issue1433_torus_tilted_below_s0_i1",
+        "issue1433_torus_tilted_below_s1_i0", "issue1433_torus_tilted_below_s1_i1",
+        "issue1433_torus_tilted_inner_s0_i0", "issue1433_torus_tilted_inner_s0_i1",
+        "issue1433_torus_tilted_inner_s1_i0", "issue1433_torus_tilted_inner_s1_i1",
+        "issue1433_torus_tilted_offseam_s0_i0", "issue1433_torus_tilted_offseam_s0_i1",
+        "issue1433_torus_tilted_offseam_s1_i0", "issue1433_torus_tilted_offseam_s1_i1",
+        "issue1433_torus_tilted_past180_s0_i0", "issue1433_torus_tilted_past180_s0_i1",
+        "issue1433_torus_tilted_past180_s1_i0", "issue1433_torus_tilted_past180_s1_i1",
+        "issue1433_torus_tilted_quarter_s0_i1", "issue1433_torus_tilted_quarter_s1_i1",
+        "issue1433_torus_tolscale_1000",
+        "issue1433_torus_z_below_s0_i0", "issue1433_torus_z_below_s0_i1",
+        "issue1433_torus_z_below_s1_i0", "issue1433_torus_z_below_s1_i1",
+        "issue1433_torus_z_inner_s0_i0", "issue1433_torus_z_inner_s0_i1",
+        "issue1433_torus_z_inner_s1_i0", "issue1433_torus_z_inner_s1_i1",
+        "issue1433_torus_z_offseam_s0_i0", "issue1433_torus_z_offseam_s0_i1",
+        "issue1433_torus_z_offseam_s1_i0", "issue1433_torus_z_offseam_s1_i1",
+        "issue1433_torus_z_past180_s0_i0", "issue1433_torus_z_past180_s0_i1",
+        "issue1433_torus_z_past180_s1_i0", "issue1433_torus_z_past180_s1_i1",
+        "issue1433_torus_z_quarter_s0_i1", "issue1433_torus_z_quarter_s1_i1",
+        "issue1490_r20_4_s1_i0_sw0_is_nurb", "issue1490_r20_4_s1_i0_sw1_is_nurb",
+        "issue1490_r20_4_s1_i1_sw0_is_nurb", "issue1490_r20_4_s1_i1_sw1_is_nurb",
+        "issue1490_r20_4_s1e3_i0_sw0_is_nurb", "issue1490_r20_4_s1e3_i0_sw1_is_nurb",
+        "issue1490_r20_4_s1e3_i1_sw0_is_nurb", "issue1490_r20_4_s1e3_i1_sw1_is_nurb",
+        "issue1490_r20_4_s1em3_i0_sw0_is_nurb", "issue1490_r20_4_s1em3_i0_sw1_is_nurb",
+        "issue1490_r20_4_s1em3_i1_sw0_is_nurb", "issue1490_r20_4_s1em3_i1_sw1_is_nurb",
+        "v_neg_io_swap_rebuild", "v_neg_plain_rebuild", "v_zero_io_swap_rebuild",
+    ];
+
+    /// The STEP domain `[u0, v0, u1, v1]` of a constructed torus (`None`: the whole turn
+    /// both ways).
+    fn input_lengths(t: &TorusIn) -> (f64, f64) {
+        t.dom.map_or((360.0, 360.0), |[u0, v0, u1, v1]| (u1 - u0, v1 - v0))
+    }
+
+    /// `a` and `b` agree within `tol`, with NaN failing.
+    fn near(a: f64, b: f64, tol: f64) -> bool {
+        (a - b).abs() <= tol
+    }
+
+    /// The analytic data of `t` against the torus it must be: radii `major` and `minor`,
+    /// STEP interval lengths `lengths` (degrees), the axis through `origin` along `axis`
+    /// (either sense), and the analytic surface passing through `nurb` at the NURB
+    /// domain's four corners and its centre. `slack` is a certified bound on how far
+    /// `nurb` lies off that torus (a perturbed control point; 0 otherwise).
+    #[allow(clippy::too_many_arguments)]
+    fn assert_is_torus(
+        name: &str,
+        k: &Kernel,
+        t: &Torus,
+        nurb: &BSplineSurface,
+        major: f64,
+        minor: f64,
+        lengths: (f64, f64),
+        origin: Vec3,
+        axis: Vec3,
+        slack: f64,
+    ) {
+        // rounding allowance: 1e-9 relative to the model size, plus the slack; every move
+        // this test pins is at least 1e-3 of the model size or 1e-3 degrees (the PR lists
+        // each)
+        let size = 1.0 + origin.length() + major + minor;
+        let tol = 1e-9 * size + slack;
+        // a point moved by `slack` turns the tube or the sweep by at most
+        // slack / (the smaller circle radius) radians
+        let ang = 1e-9 + (slack / minor.min((major - minor).abs())).to_degrees();
+        assert!(near(t.major_radius(), major, 1e-9 * major + slack), "{name}: major {} vs {major}", t.major_radius());
+        assert!(near(t.minor_radius(), minor, 1e-9 * minor + slack), "{name}: minor {} vs {minor}", t.minor_radius());
+        let d = t.base().step_uv_domain();
+        assert!(near(d.u_interval().length(), lengths.0, ang), "{name}: u length {:?} vs {}", d.u_interval(), lengths.0);
+        assert!(near(d.v_interval().length(), lengths.1, ang), "{name}: v length {:?} vs {}", d.v_interval(), lengths.1);
+        let pos = t.base().position();
+        assert!((pos.origin() - origin).length() <= tol, "{name}: origin {:?} vs {origin:?}", pos.origin());
+        let z = pos.z_axis();
+        assert!(z.cross(axis).length() <= 1e-9, "{name}: axis {z:?} vs {axis:?}");
+        let nd = nurb.natural_uv_domain();
+        for (a, b) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0), (0.5, 0.5)] {
+            let uv = nd.evaluate(a, b);
+            let p = nurb.evaluate_point(uv).expect("nurb point");
+            let step = t.convert_uv_from_nurbs_to_step(k, uv).expect("to step");
+            assert!(
+                step.x >= d.u_interval().min() - 1e-9 && step.x <= d.u_interval().max() + 1e-9,
+                "{name}: step u {} outside {:?}",
+                step.x,
+                d.u_interval()
+            );
+            assert!(
+                step.y >= d.v_interval().min() - 1e-9 && step.y <= d.v_interval().max() + 1e-9,
+                "{name}: step v {} outside {:?}",
+                step.y,
+                d.v_interval()
+            );
+            let q = t.evaluate_step_point(step).expect("step point");
+            assert!((p - q).length() <= tol, "{name}: at ({a}, {b}) nurb {p:?} analytic {q:?}");
+        }
+    }
+
+    /// Every golden row that moved with the WR-408/501/504 retirement holds the exact torus
+    /// (the recogniser and the rebuild) or the exact minor circle (the horn iso curve).
+    #[test]
+    fn wr408_501_504_moved_rows_are_the_exact_torus() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: MIN_GENERATED,
+        };
+        let cases = Runner.cases(&ctx).expect("cases");
+        let k = Kernel::default();
+        let mut seen = 0;
+        for case in &cases {
+            if !WR408_501_504_MOVED.contains(&case.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let name = case.name.as_str();
+            let i: Inputs = case.parse().expect("inputs");
+            let t = rust_torus(&k, &i.torus).expect("harness").expect("torus builds");
+            let (major, minor) = (i.torus.major, i.torus.minor);
+            let origin = v3(i.torus.origin);
+            let axis = v3(i.torus.x).cross(v3(i.torus.y));
+            match &i.op {
+                OpIn::IsNurb { scale, net_scale, perturb } => {
+                    // the moved is_nurb rows are unscaled or mirrored nets (an isometry
+                    // about the world origin), some with one control point moved by at most
+                    // 1e-9
+                    assert!(net_scale.iter().all(|s| s.abs() == 1.0), "{name}: net {net_scale:?}");
+                    assert!(perturb.iter().all(|p| p.d.iter().all(|d| d.abs() <= 1e-9)), "{name}");
+                    let m = Vec3::new(net_scale[0], net_scale[1], net_scale[2]);
+                    let mo = Vec3::new(origin.x * m.x, origin.y * m.y, origin.z * m.z);
+                    let ma = Vec3::new(axis.x * m.x, axis.y * m.y, axis.z * m.z);
+                    let mut nurb = t.base().base().gw_nurb().cloned().expect("nurb");
+                    let ix = nurb.indices();
+                    for a in 0..=ix.n {
+                        for b in 0..=ix.m {
+                            let p = nurb.cpt_mut(a, b).expect("cpt");
+                            p.x *= m.x;
+                            p.y *= m.y;
+                            p.z *= m.z;
+                        }
+                    }
+                    for pt in perturb {
+                        if let Ok(p) = nurb.cpt_mut(pt.i, pt.j) {
+                            p.x += pt.d[0];
+                            p.y += pt.d[1];
+                            p.z += pt.d[2];
+                        }
+                    }
+                    // moving one control point by d moves the rational surface by at most
+                    // |d| max(1, w_max) / w_min (its weighted basis over the weighted sum,
+                    // whose basis sums to 1), whether the coordinates are homogeneous or not
+                    let ws: Vec<f64> = nurb.rows().flat_map(|r| r.iter().map(|p| p.w)).collect();
+                    let (w_min, w_max) = ws.iter().fold((f64::INFINITY, 1.0_f64), |(a, b), w| (a.min(*w), b.max(*w)));
+                    assert!(w_min > 0.0, "{name}: weights {ws:?}");
+                    let moved: f64 = perturb.iter().map(|p| v3(p.d).length()).sum();
+                    let slack = moved * w_max / w_min;
+                    let test = BSplineSurface::from_nurb(nurb, false);
+                    let found = Torus::is_nurb_surface_torus(&k, &test, *scale)
+                        .expect("no error")
+                        .unwrap_or_else(|| panic!("{name}: not found"));
+                    assert_eq!(found.inside_out(), i.torus.inside_out != (m.x * m.y * m.z < 0.0), "{name}: inside out");
+                    assert_is_torus(name, &k, &found, &test, major, minor, input_lengths(&i.torus), mo, ma, slack);
+                }
+                OpIn::Rebuild {} => {
+                    let mut r = t.clone();
+                    r.rebuild_step_from_nurb_parameters(&k).unwrap_or_else(|e| panic!("{name}: {e}"));
+                    assert_eq!(r.inside_out(), i.torus.inside_out, "{name}: inside out");
+                    assert_is_torus(name, &k, &r, t.base().base(), major, minor, input_lengths(&i.torus), origin, axis, 0.0);
+                }
+                OpIn::Offset { dist, tol, rebuild } => {
+                    assert!(*rebuild, "{name}: only rebuilt offsets move");
+                    let off = t
+                        .create_offset_surface(&k, *dist, *tol)
+                        .expect("offset")
+                        .unwrap_or_else(|| panic!("{name}: no offset"));
+                    // the offset torus as constructed: the rebuild must give its analytic data back
+                    let mut r = off.clone();
+                    r.rebuild_step_from_nurb_parameters(&k).unwrap_or_else(|e| panic!("{name}: {e}"));
+                    assert_eq!(r.inside_out(), off.inside_out(), "{name}: inside out");
+                    let od = off.base().step_uv_domain();
+                    assert_is_torus(
+                        name,
+                        &k,
+                        &r,
+                        off.base().base(),
+                        off.major_radius(),
+                        off.minor_radius(),
+                        (od.u_interval().length(), od.v_interval().length()),
+                        off.base().position().origin(),
+                        off.base().position().z_axis(),
+                        0.0,
+                    );
+                    // and the offset is the closed form: same major radius, minor r -+ d
+                    assert!(near(off.major_radius(), major, 1e-12 * major), "{name}: offset major");
+                    assert!(
+                        near(off.minor_radius(), minor + dist, 1e-12 * minor)
+                            || near(off.minor_radius(), minor - dist, 1e-12 * minor),
+                        "{name}: offset minor {}",
+                        off.minor_radius()
+                    );
+                }
+                OpIn::Iso { param, iso, dom } => {
+                    assert!(dom.is_none(), "{name}: only whole-domain iso curves move");
+                    let c = t
+                        .create_iso_parametric_curve(&k, param_of(*param), *iso, None, false)
+                        .unwrap_or_else(|e| panic!("{name}: {e}"));
+                    let CurveKind::Ellipse(e) = c.curve.kind() else {
+                        panic!("{name}: not a circle");
+                    };
+                    let x = e.position().x_axis();
+                    // the minor circle: unit x axis in the torus's xy plane, centre R along
+                    // it from the origin, radius r, over the torus's v interval
+                    assert!(near(x.length(), 1.0, 1e-12), "{name}: x {x:?}");
+                    assert!(x.dot(axis).abs() <= 1e-12, "{name}: x {x:?} off the xy plane");
+                    let centre = origin + major * x;
+                    assert!((e.position().origin() - centre).length() <= 1e-12 * (1.0 + major), "{name}: centre");
+                    assert!(near(e.x_radius(), minor, 1e-12 * minor), "{name}: radius {}", e.x_radius());
+                    let ivl = e.step_interval();
+                    assert!(near(ivl.length(), input_lengths(&i.torus).1, 1e-9), "{name}: interval {ivl:?}");
+                    // its analytic ends are the iso curve's NURB ends, and the NURB's middle
+                    // lies on the circle
+                    let ptol = 1e-9 * (1.0 + major + minor);
+                    let nurb = e.base();
+                    let ni = nurb.natural_interval();
+                    let ends = [ni.min(), ni.max()].map(|s| nurb.evaluate_point(s).expect("nurb point"));
+                    let step_ends = [ivl.min(), ivl.max()].map(|s| e.evaluate_step_point(s).expect("circle point"));
+                    let same = |a: [Vec3; 2], b: [Vec3; 2]| (a[0] - b[0]).length() <= ptol && (a[1] - b[1]).length() <= ptol;
+                    assert!(
+                        same(ends, step_ends) || same(ends, [step_ends[1], step_ends[0]]),
+                        "{name}: ends {ends:?} vs {step_ends:?}"
+                    );
+                    let mid = nurb.evaluate_point(ni.evaluate(0.5)).expect("nurb point");
+                    let normal = x.cross(e.position().y_axis());
+                    assert!(near((mid - centre).length(), minor, ptol), "{name}: mid {mid:?}");
+                    assert!((mid - centre).dot(normal).abs() <= ptol, "{name}: mid off the plane");
+                }
+                other => panic!("{name}: unexpected op {}", op_name(other)),
+            }
+        }
+        assert_eq!(seen, WR408_501_504_MOVED.len(), "every moved case is checked");
+    }
 }
