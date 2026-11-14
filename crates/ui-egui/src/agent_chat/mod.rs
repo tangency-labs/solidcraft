@@ -409,6 +409,10 @@ pub struct AgentChat {
     pub input: String,
     /// The viewer, open on one message's pictures.
     gallery: Option<Gallery>,
+    /// The `agent_computer_access` preference as the backend last heard it (None: not known, a
+    /// backend not started by connect), so a change reaches the backend before its next
+    /// session, whatever state the chat is in.
+    computer_pushed: Option<bool>,
     state: Option<State>,
     agent: String,
     images: bool,
@@ -1169,6 +1173,15 @@ fn working_dir() -> std::path::PathBuf {
     d
 }
 
+/// The agent's working folder: the chat's own, or the home folder, where a terminal starts, when
+/// the user lets the agent use the computer (`agent_computer_access`).
+#[cfg(not(target_arch = "wasm32"))]
+fn agent_dir(computer: bool) -> std::path::PathBuf {
+    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    let home = std::env::var_os(var).map(std::path::PathBuf::from).filter(|h| h.is_absolute() && h.is_dir());
+    home.filter(|_| computer).unwrap_or_else(working_dir)
+}
+
 /// Start the agent: the chat's control endpoint for its MCP bridge if needed, the process.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
@@ -1196,6 +1209,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
         None
     };
     let http = app.services.agent_http.clone();
+    let computer = app.preferences.agent_computer_access;
     let chat = &mut app.agent_chat;
     if chat.tools_port.is_none()
         && let Some(start) = chat.control_starter.as_mut()
@@ -1222,7 +1236,13 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     chat.tools_available = Some(bridge.is_some());
     chat.tools_bridged = bridge.is_some();
     let wake = ctx.clone();
-    let start = backend::StartContext { cwd: working_dir(), bridge, tools: chat.tools_tx.clone(), wake: Box::new(move || wake.request_repaint()) };
+    let start = backend::StartContext {
+        cwd: agent_dir(computer),
+        bridge,
+        computer,
+        tools: chat.tools_tx.clone(),
+        wake: Box::new(move || wake.request_repaint()),
+    };
     let started: Result<Box<dyn ChatBackend>, String> = match entry.kind {
         agents::Kind::Acp if entry.argv.is_empty() => Err(tr("ui.agent_chat_none_found").to_string()),
         agents::Kind::Acp => acp_client::AcpBackend::start(&entry.argv, start).map(|b| Box::new(b) as Box<dyn ChatBackend>),
@@ -1253,6 +1273,8 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
             b.set_instructions(&app.preferences.agent_instructions);
             app.preferences.agent_last = entry.id.clone();
             chat.backend = Some(b);
+            // Started with the preference as it is now (StartContext); poll pushes later changes.
+            chat.computer_pushed = Some(computer);
             chat.argv = entry.argv.clone();
             chat.running_id = entry.id.clone();
             chat.modes.clear();
@@ -1812,6 +1834,8 @@ pub fn new_chat(app: &mut SolveApp) {
     }
     decline_all(app, "the chat was cleared");
     end_turn(app);
+    #[cfg(not(target_arch = "wasm32"))]
+    let computer = app.preferences.agent_computer_access;
     let chat = &mut app.agent_chat;
     chat.confirm_new = false;
     chat.items.clear();
@@ -1836,6 +1860,11 @@ pub fn new_chat(app: &mut SolveApp) {
         chat.restore_mode = Some(chat.mode.clone()).filter(|m| !m.is_empty());
         chat.state = Some(State::Starting);
         if let Some(b) = chat.backend.as_mut() {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                b.set_computer(computer, &agent_dir(computer));
+                chat.computer_pushed = Some(computer);
+            }
             // Instructions edited since the last session apply from this one on.
             b.set_instructions(&app.preferences.agent_instructions);
             b.new_session();
@@ -2238,6 +2267,9 @@ fn pump_tools(app: &mut SolveApp) {
     let Some(rx) = app.agent_chat.tools_rx.take() else { return };
     let configured = app.preferences.agent_chat_turn_limit;
     let limit = if configured == 0 { u32::MAX } else { configured.clamp(1, 1000) };
+    // A session opened with the computer (`agent_computer_access`) is not confined to the chat's
+    // folder: the user let SolidCraft's file commands reach any folder (docs/agent-chat.md).
+    let computer = app.agent_chat.backend.as_ref().is_some_and(|b| b.session_computer());
     for mut req in rx.try_iter().take(64) {
         let refuse = |req: ControlRequest, e: String| {
             let _ = req.reply.send(json!({"ok": false, "error": e}));
@@ -2254,7 +2286,8 @@ fn pump_tools(app: &mut SolveApp) {
         req.chat_turn = Some(Arc::clone(&turn.active));
         turn.requests += 1;
         // Requests without folders of their own stay inside the chat's working folder.
-        if let Some(o) = req.params.as_object_mut()
+        if !computer
+            && let Some(o) = req.params.as_object_mut()
             && !o.contains_key("allow_paths")
         {
             o.insert("allow_paths".into(), json!([working_dir().to_string_lossy()]));
@@ -2383,6 +2416,25 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     take_loaded(app, ctx);
+    // The preference changed since the backend last heard it (the checkbox, a profile, the
+    // control channel): the next session follows it in every state, so a login or New chat
+    // from NeedsAuth does not open a session on a stale snapshot.
+    #[cfg(not(target_arch = "wasm32"))]
+    if app.agent_chat.backend.is_some() {
+        let computer = app.preferences.agent_computer_access;
+        match app.agent_chat.computer_pushed {
+            // A backend that was not started by connect (a test's, a tab's) keeps what it
+            // was given until the preference changes.
+            None => app.agent_chat.computer_pushed = Some(computer),
+            Some(pushed) if pushed != computer => {
+                if let Some(b) = app.agent_chat.backend.as_mut() {
+                    b.set_computer(computer, &agent_dir(computer));
+                }
+                app.agent_chat.computer_pushed = Some(computer);
+            }
+            Some(_) => {}
+        }
+    }
     let events = app.agent_chat.backend.as_mut().map(|b| b.poll()).unwrap_or_default();
     for e in events {
         let ready = matches!(e, Event::Ready { .. });

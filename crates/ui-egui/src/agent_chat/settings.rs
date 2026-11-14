@@ -549,6 +549,19 @@ fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::help_icon(ui, tr(help));
             });
         }
+        // The agent may use this computer (off by default): its own tools and any folder. Down
+        // here, below the agents, so Add agent keeps its place (a row more in Permissions put it
+        // behind the footer of a 1000 px high window).
+        ui.horizontal(|ui| {
+            let response = ui_kit::checkbox(ui, tr("ui.ai_computer_access"), &mut app.preferences.agent_computer_access)
+                .backing_on_hover_text(tr("ui.ai_computer_access_note"));
+            solidcraft_ui_registry::publish_handle("prefs:agent_computer_access", response.rect.center());
+            ui_kit::help_icon(ui, tr("ui.ai_computer_access_note"));
+        });
+        let any_all = app.preferences.ai_permissions == Mode::All || app.preferences.agent_permissions.values().any(|m| *m == Mode::All);
+        if app.preferences.agent_computer_access && any_all {
+            ui_kit::text(ui, tr("ui.ai_computer_access_warning"), ui_kit::Text::Report("computer_access_warning", true));
+        }
     });
 }
 

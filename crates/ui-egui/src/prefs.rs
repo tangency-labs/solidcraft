@@ -1677,6 +1677,11 @@ preference_settings! {
     /// How much the agent may do without asking (`ask`, `edits`, `all`), and per agent.
     ai_permissions: crate::agent_chat::agents::Mode = crate::agent_chat::agents::Mode::Edits, PAGE_ASSISTANT;
     agent_permissions: std::collections::BTreeMap<String, crate::agent_chat::agents::Mode> = Default::default(), PAGE_ASSISTANT;
+    /// The agent may use this computer (docs/agent-chat.md): it keeps its own tools (the Claude
+    /// Code adapter's shell, file and web tools are no longer turned off), starts in the home folder,
+    /// and SolidCraft's file commands reach any folder. Off: it works only through SolidCraft's
+    /// tools, inside the folder limits (the default).
+    agent_computer_access: bool = false, PAGE_ASSISTANT;
     /// The model last chosen in the chat, per agent: put back when the agent offers it again.
     agent_models: std::collections::BTreeMap<String, String> = Default::default();
     /// "Always allow" answers: per agent, the tools it may use without asking.

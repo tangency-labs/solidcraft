@@ -122,11 +122,15 @@ pub enum Event {
 
 /// What a backend gets to start.
 pub struct StartContext {
-    /// Its working folder: an empty folder of SolidCraft's own, not the user's files.
+    /// Its working folder: an empty folder of SolidCraft's own, not the user's files (the home
+    /// folder when the user lets the agent use the computer).
     pub cwd: std::path::PathBuf,
     /// The MCP server that reaches this window (`solidcraft-cli mcp --connect` to the chat's own
     /// endpoint), for backends that start MCP servers; `None` when it could not be set up.
     pub bridge: Option<super::acp::McpBridge>,
+    /// The user lets the agent use the computer (`agent_computer_access`): its own tools stay on
+    /// and the MCP server has no folder limits.
+    pub computer: bool,
     /// Where tool calls run in process go, for backends that run their own tool loop.
     pub tools: Option<std::sync::mpsc::Sender<crate::ControlRequest>>,
     /// Wakes the window when something arrives.
@@ -144,6 +148,16 @@ pub trait ChatBackend {
     /// Start a fresh conversation on the running backend (no restart); [`Event::Ready`] follows.
     /// A message being answered is cancelled first.
     fn new_session(&mut self);
+    /// Whether the next session may use the computer (`agent_computer_access`) and where it
+    /// starts, so New chat follows the preference as it is then. The agent's process keeps the
+    /// folder it was started in; a session's `cwd` is what changes. Backends without their own
+    /// tools ignore it.
+    fn set_computer(&mut self, _computer: bool, _cwd: &std::path::Path) {}
+    /// Whether the session that is running was opened with the computer (`set_computer` or the
+    /// start context): then the chat does not confine its tool requests to its own folder.
+    fn session_computer(&self) -> bool {
+        false
+    }
     /// The user's custom instructions (#8220), added to the system note of every session that
     /// starts after this call. The panel sets them before the first session and before New chat.
     fn set_instructions(&mut self, _text: &str) {}

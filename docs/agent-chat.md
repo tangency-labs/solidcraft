@@ -510,12 +510,30 @@ a leading dot or a known extension), or any value of those in a command that exp
 saves, opens or inserts. A sweep's or pattern's `path` (curve ids) and an occurrence's `path`
 (ids) are geometry and run without a question.
 
+### Letting the agent use this computer
+
+**Let the agent use this computer** (off by default, on the same page) is for when you want the
+agent in the panel to work like Claude Code in a terminal: it keeps its own shell, file and web
+tools, starts in your home folder, and SolidCraft's file commands reach any folder (the MCP server
+runs with `--allow-any-path`, and the panel no longer confines its requests to the chat's own
+folder). It still changes the open design through SolidCraft's tools. It takes effect with the
+next conversation, on and off alike: start a new chat. An agent connected with an API key
+(no ACP) gets it from its next connection.
+
+Its own tools then ask through the panel as the agent's own mode has it, and Claude Code's own
+permission settings (`~/.claude/settings.json`) apply as in a terminal. With **Do everything**
+(the page's permission mode, called **Allow everything** above) nothing asks: the agent can read,
+change and delete whatever your user account can. Other ACP agents keep their own tools as they
+are; for them the switch lifts the folder limits, starts them in your home folder and no longer
+tells them to stay off their own tools.
+
 ## What it can't do
 
 - **Files wait for you** unless you chose **Allow everything**. **Cancel** or **Stop** declines
   everything that's waiting, and a question nobody answers is declined after four minutes. The
   [MCP server's folder limits](mcp.md) still apply after you allow: the design's folder, the
-  recovery folder and the server's own scratch folder.
+  recovery folder and the server's own scratch folder (unless you let the agent use this
+  computer).
 - **An optional limit per message.** There's none by default. Untick **Unlimited** on the AI
   page to cap the changes the agent may make per message (it starts at 24). Reading the design
   doesn't count. At the limit, it's told to stop and report what's left; send another message to
@@ -524,9 +542,10 @@ saves, opens or inserts. A sweep's or pattern's `path` (curve ids) and an occurr
   paths.
 - **Not the rest of the app.** It can't click the interface, change settings, quit, or drive the
   chat itself.
-- **Its own tools stay off where we can turn them off.** SolidCraft declares no file system and
-  no terminal to the agent, runs it in an empty working folder of its own, and asks the Claude
-  Code adapter to turn off its shell, file and web tools for the session.
+- **Its own tools stay off where we can turn them off,** unless you let the agent use this
+  computer. SolidCraft declares no file system and no terminal to the agent, runs it in an empty
+  working folder of its own, and asks the Claude Code adapter to turn off its shell, file and web
+  tools for the session.
 
 When the panel's agent is stopped, another agent is picked, or SolidCraft quits, the agent and
 every program it started (the CLI it wraps, its MCP server) are stopped.
