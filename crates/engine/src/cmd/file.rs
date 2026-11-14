@@ -143,7 +143,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_OBJ_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
-        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard) → {path, bytes, format, files}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it"),
+        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard) → {path, bytes, format, files, warnings?}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it"),
     CommandSpec::new("file.export_urdf", "Export URDF", crate::checked!("file.export_urdf", export_urdf_cmd))
         .icon("export")
         .noundo()
@@ -2151,6 +2151,9 @@ fn export_to(
         return export_glb(s, cmd, path, bodies, quality);
     }
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
+    // What meshing the bodies reported (STL and 3MF): each face the mesh path left short of the
+    // smallest angle or the chord tolerance, as the reply's warnings.
+    let mut warnings = Vec::new();
     // A design with components exports as a STEP assembly; otherwise bodies as placed.
     let bytes = if format == Format::Design {
         if !bodies.is_empty() {
@@ -2162,7 +2165,8 @@ fn export_to(
     } else {
         // Bodies carry the colour they are shown in (appearance, material or imported), and the
         // file the design's properties where the format has a place for them.
-        solidcraft_io::export_with_parts(
+        let bytes;
+        (bytes, warnings) = solidcraft_io::export_with_parts_noted(
             &s.doc.painted(&*s.world_state()?),
             bodies,
             parts,
@@ -2171,10 +2175,11 @@ fn export_to(
             &s.doc.metadata,
             quality,
             export_thumbnail(s, format, bodies).as_deref(),
-        )?
+        )?;
+        bytes
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let reply = ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), ..ExportResult::default() };
+    let reply = ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), warnings, ..ExportResult::default() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
@@ -2195,7 +2200,8 @@ fn lay_on_print_faces(p: &Value, cmd: &str, format: Format) -> Result<bool> {
 }
 
 /// Write the bodies as a mesh file (STL or 3MF), each laid on its print face: the file's size, and
-/// which bodies were laid and which were written as they lie.
+/// which bodies were laid and which were written as they lie, with what meshing them reported
+/// among the warnings.
 fn write_laid(
     s: &Session,
     path: &str,
@@ -2208,7 +2214,10 @@ fn write_laid(
     let mut state = s.doc.painted(&*s.world_state()?);
     let laid = print_face::lay_on_print_faces(s, &mut state, bodies, parts);
     let thumbnail = export_thumbnail(s, format, bodies);
-    let bytes = solidcraft_io::export_with_parts(&state, bodies, parts, format, &name, &s.doc.metadata, quality, thumbnail.as_deref())?;
+    let mut laid = laid;
+    let (bytes, notes) =
+        solidcraft_io::export_with_parts_noted(&state, bodies, parts, format, &name, &s.doc.metadata, quality, thumbnail.as_deref())?;
+    laid.warnings.extend(notes);
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok((bytes.len(), laid))
 }
@@ -2338,7 +2347,13 @@ fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io
         }
         written.push(t.clone());
     }
-    Ok(json!({"path": path, "bytes": files.obj.len(), "format": format!("{:?}", Format::Obj), "files": written}))
+    let mut reply = json!({"path": path, "bytes": files.obj.len(), "format": format!("{:?}", Format::Obj), "files": written});
+    // What meshing the bodies reported: each face the mesh path left short of the smallest angle
+    // or the chord tolerance.
+    if !files.warnings.is_empty() {
+        reply["warnings"] = json!(files.warnings);
+    }
+    Ok(reply)
 }
 
 /// The GLB export (#1553): the bodies as placed, with the looks the design shows them in.
@@ -2669,6 +2684,53 @@ mod tests {
         assert_eq!(other.doc.name, "Other");
     }
 
+    /// Every placement of a part is its first placement's triangles, moved: a copy moved by a
+    /// translation that rounds (0.1, 1/3, 7.3) and a copy turned 45° about z (whose box, and so
+    /// whose own size, is not the part's) are exported with the same triangles, their points the
+    /// first placement's carried by the placement, to the file's precision (3MF with face tags
+    /// writes full precision).
+    #[test]
+    fn every_placement_of_a_part_exports_its_first_placements_triangles_moved() {
+        use solidcraft_geom::prelude::*;
+        let dir = std::env::temp_dir().join(format!("solidcraft-placed-copies-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("copies.3mf").to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("component.create", &json!({"name": "Part"})).unwrap();
+        s.execute("solid.box", &json!({"length": 30, "width": 20, "height": 10, "body_name": "Base"})).unwrap();
+        s.execute("solid.cylinder", &json!({"radius": 5, "height": 10, "base": [10, 10, 10], "operation": "new", "body_name": "Boss"})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("occurrence.copy", &json!({"component": "Part", "translate": [0.1, 1.0 / 3.0, 7.3]})).unwrap();
+        let turned = s.execute("occurrence.copy", &json!({"component": "Part", "translate": [60, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": turned, "angle": "45 deg", "axis": [0, 0, 1], "origin": [60, 0, 0]})).unwrap();
+        s.execute("file.export", &json!({"path": path, "format": "3mf-tagged"})).unwrap();
+        let (objects, _) = solidcraft_io::read_3mf(&std::fs::read(&path).unwrap()).unwrap();
+        let world = s.world_state().unwrap();
+        for part in ["Base", "Boss"] {
+            let placed: Vec<_> = world.bodies.iter().filter(|b| b.definition_name() == part).collect();
+            assert_eq!(placed.len(), 3, "{part}: three placements");
+            let object = |name: &str| objects.iter().find(|o| o.name == name).unwrap_or_else(|| panic!("no object {name}"));
+            let first = object(&placed[0].name);
+            let inv = solidcraft_doc::mat_inverse(&placed[0].source_transform).unwrap();
+            for copy in &placed[1..] {
+                let o = object(&copy.name);
+                assert_eq!(o.triangles.len(), first.triangles.len(), "{}", copy.name);
+                assert_eq!(o.positions.len(), first.positions.len(), "{}", copy.name);
+                let rel = solidcraft_doc::mat_mul(&copy.source_transform, &inv);
+                let far = first
+                    .positions
+                    .iter()
+                    .map(|p| {
+                        let q = solidcraft_doc::apply_point(&rel, *p);
+                        o.positions.iter().map(|r| r.dist(q)).fold(f64::INFINITY, f64::min)
+                    })
+                    .fold(0.0, f64::max);
+                assert!(far < 1e-9 * 100.0, "{}: a point of the first placement, moved, is {far} mm from the copy's", copy.name);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// #8139: with `objects: "component"` a 3MF has one object for each placement of a component
     /// with two or more bodies, its bodies the object's parts; the design's own bodies stay objects
     /// of their own. The default (and `objects: "body"`) is one object per body, as before. Read
@@ -2904,16 +2966,37 @@ mod tests {
             assert!(bytes.starts_with(signature), "{cmd}");
         }
         // The triangles `file.export` writes (the 80-byte header holds the file's name), 84 + 50
-        // bytes each. A planar face is exact for any triangulation of its outline, so the mesher
-        // gives each of the box's six faces two triangles (kernel test `a_box_is_two_triangles_a_face`).
+        // bytes each, as many as the OBJ export's. The 20 x 10 x 5 box is meshed on the mesh path,
+        // shaped to the smallest angle, so its faces take nodes inside them (it was two triangles a
+        // face on the display path, kernel test `a_box_is_two_triangles_a_face`). Whatever their
+        // number: the OBJ's welded mesh is a sphere's (f = 2v - 4), no triangle is sharper than
+        // the smallest angle, and the STL's area and volume are the box's to f32 rounding.
         s.execute("file.export", &json!({"path": at("box.stl")})).unwrap();
         assert_eq!(std::fs::read(at("StlBinary.txt")).unwrap()[80..], std::fs::read(at("box.stl")).unwrap()[80..]);
-        let triangles = 6 * 2;
+        let obj = std::fs::read_to_string(at("Obj.txt")).unwrap();
+        let triangles = obj.lines().filter(|l| l.starts_with("f ")).count();
+        let vertices = obj.lines().filter(|l| l.starts_with("v ")).count();
+        assert_eq!(triangles, 2 * vertices - 4, "{obj}");
         let stl = std::fs::read(at("box.stl")).unwrap();
         assert_eq!(u32::from_le_bytes([stl[80], stl[81], stl[82], stl[83]]), u32::try_from(triangles).unwrap());
         assert_eq!(stl.len(), 84 + 50 * triangles);
-        let obj = std::fs::read_to_string(at("Obj.txt")).unwrap();
-        assert_eq!(obj.lines().filter(|l| l.starts_with("f ")).count(), triangles, "{obj}");
+        use solidcraft_geom::prelude::*;
+        let (mut area, mut volume) = (0.0f64, 0.0f64);
+        for t in solidcraft_io::read_stl(&stl).unwrap() {
+            let p = |k: usize| solidcore_record::Vec3::new(t[k][0] as f64, t[k][1] as f64, t[k][2] as f64);
+            let (a, b, c) = (p(0), p(1), p(2));
+            let corner = |a: solidcore_record::Vec3, b: solidcore_record::Vec3, c: solidcore_record::Vec3| {
+                (b - a).cross(c - a).len().atan2((b - a).dot(c - a)).to_degrees()
+            };
+            let smallest = corner(a, b, c).min(corner(b, c, a)).min(corner(c, a, b));
+            // f32 coordinates move a corner by well under 1e-3 degrees on sides of a millimetre.
+            assert!(smallest >= solidcraft_kernel::MESH_MIN_ANGLE - 1e-3, "{smallest}°");
+            area += (b - a).cross(c - a).len() / 2.0;
+            volume += a.dot(b.cross(c)) / 6.0;
+        }
+        // f32 rounding of coordinates up to 20 mm (under 1e-6 mm each) over 700 mm² of faces.
+        assert!((area - 700.0).abs() < 1e-3, "{area}");
+        assert!((volume - 1000.0).abs() < 1e-3, "{volume}");
         let r = s.execute("file.export_urdf", &json!({"path": at("robot.urdf")})).unwrap();
         assert_eq!(r["format"], "Urdf");
         assert!(std::fs::read_to_string(at("robot.urdf")).unwrap().contains("<robot"));

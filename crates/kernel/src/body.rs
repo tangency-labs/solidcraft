@@ -148,7 +148,7 @@ impl DisplayShare {
 /// transforms take it): positions, normals and edge polylines move, everything indexed stays.
 /// `None` for anything but a rotation and translation (a reflection would turn the triangles
 /// inside out).
-fn placed_mesh(m: &Mesh, t: &[[f64; 4]; 4]) -> Option<Mesh> {
+pub fn placed_mesh(m: &Mesh, t: &[[f64; 4]; 4]) -> Option<Mesh> {
     let r = |v: Vec3, w: f64| {
         Vec3::new(
             t[0][0] * v.x + t[1][0] * v.y + t[2][0] * v.z + w * t[3][0],
@@ -292,6 +292,8 @@ pub struct FaceInfo {
 /// How closely [`Body::mesh`] follows the exact surfaces, and the facet angle a viewport draws
 /// at: the mesher's own (solidcore-tess).
 pub use solidcore_tess::{DISPLAY_ANGLE, MeshTolerance};
+/// How [`Body::export_mesh`] meshes (the mesh path's spec and its default smallest angle), and what it reports.
+pub use solidcore_tess::{MESH_MIN_ANGLE, MeshSpec, PlanStats};
 
 pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
@@ -1190,6 +1192,23 @@ impl Body {
     /// gives at the plan's tolerance.
     pub fn mesh_of(&self, plan: &solidcraft_geom::tess::TessPlan) -> Result<Mesh> {
         self.flagged(solidcraft_geom::tess::EvaluateMesh::evaluate_mesh(plan))
+    }
+
+    /// The body meshed on the mesh path (solidcore-tess's `mesh`) to `spec`, with what it reported
+    /// about the faces: for export, never the viewport ([`Body::mesh`]). Strict: a face it cannot
+    /// mesh or evaluate is an error naming it. A mesh body gives its own triangles.
+    pub fn export_mesh(&self, spec: &MeshSpec) -> Result<(Mesh, PlanStats)> {
+        crate::profile::timed(crate::profile::Kind::Tessellate, "export_mesh", || {
+            if let Some(m) = &self.mesh {
+                return Ok((m.to_mesh(), PlanStats::default()));
+            }
+            let (plan, stats) = guard("export mesh", || solidcore_tess::mesh(&self.record, spec, self.size(), None).map_err(KernelError::from))?;
+            let (mesh, refused) = plan.evaluate();
+            match refused.first() {
+                Some(f) => Err(KernelError::Failed(format!("mesh: face {}: {}", f.face, f.reason))),
+                None => Ok((mesh, stats)),
+            }
+        })
     }
 
     /// A copy of this body that keeps the meshes made of it for reuse, for as long as the copy

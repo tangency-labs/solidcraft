@@ -58,5 +58,7 @@ gethostname = { workspace = true }
 
 [dev-dependencies]
 solidcraft-testkit = { workspace = true }
+# The mesh path's stats, built by hand in the export notes' test.
+solidcore-tess = { workspace = true }
 # Provenance tests sign with a software OpenPGP key, so they need no GnuPG or smartcard.
 rand = "0.8"

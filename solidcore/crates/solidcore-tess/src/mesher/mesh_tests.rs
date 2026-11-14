@@ -85,7 +85,7 @@ fn shaped_in_3d(b: &brep::Brep, size: f64, what: &str) -> PlanStats {
     eprintln!("{what} on the mesh path: smallest angle {worst} degrees (face {face}, corners {at:?}) over {} triangles", m.triangles.len());
     assert!(worst >= 20.0, "{what}: smallest angle {worst} degrees, on face {face}, corners {at:?}; unshaped: {:?}", stats.unshaped);
     assert_nothing_folds(&m, what);
-    let (w, refused) = plan.welded();
+    let (w, refused) = plan.welded().unwrap();
     assert!(refused.is_empty(), "{what}: {refused:?}");
     assert_closed(&w, what);
     stats
@@ -212,7 +212,7 @@ fn a_plate_a_ball_sinks_into_has_no_needles_on_the_mesh_path() {
     let ball: Vec<usize> = (0..plan.surfaces.len()).filter(|&f| !matches!(plan.surfaces[f], EvalSurface::Plane { .. })).collect();
     assert!(stats.unshaped.iter().all(|u| !ball.contains(&u.face)), "the ball's faces {ball:?}; unshaped: {:?}", stats.unshaped);
     assert_nothing_folds(&m, "sunk ball");
-    let (w, refused) = plan.welded();
+    let (w, refused) = plan.welded().unwrap();
     assert!(refused.is_empty(), "{refused:?}");
     assert_closed(&w, "sunk ball");
 }
@@ -241,7 +241,7 @@ fn a_box_on_the_mesh_path_keeps_its_angle_and_its_side() {
         }
     }
     assert_nothing_folds(&m, "box");
-    let (w, _) = plan.welded();
+    let (w, _) = plan.welded().unwrap();
     assert_closed(&w, "box");
 }
 
@@ -262,7 +262,7 @@ fn a_cylinder_wall_on_the_mesh_path_is_shaped() {
     eprintln!("cylinder wall on the mesh path: smallest angle {worst} degrees over {count} triangles");
     assert!(worst >= 20.0, "the wall's smallest angle is {worst} degrees over {count} triangles; unshaped: {:?}", stats.unshaped);
     assert_nothing_folds(&m, "cylinder");
-    let (w, _) = plan.welded();
+    let (w, _) = plan.welded().unwrap();
     assert_closed(&w, "cylinder");
 }
 
@@ -302,7 +302,7 @@ fn a_size_function_gives_shorter_sides_where_it_asks() {
             }
         }
     }
-    let (w, _) = sized_plan.welded();
+    let (w, _) = sized_plan.welded().unwrap();
     assert_closed(&w, "box with a size function");
 }
 

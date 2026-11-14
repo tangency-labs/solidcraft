@@ -76,6 +76,16 @@ pub enum TessError {
     /// A panic inside the mesher, caught there.
     #[error("kernel internal error: {0}")]
     Internal(String),
+    /// A mesh with more vertices than a `u32` index names ([`TessPlan::welded`]): `vertices`
+    /// is the count it had reached when the next one could not be numbered, past `u32::MAX`.
+    #[error(
+        "the mesh has more than {} vertices, more than a 32-bit index can name (reached {vertices})",
+        u32::MAX
+    )]
+    TooManyVertices {
+        /// The vertices numbered or asked for so far (more than `u32::MAX`).
+        vertices: usize,
+    },
 }
 
 /// The mesher's result.

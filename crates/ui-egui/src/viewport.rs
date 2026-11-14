@@ -9970,13 +9970,29 @@ mod tests {
         app.set_origin_shown(false);
         app.ui.ground_shadow = false;
         app.fit_view();
+        // Twelve edges per placed box, each a straight run of the exported mesh's segments along
+        // a box edge (the export's mesh path puts nodes along them, so their number is the
+        // mesher's): every segment of every outline drawn once per placement.
+        let world = crate::open_meshing::session_world(&app.session);
+        let mut segments = 0;
+        for body in &world.bodies {
+            let mesh = body.mesh();
+            assert_eq!(mesh.edges.len(), 12, "twelve edges per placed box");
+            for edge in &mesh.edges {
+                let (a, b) = (edge[0], edge[edge.len() - 1]);
+                for p in edge {
+                    let t = (*p - a).dot(b - a) / (b - a).dot(b - a);
+                    assert!((a + (b - a) * t - *p).len() < 1e-4, "an outline runs straight along a box edge");
+                }
+                segments += edge.len() - 1;
+            }
+        }
+        assert_eq!(world.bodies.len(), 2);
         for style in 0..4 {
             app.ui.visual_style = style;
             let scene = build_scene(&app).merged();
-            // Twelve edges per placed box, each one segment (a flat face needs no nodes along its
-            // edges), 24 segments.
-            let lines = if style == 1 { 0 } else { 2 * 12 * crate::gpu::LINE_SIZE };
-            assert_eq!(scene.lines.len(), lines, "style {style}: twelve edges per placed box");
+            let lines = if style == 1 { 0 } else { segments * crate::gpu::LINE_SIZE };
+            assert_eq!(scene.lines.len(), lines, "style {style}: every outline segment of both placed boxes");
             assert_eq!(scene.hidden.len(), if style == 3 { lines } else { 0 });
             assert_eq!(scene.tris.is_empty(), style == 2, "wireframe draws only the edges");
         }

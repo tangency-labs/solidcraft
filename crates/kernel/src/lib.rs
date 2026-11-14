@@ -167,8 +167,8 @@ pub use blend::{
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
 pub use body::{
-    Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MeshTolerance, Paint, PointClass,
-    Refusal, SurfaceKind, colour_name,
+    Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MESH_MIN_ANGLE, MeshSpec,
+    MeshTolerance, Paint, PlanStats, PointClass, Refusal, SurfaceKind, colour_name, placed_mesh,
 };
 pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
@@ -272,6 +272,7 @@ impl From<solidcore_tess::TessError> for KernelError {
             solidcore_tess::TessError::Invalid(m) => KernelError::Invalid(m),
             solidcore_tess::TessError::Failed(m) => KernelError::Failed(m),
             solidcore_tess::TessError::Internal(m) => KernelError::Internal(m),
+            e @ solidcore_tess::TessError::TooManyVertices { .. } => KernelError::TooLarge(e.to_string()),
         }
     }
 }

@@ -665,7 +665,7 @@ fn an_assembly_s_bodies_land_where_the_world_has_them() {
             placed.push(bounds(world));
         }
     }
-    let mut expected: Vec<_> = world.bodies.iter().map(|b| bounds(export_mesh_at(&b.body, MeshQuality::Standard).unwrap().positions)).collect();
+    let mut expected: Vec<_> = world.bodies.iter().map(|b| bounds(display_mesh_at(&b.body, MeshQuality::Standard).unwrap().positions)).collect();
     let key = |b: &([f64; 3], [f64; 3])| (b.0.map(|x| (x * 1000.0).round() as i64), b.1.map(|x| (x * 1000.0).round() as i64));
     placed.sort_by_key(key);
     expected.sort_by_key(key);

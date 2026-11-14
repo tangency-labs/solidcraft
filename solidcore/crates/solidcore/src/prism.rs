@@ -11,6 +11,7 @@
 //! typed refusal): it decides nothing at a tolerance it cannot prove (owner rule 13564).
 
 pub mod extrude;
+pub mod fit;
 pub mod measure;
 pub mod profile;
 pub mod read;
