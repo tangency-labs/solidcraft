@@ -20,6 +20,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "sketch.rectangle.center", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.rectangle.rounded", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.rectangle.three_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.rectangle.edge_center", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.circle.center", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.circle.two_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.circle.three_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
@@ -115,6 +116,7 @@ impl Tool {
             "sketch.rectangle.center" => ("sketch.rectangle.center", Kind::Draw(2)),
             "sketch.rectangle.rounded" => ("sketch.rectangle.rounded", Kind::Draw(2)),
             "sketch.rectangle.three_point" => ("sketch.rectangle.three_point", Kind::Draw(3)),
+            "sketch.rectangle.edge_center" => ("sketch.rectangle.edge_center", Kind::Draw(3)),
             "sketch.circle.center" => ("sketch.circle.center", Kind::Draw(2)),
             "sketch.circle.two_point" => ("sketch.circle.two_point", Kind::Draw(2)),
             "sketch.circle.three_point" => ("sketch.circle.three_point", Kind::Draw(3)),
@@ -170,6 +172,7 @@ pub fn hint(id: &str) -> String {
         "sketch.rectangle.center" => tr("sketch.hint.rectangle.center").into(),
         "sketch.rectangle.rounded" => tr("sketch.hint.rectangle.rounded").into(),
         "sketch.rectangle.three_point" => tr("sketch.hint.rectangle.three_point").into(),
+        "sketch.rectangle.edge_center" => tr("sketch.hint.rectangle.edge_center").into(),
         "sketch.circle.center" => tr("sketch.hint.circle.center").into(),
         "sketch.arc.three_point" => tr("sketch.hint.arc.three_point").into(),
         "sketch.arc3d" => tr("sketch.hint.arc3d").into(),
@@ -631,6 +634,19 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
             json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "radius": crate::sketch_dims::rounded_radius_value(app, t, p[0].0, p[1].0)})
         }
         "sketch.rectangle.three_point" => json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "p2": xy(&p[2])}),
+        "sketch.rectangle.edge_center" => {
+            // The second click gives the edge's direction and half-length, the third its width.
+            // The middle goes as the circle's centre does: a snap to a line's midpoint, a curve or
+            // a crossing as itself, so it is held there; a snap to a point as its place (#7299).
+            let (a, p1) = (p[0].0, edge_end(p[0].0, &p[1]));
+            let d = (p1 - a).normalized().ok_or("the edge's end must differ from its middle")?;
+            let corner = a + d * (p1 - a).len() + d.perp() * (p[2].0 - a).dot(d.perp());
+            let anchor = match &p[0].1 {
+                Some(id) if ["mid:", "on:", "vertex:", "x:"].iter().any(|k| id.starts_with(k)) => json!(id),
+                _ => xy(&p[0]),
+            };
+            json!({"anchor": anchor, "direction": [d.x, d.y], "corner": xy(&(corner, None))})
+        }
         "sketch.circle.center" => {
             // A centre snapped to an existing point goes as its place, where `connect` ties
             // them with a Coincident the sketch shows (#7299); a midpoint, on-curve, crossing or
@@ -1406,6 +1422,18 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
             let outline: Vec<_> = rounded_outline(*a, h, r).into_iter().map(|q| ss.plane.to_world(q)).collect();
             paint_sketch_path(&outline, crate::sketch_palette::mode(app), painter, proj, stroke);
         }
+        ("sketch.rectangle.edge_center", [a]) => {
+            let e = edge_end(*a, &(h, t.hover.as_ref().and_then(|x| x.1.clone())));
+            line(*a * 2.0 - e, e);
+        }
+        ("sketch.rectangle.edge_center", [a, b]) => {
+            let e = edge_end(*a, &(*b, t.pts.get(1).and_then(|x| x.1.clone())));
+            if let Some(k) = edge_center_outline(*a, e, h) {
+                for i in 0..4 {
+                    line(k[i], k[(i + 1) % 4]);
+                }
+            }
+        }
         ("sketch.rectangle.center", [c]) => {
             let d = h - *c;
             let k =
@@ -1421,6 +1449,27 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         }
         _ => {}
     }
+}
+
+/// The end of the anchored edge for the second click `p`: within a couple of degrees of a sketch
+/// axis it is nudged onto it (as for a line), unless it snapped to existing geometry.
+pub(crate) fn edge_end(a: Vec2, p: &(Vec2, Option<String>)) -> Vec2 {
+    let v = p.0 - a;
+    if p.1.is_some() || v.len() < 1e-12 {
+        return p.0;
+    }
+    a + Vec2::from_angle(crate::sketch_dims::snap_axis(v.angle())) * v.len()
+}
+
+/// The corners of the edge-centre rectangle whose edge is centred at `a` and ends at `e`, with
+/// its width taken from the cursor `c` (the geometry of the `sketch.rectangle.edge_center`
+/// command). None until the edge has a direction.
+fn edge_center_outline(a: Vec2, e: Vec2, c: Vec2) -> Option<[Vec2; 4]> {
+    let d = (e - a).normalized()?;
+    let n = d.perp();
+    let w = (c - a).dot(n);
+    let (c0, c1) = (a * 2.0 - e, e);
+    Some([c0, c1, c1 + n * w, c0 + n * w])
 }
 
 /// The closed outline of the rectangle with corners `a`, `b` and corner radius `r` (clamped to

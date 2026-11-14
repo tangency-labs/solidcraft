@@ -28,7 +28,13 @@ pub const FAMILIES: &[Family] = &[
     Family { label: "Line", commands: &["sketch.line", "sketch.line.midpoint"] },
     Family {
         label: "Rectangle",
-        commands: &["sketch.rectangle.two_point", "sketch.rectangle.three_point", "sketch.rectangle.center", "sketch.rectangle.rounded"],
+        commands: &[
+            "sketch.rectangle.two_point",
+            "sketch.rectangle.three_point",
+            "sketch.rectangle.center",
+            "sketch.rectangle.edge_center",
+            "sketch.rectangle.rounded",
+        ],
     },
     Family {
         label: "Circle",

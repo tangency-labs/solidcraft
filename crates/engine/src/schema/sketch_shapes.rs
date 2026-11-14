@@ -810,6 +810,38 @@ pub struct RectCenterParams {
     pub connect: Option<bool>,
 }
 
+/// Draw a rectangle from the middle of one edge and a corner of the opposite edge (#4798). The
+/// edge can run in any direction; the middle stays at the middle of its edge.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RectEdgeCenterParams {
+    /// The sketch to draw in: its feature id or name. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+    /// The middle of the first edge. An existing point's id, or a snap such as `"mid:l1"` (the
+    /// middle of line `l1`, whose direction the edge then takes unless `direction` or `line` is
+    /// given).
+    pub anchor: SnapPoint,
+    /// A corner of the opposite edge, in mm. Its distance from the first edge is the width; its
+    /// offset along the first edge is half the edge's length.
+    pub corner: PlainPoint,
+    /// The direction the first edge runs, `[dx, dy]`, any length but not zero. Wins over `line`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlainPoint")]
+    pub direction: Option<PlainPoint>,
+    /// A line the first edge runs parallel to, by id. Used when `direction` is not given. One of
+    /// `direction`, `line` or a `"mid:<line>"` anchor is needed.
+    #[serde(default)]
+    pub line: Option<String>,
+    /// Draw construction geometry, which is not part of a profile. Default: false.
+    #[serde(default)]
+    pub construction: Option<bool>,
+    /// Make a new point that lands exactly on an existing point (the origin too) coincident with
+    /// it. Default: true.
+    #[serde(default)]
+    pub connect: Option<bool>,
+}
+
 /// Draw an axis-aligned rectangle from two opposite corners, its four corners rounded alike, as
 /// one undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -956,6 +988,56 @@ pub struct RectResult {
     pub sides: RectSides,
     /// The corners by place.
     pub corners: RectCorners,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// An edge-centre rectangle's sides, as line ids. It may be turned at any angle, so they are
+/// named from the first edge, not by place.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct EdgeCenterRectSides {
+    /// The first edge, whose middle is the anchor.
+    pub anchor: Option<String>,
+    /// The side from the first edge's end to the opposite edge.
+    pub side_a: Option<String>,
+    /// The edge opposite the first.
+    pub far: Option<String>,
+    /// The side from the opposite edge back to the first edge's start.
+    pub side_b: Option<String>,
+}
+
+/// An edge-centre rectangle's corners, as point ids, named from the first edge.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct EdgeCenterRectCorners {
+    /// The first edge's start.
+    pub anchor_start: Option<String>,
+    /// The first edge's end.
+    pub anchor_end: Option<String>,
+    /// The end of the opposite edge across from `anchor_end`.
+    pub far_end: Option<String>,
+    /// The end of the opposite edge across from `anchor_start`.
+    pub far_start: Option<String>,
+}
+
+/// What `sketch.rectangle.edge_center` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct EdgeCenterRectResult {
+    /// The ids of the four sides: the first edge, then on round the rectangle.
+    pub curves: Vec<String>,
+    /// The ids of the constraints added: horizontal and vertical sides (perpendicular and parallel
+    /// ones for a turned rectangle), the anchor held at the middle of the first edge, and a
+    /// coincident for a corner that landed on an existing point.
+    pub constraints: Vec<String>,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// The sides, named from the first edge.
+    pub sides: EdgeCenterRectSides,
+    /// The corners, named from the first edge.
+    pub corners: EdgeCenterRectCorners,
     /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created: Option<Created>,

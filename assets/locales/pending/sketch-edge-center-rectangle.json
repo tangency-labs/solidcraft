@@ -1,0 +1,43 @@
+{
+  "ar": {
+    "cmd.sketch_rectangle_edge_center": "مستطيل من منتصف ضلع",
+    "help.sketch.rectangle.edge_center": "يرسم مستطيلًا من منتصف أحد أضلاعه وأحد طرفي ذلك الضلع وعرضه. استخدمه لشق أو لسان أو كتيفة متمركزة على نقطة أو على منتصف خط.",
+    "sketch.hint.rectangle.edge_center": "مستطيل من منتصف ضلع: انقر منتصف الضلع، ثم أحد طرفيه (يحدد اتجاهه وطوله)، ثم العرض"
+  },
+  "de": {
+    "cmd.sketch_rectangle_edge_center": "Rechteck von Kantenmitte",
+    "help.sketch.rectangle.edge_center": "Zeichnet ein Rechteck aus der Mitte einer Kante, einem Ende dieser Kante und seiner Breite. Für Langlöcher, Laschen oder Halter, die mittig auf einem Punkt oder auf der Mitte einer Linie liegen."
+  },
+  "en": {
+    "cmd.sketch_rectangle_edge_center": "Edge Center Rectangle",
+    "help.sketch.rectangle.edge_center": "Draws a rectangle from the middle of one edge, one end of that edge and its width. Use it for a slot, tab or bracket centred on a point or on the middle of a line.",
+    "sketch.hint.rectangle.edge_center": "Edge center rectangle: click the middle of an edge, then one end of that edge (sets its direction and length), then the width"
+  },
+  "en-GB": {
+    "cmd.sketch_rectangle_edge_center": "Edge Centre Rectangle",
+    "sketch.hint.rectangle.edge_center": "Edge centre rectangle: click the middle of an edge, then one end of that edge (sets its direction and length), then the width"
+  },
+  "he": {
+    "cmd.sketch_rectangle_edge_center": "מלבן ממרכז צלע",
+    "help.sketch.rectangle.edge_center": "משרטט מלבן לפי אמצע אחת מצלעותיו, קצה אחד של אותה צלע והרוחב שלו. מתאים לחריץ, לשונית או תושבת הממורכזים סביב נקודה או סביב אמצע של קו.",
+    "sketch.hint.rectangle.edge_center": "Edge center rectangle: click the middle of an edge, then one end of that edge (sets its direction and length), then the width"
+  },
+  "ja": {
+    "cmd.sketch_rectangle_edge_center": "辺中点指定の長方形",
+    "help.sketch.rectangle.edge_center": "1辺の中点、その辺の端点、幅から長方形を描きます。点や線の中点を中心にしたスロット、タブ、ブラケットに使います。",
+    "sketch.hint.rectangle.edge_center": "Edge center rectangle: click the middle of an edge, then one end of that edge (sets its direction and length), then the width"
+  },
+  "ko": {
+    "cmd.sketch_rectangle_edge_center": "모서리 중점 사각형"
+  },
+  "vi": {
+    "cmd.sketch_rectangle_edge_center": "Hình chữ nhật từ trung điểm cạnh",
+    "help.sketch.rectangle.edge_center": "Vẽ hình chữ nhật từ trung điểm của một cạnh, một đầu của cạnh đó và chiều rộng. Dùng cho rãnh, tai hoặc giá đỡ có tâm tại một điểm hoặc tại trung điểm của một đường.",
+    "sketch.hint.rectangle.edge_center": "Edge center rectangle: click the middle of an edge, then one end of that edge (sets its direction and length), then the width"
+  },
+  "zh": {
+    "cmd.sketch_rectangle_edge_center": "边中点矩形",
+    "help.sketch.rectangle.edge_center": "根据一条边的中点、该边的一个端点和宽度绘制矩形。用于以某点或某条线的中点为中心的槽、凸片或支架。",
+    "sketch.hint.rectangle.edge_center": "边中点矩形：单击一条边的中点，再单击该边的一个端点（确定方向和长度），再确定宽度"
+  }
+}
