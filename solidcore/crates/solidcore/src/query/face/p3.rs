@@ -11,7 +11,7 @@
 //! | Rust                                          | Upstream                                    |
 //! |-----------------------------------------------|---------------------------------------------|
 //! | [`calculate_tight_bounding_box`], [`calculate_tight_bounding_box_into`] | `SmFace::CalculateTightBoundingBox` |
-//! | `face_directed_max` (opt-in, WR-588), `cell_directed_max`, `cell_monotone`, `cell_division` (WR-651) | `sm_FaceDirectedMax`, `sm_CellDirectedMax`, `sm_CellMonotone` (the fork tangency-labs/smlib@9d44c1b), `sm_CellDivision` (tangency-labs/smlib@326de73) |
+//! | `face_directed_max` (opt-in, WR-588), `cell_directed_max`, `cell_monotone`, `cell_division` (WR-651), `TrimCover` and `cell_outside_face` (#16394, not upstream's) | `sm_FaceDirectedMax`, `sm_CellDirectedMax`, `sm_CellMonotone` (the fork tangency-labs/smlib@9d44c1b), `sm_CellDivision` (tangency-labs/smlib@326de73) |
 //! | [`face_classify_uv_line`]                     | `sm_FaceClassifyUVLine` (file static)       |
 //! | [`face_classify_uv_line_mut`]                 | `sm_FaceClassifyUVLine` (in place)          |
 //! | [`find_and_classify_loop_bisector`], [`LoopBisector`] | `sms_FindAndClassifyLoopBisector`   |
@@ -95,6 +95,15 @@
 //!   finite bound, a typed error when neither has).
 //!   Not the fork's (#14460): a cell is divided only the ways a knot lies inside it while
 //!   either way has one, halved both ways only once it lies within one span each way.
+//!   Not the fork's (#16394): a cell that no box of the face's UV trim curves meets
+//!   (`TrimCover`) and whose middle classifies outside the face is passed over unsolved
+//!   (`cell_outside_face`), so the cells of a surface run on past its face (a blend's) are
+//!   neither divided to the cell limit nor counted with their greatest values there. A
+//!   blend face (procedural blend, ball patch) is divided at its net's knots, as the fork's
+//!   `IsKindOf(SmBSplineSurface)` reads them, and also bounded by its net's subpatch hull
+//!   raised by the net's certified bound (`blend_net_slack`), solved on its own surface;
+//!   the port had no knots for it, so a cell over a knot never came within one span and was
+//!   never monotone, and every cell along its trim was divided to the cell limit.
 //!   The step-off loops keep upstream's bounds (20 rounds in the sector
 //!   classification; its UV fallback doubles the step-off until it leaves the curve
 //!   interval, and stops after [`MAX_UV_STEP_OFF_ROUNDS`] rounds when the curve
@@ -511,6 +520,10 @@ pub fn calculate_tight_bounding_box_into(
     // its trim (`sm_FaceDirectedMax`), not the surface's global ones alone. The starting
     // values are the box of the vertices and edges, as the fork's.
     if k.fixes.face_tight_box_searches_trim {
+        // (#16394) the boxes of the trim curves, by which the six searches pass over a
+        // cell lying wholly outside the face
+        let cover = TrimCover::of(k, lb, f)?;
+        let cover = cover.as_ref();
         let (lo, hi) = (face_bbox.min(), face_bbox.max());
         let x_max = face_directed_max(
             k,
@@ -519,6 +532,7 @@ pub fn calculate_tight_bounding_box_into(
             surface,
             &uv_domain,
             face_zone_tol_3d,
+            cover,
             Vec3::new(1.0, 0.0, 0.0),
             hi.x,
         )?;
@@ -529,6 +543,7 @@ pub fn calculate_tight_bounding_box_into(
             surface,
             &uv_domain,
             face_zone_tol_3d,
+            cover,
             Vec3::new(-1.0, 0.0, 0.0),
             -lo.x,
         )?;
@@ -539,6 +554,7 @@ pub fn calculate_tight_bounding_box_into(
             surface,
             &uv_domain,
             face_zone_tol_3d,
+            cover,
             Vec3::new(0.0, 1.0, 0.0),
             hi.y,
         )?;
@@ -549,6 +565,7 @@ pub fn calculate_tight_bounding_box_into(
             surface,
             &uv_domain,
             face_zone_tol_3d,
+            cover,
             Vec3::new(0.0, -1.0, 0.0),
             -lo.y,
         )?;
@@ -559,6 +576,7 @@ pub fn calculate_tight_bounding_box_into(
             surface,
             &uv_domain,
             face_zone_tol_3d,
+            cover,
             Vec3::new(0.0, 0.0, 1.0),
             hi.z,
         )?;
@@ -569,6 +587,7 @@ pub fn calculate_tight_bounding_box_into(
             surface,
             &uv_domain,
             face_zone_tol_3d,
+            cover,
             Vec3::new(0.0, 0.0, -1.0),
             -lo.z,
         )?;
@@ -1072,6 +1091,20 @@ fn patch_hull_max(patch: &BSplineSurface, dir: Vec3) -> Option<f64> {
     hull
 }
 
+/// How far from the face's surface the net of a blend surface lies (#16394), for a face
+/// [`face_directed_max`] does not solve on its subpatches but bounds and divides by its
+/// net: a procedural blend's certified bound (`|B - S| <= bound`, its net is no more than
+/// that from its definition), a ball patch's 0 (its net is the surface). `None` for any
+/// other kind (a B-spline's subpatch is its own surface, [`face_directed_max`]'s `by_patch`)
+/// and for a bound that is not finite and non-negative.
+fn blend_net_slack(surface: &Surface) -> Option<f64> {
+    match surface.kind() {
+        SurfaceKind::ProceduralBlend(pb) => Some(pb.bound()).filter(|b| b.is_finite() && *b >= 0.0),
+        SurfaceKind::BallPatch(_) => Some(0.0),
+        _ => None,
+    }
+}
+
 /// The face's B-spline surface over `cell` alone: its exact subpatch there
 /// ([`cell_patch`]), owned by the same face with the same zone tolerance, so a solve over
 /// the cell starts from the cell's own control net (the control-net guesses of the
@@ -1155,12 +1188,22 @@ fn unsolved_cell_top(
 /// 4. `S . dir` is monotone over it ([`cell_monotone`]): the face's highest point in it is
 ///    on the face's boundary or on the cell's own sides, which `best` and the neighbouring
 ///    cells hold;
+/// 5. (#16394, not the fork's; tested before the cell is solved) no UV trim curve of the
+///    face reaches it ([`TrimCover`]) and its middle classifies outside the face: no point
+///    of it lies in the face ([`cell_outside_face`]);
 ///
 /// otherwise the cell is divided ([`cell_division`]: at the knots inside it, a way within
 /// one span left whole while the other has a knot inside, else at its middles; WR-651).
 /// A cell left at [`FACE_EXTREME_MAX_DEPTH`] or past [`FACE_EXTREME_MAX_CELLS`] counts
 /// with its greatest value, or unsolved with its own bound ([`unsolved_cell_top`]). The cells are an explicit stack (no recursion), taken last
-/// first, as the fork's.
+/// first, as the fork's. `cover` is the face's [`TrimCover`], `None` where rule 5 is not
+/// taken.
+///
+/// A blend face (a procedural blend or ball patch, #16394) is divided at its net's knots
+/// and bounded (1.), decided (4.) and, unsolved at the limits, bounded by its net's subpatch
+/// over the cell, the hull raised by the net's distance from the surface
+/// ([`blend_net_slack`]); its cells are solved on the face's own surface. A cell of it with
+/// no solution goes on to 4. as a B-spline's does, not straight to its loose box.
 fn face_directed_max(
     k: &Kernel,
     lb: &mut LazyBrep<'_>,
@@ -1168,6 +1211,7 @@ fn face_directed_max(
     surface: &Surface,
     uv_domain: &Extent2d,
     face_zone_tol_3d: f64,
+    cover: Option<&TrimCover>,
     dir: Vec3,
     best: f64,
 ) -> Result<f64> {
@@ -1186,6 +1230,7 @@ fn face_directed_max(
         &mut |lb, solve_on, cell, dir| {
             cell_directed_max(k, lb, f, surface, solve_on, face_zone_tol_3d, cell, dir)
         },
+        &mut |lb, cell| cell_outside_face(k, lb, f, face_zone_tol_3d, cover, cell),
     )
 }
 
@@ -1203,7 +1248,12 @@ struct SearchLimits {
 type CellSolve<'a, 'b> =
     dyn FnMut(&mut LazyBrep<'b>, &Surface, &Extent2d, Vec3) -> Result<CellDirectedMax> + 'a;
 
-/// [`face_directed_max`] within `limits`, each cell solved by `solve`.
+/// Tells [`face_directed_max_with`] whether a cell lies wholly outside the face (its rule
+/// 5); [`cell_outside_face`] in [`face_directed_max`].
+type CellOutside<'a, 'b> = dyn FnMut(&mut LazyBrep<'b>, &Extent2d) -> Result<bool> + 'a;
+
+/// [`face_directed_max`] within `limits`, each cell solved by `solve` and passed over
+/// unsolved where `outside` says it lies wholly outside the face.
 #[allow(clippy::too_many_arguments)]
 fn face_directed_max_with<'b>(
     k: &Kernel,
@@ -1215,9 +1265,14 @@ fn face_directed_max_with<'b>(
     mut best: f64,
     limits: SearchLimits,
     solve: &mut CellSolve<'_, 'b>,
+    outside: &mut CellOutside<'_, 'b>,
 ) -> Result<f64> {
-    // (`IsKindOf(SmBSplineSurface_TYPE)`: `GetKnots` through `GetOrCreateGwNurbPointer`)
-    let (knots_u, knots_v) = if has_b_spline_box(surface) {
+    // (#16394) a blend surface's net: its knots divide the cells and its subpatches bound
+    // and decide them as a B-spline's do, the face's own surface still solved
+    let net_slack = blend_net_slack(surface);
+    // (`IsKindOf(SmBSplineSurface_TYPE)`: `GetKnots` through `GetOrCreateGwNurbPointer`; the
+    // fork's `SmProceduralBlend` and `SmBallPatch` are `SmBSplineSurface`s, their nets' knots)
+    let (knots_u, knots_v) = if has_b_spline_box(surface) || net_slack.is_some() {
         (
             surface.knots_with_nurb(k, SurfParamType::U, None)?.0,
             surface.knots_with_nurb(k, SurfParamType::V, None)?.0,
@@ -1238,12 +1293,18 @@ fn face_directed_max_with<'b>(
     let mut divided = 0usize;
     while let Some((cell, depth)) = cells.pop() {
         // The cell's subpatch and the greatest `P . dir` of its control points, which no
-        // point of the cell exceeds (each is a convex combination of them).
-        let patch = if by_patch {
-            cell_patch(k, surface, &cell)?
-                .and_then(|patch| patch_hull_max(&patch, dir).map(|hull| (patch, hull)))
-        } else {
-            None
+        // point of the cell exceeds (each is a convex combination of them). A blend's: its
+        // net's, raised by how far the net may lie from the surface (#16394).
+        let patch = match (by_patch, net_slack) {
+            (true, _) => cell_patch(k, surface, &cell)?
+                .and_then(|patch| patch_hull_max(&patch, dir).map(|hull| (patch, hull))),
+            (false, Some(slack)) => cell_patch(k, surface, &cell)?.and_then(|patch| {
+                patch_hull_max(&patch, dir)
+                    .map(|hull| hull + slack)
+                    .filter(|top| top.is_finite())
+                    .map(|top| (patch, top))
+            }),
+            (false, None) => None,
         };
         // 1., from the control points: nothing in the cell is higher than `best`.
         if patch
@@ -1252,8 +1313,19 @@ fn face_directed_max_with<'b>(
         {
             continue;
         }
+        // 5. (#16394) no trim curve reaches the cell and its middle is outside the face:
+        // nothing in it is the face's. Without it a cell outside the trim whose surface
+        // rises past `best` (a blend surface run on past its face) was divided along its
+        // level of `best` until the cell limit, and the cells left then counted with their
+        // greatest values, far outside the face.
+        if outside(lb, &cell)? {
+            continue;
+        }
+        // (a blend is solved on its own surface, not on its net, which lies only within its
+        // bound of it)
         let sub = patch
             .as_ref()
+            .filter(|_| by_patch)
             .map(|(patch, _)| cell_sub_surface(surface, patch.clone()));
         let solve_on = sub.as_ref().unwrap_or(surface);
         let top = solve(lb, solve_on, &cell, dir)?;
@@ -1326,6 +1398,234 @@ fn face_directed_max_with<'b>(
         }
     }
     Ok(best)
+}
+
+// ---- #16394: cells wholly outside the face (rule 5 of the trimmed-face search) -------------
+
+/// How many equal pieces [`TrimCover`] boxes a straight UV trim curve in.
+const TRIM_COVER_LINE_PIECES: u32 = 32;
+
+/// How far [`TrimCover`] grows each box, relative to its size and its coordinates, for the
+/// rounding of the points it is made from (as the box of `query::loop`'s
+/// `curve_box_reaches`).
+const TRIM_COVER_PAD: f64 = 1.0e-6;
+
+/// Boxes in the face's UV space that together hold every point of its UV trim curves,
+/// piece by piece (#16394): for a B-spline trim curve the box of each knot span's control
+/// points (with positive weights each point of a span is a convex combination of them), for
+/// a line the boxes of equal pieces of the segment between its ends, each box grown by
+/// [`TRIM_COVER_PAD`]. A cell that meets none of them meets no trim curve: the face's
+/// boundary inside the surface's domain is its trim curves, so such a cell lies wholly
+/// inside the face or wholly outside it, and one point of it tells which
+/// ([`cell_outside_face`]).
+#[derive(Debug, Clone, Default)]
+struct TrimCover {
+    /// `(u_lo, v_lo, u_hi, v_hi)` of each box.
+    boxes: Vec<[f64; 4]>,
+}
+
+impl TrimCover {
+    /// The cover of face `f`'s UV trim curves, each over its edge's interval (a UV trim
+    /// curve is parameterised as its edge, as `query::loop`'s containment walk reads it),
+    /// made first where missing (as the search's point classifications make them). `None`
+    /// when a curve cannot be bounded so: a face without edge uses, an edge use without
+    /// edge or trim curve, a trim curve that cannot be made, a curve neither a line nor a
+    /// B-spline with a well-made basis and positive weights, a point not finite. Then the
+    /// search takes no cell as outside.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] (and a cancellation) from making a trim curve or evaluating
+    /// a line; those of the topology reads.
+    fn of(k: &Kernel, lb: &mut LazyBrep<'_>, f: FaceId) -> Result<Option<Self>> {
+        let b = lb.get_mut()?;
+        let mut edgeuses = Vec::new();
+        for l in crate::topology::face::p2::loops(b, f, false, None)? {
+            let Some(lu) = b.loop_(l)?.loopuse else {
+                return Ok(None);
+            };
+            edgeuses.extend(loopuse::edgeuses(b, lu, None, None)?);
+        }
+        if edgeuses.is_empty() {
+            return Ok(None);
+        }
+        let mut cover = Self::default();
+        for eu in edgeuses {
+            match crate::topology::edgeuse::p3::get_or_create_uv_trim_curve(
+                k, b, eu, false, false, true,
+            ) {
+                Ok(fetch) if fetch.status.is_ok() => {}
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Ok(_) | Err(_) => return Ok(None),
+            }
+            let Some(e) = eu1::edge(b, eu)? else {
+                return Ok(None);
+            };
+            let interval = b.edge(e)?.interval;
+            let Some(curve) = eu1::uv_trim_curve(b, eu)?.0 else {
+                return Ok(None);
+            };
+            if !cover.add_curve(k, curve, &interval)? {
+                return Ok(None);
+            }
+        }
+        Ok(Some(cover))
+    }
+
+    /// Adds the boxes of `curve` over `interval`; `false` when they cannot be told (see
+    /// [`TrimCover::of`]). A B-spline takes the spans that meet `interval` when `interval`
+    /// lies in its domain, else all of them.
+    fn add_curve(&mut self, k: &Kernel, curve: &Curve, interval: &Extent1d) -> Result<bool> {
+        match curve.kind() {
+            CurveKind::Line(_) => {
+                let (t0, t1) = (interval.min(), interval.max());
+                if !(t0.is_finite() && t1.is_finite()) {
+                    return Ok(false);
+                }
+                let (Some(a), Some(c)) = (
+                    ignored(curve.evaluate_point(k, t0))?,
+                    ignored(curve.evaluate_point(k, t1))?,
+                ) else {
+                    return Ok(false);
+                };
+                // (the line's points over the interval are the segment between its ends)
+                let at = |r: f64| Point2::new(a.x + (c.x - a.x) * r, a.y + (c.y - a.y) * r);
+                let pieces = f64::from(TRIM_COVER_LINE_PIECES);
+                for j in 0..TRIM_COVER_LINE_PIECES {
+                    let (r0, r1) = (f64::from(j) / pieces, f64::from(j + 1) / pieces);
+                    if !self.push(&[at(r0), at(r1)]) {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            CurveKind::BSpline(c) => {
+                let Some(nurb) = c.nurb.as_ref() else {
+                    return Ok(false);
+                };
+                let p = nurb.degree();
+                let cpts = nurb.cpts();
+                let knots = nurb.knots();
+                let well_made = p >= 1
+                    && cpts.len() > p
+                    && knots.len() == cpts.len() + p + 1
+                    && knots.windows(2).all(|w| matches!(w, [a, b] if a <= b));
+                let (Some(&lo), Some(&hi)) = (knots.get(p), knots.get(cpts.len())) else {
+                    return Ok(false);
+                };
+                if !well_made {
+                    return Ok(false);
+                }
+                let (lo, hi) = if interval.min() >= lo && interval.max() <= hi {
+                    (interval.min(), interval.max())
+                } else {
+                    (lo, hi)
+                };
+                // span i (from p to n) is [knots[i], knots[i + 1]], made of control points
+                // i - p to i
+                for i in p..cpts.len() {
+                    let (Some(&t0), Some(&t1)) = (knots.get(i), knots.get(i + 1)) else {
+                        return Ok(false);
+                    };
+                    if t1 <= t0 || t1 < lo || t0 > hi {
+                        continue;
+                    }
+                    let Some(span) = i.checked_sub(p).and_then(|first| cpts.get(first..=i)) else {
+                        return Ok(false);
+                    };
+                    let mut points = Vec::new();
+                    for cp in span {
+                        let weight_ok = cp.w == crate::nurbs::math::NOW
+                            || (is_positive(cp.w) && cp.w.is_finite());
+                        if !weight_ok {
+                            return Ok(false);
+                        }
+                        let e = cp.to_euclid();
+                        points.push(Point2::new(e.x, e.y));
+                    }
+                    if !self.push(&points) {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    /// Adds the box of `points`, grown by [`TRIM_COVER_PAD`]; `false` when a coordinate is
+    /// not finite or there is no point.
+    fn push(&mut self, points: &[Point2]) -> bool {
+        let (mut u0, mut v0) = (f64::INFINITY, f64::INFINITY);
+        let (mut u1, mut v1) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for p in points {
+            if !(p.x.is_finite() && p.y.is_finite()) {
+                return false;
+            }
+            (u0, v0) = (u0.min(p.x), v0.min(p.y));
+            (u1, v1) = (u1.max(p.x), v1.max(p.y));
+        }
+        if !(u0 <= u1 && v0 <= v1) {
+            return false;
+        }
+        let size = (u1 - u0).max(v1 - v0);
+        let reach = u0.abs().max(v0.abs()).max(u1.abs()).max(v1.abs());
+        let pad = TRIM_COVER_PAD * (1.0 + size + reach);
+        self.boxes.push([u0 - pad, v0 - pad, u1 + pad, v1 + pad]);
+        true
+    }
+
+    /// Whether `cell` meets one of the boxes (sides included).
+    fn meets(&self, cell: &Extent2d) -> bool {
+        let (lo, hi) = (cell.min(), cell.max());
+        self.boxes.iter().any(|&[u0, v0, u1, v1]| {
+            // (a NaN side meets: never taken as apart)
+            !(u1 < lo.x || u0 > hi.x || v1 < lo.y || v0 > hi.y)
+        })
+    }
+}
+
+/// Rule 5 of [`face_directed_max`] (#16394): whether `cell` lies wholly outside the face.
+/// True when no box of `cover` meets it ([`TrimCover::meets`]) and its middle classifies
+/// outside the face: a successful point classification that leaves the class at
+/// `SM_PC_UNKNOWN`, which is outside the face ([`point_classify`]: outside the face's UV
+/// domain or its outer loop, inside a hole, outside by the trim cache). A failed
+/// classification, a point on an edge or a vertex, and a face without `cover` decide
+/// nothing.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] (and a cancellation) from the classification; those of
+/// [`LazyBrep::get_mut`].
+fn cell_outside_face(
+    k: &Kernel,
+    lb: &mut LazyBrep<'_>,
+    f: FaceId,
+    face_zone_tol_3d: f64,
+    cover: Option<&TrimCover>,
+    cell: &Extent2d,
+) -> Result<bool> {
+    let Some(cover) = cover else {
+        return Ok(false);
+    };
+    if cover.meets(cell) {
+        return Ok(false);
+    }
+    let mut pt_class = PointClassification::new(face_zone_tol_3d);
+    let classified = ignored(point_classify(
+        k,
+        lb.get_mut()?,
+        f,
+        cell.mid(),
+        &mut pt_class,
+        PointClassifyOptions {
+            src_zone_tol_3d: face_zone_tol_3d,
+            do_boundary_intersections: false,
+            use_uv_classification: true,
+            ..PointClassifyOptions::default()
+        },
+    ))?;
+    Ok(classified.is_some() && pt_class.point_class() == PointClassType::Unknown)
 }
 
 // ---- classification curves ----------------------------------------------------------------
@@ -3294,6 +3594,7 @@ mod tests {
                 0.0,
                 limits,
                 &mut unsolved,
+                &mut |_, _| Ok(false),
             )
             .unwrap();
             assert!(
@@ -3354,6 +3655,114 @@ mod tests {
                 bx.max().z
             );
         }
+    }
+
+    /// #16394: the cover of the unit square's four UV trim lines meets a cell across one of
+    /// them and none inside or outside the square away from them. Of the cells it meets
+    /// none, the one inside the face is not outside it, the ones outside the square are.
+    #[test]
+    fn trim_cover_of_a_square_tells_cells_outside_the_face() {
+        let k = Kernel::default();
+        let mut b = Brep::new();
+        let f = square(&mut b, 0.0);
+        let tol = zone_tol3d(&k, b.face(f).unwrap().tolerance);
+        let mut lb: LazyBrep<'_> = (&b).into();
+        let cover = TrimCover::of(&k, &mut lb, f)
+            .unwrap()
+            .expect("the square's trim lines are bounded");
+        let inside = Extent2d::from_bounds(0.25, 0.25, 0.75, 0.75);
+        let across = Extent2d::from_bounds(0.9, 0.4, 1.1, 0.6);
+        let beyond = Extent2d::from_bounds(1.2, 1.2, 1.5, 1.5);
+        assert!(!cover.meets(&inside));
+        assert!(cover.meets(&across));
+        assert!(!cover.meets(&beyond));
+        let outside = |lb: &mut LazyBrep<'_>, cell: &Extent2d| {
+            cell_outside_face(&k, lb, f, tol, Some(&cover), cell)
+        };
+        assert!(
+            !outside(&mut lb, &inside).unwrap(),
+            "the middle of the face"
+        );
+        assert!(
+            !outside(&mut lb, &across).unwrap(),
+            "a trim line crosses it"
+        );
+        assert!(outside(&mut lb, &beyond).unwrap(), "past the square");
+        // without a cover no cell is taken as outside
+        assert!(!cell_outside_face(&k, &mut lb, f, tol, None, &beyond).unwrap());
+    }
+
+    /// #16394: the crowned face's trim square `[-10, 10]^2` inside its surface's domain
+    /// `[-20, 20]^2`, the surface rising to 50 at the corner outside the trim (the case of a
+    /// blend surface run on past its face). With rule 5 the search solves no cell lying
+    /// wholly outside the square, and fewer cells in all, and finds the same peak 4. Without
+    /// it the corner's cells are solved and divided (the issue's blend face was divided so
+    /// until the cell limit, and its box reached 44 mm past the face).
+    #[test]
+    fn search_passes_over_cells_outside_the_trim_and_keeps_the_peak() {
+        let (k, b, f) = crowned_trimmed_face(50.0, true);
+        let face = b.face(f).unwrap();
+        let surface = face.surface.clone().unwrap();
+        let domain = face.uv_domain;
+        let tol = zone_tol3d(&k, face.tolerance);
+        let mut lb: LazyBrep<'_> = (&b).into();
+        let cover = TrimCover::of(&k, &mut lb, f)
+            .unwrap()
+            .expect("the square's trim curves are bounded");
+        assert!(!cover.meets(&Extent2d::from_bounds(-20.0, -20.0, -15.0, -15.0)));
+        assert!(!cover.meets(&Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0)));
+        assert!(cover.meets(&Extent2d::from_bounds(-12.0, -1.0, -9.0, 1.0)));
+        let limits = SearchLimits {
+            max_depth: FACE_EXTREME_MAX_DEPTH,
+            max_cells: FACE_EXTREME_MAX_CELLS,
+        };
+        let mut search = |cover: Option<&TrimCover>| {
+            let mut solved: Vec<Extent2d> = Vec::new();
+            let top = face_directed_max_with(
+                &k,
+                &mut lb,
+                f,
+                &surface,
+                &domain,
+                Vec3::Z,
+                0.0,
+                limits,
+                &mut |lb, solve_on, cell, dir| {
+                    solved.push(*cell);
+                    cell_directed_max(&k, lb, f, &surface, solve_on, tol, cell, dir)
+                },
+                &mut |lb, cell| cell_outside_face(&k, lb, f, tol, cover, cell),
+            )
+            .unwrap();
+            (top, solved)
+        };
+        let (with_top, with_cells) = search(Some(&cover));
+        let (without_top, without_cells) = search(None);
+        assert!(
+            (with_top - 4.0).abs() <= 1e-9,
+            "with the rule: z max {with_top}"
+        );
+        assert!(
+            (without_top - 4.0).abs() <= 1e-9,
+            "without: z max {without_top}"
+        );
+        let past_the_square = |c: &Extent2d| {
+            c.max().x < -10.01 || c.min().x > 10.01 || c.max().y < -10.01 || c.min().y > 10.01
+        };
+        assert!(
+            !with_cells.iter().any(past_the_square),
+            "a cell outside the trim was solved"
+        );
+        assert!(
+            without_cells.iter().any(past_the_square),
+            "without the rule the corner's cells are solved"
+        );
+        assert!(
+            with_cells.len() < without_cells.len(),
+            "solves with the rule {}, without {}",
+            with_cells.len(),
+            without_cells.len()
+        );
     }
 
     #[test]

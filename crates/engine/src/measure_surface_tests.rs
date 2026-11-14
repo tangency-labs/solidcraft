@@ -1,5 +1,6 @@
 //! Measure on a body's faces: the area comes from the exact surface and edges, not from the
-//! display mesh's triangles, which run inside a curve (#9086, #12372).
+//! display mesh's triangles, which run inside a curve (#9086, #12372). A body's box holds its
+//! faces and no more, also after a round (#16394).
 #![allow(clippy::unwrap_used)]
 
 use std::f64::consts::TAU;
@@ -284,4 +285,81 @@ fn a_curved_faces_perimeter_counts_its_rims_and_not_its_seam() {
     let ball = face_of(&s, |f| matches!(f, solidcraft_kernel::FaceSurface::Sphere { .. }));
     let r = measure(&mut s, vec![ball]);
     assert!(r["items"][0].get("perimeter_mm").is_none(), "{r}");
+}
+
+/// A ring segment cut to −10 ≤ x ≤ 10 (#16394): the YZ section `points` closed by an arc about
+/// `centre` from its last point to its first, revolved 120° about z, symmetric, and
+/// intersected with a box over that x range.
+fn ring_segment(s: &mut Session, points: Value, centre: [f64; 2]) {
+    let first = points[0].clone();
+    let last = points.as_array().and_then(|p| p.last()).cloned().unwrap();
+    run(s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
+    run(s, "sketch.line", json!({"points": points}));
+    run(s, "sketch.arc.center_point", json!({"center": centre, "start": last, "end": first}));
+    run(s, "sketch.finish", json!({}));
+    run(
+        s,
+        "solid.revolve",
+        json!({"sketch": "Section", "axis": "Z", "angle": "120 deg", "direction": "symmetric", "operation": "new", "name": "Ring", "body_name": "Part"}),
+    );
+    run(
+        s,
+        "solid.box",
+        json!({"length": 20, "width": 50, "height": 30, "corner": [-10, 0, -10], "operation": "intersect", "targets": ["Part"], "name": "Plan"}),
+    );
+}
+
+/// The one body's box from `inspect.measure`, checked against `min` and `max` to 0.05 mm (the
+/// MCP tools' `expect: {bbox}`), with `case` and the reply for the message.
+fn assert_box(s: &mut Session, case: &str, min: [f64; 3], max: [f64; 3]) -> Value {
+    let b = run(s, "inspect.measure", json!({}))["bodies"][0].clone();
+    for (i, (lo, hi)) in min.iter().zip(&max).enumerate() {
+        assert!(close(&b["bbox"]["min"][i], *lo, 0.05), "{case}: min {i}: want {lo}: {b}");
+        assert!(close(&b["bbox"]["max"][i], *hi, 0.05), "{case}: max {i}: want {hi}: {b}");
+    }
+    assert_eq!(b["closed"], json!(true), "{case}: {b}");
+    b
+}
+
+/// #16394: a radius 1 round on the edge where a ring segment's rounded corner (a torus) meets
+/// its flat end at x = −10 leaves the body's box as it was, as a round on a convex edge only
+/// removes material. The body's box comes from its exact faces; the blend's face lies on a
+/// surface that runs on past it, and the box took that surface's far end (y from −26.45). The
+/// section is 20 × 10 (radius 20 to 40, z 0 to 10) with its outer top corner rounded r 3. By
+/// hand: x from −10 to 10; y from √(20² − 10²), the inner wall at x = ±10, to the outer
+/// radius 40; z from 0 to 10.
+#[test]
+fn a_round_on_a_ring_segments_torus_edge_keeps_the_bodys_box() {
+    for radius in ["0.5", "1"] {
+        let mut s = Session::default();
+        ring_segment(&mut s, json!([[37, 10], [20, 10], [20, 0], [40, 0], [40, 7]]), [37.0, 7.0]);
+        let inner = (20.0_f64 * 20.0 - 10.0 * 10.0).sqrt();
+        let before = assert_box(&mut s, "before the round", [-10.0, inner, 0.0], [10.0, 40.0, 10.0]);
+        run(
+            &mut s,
+            "solid.fillet",
+            json!({"edges": [[-10, 37.801, 9.141]], "radius": radius, "body": "Part", "tangent_chain": false, "name": "Round"}),
+        );
+        let after = assert_box(&mut s, &format!("round of radius {radius}"), [-10.0, inner, 0.0], [10.0, 40.0, 10.0]);
+        let (v0, v1) = (before["volume_mm3"].as_f64().unwrap(), after["volume_mm3"].as_f64().unwrap());
+        assert!(v1 < v0, "radius {radius}: the round removes material: {v0} -> {v1}");
+    }
+}
+
+/// #16394, the arc wall rows: a 22 × 6 section whose outer wall is an arc of radius 10 about
+/// (32, 0), from (42, 0) to (40, 6). A radius 1 round on the wall's edge at the end face keeps
+/// the box (it grew to z 6.0013); one on the wall's bottom edge keeps x within ±10 (it grew to
+/// ±10.25) and brings the outer radius in to 32 + √(9² − 1²) + 1, the ball's centre 1 above the
+/// floor and 9 from the arc's centre.
+#[test]
+fn a_round_on_an_arc_walls_edges_keeps_the_bodys_box() {
+    let inner = (20.0_f64 * 20.0 - 10.0 * 10.0).sqrt();
+    let rounded = 32.0 + (9.0_f64 * 9.0 - 1.0).sqrt() + 1.0;
+    for (pick, max_y) in [([-10.0, 40.26, 3.171], 42.0), ([0.0, 42.0, 0.0], rounded)] {
+        let mut s = Session::default();
+        ring_segment(&mut s, json!([[40, 6], [20, 6], [20, 0], [42, 0]]), [32.0, 0.0]);
+        assert_box(&mut s, "before the round", [-10.0, inner, 0.0], [10.0, 42.0, 6.0]);
+        run(&mut s, "solid.fillet", json!({"edges": [pick], "radius": "1", "body": "Part", "tangent_chain": false, "name": "Round"}));
+        assert_box(&mut s, &format!("round on the edge at {pick:?}"), [-10.0, inner, 0.0], [10.0, max_y, 6.0]);
+    }
 }
