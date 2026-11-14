@@ -30,6 +30,14 @@ use crate::order::{self, Order};
 use crate::session::{answer, measure_body, with_body, Answer};
 use crate::{Error, Result};
 
+/// The closest signed Cartesian unit direction, or no direction for zero or non-finite input.
+/// Geometry is computed by the kernel; the application can use this to choose a principal view.
+#[must_use]
+pub fn nearest_principal_direction(direction: [f64; 3]) -> Option<[f64; 3]> {
+    solidcore::eval::vec::nearest_principal_direction(Vec3::from_array(direction))
+        .map(|v| [v.x, v.y, v.z])
+}
+
 impl Answer for Vec<q::EdgeFaceGapSample> {}
 impl Answer for Distance {}
 impl Answer for solidcore::geom::extent3d::Extent3d {}
@@ -824,6 +832,16 @@ pub(crate) fn outer_faceuse(b: &Brep, f: FaceId) -> solidcore::Result<Result<Fac
 pub(crate) mod tests {
     use super::*;
     use crate::{make_box, session};
+
+    #[test]
+    fn principal_direction_preserves_the_kernel_answer_at_the_record_boundary() {
+        assert_eq!(
+            nearest_principal_direction([1.0, -3.0, 2.0]),
+            Some([0.0, -1.0, 0.0])
+        );
+        assert_eq!(nearest_principal_direction([0.0; 3]), None);
+        assert_eq!(nearest_principal_direction([f64::NAN, 1.0, 0.0]), None);
+    }
 
     fn all_fixes() {
         session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();

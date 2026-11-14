@@ -80,6 +80,7 @@ const PROFILE_KEYS: &[&str] = &[
     "navigation_bar",
     "navigator_fit",
     "navigator_style",
+    "nx_shortcuts",
     "orbit_around",
     "orbit_reverse",
     "origin_plane_names",
