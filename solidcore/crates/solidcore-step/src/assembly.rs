@@ -1617,6 +1617,39 @@ pub(crate) fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2
     Ok(out)
 }
 
+/// An edge on a closed (periodic) spline over `interval` in the spline's parameter, which may
+/// lie a whole number of periods from the curve's own range and run across its seam (a producer
+/// that evaluates a periodic spline modulo its period): the curve and interval the record takes,
+/// the interval moved into the range by whole periods, and the curve restarted there (exactly:
+/// knot insertion) when the edge runs across the seam, as the STEP reader reads such an edge.
+pub fn periodic_edge(curve: BCurve, [t0, t1]: [f64; 2]) -> R<(BCurve, [f64; 2])> {
+    let Natural::Range(a, b) = curve.natural() else { return Err("a periodic spline without a range".into()) };
+    let period = b - a;
+    if !(period > 0.0) || !(t0 <= t1) || !(t1 - t0 <= period) {
+        return Err("an edge longer than its periodic spline's period".into());
+    }
+    let turns = ((t0 - a) / period).floor();
+    let (lo, hi) = (t0 - turns * period, t1 - turns * period);
+    if hi <= b {
+        return Ok((curve, [lo, hi]));
+    }
+    Ok((crate::kernel::restart_curve(&curve, lo)?, [lo, hi]))
+}
+
+/// The exact spline of a parabola edge over `interval` in the parabola's parameter: about
+/// `vertex`, `axis` its plane's normal, `reference` its axis of symmetry, `focal` its focal
+/// distance (`vertex + f t² x + 2 f t y`).
+pub fn parabola_curve(vertex: P3, axis: P3, reference: P3, focal: f64, interval: [f64; 2]) -> BCurve {
+    crate::topology::parabola_curve(&crate::geom::Placement { origin: vertex, axis, ref_direction: reference }, focal, interval)
+}
+
+/// The exact spline of a hyperbola edge over `interval` in the hyperbola's parameter: about
+/// `center`, `axis` its plane's normal, `reference` its major axis (`center + a cosh t x +
+/// b sinh t y`).
+pub fn hyperbola_curve(center: P3, axis: P3, reference: P3, radii: [f64; 2], interval: [f64; 2]) -> BCurve {
+    crate::topology::hyperbola_curve(&crate::geom::Placement { origin: center, axis, ref_direction: reference }, radii[0], radii[1], interval)
+}
+
 /// A B-spline curve of `degree` on its full knot vector `knots` (one knot per entry, `points`
 /// plus `degree` plus one of them) over `points`, rational with `weights` when given: the
 /// record's spline, an unclamped knot vector (a periodic spline written with uniform knots)

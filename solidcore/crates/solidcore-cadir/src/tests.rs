@@ -206,8 +206,10 @@ fn a_polyline_with_decreasing_parameters_keeps_its_parameters() {
     let g = CurveGeometry::Solved(SolvedCurveGeometry::Polyline(
         PolylineCurve::new(samples, 0.0).unwrap(),
     ));
-    let Some(solidcore_record::brep::Curve::Spline { knots, points }) =
-        geometry::curve(&g).unwrap()
+    let Some(geometry::Carrier::Curve {
+        curve: solidcore_record::brep::Curve::Spline { knots, points },
+        periodic: false,
+    }) = geometry::curve(&g).unwrap()
     else {
         panic!("not a spline")
     };

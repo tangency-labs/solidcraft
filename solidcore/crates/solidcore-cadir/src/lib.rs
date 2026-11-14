@@ -28,7 +28,9 @@ use cadmpeg_ir::topology::{
 };
 use solidcore_ops::pcurve::Trims;
 pub use solidcore_step::assembly::Solid;
-use solidcore_step::assembly::{Assembly, Bound, Kind};
+use solidcore_step::assembly::{
+    Assembly, Bound, Kind, hyperbola_curve, parabola_curve, periodic_edge,
+};
 use solidcore_step::topology::{
     MAX_FACES, MAX_FILE_FACES, MAX_FIT_TOLERANCE, MAX_LOOP, MIN_TOLERANCE,
 };
@@ -272,10 +274,38 @@ impl<'a> Builder<'_, 'a, '_> {
             None => None,
         };
         let made = match curve {
-            Some(curve) => {
+            Some(carrier) => {
                 let interval = edge.param_range().map(|r| r.get()).ok_or_else(|| {
                     format!("edge {id}: not supported yet: an edge without a parameter range")
                 })?;
+                let (curve, interval) = match carrier {
+                    geometry::Carrier::Curve {
+                        curve,
+                        periodic: false,
+                    } => (curve, interval),
+                    geometry::Carrier::Curve {
+                        curve,
+                        periodic: true,
+                    } => periodic_edge(curve, interval).map_err(|m| format!("edge {id}: {m}"))?,
+                    geometry::Carrier::Parabola {
+                        vertex,
+                        axis,
+                        reference,
+                        focal,
+                    } => (
+                        parabola_curve(vertex, axis, reference, focal, interval),
+                        interval,
+                    ),
+                    geometry::Carrier::Hyperbola {
+                        center,
+                        axis,
+                        reference,
+                        radii,
+                    } => (
+                        hyperbola_curve(center, axis, reference, radii, interval),
+                        interval,
+                    ),
+                };
                 Ok(self
                     .asm
                     .add_edge(origin, curve, interval, [start, end])

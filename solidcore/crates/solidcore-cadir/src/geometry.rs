@@ -106,6 +106,11 @@ impl Similarity {
         Ok(Similarity { rows, scale })
     }
 
+    /// The uniform scale.
+    pub(crate) fn scale(&self) -> f64 {
+        self.scale
+    }
+
     pub(crate) fn point(&self, p: [f64; 3]) -> [f64; 3] {
         self.rows
             .map(|r| r[0] * p[0] + r[1] * p[1] + r[2] * p[2] + r[3])
@@ -117,7 +122,7 @@ impl Similarity {
     }
 
     /// A unit direction: turned, still unit.
-    fn direction(&self, d: [f64; 3]) -> [f64; 3] {
+    pub(crate) fn direction(&self, d: [f64; 3]) -> [f64; 3] {
         self.vector(d).map(|x| x / self.scale)
     }
 
@@ -267,14 +272,106 @@ fn surface_kind(s: &BSurface) -> &'static str {
 
 /// An edge's curve: the record curve with CADIR's parameter, or `None` for a degenerate curve
 /// (an edge collapsed to a point: a pole of the faces it bounds).
-pub(crate) fn curve(g: &CurveGeometry) -> R<Option<BCurve>> {
+pub(crate) fn curve(g: &CurveGeometry) -> R<Option<Carrier>> {
     let solved = g
         .solved()
         .ok_or_else(|| unsupported("a procedural curve without its solved form"))?;
     solved_curve(solved, 0)
 }
 
-fn solved_curve(g: &SolvedCurveGeometry, depth: usize) -> R<Option<BCurve>> {
+/// An edge's carrier as the record takes it.
+#[derive(Clone, Debug)]
+pub(crate) enum Carrier {
+    /// A record curve with CADIR's parameter; `periodic`: a spline CADIR evaluates modulo its
+    /// period, so an edge's interval on it may lie past its range or across its seam.
+    Curve { curve: BCurve, periodic: bool },
+    /// A parabola (`vertex + f t² x + 2 f t y`), which the record holds as the exact spline over
+    /// each edge's interval.
+    Parabola {
+        vertex: [f64; 3],
+        axis: [f64; 3],
+        reference: [f64; 3],
+        focal: f64,
+    },
+    /// A hyperbola (`center + a cosh t x + b sinh t y`), held likewise.
+    Hyperbola {
+        center: [f64; 3],
+        axis: [f64; 3],
+        reference: [f64; 3],
+        radii: [f64; 2],
+    },
+}
+
+fn solved_curve(g: &SolvedCurveGeometry, depth: usize) -> R<Option<Carrier>> {
+    Ok(Some(match g {
+        SolvedCurveGeometry::Parabola(p) => {
+            let f = p.frame();
+            Carrier::Parabola {
+                vertex: point(p.vertex().get()),
+                axis: a(unit(f.axis())),
+                reference: a(unit(f.reference())),
+                focal: p.focal_distance().get(),
+            }
+        }
+        SolvedCurveGeometry::Hyperbola(h) => {
+            let f = h.frame();
+            Carrier::Hyperbola {
+                center: point(h.center().get()),
+                axis: a(unit(f.axis())),
+                reference: a(unit(f.reference())),
+                radii: [h.major_radius().get(), h.minor_radius().get()],
+            }
+        }
+        SolvedCurveGeometry::Transformed(placed) => {
+            if depth >= MAX_PLACEMENTS {
+                return Err("placed curves nested too deeply".into());
+            }
+            let Some(basis) = solved_curve(placed.basis(), depth + 1)? else {
+                return Ok(None);
+            };
+            let s = Similarity::of(placed.transform().rows3())?;
+            match basis {
+                Carrier::Curve { curve, periodic } => Carrier::Curve {
+                    curve: s.curve(curve)?,
+                    periodic,
+                },
+                Carrier::Parabola {
+                    vertex,
+                    axis,
+                    reference,
+                    focal,
+                } => Carrier::Parabola {
+                    vertex: s.point(vertex),
+                    axis: s.direction(axis),
+                    reference: s.direction(reference),
+                    focal: focal * s.scale(),
+                },
+                Carrier::Hyperbola {
+                    center,
+                    axis,
+                    reference,
+                    radii,
+                } => Carrier::Hyperbola {
+                    center: s.point(center),
+                    axis: s.direction(axis),
+                    reference: s.direction(reference),
+                    radii: radii.map(|r| r * s.scale()),
+                },
+            }
+        }
+        _ => {
+            let periodic = matches!(g, SolvedCurveGeometry::Nurbs(n) if n.periodic());
+            match solved_plain(g)? {
+                Some(curve) => Carrier::Curve { curve, periodic },
+                None => return Ok(None),
+            }
+        }
+    }))
+}
+
+/// The record curve of a carrier that is one, with CADIR's parameter, or `None` for a degenerate
+/// curve. Parabolas, hyperbolas and placed carriers are [`solved_curve`]'s.
+fn solved_plain(g: &SolvedCurveGeometry) -> R<Option<BCurve>> {
     Ok(Some(match g {
         SolvedCurveGeometry::Line(l) => {
             let (o, d) = (point(l.origin().get()), unit(&l.direction()));
@@ -337,17 +434,13 @@ fn solved_curve(g: &SolvedCurveGeometry, depth: usize) -> R<Option<BCurve>> {
             spline_curve(1, knots, &points, None)?
         }
         SolvedCurveGeometry::Degenerate(_) => return Ok(None),
-        SolvedCurveGeometry::Transformed(placed) => {
-            if depth >= MAX_PLACEMENTS {
-                return Err("placed curves nested too deeply".into());
-            }
-            let Some(basis) = solved_curve(placed.basis(), depth + 1)? else {
-                return Ok(None);
-            };
-            Similarity::of(placed.transform().rows3())?.curve(basis)?
+        SolvedCurveGeometry::Transformed(_)
+        | SolvedCurveGeometry::Parabola(_)
+        | SolvedCurveGeometry::Hyperbola(_) => {
+            return Err(unsupported(
+                "a placed or open conic carrier read as a plain one",
+            ));
         }
-        SolvedCurveGeometry::Parabola(_) => return Err(unsupported("a parabola")),
-        SolvedCurveGeometry::Hyperbola(_) => return Err(unsupported("a hyperbola")),
         SolvedCurveGeometry::Composite { .. } => return Err(unsupported("a composite curve")),
         SolvedCurveGeometry::Unknown { .. } => {
             return Err(unsupported("a curve of a kind the producer did not state"));

@@ -1398,6 +1398,18 @@ fn map_edge(curve: &Curve, ps: P3, pe: P3, same_sense: bool, closed: bool, full:
     }
 }
 
+/// A parabola as the record holds an edge on it: the exact spline over `[t0, t1]`, its
+/// parameter the parabola's (`origin + f t² x + 2 f t y`, STEP `PARABOLA`).
+pub(crate) fn parabola_curve(position: &Placement, focal: f64, [t0, t1]: [f64; 2]) -> BCurve {
+    swept::parabola_spline(position, focal, t0, t1)
+}
+
+/// A hyperbola as the record holds an edge on it: the exact spline over `[t0, t1]`, its
+/// parameter the hyperbola's (`origin + a cosh t x + b sinh t y`, STEP `HYPERBOLA`).
+pub(crate) fn hyperbola_curve(position: &Placement, a: f64, b: f64, [t0, t1]: [f64; 2]) -> BCurve {
+    swept::hyperbola_spline(position, a, b, t0, t1)
+}
+
 /// A hyperbola or parabola: the vertices' parameters in closed form, the edge running the way
 /// they go, as an exact spline over just that interval.
 fn open_conic(curve: &Curve, ps: P3, pe: P3, same_sense: bool, closed: bool, spline: impl Fn(f64, f64) -> BCurve) -> R<Mapped> {
