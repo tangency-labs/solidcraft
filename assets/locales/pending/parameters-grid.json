@@ -1,0 +1,12 @@
+{
+  "en": {
+    "parameters.grid_name_required": "A parameter needs a name",
+    "parameters.grid_new_needs": "A pasted row needs a name and an expression to become a parameter",
+    "parameters.grid_unknown_unit": "“{unit}” is not one of the units"
+  },
+  "de": {
+    "parameters.grid_name_required": "Ein Parameter braucht einen Namen",
+    "parameters.grid_new_needs": "Eine eingefügte Zeile braucht einen Namen und einen Ausdruck, um ein Parameter zu werden",
+    "parameters.grid_unknown_unit": "„{unit}“ ist keine der Einheiten"
+  }
+}

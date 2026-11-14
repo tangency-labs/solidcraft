@@ -267,6 +267,15 @@ impl Table<'_> {
         response
     }
 
+    /// Keep the space of `count` rows that are not built (off screen in a virtualized grid), and
+    /// count them as rows, so the table does not say it is empty.
+    pub fn skip_rows(&mut self, ui: &mut Ui, count: usize) {
+        if count > 0 {
+            ui.allocate_space(vec2(0.0, super::table_row_height() * count as f32));
+            self.rows += count;
+        }
+    }
+
     /// The last, slim dashed line. Clicking asks the owner to insert a regular draft row.
     pub fn add_prompt(&mut self, ui: &mut Ui, label: &str, tooltip: &str) -> Response {
         let t = Tokens::get();

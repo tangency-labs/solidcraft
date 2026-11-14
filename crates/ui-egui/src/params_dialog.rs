@@ -19,7 +19,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::SolveApp;
-use crate::ui_kit::{self, Column};
+use crate::ui_kit;
 
 /// What Import reads. The picker must list them: on macOS, files of a type no filter names
 /// can't be picked (#3216).
@@ -57,6 +57,16 @@ pub struct ParamsDialog {
     new_refused: Option<NewRefused>,
     /// The expression edit to preview: (name, expression).
     pub preview: Option<(String, String)>,
+    /// Whether an expression box set the preview this frame (else it ends with the edit).
+    previewing: bool,
+    /// Which opening of the window this is: each section's grid keeps its cursor and edit under
+    /// it, so a window opened again starts clean.
+    opening: u64,
+    /// The sections whose grids were drawn, so closing the window forgets their state.
+    grids: Vec<String>,
+    /// The cell being typed in (section, parameter, column) and the draft it held before, which
+    /// is what the cell holds until the edit commits: `editing` and `comments` show the typing.
+    typing: Option<(String, String, usize, Option<String>)>,
     /// The rows as the engine listed them at one revision of the design (#2723): listing
     /// evaluates every parameter, so it happens when the design changes, not every frame.
     listed: Option<(u64, Arc<Vec<Row>>)>,
@@ -88,7 +98,16 @@ impl ParamsDialog {
     /// The add row starts blank, its expression too (#2919): a value put there for the user was
     /// almost never the one wanted, and had to be erased first.
     pub fn new() -> Self {
-        ParamsDialog { reset_scroll: true, ..Default::default() }
+        static OPENINGS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let opening = OPENINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        ParamsDialog { reset_scroll: true, opening, ..Default::default() }
+    }
+
+    /// Forget the grids' cursors and open edits, as the window closes.
+    fn forget_grids(&self, ctx: &egui::Context) {
+        for salt in &self.grids {
+            ui_kit::Grid::forget(ctx, grid_state(self, salt));
+        }
     }
 
     /// What the window's banner says: the last action's message, else why the add row's draft
@@ -204,7 +223,9 @@ pub(crate) fn cancel_on_escape(app: &mut SolveApp, ctx: &egui::Context) -> bool 
         i.raw.events.retain(|event| !matches!(event, egui::Event::Key { key: egui::Key::Escape, modifiers, .. } if modifiers.matches_logically(egui::Modifiers::NONE)));
     });
     // Dropping the dialog discards every draft. The regular preview update clears its scene.
-    app.params = None;
+    if let Some(d) = app.params.take() {
+        d.forget_grids(ctx);
+    }
     app.esc_handled = true;
     true
 }
@@ -263,6 +284,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let live = app.preferences.parameters_apply_live;
     let held_status = if live { None } else { held_status(held(&d, &all).len()) };
     let mut resize = Resize::None;
+    d.previewing = false;
     let shown = panel.window(ctx).show(ctx, |ui| {
         outcome = panel.feature(
             ui,
@@ -398,7 +420,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         let chosen = d.sort;
         ctx.data_mut(|m| m.insert_persisted(sort_id(), chosen));
     }
-    if !close {
+    // The preview lasts while its expression is being edited.
+    if !d.previewing {
+        d.preview = None;
+    }
+    if close {
+        d.forget_grids(ctx);
+    } else {
         app.params = Some(d);
     }
 }
@@ -592,219 +620,472 @@ fn new_check(app: &mut SolveApp, d: &mut ParamsDialog, unit: &str) -> Result<Str
     r
 }
 
-/// One section's table of parameter rows with its sortable, resizable headings and add row.
-/// `salt` keeps each section's widgets apart; `name_floor` is the shared Name column minimum.
-fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&Row], salt: &str, name_floor: f32) {
-    let units: Vec<_> = UNITS.iter().map(|unit| unit_label(unit)).collect();
-    // Name keeps a larger share and a shared content floor so long identifiers stay readable
-    // and every section's columns line up (#8533, #8551 review). Full window/column resize is #5097.
-    // Widths the user dragged a header divider to (#5097); the rest keep their automatic widths.
-    let manual: Vec<Option<f32>> = ui.ctx().data_mut(|m| m.get_persisted(columns_id())).unwrap_or_default();
-    let columns = [
-        Column::new("", 0.0).min_content_width(solidcraft_theme::Tokens::get().space_24 * 3.0),
-        Column::new("Name", 2.0).flex().min_content_width(name_floor),
-        Column::new("Unit", 0.65).min_content_width(
-            ui_kit::ContentWidth::dropdown(ui, &units).max(solidcraft_theme::Tokens::get().space_24 * 3.0 + solidcraft_theme::Tokens::get().space_6),
-        ),
-        Column::new("Expression", 1.5).flex(),
-        Column::new("Value", 1.1).flex(),
-        Column::new("Comment", 1.0).flex(),
-        Column::new("Actions", 0.0).icon_only().min_content_width(ui_kit::table_row_height()),
-    ];
-    let columns: Vec<_> = columns.into_iter().enumerate().map(|(i, c)| c.manual_width(manual.get(i).copied().flatten())).collect();
-    // An expression being edited may open over the cells to its right, up to the table's edge.
-    let right = ui.max_rect().right().min(ui.clip_rect().right());
-    // Enter commits a cell and moves to the one below in the same column, Shift+Enter above.
-    let cells = egui::Id::unique(("params_cells", salt));
-    let neighbour = |index: usize, key: Option<ui_kit::CellKey>| match key {
-        Some(ui_kit::CellKey::Down) => rows.get(index + 1).map(|r| r.name.clone()),
-        Some(ui_kit::CellKey::Up) => index.checked_sub(1).and_then(|i| rows.get(i)).map(|r| r.name.clone()),
-        _ => None,
-    };
-    ui_kit::table_custom(ui, salt, &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
-        // The Name heading sorts every section at once, each inside itself (#8563).
-        table.headers_resizable(ui, columns_id(), |ui, index| {
-            if index != 1 {
-                return false;
+/// The columns of every section's grid, in order.
+const STAR: usize = 0;
+const NAME: usize = 1;
+const UNIT: usize = 2;
+const EXPRESSION: usize = 3;
+const VALUE: usize = 4;
+const COMMENT: usize = 5;
+
+/// One section's parameters as a [`ui_kit::Grid`]: the cells show the design (or an edit held for
+/// Apply), and each gesture on them comes back as one edit list, applied as one undo step.
+struct ParamGrid<'a> {
+    app: &'a mut SolveApp,
+    d: &'a mut ParamsDialog,
+    rows: &'a [&'a Row],
+    salt: &'a str,
+    name_floor: f32,
+    unit_width: f32,
+    /// How far right an expression being edited may open (#9358).
+    right: f32,
+    /// The live check of each row's held or typed expression that differs from the design's.
+    live: std::collections::HashMap<String, Result<String, String>>,
+}
+
+impl ParamGrid<'_> {
+    fn row(&self, row: usize) -> Option<&Row> {
+        self.rows.get(row).copied()
+    }
+
+    /// The expression a row shows: an edit held for Apply or being typed, else the design's.
+    fn expression<'r>(&'r self, r: &'r Row) -> &'r str {
+        self.d.editing.get(&r.name).map_or(r.expression.as_str(), String::as_str)
+    }
+
+    /// What the cell being typed in holds until its edit commits: the draft it had before (an edit
+    /// held for Apply), else the design's.
+    fn before_typing<'r>(&'r self, r: &'r Row, col: usize) -> Option<&'r str> {
+        let (salt, name, typed, before) = self.d.typing.as_ref()?;
+        if salt != self.salt || *name != r.name || *typed != col {
+            return None;
+        }
+        Some(before.as_deref().unwrap_or(if col == COMMENT { r.comment.as_str() } else { r.expression.as_str() }))
+    }
+
+    /// The Value column: the live check of an edited expression, the row's error, or its value.
+    fn shown(&self, r: &Row) -> (String, bool) {
+        match (self.live.get(&r.name), &r.error) {
+            (Some(Err(message)), _) | (None, Some(message)) => (message.clone(), true),
+            (Some(Ok(value)), _) => (value.clone(), false),
+            (None, None) => (show_value(r), false),
+        }
+    }
+}
+
+impl ui_kit::GridSource for ParamGrid<'_> {
+    fn columns(&self) -> Vec<ui_kit::GridColumn> {
+        use ui_kit::{CellKind, GridColumn};
+        let t = solidcraft_theme::Tokens::get();
+        let units = UNITS.iter().map(|u| unit_label(u).to_owned()).collect();
+        // Name keeps a larger share and a shared content floor so long identifiers stay readable
+        // and every section's columns line up (#8533, #8551 review).
+        vec![
+            GridColumn::new("favorite", "", 0.0, CellKind::Custom).min_content_width(t.space_24 * 3.0),
+            GridColumn::new("name", "Name", 2.0, CellKind::Text).flex().min_content_width(self.name_floor),
+            GridColumn::new("unit", "Unit", 0.65, CellKind::Choice(units)).min_content_width(self.unit_width),
+            GridColumn::new("expression", "Expression", 1.5, CellKind::Expression).flex().edit_on_click(),
+            GridColumn::new("value", "Value", 1.1, CellKind::ReadOnly).flex(),
+            GridColumn::new("comment", "Comment", 1.0, CellKind::Text).flex().edit_on_click(),
+            GridColumn::new("actions", "Actions", 0.0, CellKind::Custom).icon_only().min_content_width(ui_kit::table_row_height()),
+        ]
+    }
+
+    fn row_count(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn row_key(&self, row: usize) -> std::borrow::Cow<'_, str> {
+        self.row(row).map_or(std::borrow::Cow::Borrowed(""), |r| std::borrow::Cow::Borrowed(r.name.as_str()))
+    }
+
+    fn text(&self, row: usize, col: usize) -> std::borrow::Cow<'_, str> {
+        use std::borrow::Cow;
+        let Some(r) = self.row(row) else { return Cow::Borrowed("") };
+        if let Some(before) = self.before_typing(r, col) {
+            return Cow::Borrowed(before);
+        }
+        match col {
+            STAR => Cow::Borrowed(if r.favorite { "★" } else { "" }),
+            NAME => Cow::Borrowed(&r.name),
+            UNIT => Cow::Borrowed(unit_label(&r.unit)),
+            EXPRESSION => Cow::Borrowed(self.expression(r)),
+            VALUE => Cow::Owned(self.shown(r).0),
+            COMMENT => Cow::Borrowed(self.d.comments.get(&r.name).unwrap_or(&r.comment)),
+            _ => Cow::Borrowed(""),
+        }
+    }
+
+    fn kind(&self, row: usize, col: usize) -> Option<ui_kit::CellKind> {
+        // A model parameter's unit is the dimension's: shown, not chosen.
+        (col == UNIT && self.row(row).is_some_and(|r| r.source != "user")).then_some(ui_kit::CellKind::ReadOnly)
+    }
+
+    fn message(&self, row: usize, col: usize) -> Option<(std::borrow::Cow<'_, str>, bool)> {
+        let r = self.row(row)?;
+        let (shown, error) = self.shown(r);
+        (col == EXPRESSION && error).then_some((std::borrow::Cow::Owned(shown), true))
+    }
+
+    fn set_cell(&mut self, row: usize, col: usize, text: &str) -> Result<(), String> {
+        let Some(r) = self.row(row) else { return Err(String::new()) };
+        match col {
+            NAME if text.trim().is_empty() => Err(solidcraft_ui_text::tr("parameters.grid_name_required").to_owned()),
+            UNIT => unit_from(text).map(|_| ()),
+            // Applied as you go, an expression is checked before it is handed back, so a wrong one
+            // keeps its box open; held for Apply, it is checked when it is held (#9279).
+            EXPRESSION if self.app.preferences.parameters_apply_live => {
+                let unit = r.unit.clone();
+                check(self.app, text, &unit).map(|_| ())
             }
-            let response = ui_kit::sort_header(ui, "Name", &mut d.sort);
-            crate::scenario::publish_handle(&format!("params:sort:{salt}"), response.rect.center());
-            true
-        });
-        for (index, r) in rows.iter().enumerate() {
-            // Skip cells outside the clip while preserving the table's row geometry (#2723).
-            // Drafts remain live until their edits have been committed.
-            let busy = d.editing.contains_key(&r.name)
-                || d.comments.contains_key(&r.name)
-                || d.renaming.as_ref().is_some_and(|(old, _)| *old == r.name)
-                || ui_kit::landing_in_row(ui.ctx(), cells, &r.name);
-            table.row_visible(ui, &r.name, false, busy, |row| {
-                row.cell(|ui| {
+            _ => Ok(()),
+        }
+    }
+
+    fn add_row(&self) -> Option<std::borrow::Cow<'_, str>> {
+        (self.salt == "user").then_some(std::borrow::Cow::Borrowed("Add parameter"))
+    }
+
+    fn header(&mut self, ui: &mut egui::Ui, col: usize) -> bool {
+        // The Name heading sorts every section at once, each inside itself (#8563).
+        if col != NAME {
+            return false;
+        }
+        let response = ui_kit::sort_header(ui, "Name", &mut self.d.sort);
+        crate::scenario::publish_handle(&format!("params:sort:{}", self.salt), response.rect.center());
+        true
+    }
+
+    fn draw(&mut self, ui: &mut egui::Ui, row: usize, col: usize) -> Option<egui::Response> {
+        let rows = self.rows;
+        let r = *rows.get(row)?;
+        match col {
+            STAR => Some(
+                ui.horizontal(|ui| {
                     let star = if r.favorite { "★" } else { "☆" };
                     ui.spacing_mut().item_spacing.x = 0.0;
                     let favorite = ui_kit::compact_button(ui, star, "Favourite", true, r.favorite);
                     crate::scenario::publish_handle(&format!("param:star:{}", r.name), favorite.rect.center());
                     if favorite.clicked() {
-                        d.error = app.run("parameters.favorite", json!({"name": r.name, "favorite": !r.favorite})).err();
+                        self.d.error = self.app.run("parameters.favorite", json!({"name": r.name, "favorite": !r.favorite})).err();
                     }
-                    if salt == "user" {
+                    if self.salt == "user" {
                         // A sorted list doesn't show the stored order, so moving a row in it
                         // would jump to a place nobody sees; moving waits for the listed order.
-                        let listed = d.sort == ui_kit::Sort::Listed;
+                        let listed = self.d.sort == ui_kit::Sort::Listed;
                         for (glyph, tip, neighbour, side) in [
-                            (ui_kit::MOVE_UP, "Move up", index.checked_sub(1).and_then(|i| rows.get(i)), "before"),
-                            (ui_kit::MOVE_DOWN, "Move down", rows.get(index + 1), "after"),
+                            (ui_kit::MOVE_UP, "Move up", row.checked_sub(1).and_then(|i| rows.get(i)), "before"),
+                            (ui_kit::MOVE_DOWN, "Move down", rows.get(row + 1), "after"),
                         ] {
                             let response = ui_kit::compact_button(ui, glyph, tip, listed && neighbour.is_some(), false);
                             crate::scenario::publish_handle(&format!("param:{side}:{}", r.name), response.rect.center());
                             if response.clicked()
                                 && let Some(neighbour) = neighbour
                             {
-                                d.error = app.run("parameters.move", json!({"name":r.name, side:neighbour.name})).err();
+                                self.d.error = self.app.run("parameters.move", json!({"name": r.name, side: neighbour.name})).err();
                             }
                         }
                     }
-                });
-                let renaming_here = d.rename_table == salt;
-                row.cell(|ui| match &mut d.renaming {
-                    Some((old, new)) if *old == r.name && renaming_here => {
-                        let id = ui.make_persistent_id(("rename", salt, &r.name));
-                        let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
-                        let response = ui_kit::cell_editor(ui, id, new, "Name", false);
-                        ui_kit::landing(ui, cells, &r.name, "name", &response, new);
-                        let key = ui_kit::cell_key(ui, focused);
-                        let entered = enter_for(ui, focused) || key == Some(ui_kit::CellKey::Up);
-                        if response.lost_focus() || entered {
-                            let (old, new) = (old.clone(), new.trim().to_owned());
-                            if !new.is_empty() && new != old {
-                                d.error = app.run("parameters.rename", json!({"name":old,"new_name":new})).err();
-                            }
-                            d.renaming = None;
-                            // The name below (or above) opens for renaming, its text selected.
-                            if let Some(next) = neighbour(index, key) {
-                                ui_kit::land_in_cell(ui.ctx(), cells, &next, "name");
-                                d.renaming = Some((next.clone(), next));
-                                d.rename_table = salt.to_string();
-                            }
-                        } else if !response.has_focus() {
-                            response.request_focus();
-                        }
-                    }
-                    _ => {
-                        let rename = solidcraft_ui_text::tr_label("Double-click to rename");
-                        // Keep long identifiers readable (#8533) without stacking the cell's own tooltip.
-                        let response = ui_kit::name_cell_with_hint(ui, &r.name, false, rename);
-                        crate::scenario::publish_handle(&format!("param:name:{}", r.name), response.rect.center());
-                        if response.double_clicked() {
-                            d.renaming = Some((r.name.clone(), r.name.clone()));
-                            d.rename_table = salt.to_string();
-                        }
-                    }
-                });
-                row.cell(|ui| {
-                    if r.source == "user" {
-                        let mut selected = UNITS.iter().position(|u| *u == r.unit).unwrap_or(0);
-                        let before = selected;
-                        ui_kit::dropdown(ui, &format!("punit:{salt}:{}", r.name), &mut selected, &units);
-                        if selected != before
-                            && let Some(unit) = UNITS.get(selected)
-                        {
-                            d.error = app.run("parameters.change", json!({"name":r.name,"expression":r.expression,"unit":unit})).err();
-                        }
-                    } else {
-                        ui_kit::text(ui, unit_label(&r.unit), ui_kit::Text::MonoCell);
-                    }
-                });
-                let mut expression = d.editing.get(&r.name).cloned().unwrap_or_else(|| r.expression.clone());
-                let live = (expression != r.expression).then(|| check(app, &expression, &r.unit));
-                let invalid = matches!(live, Some(Err(_))) || (live.is_none() && r.error.is_some());
+                    favorite
+                })
+                .inner,
+            ),
+            NAME => {
+                // Keep long identifiers readable (#8533) without stacking the cell's own tooltip.
+                let response = ui_kit::name_cell_with_hint(ui, &r.name, false, solidcraft_ui_text::tr_label("Double-click to rename"));
+                crate::scenario::publish_handle(&format!("param:name:{}", r.name), response.rect.center());
+                Some(response)
+            }
+            UNIT if r.source != "user" => Some(ui_kit::text(ui, unit_label(&r.unit), ui_kit::Text::MonoCell)),
+            VALUE => {
+                let (shown, error) = self.shown(r);
+                Some(ui_kit::text(ui, &shown, ui_kit::Text::Value(&format!("value:{}", r.name), error)).backing_on_hover_text(&shown))
+            }
+            ACTIONS if r.source == "user" => {
+                let response = ui_kit::bin_button(ui, "Delete");
+                if response.clicked() {
+                    self.d.error = self.app.run("parameters.delete", json!({"name": r.name})).err();
+                }
+                Some(response)
+            }
+            _ => None,
+        }
+    }
+
+    fn editor(&mut self, ui: &mut egui::Ui, row: usize, col: usize, id: egui::Id, text: &mut String) -> ui_kit::CellEditor {
+        let Some(r) = self.row(row).cloned() else {
+            return ui_kit::CellEditor { response: ui_kit::cell_editor(ui, id, text, "", false), taken: false };
+        };
+        match col {
+            EXPRESSION => {
+                let live = (*text != r.expression).then(|| check(self.app, text, &r.unit));
                 let (shown, error) = match (&live, &r.error) {
                     (Some(Err(message)), _) | (None, Some(message)) => (message.clone(), true),
                     (Some(Ok(value)), _) => (value.clone(), false),
-                    (None, None) => (show_value(r), false),
+                    (None, None) => (show_value(&r), false),
                 };
-                row.cell(|ui| {
-                    let id = ui.make_persistent_id(("pexpr", salt, &r.name));
-                    let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
-                    let response = ui_kit::wide_cell_editor(ui, id, &mut expression, "Expression", invalid, right, (&shown, error));
-                    crate::scenario::publish_target_as(&format!("param:{}", r.name), &format!("param:{}", r.name), response.rect);
-                    if salt == "fav" {
-                        crate::scenario::publish_handle(&format!("param:favorite:{}", r.name), response.rect.center());
-                    }
-                    ui_kit::landing(ui, cells, &r.name, "expression", &response, &expression);
-                    let completed = complete(ui, &response, &mut expression);
-                    if response.changed() || completed {
-                        d.editing.insert(r.name.clone(), expression.clone());
-                    }
-                    let key = if completed { None } else { ui_kit::cell_key(ui, focused) };
-                    // Held edits (#9279) preview nothing: the preview is a rebuild too.
-                    let apply_live = app.preferences.parameters_apply_live;
-                    if apply_live && response.has_focus() && matches!(live, Some(Ok(_))) {
-                        d.preview = Some((r.name.clone(), expression.clone()));
-                    }
-                    let entered = !completed && (enter_for(ui, focused) || key == Some(ui_kit::CellKey::Up));
-                    if !completed && (response.lost_focus() || entered) {
-                        d.preview = None;
-                        if expression != r.expression && !apply_live {
-                            // Kept in `editing` for Apply or OK, checked now.
-                            d.error = check(app, &expression, &r.unit).err();
-                        } else if expression != r.expression {
-                            d.error = check(app, &expression, &r.unit)
-                                .and_then(|_| app.run("parameters.change", json!({"name":r.name,"expression":expression})))
-                                .err();
-                            if d.error.is_none() {
-                                d.editing.remove(&r.name);
-                            }
-                        } else {
-                            d.editing.remove(&r.name);
-                        }
-                        if let Some(next) = neighbour(index, key) {
-                            ui_kit::land_in_cell(ui.ctx(), cells, &next, "expression");
-                        }
-                    }
-                });
-                row.cell(|ui| {
-                    ui_kit::text(ui, &shown, ui_kit::Text::Value(&format!("value:{}", r.name), error)).backing_on_hover_text(&shown);
-                });
-                row.cell(|ui| {
-                    let mut comment = d.comments.get(&r.name).cloned().unwrap_or_else(|| r.comment.clone());
-                    let id = ui.make_persistent_id(("comment", &r.name));
-                    let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
-                    let response = ui_kit::cell_editor(ui, id, &mut comment, "Comment", false);
-                    crate::scenario::publish_handle(&format!("param:comment:{}", r.name), response.rect.center());
-                    ui_kit::landing(ui, cells, &r.name, "comment", &response, &comment);
-                    let key = ui_kit::cell_key(ui, focused);
-                    let entered = enter_for(ui, focused) || key == Some(ui_kit::CellKey::Up);
-                    if response.changed() {
-                        d.comments.insert(r.name.clone(), comment.clone());
-                    }
-                    if response.lost_focus() || entered {
-                        if comment != r.comment {
-                            d.error = app.run("parameters.comment", json!({"name":r.name,"comment":comment})).err();
-                        }
-                        d.comments.remove(&r.name);
-                        if let Some(next) = neighbour(index, key) {
-                            ui_kit::land_in_cell(ui.ctx(), cells, &next, "comment");
-                        }
-                    }
-                });
-                row.cell(|ui| {
-                    if r.source == "user" && ui_kit::bin_button(ui, "Delete").clicked() {
-                        d.error = app.run("parameters.delete", json!({"name":r.name})).err();
-                    }
-                });
-            });
-        }
-        if salt == "user" {
-            if d.adding {
-                ui.push_id("parameter_draft", |ui| add_row(app, ui, table, d, right));
+                let response = ui_kit::wide_cell_editor(ui, id, text, "Expression", error, self.right, (&shown, error));
+                let taken = complete(ui, &response, text);
+                // Held edits (#9279) preview nothing: the preview is a rebuild too.
+                if self.app.preferences.parameters_apply_live && response.has_focus() && matches!(live, Some(Ok(_))) {
+                    self.d.preview = Some((r.name.clone(), text.clone()));
+                }
+                self.d.previewing |= self.d.preview.as_ref().is_some_and(|(name, _)| *name == r.name);
+                ui_kit::CellEditor { response, taken }
             }
-            if table.add_prompt(ui, "Add parameter", "Add parameter").clicked() {
-                d.adding = true;
-                d.focus_new = true;
+            NAME => ui_kit::CellEditor { response: ui_kit::cell_editor(ui, id, text, "Name", false), taken: false },
+            _ => ui_kit::CellEditor { response: ui_kit::cell_editor(ui, id, text, "Comment", false), taken: false },
+        }
+    }
+
+    fn drawn(&mut self, _ui: &egui::Ui, row: usize, col: usize, response: &egui::Response, _editing: bool) {
+        let Some(r) = self.row(row) else { return };
+        // The handles the scenarios click, as when every cell was an open box.
+        match col {
+            EXPRESSION => {
+                crate::scenario::publish_target_as(&format!("param:{}", r.name), &format!("param:{}", r.name), response.rect);
+                if self.salt == "fav" {
+                    crate::scenario::publish_handle(&format!("param:favorite:{}", r.name), response.rect.center());
+                }
+            }
+            COMMENT => crate::scenario::publish_handle(&format!("param:comment:{}", r.name), response.rect.center()),
+            _ => {}
+        }
+    }
+}
+
+const ACTIONS: usize = 6;
+
+/// The unit a Unit cell's text names: its label ("none" for no unit) or the unit itself.
+fn unit_from(text: &str) -> Result<&'static str, String> {
+    let text = text.trim();
+    UNITS
+        .iter()
+        .copied()
+        .find(|u| *u == text || unit_label(u) == text)
+        .ok_or_else(|| solidcraft_ui_text::format("parameters.grid_unknown_unit", &[("unit", text)]))
+}
+
+/// The grid state of section `salt` in this opening of the window: a new opening starts clean.
+fn grid_state(d: &ParamsDialog, salt: &str) -> egui::Id {
+    egui::Id::unique(("sc_params_grid", d.opening, salt))
+}
+
+/// One section's grid of parameter rows with its sortable, resizable headings and add row.
+/// `salt` keeps each section's widgets apart; `name_floor` is the shared Name column minimum.
+fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&Row], salt: &str, name_floor: f32) {
+    let t = solidcraft_theme::Tokens::get();
+    let units: Vec<_> = UNITS.iter().map(|unit| unit_label(unit)).collect();
+    let unit_width = ui_kit::ContentWidth::dropdown(ui, &units).max(t.space_24 * 3.0 + t.space_6);
+    // An expression being edited may open over the cells to its right, up to the table's edge.
+    let right = ui.max_rect().right().min(ui.clip_rect().right());
+    let state = grid_state(d, salt);
+    if !d.grids.iter().any(|g| g == salt) {
+        d.grids.push(salt.to_owned());
+    }
+    let mut live = std::collections::HashMap::new();
+    for r in rows {
+        if let Some(edited) = d.editing.get(&r.name).filter(|e| **e != r.expression) {
+            let edited = edited.clone();
+            live.insert(r.name.clone(), check(app, &edited, &r.unit));
+        }
+    }
+    let mut grid = ParamGrid { app, d, rows, salt, name_floor, unit_width, right, live };
+    let out = ui_kit::Grid::new(salt).state(state).empty(solidcraft_ui_text::tr("manage.empty")).resizable(columns_id()).show_with(
+        ui,
+        &mut grid,
+        |ui, table, grid| {
+            if grid.salt == "user" && grid.d.adding {
+                let right = grid.right;
+                ui.push_id("parameter_draft", |ui| add_row(grid.app, ui, table, grid.d, right));
+            }
+        },
+    );
+    if out.add_row {
+        d.adding = true;
+        d.focus_new = true;
+    }
+    apply_grid(app, ui.ctx(), d, rows, salt, out);
+}
+
+/// Mirror the edit being typed into the dialog's drafts, then apply one gesture's edits as one
+/// undo step: expressions in one `parameters.change` (or held for Apply), then units, comments,
+/// renames and pasted new rows.
+fn apply_grid(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, rows: &[&Row], salt: &str, out: ui_kit::GridOutput) {
+    let find = |name: &str| rows.iter().copied().find(|r| r.name == name);
+    let typing_here = d.typing.as_ref().is_some_and(|(s, ..)| s == salt);
+    match &out.editing {
+        Some((name, col, _)) if matches!(*col, EXPRESSION | COMMENT) => {
+            let same = d.typing.as_ref().is_some_and(|(s, n, c, _)| s == salt && n == name && c == col);
+            if !same {
+                let before = if *col == COMMENT { d.comments.get(name) } else { d.editing.get(name) }.cloned();
+                d.typing = Some((salt.to_owned(), name.clone(), *col, before));
             }
         }
-    });
+        _ if typing_here => d.typing = None,
+        _ => {}
+    }
+    match &out.editing {
+        Some((name, EXPRESSION, text)) => {
+            d.editing.insert(name.clone(), text.clone());
+        }
+        Some((name, COMMENT, text)) => {
+            d.comments.insert(name.clone(), text.clone());
+        }
+        Some((name, NAME, text)) => {
+            d.renaming = Some((name.clone(), text.clone()));
+            d.rename_table = salt.to_owned();
+        }
+        _ => {}
+    }
+    if d.rename_table == salt && !matches!(out.editing, Some((_, NAME, _))) {
+        d.renaming = None;
+    }
+    if let Some((name, col)) = &out.cancelled {
+        // Back to the draft the cell held before the edit, if any.
+        let before = d.typing.take().filter(|(s, n, c, _)| s == salt && n == name && c == col).and_then(|(.., before)| before);
+        let drafts = match *col {
+            EXPRESSION => Some(&mut d.editing),
+            COMMENT => Some(&mut d.comments),
+            _ => None,
+        };
+        if let Some(drafts) = drafts {
+            match before {
+                Some(before) => drafts.insert(name.clone(), before),
+                None => drafts.remove(name),
+            };
+        }
+    }
+    if let Some(message) = out.refused {
+        d.error = Some(message);
+    }
+    if let Some(notice) = out.notice {
+        d.error = Some(notice);
+    }
+    if out.edits.is_empty() {
+        return;
+    }
+    let live = app.preferences.parameters_apply_live;
+    let mut changes = serde_json::Map::new();
+    let mut steps: Vec<(&str, Value)> = Vec::new();
+    let mut renames: Vec<(&str, Value)> = Vec::new();
+    let mut new_rows: std::collections::BTreeMap<usize, [String; 4]> = Default::default();
+    let mut held_error = None;
+    let mut comments = Vec::new();
+    for edit in &out.edits {
+        let text = edit.text();
+        match edit.row() {
+            ui_kit::RowRef::New(n) => {
+                if let Some(slot) = [NAME, UNIT, EXPRESSION, COMMENT].iter().position(|c| *c == edit.col())
+                    && let Some(cell) = new_rows.entry(*n).or_default().get_mut(slot)
+                {
+                    *cell = text.to_owned();
+                }
+            }
+            ui_kit::RowRef::Existing(name) => {
+                let Some(r) = find(name) else { continue };
+                match edit.col() {
+                    EXPRESSION if !live => {
+                        // Kept in `editing` for Apply or OK, checked now (#9279).
+                        held_error = held_error.or(check(app, text, &r.unit).err());
+                        d.editing.insert(r.name.clone(), text.to_owned());
+                    }
+                    EXPRESSION => {
+                        changes.insert(r.name.clone(), json!(text));
+                    }
+                    UNIT => {
+                        if let Ok(unit) = unit_from(text) {
+                            steps.push(("parameters.change", json!({"name": r.name, "expression": r.expression, "unit": unit})));
+                        }
+                    }
+                    COMMENT => {
+                        steps.push(("parameters.comment", json!({"name": r.name, "comment": text})));
+                        comments.push(r.name.clone());
+                    }
+                    NAME => {
+                        let new = text.trim();
+                        if !new.is_empty() && new != r.name {
+                            renames.push(("parameters.rename", json!({"name": r.name, "new_name": new})));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    let applied: Vec<String> = changes.keys().cloned().collect();
+    // Expressions by their names as they are now, so they go before the renames.
+    let mut all: Vec<(&str, Value)> = Vec::new();
+    match changes.len() {
+        0 => {}
+        1 => {
+            if let Some((name, expression)) = changes.into_iter().next() {
+                all.push(("parameters.change", json!({"name": name, "expression": expression})));
+            }
+        }
+        _ => all.push(("parameters.change", json!({"changes": changes}))),
+    }
+    all.extend(steps);
+    all.extend(renames);
+    let unit = UNITS.get(d.new_unit).copied().unwrap_or("mm");
+    for [name, unit_text, expression, comment] in new_rows.into_values() {
+        if name.trim().is_empty() || expression.trim().is_empty() {
+            let message = solidcraft_ui_text::tr("parameters.grid_new_needs").to_owned();
+            ui_kit::Grid::refuse(ctx, grid_state(d, salt), &message);
+            d.error = Some(message);
+            return;
+        }
+        let unit = if unit_text.trim().is_empty() { Ok(unit) } else { unit_from(&unit_text) };
+        let unit = unit.unwrap_or("mm");
+        all.push(("parameters.add", json!({"name": name.trim(), "expression": expression, "unit": unit, "comment": comment})));
+    }
+    if all.is_empty() {
+        // Held edits only: the message is the check's.
+        d.error = held_error;
+        return;
+    }
+    match run_as_one(app, &all) {
+        Ok(()) => {
+            d.error = held_error;
+            for name in applied {
+                d.editing.remove(&name);
+            }
+            for name in comments {
+                d.comments.remove(&name);
+            }
+        }
+        Err(error) => {
+            d.error = Some(error.clone());
+            ui_kit::Grid::refuse(ctx, grid_state(d, salt), &error);
+        }
+    }
+}
+
+/// Run `steps` as one gesture: all of them or none, and one undo step for all. A refused step
+/// takes back the ones before it; afterwards only the design before the first step stays in the
+/// undo history, so one Undo takes the whole paste or fill back.
+fn run_as_one(app: &mut SolveApp, steps: &[(&str, Value)]) -> Result<(), String> {
+    let before = app.session.doc.clone();
+    let undo = app.session.undo.len();
+    for (index, (command, params)) in steps.iter().enumerate() {
+        if let Err(error) = app.run(command, params.clone()) {
+            if index > 0 {
+                while app.session.undo.len() > undo && !Arc::ptr_eq(&app.session.doc, &before) {
+                    if app.run("edit.undo", json!({})).is_err() {
+                        break;
+                    }
+                }
+                app.session.redo.clear();
+            }
+            return Err(error);
+        }
+    }
+    if steps.len() > 1
+        && let Some(first) = app.session.undo.iter().rposition(|s| Arc::ptr_eq(&s.doc, &before))
+    {
+        app.session.undo.truncate(first + 1);
+    }
+    Ok(())
 }
 
 fn unit_label(u: &str) -> &str {
@@ -2257,6 +2538,48 @@ mod tests {
         h.step(&json!({"key":"Escape"})).unwrap();
         h.frames(2);
         assert_eq!(comment(&h, "b"), "note b", "Escape discards the edit");
+    }
+
+    /// A block pasted from a spreadsheet (Excel's tab-separated text) over Expression, Value and
+    /// Comment goes in as one gesture: one undo step takes all of it back. The read-only Value
+    /// column keeps its text.
+    #[test]
+    fn a_pasted_block_is_one_undo_step() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        for (name, expression) in [("a", "1 mm"), ("b", "2 mm"), ("c", "3 mm")] {
+            h.app.run("parameters.add", json!({"name": name, "expression": expression})).unwrap();
+        }
+        h.step(&json!({"start": "parameters.change"})).unwrap();
+        h.frames(3);
+        // The cursor on a's expression without editing it: click its Value, then Left.
+        h.run(&json!([{"click": {"handle": "grid:user:a:value"}}])).unwrap();
+        let state = grid_state(h.app.params.as_ref().unwrap(), "user");
+        h.run(&json!([{"key": "ArrowLeft"}])).unwrap();
+        assert!(h.app.params.as_ref().unwrap().editing.is_empty(), "the cursor moved; nothing is edited");
+        assert_eq!(ui_kit::Grid::selection(&h.ctx, state), Some((0, 0, EXPRESSION, EXPRESSION)), "the cursor is on a's expression");
+        assert!(h.ctx.memory(|m| m.focused()).is_some_and(|f| f == state.with("focus")), "and the grid has the keyboard");
+        let undo = h.app.session.undo.len();
+        h.app.synthetic.push(egui::Event::Paste("20 mm\tignored\tfirst\r\n30 mm\tignored\tsecond\r\n".into()));
+        h.frames(3);
+        let param = |h: &crate::scenario::Harness, name: &str| {
+            let p = h.app.session.doc.param(name).unwrap();
+            (p.expr.clone(), p.comment.clone())
+        };
+        assert_eq!(param(&h, "a"), ("20 mm".into(), "first".into()));
+        assert_eq!(param(&h, "b"), ("30 mm".into(), "second".into()));
+        assert_eq!(param(&h, "c"), ("3 mm".into(), String::new()), "the block ends at b");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one paste, one undo step");
+        assert!(h.app.params.as_ref().unwrap().error.is_none());
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(param(&h, "a"), ("1 mm".into(), String::new()));
+        assert_eq!(param(&h, "b"), ("2 mm".into(), String::new()), "one undo takes the whole paste back");
+        // Ctrl+D fills a's expression down to b and c, again as one step.
+        h.run(&json!([{"click": {"handle": "grid:user:a:value"}}, {"key": "ArrowLeft"}, {"key": "ArrowDown", "shift": true}, {"key": "ArrowDown", "shift": true}, {"key": "D", "cmd": true}])).unwrap();
+        h.frames(2);
+        assert_eq!((param(&h, "b").0, param(&h, "c").0), ("1 mm".into(), "1 mm".into()));
+        assert_eq!(h.app.session.undo.len(), undo + 1, "the fill is one step too (the paste was undone)");
     }
 
     /// An open window lists and checks once per revision of the design, not once per frame
