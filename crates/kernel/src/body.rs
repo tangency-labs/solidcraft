@@ -1417,6 +1417,23 @@ impl Body {
         Ok(point_class(class))
     }
 
+    /// The point of face `face_index` nearest `point`, when `point` lies on that face itself
+    /// within `tolerance`, else `None`: solidcore decides it exactly on the face's surface and
+    /// trim ([`solidcore_ops::Body::point_on_face`]), no mesh. `None` too for a mesh body, an
+    /// index out of range, a point or tolerance that is not usable; `Err` for the kernel's
+    /// failure.
+    pub fn point_lies_on_face(&self, face_index: usize, point: Vec3, tolerance: f64) -> Result<Option<Vec3>> {
+        let Some((body, order)) = self.ops_body() else { return Ok(None) };
+        if face_index >= self.record.faces.len() {
+            return Ok(None);
+        }
+        match body.point_on_face(order, face_index, [point.x, point.y, point.z], tolerance) {
+            Ok(found) => Ok(found.map(|p| Vec3::new(p[0], p[1], p[2]))),
+            Err(solidcore_ops::Error::Argument) => Ok(None),
+            Err(e) => Err(KernelError::Failed(format!("point on face: {e}"))),
+        }
+    }
+
     /// [`Body::classify_point`] for each of `points`, in order, through one classification of
     /// the body: SMLib's copy of it and its search structures are made once for all the points,
     /// where a call a point makes them again each time (on a large body far more work than a

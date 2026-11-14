@@ -308,3 +308,12 @@ fn points_classify_against_a_mesh_body() {
     assert_eq!(m.classify_point(Vec3::new(1.0, 1.0, 0.0)).unwrap(), OnBoundary);
     assert_eq!(m.classify_point(Vec3::X * 10.0).unwrap(), OnBoundary);
 }
+
+#[test]
+fn point_lies_on_face_answers_through_solidcore() {
+    // The query itself is tested in solidcore-ops (`tests/measure.rs`); this is the wrapper.
+    let body = cube(10.0);
+    let found = (0..body.record().faces.len()).filter_map(|f| body.point_lies_on_face(f, Vec3::new(10.0, 3.0, -4.0), 1e-6).ok().flatten()).count();
+    assert_eq!(found, 1);
+    assert_eq!(body.point_lies_on_face(99, Vec3::ZERO, 1e-6).unwrap(), None);
+}
