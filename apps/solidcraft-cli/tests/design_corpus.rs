@@ -24,8 +24,9 @@ fn open(path: &Path) -> Session {
 }
 
 /// Every corpus design opens, is upgraded to the current format, evaluates, and saves and reads
-/// back the same. A feature may fail only by asking for a reference it lost to be picked again
-/// (a name saved before format 14 finds nothing today).
+/// back the same. A feature may fail only by asking for a reference it lost to be picked again,
+/// or a sketch by naming the projections it lost (a name saved before format 14 finds nothing
+/// today).
 #[test]
 fn old_designs_open_upgrade_and_evaluate() {
     let mut problems = Vec::new();
@@ -33,7 +34,8 @@ fn old_designs_open_upgrade_and_evaluate() {
         let name = p.file_stem().unwrap_or_default().to_string_lossy().to_string();
         let mut s = open(&p);
         for r in &s.model.results {
-            if let Some(e) = r.error.as_deref().filter(|e| solidcraft_engine::doc::reselect_parts(e).is_none()) {
+            let lost = |e: &str| solidcraft_engine::doc::reselect_parts(e).is_some() || solidcraft_engine::doc::lost_projection_parts(e).is_some();
+            if let Some(e) = r.error.as_deref().filter(|e| !lost(e)) {
                 problems.push(format!("{name}: feature {}: {e}", r.id));
             }
         }

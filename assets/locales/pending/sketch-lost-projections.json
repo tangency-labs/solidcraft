@@ -1,0 +1,42 @@
+{
+  "en": {
+    "diagnostic.lost_projection": "{feature}: {projection} is lost; delete the projection or project it again",
+    "diagnostic.lost_projections": "{feature}: {count} projected references are lost: {projections}; delete each projection or project it again",
+    "diagnostic.lost_projections_more": "{feature}: {count} projected references are lost: {projections} and {more} more; delete each projection or project it again"
+  },
+  "de": {
+    "diagnostic.lost_projection": "{feature}: {projection} ist verloren; Projektion löschen oder erneut projizieren",
+    "diagnostic.lost_projections": "{feature}: {count} projizierte Referenzen sind verloren: {projections}; jede Projektion löschen oder erneut projizieren",
+    "diagnostic.lost_projections_more": "{feature}: {count} projizierte Referenzen sind verloren: {projections} und {more} weitere; jede Projektion löschen oder erneut projizieren"
+  },
+  "ja": {
+    "diagnostic.lost_projection": "{feature}: {projection} が参照切れです。投影を削除するか、もう一度投影してください",
+    "diagnostic.lost_projections": "{feature}: {count} 個の投影参照が参照切れです: {projections}。各投影を削除するか、もう一度投影してください",
+    "diagnostic.lost_projections_more": "{feature}: {count} 個の投影参照が参照切れです: {projections} ほか {more} 個。各投影を削除するか、もう一度投影してください"
+  },
+  "ko": {
+    "diagnostic.lost_projection": "{feature}: {projection}이(가) 손실되었습니다. 투영을 삭제하거나 다시 투영하세요",
+    "diagnostic.lost_projections": "{feature}: 투영 참조 {count}개가 손실되었습니다: {projections}. 각 투영을 삭제하거나 다시 투영하세요",
+    "diagnostic.lost_projections_more": "{feature}: 투영 참조 {count}개가 손실되었습니다: {projections} 외 {more}개. 각 투영을 삭제하거나 다시 투영하세요"
+  },
+  "zh": {
+    "diagnostic.lost_projection": "{feature}：{projection} 已丢失；请删除该投影或重新投影",
+    "diagnostic.lost_projections": "{feature}：{count} 个投影引用已丢失：{projections}；请删除每个投影或重新投影",
+    "diagnostic.lost_projections_more": "{feature}：{count} 个投影引用已丢失：{projections} 等另外 {more} 个；请删除每个投影或重新投影"
+  },
+  "vi": {
+    "diagnostic.lost_projection": "{feature}: {projection} bị mất; hãy xóa hình chiếu hoặc chiếu lại",
+    "diagnostic.lost_projections": "{feature}: {count} tham chiếu chiếu bị mất: {projections}; hãy xóa từng hình chiếu hoặc chiếu lại",
+    "diagnostic.lost_projections_more": "{feature}: {count} tham chiếu chiếu bị mất: {projections} và {more} tham chiếu khác; hãy xóa từng hình chiếu hoặc chiếu lại"
+  },
+  "ar": {
+    "diagnostic.lost_projection": "{feature}: {projection} مفقود؛ احذف الإسقاط أو أسقطه من جديد",
+    "diagnostic.lost_projections": "{feature}: {count} من مراجع الإسقاط مفقودة: {projections}؛ احذف كل إسقاط أو أسقطه من جديد",
+    "diagnostic.lost_projections_more": "{feature}: {count} من مراجع الإسقاط مفقودة: {projections} و{more} غيرها؛ احذف كل إسقاط أو أسقطه من جديد"
+  },
+  "he": {
+    "diagnostic.lost_projection": "{feature}: {projection} אבד; יש למחוק את ההטלה או להטיל מחדש",
+    "diagnostic.lost_projections": "{feature}: {count} הפניות מוטלות אבדו: {projections}; יש למחוק כל הטלה או להטיל מחדש",
+    "diagnostic.lost_projections_more": "{feature}: {count} הפניות מוטלות אבדו: {projections} ועוד {more}; יש למחוק כל הטלה או להטיל מחדש"
+  }
+}

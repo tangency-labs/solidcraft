@@ -172,6 +172,7 @@ pub struct ViewportState {
     wireframe: crate::wireframe_silhouettes::Outlines,
     physical_scale: f32,
     pub(crate) display: std::sync::Mutex<crate::sketch_display::DisplayCache>,
+    failed_sketches: std::sync::Mutex<FailedSketches>,
     pub(crate) hl_slot: SceneSlot,
     pub(crate) hl_key: u64,
     /// Browser/timeline body feedback, independent of the camera and reference widget scale.
@@ -461,10 +462,15 @@ fn rgba(c: Rgb) -> [u8; 4] {
     [c.0, c.1, c.2, 255]
 }
 
-fn scene_bounds(app: &SolveApp) -> solidcraft_engine::geom::Aabb3 {
+pub(crate) fn scene_bounds(app: &SolveApp) -> solidcraft_engine::geom::Aabb3 {
     let mut b = model_bounds(app);
     if !app.preview.bounds.is_empty() {
         b = b.union(&app.preview.bounds);
+    }
+    // Failed sketches drawn are in the depth range, not in what Fit frames.
+    let (_, failed) = failed_sketches(app);
+    if !failed.is_empty() {
+        b = b.union(&failed);
     }
     b
 }
@@ -527,6 +533,110 @@ fn picture_far(app: &SolveApp, cam: &Camera) -> f64 {
 pub(crate) fn visible_sketches(app: &SolveApp) -> Vec<u64> {
     let st = crate::open_meshing::shown_world(app);
     st.sketches.iter().filter(|s| solidcraft_engine::view::sketch_shown(&app.session, s.feature)).map(|s| s.feature).collect()
+}
+
+/// The sketches that failed for lost projections, each built for the result it failed with and
+/// the model before it (both held weakly), and those shown, placed in one world, with their box.
+#[derive(Default)]
+struct FailedSketches {
+    built: std::collections::BTreeMap<u64, BuiltFailed>,
+    list: std::sync::Arc<Vec<std::sync::Arc<solidcraft_engine::doc::SolvedSketch>>>,
+    world: std::sync::Weak<solidcraft_engine::doc::ModelState>,
+    ids: Vec<u64>,
+    placed: std::sync::Arc<Vec<std::sync::Arc<solidcraft_engine::doc::SolvedSketch>>>,
+    bounds: solidcraft_engine::geom::Aabb3,
+    #[cfg(test)]
+    builds: usize,
+    #[cfg(test)]
+    placements: usize,
+}
+
+/// One failed sketch as built, and what it was built from: its result's lost projections and
+/// the state before it. Neither changes while a later sketch is edited or dragged.
+struct BuiltFailed {
+    lost: std::sync::Weak<Vec<solidcraft_engine::doc::LostProjection>>,
+    before: std::sync::Weak<solidcraft_engine::doc::ModelState>,
+    sketch: Option<std::sync::Arc<solidcraft_engine::doc::SolvedSketch>>,
+}
+
+/// Every shown sketch (as [`visible_sketches`] decides) that failed because projections lost
+/// their face or edge, as [`solidcraft_engine::doc::Model::failed_sketch_shown`] builds it (a
+/// sketch held for its editor is in the model already). A sketch is built again only when its
+/// own result or the model before it changed.
+fn failed_sketches_built(app: &SolveApp) -> std::sync::Arc<Vec<std::sync::Arc<solidcraft_engine::doc::SolvedSketch>>> {
+    let s = &app.session;
+    let model = s.model.state();
+    let Ok(mut cache) = app.viewport.failed_sketches.lock() else { return std::sync::Arc::default() };
+    let failed: Vec<(u64, &std::sync::Arc<Vec<solidcraft_engine::doc::LostProjection>>)> = s
+        .model
+        .results
+        .iter()
+        .filter(|r| !r.skipped && !r.stale && model.sketch(r.id).is_none() && solidcraft_engine::view::sketch_shown(s, r.id))
+        .filter_map(|r| r.lost_projections.as_ref().map(|lost| (r.id, lost)))
+        .collect();
+    let mut changed = cache.built.len() != failed.len() || failed.iter().any(|(id, _)| !cache.built.contains_key(id));
+    cache.built.retain(|id, _| failed.iter().any(|(f, _)| f == id));
+    for (id, lost) in failed {
+        let before = s.model.state_before(id);
+        let current = cache.built.get(&id).is_some_and(|b| {
+            std::sync::Weak::as_ptr(&b.lost) == std::sync::Arc::as_ptr(lost) && std::sync::Weak::as_ptr(&b.before) == std::sync::Arc::as_ptr(&before)
+        });
+        if !current {
+            #[cfg(test)]
+            {
+                cache.builds += 1;
+            }
+            let sketch = s.model.failed_sketch_shown(&s.doc, id);
+            cache.built.insert(id, BuiltFailed { lost: std::sync::Arc::downgrade(lost), before: std::sync::Arc::downgrade(&before), sketch });
+            changed = true;
+        }
+    }
+    if changed {
+        cache.list = std::sync::Arc::new(cache.built.values().filter_map(|b| b.sketch.clone()).collect());
+        (cache.world, cache.ids, cache.placed) = Default::default();
+    }
+    cache.list.clone()
+}
+
+/// How many failed sketches have been built and placements made (tests).
+#[cfg(test)]
+pub(crate) fn failed_sketch_counts(app: &SolveApp) -> (usize, usize) {
+    app.viewport.failed_sketches.lock().map(|c| (c.builds, c.placements)).unwrap_or_default()
+}
+
+/// The failed sketches drawn ([`failed_sketches_built`]), placed where the world places
+/// sketches, and their box. Drawn only: never picked, framed by Fit or read by a command.
+/// Nothing while the model can't be placed.
+pub(crate) fn failed_sketches(
+    app: &SolveApp,
+) -> (std::sync::Arc<Vec<std::sync::Arc<solidcraft_engine::doc::SolvedSketch>>>, solidcraft_engine::geom::Aabb3) {
+    let s = &app.session;
+    let shown: Vec<_> = failed_sketches_built(app).iter().cloned().collect();
+    let none = (std::sync::Arc::default(), solidcraft_engine::geom::Aabb3::EMPTY);
+    let world = if shown.is_empty() { None } else { s.world_state().ok() };
+    let Ok(mut cache) = app.viewport.failed_sketches.lock() else { return none };
+    let Some(world) = world else {
+        (cache.world, cache.ids, cache.placed) = Default::default();
+        return none;
+    };
+    let ids: Vec<u64> = shown.iter().map(|ss| ss.feature).collect();
+    if std::sync::Weak::as_ptr(&cache.world) != std::sync::Arc::as_ptr(&world) || cache.ids != ids {
+        #[cfg(test)]
+        {
+            cache.placements += 1;
+        }
+        let placed = s.sketches_placed(shown).unwrap_or_default();
+        let mut bounds = solidcraft_engine::geom::Aabb3::EMPTY;
+        for ss in &placed {
+            if let Some((lo, hi)) = ss.sketch.bounds() {
+                for p in [lo, hi, solidcore_record::Vec2::new(lo.x, hi.y), solidcore_record::Vec2::new(hi.x, lo.y)] {
+                    bounds.add(ss.plane.to_world(p));
+                }
+            }
+        }
+        (cache.world, cache.ids, cache.placed, cache.bounds) = (std::sync::Arc::downgrade(&world), ids, std::sync::Arc::new(placed), bounds);
+    }
+    (cache.placed.clone(), cache.bounds)
 }
 
 /// What Home, Fit and the orbit pivot frame: the bodies and sketches shown now, where they are
@@ -2092,27 +2202,37 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     // the display cache, which holds the design's own solve for picking.
     let typed = crate::dim_view::preview_world(app);
     let ppp = app.viewport.pixels_per_point();
-    let mut uncached = crate::sketch_display::Uncached::default();
-    for sid in visible_sketches(app) {
+    let (failing, _) = failed_sketches(app);
+    let shown: Vec<(u64, &solidcraft_engine::doc::SolvedSketch, bool)> = visible_sketches(app)
+        .into_iter()
+        .filter_map(|sid| typed.as_ref().filter(|_| s.active_sketch == Some(sid)).unwrap_or(&st).sketch(sid).map(|ss| (sid, ss, false)))
+        .chain(failing.iter().map(|ss| (ss.feature, &**ss, true)))
+        .collect();
+    for (sid, ss, failed) in shown {
+        // A budget per sketch, so one large sketch leaves the next its curves (#6524).
+        let mut uncached = crate::sketch_display::Uncached::default();
         let active = s.active_sketch == Some(sid);
-        let typed = typed.as_ref().filter(|_| active);
-        let Some(ss) = typed.unwrap_or(&st).sketch(sid) else { continue };
+        // Sampled here, past the display cache: the open sketch as a typed value leaves it, or a
+        // failed sketch no world state holds.
+        let here = failed || (active && typed.is_some());
         // Its curves are sampled before its profiles, which share their budget: past it a fill
         // goes missing rather than a curve.
-        let mut typed_curves: std::collections::HashMap<usize, Vec<Vec<Vec3>>> = match typed {
-            Some(_) => (0..ss.sketch.curves.len())
+        let mut typed_curves: std::collections::HashMap<usize, Vec<Vec<Vec3>>> = if here {
+            (0..ss.sketch.curves.len())
                 .filter(|i| solidcraft_engine::view::sketch_curve_visible(&ss.sketch, *i))
                 .map(|i| (i, uncached.curve(&ss.sketch, i, &ss.plane, proj, ppp)))
-                .collect(),
-            None => std::collections::HashMap::new(),
+                .collect()
+        } else {
+            std::collections::HashMap::new()
         };
-        // Closed profiles are shaded (lifted off a face they may lie on).
+        // Closed profiles are shaded (lifted off a face they may lie on); a failed sketch has none.
         let lift = ss.plane.normal() * 0.01;
-        let profiles = if app.session.visibility.hidden_profiles.contains(&sid) || ss.sketch.view.hide_profile { &[][..] } else { &ss.profiles[..] };
+        let hidden = failed || app.session.visibility.hidden_profiles.contains(&sid) || ss.sketch.view.hide_profile;
+        let profiles = if hidden { &[][..] } else { &ss.profiles[..] };
         let profile_fill = sc.color(c4(tk.profile_fill));
         for (index, profile) in profiles.iter().enumerate() {
             let (sampled, cached);
-            let display = if typed.is_some() {
+            let display = if here {
                 sampled = uncached.profile(&profile.region, &ss.plane, proj, ppp);
                 &sampled
             } else {
@@ -2137,9 +2257,10 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         let conflict = if active { Conflict::of(app, &ss.sketch, &ss.report) } else { Conflict::default() };
         let mut owners = Vec::new();
         let lines = sketch_lines_with_sampler(&ss.sketch, &ss.plane, active, &ss.report.curve_determined, |_, index, plane| {
-            let parts = match typed {
-                Some(_) => typed_curves.remove(&index).unwrap_or_default(),
-                None => crate::sketch_display::curve_sample(app, sid, index, plane, proj).parts.clone(),
+            let parts = if here {
+                typed_curves.remove(&index).unwrap_or_default()
+            } else {
+                crate::sketch_display::curve_sample(app, sid, index, plane, proj).parts.clone()
             };
             owners.extend(std::iter::repeat_n(index, parts.len()));
             parts
