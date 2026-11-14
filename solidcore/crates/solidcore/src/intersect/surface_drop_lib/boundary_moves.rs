@@ -350,8 +350,8 @@ pub fn fix_boundary_curves_bounded(
         let this_pt = 3 * ii;
         let knot = {
             let k = ctrl_poly.get_mut(this_pt).ok_or_else(bad)?;
-            k.x = k.x.clamp(lo.x, hi.x.max(lo.x));
-            k.y = k.y.clamp(lo.y, hi.y.max(lo.y));
+            k.x = uv_domain.u_interval().clamp_value(k.x);
+            k.y = uv_domain.v_interval().clamp_value(k.y);
             *k
         };
         if ii == 0 || ii == num_spans {
@@ -401,8 +401,8 @@ pub fn fix_boundary_curves_bounded(
     // 5. every control point into the domain
     for p in ctrl_poly.iter_mut() {
         let (x, y) = (
-            p.x.clamp(lo.x, hi.x.max(lo.x)),
-            p.y.clamp(lo.y, hi.y.max(lo.y)),
+            uv_domain.u_interval().clamp_value(p.x),
+            uv_domain.v_interval().clamp_value(p.y),
         );
         if x != p.x || y != p.y {
             p.x = x;
