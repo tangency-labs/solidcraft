@@ -1,5 +1,4 @@
 [
-  "plane_recognition_origin_after_axes",
   "curve_loop_start_after_previous_end",
   "fillet_trim_status",
   "curve_loop_normal_from_area",
@@ -42,7 +41,6 @@
   "local_surface_intersect_guards_max_boundary_retry",
   "cylinder_rebuild_mean_radius",
   "nurb_cylinder_inside_out_frame",
-  "plane_reparameterize_moves_origin",
   "curve_bounded_surface_read_uv_type_and_implicit_outer",
   "planar_path_profile_placement_statuses",
   "revolve_analytic_profile_faces",
