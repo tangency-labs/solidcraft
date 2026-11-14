@@ -53,8 +53,7 @@
 //!   not returned, except by `check_for_squeeze_vertices_into`, which appends to the
 //!   caller's lists as upstream does (a failure after the first conflict keeps its
 //!   appends). The `NotUsed` `bMakingManifoldSolid` of `EdgeEdgeIntersect` is kept.
-//! - **Opt-in (WR-527, #1526).** With `Kernel::fixes.boolean_skips_faces_apart`,
-//!   `IntersectTopology` skips a face pair whose face boxes are disjoint by the
+//! - **Not upstream (WR-527, #1526).** `IntersectTopology` skips a face pair whose face boxes are disjoint by the
 //!   intersection tolerance (the fork's tangency-labs/smlib@60b1c6a). It then visits,
 //!   for each face of the B-rep, only the faces of the other B-rep a box search
 //!   (`SpatialIndex`) finds not disjoint from its box, in ascending order (the fork's
@@ -1491,7 +1490,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
         }
 
-        // Opt-in (WR-527, #1526/#1527): each face's bounding box, for skipping the pairs
+        // Not upstream (WR-527, #1526/#1527): each face's bounding box, for skipping the pairs
         // below that lie apart. A box that cannot be computed, or holds nothing, rules
         // nothing out.
         let face_boxes = |faces: &[O]| -> Result<Vec<Extent3d>> {
@@ -1511,17 +1510,14 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
             Ok(out)
         };
-        let skip_apart = k.fixes.boolean_skips_faces_apart;
-        let (boxes1, boxes2) = if skip_apart {
-            (face_boxes(&faces1)?, face_boxes(&faces2)?)
-        } else {
-            (Vec::new(), Vec::new())
-        };
+        let (boxes1, boxes2) = (face_boxes(&faces1)?, face_boxes(&faces2)?);
         // (the fork's tangency-labs/smlib@84a7998) the other B-rep's faces whose box may
         // lie within the tolerance of a face's box: a superset of the pairs the box test
         // below keeps, in ascending order. The pairs it leaves out reach nothing before
         // that test but lookups without effect (no intersection table is registered).
-        let pair_search = (skip_apart && self.intersection_table().is_none())
+        let pair_search = self
+            .intersection_table()
+            .is_none()
             .then(|| SpatialIndex::new(boxes2.iter().copied().map(Some)));
 
         // Finally, the Face-Face intersections.
@@ -1555,7 +1551,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // No existing SSI, check coincidence or intersection.
                 let tol = self.this_approx_tol_3d();
 
-                // Opt-in (WR-527): no work - faces farther apart than the intersection
+                // (WR-527) no work - faces farther apart than the intersection
                 // tolerance cannot meet
                 if let (Some(box1), Some(box2)) = (boxes1.get(ii), boxes2.get(jj)) {
                     if box1.are_disjoint(box2, tol) {

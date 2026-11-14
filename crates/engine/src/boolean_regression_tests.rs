@@ -255,6 +255,20 @@ fn step_export_of_a_flanged_enclosure_finishes_and_reads_back() {
     assert_eq!(file_faces, 29);
 }
 
+/// #15418 (solidcore, PR #16594): the flanged enclosure's flange walls lie on planes 1.2e-10 to
+/// 9.8e-10 off the walls they continue (the booleans' rounding). The cleanup merges each pair,
+/// two planes covering each other within upstream's plane tolerance with no tolerance raised:
+/// 29 faces, and the body is valid.
+#[test]
+fn a_flanged_enclosure_s_near_coplanar_walls_merge_and_the_body_is_valid() {
+    let s = replay(include_str!("../../../examples/regressions/step_export_flanged_enclosure.json"));
+    let state = s.model.state();
+    let body = &state.body("Unterteil").unwrap().body;
+    assert_eq!(body.face_count(), 29);
+    let v = solidcraft_kernel::validity(body);
+    assert!(v.ok(), "{v:?}");
+}
+
 /// The body's STEP text, which reads back without warnings as one closed solid of the same
 /// volume and area, and the number of faces the file holds.
 fn read_back(s: &Session, body: &solidcraft_kernel::Body) -> (String, usize) {
