@@ -1,6 +1,7 @@
 {
   "en": {
     "Another angle of this view": "Another angle of this view",
+    "Maximise this view": "Maximise this view",
     "One large and two small": "One large and two small",
     "Open beside": "Open beside",
     "Show beside": "Show beside",
@@ -12,6 +13,7 @@
   },
   "de": {
     "Another angle of this view": "Weiterer Blickwinkel dieser Ansicht",
+    "Maximise this view": "Diese Ansicht maximieren",
     "One large and two small": "Eine große und zwei kleine",
     "Open beside": "Daneben öffnen",
     "Show beside": "Daneben anzeigen",
@@ -23,6 +25,7 @@
   },
   "ko": {
     "Another angle of this view": "이 뷰의 다른 각도",
+    "Maximise this view": "이 뷰 최대화",
     "One large and two small": "큰 뷰 하나와 작은 뷰 둘",
     "Open beside": "옆에 열기",
     "Show beside": "옆에 표시",
@@ -34,6 +37,7 @@
   },
   "ar": {
     "Another angle of this view": "زاوية أخرى لهذا العرض",
+    "Maximise this view": "تكبير هذا العرض",
     "One large and two small": "واحد كبير واثنان صغيران",
     "Open beside": "فتح بجانبه",
     "Show beside": "إظهار بجانبه",
@@ -45,6 +49,7 @@
   },
   "he": {
     "Another angle of this view": "זווית נוספת של התצוגה הזו",
+    "Maximise this view": "הגדלת התצוגה הזו",
     "One large and two small": "אחת גדולה ושתיים קטנות",
     "Open beside": "פתיחה לצד",
     "Show beside": "הצגה לצד",
@@ -56,6 +61,7 @@
   },
   "ja": {
     "Another angle of this view": "このビューの別の角度",
+    "Maximise this view": "このビューを最大化",
     "One large and two small": "大1つと小2つ",
     "Open beside": "隣に開く",
     "Show beside": "隣に表示",
@@ -67,6 +73,7 @@
   },
   "vi": {
     "Another angle of this view": "Một góc nhìn khác của góc nhìn này",
+    "Maximise this view": "Phóng to góc nhìn này",
     "One large and two small": "Một lớn và hai nhỏ",
     "Open beside": "Mở bên cạnh",
     "Show beside": "Hiển thị bên cạnh",
@@ -78,6 +85,7 @@
   },
   "zh": {
     "Another angle of this view": "此视图的另一个角度",
+    "Maximise this view": "最大化此视图",
     "One large and two small": "一大两小",
     "Open beside": "在旁边打开",
     "Show beside": "在旁边显示",
