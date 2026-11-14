@@ -259,7 +259,7 @@ fn a_section_pick_skips_edges_and_vertices_in_the_removed_half() {
     // The same projection the model-frame pick builds, so a world point's pixel can be picked.
     let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(960.0, 600.0));
     let cam = h.app.cam;
-    let proj = crate::viewport::Proj { cam, vp: cam.view_proj(960.0 / 600.0, crate::viewport::scene_radius(&h.app)), rect };
+    let proj = crate::viewport::Proj { cam, vp: cam.view_proj(960.0 / 600.0, crate::viewport::scene_radius(&h.app)), rect, bounds: None };
     let px = |p: [f64; 3]| {
         let sp = proj.to_screen(Vec3::new(p[0], p[1], p[2])).unwrap();
         json!([sp.x as f64, sp.y as f64])
