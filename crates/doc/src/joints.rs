@@ -2610,7 +2610,12 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Sol
                 // parts as they are now: leaving it out would cut every part joined through it
                 // from the grounded ones, and driving a joint on the far side would move nothing.
                 if j.kind == JointKind::Rigid {
-                    let held = mat_inverse(&occurrence_world(doc, j.a.occurrence)).map(|inv| mat_mul(&inv, &occurrence_world(doc, j.b.occurrence)));
+                    // Traversal applies the joint's constant link (its flip, angle and offset),
+                    // so the frame carries that link's inverse and the part lands on its saved pose.
+                    let link = link_of(j, &[]);
+                    let held = mat_inverse(&occurrence_world(doc, j.a.occurrence))
+                        .map(|inv| mat_mul(&inv, &occurrence_world(doc, j.b.occurrence)))
+                        .and_then(|held| mat_inverse(&link).map(|inv| mat_mul(&held, &inv)));
                     if let Some(held) = held {
                         frames.insert(j.id, JointFrames::new(held, IDENTITY));
                     }
