@@ -713,3 +713,14 @@ fn a_border_on_paper_draws_only_what_its_profile_has() {
     assert_eq!(paper(DrawingBorderProfile { grid: GridRule::Equal { columns: 1, rows: 1 }, ..iso() }, &a3), [1, 1, 4]);
     assert_eq!(paper(iso(), &Sheet::standard(PaperSize::A4, Orientation::Portrait)), [1, 1 + 2 * 3 + 2 * 5, 4]);
 }
+
+#[test]
+fn alternate_letter_alphabets_share_the_bijective_sequence_and_reject_unbounded_work() {
+    assert_eq!(letters_from_alphabet(0, b"AB").as_deref(), Some("A"));
+    assert_eq!(letters_from_alphabet(2, b"AB").as_deref(), Some("AA"));
+    assert_eq!(letters_from_alphabet(5, b"AB").as_deref(), Some("BB"));
+    assert_eq!(letters_from_alphabet(6, b"AB").as_deref(), Some("AAA"));
+    assert_eq!(letters_from_alphabet(23, b"ABCDEFGHJKLMNPRSTUVWXYZ").as_deref(), Some("AA"));
+    assert_eq!(letters_from_alphabet(usize::MAX, b""), None);
+    assert_eq!(letters_from_alphabet(usize::MAX, b"A"), None);
+}
