@@ -1792,6 +1792,9 @@ preference_settings! {
     /// theme's dimension colours (Preferences › Sketch › Dimension color, #14121). Selection, hover
     /// and conflicts keep their own colours.
     dimension_colour: Option<[u8; 3]> = None, PAGE_SKETCH;
+    /// In Dimension, drag an unambiguous two-line corner to place its angular dimension.
+    /// Off retains the ordinary tool behavior: a drag clicks where it ends.
+    dimension_corner_drag: bool = true, PAGE_SKETCH => check_id("prefs.dimension_corner_drag");
     /// The first length dimension of a sketch with nothing sized yet scales the whole drawing to
     /// its value (#1365). Off: it sizes only what it measures (#4109).
     first_dimension_scales: bool = true, PAGE_SKETCH;

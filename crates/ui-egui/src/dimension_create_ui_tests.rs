@@ -2428,3 +2428,103 @@ fn shown_dimensions_in_a_conflict_take_the_conflict_colour() {
     h.call("ui.prefs", json!({"theme": "dark"}));
     h.frame();
 }
+
+fn corner_sketch() -> Harness {
+    sketch_with(
+        &[
+            ("sketch.line", json!({"points":[[0,20],[0,0],[20,0]],"infer":false})),
+            ("sketch.constraint.fix", json!({"entity":"l1.end"})),
+            ("sketch.constraint.horizontal_vertical", json!({"line":"l2","mode":"horizontal"})),
+        ],
+        [8., 8.],
+    )
+}
+
+#[test]
+fn corner_drag_angle_edits_and_undoes_once() {
+    let mut h = corner_sketch();
+    let original = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    let dims = dimension_count(&h);
+    h.step(&json!({"drag":[{"sketch":[0,0]},{"sketch":[10,6]}]})).unwrap();
+    assert!(crate::dim_view::editing(), "releasing the corner drag opens the angle value");
+    assert_eq!(h.app.session.doc.to_json(), original, "placement alone is a draft");
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")));
+    type_value(&mut h, "60");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    let new = added(&h, dims);
+    assert_eq!(new.len(), 1);
+    assert!(new[0].kind.is_angle());
+    assert!((new[0].kind.value().unwrap().to_degrees() - 60.).abs() < 1e-6);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.to_json(), original);
+}
+
+#[test]
+fn corner_drag_angle_cancel_and_outside_release_leave_document_unchanged() {
+    let mut h = corner_sketch();
+    let original = h.app.session.doc.to_json();
+    h.step(&json!({"drag":[{"sketch":[0,0]},{"sketch":[10,6]}]})).unwrap();
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(!crate::dim_view::editing());
+    assert_eq!(h.app.session.doc.to_json(), original);
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    h.step(&json!({"drag":[{"sketch":[0,0]},[-50,-50]]})).unwrap();
+    assert!(!crate::dim_view::editing());
+    assert!(h.app.viewport.corner_dimension_drag.is_none());
+    assert_eq!(h.app.session.doc.to_json(), original);
+}
+
+#[test]
+fn corner_drag_angle_disabled_or_ambiguous_keeps_ordinary_tool_behavior() {
+    for disabled in [false, true] {
+        let mut h = corner_sketch();
+        if disabled {
+            h.app.preferences.dimension_corner_drag = false;
+        } else {
+            h.app.run("sketch.line", json!({"points":[[0,0],[-15,8]],"infer":false})).unwrap();
+            h.settle();
+        }
+        let original = h.app.session.doc.to_json();
+        h.step(&json!({"drag":[{"sketch":[0,0]},{"sketch":[10,6]}]})).unwrap();
+        assert!(!crate::dim_view::editing());
+        assert!(h.app.tool.as_ref().unwrap().picks.is_empty());
+        assert_eq!(h.app.session.doc.to_json(), original);
+    }
+}
+
+#[test]
+fn corner_drag_angle_collinear_corner_does_not_become_a_length() {
+    let mut h = sketch_with(&[("sketch.line", json!({"points":[[-20,0],[0,0],[20,0]],"infer":false}))], [0., 0.]);
+    let original = h.app.session.doc.to_json();
+    h.step(&json!({"drag":[{"sketch":[0,0]},{"sketch":[10,6]}]})).unwrap();
+    assert!(!crate::dim_view::editing());
+    assert_eq!(h.app.session.doc.to_json(), original);
+}
+
+#[test]
+fn corner_drag_angle_fixed_corner_places_reference_dimension() {
+    let mut h = corner_sketch();
+    h.app.run("sketch.constraint.horizontal_vertical", json!({"line":"l1","mode":"vertical"})).unwrap();
+    h.settle();
+    let dims = dimension_count(&h);
+    h.step(&json!({"drag":[{"sketch":[0,0]},{"sketch":[10,6]}]})).unwrap();
+    let new = added(&h, dims);
+    assert_eq!(new.len(), 1);
+    assert!(new[0].driven && new[0].kind.is_angle());
+    assert!(!crate::dim_view::editing(), "a constrained angle is a reference, not an editable constraint");
+}
+
+#[test]
+fn corner_drag_angle_short_motion_retains_point_pick() {
+    let mut h = corner_sketch();
+    let [x, y] = h.at(&json!({"sketch":[0,0]})).unwrap();
+    // Holding a button can be classified as a drag even with very little motion.
+    let p = egui::pos2(x as f32, y as f32);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let drag = crate::tools::corner_dimension_start(&mut h.app, &proj, p).unwrap();
+    crate::tools::corner_dimension_end(&mut h.app, &proj, drag, Some(p));
+    assert!(!crate::dim_view::editing());
+    assert_eq!(h.app.tool.as_ref().unwrap().picks.len(), 1, "small motion still picks the corner point");
+}

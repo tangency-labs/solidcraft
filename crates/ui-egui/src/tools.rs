@@ -1447,3 +1447,80 @@ pub(crate) fn rounded_outline(a: Vec2, b: Vec2, r: f64) -> Vec<Vec2> {
     }
     pts
 }
+/// A corner drag keeps the document identity so a replacement or an edit during the
+/// gesture cannot dimension unrelated geometry on release.
+pub(crate) struct CornerDimensionDrag {
+    baseline: std::sync::Arc<solidcraft_engine::doc::Document>,
+    sketch: u64,
+    entities: Vec<String>,
+    from: Pos2,
+}
+
+pub(crate) fn corner_dimension_start(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Option<CornerDimensionDrag> {
+    if !app.preferences.dimension_corner_drag || crate::dim_view::editing() || app.dialog.is_some() {
+        return None;
+    }
+    let tool = app.tool.as_ref().filter(|t| t.kind == Kind::Dimension && t.picks.is_empty())?;
+    if !tool.point_picks.is_empty() {
+        return None;
+    }
+    let sketch = app.session.active_sketch?;
+    let point = pick(app, proj, pos).into_iter().find_map(|hit| match hit {
+        Hit::SketchPoint { sketch: sid, id, .. } if sid == sketch => Some(id),
+        _ => None,
+    })?;
+    let state = app.session.world_state().ok()?;
+    let sk = &state.sketch(sketch)?.sketch;
+    if sk.view.three_d {
+        return None;
+    }
+    let corner = sk.point(sk.resolve_point(&point)?)?;
+    let mut lines = Vec::new();
+    for (index, curve) in sk.curves.iter().enumerate() {
+        if !solidcraft_engine::view::sketch_curve_visible(sk, index) {
+            continue;
+        }
+        let solidcraft_engine::sketch::CurveKind::Line { a, b } = curve.kind else { continue };
+        let (Some(a), Some(b)) = (sk.point(a), sk.point(b)) else { continue };
+        // Coincident ends may be separate solver points, as with independently drawn lines.
+        let end = if (a - corner).len() < 1e-7 {
+            Some(b)
+        } else if (b - corner).len() < 1e-7 {
+            Some(a)
+        } else {
+            None
+        };
+        if let Some(end) = end {
+            lines.push((curve.id.clone(), end - corner));
+        }
+    }
+    let [(a, u), (b, v)] = lines.as_slice() else { return None };
+    let scale = u.len() * v.len();
+    if !scale.is_finite() || scale < 1e-14 || (u.x * v.y - u.y * v.x).abs() <= scale * 1e-8 {
+        return None;
+    }
+    let entities = vec![a.clone(), b.clone()];
+    app.tool.as_mut()?.picks = entities.clone();
+    Some(CornerDimensionDrag { baseline: app.session.doc.clone(), sketch, entities, from: pos })
+}
+
+pub(crate) fn corner_dimension_end(app: &mut SolveApp, proj: &Proj, drag: CornerDimensionDrag, pos: Option<Pos2>) {
+    let same_tool = app.tool.as_ref().is_some_and(|t| t.kind == Kind::Dimension && t.picks == drag.entities);
+    let valid = same_tool && app.session.active_sketch == Some(drag.sketch) && std::sync::Arc::ptr_eq(&drag.baseline, &app.session.doc);
+    if same_tool && let Some(tool) = app.tool.as_mut() {
+        tool.picks.clear();
+        tool.point_picks.clear();
+    }
+    if valid && let Some(pos) = pos.filter(|p| p.distance(drag.from) < 8.0) {
+        on_hover(app, proj, pos, false);
+        on_click(app, proj, pos, false);
+        return;
+    }
+    if valid
+        && let Some(pos) = pos
+        && let Some((at, _)) = sketch_point_at(app, proj, pos)
+        && let Err(error) = crate::dim_view::begin_dimension(app, drag.entities, at)
+    {
+        app.set_status(error, true);
+    }
+}
