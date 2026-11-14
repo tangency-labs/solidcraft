@@ -83,6 +83,7 @@ use crate::blend::fillet_standard_solver::p1::{
 use crate::curve::curve_cache::CurveCache;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::{ids, Attribute, AttributeHandle, AttributeStore, Behavior};
+use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::heal::stitch::p1::{
@@ -5679,6 +5680,42 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         use crate::intersect::point_class::{PointClassType, PointClassification};
         let (rails, edges, tol) = band_rails(self, k, solvers)?;
         let apart = 10.0 * tol;
+        // Pruning by boxes (#16645: the pair loop is quadratic in the blends, and each
+        // sample classifies against the face). A pair `(a, b)` can refuse only through a
+        // sample `p` of rail `a`'s kept part for which, with `e` on edge `b` and `r` on
+        // rail `b` (both inside their curves' boxes), `|p - e| < |e - r|`. So `p` lies
+        // within `|e - r|` of `e`, and `|e - r|` is at most the diagonal of the union
+        // of edge `b`'s box and rail `b`'s box. Rail `a`'s box contains `p`; when it is
+        // separated from edge `b`'s box grown by that diagonal (plus a margin) on some
+        // axis, the Euclidean distance from `p` to every `e` exceeds the diagonal, so
+        // no sample of the pair can pass the band test and skipping it gives the same
+        // verdict. Boxes are the curves' exact bounds; a curve whose box cannot be
+        // computed is never pruned.
+        let margin = 100.0 * tol + apart;
+        let mut edge_boxes: Vec<Option<Extent3d>> = Vec::new();
+        for &(edge, _) in &edges {
+            let e = self.target.edge(edge)?;
+            let boxed = match &e.curve {
+                Some(c) => c.calculate_tight_bounding_box(k, &e.interval).ok(),
+                None => None,
+            };
+            edge_boxes.push(boxed);
+        }
+        // per rail: the box of its kept part (as rail `a`) and of its natural interval
+        // (as rail `b`)
+        let mut rail_boxes: Vec<Vec<(Option<Extent3d>, Option<Extent3d>)>> = Vec::new();
+        for own in &rails {
+            let mut v = Vec::new();
+            for (_, curve, kept) in own {
+                v.push((
+                    curve.calculate_tight_bounding_box(k, kept).ok(),
+                    curve
+                        .calculate_tight_bounding_box(k, &curve.natural_interval())
+                        .ok(),
+                ));
+            }
+            rail_boxes.push(v);
+        }
         for (a, &(edge_a, ends_a)) in edges.iter().enumerate() {
             for (b, &(edge_b, ends_b)) in edges.iter().enumerate() {
                 if a == b || edge_a == edge_b {
@@ -5687,6 +5724,17 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                 if ends_a.iter().any(|v| ends_b.contains(v)) {
                     continue; // a corner trims them where they meet
                 }
+                let (Some(rails_a), Some(rails_b)) = (rails.get(a), rails.get(b)) else {
+                    continue;
+                };
+                // only rails on a face the two blends share can refuse
+                if !rails_a
+                    .iter()
+                    .any(|(fa, _, _)| rails_b.iter().any(|(fb, _, _)| fa == fb))
+                {
+                    continue;
+                }
+                let edge_box_b = edge_boxes.get(b).and_then(|x| x.as_ref());
                 let edge_curve_b = self
                     .target
                     .edge(edge_b)?
@@ -5696,37 +5744,28 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                 let edge_ivl_b = self.target.edge(edge_b)?.interval;
                 let edge_start_b = edge_curve_b.evaluate_point(k, edge_ivl_b.min())?;
                 let edge_end_b = edge_curve_b.evaluate_point(k, edge_ivl_b.max())?;
-                let (Some(rails_a), Some(rails_b)) = (rails.get(a), rails.get(b)) else {
-                    continue;
-                };
-                for (face_a, curve_a, kept_a) in rails_a {
-                    for (face_b, curve_b, _) in rails_b {
+                for (ia, (face_a, curve_a, kept_a)) in rails_a.iter().enumerate() {
+                    for (ib, (face_b, curve_b, _)) in rails_b.iter().enumerate() {
                         if face_a != face_b {
                             continue;
+                        }
+                        if let (Some(eb), Some(Some(box_a)), Some(Some(box_b))) = (
+                            edge_box_b,
+                            rail_boxes.get(a).and_then(|r| r.get(ia)).map(|x| &x.0),
+                            rail_boxes.get(b).and_then(|r| r.get(ib)).map(|x| &x.1),
+                        ) {
+                            let reach = eb.union(box_b).size().length() + margin;
+                            let mut grown = eb.clone();
+                            grown.expand_absolute(reach);
+                            if box_a.are_disjoint(&grown, 0.0) {
+                                continue; // no sample can fall inside the band
+                            }
                         }
                         let ivl_a = *kept_a;
                         let ivl_b = curve_b.natural_interval();
                         for s in 1..16_u32 {
                             let p =
                                 curve_a.evaluate_point(k, ivl_a.evaluate(f64::from(s) / 16.0))?;
-                            let face_tol = crate::geom::tol::zone_tol3d(
-                                k,
-                                crate::topology::face::p2::tolerance(self.target, *face_a)?,
-                            );
-                            let mut on = PointClassification::<EntityRef>::new(face_tol);
-                            crate::query::face::p1::point_3d_classify(
-                                k,
-                                self.target,
-                                *face_a,
-                                p,
-                                face_tol,
-                                true,
-                                &mut on,
-                                crate::query::face::p1::Point3dClassifyOptions::default(),
-                            )?;
-                            if on.point_class() == PointClassType::Unknown {
-                                continue; // off the face
-                            }
                             let on_edge = edge_curve_b.drop_point(
                                 k,
                                 &edge_ivl_b,
@@ -5784,6 +5823,29 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                 && from_rail < width - apart
                                 && (p - e).length() < width
                             {
+                                // Inside the band by geometry; it refuses when the sample
+                                // is also on its face. The face test comes last because it
+                                // only filters (a sample off the face never refuses), so
+                                // the verdict does not depend on the order, and it is the
+                                // costly step (#16645): it runs only for a real overlap.
+                                let face_tol = crate::geom::tol::zone_tol3d(
+                                    k,
+                                    crate::topology::face::p2::tolerance(self.target, *face_a)?,
+                                );
+                                let mut on = PointClassification::<EntityRef>::new(face_tol);
+                                crate::query::face::p1::point_3d_classify(
+                                    k,
+                                    self.target,
+                                    *face_a,
+                                    p,
+                                    face_tol,
+                                    true,
+                                    &mut on,
+                                    crate::query::face::p1::Point3dClassifyOptions::default(),
+                                )?;
+                                if on.point_class() == PointClassType::Unknown {
+                                    continue; // off the face
+                                }
                                 return Ok(false);
                             }
                         }
