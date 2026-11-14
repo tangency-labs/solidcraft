@@ -1495,3 +1495,23 @@ fn the_faces_a_round_is_carried_on_past_are_the_kernels() {
         Err(Error::Argument)
     ));
 }
+
+/// A session's failure says what the session noted of the step that failed
+/// ([`solidcore_ops::blend::session_failure`]). The session here is asked to fillet with no
+/// edge set up: it makes no fillet face, and what it noted says so after the kernel's statement.
+#[test]
+fn a_session_failure_says_what_its_session_noted() {
+    use solidcore::blend::fillet_executive::session::FilletSession;
+    let (mut k, mut brep) = kernel_copy(&block());
+    let mut s = FilletSession::new(&mut k, &mut brep).unwrap();
+    let e = s.do_filleting(&mut k, None).unwrap_err();
+    assert_eq!(
+        blend::failure(&e).unwrap().to_string(),
+        "the blend failed (status 1001): the fillet body has no faces"
+    );
+    assert_eq!(
+        blend::session_failure(&s, &e).unwrap().to_string(),
+        "the blend failed (status 1001): the fillet body has no faces: Fillet Surface \
+         Computation Failure: no fillet faces were made"
+    );
+}
