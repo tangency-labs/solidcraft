@@ -426,9 +426,10 @@ The agent reaches the open design only through SolidCraft's own tools (the
   a single undo step, named after your message. The conversation shows *N changes, one undo
   step* with **Undo these changes** while nothing else has happened since.
 - **Tool cards:** each tool call shows as a card with its state; click it to see what it returned.
-- **Formatted text:** the agent's answers show as Markdown: headings, lists, quotes, code blocks
-  (with **Copy**), bold, italic, `code` and links (web links only; each link is a button that opens
-  it in your browser). What you type, and the agent's thoughts, stay plain text.
+- **Formatted text:** the agent's answers show as Markdown: headings, lists, quotes, tables, code
+  blocks (with **Copy**), bold, italic, `code` and links (web links only; each link is a button
+  that opens it in your browser). A wide table scrolls sideways; one without the `|---|` line
+  under its header, or with more than 200 rows or 2000 cells, shows as plain text. What you type, and the agent's thoughts, stay plain text.
 - **Attach view:** tick it to send a picture of the current view with your message, for agents
   that take pictures. The picture is taken when the agent starts on the message and then shows as
   a small thumbnail under it. Hold the pointer over the thumbnail for a bigger preview that stays
