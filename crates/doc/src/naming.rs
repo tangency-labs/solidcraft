@@ -277,7 +277,7 @@ impl FaceIndex {
 }
 
 fn face_count(b: &ModelBody) -> usize {
-    b.mesh().tri_face.iter().map(|f| *f as usize + 1).max().unwrap_or(0)
+    b.body.face_count()
 }
 
 /// Names of a body's faces (by B-rep face index).

@@ -57,7 +57,6 @@ crates/doc/src/naming.rs:carried_face_names carries face names to imported bodie
 crates/doc/src/naming.rs:edge_names_at names the edges nearest points by the display mesh
 crates/doc/src/naming.rs:edge_names_from names edges from their faces by the display mesh
 crates/doc/src/naming.rs:face_centres takes face centres from mesh triangles
-crates/doc/src/naming.rs:face_count counts faces by the display mesh
 crates/doc/src/naming.rs:face_name_at_body names a face at a point by the display mesh
 crates/doc/src/naming.rs:face_names_at names the faces holding points by the display mesh
 crates/doc/src/naming.rs:face_spot finds where a face is by the display mesh
