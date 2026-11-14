@@ -548,13 +548,14 @@ mod tests {
         .unwrap();
     }
 
-    /// `Test #82` refuses a vertex tolerance equal to its limit, not only one over it: just under
-    /// the limit the check reports nothing, at it test 82 fails for that vertex.
+    /// A finite vertex tolerance is the vertex's own stored zone, not bounded by a ratio to the
+    /// body tolerance: just under, at and past the old `LARGE_SMALL_SIZE_RATIO` limit the check
+    /// reports nothing for that vertex.
     #[test]
-    fn the_check_refuses_a_vertex_tolerance_at_the_limit() {
+    fn a_finite_vertex_tolerance_past_the_old_ratio_limit_is_accepted() {
         use crate::topology::brep::validation::{check_brep, CheckLevel};
 
-        for (factor, refused) in [(0.999_999, false), (1.0, true)] {
+        for factor in [0.999_999, 1.0, 2.0] {
             with_box(|k, b| {
                 let (v, _, limit) = corner_and_limit(b);
                 b.vertex_mut(v)?.tolerance = factor * limit;
@@ -567,11 +568,7 @@ mod tests {
                     .filter(|r| !r.ok)
                     .map(|r| r.test_index as u32)
                     .collect();
-                assert_eq!(
-                    failed,
-                    if refused { vec![82] } else { vec![] },
-                    "at {factor} of the limit"
-                );
+                assert_eq!(failed, Vec::<u32>::new(), "at {factor} of the old limit");
                 Ok(())
             })
             .unwrap();
