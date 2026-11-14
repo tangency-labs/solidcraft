@@ -1,0 +1,21 @@
+diff --git a/apps/solidcraft-cli/src/kernel_cases.rs b/apps/solidcraft-cli/src/kernel_cases.rs
+index d320b3a6e..3af7328c8 100644
+--- a/apps/solidcraft-cli/src/kernel_cases.rs
++++ b/apps/solidcraft-cli/src/kernel_cases.rs
+@@ -801,6 +801,16 @@ fn check_case_in(
+             return out;
+         }
+     };
++    if let Ok(d) = std::env::var("MESHBAKE_DUMP") {
++        for (i, b) in world.bodies.iter().enumerate() {
++            if let Ok(t) = serde_json::to_string(b.body.record()) {
++                let _ = std::fs::write(format!("{d}/{area}__{name}__{i}.json"), t);
++            }
++            if let Ok(nb) = solidcraft_engine::kernel::encode_native_body(&b.body) {
++                let _ = std::fs::write(format!("{d}/{area}__{name}__{i}.nb"), nb);
++            }
++        }
++    }
+     let mut bodies = Vec::new();
+     let mut c = Checks { list: Vec::new(), pass: true };
+     let want_valid = want["valid"].as_bool().unwrap_or(true);
