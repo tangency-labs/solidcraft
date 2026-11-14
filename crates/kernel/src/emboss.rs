@@ -27,27 +27,11 @@ fn arr(v: Vec3) -> [f64; 3] {
 }
 
 /// For a plane tangent to a cylinder about the axis `a` of radius `r` through `o`: the direction
-/// from the axis to the tangent line, and the direction the wrapped profile's x runs in, which
-/// is such that x, then the axis, turn about the wall's own normal (away from the axis outside,
-/// towards it in a bore). An exterior wall needs the plane's normal pointing away from the axis.
+/// from the axis to the tangent line, and the direction the wrapped profile's x runs in (found by
+/// solidcore). An exterior wall needs the plane's normal pointing away from the axis.
 fn wall_frame(normal: Vec3, w: Vec3, a: Vec3, r: f64, convex: bool, tol: f64) -> Option<(Vec3, Vec3)> {
-    if normal.dot(a).abs() > 1e-8 {
-        return None;
-    }
-    let s = w.dot(normal);
-    let u = if convex {
-        if (s - r).abs() > tol * 10.0 {
-            return None;
-        }
-        normal
-    } else {
-        if (s.abs() - r).abs() > tol * 10.0 {
-            return None;
-        }
-        if s < 0.0 { -normal } else { normal }
-    };
-    let u = u.normalized()?;
-    Some((u, if convex { a.cross(u) } else { u.cross(a) }))
+    let f = solidcore_ops::cylinder_wall::wall_frame(arr(normal), arr(w), arr(a), r, convex, tol)?;
+    Some((Vec3::from(f.radial), Vec3::from(f.tangent)))
 }
 
 /// The angles a wall face spans about the axis, seen from `radial`: from one of its arcs about
@@ -155,19 +139,19 @@ pub fn infer_cylinder_emboss(body: &Body, plane: &Plane, regions: &[Region2], de
                 let signed = w.dot(normal);
                 if normal.dot(a).abs() < 1e-8 && (signed.abs() - r).abs() <= tol * 10.0 {
                     let radial = if signed < 0.0 { -normal } else { normal };
-                    let tangent = if convex { a.cross(radial) } else { radial.cross(a) };
+                    let wrap_x = if convex { a.cross(radial) } else { radial.cross(a) };
                     // Every supported uninterrupted wall uses one angle interval
                     // around this tangent normal, contained in (-pi,pi). A remote
                     // footprint entirely outside even that global interval cannot
                     // select this body, regardless of other unsupported faces.
-                    if !profile_interval_overlaps(plane, regions, o, tangent, -std::f64::consts::PI * r, std::f64::consts::PI * r)? {
+                    if !profile_interval_overlaps(plane, regions, o, wrap_x, -std::f64::consts::PI * r, std::f64::consts::PI * r)? {
                         continue;
                     }
-                    if let Some((lo, hi)) = wall_angles(&rec, face, o, a, radial, tangent) {
+                    if let Some((lo, hi)) = wall_angles(&rec, face, o, a, radial, wrap_x) {
                         if lo >= -tol / r || hi <= tol / r {
                             continue;
                         }
-                        if !profile_interval_overlaps(plane, regions, o, tangent, lo * r, hi * r)? {
+                        if !profile_interval_overlaps(plane, regions, o, wrap_x, lo * r, hi * r)? {
                             continue;
                         }
                     }
@@ -373,8 +357,9 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
         // forms run on the face's own quarter grid and their pcurves there are exact.
         let label = form::frame_of(&selected.surface);
         let wall = Wrap { o, axis, radial, tangent, r, label, tol };
-        // The cap's normal is away from the axis, except for a slot sunk into a bore's wall.
-        let cap_out = outside || rr < r;
+        // The cap's normal, out of the material, is away from the axis outside and towards it in a
+        // bore, raised or sunk.
+        let cap_out = outside;
         // The wall's pieces left around the footprints: the face itself, then one per profile
         // hole (the original radius inside it).
         let mut base_patches: Vec<Vec<Vec<AUse>>> = vec![selected.loops.clone()];

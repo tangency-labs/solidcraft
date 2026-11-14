@@ -46,6 +46,7 @@ pub mod curve;
 pub mod curve_fit;
 pub mod curve_knots;
 pub mod curve_plane;
+pub mod cylinder_wall;
 pub mod error;
 pub mod extend;
 pub mod face_surface;
