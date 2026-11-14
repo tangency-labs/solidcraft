@@ -885,11 +885,15 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let Some(value) = metadata.get("features").and_then(|v| v.get(index)) else { continue };
         let readable = match &mut feature.kind {
-            FeatureKind::Import { .. } => reader
-                .blob(value, "step_blob", "step")
-                .map(|_| ())
-                .and_then(|()| if value.get("records_blob").is_some() { reader.blob(value, "records_blob", "records").map(|_| ()) } else { Ok(()) })
-                .map_err(IoError::from),
+            // The records must read as this build's records, or the import is kept as the file
+            // has it rather than failing the whole design when it is hydrated.
+            FeatureKind::Import { .. } => reader.blob(value, "step_blob", "step").map(|_| ()).map_err(IoError::from).and_then(|()| {
+                if value.get("records_blob").is_none() {
+                    return Ok(());
+                }
+                let text = reader.blob(value, "records_blob", "records")?;
+                serde_json::from_slice::<solidcraft_kernel::ImportRecords>(text).map(|_| ()).map_err(invalid)
+            }),
             FeatureKind::MeshImport { meshes, .. } => {
                 let mut check = meshes.clone();
                 check.iter_mut().enumerate().try_for_each(|(i, mesh)| {
@@ -2371,6 +2375,50 @@ mod tests {
         let said = &opened.newer_file.as_ref().unwrap().not_understood;
         assert!(said.iter().any(|what| what.contains("unsupported mesh blob version")), "{said:?}");
         assert_eq!(parts(&write_design_container(&opened).unwrap())[&renamed], encoded);
+    }
+
+    /// A newer build's import whose records this build cannot read costs that feature, which is
+    /// kept as the file has it, not the whole design.
+    #[test]
+    fn a_newer_builds_records_this_build_cannot_read_cost_only_their_import() {
+        use solidcore_record::Vec3;
+        let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+        let brep = solidcraft_kernel::brep_record(&part).unwrap();
+        let face_origin = (0..brep.faces.len() as u64).collect();
+        let body = solidcraft_kernel::RecordBody {
+            name: "Block".into(),
+            path: Vec::new(),
+            instance: None,
+            color: None,
+            hidden: false,
+            placement: None,
+            brep,
+            face_origin,
+            sheet: false,
+        };
+        let records =
+            Arc::new(solidcraft_kernel::ImportRecords { bodies: vec![body], tree: Vec::new(), warnings: Vec::new(), system: String::new() });
+        let mut doc = document();
+        let kind =
+            FeatureKind::Import { file: "block.FCStd".into(), step: "".into(), components: Vec::new(), skip: Vec::new(), records: Some(records) };
+        doc.add_feature(kind, Some("Imported block")).unwrap();
+        let mut entries = parts(&write_design_container(&doc).unwrap());
+        let mut metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+        metadata["format"] = json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1));
+        // The newer records: a shape this build's records do not have.
+        let newer = br#"{"bodies":{"a later shape":true}}"#.to_vec();
+        let blob = format!("blobs/{}.records", digest(&newer));
+        let import = metadata["features"].as_array_mut().unwrap().iter_mut().find(|f| f.get("records_blob").is_some()).unwrap();
+        let old = import["records_blob"].as_str().unwrap().to_string();
+        import["records_blob"] = json!(blob);
+        entries.remove(&old);
+        entries.insert(blob.clone(), newer.clone());
+        entries.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        let said = &opened.newer_file.as_ref().unwrap().not_understood;
+        assert!(said.iter().any(|what| what.contains("Imported block")), "{said:?}");
+        assert_eq!(opened.features.len(), doc.features.len());
+        assert_eq!(parts(&write_design_container(&opened).unwrap())[&blob], newer, "the records are kept as the file has them");
     }
 
     /// Plugin data under `plugins/<plugin-id>/` opens and saves back byte for byte with no plugin

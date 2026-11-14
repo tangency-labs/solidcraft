@@ -71,15 +71,43 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
     check_tree(&records.tree, records.bodies.len(), 0)?;
     let mut bodies = Vec::with_capacity(records.bodies.len());
     let mut report = ImportReport { parts: records.bodies.len(), ..ImportReport::default() };
+    let mut warnings = records.warnings.clone();
     for w in &records.warnings {
         report.issues.push(ImportIssue { kind: IssueKind::File, item: None, part: String::new(), faces: 0, times: 1, detail: w.clone() });
     }
+    // A body SMLib refuses is left out, as a STEP import leaves out a solid it cannot make, and
+    // the others still come in: `kept[k]` is where record body `k` is among the bodies made.
+    let mut kept = vec![None; records.bodies.len()];
     for (k, r) in records.bodies.iter().enumerate() {
-        let part = part_of(r).map_err(|m| KernelError::Invalid(format!("{}: {m}", if r.name.is_empty() { "a body" } else { &r.name })))?;
-        let body = placed(&part.body, &r.placement.unwrap_or(super::IDENTITY))?;
+        let label = if r.name.is_empty() { format!("body {}", k + 1) } else { r.name.clone() };
+        let made =
+            part_of(r).and_then(|part| placed(&part.body, &r.placement.unwrap_or(super::IDENTITY)).map(|b| (part, b)).map_err(|e| e.to_string()));
+        let (part, body) = match made {
+            Ok(made) => made,
+            Err(why) => {
+                let detail = format!("{label}: not imported: {why}");
+                report.issues.push(ImportIssue {
+                    kind: IssueKind::NotImported,
+                    item: Some(k as u64),
+                    part: r.name.clone(),
+                    faces: 0,
+                    times: 1,
+                    detail: detail.clone(),
+                });
+                warnings.push(detail);
+                continue;
+            }
+        };
+        // Each face known by its record body and its face in the file (from 1: a certificate
+        // takes no 0), as a STEP import knows its faces by their entities.
+        let item = k as u64 + 1;
+        let sources =
+            part.face_origin.iter().map(|f| Some(crate::FaceSource::Imported { item, face: f + 1, payload_sha256: None, producer: None })).collect();
+        let body = body.with_color(r.color).with_face_sources(Some(Arc::new(sources)));
         if part.closed {
             report.solids += 1;
         }
+        kept[k] = Some(bodies.len());
         bodies.push(ImportedBody {
             source_item: k as u64,
             face_origin: part.face_origin,
@@ -96,14 +124,27 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
     }
     Ok(StepImport {
         bodies,
-        tree: records.tree.clone(),
-        warnings: records.warnings.clone(),
+        tree: renumbered(&records.tree, &kept),
+        warnings,
         report,
         schema: String::new(),
         system: records.system.clone(),
         preprocessor: String::new(),
         description: String::new(),
     })
+}
+
+/// `nodes` with each body index `k` the made body `kept[k]` is, and the bodies left out dropped.
+fn renumbered(nodes: &[StepNode], kept: &[Option<usize>]) -> Vec<StepNode> {
+    nodes
+        .iter()
+        .map(|n| StepNode {
+            name: n.name.clone(),
+            transform: n.transform,
+            bodies: n.bodies.iter().filter_map(|b| kept.get(*b).copied().flatten()).collect(),
+            children: renumbered(&n.children, kept),
+        })
+        .collect()
 }
 
 /// [`records_import`] through the recent imports' cache ([`super::step_import_shared`]'s), keyed
@@ -137,13 +178,16 @@ fn part_of(r: &RecordBody) -> std::result::Result<Part, String> {
     }
     solidcore_ops::record_check::validate(&r.brep).map_err(|e| format!("the record is invalid: {e}"))?;
     solidcore_ops::record_check::agreement(&r.brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
+    // A sheet is what its record is, whatever the file says: no bounded region but the
+    // infinite one's.
+    let sheet = r.sheet || r.brep.regions.len() <= 1;
     let solid = solidcore_step::topology::Solid {
         item: 0,
         name: r.name.clone(),
         product: None,
         brep: r.brep.clone(),
         face_origin: r.face_origin.clone(),
-        sheet: r.sheet,
+        sheet,
         notes: Vec::new(),
         turned: Vec::new(),
     };
