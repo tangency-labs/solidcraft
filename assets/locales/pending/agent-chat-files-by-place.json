@@ -1,0 +1,66 @@
+{
+  "en": {
+    "ui.agent_chat_add_folder": "Choose a folder…",
+    "ui.agent_chat_add_folder_tip": "The agent is told where the folder is and what it holds, and reads the files it needs itself, at full size",
+    "ui.agent_chat_file_by_place_tip": "Not in the message: the agent is told where it is and reads it with its own tools",
+    "ui.agent_chat_files_by_place": "Past {max} files, the rest go by their place on disk: the agent reads them with its own tools, at full size",
+    "ui.agent_chat_folder_tip": "A folder: the agent is told where it is and what it holds, and reads the files it needs with its own tools",
+    "ui.agent_chat_paste_past_max": "At most {max} files go in one message; save the picture as a file and attach that instead"
+  },
+  "ar": {
+    "ui.agent_chat_add_folder": "اختر مجلدًا…",
+    "ui.agent_chat_add_folder_tip": "يُخبَر الوكيل بمكان المجلد وما يحتويه، ويقرأ بنفسه الملفات التي يحتاجها بحجمها الكامل",
+    "ui.agent_chat_file_by_place_tip": "ليس ضمن الرسالة: يُخبَر الوكيل بمكانه ويقرؤه بأدواته الخاصة",
+    "ui.agent_chat_files_by_place": "بعد {max} ملفات، تُرسل البقية بمكانها على القرص: يقرؤها الوكيل بأدواته الخاصة بحجمها الكامل",
+    "ui.agent_chat_folder_tip": "مجلد: يُخبَر الوكيل بمكانه وما يحتويه، ويقرأ الملفات التي يحتاجها بأدواته الخاصة",
+    "ui.agent_chat_paste_past_max": "يُرسل {max} ملفات كحد أقصى في رسالة واحدة؛ احفظ الصورة في ملف وأرفقه بدلًا منها"
+  },
+  "de": {
+    "ui.agent_chat_add_folder": "Ordner auswählen…",
+    "ui.agent_chat_add_folder_tip": "Der Agent erfährt, wo der Ordner liegt und was er enthält, und liest die benötigten Dateien selbst, in voller Größe",
+    "ui.agent_chat_file_by_place_tip": "Nicht in der Nachricht: Der Agent erfährt, wo die Datei liegt, und liest sie mit seinen eigenen Werkzeugen",
+    "ui.agent_chat_files_by_place": "Ab {max} Dateien gehen die übrigen über ihren Ort auf der Festplatte: Der Agent liest sie mit seinen eigenen Werkzeugen, in voller Größe",
+    "ui.agent_chat_folder_tip": "Ein Ordner: Der Agent erfährt, wo er liegt und was er enthält, und liest die benötigten Dateien mit seinen eigenen Werkzeugen",
+    "ui.agent_chat_paste_past_max": "Höchstens {max} Dateien pro Nachricht; speichern Sie das Bild als Datei und hängen Sie diese an"
+  },
+  "he": {
+    "ui.agent_chat_add_folder": "בחירת תיקייה…",
+    "ui.agent_chat_add_folder_tip": "הסוכן מקבל את מיקום התיקייה ואת תוכנה, וקורא בעצמו את הקבצים שהוא צריך, בגודלם המלא",
+    "ui.agent_chat_file_by_place_tip": "לא בתוך ההודעה: הסוכן מקבל את מיקום הקובץ וקורא אותו בכלים שלו",
+    "ui.agent_chat_files_by_place": "מעבר ל־{max} קבצים, השאר נשלחים לפי מיקומם בדיסק: הסוכן קורא אותם בכלים שלו, בגודלם המלא",
+    "ui.agent_chat_folder_tip": "תיקייה: הסוכן מקבל את מיקומה ואת תוכנה, וקורא את הקבצים שהוא צריך בכלים שלו",
+    "ui.agent_chat_paste_past_max": "לכל היותר {max} קבצים בהודעה אחת; יש לשמור את התמונה כקובץ ולצרף אותו במקומה"
+  },
+  "ja": {
+    "ui.agent_chat_add_folder": "フォルダーを選択…",
+    "ui.agent_chat_add_folder_tip": "フォルダーの場所と中身がエージェントに伝えられ、必要なファイルはエージェントがフルサイズのまま自分で読み込みます",
+    "ui.agent_chat_file_by_place_tip": "メッセージには含まれません。場所がエージェントに伝えられ、エージェントが自分のツールで読み込みます",
+    "ui.agent_chat_files_by_place": "{max} 個を超えたファイルはディスク上の場所で渡されます。エージェントが自分のツールでフルサイズのまま読み込みます",
+    "ui.agent_chat_folder_tip": "フォルダー: 場所と中身がエージェントに伝えられ、必要なファイルはエージェントが自分のツールで読み込みます",
+    "ui.agent_chat_paste_past_max": "1 つのメッセージで送れるファイルは {max} 個までです。画像をファイルとして保存し、そのファイルを添付してください"
+  },
+  "ko": {
+    "ui.agent_chat_add_folder": "폴더 선택…",
+    "ui.agent_chat_add_folder_tip": "폴더의 위치와 내용이 에이전트에게 전달되고, 에이전트가 필요한 파일을 원래 크기 그대로 직접 읽습니다",
+    "ui.agent_chat_file_by_place_tip": "메시지에 포함되지 않음: 에이전트에게 위치가 전달되고 에이전트가 자체 도구로 읽습니다",
+    "ui.agent_chat_files_by_place": "{max}개를 넘는 파일은 디스크 위치로 전달됩니다. 에이전트가 자체 도구로 원래 크기 그대로 읽습니다",
+    "ui.agent_chat_folder_tip": "폴더: 위치와 내용이 에이전트에게 전달되고, 에이전트가 필요한 파일을 자체 도구로 읽습니다",
+    "ui.agent_chat_paste_past_max": "메시지 하나에는 파일을 최대 {max}개까지 보낼 수 있습니다. 그림을 파일로 저장한 뒤 그 파일을 첨부하세요"
+  },
+  "vi": {
+    "ui.agent_chat_add_folder": "Chọn một thư mục…",
+    "ui.agent_chat_add_folder_tip": "AI Agent được cho biết thư mục nằm ở đâu và chứa gì, rồi tự đọc các tệp cần thiết ở kích thước đầy đủ",
+    "ui.agent_chat_file_by_place_tip": "Không nằm trong tin nhắn: AI Agent được cho biết vị trí của tệp và đọc nó bằng công cụ của mình",
+    "ui.agent_chat_files_by_place": "Quá {max} tệp, các tệp còn lại được gửi theo vị trí trên ổ đĩa: AI Agent đọc chúng bằng công cụ của mình, ở kích thước đầy đủ",
+    "ui.agent_chat_folder_tip": "Một thư mục: AI Agent được cho biết nó nằm ở đâu và chứa gì, rồi đọc các tệp cần thiết bằng công cụ của mình",
+    "ui.agent_chat_paste_past_max": "Tối đa {max} tệp trong một tin nhắn; hãy lưu hình ảnh thành tệp rồi đính kèm tệp đó"
+  },
+  "zh": {
+    "ui.agent_chat_add_folder": "选择文件夹…",
+    "ui.agent_chat_add_folder_tip": "智能体会得知文件夹的位置和内容，并自行以原始尺寸读取所需的文件",
+    "ui.agent_chat_file_by_place_tip": "不在消息中：智能体会得知它的位置，并用自己的工具读取",
+    "ui.agent_chat_files_by_place": "超过 {max} 个文件后，其余文件按磁盘位置提供：智能体用自己的工具以原始尺寸读取",
+    "ui.agent_chat_folder_tip": "文件夹：智能体会得知它的位置和内容，并用自己的工具读取所需的文件",
+    "ui.agent_chat_paste_past_max": "一条消息最多发送 {max} 个文件；请把图片另存为文件，再附加该文件"
+  }
+}

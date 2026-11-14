@@ -585,6 +585,15 @@ impl DialogFolder {
         Some(picked.path().to_string_lossy().into_owned())
     }
 
+    /// A dialog's answer of several files as paths, their folder remembered for the next dialog.
+    fn answer_all(&self, picked: Option<Vec<rfd::FileHandle>>) -> Vec<String> {
+        let picked = picked.unwrap_or_default();
+        if let Some(first) = picked.first() {
+            self.chosen(first.path());
+        }
+        picked.iter().map(|p| p.path().to_string_lossy().into_owned()).collect()
+    }
+
     fn folder(&self) -> Option<std::path::PathBuf> {
         self.0.lock().ok().and_then(|state| state.folder.clone())
     }
@@ -596,6 +605,19 @@ impl DialogFolder {
             None => dialog,
         }
     }
+}
+
+/// Extensions as given and in lower and upper case, each once (Linux dialogs match case).
+fn any_case(exts: &[&str]) -> Vec<String> {
+    let mut all: Vec<String> = Vec::new();
+    for e in exts {
+        for v in [e.to_string(), e.to_ascii_lowercase(), e.to_ascii_uppercase()] {
+            if !all.contains(&v) {
+                all.push(v);
+            }
+        }
+    }
+    all
 }
 
 /// Linux file dialogs match patterns by case, so each extension goes in as lower and upper
@@ -656,7 +678,10 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let open_parent = parent.clone();
     let program_parent = parent.clone();
     let file_parent = parent.clone();
+    let files_parent = parent.clone();
+    let folder_parent = parent.clone();
     let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
+    let (files_folder, folder_folder) = (folder.clone(), folder.clone());
     Services {
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The chooser that opens may not be the desktop's own (#10159).
@@ -679,21 +704,29 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             let folder = open_folder.clone();
             Box::pin(async move { folder.answer(future.await) })
         })),
-        // One kind of file (the agent chat's attachments): only the types it names, as given and in
-        // lower and upper case (Linux dialogs match case; macOS allows just the listed types).
+        // One kind of file (a plug-in, the agent chat's attachments): only the types it names, as
+        // given and in lower and upper case (Linux dialogs match case; macOS allows just the listed
+        // types).
         pick_file: Some(Box::new(move |label: &str, exts: &[&str]| {
-            let mut all: Vec<String> = Vec::new();
-            for e in exts {
-                for v in [e.to_string(), e.to_ascii_lowercase(), e.to_ascii_uppercase()] {
-                    if !all.contains(&v) {
-                        all.push(v);
-                    }
-                }
-            }
+            let all = any_case(exts);
             let all: Vec<&str> = all.iter().map(String::as_str).collect();
             // Any other file attaches by reference, so the list is not the only choice.
             let future = file_folder.start(file_parent.clone()).add_filter(label, &all).add_filter("All files", &["*"]).pick_file();
             let folder = file_folder.clone();
+            Box::pin(async move { folder.answer(future.await) })
+        })),
+        // The same, several files at once (the agent chat's attachments: a batch of photos).
+        pick_files: Some(Box::new(move |label: &str, exts: &[&str]| {
+            let all = any_case(exts);
+            let all: Vec<&str> = all.iter().map(String::as_str).collect();
+            let future = files_folder.start(files_parent.clone()).add_filter(label, &all).add_filter("All files", &["*"]).pick_files();
+            let folder = files_folder.clone();
+            Box::pin(async move { folder.answer_all(future.await) })
+        })),
+        // A folder (the agent chat attaches one by its place).
+        pick_folder: Some(Box::new(move || {
+            let future = folder_folder.start(folder_parent.clone()).pick_folder();
+            let folder = folder_folder.clone();
             Box::pin(async move { folder.answer(future.await) })
         })),
         pick_program: Some(Box::new(move || {

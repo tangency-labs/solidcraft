@@ -5182,7 +5182,7 @@
   "ui.add_parameter": "Thêm tham số",
   "ui.agent_chat": "Trò chuyện với AI Agent",
   "ui.agent_chat_add": "Đính kèm tệp",
-  "ui.agent_chat_add_file": "Chọn một tệp…",
+  "ui.agent_chat_add_file": "Chọn tệp…",
   "ui.agent_chat_allow": "Cho phép",
   "ui.agent_chat_allow_once": "Cho phép một lần",
   "ui.agent_chat_allowed": "Đã cho phép",

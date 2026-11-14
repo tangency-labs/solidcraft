@@ -192,7 +192,7 @@ pub(crate) mod frame_watch;
 #[cfg(test)]
 mod history_off_thread_tests;
 mod move_preview;
-pub use file_picker::FilePickerFuture;
+pub use file_picker::{FilePickerFuture, FilesPickerFuture};
 #[cfg(test)]
 mod blend_arrow_tests;
 #[cfg(test)]
@@ -489,6 +489,11 @@ pub struct Services {
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
+    /// The same dialog, allowing several files at once (the agent chat's files). `None`: one
+    /// file, with `pick_file`.
+    pub pick_files: Option<Box<dyn Fn(&str, &[&str]) -> FilesPickerFuture>>,
+    /// Open a dialog for a folder (the agent chat attaches one); `None` when the host has none.
+    pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
     pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,

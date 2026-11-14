@@ -125,13 +125,14 @@ turn limit. Queue, Send now and Stop keep their existing behavior.
 
 ## Files and pictures
 
-A message can carry up to eight files, to show the agent what you mean: a concept picture, a
-sketch, a brief, a part to fit around.
+A message carries the contents of up to eight files, to show the agent what you mean: a concept
+picture, a sketch, a brief, a part to fit around. More files, and folders, go by their place on
+disk (below), up to 200 on one message.
 
-- **+** next to **Send** has **Choose a file…** (a file dialog for the types below) and **Paste a
-  picture** (the picture on the clipboard).
-- **Drop files on the chat.** Files dropped on the panel (or its folded strip) attach to the
-  next message, and the app doesn't open them too. While files are dragged over the chat, it says
+- **+** next to **Send** has **Choose files…** (a file dialog for the types below; pick several at
+  once), **Choose a folder…** and **Paste a picture** (the picture on the clipboard).
+- **Drop files or folders on the chat.** What is dropped on the panel (or its folded strip)
+  attaches to the next message, and the app doesn't open it too. While files are dragged over the chat, it says
   so. The window gives no position while something is dragged, so the drop is the chat's when the
   pointer was last seen over the chat; **+** always works.
 - The files show as chips above the text box: a picture's thumbnail, the name, and × to take the
@@ -151,6 +152,19 @@ sketch, a brief, a part to fit around.
   shows a spinner meanwhile, and **Send** waits), and the message tells the agent it was added; a
   failed import says why and the agent is told nothing of it. Taking a part's chip off the message
   leaves the part in the design (Undo removes it).
+- **Past eight files**, every further file goes by its place: the message tells the agent its
+  name, type, size (a picture's size in pixels too) and path, and the agent reads it with its own
+  tools. Nothing is read, scaled down or copied, so a batch of photos reaches the agent whole, at
+  full size, however many there are; the chat says so once for the batch. Its chip shows the
+  file's type instead of a thumbnail, and holding the pointer over it shows its path. A pasted
+  picture has no place on disk, so past eight it is refused: save it as a file and attach that.
+- **A folder** goes by its place too: the message says where it is, how many files and folders it
+  holds and their size, and names the first 200 entries at its top level (hidden ones left out).
+  The agent reads the files it needs with its own tools. A folder or a file by its place doesn't
+  take one of the eight. Files other than the types above (a ZIP, a DXF) also go by their place.
+  Only a coding agent (Claude Code, Codex, Gemini CLI…) has tools of its own to read them, and it
+  may ask before it reads outside its working folder; an OpenAI- or Anthropic-compatible endpoint
+  has only SolidCraft's tools, so it gets the eight files in the message and the others' names.
 - Every file is named in the message. In the conversation the attached pictures show under it as
   thumbnails (hold the pointer over one for a bigger preview, click it to open the viewer, where
   the file's name is shown and ‹ › step through the message's pictures, together with the picture
@@ -160,7 +174,8 @@ sketch, a brief, a part to fit around.
 
 Files stay with their message: one queued while the agent works keeps its files, and one sent
 again after a sign-in sends them again. When several queued messages go as one prompt, their
-files go with it, at most eight; the rest are named in the chat and not sent. **New chat**
+files go with it, the contents of at most eight; the rest are named in the chat and not sent
+(files and folders by their place all go). **New chat**
 clears the files waiting on the chips too.
 
 ## Typing while the agent works

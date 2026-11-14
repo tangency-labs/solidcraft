@@ -5182,7 +5182,7 @@
   "ui.add_parameter": "Añadir parámetro",
   "ui.agent_chat": "Chat del agente",
   "ui.agent_chat_add": "Adjuntar archivos",
-  "ui.agent_chat_add_file": "Elegir un archivo…",
+  "ui.agent_chat_add_file": "Elegir archivos…",
   "ui.agent_chat_allow": "Permitir",
   "ui.agent_chat_allow_once": "Permitir una vez",
   "ui.agent_chat_allowed": "Permitido",
