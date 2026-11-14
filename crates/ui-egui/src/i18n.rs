@@ -35,6 +35,8 @@ static PORTUGUESE_BR: Catalog = Catalog::new("pt-BR", "Português (Brasil)", inc
 static ROMANIAN: Catalog = Catalog::new("ro", "Română", include_str!(concat!(env!("OUT_DIR"), "/locales/ro.json")));
 static RUSSIAN: Catalog = Catalog::new("ru", "Русский", include_str!(concat!(env!("OUT_DIR"), "/locales/ru.json")));
 static SERBIAN: Catalog = Catalog::new("sr", "Српски", include_str!(concat!(env!("OUT_DIR"), "/locales/sr.json")));
+/// Serbian in Latin script: the Cyrillic catalog transliterated at build time (`build.rs`).
+static SERBIAN_LATIN: Catalog = Catalog::new("sr-Latn", "Srpski (latinica)", include_str!(concat!(env!("OUT_DIR"), "/locales/sr-Latn.json")));
 static SWEDISH: Catalog = Catalog::new("sv", "Svenska", include_str!(concat!(env!("OUT_DIR"), "/locales/sv.json")));
 static TURKISH: Catalog = Catalog::new("tr", "Türkçe", include_str!(concat!(env!("OUT_DIR"), "/locales/tr.json")));
 static UKRAINIAN: Catalog = Catalog::new("uk", "Українська", include_str!(concat!(env!("OUT_DIR"), "/locales/uk.json")));
@@ -75,6 +77,7 @@ pub const LOCALES: &[&Catalog] = &[
     &ROMANIAN,
     &RUSSIAN,
     &SERBIAN,
+    &SERBIAN_LATIN,
     &SWEDISH,
     &TURKISH,
     &UKRAINIAN,
@@ -337,7 +340,12 @@ mod tests {
             assert_eq!(match_system_tags(&tags(&[tag])), want, "{tag}");
         }
         // Other languages keep the exact tag, then the base language.
-        assert_eq!(match_system_tags(&tags(&["sr-Latn-RS"])), "sr");
+        // A script given in the tag picks the catalog in that script (Serbian in Latin script).
+        assert_eq!(match_system_tags(&tags(&["sr-Latn-RS"])), "sr-Latn");
+        assert_eq!(match_system_tags(&tags(&["sr_Latn"])), "sr-Latn");
+        assert_eq!(match_system_tags(&tags(&["sr-Cyrl-RS"])), "sr");
+        assert_eq!(match_system_tags(&tags(&["sr-RS"])), "sr");
+        assert_eq!(match_system_tags(&tags(&["bs-Latn-BA"])), "bs", "a script without its own catalog falls back to the base language");
         assert_eq!(match_system_tags(&tags(&["zhx-TW", "de"])), "de", "only zh itself is Chinese");
     }
 
@@ -1331,6 +1339,22 @@ mod tests {
         assert_eq!(vi.dynamic("Sketch of bracket"), "Sketch of bracket");
     }
 
+    /// Serbian in Latin script is built from the Cyrillic catalog, so it has every message the
+    /// Cyrillic one has, in Latin letters only, with Lj, Nj and Dž in capitals inside capitals.
+    #[test]
+    fn serbian_latin_is_the_cyrillic_catalog_transliterated() {
+        install();
+        let cyrillic: Messages = serde_json::from_str(SERBIAN.source).unwrap();
+        let latin: Messages = serde_json::from_str(SERBIAN_LATIN.source).unwrap();
+        assert_eq!(cyrillic.keys().collect::<Vec<_>>(), latin.keys().collect::<Vec<_>>());
+        let cyrillic_left: Vec<&String> = latin.values().filter(|text| text.chars().any(|c| ('\u{400}'..='\u{4ff}').contains(&c))).collect();
+        assert!(cyrillic_left.is_empty(), "Cyrillic left in sr-Latn: {cyrillic_left:?}");
+        let sr = Locale::for_language("sr-Latn");
+        assert_eq!(sr.text("ui.shell"), "Ljuska");
+        assert_eq!(sr.text("ui.heading_shell"), "LJUSKA");
+        assert_eq!(sr.text("ui.tab_manage"), "Upravljanje");
+    }
+
     #[test]
     fn new_languages_translate_keys_labels_and_default_names() {
         install();
@@ -1338,6 +1362,7 @@ mod tests {
             ("bs", "Bosanski", "Postavke", "Ekstrudiraj", "Skica1", "Sačuvati promjene u My {design}?"),
             ("hr", "Hrvatski", "Postavke", "Ekstrudiraj", "Skica1", "Spremiti promjene u My {design}?"),
             ("sr", "Српски", "Подешавања", "Екструдирај", "Скица1", "Сачувати промене у My {design}?"),
+            ("sr-Latn", "Srpski (latinica)", "Podešavanja", "Ekstrudiraj", "Skica1", "Sačuvati promene u My {design}?"),
             ("ka", "ქართული", "პარამეტრები", "ამოწევა", "ესკიზი1", "შევინახოთ ცვლილებები My {design}-ში?"),
             ("lv", "Latviešu", "Iestatījumi", "Izspiešana", "Skice1", "Saglabāt izmaiņas failā My {design}?"),
             ("hu", "Magyar", "Beállítások", "Kihúzás", "Vázlat1", "Menti a(z) My {design} módosításait?"),
