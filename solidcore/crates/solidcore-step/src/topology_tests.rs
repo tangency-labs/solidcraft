@@ -1170,10 +1170,63 @@ fn spline_edges_get_their_vertices_parameters() {
         let [a, z] = e.vertices.map(|v| s.brep.vertices[v as usize].point);
         assert_eq!((a, z), if same_sense { ([1.0, 0.0, 0.0], [1.0, 1.0, 0.0]) } else { ([1.0, 1.0, 0.0], [1.0, 0.0, 0.0]) });
     }
-    // An edge across a closed spline's seam is refused, for now.
-    let r = read_solids(&spline_sheet(true, true));
-    assert_eq!(r.solids.len(), 0);
-    assert!(r.failures[0].message.contains("across a closed spline's seam"), "{:?}", r.failures);
+    // This closed polygon spline's right edge crosses its original seam.
+    let s = one_solid(&spline_sheet(true, true));
+    assert_eq!(counts(&s.brep), [1, 1, 1, 4, 4]);
+    let edge = s.brep.edges.iter().find(|e| matches!(e.curve, BCurve::Spline { .. })).unwrap();
+    let eval = CurveEval::new(&edge.curve).unwrap();
+    let [a, b] = edge.interval;
+    for i in 0..=16 {
+        let p = eval.point(a + (b - a) * f64::from(i) / 16.0).unwrap();
+        assert!((p.x - 1.0).abs() < 1e-12 && p.z.abs() < 1e-12, "{p:?}");
+        assert!((p.y - f64::from(i) / 16.0).abs() < 1e-12, "{p:?}");
+    }
+}
+
+/// The issue's exact rational circles have their seam at +X and edge ends at ±Y.
+/// Both caps and one side used to be discarded when their edges crossed that seam.
+#[test]
+fn a_cylinder_with_edges_across_closed_spline_seams_is_solid() {
+    let ex = p21::parse(include_str!("../tests/fixtures/closed-spline-cylinder.step")).unwrap();
+    let s = one_solid(&ex);
+    assert_eq!(counts(&s.brep), [2, 1, 4, 6, 4]);
+    assert!(!s.sheet);
+    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    let mass = body.mass_properties(1e-6).unwrap();
+    assert!((mass.volume - 2.0 * PI).abs() < 1e-3, "{mass:?}");
+    assert!((mass.area - 6.0 * PI).abs() < 1e-3, "{mass:?}");
+}
+
+#[test]
+fn closed_spline_seam_mapping_preserves_sense_and_geometry() {
+    let points = vec![[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.], [0., 0., 0.]];
+    let knots = vec![0., 0., 1., 2., 3., 4., 4.];
+    let polynomial = BCurve::Spline { knots: knots.clone(), points: points.clone() };
+    let rational = BCurve::RationalSpline {
+        knots,
+        homogeneous: points.iter().zip([2., 3., 4., 2., 1.]).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, w]).collect(),
+    };
+    for curve in [polynomial, rational, BCurve::Polyline { points }] {
+        let original = CurveEval::new(&curve).unwrap();
+        let lo = original.point(3.25).unwrap();
+        let hi = original.point(0.75).unwrap();
+        let array = |p: Vec3| [p.x, p.y, p.z];
+        for sense in [true, false] {
+            let (ps, pe) = if sense { (array(lo), array(hi)) } else { (array(hi), array(lo)) };
+            let mapped = open_or_closed(curve.clone(), ps, pe, sense, false, 1e-7).unwrap();
+            assert_eq!(mapped.with_step, sense);
+            assert!(!mapped.sense_mismatch);
+            assert_eq!(mapped.interval, [3.25, 4.75], "retain exact sampled parameters");
+            let rotated = CurveEval::new(&mapped.curve).unwrap();
+            for i in 0..=32 {
+                let t = 3.25 + 1.5 * f64::from(i) / 32.;
+                let old_t = if t >= 4. { t - 4. } else { t };
+                assert!(rotated.point(t).unwrap().dist(original.point(old_t).unwrap()) < 1e-12, "{t}");
+            }
+        }
+        assert!(open_or_closed(curve.clone(), array(lo), array(lo), true, false, 1e-7).is_err());
+    }
 }
 
 #[test]
@@ -2081,8 +2134,13 @@ fn an_edge_to_a_vertex_a_hair_off_a_closed_splines_seam_ends_at_the_seam() {
     let m = open_or_closed(square(), off, mid, false, false, tol).unwrap();
     assert!((m.interval[0] - 1.5).abs() < 1e-9 && m.interval[1] == 4.0, "{:?}", m.interval);
     // Farther off than the tolerance it is a vertex of the curve like any other: the edge from
-    // the middle to it, the curve's way, crosses the seam.
-    assert!(open_or_closed(square(), mid, [5e-3, 0.0, 0.0], true, false, tol).is_err());
+    // the middle to it, the curve's way, crosses the seam, so the curve restarts at the middle
+    // and the edge runs from there round to that vertex.
+    let far = [5e-3, 0.0, 0.0];
+    let m = open_or_closed(square(), mid, far, true, false, tol).unwrap();
+    let eval = CurveEval::new(&m.curve).unwrap();
+    let at = |t: f64, q: [f64; 3]| eval.point(t).unwrap().dist(v3(q)) < 1e-9;
+    assert!(at(m.interval[0], mid) && at(m.interval[1], far), "{:?}", m.interval);
 }
 
 /// A spline surface whose first and last control columns lie within the tolerance of each other
@@ -2217,4 +2275,14 @@ fn a_walk_past_the_start_covers_the_gap_found_before_it() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn restarted_curve_errors_keep_their_step_messages() {
+    let line = BCurve::Line { start: [0.; 3], end: [1.; 3] };
+    assert_eq!(crate::kernel::restart_curve(&line, 0.5).unwrap_err(), "only splines and polylines can be restarted");
+    let closed = BCurve::Polyline { points: vec![[0.; 3], [1.; 3], [0.; 3]] };
+    assert_eq!(crate::kernel::restart_curve(&closed, 0.).unwrap_err(), "spline restart outside the open domain");
+    let open = BCurve::Polyline { points: vec![[0.; 3], [1.; 3], [2.; 3]] };
+    assert_eq!(crate::kernel::restart_curve(&open, 0.5).unwrap_err(), "spline seam endpoints do not coincide");
 }
