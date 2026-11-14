@@ -8,7 +8,6 @@
   "fillet_refuse_overlapping_bands",
   "fillet_vertex_error_diagnostics",
   "fillet_chamfer_cone_on_arc",
-  "fillet_chamfer_cone_stored_as_cone",
   "corner_patch_face_side_twist",
   "fillet_exact_round_classes",
   "fillet_patch_keeps_fillet_edges",

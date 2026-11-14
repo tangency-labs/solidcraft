@@ -148,7 +148,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.thicken_planar_side_walls = true;
     f.fillet_knife_edge_rounds = true;
     f.revolution_round_offset_collapses = true;
-    f.fillet_chamfer_cone_stored_as_cone = true;
     f.offset_point_vertex_caps = true;
     f.proto_edge_splits_at_captured_vertices = true;
     f.local_operation_closes_walls_to_nothing = true;
