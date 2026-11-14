@@ -649,6 +649,9 @@ fn issue_880_one_half_chamfer_splits_at_its_crease_as_a_definition() {
             (v - v0).abs(),
             d * area
         );
+        // MEASURED, not proven: d is sampled, and the volume between the two builds' faces
+        // near the wall's rail is not bounded by d A; the bound holds with margins of 6.7x
+        // and 11x at the two setbacks
         assert!((v - v0).abs() <= d * area, "{offsets:?}: {v} against {v0}");
     }
 }
@@ -817,85 +820,97 @@ fn plane_flux(k: &Kernel, b: &mut Brep, f: FaceId) -> f64 {
     outward_sign(b, f) * 0.5 * 5.0_f64.sqrt() * axis().dot(n) * integral
 }
 
-/// The flux of [`axial_field`] out of a chamfer face by its definition over its exact
-/// region: the rectangle of its net's domain where the chord at u lies inside the
-/// cylinder and on the part's side of each new plane face beside it (`caps`), u split at
-/// the net's knots (the spine's, where the definition is only as smooth as it) and where
-/// a bound of v changes; v exact by a 4-point rule (g is quadratic in v on a chord); u
-/// by an `n`-point Gauss rule per span.
-fn chord_flux(
-    k: &Kernel,
-    b: &Brep,
-    f: FaceId,
-    pb: &ProceduralBlend,
-    caps: &[(Point3, Vec3)],
+/// Where a ruled patch's region is clipped: inside the cylinder of `radius` about `axis`
+/// (a unit vector) through `centre`, and on the side of each cap plane (a point, a normal)
+/// the normal points to.
+struct Clip {
+    centre: Point3,
+    axis: Vec3,
+    radius: f64,
+    caps: Vec<(Point3, Vec3)>,
+}
+
+/// Which constraint holds a bound of v: the patch's own end (0), the cylinder (1) or
+/// cap i (2 + i).
+type Bound = usize;
+
+/// How far in t a constraint must cut into the range to take a bound from the one
+/// holding it: an end lying on the cylinder (a chamfer's rail on the wall) puts its root
+/// within rounding (2e-15 measured) of the end, which would otherwise hand the bound back
+/// and forth between them from one u to the next.
+const TIE: f64 = 1e-12;
+
+/// The range of t in [0, 1] along the line from `p0` to `p1` that lies in `clip`, with
+/// the constraints holding each end ([`TIE`]); `None` where it is empty.
+fn clip_line(clip: &Clip, p0: Point3, p1: Point3) -> Option<(f64, f64, Bound, Bound)> {
+    let perp = |w: Vec3| w - clip.axis * w.dot(clip.axis);
+    let (mut lo, mut hi, mut lo_by, mut hi_by) = (0.0_f64, 1.0_f64, 0, 0);
+    let q0 = perp(p0 - clip.centre);
+    let dq = perp(p1 - p0);
+    let (al, be, ga) = (
+        dq.dot(dq),
+        2.0 * q0.dot(dq),
+        q0.dot(q0) - clip.radius * clip.radius,
+    );
+    let disc = be * be - 4.0 * al * ga;
+    if disc < 0.0 {
+        return None;
+    }
+    let r = disc.sqrt();
+    let (ra, rb) = ((-be - r) / (2.0 * al), (-be + r) / (2.0 * al));
+    if ra.min(rb) > lo + TIE {
+        (lo, lo_by) = (ra.min(rb), 1);
+    }
+    if ra.max(rb) < hi - TIE {
+        (hi, hi_by) = (ra.max(rb), 1);
+    }
+    for (i, &(cp, cn)) in clip.caps.iter().enumerate() {
+        let (h0, h1) = ((p0 - cp).dot(cn), (p1 - cp).dot(cn));
+        if h0 < 0.0 && h1 < 0.0 {
+            return None;
+        }
+        if h0 < 0.0 || h1 < 0.0 {
+            let tc = h0 / (h0 - h1);
+            if h0 < 0.0 && tc > lo + TIE {
+                (lo, lo_by) = (tc, 2 + i);
+            } else if h1 < 0.0 && tc < hi - TIE {
+                (hi, hi_by) = (tc, 2 + i);
+            }
+        }
+    }
+    (hi > lo).then_some((lo, hi, lo_by, hi_by))
+}
+
+/// The integral of `g` over the region of a ruled patch `at` (a line in v for each u) on
+/// `us` x `vs` that lies in `clip`: u split at `knots` (where the patch is only as smooth
+/// as its rails) and wherever a bound of v changes the constraint holding it (found on a
+/// 400-cell grid in u and bisected; a constraint taking a bound and handing it back
+/// within one cell is not seen, which the caller's convergence in `n` guards); v exact by
+/// a 4-point rule (`g` must be a polynomial of degree 7 or less in v); u by an `n`-point
+/// Gauss rule per span.
+fn ruled_flux(
+    at: &dyn Fn(f64, f64) -> Point3,
+    g: &dyn Fn(f64, f64) -> f64,
+    us: (f64, f64),
+    vs: (f64, f64),
+    clip: &Clip,
+    knots: &[f64],
     n: usize,
 ) -> f64 {
-    let a = axis();
-    let c0 = Point3::new(0.0, 0.0, -10.0);
-    let perp = |w: Vec3| w - a * w.dot(a);
-    let d = pb.net().natural_uv_domain();
-    let at = |u: f64, v: f64| {
-        let st = pb.definition_parameters(Point2::new(u, v));
-        pb.evaluate_definition(k, st.x, st.y, 0, 0).unwrap()[0][0]
-    };
-    // each cap's kept side: the side of the face's end farther from it
-    let keeps: Vec<f64> = caps
-        .iter()
-        .map(|&(cp, cn)| {
-            let (h0, h1) = (
-                (at(d.min().x, 0.5) - cp).dot(cn),
-                (at(d.max().x, 0.5) - cp).dot(cn),
-            );
-            if h0.abs() > h1.abs() {
-                h0.signum()
-            } else {
-                h1.signum()
-            }
-        })
-        .collect();
-    let range = |u: f64| -> (f64, f64) {
-        let (p0, p1_) = (at(u, 0.0), at(u, 1.0));
-        let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
-        let q0 = perp(p0 - c0);
-        let dq = perp(p1_ - p0);
-        let (al, be, ga) = (dq.dot(dq), 2.0 * q0.dot(dq), q0.dot(q0) - 25.0);
-        let disc = be * be - 4.0 * al * ga;
-        if disc < 0.0 {
-            return (0.0, 0.0);
-        }
-        let r = disc.sqrt();
-        let (ra, rb) = ((-be - r) / (2.0 * al), (-be + r) / (2.0 * al));
-        lo = lo.max(ra.min(rb));
-        hi = hi.min(ra.max(rb));
-        for (&(cp, cn), &keep) in caps.iter().zip(&keeps) {
-            let (h0, h1) = ((p0 - cp).dot(cn) * keep, (p1_ - cp).dot(cn) * keep);
-            if h0 < 0.0 && h1 < 0.0 {
-                return (0.0, 0.0);
-            }
-            if h0 < 0.0 || h1 < 0.0 {
-                let tc = h0 / (h0 - h1);
-                if h0 < 0.0 {
-                    lo = lo.max(tc);
-                } else {
-                    hi = hi.min(tc);
-                }
-            }
-        }
-        (lo, hi.max(lo))
-    };
-    // where a bound of v changes which constraint holds it
-    let which = |u: f64| {
-        let (l, h) = range(u);
-        (l > 1e-12, h < 1.0 - 1e-12, h <= l)
-    };
-    let mut breaks = vec![d.min().x, d.max().x];
+    let range = |u: f64| clip_line(clip, at(u, vs.0), at(u, vs.1));
+    let which = |u: f64| range(u).map(|(_, _, l, h)| (l, h));
+    let mut breaks = vec![us.0, us.1];
     let grid = 400;
     for i in 0..grid {
-        let mut x0 = d.min().x + (d.max().x - d.min().x) * f64::from(i) / f64::from(grid);
-        let mut x1 = d.min().x + (d.max().x - d.min().x) * f64::from(i + 1) / f64::from(grid);
-        let w0 = which(x0);
-        if w0 != which(x1) {
+        let mut x0 = us.0 + (us.1 - us.0) * f64::from(i) / f64::from(grid);
+        let end = us.0 + (us.1 - us.0) * f64::from(i + 1) / f64::from(grid);
+        // every change between the cell's ends: bisect to one, then go on from it
+        for _ in 0..8 {
+            let w0 = which(x0);
+            if w0 == which(end) {
+                break;
+            }
+            let mut x1 = end;
             for _ in 0..100 {
                 let m = 0.5 * (x0 + x1);
                 if which(m) == w0 {
@@ -905,15 +920,117 @@ fn chord_flux(
                 }
             }
             breaks.push(0.5 * (x0 + x1));
+            x0 = x1;
         }
     }
-    let (knots, _) = pb.net().knots(SurfParamType::U, None).unwrap();
-    breaks.extend(
-        knots
-            .into_iter()
-            .filter(|&x| x > d.min().x && x < d.max().x),
-    );
+    breaks.extend(knots.iter().copied().filter(|&x| x > us.0 && x < us.1));
     breaks.sort_by(f64::total_cmp);
+    let inner = gauss_legendre(4);
+    let outer = gauss_legendre(n);
+    let mut sum = 0.0;
+    for span in breaks.windows(2) {
+        let (lo, hi) = (span[0], span[1]);
+        for &(x, w) in &outer {
+            let u = 0.5 * (lo + hi) + 0.5 * (hi - lo) * x;
+            let Some((tl, th, _, _)) = range(u) else {
+                continue;
+            };
+            let (vl, vh) = (vs.0 + (vs.1 - vs.0) * tl, vs.0 + (vs.1 - vs.0) * th);
+            let mut col = 0.0;
+            for &(y, wy) in &inner {
+                col += wy * g(u, 0.5 * (vl + vh) + 0.5 * (vh - vl) * y);
+            }
+            sum += 0.5 * (hi - lo) * w * 0.5 * (vh - vl) * col;
+        }
+    }
+    sum
+}
+
+/// [`ruled_flux`] against closed forms: the patch (2v, u, 0) on [0, 0.95] x [0, 1] inside
+/// the unit cylinder about z, between the caps x >= 0.1 and x <= 0.6, of g = 1 + v. Its
+/// upper bound of v passes from the cap (v = 0.3) to the cylinder (v = sqrt(1 - u^2) / 2)
+/// at u = 0.8, where nothing about the bounds' being 1 or not changes; the lower bound is
+/// the cap's v = 0.05. The integral of (1 + v) dv from lo to hi is (hi - lo) +
+/// (hi^2 - lo^2) / 2, so it is 0.8 (0.25 + 0.04375) plus, on [0.8, 0.95],
+/// (A(0.95) - A(0.8)) / 2 - 0.05 (0.15) + ((u - u^3/3) / 8 from 0.8 to 0.95) - 0.00125
+/// (0.15), with A(u) = (u sqrt(1 - u^2) + asin u) / 2.
+#[test]
+fn ruled_flux_matches_closed_forms_across_a_cap_cylinder_switch() {
+    let clip = Clip {
+        centre: Point3::new(0.0, 0.0, 0.0),
+        axis: Vec3::new(0.0, 0.0, 1.0),
+        radius: 1.0,
+        caps: vec![
+            (Point3::new(0.1, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)),
+            (Point3::new(0.6, 0.0, 0.0), Vec3::new(-1.0, 0.0, 0.0)),
+        ],
+    };
+    let at = |u: f64, v: f64| Point3::new(2.0 * v, u, 0.0);
+    let g = |_u: f64, v: f64| 1.0 + v;
+    let a = |u: f64| 0.5 * (u * (1.0 - u * u).sqrt() + u.asin());
+    let cube = |u: f64| (u - u * u * u / 3.0) / 8.0;
+    let exact = 0.8 * (0.25 + 0.04375) + 0.5 * (a(0.95) - a(0.8)) - 0.05 * 0.15
+        + (cube(0.95) - cube(0.8))
+        - 0.00125 * 0.15;
+    for n in [16, 24] {
+        let got = ruled_flux(&at, &g, (0.0, 0.95), (0.0, 1.0), &clip, &[], n);
+        assert!(
+            (got - exact).abs() <= 1e-13,
+            "n = {n}: {got} against {exact}"
+        );
+    }
+    // and one rule over the whole range, the switch not split, is not
+    let whole = {
+        let mut sum = 0.0;
+        for &(x, w) in &gauss_legendre(24) {
+            let u = 0.475 + 0.475 * x;
+            let hi = 0.3_f64.min(0.5 * (1.0 - u * u).sqrt());
+            sum += 0.475 * w * ((hi - 0.05) + 0.5 * (hi * hi - 0.0025));
+        }
+        sum
+    };
+    assert!((whole - exact).abs() > 1e-7, "{whole} against {exact}");
+}
+
+/// The flux of [`axial_field`] out of a chamfer face by its definition over its exact
+/// region ([`ruled_flux`]): the net's domain where the chord at u lies inside the
+/// cylinder and on the part's side of each new plane face beside it (`caps`), u split at
+/// the net's knots (the spine's, where the definition is only as smooth as it); g is
+/// quadratic in v on a chord, the definition being linear in v.
+fn chord_flux(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    pb: &ProceduralBlend,
+    caps: &[(Point3, Vec3)],
+    n: usize,
+) -> f64 {
+    let d = pb.net().natural_uv_domain();
+    let (vs, us) = ((d.min().y, d.max().y), (d.min().x, d.max().x));
+    let at = |u: f64, v: f64| {
+        let st = pb.definition_parameters(Point2::new(u, v));
+        pb.evaluate_definition(k, st.x, st.y, 0, 0).unwrap()[0][0]
+    };
+    // each cap's kept side: the side of the face's end farther from it
+    let vm = 0.5 * (vs.0 + vs.1);
+    let caps = caps
+        .iter()
+        .map(|&(cp, cn)| {
+            let (h0, h1) = ((at(us.0, vm) - cp).dot(cn), (at(us.1, vm) - cp).dot(cn));
+            let keep = if h0.abs() > h1.abs() {
+                h0.signum()
+            } else {
+                h1.signum()
+            };
+            (cp, cn * keep)
+        })
+        .collect();
+    let clip = Clip {
+        centre: Point3::new(0.0, 0.0, -10.0),
+        axis: axis(),
+        radius: 5.0,
+        caps,
+    };
     let g = |u: f64, v: f64| -> f64 {
         let st = pb.definition_parameters(Point2::new(u, v));
         let su = pb.definition_parameters(Point2::new(u + 1.0, v)) - st;
@@ -923,25 +1040,8 @@ fn chord_flux(
         let (pu, pv) = (ps * su.x + pt * su.y, ps * sv.x + pt * sv.y);
         axial_field(dd[0][0]).dot(pu.cross(pv))
     };
-    let inner = gauss_legendre(4);
-    let outer = gauss_legendre(n);
-    let mut sum = 0.0;
-    for span in breaks.windows(2) {
-        let (lo, hi) = (span[0], span[1]);
-        for &(x, w) in &outer {
-            let u = 0.5 * (lo + hi) + 0.5 * (hi - lo) * x;
-            let (vl, vh) = range(u);
-            if vh <= vl {
-                continue;
-            }
-            let mut col = 0.0;
-            for &(y, wy) in &inner {
-                col += wy * g(u, 0.5 * (vl + vh) + 0.5 * (vh - vl) * y);
-            }
-            sum += 0.5 * (hi - lo) * w * 0.5 * (vh - vl) * col;
-        }
-    }
-    outward_sign(b, f) * sum
+    let (knots, _) = pb.net().knots(SurfParamType::U, None).unwrap();
+    outward_sign(b, f) * ruled_flux(&at, &g, us, vs, &clip, &knots, n)
 }
 
 /// The chamfered part's volume by its definitions: [`original_volume`] plus the flux out
@@ -1018,13 +1118,14 @@ fn trims_volume(k: &Kernel, b: &mut Brep, originals: &[FaceId], panels: usize) -
 /// - The chamfered part's volume is the closed form plus two fluxes: out of the chamfer's
 ///   definitions over their exact regions (each chord inside the cylinder and on the
 ///   part's side of the bevel cap, with Gauss rules split at the spine's knots, converged
-///   to 1e-7), and out of the bevel cap (Green's theorem on its edges).
+///   to 1e-7 at n = 16, 24 and 32), and out of the bevel cap (Green's theorem on its
+///   B-rep face's edges).
 ///
 /// Both B-reps bound that volume to within their faces' fit: the trims of either build
-/// are within 1e-4 of it. `brep_volume` reads both low, by 3.8e-4 and 1.7e-3 at the
-/// setbacks 1 and 2, and the original part by 3.6e-4: its x / 3 crosses every tolerant
-/// edge's gap. The 1.3e-3 between the two builds is that error, not a difference in
-/// their shapes.
+/// are within 1e-4 of it (MEASURED, a 1.47x margin). `brep_volume` reads both low, by
+/// 3.8e-4 and 1.7e-3 at the setbacks 1 and 2, and the original part by 3.6e-4: its x / 3
+/// crosses every tolerant edge's gap. The 1.3e-3 between the two builds is that error,
+/// not a difference in their shapes.
 #[test]
 fn issue_880_one_half_chamfer_volume_by_its_definitions() {
     for offsets in [
@@ -1056,15 +1157,18 @@ fn issue_880_one_half_chamfer_volume_by_its_definitions() {
         chamfer(&mut k, &mut b, &[(e, u)], offsets).unwrap();
         let _ = finish(&mut k, &mut b, originals.len());
         // the definitions' volume, converged
-        let (v24, v32) = (
+        let (v16, v24, v32) = (
+            definition_volume(&k, &mut b, &originals, 16),
             definition_volume(&k, &mut b, &originals, 24),
             definition_volume(&k, &mut b, &originals, 32),
         );
-        assert!(
-            (v24 - v32).abs() <= 1e-7,
-            "{offsets:?}: {v24} against {v32}"
-        );
-        // the definition build's B-rep bounds it to within its trims' fit
+        for v in [v16, v24] {
+            assert!((v - v32).abs() <= 1e-7, "{offsets:?}: {v} against {v32}");
+        }
+        // the definition build's B-rep bounds it to within its trims' fit. MEASURED: the
+        // largest of the four differences here is 6.8e-5, so 1e-4 has a 1.47x margin; it is
+        // the faces' fit to their definitions and the trims' to the edges, which nothing
+        // here bounds a priori
         let on = trims_volume(&k, &mut b, &originals, 64);
         assert!(
             (on - v32).abs() <= 1e-4,
