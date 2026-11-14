@@ -3755,6 +3755,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 format!("Fillet Error: a face curves tighter than the round's ball where its radius reaches {}: the ball does not fit the face past there", g(worst.works)),
                 NoRoomReason::BallDoesNotFit,
             )
+        } else if worst.check == BallCheck::NotEnclosed && worst.fits >= BIG_DOUBLE {
+            (
+                format!("Fillet Error: no rolling ball of radius {} touches both faces anywhere along the edge: a face's own radius of curvature is that radius, so the offset the ball rolls on collapses onto a curve", g(worst.radius)),
+                NoRoomReason::BallDoesNotFit,
+            )
         } else if worst.check == BallCheck::NotEnclosed {
             (
                 format!("Fillet Error: a face curves tighter than the rolling ball of radius {}, which does not fit it{works}", g(worst.radius)),

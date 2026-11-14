@@ -46,6 +46,15 @@ use crate::surface::procedural_blend::chamfer::ChamferDefinition;
 use crate::surface::procedural_blend::{count_area_root, BlendDefinitionInput, ProceduralBlend};
 use crate::surface::surface::{Surface, SurfaceKind};
 use core::sync::atomic::{AtomicU32, Ordering};
+
+/// How many halvings in a row of a span may leave its bound no better than half its parent's
+/// (or still unproved: every piece's enclosure fails, at pieces 64 times finer than the span at
+/// the last). A bound over a smooth span falls with its length to a power, at least halving
+/// with each halving; one that does not, four times running, is not a matter of resolution:
+/// the ball's section is degenerate there (an offset collapsing to a curve, as where a ball's
+/// radius is a face's own radius of curvature), and halving further only multiplies the work,
+/// the stations doubling each round to the cap of 4096.
+const MAX_STALLED_HALVINGS: u32 = 4;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -1988,6 +1997,11 @@ impl GnSectionFsg {
         // a span's finest proved level, kept while it is over the target: its halves start
         // from its pieces (not the fork's, which certifies each half afresh)
         let mut levels: Vec<Option<Arc<CertifiedLevel>>> = vec![None; bounds.len()];
+        // for each span: its parent's bound (none for a span not halved from another) and how
+        // many halvings in a row, itself included once certified, left a bound no better than
+        // half the parent's
+        let mut parents: Vec<Option<f64>> = vec![None; bounds.len()];
+        let mut stalled: Vec<u32> = vec![0; bounds.len()];
         loop {
             let mut all = true;
             // a span's first level tried, where it inherits none (not the fork's, which
@@ -2026,6 +2040,22 @@ impl GnSectionFsg {
                     )?;
                     // the next span's first level: one coarser than this one's first proved
                     hint = reuse.first.map_or(0, |f| f.saturating_sub(1));
+                    if let (Some(&parent), Some(count)) = (parents.get(j), stalled.get_mut(j)) {
+                        let better = match parent {
+                            Some(p) if p.is_finite() => *bj <= 0.5 * p,
+                            Some(_) => bj.is_finite(),
+                            None => true,
+                        };
+                        *count = if better { 0 } else { *count + 1 };
+                        if *bj > target && *count >= MAX_STALLED_HALVINGS {
+                            return Err(SolidError::blend_failed(
+                                OP,
+                                "the blend cannot be certified: halving the rolling ball's section no longer \
+                                 tightens its bound, where the ball's offsets nearly collapse (the radius is \
+                                 close to a face's own radius of curvature), so no ball rolls there",
+                            ));
+                        }
+                    }
                     let within = *bj <= target;
                     *lj = if within {
                         None
@@ -2051,13 +2081,19 @@ impl GnSectionFsg {
             let mut next: Vec<GnStation> = Vec::new();
             let mut next_bounds: Vec<f64> = Vec::new();
             let mut next_levels: Vec<Option<Arc<CertifiedLevel>>> = Vec::new();
-            for ((pair, &bj), lj) in stations.windows(2).zip(&bounds).zip(&levels) {
+            let mut next_parents: Vec<Option<f64>> = Vec::new();
+            let mut next_stalled: Vec<u32> = Vec::new();
+            for (((pair, &bj), lj), &uj) in
+                stations.windows(2).zip(&bounds).zip(&levels).zip(&stalled)
+            {
                 k.check_cancelled(OP_CERTIFY)?;
                 let [a, b] = pair else { continue };
                 next.push(*a);
                 if bj <= target {
                     next_bounds.push(bj);
                     next_levels.push(None);
+                    next_parents.push(None);
+                    next_stalled.push(0);
                     continue;
                 }
                 let mid = 0.5 * (a.s + b.s);
@@ -2097,6 +2133,10 @@ impl GnSectionFsg {
                 next_bounds.push(-1.0);
                 next_levels.push(lj.clone());
                 next_levels.push(lj.clone());
+                next_parents.push(Some(bj));
+                next_parents.push(Some(bj));
+                next_stalled.push(uj);
+                next_stalled.push(uj);
             }
             if let Some(last) = stations.last() {
                 next.push(*last);
@@ -2104,6 +2144,8 @@ impl GnSectionFsg {
             stations = next;
             bounds = next_bounds;
             levels = next_levels;
+            parents = next_parents;
+            stalled = next_stalled;
         }
         let mut bound = 0.0_f64;
         for &b in &bounds {

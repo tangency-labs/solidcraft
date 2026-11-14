@@ -1077,6 +1077,27 @@ pub fn ball_is_regular(
         return Ok(first);
     }
 
+    // no section of the ball at any of the edge's stations (each judged Unjudged, none but a
+    // pole or a section not found judging nothing): a ball of this radius touches both faces
+    // nowhere along the edge, as where its radius is a face's own radius of curvature, the
+    // offset collapsing onto a curve the other offset meets in isolated points. Nothing rolls,
+    // so the round is refused as one that does not fit.
+    if rolls && !ts.is_empty() && margins[0].iter().all(|&m| m >= BIG_DOUBLE) {
+        let (_, on_edge) = rolls_a_ball(solver);
+        if !on_edge {
+            let radius = ball_law(k, solver, &TsectPnt::new())?.r[0];
+            if radius > EFF_ZERO {
+                // no radius is named: sections found at radii a hair under it are the offset's
+                // collapsed loop, not a ball that rolls along the edge
+                return Ok(BallStation {
+                    check: BallCheck::NotEnclosed,
+                    radius,
+                    ..BallStation::default()
+                });
+            }
+        }
+    }
+
     // every section regular: each margin's least between the sections about its least one
     for (m, marg) in margins.iter().enumerate() {
         let mut least_idx = 0;
