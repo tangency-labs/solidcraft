@@ -57,7 +57,7 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::topology_solver::p1::{CurveRef, TopologyObjects, TopologySolver};
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
+use crate::math::{Point2, Point3, Vec2, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::BrepClassifier;
@@ -1278,6 +1278,90 @@ pub fn point_distance(a: Point3, b: Point3) -> Result<Distance> {
     })
 }
 
+/// A point set's arithmetic centroid and mean Euclidean distance from that centroid.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PointSetSummary {
+    /// The arithmetic mean of the input points.
+    pub centroid: Point2,
+    /// The arithmetic mean of each point's distance from `centroid`.
+    pub mean_distance: f64,
+}
+
+/// The arithmetic centroid and mean radial distance of a non-empty point set.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for an empty set, a non-finite point, or a non-finite
+/// intermediate or result.
+pub fn point_set_summary(points: &[Point2]) -> Result<PointSetSummary> {
+    if points.is_empty() {
+        return Err(SolidError::invalid_input(OP, "empty point set"));
+    }
+    if points.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
+        return Err(SolidError::invalid_input(OP, "non-finite point"));
+    }
+
+    let (mut x, mut y) = (0.0, 0.0);
+    for point in points {
+        x += point.x;
+        y += point.y;
+        if !x.is_finite() || !y.is_finite() {
+            return Err(SolidError::invalid_input(OP, "point centroid overflows"));
+        }
+    }
+    let count = points.len() as f64;
+    let centroid = Point2::new(x / count, y / count);
+    if !centroid.x.is_finite() || !centroid.y.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "point centroid is not finite",
+        ));
+    }
+
+    let mut total_distance = 0.0;
+    for point in points {
+        let distance = point.distance(centroid);
+        if !distance.is_finite() {
+            return Err(SolidError::invalid_input(OP, "point distance overflows"));
+        }
+        total_distance += distance;
+        if !total_distance.is_finite() {
+            return Err(SolidError::invalid_input(
+                OP,
+                "mean point distance overflows",
+            ));
+        }
+    }
+    let mean_distance = total_distance / count;
+    if !mean_distance.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "mean point distance is not finite",
+        ));
+    }
+    Ok(PointSetSummary {
+        centroid,
+        mean_distance,
+    })
+}
+
+/// The vector from point `from` to point `to`.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a non-finite input or a displacement that overflows.
+pub fn point_displacement(from: Point2, to: Point2) -> Result<Vec2> {
+    if !from.x.is_finite() || !from.y.is_finite() || !to.x.is_finite() || !to.y.is_finite() {
+        return Err(SolidError::invalid_input(OP, "non-finite point"));
+    }
+    let displacement = to - from;
+    if !displacement.x.is_finite() || !displacement.y.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "point displacement overflows",
+        ));
+    }
+    Ok(displacement)
+}
+
 /// The distance from vertex `id`'s point to `point`, as [`point_distance`] (not
 /// upstream; the point picks' vertex distance).
 ///
@@ -1678,6 +1762,81 @@ mod tests {
         assert!(point_distance(Point3::ZERO, nan).is_err());
         let inf = Point3::new(0.0, f64::INFINITY, 0.0);
         assert!(point_distance(inf, Point3::ZERO).is_err());
+    }
+
+    #[test]
+    fn point_set_summary_uses_the_arithmetic_mean_radius() {
+        let points = [
+            Point2::new(0.0, 0.0),
+            Point2::new(6.0, 0.0),
+            Point2::new(0.0, 6.0),
+        ];
+        let summary = point_set_summary(&points).unwrap();
+        assert_eq!(summary.centroid, Point2::new(2.0, 2.0));
+        let expected = (2.0 * 2.0_f64.sqrt() + 4.0 * 5.0_f64.sqrt()) / 3.0;
+        assert!((summary.mean_distance - expected).abs() <= 2.0 * f64::EPSILON * expected);
+        assert_ne!(
+            summary.mean_distance, 4.0,
+            "the RMS radius is not the mean radius"
+        );
+
+        let moved = [
+            Point2::new(0.0, 0.0),
+            Point2::new(6.0, 0.0),
+            Point2::new(0.0, 12.0),
+        ];
+        let moved_summary = point_set_summary(&moved).unwrap();
+        assert_eq!(moved_summary.centroid, Point2::new(2.0, 4.0));
+        let moved_expected =
+            (2.0 * 5.0_f64.sqrt() + 4.0 * 2.0_f64.sqrt() + 2.0 * 17.0_f64.sqrt()) / 3.0;
+        assert!(
+            (moved_summary.mean_distance - moved_expected).abs()
+                <= 2.0 * f64::EPSILON * moved_expected
+        );
+    }
+
+    #[test]
+    fn point_set_summary_accepts_single_and_duplicate_points() {
+        let one = Point2::new(3.0, -4.0);
+        assert_eq!(
+            point_set_summary(&[one]).unwrap(),
+            PointSetSummary {
+                centroid: one,
+                mean_distance: 0.0,
+            }
+        );
+        assert_eq!(
+            point_set_summary(&[one, one, one]).unwrap(),
+            PointSetSummary {
+                centroid: one,
+                mean_distance: 0.0,
+            }
+        );
+    }
+
+    #[test]
+    fn point_set_summary_refuses_empty_non_finite_and_overflowing_sets() {
+        assert!(point_set_summary(&[]).is_err());
+        assert!(point_set_summary(&[Point2::new(f64::NAN, 0.0)]).is_err());
+        assert!(point_set_summary(&[Point2::new(0.0, f64::INFINITY)]).is_err());
+        assert!(
+            point_set_summary(&[Point2::new(f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),]).is_err()
+        );
+        assert!(
+            point_set_summary(&[Point2::new(-f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),]).is_err()
+        );
+    }
+
+    #[test]
+    fn point_displacement_is_from_first_point_to_second_and_refuses_bad_values() {
+        assert_eq!(
+            point_displacement(Point2::new(2.0, 2.0), Point2::new(5.0, 6.0)).unwrap(),
+            Vec2::new(3.0, 4.0)
+        );
+        assert!(point_displacement(Point2::new(f64::NAN, 0.0), Point2::ZERO).is_err());
+        assert!(
+            point_displacement(Point2::new(-f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),).is_err()
+        );
     }
 
     #[test]

@@ -65,6 +65,8 @@ pub enum NavMode {
 
 #[derive(Default)]
 pub struct ViewportState {
+    /// Touchscreen gesture ownership and contacts for the shared camera handler.
+    pub(crate) touch: crate::navigation::TouchNavigation,
     /// The faces the modelling kernel refuses that the window points at (a failed operation's
     /// message, a "needs repair" row under the pointer): ringed in the error colour. What this
     /// frame asks for ([`crate::refused_part::ring`]) is drawn from the next one on, so the ring
