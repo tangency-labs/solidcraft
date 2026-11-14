@@ -745,3 +745,1354 @@ fn a_tapered_flange_changes_by_half_its_length_times_the_slope_tangent() {
     // A non-finite input gives a non-finite answer, never a panic.
     assert!(tapered_flange_ends(f64::NAN, 1.0, 5.0).0.is_nan());
 }
+
+mod recognition {
+    use super::*;
+    use crate::geom::certified::{next_down, next_up};
+    use crate::prism::recognition::{
+        conic_ellipse, loop_circle, loop_ellipse, EllipseArc, RecognitionVector,
+    };
+    trait RecognizedLoop {
+        fn as_circle(&self) -> Option<(Vec2, f64)>;
+        fn as_ellipse(&self) -> Option<(Vec2, Vec2, f64)>;
+        fn circle(center: Vec2, radius: f64) -> Self;
+        fn circle_from(center: Vec2, radius: f64, start: f64) -> Self;
+    }
+    impl RecognizedLoop for Loop2 {
+        fn as_circle(&self) -> Option<(Vec2, f64)> {
+            loop_circle(self)
+        }
+        fn as_ellipse(&self) -> Option<(Vec2, Vec2, f64)> {
+            loop_ellipse(self)
+        }
+        fn circle(center: Vec2, radius: f64) -> Self {
+            Self::circle_from(center, radius, 0.0)
+        }
+        fn circle_from(center: Vec2, radius: f64, start: f64) -> Self {
+            Self {
+                segs: vec![Seg2::Arc {
+                    center,
+                    radius,
+                    start,
+                    sweep: TAU,
+                }],
+            }
+        }
+    }
+    #[test]
+    fn profile_circle_recognition_tracks_direction_and_one_turn() {
+        use std::f64::consts::TAU;
+        for (center, radius) in [
+            (Vec2::ZERO, 2.0),
+            (Vec2::ZERO, 1e12),
+            (Vec2::new(1e12, -1e12), 1e9),
+        ] {
+            for count in [1, 2, 3, 4] {
+                for start in [0.0, 0.1, 0.3, 2.7, 100.0, -100.0] {
+                    let sweep = TAU / f64::from(count);
+                    let circle = Loop2 {
+                        segs: (0..count)
+                            .map(|i| Seg2::Arc {
+                                center,
+                                radius,
+                                start: start + f64::from(i) * sweep,
+                                sweep,
+                            })
+                            .collect(),
+                    };
+                    for mut path in [circle.clone(), circle.reversed()] {
+                        for _ in 0..count {
+                            assert_eq!(
+                                path.as_circle(),
+                                Some((center, radius)),
+                                "count={count}, start={start}, {path:?}"
+                            );
+                            path.segs.rotate_left(1);
+                        }
+                    }
+                }
+            }
+        }
+        let circle = Loop2::circle_from(Vec2::new(1e12, -1e12), 1e9, 0.3);
+        assert_eq!(circle.as_circle(), Some((Vec2::new(1e12, -1e12), 1e9)));
+        assert_eq!(circle.reversed().as_circle(), circle.as_circle());
+        // Each piece may store an equivalent phase from a different turn.
+        let mut circle = Loop2 {
+            segs: vec![
+                Seg2::Arc {
+                    center: Vec2::ZERO,
+                    radius: 2.0,
+                    start: 0.0,
+                    sweep: TAU * 0.5,
+                },
+                Seg2::Arc {
+                    center: Vec2::ZERO,
+                    radius: 2.0,
+                    start: TAU * 0.5,
+                    sweep: TAU * 0.5,
+                },
+            ],
+        };
+        if let Seg2::Arc { start, .. } = &mut circle.segs[1] {
+            *start = 3.0 * PI;
+        }
+        for mut path in [circle.clone(), circle.reversed()] {
+            for _ in 0..2 {
+                assert_eq!(path.as_circle(), Some((Vec2::ZERO, 2.0)));
+                path.segs.rotate_left(1);
+            }
+        }
+    }
+
+    #[test]
+    fn profile_circle_recognition_rejects_gaps_retracing_and_invalid_arcs() {
+        use std::f64::consts::{PI, TAU};
+        let arc = |start, sweep| Seg2::Arc {
+            center: Vec2::ZERO,
+            radius: 2.0,
+            start,
+            sweep,
+        };
+        for segs in [
+            vec![],
+            vec![arc(0.0, PI)],
+            vec![arc(0.0, PI), arc(0.0, PI)],
+            vec![arc(0.0, PI), arc(PI + 0.01, PI)],
+            vec![arc(0.0, PI), arc(PI + 1e-8, PI)],
+            vec![arc(0.0, PI), arc(PI, -PI)],
+            vec![arc(0.0, PI), arc(PI, PI), arc(TAU, PI), arc(TAU + PI, PI)],
+            vec![arc(0.0, TAU), arc(0.0, TAU)],
+            vec![
+                arc(0.0, PI),
+                Seg2::Line {
+                    a: Vec2::new(-2.0, 0.0),
+                    b: Vec2::new(2.0, 0.0),
+                },
+            ],
+        ] {
+            let path = Loop2 { segs };
+            assert_eq!(path.as_circle(), None, "{path:?}");
+            assert_eq!(path.reversed().as_circle(), None, "{path:?}");
+        }
+        for sweep in [
+            0.0,
+            TAU + 1e-13,
+            -TAU - 1e-13,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            assert_eq!(
+                Loop2 {
+                    segs: vec![arc(0.0, sweep)]
+                }
+                .as_circle(),
+                None
+            );
+        }
+        for start in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e20, f64::MAX] {
+            assert_eq!(Loop2::circle_from(Vec2::ZERO, 2.0, start).as_circle(), None);
+        }
+        for radius in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(Loop2::circle(Vec2::ZERO, radius).as_circle(), None);
+        }
+        assert_eq!(
+            Loop2::circle(Vec2::new(f64::NAN, 0.0), 2.0).as_circle(),
+            None
+        );
+        let mut path = Loop2 {
+            segs: vec![arc(0.0, PI), arc(PI, PI)],
+        };
+        path.segs[1] = Seg2::Arc {
+            center: Vec2::ZERO,
+            radius: next_up(2.0_f64),
+            start: PI,
+            sweep: PI,
+        };
+        assert_eq!(path.as_circle(), None, "support equality is exact");
+        path.segs[1] = Seg2::Arc {
+            center: Vec2::new(1e-15, 0.0),
+            radius: 2.0,
+            start: PI,
+            sweep: PI,
+        };
+        assert_eq!(path.as_circle(), None);
+        // The stored phase resolves an extra 0.125 radians; its rounding cell must not
+        // close the resulting gap/overlap by independently widening both arc endpoints.
+        let start = 2.0_f64.powi(49);
+        let circle = Loop2 {
+            segs: vec![arc(start, PI), arc((start + PI) + 0.125, PI)],
+        };
+        for mut path in [circle.clone(), circle.reversed()] {
+            for _ in 0..2 {
+                assert_eq!(path.as_circle(), None, "{path:?}");
+                path.segs.rotate_left(1);
+            }
+        }
+    }
+
+    fn ellipse_quarters(center: Vec2, u: Vec2, v: Vec2) -> Loop2 {
+        let axes = [u, v, -u, -v];
+        Loop2 {
+            segs: (0..4)
+                .map(|i| Seg2::Conic {
+                    a: center + axes[i],
+                    apex: (center + axes[i]) + axes[(i + 1) % 4],
+                    b: center + axes[(i + 1) % 4],
+                    w: FRAC_1_SQRT_2,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn profile_ellipse_recognition_preserves_quarters_and_orientation() {
+        for (center, u, v) in [
+            (
+                Vec2::new(3.0, -2.0),
+                Vec2::new(5.0, 0.0),
+                Vec2::new(0.0, 2.0),
+            ),
+            (
+                Vec2::new(17.0, -11.0),
+                Vec2::new(12.0, 9.0),
+                Vec2::new(-4.8, 6.4),
+            ),
+        ] {
+            let ellipse = ellipse_quarters(center, u, v);
+            for mut path in [ellipse.clone(), ellipse.reversed()] {
+                for _ in 0..4 {
+                    let (c, major, ratio) =
+                        path.as_ellipse().expect("four original ellipse quarters");
+                    assert_eq!(c, center);
+                    assert!(
+                        (major.length_hypot() - u.length_hypot()).abs() < 1e-12,
+                        "{major:?}"
+                    );
+                    assert!(
+                        (ratio - v.length_hypot() / u.length_hypot()).abs() < 1e-12,
+                        "{ratio}"
+                    );
+                    for seg in &path.segs {
+                        for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                            let d = seg.point_at(t) - c;
+                            let x = d.dot(major) / major.length_squared();
+                            let y = d.dot(major.perp()) / (major.length_squared() * ratio);
+                            assert!((x * x + y * y - 1.0).abs() < 1e-12);
+                        }
+                    }
+                    path.segs.rotate_left(1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn profile_ellipse_recognition_does_not_replace_other_paths() {
+        let ellipse = ellipse_quarters(
+            Vec2::new(3.0, -2.0),
+            Vec2::new(5.0, 0.0),
+            Vec2::new(0.0, 2.0),
+        );
+        let q = ellipse.segs[0];
+        assert_eq!(
+            Loop2 {
+                segs: vec![q, q.reversed(), q, q.reversed()]
+            }
+            .as_ellipse(),
+            None
+        );
+        assert_eq!(Loop2 { segs: vec![q; 4] }.as_ellipse(), None);
+        assert_eq!(
+            Loop2 {
+                segs: ellipse.segs.repeat(2)
+            }
+            .as_ellipse(),
+            None
+        );
+        assert_eq!(
+            Loop2 {
+                segs: ellipse.segs[..3].to_vec()
+            }
+            .as_ellipse(),
+            None
+        );
+        assert_eq!(Loop2::circle(Vec2::ZERO, 2.0).as_ellipse(), None);
+        assert_eq!(Loop2::default().as_ellipse(), None);
+        for delta in [Vec2::new(0.001, 0.0), Vec2::new(f64::NAN, 0.0)] {
+            let mut path = ellipse.clone();
+            if let Seg2::Conic { a, .. } = &mut path.segs[1] {
+                *a += delta;
+            }
+            assert_eq!(path.as_ellipse(), None);
+        }
+        for weight in [0.5, 1.0, 1.1, f64::NAN, f64::INFINITY] {
+            let mut path = ellipse.clone();
+            if let Seg2::Conic { w, .. } = &mut path.segs[1] {
+                *w = weight;
+            }
+            assert_eq!(path.as_ellipse(), None);
+        }
+        // The world-coordinate midpoint rounds to c, but the x displacements are +4/-3
+        // or +4/-3.5. Even when one offset reconstructs both rounded endpoints, the local
+        // asymmetry is significant and must not be replaced by a full ellipse.
+        let c = 2.0_f64.powi(52);
+        for left in [3.0, 3.5] {
+            let points = [
+                Vec2::new(c + 4.0, 0.0),
+                Vec2::new(c, 2.0),
+                Vec2::new(c - left, 0.0),
+                Vec2::new(c, -2.0),
+            ];
+            let apices = [
+                Vec2::new(c + 4.0, 2.0),
+                Vec2::new(c - left, 2.0),
+                Vec2::new(c - left, -2.0),
+                Vec2::new(c + 4.0, -2.0),
+            ];
+            let ellipse = Loop2 {
+                segs: (0..4)
+                    .map(|i| Seg2::Conic {
+                        a: points[i],
+                        apex: apices[i],
+                        b: points[(i + 1) % 4],
+                        w: FRAC_1_SQRT_2,
+                    })
+                    .collect(),
+            };
+            for mut path in [ellipse.clone(), ellipse.reversed()] {
+                for _ in 0..4 {
+                    assert_eq!(path.as_ellipse(), None, "{path:?}");
+                    path.segs.rotate_left(1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn profile_conic_ellipse_keeps_directed_endpoints_and_unclamped_ratio() {
+        let ellipse = ellipse_quarters(
+            Vec2::new(3.0, -2.0),
+            Vec2::new(5.0, 0.0),
+            Vec2::new(0.0, 2.0),
+        );
+        for seg in &ellipse.segs {
+            for (piece, positive) in [(*seg, true), (seg.reversed(), false)] {
+                let Seg2::Conic { a, apex, b, w } = piece else {
+                    panic!("fixture must be a conic")
+                };
+                let arc = conic_ellipse(a, apex, b, w).expect("elliptical quarter");
+                assert_eq!(arc.end > arc.start, positive);
+                for (t, expected) in [
+                    (arc.start, a),
+                    ((arc.start + arc.end) * 0.5, piece.point_at(0.5)),
+                    (arc.end, b),
+                ] {
+                    let actual =
+                        arc.center + arc.major * t.cos() + arc.major.perp() * (arc.ratio * t.sin());
+                    assert!(
+                        actual.dist(expected) < 1e-12,
+                        "{piece:?}: {actual:?} != {expected:?}"
+                    );
+                }
+            }
+        }
+        let thin = ellipse_quarters(Vec2::ZERO, Vec2::new(1e12, 0.0), Vec2::new(0.0, 0.5));
+        let (_, _, ratio) = thin
+            .as_ellipse()
+            .expect("thin ellipse from its original axes");
+        assert!((ratio - 5e-13).abs() < 1e-25);
+        for seg in thin.segs {
+            let Seg2::Conic { a, apex, b, w } = seg else {
+                panic!("fixture must be a conic")
+            };
+            if let Some(arc) = conic_ellipse(a, apex, b, w) {
+                assert!(arc.ratio < 1e-12, "a small ratio must not be clamped");
+            }
+        }
+        for w in [0.2, 0.5, 0.8] {
+            assert!(conic_ellipse(
+                Vec2::new(1.0, 0.0),
+                Vec2::new(1.0, 1.0),
+                Vec2::new(0.0, 1.0),
+                w
+            )
+            .is_some());
+        }
+        for w in [-1.0, 0.0, 1.0 - 1e-7, 1.0, 1.1, f64::NAN, f64::INFINITY] {
+            assert!(conic_ellipse(
+                Vec2::new(1.0, 0.0),
+                Vec2::new(1.0, 1.0),
+                Vec2::new(0.0, 1.0),
+                w
+            )
+            .is_none());
+        }
+        assert!(conic_ellipse(Vec2::ZERO, Vec2::new(1.0, 0.0), Vec2::new(2.0, 0.0), 0.5).is_none());
+        assert!(conic_ellipse(Vec2::ZERO, Vec2::ZERO, Vec2::ZERO, 0.5).is_none());
+        assert!(conic_ellipse(
+            Vec2::new(f64::INFINITY, 0.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(0.0, 1.0),
+            0.5
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn profile_conic_ellipse_recovers_nonquarter_analytic_parameters() {
+        // For A=(0,-2), P=(4,0), B=(0,2), eliminating the rational parameter gives
+        // (1-w²)x²/(16w²) + x/2 + y²/4 = 1. Completing its square gives these independent
+        // centers and principal axes. At w=1/5 the longer axis is Y, not X.
+        let cases = [
+            (
+                0.2,
+                Vec2::new(-1.0 / 6.0, 0.0),
+                Vec2::new(0.0, 5.0 / 6.0_f64.sqrt()),
+                1.0 / 6.0_f64.sqrt(),
+                2.0 / 3.0,
+            ),
+            (
+                0.5,
+                Vec2::new(-4.0 / 3.0, 0.0),
+                Vec2::new(8.0 / 3.0, 0.0),
+                3.0_f64.sqrt() / 2.0,
+                4.0 / 3.0,
+            ),
+            (
+                0.6,
+                Vec2::new(-9.0 / 4.0, 0.0),
+                Vec2::new(15.0 / 4.0, 0.0),
+                2.0 / 3.0,
+                1.5,
+            ),
+            (
+                0.8,
+                Vec2::new(-64.0 / 9.0, 0.0),
+                Vec2::new(80.0 / 9.0, 0.0),
+                3.0 / 8.0,
+                16.0 / 9.0,
+            ),
+        ];
+        let (a, apex, b) = (
+            Vec2::new(0.0, -2.0),
+            Vec2::new(4.0, 0.0),
+            Vec2::new(0.0, 2.0),
+        );
+        for (w, center, major, ratio, middle_x) in cases {
+            for (start, end, direction) in [(a, b, 1.0), (b, a, -1.0)] {
+                let arc = conic_ellipse(start, apex, end, w).expect("non-quarter elliptic conic");
+                assert_profile_ellipse_arc(
+                    arc,
+                    center,
+                    major,
+                    ratio,
+                    direction * 2.0 * w.acos(),
+                    [start, Vec2::new(middle_x, 0.0), end],
+                );
+            }
+        }
+    }
+
+    fn assert_profile_ellipse_arc(
+        arc: EllipseArc,
+        center: Vec2,
+        major: Vec2,
+        ratio: f64,
+        sweep: f64,
+        points: [Vec2; 3],
+    ) {
+        assert!(
+            arc.center.dist(center) < 1e-12,
+            "center: {arc:?}, expected {center:?}"
+        );
+        // Changing the major-axis sign and shifting both parameters describes the same arc.
+        let aligned_major = if arc.major.dot(major) < 0.0 {
+            -arc.major
+        } else {
+            arc.major
+        };
+        assert!(
+            aligned_major.dist(major) < 1e-12,
+            "major: {arc:?}, expected ±{major:?}"
+        );
+        assert!(
+            (arc.ratio - ratio).abs() < 1e-12,
+            "ratio: {arc:?}, expected {ratio}"
+        );
+        assert!(
+            (arc.end - arc.start - sweep).abs() < 1e-12,
+            "sweep: {arc:?}, expected {sweep}"
+        );
+        // Only the symmetric rational midpoint corresponds to the angular midpoint. The
+        // rational parameter is not generally a linear fraction of this angular interval.
+        for (t, expected) in [arc.start, (arc.start + arc.end) * 0.5, arc.end]
+            .into_iter()
+            .zip(points)
+        {
+            let actual =
+                arc.center + arc.major * t.cos() + arc.major.perp() * (arc.ratio * t.sin());
+            assert!(
+                actual.dist(expected) < 1e-12,
+                "point: {actual:?}, expected {expected:?}, {arc:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn profile_conic_ellipse_preserves_transformed_partial_arcs() {
+        // Apply T(x,y)=(7-2y,-5+2x) to the w=3/5 conic above: rotate 90°, scale 2,
+        // translate. Its independent center is (7,-19/2), semiaxes 15/2 and 5.
+        // Reflecting Y then reverses the orientation while keeping both axis lengths.
+        for reflection in [1.0, -1.0] {
+            let (a, apex, b) = (
+                Vec2::new(11.0, -5.0 * reflection),
+                Vec2::new(7.0, 3.0 * reflection),
+                Vec2::new(3.0, -5.0 * reflection),
+            );
+            for (start, end, direction) in [(a, b, reflection), (b, a, -reflection)] {
+                let arc = conic_ellipse(start, apex, end, 0.6)
+                    .expect("transformed non-quarter elliptic conic");
+                assert_profile_ellipse_arc(
+                    arc,
+                    Vec2::new(7.0, -9.5 * reflection),
+                    Vec2::new(0.0, 7.5),
+                    2.0 / 3.0,
+                    direction * 2.0 * 0.6_f64.acos(),
+                    [start, Vec2::new(7.0, -2.0 * reflection), end],
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn profile_conic_ellipse_declines_nonelliptic_weights_and_conservative_boundaries() {
+        let (a, apex, b) = (
+            Vec2::new(0.0, -2.0),
+            Vec2::new(4.0, 0.0),
+            Vec2::new(0.0, 2.0),
+        );
+        for w in [
+            -f64::MAX,
+            -1.0,
+            -0.0,
+            0.0,
+            next_down(1e-9_f64),
+            1e-9,
+            1.0 - 1e-6,
+            1.0 - 1e-7,
+            next_down(1.0_f64),
+            1.0,
+            next_up(1.0_f64),
+            1.5,
+            f64::MAX,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            assert!(conic_ellipse(a, apex, b, w).is_none(), "w={w}");
+            assert!(conic_ellipse(b, apex, a, w).is_none(), "reversed w={w}");
+        }
+        // Small positive weights and weights just below 1 still describe ellipses, but the
+        // inherited extractor guards conservatively retain their original rational curves.
+        // At w=1 this noncollinear conic is parabolic; above 1 it is hyperbolic.
+    }
+
+    #[test]
+    fn profile_conic_ellipse_declines_nonfinite_controls_in_every_position() {
+        let original = [
+            Vec2::new(0.0, -2.0),
+            Vec2::new(4.0, 0.0),
+            Vec2::new(0.0, 2.0),
+        ];
+        for position in 0..3 {
+            for coordinate in 0..2 {
+                for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                    let mut controls = original;
+                    if coordinate == 0 {
+                        controls[position].x = invalid;
+                    } else {
+                        controls[position].y = invalid;
+                    }
+                    let [a, apex, b] = controls;
+                    assert!(
+                        conic_ellipse(a, apex, b, 0.6).is_none(),
+                        "control={position}, coordinate={coordinate}, value={invalid}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn profile_conic_ellipse_declines_degeneracy_and_unrepresentable_extraction() {
+        for [a, apex, b] in [
+            [Vec2::new(3.0, -2.0); 3],
+            [Vec2::ZERO, Vec2::new(1.0, 0.0), Vec2::new(2.0, 0.0)],
+            [
+                Vec2::new(-3.0, -5.0),
+                Vec2::new(1.0, 3.0),
+                Vec2::new(5.0, 11.0),
+            ],
+            [
+                Vec2::new(0.0, -2.0),
+                Vec2::new(4.0, 0.0),
+                Vec2::new(0.0, -2.0),
+            ],
+            [
+                Vec2::new(0.0, -2.0),
+                Vec2::new(0.0, -2.0),
+                Vec2::new(0.0, 2.0),
+            ],
+            [
+                Vec2::new(0.0, -2.0),
+                Vec2::new(0.0, 2.0),
+                Vec2::new(0.0, 2.0),
+            ],
+            // Finite inputs can still overflow the derived dot products or chord midpoint.
+            [
+                Vec2::new(f64::MAX, 0.0),
+                Vec2::new(f64::MAX, f64::MAX),
+                Vec2::new(0.0, f64::MAX),
+            ],
+            [
+                Vec2::new(f64::MAX, 0.0),
+                Vec2::new(f64::MAX, 1.0),
+                Vec2::new(f64::MAX, 2.0),
+            ],
+        ] {
+            assert!(
+                conic_ellipse(a, apex, b, 0.6).is_none(),
+                "{a:?}, {apex:?}, {b:?}"
+            );
+            assert!(conic_ellipse(b, apex, a, 0.6).is_none());
+        }
+        // A real but very small ellipse is also outside the inherited extraction guard;
+        // this is a conservative recognition miss, not a claim of geometric degeneracy.
+        assert!(conic_ellipse(
+            Vec2::new(0.0, -2e-10),
+            Vec2::new(4e-10, 0.0),
+            Vec2::new(0.0, 2e-10),
+            0.6
+        )
+        .is_none());
+    }
+
+    fn ellipse_unequal_pieces(three: bool) -> Loop2 {
+        // Original integer controls on x²/225+y²/400=1. The three-piece neighboring
+        // unit-ellipse dot products are -3/5, -7/25, -3/5; their weights are
+        // sqrt((1+h)/2) = 1/sqrt(5), 3/5, 1/sqrt(5), rounded to nearest binary64.
+        let pieces = if three {
+            vec![
+                (
+                    Vec2::new(15.0, 0.0),
+                    Vec2::new(15.0, 40.0),
+                    Vec2::new(-9.0, 16.0),
+                    0.4472135954999579,
+                ),
+                (
+                    Vec2::new(-9.0, 16.0),
+                    Vec2::new(-25.0, 0.0),
+                    Vec2::new(-9.0, -16.0),
+                    0.6,
+                ),
+                (
+                    Vec2::new(-9.0, -16.0),
+                    Vec2::new(15.0, -40.0),
+                    Vec2::new(15.0, 0.0),
+                    0.4472135954999579,
+                ),
+            ]
+        } else {
+            vec![
+                (
+                    Vec2::new(9.0, -16.0),
+                    Vec2::new(25.0, 0.0),
+                    Vec2::new(9.0, 16.0),
+                    0.6,
+                ),
+                (
+                    Vec2::new(9.0, 16.0),
+                    Vec2::new(0.0, 25.0),
+                    Vec2::new(-9.0, 16.0),
+                    0.8,
+                ),
+                (
+                    Vec2::new(-9.0, 16.0),
+                    Vec2::new(-25.0, 0.0),
+                    Vec2::new(-9.0, -16.0),
+                    0.6,
+                ),
+                (
+                    Vec2::new(-9.0, -16.0),
+                    Vec2::new(0.0, -25.0),
+                    Vec2::new(9.0, -16.0),
+                    0.8,
+                ),
+            ]
+        };
+        Loop2 {
+            segs: pieces
+                .into_iter()
+                .map(|(a, apex, b, w)| Seg2::Conic { a, apex, b, w })
+                .collect(),
+        }
+    }
+
+    fn transform_ellipse_pieces(
+        path: &Loop2,
+        center: Vec2,
+        scale: f64,
+        rotated: bool,
+        reflected: bool,
+    ) -> Loop2 {
+        let transform = |p: Vec2| {
+            let p = if rotated { Vec2::new(-p.y, p.x) } else { p };
+            let p = if reflected { Vec2::new(p.x, -p.y) } else { p };
+            center + p * scale
+        };
+        Loop2 {
+            segs: path
+                .segs
+                .iter()
+                .map(|seg| match *seg {
+                    Seg2::Conic { a, apex, b, w } => Seg2::Conic {
+                        a: transform(a),
+                        apex: transform(apex),
+                        b: transform(b),
+                        w,
+                    },
+                    _ => panic!("analytic fixture contains only conics"),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn profile_ellipse_recognizes_unequal_integer_partitions_through_the_real_candidate() {
+        let far = 2.0_f64.powi(52);
+        for three in [false, true] {
+            let original = ellipse_unequal_pieces(three);
+            for (center, scale) in [
+                (Vec2::ZERO, 1.0),
+                (Vec2::new(7.0, -5.0), 2.0),
+                (Vec2::new(far, far), 1.0),
+            ] {
+                for rotated in [false, true] {
+                    for reflected in [false, true] {
+                        let transformed =
+                            transform_ellipse_pieces(&original, center, scale, rotated, reflected);
+                        let major = if rotated {
+                            Vec2::new(20.0 * scale, 0.0)
+                        } else {
+                            Vec2::new(0.0, 20.0 * scale)
+                        };
+                        for mut path in [transformed.clone(), transformed.reversed()] {
+                            for _ in 0..path.segs.len() {
+                                assert_eq!(
+                                    path.as_ellipse(),
+                                    Some((center, major, 0.75)),
+                                    "three={three}, {path:?}"
+                                );
+                                path.segs.rotate_left(1);
+                            }
+                        }
+                    }
+                }
+            }
+            // T(x,y)=(3x-4y,4x+3y) preserves integer controls. Its support is
+            // [[8425,-2100],[-2100,7200]], with eigenvalues 10000 and 5625.
+            // This exercises both the non-diagonal candidate and the support cross term.
+            let transform = |p: Vec2| Vec2::new(3.0 * p.x - 4.0 * p.y, 4.0 * p.x + 3.0 * p.y);
+            let inclined = Loop2 {
+                segs: original
+                    .segs
+                    .iter()
+                    .map(|seg| match *seg {
+                        Seg2::Conic { a, apex, b, w } => Seg2::Conic {
+                            a: transform(a),
+                            apex: transform(apex),
+                            b: transform(b),
+                            w,
+                        },
+                        _ => panic!("analytic fixture contains only conics"),
+                    })
+                    .collect(),
+            };
+            assert!(inclined.is_closed(0.0));
+            for mut path in [inclined.clone(), inclined.reversed()] {
+                for _ in 0..path.segs.len() {
+                    assert_eq!(
+                        path.as_ellipse(),
+                        Some((Vec2::ZERO, Vec2::new(80.0, -60.0), 0.75)),
+                        "three={three}, {path:?}"
+                    );
+                    path.segs.rotate_left(1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn profile_ellipse_rejects_distinct_supports_even_with_shared_endpoints() {
+        for three in [false, true] {
+            let path = ellipse_unequal_pieces(three);
+            let mut different_apex = path.clone();
+            if let Seg2::Conic { apex, .. } = &mut different_apex.segs[0] {
+                apex.x += 1e-8;
+            }
+            let mut different_weight = path.clone();
+            if let Seg2::Conic { w, .. } = &mut different_weight.segs[0] {
+                *w += 1e-8;
+            }
+            let mut different_vertex = path.clone();
+            if let Seg2::Conic { b, .. } = &mut different_vertex.segs[0] {
+                b.x += 1e-8;
+            }
+            if let Seg2::Conic { a, .. } = &mut different_vertex.segs[1] {
+                a.x += 1e-8;
+            }
+            let mut different_half = path.clone();
+            if let Seg2::Conic { apex, .. } = &mut different_half.segs[1] {
+                apex.y += 0.25;
+            }
+            for changed in [
+                different_apex,
+                different_weight,
+                different_vertex,
+                different_half,
+            ] {
+                assert!(changed.is_closed(0.0));
+                for mut ordered in [changed.clone(), changed.reversed()] {
+                    for _ in 0..ordered.segs.len() {
+                        assert_eq!(ordered.as_ellipse(), None, "{ordered:?}");
+                        ordered.segs.rotate_left(1);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn profile_ellipse_rejects_gaps_retracing_and_repeated_unequal_turns() {
+        let ellipse = ellipse_unequal_pieces(false);
+        let q = ellipse.segs[0];
+        let mut one_step_gap = ellipse.clone();
+        if let Seg2::Conic { a, .. } = &mut one_step_gap.segs[1] {
+            a.x = next_up(a.x);
+        }
+        let mut reordered = ellipse.clone();
+        reordered.segs.swap(1, 2);
+        for path in [
+            one_step_gap,
+            reordered,
+            Loop2 {
+                segs: vec![q, q.reversed(), q, q.reversed()],
+            },
+            Loop2 { segs: vec![q; 4] },
+            Loop2 {
+                segs: ellipse.segs.repeat(2),
+            },
+            Loop2 {
+                segs: ellipse.segs[..3].to_vec(),
+            },
+            Loop2 {
+                segs: vec![
+                    q,
+                    Seg2::Line {
+                        a: Vec2::new(1.0, 0.0),
+                        b: Vec2::ZERO,
+                    },
+                ],
+            },
+        ] {
+            assert_eq!(path.as_ellipse(), None, "{path:?}");
+            assert_eq!(path.reversed().as_ellipse(), None, "{path:?}");
+        }
+    }
+
+    #[test]
+    fn profile_ellipse_uses_local_cells_at_large_world_coordinates() {
+        let c = 2.0_f64.powi(52);
+        let original = transform_ellipse_pieces(
+            &ellipse_unequal_pieces(false),
+            Vec2::new(c, c),
+            1.0,
+            false,
+            false,
+        );
+        assert!(
+            original.as_ellipse().is_some(),
+            "large coordinates alone are not a refusal"
+        );
+        let mut changed = original.clone();
+        if let Seg2::Conic { b, .. } = &mut changed.segs[1] {
+            b.x += 0.5;
+        }
+        if let Seg2::Conic { a, .. } = &mut changed.segs[2] {
+            a.x += 0.5;
+        }
+        assert!(changed.is_closed(0.0));
+        assert_eq!(
+            changed.as_ellipse(),
+            None,
+            "a resolved local displacement cannot fit a world-coordinate allowance"
+        );
+        // The canonical left chord still has length32. Changing its apex from -25 to -24
+        // proposes a center with a fractional offset that cannot survive addition to c.
+        let mut center_loss = original.clone();
+        if let Seg2::Conic { apex, .. } = &mut center_loss.segs[2] {
+            apex.x += 1.0;
+        }
+        assert_eq!(
+            center_loss.as_ellipse(),
+            None,
+            "final-center loss must fit the local cell"
+        );
+        let mut outlier = original;
+        if let Seg2::Conic { apex, .. } = &mut outlier.segs[0] {
+            apex.x = 1e100;
+        }
+        assert_eq!(
+            outlier.as_ellipse(),
+            None,
+            "an apex cannot enlarge the vertex budget"
+        );
+    }
+
+    #[test]
+    fn profile_ellipse_declines_hostile_general_partitions() {
+        let original = ellipse_unequal_pieces(false);
+        for weight in [
+            0.0,
+            -1.0,
+            1e-9,
+            1.0 - 1e-6,
+            1.0,
+            1.1,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            let mut path = original.clone();
+            if let Seg2::Conic { w, .. } = &mut path.segs[0] {
+                *w = weight;
+            }
+            assert_eq!(path.as_ellipse(), None, "w={weight}");
+        }
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for control in 0..3 {
+                for coordinate in 0..2 {
+                    let mut path = original.clone();
+                    if let Seg2::Conic { a, apex, b, .. } = &mut path.segs[0] {
+                        let point = match control {
+                            0 => a,
+                            1 => apex,
+                            _ => b,
+                        };
+                        if coordinate == 0 {
+                            point.x = value;
+                        } else {
+                            point.y = value;
+                        }
+                    }
+                    assert_eq!(path.as_ellipse(), None);
+                }
+            }
+        }
+        for scale in [0.0, 1e-200, 1e200] {
+            assert_eq!(
+                transform_ellipse_pieces(&original, Vec2::ZERO, scale, false, false).as_ellipse(),
+                None
+            );
+        }
+        let mut collinear = original.clone();
+        for seg in &mut collinear.segs {
+            if let Seg2::Conic { a, apex, b, .. } = seg {
+                a.y = 0.0;
+                apex.y = 0.0;
+                b.y = 0.0;
+            }
+        }
+        assert_eq!(collinear.as_ellipse(), None);
+        // Keep exact joins and nonzero chords. The left chord of length 32 supplies
+        // the known support; the first piece has antipodal endpoints on that support.
+        let antipodal = Loop2 {
+            segs: vec![
+                Seg2::Conic {
+                    a: Vec2::new(15.0, 0.0),
+                    apex: Vec2::new(0.0, 20.0),
+                    b: Vec2::new(-15.0, 0.0),
+                    w: 0.6,
+                },
+                Seg2::Conic {
+                    a: Vec2::new(-15.0, 0.0),
+                    apex: Vec2::new(-15.0, -10.0),
+                    b: Vec2::new(-9.0, -16.0),
+                    w: 0.8944271909999159,
+                },
+                Seg2::Conic {
+                    a: Vec2::new(-9.0, -16.0),
+                    apex: Vec2::new(-25.0, 0.0),
+                    b: Vec2::new(-9.0, 16.0),
+                    w: 0.6,
+                },
+                Seg2::Conic {
+                    a: Vec2::new(-9.0, 16.0),
+                    apex: Vec2::new(15.0, 40.0),
+                    b: Vec2::new(15.0, 0.0),
+                    w: 0.4472135954999579,
+                },
+            ],
+        };
+        assert!(antipodal.is_closed(0.0));
+        assert!(antipodal
+            .segs
+            .iter()
+            .all(|seg| matches!(*seg, Seg2::Conic { a, b, .. } if a != b)));
+        assert_eq!(antipodal.as_ellipse(), None);
+    }
+
+    #[test]
+    fn profile_ellipse_arithmetic_retains_exact_dyadic_residuals() {
+        use crate::prism::recognition::EllipseScalar as Number;
+        let number = |x| Number::exact(x).expect("finite dyadic fixture");
+        let large = 2.0_f64.powi(53);
+        let sum = number(large).plus(number(1.0)).expect("finite sum");
+        assert_eq!((sum.hi, sum.lo, sum.radius), (large, 1.0, 0.0));
+        let cancellation = sum.minus(number(large)).expect("exact cancellation");
+        assert_eq!(
+            (cancellation.hi, cancellation.lo, cancellation.radius),
+            (1.0, 0.0, 0.0)
+        );
+        let e = 2.0_f64.powi(-27);
+        let product = number(1.0 + e)
+            .times(number(1.0 - e))
+            .expect("finite product");
+        // (1+2^-27)(1-2^-27) = 1-2^-54; the low term cannot be discarded.
+        assert_eq!((product.hi, product.lo), (1.0, -e * e));
+        assert!(product.radius < 2.0_f64.powi(-100));
+        let third = 2.0_f64.powi(-108);
+        let three_terms = number(1.0)
+            .plus(number(2.0_f64.powi(-54)))
+            .expect("pair")
+            .plus(number(third))
+            .expect("three terms");
+        assert!(
+            three_terms.radius >= third,
+            "a discarded third component remains in the radius"
+        );
+    }
+
+    #[test]
+    fn profile_ellipse_arithmetic_certifies_quotients_and_roots() {
+        use crate::prism::recognition::EllipseScalar as Number;
+        let number = |x| Number::exact(x).expect("finite fixture");
+        let dyadic = number(1.0)
+            .plus(number(2.0_f64.powi(-53)))
+            .expect("exact two-term numerator");
+        let quotient = dyadic.divided_by(number(2.0)).expect("dyadic quotient");
+        assert_eq!((quotient.hi, quotient.lo), (0.5, 2.0_f64.powi(-54)));
+        assert!(quotient.radius < 2.0_f64.powi(-100));
+        let third = number(1.0).divided_by(number(3.0)).expect("one third");
+        let correction = third.minus(number(1.0 / 3.0)).expect("retain correction");
+        // The exact correction is 1/(3*2^54), strictly between these independent dyadics.
+        assert_eq!(
+            correction
+                .minus(number(2.0_f64.powi(-56)))
+                .expect("lower comparison")
+                .sign(),
+            Some(1)
+        );
+        assert_eq!(
+            number(2.0_f64.powi(-55))
+                .minus(correction)
+                .expect("upper comparison")
+                .sign(),
+            Some(1)
+        );
+        assert!(third.radius < 2.0_f64.powi(-100));
+        let e = 2.0_f64.powi(-27);
+        let square = number(1.0 + 2.0 * e)
+            .plus(number(e * e))
+            .expect("(1+e)^2 exactly");
+        let root = square.square_root().expect("positive exact-dyadic square");
+        assert!(root
+            .minus(number(1.0 + e))
+            .expect("compare analytic root")
+            .fits(2.0_f64.powi(-100)));
+    }
+
+    #[test]
+    fn profile_ellipse_arithmetic_refuses_uncertainty_and_preserves_subnormal_bounds() {
+        use crate::prism::recognition::EllipseScalar as Number;
+        let number = |x| Number::exact(x).expect("finite fixture");
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(Number::exact(invalid).is_none());
+        }
+        assert!(number(f64::MAX).plus(number(f64::MAX)).is_none());
+        assert!(number(f64::MAX).times(number(2.0)).is_none());
+        assert!(number(1.0).divided_by(number(0.0)).is_none());
+        assert!(number(-1.0).square_root().is_none());
+        assert!(number(0.0).square_root().is_none());
+        let minimum = f64::from_bits(1);
+        let underflow = number(minimum)
+            .times(number(0.5))
+            .expect("half a minimum subnormal is enclosed");
+        assert_eq!((underflow.hi, underflow.lo), (0.0, 0.0));
+        assert!(underflow.radius >= minimum);
+        assert!(!underflow.fits(0.0));
+        assert_eq!(underflow.sign(), None);
+        let radius = 2.0_f64.powi(-53);
+        assert!(number(radius).fits(radius));
+        assert!(!number(next_up(radius)).fits(radius));
+        let uncertain = Number {
+            hi: 0.0,
+            lo: 0.0,
+            radius: 2.0 * radius,
+        };
+        assert!(
+            !uncertain.fits(radius),
+            "intersection with the cell does not prove inclusion"
+        );
+        assert!(number(1.0).divided_by(uncertain).is_none());
+    }
+
+    #[test]
+    fn profile_ellipse_weight_cells_are_asymmetric_and_local_extent_does_not_round_up() {
+        use crate::prism::recognition::{ellipse_local_resolution, EllipseScalar as Number};
+        let number = |x| Number::exact(x).expect("finite fixture");
+        let center = number(0.5);
+        let lower_midpoint = center
+            .minus(number(2.0_f64.powi(-55)))
+            .expect("lower midpoint");
+        let upper_midpoint = center
+            .plus(number(2.0_f64.powi(-54)))
+            .expect("upper midpoint");
+        assert_eq!(lower_midpoint.rounds_to(0.5), Some(false));
+        assert_eq!(upper_midpoint.rounds_to(0.5), Some(false));
+        assert_eq!(
+            center
+                .minus(number(2.0_f64.powi(-56)))
+                .expect("inside lower cell")
+                .rounds_to(0.5),
+            Some(true)
+        );
+        assert_eq!(
+            center
+                .plus(number(2.0_f64.powi(-55)))
+                .expect("inside upper cell")
+                .rounds_to(0.5),
+            Some(true)
+        );
+        assert_eq!(
+            center
+                .minus(number(3.0 * 2.0_f64.powi(-56)))
+                .expect("outside lower cell")
+                .rounds_to(0.5),
+            Some(false)
+        );
+        let local = 2.0_f64.powi(-52);
+        let c = 2.0_f64.powi(52);
+        assert_eq!(ellipse_local_resolution(-4.0, 4.0), Some(local));
+        assert_eq!(ellipse_local_resolution(c - 4.0, c + 4.0), Some(local));
+        assert_eq!(
+            ellipse_local_resolution(-4.0, next_down(4.0_f64)),
+            Some(local),
+            "rounded extent must not select a larger binade"
+        );
+        assert!(ellipse_local_resolution(0.0, f64::from_bits(1)).is_none());
+        assert!(ellipse_local_resolution(-f64::MAX, f64::MAX).is_none());
+        assert!(ellipse_local_resolution(1.0, 1.0).is_none());
+    }
+}
+
+mod path_export_regressions {
+    use super::super::path_export::*;
+    use super::super::profile::Seg2;
+    use crate::math::Vec2;
+
+    #[test]
+    fn admitted_tiny_arc_preserves_the_source_but_refuses_collapsed_wire_angles() {
+        let s = Seg2::Arc {
+            center: Vec2::ZERO,
+            radius: 8.0,
+            start: 0.0,
+            sweep: 1e-16,
+        };
+        assert!(admit_piece(&s, 0, 3).is_ok());
+        // An explicit coarse scalar encoding makes this a geometry refusal test,
+        // independent of any file format's decimal spelling.
+        let encoding = ScalarEncoding {
+            round_trip: |v| Some(if v.abs() < 1e-12 { 0.0 } else { v }),
+            min_ellipse_ratio: 1e-12,
+            turn_snap_radians: 1e-12,
+        };
+        let err = exact_piece(&s, 0, 3, encoding).unwrap_err();
+        assert_eq!(err.piece, Some((0, 3)));
+        assert_eq!(
+            err.reason,
+            "arc endpoints collapse in the angular representation"
+        );
+    }
+
+    fn scalar_encoding(round_trip: fn(f64) -> Option<f64>) -> ScalarEncoding {
+        ScalarEncoding {
+            round_trip,
+            min_ellipse_ratio: 1e-12,
+            turn_snap_radians: 1e-12,
+        }
+    }
+
+    #[test]
+    fn refused_line_endpoint_never_certifies_a_path_or_a_degenerate_line() {
+        let encoding = scalar_encoding(|v| (v <= 10.0).then_some(v));
+        for (a, b) in [
+            (Vec2::ZERO, Vec2::new(11.0, 0.0)),
+            (Vec2::new(11.0, 0.0), Vec2::ZERO),
+            (Vec2::new(11.0, 0.0), Vec2::new(11.0, 0.0)),
+        ] {
+            let segs = [
+                Seg2::Line {
+                    a: Vec2::ZERO,
+                    b: Vec2::new(1.0, 0.0),
+                },
+                Seg2::Line { a, b },
+            ];
+            let error =
+                path_shapes(DxfPath::Open(&segs), DxfPathStyle::Exact, encoding).unwrap_err();
+            assert_eq!(error.piece, Some((1, 2)));
+            assert_eq!(error.reason, "line endpoint cannot be encoded");
+        }
+    }
+
+    #[test]
+    fn refused_arc_angle_never_certifies_a_one_sided_encoding() {
+        let arc = Seg2::Arc {
+            center: Vec2::ZERO,
+            radius: 2.0,
+            start: 0.0,
+            sweep: std::f64::consts::FRAC_PI_2,
+        };
+        for encoding in [
+            scalar_encoding(|v| (v != 90.0).then_some(v)),
+            scalar_encoding(|v| (v != 0.0).then_some(v)),
+        ] {
+            let error = exact_piece(&arc, 2, 4, encoding).unwrap_err();
+            assert_eq!(error.piece, Some((2, 4)));
+            assert_eq!(error.reason, "arc angle cannot be encoded");
+        }
+    }
+
+    #[test]
+    fn refused_ellipse_parameters_keep_the_exact_rational_controls() {
+        let a = Vec2::new(2.0, 0.0);
+        let apex = Vec2::new(2.0, 1.0);
+        let b = Vec2::new(0.0, 1.0);
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let conic = Seg2::Conic { a, apex, b, w };
+        assert!(matches!(
+            exact_piece(&conic, 0, 1, scalar_encoding(Some)).unwrap(),
+            PathShape::Ellipse { .. }
+        ));
+        // The quarter ellipse's pi/2 parameter is refused; all its rational
+        // controls, weights and knots are representable in this same encoding.
+        let encoding = scalar_encoding(|v| (!(1.0..2.0).contains(&v) || v == 1.0).then_some(v));
+        let PathShape::Spline {
+            degree,
+            knots,
+            ctrl,
+            weights,
+        } = exact_piece(&conic, 0, 1, encoding).unwrap()
+        else {
+            panic!("unencodable ellipse parameter must keep the rational source");
+        };
+        assert_eq!(degree, 2);
+        assert_eq!(knots, [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+        assert_eq!(ctrl, [a, apex, b]);
+        assert_eq!(weights, Some(vec![1.0, w, 1.0]));
+        let error = exact_piece(
+            &conic,
+            0,
+            1,
+            scalar_encoding(|v| (!(1.9..2.1).contains(&v.abs())).then_some(v)),
+        )
+        .unwrap_err();
+        assert_eq!(error.reason, "spline control cannot be encoded");
+    }
+
+    #[test]
+    fn refused_spline_control_never_passes_a_partial_collapse_check() {
+        let cubic = Seg2::Cubic {
+            p0: Vec2::ZERO,
+            p1: Vec2::new(1.0, 1.0),
+            p2: Vec2::new(11.0, 1.0),
+            p3: Vec2::new(2.0, 0.0),
+        };
+        let error =
+            exact_piece(&cubic, 1, 3, scalar_encoding(|v| (v <= 10.0).then_some(v))).unwrap_err();
+        assert_eq!(error.piece, Some((1, 3)));
+        assert_eq!(error.reason, "spline control cannot be encoded");
+    }
+
+    #[test]
+    fn nonfinite_decoded_scalars_never_certify_points_angles_or_positive_values() {
+        for decoded in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let round_trip: fn(f64) -> Option<f64> = if decoded.is_nan() {
+                |v| Some(if v == 2.0 { f64::NAN } else { v })
+            } else if decoded.is_sign_positive() {
+                |v| Some(if v == 2.0 { f64::INFINITY } else { v })
+            } else {
+                |v| Some(if v == 2.0 { f64::NEG_INFINITY } else { v })
+            };
+            let encoding = scalar_encoding(round_trip);
+            let line = Seg2::Line {
+                a: Vec2::ZERO,
+                b: Vec2::new(2.0, 0.0),
+            };
+            assert_eq!(
+                exact_piece(&line, 0, 1, encoding).unwrap_err().reason,
+                "line endpoint cannot be encoded"
+            );
+            let circle = Seg2::Arc {
+                center: Vec2::ZERO,
+                radius: 2.0,
+                start: 0.0,
+                sweep: std::f64::consts::TAU,
+            };
+            assert_eq!(
+                exact_piece(&circle, 0, 1, encoding).unwrap_err().reason,
+                "arc radius is not positive at writer precision"
+            );
+        }
+        let arc = Seg2::Arc {
+            center: Vec2::ZERO,
+            radius: 2.0,
+            start: 0.0,
+            sweep: std::f64::consts::FRAC_PI_2,
+        };
+        let error = exact_piece(
+            &arc,
+            0,
+            1,
+            scalar_encoding(|v| Some(if v == 90.0 { f64::INFINITY } else { v })),
+        )
+        .unwrap_err();
+        assert_eq!(error.reason, "arc angle cannot be encoded");
+    }
+
+    #[test]
+    fn bulge_bounds_include_the_directed_cardinal_extremum() {
+        let pts = bulged_edge_points(
+            Vertex {
+                at: Vec2::new(1.0, 0.0),
+                bulge: 1.0,
+            },
+            Vec2::new(-1.0, 0.0),
+        )
+        .unwrap();
+        assert!(pts.contains(&Vec2::new(0.0, 1.0)));
+        assert!(!pts.contains(&Vec2::new(0.0, -1.0)));
+        assert_eq!(pts.len(), 5);
+    }
+}

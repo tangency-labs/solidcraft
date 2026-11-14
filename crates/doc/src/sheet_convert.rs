@@ -152,12 +152,20 @@ fn outline_segs(pts: &[(Vec2, Option<u32>)], wall: &mut impl FnMut(u32) -> Optio
         while j < m && same(start + j, (c, r)) {
             j += 1;
         }
-        let sweep: f64 = (i..j)
+        let summed_sweep: f64 = (i..j)
             .map(|s| {
                 let d = (point(start + s + 1) - c).angle() - (point(start + s) - c).angle();
                 (d + PI).rem_euclid(TAU) - PI
             })
             .sum();
+        // When one admitted round-wall run covers every source edge, its ordered
+        // points may prove one turn even if floating sums miss +/-TAU by a few ULP.
+        // Partial and uncertified runs keep their originally computed sweep.
+        let sweep = if i == 0 && j == m && c.is_finite() && r.is_finite() && r > 0.0 {
+            solidcore_ops::prism::certified_round_wall_turn(&pts.iter().map(|(point, _)| *point).collect::<Vec<_>>(), c).unwrap_or(summed_sweep)
+        } else {
+            summed_sweep
+        };
         // Arcs of up to half a turn each.
         let pieces = ((sweep.abs() / PI - 1e-9).ceil() as usize).clamp(1, 4);
         let (a0, step) = ((point(k) - c).angle(), sweep / pieces as f64);
@@ -1194,6 +1202,49 @@ pub fn convert_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sampled_round_wall_turn_is_one_circle_without_widening_recognition() {
+        let center = Vec2::new(80.0, 30.0);
+        let radius = 8.0;
+        let mut ring: Vec<(Vec2, Option<u32>)> = (0..128)
+            .map(|i| {
+                let angle = 10.0f64.to_radians() - TAU * i as f64 / 128.0;
+                (center + Vec2::from_angle(angle) * radius, Some((i / 32) as u32))
+            })
+            .collect();
+        // The seam and any of the four wall-face partitions must not matter.
+        for shift in [0, 7, 31] {
+            ring.rotate_left(shift);
+            let loop2 = outline_loop(&ring, &mut |_id| Some((center, radius)), 1e-9);
+            assert_eq!(solidcore_ops::prism::loop_circle(&loop2), Some((center, radius)));
+        }
+        ring.reverse();
+        let reversed = outline_loop(&ring, &mut |_id| Some((center, radius)), 1e-9);
+        assert_eq!(solidcore_ops::prism::loop_circle(&reversed), Some((center, radius)));
+
+        // Repeated turns, reversal midway and an untagged chord are not circles.
+        let twice: Vec<(Vec2, Option<u32>)> = (0..128)
+            .map(|i| {
+                let angle = 10.0f64.to_radians() - 2.0 * TAU * i as f64 / 128.0;
+                (center + Vec2::from_angle(angle) * radius, Some((i / 32) as u32))
+            })
+            .collect();
+        assert!(solidcore_ops::prism::loop_circle(&outline_loop(&twice, &mut |_id| Some((center, radius)), 1e-9)).is_none());
+
+        let backtrack: Vec<(Vec2, Option<u32>)> = (0..128)
+            .map(|i| {
+                let step = if i <= 64 { i } else { 128 - i };
+                let angle = 10.0f64.to_radians() - TAU * step as f64 / 128.0;
+                (center + Vec2::from_angle(angle) * radius, Some((i / 32) as u32))
+            })
+            .collect();
+        assert!(solidcore_ops::prism::loop_circle(&outline_loop(&backtrack, &mut |_id| Some((center, radius)), 1e-9)).is_none());
+
+        let mut missing_wall = ring;
+        missing_wall[17].1 = None;
+        assert!(solidcore_ops::prism::loop_circle(&outline_loop(&missing_wall, &mut |_id| Some((center, radius)), 1e-9)).is_none());
+    }
 
     #[test]
     fn edges_move_in_by_their_own_amounts_and_step_along_one_line() {
