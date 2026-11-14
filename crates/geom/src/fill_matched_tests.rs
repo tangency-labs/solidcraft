@@ -185,3 +185,41 @@ fn a_setback_g2_fill_stays_under_its_planes() {
         assert!(over < 1e-3, "set back {s}: {over}");
     }
 }
+
+/// The curvature a corner of `setback_hole(5, 8)` leaves the fill, from its two faces' jets: at
+/// (−8, −5, 0) the plane z = 0's curve ends running along −x (tangent to the round's contact
+/// line) and the round about the line y = z = −5 starts its section along +y. Held G1 along both
+/// curves, the fill's second fundamental form there is the face's along each curve's tangent:
+/// along x (the plane's curve) it is 0 and along y (the round's section) −1/5 across the axis,
+/// with no twist, so `II = diag(0, −1/5)` on (x, y) about +z, and the graph's
+/// `II(X, Y) = (N·n) X_pᵀ H Y_p` gives it back exactly.
+#[test]
+fn a_corners_curvature_is_the_one_both_curves_leave_it() {
+    let r = 5.0;
+    let mut hole = setback_hole(r, 8.0, true);
+    let points: Vec<Vec3> = (0..6).flat_map(|k| hole(k, &[0.0, 0.25, 0.5, 0.75]).unwrap()).map(|st| st.p).collect();
+    let f = crate::fill::loop_frame(&points).unwrap();
+    let jet = |c_tt: f64| Some(crate::linkage::Jet { order: 2, forms: [[c_tt, 0.0, 0.0, 0.0, 0.0], [0.0; 5], [0.0; 5]] });
+    let with_jet = |mut st: Station, c_tt: f64| {
+        st.across = st.across.map(|a| Across { jet: jet(c_tt), ..a });
+        st
+    };
+    // The plane's side ends where the round's begins; the round's jet on its frame t = n × w = y.
+    let before = with_jet(hole(5, &[1.0]).unwrap()[0], 0.0);
+    let after = with_jet(hole(0, &[0.0]).unwrap()[0], -1.0 / r);
+    assert!(before.p.dist(Vec3::new(-8.0, -5.0, 0.0)) < 1e-12 && after.p.dist(Vec3::new(-8.0, -5.0, 0.0)) < 1e-12);
+    let h = corner_hessian(&before, &after, &f).unwrap().unwrap();
+    let c = Vec3::Z.dot(f.n);
+    let ii = |p: Vec3, q: Vec3| {
+        let (a, b) = ([p.dot(f.x), p.dot(f.y)], [q.dot(f.x), q.dot(f.y)]);
+        c * (a[0] * b[0] * h[0] + (a[0] * b[1] + a[1] * b[0]) * h[1] + a[1] * b[1] * h[2])
+    };
+    for (p, q, want) in [(Vec3::X, Vec3::X, 0.0), (Vec3::X, Vec3::Y, 0.0), (Vec3::Y, Vec3::Y, -1.0 / r)] {
+        let got = ii(p, q);
+        assert!((got - want).abs() <= 1e-13, "II({p:?}, {q:?}) = {got}, want {want}");
+    }
+    // Without a jet on either face the corner has no curvature of its own, and neither has a
+    // vertex where both curves leave the same way (the across curvature is left undecided).
+    assert_eq!(corner_hessian(&hole(5, &[1.0]).unwrap()[0], &after, &f).unwrap(), None);
+    assert_eq!(corner_hessian(&after, &after, &f).unwrap(), None);
+}

@@ -28,12 +28,21 @@
 //!   across the corner differ (a round ending on a plane: the round's section has the round's
 //!   curvature where it reaches the plane, which is flat across its own curve) no surface is G2
 //!   to both there: the surface's curvature is continuous, and has to pass from one face's to the
-//!   other's. A plane's G2 with G1 makes the surface flat to the second order all along its
-//!   curve, so the passage is a stiff one, and asked over a few cells it pulls the surface off
-//!   the loop along the whole side. The corner's own station holds the position only; the G2
-//!   rows fade in over [`FADE_SHARE`] of the run from each corner to the next (a smoothstep of
-//!   the distance along the loop), a stretch of the loop's own, which finer grids then resolve,
-//!   and hold everywhere else. G1 rows fade likewise from a corner whose faces' tangent planes
+//!   other's. What it is at the corner is set by the two curves alone: a surface G1 to a face
+//!   along a curve has the face's second fundamental form along the curve's tangent `t`
+//!   (`II(t, t)` and `II(t, w)`, `w` the leave direction, since its normal turns as the face's
+//!   along the curve), so the two faces give four linear conditions on the three second
+//!   derivatives of `h` there ([`corner_hessian`], solved in least squares; exact where the faces
+//!   agree on them, as a round and a plane it is tangent to do). The corner's own station holds
+//!   the position only, and the G2 rows fade in over [`FADE_SHARE`] of the run from each corner
+//!   to the next (a smoothstep of the distance along the loop, [`fade`]), a stretch of the loop's
+//!   own, which finer grids then resolve, and hold everywhere else. Within that stretch each row
+//!   asks for a curvature passing from the corner's to its face's (a C2 smootherstep of the same
+//!   distance, [`ramp`]) instead of the face's own: rows a surface can meet, so the fit does not
+//!   trade the corner's misfit into the stations just past the stretch, where every row asks the
+//!   face's own curvature at full weight. At a corner whose faces give no second fundamental form
+//!   (a station without a jet) or whose tangent planes disagree, the rows ask for the face's own
+//!   curvature throughout. G1 rows fade likewise from a corner whose faces' tangent planes
 //!   disagree (`clash`), where no surface is G1 to both.
 //! - **Grids** of 4 to [`MAX_MATCHED_SPANS`] spans across the box's longer side are tried in turn,
 //!   with denser sampling when a grid's cells are finer than twice the stations' step: the first
@@ -57,7 +66,8 @@ pub const MAX_MATCHED_SPANS: usize = 128;
 /// Fewest spans (the first grid tried).
 const MIN_SPANS: usize = 4;
 /// The share of the run from a corner to the next over which the conditions the corner cannot
-/// hold fade in.
+/// hold fade in ([`fade`]), and the curvature asked passes from the corner's own to the face's
+/// ([`ramp`]).
 pub const FADE_SHARE: f64 = 0.15;
 /// The thin-plate energy's weight per fitted station: a thousand times
 /// [`crate::fill::fill_loop`]'s. Its fill only passes through points, which leave the inside to
@@ -130,6 +140,12 @@ pub fn fill_matched(
             })
             .collect()
     };
+    // Each side's end, where the next one starts: at a corner, the face before it.
+    let ends: Vec<Station> = sample(&[1.0])?
+        .into_iter()
+        .map(|side| side.into_iter().next())
+        .collect::<Option<_>>()
+        .ok_or_else(|| SplineError::Invalid("a side has no end".into()))?;
     let mut per = 16usize;
     let mut fit = sample(&(0..per).map(|i| i as f64 / per as f64).collect::<Vec<_>>())?;
     let mut best = Shortfall::default();
@@ -144,7 +160,7 @@ pub fn fill_matched(
                 all.push((*b, false));
             }
         }
-        match fit_round(&all, spec, level)? {
+        match fit_round(&all, &ends, spec, level)? {
             Round::Done(fill) => return Ok(*fill),
             Round::Denser(s, at) => {
                 best = best.min(s);
@@ -214,8 +230,9 @@ struct Row {
     fitted: bool,
     /// G1: the height field's gradient there, and the face's unit normal on `n`'s side.
     gradient: Option<([f64; 2], Vec3)>,
-    /// G2: the leave direction's plane components `(a, b)` and the second derivative of `h`
-    /// along them, `κ / N·n`, with `κ` itself.
+    /// G2: the leave direction's plane components `(a, b)`, the second derivative of `h` asked
+    /// along them (`κ / N·n`, or within a corner's fade passing to it from the corner's), and `κ`
+    /// itself.
     curvature: Option<([f64; 2], f64, f64)>,
     /// How near the station is to a corner, and to a clashing corner: its distance along the
     /// loop to the nearer of the two around it, as a share of the run between them (0 at a
@@ -226,8 +243,15 @@ struct Row {
 }
 
 /// The stations in the plane `f`'s terms, with their distances to the corners along the loop.
-fn rows(all: &[(Station, bool)], f: &LoopFrame) -> SplineResult<Vec<Row>> {
+/// `ends` are the sides' ends (each where the next side starts), `all` the sides' stations in
+/// order, as many on each.
+fn rows(all: &[(Station, bool)], ends: &[Station], f: &LoopFrame) -> SplineResult<Vec<Row>> {
     let m = all.len();
+    let sides = ends.len();
+    if sides == 0 || !m.is_multiple_of(sides) {
+        return invalid("stations");
+    }
+    let per_side = m / sides;
     // Arc length along the loop (chords), and where its corners are.
     let mut s = vec![0.0f64; m + 1];
     for k in 0..m {
@@ -242,19 +266,41 @@ fn rows(all: &[(Station, bool)], f: &LoopFrame) -> SplineResult<Vec<Row>> {
         return invalid("the loop has no length");
     }
     let at = |k: usize| s.get(k).copied().unwrap_or(0.0);
-    let corners: Vec<f64> = (0..m).filter(|&k| all.get(k).is_some_and(|(st, _)| st.corner)).map(at).collect();
+    let at_corner: Vec<usize> = (0..m).filter(|&k| all.get(k).is_some_and(|(st, _)| st.corner)).collect();
+    let corners: Vec<f64> = at_corner.iter().map(|&k| at(k)).collect();
+    // Each corner's own curvature: from the face before it (the previous side's end) and the face
+    // after it (its station's), where both give it.
+    let mut hessians: Vec<Option<[f64; 3]>> = Vec::with_capacity(at_corner.len());
+    for &k in &at_corner {
+        let before = ends.get((k / per_side + sides - 1) % sides);
+        let (Some((after, _)), Some(before)) = (all.get(k), before) else { return invalid("stations") };
+        hessians.push(if after.clash { None } else { corner_hessian(before, after, f)? });
+    }
     let clashes: Vec<f64> = (0..m).filter(|&k| all.get(k).is_some_and(|(st, _)| st.clash)).map(at).collect();
-    let share = |list: &[f64], x: f64| {
-        if list.is_empty() {
-            return 1.0;
+    // The share of the run between the two corners around `x` from the nearer one, and that one.
+    let nearest = |list: &[f64], x: f64| -> (f64, usize) {
+        let (mut back, mut behind) = (f64::INFINITY, 0usize);
+        let (mut ahead, mut before) = (total, 0usize);
+        for (i, c) in list.iter().enumerate() {
+            let b = (x - c).rem_euclid(total);
+            if b < back {
+                (back, behind) = (b, i);
+            }
+            let a = (c - x).rem_euclid(total);
+            if a > 0.0 && a < ahead {
+                (ahead, before) = (a, i);
+            }
         }
-        let back = list.iter().map(|c| (x - c).rem_euclid(total)).fold(f64::INFINITY, f64::min);
-        let ahead = list.iter().map(|c| (c - x).rem_euclid(total)).filter(|d| *d > 0.0).fold(total, f64::min);
+        if list.is_empty() {
+            return (1.0, 0);
+        }
         let run = back + ahead;
-        if run > 0.0 { back.min(ahead) / run } else { 0.0 }
+        (if run > 0.0 { back.min(ahead) / run } else { 0.0 }, if back <= ahead { behind } else { before })
     };
     let mut out = Vec::with_capacity(m);
     for (k, (st, fitted)) in all.iter().enumerate() {
+        let (to_corner, near) = nearest(&corners, at(k));
+        let own = hessians.get(near).copied().flatten();
         let d = st.p - f.o;
         let q = [d.dot(f.x), d.dot(f.y)];
         let mut gradient = None;
@@ -271,21 +317,102 @@ fn rows(all: &[(Station, bool)], f: &LoopFrame) -> SplineResult<Vec<Row>> {
             if let Some(bend) = a.bend {
                 let kappa = bend.dot(nn);
                 let w = a.leave;
-                curvature = Some(([w.dot(f.x), w.dot(f.y)], kappa / c, kappa));
+                let ab = [w.dot(f.x), w.dot(f.y)];
+                let second = match own {
+                    Some([huu, huv, hvv]) => {
+                        let blend = ramp(to_corner);
+                        let from = ab[0] * ab[0] * huu + 2.0 * ab[0] * ab[1] * huv + ab[1] * ab[1] * hvv;
+                        (1.0 - blend) * from + blend * (kappa / c)
+                    }
+                    None => kappa / c,
+                };
+                curvature = Some((ab, second, kappa));
             }
         }
-        out.push(Row {
-            q,
-            h: d.dot(f.n),
-            fitted: *fitted,
-            gradient,
-            curvature,
-            to_corner: share(&corners, at(k)),
-            to_clash: share(&clashes, at(k)),
-            corner: st.corner,
-        });
+        out.push(Row { q, h: d.dot(f.n), fitted: *fitted, gradient, curvature, to_corner, to_clash: nearest(&clashes, at(k)).0, corner: st.corner });
     }
     Ok(out)
+}
+
+/// The second derivatives `[h_uu, h_uv, h_vv]` of the height field over the plane `f` at a
+/// corner of the loop between the face `before` it and the face `after` (module docs): a
+/// surface G1 to a face along a curve has the face's `II(t, t)` and `II(t, w)` along the curve's
+/// tangent `t` (`w` the leave direction), read off the face's jet, and with the graph's
+/// `II(X, Y) = (N·n) X_pᵀ H Y_p` (`X_p` the plane components) each is linear in `H`. Two faces
+/// give four conditions on three unknowns: their least-squares solution, exact where they agree.
+/// `None` where a face gives no jet (no second fundamental form to hold), or where the two curves
+/// leave the corner so nearly the same way that the conditions leave `H` undecided (the normal
+/// equations' determinant under [`UNDECIDED`] of its largest, `(trace / 3)³`).
+fn corner_hessian(before: &Station, after: &Station, f: &LoopFrame) -> SplineResult<Option<[f64; 3]>> {
+    // The normal equations of the four conditions.
+    let mut m = [[0.0f64; 3]; 3];
+    let mut r = [0.0f64; 3];
+    for st in [before, after] {
+        let Some(a) = st.across else { return Ok(None) };
+        let Some(jet) = a.jet else { return Ok(None) };
+        let Some(&[ctt, ctw, _]) = jet.forms.first().and_then(|form| form.get(..3)) else { return Ok(None) };
+        let normal = a.normal.normalized().ok_or_else(|| SplineError::Invalid("a neighbour's normal has no direction".into()))?;
+        // The jet is the face's height along `normal`; the rows take it along `n`'s side.
+        let side = if normal.dot(f.n) >= 0.0 { 1.0 } else { -1.0 };
+        let c = normal.dot(f.n) * side;
+        if !(c > MIN_NORMAL_COS) {
+            return Err(SplineError::Unsupported("filling a loop beside a face that stands along the fill's normal".into()));
+        }
+        let w = a.leave;
+        let t = normal.cross(w);
+        let tp = [t.dot(f.x), t.dot(f.y)];
+        // II(t, t) is the jet's t² coefficient, II(t, w) half its t·w one.
+        for (q, value) in [(tp, ctt), ([w.dot(f.x), w.dot(f.y)], 0.5 * ctw)] {
+            let row = [tp[0] * q[0], tp[0] * q[1] + tp[1] * q[0], tp[1] * q[1]];
+            let rhs = value * side / c;
+            for (mi, ri) in m.iter_mut().zip(row) {
+                for (mij, rj) in mi.iter_mut().zip(row) {
+                    *mij += ri * rj;
+                }
+            }
+            for (x, ri) in r.iter_mut().zip(row) {
+                *x += ri * rhs;
+            }
+        }
+    }
+    let det = |a: &[[f64; 3]; 3]| {
+        let [[a00, a01, a02], [a10, a11, a12], [a20, a21, a22]] = *a;
+        a00 * (a11 * a22 - a12 * a21) - a01 * (a10 * a22 - a12 * a20) + a02 * (a10 * a21 - a11 * a20)
+    };
+    let d = det(&m);
+    // Apart, the two tangents make the conditions independent; together (a vertex where the loop
+    // does not turn, marked a corner) they leave the curvature across undecided.
+    let scale = (m[0][0] + m[1][1] + m[2][2]) / 3.0;
+    if !(d > UNDECIDED * scale * scale * scale) {
+        return Ok(None);
+    }
+    let mut out = [0.0; 3];
+    for (col, o) in out.iter_mut().enumerate() {
+        let mut a = m;
+        for (row, x) in a.iter_mut().zip(r) {
+            if let Some(slot) = row.get_mut(col) {
+                *slot = x;
+            }
+        }
+        *o = det(&a) / d;
+    }
+    Ok(out.iter().all(|x| x.is_finite()).then_some(out))
+}
+
+/// How small the determinant of [`corner_hessian`]'s normal equations may be against its largest
+/// for a positive semidefinite matrix of that trace, `(trace / 3)³`, before the conditions count
+/// as undecided: two curves a degree apart give about 3e-4 (it goes as the sine squared of the
+/// angle between them), so only curves that leave the same way to rounding fall under it.
+const UNDECIDED: f64 = 1e-12;
+
+/// The C2 smootherstep `6t⁵ − 15t⁴ + 10t³` of `share / FADE_SHARE` (1 from [`FADE_SHARE`] on):
+/// how far the curvature a G2 row near a corner with a curvature of its own asks has passed from
+/// the corner's to its face's. Its first and second derivatives vanish at both ends, so the
+/// curvature asked along the loop has a continuous slope and bend where the ramp meets the
+/// corner's and the face's.
+fn ramp(share: f64) -> f64 {
+    let t = (share / FADE_SHARE).clamp(0.0, 1.0);
+    t * t * t * (10.0 + t * (6.0 * t - 15.0))
 }
 
 /// The smoothstep `3t² − 2t³` of `share / FADE_SHARE` (1 from [`FADE_SHARE`] on).
@@ -420,11 +547,11 @@ fn achieved(grid: &Grid, heights: &[f64], rows: &[Row], f: &LoopFrame) -> Spline
 }
 
 /// One round: the grids from `level` up, on these stations.
-fn fit_round(all: &[(Station, bool)], spec: &MatchedSpec, level: usize) -> SplineResult<Round> {
+fn fit_round(all: &[(Station, bool)], ends: &[Station], spec: &MatchedSpec, level: usize) -> SplineResult<Round> {
     let fitted: Vec<Vec3> = all.iter().filter(|(_, f)| *f).map(|(s, _)| s.p).collect();
     let frame = loop_frame(&fitted)?;
     let points: Vec<Vec3> = all.iter().map(|(s, _)| s.p).collect();
-    let rows = rows(all, &frame)?;
+    let rows = rows(all, ends, &frame)?;
     let uv: Vec<[f64; 2]> = rows.iter().map(|r| r.q).collect();
     check_projectable(&points, &uv)?;
     let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
