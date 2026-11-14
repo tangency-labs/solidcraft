@@ -1274,6 +1274,105 @@ fn a_loop_through_a_pole_closes_its_turn_from_the_seam() {
     );
 }
 
+/// A 5 mm sphere about z, its seam the meridian through +x (angle −π/2 at the south pole, π/2
+/// at the north), and the circle where the plane at `d` from the centre across direction
+/// `(cos a, sin a, 0)` meets it (angle 0 at its top, a quarter turn towards +y about it).
+fn sphere_seam_and_cut(a: f64, d: f64) -> (Surface, Curve, Curve) {
+    let r = 5.0f64;
+    let sphere = Surface::Sphere {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let seam = Curve::Circle {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 0., 1.],
+        },
+        radius: r,
+    };
+    let (s, c) = a.sin_cos();
+    let cut = Curve::Circle {
+        frame: Frame {
+            origin: [d * c, d * s, 0.],
+            x_axis: [0., 0., 1.],
+            y_axis: [-s, c, 0.],
+        },
+        radius: (r * r - d * d).sqrt(),
+    };
+    (sphere, seam, cut)
+}
+
+/// A sphere less a hole beside its seam (#16872: a ball with a bore in it, after a STEP round
+/// trip): the seam's loop, up the meridian and back down it, has no width, yet the face covers
+/// the whole turn with the hole in it, whichever loop comes first. Taken as wide as the hole, the
+/// face's form was a sliver and its seam loop enclosed nothing.
+#[test]
+fn a_sphere_less_a_hole_beside_its_seam_spans_the_whole_turn() {
+    let (sphere, seam, hole) = sphere_seam_and_cut(0.4, 4.8);
+    let seam_loop = vec![
+        (&seam, [-FRAC_PI_2, FRAC_PI_2], true),
+        (&seam, [-FRAC_PI_2, FRAC_PI_2], false),
+    ];
+    let hole_loop = vec![(&hole, [0., TAU], false)];
+    for loops in [
+        [seam_loop.clone(), hole_loop.clone()],
+        [hole_loop.clone(), seam_loop.clone()],
+    ] {
+        let [u, v] = form::extent(&sphere, &loops, 1e-9)
+            .unwrap()
+            .expect("an extent");
+        assert!((u[1] - u[0] - TAU).abs() < 1e-9, "one turn: {u:?}");
+        let from = u[0].rem_euclid(TAU);
+        assert!(from.min(TAU - from) < 1e-9, "from the seam: {u:?}");
+        let hole_u = 0.4 + ((u[0] - 0.4) / TAU).ceil() * TAU;
+        assert!(hole_u > u[0] && hole_u < u[1], "the hole in the turn: {u:?}");
+        assert!(
+            (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
+            "{v:?}"
+        );
+    }
+}
+
+/// A sphere less a bore across its seam (#16872): its loop runs up the seam to the bore, round
+/// the bore's one side, up the seam to the north pole, down the seam's other use, round the
+/// bore's other side and down to the south pole. It passes both poles, so it closes whatever
+/// turns it takes there; the face lies on its left, so over the north pole it turns back a whole
+/// turn and the face covers it. Closing the loop instead took the turns of no width, a box just
+/// as wide as the bore, and the face came out as the bore turned over.
+#[test]
+fn a_loop_over_both_poles_turns_the_way_its_face_lies() {
+    let (sphere, seam, bore) = sphere_seam_and_cut(0.0, 4.0);
+    let below = [-FRAC_PI_2, -(0.6f64.asin())];
+    let above = [0.6f64.asin(), FRAC_PI_2];
+    let outer = vec![
+        (&seam, below, true),
+        (&bore, [std::f64::consts::PI, TAU], true),
+        (&seam, above, true),
+        (&seam, above, false),
+        (&bore, [0., std::f64::consts::PI], true),
+        (&seam, below, false),
+    ];
+    // Started anywhere round it, the loop takes the same turns.
+    for k in 0..outer.len() {
+        let l: Vec<_> = outer.iter().cycle().skip(k).take(outer.len()).copied().collect();
+        let [u, v] = form::extent(&sphere, &[l], 1e-9)
+            .unwrap()
+            .expect("an extent");
+        assert!((u[1] - u[0] - TAU).abs() < 1e-9, "start {k}: one turn: {u:?}");
+        let from = u[0].rem_euclid(TAU);
+        assert!(from.min(TAU - from) < 1e-9, "start {k}: from the seam: {u:?}");
+        assert!(
+            (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
+            "start {k}: {v:?}"
+        );
+    }
+}
+
 /// A face's box reaches its boundary's extremes, not its samples' nearest ones.
 #[test]
 fn a_face_box_reaches_its_boundary_extremes() {
