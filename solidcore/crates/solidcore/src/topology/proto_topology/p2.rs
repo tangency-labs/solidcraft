@@ -3218,7 +3218,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 /// [`SolidError::InvalidInput`] for a non-finite or negative tolerance, or a NaN gap.
 fn ends_are_a_stretch(gap: f64, edge_tol: f64, vertex_tols: [f64; 2]) -> Result<bool> {
     let usable = |t: f64| t.is_finite() && t >= 0.0;
-    if gap.is_nan() || !usable(edge_tol) || !vertex_tols.into_iter().all(usable) {
+    if !gap.is_finite() || !usable(edge_tol) || !vertex_tols.into_iter().all(usable) {
         return Err(SolidError::invalid_input(
             OP_IMPRINT_ED,
             "a definition's end gap and tolerances must be finite and not negative",
@@ -3259,6 +3259,7 @@ mod tests {
             (1.0, f64::INFINITY, [1e-6, 1e-6]),
             (1.0, 1e-6, [1e-6, -1.0]),
             (f64::NAN, 1e-6, [1e-6, 1e-6]),
+            (f64::INFINITY, 1e-6, [1e-6, 1e-6]),
         ] {
             assert!(ends_are_a_stretch(gap, edge, vertex).is_err());
         }
