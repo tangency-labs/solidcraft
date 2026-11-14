@@ -542,7 +542,8 @@ fn a_wall_one_span_across_is_divided_only_along_its_spans() {
 /// The Mixed corner's chamfer face of the peg case
 /// `fillets/report-peg-front-and-concave-chamfers-together-d2` (degrees 9 and 5, 91 x 6
 /// control points), as the case built it on 2026-11-05: its record's homogeneous net in
-/// `data/issue_13753_mixed_chamfer_face.json`.
+/// `data/issue_13753_mixed_chamfer_face.json`. In the case it is a B-spline face open both
+/// ways too, so its search takes the same path.
 fn mixed_chamfer_face() -> Surface {
     let text = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -598,8 +599,13 @@ fn a_dip_the_whole_domain_solve_misses_is_inside_the_box() {
     assert!(dip.y < -7.2e-4, "the dip: {dip:?}");
     let (b, f) = sheet_on(&mut k, face, 1e-6).unwrap();
     assert_eq!(
-        (b.faces().len(), b.edges().len(), b.vertices().len()),
-        (1, 4, 4)
+        (
+            b.faces().len(),
+            b.edges().len(),
+            b.vertices().len(),
+            b.shells().len()
+        ),
+        (1, 4, 4, 1)
     );
     let bx = calculate_tight_bounding_box(&k, &b, f).unwrap();
     assert!(
@@ -613,4 +619,76 @@ fn a_dip_the_whole_domain_solve_misses_is_inside_the_box() {
     assert_close("y max", bx.max().y, 2.0);
     assert_close("z min", bx.min().z, 8.0);
     assert_close("z max", bx.max().z, 10.0);
+}
+
+/// A quarter of a cylinder of radius 10 about z, from -30 to 60 degrees (one rational
+/// quadratic span along u), z = 10 v over [0, 1]: its greatest x, 10, runs along the whole
+/// line of angle 0 inside it, which no halving of u reaches.
+fn quarter_cylinder() -> Surface {
+    let (r, s) = (10.0, FRAC_1_SQRT_2);
+    let at = |deg: f64, scale: f64| {
+        let a = deg.to_radians();
+        (scale * a.cos(), scale * a.sin())
+    };
+    let ((x0, y0), (x1, y1), (x2, y2)) = (at(-30.0, r), at(15.0, r / s), at(60.0, r));
+    let arc = [(x0, y0, 1.0), (x1, y1, s), (x2, y2, 1.0)];
+    let net: Vec<Vec<CPoint>> = arc
+        .iter()
+        .map(|&(x, y, w)| {
+            [0.0, 10.0]
+                .iter()
+                .map(|&z| CPoint::new(x * w, y * w, z * w, w))
+                .collect()
+        })
+        .collect();
+    let nurb = NurbSurface::new(
+        net,
+        2,
+        1,
+        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        vec![0.0, 0.0, 1.0, 1.0],
+    )
+    .unwrap();
+    Surface::from(BSplineSurface::from_nurb(nurb, false))
+}
+
+/// #13753: a face whose greatest value runs along a line inside it (a cylinder's, in x).
+/// Set aside only on their control points, the cells along that line are divided until
+/// their hull comes within 1e-6 of it; halved along the line too, they doubled at every
+/// depth, the search reached its cell limit, and the cells left on the stack counted with
+/// hulls far above the face. Divided only across the line, the box is the face's (x max 10
+/// to 1e-6) and the solves read few control points.
+#[test]
+fn a_ridge_along_a_face_is_divided_only_across_it() {
+    let mut k = Kernel::default();
+    k.fixes.face_tight_box_searches_trim = true;
+    let (b, f) = sheet_on(&mut k, quarter_cylinder(), 1e-6).unwrap();
+    assert_eq!(
+        (
+            b.faces().len(),
+            b.edges().len(),
+            b.vertices().len(),
+            b.shells().len()
+        ),
+        (1, 4, 4, 1)
+    );
+    k.work_counters.reset();
+    let bx = calculate_tight_bounding_box(&k, &b, f).unwrap();
+    let read = k.work_counters.face_extreme_control_points();
+    assert!(
+        (bx.max().x - 10.0).abs() <= 1e-6,
+        "x max {}",
+        bx.max().x
+    );
+    assert!((bx.min().x - 5.0).abs() <= 1e-6, "x min {}", bx.min().x);
+    assert!((bx.min().y + 5.0).abs() <= 1e-6, "y min {}", bx.min().y);
+    assert!(
+        (bx.max().y - 10.0 * 60f64.to_radians().sin()).abs() <= 1e-6,
+        "y max {}",
+        bx.max().y
+    );
+    assert_close("z min", bx.min().z, 0.0);
+    assert_close("z max", bx.max().z, 10.0);
+    eprintln!("control points read {read}");
+    assert!(read <= 2000, "control points read {read}");
 }
