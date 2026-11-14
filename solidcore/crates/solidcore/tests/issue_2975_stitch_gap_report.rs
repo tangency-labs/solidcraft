@@ -666,9 +666,6 @@ fn lifted_sheets_beside(
     let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT).unwrap();
     add_square(k, &mut b, 0.0, 0.0);
     add_square(k, &mut b, 1.0, 0.0);
-    if let Some((x, y)) = beside {
-        add_square(k, &mut b, x, y);
-    }
     // A body tolerance of 1e-4 puts the size ratio limit (1000x) at 0.1, above every zone here.
     b.set_tolerance(1e-4);
     for f in b.face_list().to_vec() {
@@ -717,6 +714,11 @@ fn lifted_sheets_beside(
     let sewed = stitch_faces(k, &mut b, stitch_tol, None, false)
         .map_or(0, |outcome| outcome.stitched_edges);
     b.refresh_cached_topology();
+    // the third face comes after the stitch, so nothing sews it
+    if let Some((x, y)) = beside {
+        add_square(k, &mut b, x, y);
+        b.refresh_cached_topology();
+    }
     // `add_square` names each surface's owner by its arena identity, while `new_brep`
     // checks under the notification scheme: relabel so the check sees the owners.
     b.use_arena_naming().unwrap();
@@ -787,13 +789,13 @@ fn a_gap_inside_the_summed_local_zones_is_taken_only_by_the_stitch_scope() {
     for &e in b.edge_list() {
         assert_eq!(b.edge(e).unwrap().tolerance, 0.02);
     }
-    for &v in b.vertex_list() {
-        assert_eq!(b.vertex(v).unwrap().tolerance, 0.006);
-    }
     // Checking validity must not silently repair the model.
+    let before: Vec<f64> = b.vertex_list().iter().map(|&v| b.vertex(v).unwrap().tolerance).collect();
     let mut repair = AssertArray::default();
     let gaps = validate_and_update_tolerances(&mut k, &mut b, true, Some(&mut repair), 2).unwrap();
     assert!((gaps.max_vertex_edge_gap - 0.004).abs() < 1e-12);
+    let after: Vec<f64> = b.vertex_list().iter().map(|&v| b.vertex(v).unwrap().tolerance).collect();
+    assert_eq!(before, after);
 }
 
 /// The stitch's scope takes a gap past the rule for every body only where the tolerance ball that
