@@ -160,6 +160,8 @@ pub enum ObjectKind {
     CentreMark,
     /// A centre line joining two named model points.
     CentreLine,
+    /// A view's label: its letter, name and scale, above the view unless moved (#13044).
+    ViewLabel,
 }
 
 impl ObjectKind {
@@ -178,6 +180,7 @@ impl ObjectKind {
             ObjectKind::Note => "NOTE",
             ObjectKind::CentreMark => "CENTRE_MARK",
             ObjectKind::CentreLine => "CENTRE_LINE",
+            ObjectKind::ViewLabel => "VIEW_LABEL",
         }
     }
 
@@ -191,7 +194,7 @@ impl ObjectKind {
             ObjectKind::SheetBorder | ObjectKind::DrawingBorder => 0,
             ObjectKind::SheetImage => 1,
             ObjectKind::View => 2,
-            ObjectKind::Dimension | ObjectKind::CentreMark | ObjectKind::CentreLine => 3,
+            ObjectKind::Dimension | ObjectKind::CentreMark | ObjectKind::CentreLine | ObjectKind::ViewLabel => 3,
             ObjectKind::Note => match of {
                 DrawnFor::View => 3,
                 DrawnFor::Sheet => 5,

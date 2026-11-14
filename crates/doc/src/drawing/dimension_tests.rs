@@ -45,6 +45,7 @@ fn measured() -> (Drawing, [u64; 3]) {
         settings,
         reference_shown_percent: 0.0,
         centre_marks: None,
+        label: None,
     })]);
     let kinds = [
         DimensionKind::Linear {

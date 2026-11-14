@@ -384,6 +384,7 @@ fn a_view_is_outlined_only_near_its_edge() {
     assert!(outlined(&hit(ObjectKind::Dimension, false)));
     assert!(outlined(&hit(ObjectKind::Note, false)));
     assert_eq!(kind_name(ObjectKind::Note), "note");
+    assert_eq!(kind_name(ObjectKind::ViewLabel), "view_label");
     assert!(outlined(&hit(ObjectKind::TitleBlock, false)));
 }
 

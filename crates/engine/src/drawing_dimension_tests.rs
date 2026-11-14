@@ -67,6 +67,7 @@ fn boxed() -> Fixture {
             settings: half,
             reference_shown_percent: 0.0,
             centre_marks: None,
+            label: None,
         }),
         Arc::new(View {
             id: right,
@@ -76,6 +77,7 @@ fn boxed() -> Fixture {
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
             centre_marks: None,
+            label: None,
         }),
     ]);
     d.validate().unwrap();
@@ -700,7 +702,7 @@ fn a_spheres_size_reads_on_its_contour_where_its_faces_are() {
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Top) };
     let place = ViewPlace::At([300.0, 230.0]);
     let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
-    f.d.add_views([Arc::new(View { id: top, sheet, kind, place, settings, reference_shown_percent: 0.0, centre_marks: None })]);
+    f.d.add_views([Arc::new(View { id: top, sheet, kind, place, settings, reference_shown_percent: 0.0, centre_marks: None, label: None })]);
     let from_above = f.add(top, sphere(&cap), None);
     let r = f.resolve(from_above);
     assert!(matches!(&r.status, Status::Unmeasurable(why) if why.contains("contour in this view isn't on it")), "{r:?}");
@@ -879,7 +881,16 @@ fn base_view(f: &mut Fixture, direction: ViewDirection, at: [f64; 2]) -> u64 {
     let (sheet, source) = (f.d.sheets[0].id, f.d.sources[0].id);
     let kind = ViewKind::Base { source, view: direction };
     let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
-    f.d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At(at), settings, reference_shown_percent: 0.0, centre_marks: None })]);
+    f.d.add_views([Arc::new(View {
+        id,
+        sheet,
+        kind,
+        place: ViewPlace::At(at),
+        settings,
+        reference_shown_percent: 0.0,
+        centre_marks: None,
+        label: None,
+    })]);
     id
 }
 

@@ -34,7 +34,7 @@ fn front() -> (Drawing, IdSource, u64) {
 fn add(d: &mut Drawing, id_source: &mut IdSource, kind: ViewKind, place: ViewPlace, settings: ViewOverrides) -> u64 {
     let id = d.allocate_id(id_source).unwrap();
     let sheet = d.sheets[0].id;
-    d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, centre_marks: None })]);
+    d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, centre_marks: None, label: None })]);
     id
 }
 
@@ -817,4 +817,109 @@ fn auto_mark_grouping_requires_complete_rims_and_topological_association() {
     let mut invalid = candidates.clone();
     invalid[0].spans[0].0 = f64::NAN;
     assert!(group_candidates(&invalid).is_err());
+}
+
+/// View `id`'s letter, if it has one.
+fn letter(d: &Drawing, id: u64) -> Option<String> {
+    d.view(id)?.label.as_ref().map(|label| label.letter.clone())
+}
+
+/// A view placed apart from its projection place gets the first letter no view holds, I, O and Q
+/// skipped; one lined up with its parent or a base view gets none. A freed letter comes back while
+/// letters are reused, never once they aren't, and the letters given are counted either way.
+#[test]
+fn a_view_placed_apart_gets_the_first_free_letter() {
+    let (mut d, mut id_source, [front, right, top]) = three();
+    for id in [front, right, top] {
+        d.give_letter(id).unwrap();
+    }
+    assert_eq!([front, right, top].map(|id| letter(&d, id)), [None, None, Some("A".into())]);
+    let label = d.view(top).unwrap().label.clone().unwrap();
+    assert_eq!((label.words.as_str(), label.scale_words.as_str(), label.shown, label.offset), ("VIEW", "SCALE", true, None));
+    let mut apart = |d: &mut Drawing| {
+        let id = add(d, &mut id_source, projected(front, ProjectedSide::Below), ViewPlace::At([150.0, 40.0]), ViewOverrides::default());
+        d.give_letter(id).unwrap();
+        id
+    };
+    let more: Vec<u64> = (0..8).map(|_| apart(&mut d)).collect();
+    let given: Vec<String> = more.iter().filter_map(|id| letter(&d, *id)).collect();
+    assert_eq!(given, ["B", "C", "D", "E", "F", "G", "H", "J"], "I is skipped");
+    assert_eq!(d.view_letters, ViewLetters { reuse: true, given: 9 });
+    // A letter already there stays; a view freed of its letter's holder gives it back.
+    d.give_letter(top).unwrap();
+    assert_eq!(letter(&d, top).as_deref(), Some("A"));
+    d.views.retain(|v| v.id != top);
+    let again = apart(&mut d);
+    assert_eq!(letter(&d, again).as_deref(), Some("A"), "a freed letter comes back");
+    d.views.retain(|v| v.id != more[0]);
+    d.view_letters.reuse = false;
+    let past = apart(&mut d);
+    assert_eq!(letter(&d, past).as_deref(), Some("K"), "never again once letters aren't reused: B stays free");
+    assert_eq!(d.view_letters.given, 10);
+    d.validate().unwrap();
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened.view_letters, d.view_letters, "saved");
+}
+
+/// A view's label reads `VIEW` and its letter, its name, then its scale when it isn't its sheet's,
+/// each part as typed and only when shown; a view in its projection place, or one whose label is
+/// hidden, draws none and keeps its letter.
+#[test]
+fn a_views_label_reads_its_shown_parts() {
+    let (mut d, _, [front, right, top]) = three();
+    d.give_letter(top).unwrap();
+    assert_eq!(d.label_text(top).as_deref(), Some("VIEW A"));
+    assert_eq!((d.label_text(front), d.label_text(right)), (None, None), "no label");
+    view_mut(&mut d, top).settings.scale = Some("2:1".parse().unwrap());
+    assert_eq!(d.label_text(top).as_deref(), Some("VIEW A\nSCALE 2:1"), "the sheet's scale is its base view's, 1:2");
+    let label = view_mut(&mut d, top).label.as_mut().unwrap();
+    label.words = String::new();
+    label.name = "BRACKET END".into();
+    label.scale_words = "ECHELLE".into();
+    assert_eq!(d.label_text(top).as_deref(), Some("A\nBRACKET END\nECHELLE 2:1"));
+    let label = view_mut(&mut d, top).label.as_mut().unwrap();
+    (label.show_letter, label.show_scale) = (false, false);
+    assert_eq!(d.label_text(top).as_deref(), Some("BRACKET END"));
+    view_mut(&mut d, top).label.as_mut().unwrap().name.clear();
+    assert_eq!(d.label_text(top), None, "nothing shown");
+    view_mut(&mut d, top).label.as_mut().unwrap().show_letter = true;
+    view_mut(&mut d, top).label.as_mut().unwrap().shown = false;
+    assert_eq!((d.label_text(top), letter(&d, top).as_deref()), (None, Some("A")), "hidden, its letter kept");
+    view_mut(&mut d, top).label.as_mut().unwrap().shown = true;
+    view_mut(&mut d, top).place = ViewPlace::Aligned(320.0);
+    assert_eq!((d.label_text(top), letter(&d, top).as_deref()), (None, Some("A")), "back in its projection place");
+}
+
+/// A label's letter is one to three capitals, its words one line each, and its offset a point on
+/// paper; a letter two views hold opens (a hand edit), and giving one of them a letter gives it
+/// another.
+#[test]
+fn a_label_keeps_the_records_rules_and_a_doubled_letter_opens() {
+    let (mut d, mut id_source, [front, _, top]) = three();
+    d.give_letter(top).unwrap();
+    let at = |v: &mut Value| v["views"].as_array_mut().unwrap().iter_mut().find(|v| v["label"].is_object()).unwrap()["label"].take();
+    let with = |d: &Drawing, key: &str, value: Value| {
+        refused(d, |v| {
+            let mut label = at(v);
+            label[key] = value;
+            let views = v["views"].as_array_mut().unwrap();
+            views.iter_mut().find(|v| v["label"].is_null() && v["place"]["at"].is_array() && v["kind"]["projected"].is_object()).unwrap()["label"] =
+                label;
+        })
+    };
+    assert_eq!(with(&d, "letter", json!("B")), "read");
+    for (key, value) in [("letter", json!("a")), ("letter", json!("ABCD")), ("letter", json!("")), ("letter", json!("A1"))] {
+        assert!(with(&d, key, value.clone()).contains("its letter is one to three capital letters A to Z"), "{key}: {value}");
+    }
+    assert!(with(&d, "name", json!("two\nlines")).contains("a label is one line"));
+    assert!(with(&d, "words", json!("x".repeat(5000))).contains("a label is one line"));
+    for offset in [json!([1e9, 0.0]), json!([0.0, -6000.0])] {
+        assert!(with(&d, "offset", offset.clone()).contains("its label's offset is at most 5000 mm"), "{offset}");
+    }
+    let twin = add(&mut d, &mut id_source, projected(front, ProjectedSide::Below), ViewPlace::At([150.0, 40.0]), ViewOverrides::default());
+    view_mut(&mut d, twin).label = d.view(top).unwrap().label.clone();
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(letter(&reopened, twin).as_deref(), Some("A"), "a doubled letter opens");
+    d.give_letter(twin).unwrap();
+    assert_eq!((letter(&d, top).as_deref(), letter(&d, twin).as_deref()), (Some("A"), Some("B")), "the copy takes the next");
 }

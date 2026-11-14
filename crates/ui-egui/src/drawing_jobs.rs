@@ -79,6 +79,7 @@ mod tests {
                 settings: ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() },
                 reference_shown_percent: 0.0,
                 centre_marks: None,
+                label: None,
             })]);
         }
         h.app.session.doc_mut().put_drawing(Arc::new(d));

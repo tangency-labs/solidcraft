@@ -673,6 +673,7 @@ mod tests {
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
             centre_marks: None,
+            label: None,
         };
         d.add_views([Arc::new(on_other)]);
         s.doc_mut().put_drawing(Arc::new(d));

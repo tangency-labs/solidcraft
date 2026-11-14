@@ -44,6 +44,7 @@ fn placed() -> (Session, u64, u64, [u64; 2]) {
         settings,
         reference_shown_percent: 0.0,
         centre_marks: None,
+        label: None,
     })]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));

@@ -141,6 +141,7 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
             ObjectKind::CentreLine => CheckedKind::CentreLine,
             ObjectKind::CentreMark => CheckedKind::CentreMark,
             ObjectKind::Note => CheckedKind::Note,
+            ObjectKind::ViewLabel => CheckedKind::ViewLabel,
             ObjectKind::PartsList | ObjectKind::RevisionTable => CheckedKind::Table,
             // Images are painted with the border and aren't among the objects: read below.
             ObjectKind::SheetImage | ObjectKind::SheetBorder | ObjectKind::DrawingBorder | ObjectKind::TitleBlock => continue,
