@@ -1125,6 +1125,7 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
         ],
         "close" => &[&[(6.0, 6.0), (18.0, 18.0)], &[(18.0, 6.0), (6.0, 18.0)]],
         "duplicate" => &[&[(8.0, 8.0), (19.0, 8.0), (19.0, 19.0), (8.0, 19.0), (8.0, 8.0)], &[(5.0, 15.0), (5.0, 5.0), (15.0, 5.0)]],
+        "tiles" => &[&[(4.0, 4.0), (20.0, 4.0), (20.0, 20.0), (4.0, 20.0), (4.0, 4.0)], &[(12.0, 4.0), (12.0, 20.0)], &[(4.0, 12.0), (20.0, 12.0)]],
         "reopen" => &[
             &[(3.0, 12.0), (4.2, 16.5), (7.5, 19.8), (12.0, 21.0), (16.5, 19.8), (19.8, 16.5), (21.0, 12.0), (19.8, 7.5), (16.5, 4.2), (12.0, 3.0)],
             &[(3.0, 4.0), (3.0, 9.0), (8.0, 9.0)],
@@ -1134,7 +1135,7 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
 }
 
 /// Draws a view's icon (`model`, `sketch`, `sheet`, `render` or `animation`, or the menu glyphs
-/// `rename`, `window`, `close`, `duplicate` and `reopen`; another name draws nothing) as strokes of `ink` in `r`.
+/// `rename`, `window`, `close`, `duplicate`, `tiles` and `reopen`; another name draws nothing) as strokes of `ink` in `r`.
 pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
     let s = r.width() / 24.0;
     let stroke = Stroke::new(2.0 * s, ink);

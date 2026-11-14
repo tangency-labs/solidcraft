@@ -1,0 +1,90 @@
+{
+  "en": {
+    "Another angle of this view": "Another angle of this view",
+    "One large and two small": "One large and two small",
+    "Open beside": "Open beside",
+    "Show beside": "Show beside",
+    "Show views together": "Show views together",
+    "Single view": "Single view",
+    "Two by two": "Two by two",
+    "Two side by side": "Two side by side",
+    "Two stacked": "Two stacked"
+  },
+  "de": {
+    "Another angle of this view": "Weiterer Blickwinkel dieser Ansicht",
+    "One large and two small": "Eine große und zwei kleine",
+    "Open beside": "Daneben öffnen",
+    "Show beside": "Daneben anzeigen",
+    "Show views together": "Ansichten gemeinsam anzeigen",
+    "Single view": "Eine Ansicht",
+    "Two by two": "Zwei mal zwei",
+    "Two side by side": "Zwei nebeneinander",
+    "Two stacked": "Zwei untereinander"
+  },
+  "ko": {
+    "Another angle of this view": "이 뷰의 다른 각도",
+    "One large and two small": "큰 뷰 하나와 작은 뷰 둘",
+    "Open beside": "옆에 열기",
+    "Show beside": "옆에 표시",
+    "Show views together": "뷰를 함께 표시",
+    "Single view": "뷰 하나",
+    "Two by two": "2×2",
+    "Two side by side": "나란히 둘",
+    "Two stacked": "위아래로 둘"
+  },
+  "ar": {
+    "Another angle of this view": "زاوية أخرى لهذا العرض",
+    "One large and two small": "واحد كبير واثنان صغيران",
+    "Open beside": "فتح بجانبه",
+    "Show beside": "إظهار بجانبه",
+    "Show views together": "إظهار العروض معًا",
+    "Single view": "عرض واحد",
+    "Two by two": "اثنان في اثنين",
+    "Two side by side": "اثنان جنبًا إلى جنب",
+    "Two stacked": "اثنان فوق بعض"
+  },
+  "he": {
+    "Another angle of this view": "זווית נוספת של התצוגה הזו",
+    "One large and two small": "אחת גדולה ושתיים קטנות",
+    "Open beside": "פתיחה לצד",
+    "Show beside": "הצגה לצד",
+    "Show views together": "הצגת תצוגות יחד",
+    "Single view": "תצוגה אחת",
+    "Two by two": "שתיים על שתיים",
+    "Two side by side": "שתיים זו לצד זו",
+    "Two stacked": "שתיים זו מעל זו"
+  },
+  "ja": {
+    "Another angle of this view": "このビューの別の角度",
+    "One large and two small": "大1つと小2つ",
+    "Open beside": "隣に開く",
+    "Show beside": "隣に表示",
+    "Show views together": "ビューを並べて表示",
+    "Single view": "ビュー1つ",
+    "Two by two": "2×2",
+    "Two side by side": "左右に2つ",
+    "Two stacked": "上下に2つ"
+  },
+  "vi": {
+    "Another angle of this view": "Một góc nhìn khác của góc nhìn này",
+    "One large and two small": "Một lớn và hai nhỏ",
+    "Open beside": "Mở bên cạnh",
+    "Show beside": "Hiển thị bên cạnh",
+    "Show views together": "Hiển thị các góc nhìn cùng lúc",
+    "Single view": "Một góc nhìn",
+    "Two by two": "Hai nhân hai",
+    "Two side by side": "Hai góc nhìn cạnh nhau",
+    "Two stacked": "Hai góc nhìn xếp chồng"
+  },
+  "zh": {
+    "Another angle of this view": "此视图的另一个角度",
+    "One large and two small": "一大两小",
+    "Open beside": "在旁边打开",
+    "Show beside": "在旁边显示",
+    "Show views together": "并排显示视图",
+    "Single view": "单个视图",
+    "Two by two": "两行两列",
+    "Two side by side": "左右两个",
+    "Two stacked": "上下两个"
+  }
+}

@@ -385,6 +385,7 @@ mod view_confirm;
 pub mod view_gizmo;
 mod view_memory;
 pub mod view_pick;
+mod view_tiles;
 pub mod viewport;
 mod viewport_details;
 mod viewport_layout;
@@ -4321,6 +4322,8 @@ impl SolveApp {
             // The model view is not drawn, so no shown dimension can be double-clicked.
             dim_view::set_model_drawn(Vec::new());
             render_workspace::show(self, ui);
+        } else if view_tiles::shown(self) {
+            view_tiles::show(self, ui);
         } else {
             viewport::show(self, ui);
         }
