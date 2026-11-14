@@ -1492,8 +1492,11 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
             nf.keep_pattern_names_with_sources(old);
         }
     }
-    // New face points: their faces' names now.
-    if nf.kind.face_points() != f.kind.face_points() {
+    // New face points: their faces' names now. A feature whose reference was lost takes them
+    // fresh too, even when the point sent is the stored one: that is how a broken reference is
+    // picked again (#16661), where the stored name would otherwise be kept and fail the same way.
+    let lost = s.model.result(id).and_then(|r| r.error.as_deref()).is_some_and(|e| solidcraft_doc::reselect_parts(e).is_some());
+    if nf.kind.face_points() != f.kind.face_points() || (lost && !nf.kind.face_points().is_empty()) {
         nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component)?;
     }
     if let Some(slot) = s.doc_mut().feature_mut(id) {

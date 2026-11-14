@@ -429,3 +429,54 @@ fn a_chamfer_whose_old_name_and_pick_fit_two_edges_asks_again() {
     let result = reopened.model.result(reopened.doc.features[bevel].id).unwrap();
     assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{:?}", result.error);
 }
+
+/// A 40 x 20 x 10 block, shelled open at the side face of its line `l1` (picked at (20, 0, 5)).
+/// Returns the shell's feature id.
+fn block_shelled_at_its_first_side(s: &mut Session) -> u64 {
+    run(s, "sketch.create", json!({"plane": "XY", "name": "S1"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.extrude", json!({"distance": 10, "name": "E1"}));
+    let id = run(s, "solid.shell", json!({"faces": [[20, 0, 5]], "thickness": 2}))["feature"].as_u64().unwrap_or(0);
+    assert_eq!(shell_error(s, id), None);
+    id
+}
+
+fn shell_error(s: &Session, id: u64) -> Option<String> {
+    s.model.result(id).and_then(|r| r.error.clone())
+}
+
+/// Delete `l1` and draw `line` in the sketch under the extrude.
+fn replace_first_side(s: &mut Session, line: [[f64; 2]; 2]) {
+    run(s, "sketch.edit", json!({"sketch": "S1"}));
+    run(s, "sketch.delete", json!({"entities": ["l1"]}));
+    run(s, "sketch.line", json!({"points": line}));
+    run(s, "sketch.finish", json!({}));
+}
+
+/// #16661: a side deleted and drawn again where it was is a new line with a new id, and the
+/// shell's saved face still finds the face on it.
+#[test]
+fn a_side_line_deleted_and_drawn_again_keeps_the_shells_face() {
+    let mut s = Session::default();
+    let shell = block_shelled_at_its_first_side(&mut s);
+    replace_first_side(&mut s, [[0.0, 0.0], [40.0, 0.0]]);
+    assert_eq!(shell_error(&s, shell), None);
+}
+
+/// A different line in its place is another face: the shell asks for it to be picked again, and a
+/// point pick through `timeline.edit` repairs the reference.
+#[test]
+fn a_different_line_in_its_place_asks_to_reselect_and_a_point_pick_repairs_it() {
+    let mut s = Session::default();
+    let shell = block_shelled_at_its_first_side(&mut s);
+    replace_first_side(&mut s, [[0.0, 0.0], [40.0, 6.0]]);
+    let error = shell_error(&s, shell).unwrap_or_default();
+    assert!(error.contains("reselect"), "{error}");
+    // Picking the face now on the other line stores its name ...
+    run(&mut s, "timeline.edit", json!({"feature": shell, "set": {"faces": [[20, 3, 5]]}}));
+    assert_eq!(shell_error(&s, shell), None);
+    // ... and the stored name is the new face's, so a reopened design finds it too.
+    let reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
+    assert_eq!(shell_error(&reopened, shell), None);
+}
