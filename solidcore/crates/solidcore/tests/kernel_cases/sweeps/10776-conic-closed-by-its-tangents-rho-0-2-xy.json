@@ -1,0 +1,140 @@
+{
+  "area": "sweeps",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 5.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "nurbs": {
+              "degree": 2,
+              "knots": [
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "points": [
+                [
+                  10.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.25
+                ],
+                [
+                  0.0,
+                  10.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                10.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "10776-conic-closed-by-its-tangents-rho-0-2-xy",
+  "expected": {
+    "body_count": 1,
+    "method": "Rational quadratic Bezier with control triangle T = 10*10/2 = 50 mm^2 and weight w = rho/(1-rho) = 0.25, rho being the conic's shoulder parameter (SolidCraft's sketch.conic). The area between the conic and the corner is A = T*(1 - g(w)) with g(w) = w/(1-w^2)*(acos(w)/sqrt(1-w^2) - w). V = 5*A = 175.9103716643608 mm^3. One body.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#10776"
+    ],
+    "tolerance": {
+      "rel": 1e-6
+    },
+    "volume_mm3": 175.9103716643608,
+    "what": "a profile closed by a conic (rho 0.2, an ellipse arc) and its two tangent lines to the apex, (10,0)-(0,0)-(0,10), extruded 5 mm on the XY sketch plane: one valid solid. Under truck the extrusion was refused (#10776). The issue also showed the XZ plane; it is left out because SolidCraft extrudes in XY then rotates the body, with the same kernel call."
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 9,
+      "faces": 5,
+      "vertices": 6
+    }
+  },
+  "result": [
+    {
+      "body": "P",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 243.55874857651943,
+      "body_count": 1,
+      "edges": 9,
+      "faces": 5,
+      "vertices": 6,
+      "volume_mm3": 175.9103716640548
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#10776"
+  ],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "a profile closed by a conic (rho 0.2, an ellipse arc) and its two tangent lines to the apex, (10,0)-(0,0)-(0,10), extruded 5 mm on the XY sketch plane: one valid solid. Under truck the extrusion was refused (#10776). The issue also showed the XZ plane; it is left out because SolidCraft extrudes in XY then rotates the body, with the same kernel call.",
+  "why_not": []
+}
