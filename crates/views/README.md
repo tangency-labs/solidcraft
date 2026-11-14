@@ -12,4 +12,5 @@ and any other front end read one model and draw it their own way.
 | `ViewKind` | What a view shows of its design: its stable key (`key`, `from_key`) and the order the "+" menu lists |
 | `DesignView` | One view: id, kind, name, and the sketch or sheet it shows |
 | `ViewSet` | The views of one design in tab order: open (reusing a view of the same subject), activate, close (never the last), close others or to the right, reopen, rename, duplicate, move, and the saved form (`to_json`, `from_json`, safe on hostile input) |
+| `Tiles`, `Preset`, `Axis`, `Edge`, `Rect`, `Splitter`, `MAX_TILES` | How a window lays views out side by side: a tree of splits whose leaves are view ids. The presets the Layout menu offers, the rectangles and splitters for a front end to draw, drop-on-an-edge splitting, swap, remove, the splitter ratio, and the saved form (no UI toolkit; at most four views) |
 | `MAX_VIEWS`, `MAX_NAME` | The most views a design keeps and the longest view name |
