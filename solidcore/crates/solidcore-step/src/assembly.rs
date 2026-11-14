@@ -25,8 +25,8 @@ use crate::kernel::{CurveEval, SurfaceEval, face_flux};
 use solidcore_ops::pcurve::{self, EdgeUse, TrimEdge, TrimFace, TrimUse, Trims};
 use solidcore_record::Vec3;
 use solidcore_record::brep::{
-    self, Brep, Curve as BCurve, Curve2, Edge, EdgeUseRef, Face, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell, Surface as BSurface,
-    Vertex,
+    self, Brep, Curve as BCurve, Curve2, Edge, EdgeUseRef, Face, Frame, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell,
+    Surface as BSurface, Vertex,
 };
 
 use crate::geom::P3;
@@ -222,12 +222,54 @@ impl<'t> Assembly<'t> {
         Ok((i, along))
     }
 
+    /// A sphere face bounded by vertex loops alone, each at one of its poles (a face of a closed
+    /// surface bounded by vertices is all of the surface): the whole sphere, its loop a meridian
+    /// from the south pole to the north and back, which [`Assembly::complete_slits`] keeps as its
+    /// seam. The sphere is about `origin`, `axis` its north, `reference` its meridian's plane. Any
+    /// other face without an edge loop is refused.
+    pub(crate) fn whole_sphere(&mut self, origin: P3, axis: P3, reference: P3, radius: f64, loops: &[Bound]) -> R<Vec<Bound>> {
+        let unsupported_here = || unsupported("a face without an edge loop");
+        let (o, z, x) = (v3(origin), v3(axis), v3(reference));
+        let poles = [o - z * radius, o + z * radius];
+        let mut at = [None, None];
+        for l in loops {
+            let Bound::Vertex(v) = l else { return Err(unsupported_here()) };
+            let p = v3(self.point(*v)?);
+            let tol = self.vertices.get(*v as usize).map_or(self.tol, |x| x.tolerance.max(self.tol));
+            let k = poles.iter().position(|q| q.dist(p) <= tol).ok_or_else(unsupported_here)?;
+            if let Some(slot) = at.get_mut(k) {
+                *slot = Some(*v);
+            }
+        }
+        let mut ends = [0u32; 2];
+        for ((end, found), pole) in ends.iter_mut().zip(at).zip(poles) {
+            *end = match found {
+                Some(v) => v,
+                None => self.add_vertex([pole.x, pole.y, pole.z])?,
+            };
+        }
+        let e = index(self.edges.len())?;
+        let frame = Frame { origin, x_axis: [x.x, x.y, x.z], y_axis: [z.x, z.y, z.z] };
+        let half = std::f64::consts::FRAC_PI_2;
+        self.edges.push(EdgeB { curve: BCurve::Circle { frame, radius }, interval: [-half, half], vertices: ends, tolerance: self.tol, form: None });
+        Ok(vec![Bound::Edges(vec![(e, true), (e, false)])])
+    }
+
     /// A face on `surface` bounded by `bounds`, its index. Each bound is relative to the
     /// surface's natural normal; `outer` is the outer bound's index in `bounds` when the reader
     /// knows it (the pcurves decide otherwise, [`Assembly::finish`]); `forward` says the face's
     /// side is the natural normal. A spline surface whose first and last control lines meet
     /// within the tolerance is closed on itself (noted). `origin` names the face.
     pub fn add_face(&mut self, origin: u64, surface: BSurface, bounds: Vec<Bound>, outer: Option<usize>, forward: bool) -> R<u32> {
+        // A sphere bounded by its poles alone is the whole sphere, with a meridian for its seam.
+        let bounds = match &surface {
+            BSurface::Sphere { frame, radius } if !bounds.iter().any(|b| matches!(b, Bound::Edges(_))) => {
+                let (x, y) = (v3(frame.x_axis), v3(frame.y_axis));
+                let z = x.cross(y);
+                self.whole_sphere(frame.origin, [z.x, z.y, z.z], frame.x_axis, *radius, &bounds)?
+            }
+            _ => bounds,
+        };
         let surface = match crate::topology::closed_within(&surface, self.tol) {
             Some(closed) => {
                 self.splines_closed += 1;
@@ -1456,6 +1498,7 @@ pub(crate) fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2
 /// clamped exactly ([`clamped`]).
 pub fn spline_curve(degree: usize, knots: Vec<f64>, points: &[[f64; 3]], weights: Option<&[f64]>) -> R<BCurve> {
     check_spline(degree, knots.len(), points.len())?;
+    check_values(degree, points.len(), &knots, points.iter(), weights.into_iter().flatten().copied())?;
     let homogeneous: Vec<[f64; 4]> = match weights {
         None => points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect(),
         Some(w) => {
@@ -1485,6 +1528,8 @@ pub fn spline_surface(
     let nv = points.first().map_or(0, Vec::len);
     check_spline(u_degree, u_knots.len(), nu)?;
     check_spline(v_degree, v_knots.len(), nv)?;
+    check_values(u_degree, nu, &u_knots, std::iter::empty(), std::iter::empty())?;
+    check_values(v_degree, nv, &v_knots, points.iter().flatten(), weights.into_iter().flatten().flatten().copied())?;
     if points.iter().any(|r| r.len() != nv) {
         return Err("ragged B-spline surface".into());
     }
@@ -1511,6 +1556,32 @@ pub fn spline_surface(
         None => BSurface::Spline { u_knots, v_knots, points: rows.iter().map(|r| r.iter().map(|h| [h[0], h[1], h[2]]).collect()).collect() },
         Some(_) => BSurface::RationalSpline { u_knots, v_knots, homogeneous: rows },
     })
+}
+
+/// Knots that do not decrease and leave the spline of `degree` over `count` points a domain of
+/// some width, control points and weights that are finite numbers, and weights above zero.
+fn check_values<'a>(
+    degree: usize,
+    count: usize,
+    knots: &[f64],
+    points: impl Iterator<Item = &'a [f64; 3]>,
+    weights: impl Iterator<Item = f64>,
+) -> R<()> {
+    if knots.iter().any(|k| !k.is_finite()) || knots.windows(2).any(|w| matches!(w, [a, b] if b < a)) {
+        return Err("a B-spline whose knots are not finite and increasing".into());
+    }
+    if !matches!((knots.get(degree), knots.get(count)), (Some(a), Some(b)) if a < b) {
+        return Err("a B-spline whose parameter domain is empty".into());
+    }
+    let mut points = points;
+    if points.any(|p| p.iter().any(|x| !x.is_finite())) {
+        return Err("a B-spline control point that is not a finite number".into());
+    }
+    let mut weights = weights;
+    if weights.any(|w| !(w.is_finite() && w > 0.0)) {
+        return Err("a B-spline weight that is not a positive number".into());
+    }
+    Ok(())
 }
 
 /// A spline of `degree` with `knots` knots over `count` control points, within the record's

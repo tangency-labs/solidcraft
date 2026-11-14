@@ -107,3 +107,42 @@ fn a_vertex_far_off_its_edge_refuses_the_edge() {
     let e = asm.add_edge(7, line, [0.0, 1.0], [a, z]).unwrap_err();
     assert!(e.starts_with("edge #7: a vertex lies 5 mm off its curve"), "{e}");
 }
+
+/// A sphere face bounded by its two poles alone, added through the API, is the whole ball:
+/// one face whose seam is a meridian, and the ball's volume.
+#[test]
+fn a_sphere_bounded_by_its_poles_is_the_whole_ball() {
+    let r = 7.0;
+    let mut asm = Assembly::new(1e-6, None);
+    let south = asm.add_vertex([1.0, 2.0, 3.0 - r]).unwrap();
+    let north = asm.add_vertex([1.0, 2.0, 3.0 + r]).unwrap();
+    let frame = solidcore_record::brep::Frame { origin: [1.0, 2.0, 3.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] };
+    let face = asm.add_face(0, BSurface::Sphere { frame, radius: r }, vec![Bound::Vertex(south), Bound::Vertex(north)], None, true).unwrap();
+    let solid = asm.finish(0, "ball".into(), vec![vec![(face, true)]], Kind::Solid).unwrap();
+    assert_eq!((solid.brep.faces.len(), solid.brep.edges.len()), (1, 1), "one face, its meridian seam");
+    let (body, _) = solidcore_ops::Body::from_record(&solid.brep, false).unwrap();
+    let v = body.volume(1e-9).unwrap();
+    let ball = 4.0 / 3.0 * std::f64::consts::PI * r * r * r;
+    assert!((v - ball).abs() < 1e-6 * ball, "{v} vs {ball}");
+}
+
+/// The spline constructors refuse what no spline is: knots that decrease or leave no domain,
+/// coordinates that are not numbers, weights that are not positive.
+#[test]
+fn malformed_splines_are_refused() {
+    let pts = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+    assert!(spline_curve(1, vec![0.0, 0.0, 1.0, 1.0], &pts, None).is_ok());
+    assert!(spline_curve(1, vec![0.0; 4], &pts, None).unwrap_err().contains("domain is empty"));
+    assert!(spline_curve(1, vec![0.0, 1.0, 0.5, 1.0], &pts, None).unwrap_err().contains("increasing"));
+    assert!(spline_curve(1, vec![0.0, 0.0, f64::NAN, 1.0], &pts, None).unwrap_err().contains("increasing"));
+    assert!(spline_curve(1, vec![0.0, 0.0, 1.0, 1.0], &[[f64::NAN, 0.0, 0.0], [1.0, 0.0, 0.0]], None).unwrap_err().contains("finite"));
+    assert!(spline_curve(1, vec![0.0, 0.0, 1.0, 1.0], &pts, Some(&[1.0, 0.0])).unwrap_err().contains("weight"));
+    let grid = vec![vec![[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]], vec![[1.0, 0.0, 0.0], [1.0, 1.0, 0.0]]];
+    let k = || vec![0.0, 0.0, 1.0, 1.0];
+    assert!(spline_surface([1, 1], [k(), k()], &grid, None).is_ok());
+    assert!(spline_surface([1, 1], [vec![0.0; 4], k()], &grid, None).unwrap_err().contains("domain is empty"));
+    let mut bad = grid.clone();
+    bad[1][1][2] = f64::INFINITY;
+    assert!(spline_surface([1, 1], [k(), k()], &bad, None).unwrap_err().contains("finite"));
+    assert!(spline_surface([1, 1], [k(), k()], &grid, Some(&[vec![1.0, 1.0], vec![1.0, -1.0]])).unwrap_err().contains("weight"));
+}

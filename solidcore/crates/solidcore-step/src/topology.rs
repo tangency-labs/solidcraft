@@ -1080,43 +1080,10 @@ impl<'b, 'a> Builder<'b, 'a> {
     /// a meridian from the south pole to the north and back, which [`Assembly::complete_slits`]
     /// keeps as its seam. Any other face without an edge loop is refused.
     fn whole_sphere(&mut self, surface: &crate::geom::Surface, loops: &[Bound]) -> R<Vec<Bound>> {
-        let unsupported_here = || unsupported("a face without an edge loop");
-        let crate::geom::Surface::Sphere { position, radius } = surface else { return Err(unsupported_here()) };
-        let (o, z, x) = (v3(position.origin), v3(position.axis), v3(position.ref_direction));
-        let poles = [o - z * *radius, o + z * *radius];
-        let mut at = [None, None];
-        for l in loops {
-            let &Bound::Vertex(v) = l else { return Err(unsupported_here()) };
-            let v = self.find(v);
-            let p = v3(self.asm.point(v)?);
-            let tol = self.asm.vertices.get(v as usize).map_or(self.asm.tol, |x| x.tolerance.max(self.asm.tol));
-            let k = poles.iter().position(|q| q.dist(p) <= tol).ok_or_else(unsupported_here)?;
-            if let Some(slot) = at.get_mut(k) {
-                *slot = Some(v);
-            }
-        }
-        let mut ends = [0u32; 2];
-        for ((end, found), pole) in ends.iter_mut().zip(at).zip(poles) {
-            *end = match found {
-                Some(v) => v,
-                None => {
-                    let i = index(self.asm.vertices.len())?;
-                    self.asm.vertices.push(Vertex { point: [pole.x, pole.y, pole.z], tolerance: self.asm.tol });
-                    i
-                }
-            };
-        }
-        let e = index(self.asm.edges.len())?;
-        let frame = Frame { origin: position.origin, x_axis: [x.x, x.y, x.z], y_axis: [z.x, z.y, z.z] };
-        let half = std::f64::consts::FRAC_PI_2;
-        self.asm.edges.push(EdgeB {
-            curve: BCurve::Circle { frame, radius: *radius },
-            interval: [-half, half],
-            vertices: ends,
-            tolerance: self.asm.tol,
-            form: None,
-        });
-        Ok(vec![Bound::Edges(vec![(e, true), (e, false)])])
+        let crate::geom::Surface::Sphere { position, radius } = surface else { return Err(unsupported("a face without an edge loop")) };
+        // Each pole vertex as its joined set's root ([`Builder::meet`]).
+        let loops: Vec<Bound> = loops.iter().map(|l| if let &Bound::Vertex(v) = l { Bound::Vertex(self.find(v)) } else { l.clone() }).collect();
+        self.asm.whole_sphere(position.origin, position.axis, position.ref_direction, *radius, &loops)
     }
 
     /// The plane a plain FACE's loops lie in (ISO 10303-42: a FACE with no face geometry is
