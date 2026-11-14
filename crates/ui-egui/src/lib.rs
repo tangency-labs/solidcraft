@@ -1500,6 +1500,9 @@ impl SolveApp {
         let selection_changed = self.session.selection != selected_before || matches!(id, "select.set" | "select.clear" | "select.same_look");
         if done.is_ok() && selection_changed {
             self.tree.clear_folder_pick();
+            if id == "select.set" {
+                sketch_attachment_ui::selection_picked(self);
+            }
         }
         // Render focus already applies its semantic selection after clearing object picks.
         // A tab switch brings in the other design's own Render selection.

@@ -351,7 +351,7 @@ fn view_schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ViewDeleteParams>(), &["view"]);
     assert_keys(input_schema_for::<ViewListParams>(), &[]);
     assert_keys(input_schema_for::<ViewApplyParams>(), &["camera", "view"]);
-    assert_keys(input_schema_for::<RedefineSketchParams>(), &["author_path", "frame", "offset", "plane", "sketch"]);
+    assert_keys(input_schema_for::<RedefineSketchParams>(), &["author_path", "flip", "frame", "offset", "plane", "sketch"]);
 }
 
 /// Each call has one problem the handler already refuses: strict gives its message. The session

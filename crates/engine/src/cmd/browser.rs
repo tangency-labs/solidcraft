@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-use solidcraft_doc::{BrowserEntry, FeatureKind, MAX_GROUP_NESTING};
+use solidcraft_doc::{BrowserEntry, FeatureKind, MAX_GROUP_NESTING, PlaneRef};
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr};
@@ -19,7 +19,7 @@ use crate::params::{bad, bool_, expr, str_};
 use crate::schema::browser::{
     BodyRenameParams, BodyRenamed, BrowserFoldParams, BrowserFoldResult, BrowserGroupMade, BrowserGroupParams, BrowserGroupRenamed,
     BrowserMoveParams, BrowserMoved, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams, BrowserUngroupParams, BrowserUngrouped,
-    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, Isolated, PlaneFrame, RedefineAttachment,
+    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, FlipAxis, Isolated, PlaneFrame, RedefineAttachment,
     RedefineSketchParams, RedefineSketchResult, RenamedBody, RepairDone, RepairFace, RepairHole, RepairParams, RepairResult, RepairSewn,
     ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed, ViewSaveParams, ViewSaved,
     VisibilityState,
@@ -69,7 +69,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane")
         .contract(&REDEFINE_SKETCH_CONTRACT)
         .output(output_schema_for::<RedefineSketchResult>)
-        .params("sketch: id or name; plane: as sketch.create; frame?: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names"),
+        .params("sketch: id or name; plane: as sketch.create; flip?: bool | \"x\" | \"y\" as sketch.create (not on a face; default: when the new plane faces the other way, it is turned so the sketch keeps facing the way it did and stays upright, and the reply's `flip` says about which axis; false keeps the new plane's own side); frame?: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names"),
     CommandSpec::new("browser.group", "New Group", crate::checked!("browser.group", group))
         .icon("folder")
         .contract(&GROUP_CONTRACT)
@@ -1615,6 +1615,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     baseline.doc_mut().marker = Some(index + 1);
     baseline.refresh();
     let visible_geometry = baseline.model.state().sketch(id).map(|resolved| resolved.sketch.clone());
+    let evaluated_plane = baseline.model.state().sketch(id).map(|resolved| resolved.plane);
     let mut trial = s.scratch();
     trial.active_component = component;
     trial.active_occurrence_path = (!author_path.is_empty()).then_some(author_path);
@@ -1629,9 +1630,16 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .cloned();
-    let plane = super::sketch::plane_ref(&trial, p, cmd)?;
+    let mut plane = super::sketch::plane_ref(&trial, p, cmd)?;
     if super::sketch::face::is_face(p) {
         super::sketch::face::capture_positions(&mut trial, &plane)?;
+    }
+    let flipped = match p.get("flip") {
+        None | Some(Value::Null) if !super::sketch::face::is_face(p) => keep_facing(&trial, id, evaluated_plane, &plane),
+        _ => super::sketch::flip_param(&trial, p, &plane, cmd)?,
+    };
+    if let Some(about_y) = flipped {
+        plane = PlaneRef::Flipped { base: Box::new(plane), about_y };
     }
     if let Some(anchor) = old_anchor
         && super::sketch::face::anchor(&plane)
@@ -1697,7 +1705,36 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     });
     let note = frame.and_then(|f| super::sketch::frame_note(Some(f), &placement)).map(str::to_string);
     let frame = frame.and_then(PlaneFrame::from_name);
-    reply(cmd, RedefineSketchResult { sketch: id, attachment, frame, note, created: None, param_warnings: Vec::new() })
+    let flip = flipped.map(|about_y| if about_y { FlipAxis::Y } else { FlipAxis::X });
+    reply(cmd, RedefineSketchResult { sketch: id, attachment, flip, frame, note, created: None, param_warnings: Vec::new() })
+}
+
+/// Moved onto a plane whose normal points against the one it is on now, a sketch would come
+/// out back to front and upside down (#11467): a sketch drawn from the front on XZ is turned to
+/// face the viewer, and an offset of XZ is not. `Some(about_y)`: the half turn of the new plane
+/// (as `sketch.create`'s `flip`) that keeps it facing the same way, about whichever in-plane axis
+/// keeps the sketch's x and y closest to where they were. `None` when it already faces that
+/// way, or when either plane cannot be placed (a lost face: nothing to keep).
+///
+/// `evaluated`: where the sketch is now as the model placed it (a face attachment follows its
+/// face, which may have turned since it was picked); without it, its stored plane.
+fn keep_facing(s: &Session, sketch: u64, evaluated: Option<solidcore_record::Plane>, next: &PlaneRef) -> Option<bool> {
+    use solidcraft_geom::{PlaneGeom, Vec3Geom};
+    let (vals, _) = s.doc.param_values();
+    let state = s.model.state();
+    let now = match evaluated {
+        Some(plane) => plane,
+        None => {
+            let FeatureKind::Sketch { plane: now, .. } = &s.doc.feature(sketch)?.kind else { return None };
+            s.doc.resolve_plane_in(&vals, now, 0, s.active_component, Some(&state)).ok()?
+        }
+    };
+    let next = s.doc.resolve_plane_in(&vals, next, 0, s.active_component, Some(&state)).ok()?;
+    if now.normal().dot(next.normal()) >= -1e-9 {
+        return None;
+    }
+    // A half turn about x reverses y, about y reverses x: keep the axis that agrees more.
+    Some(next.y.dot(now.y) > next.x.dot(now.x))
 }
 
 #[cfg(test)]
@@ -2573,6 +2610,53 @@ mod tests {
         assert!((ymin + 20.0).abs() < 1e-6);
         assert!(s.execute("sketch.redefine", &json!({"sketch": sk, "plane": "nope"})).is_err());
         assert!(s.execute("sketch.redefine", &json!({"sketch": 999, "plane": "XY"})).is_err());
+    }
+
+    /// #11467: a sketch drawn from the front on XZ faces the viewer (XZ turned about its x
+    /// axis). Moved onto a plane offset from XZ, which faces the other way, it came out upside
+    /// down and back to front; it keeps facing the viewer and stays upright now.
+    #[test]
+    fn redefined_sketch_keeps_facing_the_way_it_did() {
+        let mut s = Session::default();
+        run(&mut s, "construct.plane.offset", json!({"base": "XZ", "offset": 30, "name": "Front30"}));
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XZ", "flip": "x"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5}));
+        let bbox = |s: &mut Session| {
+            let m = run(s, "inspect.measure", json!({}));
+            let b = &m["bodies"][0]["bbox"];
+            let v = |k: &str, i: usize| b[k][i].as_f64().unwrap();
+            [v("min", 1), v("max", 1), v("min", 2), v("max", 2)]
+        };
+        let near = |a: [f64; 4], b: [f64; 4]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6);
+        let before = bbox(&mut s);
+        assert!(near(before, [-5.0, 0.0, 0.0, 20.0]), "{before:?}");
+
+        let reply = run(&mut s, "sketch.redefine", json!({"sketch": sk, "plane": "Front30"}));
+        assert_eq!(reply["flip"], "x", "{reply}");
+        let after = bbox(&mut s);
+        assert!(near(after, [25.0, 30.0, 0.0, 20.0]), "upright and still extruding toward the viewer: {after:?}");
+
+        // Back onto XZ itself it is where it started, with no second turn piled on.
+        let reply = run(&mut s, "sketch.redefine", json!({"sketch": sk, "plane": "XZ"}));
+        assert_eq!(reply["flip"], "x", "{reply}");
+        assert!(near(bbox(&mut s), before));
+
+        // An explicit turn is taken as given.
+        let reply = run(&mut s, "sketch.redefine", json!({"sketch": sk, "plane": "XZ", "flip": "y"}));
+        assert_eq!(reply["flip"], "y", "{reply}");
+        assert!(near(bbox(&mut s), [-5.0, 0.0, -20.0, 0.0]), "XZ turned about its y axis: sketch y along -Z");
+        // A plane already facing the same way: nothing to turn.
+        let reply = run(&mut s, "sketch.redefine", json!({"sketch": sk, "plane": {"origin": [0, 10, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+        assert!(reply.get("flip").is_none(), "{reply}");
+        assert!(near(bbox(&mut s), [5.0, 10.0, 0.0, 20.0]));
+
+        // `flip: false` takes the new plane's own side, as before.
+        let reply = run(&mut s, "sketch.redefine", json!({"sketch": sk, "plane": "Front30", "flip": false}));
+        assert!(reply.get("flip").is_none(), "{reply}");
+        assert!(near(bbox(&mut s), [30.0, 35.0, -20.0, 0.0]));
+        assert!(s.execute("sketch.redefine", &json!({"sketch": sk, "plane": "XZ", "flip": "sideways"})).is_err());
     }
 
     #[test]
