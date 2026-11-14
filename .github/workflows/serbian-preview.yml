@@ -1,0 +1,40 @@
+# Test build of the Serbian translation for this fork: Windows x64 MSI and portable zip, unsigned,
+# on a GitHub-hosted runner (the release pipeline uses Blacksmith runners a fork does not have).
+# The packages are attached to the run as the artifact `solidcraft-windows-x64`.
+name: Serbian preview build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [serbian-complete-and-latin]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-2025
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: serbian-preview-windows-x64
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2 WixToolset.Util.wixext/5.0.2
+      - name: Build and package (msi, portable zip)
+        shell: pwsh
+        run: ./packaging/windows/package.ps1 -Arch x64
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: solidcraft-windows-x64
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 14
