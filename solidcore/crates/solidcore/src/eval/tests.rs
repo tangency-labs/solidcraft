@@ -1330,7 +1330,10 @@ fn a_sphere_less_a_hole_beside_its_seam_spans_the_whole_turn() {
         let from = u[0].rem_euclid(TAU);
         assert!(from.min(TAU - from) < 1e-9, "from the seam: {u:?}");
         let hole_u = 0.4 + ((u[0] - 0.4) / TAU).ceil() * TAU;
-        assert!(hole_u > u[0] && hole_u < u[1], "the hole in the turn: {u:?}");
+        assert!(
+            hole_u > u[0] && hole_u < u[1],
+            "the hole in the turn: {u:?}"
+        );
         assert!(
             (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
             "{v:?}"
@@ -1359,13 +1362,25 @@ fn a_loop_over_both_poles_turns_the_way_its_face_lies() {
     ];
     // Started anywhere round it, the loop takes the same turns.
     for k in 0..outer.len() {
-        let l: Vec<_> = outer.iter().cycle().skip(k).take(outer.len()).copied().collect();
+        let l: Vec<_> = outer
+            .iter()
+            .cycle()
+            .skip(k)
+            .take(outer.len())
+            .copied()
+            .collect();
         let [u, v] = form::extent(&sphere, &[l], 1e-9)
             .unwrap()
             .expect("an extent");
-        assert!((u[1] - u[0] - TAU).abs() < 1e-9, "start {k}: one turn: {u:?}");
+        assert!(
+            (u[1] - u[0] - TAU).abs() < 1e-9,
+            "start {k}: one turn: {u:?}"
+        );
         let from = u[0].rem_euclid(TAU);
-        assert!(from.min(TAU - from) < 1e-9, "start {k}: from the seam: {u:?}");
+        assert!(
+            from.min(TAU - from) < 1e-9,
+            "start {k}: from the seam: {u:?}"
+        );
         assert!(
             (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
             "start {k}: {v:?}"
