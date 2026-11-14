@@ -122,10 +122,14 @@ fn same_plane(a: (Vec3, f64), b: (Vec3, f64), tol: f64) -> bool {
 
 /// Loop `a` and loop `b` joined along the edge `e` that each uses once (in opposite
 /// directions): `a` from after `e` round to before it, then `b` likewise. `None` when `e` is
-/// not used exactly once in each, or the joined loop would use an edge twice.
+/// not used exactly once in each, both run it the same way, or the joined loop would use an
+/// edge twice.
 fn splice(a: &[AUse], b: &[AUse], e: u32) -> Option<Vec<AUse>> {
     let once = |l: &[AUse]| if l.iter().filter(|u| u.edge == e).count() == 1 { l.iter().position(|u| u.edge == e) } else { None };
     let (i, j) = (once(a)?, once(b)?);
+    if a.get(i)?.forward == b.get(j)?.forward {
+        return None;
+    }
     let out: Vec<AUse> = a.iter().skip(i + 1).chain(a.iter().take(i)).chain(b.iter().skip(j + 1)).chain(b.iter().take(j)).cloned().collect();
     let edges: HashSet<u32> = out.iter().map(|u| u.edge).collect();
     (!out.is_empty() && edges.len() == out.len()).then_some(out)
@@ -358,6 +362,8 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
         }
         let q = size * 1e-7;
         let mut shared = Shared { q, vertices: HashMap::new(), lines: HashMap::new() };
+        // The deleted face each closing edge stands in for, to name it if the gap cannot close.
+        let mut closed_by: HashMap<u32, usize> = HashMap::new();
         for (i, v) in asm.vertices.iter().enumerate() {
             if !moved.contains_key(&(i as u32)) {
                 shared.vertices.insert(key(Vec3::from(v.point), q), i as u32);
@@ -417,6 +423,7 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                 let mut edges: Vec<AUse> = Vec::new();
                 // The moved corners along a gap stretch.
                 let mut pending: Option<Vec<Vec3>> = None;
+                let mut pending_by: Option<usize> = None;
                 for k in 0..m {
                     let Some(u) = l.get((start + k) % m) else { continue };
                     let (va, vb) = asm.ends(u).ok_or_else(|| fail("edge"))?;
@@ -424,11 +431,17 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                     if gap_edge(u.edge) {
                         let stretch = pending.get_or_insert_with(Vec::new);
                         stretch.extend([(va, a), (vb, b)].into_iter().filter(|(v, _)| !dropped.contains(v)).map(|(_, p)| p));
+                        pending_by = pending_by.or_else(|| efaces.get(&u.edge).and_then(|fs| fs.iter().find(|x| del.contains(x)).copied()));
                         continue;
                     }
                     if let Some(p) = pending.take() {
+                        let by = pending_by.take();
                         for (x, y) in close(p, a, q) {
-                            edges.push(shared.line(&mut asm, x, y)?);
+                            let line = shared.line(&mut asm, x, y)?;
+                            if let Some(d) = by {
+                                closed_by.entry(line.edge).or_insert(d);
+                            }
+                            edges.push(line);
                         }
                     }
                     if !corner_moves(&asm, &moved, u) {
@@ -448,7 +461,11 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                     let (v0, _) = asm.ends(first).ok_or_else(|| fail("edge"))?;
                     let a = asm.point(v0).ok_or_else(|| fail("vertex"))?;
                     for (x, y) in close(p, a, q) {
-                        edges.push(shared.line(&mut asm, x, y)?);
+                        let line = shared.line(&mut asm, x, y)?;
+                        if let Some(d) = pending_by {
+                            closed_by.entry(line.edge).or_insert(d);
+                        }
+                        edges.push(line);
                     }
                 }
                 if edges.is_empty() {
@@ -473,7 +490,13 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                 *slot = Some(face);
             }
         }
-        let beside = |e: u32| efaces.get(&e).and_then(|fs| fs.iter().find(|f| del.contains(f)).copied());
+        let beside = |e: u32| {
+            closed_by
+                .get(&e)
+                .copied()
+                .or_else(|| efaces.get(&e).and_then(|fs| fs.iter().find(|f| del.contains(f)).copied()))
+                .or_else(|| del.first().copied())
+        };
         fill_on_planes(&mut asm, &planes, size * 1e-6, &mut history, beside)?;
         history.sort_by_key(|(fi, _)| *fi);
         let finished = asm.finish().map_err(|e| fail(format!("the neighbouring faces do not close the gap ({e})")))?;
@@ -573,6 +596,12 @@ mod tests {
         let top = faces_where(&plate, |p| (p.z - 10.0).abs() < 1e-9);
         let refused = delete_faces(&plate, &top).unwrap_err().to_string();
         assert!(refused.contains("cannot close: no neighbouring plane extends across it"), "{refused}");
+        // The refusal names the face deleted, not face 0.
+        let bottom = faces_where(&plate, |p| p.z.abs() < 1e-9);
+        assert_eq!(bottom.len(), 1);
+        assert_ne!(bottom[0], 0);
+        let refused = delete_faces(&plate, &bottom).unwrap_err().to_string();
+        assert!(refused.contains(&format!("the gap left by face {} cannot close", bottom[0])), "{refused}");
     }
 
     /// A half-space `n · x <= d` with `n` made unit.
