@@ -15,6 +15,9 @@ versions. Two preferences opt into holding the model:
   the turn begins. A faint ball marks that point until the cap is back at rest. Over empty space,
   the pivot is the middle of the bodies in view. The navigation bridge uses the same preference,
   but picks the point each frame because device apps do not report rest.
+- With **Classic** (the default), the cap turns around what **Orbit around** names, as a drag does:
+  the view's centre, the world origin, or the model point under the pointer when the turn begins
+  (#10452). The same faint ball marks a grabbed point; the view's centre is unmarked, as before.
 
 While editing a sketch, the cap pans and zooms without changing the sketch's initial view. After you
 adjust the view with the navigation cube, the cap can rotate it too. Turn on **Turn sketches with

@@ -1112,7 +1112,8 @@ preference_settings! {
     zoom_reverse: bool = false, PAGE_NAVIGATION => check("Reverse zoom direction");
     /// Maya Alt+right drag uses horizontal motion; off restores the former vertical zoom.
     maya_horizontal_zoom: bool = true, PAGE_NAVIGATION => check_id("nav.maya_horizontal_zoom.label");
-    /// What an orbit turns around.
+    /// What an orbit turns around: a drag's, and the 3D mouse's when its Orbit is Classic (the 3D
+    /// mouse's Traced orbit picks the model in the middle of the view instead, #10452).
     orbit_around: OrbitAround = OrbitAround::default(), PAGE_NAVIGATION;
     /// The cursor preference as releases before the origin option saved it (`true` = the point
     /// under the cursor). [`migrate`] folds it into `orbit_around` when saved preferences are
