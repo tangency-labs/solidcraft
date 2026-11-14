@@ -152,6 +152,9 @@ struct SourceProperties {
     appearance: Option<solidcraft_doc::appearance::Look>,
     /// Resolved authored overrides, by the face index in this imported body.
     faces: Vec<(usize, solidcraft_doc::appearance::Look)>,
+    /// The body is hidden in the linked design, by its own eye or a hidden placement above it:
+    /// it comes in hidden here too (#16506).
+    hidden: bool,
 }
 
 /// What a linked file last gave, by the file: digests of its bytes, of the STEP text it gave and
@@ -339,7 +342,8 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
                 .filter_map(|(index, look)| names.get(index).map(|name| (name.clone(), look)))
                 .collect();
             let faces = carried.iter().enumerate().filter_map(|(index, name)| authored.get(name).map(|look| (index, look.clone()))).collect();
-            Ok(SourceProperties { material, definition, appearance, faces })
+            let hidden = !part.body_visible(&source.name);
+            Ok(SourceProperties { material, definition, appearance, faces, hidden })
         })
         .collect::<Result<Vec<_>>>()?;
     Ok((name, feature, faces, part.doc.metadata.clone(), properties))
@@ -489,7 +493,7 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
     let mut inherited = link.inherited.clone();
     inherited.resize(sources.len(), LinkedBodyProperties::default());
     let mut changed = false;
-    for (name, slot) in names.iter().zip(slots) {
+    for (name, slot) in names.iter().zip(slots.iter().copied()) {
         let Some(source) = sources.get(slot) else { continue };
         let old = link.inherited.get(slot);
         let current_definition = material_fingerprint(&s.doc, &s.doc.body_material(name))?;
@@ -526,6 +530,31 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
     }
     if let Some(link) = s.doc_mut().links.get_mut(&component) {
         link.inherited = inherited;
+    }
+    let hidden: std::collections::BTreeSet<&str> =
+        names.iter().zip(slots).filter(|(_, slot)| sources.get(*slot).is_some_and(|source| source.hidden)).map(|(name, _)| name.as_str()).collect();
+    changed |= hide_in_every_placement(s, link.feature, &hidden)?;
+    Ok(changed)
+}
+
+/// Hide, in every placement of the linked component, the bodies of its Import feature `feature`
+/// named in `hidden` (their names in the component), as the linked design hides them (#16506).
+/// They stay in the model, so Show brings them back; a body shown in the design is left as it is
+/// here. Whether anything was hidden.
+fn hide_in_every_placement(s: &mut Session, feature: u64, hidden: &std::collections::BTreeSet<&str>) -> Result<bool> {
+    if hidden.is_empty() {
+        return Ok(false);
+    }
+    let world = s.world_state()?;
+    let mut changed = false;
+    for body in world.bodies.iter().filter(|b| b.feature == feature && hidden.contains(b.definition_name())) {
+        if !s.visibility.hidden_bodies.contains(&body.name) {
+            s.visibility.hidden_bodies.push(body.name.clone());
+            changed = true;
+        }
+    }
+    if changed {
+        s.refresh_display();
     }
     Ok(changed)
 }
@@ -1017,6 +1046,56 @@ mod tests {
 
     fn volume(s: &mut Session) -> f64 {
         run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
+    }
+
+    /// The linked design's hidden bodies by the name the assembly shows, and whether each shows.
+    fn shown(s: &mut Session) -> Vec<(String, bool)> {
+        let inspected = run(s, "document.inspect", json!({}));
+        let bodies = inspected["bodies"].as_array().cloned().unwrap_or_default();
+        let mut out: Vec<(String, bool)> =
+            bodies.iter().map(|b| (b["name"].as_str().unwrap_or_default().to_string(), b["visible"].as_bool().unwrap_or(true))).collect();
+        out.sort();
+        out
+    }
+
+    /// #16506: a body hidden in the linked design comes in hidden, in every placement of the
+    /// linked component, and again after Update Links; Show still brings it back, and a body
+    /// the design shows is left shown.
+    #[test]
+    fn bodies_hidden_in_the_linked_design_come_in_hidden() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-hidden-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let part = dir.join("shell.solidcraft");
+        let save = |height: f64| {
+            let mut p = Session::default();
+            run(&mut p, "solid.box", json!({"length": 20, "width": 20, "height": height, "body_name": "Shell"}));
+            run(&mut p, "solid.box", json!({"corner": [40, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Helper"}));
+            run(&mut p, "browser.visibility", json!({"visible": false, "items": ["Helper"]}));
+            run(&mut p, "file.save", json!({"path": part}));
+        };
+        save(10.0);
+        let mut s = Session::default();
+        run(&mut s, "component.insert_design", json!({"path": part}));
+        let one = shown(&mut s);
+        assert_eq!(one.iter().filter(|(_, visible)| !visible).count(), 1, "{one:?}");
+        assert!(one.iter().any(|(name, visible)| name.contains("Helper") && !visible), "{one:?}");
+        assert!(one.iter().any(|(name, visible)| !name.contains("Helper") && *visible), "{one:?}");
+        // A second placement of the same linked design hides it too.
+        run(&mut s, "component.insert_design", json!({"path": part, "reuse": true, "translate": [100, 0, 0]}));
+        let two = shown(&mut s);
+        assert_eq!(two.len(), 4, "{two:?}");
+        assert_eq!(two.iter().filter(|(_, visible)| !visible).count(), 2, "{two:?}");
+        // Show brings a hidden one back, as for any other body.
+        let helpers: Vec<String> = two.iter().filter(|(name, _)| name.contains("Helper")).map(|(name, _)| name.clone()).collect();
+        run(&mut s, "browser.visibility", json!({"visible": true, "items": helpers}));
+        assert!(shown(&mut s).iter().all(|(_, visible)| *visible));
+        // The design changed: Update Links reads it again and hides what it hides.
+        save(15.0);
+        run(&mut s, "component.update_links", json!({}));
+        let again = shown(&mut s);
+        assert_eq!(again.iter().filter(|(_, visible)| !visible).count(), 2, "{again:?}");
+        assert!(again.iter().filter(|(_, visible)| !visible).all(|(name, _)| name.contains("Helper")), "{again:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// #6860: Save As changes the file's folder, not the targets kept in the edit history.
