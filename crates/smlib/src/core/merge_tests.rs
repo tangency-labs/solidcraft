@@ -66,6 +66,61 @@ fn loose_faces(sides: &[usize], lift: f64) -> Body {
     .unwrap()
 }
 
+/// The cube's sides `sides` as separate faces of one body, the top face's surface a
+/// shallow B-spline that passes through its four corners but sags 1e-4 below the plane
+/// at the middle of its y = 0 and y = 10 edges: two faces whose surfaces sit slightly
+/// off the straight curve they share, as an imported boundary sheet and a loft sheet
+/// over one sketch curve do (#16508).
+fn loose_faces_top_surface_off(sides: &[usize]) -> Body {
+    run("loose faces with top surface off", |k| {
+        let mut b = new_brep(k, solidcore::geom::tol::USE_DEFAULT, solidcore::geom::tol::USE_DEFAULT)?;
+        for &i in sides {
+            let Some(&(o, u, v)) = SIDES.get(i) else { continue };
+            let domain = Extent2d::from_bounds(0.0, 0.0, 10.0, 10.0);
+            let plane = Plane::new(v3(o), v3(u), v3(v), Vec2::new(1.0, 1.0), &domain);
+            let f = build_faces(&mut b, |b, fenv| {
+                create_face_from_surface(k, b, Some(Surface::from(plane)), &domain, fenv)
+            })?;
+            if i == 5 {
+                // a quadratic across u with the middle control point 2e-4 below the
+                // plane sags 1e-4 at mid-edge, and its u = 0 / u = 10 boundaries are the
+                // straight x = 0 / x = 10 edges; the corners stay on the surface, so the
+                // vertex/face gaps stay inside the intersection tolerance
+                let z = SIDES[5].0[2];
+                let sag = 2e-4;
+                let net = [
+                    v3([0.0, 0.0, z]),
+                    v3([0.0, 10.0, z]),
+                    v3([5.0, 0.0, z - sag]),
+                    v3([5.0, 10.0, z - sag]),
+                    v3([10.0, 0.0, z]),
+                    v3([10.0, 10.0, z]),
+                ];
+                let weights = [1.0; 6];
+                let data = CanonicalSurfaceData {
+                    u_degree: 2,
+                    v_degree: 1,
+                    control_points: &net,
+                    form: BSplineSurfaceForm::Unspecified,
+                    u_multiplicities: &[3, 3],
+                    v_multiplicities: &[2, 2],
+                    u_knots: &[0.0, 10.0],
+                    v_knots: &[0.0, 10.0],
+                    knot_type: KnotType::Unspecified,
+                    weights: Some(&weights),
+                    uv_domain: None,
+                };
+                let surface = BSplineSurface::create_canonical(&data)?;
+                b.face_mut(f)?.surface = Some(Surface::from(surface));
+            }
+        }
+        b.refresh_cached_topology();
+        Ok(b)
+    })
+    .map(Body::new)
+    .unwrap()
+}
+
 /// Two 10 mm cubes side by side along x, unioned: one 20 x 10 x 10 block.
 fn two_boxes() -> Body {
     let a = make_box([0.0; 3], [10.0; 3]).unwrap();
@@ -353,4 +408,22 @@ fn the_body_stays_as_it_was() {
     let was = counts(&block).unwrap();
     let _ = merge_faces(&block, &[], TOL).unwrap();
     assert_eq!(counts(&block).unwrap(), was);
+}
+
+/// #16508: two faces whose surfaces each sit slightly off the straight curve they share
+/// (an imported boundary sheet and a loft sheet over one sketch curve) sew with the old
+/// tolerance — the glue widens a sewn edge only by the distance between the two curves,
+/// which says nothing about either surface's distance from it — and the result check
+/// refused the Edge/Surface gap (`SmBrep::Test #4`) whatever the stitch tolerance was.
+/// The stitch now runs the updating tolerance pass on its result
+/// (`stitch_updates_result_tolerances`), so the sewn edge widens to cover the gap and
+/// the check accepts.
+#[test]
+fn a_stitch_across_a_straight_gap_passes_the_check() {
+    // the 1e-4 surface offset is far over the 1e-5 kernel tolerance but far under the
+    // check's 1000x edge/brep ratio (`Test #59`), so the widened tolerance stays legal
+    let (sewn, closed) = stitch(&loose_faces_top_surface_off(ALL), 1e-3).unwrap();
+    assert!(closed);
+    let report = super::check(&sewn, crate::check::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
 }

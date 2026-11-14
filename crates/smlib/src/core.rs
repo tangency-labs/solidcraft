@@ -245,6 +245,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
     f.offset_updates_result_tolerances = true;
+    f.stitch_updates_result_tolerances = true;
     f.cone_iso_circle_at_axial_height = true;
     f.fillet_overflow_trim_at_creases = true;
     f.fillet_section_end_trim_at_creases = true;
