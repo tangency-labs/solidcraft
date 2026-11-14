@@ -66,14 +66,14 @@ class AppRunCli(unittest.TestCase):
         apps.mkdir(parents=True)
         icons = self.home / ".local/share/icons/hicolor/256x256/apps"
         icons.mkdir(parents=True)
-        for old in ("ai.storyteller.solidcraft", "ai.storyteller.solvecraft"):
+        for old in ("ai.storyteller.solidcraft",):
             (apps / f"{old}.desktop").write_text(f'[Desktop Entry]\nExec="/old/SolidCraft.AppImage" %F\nIcon={old}\n')
             (icons / f"{old}.png").write_text("png")
         # An entry this script did not write (a package's, Exec on PATH) is left alone.
         (apps / "ai.storyteller.other.desktop").write_text("[Desktop Entry]\nExec=other\nIcon=ai.storyteller.other\n")
         self.run_apprun()
         self.assertTrue((apps / "io.tangencylabs.solidcraft.desktop").is_file())
-        for old in ("ai.storyteller.solidcraft", "ai.storyteller.solvecraft"):
+        for old in ("ai.storyteller.solidcraft",):
             self.assertFalse((apps / f"{old}.desktop").exists())
             self.assertFalse((icons / f"{old}.png").exists())
         self.assertTrue((apps / "ai.storyteller.other.desktop").is_file())

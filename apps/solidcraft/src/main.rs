@@ -942,35 +942,20 @@ fn graphics_path() -> Option<std::path::PathBuf> {
     settings_dir().ok().flatten().map(|d| d.join("graphics.json"))
 }
 
-/// Compatibility shim (docs/compatibility.md): on the first launch after the app id changed,
-/// copy the settings of earlier releases into the new folder. eframe kept `app.ron` under the
-/// window's old app id. In the Flatpak sandbox, earlier releases kept everything under an
-/// old app id's `~/.var/app` folder; those copies come first, newest first. The old folders
-/// are never changed.
+/// Compatibility shim (docs/compatibility.md): on the first launch after the app id changed, copy
+/// the settings of earlier releases into the new folder. In the Flatpak sandbox, earlier releases
+/// kept everything under an old app id's `~/.var/app` folder; those copies come first, newest
+/// first. The old folders are never changed.
 fn adopt_legacy_settings() {
     let Some(current) = settings_dir().ok().flatten() else { return };
-    let legacy_eframe = eframe::storage_dir(solidcraft_engine::io::LEGACY_APP_ID);
-    let old_flatpak = solidcraft_engine::io::legacy_flatpak_paths(&current);
-    if let Err(e) = adopt_settings(&current, &old_flatpak, legacy_eframe.as_deref()) {
+    if let Err(e) = adopt_settings(&current, &solidcraft_engine::io::legacy_flatpak_paths(&current)) {
         log::warn!("settings: could not copy the previous release's settings into {}: {e}", current.display());
     }
 }
 
-fn adopt_settings(
-    current: &std::path::Path,
-    old_flatpak: &[std::path::PathBuf],
-    legacy_eframe: Option<&std::path::Path>,
-) -> std::io::Result<()> {
-    let fresh = !current.exists();
+fn adopt_settings(current: &std::path::Path, old_flatpak: &[std::path::PathBuf]) -> std::io::Result<()> {
     for old in old_flatpak {
         solidcraft_engine::io::adopt_legacy_dir(current, old)?;
-    }
-    if let Some(old) = legacy_eframe.map(|d| d.join("app.ron")).filter(|p| fresh && p.is_file()) {
-        std::fs::create_dir_all(current)?;
-        let new = current.join("app.ron");
-        if !new.exists() {
-            std::fs::copy(old, new)?;
-        }
     }
     Ok(())
 }
@@ -2243,16 +2228,16 @@ mod msaa_tests {
     fn first_launch_adopts_the_previous_release_settings() {
         let d = std::env::temp_dir().join(format!("solidcraft-adopt-settings-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
-        let (current, legacy_eframe) = (d.join("solidcraft"), d.join("ai.storyteller.solvecraft"));
-        std::fs::create_dir_all(&legacy_eframe).unwrap();
-        std::fs::write(legacy_eframe.join("app.ron"), "(prefs)").unwrap();
-        super::adopt_settings(&current, &[], Some(&legacy_eframe)).unwrap();
-        assert_eq!(std::fs::read_to_string(current.join("app.ron")).unwrap(), "(prefs)");
-        assert!(legacy_eframe.join("app.ron").is_file());
+        let (current, old) = (d.join("solidcraft"), d.join("ai.storyteller.solidcraft"));
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("graphics.json"), r#"{"msaa":8}"#).unwrap();
+        super::adopt_settings(&current, &[old.clone()]).unwrap();
+        assert_eq!(std::fs::read_to_string(current.join("graphics.json")).unwrap(), r#"{"msaa":8}"#);
+        assert!(old.join("graphics.json").is_file());
         // Later launches leave the current settings alone.
-        std::fs::write(current.join("app.ron"), "(mine)").unwrap();
-        super::adopt_settings(&current, &[], Some(&legacy_eframe)).unwrap();
-        assert_eq!(std::fs::read_to_string(current.join("app.ron")).unwrap(), "(mine)");
+        std::fs::write(current.join("graphics.json"), r#"{"msaa":2}"#).unwrap();
+        super::adopt_settings(&current, &[old]).unwrap();
+        assert_eq!(std::fs::read_to_string(current.join("graphics.json")).unwrap(), r#"{"msaa":2}"#);
         let _ = std::fs::remove_dir_all(&d);
     }
 

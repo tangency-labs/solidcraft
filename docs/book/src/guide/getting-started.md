@@ -92,12 +92,11 @@ A SolidCraft remote added before the project moved to `docs.solidcraft.io` (from
 `flatpak remote-modify --user --url=https://docs.solidcraft.io/flatpak/repo/ solidcraft` and
 `flatpak update --user`.
 
-Earlier releases used the application IDs `ai.storyteller.solidcraft` and, up to 0.7,
-`ai.storyteller.solvecraft`. If you installed one of those from the SolidCraft remote,
+Earlier releases used the application ID `ai.storyteller.solidcraft`. If you installed that from the SolidCraft remote,
 `flatpak update --user` reports it as end-of-life and offers to replace it with
 `io.tangencylabs.solidcraft`; accept, and your settings and autosaves move with it. If you
 installed a `.flatpak` bundle, install the new bundle, launch it once (it copies your settings),
-then run `flatpak uninstall --user ai.storyteller.solidcraft` (or `ai.storyteller.solvecraft`; see the
+then run `flatpak uninstall --user ai.storyteller.solidcraft` (see the
 [compatibility notes](https://github.com/tangency-labs/solidcraft/blob/main/docs/compatibility.md#linux-app-id)).
 
 Alternatively, download the release's `.flatpak` file for your architecture and run

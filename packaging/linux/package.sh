@@ -3,7 +3,6 @@
 #
 #   $DIST/solidcraft-<version>-linux-<arch>.AppImage        any distro with glibc >= the build host's
 #   $DIST/solidcraft-<version>-linux-<arch>.AppImage.zsync  delta updates (needs zsyncmake)
-#   $DIST/solvecraft-<version>-linux-<arch>.AppImage.zsync  the same, for pre-rename AppImages
 #   $DIST/solidcraft-<version>-linux-<arch>.deb             Debian, Ubuntu, Mint, Pop!_OS, ...
 #   $DIST/solidcraft-<version>-linux-<arch>.rpm             Fedora, openSUSE, RHEL, ...
 #   $DIST/solidcraft-<version>-linux-<arch>.tar.gz          plain FHS-style tree (bin/, share/)
@@ -142,12 +141,6 @@ if has appimage; then
   echo "wrote $OUT"
   if [ -s "$OUT.zsync" ]; then
     echo "wrote $OUT.zsync"
-    # Compatibility shim (docs/compatibility.md): AppImages from before the rename look for
-    # `solvecraft-*-linux-$ARCH.AppImage.zsync` in the latest release. The same .zsync under that
-    # name (its URL is the new AppImage's file name, relative to the release) updates them to
-    # SolidCraft.
-    cp "$OUT.zsync" "$DIST/solvecraft-$VERSION-linux-$ARCH.AppImage.zsync"
-    echo "wrote $DIST/solvecraft-$VERSION-linux-$ARCH.AppImage.zsync (legacy update alias)"
   else
     warn "zsyncmake not found, so $OUT.zsync was not written; AppImage delta updates need it"
   fi

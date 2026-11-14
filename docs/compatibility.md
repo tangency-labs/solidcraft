@@ -8,11 +8,10 @@ copy. What stays is what an existing design or install still needs:
   the file's contents (section 2).
 - The `.solidcraft` extension (saved before designs moved to `.sc`) is still a design extension
   (section 1).
-- The app-ID moves in the packages (`ai.storyteller.*` to `io.tangencylabs.solidcraft`,
+- The app-ID move in the packages (`ai.storyteller.solidcraft` to `io.tangencylabs.solidcraft`,
   [Linux app ID](#linux-app-id)).
 
-`git grep -i solvecraft` should list only: the content tags in section 2, the old app IDs, the
-old package and release-asset names under [Package IDs](#package-ids), the tests that pin that
+`git grep -i solvecraft` should list only: the content tags in section 2, the tests that pin that
 a file under the old name opens by contents, this file, and changelog / release notes. When you
 add or remove a shim, update this file in the same PR.
 
@@ -102,29 +101,24 @@ Resources are listed as `solidcraft://design` and `solidcraft://commands`.
 
 | Package | Decision | Why |
 |---|---|---|
-| Flatpak app ID / Linux desktop ID | changed in 0.8 from `ai.storyteller.solvecraft` to `ai.storyteller.solidcraft`, then with the move to Tangency Labs to `io.tangencylabs.solidcraft` | The project's own reverse-DNS domain. The `.desktop`, metainfo and MIME file names, the icon name, and the Wayland `app_id` / X11 class follow it. Existing installs are moved over; see [Linux app ID](#linux-app-id). |
-| Flatpak remote file | `solidcraft.flatpakrepo`, plus a legacy `solvecraft.flatpakrepo` copy | Old links keep working; existing remotes point at the repo URL, which is unchanged. |
+| Flatpak app ID / Linux desktop ID | changed in 0.42 from `ai.storyteller.solidcraft` to `io.tangencylabs.solidcraft` | The project's own reverse-DNS domain. The `.desktop`, metainfo and MIME file names, the icon name, and the Wayland `app_id` / X11 class follow it. Existing installs are moved over; see [Linux app ID](#linux-app-id). |
 | macOS bundle ID | changed to `ai.storyteller.solidcraft`, then to `io.tangencylabs.solidcraft`; the CLI's signing identifier is `io.tangencylabs.solidcraft.cli` (was `ai.storyteller.solidcraft-cli`) | No updater depends on it; the app is drag-installed and replaces the old `SolidCraft.app`. Settings live in folders named after the product, not the bundle ID, so they stay. macOS ties privacy permissions (such as access to Documents or Downloads) to the bundle ID, so it asks for them once more after the update. |
 | MSI `UpgradeCode` | **kept** (also through the `io.tangencylabs` move; the Windows build sets no AppUserModelID and its ProgIDs `Solidcraft.Design` / `Solidcraft.Model` don't carry the app ID, so nothing there changes) | So the new MSI upgrades the old install in place. Product name is SolidCraft; the default folder becomes `Program Files\SolidCraft` (the major upgrade removes the old folder). A custom install folder isn't remembered across this one upgrade. |
-| deb / rpm package name | renamed to `solidcraft`; deb `Replaces`/`Conflicts`/`Provides: solvecraft`, rpm `Obsoletes`/`Provides: solvecraft` | Installing the new package replaces the old one instead of installing side by side. |
-| AppImage | `solidcraft-<version>-linux-<arch>.AppImage`; the release also carries a copy of its `.zsync` under the old `solvecraft-…` name | AppImages already installed look for the old-named `.zsync`, so AppImageUpdate keeps finding updates. |
 
 ## Linux app ID
 
-Releases up to 0.7 used `ai.storyteller.solvecraft`; 0.8 until the move to Tangency Labs used
-`ai.storyteller.solidcraft`; releases since use `io.tangencylabs.solidcraft` everywhere (Flatpak,
+Releases before the move to Tangency Labs used `ai.storyteller.solidcraft`; releases since use `io.tangencylabs.solidcraft` everywhere (Flatpak,
 deb, rpm, AppImage, Snap, FreeBSD, Nix, and the macOS bundle). The settings and autosave folders
 (`solidcraft` / `SolidCraft`) are named after the product, not the app ID, so outside the Flatpak
-sandbox they don't move. The shims cover both earlier IDs:
+sandbox they don't move. The shims cover the earlier ID:
 
 | Shim | Where | What it does |
 |---|---|---|
-| End-of-life rebase in the Flatpak repository | `packaging/flatpak-site.sh` | Each release's Pages deploy keeps the old `app/ai.storyteller.solidcraft/<arch>/stable` and `app/ai.storyteller.solvecraft/<arch>/stable` refs (mirrored from the previous deploy) and marks each with `flatpak build-commit-from --end-of-life-rebase=<old id>=io.tangencylabs.solidcraft` (once the repository has the new ref). A ref already marked with a rebase to an older id (`ai.storyteller.solvecraft` pointed at `ai.storyteller.solidcraft`) is marked again, so every old install moves in one step. `flatpak update` then says the old app is end-of-life and offers to replace it with the new one; accepting installs `io.tangencylabs.solidcraft`, uninstalls the old app, and Flatpak moves `~/.var/app/<old id>` to the new id's folder (leaving a symlink at the old path) on the first launch, so settings and autosaves come along unchanged. |
-| AppStream `<replaces>` / `<provides>` | `assets/platforms/linux/io.tangencylabs.solidcraft.metainfo.xml.in` | Software centres treat the new id as the successor of `ai.storyteller.solidcraft` and `ai.storyteller.solvecraft` and of their `.desktop` ids. |
+| End-of-life rebase in the Flatpak repository | `packaging/flatpak-site.sh` | Each release's Pages deploy keeps the old `app/ai.storyteller.solidcraft/<arch>/stable` ref (mirrored from the previous deploy) and marks each with `flatpak build-commit-from --end-of-life-rebase=<old id>=io.tangencylabs.solidcraft` (once the repository has the new ref). `flatpak update` then says the old app is end-of-life and offers to replace it with the new one; accepting installs `io.tangencylabs.solidcraft`, uninstalls the old app, and Flatpak moves `~/.var/app/<old id>` to the new id's folder (leaving a symlink at the old path) on the first launch, so settings and autosaves come along unchanged. |
+| AppStream `<replaces>` / `<provides>` | `assets/platforms/linux/io.tangencylabs.solidcraft.metainfo.xml.in` | Software centres treat the new id as the successor of `ai.storyteller.solidcraft` and of its `.desktop` ids. |
 | `X-Flatpak-RenamedFrom` | `assets/platforms/linux/io.tangencylabs.solidcraft.desktop` (both old `.desktop` ids) | Desktops that honour it (GNOME Shell) keep favourites and pinned launchers pointing at the renamed entry. |
-| Read-only access to the old Flatpak data folders | `--filesystem=~/.var/app/ai.storyteller.solidcraft:ro` and `--filesystem=~/.var/app/ai.storyteller.solvecraft:ro` in `packaging/linux/flatpak/io.tangencylabs.solidcraft.bundle.yml`; `solidcraft_io::legacy_flatpak_paths` (`PREVIOUS_APP_IDS`, newest first), used by `adopt_legacy_settings` and `recovery::default_dir` | When the new app was installed next to an old one (for example from a `.flatpak` bundle, which has no update feed) instead of through the rebase, its first launch copies settings and autosaves from the newest old app's folder that exists, as in section 3. The old folders are not changed. |
-| The old window `app_id` as eframe's legacy storage key | `adopt_legacy_settings` (`LEGACY_APP_ID`) | Window state that releases before the settings rename kept under `~/.local/share/ai.storyteller.solvecraft` is still copied (section 3). |
-| Old AppImage menu entries | `packaging/linux/AppRun` | An AppImage's first run removes the `ai.storyteller.solidcraft.desktop` and `ai.storyteller.solvecraft.desktop` entries and icons that an earlier AppImage installed in `~/.local/share` (only entries it wrote itself), so the menu doesn't show the app twice. Test: `packaging/tests/apprun_test.py`. |
+| Read-only access to the old Flatpak data folders | `--filesystem=~/.var/app/ai.storyteller.solidcraft:ro` in `packaging/linux/flatpak/io.tangencylabs.solidcraft.bundle.yml`; `solidcraft_io::legacy_flatpak_paths` (`PREVIOUS_APP_IDS`, newest first), used by `adopt_legacy_settings` and `recovery::default_dir` | When the new app was installed next to an old one (for example from a `.flatpak` bundle, which has no update feed) instead of through the rebase, its first launch copies settings and autosaves from the newest old app's folder that exists, as in section 3. The old folders are not changed. |
+| Old AppImage menu entries | `packaging/linux/AppRun` | An AppImage's first run removes the `ai.storyteller.solidcraft.desktop` entry and icons that an earlier AppImage installed in `~/.local/share` (only entries it wrote itself), so the menu doesn't show the app twice. Test: `packaging/tests/apprun_test.py`. |
 
 deb and rpm need no shim: the package (`solidcraft`) is unchanged, and an upgrade removes the old
 `/usr/share/applications/ai.storyteller.*.desktop`, metainfo, MIME and icon files
@@ -134,7 +128,7 @@ and icon caches, so no stale menu entry is left. The Snap is unaffected apart fr
 
 Flatpak installed from a downloaded `.flatpak` bundle (no update feed): install the new bundle,
 launch it once (settings and autosaves are copied), then
-`flatpak uninstall --user ai.storyteller.solidcraft` (or `ai.storyteller.solvecraft`).
+`flatpak uninstall --user ai.storyteller.solidcraft`.
 
 **Removal:** keep the end-of-life refs in the Flatpak repository for at least six months after
 the release that moved to `io.tangencylabs.solidcraft` and at least two minor releases; removing

@@ -53,7 +53,7 @@ pub use dxf_out::{
     DxfEntity, DxfLayer, DxfLinetype, DxfShape, loop_lwpolyline, loop_lwpolyline_scaled, loop_shapes, seg_shape, write_dxf_drawing,
     write_dxf_drawing_units,
 };
-pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
+pub use legacy_dir::{APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
 pub use svg::{decode_svg, read_svg, svg_nothing_to_import, svg_sheet};
