@@ -116,7 +116,7 @@ const LIMITS: Limits = Limits {
 /// limit: level 1 of a large payload leaves more on disk, and that part exists only because
 /// compression is what makes it fit. Everything else is level 1.
 fn part_level(name: &str, length: usize) -> i64 {
-    if name.ends_with(".step") || (name.ends_with(".mesh") && length > max_part()) { STEP_LEVEL } else { 1 }
+    if name.ends_with(".step") || name.ends_with(".records") || (name.ends_with(".mesh") && length > max_part()) { STEP_LEVEL } else { 1 }
 }
 
 /// A design container being written, within [`LIMITS`].
@@ -135,10 +135,10 @@ impl std::ops::DerefMut for PackageWriter {
     }
 }
 
-/// The uncompressed size a part may have. STEP and mesh blobs may be larger than the
-/// design file because they are stored compressed when they would not fit otherwise.
+/// The uncompressed size a part may have. STEP, import record and mesh blobs may be larger than
+/// the design file because they are stored compressed when they would not fit otherwise.
 fn part_limit(name: &str) -> usize {
-    if name.ends_with(".step") {
+    if name.ends_with(".step") || name.ends_with(".records") {
         max_step_part()
     } else if name.ends_with(".mesh") {
         max_mesh_part()
@@ -241,11 +241,18 @@ fn write_container(
     let mut features = Vec::with_capacity(doc.features.len());
     for feature in &doc.features {
         let replacements = match &feature.kind {
-            FeatureKind::Import { step, .. } => {
+            FeatureKind::Import { step, records, .. } => {
                 // STEP is text and shrinks several times: always compressed, so an import as large
                 // as MAX_STEP_BYTES still fits in a design file.
                 let blob = writer.blob(step.as_bytes(), "step", true)?;
-                fields([("step", Value::String(String::new())), ("step_blob", blob)])
+                let mut replaced = fields([("step", Value::String(String::new())), ("step_blob", blob)]);
+                // An import kept as records: they go in a part of their own, compressed as STEP.
+                if let Some(r) = records {
+                    let text = solidcraft_kernel::records_text(r)?;
+                    replaced.insert("records".into(), Value::Null);
+                    replaced.insert("records_blob".into(), writer.blob(text.as_bytes(), "records", true)?);
+                }
+                replaced
             }
             FeatureKind::MeshImport { meshes, .. } => {
                 let mut metadata = Vec::with_capacity(meshes.len());
@@ -266,9 +273,12 @@ fn write_container(
         };
         // Extra reference fields are added after serializing existing fields.
         let step_blob = replacements.get("step_blob").cloned();
+        let records_blob = replacements.get("records_blob").cloned();
         let mut value = replace(feature, replacements).map_err(invalid)?;
-        if let Some(blob) = step_blob {
-            value.as_object_mut().ok_or_else(|| invalid("feature metadata"))?.insert("step_blob".into(), blob);
+        for (key, blob) in [("step_blob", step_blob), ("records_blob", records_blob)] {
+            if let Some(blob) = blob {
+                value.as_object_mut().ok_or_else(|| invalid("feature metadata"))?.insert(key.into(), blob);
+            }
         }
         features.push(value);
     }
@@ -875,7 +885,11 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let Some(value) = metadata.get("features").and_then(|v| v.get(index)) else { continue };
         let readable = match &mut feature.kind {
-            FeatureKind::Import { .. } => reader.blob(value, "step_blob", "step").map(|_| ()).map_err(IoError::from),
+            FeatureKind::Import { .. } => reader
+                .blob(value, "step_blob", "step")
+                .map(|_| ())
+                .and_then(|()| if value.get("records_blob").is_some() { reader.blob(value, "records_blob", "records").map(|_| ()) } else { Ok(()) })
+                .map_err(IoError::from),
             FeatureKind::MeshImport { meshes, .. } => {
                 let mut check = meshes.clone();
                 check.iter_mut().enumerate().try_for_each(|(i, mesh)| {
@@ -1046,11 +1060,18 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let value = metadata.get("features").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing feature metadata"))?;
         match &mut feature.kind {
-            FeatureKind::Import { step, .. } => {
+            FeatureKind::Import { step, records, .. } => {
                 if !step.is_empty() {
                     return Err(invalid("ambiguous embedded STEP and blob"));
                 }
                 *step = std::str::from_utf8(reader.blob(value, "step_blob", "step")?).map_err(invalid)?.into();
+                if value.get("records_blob").is_some() {
+                    if records.is_some() {
+                        return Err(invalid("ambiguous embedded import records and blob"));
+                    }
+                    let text = reader.blob(value, "records_blob", "records")?;
+                    *records = Some(Arc::new(serde_json::from_slice(text).map_err(invalid)?));
+                }
             }
             FeatureKind::MeshImport { meshes, .. } => {
                 for (index, mesh) in meshes.iter_mut().enumerate() {
@@ -1410,8 +1431,11 @@ mod tests {
     fn seekable_preview_defers_large_source_blob_until_document_read() {
         let mut doc = Document::new("Deferred source");
         let step = noise(2_600_000);
-        doc.add_feature(FeatureKind::Import { file: "large.step".into(), step: step.clone().into(), components: Vec::new(), skip: Vec::new() }, None)
-            .unwrap();
+        doc.add_feature(
+            FeatureKind::Import { file: "large.step".into(), step: step.clone().into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
+        .unwrap();
         let preview = DesignPreview { meshes: vec![mesh()] };
         let bytes = write_design_container_with_preview(&doc, DesignCompression::Fast, Some(&preview)).unwrap();
         let count = std::rc::Rc::new(std::cell::Cell::new(0));
@@ -1528,8 +1552,11 @@ mod tests {
     fn native_cache_round_trip_and_preview_defer_original_sources() {
         let mut doc = Document::new("Native cache");
         let step = noise(2_600_000);
-        doc.add_feature(FeatureKind::Import { file: "large.step".into(), step: step.clone().into(), components: Vec::new(), skip: Vec::new() }, None)
-            .unwrap();
+        doc.add_feature(
+            FeatureKind::Import { file: "large.step".into(), step: step.clone().into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
+        .unwrap();
         let bodies = native_geometry();
         let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&bodies)).unwrap();
         let entries = parts(&bytes);
@@ -1592,6 +1619,56 @@ mod tests {
         assert_eq!(tree.as_object().unwrap().len(), 12, "{:?}", tree.as_object().unwrap().keys().collect::<Vec<_>>());
     }
 
+    /// An import kept as B-rep records (a FreeCAD or Rhino file read through cadmpeg) is saved in
+    /// a part of its own and opens with the same records, which build the same body.
+    #[test]
+    fn an_import_kept_as_records_survives_saving_and_opening() {
+        use solidcore_record::Vec3;
+        let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+        let brep = solidcraft_kernel::brep_record(&part).unwrap();
+        let body = solidcraft_kernel::RecordBody {
+            name: "Block".into(),
+            path: vec!["block".into()],
+            instance: None,
+            color: Some([0.2, 0.4, 0.6]),
+            hidden: false,
+            placement: None,
+            face_origin: (0..brep.faces.len() as u64).collect(),
+            brep,
+            sheet: false,
+        };
+        let tree = vec![solidcraft_kernel::StepNode {
+            name: "block".into(),
+            transform: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]],
+            bodies: vec![0],
+            children: Vec::new(),
+        }];
+        let records = Arc::new(solidcraft_kernel::ImportRecords { bodies: vec![body], tree, warnings: Vec::new(), system: "FreeCAD".into() });
+        let mut doc = Document::new("Records");
+        let kind = FeatureKind::Import {
+            file: "block.FCStd".into(),
+            step: "".into(),
+            components: Vec::new(),
+            skip: Vec::new(),
+            records: Some(records.clone()),
+        };
+        doc.add_feature(kind, None).unwrap();
+        let volume = |doc: &Document| {
+            let mut model = solidcraft_doc::Model::new();
+            model.evaluate(doc);
+            assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+            solidcraft_kernel::measure(&model.state().bodies[0].body).unwrap().volume
+        };
+        assert!((volume(&doc) - 6000.0).abs() < 1e-6);
+        let bytes = write_design_container(&doc).unwrap();
+        assert!(parts(&bytes).keys().any(|k| k.ends_with(".records")), "{:?}", parts(&bytes).keys().collect::<Vec<_>>());
+        let opened = crate::read_design(&bytes).unwrap();
+        let Some(FeatureKind::Import { step, records: Some(read), .. }) = opened.features.first().map(|f| &f.kind) else { panic!("no records") };
+        assert!(step.is_empty());
+        assert_eq!(**read, *records);
+        assert!((volume(&opened) - 6000.0).abs() < 1e-6);
+    }
+
     /// #9170: a mesh body (an imported STL) is kept in the model cache with the rest of the
     /// model, as its own triangles, colour and paint. One mesh body left the whole cache out, so
     /// opening the design evaluated every feature again.
@@ -1606,8 +1683,11 @@ mod tests {
             part.with_color(Some([0.5, 0.5, 0.5])).with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces, name: Some("Body grey".into()) }));
         let step = solidcraft_kernel::step_export(&[&named], "named").unwrap();
         let mut doc = Document::new("Named colours");
-        doc.add_feature(FeatureKind::Import { file: "named.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
-            .unwrap();
+        doc.add_feature(
+            FeatureKind::Import { file: "named.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
+        .unwrap();
         let mut model = solidcraft_doc::Model::new();
         model.evaluate(&doc);
         let names = |model: &solidcraft_doc::Model| {
@@ -2209,6 +2289,7 @@ mod tests {
                     step: "ISO-10303-21;\nEND-ISO-10303-21;".into(),
                     components: Vec::new(),
                     skip: Vec::new(),
+                    records: None,
                 },
                 None,
             )
@@ -2811,8 +2892,11 @@ mod tests {
     fn step_that_cannot_be_saved_even_compressed_is_refused_when_the_design_is_saved() {
         let step = padded_step(crate::MAX_DESIGN_BYTES + (80 << 20), true);
         let mut doc = Document::new("Noisy import");
-        doc.add_feature(FeatureKind::Import { file: "noisy.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
-            .unwrap();
+        doc.add_feature(
+            FeatureKind::Import { file: "noisy.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
+        .unwrap();
         let message = write_design_container(&doc).err().unwrap().to_string();
         assert!(message.contains("the design would be") && message.contains("a design file may hold"), "{message}");
     }
@@ -2838,7 +2922,11 @@ mod tests {
         // 64 MiB that deflate to a few hundred kilobytes, declared as a 1 KiB STEP source.
         let mut doc = Document::new("Bomb");
         let step = format!("ISO-10303-21;{}", " ".repeat(64 << 20));
-        doc.add_feature(FeatureKind::Import { file: "bomb.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None).unwrap();
+        doc.add_feature(
+            FeatureKind::Import { file: "bomb.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
+        .unwrap();
         let honest = write_design_container(&doc).unwrap();
         assert!(honest.len() < 1 << 20);
         let central = honest.windows(4).position(|v| v == b"PK\x01\x02").unwrap();
@@ -3154,8 +3242,11 @@ mod tests {
             .collect();
         let step = solidcraft_kernel::step_export(&bodies.iter().collect::<Vec<_>>(), "SolidCraft storage benchmark").unwrap();
         let mut doc = Document::new("Generated STEP benchmark");
-        doc.add_feature(FeatureKind::Import { file: "generated.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
-            .unwrap();
+        doc.add_feature(
+            FeatureKind::Import { file: "generated.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
+        .unwrap();
         measure_storage(&doc, "step");
     }
 

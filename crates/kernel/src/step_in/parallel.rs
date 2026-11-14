@@ -94,7 +94,7 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
 
 /// The part's body where its instance goes: the very same body at the identity (it keeps the
 /// SMLib body the read made), else its record moved there.
-fn placed(body: &Body, m: &M4) -> crate::Result<Body> {
+pub(super) fn placed(body: &Body, m: &M4) -> crate::Result<Body> {
     if *m == IDENTITY {
         return Ok(body.clone());
     }
@@ -119,7 +119,7 @@ pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result:
 /// normal, so a sheet whose file uses some faces the other way is given to SMLib with those faces
 /// turned over (exactly, on the record) and they are turned back on SMLib's body: the body faces
 /// as the file does, and each of its faces is known to be the record's face it was.
-fn solid_part(solid: &solidcore_step::topology::Solid) -> std::result::Result<Part, Failure> {
+pub(super) fn solid_part(solid: &solidcore_step::topology::Solid) -> std::result::Result<Part, Failure> {
     let failed = |e: KernelError| Failure { read: false, msg: e.to_string().trim_start_matches("the operation failed: ").to_string() };
     let r = &solid.brep;
     let mut reversed = vec![false; r.faces.len()];
