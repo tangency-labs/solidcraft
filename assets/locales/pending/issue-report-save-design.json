@@ -1,0 +1,20 @@
+{
+  "en": {
+    "Design (optional)": "Design (optional)",
+    "Reports are public: attach the design only if it can be shared. Drag the saved file into the GitHub draft.": "Reports are public: attach the design only if it can be shared. Drag the saved file into the GitHub draft.",
+    "Save design…": "Save design…",
+    "Design saved. Drag the .json file into the GitHub draft to attach it.": "Design saved. Drag the .json file into the GitHub draft to attach it."
+  },
+  "ja": {
+    "Design (optional)": "デザイン（任意）",
+    "Reports are public: attach the design only if it can be shared. Drag the saved file into the GitHub draft.": "レポートは公開されます。共有してよい場合にのみデザインを添付してください。保存したファイルを GitHub の下書きにドラッグします。",
+    "Save design…": "デザインを保存…",
+    "Design saved. Drag the .json file into the GitHub draft to attach it.": "デザインを保存しました。.json ファイルを GitHub の下書きにドラッグして添付してください。"
+  },
+  "zh": {
+    "Design (optional)": "设计（可选）",
+    "Reports are public: attach the design only if it can be shared. Drag the saved file into the GitHub draft.": "报告是公开的：仅在可以共享时附上设计。将保存的文件拖入 GitHub 草稿。",
+    "Save design…": "保存设计…",
+    "Design saved. Drag the .json file into the GitHub draft to attach it.": "设计已保存。将 .json 文件拖入 GitHub 草稿即可附加。"
+  }
+}
