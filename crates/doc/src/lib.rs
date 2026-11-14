@@ -101,11 +101,12 @@ pub use document::*;
 pub use eval::cell_grid::{MAX_CUT_CELLS, SLOW_CUT_CELLS};
 pub use eval::{
     EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch, ThreadInfo,
-    blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state, hole_direction_at,
-    hole_on_surface, import_body_names, join_pieces_added, map_wire, metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices,
-    revolve_extent, revolve_extent_for_handle, revolve_extent_with_convention, select_profiles, sketch_hole_direction, sketch_line_plane,
-    state_in_frame, state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance, with_placed_copies,
-    world_state, world_state_reusing,
+    blend_target, component_patterns_need_update, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names,
+    face_point_state, has_component_patterns, hole_direction_at, hole_on_surface, import_body_names, join_pieces_added, map_wire,
+    metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices, reconcile_component_patterns, revolve_extent,
+    revolve_extent_for_handle, revolve_extent_with_convention, select_profiles, sketch_hole_direction, sketch_line_plane, state_in_frame,
+    state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance, with_placed_copies, world_state,
+    world_state_reusing,
 };
 pub use eval::{EvalCache, KeptResults};
 pub use expr::Expr;

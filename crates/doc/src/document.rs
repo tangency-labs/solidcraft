@@ -972,14 +972,23 @@ pub enum FeatureKind {
         #[serde(default)]
         keep_tools: bool,
     },
-    /// Copies of other features' results, or of bodies (rectangular, circular or along a path).
-    /// The copied features are named by id (#1134).
+    /// Copies of other features' results, of bodies, or of components (rectangular, circular or
+    /// along a path). The copied features are named by id (#1134). Component copies are named by
+    /// component id; the occurrence ids they make are kept so a count change keeps survivors (#12116).
     Pattern {
         features: Vec<FeatureId>,
         pattern: PatternKind,
         /// Copy these bodies (as new bodies) instead of replaying features.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         bodies: Vec<BodyName>,
+        /// Place these components again as occurrences (one per pattern matrix, beyond each
+        /// component's first placement). Empty for a pattern of features or bodies.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        components: Vec<u64>,
+        /// Occurrence ids this pattern of components made, in order: for each of `components`,
+        /// one id per matrix. Kept across count changes so survivors keep their identity (#12116).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        occurrences: Vec<u64>,
     },
     /// Mirror copies of other features' results in a plane. The copied features are named by
     /// id (#1134).
@@ -4571,6 +4580,20 @@ impl Document {
         // How many of them come before the rollback marker: it keeps its place among the rest.
         let before_marker = self.marker.map(|m| self.features.iter().take(m).filter(|f| gone.contains(&f.id)).count());
         let gone_params: Vec<String> = self.features.iter().filter(|f| gone.contains(&f.id)).flat_map(|f| f.param_names.clone()).collect();
+        // A Pattern of components takes the occurrences it made with it (#12116).
+        let patterned: std::collections::BTreeSet<u64> = self
+            .features
+            .iter()
+            .filter(|f| gone.contains(&f.id))
+            .filter_map(|f| match &f.kind {
+                FeatureKind::Pattern { occurrences, .. } if !occurrences.is_empty() => Some(occurrences.iter().copied()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        if !patterned.is_empty() {
+            self.remove_occurrences(&patterned);
+        }
         self.configs
             .rules
             .retain(|rule| !rule.references_features(&gone) && !rule.parameter_references().iter().any(|name| gone_params.contains(name)));
