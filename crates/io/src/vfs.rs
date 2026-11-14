@@ -363,7 +363,7 @@ impl PathScope {
             let request = std::path::absolute(path).ok();
             let names_root = |r: &RejectedRoot| {
                 std::path::Path::new(path).starts_with(&r.path)
-                    || matches!((&request, std::path::absolute(&r.path).ok()), (Some(q), Some(a)) if q.starts_with(a))
+                    || matches!((&request, std::path::absolute(&r.path).ok()), (Some(q), Some(a)) if q.starts_with(&a))
             };
             if let Some(r) = self.rejected.iter().find(|r| names_root(r)) {
                 return Error::new(
