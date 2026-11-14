@@ -518,9 +518,10 @@ pub(super) fn axis_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
 /// ends, and [`closest`] measures it.
 fn exact_min(a: &Shape, b: &Shape, anchor: Option<Vec3>, unbounded: (bool, bool)) -> Option<(f64, Vec3, Vec3)> {
     use Shape::*;
-    // From an item to a plane that runs on for ever: a segment that crosses it meets it, one
-    // that doesn't comes nearest at its nearer end.
-    let to_plane = |x: &Shape, point: Vec3, normal: UnitVec3| {
+    // From an item to a plane that runs on for ever: a segment that crosses it, or an axis not
+    // parallel to it, meets it; a segment that doesn't comes nearest at its nearer end. An axis
+    // is drawn as a segment with ends far out, which it runs on past.
+    let to_plane = |x: &Shape, point: Vec3, normal: UnitVec3, x_runs_on: bool| {
         let n = normal.vec();
         let (p, q) = match *x {
             Point(p) => (p, p),
@@ -528,7 +529,7 @@ fn exact_min(a: &Shape, b: &Shape, anchor: Option<Vec3>, unbounded: (bool, bool)
             _ => return None,
         };
         let (hp, hq) = ((p - point).dot(n), (q - point).dot(n));
-        if hp * hq <= 0.0 && hp != hq {
+        if (x_runs_on || hp * hq <= 0.0) && hp != hq {
             let x = p.lerp(q, hp / (hp - hq));
             return Some((0.0, x, x));
         }
@@ -539,8 +540,8 @@ fn exact_min(a: &Shape, b: &Shape, anchor: Option<Vec3>, unbounded: (bool, bool)
         (Plane { point: p1, normal: n1 }, Plane { point: p2, normal: n2 }) if unbounded.0 || unbounded.1 => {
             super::measure_shape::plane_plane(*p1, *n1, *p2, *n2, anchor.unwrap_or(*p1), unbounded.0 && unbounded.1)
         }
-        (Plane { point, normal }, x) if unbounded.0 => to_plane(x, *point, *normal).map(|(d, p, q)| (d, q, p)),
-        (x, Plane { point, normal }) if unbounded.1 => to_plane(x, *point, *normal),
+        (Plane { point, normal }, x) if unbounded.0 => to_plane(x, *point, *normal, unbounded.1).map(|(d, p, q)| (d, q, p)),
+        (x, Plane { point, normal }) if unbounded.1 => to_plane(x, *point, *normal, unbounded.0),
         _ => None,
     }
 }

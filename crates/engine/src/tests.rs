@@ -1983,6 +1983,10 @@ fn measure_origin_planes_axes_and_points() {
     // The XY plane and the Z axis meet: nothing between them.
     let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "plane", "name": "XY"}, {"type": "axis", "name": "Z"}]}));
     assert!(r["distance_mm"].as_f64().unwrap().abs() < 1e-9, "{r}");
+    // An axis runs on for ever: it meets a plane past the ends of the segment it is drawn as.
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 2e6, "name": "Far"}));
+    let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "axis", "name": "Z"}, {"type": "plane", "name": "Far"}]}));
+    assert!(r["distance_mm"].as_f64().unwrap().abs() < 1e-9, "{r}");
 }
 
 #[test]
