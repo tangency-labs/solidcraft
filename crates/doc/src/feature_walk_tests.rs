@@ -198,6 +198,10 @@ fn construction_names_follow_renames_in_every_definition() {
         json!({"type": "construction_point", "def": {"type": "center", "of": axis}}),
         json!({"type": "construction_point", "def": {"type": "edge_and_plane", "edge": axis, "plane": plane}}),
         json!({"type": "construction_point", "def": {"type": "along_path", "path": axis, "t": "0.5"}}),
+        // A hole or cylinder placed from a construction plane or axis (#10877).
+        json!({"type": "cylinder", "base": [0, 0, 0], "radius": "5", "height": "10", "references": [
+            {"edge": [0, 0, 0], "distance": "8", "datum": {"plane": "Old"}},
+            {"edge": [0, 0, 0], "distance": "6", "datum": {"axis": "Old"}}]}),
     ];
     let planes = [
         json!({"type": "midplane", "a": plane, "b": plane}),

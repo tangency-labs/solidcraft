@@ -96,42 +96,180 @@ impl ReferenceFrame {
 /// name, else the edge nearest its point. The face is the flat face under `at` that faces the
 /// drill, else the one the edges border.
 pub fn reference_frame(st: &ModelState, at: Vec3, dir: Vec3, edges: &[(Vec3, Option<&str>)], exact: bool) -> Result<ReferenceFrame> {
-    if edges.len() > MAX_HOLE_REFERENCES {
-        return Err(DocError::Invalid(format!("a hole takes at most {MAX_HOLE_REFERENCES} reference edges")));
+    let refs: Vec<RefInput> = edges.iter().map(|(p, name)| RefInput::Edge(*p, *name)).collect();
+    reference_frame_of(st, at, dir, &refs, exact)
+}
+
+/// One reference of a hole: a straight edge (a point on it and its persistent name, when it has
+/// one), or a plane or an axis, which measures from the line it makes in the face's plane. A
+/// plane's or an axis' `opposite` is the side of that line the hole is on (see
+/// [`crate::HoleReference::opposite`]); none takes the side the hole is on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RefInput<'a> {
+    Edge(Vec3, Option<&'a str>),
+    Plane { point: Vec3, normal: Vec3, opposite: Option<bool> },
+    Axis { point: Vec3, dir: Vec3, opposite: Option<bool> },
+}
+
+impl RefInput<'_> {
+    /// This reference with the side of its line set, for a plane or an axis.
+    fn on_side(self, side: Option<bool>) -> Self {
+        match self {
+            RefInput::Plane { point, normal, .. } => RefInput::Plane { point, normal, opposite: side },
+            RefInput::Axis { point, dir, .. } => RefInput::Axis { point, dir, opposite: side },
+            edge => edge,
+        }
+    }
+}
+
+/// The `edges` slot of a [`ReferenceFrame`] for a reference that is a plane or an axis.
+pub const NO_EDGE: usize = usize::MAX;
+
+/// [`reference_frame`] for edges, planes and axes. A plane's line is where it cuts the face's
+/// plane; an axis' line is its projection onto it. The side of such a line is its `opposite`, else
+/// the one the hole is on.
+pub fn reference_frame_of(st: &ModelState, at: Vec3, dir: Vec3, refs: &[RefInput], exact: bool) -> Result<ReferenceFrame> {
+    if refs.len() > MAX_HOLE_REFERENCES {
+        return Err(DocError::Invalid(format!("a hole takes at most {MAX_HOLE_REFERENCES} references")));
     }
     let dir = dir.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
-    if !at.is_finite() || edges.iter().any(|(p, _)| !p.is_finite()) {
-        return Err(DocError::Invalid("reference edges need finite points".into()));
+    let finite = |r: &RefInput| match r {
+        RefInput::Edge(p, _) => p.is_finite(),
+        RefInput::Plane { point, normal, .. } => point.is_finite() && normal.is_finite(),
+        RefInput::Axis { point, dir, .. } => point.is_finite() && dir.is_finite(),
+    };
+    if !at.is_finite() || !refs.iter().all(finite) {
+        return Err(DocError::Invalid("references need finite points".into()));
     }
-    let points: Vec<Vec3> = edges.iter().map(|(p, _)| *p).collect();
-    let b = body_for(st, at, &points).ok_or_else(|| DocError::Invalid("no body at the hole for its reference edges".into()))?;
+    let points: Vec<Vec3> = refs.iter().filter_map(|r| if let RefInput::Edge(p, _) = r { Some(*p) } else { None }).collect();
+    let b = body_for(st, at, &points).ok_or_else(|| DocError::Invalid("no body at the hole for its references".into()))?;
     let m = b.mesh();
     let size = b.body.size().max(1e-9);
-    let mut found = Vec::with_capacity(edges.len());
-    for (k, (p, name)) in edges.iter().enumerate() {
-        found.push(find_edge(b, &m, k, *p, *name, exact)?);
+    // Each reference's edge, in order (none for a plane or an axis).
+    let mut found = Vec::with_capacity(refs.len());
+    for (k, r) in refs.iter().enumerate() {
+        found.push(match r {
+            RefInput::Edge(p, name) => Some(find_edge(b, &m, k, *p, *name, exact)?),
+            _ => None,
+        });
     }
-    let (face, origin, normal) = flat_face(b, &m, at, dir, &found).ok_or_else(|| {
-        DocError::Invalid("reference edges need the hole on a flat face: no flat face facing the drill at the hole or along its edges".into())
+    let edges: Vec<(Vec3, Vec3, usize)> = found.iter().flatten().copied().collect();
+    let (face, origin, normal) = flat_face(b, &m, at, dir, &edges).ok_or_else(|| {
+        DocError::Invalid("references need the hole on a flat face: no flat face facing the drill at the hole or along its edges".into())
     })?;
-    let mut lines = Vec::with_capacity(found.len());
-    for (k, (a, z, _)) in found.iter().enumerate() {
-        let flat = |q: Vec3| q - normal * (q - origin).dot(normal);
-        let (a, z) = (flat(*a), flat(*z));
-        let along = (z - a).normalized().ok_or_else(|| DocError::Invalid(format!("reference edge {} is square to the face", k + 1)))?;
-        let across = normal.cross(along).normalized().ok_or_else(|| DocError::Invalid(format!("reference edge {} is square to the face", k + 1)))?;
-        let mid = (a + z) * 0.5;
-        // The side the face is on next to the edge; an edge the face doesn't border (or borders
-        // on both sides) takes the side the hole is on.
-        let side = face_side(&m, face, mid, across, normal, size).unwrap_or_else(|| if (at - mid).dot(across) < 0.0 { -1.0 } else { 1.0 });
-        lines.push(ReferenceLine { point: mid, along, toward: across * side });
+    let mut lines = Vec::with_capacity(refs.len());
+    for (k, (r, e)) in refs.iter().zip(&found).enumerate() {
+        if let Some((a, z, _)) = e {
+            let flat = |q: Vec3| q - normal * (q - origin).dot(normal);
+            let (a, z) = (flat(*a), flat(*z));
+            let along = (z - a).normalized().ok_or_else(|| DocError::Invalid(format!("reference edge {} is square to the face", k + 1)))?;
+            let across =
+                normal.cross(along).normalized().ok_or_else(|| DocError::Invalid(format!("reference edge {} is square to the face", k + 1)))?;
+            let mid = (a + z) * 0.5;
+            // The side the face is on next to the edge; an edge the face doesn't border (or borders
+            // on both sides) takes the side the hole is on.
+            let side = face_side(&m, face, mid, across, normal, size).unwrap_or_else(|| if (at - mid).dot(across) < 0.0 { -1.0 } else { 1.0 });
+            lines.push(ReferenceLine { point: mid, along, toward: across * side });
+        } else {
+            lines.push(datum_line(r, k, at, origin, normal)?);
+        }
     }
     if let [a, b] = lines.as_slice()
         && a.along.cross(b.along).len() < 1e-6
     {
-        return Err(DocError::Invalid("the reference edges are parallel: pick edges that cross".into()));
+        return Err(DocError::Invalid("the references are parallel: pick references that cross".into()));
     }
-    Ok(ReferenceFrame { body: b.name.clone(), face, origin, normal, lines, edges: found.iter().map(|(_, _, i)| *i).collect() })
+    let edge_index = found.iter().map(|e| e.map_or(NO_EDGE, |(_, _, i)| i)).collect();
+    Ok(ReferenceFrame { body: b.name.clone(), face, origin, normal, lines, edges: edge_index })
+}
+
+/// The line a plane or an axis makes in the face's plane (through `origin`, square to `normal`),
+/// on the side its `opposite` says, else on the side of the hole at `at`.
+fn datum_line(r: &RefInput, k: usize, at: Vec3, origin: Vec3, normal: Vec3) -> Result<ReferenceLine> {
+    let (point, along, opposite) = match r {
+        RefInput::Plane { point, normal: n, opposite } => {
+            let n = n.normalized().ok_or_else(|| DocError::Invalid(format!("reference {} has no direction", k + 1)))?;
+            // Running so that the plane's normal is on its positive side (`normal × along`).
+            let u = n.cross(normal);
+            let along = u.normalized().ok_or_else(|| DocError::Invalid(format!("reference {} is a plane parallel to the face", k + 1)))?;
+            // The point where the face's plane, the plane and the plane square to the line through
+            // the hole meet.
+            let (d1, d2, d3) = (normal.dot(origin), n.dot(*point), along.dot(at));
+            let det = normal.dot(n.cross(along));
+            if det.abs() < 1e-9 {
+                return Err(DocError::Invalid(format!("reference {} is a plane parallel to the face", k + 1)));
+            }
+            ((n.cross(along) * d1 + along.cross(normal) * d2 + normal.cross(n) * d3) * (1.0 / det), along, opposite)
+        }
+        RefInput::Axis { point, dir, opposite } => {
+            let d = *dir - normal * dir.dot(normal);
+            let along = d.normalized().ok_or_else(|| DocError::Invalid(format!("reference {} is an axis square to the face", k + 1)))?;
+            (*point - normal * (*point - origin).dot(normal), along, opposite)
+        }
+        RefInput::Edge(..) => return Err(DocError::Invalid("an edge is not a datum".into())),
+    };
+    let across = normal.cross(along).normalized().ok_or_else(|| DocError::Invalid(format!("reference {} is square to the face", k + 1)))?;
+    let opposite = opposite.unwrap_or((at - point).dot(across) < 0.0);
+    Ok(ReferenceLine { point, along, toward: if opposite { -across } else { across } })
+}
+
+/// The geometry of the plane or axis a reference is made from, by name: the origin planes `XY`,
+/// `XZ`, `YZ` and axes `X`, `Y`, `Z`, else a construction plane or axis of the timeline.
+pub fn datum_input(st: &ModelState, datum: &crate::HoleDatum) -> Result<RefInput<'static>> {
+    use crate::construct::ConstructGeom;
+    let find = |name: &str| st.construct.iter().find(|c| c.name == name).map(|c| c.geom.clone());
+    match datum {
+        crate::HoleDatum::Plane(name) => match name.to_ascii_uppercase().as_str() {
+            "XY" => Ok(RefInput::Plane { point: Vec3::ZERO, normal: Vec3::Z, opposite: None }),
+            "XZ" => Ok(RefInput::Plane { point: Vec3::ZERO, normal: Vec3::Y, opposite: None }),
+            "YZ" => Ok(RefInput::Plane { point: Vec3::ZERO, normal: Vec3::X, opposite: None }),
+            _ => match find(name) {
+                Some(ConstructGeom::Plane(p)) => Ok(RefInput::Plane { point: p.origin, normal: p.normal(), opposite: None }),
+                Some(_) => Err(DocError::Invalid(format!("`{name}` is not a plane"))),
+                None => Err(DocError::Unknown(format!("plane `{name}` (it must come earlier in the timeline)"))),
+            },
+        },
+        crate::HoleDatum::Axis(name) => match name.to_ascii_uppercase().as_str() {
+            "X" => Ok(RefInput::Axis { point: Vec3::ZERO, dir: Vec3::X, opposite: None }),
+            "Y" => Ok(RefInput::Axis { point: Vec3::ZERO, dir: Vec3::Y, opposite: None }),
+            "Z" => Ok(RefInput::Axis { point: Vec3::ZERO, dir: Vec3::Z, opposite: None }),
+            _ => match find(name) {
+                Some(ConstructGeom::Axis { origin, dir }) => Ok(RefInput::Axis { point: origin, dir, opposite: None }),
+                Some(_) => Err(DocError::Invalid(format!("`{name}` is not an axis"))),
+                None => Err(DocError::Unknown(format!("axis `{name}` (it must come earlier in the timeline)"))),
+            },
+        },
+    }
+}
+
+/// The references of a hole as [`RefInput`]s, the names being the persistent names of the edges
+/// (by reference, empty where a reference has none).
+pub fn inputs_of<'a>(st: &ModelState, references: &'a [crate::HoleReference], names: &'a [String]) -> Result<Vec<RefInput<'a>>> {
+    references
+        .iter()
+        .enumerate()
+        .map(|(i, r)| match &r.datum {
+            Some(d) => datum_input(st, d).map(|input| input.on_side(Some(r.opposite))),
+            None => Ok(RefInput::Edge(r.edge.0, names.get(i).map(String::as_str))),
+        })
+        .collect()
+}
+
+/// Sets each plane or axis reference's `opposite` to the side of its line the hole at `at`,
+/// drilled along `dir`, is on, so the hole keeps that side when the plane or axis moves past it.
+pub fn keep_datum_sides(st: &ModelState, at: Vec3, dir: Vec3, references: &mut [crate::HoleReference], exact: bool) -> Result<()> {
+    if references.iter().all(|r| r.datum.is_none()) {
+        return Ok(());
+    }
+    // Every line on its positive side: the hole is opposite where it is on the negative one.
+    let positive: Vec<RefInput> = inputs_of(st, references, &[])?.into_iter().map(|r| r.on_side(Some(false))).collect();
+    let frame = reference_frame_of(st, at, dir, &positive, exact)?;
+    for (r, line) in references.iter_mut().zip(&frame.lines) {
+        if r.datum.is_some() {
+            r.opposite = (at - line.point).dot(line.toward) < 0.0;
+        }
+    }
+    Ok(())
 }
 
 /// Whether `p` lies on the flat face a reference frame was made for.
@@ -159,8 +297,15 @@ pub fn reference_edge_names(st: &ModelState, at: Vec3, edges: &[Vec3]) -> Vec<St
 /// `base` (its coordinates are numbers when it has reference edges).
 pub fn cylinder_edge_names(st: &ModelState, base: &crate::PointExpr, references: &[crate::HoleReference]) -> Vec<String> {
     let [x, y, z] = base.clone().map(|c| c.parse::<f64>().unwrap_or(0.0));
-    let edges: Vec<Vec3> = references.iter().map(|r| r.edge.0).collect();
-    reference_edge_names(st, Vec3::new(x, y, z), &edges)
+    reference_names(st, Vec3::new(x, y, z), references)
+}
+
+/// The persistent names of a hole's references, one for each: those of its edges, empty for a plane
+/// or an axis.
+pub fn reference_names(st: &ModelState, at: Vec3, references: &[crate::HoleReference]) -> Vec<String> {
+    let edges: Vec<Vec3> = references.iter().filter(|r| r.datum.is_none()).map(|r| r.edge.0).collect();
+    let mut named = reference_edge_names(st, at, &edges).into_iter();
+    references.iter().map(|r| if r.datum.is_some() { String::new() } else { named.next().unwrap_or_default() }).collect()
 }
 
 /// The (non-mesh) body whose surface is nearest `p`; of the bodies equally near (parts that touch
@@ -170,11 +315,12 @@ fn body_for<'a>(st: &'a ModelState, p: Vec3, edges: &[Vec3]) -> Option<&'a Model
     let near: Vec<(f64, &ModelBody)> =
         st.bodies.iter().filter(|b| !b.body.is_mesh()).filter_map(|b| crate::appearance::nearest_face(b, p).map(|(d, _)| (d, b))).collect();
     let nearest = near.iter().map(|(d, _)| *d).min_by(f64::total_cmp)?;
-    let tied: Vec<&ModelBody> = near.iter().filter(|(d, b)| *d <= nearest + (b.body.size() * 1e-4).max(1e-6)).map(|(_, b)| *b).collect();
+    let tied = near.iter().filter(|(d, b)| *d <= nearest + (b.body.size() * 1e-4).max(1e-6)).map(|(_, b)| *b);
     let has_edges = |b: &ModelBody| {
         let reach = (b.body.size() * 1e-2).max(1e-3);
         edges.iter().all(|q| matches!(b.body.nearest_edge(*q, reach), Ok(Some((_, d))) if d <= reach))
     };
+    let tied: Vec<&ModelBody> = tied.collect();
     tied.iter().find(|b| has_edges(b)).or(tied.first()).copied()
 }
 
