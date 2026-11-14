@@ -1521,13 +1521,14 @@ fn selection_item(s: &Session, value: Value) -> Result<Sel> {
         (Some(index), None) => {
             let point = if face {
                 solidcraft_doc::naming::face_spot(b, index).map(|spot| spot.point)
+            } else if b.body.is_mesh() {
+                None
             } else {
-                let mesh = b.mesh();
-                mesh.edges.get(index).and_then(|edge| match edge.as_slice() {
-                    [a, b] => Some(a.lerp(*b, 0.5)),
-                    // Use a sample on the curve, not the midpoint of a chord inside it.
-                    points if points.len() > 2 => points.get(points.len() / 2).copied(),
-                    _ => None,
+                let record = b.body.record();
+                record.edges.get(index).and_then(|edge| {
+                    let c = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()).ok()?;
+                    let [t0, t1] = edge.interval;
+                    c.point((t0 + t1) * 0.5)
                 })
             };
             (index, point.filter(|p| p.is_finite()).ok_or_else(missing)?)
@@ -1535,15 +1536,33 @@ fn selection_item(s: &Session, value: Value) -> Result<Sel> {
         (None, Some(point)) if point.is_finite() => {
             let index = if face {
                 solidcraft_doc::appearance::face_index_at(b, point)
+            } else if b.body.is_mesh() {
+                None
             } else {
-                let mesh = b.mesh();
-                mesh.edges
+                let record = b.body.record();
+                let tol = solidcraft_doc::appearance::pick_tolerance(b);
+                record
+                    .edges
                     .iter()
                     .enumerate()
                     .filter_map(|(index, edge)| {
-                        let distance =
-                            edge.windows(2).filter_map(|w| Some(point.dist_to_segment(*w.first()?, *w.get(1)?))).fold(f64::INFINITY, f64::min);
-                        (distance <= solidcraft_doc::appearance::pick_tolerance(b)).then_some((index, distance))
+                        let c = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()).ok()?;
+                        let [t0, t1] = edge.interval;
+                        let n = match &edge.curve {
+                            solidcore_record::brep::Curve::Line { .. } => 1,
+                            _ => 16,
+                        };
+                        let step = (t1 - t0) / (n as f64);
+                        let mut min_d = f64::INFINITY;
+                        let mut prev = c.point(t0);
+                        for i in 1..=n {
+                            let curr = c.point(t0 + step * (i as f64));
+                            if let (Some(p0), Some(p1)) = (prev, curr) {
+                                min_d = min_d.min(point.dist_to_segment(p0, p1));
+                            }
+                            prev = curr;
+                        }
+                        (min_d <= tol).then_some((index, min_d))
                     })
                     .min_by(|(_, a), (_, b)| a.total_cmp(b))
                     .map(|(index, _)| index)

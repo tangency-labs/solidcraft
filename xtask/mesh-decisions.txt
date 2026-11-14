@@ -96,7 +96,6 @@ crates/engine/src/cmd/contact_sweep.rs:ContactGeometry::gap measures gaps by mes
 crates/engine/src/cmd/contact_sweep.rs:ContactGeometry::gaps measures gaps by mesh triangles
 crates/engine/src/cmd/contact_sweep.rs:ContactGeometry::placed places meshes for contact checks
 crates/engine/src/cmd/contact_sweep.rs:contact_mesh tessellates bodies for contact checks
-crates/engine/src/cmd/edit.rs:selection_item keeps a selection's face or edge index through the display mesh
 crates/engine/src/cmd/face.rs:face_at_state picks the face at a point by the display mesh
 crates/engine/src/cmd/face.rs:face_is_planar decides whether a face is planar by mesh triangles
 crates/engine/src/cmd/face.rs:face_normal_in takes a planar face's normal from mesh triangles
