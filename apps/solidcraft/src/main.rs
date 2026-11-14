@@ -45,6 +45,8 @@ mod open_documents;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
 mod startup;
+#[cfg(unix)]
+mod system_quit;
 #[cfg(any(target_os = "windows", test))]
 mod window_fit;
 
@@ -220,6 +222,13 @@ impl eframe::App for App {
             if self.window_frames == 2 && !self.take_focus_unwanted {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             }
+        }
+        // The system asked the app to stop (shutdown, SIGTERM): close as a forced quit does,
+        // keeping unsaved changes for recovery, since nobody is there to answer "save changes?".
+        // Before the starting page returns, so a signal during the setup closes the app too.
+        #[cfg(unix)]
+        if system_quit::requested() {
+            self.solve.quit_requested = true;
         }
         // The window shows with its first frame: the starting page, before the slow setup.
         let mut setup = std::mem::take(&mut self.setup);
@@ -1418,6 +1427,14 @@ fn main() -> eframe::Result {
             } else {
                 files
             };
+            // A shutdown or restart closes the app cleanly instead of killing it (#7345).
+            #[cfg(unix)]
+            {
+                let ctx = cc.egui_ctx.clone();
+                if let Err(error) = system_quit::install(move || ctx.request_repaint()) {
+                    log::warn!("shutdown signals: {error}");
+                }
+            }
             let nav_bridge = nav_bridge::NavBridge::start(&cc.egui_ctx);
             // The rest is slow on some computers: it runs after the window shows, a step a frame,
             // behind the starting page (#1210).
