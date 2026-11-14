@@ -33,12 +33,14 @@ solidcraft --control 7878 &
 solidcraft-cli mcp --connect 127.0.0.1:7878
 ```
 
-Picking geometry with `execute` `view.pick` requires a connection to the running SolidCraft
-app. It is unavailable with `--headless` or when automatic discovery starts a headless session.
-`frame: "model"` chooses the pixels of a rendered model image; it does not enable headless MCP
-picking. The app handles this command outside the engine registry, so `list_commands` and
-`describe_command` do not include it, even when connected. See `ui.pick` in the
-[control protocol](control-protocol.md) for pixel and ray parameters.
+`execute` `view.pick` with `rays: [{origin, dir}…]` answers in every session, headless too:
+for each world ray, the body, face index, world `point`, outward `normal` and `depth` where it
+first meets the design's shown bodies, decided on their exact faces (`null` where it meets
+nothing; `all: true` lists every body it meets, nearest first). With `--headless`, or when
+automatic discovery starts a headless session, the engine answers; connected, the app does.
+Picking screenshot `pixels` requires a connection to the running SolidCraft app; `frame:
+"model"` chooses the pixels of a rendered model image and does not enable headless pixel picks.
+See `ui.pick` in the [control protocol](control-protocol.md) for pixel and ray parameters.
 
 ### The app listens when turned on
 

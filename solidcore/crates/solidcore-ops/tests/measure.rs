@@ -534,3 +534,59 @@ fn a_box_face_holds_the_points_on_it_and_no_others() {
         .point_on_face(&order, record.faces.len(), [15.0, 10.0, 10.0], 1e-6)
         .is_err());
 }
+
+/// A ray fired at a body meets its exact faces: straight down onto a 10 mm box, the top face at
+/// distance 10; down beside a sphere of radius 2 about (1, 2, 3) at 1 from its axis, the sphere
+/// at z = 3 + √3, a point of the surface, not of a facet; through an edge of the box, that edge;
+/// past the box, nothing.
+#[test]
+fn a_fired_ray_meets_the_exact_face_edge_or_nothing() {
+    use solidcore_ops::RayEntity;
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0; 3]).unwrap();
+    let (_, order) = b.to_record().unwrap();
+    let top = b
+        .fire_ray(&order, [3.0, 4.0, 20.0], [0.0, 0.0, -2.0])
+        .unwrap()
+        .unwrap();
+    assert!(near(top.distance, 10.0, 1e-12), "{top:?}");
+    let RayEntity::Face(f) = top.entity else {
+        panic!("{top:?}")
+    };
+    let n = b.face_plane_normal(&order, f).unwrap().unwrap().value;
+    assert!(near(n[2], 1.0, 1e-12), "the top face's normal {n:?}");
+    let edge = b
+        .fire_ray(&order, [10.0, 5.0, 20.0], [0.0, 0.0, -1.0])
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(edge.entity, RayEntity::Edge(_)) && near(edge.distance, 10.0, 1e-9),
+        "{edge:?}"
+    );
+    assert_eq!(
+        b.fire_ray(&order, [30.0, 5.0, 20.0], [0.0, 0.0, -1.0])
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        b.fire_ray(&order, [3.0, 4.0, 20.0], [0.0, 0.0, 1.0])
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        b.fire_ray(&order, [f64::NAN, 4.0, 20.0], [0.0, 0.0, -1.0]),
+        Err(solidcore_ops::Error::Argument)
+    );
+
+    let s = make_sphere([1.0, 2.0, 3.0], 2.0).unwrap();
+    let (_, order) = s.to_record().unwrap();
+    let hit = s
+        .fire_ray(&order, [1.0, 3.0, 20.0], [0.0, 0.0, -1.0])
+        .unwrap()
+        .unwrap();
+    assert!(matches!(hit.entity, RayEntity::Face(_)), "{hit:?}");
+    assert!(
+        near(20.0 - hit.distance, 3.0 + 3f64.sqrt(), 1e-9),
+        "{hit:?}"
+    );
+}
