@@ -179,8 +179,8 @@ impl<'a> Occluders<'a> {
 
     /// Points along an edge's parameter range `r` in world coordinates, close enough that no
     /// chord between neighbours is farther than `tol(point)` from the curve at its middle (at
-    /// most 4096 chords): what is drawn of the edge.
-    pub fn edge_points(&self, placement: usize, edge: usize, r: [f64; 2], tol: &dyn Fn(Vec3) -> f64) -> Vec<Vec3> {
+    /// most 4096 chords): what is drawn of the edge, with each point's parameter.
+    pub fn edge_points(&self, placement: usize, edge: usize, r: [f64; 2], tol: &dyn Fn(Vec3) -> f64) -> Vec<(f64, Vec3)> {
         let (Some(p), Some(e)) = (self.scene.get(placement), self.scene.get(placement).and_then(|p| self.defs.get(p.body)?.edges.get(edge))) else {
             return Vec::new();
         };
@@ -217,7 +217,27 @@ impl<'a> Occluders<'a> {
                 }
             }
         }
-        pts.into_iter().map(|(_, q)| q).filter(|q| q.is_finite()).collect()
+        pts.into_iter().filter(|(_, q)| q.is_finite()).collect()
+    }
+
+    /// The unit normals (world, either side) of the first two faces an edge bounds, at its
+    /// parameter `t`; a zero vector for a face it has not or whose surface does not evaluate there.
+    pub fn edge_normals(&self, placement: usize, edge: usize, t: f64) -> [Vec3; 2] {
+        let mut out = [Vec3::ZERO; 2];
+        let Some(p) = self.scene.get(placement) else { return out };
+        let Some(def) = self.defs.get(p.body) else { return out };
+        let Some(e) = def.edges.get(edge) else { return out };
+        let at = e.curve.at(t);
+        let mut faces = e.faces.clone();
+        faces.dedup();
+        for (slot, fi) in out.iter_mut().zip(faces) {
+            let Some(f) = def.faces.get(fi) else { continue };
+            if let Some(n) = f.surface.inverse(at, None).and_then(|uv| f.surface.normal(uv)) {
+                let [a, b, c] = p.rotation;
+                *slot = a * n.x + b * n.y + c * n.z;
+            }
+        }
+        out
     }
 
     /// The visible and hidden stretches of edge `edge` of placement `placement` seen from
@@ -358,7 +378,7 @@ impl<'a> Occluders<'a> {
             if let [(a, Seen::Hidden(fa)), (b, Seen::Hidden(fb))] = *w
                 && fa != fb
             {
-                gap(&seen, &hides, (a, fa), (b, fb), GAP_HALVINGS, &mut found, &mut out.rays);
+                gap(&seen, &hides, &|x, y| self.joined(x, y), (a, fa), (b, fb), GAP_HALVINGS, &mut found, &mut out.rays);
             }
         }
         if !found.is_empty() {
@@ -390,6 +410,16 @@ impl<'a> Occluders<'a> {
         }
         [out.tests, out.spline_tests] = tests.get();
         Ok(out)
+    }
+
+    /// Whether two faces (`[placement, face]`) are faces of one placed body that share an edge.
+    fn joined(&self, [qa, fa]: [u32; 2], [qb, fb]: [u32; 2]) -> bool {
+        qa == qb
+            && self
+                .scene
+                .get(qa as usize)
+                .and_then(|q| self.defs.get(q.body)?.faces.get(fa as usize))
+                .is_some_and(|f| f.neighbours.binary_search(&(fb as usize)).is_ok())
     }
 
     /// The direction from `point` (scene coordinates) toward the viewer and how far the viewer
@@ -515,15 +545,16 @@ impl Occluders<'_> {
 fn gap(
     seen: &dyn Fn(f64) -> Seen,
     hides: &dyn Fn([u32; 2], f64) -> bool,
+    joined: &dyn Fn([u32; 2], [u32; 2]) -> bool,
     (a, fa): (f64, [u32; 2]),
     (b, fb): (f64, [u32; 2]),
     halvings: u32,
     found: &mut Vec<(f64, Seen)>,
     rays: &mut usize,
 ) {
-    // Faces that overlap there (either one also hides the other's sample) leave no gap between
-    // the samples, as one face hiding both does not.
-    if halvings == 0 || hides(fb, a) || hides(fa, b) {
+    // Faces of one body that share an edge, or that overlap there (either one also hides the
+    // other's sample), leave no gap between the samples, as one face hiding both does not.
+    if halvings == 0 || joined(fa, fb) || hides(fb, a) || hides(fa, b) {
         return;
     }
     let m = 0.5 * (a + b);
@@ -532,10 +563,10 @@ fn gap(
     found.push((m, s));
     if let Seen::Hidden(fm) = s {
         if fm != fa {
-            gap(seen, hides, (a, fa), (m, fm), halvings - 1, found, rays);
+            gap(seen, hides, joined, (a, fa), (m, fm), halvings - 1, found, rays);
         }
         if fm != fb {
-            gap(seen, hides, (m, fm), (b, fb), halvings - 1, found, rays);
+            gap(seen, hides, joined, (m, fm), (b, fb), halvings - 1, found, rays);
         }
     }
 }

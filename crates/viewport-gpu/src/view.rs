@@ -1280,6 +1280,13 @@ impl EdgeLayer {
         self.lines.extend_from_slice(&line_record(a, b, c, width.to_bits()));
     }
 
+    /// A visible stretch's line drawn lifted toward the eye over the faces beside it, whose
+    /// normals `normals` gives ([`lifted_width`]): the faces meeting along an edge seen at a
+    /// grazing angle do not bury parts of it.
+    pub fn lifted_line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32, normals: [[f32; 3]; 2]) {
+        self.lines.extend_from_slice(&line_record(a, b, c, lifted_width(width, normals)));
+    }
+
     /// A hidden stretch's line.
     pub fn hidden_line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32) {
         self.hidden.extend_from_slice(&line_record(a, b, c, width.to_bits()));

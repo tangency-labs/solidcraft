@@ -466,14 +466,25 @@ fn run(input: Input, cache: &Mutex<Cache>, cancel: &AtomicBool, progress: &Progr
                         hidden_edges += 1;
                     }
                     for r in &pieces.visible {
-                        for w in occluders.edge_points(pi, edge, *r, &tol).windows(2) {
-                            layer.line(f32s(w[0]), f32s(w[1]), d.edge, EDGE_WIDTH);
+                        // Lifted over the edge's own faces: the stretch is known to be seen, so a
+                        // face beside it seen at a grazing angle must not cut it into dashes.
+                        // The faces' normals at up to 16 places along the stretch (the lift needs
+                        // only their angle to the view), each segment taking the nearest.
+                        let points = occluders.edge_points(pi, edge, *r, &tol);
+                        let segments = points.len().saturating_sub(1);
+                        let k = segments.clamp(1, 16);
+                        let normals: Vec<[[f32; 3]; 2]> =
+                            (0..k).map(|i| occluders.edge_normals(pi, edge, r[0] + (r[1] - r[0]) * (i as f64 + 0.5) / k as f64).map(f32s)).collect();
+                        for (i, w) in points.windows(2).enumerate() {
+                            let [(_, a), (_, b)] = [w[0], w[1]];
+                            let n = normals.get(i * k / segments.max(1)).copied().unwrap_or_default();
+                            layer.lifted_line(f32s(a), f32s(b), d.edge, EDGE_WIDTH, n);
                         }
                     }
                     if input.hidden {
                         for r in &pieces.hidden {
                             for w in occluders.edge_points(pi, edge, *r, &tol).windows(2) {
-                                layer.hidden_line(f32s(w[0]), f32s(w[1]), d.hidden, HIDDEN_WIDTH);
+                                layer.hidden_line(f32s(w[0].1), f32s(w[1].1), d.hidden, HIDDEN_WIDTH);
                             }
                         }
                     }

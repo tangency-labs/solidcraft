@@ -69,10 +69,10 @@ fn seed_in_quad(q: &[[f64; 2]; 4]) -> Option<[f64; 2]> {
             best = Some((gap, at));
         }
     }
-    best.filter(|(gap, _)| *gap <= pad).map(|(_, at)| at)
+    best.filter(|(gap, _)| *gap <= pad * pad).map(|(_, at)| at)
 }
 
-/// The weights of the point of triangle `t` nearest the origin, and its distance from it.
+/// The weights of the point of triangle `t` nearest the origin, and its squared distance from it.
 fn nearest_in_triangle(t: [[f64; 2]; 3]) -> ([f64; 3], f64) {
     let [a, b, c] = t;
     let cross = |u: [f64; 2], v: [f64; 2]| u[0] * v[1] - u[1] * v[0];
@@ -91,7 +91,7 @@ fn nearest_in_triangle(t: [[f64; 2]; 3]) -> ([f64; 3], f64) {
         let l2 = d[0] * d[0] + d[1] * d[1];
         let s = if l2 > 0. { (-(p[0] * d[0] + p[1] * d[1]) / l2).clamp(0., 1.) } else { 0. };
         let x = [p[0] + d[0] * s, p[1] + d[1] * s];
-        (s, x[0].hypot(x[1]))
+        (s, x[0] * x[0] + x[1] * x[1])
     };
     let (sab, gab) = side(a, b);
     let (sbc, gbc) = side(b, c);

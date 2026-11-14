@@ -120,6 +120,8 @@ struct FaceData {
     hi: Vec3,
     /// Neither a plane nor a recognised quadric or torus.
     freeform: bool,
+    /// The other faces it shares an edge with, sorted.
+    neighbours: Vec<usize>,
 }
 
 /// A body prepared once and shared by all of its placements.
@@ -316,7 +318,7 @@ pub fn prepare_cancellable(b: &Brep, opts: &Options, cancel: &dyn Fn() -> bool) 
         if freeform {
             report.freeform_faces.push(fi);
         }
-        faces.push(FaceData { surface, analytic, group: Vec::new(), trim, lo, hi, freeform });
+        faces.push(FaceData { surface, analytic, group: Vec::new(), trim, lo, hi, freeform, neighbours: Vec::new() });
     }
     for (ei, (c, acc)) in curves.into_iter().enumerate() {
         let list = users.get(ei).cloned().unwrap_or_default();
@@ -351,7 +353,21 @@ pub fn prepare_cancellable(b: &Brep, opts: &Options, cancel: &dyn Fn() -> bool) 
             EdgeKind::Seam => report.seam_edges += 1,
             EdgeKind::Sharp => {}
         }
+        for (i, a) in distinct.iter().enumerate() {
+            for b in distinct.iter().skip(i + 1) {
+                if let Some(f) = faces.get_mut(*a) {
+                    f.neighbours.push(*b);
+                }
+                if let Some(f) = faces.get_mut(*b) {
+                    f.neighbours.push(*a);
+                }
+            }
+        }
         edges.push(EdgeData { curve: c, acc, faces: list, kind });
+    }
+    for f in &mut faces {
+        f.neighbours.sort_unstable();
+        f.neighbours.dedup();
     }
     // Faces on one quadric or torus. Only surfaces of one kind whose size (radius, half angle,
     // major radius) agrees to the tolerance can match, so each face is compared with the faces
