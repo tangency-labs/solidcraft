@@ -135,6 +135,7 @@ pub enum Mod {
         spacing: String,
         count2: String,
         spacing2: String,
+        linear: bool,
         alignment: PatternAlignment,
         alignment2: PatternAlignment,
         reversed: bool,
@@ -273,6 +274,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             spacing: crate::dialogs::length_default(&app.session, "20"),
             count2: "1".into(),
             spacing2: crate::dialogs::length_default(&app.session, "20"),
+            linear: false,
             alignment: PatternAlignment::Right,
             alignment2: PatternAlignment::Right,
             reversed: false,
@@ -404,16 +406,23 @@ pub fn edit_pattern(app: &mut SolveApp, id: &str) -> bool {
             alignment: if *alignment == PatternAlignment::Left { PatternAlignment::Right } else { *alignment },
             reversed: *reversed ^ (*alignment == PatternAlignment::Left),
         },
-        SketchPatternKind::Rectangular { count, spacing, count2, spacing2, alignment, alignment2, reversed, reversed2, .. } => Mod::PatternRect {
-            count: input("count", count.to_string()),
-            spacing: input("spacing", format!("{spacing} mm")),
-            count2: input("count2", count2.to_string()),
-            spacing2: input("spacing2", format!("{spacing2} mm")),
-            alignment: if *alignment == PatternAlignment::Left { PatternAlignment::Right } else { *alignment },
-            alignment2: if *alignment2 == PatternAlignment::Left { PatternAlignment::Right } else { *alignment2 },
-            reversed: *reversed ^ (*alignment == PatternAlignment::Left),
-            reversed2: *reversed2 ^ (*alignment2 == PatternAlignment::Left),
-        },
+        SketchPatternKind::Rectangular { count, spacing, count2, spacing2, dir2, direction2, alignment, alignment2, reversed, reversed2, .. } => {
+            Mod::PatternRect {
+                count: input("count", count.to_string()),
+                spacing: input("spacing", format!("{spacing} mm")),
+                count2: input("count2", count2.to_string()),
+                spacing2: input("spacing2", format!("{spacing2} mm")),
+                linear: app.preferences.linear_pattern_editor
+                    && *count2 == 1
+                    && input("count2", count2.to_string()).trim() == "1"
+                    && dir2.is_none()
+                    && direction2.is_none(),
+                alignment: if *alignment == PatternAlignment::Left { PatternAlignment::Right } else { *alignment },
+                alignment2: if *alignment2 == PatternAlignment::Left { PatternAlignment::Right } else { *alignment2 },
+                reversed: *reversed ^ (*alignment == PatternAlignment::Left),
+                reversed2: *reversed2 ^ (*alignment2 == PatternAlignment::Left),
+            }
+        }
     };
     let mut dialog = Dialog::new(Kind::SketchModify(kind.clone()), inputs(&kind));
     if let Some(input) = dialog.inputs.first_mut() {
@@ -657,12 +666,33 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             enter |= number(ui, "Scale", factor);
             enter |= number(ui, "Angle", angle);
         }
-        Mod::PatternRect { count, spacing, count2, spacing2, alignment: a, alignment2, reversed, reversed2 } => {
-            let (left1, left2) = (copies_left(doc, count2), copies_left(doc, count));
-            for (key, title, count, spacing, align, reverse, label, distance, align_label, left) in [
-                ("direction1", "Direction 1", count, spacing, a, reversed, "Quantity", "Spacing", "Alignment", left1),
-                ("direction2", "Direction 2", count2, spacing2, alignment2, reversed2, "Quantity 2", "Spacing 2", "Alignment 2", left2),
-            ] {
+        Mod::PatternRect { count, spacing, count2, spacing2, linear, alignment: a, alignment2, reversed, reversed2 } => {
+            let mut mode = usize::from(*linear);
+            ui_kit::choice_row(
+                ui,
+                solidcraft_ui_text::tr("ui.pattern_mode"),
+                "sketch_pattern_mode",
+                &mut mode,
+                &[solidcraft_ui_text::tr("ui.pattern_rectangular"), solidcraft_ui_text::tr("ui.pattern_linear")],
+            );
+            *linear = mode == 1;
+            let (left1, left2) = (copies_left(doc, if *linear { "1" } else { count2 }), copies_left(doc, count));
+            let mut sections = vec![("direction1", "Direction 1", count, spacing, a, reversed, "Quantity", "Spacing", "Alignment", left1)];
+            if !*linear {
+                sections.push((
+                    "direction2",
+                    "Direction 2",
+                    count2,
+                    spacing2,
+                    alignment2,
+                    reversed2,
+                    "Quantity 2",
+                    "Spacing 2",
+                    "Alignment 2",
+                    left2,
+                ));
+            }
+            for (key, title, count, spacing, align, reverse, label, distance, align_label, left) in sections {
                 ui_kit::section(ui, key, title, true, |ui| {
                     enter |= quantity(ui, doc, label, count, 1, left);
                     enter |= number(ui, distance, spacing);
@@ -1080,15 +1110,15 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             }
             ("sketch.move", p)
         }
-        Mod::PatternRect { count, spacing, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
+        Mod::PatternRect { count, spacing, count2, spacing2, linear, alignment, alignment2, reversed, reversed2 } => {
             let entities = entity_ids(&app.session, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to pattern first".into());
             }
             let n1 = whole(app, "Quantity", count)?;
             let s1 = length(app, "Spacing", spacing)?;
-            let n2 = whole(app, "Quantity 2", count2)?;
-            let s2 = length(app, "Spacing 2", spacing2)?;
+            let n2 = if *linear { 1 } else { whole(app, "Quantity 2", count2)? };
+            let s2 = if *linear { 0.0 } else { length(app, "Spacing 2", spacing2)? };
             if n1 > 1 && s1.abs() <= 1e-9 {
                 return Err("Spacing must be a non-zero number".into());
             }
@@ -1098,10 +1128,23 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             if n1.saturating_mul(n2) > MAX_COPIES as u64 {
                 return Err(format!("Quantity and Quantity 2 together must make at most {MAX_COPIES:.0} instances"));
             }
-            let mut p = json!({"entities": entities, "count": count, "spacing": spacing, "count2": count2, "spacing2": spacing2, "alignment": alignment, "alignment2": alignment2, "reversed": reversed, "reversed2": reversed2});
+            let count2_param = if *linear { "1" } else { count2.as_str() };
+            let spacing2_param = if *linear && length(app, "Spacing 2", spacing2).is_err() {
+                crate::dialogs::length_default(&app.session, "20")
+            } else {
+                spacing2.clone()
+            };
+            let mut p = json!({"entities": entities, "count": count, "spacing": spacing, "count2": count2_param, "spacing2": spacing2_param, "alignment": alignment, "alignment2": alignment2, "reversed": reversed, "reversed2": reversed2});
+            if *linear {
+                p["dir2"] = Value::Null;
+            }
             // A picked direction that has no component in the sketch plane is reported rather
             // than quietly replaced by the default.
             for (index, vector_key, line_key) in [(1, "dir", "direction"), (2, "dir2", "direction2")] {
+                if *linear && index == 2 {
+                    p[line_key] = Value::Null;
+                    continue;
+                }
                 if let Some(sel) = inputs.get(index).and_then(|i| i.items.first()) {
                     let d = sketch_dir(app, sel).ok_or("The direction must be an axis or a straight sketch curve that lies in the sketch plane")?;
                     p[vector_key] = json!([d.x, d.y]);

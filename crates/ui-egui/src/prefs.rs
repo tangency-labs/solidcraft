@@ -1106,6 +1106,8 @@ preference_settings! {
     radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
     /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.
     direct_interaction: bool = false, PAGE_TOOLS;
+    /// Open saved single-direction patterns in the Linear editor; off keeps the Rectangular editor.
+    linear_pattern_editor: bool = true, PAGE_TOOLS => check_id("prefs.linear_pattern_editor");
     /// Mouse gestures: a ring of tools on the right button.
     mouse_gestures: crate::mouse_gesture::Config = Default::default(), PAGE_NAVIGATION;
     /// The wheel zooms out when turned forward.
