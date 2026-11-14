@@ -56,6 +56,19 @@ pub(crate) fn stitch(body: &Body, tolerance: f64) -> Result<(Body, bool)> {
         if let Err(e) = oriented {
             return Ok(Err(status(e)));
         }
+        // (not upstream, #16508, `Kernel::fixes.stitch_updates_result_tolerances`): the
+        // glue widens a sewn edge only by the distance between the two curves, which
+        // says nothing about how far either face's surface sits from the sewn curve —
+        // surfaces both slightly off the curve they share sew with the old tolerance
+        // and the result check refuses the Edge/Surface gap whatever the stitch
+        // tolerance was. The updating pass widens each edge and vertex of the result to
+        // cover the gaps it bounds, as the offset executive does for its results
+        // (WR-705); the check itself runs validate-only and widens nothing.
+        if k.fixes.stitch_updates_result_tolerances {
+            solidcore::topology::brep::validation::validate_and_update_tolerances(
+                k, &mut b, false, None, 0,
+            )?;
+        }
         b.refresh_cached_topology();
         closed = lamina == 0 && is_manifold_solid(&b)?;
         Ok(Ok(b))

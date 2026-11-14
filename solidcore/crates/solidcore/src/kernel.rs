@@ -699,6 +699,21 @@ pub struct UpstreamFixes {
     /// call; the update grows a vertex for a gap between half its tolerance and all of
     /// it only with `validate_tolerances_fixes_reported_gaps` (WR-705, #2111).
     pub offset_updates_result_tolerances: bool,
+    /// The stitcher glues a pair of edges and widens the sewn edge only by the distance
+    /// between the two curves: when both curves are lines the distance test is skipped
+    /// and the glue's `dist` arrives as 0, and in any case the distance says nothing
+    /// about how far either face's surface sits from the sewn curve. A pair whose
+    /// surfaces are both slightly off the curve they share (an imported boundary sheet
+    /// and a loft sheet over one sketch curve) then sews with its old tolerance, and the
+    /// result check refuses the Edge/Surface gap (`SmBrep::Test #4`) whatever the stitch
+    /// tolerance was, because the check runs validate-only and never widens a tolerance
+    /// itself (not upstream; SolidCraft #16508: a 6.8e-05 mm gap against a 1.2165363e-05
+    /// mm edge tolerance, unchanged at stitch tolerances of 0.001, 0.01 and 0.1). With
+    /// this set the stitch runs the updating tolerance pass (`SmBrep::
+    /// ValidateAndUpdateTolerances`) on its result, as the offset executive does for
+    /// `offset_updates_result_tolerances` (WR-705): each edge and vertex of the result
+    /// widens to cover the gaps it bounds, when the gaps are small against the part.
+    pub stitch_updates_result_tolerances: bool,
     /// Before the piecewise merge, `do_extended_offset` rebuilds every offset face whose loops cross from the stretches of its loops that bound it (WR-345, #854).
     pub offset_resolve_crossing_loops: bool,
     /// [`crate::topology::edgeuse::p2::is_convex_radial_sector`]
