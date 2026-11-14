@@ -520,6 +520,8 @@ fn kind_name(kind: ObjectKind) -> &'static str {
         ObjectKind::View => "view",
         ObjectKind::Dimension => "dimension",
         ObjectKind::Note => "note",
+        ObjectKind::CentreMark => "centre_mark",
+        ObjectKind::CentreLine => "centre_line",
         ObjectKind::TitleBlock => "title_block",
         ObjectKind::PartsList => "parts_list",
         ObjectKind::RevisionTable => "revision_table",

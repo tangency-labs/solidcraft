@@ -104,6 +104,7 @@ fn the_schema_takes_every_selection_item() {
         Sel::Edge { body: "B".into(), index: 0, point },
         Sel::Face { body: "B".into(), index: 1, point },
         Sel::Feature { id: 4 },
+        Sel::Drawing { drawing: 3, object: 4 },
         Sel::SketchCurve { id: "c1".into(), sketch: None },
         Sel::SketchCurve { id: "c1".into(), sketch: Some(2) },
         Sel::SketchPoint { id: "p1".into() },

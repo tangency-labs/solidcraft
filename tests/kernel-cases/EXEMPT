@@ -75,10 +75,22 @@ document.metadata                 document metadata and revisions
 document.metadata.remove          document metadata and revisions
 document.metadata.set             document metadata and revisions
 document.revision                 document metadata and revisions
+drawing.auto_center_mark.exclude  a drawing: tested in crates/engine/src/drawing_dimension_tests.rs
+drawing.auto_center_mark.include  a drawing: tested in crates/engine/src/drawing_dimension_tests.rs
+drawing.auto_center_mark.inspect  a drawing: tested in crates/engine/src/drawing_dimension_tests.rs
+drawing.auto_center_mark.set      a drawing: tested in crates/engine/src/drawing_dimension_tests.rs
 drawing.balloon.add               a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.edit              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.inspect           a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.repair            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.center_line.add          paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_line.edit         paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_line.inspect      paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_line.remove       paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_mark.add          paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_mark.edit         paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_mark.inspect      paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_mark.remove       paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
 drawing.check                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.close                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.create                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs

@@ -790,3 +790,46 @@ fn a_note_on_an_exploded_view_is_checked_as_any_views_and_covers_its_feature() {
     assert!(whys(&reply, "out_of_date").is_empty(), "{reply}");
     assert_eq!(coverage_of(&reply, plate)["by"], json!([{"kind": "note", "id": note}]), "{reply}");
 }
+
+/// Automatic groups belong to a view, but are absent from selectable objects; check their accepted
+/// paper geometry once per view and preserve the identities of manual annotations.
+#[test]
+fn automatic_mark_findings_name_the_view_and_check_accepted_geometry() {
+    use crate::drawing_scene::{AnnotationFailure, SheetObject};
+    use solidcore_record::Seg2;
+    use solidcraft_geom::paper::Group;
+
+    let (mut s, _) = plate();
+    let (sheet, view) = drawn(&mut s);
+    let d = s.drawing("test").unwrap().clone();
+    let mut shown = crate::drawing_scene::build(&s, &d, sheet).unwrap();
+    let manual = view + 100_000;
+    let line = |id| Group {
+        object: id,
+        kind: ObjectKind::CentreMark,
+        items: vec![Item::Stroke {
+            path: vec![Seg2::Line { a: Vec2::new(-2.0, 10.0), b: Vec2::new(2.0, 10.0) }],
+            closed: false,
+            width_mm: 0.18,
+            pattern: None,
+        }],
+    };
+    shown.scene.groups.extend([line(view), line(view), line(manual)]);
+    shown.objects.push(SheetObject {
+        object: manual,
+        kind: ObjectKind::CentreMark,
+        bounds_mm: Aabb2 { min: Vec2::new(-2.0, 10.0), max: Vec2::new(2.0, 10.0) },
+        boundary_mm: None,
+    });
+    shown.annotation_failures.extend([
+        AnnotationFailure { object: view, view, kind: ObjectKind::CentreMark, reason: "automatic failure".into() },
+        AnnotationFailure { object: manual, view, kind: ObjectKind::CentreMark, reason: "manual failure".into() },
+    ]);
+    let findings = on_sheet(&d, sheet, shown).unwrap();
+    let count = |kind, what, id| findings.iter().filter(|f| f.kind == kind && f.object.kind == what && f.object.id == ids::encode(id)).count();
+    assert_eq!(count(FindingKind::OutsideSheet, CheckedKind::View, view), 1);
+    assert_eq!(count(FindingKind::OutsideSheet, CheckedKind::CentreMark, manual), 1);
+    assert_eq!(count(FindingKind::Failed, CheckedKind::View, view), 1);
+    assert_eq!(count(FindingKind::Failed, CheckedKind::CentreMark, manual), 1);
+    assert_eq!(count(FindingKind::Failed, CheckedKind::CentreMark, view), 0);
+}

@@ -63,7 +63,7 @@ pub(crate) fn three_views_of(mut s: Session) -> (Session, [u64; 3]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, centre_marks: None })]);
         id
     };
     let front_settings =
@@ -2163,6 +2163,57 @@ fn an_exploded_view_takes_what_measures_its_parts_where_it_draws_them() {
     assert!(near_value(&run(&mut s, "drawing.dimension.inspect", json!({"dimension": on_above})), 70.0));
 }
 
+/// A projected view's centre annotation blocks its parent from exploding until the follower
+/// explicitly chooses the assembled design for itself.
+#[test]
+fn a_centre_line_on_a_follower_blocks_an_exploded_parent() {
+    let (mut s, parent, [first, _], apart) = exploded_pair();
+    let (_, above) = create(&mut s, PROJECTED, json!({"parent": ids::encode(parent), "side": "above", "place": {"at": [150, 250]}}));
+    let line = run(
+        &mut s,
+        "drawing.center_line.add",
+        json!({"view": ids::encode(above), "a": {"point": [0, 0, 0], "path": [first]}, "b": {"point": [10, 0, 0], "path": [first]}, "overshoot_mm": 2.0}),
+    )["line"]
+        .clone();
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let error = edit_refused(&mut s, parent, json!({"exploded": apart}));
+    assert!(error.contains("exploded view with centre annotations"), "{error}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    edit_view(&mut s, above, json!({"exploded": "assembled"}));
+    edit_view(&mut s, parent, json!({"exploded": apart}));
+    assert_eq!(run(&mut s, "drawing.center_line.inspect", json!({"line": line}))["status"], "ok");
+}
+
+/// A projected view's automatic centre-mark rule blocks its parent from exploding, and a view that
+/// draws an exploded view through its parent can't turn the rule on, until the follower explicitly
+/// chooses the assembled design for itself; turning the rule off is never refused.
+#[test]
+fn an_automatic_centre_mark_rule_on_a_follower_blocks_an_exploded_parent() {
+    let (mut s, parent, _, apart) = exploded_pair();
+    let (_, above) = create(&mut s, PROJECTED, json!({"parent": ids::encode(parent), "side": "above", "place": {"at": [150, 250]}}));
+    let set = |s: &mut Session, view: u64, enabled: bool| {
+        s.execute("drawing.auto_center_mark.set", &json!({"view": ids::encode(view), "enabled": enabled}))
+    };
+    set(&mut s, above, true).unwrap();
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let error = edit_refused(&mut s, parent, json!({"exploded": apart}));
+    assert!(error.contains("automatic centre marks enabled"), "{error}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    edit_view(&mut s, above, json!({"exploded": "assembled"}));
+    edit_view(&mut s, parent, json!({"exploded": apart}));
+    assert!((width(&mut s, parent) - 70.0).abs() < 1e-6 && (width(&mut s, above) - 40.0).abs() < 1e-6);
+
+    // Following the exploded parent again would draw the rule's view exploded: refused.
+    let error = edit_refused(&mut s, above, json!({"exploded": null}));
+    assert!(error.contains("automatic centre marks enabled"), "{error}");
+    // The parent now draws exploded: a rule can't be enabled on it, but a follower's can be disabled.
+    let error = set(&mut s, parent, true).unwrap_err().to_string();
+    assert!(error.contains("automatic centre marks on an exploded view"), "{error}");
+    assert_eq!(set(&mut s, above, false).unwrap()["enabled"], false);
+    edit_view(&mut s, above, json!({"exploded": null}));
+    assert!((width(&mut s, above) - 70.0).abs() < 1e-6);
+}
+
 /// A shaded view's pictures are rendered from the design as it places its parts, so an exploded view
 /// can't be shaded yet. Whichever setting would make one, the exploded choice, a style or following a
 /// shaded parent, it is refused and changes nothing, on the view itself or on a view that follows it;
@@ -3066,4 +3117,55 @@ fn a_left_out_part_says_where_each_kind_of_setter_set_it() {
     assert_eq!(set_on(SetBy::Sheet), " (set on its sheet)");
     assert_eq!(set_on(SetBy::Drawing), " (set on the drawing)");
     assert_eq!((set_on(SetBy::This), set_on(SetBy::Default)), (String::new(), String::new()));
+}
+
+/// A posed view reads a different placement, so centre references cannot be added there or kept
+/// visible when a saved file combines them; an attempted edit is refused without changing the file.
+#[test]
+fn posed_views_refuse_and_report_centre_annotations() {
+    let (mut s, view, _) = hinge_pair();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, other) = create(&mut s, BASE, json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [250, 150]}));
+    let line =
+        run(&mut s, "drawing.center_line.add", json!({"view": ids::encode(view), "a": [0, 0, 0], "b": [40, 0, 0], "overshoot_mm": 2.0}))["line"]
+            .clone();
+    let pose = json!({"pose": [{"joint": "Hinge", "values": [90]}]});
+    let before = s.drawing("test").unwrap().clone();
+    let error = edit_refused(&mut s, view, pose.clone());
+    assert!(error.contains("position of its own") && error.contains("centre annotations"), "{error}");
+    assert_eq!(s.drawing("test").unwrap().clone(), before);
+    edit_view(&mut s, other, pose);
+    for (cmd, params) in [
+        ("drawing.center_line.add", json!({"view": ids::encode(other), "a": [0, 0, 0], "b": [40, 0, 0], "overshoot_mm": 2.0})),
+        ("drawing.center_mark.add", json!({"view": ids::encode(other), "edge": [0, 0, 0], "overshoot_mm": 2.0})),
+    ] {
+        let error = s.execute(cmd, &params).unwrap_err().to_string();
+        assert!(error.contains("position of its own"), "{error}");
+    }
+    // Files can contain the combination even though commands refuse it.
+    let mut drawing = (**s.drawing("test").unwrap()).clone();
+    let saved_pose = drawing.views.iter().find(|v| v.id == other).unwrap().settings.pose.clone();
+    let target = drawing.views.iter_mut().find(|v| v.id == view).unwrap();
+    Arc::make_mut(target).settings.pose = saved_pose;
+    s.doc_mut().put_drawing(Arc::new(drawing));
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": sheet}));
+    assert!(
+        scene["annotation_failures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["object"] == line && f["reason"].as_str().unwrap().contains("position of its own")),
+        "{scene}"
+    );
+    let check = run(&mut s, "drawing.check", json!({"sheet": sheet}));
+    assert!(
+        check["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "failed" && f["object"]["kind"] == "centre_line" && f["object"]["id"] == line),
+        "{check}"
+    );
+    let inspected = run(&mut s, "drawing.center_line.inspect", json!({"line": line}));
+    assert!(inspected["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("position of its own")), "{inspected}");
 }

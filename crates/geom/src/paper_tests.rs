@@ -80,6 +80,8 @@ fn each_kind_names_its_layer_in_the_capitals_of_its_id() {
     for (kind, layer) in [
         (SheetBorder, "SHEET_BORDER"),
         (DrawingBorder, "DRAWING_BORDER"),
+        (CentreMark, "CENTRE_MARK"),
+        (CentreLine, "CENTRE_LINE"),
         (TitleBlock, "TITLE_BLOCK"),
         (PartsList, "PARTS_LIST"),
         (RevisionTable, "REVISION_TABLE"),
@@ -107,6 +109,8 @@ fn each_kind_paints_in_its_band() {
         (SheetImage, 1, 1),
         (View, 2, 2),
         (Dimension, 3, 3),
+        (CentreMark, 3, 3),
+        (CentreLine, 3, 3),
         (Note, 3, 5),
         (PartsList, 4, 4),
         (RevisionTable, 4, 4),
