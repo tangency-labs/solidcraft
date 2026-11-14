@@ -93,7 +93,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.boolean_outer_shell_first = true;
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.cover_wraps_across_closed_seam = true;
-    k.fixes.boolean2d_plane_covers_far_faces = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
@@ -134,7 +133,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.ssi_singular_start_inside_direction = true;
     k.fixes.ssi_pole_point_keeps_its_tangent = true;
     k.fixes.ssi_tangent_curve_tracer = true;
-    k.fixes.boolean_skips_faces_apart = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;
     k.fixes.boolean_new_face_closure_both_sides = true;
     k.fixes.glue_vertices_joins_every_region = true;

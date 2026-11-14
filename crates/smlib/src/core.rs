@@ -137,13 +137,11 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ssi_trace_tangent_curves_once = true;
     f.ssi_singular_start_inside_direction = true;
     f.found_torus_sphere_keep_tested_nurb = true;
-    f.boolean_skips_faces_apart = true;
     f.local_operation_box_holds_new_surfaces = true;
     f.shell_edges_on_analytics_exact = true;
     f.ssi_pole_point_keeps_its_tangent = true;
     f.fillet_patch_keeps_fillet_edges = true;
     f.fillet_corner_ball_center_from_axes = true;
-    f.boolean2d_plane_covers_far_faces = true;
     f.boolean_splits_definition_across_split = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;

@@ -406,6 +406,44 @@ fn a_piece_made_a_curve_reads_back_as_itself() {
     }
 }
 
+/// A polynomial quadratic (a font's quadratic curve: a conic of weight 1) reads back as that
+/// conic, as a profile writes it, not as a degree-2 Bézier.
+#[test]
+fn a_polynomial_quadratic_reads_back_as_the_conic_of_weight_one() {
+    let k = Kernel::default();
+    let s = Seg2::Conic {
+        a: p(0.0, 0.0),
+        apex: p(1.0, 2.0),
+        b: p(3.0, 0.5),
+        w: 1.0,
+    };
+    let c = curve_on_frame(&k, &xy(), 0.0, &s).unwrap();
+    let iv = c.natural_interval();
+    for forward in [true, false] {
+        let back = read(&k, &c, iv, forward, &xy(), 1e-7).unwrap();
+        let [Seg2::Conic { a, apex, b, w }] = back[..] else {
+            panic!("{back:?}")
+        };
+        let (a0, b0) = if forward {
+            (s.start(), s.end())
+        } else {
+            (s.end(), s.start())
+        };
+        assert!(a.distance(a0) < 1e-12 && b.distance(b0) < 1e-12, "{back:?}");
+        assert!(apex.distance(p(1.0, 2.0)) < 1e-12 && w == 1.0, "{back:?}");
+    }
+    // the same parabola as a quadratic Bézier made a curve: the same conic back
+    let mut q = [p(0.0, 0.0); 10];
+    q[1] = p(1.0, 2.0);
+    q[2] = p(3.0, 0.5);
+    let c = curve_on_frame(&k, &xy(), 0.0, &Seg2::Bezier { n: 2, p: q }).unwrap();
+    let back = read(&k, &c, c.natural_interval(), true, &xy(), 1e-7).unwrap();
+    assert!(
+        matches!(back[..], [Seg2::Conic { w, .. }] if w == 1.0),
+        "{back:?}"
+    );
+}
+
 /// A curve moved off its definition is refused: a circle's net moved off the circle, a curve
 /// lifted off the frame's plane at one end, a run's end moved off the curve's.
 #[test]

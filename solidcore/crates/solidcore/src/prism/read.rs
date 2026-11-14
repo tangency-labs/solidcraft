@@ -504,13 +504,13 @@ fn arc(
             Seg2::Arc {
                 center,
                 radius,
-                start,
+                start: principal(start),
                 sweep: h,
             },
             Seg2::Arc {
                 center,
                 radius,
-                start: start + h,
+                start: principal(start + h),
                 sweep: h,
             },
         ]);
@@ -518,9 +518,24 @@ fn arc(
     Some(vec![Seg2::Arc {
         center,
         radius,
-        start,
+        start: principal(start),
         sweep,
     }])
+}
+
+/// The angle `a` in (-π, π]: unchanged when it is already (so an angle in range keeps its bits),
+/// else turned by whole turns (`atan2` answers -π for a point on the negative x axis at y = -0,
+/// and a whole turn's second half starts past π).
+fn principal(a: f64) -> f64 {
+    if a > -PI && a <= PI {
+        return a;
+    }
+    let r = a.rem_euclid(TAU);
+    if r > PI {
+        r - TAU
+    } else {
+        r
+    }
 }
 
 /// Several spans end to end from `a` to `b`, each the segment it is: a polynomial span along its
@@ -578,8 +593,9 @@ fn off_chord(pts: &[Point2]) -> f64 {
 }
 
 /// One Bézier span that is neither a line nor an arc, as the exact free-form segment it is (a
-/// polynomial Bézier, a conic), its ends `a` and `b`. `None` for several spans, degrees past
-/// [`MAX_BEZIER_DEGREE`], rational spans other than conics, and control polygons with no area.
+/// polynomial Bézier, a polynomial quadratic as the conic of weight 1, a conic), its ends `a` and
+/// `b`. `None` for several spans, degrees past [`MAX_BEZIER_DEGREE`], rational spans other than
+/// conics, and control polygons with no area.
 fn free_form(spans: &[Vec<H2>], a: Point2, b: Point2, tol: f64) -> Option<Vec<Seg2>> {
     let [span] = spans else { return None };
     let pts: Vec<Point2> = span.iter().map(|p| point_of(*p)).collect();
@@ -598,6 +614,14 @@ fn free_form(spans: &[Vec<H2>], a: Point2, b: Point2, tol: f64) -> Option<Vec<Se
             p1: *pts.get(1)?,
             p2: *pts.get(2)?,
             p3: b,
+        },
+        // a polynomial quadratic is the conic of weight 1, as a profile writes one (a font's
+        // quadratic curves)
+        (3, false) => Seg2::Conic {
+            a,
+            apex: *pts.get(1)?,
+            b,
+            w: 1.0,
         },
         (n, false) if (2..=MAX_BEZIER_DEGREE + 1).contains(&n) => {
             let mut p = [Vec2::ZERO; super::profile::MAX_BEZIER_CTRL];

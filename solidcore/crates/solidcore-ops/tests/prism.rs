@@ -1026,6 +1026,249 @@ fn a_bent_edge_crossing_its_neighbour_by_their_corner_leaves_no_sliver() {
     }
 }
 
+/// Two disjoint squares intersect in nothing: the kernel's 2D boolean answers with a sheet of no
+/// faces, which is an empty result, not a sheet to read back (that refused with a query failure).
+#[test]
+fn disjoint_squares_intersect_in_nothing() {
+    let a = rectangle(v(0., 0.), v(10., 10.));
+    let b = rectangle(v(20., 0.), v(30., 10.));
+    for (x, y) in [(&a, &b), (&b, &a)] {
+        let out = planar_regions_boolean(
+            std::slice::from_ref(x),
+            std::slice::from_ref(y),
+            BooleanOp::Intersect,
+            1e-7,
+        );
+        assert_eq!(out, Ok(vec![]));
+    }
+    let union = planar_regions_boolean(
+        std::slice::from_ref(&a),
+        std::slice::from_ref(&b),
+        BooleanOp::Union,
+        1e-7,
+    )
+    .unwrap();
+    assert_eq!(union.len(), 2);
+    assert!(union.iter().all(|r| (area(r) - 100.0).abs() < 1e-9));
+}
+
+/// Whether `a` and `b` are the same regions in the same order: loop for loop, segment for
+/// segment of the same kind, every number within 1e-12.
+fn same_regions(a: &[Region2], b: &[Region2]) -> bool {
+    let near = |x: f64, y: f64| (x - y).abs() <= 1e-12;
+    let pt = |p: Vec2, q: Vec2| near(p.x, q.x) && near(p.y, q.y);
+    let seg = |s: &Seg2, t: &Seg2| match (*s, *t) {
+        (Seg2::Line { a, b }, Seg2::Line { a: c, b: d }) => pt(a, c) && pt(b, d),
+        (
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            },
+            Seg2::Arc {
+                center: c,
+                radius: r,
+                start: s0,
+                sweep: w,
+            },
+        ) => pt(center, c) && near(radius, r) && near(start, s0) && near(sweep, w),
+        _ => same_seg(s, t),
+    };
+    let lp = |l: &Loop2, m: &Loop2| {
+        l.segs.len() == m.segs.len() && l.segs.iter().zip(&m.segs).all(|(s, t)| seg(s, t))
+    };
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(r, q)| {
+            lp(&r.outer, &q.outer)
+                && r.holes.len() == q.holes.len()
+                && r.holes.iter().zip(&q.holes).all(|(h, g)| lp(h, g))
+        })
+}
+
+/// The result of a planar boolean comes in one canonical order whatever order its operands came
+/// in: each loop starts at its smallest start point (x, then y), holes and regions sorted by that
+/// point, and every arc starts at an angle in (-π, π].
+#[test]
+fn shuffled_operands_give_the_same_regions() {
+    let circle = |c: Vec2, r: f64, start: f64| Loop2 {
+        segs: vec![
+            Seg2::Arc {
+                center: c,
+                radius: r,
+                start,
+                sweep: PI,
+            },
+            Seg2::Arc {
+                center: c,
+                radius: r,
+                start: start + PI,
+                sweep: PI,
+            },
+        ],
+    };
+    let mut ring = rectangle(v(0., 0.), v(20., 20.));
+    ring.holes = vec![circle(v(6., 6.), 2., PI), circle(v(14., 14.), 3., 0.5)];
+    let a = vec![
+        ring,
+        rectangle(v(30., 0.), v(40., 10.)),
+        Region2 {
+            outer: circle(v(60., 5.), 5., -PI),
+            holes: vec![],
+        },
+    ];
+    let b = vec![rectangle(v(15., -5.), v(65., 3.))];
+    // the same regions: in another order, each loop turned to start elsewhere, holes swapped
+    let turned = |l: &Loop2, n: usize| {
+        let mut segs = l.segs.clone();
+        let len = segs.len();
+        segs.rotate_left(n % len);
+        Loop2 { segs }
+    };
+    let shuffled: Vec<Region2> = a
+        .iter()
+        .rev()
+        .map(|r| Region2 {
+            outer: turned(&r.outer, 1),
+            holes: r.holes.iter().rev().map(|h| turned(h, 1)).collect(),
+        })
+        .collect();
+    for op in [BooleanOp::Union, BooleanOp::Subtract, BooleanOp::Intersect] {
+        let one = planar_regions_boolean(&a, &b, op, 1e-7).unwrap();
+        let two = planar_regions_boolean(&shuffled, &b, op, 1e-7).unwrap();
+        let three = planar_regions_boolean(&b, &shuffled, op, 1e-7).unwrap();
+        assert!(!one.is_empty());
+        // the same regions, loops and segments in the same order; the numbers differ only by
+        // the rounding of the operands' other order (well under 1e-12 here)
+        assert!(same_regions(&one, &two), "{op:?}: {one:?} {two:?}");
+        if op != BooleanOp::Subtract {
+            assert!(same_regions(&one, &three), "{op:?}: {one:?} {three:?}");
+        }
+        let loops: Vec<&Loop2> = one
+            .iter()
+            .flat_map(|r| std::iter::once(&r.outer).chain(&r.holes))
+            .collect();
+        for l in &loops {
+            let first = start(&l.segs[0]);
+            assert!(l.segs.iter().all(|s| {
+                let p = start(s);
+                (first.x, first.y) <= (p.x, p.y)
+            }));
+            for s in &l.segs {
+                if let Seg2::Arc { start, .. } = *s {
+                    assert!(start > -PI && start <= PI, "{start}");
+                }
+            }
+        }
+        let firsts: Vec<(f64, f64)> = one
+            .iter()
+            .map(|r| {
+                let p = start(&r.outer.segs[0]);
+                (p.x, p.y)
+            })
+            .collect();
+        assert!(firsts.windows(2).all(|w| w[0] <= w[1]), "{firsts:?}");
+    }
+}
+
+/// The canonical order does not hang on rounding noise. Two regions whose leftmost edges are
+/// vertical, at x values that differ by one ulp only, one way round and then the other: compared
+/// exactly, the smaller x would pick each loop's start corner and the regions' order. On the grid
+/// of the tolerance the x values are equal, so y decides: each loop starts at its lower left
+/// corner and the lower region comes first, in both variants.
+#[test]
+fn leftmost_points_a_rounding_apart_keep_one_order() {
+    let ulp = f64::EPSILON;
+    let variant = |lo: f64, hi: f64| {
+        // lower region: left edge from (lo, 0) to (hi, 4); upper one: from (hi, 10) to (lo, 14)
+        let lower = Region2 {
+            outer: Loop2::polygon(&[v(lo, 0.), v(5., 0.), v(5., 4.), v(hi, 4.)]),
+            holes: vec![],
+        };
+        let upper = Region2 {
+            outer: Loop2::polygon(&[v(hi, 10.), v(5., 10.), v(5., 14.), v(lo, 14.)]),
+            holes: vec![],
+        };
+        let far = rectangle(v(100., 0.), v(110., 10.));
+        planar_regions_boolean(&[upper, lower], &[far], BooleanOp::Union, 1e-7).unwrap()
+    };
+    let one = variant(1.0 + ulp, 1.0);
+    let two = variant(1.0, 1.0 + ulp);
+    for out in [&one, &two] {
+        assert_eq!(out.len(), 3);
+        let firsts: Vec<Vec2> = out.iter().map(|r| start(&r.outer.segs[0])).collect();
+        for (p, y) in firsts.iter().zip([0., 10., 0.]) {
+            assert_eq!(p.y, y, "{firsts:?}");
+        }
+        assert!((firsts[0].x - 1.0).abs() <= ulp && (firsts[1].x - 1.0).abs() <= ulp);
+    }
+    assert!(same_regions(&one, &two), "{one:?} {two:?}");
+}
+
+/// Planar booleans SolidCraft's sheet tests make (a channel engraved, a sheet with small bends
+/// and holes, a sheet perforated with a thousand round holes: each operand pair recorded from the
+/// call), where a face of one operand lies far from the other's plane face. The 2D boolean
+/// rebuilds the faces on the first face's plane after growing it to cover them, and a plane grew
+/// only 100 of its widths: the faces beyond were rebuilt on a plane that did not hold them
+/// (WR-536), and the call failed (1001, 1006, 1007, or an edge off the plane). Each case's union,
+/// intersection and both differences now build, closed, and their areas agree: the union is the
+/// two differences and the intersection, which share no area, and it is also the operands' areas
+/// (from the inputs) less the intersection's: area(A) + area(B) - area(A and B).
+#[test]
+fn far_faces_of_recorded_sheet_cuts_build_and_their_areas_agree() {
+    use std::io::BufRead;
+    #[derive(serde::Deserialize)]
+    struct Case {
+        test: String,
+        tol: f64,
+        a: Vec<Region2>,
+        b: Vec<Region2>,
+    }
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/planar_regions_far_faces.jsonl.gz"
+    );
+    let gz = flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap());
+    let mut n = 0;
+    for line in std::io::BufReader::new(gz).lines() {
+        let c: Case = serde_json::from_str(&line.unwrap()).unwrap();
+        let run = |x: &[Region2], y: &[Region2], op| {
+            let out = planar_regions_boolean(x, y, op, c.tol)
+                .unwrap_or_else(|e| panic!("case {n} ({}), {op:?}: {e:?}", c.test));
+            for l in out
+                .iter()
+                .flat_map(|r| std::iter::once(&r.outer).chain(&r.holes))
+            {
+                assert!(closed(l, c.tol * 10.0), "case {n} ({}), {op:?}", c.test);
+            }
+            out.iter().map(area).sum::<f64>()
+        };
+        let union = run(&c.a, &c.b, BooleanOp::Union);
+        let common = run(&c.a, &c.b, BooleanOp::Intersect);
+        let a_less_b = run(&c.a, &c.b, BooleanOp::Subtract);
+        let b_less_a = run(&c.b, &c.a, BooleanOp::Subtract);
+        let parts = a_less_b + b_less_a + common;
+        assert!(
+            (union - parts).abs() <= 1e-9 * union,
+            "case {n} ({}): union {union}, parts {parts}",
+            c.test
+        );
+        // the operands' own areas, from the inputs: a result that drops faces (far ones, say)
+        // loses their area from the union and from the differences alike, which the check above
+        // cannot see
+        let area_a = c.a.iter().map(area).sum::<f64>();
+        let area_b = c.b.iter().map(area).sum::<f64>();
+        let whole = area_a + area_b - common;
+        assert!(
+            (union - whole).abs() <= 1e-9 * (area_a + area_b),
+            "case {n} ({}): union {union}, area(A) + area(B) - area(A and B) {whole}",
+            c.test
+        );
+        n += 1;
+    }
+    assert_eq!(n, 35);
+}
+
 #[test]
 fn planar_region_api_rejects_hostile_values_and_budgets() {
     all_fixes();

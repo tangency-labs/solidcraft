@@ -19,7 +19,8 @@
 //! the failure's `operation` path says which routine. No failure names an entity: the
 //! sites they replace named none. The failures that are checks of a caller's arguments
 //! stay [`crate::SolidError::InvalidInput`]. [`PrimitiveFailure::PlaneCannotCover`] is
-//! not upstream: it is the refusal of the opt-in `boolean2d_plane_covers_far_faces` fix.
+//! not upstream: it is the refusal of WR-536's fix (`Boolean2D` refuses a plane it cannot grow
+//! to cover the other faces).
 
 use super::{
     ErrorKind, Failure, Reason, SM_ERR, SM_ERR_AXIS_INSIDE_FACE, SM_ERR_INVALID_INPUT,
@@ -49,7 +50,7 @@ pub enum PrimitiveFailure {
     AxisInsideFace,
     /// A planar 2D boolean's face lies on a plane that cannot be grown to cover the
     /// other faces, so the faces rebuilt on it would carry edges far off their surface
-    /// (not upstream: the opt-in `boolean2d_plane_covers_far_faces` fix refuses these).
+    /// (not upstream: WR-536's fix refuses these, where upstream builds them).
     PlaneCannotCover,
 }
 

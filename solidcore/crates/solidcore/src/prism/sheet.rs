@@ -14,6 +14,7 @@ use super::read::{planar_pieces, Run};
 use crate::error::{Result, SolidError};
 use crate::eval::Frame;
 use crate::kernel::Kernel;
+use crate::math::Point2;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::api_queries::{face_get_boundary_loops, get_faces};
 use crate::surface::surface::SurfaceKind;
@@ -102,7 +103,9 @@ pub fn region_loops(region: &Region2, tol: f64) -> Result<RegionLoops> {
 /// vertex twice (a cut-out touching the outline, material meeting at a corner), seen from the
 /// face's normal turned to run counter-clockwise in the frame; counter-clockwise pieces are
 /// material, the others holes of the smallest material piece of the face holding them
-/// ([`Loop2::holds`]). `tol` (mm, at least the sheet's edges') is how far an edge's curve may end
+/// ([`Loop2::holds`]). The regions come in a canonical order: each loop starts at its smallest
+/// start point (x, then y, each rounded to the grid of `tol` so rounding noise does not decide),
+/// and holes and regions are sorted by that point, the larger first where two share it. `tol` (mm, at least the sheet's edges') is how far an edge's curve may end
 /// from its vertices.
 ///
 /// # Errors
@@ -207,5 +210,80 @@ pub fn sheet_regions(k: &Kernel, b: &Brep, frame: &Frame, tol: f64) -> Result<Sh
                 .push(hole);
         }
     }
+    canonical(&mut out.regions, tol)?;
     Ok(out)
+}
+
+/// `regions` in their canonical order, whatever order the sheet's faces, loops and edges came in:
+/// each loop starts at its smallest start point and the holes of a region and the regions are
+/// sorted by that point, the larger loop first where two share it. Points compare by
+/// [`point_key`] on the grid of `tol`, so coordinates that differ by rounding only (a vertical
+/// edge whose ends' x differ in the last bits) compare equal and the next coordinate decides.
+fn canonical(regions: &mut Vec<Region2>, tol: f64) -> Result<()> {
+    let mut keyed = Vec::new();
+    for mut r in std::mem::take(regions) {
+        let key = start_at_smallest(&mut r.outer, tol)?;
+        let mut holes = Vec::new();
+        for mut h in std::mem::take(&mut r.holes) {
+            let k = start_at_smallest(&mut h, tol)?;
+            holes.push((k, h));
+        }
+        holes.sort_by(|a, b| by_key(&a.0, &b.0));
+        r.holes = holes.into_iter().map(|(_, h)| h).collect();
+        keyed.push((key, r));
+    }
+    keyed.sort_by(|a, b| by_key(&a.0, &b.0));
+    regions.extend(keyed.into_iter().map(|(_, r)| r));
+    Ok(())
+}
+
+/// A point's sort key on the grid of step `tol`: its x and y rounded to the nearest multiple of
+/// `tol` (as `x / tol` rounded half away from zero), then its exact x and y. Comparing keys
+/// lexicographically with `total_cmp` is a total order. Two points whose coordinates differ by
+/// much less than `tol` get the same rounded coordinates, unless one lies within that difference
+/// of a cell boundary, a half-odd multiple of `tol` (round coordinates sit at cell centres, not
+/// on boundaries); the exact coordinates then break the tie between points of one cell, which
+/// are within `tol` of each other in both coordinates. A `tol` that is not positive and finite
+/// leaves the exact coordinates alone to decide.
+fn point_key(p: Point2, tol: f64) -> [f64; 4] {
+    let cell = |c: f64| {
+        if tol > 0.0 && tol.is_finite() {
+            (c / tol).round()
+        } else {
+            0.0
+        }
+    };
+    [cell(p.x), cell(p.y), p.x, p.y]
+}
+
+fn by_point(a: &[f64; 4], b: &[f64; 4]) -> std::cmp::Ordering {
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| x.total_cmp(y))
+        .find(|o| o.is_ne())
+        .unwrap_or(std::cmp::Ordering::Equal)
+}
+
+/// A loop's sort key: the [`point_key`] of its first start point and the size of its area.
+type Key = ([f64; 4], f64);
+
+fn by_key(a: &Key, b: &Key) -> std::cmp::Ordering {
+    by_point(&a.0, &b.0).then(b.1.total_cmp(&a.1))
+}
+
+/// Turns `lp` to start at the segment whose start point has the smallest [`point_key`] on the
+/// grid of `tol` (the first such), and returns that key with the size of the loop's area.
+fn start_at_smallest(lp: &mut Loop2, tol: f64) -> Result<Key> {
+    let mut best: Option<(usize, [f64; 4])> = None;
+    for (i, s) in lp.segs.iter().enumerate() {
+        let k = point_key(s.start(), tol);
+        if best.is_none_or(|(_, q)| by_point(&k, &q).is_lt()) {
+            best = Some((i, k));
+        }
+    }
+    let (i, k) = best.ok_or_else(|| refused("an empty loop"))?;
+    let segs = std::mem::take(&mut lp.segs);
+    let (before, after): (Vec<_>, Vec<_>) = segs.into_iter().enumerate().partition(|(j, _)| *j < i);
+    lp.segs = after.into_iter().chain(before).map(|(_, s)| s).collect();
+    Ok((k, lp.signed_area()?.value.abs()))
 }

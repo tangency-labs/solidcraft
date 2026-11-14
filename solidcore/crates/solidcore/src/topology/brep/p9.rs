@@ -45,8 +45,7 @@
 //! `UpdateVertexEdgeIntervals` sets it. By default it leaves gaps up to the full
 //! tolerance, as the pinned C++ does, which `AssertValid` refuses above half of it.
 //! See `plan/upstream-issues/WR-469--make-edge-in-face-vertex-tolerance-gap.md`.
-//! Opt-in ([`UpstreamFixes::boolean_skips_faces_apart`](crate::kernel::UpstreamFixes::boolean_skips_faces_apart),
-//! WR-527, #1527): on two planes, `MakeEdgeInFaceWithVU` leaves an inner loop whose
+//! Not upstream (WR-527, #1527): on two planes, `MakeEdgeInFaceWithVU` leaves an inner loop whose
 //! test point lies outside the new face's outer loop box (at the retry tolerance)
 //! in place without classifying it, as the fork's tangency-labs/smlib@60b1c6a.
 //! Each inner loop it goes on to classify adds one to
@@ -2338,14 +2337,10 @@ fn redistribute_inner_loops(
     let classify_to_original = !missing_original;
     let mut loops = fp2::loops(b, face, false, None)?;
 
-    // Opt-in (WR-527, #1526/#1527): on a plane the region a loop bounds lies within the
+    // Not upstream (WR-527, #1526/#1527): on a plane the region a loop bounds lies within the
     // loop's box, so an inner loop sampled outside the box of the new face's outer loop
     // is not in the new face and stays: only when every edge has a box.
-    let new_outer_box = if k.fixes.boolean_skips_faces_apart {
-        new_face_outer_box(k, b, face, new_face)?
-    } else {
-        None
-    };
+    let new_outer_box = new_face_outer_box(k, b, face, new_face)?;
 
     let mut i = 1;
     while let Some(&loop_) = loops.get(i) {
@@ -2364,7 +2359,7 @@ fn redistribute_inner_loops(
             )?;
             (b.vertex(v)?.point, b.vertex(v)?.tolerance)
         };
-        // Opt-in (WR-527): no move - the test point is outside the new face's outer loop
+        // (WR-527) no move - the test point is outside the new face's outer loop
         // box, even at the retry tolerance below
         if new_outer_box.is_some_and(|bbox| !bbox.contains_point(point, tolerance * 100.0)) {
             i += 1;

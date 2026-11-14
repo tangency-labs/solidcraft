@@ -72,7 +72,6 @@ fn plate(k: &mut Kernel, w: f64, n: u32) -> Brep {
 /// coincident edge curves `FaceIntersect` classified.
 fn curves_classified(n: u32) -> u64 {
     let mut k = Kernel::default();
-    k.fixes.boolean_skips_faces_apart = true;
     k.work_counters.reset();
     let h = SIDE / 2.0;
     let mut holes = Vec::new();
