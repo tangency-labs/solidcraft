@@ -165,12 +165,13 @@ Three scales live in the body (`topology.rs`):
 
 The default zone tolerance follows the model's size class (`size_estimate_to_zone_tol_3d`): 1e-5 for
 a size between 0.5 and 500, 1e-4 up to 5e4, 1e-6 down to 0.005, and so on by factors of 100 in
-size. Vertex tolerances must be finite and at least the body's tolerance (allowing the check's 1%
-rounding margin). There is no upper ratio between a vertex's local tolerance and the body's:
-an imported corner's gap does not change the accuracy of unrelated topology. Geometric gap checks
-still apply. The pointer check retains legacy upper ratios of 1000 for faces and edges
-(`validation/pointers.rs`); the separate Edge tests 5, 6 are obsolete, and Face tests 25, 26 and 30
-are not run (`assert_valid/face.rs`).
+size. Vertex tolerances must be finite and at least the body's (allowing the check's 1% rounding
+margin). A vertex tolerance under 1000 times the body's passes Test 82 as ever. One at or past that
+limit, an imported corner whose gap is local, is accepted only if its ball reaches no face or edge
+it does not bound or neighbour (rule 7); a ball that does, or whose clearance cannot be established,
+is refused with Test 82. Geometric gap checks still apply. The pointer check keeps its ratio of 1000
+for faces and edges (`validation/pointers.rs`); the separate Edge tests 5, 6 are obsolete, and Face
+tests 25, 26 and 30 are not run (`assert_valid/face.rs`).
 
 ### 5.2 What an edge's tolerance must cover
 
@@ -397,8 +398,9 @@ and the tolerance pass.
   bands) is not checked.
 - No step closes a gap by recomputing geometry: `fix_bad_gaps` is empty, the coincident-edge and
   missed-intersection steps are not implemented upstream.
-- Vertex tolerances have no upper ratio to the body's; faces and edges retain the pointer
-  check's legacy ratio of 1000. The separate Edge tests 5, 6 are obsolete; Face 25, 26, 30 are not run.
+- A vertex tolerance past 1000 times the body's is decided by clearance from non-incident topology,
+  not by the ratio; faces and edges retain the pointer check's ratio of 1000. The separate Edge
+  tests 5, 6 are obsolete; Face 25, 26, 30 are not run.
 
 ## 11. If you're stuck
 

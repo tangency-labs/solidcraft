@@ -370,14 +370,10 @@ fn validate_and_update_body(
                     out.violated_or_updated = true;
                     if !validate_only {
                         let gap = 2.0 * edge_gap.unwrap_or(0.0).max(face_gap.unwrap_or(0.0));
-                        let grown = tol::zone_tol3d(k, gap);
-                        // A tolerance grows to a bound, never to a sample: a gap that would
-                        // need a vertex past the large/small size ratio of the body is a
-                        // construction fault, left over its vertex for the check to report
-                        // (stored finite tolerances are not bounded by this; only growth is).
-                        if grown < tol::LARGE_SMALL_SIZE_RATIO * b.tolerance() {
-                            tvertex::set_tolerance(b, v, grown, true, true)?;
-                        }
+                        // A vertex grown past the large/small size ratio of the body is not
+                        // refused here: the pointer check keeps it only if its ball reaches no
+                        // topology it does not bound (Test #82, validity rule 7).
+                        tvertex::set_tolerance(b, v, tol::zone_tol3d(k, gap), true, true)?;
                     }
                 }
             }
