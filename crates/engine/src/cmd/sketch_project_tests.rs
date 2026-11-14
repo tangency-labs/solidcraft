@@ -1298,6 +1298,40 @@ fn projecting_what_the_face_sketch_already_shows_adds_no_second_copy() {
     assert_eq!(shown(&mut s).0, border.0 + 1);
 }
 
+#[test]
+fn intersecting_a_semicircle_keeps_both_endpoints_fixed_and_linked() {
+    for through_y in [-10., 10.] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane":"XY","name":"Source"}));
+        let arc = run(&mut s, "sketch.arc.three_point", json!({"start":[-10,0],"end":[10,0],"through":[0,through_y]}));
+        let curve = ids(&arc["curves"])[0].clone();
+        run(&mut s, "sketch.finish", json!({}));
+        let section = run(&mut s, "sketch.create", json!({"plane":"XZ"}))["sketch"].as_u64().unwrap();
+        let result = run(&mut s, "sketch.intersect", json!({"refs":[{"sketch":"Source","curve":curve}]}));
+        assert_eq!(result["created"]["points"].as_array().unwrap().len(), 2, "through {through_y}: {result}");
+        let si = inspect(&mut s);
+        let points: Vec<_> = si["points"].as_array().unwrap().iter().filter(|p| !p["link"].is_null()).collect();
+        assert_eq!(points.len(), 2, "{si}");
+        assert!(points.iter().all(|p| p["fixed"] == true && p["link"] == "j1"), "{si}");
+        assert_eq!(si["dof"], 0, "{si}");
+        for x in [-10., 10.] {
+            assert!(points.iter().any(|p| (p["at"][0].as_f64().unwrap() - x).abs() < 1e-9 && p["at"][1].as_f64().unwrap().abs() < 1e-9), "{si}");
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        let verify = |session: &Session| {
+            let state = session.model.state();
+            let sketch = &state.sketch(section).unwrap().sketch;
+            assert_eq!(sketch.links.len(), 1);
+            assert!(!sketch.links[0].lost);
+            let points: Vec<_> = sketch.points.iter().filter(|p| p.link.as_deref() == Some("j1")).collect();
+            assert_eq!(points.len(), 2);
+            assert!(points.iter().all(|p| p.fixed));
+        };
+        verify(&s);
+        verify(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+    }
+}
+
 /// Intersecting what was intersected before laid another point on the first each time (one spot
 /// held 11 points): the same curve or edge again is refused, as Project refuses what the sketch
 /// already shows, and something new alongside it still goes in.
