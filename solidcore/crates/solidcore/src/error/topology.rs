@@ -15,6 +15,7 @@
 //! | [`TopologyFailure::Inconsistent`]    | `SM_ERR_ASSERT_FAILURE`       |
 //! | [`TopologyFailure::OutOfMemory`]     | `SM_ERR_OUT_OF_MEMORY`        |
 //! | [`TopologyFailure::DropFailed`]      | the drop's own recorded status |
+//! | [`TopologyFailure::JoinedVertexReaches`] | `SM_ERR` (not upstream, #15718) |
 //!
 //! Deviations: not upstream. A failure says in a phrase (or by its variant) what went
 //! wrong; the failure's `operation` path says which routine, and its entity is the one
@@ -30,7 +31,7 @@ use super::{
 };
 
 /// Why a topology routine fails.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum TopologyFailure {
     /// The routine could not continue, as the phrase says (for example "the loop does
@@ -54,13 +55,24 @@ pub enum TopologyFailure {
         /// The status the drop recorded (a comparison detail).
         status: i32,
     },
+    /// A vertex at a joined edge needs tolerance `needed` to cover the gap the join left
+    /// between it and the edge's curve end (twice the gap), and that ball would reach the far
+    /// vertex of one of its edges, which it does not bound. A tolerance below `fits_below`
+    /// fits (the distance less that vertex's tolerance, the smallest over its edges); `None`
+    /// when none does.
+    JoinedVertexReaches {
+        /// The tolerance the vertex needs.
+        needed: f64,
+        /// The tolerance that fits, if any.
+        fits_below: Option<f64>,
+    },
 }
 
 impl TopologyFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) => SM_ERR,
+            Self::Failed(_) | Self::JoinedVertexReaches { .. } => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
@@ -89,6 +101,22 @@ impl core::fmt::Display for TopologyFailure {
             Self::DropFailed { .. } => {
                 f.write_str("the edge use's curve could not be dropped onto its face")
             }
+            Self::JoinedVertexReaches {
+                needed,
+                fits_below: Some(fits),
+            } => write!(
+                f,
+                "a joined edge's vertex needs tolerance {needed} to cover the join's gap, which \
+                 reaches the far vertex of one of its edges; a tolerance below {fits} fits"
+            ),
+            Self::JoinedVertexReaches {
+                needed,
+                fits_below: None,
+            } => write!(
+                f,
+                "a joined edge's vertex needs tolerance {needed} to cover the join's gap, which \
+                 reaches the far vertex of one of its edges; no tolerance fits"
+            ),
         }
     }
 }

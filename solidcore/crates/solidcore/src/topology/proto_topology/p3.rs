@@ -323,6 +323,16 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             return Ok((None, false));
         }
 
+        // Not upstream (#15718): a point on one edge of a coincident line edge pair in each
+        // B-rep is where two coincident pieces cross within their tolerance, no event
+        if pc1.point_class() == PointClassType::Edge && pc2.point_class() == PointClassType::Edge {
+            if let (Some(e1), Some(e2)) = (pc1.object(), pc2.object()) {
+                if self.are_coincident_edges(e1, e2) {
+                    return Ok((None, false));
+                }
+            }
+        }
+
         // sm_FindPositionFromPCs, status ignored; the position stays SM_UNDEF on failure
         // (passed on with `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
         let pass = k.fixes.ssi_proto_topology_statuses_pass_on;

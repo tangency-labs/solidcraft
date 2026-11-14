@@ -26,9 +26,10 @@
 //! | [`face_cache_tree`] | `SmSurfaceCache::GetTree` of a face surface's trimmed cache |
 //!
 //! Deviations:
-//! - **Opt-in fix (WR-305, #1057).** With `Kernel::fixes.classify_edge_interval`,
-//!   `CurveOnClassify` runs the fork's `ClassifyEdgeInterval` on each interval before
-//!   `ClassifyFaceInterval` (`CurveClassification::classify_edge_interval`).
+//! - **WR-305 (#1057).** `CurveOnClassify` runs the fork's `ClassifyEdgeInterval` on each
+//!   interval before `ClassifyFaceInterval` (`CurveClassification::classify_edge_interval`):
+//!   for a straight interval along a straight edge always, certified by its ends; for
+//!   curves only with `Kernel::fixes.classify_edge_interval` (a midpoint sample).
 //! - **Classification B-rep (temporary).** [`curve_on_classify_mut`] runs on the face's own
 //!   B-rep through [`CurveOnClassifyBrep`] and makes upstream's lazy edits (UV trim curves,
 //!   gap caches, the trimmed cache's tolerance growth) on it in place, in upstream order.
@@ -2296,10 +2297,9 @@ pub fn curve_on_classify_mut<O: ClassObject>(
         }
 
         // WR-305: an interval running along a boundary edge between two points on it is
-        // on that edge
-        if k.fixes.classify_edge_interval {
-            cc.classify_edge_interval(k, &*objects, ii)?;
-        }
+        // on that edge (straight pieces always, by their ends; curved ones with
+        // `classify_edge_interval`)
+        cc.classify_edge_interval(k, &*objects, ii)?;
 
         // classify the interval - avoiding point classification if possible
         if cc.at(ii)?.mid.point_class() == PointClassType::Unknown {
