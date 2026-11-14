@@ -507,7 +507,7 @@ pub(crate) fn inside_loop(p: [f64; 2], uv: &[[f64; 2]]) -> bool {
 }
 
 /// Whether the segment `p`–`q` meets the rectangle `lo`–`hi` (Liang–Barsky clipping).
-fn segment_meets_rect(p: [f64; 2], q: [f64; 2], lo: [f64; 2], hi: [f64; 2]) -> bool {
+pub(crate) fn segment_meets_rect(p: [f64; 2], q: [f64; 2], lo: [f64; 2], hi: [f64; 2]) -> bool {
     let (mut t0, mut t1) = (0.0f64, 1.0f64);
     for d in 0..2 {
         let delta = q[d] - p[d];
