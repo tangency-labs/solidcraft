@@ -236,3 +236,97 @@ fn issue_1476_swept_bar_shells_with_solidcraft_fixes_and_edges_on_analytics_exac
     fixes.shell_edges_on_analytics_exact = true;
     assert_eq!(check(&fixes, Some(1299.482314966473)), 18);
 }
+
+/// The shell's volume is the closed B-rep's, origin-independent (#16735; adapted from
+/// #15946's test by @bherbruck). One wall's trims leave its plane's analytic domain by
+/// 1.5e-6 in u: integrated clamped while its strips start on the continued trims, the
+/// volume moved with the origin's z. About the box's middle and 100 above and below it,
+/// and moved 1e3 up about the world origin, the volume agrees within the integration's own
+/// error scale ([`integration_scale`]) of the two volumes compared.
+#[test]
+fn issue_1476_volume_is_origin_independent() {
+    use solidcore::mass::integrator::properties::{
+        brep_properties, MassPropertyBehavior, PropertyAttributes,
+    };
+    use solidcore::math::{Point3, Vec3};
+    use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
+    use solidcore::topology::proto_topology::p1::api_transform::{api_translate, TransformObject};
+    const ACCURACY: f64 = 1e-9;
+    let (mut k, result) = shell(&UpstreamFixes::default());
+    let mut b = result.unwrap();
+    b.refresh_cached_topology();
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    let volume = |k: &Kernel, b: &mut Brep, origin: Point3| -> f64 {
+        brep_properties(
+            k,
+            b,
+            ACCURACY,
+            origin,
+            MassPropertyBehavior::default(),
+            &attrs,
+        )
+        .unwrap()
+        .volume
+    };
+    let mid = calculate_bounding_box(&k, &mut b, BoundingBoxOptions::default())
+        .unwrap()
+        .mid();
+    let got: Vec<_> = [0.0, 100.0, -100.0]
+        .iter()
+        .map(|&dz| {
+            let origin = mid + Vec3::new(0.0, 0.0, dz);
+            (
+                volume(&k, &mut b, origin),
+                integration_scale(&k, &mut b, origin, ACCURACY),
+            )
+        })
+        .collect();
+    for (i, (vi, ei)) in got.iter().enumerate() {
+        for (vj, ej) in got.iter().skip(i + 1) {
+            let spread = (vi - vj).abs();
+            assert!(spread <= ei + ej, "spread {spread:e} above {:e}", ei + ej);
+        }
+    }
+    let here = volume(&k, &mut b, Point3::ZERO);
+    let eh = integration_scale(&k, &mut b, Point3::ZERO, ACCURACY);
+    api_translate(
+        &mut k,
+        Some(TransformObject::Brep(&mut b)),
+        Vec3::new(0.0, 0.0, 1e3),
+    )
+    .unwrap();
+    let there = volume(&k, &mut b, Point3::ZERO);
+    let et = integration_scale(&k, &mut b, Point3::ZERO, ACCURACY);
+    assert!(
+        (here - there).abs() <= eh + et,
+        "{here} moved 1e3 up: {there} (allowed {:e})",
+        eh + et
+    );
+}
+
+/// The integration's own error scale for a body's volume about `origin` at `accuracy`: what
+/// `brep_properties` holds each face's volume to (`boundary_properties`' scale for the
+/// volume component: the area scale `estimated / 10`, `estimated` the body box's largest
+/// size squared over 100, times a length, the larger of `10 sqrt(estimated)` and the face's
+/// distance from the origin; taken here at the body box's farthest point, which no face is
+/// farther than), summed over the faces. An estimate the integrator steps by, not a proved
+/// bound (ARGUED).
+fn integration_scale(
+    k: &Kernel,
+    b: &mut Brep,
+    origin: solidcore::math::Point3,
+    accuracy: f64,
+) -> f64 {
+    use solidcore::geom::extent3d::Extent3d;
+    use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
+    let bbox = calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default()).unwrap();
+    let size = bbox.max_dimension();
+    let estimated = size * size / 100.0;
+    let far = bbox.max_distance(&Extent3d::from_point(origin));
+    let length = (10.0 * estimated.sqrt()).max(far);
+    accuracy * (estimated / 10.0) * length * b.face_list().len() as f64
+}

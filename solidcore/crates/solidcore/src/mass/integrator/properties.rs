@@ -261,6 +261,16 @@ pub fn curve_properties(
 /// the caller's B-rep: the UV trim curves it makes stay there, as upstream. The returned
 /// curves' edge-use owners are not read here.
 fn boundary(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<Curve>> {
+    oriented_boundary(k, b, f).map(|t| t.curves)
+}
+
+/// [`boundary`] with the loops' curve counts and each curve's edge use (`None` for a UV
+/// line filling a gap), for [`gap_closure`] (#16735).
+fn oriented_boundary(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+) -> Result<crate::topology::face::p1::OrientedTrimBoundary> {
     let key_of = |e: EntityRef| crate::geom::object::ObjectRef {
         type_code: 0,
         key: ObjectKey(match e {
@@ -269,7 +279,286 @@ fn boundary(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<Curve>> {
         }),
     };
     crate::topology::face::p1::create_oriented_trim_boundary(k, b, f, true, true, None, &key_of)
-        .map(|t| t.curves)
+}
+
+/// [`oriented_boundary`] with its loops closed ([`close_loops`]): the boundary
+/// [`brep_properties`] integrates a face it closes over, and its closure starts from
+/// (#16735).
+fn closed_boundary(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+) -> Result<crate::topology::face::p1::OrientedTrimBoundary> {
+    let mut trims = oriented_boundary(k, b, f)?;
+    close_loops(k, &mut trims)?;
+    Ok(trims)
+}
+
+/// Not upstream (#16735; adapted from #15946 by @bherbruck): the uv line from `a` to `z` as
+/// a degree 1 B-spline on `[0, 1]`: a gap may be as short as a rounding, which a line's unit
+/// direction cannot take (`Line::create_line_segment` refuses coincident ends).
+fn gap_segment(a: Point3, z: Point3) -> Result<Curve> {
+    use crate::nurbs::b_spline_curve::p1::{
+        BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+    };
+    BSplineCurve::create_canonical(&CanonicalData {
+        dim: 2,
+        degree: 1,
+        control_points: &[a, z],
+        form: BSplineCurveForm::default(),
+        knot_multiplicities: &[2, 2],
+        knots: &[0.0, 1.0],
+        knot_type: KnotType::default(),
+        weights: None,
+        trim: None,
+    })
+    .map(Curve::from)
+}
+
+/// Not upstream (#16735; adapted from #15946 by @bherbruck): closes a trim boundary's loops
+/// where `create_oriented_trim_boundary` leaves them open, in place. It fills a gap between a
+/// curve's end and the next one's start with a uv line only past `|d|^2 > EFF_ZERO (1 + |p|)`
+/// (a squared length against a length: gaps up to about `1e-6` stay open). An open loop
+/// loses its gap's shadow down to the integration's base, an error of first order that
+/// depends on the origin. Each gap within the test gets the uv line too; the loop counts
+/// and the edge-use records (`None`, a gap line) take the lines in.
+fn close_loops(
+    k: &Kernel,
+    trims: &mut crate::topology::face::p1::OrientedTrimBoundary,
+) -> Result<()> {
+    let recorded = trims.edgeuses.len() == trims.curves.len();
+    let mut curves = Vec::new();
+    let mut edgeuses = Vec::new();
+    let mut loops = Vec::new();
+    let mut start = 0;
+    for &n in &trims.loops {
+        let lp = trims
+            .curves
+            .get(start..start + n)
+            .ok_or_else(|| SolidError::mass_failed(OP, "the trim boundary's loop counts"))?;
+        let mut count = n;
+        for (i, c) in lp.iter().enumerate() {
+            curves.push(c.clone());
+            if recorded {
+                edgeuses.push(trims.edgeuses.get(start + i).copied().flatten());
+            }
+            let next = lp
+                .get((i + 1) % n)
+                .ok_or_else(|| SolidError::mass_failed(OP, "the trim boundary's loop counts"))?;
+            let end = c.evaluate_point(k, c.natural_interval().max())?;
+            let first = next.evaluate_point(k, next.natural_interval().min())?;
+            let d = first - end;
+            if end != first && d.length_squared() <= EFF_ZERO * (1.0 + first.max_dimension()) {
+                curves.push(gap_segment(end, first)?);
+                if recorded {
+                    edgeuses.push(None);
+                }
+                count += 1;
+            }
+        }
+        loops.push(count);
+        start += n;
+    }
+    trims.curves = curves;
+    trims.edgeuses = if recorded { edgeuses } else { Vec::new() };
+    trims.loops = loops;
+    Ok(())
+}
+
+/// Not upstream (#16735; adapted from #15946 by @bherbruck): where a trim of `trims` may
+/// leave the parameter box `[u0, u1] x [v0, v1]`, where its surface's evaluation clamps it:
+/// `None` where every curve's control points are proved inside (their homogeneous
+/// coordinates over their weights in rounded interval arithmetic), else the uv box of all
+/// the curves' control points, `(u0, u1, v0, v1)`. A NURB curve with positive weights lies
+/// in the convex hull of its control points, and a box is convex, so the curve lies in the
+/// box when they do; the loops' closing uv lines are among the curves ([`close_loops`]). A
+/// weight not proved positive, or a curve with no B-spline form, is taken as leaving, over
+/// the whole parameter plane.
+fn trims_past(
+    trims: &[Curve],
+    u: (f64, f64),
+    v: (f64, f64),
+) -> Result<Option<(f64, f64, f64, f64)>> {
+    use crate::blend::fillet_section::certificate::NurbsCurve;
+    use crate::blend::fillet_section::interval::Ivl;
+    let everywhere = (
+        f64::NEG_INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::INFINITY,
+    );
+    let mut hull = (u.0, u.1, v.0, v.1);
+    let mut leaves = false;
+    for c in trims {
+        let Some(bs) = c.b_spline_base() else {
+            return Ok(Some(everywhere));
+        };
+        let cn = NurbsCurve::of(bs)?;
+        for p in cn.pw.chunks(4) {
+            let &[xw, yw, _, w] = p else {
+                return Ok(Some(everywhere));
+            };
+            if w.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+                return Ok(Some(everywhere));
+            }
+            let (x, y) = (Ivl::from(xw) / Ivl::from(w), Ivl::from(yw) / Ivl::from(w));
+            if x.lo < u.0 || x.hi > u.1 || y.lo < v.0 || y.hi > v.1 {
+                leaves = true;
+            }
+            hull = (
+                hull.0.min(x.lo),
+                hull.1.max(x.hi),
+                hull.2.min(y.lo),
+                hull.3.max(y.hi),
+            );
+        }
+    }
+    Ok(leaves.then_some(hull))
+}
+
+/// Not upstream (#16735; adapted from #15946 by @bherbruck): a face's surface continued
+/// past the domain its evaluation clamps to, for the face's integration and its closure
+/// strips, where its trims may leave that domain and the continuation is certified;
+/// restored when dropped, so on every path out (as upstream's `SmTemporaryChangeValue` on
+/// `GetOutOfBoundsEnabled()`).
+///
+/// Clamped, a trim past the domain has the clamped point as its image but the domain
+/// edge's partials as its derivative: the face's Green integral and the strips along that
+/// trim then integrate different curves, and the closed surface leaks a first-order,
+/// origin-dependent flux (the `stubs4-degenerate-brepForFillet2-e9-r0.5` fillet's wall, its
+/// trim 3.3e-6 past `u = 1`). Continued, the trim's image is the continued surface's, the
+/// one both integrate.
+///
+/// The flags toggled are the B-spline part's the evaluation reads: a plane's base (whose
+/// `evaluate` clamps to its analytic domain unless out-of-bounds evaluation is on), a
+/// B-spline, an analytic kind's NURB, a ball patch's or answering blend's net. Other kinds
+/// are left clamped. The domain tested is the one the evaluation clamps to: a plane's
+/// analytic domain, else the NURB's natural (knot) domain.
+struct Unclamped<'a> {
+    /// The surface toggled, with the two flags' values before.
+    base: Option<(
+        &'a crate::nurbs::b_spline_surface::BSplineSurface,
+        bool,
+        bool,
+    )>,
+}
+
+impl<'a> Unclamped<'a> {
+    /// Turns `surface`'s continuation on where `trims` may leave its domain and its
+    /// continuation over the trims' box is certified: a plane, a non-rational NURB, or a
+    /// rational one whose weights are proved positive over that box
+    /// ([`continuation_certified`]). Otherwise nothing is toggled: the face stays clamped,
+    /// as upstream integrates it.
+    fn where_trims_may_leave(k: &Kernel, surface: &'a Surface, trims: &[Curve]) -> Result<Self> {
+        use crate::surface::surface::SurfaceKind;
+        let none = Self { base: None };
+        let (base, domain) = match surface.kind() {
+            SurfaceKind::Plane(plane) => (plane.base(), Some(plane.step_uv_domain())),
+            SurfaceKind::BSpline(s) => (s, None),
+            SurfaceKind::BallPatch(s) => (s.net(), None),
+            SurfaceKind::ProceduralBlend(s) if s.net_answers(k) => (s.net(), None),
+            SurfaceKind::Cone(_)
+            | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_) => (surface.analytic_base_with_nurb(k)?, None),
+            _ => return Ok(none),
+        };
+        if base.is_out_of_bounds_enabled() {
+            return Ok(none);
+        }
+        let domain = domain.unwrap_or_else(|| base.natural_uv_domain());
+        let (u, v) = (
+            (domain.u_min(), domain.u_max()),
+            (domain.v_min(), domain.v_max()),
+        );
+        let Some(hull) = trims_past(trims, u, v)? else {
+            return Ok(none);
+        };
+        // a plane is a bilinear, non-rational patch: its continuation is itself
+        if !matches!(surface.kind(), SurfaceKind::Plane(_)) && !continuation_certified(base, hull)?
+        {
+            return Ok(none);
+        }
+        let was = (
+            base.is_out_of_bounds_enabled(),
+            base.continues_past_domain(),
+        );
+        base.set_out_of_bounds_enabled_in_place(true);
+        base.set_continues_past_domain_in_place(true);
+        Ok(Self {
+            base: Some((base, was.0, was.1)),
+        })
+    }
+}
+
+impl Drop for Unclamped<'_> {
+    fn drop(&mut self) {
+        if let Some((base, was_oob, was_cont)) = self.base {
+            base.set_out_of_bounds_enabled_in_place(was_oob);
+            base.set_continues_past_domain_in_place(was_cont);
+        }
+    }
+}
+
+/// The times a box is cut in halves along any path while [`continuation_certified`] proves
+/// its weights, as [`crate::mass::enclosure`] cuts a trim's (2^16 parts).
+const CERTIFY_CUTS: u32 = 16;
+
+/// Not upstream (#16735; adapted from #15946 by @bherbruck): whether `base`'s continuation
+/// over the uv box `hull` (`(u0, u1, v0, v1)`) is certified: non-rational (every weight 1),
+/// or its weights proved positive over the box as the enclosure proves them
+/// (`mass::enclosure::partials_over`), the box cut in halves where that is too coarse,
+/// along the side longer against the domain's, at most [`CERTIFY_CUTS`] times along any
+/// path.
+fn continuation_certified(
+    base: &crate::nurbs::b_spline_surface::BSplineSurface,
+    hull: (f64, f64, f64, f64),
+) -> Result<bool> {
+    use crate::blend::fillet_section::interval::Ivl;
+    use crate::blend::fillet_section::station::Nurbs;
+    use crate::mass::enclosure::partials_over;
+    let cn = Nurbs::of(base)?;
+    if cn.pw.chunks(4).all(|p| p.get(3) == Some(&1.0)) {
+        return Ok(true);
+    }
+    let (u0, u1, v0, v1) = hull;
+    if !(u0.is_finite() && u1.is_finite() && v0.is_finite() && v1.is_finite()) {
+        return Ok(false);
+    }
+    let proved = |a: f64, b: f64, c: f64, d: f64| -> Result<bool> {
+        match partials_over(&cn, Ivl::new(a, b), Ivl::new(c, d), 0) {
+            Ok(p) => Ok(p.is_some()),
+            Err(SolidError::Unsupported { .. }) => Ok(false),
+            Err(e) => Err(e),
+        }
+    };
+    let domain = base.natural_uv_domain();
+    let (du, dv) = (
+        domain.u_max() - domain.u_min(),
+        domain.v_max() - domain.v_min(),
+    );
+    let mut stack = vec![(u0, u1, v0, v1, 0u32)];
+    while let Some((a, b, c, d, cuts)) = stack.pop() {
+        if proved(a, b, c, d)? {
+            continue;
+        }
+        let (um, vm) = (0.5 * (a + b), 0.5 * (c + d));
+        if cuts >= CERTIFY_CUTS || !proved(um, um, vm, vm)? {
+            return Ok(false);
+        }
+        let (cut_u, cut_v) = (a < um && um < b, c < vm && vm < d);
+        if cut_u && (!cut_v || (b - a) * dv >= (d - c) * du) {
+            stack.push((um, b, c, d, cuts + 1));
+            stack.push((a, um, c, d, cuts + 1));
+        } else if cut_v {
+            stack.push((a, b, vm, d, cuts + 1));
+            stack.push((a, b, c, vm, cuts + 1));
+        } else {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 /// `SmFace::ComputePreciseProperties`; the default property mask is `PPF_ALL`. Missing UV
 /// trim curves of the face are made on `b`.
@@ -284,14 +573,56 @@ pub fn face_properties(
     thickness: f64,
     flags: u64,
 ) -> Result<PreciseProperties> {
+    face_properties_in(
+        k,
+        b,
+        f,
+        orientation,
+        accuracy,
+        origin,
+        estimated_area,
+        thickness,
+        flags,
+        false,
+    )
+}
+
+/// [`face_properties`], or with `closed` as [`brep_properties`] integrates the faces it
+/// closes (#16735): over the loops closed ([`closed_boundary`]), on the surface continued
+/// past the domain its evaluation clamps to where its trims leave it and the continuation
+/// is certified ([`Unclamped`]).
+#[allow(clippy::too_many_arguments)] // face_properties' inputs and the scope
+fn face_properties_in(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    orientation: OrientType,
+    accuracy: f64,
+    origin: Point3,
+    estimated_area: f64,
+    thickness: f64,
+    flags: u64,
+    closed: bool,
+) -> Result<PreciseProperties> {
     valid_flags(flags)?;
-    let trims = boundary(k, b, f)?;
+    let trims = if closed {
+        closed_boundary(k, b, f)?.curves
+    } else {
+        boundary(k, b, f)?
+    };
     let fbox = face_box(k, b, f)?;
     let surface = b
         .face(f)?
         .surface
         .as_ref()
         .ok_or_else(|| SolidError::mass_missing(OP, "the face's surface"))?;
+    // set for the integration alone (after the face's box, which may fill the surface's
+    // caches), and restored when the guard drops, on every path
+    let _unclamped = if closed {
+        Some(Unclamped::where_trims_may_leave(k, surface, &trims)?)
+    } else {
+        None
+    };
     boundary_properties(
         k,
         surface,
@@ -1091,6 +1422,19 @@ struct ClosureSide {
     edge_ends: [Vec3; 2],
 }
 
+/// The side of a UV line the face's boundary fills a gap with (#16735): no edge, so it
+/// closes as a cone onto `vertex`, the corner's; the line runs the loop's way.
+fn gap_side(trim: Curve, vertex: Vec3) -> ClosureSide {
+    ClosureSide {
+        trim,
+        edge: None,
+        vertex,
+        same: true,
+        trim_ends: [vertex; 2],
+        edge_ends: [vertex; 2],
+    }
+}
+
 /// Not upstream (#16735): the volume group of the strips and corners closing face `f`'s
 /// trims onto its edges' curves and vertices (see above), its area vectors the face's
 /// surface normal's way round, relative to `origin`; the strips integrated along the
@@ -1153,11 +1497,70 @@ fn gap_closure(
         }
         loops.push(sides);
     }
+    // The face is integrated over its oriented trim boundary ([`boundary`]), which fills a
+    // UV gap between consecutive trims (a surface singularity, or a trim ending short of the
+    // next) with a UV line. Such a line's image is part of the face's boundary but of no
+    // edge use: it closes as a cone onto the corner's vertex, as a side without an edge
+    // curve does, so every piece of the boundary the face integral runs along is closed.
+    let integrated = closed_boundary(k, b, f)?;
+    let mut at_curve = 0usize;
+    for (sides, &count) in loops.iter_mut().zip(&integrated.loops) {
+        let curves = at_curve..at_curve + count;
+        at_curve += count;
+        let mut used = core::mem::take(sides).into_iter().peekable();
+        let mut closed = Vec::new();
+        let mut gaps = Vec::new();
+        for j in curves {
+            match integrated.edgeuses.get(j) {
+                Some(Some(_)) => {
+                    // the gap lines before this side end at its vertex
+                    let Some(side) = used.next() else {
+                        return Err(SolidError::mass_failed(
+                            OP,
+                            "the face's boundary has more trims than its loop",
+                        ));
+                    };
+                    for trim in gaps.drain(..) {
+                        closed.push(gap_side(trim, side.vertex));
+                    }
+                    closed.push(side);
+                }
+                Some(None) => {
+                    let trim = integrated.curves.get(j).cloned().ok_or_else(|| {
+                        SolidError::mass_failed(OP, "the face's boundary lost a gap line")
+                    })?;
+                    gaps.push(trim);
+                }
+                None => {
+                    return Err(SolidError::mass_failed(
+                        OP,
+                        "the face's boundary curve has no edge use record",
+                    ));
+                }
+            }
+        }
+        // gap lines after the last trim close the loop at its first side's vertex
+        if let Some(first) = closed.first().map(|s: &ClosureSide| s.vertex) {
+            for trim in gaps.drain(..) {
+                closed.push(gap_side(trim, first));
+            }
+        }
+        if used.peek().is_some() {
+            return Err(SolidError::mass_failed(
+                OP,
+                "the face's loop has more edge uses than its boundary",
+            ));
+        }
+        *sides = closed;
+    }
     let surface = b
         .face(f)?
         .surface
         .clone()
         .ok_or_else(|| SolidError::mass_missing(OP, "the face's surface"))?;
+    // continued past its domain where the face's integration continues it, so the strips
+    // start on the curves the face's Green integral runs along
+    let _unclamped = Unclamped::where_trims_may_leave(k, &surface, &integrated.curves)?;
     // the surface as the face's integrand evaluates it (`OdeIsoCurveLength`): the point,
     // then the u and v derivatives
     let at = |uv: Vec3| -> Result<(Vec3, Vec3, Vec3)> {
@@ -1394,7 +1797,9 @@ pub fn brep_properties(
             }
             if separating || mass.y > EFF_ZERO {
                 let orientation = b.faceuse(fu)?.orientation;
-                let delta = face_properties(
+                // on the surface continued where the trims leave its domain, as its closure
+                // strips are built (#16735)
+                let delta = face_properties_in(
                     k,
                     b,
                     f,
@@ -1404,6 +1809,7 @@ pub fn brep_properties(
                     estimated,
                     if separating { 0.0 } else { mass.y },
                     PPF_ALL,
+                    true,
                 )?;
                 if separating {
                     // Not upstream (WR-535, the fork's tangency-labs/smlib@d2d9586): the

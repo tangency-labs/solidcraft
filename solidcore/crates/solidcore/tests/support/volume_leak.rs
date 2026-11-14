@@ -11,8 +11,11 @@
 //! leak bound, and the volume is origin-free. The tube figures ([`Leak::new_bound`],
 //! [`Leak::new_bound_measured`]) are informational: the solid is defined only up to the
 //! tubes of width w about its edges and the balls about its vertices, sum pi w^2 L + sum
-//! 4/3 pi r^3 (ARGUED, not certified), with w each strip's width measured along the
-//! closure's own correspondence and r each corner fan's reach from its vertex.
+//! 4/3 pi r^3 (ARGUED and diagnostic only: w and r are sampled, not certified, so it is no
+//! bound), with w each strip's width measured along the closure's own correspondence and r
+//! each corner fan's reach from its vertex. (#15946's outward-rounded cap bound, `L^2 / 4`
+//! times `max |f|` over the openings, is a proved one; the strips here leave no opening to
+//! cap, so none is computed.)
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

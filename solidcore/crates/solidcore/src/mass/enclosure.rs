@@ -555,7 +555,12 @@ fn piece_partials(
 /// The surface's partials up to order `lk` at every point of the box, from every piece it
 /// meets, hulled; `None` where a piece's weights are not proved positive over it
 /// ([`piece_partials`]).
-fn partials_over(cn: &Nurbs, u: Ivl, v: Ivl, lk: usize) -> Result<Option<Partials<Ivl>>> {
+pub(crate) fn partials_over(
+    cn: &Nurbs,
+    u: Ivl,
+    v: Ivl,
+    lk: usize,
+) -> Result<Option<Partials<Ivl>>> {
     let bad = || SolidError::Unsupported {
         operation: OP,
         reason: "a parameter box that is not finite",

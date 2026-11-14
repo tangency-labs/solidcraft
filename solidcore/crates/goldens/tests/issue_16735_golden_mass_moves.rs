@@ -65,7 +65,8 @@
 //! * **Reported only, not the gate**: the tube bound's premise, every sampled gap within its
 //!   edge's stored tolerance and every corner point within its vertex's (then the closed
 //!   region differs from the solid only inside the tubes and balls, `Σ π tol_e² L_e +
-//!   Σ 4/3 π tol_v³`, ARGUED in the PR); the bodies beyond it are counted and listed.
+//!   Σ 4/3 π tol_v³`, ARGUED in the PR and diagnostic only: the gaps are sampled, not
+//!   certified); the bodies beyond it are counted and listed.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
