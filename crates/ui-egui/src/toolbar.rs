@@ -383,6 +383,8 @@ pub enum FileAction {
     Undo,
     /// Redo the active design's last undone command.
     Redo,
+    /// Read the active design again from its file, dropping its unsaved changes after asking.
+    Revert,
     /// Save a JSON design using the existing save-as flow.
     SaveJson,
     /// Check the signatures of the active design's saved file.
@@ -412,7 +414,15 @@ impl FileAction {
     pub fn enabled(&self, app: &SolveApp) -> bool {
         let needs_design = matches!(
             self,
-            Self::NewDrawing | Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_) | Self::VerifySignature
+            Self::NewDrawing
+                | Self::Save
+                | Self::SaveAs
+                | Self::Revert
+                | Self::Undo
+                | Self::Redo
+                | Self::ExportMesh(_)
+                | Self::Command(_)
+                | Self::VerifySignature
         ) || matches!(self, Self::Export(extension) if *extension != "json");
         // An open bug report describes the designs as they are, and a window opened behind it
         // covers it (#7188). Quit too, as behind any modal window: it would switch to a design
@@ -424,6 +434,7 @@ impl FileAction {
             Self::Redo => !app.session.redo.is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
             Self::VerifySignature => app.session.path.is_some() && app.verifying.is_none(),
+            Self::Revert => app.session.path.is_some(),
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
             _ => true,
         };
@@ -454,6 +465,7 @@ impl FileAction {
             Self::Undo => drop(app.run("edit.undo", json!({}))),
             Self::Redo => drop(app.run("edit.redo", json!({}))),
             Self::SaveJson => save_as_with_extension(app, "json"),
+            Self::Revert => crate::documents::revert(app),
             Self::VerifySignature => {
                 crate::verify_job::start(app);
             }
@@ -547,6 +559,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     // Save As shows the shortcut of the command it runs, from the app's own registry.
     let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
     rows.push(row("save_as", &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown));
+    rows.push(row("revert", app.tr("ui.revert_to_saved"), "", "open", shown && app.session.path.is_some()));
     rows.push(row("save_json", app.tr_label("Save As JSON…"), "", "save", true));
     rows.push(row("file.verify", app.tr("cmd.file.verify"), "", "shield", shown && app.session.path.is_some()));
     // The browser build: a copy as a downloaded file, whatever Save does.
@@ -631,6 +644,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "pointcloud.insert" | "file.send_to_slicer" => app.start(id),
         "save" => FileAction::Save.run(app),
         "save_as" => FileAction::SaveAs.run(app),
+        "revert" => FileAction::Revert.run(app),
         "save_json" => FileAction::SaveJson.run(app),
         "file.verify" => FileAction::VerifySignature.run(app),
         "download" => download_design(app),
