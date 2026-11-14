@@ -38,7 +38,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedPart>)
-        .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction? (from the shank's tip toward the head), flip?, name?"),
+        .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction? (from the shank's tip toward the head), flip?, other_side?, name?"),
     CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic))
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
@@ -52,7 +52,8 @@ pub static COMMANDS: &[CommandSpec] = &[
          them (one component, placed and seated once per pick) | point?: [x,y,z] with direction?: [x,y,z] (no joint: the part's seating plane, under a head or \
          the bottom of a nut, washer or bearing, the top of a set screw, pin or countersunk head, goes to point, and direction is its +z, from the shank's tip toward the head; default [0,0,1], \
          head up, shank down -z); flip?: bool (default false: turned over, head into the material with at, +z against direction \
-         with point); name? → component, occurrence, joint?, directions (each placement's head direction in the world, the one \
+         with point); other_side?: bool (default false: with at, each part goes in from the other end of its hole, head on the \
+         face the hole comes out of; refused for a pick that is not on a through hole); name? → component, occurrence, joint?, directions (each placement's head direction in the world, the one \
          chosen), and with at: occurrences, joints (one per pick, in pick order)",
         ),
     CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic))
@@ -839,12 +840,27 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     // Each hole's occurrence is found before the part exists, so a pick off every body fails the
     // insert before anything is made.
     let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
+    let other_side = match p.get("other_side") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(bad(cmd, "`other_side` must be true or false")),
+    };
+    if other_side && p.get("at").is_none_or(Value::is_null) {
+        return Err(bad(cmd, "`other_side` goes with `at`: it seats the part at the other end of a hole"));
+    }
     let mut holes: Vec<(Vec3, u64)> = Vec::new();
     let mut seats: Vec<(u64, HoleWall)> = Vec::new();
     // Picks on a flat face, off every hole: the point and the face's outward normal (world).
     let mut faces: Vec<Option<Vec3>> = Vec::new();
     for a in hole_picks(p, cmd)? {
         let found = hole_wall(s, a);
+        // From the other side: the same hole, seated at its far end, which must come out of the part.
+        let found = if other_side {
+            let far = found.as_ref().and_then(|near| far_end(s, near)).filter(|far| far.open);
+            Some(far.ok_or_else(|| bad(cmd, "`other_side` needs a hole that goes through the part: this pick is on a blind hole or not on a hole"))?)
+        } else {
+            found
+        };
         let face = if found.is_none() { outward_normal(s, a) } else { None };
         let wall = found.unwrap_or(HoleWall { at: a, seat: a, axis: None, ends: None, open: true, radius: 0.0 });
         let host = super::joints::occurrence_at(s, wall.at).ok_or_else(|| bad(cmd, "no body at `at` (pick a hole's rim or wall)"))?;
@@ -1053,31 +1069,58 @@ fn hole_wall(s: &Session, a: Vec3) -> Option<HoleWall> {
         for b in &st.bodies {
             for d in dirs {
                 let q = a + d * step;
-                if let Some(c) = solidcraft_doc::kernel::cylinder_face_at(&b.body, q) {
-                    let v = q - c.axis_point;
-                    let along = v.dot(c.axis);
-                    let on_wall = ((v - c.axis * along).len() - c.radius).abs() < 1e-3 && along > c.start && along < c.end;
-                    if on_wall {
-                        let axis: Vec3 = c.axis * 1.0;
-                        // The end of the wall nearer the pick, and a point on the axis just past it.
-                        let (end, out) = if along - c.start < c.end - along { (c.start, -1.0) } else { (c.end, 1.0) };
-                        let past = c.axis_point + axis * (end + out * (c.end - c.start).min(1.0) * 0.25);
-                        let open = !matches!(b.body.classify_point(past), Ok(solidcraft_doc::kernel::PointClass::Inside));
-                        let ends = [c.axis_point + axis * c.start, c.axis_point + axis * c.end];
-                        return Some(HoleWall {
-                            at: q,
-                            seat: c.axis_point + axis * along,
-                            axis: Some(axis),
-                            ends: Some(ends),
-                            open,
-                            radius: c.radius,
-                        });
-                    }
+                if let Some(wall) = wall_at(b, q) {
+                    return Some(wall);
                 }
             }
         }
     }
     None
+}
+
+/// The hole wall of body `b` that `q` lies on, seated at the end of the wall nearer `q`.
+fn wall_at(b: &solidcraft_doc::ModelBody, q: Vec3) -> Option<HoleWall> {
+    let c = solidcraft_doc::kernel::cylinder_face_at(&b.body, q)?;
+    let v = q - c.axis_point;
+    let along = v.dot(c.axis);
+    let on_wall = ((v - c.axis * along).len() - c.radius).abs() < 1e-3 && along > c.start && along < c.end;
+    if !on_wall {
+        return None;
+    }
+    let axis: Vec3 = c.axis * 1.0;
+    // The end of the wall nearer the pick, and a point on the axis just past it.
+    let (end, out) = if along - c.start < c.end - along { (c.start, -1.0) } else { (c.end, 1.0) };
+    let past = c.axis_point + axis * (end + out * (c.end - c.start).min(1.0) * 0.25);
+    let open = !matches!(b.body.classify_point(past), Ok(solidcraft_doc::kernel::PointClass::Inside));
+    let ends = [c.axis_point + axis * c.start, c.axis_point + axis * c.end];
+    Some(HoleWall { at: q, seat: c.axis_point + axis * along, axis: Some(axis), ends: Some(ends), open, radius: c.radius })
+}
+
+/// The same hole wall as `near`, seated at its other end: a point on the wall a little in from
+/// the end farther from where `near` sits.
+fn far_end(s: &Session, near: &HoleWall) -> Option<HoleWall> {
+    let [a, b] = near.ends?;
+    let far = if (a - near.seat).len() > (b - near.seat).len() { a } else { b };
+    let to_far = far - near.seat;
+    let length = to_far.len();
+    if !(length > 1e-9) {
+        return None;
+    }
+    // As far in from the far end as a pick on a rim is stepped in from the near one.
+    let inset = (0.25 * (a - b).len()).min(0.2);
+    let q = near.at + to_far * ((length - inset).max(0.0) / length);
+    let st = s.world_state().ok()?;
+    st.bodies.iter().find_map(|body| wall_at(body, q).filter(|wall| runs_out(body, wall)))
+}
+
+/// Just past the end `wall` is seated at, the hole is still as wide as its wall: it runs out
+/// of the part there, where a drill point or a step down to a smaller hole does not.
+fn runs_out(b: &solidcraft_doc::ModelBody, wall: &HoleWall) -> bool {
+    let Some([a, c]) = wall.ends else { return false };
+    let (end, other) = if (a - wall.seat).len() < (c - wall.seat).len() { (a, c) } else { (c, a) };
+    let (Some(out), Some(radial)) = ((end - other).normalized(), (wall.at - wall.seat).normalized()) else { return false };
+    let past = end + out * (0.25 * (a - c).len().min(1.0)) + radial * (0.9 * wall.radius);
+    !matches!(b.body.classify_point(past), Ok(solidcraft_doc::kernel::PointClass::Inside))
 }
 
 fn shape_len(sh: &Shape) -> Option<f64> {
@@ -1605,6 +1648,40 @@ mod tests {
         assert_eq!(r["directions"], json!([[0.0, 0.0, -1.0]]), "{r}");
         let (lo, hi) = bbox(&s, "SHCS M3x8");
         assert!((lo.z + 13.0).abs() < 1e-6 && (hi.z + 2.0).abs() < 1e-6, "{lo:?} {hi:?}");
+    }
+
+    /// `other_side` seats a screw at the far end of a through hole: its head lies on the face
+    /// the hole comes out of and points away from it, the shank runs back through the hole. A
+    /// blind hole and a flat face have no other side, and are refused with nothing made.
+    #[test]
+    fn other_side_seats_a_screw_from_the_far_end_of_a_through_hole() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.hole", json!({"position": [15, 15, 10], "diameter": 6.4}));
+        run(&mut s, "solid.hole", json!({"position": [45, 15, 10], "diameter": 6.4, "depth": 6}));
+        let screw = |x: f64, other_side: bool| json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20, "at": [x + 3.2, 15, 10], "other_side": other_side});
+        let origin = |s: &Session, r: &Value| solidcraft_doc::joints::occurrence_world(&s.doc, r["occurrence"].as_u64().unwrap())[3];
+        // As picked: under the head at the top face, head up.
+        let near = run(&mut s, "parts.insert", screw(15.0, false));
+        assert_eq!(near["directions"], json!([[0.0, 0.0, 1.0]]));
+        assert!((origin(&s, &near)[2] - 10.0).abs() < 1e-6, "{:?}", origin(&s, &near));
+        // From the other side: under the head at the bottom face, head down, on the same axis.
+        let far = run(&mut s, "parts.insert", screw(15.0, true));
+        assert_eq!(far["directions"], json!([[0.0, 0.0, -1.0]]));
+        let at = origin(&s, &far);
+        assert!((at[0] - 15.0).abs() < 1e-6 && (at[1] - 15.0).abs() < 1e-6 && at[2].abs() < 1e-6, "{at:?}");
+        // A blind hole, a flat face and no pick at all have no other side.
+        let made = s.doc.components.len();
+        for p in [
+            screw(45.0, true),
+            json!({"family": "socket_head_cap_screw", "size": "M6", "at": [30, 5, 10], "other_side": true}),
+            json!({"family": "socket_head_cap_screw", "size": "M6", "point": [0, 0, 0], "other_side": true}),
+            json!({"family": "socket_head_cap_screw", "size": "M6", "at": [18.2, 15, 10], "other_side": "yes"}),
+        ] {
+            let e = s.execute("parts.insert", &p).unwrap_err().to_string();
+            assert!(e.contains("other_side"), "{p}: {e}");
+        }
+        assert_eq!(s.doc.components.len(), made);
     }
 
     /// #12150: `flip` turns a seated part over (head into the hole, shank out of the face) and a

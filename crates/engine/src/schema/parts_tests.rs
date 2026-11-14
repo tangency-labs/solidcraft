@@ -21,7 +21,7 @@ fn plate(s: &mut Session) -> [[f64; 3]; 2] {
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<PartsLibraryParams>(), &["family"]);
-    assert_keys(input_schema_for::<PartsInsertParams>(), &["at", "direction", "family", "flip", "length", "name", "point", "size"]);
+    assert_keys(input_schema_for::<PartsInsertParams>(), &["at", "direction", "family", "flip", "length", "name", "other_side", "point", "size"]);
     assert_keys(input_schema_for::<PartsResizeParams>(), &["component", "length", "size"]);
 }
 
