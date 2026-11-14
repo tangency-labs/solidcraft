@@ -2888,6 +2888,38 @@ mod tests {
     }
 
     #[test]
+    fn wr41_plane_reparam_huge_scale_stays_on_nurb() {
+        // Origin ~1e7, domain moved so the origin moves ~1e6. Analytic plane and NURB
+        // are both affine in (u, v): three corners agreeing means the surfaces agree.
+        let mut p = Plane::new(
+            Point3::new(1.2e7, -8.7e6, 3.1e6),
+            Vec3::new(0.6, 0.8, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec2::new(1.3e3, 7.1e2),
+            &Extent2d::from_bounds(-150.0, 20.0, 450.0, 900.0),
+        );
+        let origin = p.position().origin();
+        let new_domain = Extent2d::from_bounds(1.0e3, -4.0e3, 1.7e3, -2.5e3);
+        p.reparameterize(&new_domain).unwrap();
+        let moved = p.position().origin().distance(origin);
+        assert!(moved > 1.0e6, "origin moved {moved:e}");
+
+        let w = p.base_with_nurb().unwrap();
+        for uv in [
+            new_domain.evaluate(0.0, 0.0),
+            new_domain.evaluate(1.0, 0.0),
+            new_domain.evaluate(0.0, 1.0),
+        ] {
+            let n = w.evaluate_point(uv).unwrap();
+            let gap = p.evaluate_point(uv).distance(n);
+            assert!(
+                gap <= 1.0e-15 * n.length().max(origin.length()) * 4.0,
+                "gap {gap:e} at {n:?}"
+            );
+        }
+    }
+
+    #[test]
     fn wr41_plane_reparam_arbitrary_frame_and_scale() {
         let mut p = Plane::new(
             Point3::new(-15.0, 4.2, 100.0),
