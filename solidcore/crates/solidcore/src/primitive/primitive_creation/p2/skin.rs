@@ -16,6 +16,8 @@
 //! and null reads) are errors. No recursion. Not upstream (tangency-labs/solidcore#3139):
 //! [`PrimitiveCreation::create_skin_primitive_traced`] also traces each side face's
 //! profile curves (`p3::skin_sources`), building the same skin.
+//! Closed nonplanar wires are skinned as composite curves. Only the end caps
+//! require planar wires; an interpolated interior wire need not lie in a plane.
 
 use super::PrimitiveCreationAccess;
 use crate::curve::composite_curve::CompositeCurve;
@@ -30,11 +32,51 @@ use crate::topology::{BrepId, FaceId};
 
 const OP: &str = "primitive::primitive_creation::p2::skin";
 
+/// Whether the skin needs wire profiles rather than planar faces. Planarity is
+/// checked on the joined B-spline's control hull, not a display polyline.
+fn has_nonplanar_wire(
+    k: &crate::kernel::Kernel,
+    counts: &[usize],
+    curves: &[Option<Curve>],
+    tol: f64,
+) -> Result<bool> {
+    let mut start = 0usize;
+    for &count in counts {
+        let end = start
+            .checked_add(count)
+            .ok_or_else(|| SolidError::invalid_input(OP, "too many profile curves"))?;
+        let profile = curves
+            .get(start..end)
+            .ok_or_else(|| SolidError::invalid_input(OP, "more profile curves than curves"))?
+            .iter()
+            .map(|c| {
+                c.clone()
+                    .ok_or_else(|| SolidError::primitive_missing(OP, "a profile curve"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let built = CompositeCurve::build_composites_from_curves(k, profile, tol, 0.0)?;
+        for mut composite in built.composites {
+            // The same plane tolerance as order_curves_into_loops uses.
+            if composite.is_closed()
+                && !composite
+                    .make_composite_nurb()?
+                    .is_planar(tol * 1000.0)?
+                    .is_planar
+            {
+                return Ok(true);
+            }
+        }
+        start = end;
+    }
+    Ok(false)
+}
+
 impl PrimitiveCreation {
     /// Loft the profiles of `curves`, `curves_in_each_profile` curves each, into the
     /// target B-rep (`CreateSkinPrimitive` with ownership reporting). Closed planar
-    /// profiles become faces whose loops are lofted; otherwise each profile becomes
-    /// one composite curve and the result has no caps. `approx_tol` 0 interpolates
+    /// profiles become faces whose loops are lofted. Nonplanar closed wires are
+    /// joined and skinned directly, with planar end caps when requested; open
+    /// profiles have no caps. `approx_tol` 0 interpolates
     /// the profiles; `degree` is the loft degree (1 linear, 2 parabolic, 3 cubic).
     /// `transferred` gets one flag per curve: `true` when the call consumed it.
     ///
@@ -201,6 +243,8 @@ fn skin_with_scratch(
     let mut profile_faces: Vec<FaceId> = Vec::new();
     let mut nurbs = Vec::new();
 
+    let wire_profiles = has_nonplanar_wire(a.kernel(brep)?, curves_in_each_profile, curves, tol)?;
+
     // profiles are boundaries of planar faces - they must be closed
     let mut open_profiles = false;
 
@@ -214,7 +258,7 @@ fn skin_with_scratch(
             .ok_or_else(|| SolidError::invalid_input(OP, "more profile curves than curves"))?;
         let range = profile_start..count;
 
-        if ii == 0 || !open_profiles {
+        if !wire_profiles && (ii == 0 || !open_profiles) {
             // see if this profile is a set of co-planar loops
             let mut profile: Vec<Option<Curve>> = curves
                 .get_mut(range.clone())
@@ -294,7 +338,7 @@ fn skin_with_scratch(
         }
 
         // when input data has been found to be a sequence of loft curves
-        if open_profiles {
+        if open_profiles || wire_profiles {
             // build a composite curve from these profile curves
             let brep_tol = a.brep(brep)?.tolerance();
             let mut profile = Vec::new();
@@ -326,6 +370,12 @@ fn skin_with_scratch(
             let mut composite = built.composites.into_iter().next().ok_or_else(|| {
                 SolidError::primitive_failed(OP, "an open profile makes no composite curve")
             })?;
+            if wire_profiles && !composite.is_closed() {
+                return Err(SolidError::primitive_failed(
+                    OP,
+                    "the profiles do not all match",
+                ));
+            }
             if let Some(t) = trace.as_deref_mut() {
                 // (the trace: the composite's breaks, and each segment's curve among all the
                 // curves, or none for a gap line; the curve is the one made untraced)
@@ -357,9 +407,9 @@ fn skin_with_scratch(
         a, brep, &faces, &nurbs, approx_tol, degree, side_faces, trace,
     )?;
 
-    // When asked - create start and stop cap faces
-    if cap_ends {
-        // A planar loft (all profiles coplanar) has no depth to cap.
+    // A planar loft (all profiles coplanar) has no depth to cap. A nonplanar
+    // wire already proves that the profiles do not share one plane.
+    if cap_ends && !wire_profiles {
         let k = a.kernel(brep)?;
         let &(first_brep, first) = faces
             .first()
@@ -393,8 +443,12 @@ fn skin_with_scratch(
                 "cannot cap a planar loft (coplanar profiles)",
             ));
         }
+    }
 
+    // When asked - create start and stop cap faces.
+    if cap_ends {
         // Only side faces touching the full skin's U endpoints bound the caps.
+        let k = a.kernel(brep)?;
         if side_faces.is_empty() {
             return Err(SolidError::primitive_failed(
                 OP,
