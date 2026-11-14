@@ -46,7 +46,6 @@ use solidcore::Kernel;
 /// The flags SolidCraft's `fixes()` turns on at tangency-labs/solidcraft c494a18.
 const SOLIDCRAFT_C494A18: &[&str] = &[
     "analytic_copy_keeps_parameterization",
-    "analytic_corner_failure_is_false",
     "analytic_inversion_answers_apart",
     "ascii_doubles_round_trip",
     "boolean_cleanup_removes_slits",
@@ -86,7 +85,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "extrusion_origin_scaled_zero",
     "face_points_span_domain",
     "face_tight_box_searches_trim",
-    "fillet_3x2_mixed_concave_side_edge",
     "fillet_chamfer_cone_on_arc",
     "fillet_chamfer_cone_stored_as_cone",
     "fillet_cleanup_keeps_target_faces",
@@ -96,7 +94,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_knife_edge_rounds",
     "fillet_mitre_concave_face_corners",
     "fillet_mitre_gap_patch",
-    "fillet_nx1_opposite_continuation_side_edge",
     "fillet_nx1_tangent_side_edge",
     "fillet_patch_keeps_fillet_edges",
     "fillet_point_step_per_point",
@@ -187,7 +184,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "torus_signed_gen_curve_interval",
     "transform_model_size_from_body_box",
     "transform_scales_each_tolerance",
-    "twist_simple_duw_sign",
     "uv_trim_corner_end_points_only",
     "validate_tolerances_fixes_reported_gaps",
     "validation_does_not_make_uv_trims",

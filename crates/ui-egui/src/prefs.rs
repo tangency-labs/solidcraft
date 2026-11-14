@@ -1385,6 +1385,9 @@ preference_settings! {
     /// click shows its panels over the view until a command starts or the pointer leaves them.
     /// Off by default: the whole ribbon shows. `view.ribbon_tabs_only` switches it.
     ribbon_tabs_only: bool = false, PAGE_LAYOUT;
+    /// Constraints pinned to the sketch ribbon's Constrain panel are drawn as small cells in its
+    /// constraint grid, like the default six. Off: they are full-size buttons, as before.
+    pinned_constraints_in_grid: bool = true, PAGE_LAYOUT;
     /// A double-click on a design tab renames the design in the tab; off, it maximizes the window
     /// as the rest of the title bar does, as before.
     tab_double_click_renames: bool = true, PAGE_LAYOUT;
@@ -5211,7 +5214,7 @@ mod tests {
             for (key, label, labels) in [
                 ("size", "Size", &["Compact", "Regular"][..]),
                 ("buttons", "Buttons", &["Icons", "Icons + labels"][..]),
-                ("idle", "When idle", &["Always", "Fade", "Hover"][..]),
+                ("idle", "When idle", &["Always visible", "Fade", "Hide until hovered"][..]),
             ] {
                 let body = crate::scenario::rect_of("prefs:page_body").unwrap();
                 let row = crate::scenario::rect_of(&format!("prefs:navbar:{key}")).unwrap();
@@ -5323,6 +5326,8 @@ mod tests {
                 let stage = crate::scenario::rect_of("prefs:navbar:stage").unwrap();
                 let count = crate::scenario::rect_of("prefs:navbar:count").unwrap();
                 assert!(status.bottom() <= stage.top(), "Show and Reset belong above the shared stage");
+                let idle = crate::scenario::rect_of("prefs:navbar:idle").unwrap();
+                assert!(status.bottom() <= idle.top() && idle.bottom() <= stage.top(), "When idle belongs with Show, before the preview");
                 let bar = crate::scenario::rect_of("prefs:navbar:bar").unwrap();
                 assert!(stage.contains_rect(count), "the real slot count sits in the stage");
                 assert!(!count.intersects(bar), "the count never covers the bar");
@@ -6800,6 +6805,7 @@ mod tests {
             ("sketch_tab_always", json!(true), PAGE_LAYOUT),
             ("keep_work_on_tab_switch", json!(true), PAGE_LAYOUT),
             ("ribbon_reveal", json!(true), PAGE_LAYOUT),
+            ("pinned_constraints_in_grid", json!(false), PAGE_LAYOUT),
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("dialog_buttons", json!("top"), PAGE_LAYOUT),
             ("toast_place", json!("centre"), PAGE_LAYOUT),

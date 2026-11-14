@@ -1,0 +1,10 @@
+{
+  "en": { "joint.error.limit_order": "joint limit minimum must not exceed maximum" },
+  "ar": { "joint.error.limit_order": "يجب ألا يتجاوز الحد الأدنى للمفصل الحد الأقصى" },
+  "he": { "joint.error.limit_order": "הגבול התחתון של המפרק לא יכול להיות גדול מהגבול העליון" },
+  "ja": { "joint.error.limit_order": "ジョイントの下限は上限以下でなければなりません" },
+  "vi": { "joint.error.limit_order": "Giới hạn dưới của khớp nối không được vượt quá giới hạn trên" },
+  "zh": { "joint.error.limit_order": "接头的下限不得大于上限" },
+  "de": { "joint.error.limit_order": "Die untere Gelenkgrenze darf die obere Grenze nicht überschreiten" },
+  "ko": { "joint.error.limit_order": "관절 제한의 최솟값은 최댓값보다 클 수 없습니다" }
+}

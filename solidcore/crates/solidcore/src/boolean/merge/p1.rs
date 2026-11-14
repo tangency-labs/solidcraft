@@ -559,45 +559,6 @@ fn brep_shells(k: &mut Kernel, brep: &Brep) -> Result<Vec<ShellId>> {
     crate::topology::brep::p1::shells(k, brep, None)
 }
 
-/// WR-599 (`Kernel::fixes.cover_wraps_across_closed_seam`): `pMerged->HasSeamProblem(..)`
-/// (its classification status propagated, as the fork's `SER`), then, when a seam is
-/// crossed or missing (the fork's static `SmFace::HasSeamProblem(eCrossed, eMissing)`),
-/// `pMerged->SplitAtSeam(..)` with its optional arguments left out, notifying through
-/// the merge's `notifications` when it has them.
-fn split_merged_face_at_seam(
-    k: &mut Kernel,
-    brep: &mut Brep,
-    notifications: Option<&mut edge::NotifyEnv<'_>>,
-    face: FaceId,
-) -> Result<()> {
-    use crate::heal::face_props::LoopObject;
-    use crate::nurbs::b_spline_surface::SurfParamType;
-    use crate::topology::brep::p1::HealLoopHandle;
-    let check = crate::topology::face::p4::has_seam_problem_in_brep_mut::<HealLoopHandle>(
-        k,
-        brep,
-        face,
-        crate::topology::face::p4::HasSeamProblemOptions::default(),
-    )?;
-    let problem = check.problem;
-    if problem.crossed == SurfParamType::Neither && problem.missing == SurfParamType::Neither {
-        return Ok(());
-    }
-    let (mut class_u, mut class_v) = (check.class_u, check.class_v);
-    crate::topology::face::p1::split_at_seam_notified(
-        k,
-        brep,
-        notifications,
-        face,
-        &mut class_u,
-        &mut class_v,
-        problem,
-        None,
-        &|o: HealLoopHandle| o.as_topology(),
-    )?;
-    Ok(())
-}
-
 /// Remove topological intersection edges and redundant vertices. `check_all_edges`
 /// defaults to true upstream; false checks only the intersection lists with live
 /// mates. In both modes the vertex list is the intersection list plus the deleted
@@ -745,7 +706,12 @@ pub(crate) fn boolean_post_process_with_notifications(
             // (`CoverCoincidentSurface`): the merged face is the periodic face whose seam
             // runs on through that part. Add the missing piece of the seam, splitting the
             // edges that cross it, as a face on a periodic surface has it.
-            split_merged_face_at_seam(k, brep, notifications.as_deref_mut(), keep)?;
+            crate::topology::face::p1::complete_merged_face_seam(
+                k,
+                brep,
+                notifications.as_deref_mut(),
+                keep,
+            )?;
         }
         if slits {
             // WR-304: an operand edge between two faces that are now one bounds the
