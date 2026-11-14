@@ -102,6 +102,10 @@
 //!   subpatch gives no solution is divided, and at the limits counts with that bound, its
 //!   control-point hull raised by the subpatch's rounding (its loose box when that has no
 //!   finite bound, a typed error when neither has).
+//!   Not the fork's (#13753): such a cell is set aside on its control points alone, a
+//!   solve's value in the face only raising the box so far, and at the limits it counts
+//!   with that bound too; the fork set a cell aside on its solve's value, which the
+//!   surface takes but need not be its greatest.
 //!   Not the fork's (#14460): a cell is divided only the ways a knot lies inside it while
 //!   either way has one, halved both ways only once it lies within one span each way.
 //!   The step-off loops keep upstream's bounds (20 rounds in the sector
@@ -1109,7 +1113,8 @@ fn loose_top(
         + (lo.z * dir.z).max(hi.z * dir.z))
 }
 
-/// A bound on `S . dir` over a cell [`face_directed_max`] leaves unsolved at its limits:
+/// A bound on `S . dir` over a cell [`face_directed_max`] leaves at its limits unsolved or
+/// with control points (#13753):
 /// its subpatch's control-point hull (`hull`, from [`patch_hull_max`]) raised by the
 /// subpatch's rounding ([`sub_patch_rounding`]); without a subpatch, or when that rounding
 /// has no finite bound (a weight not positive, a NaN or an overflow anywhere in the base's
@@ -1170,6 +1175,12 @@ fn unsolved_cell_top(
 /// A cell left at [`FACE_EXTREME_MAX_DEPTH`] or past [`FACE_EXTREME_MAX_CELLS`] counts
 /// with its greatest value, or unsolved with its own bound ([`unsolved_cell_top`]). The cells are an explicit stack (no recursion), taken last
 /// first, as the fork's.
+///
+/// Not the fork's (#13753): a solve's greatest is a value the surface takes, a lower
+/// bound on the cell's greatest, so the fork's 1.–3. on it can set aside a cell with a
+/// higher point the solve missed. A cell with control points ([`cell_patch`]) is decided
+/// on them: 1. on their greatest, 2. only raises `best`, 3. on their least, and at the
+/// limits it counts with its own bound.
 fn face_directed_max(
     k: &Kernel,
     lb: &mut LazyBrep<'_>,
@@ -1243,6 +1254,12 @@ fn face_directed_max_with<'b>(
         && !surface
             .is_closed(k, uv_domain, SurfParamType::V, None, false)?
             .0;
+    // How far a subpatch's control points may lie from their exact values (3. below).
+    let rounding = if by_patch {
+        patch_base(k, surface)?.and_then(sub_patch_rounding)
+    } else {
+        None
+    };
     let mut cells: Vec<(Extent2d, u32)> = vec![(*uv_domain, 0)];
     let mut divided = 0usize;
     while let Some((cell, depth)) = cells.pop() {
@@ -1266,7 +1283,27 @@ fn face_directed_max_with<'b>(
             .map(|(patch, _)| cell_sub_surface(surface, patch.clone()));
         let solve_on = sub.as_ref().unwrap_or(surface);
         let top = solve(lb, solve_on, &cell, dir)?;
-        if top.found {
+        if let Some((patch, hull)) = &patch {
+            // (#13753) A solved value is one the surface takes, no bound on the cell's
+            // greatest: the solve over a whole Mixed chamfer face found its edges' value
+            // and missed a dip of 7.2e-4 inside it. With the control points to bound the
+            // cell, a value in the face only raises `best` (2.), and 1. is asked again of
+            // the hull; 3. takes the least control point, less the subpatch's rounding.
+            if top.in_face {
+                best = best.max(top.top);
+            }
+            if *hull <= best + EFF_ZERO_SQRT {
+                continue;
+            }
+            if top.found
+                && !top.in_face
+                && patch_hull_max(patch, -dir)
+                    .zip(rounding)
+                    .is_some_and(|(least, rounding)| -least - rounding > best)
+            {
+                continue;
+            }
+        } else if top.found {
             if top.top <= best + EFF_ZERO_SQRT {
                 continue;
             }
@@ -1297,10 +1334,11 @@ fn face_directed_max_with<'b>(
             divided > limits.max_cells
         };
         if exhausted {
-            // Solved, the solver's greatest, above `best` (a lower one was passed over
-            // above). Unsolved, the cell's own bound, never below `best`: no point of the
-            // cell lies above it (#16249: its `-BIG_DOUBLE` threw away the box so far).
-            best = if top.found {
+            // Solved without control points, the solver's greatest, above `best` (a lower
+            // one was passed over above). Unsolved, or with control points (#13753), the
+            // cell's own bound, never below `best`: no point of the cell lies above it
+            // (#16249: its `-BIG_DOUBLE` threw away the box so far).
+            best = if top.found && patch.is_none() {
                 top.top
             } else {
                 best.max(unsolved_cell_top(
