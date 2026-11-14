@@ -166,6 +166,7 @@ fn a_rebuilt_history_that_cannot_be_inserted_falls_back_to_solids() {
         participants: Vec::new(),
         shell_piece_order: false,
         kernel_piece_order: false,
+        pattern_names_in_order: false,
         inserted: false,
         link_faces: Vec::new(),
         touching: solidcraft_doc::Touching::Separate,

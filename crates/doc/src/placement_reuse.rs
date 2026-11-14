@@ -113,6 +113,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 from,
                 corner: _,
                 to_body_apart: _,
+                picked_placements: _,
             } = extent;
             to.is_none() && from.is_none() && !through_all && components.get(&sketch.0) == Some(&f.component)
         }
@@ -219,6 +220,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         touching,
         shell_piece_order,
         kernel_piece_order,
+        pattern_names_in_order,
         inserted,
         link_faces,
         kind,
@@ -236,6 +238,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         && *touching == b.touching
         && *shell_piece_order == b.shell_piece_order
         && *kernel_piece_order == b.kernel_piece_order
+        && *pattern_names_in_order == b.pattern_names_in_order
         && *inserted == b.inserted
         && *link_faces == b.link_faces
         && match (kind, &b.kind) {

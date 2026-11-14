@@ -15,6 +15,110 @@ fn named_box(name: &str, width: f64, height: f64) -> ModelBody {
     result
 }
 
+/// `error` fails a sketch for one projection, the one kept by `name`, without printing the name.
+fn lost_one(error: &crate::DocError, name: &str) -> bool {
+    matches!(error, crate::DocError::LostProjections { links, .. } if links.len() == 1 && links[0].name == name) && !error.to_string().contains(name)
+}
+
+/// Five faces projected from `Source`, which goes: the sketch fails once, naming every projection
+/// by its source and curves and counting them, never by the faces' persistent names. Each link is
+/// marked lost and keeps its curves, and the message reads back as the sketch's.
+#[test]
+fn a_sketch_whose_projected_faces_are_gone_names_each_projection_as_the_user_sees_it() {
+    let doc = Document::default();
+    let mut initial = ModelState::default();
+    initial.bodies.push(named_box("Source", 20., 10.));
+    let plane = Plane::XY.offset(20.);
+    let source = LinkSource::Face { body: "Source".into(), at: Vec3::new(1., 1., 10.) };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
+    let mut sketch = Sketch::default();
+    for _ in 0..5 {
+        sketch.add_link(LinkKind::Project, source.clone(), &resolved.geom).unwrap();
+    }
+    for link in &mut sketch.links {
+        link.face_name = Some("shared:top".into());
+    }
+    let saved = sketch.clone();
+    let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &ModelState::default(), &plane, &mut sketch).unwrap_err().in_feature("Outline");
+    let crate::DocError::LostProjections { links, .. } = &error else { panic!("{error}") };
+    let ids: Vec<&str> = links.iter().map(|l| l.link.as_str()).collect();
+    assert_eq!(ids, saved.links.iter().map(|l| l.id.as_str()).collect::<Vec<_>>());
+    let first = &links[0];
+    assert_eq!(first.what, "projected face of Source");
+    assert_eq!(first.curves, saved.link_curves(&first.link).iter().map(|&c| saved.curves[c].id.clone()).collect::<Vec<_>>());
+    assert_eq!(first.curves.len(), 4, "the face's four edges");
+    assert!(sketch.links.iter().all(|l| !l.lost), "the failing refresh marks nothing in the sketch it was given");
+    assert_eq!(sketch.curves, saved.curves);
+    let text = error.to_string();
+    assert!(!text.contains("shared:top"), "{text}");
+    assert!(text.starts_with("Outline: 5 projected references are lost: projected face of Source (curves l1, l2, l3, l4), "), "{text}");
+    assert!(text.ends_with(" and 2 more; delete each projection or project it again"), "{text}");
+    let read = crate::lost_projection_parts(&text).unwrap();
+    assert_eq!((read.feature, read.count, read.more), ("Outline", 5, 2));
+    assert!(read.listed.starts_with("projected face of Source (curves l1, l2, l3, l4)") && !read.listed.ends_with("more"), "{}", read.listed);
+    assert_eq!(crate::reselect_parts(&text), None);
+
+    let one = crate::DocError::LostProjections { feature: String::new(), links: vec![first.clone()] }.in_feature("Outline").to_string();
+    assert_eq!(one, "Outline: projected face of Source (curves l1, l2, l3, l4) is lost; delete the projection or project it again");
+    let listed = "projected face of Source (curves l1, l2, l3, l4)";
+    assert_eq!(crate::lost_projection_parts(&one), Some(crate::LostProjectionsText { feature: "Outline", count: 1, listed, more: 0 }));
+    // Read back by its own wording: a sketch name holding ": " or a projection's kind, and the
+    // error of a feature built from the sketch, which puts its own words in front.
+    for feature in [
+        "Base: top",
+        "sketch `Base: top` failed: Base: top",
+        "Base: projected top",
+        "Sketch3: included rim",
+        "sketch `projected outline` failed: projected outline",
+    ] {
+        let renamed = error.clone().to_string().replacen("Outline", feature, 1);
+        let read = crate::lost_projection_parts(&renamed).unwrap();
+        assert_eq!((read.feature, read.count, read.more), (feature, 5, 2), "{renamed}");
+        let one = one.replacen("Outline", feature, 1);
+        assert_eq!(crate::lost_projection_parts(&one), Some(crate::LostProjectionsText { feature, count: 1, listed, more: 0 }), "{one}");
+    }
+}
+
+/// A projection's label names its kind and lists its curves, four of them and then "…", or its
+/// points when it gives no curve; a link of each kind lost by name is named by its kind.
+#[test]
+fn a_lost_projection_is_labelled_by_its_kind_and_its_curves_or_points() {
+    let lost = |curves: &[&str], points: &[&str]| crate::LostProjection {
+        link: "j1".into(),
+        what: "projected face of Source".into(),
+        curves: curves.iter().map(|c| c.to_string()).collect(),
+        points: points.iter().map(|p| p.to_string()).collect(),
+        name: "shared:top".into(),
+    };
+    assert_eq!(lost(&["l1", "l2", "l3", "l4", "a1", "a2"], &["p1"]).label(), "projected face of Source (curves l1, l2, l3, l4, …)");
+    assert_eq!(lost(&["l1", "l2", "l3", "l4"], &[]).label(), "projected face of Source (curves l1, l2, l3, l4)");
+    assert_eq!(lost(&["l1"], &["p1", "p2"]).label(), "projected face of Source (curve l1)");
+    assert_eq!(lost(&[], &["p1"]).label(), "projected face of Source (point p1)");
+    assert_eq!(lost(&[], &["p1", "p2"]).label(), "projected face of Source (points p1, p2)");
+    assert_eq!(lost(&[], &[]).label(), "projected face of Source");
+
+    let doc = Document::default();
+    let mut initial = ModelState::default();
+    initial.bodies.push(named_box("Source", 20., 10.));
+    let plane = Plane::XY.offset(20.);
+    let source = LinkSource::Face { body: "Source".into(), at: Vec3::new(1., 1., 10.) };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
+    for (kind, what) in [
+        (LinkKind::Project, "projected face of Source"),
+        (LinkKind::Intersect, "intersected face of Source"),
+        (LinkKind::Include, "included face of Source"),
+    ] {
+        let mut sketch = Sketch::default();
+        sketch.add_link(kind, source.clone(), &resolved.geom).unwrap();
+        sketch.links[0].face_name = Some("shared:top".into());
+        let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &ModelState::default(), &plane, &mut sketch).unwrap_err();
+        let crate::DocError::LostProjections { links, .. } = &error else { panic!("{kind:?}: {error}") };
+        assert_eq!(links.iter().map(|l| l.what.as_str()).collect::<Vec<_>>(), [what], "{kind:?}");
+        let text = error.in_feature("Outline").to_string();
+        assert_eq!(crate::lost_projection_parts(&text).map(|t| (t.feature, t.count)), Some(("Outline", 1)), "{text}");
+    }
+}
+
 #[test]
 fn named_manual_projection_keeps_its_body_and_face_at_shared_boundaries() {
     let doc = Document::default();
@@ -41,9 +145,9 @@ fn named_manual_projection_keeps_its_body_and_face_at_shared_boundaries() {
     let saved = sketch.clone();
     let mut missing = ModelState::default();
     missing.bodies.push(named_box("Control", 5., 10.));
-    // Its body gone, the named face finds nothing: the sketch fails, asking for it again.
+    // Its body gone, the named face finds nothing: the sketch fails, naming the projection.
     let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &missing, &plane, &mut sketch).unwrap_err();
-    assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == "shared:top"), "{error}");
+    assert!(lost_one(&error, "shared:top"), "{error}");
     assert_eq!(sketch.curves, saved.curves);
     assert_eq!(sketch.points, saved.points);
     assert_eq!(sketch.links[0].id, link);
@@ -180,7 +284,7 @@ fn numbered_round_face_projection_recovers_the_whole_face() {
     let mut outside = doc.sketch(3).unwrap().clone();
     outside.links[0].source = LinkSource::Face { body: "Body1".into(), at: Vec3::new(-19.87, -2.3, 12.) };
     let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &state, &Plane::YZ, &mut outside).unwrap_err();
-    assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == "F2:side:c1#1"), "{error}");
+    assert!(lost_one(&error, "F2:side:c1#1"), "{error}");
 }
 
 #[test]
@@ -457,7 +561,7 @@ fn numbered_edge_projection_recovers_the_edge_between_whole_faces() {
     let mut elsewhere = saved;
     elsewhere.links[0].source = LinkSource::Edge { body: "Ring".into(), at: Vec3::new(0., -10., 5.) };
     let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &state, &Plane::XY, &mut elsewhere).unwrap_err();
-    assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == numbered), "{error}");
+    assert!(lost_one(&error, numbered), "{error}");
 }
 
 /// A drafted face's edge is a circle seen at a slant: an ellipse. The sketch takes it as the
@@ -614,11 +718,17 @@ fn named_vertex_projection_moves_past_closer_neighbor_and_fails_when_removed() {
     // Plane::XZ has local y_dir = -Z, so z = 40 projects to local y = -40.
     assert!((pt.x - 10.0).abs() < 1e-6 && (pt.y + 40.0).abs() < 1e-6, "vertex followed to height 40: {pt:?}");
 
-    // If the top face is gone, the named vertex fails with Reselect instead of snapping elsewhere.
+    // If the top face is gone, the named vertex fails the sketch, named as a projected vertex with
+    // its point, instead of snapping elsewhere.
     let mut renamed = taller;
     renamed.bodies[0].names = crate::naming::NameCell::known(Arc::new(vec!["other".into(); 6]));
     let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &renamed, &plane, &mut sketch).unwrap_err();
-    assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == &vertex_name), "{error}");
+    assert!(lost_one(&error, &vertex_name), "{error}");
+    let point = &sketch.points[sketch.link_points(&link_id)[0]].id;
+    assert_eq!(
+        error.to_string(),
+        format!("this sketch: projected vertex of Block (point {point}) is lost; delete the projection or project it again")
+    );
 }
 
 #[test]

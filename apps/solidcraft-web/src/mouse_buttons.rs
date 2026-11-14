@@ -13,6 +13,9 @@
 //! for its state to match it. The canvas also captures the pointer on `pointerdown`, so the
 //! release still arrives when it happens outside the canvas or the window; `pointercancel`,
 //! `lostpointercapture`, the window losing focus and the page being hidden release everything.
+//! The focus moving inside the page releases nothing: eframe moves it between the canvas and its
+//! hidden text input whenever a text field takes or gives up the keyboard, as a value box does
+//! while its manipulator is dragged.
 //! (A shim here, not a patch to eframe: its listeners stay as they are, this only adds what
 //! they miss.)
 
@@ -42,6 +45,11 @@ pub enum Happened {
     /// `pointercancel`, `lostpointercapture`, the window losing focus or the page being hidden:
     /// whatever was held won't be heard released.
     Lost,
+    /// `blur` as the window's capture listener hears it: `of_window` when the window itself lost
+    /// the focus (the same as [`Happened::Lost`]). Otherwise an element inside the page gave the
+    /// focus to another, heard on its way down to that element, and the buttons are held as
+    /// they were (#16209).
+    Blur { of_window: bool },
 }
 
 /// The listeners' state: the latest observation, waiting for the next frame.
@@ -61,7 +69,8 @@ impl Tracker {
                 self.on_canvas |= down_on_canvas;
                 buttons
             }
-            Happened::Lost => 0,
+            Happened::Lost | Happened::Blur { of_window: true } => 0,
+            Happened::Blur { of_window: false } => return false,
         };
         let observed = Observed { buttons, on_canvas: self.on_canvas };
         if buttons == 0 {
@@ -178,9 +187,23 @@ mod web {
                 }
             }
         };
-        for name in ["pointercancel", "lostpointercapture", "blur"] {
+        for name in ["pointercancel", "lostpointercapture"] {
             let lost = lost.clone();
             listen(name, Box::new(move |_| lost()));
+        }
+        // `blur` doesn't bubble, but a capture listener on the window hears every element's on
+        // its way down, not only the window's own.
+        {
+            let (tracker, ctx) = (tracker.clone(), ctx.clone());
+            listen(
+                "blur",
+                Box::new(move |e: web_sys::Event| {
+                    let of_window = e.target().is_some_and(|t| t.dyn_ref::<web_sys::Window>().is_some());
+                    if tracker.borrow_mut().note(Happened::Blur { of_window }) {
+                        ctx.request_repaint();
+                    }
+                }),
+            );
         }
         let document = window.document();
         listen(
@@ -298,6 +321,32 @@ mod tests {
         assert_eq!(down, NONE);
         // Held from before this tracker heard anything (a stale state) is released too.
         let (down, _) = frame(&mut t, held(&[PointerButton::Extra1]), &[], Happened::Lost);
+        assert_eq!(down, NONE);
+    }
+
+    /// #16209: a manipulator's value box takes the keyboard while the manipulator is dragged, so
+    /// eframe moves the focus from the canvas to its hidden text input, and a press on the canvas
+    /// takes it back. Either way an element inside the page blurs and the window hears it. The
+    /// button is still held: letting it go there ended every such drag as it began.
+    #[test]
+    fn focus_moving_inside_the_page_keeps_the_buttons_held() {
+        let mut t = Tracker::default();
+        let (down, _) = frame(&mut t, NONE, &[press(PointerButton::Primary, true)], pointer(0b01, true));
+        let (down, fixes) = frame(&mut t, down, &[], Happened::Blur { of_window: false });
+        assert!(fixes.is_empty(), "the press is not let go: {fixes:?}");
+        assert_eq!(down, held(&[PointerButton::Primary]));
+        assert!(!t.note(Happened::Blur { of_window: false }), "and no frame is asked for");
+        assert_eq!(t.take(), None);
+        // The drag goes on, and a second button still joins it: the press was on the canvas.
+        let (down, fixes) = frame(&mut t, down, &[Event::PointerMoved(Pos2::new(30.0, 40.0))], pointer(0b01, false));
+        assert!(fixes.is_empty() && down == held(&[PointerButton::Primary]), "{fixes:?}");
+        let (down, _) = frame(&mut t, down, &[], Happened::Blur { of_window: false });
+        let (down, fixes) = frame(&mut t, down, &[], pointer(0b11, false));
+        assert_eq!(fixes.len(), 1, "{fixes:?}");
+        assert_eq!(down, held(&[PointerButton::Primary, PointerButton::Secondary]));
+        // The window itself losing the focus still lets go of everything.
+        let (down, fixes) = frame(&mut t, down, &[], Happened::Blur { of_window: true });
+        assert_eq!(fixes, vec![press(PointerButton::Primary, false), press(PointerButton::Secondary, false)]);
         assert_eq!(down, NONE);
     }
 

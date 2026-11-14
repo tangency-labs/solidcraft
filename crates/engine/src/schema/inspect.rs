@@ -697,6 +697,26 @@ impl From<solidcraft_sketch::SolveStatus> for SketchStatus {
     }
 }
 
+/// The design's id and the revision its contents were last seen under (`document.revision`):
+/// the command reads no keys.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DocumentRevisionParams {}
+
+/// What `document.revision` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RevisionResult {
+    /// This open design's id: kept while it stays open, another for each design started or opened.
+    pub document_id: String,
+    /// What the design was last seen under: a new number whenever the design, what is hidden or a
+    /// component's uncaptured position changes, never on a selection or a view; from one counter
+    /// for the whole run, so it never repeats.
+    pub revision: u64,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// How `inspect.measure` selects: bodies, or one or two picked items. With `items`, `bodies` and
 /// `names_only` are not read, so the check leaves them alone.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1208,7 +1228,23 @@ pub struct SketchPoint {
     pub fixed: bool,
     /// For a linked point: the link that owns it; `null` otherwise.
     pub link: Option<String>,
+    /// For a point placed by parameters: the expressions that place it (a coordinate without one
+    /// is the number in `at`). Such a point is `fixed` and follows them; release it with
+    /// `sketch.constraint.fix` and `fixed: false`. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fixed_by: Option<PointFixedBy>,
     pub fully_constrained: bool,
+}
+
+/// The expressions that place a point, over the design's parameters.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PointFixedBy {
+    /// The x coordinate's expression; absent when x is a plain number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub x: Option<String>,
+    /// The y coordinate's expression; absent when y is a plain number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub y: Option<String>,
 }
 
 /// A constraint or dimension: its id, its kind's name and the kind's own fields (`type`, then

@@ -64,6 +64,9 @@ pub enum PlaneRef {
     /// Another plane rotated about a line (in world coordinates) by an angle expression. With
     /// `line`, an edge or round face of the model ([`crate::construct::model_axis`]), the line is
     /// found there on each evaluation and `axis_origin`/`axis_dir` are where it was when picked.
+    /// `line` can also be a construction axis ([`crate::construct::GeoRef::Axis`], by name),
+    /// found on each evaluation the same way; without `line`, `axis_origin`/`axis_dir` are the
+    /// fixed axis (how designs saved before a construction axis was followed hold one).
     /// With `direction_only`, only the axis direction is used: it is projected onto the base
     /// (nothing of that projection is kept as geometry) and the plane turns about the line
     /// through `pivot`, or through the base origin when `pivot` is absent.
@@ -393,6 +396,20 @@ pub struct Extent {
     /// it set, so they keep the bodies they were built with.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub to_body_apart: bool,
+    /// Where each other component stood, relative to this extrude's own, when To / From Object
+    /// was picked (#16732). The pick is measured against the model as it was then, so a joint
+    /// that slides the drawer does not stretch a body that ends at the frame. Designs saved
+    /// before it carry none and keep measuring against the placements shown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub picked_placements: Vec<PickedPlacement>,
+}
+
+/// A component's placement relative to a feature's own component, as it was when the feature
+/// picked something in it ([`Extent::picked_placements`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PickedPlacement {
+    pub component: u64,
+    pub placement: crate::Mat,
 }
 
 /// Thin Extrude: a wall of constant thickness along sketch curves instead of the profiles.
@@ -2856,11 +2873,19 @@ mod opt_point_expr {
 }
 
 impl FeatureKind {
-    /// A sheet metal feature (its result depends on the sheet metal rules).
+    /// A plastic part feature: a boss, lip, snap fit or rest (its result depends on the plastic
+    /// rules).
     pub fn is_plastic(&self) -> bool {
         matches!(self, FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. })
     }
 
+    /// Construction geometry: a construction plane, axis or point (the browser's Construction
+    /// folder; every feature may read them by name).
+    pub fn is_construction(&self) -> bool {
+        matches!(self, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
+    }
+
+    /// A sheet metal feature (its result depends on the sheet metal rules).
     pub fn is_sheet(&self) -> bool {
         matches!(
             self,
@@ -3263,6 +3288,13 @@ pub struct Feature {
     /// mean that numbering.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub kernel_piece_order: bool,
+    /// This body Pattern reads its stored `body_names` in the order it makes its copies, as builds
+    /// before #12114 read them, instead of by source and copy number. Set on the Patterns of
+    /// several bodies in designs saved before then, whose stored names mean that order. The
+    /// session stores such a Pattern's names again as its copies have them and clears it
+    /// (`Session::pin_body_names`), so later count changes keep each name with its source.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pattern_names_in_order: bool,
     /// Made by inserting a file (STEP, IGES or a mesh file) into the design: the feature built
     /// the component tree its component is the top of, and deleting it removes that tree
     /// ([`Document::remove_component_tree`]). Not set on other imported bodies, such as the
@@ -3307,6 +3339,35 @@ impl Feature {
                 stored.clone_from(name);
             }
         }
+    }
+
+    /// Whether the session keeps exactly the names of the bodies the feature makes now, none
+    /// more: a Pattern of several bodies reads its stored names source by source, so a name left
+    /// over from a higher count would move every later source's names to other copies (#12114).
+    pub fn pins_every_body_name(&self) -> bool {
+        matches!(&self.kind, FeatureKind::Pattern { bodies, .. } if bodies.len() > 1)
+    }
+
+    /// When a body Pattern's bodies change from `old`, move its stored names with their sources:
+    /// each source it still copies keeps its copies' names, and a new source's copies get new
+    /// names (#12114). Names still read in order (`pattern_names_in_order`) stay as they are, as
+    /// they did before then.
+    pub fn keep_pattern_names_with_sources(&mut self, old: &[BodyName]) {
+        let FeatureKind::Pattern { bodies, .. } = &self.kind else { return };
+        if self.pattern_names_in_order || old.is_empty() || bodies.as_slice() == old || !self.body_names.len().is_multiple_of(old.len()) {
+            return;
+        }
+        let per = self.body_names.len() / old.len();
+        let names: Vec<String> = bodies
+            .iter()
+            .flat_map(|b| {
+                let start = old.iter().position(|o| o == b).and_then(|j| j.checked_mul(per));
+                start
+                    .and_then(|start| self.body_names.get(start..start.saturating_add(per)))
+                    .map_or_else(|| vec![String::new(); per], <[String]>::to_vec)
+            })
+            .collect();
+        self.body_names = names;
     }
 }
 
@@ -4393,6 +4454,7 @@ impl Document {
             participants: Vec::new(),
             shell_piece_order: false,
             kernel_piece_order: false,
+            pattern_names_in_order: false,
             inserted: false,
             link_faces: Vec::new(),
             touching: Touching::Separate,

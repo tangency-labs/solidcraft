@@ -65,9 +65,8 @@
 //! - **Side edge run on (WR-610, #960).** With `fixes.fillet_trace_reaches_rails`,
 //!   `RailEdgeuseIntersect` widens a straight side edge's parameter interval on a planar
 //!   base surface past both ends (`run_side_edge_on_along_its_line`, the fork's
-//!   tangency-labs/smlib@6e77631). With `fixes.fillet_run_on_past_far_end_only` too, past
-//!   the end away from the filleted edge's vertex only (WR-643, the fork's
-//!   tangency-labs/smlib@7224896). With `fixes.fillet_run_on_bspline_trims` too, a widened
+//!   tangency-labs/smlib@6e77631), past the end away from the filleted edge's vertex
+//!   only (WR-643, the fork's tangency-labs/smlib@7224896). With `fixes.fillet_run_on_bspline_trims` too, a widened
 //!   side edge's B-spline UV trim (its local copy) evaluates out of bounds, so it runs on
 //!   along its line as a line trim does instead of clamping to its ends
 //!   (`continue_bspline_trim_past_its_ends`, WR-654, #1981). With far-end-only (and WR-600,
@@ -88,6 +87,10 @@
 //!   other's not ([`crate::blend::fillet_exact::classify_ball_on_collapsed_offset`]) is
 //!   [`FilletSolver::calc_ball_triangle_fillet_geom`]: the blend
 //!   corner's Ball patch (`sm_BallTrianglePatch`) on the ball's sphere.
+//! - **Planar rail crossings.** Constant offsets of analytic planes give an affine
+//!   rail/rail system on their exact continuations. It is solved without patch-domain
+//!   bounds: a corner's rails can meet farther past a short edge than half its span.
+//!   The later rail classification and trimming still use the faces' boundaries.
 
 use crate::blend::fillet_custom_solver::OffsetSurface;
 use crate::blend::fillet_exact::{BlendQuadric, ExactBlend, QuadricKind};
@@ -207,6 +210,28 @@ fn invalid(reason: &'static str) -> SolidError {
 
 fn sm_err() -> SolidError {
     SolidError::blend_failed(OP, "the solver has no fillet geometry for this case")
+}
+
+/// Whether this solver's offset equations are affine over the whole parameter plane.
+/// Analytic planes retain their affine parameterization on their exact extensions.
+fn planar_constant_offsets(ops: &dyn FilletSolverOps) -> Result<bool> {
+    if !ops.uses_constant_offset_equations() {
+        return Ok(false);
+    }
+    for rail in 0..2 {
+        let Some(slot) = ops.solver().surface(rail)? else {
+            return Ok(false);
+        };
+        if !slot.surface.surface.allow_extension()
+            || !matches!(
+                slot.surface.base_surface().kind(),
+                crate::surface::surface::SurfaceKind::Plane(_)
+            )
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// The analytic fillet geometry a `Calc*FilletGeom` method builds before storing it into
@@ -518,16 +543,7 @@ fn run_side_edge_on_along_its_line(
         let past = reach * edge_ivl.length() / length;
         let (in_lo, in_hi) = line_in_domain(k, uv_trim, &edge_ivl, domain)?;
         let (past_lo, past_hi) = (past.max(in_lo), past.max(in_hi));
-        if !k.fixes.fillet_run_on_past_far_end_only {
-            set_interval(
-                intervals,
-                0,
-                Extent1d::from_min_max(edge_ivl.min() - past_lo, edge_ivl.max() + past_hi),
-            );
-            return Ok(true);
-        }
-        // Opt-in (`fixes.fillet_run_on_past_far_end_only`, WR-643; the fork's
-        // tangency-labs/smlib@7224896): only past the end away from the corner. The side
+        // WR-643 (the fork's tangency-labs/smlib@7224896): only past the end away from the corner. The side
         // edge leaves the corner's vertex into the sector the blend fills, and a point of
         // its line behind that vertex lies on the far side of the filleted edge, where no
         // rail of the blend can be.
@@ -1610,7 +1626,7 @@ impl FilletSolver {
     }
 
     /// `CalcSphereFilletGeom(rTsectPnts, pFilletGeom)` (a fork addition, not in the pinned
-    /// upstream; opt-in `Kernel::fixes.fillet_corner_ball_patch`, WR-420): builds the
+    /// upstream; WR-420): builds the
     /// corner ball's patch ([`FilletSolver::sphere_fillet_geom_parts`]) and stores it
     /// into `fillet_geom` (`m_vFilletGeoms[0]` for `None`) of the pseudo B-rep `pseudo`.
     ///
@@ -1687,39 +1703,15 @@ impl FilletSolver {
             return Err(sm_err());
         }
 
-        let (center, axes) = if k.fixes.fillet_corner_ball_center_from_axes {
-            // Not upstream (WR-541, the fork's tangency-labs/smlib@bc6ddf9): the ball's
-            // centre is where the axes meet. Not the trace's points: at the edge's end where
-            // the contact circles meet both offset cylinders collapse onto their axes, so a
-            // point of their intersection fixes neither base parameter round its axis, and
-            // its solve stops a step short of the axes' crossing.
-            let axes = [cylinders[0].1.unitize()?, cylinders[1].1.unitize()?];
-            let center = axes_meet(cylinders[0].0, axes[0], cylinders[1].0, axes[1], tol)
-                .ok_or_else(sm_err)?;
-            (center, axes)
-        } else {
-            // the ball's centre: every TsectPnt's, where the axes meet
-            let center = eval_offset(k, ops.solver_mut(), 0, t_first.uv_pos(SrfIndex::First))?;
-            for t in tsects {
-                let c0 = eval_offset(k, ops.solver_mut(), 0, t.uv_pos(SrfIndex::First))?;
-                let c1 = eval_offset(k, ops.solver_mut(), 1, t.uv_pos(SrfIndex::Second))?;
-                if c0.distance(center) > tol || c1.distance(center) > tol {
-                    return Err(sm_err());
-                }
-            }
-            let axes = [cylinders[0].1.unitize()?, cylinders[1].1.unitize()?];
-            for (c, axis) in cylinders.iter().zip(axes) {
-                let off = center - c.0;
-                if (off - axis * off.dot(axis)).length() > tol {
-                    return Err(sm_err());
-                }
-            }
-            (center, axes)
-        };
+        // Not upstream (WR-541, the fork's tangency-labs/smlib@bc6ddf9): the ball's
+        // centre is where the axes meet. Not the trace's points: at the edge's end where
+        // the contact circles meet both offset cylinders collapse onto their axes, so a
+        // point of their intersection fixes neither base parameter round its axis, and
+        // its solve stops a step short of the axes' crossing.
+        let axes = [cylinders[0].1.unitize()?, cylinders[1].1.unitize()?];
+        let center =
+            axes_meet(cylinders[0].0, axes[0], cylinders[1].0, axes[1], tol).ok_or_else(sm_err)?;
         let mut turn_axis = axes[0].cross(axes[1]);
-        if !k.fixes.fillet_corner_ball_center_from_axes && turn_axis.length() < EFF_ZERO_SQRT {
-            return Err(sm_err()); // parallel cylinders: the centres fill a line, not this case
-        }
         turn_axis = turn_axis.unitize()?;
 
         // the edge's ends, and where the ball touches each cylinder in their cross-sections
@@ -2281,6 +2273,8 @@ impl FilletSolver {
             return Err(sm_err());
         }
 
+        let affine = planar_constant_offsets(ops)? && planar_constant_offsets(other)?;
+
         // Set up Solver Size
         let jacobian_size = ops.jacobian_size()?;
         let other_jacobian_size = other.jacobian_size()?;
@@ -2405,7 +2399,12 @@ impl FilletSolver {
                 RailRailIntersectEnfo::new(rail_index, ops, other_rail_index, other),
                 k,
             );
-            let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
+            // A planar corner's contacts can lie on the supports' continuations.
+            // Half a patch's span bounds neither its plane nor the rails' crossing.
+            // The affine system needs no search bounds; face containment is checked
+            // when the resulting rails are classified and trimmed.
+            let bounds = (!affine).then_some(&intervals);
+            let mut ls = LocalSolveNd::new(&mut eval, bounds, Some(&periodicities));
             ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
             ls.set_desired_accuracy(EFF_ZERO_SQ);
             ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
@@ -3379,21 +3378,16 @@ mod tests {
     }
 
     /// The parameter interval of a side edge use that `RailEdgeuseIntersect` loads,
-    /// with `fillet_trace_reaches_rails` and `fillet_run_on_past_far_end_only` as given,
-    /// on a 10 cube: the filleted edge is the top front edge (0,0,10)-(10,0,10). The side
+    /// with `fillet_trace_reaches_rails`, on a 10 cube: the filleted edge is the top front edge (0,0,10)-(10,0,10). The side
     /// edge is the top left edge, (0,0,10)-(0,10,10), which meets it at the corner (0,0,10),
     /// or, with `at_corner` false, the top back edge, (0,10,10)-(10,10,10), which does not.
     /// Returns the loaded interval, the side edge use's natural interval, and the end of
     /// it (0 start, 1 end) at the corner, if any.
-    fn run_on_interval(
-        far_end_only: bool,
-        at_corner: bool,
-    ) -> ((f64, f64), (f64, f64), Option<usize>) {
+    fn run_on_interval(at_corner: bool) -> ((f64, f64), (f64, f64), Option<usize>) {
         use crate::primitive::api_primitives::create_box;
         use crate::topology::vertex;
         let mut k = Kernel::default();
         k.fixes.fillet_trace_reaches_rails = true;
-        k.fixes.fillet_run_on_past_far_end_only = far_end_only;
         let mut ops = jacobian_size_ops(&k, 2);
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
         let ends = |b: &Brep, e: EdgeId| {
@@ -3451,28 +3445,28 @@ mod tests {
         )
     }
 
-    /// WR-643 (the SolidCraft fork's tangency-labs/smlib@7224896): with
-    /// `fillet_run_on_past_far_end_only`, the side edge runs on past its far end only,
-    /// never behind the filleted edge's vertex (where the fork's knife-edge round took the
-    /// ball's mirror image); without it, past both ends (WR-610), as does a side edge that
-    /// does not meet the filleted edge.
+    /// WR-643 (the SolidCraft fork's tangency-labs/smlib@7224896): the side edge runs on
+    /// past its far end only, never behind the filleted edge's vertex (where the fork's
+    /// knife-edge round took the ball's mirror image); a side edge that does not meet the
+    /// filleted edge runs on past both ends (WR-610).
     #[test]
     fn wr643_side_edge_runs_on_past_its_far_end_only() {
-        // WR-610 alone: past both ends, also behind the corner
-        let ((lo, hi), (a, z), corner_end) = run_on_interval(false, true);
+        // never behind the corner
+        let ((lo, hi), (a, z), corner_end) = run_on_interval(true);
         let corner_end = corner_end.expect("the side edge meets the filleted edge");
-        let past = a - lo;
-        assert!(past > 0.0, "the side edge runs on: {lo} from {a}");
-        assert_eq!((lo, hi), (a - past, z + past));
-        // with the flag: never behind the corner
-        let on = run_on_interval(true, true).0;
-        if corner_end == 0 {
-            assert_eq!(on, (a, z + past));
+        let past = if corner_end == 0 {
+            assert_eq!(lo, a);
+            hi - z
         } else {
-            assert_eq!(on, (a - past, z));
-        }
+            assert_eq!(hi, z);
+            a - lo
+        };
+        assert!(
+            past > 0.0,
+            "the side edge runs on: {lo}..{hi} from {a}..{z}"
+        );
         // a side edge with no end on the filleted edge still runs on past both
-        let ((lo, hi), (a, z), none) = run_on_interval(true, false);
+        let ((lo, hi), (a, z), none) = run_on_interval(false);
         assert_eq!(none, None);
         assert_eq!((lo, hi), (a - past, z + past));
     }

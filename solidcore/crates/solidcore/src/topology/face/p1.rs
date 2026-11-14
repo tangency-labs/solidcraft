@@ -14,6 +14,7 @@
 //! | [`calculate_uv_domain_from_uv_trim_curves`], [`calculate_uv_domain_from_uv_trim_curves_into`], [`UvDomainFromTrim`] | `SmFace::CalculateUVDomainFromUVTrimCurves` |
 //! | [`create_oriented_trim_boundary`], [`OrientedTrimBoundary`] | `SmFace::CreateOrientedTrimBoundary` |
 //! | [`find_if_rectangular_trim`], [`RectangularTrim`] | `SmFace::FindIfRectangularTrim`          |
+//! | [`trim_boundary_rectangle`]                  | (none: `FindIfRectangularTrim` without its edge count) |
 //! | [`flip_face_orientation`]                    | `SmFace::FlipFaceOrientation`                |
 //! | [`turn_over`]                                | (none: [`swap_uv`] on a face of one shell)   |
 //! | [`set_surface`], [`set_surface_notified`]    | `SmFace::SetSurface`                         |
@@ -1057,6 +1058,15 @@ pub struct RectangularTrim {
     pub natural: bool,
 }
 
+impl RectangularTrim {
+    /// Not rectangular: the "inside out" domain, neither flag.
+    pub const NONE: Self = Self {
+        uv_domain: Extent2d::new(),
+        rectangular: false,
+        natural: false,
+    };
+}
+
 /// `FindIfRectangularTrim`: whether the face is bounded by one loop of four iso UV
 /// trim curves (after filling pole gaps), and that rectangle.
 ///
@@ -1072,22 +1082,43 @@ pub fn find_if_rectangular_trim(
     f: FaceId,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
 ) -> Result<RectangularTrim> {
-    // init return value
-    let mut out = RectangularTrim {
-        uv_domain: Extent2d::new(),
-        rectangular: false,
-        natural: false,
-    };
-
     // naturally trimmed faces may only have 1 loop
     let face_loops = fp2::loops(b, f, false, None)?;
     let [l] = face_loops.as_slice() else {
-        return Ok(out);
+        return Ok(RectangularTrim::NONE);
     };
 
     // naturally trimmed face outer loops with no poles have 4 edges, with poles 3 or 2.
     let n_edges = lu1::loop_edges(b, *l)?.len();
     if !(2..=4).contains(&n_edges) {
+        return Ok(RectangularTrim::NONE);
+    }
+
+    trim_boundary_rectangle(k, b, f, key_of)
+}
+
+/// (Not upstream) [`find_if_rectangular_trim`] without its count of the loop's edges: the
+/// face's trim boundary alone decides, one loop that is four iso UV curves once its gaps
+/// at the surface's singularities are filled ([`create_oriented_trim_boundary`]), and
+/// whether their rectangle is the surface's natural domain. The count, which expects a
+/// pole to be an edge, refuses a face whose pole is a point: the face
+/// `CreateFaceFromSurface` makes on a sphere's whole box has one edge, its seam used twice
+/// (the degenerate pole sides are dropped), and its boundary is the natural rectangle.
+///
+/// # Errors
+///
+/// As [`find_if_rectangular_trim`].
+pub fn trim_boundary_rectangle(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+) -> Result<RectangularTrim> {
+    // init return value
+    let mut out = RectangularTrim::NONE;
+
+    // naturally trimmed faces may only have 1 loop
+    if fp2::loops(b, f, false, None)?.len() != 1 {
         return Ok(out);
     }
 

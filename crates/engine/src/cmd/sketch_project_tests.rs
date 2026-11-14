@@ -556,10 +556,10 @@ fn deleting_one_edge_of_a_projected_face_keeps_the_others_as_they_were() {
     assert!(s.doc.sketch(id).unwrap().links.is_empty());
 }
 
-/// The edge a projection was made from goes with its body: the sketch fails, asking for the edge
-/// again, instead of keeping a lost link.
+/// The edge a projection was made from goes with its body: the sketch fails, naming the
+/// projection by its body and curve, instead of keeping a lost link.
 #[test]
-fn a_reference_whose_body_is_gone_fails_its_sketch_asking_for_it_again() {
+fn a_reference_whose_body_is_gone_fails_its_sketch_naming_the_lost_projection() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
     let boxf = s.doc.features.last().unwrap().id;
@@ -569,7 +569,10 @@ fn a_reference_whose_body_is_gone_fails_its_sketch_asking_for_it_again() {
     let name = s.doc.sketch(s.doc.features.last().unwrap().id).unwrap().links[0].edge_name.clone().unwrap();
     run(&mut s, "timeline.suppress", json!({"feature": boxf, "suppressed": true}));
     let r = s.model.results.last().unwrap();
-    assert_eq!(r.error.as_deref().and_then(solidcraft_doc::reselect_parts), Some((r.name.as_str(), name.as_str())), "{r:?}");
+    let error = r.error.as_deref().unwrap_or_default();
+    let read = solidcraft_doc::lost_projection_parts(error).map(|t| (t.feature, t.count, t.listed));
+    assert_eq!(read, Some((r.name.as_str(), 1, "projected edge of Body1 (curve l1)")), "{r:?}");
+    assert!(!error.contains(&name), "{error}");
 }
 
 #[test]
@@ -1013,7 +1016,7 @@ fn sweeps_and_pipes_follow_3d_sketch_curves() {
 
 /// #47: references to other bodies: an edge, a face's loops and a silhouette of a second body
 /// project into a sketch on the first; they follow an edit of that body (a parameter), and when
-/// it goes away the sketch fails, asking for the named edge again, not crashed on.
+/// it goes away the sketch fails, naming the edge it included as lost, not crashed on.
 #[test]
 fn project_and_include_from_other_bodies() {
     let mut s = Session::default();
@@ -1043,17 +1046,18 @@ fn project_and_include_from_other_bodies() {
     let id = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. })).unwrap().id;
     let si = run(&mut s, "sketch.inspect", json!({"sketch": id}));
     assert!(xs(&si).iter().any(|x| (x - 70.0).abs() < 1e-6), "{:?}", xs(&si));
-    // Remove the cylinder: the edge included from it is gone, and the sketch asks for it again.
+    // Remove the cylinder: the edge included from it is gone, and the sketch says it is lost.
     let cyl = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Cylinder { .. })).unwrap().id;
     run(&mut s, "timeline.delete", json!({"feature": cyl}));
     let t = run(&mut s, "document.inspect", json!({}));
     let row = t["timeline"].as_array().unwrap().iter().find(|r| r["id"] == json!(id)).cloned().unwrap();
     let error = row["error"].as_str().unwrap_or_default();
-    assert!(
-        solidcraft_doc::reselect_parts(error)
-            .is_some_and(|(feature, reference)| feature == row["name"] && reference.starts_with(&format!("F{cyl}:"))),
-        "{row}"
-    );
+    let read = solidcraft_doc::lost_projection_parts(error).map(|t| (t.feature.to_string(), t.count, t.listed.to_string()));
+    let (feature, count, listed) = read.unwrap_or_else(|| panic!("{row}"));
+    assert_eq!((json!(feature), count), (row["name"].clone(), 1), "{row}");
+    // Its circle lies on the silhouette's, so it has no curve of its own to name.
+    assert_eq!(listed, "included edge of Body3", "the cylinder's included edge");
+    assert!(!error.contains(&format!("F{cyl}:")), "{row}");
 }
 
 /// A cylinder's wall and the torus of a rounded rim are drawn as one face but stored in halves
@@ -2135,4 +2139,220 @@ fn a_component_origin_axis_projects_where_the_component_stands() {
     // A key that names no component origin is still refused, with the existing message.
     let err = s.execute("sketch.project", &json!({"refs": [{"axis": "o:9999/origin/Z"}]})).unwrap_err().to_string();
     assert!(err.contains("unknown axis"), "{err}");
+}
+
+/// A part (not grounded) holding 40 x 20 x 10 block `Block` extruded from rectangle `Base` (`l1`
+/// its front side, y = 0) and a second block `Block2` at x = 60, a construction plane Guide 30
+/// off XZ, sketch Outline on it projecting both blocks' front faces beside a circle of its own,
+/// and Peg extruded from that circle. Returns (session, Outline, Block's link, Block2's link).
+fn part_with_outline() -> (Session, u64, String, String) {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"Part","grounded":false}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Base","distance":10,"body_name":"Block"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base2"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[60,0],"p1":[100,20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Base2","distance":10,"body_name":"Block2"}));
+    run(&mut s, "construct.plane.offset", json!({"base":"XZ","offset":30,"name":"Guide"}));
+    let outline = run(&mut s, "sketch.create", json!({"plane":"Guide","name":"Outline"}))["sketch"].as_u64().unwrap();
+    let link = |r: Value| r["links"][0]["link"].as_str().unwrap().to_string();
+    let front = link(run(&mut s, "sketch.project", json!({"refs":[{"face":[20,0,5],"body":"Block"}]})));
+    let other = link(run(&mut s, "sketch.project", json!({"refs":[{"face":[80,0,5],"body":"Block2"}]})));
+    let circle = run(&mut s, "sketch.circle.center", json!({"center":[50,5],"radius":3}))["created"]["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Outline","profiles":[{"curves":[circle]}],"distance":5,"name":"Peg"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    assert_eq!(s.model.result(outline).unwrap().error, None);
+    assert!(s.doc.sketch(outline).unwrap().link(&front).unwrap().face_name.is_some(), "kept by the face's name");
+    (s, outline, front, other)
+}
+
+/// The block's front side drawn again: its face takes a new name, so Outline's projection of it
+/// finds nothing. Returns the name it was kept by.
+fn redraw_front(s: &mut Session, outline: u64, front: &str) -> String {
+    let name = s.doc.sketch(outline).unwrap().link(front).unwrap().face_name.clone().unwrap();
+    run(s, "sketch.edit", json!({"sketch":"Base"}));
+    run(s, "sketch.delete", json!({"entities":["l1"]}));
+    run(s, "sketch.line", json!({"points":[[0,0],[40,0]]}));
+    run(s, "sketch.finish", json!({}));
+    name
+}
+
+/// The curves of link `link` in `sketch` as the design stores them: `curves l1, l2, l3, l4`.
+fn curves_named(s: &Session, sketch: u64, link: &str) -> String {
+    let sk = s.doc.sketch(sketch).unwrap();
+    let ids: Vec<&str> = sk.link_curves(link).into_iter().map(|c| sk.curves[c].id.as_str()).collect();
+    format!("curves {}", ids.join(", "))
+}
+
+/// The error of the feature with this name.
+fn error_of(s: &Session, name: &str) -> Option<String> {
+    s.model.result(s.doc.find_feature(name).unwrap().id).and_then(|r| r.error.clone())
+}
+
+#[test]
+fn a_sketch_whose_projected_face_lost_its_name_says_which_projection_and_how_to_fix_it() {
+    let (mut s, outline, front, _) = part_with_outline();
+    let name = redraw_front(&mut s, outline, &front);
+    let curves = curves_named(&s, outline, &front);
+    assert_eq!(
+        error_of(&s, "Outline").as_deref(),
+        Some(format!("Outline: projected face of Block ({curves}) is lost; delete the projection or project it again").as_str())
+    );
+    assert!(!error_of(&s, "Outline").unwrap().contains(&name), "the persistent name is not shown");
+    let lost = s.model.result(outline).and_then(|r| r.lost_projections.clone()).unwrap();
+    assert_eq!(lost.iter().map(|l| (l.link.as_str(), l.name.as_str())).collect::<Vec<_>>(), [(front.as_str(), name.as_str())]);
+    assert!(error_of(&s, "Peg").is_some_and(|e| e.contains("Outline")), "{:?}", error_of(&s, "Peg"));
+    assert!(s.model.result(s.doc.find_feature("Peg").unwrap().id).unwrap().lost_projections.is_none(), "only the sketch lost them");
+    // As the message says: the lost projection deleted, the sketch and the peg build again.
+    let projected: Vec<String> = curves.trim_start_matches("curves ").split(", ").map(str::to_string).collect();
+    run(&mut s, "sketch.edit", json!({"sketch":outline}));
+    run(&mut s, "sketch.delete", json!({"entities":projected}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(error_of(&s, "Outline"), None);
+    assert_eq!(error_of(&s, "Peg"), None);
+}
+
+/// Redefine Sketch Plane on a sketch that fails only for lost projections changes the plane; the
+/// sketch then fails as before, for the same projection, and so does the feature built on it.
+#[test]
+fn a_sketch_failing_for_lost_projections_takes_a_new_plane_and_still_fails_for_them() {
+    let (mut s, outline, front, _) = part_with_outline();
+    redraw_front(&mut s, outline, &front);
+    let failed = error_of(&s, "Outline").unwrap();
+    let plane = |s: &Session| {
+        let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &s.doc.feature(outline).unwrap().kind else { panic!("not a sketch") };
+        serde_json::to_value(plane).unwrap()
+    };
+    let before = plane(&s);
+    run(&mut s, "sketch.redefine", json!({"sketch":outline,"plane":"XZ"}));
+    assert_ne!(plane(&s), before, "the plane changed");
+    assert_eq!(error_of(&s, "Outline"), Some(failed.clone()), "the same projection is lost");
+    assert!(error_of(&s, "Peg").is_some());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(plane(&s), before);
+    assert_eq!(error_of(&s, "Outline"), Some(failed.clone()));
+    // With the timeline rolled back to before the sketch: the plane is checked as at the sketch.
+    let index = s.doc.feature_index(outline).unwrap();
+    run(&mut s, "timeline.roll_to", json!({"position": index}));
+    assert_eq!(error_of(&s, "Outline"), None, "rolled back");
+    run(&mut s, "sketch.redefine", json!({"sketch":outline,"plane":"XZ"}));
+    assert_ne!(plane(&s), before);
+    run(&mut s, "timeline.roll_to", json!({}));
+    assert_eq!(error_of(&s, "Outline"), Some(failed));
+}
+
+/// A plane is refused when the sketch would fail on it for a projection it did not lose on its
+/// old one: the projections it loses on the new plane must be among the old plane's.
+#[test]
+fn a_new_plane_is_judged_by_the_projections_the_old_one_lost() {
+    let (mut s, outline, front, _) = part_with_outline();
+    redraw_front(&mut s, outline, &front);
+    assert!(crate::cmd::browser::only_lost_before(&s.model.clone(), &s, outline), "the same projection lost");
+    let mut before = s.model.clone();
+    let index = before.results.iter().position(|r| r.id == outline).unwrap();
+    before.results[index].lost_projections = Some(std::sync::Arc::new(Vec::new()));
+    assert!(!crate::cmd::browser::only_lost_before(&before, &s, outline), "the front face's projection was not lost before");
+    before.results[index].error = None;
+    before.results[index].lost_projections = None;
+    assert!(!crate::cmd::browser::only_lost_before(&before, &s, outline), "the sketch built before");
+}
+
+/// A sketch that fails for a lost projection and, past its projections, for a dimension of its
+/// own is refused a new plane: on it, it would still fail for more than the lost projection.
+#[test]
+fn a_new_plane_is_refused_when_the_sketch_fails_for_more_than_lost_projections() {
+    let (mut s, outline, front, _) = part_with_outline();
+    run(&mut s, "parameters.add", json!({"name":"rim","expression":"3 mm"}));
+    let part = s.doc.occurrences.iter().find(|o| o.name.starts_with("Part")).unwrap().clone();
+    run(&mut s, "component.activate", json!({"component":part.component,"occurrence":part.id,"path":[part.id]}));
+    run(&mut s, "sketch.edit", json!({"sketch":outline}));
+    let circle = s.doc.sketch(outline).unwrap().curves.iter().find(|c| c.link.is_none()).unwrap().id.clone();
+    run(&mut s, "sketch.dimension", json!({"entities":[circle],"type":"radius","value":"rim"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    redraw_front(&mut s, outline, &front);
+    run(&mut s, "parameters.change", json!({"name":"rim","expression":"-3 mm"}));
+    let failed = error_of(&s, "Outline").unwrap();
+    assert!(failed.contains("projected face of Block"), "the lost projection is what it says: {failed}");
+    assert!(s.model.failed_sketch_shown(&s.doc, outline).is_none(), "it fails past its projections too");
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.redefine", &json!({"sketch":outline,"plane":"XZ"})).unwrap_err().to_string();
+    assert!(e.contains("projected face of Block"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// A sketch whose own plane, a face, was made again with the face it projects: it fails on its
+/// plane before it reaches the projection. A new plane is taken, and the sketch then fails for
+/// the projection (a name is looked up on its body, never on the plane).
+#[test]
+fn a_sketch_whose_plane_and_projection_were_lost_takes_a_new_plane() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base","name":"Original"}));
+    let top = s
+        .model
+        .state()
+        .body("Base")
+        .unwrap()
+        .body
+        .faces(0.01)
+        .unwrap()
+        .into_iter()
+        .find(|f| f.plane_normal.is_some_and(|n| n.z > 0.99))
+        .unwrap()
+        .index;
+    let id = run(&mut s, "sketch.create", json!({"plane":{"face":[5,5,10],"body":"Base","index":top},"project_edges":false,"name":"Cap"}))["sketch"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "sketch.project", json!({"refs":[{"face":[5,0,5],"body":"Base"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "timeline.suppress", json!({"feature":"Original","suppressed":true}));
+    run(&mut s, "timeline.rollback", json!({"position":1}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":30,"body_name":"Base","name":"Replacement"}));
+    run(&mut s, "timeline.rollback", json!({}));
+    let failed = s.model.result(id).unwrap();
+    assert!(failed.error.is_some() && failed.lost_projections.is_none(), "its plane fails first: {:?}", failed.error);
+    run(&mut s, "sketch.redefine", json!({"sketch":id,"plane":"XZ"}));
+    let lost = s.model.result(id).and_then(|r| r.lost_projections.clone()).expect("now it fails for its projection");
+    assert_eq!(lost.len(), 1);
+    assert!(s.model.failed_sketch_shown(&s.doc, id).is_some());
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.result(id).unwrap().lost_projections.is_none(), "undone, its plane fails again");
+}
+
+/// A sketch failing only for lost projections is shown placed where its component puts it, its
+/// lost projection marked, from a list no command reads: neither the model nor the world has it,
+/// and a new feature can't use its profiles.
+#[test]
+fn a_sketch_failing_for_lost_projections_is_shown_where_it_is_and_never_used() {
+    let (mut s, outline, front, other) = part_with_outline();
+    redraw_front(&mut s, outline, &front);
+    let part = s.doc.occurrences.iter().find(|o| o.name.starts_with("Part")).unwrap().id;
+    let shown = |s: &Session| s.sketches_placed(s.model.failed_sketch_shown(&s.doc, outline).into_iter().collect()).unwrap();
+    let first = shown(&s);
+    let [ss] = first.as_slice() else { panic!("{} shown", first.len()) };
+    assert!(ss.sketch.link(&front).unwrap().lost);
+    assert!(!ss.sketch.link(&other).unwrap().lost);
+    assert!(ss.sketch.curves.len() > ss.sketch.link_curves(&front).len(), "the rest of the sketch is there too");
+    assert!((ss.plane.origin.y.abs() - 30.0).abs() < 1e-6, "on Guide: {:?}", ss.plane.origin);
+    run(&mut s, "occurrence.move", json!({"occurrence":part,"translate":[0,0,15]}));
+    let moved = shown(&s);
+    assert!((moved[0].plane.origin.z - ss.plane.origin.z - 15.0).abs() < 1e-6, "{:?} {:?}", moved[0].plane.origin, ss.plane.origin);
+    assert!(s.model.state().sketch(outline).is_none());
+    assert!(s.world_state().unwrap().sketch(outline).is_none());
+    let features = s.doc.features.len();
+    assert!(s.execute("solid.extrude", &json!({"sketch":"Outline","distance":3,"name":"More"})).is_err());
+    assert_eq!(s.doc.features.len(), features);
+    // Built again (its lost projection deleted), it is the model's own and nothing to place.
+    let sk = s.doc.sketch(outline).unwrap();
+    let projected: Vec<String> = sk.link_curves(&front).into_iter().map(|c| sk.curves[c].id.clone()).collect();
+    run(&mut s, "sketch.edit", json!({"sketch":outline}));
+    run(&mut s, "sketch.delete", json!({"entities":projected}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(error_of(&s, "Outline"), None);
+    assert!(shown(&s).is_empty());
+    assert!(s.model.state().sketch(outline).is_some());
 }

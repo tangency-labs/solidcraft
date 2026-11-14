@@ -968,3 +968,547 @@ fn a_ball_with_its_poles_on_a_plane_or_a_cone_is_cut() {
     ));
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+/// The half roll less the r 6 ball about (0, 50 + δ, 20), its poles δ off the roll's outside:
+/// 1e-6 inside it and 1e-6 outside, within the tolerance the trace refines with, in the four
+/// frames of the walls' cylinders that failed above. The line where the ball crosses the wall
+/// passes the poles δ from them, and the trace takes each pole as a point of it (within that
+/// tolerance) and ends two curves there. `StepBackFromSingularity` took the pole point's
+/// singular parameter 1 % of the last span back from the pole, where the curve's direction
+/// seen from the pole is set by the pole's offset (an angle of about δ over the distance), not
+/// by the curve: every span into the pole failed the span test by about 100 δ, the steps
+/// shrank to the tolerance, and the pole points got singular parameters a quarter turn off
+/// (0.73 for 0.5) and UV tangents of 3e5, refused as not a solid. Each frame is one valid
+/// solid of V = 3920π less the ball between radii 48 and 50 at that distance ([`ball_inside`]).
+#[test]
+fn a_ball_with_its_poles_within_tolerance_of_a_rolls_face_is_cut() {
+    all_fixes();
+    let mut failed = Vec::new();
+    for delta in [-1e-6, 1e-6] {
+        let d = 50.0 + delta;
+        let want = 3920.0 * PI - (ball_inside(|_| 50.0, d) - ball_inside(|_| 48.0, d));
+        for frame in [2, 5, 8, 14] {
+            let what = format!("δ {delta:e}, frame {frame}");
+            failed.extend(cut_is_valid_solid(
+                half_roll(frame),
+                ball([0.0, d, 20.0], 0.0),
+                want,
+                &what,
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The same cut with the poles 1e-4 inside and outside the roll's outside, past the
+/// tolerance: each of the four frames is one valid solid of the closed-form volume, as it
+/// was before the trace placed its points at poles.
+#[test]
+fn a_ball_with_its_poles_past_tolerance_of_a_rolls_face_is_cut() {
+    all_fixes();
+    let mut failed = Vec::new();
+    for delta in [-1e-4, 1e-4] {
+        let d = 50.0 + delta;
+        let want = 3920.0 * PI - (ball_inside(|_| 50.0, d) - ball_inside(|_| 48.0, d));
+        for frame in [2, 5, 8, 14] {
+            let what = format!("δ {delta:e}, frame {frame}");
+            failed.extend(cut_is_valid_solid(
+                half_roll(frame),
+                ball([0.0, d, 20.0], 0.0),
+                want,
+                &what,
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A box read from its record and mirrored across x = 0 into one of two openings cut into the
+/// side of a loft through two closed cubic splines, 0.2 mm clear of the loft on every side
+/// (#15862). The mirror keeps each of the box's straight edges a line: before, each became the
+/// degree 1 B-spline of the whole line, its control points some 1.8e7 mm out, and the loft
+/// minus the box was nothing, the loft and the box intersected in the whole loft, and their union
+/// was refused (1001). The loft is SolidCraft's, as its record (`data/`).
+#[test]
+fn a_box_mirrored_into_an_opening_of_a_spline_loft_stays_clear_of_it() {
+    all_fixes();
+    let record: Record = serde_json::from_str(include_str!(
+        "data/issue_15862_spline_loft_with_openings.record.json"
+    ))
+    .unwrap();
+    let loft = || Body::from_record(&record, true).unwrap().0;
+    let lofted = volume(&loft());
+    // the box as SolidCraft makes it: its rectangle extruded, read back from its record
+    let mirrored = || {
+        let corners = [[-24.8, 12.0], [-10.2, 12.0], [-10.2, 25.0], [-24.8, 25.0]];
+        let rectangle: Vec<Curve> = (0..4)
+            .map(|i| {
+                let ([x0, y0], [x1, y1]) = (corners[i], corners[(i + 1) % 4]);
+                Curve::Line {
+                    start: [x0, y0, 16.2],
+                    end: [x1, y1, 16.2],
+                }
+            })
+            .collect();
+        let made = extrude(
+            &rectangle,
+            [0.0, 0.0, 1.0],
+            7.6,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        let b = Body::from_record(&made.to_record().unwrap().0, true)
+            .unwrap()
+            .0;
+        b.transform(&[
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ])
+        .unwrap();
+        b
+    };
+    let boxed = 14.6 * 13.0 * 7.6;
+    let cut = boolean(loft(), mirrored(), BooleanOp::Subtract).unwrap();
+    assert!(cut.is_some(), "the loft minus the box is nothing");
+    let cut = cut.unwrap();
+    let report = cut.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(cut.solid_count().unwrap(), 1);
+    assert_eq!(cut.counts().unwrap(), [13, 27, 18]);
+    assert!(
+        near(volume(&cut), lofted),
+        "{}, the loft {lofted}",
+        volume(&cut)
+    );
+
+    for (a, b) in [(loft(), mirrored()), (mirrored(), loft())] {
+        let common = boolean(a, b, BooleanOp::Intersect).unwrap();
+        assert!(
+            common.is_none(),
+            "the loft and the box share {:?} mm3",
+            common.map(|c| volume(&c))
+        );
+    }
+
+    let u = boolean(loft(), mirrored(), BooleanOp::Union);
+    assert!(
+        matches!(u, Ok(Some(_))),
+        "{:?}",
+        u.as_ref().map(Option::is_some)
+    );
+    let u = u.unwrap().unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 2);
+    assert_eq!(u.counts().unwrap(), [19, 39, 26]);
+    assert!(
+        near(volume(&u), lofted + boxed),
+        "{}, the loft and the box {}",
+        volume(&u),
+        lofted + boxed
+    );
+
+    let (mirrored_record, _) = mirrored().to_record().unwrap();
+    for e in &mirrored_record.edges {
+        assert!(
+            matches!(e.curve, solidcore_record::brep::Curve::Line { .. }),
+            "{:?}",
+            e.curve
+        );
+    }
+    assert!(near(volume(&mirrored()), boxed), "{}", volume(&mirrored()));
+}
+
+/// Sets the calling thread's fixes: none, or every one (SolidCraft's set).
+fn with_fixes(all: bool) {
+    if all {
+        all_fixes();
+    } else {
+        session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+    }
+}
+
+/// `body` as SolidCraft hands it to the next feature: through its record.
+fn round_tripped(body: &Body) -> Body {
+    let (record, _) = body.to_record().unwrap();
+    Body::from_record(&record, true).unwrap().0
+}
+
+/// solidcraft#12785 (solidcore #13650): a block with a hexagonal pocket through it and a
+/// round hole drilled from an end face along the pocket's axis plane, ending exactly at a
+/// corner of the pocket, so the hole's bottom meets the two pocket walls along a segment of
+/// the corner edge (a solid touching itself along a line). The cut leaves that segment as one
+/// edge of four faces; a record round trip (`to_record`, `from_record`: SolidCraft's body
+/// between features) writes it as two edges of two faces each, and filling the pocket with
+/// the same hexagon as a join failed there (`topology_intersector::p1::relate`, status 1001,
+/// or a result that is not a closed solid). Without the hole, or without the round trip, the
+/// same join works. Carried from bherbruck's
+/// `boolean_join_fills_pocket_with_hole_at_its_corner.rs`.
+#[allow(clippy::expect_used, clippy::panic)] // test helpers
+mod pocket_with_hole_at_its_corner {
+    use std::f64::consts::TAU;
+
+    use solidcore_ops::boolean::{boolean, BooleanOp};
+    use solidcore_ops::sweep::{extrude, Curve, DraftCorner};
+    use solidcore_ops::{Body, CheckLevel};
+
+    use super::{round_tripped, with_fixes};
+
+    /// The hexagon's circumradius.
+    const R: f64 = 6.3685;
+    const Z: [f64; 3] = [0.0, 0.0, 1.0];
+
+    fn line(start: [f64; 3], end: [f64; 3]) -> Curve {
+        Curve::Line { start, end }
+    }
+
+    /// The regular hexagon of circumradius `R` about the origin with a corner on +X, at z = 0
+    /// (the reporter's sketch: the corner at (R, 0), the next at (R/2, R sqrt(3)/2)).
+    fn hexagon() -> Vec<Curve> {
+        const H: f64 = 5.515_282_784_001_197;
+        let corners = [
+            [R, 0.0, 0.0],
+            [R / 2.0, H, 0.0],
+            [-R / 2.0, H, 0.0],
+            [-R, 0.0, 0.0],
+            [-R / 2.0, -H, 0.0],
+            [R / 2.0, -H, 0.0],
+        ];
+        (0..6)
+            .map(|i| line(corners[i], corners[(i + 1) % 6]))
+            .collect()
+    }
+
+    /// The block 100.29 x 32 x 10.
+    fn block() -> Body {
+        extrude(
+            &[
+                line([-50.145, -16.0, 0.0], [50.145, -16.0, 0.0]),
+                line([50.145, -16.0, 0.0], [50.145, 16.0, 0.0]),
+                line([50.145, 16.0, 0.0], [-50.145, 16.0, 0.0]),
+                line([-50.145, 16.0, 0.0], [-50.145, -16.0, 0.0]),
+            ],
+            Z,
+            10.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap()
+    }
+
+    /// The hexagon extruded through the block's height: the pocket's cutter and the join's
+    /// tool.
+    fn tool() -> Body {
+        extrude(&hexagon(), Z, 10.0, 0.0, DraftCorner::Curvature, true).unwrap()
+    }
+
+    /// The block with the pocket through it and the hole: 2.5 mm across, along -X from the
+    /// end face x = 50.145, 43.7765 deep, so it ends at the pocket's corner (R, 0).
+    fn target() -> Body {
+        let pocketed = boolean(block(), tool(), BooleanOp::Subtract)
+            .unwrap()
+            .expect("the pocketed block");
+        let hole = extrude(
+            &[Curve::Arc {
+                center: [50.145, 0.0, 5.0],
+                axis: [-1.0, 0.0, 0.0],
+                reference: [0.0, 1.0, 0.0],
+                radius: 1.25,
+                start: 0.0,
+                end: TAU,
+            }],
+            [-1.0, 0.0, 0.0],
+            50.145 - R,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        boolean(pocketed, hole, BooleanOp::Subtract)
+            .unwrap()
+            .expect("the drilled block")
+    }
+
+    /// Joins `target` and the hexagon, checks the result and compares its volume with the
+    /// sum.
+    fn join_fills(target: Body, what: &str) {
+        let want = target.volume(1e-9).unwrap() + tool().volume(1e-9).unwrap();
+        let b = match boolean(target, tool(), BooleanOp::Union) {
+            Ok(Some(b)) => b,
+            Ok(None) => panic!("{what}: no body"),
+            Err(e) => panic!("{what}: {e}"),
+        };
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{what}:\n{}", report.text);
+        let got = b.volume(1e-9).unwrap();
+        assert!(
+            (got - want).abs() <= 1e-6 * want,
+            "{what}: volume {got} vs {want}"
+        );
+    }
+
+    /// The cut's own body: the corner segment is one edge of four faces, and the join works.
+    #[test]
+    fn filling_a_pocket_whose_corner_a_hole_reaches_joins() {
+        let target = target();
+        assert_eq!(target.counts().unwrap(), [15, 37, 24]);
+        join_fills(target, "the cut's body");
+    }
+
+    /// The same body after its record round trip: the corner segment is two coincident edges
+    /// of two faces each, and the join works as well, with no fixes and with every fix.
+    #[test]
+    fn filling_a_pocket_whose_corner_a_hole_reaches_joins_after_a_record_round_trip() {
+        for all in [false, true] {
+            with_fixes(all);
+            let target = round_tripped(&target());
+            assert_eq!(target.counts().unwrap(), [15, 38, 24]);
+            assert!(target.check(CheckLevel::All).unwrap().is_valid());
+            join_fills(target, &format!("the round-tripped body, all fixes {all}"));
+        }
+    }
+
+    /// The control: without the hole the same join works, round trip or not.
+    #[test]
+    fn filling_a_pocket_without_the_hole_joins() {
+        let pocketed = boolean(block(), tool(), BooleanOp::Subtract)
+            .unwrap()
+            .expect("the pocketed block");
+        join_fills(round_tripped(&pocketed), "the pocketed block");
+    }
+}
+
+/// Two unit boxes touching along the edge x = y = 1 in one body (two solids), after a record
+/// round trip (`split_shared` writes the edge once per solid, so the operand carries it as two
+/// coincident edges, which the boolean glues back into the one edge the kernel's union shares).
+/// Booleans on it give the exact volumes, whether the tool reaches the shared edge or not,
+/// with no fixes and with every fix: subtract `[0.5, 1.5]^2 x [0, 0.5]` (an eighth of a unit
+/// from each box, across the edge) leaves 1.75; intersect `[0.5, 1.5]^2 x [0, 1]` keeps 0.5;
+/// union with a far unit box gives 3.
+#[test]
+fn two_solids_touching_along_an_edge_survive_a_round_trip_and_booleans() {
+    for all in [false, true] {
+        with_fixes(all);
+        let touching = || {
+            let a = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+            let b = make_box([1.0, 1.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+            round_tripped(&boolean(a, b, BooleanOp::Union).unwrap().unwrap())
+        };
+        let cases = [
+            (
+                BooleanOp::Subtract,
+                make_box([0.5, 0.5, 0.0], [1.0, 1.0, 0.5]).unwrap(),
+                1.75,
+            ),
+            (
+                BooleanOp::Intersect,
+                make_box([0.5, 0.5, 0.0], [1.0, 1.0, 1.0]).unwrap(),
+                0.5,
+            ),
+            (
+                BooleanOp::Union,
+                make_box([5.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap(),
+                3.0,
+            ),
+        ];
+        for (op, tool, want) in cases {
+            let r = boolean(touching(), tool, op).unwrap().unwrap();
+            let report = r.check(CheckLevel::All).unwrap();
+            assert!(
+                report.is_valid(),
+                "all fixes {all}, {op:?}:\n{}",
+                report.text
+            );
+            assert!(
+                near(volume(&r), want),
+                "all fixes {all}, {op:?}: {} vs {want}",
+                volume(&r)
+            );
+        }
+    }
+}
+
+/// An 80 x 75 x 48 block (x from 0, y from -75, z from 0) less a stadium through it along y:
+/// two half circles of radius 16 centred at x = 21 and 59, joined by flat sides 32 apart, its
+/// bottom side at z = `bottom`. The stadium's flat bottom meets each half circle at a vertex
+/// where the two are tangent.
+fn block_less_stadium(bottom: f64) -> Body {
+    let (low, high, centre) = (bottom, bottom + 32.0, bottom + 16.0);
+    let arc = |x: f64, start: f64| Curve::Arc {
+        center: [x, 5.0, centre],
+        axis: [0.0, -1.0, 0.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: 16.0,
+        start,
+        end: start + PI,
+    };
+    let profile = [
+        arc(21.0, PI / 2.0),
+        Curve::Line {
+            start: [21.0, 5.0, low],
+            end: [59.0, 5.0, low],
+        },
+        arc(59.0, -PI / 2.0),
+        Curve::Line {
+            start: [59.0, 5.0, high],
+            end: [21.0, 5.0, high],
+        },
+    ];
+    let stadium = extrude(
+        &profile,
+        [0.0, -1.0, 0.0],
+        85.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let block = make_box([0.0, -75.0, 0.0], [80.0, 75.0, 48.0]).unwrap();
+    boolean(block, stadium, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// The stadium's area, 38 x 32 + pi 16^2.
+fn stadium_area() -> f64 {
+    38.0 * 32.0 + PI * 16.0 * 16.0
+}
+
+/// The block less the stadium whose bottom lies `h` below z = 12, less the rest of the block
+/// from z = 12 up over y from -65 to 0: the stadium's part above z = 12 is its area less the
+/// strip 38 h of its flat side and the two half segments of depth h of its circles, one whole
+/// segment r^2 acos((r - h) / r) - (r - h) sqrt(2 r h - h^2).
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn block_less_stadium_and_cut(h: f64) -> f64 {
+    let r = 16.0;
+    let segment = r * r * ((r - h) / r).acos() - (r - h) * (2.0 * r * h - h * h).sqrt();
+    let above = stadium_area() - 38.0 * h - segment;
+    80.0 * 75.0 * 48.0 - 75.0 * stadium_area() - 65.0 * (80.0 * 36.0 - above)
+}
+
+fn one_valid_solid_of_volume(r: &Body, counts: [usize; 3], want: f64, rel: f64) {
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    assert_eq!(r.counts().unwrap(), counts);
+    let v = r.volume(1e-11).unwrap();
+    assert!(
+        (v - want).abs() <= rel * want,
+        "volume {v}, closed form {want}"
+    );
+}
+
+/// A box cut from z = 12 up, its bottom face on the stadium's flat bottom, which lies 3.756e-11
+/// below it (as a sketch solve leaves it, #16237), and its back face flush with the block's. The
+/// line where the box's bottom meets the block's back face runs along the stadium's bottom edge
+/// and leaves it at the vertices where the edge and the half circles are tangent, into the back
+/// face. The classification of that line against the back face stepped along it to settle the
+/// tangency and read the stepped point against the stadium's loop, a hole: a point outside a
+/// hole was taken for outside the face, the line was not imprinted there, and the merge failed
+/// ("no radial edge use classifies the face's edge use"). A box past every side of the block
+/// cut nothing instead, a valid body of the wrong volume. Both leave the closed form.
+#[test]
+fn a_cut_whose_bottom_is_a_hair_above_a_stadium_holes_flat_side_removes_the_rest() {
+    all_fixes();
+    let h = 3.756e-11;
+    let want = block_less_stadium_and_cut(h);
+    let flush = make_box([0.0, -65.0, 12.0], [80.0, 65.0, 36.0]).unwrap();
+    let r = boolean(block_less_stadium(12.0 - h), flush, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&r, [11, 30, 20], want, 1e-9);
+    let past = make_box([-5.0, -65.0, 12.0], [90.0, 70.0, 40.0]).unwrap();
+    let r = boolean(block_less_stadium(12.0 - h), past, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&r, [11, 30, 20], want, 1e-9);
+}
+
+/// The real defect beside it: a cylinder through the stadium whose circle is tangent to the
+/// stadium's flat bottom and its half circle at their common vertex, of a smaller radius, so it
+/// bends into the hole there. It lies in the hole and cuts nothing: the classification still
+/// takes the curves leaving that vertex into the hole for outside the back face.
+#[test]
+fn a_cylinder_in_a_stadium_hole_tangent_at_its_vertex_cuts_nothing() {
+    all_fixes();
+    let h = 3.756e-11;
+    let want = 80.0 * 75.0 * 48.0 - 75.0 * stadium_area();
+    for r in [15.0, 15.9, 15.99] {
+        let circle = [Curve::Arc {
+            center: [59.0, 0.0, 12.0 - h + r],
+            axis: [0.0, -1.0, 0.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: r,
+            start: 0.0,
+            end: TAU,
+        }];
+        let cylinder = extrude(
+            &circle,
+            [0.0, -1.0, 0.0],
+            65.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        let cut = boolean(block_less_stadium(12.0 - h), cylinder, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        one_valid_solid_of_volume(&cut, [10, 24, 16], want, 1e-9);
+    }
+}
+
+/// The operand records of one of SolidCraft's failing cuts (`data/<name>.bodies.json.gz`), by
+/// name.
+fn traced_operands(name: &str) -> impl Fn(&str) -> Body {
+    let path = format!(
+        "{}/tests/data/{name}.bodies.json.gz",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let records: Value = serde_json::from_str(&text).unwrap();
+    move |key: &str| {
+        let record: Record = serde_json::from_value(records[key].clone()).unwrap();
+        Body::from_record(&record, true).unwrap().0
+    }
+}
+
+/// #16237's cut as SolidCraft passed it: the block less a stadium sketched with its bottom
+/// 3.756e-11 below z = 12, less the rectangle cut from z = 12 up, flush with the block's top and
+/// back. It failed in the merge; it is the closed form of the block, the stadium and the cut.
+#[test]
+fn a_traced_cut_flush_with_an_earlier_stadium_cut_is_its_closed_form() {
+    all_fixes();
+    let body = traced_operands("issue_16237_cut_flush_with_earlier_cut");
+    let r = boolean(body("target"), body("tool"), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(
+        &r,
+        [11, 30, 20],
+        block_less_stadium_and_cut(3.756e-11),
+        1e-9,
+    );
+}
+
+/// #15247's second cut as SolidCraft passed it: a plate already cut by one half of a 0.8 mm
+/// outline wall around an arrow, less the other half, which meets the faces the first cut left.
+/// It failed in the merge. The tool lies inside the plate, so the cut removes exactly its volume.
+#[test]
+fn a_traced_cut_meeting_an_earlier_cut_removes_its_tool() {
+    all_fixes();
+    let body = traced_operands("issue_15247_cut_arrow_outline");
+    let want = body("target").volume(1e-11).unwrap() - body("tool").volume(1e-11).unwrap();
+    let r = boolean(body("target"), body("tool"), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&r, [46, 132, 88], want, 1e-9);
+}

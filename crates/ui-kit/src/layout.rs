@@ -244,7 +244,17 @@ pub fn status_line(ui: &mut Ui, text: &str, tone: StatusTone) -> Response {
 pub fn expr_row(ui: &mut Ui, label: &str, value: &mut String) -> bool {
     scrub_row(ui, label, |ui, scrub| {
         if let Some(scrub) = scrub {
-            super::fields::scrub(ui, scrub, value);
+            super::fields::scrub(ui, scrub, value, false);
+        }
+        super::field(ui, value)
+    })
+}
+
+/// Expression row whose scrubbed value stops at zero (for physical dimensions like radius or thickness).
+pub fn expr_row_positive(ui: &mut Ui, label: &str, value: &mut String) -> bool {
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value, true);
         }
         super::field(ui, value)
     })
@@ -260,7 +270,17 @@ pub fn count_row(ui: &mut Ui, label: &str, value: &mut String, limits: &super::C
 pub fn hint_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> bool {
     scrub_row(ui, label, |ui, scrub| {
         if let Some(scrub) = scrub {
-            super::fields::scrub(ui, scrub, value);
+            super::fields::scrub(ui, scrub, value, false);
+        }
+        super::hint_field(ui, value, hint)
+    })
+}
+
+/// Expression row with a hint whose scrubbed value stops at zero.
+pub fn hint_row_positive(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> bool {
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value, true);
         }
         super::hint_field(ui, value, hint)
     })
@@ -286,6 +306,19 @@ pub fn text_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> (bo
 /// Indexed choice row with the caller's unchanged dropdown ID. Tokens: `row, dropdown`.
 pub fn choice_row(ui: &mut Ui, label: &str, id: &str, selected: &mut usize, options: &[&str]) -> Response {
     row(ui, label, |ui| super::dropdown(ui, id, selected, options))
+}
+
+/// A card row whose control is one action: the kit's [`super::button_at`] across the control
+/// column, under an empty label column so it lines up with the rows' fields, its text the
+/// catalog's for `label`. Returns whether it was clicked. Published as `dialog:action:{key}`.
+/// Tokens: `row, button`.
+pub fn action_row(ui: &mut Ui, key: &str, label: &str) -> bool {
+    row(ui, "", |ui| {
+        let rect = ui.max_rect();
+        let response = super::button_at(ui, &format!("action_row:{key}"), rect, solidcraft_ui_text::tr_label(label), super::Button::Normal);
+        solidcraft_ui_registry::publish_target(&format!("dialog:action:{key}"), response.rect);
+        response.clicked()
+    })
 }
 
 /// Internal form geometry for controls which need several lines (e.g. text areas).

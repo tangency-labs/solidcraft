@@ -2386,3 +2386,27 @@ fn a_cap_whose_arcs_leave_a_ring_along_its_sides_closes_a_profile() {
         }
     }
 }
+
+/// Two corner arcs of one outline that leave their shared corner along one tangent: an arc of
+/// radius 15 and one of radius 6 inside it, touching at the origin, with 1e-10 of round-off
+/// between their ends there. The outline's corner stays at the origin. Joined at the two circles'
+/// intersection instead, it moved about 4.5e-5 along the tangent, off the sketch's point, and
+/// a join of the region onto a body with an edge at that point failed.
+#[test]
+fn tangent_corner_arcs_keep_their_shared_corner() {
+    let g = 1e-10;
+    let mut sk = Sketch::new();
+    let p = |sk: &mut Sketch, x: f64, y: f64| sk.add_point(v(x, y), None).unwrap();
+    let (big_top, small_top) = (p(&mut sk, 15.0, 15.0), p(&mut sk, 6.0, 6.0 + g));
+    let (right_low, right_high) = (p(&mut sk, 30.0, 6.0 + g), p(&mut sk, 30.0, 15.0));
+    sk.add_arc(v(15.0, 0.0), v(15.0, 15.0), v(0.0, 0.0), [None, Some(big_top), None], None).unwrap();
+    sk.add_arc(v(6.0, 0.0), v(6.0, 6.0 + g), v(-g, 0.0), [None, Some(small_top), None], None).unwrap();
+    sk.add_line_pts(small_top, right_low, None).unwrap();
+    sk.add_line_pts(right_low, right_high, None).unwrap();
+    sk.add_line_pts(right_high, big_top, None).unwrap();
+    let ps = find_profiles(&sk);
+    let Some(band) = ps.iter().find(|p| p.outer_curves.len() == 5) else { panic!("no profile between the arcs: {ps:?}") };
+    let corner = band.region.outer.segs.iter().map(|s| s.start()).min_by(|a, b| a.x.total_cmp(&b.x)).unwrap();
+    assert!(corner.x.abs() < 1e-9 && corner.y.abs() < 1e-9, "corner at ({:e}, {:e})", corner.x, corner.y);
+    assert!(band.region.outer.is_closed(1e-9), "{:?}", band.region.outer.segs);
+}

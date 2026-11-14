@@ -1,0 +1,23 @@
+{
+  "en": {
+    "ui.fillet_error_no_radius": "No radius builds on these edges, not even a very small one: this shape can't be rounded yet. Try fewer edges, or other ones."
+  },
+  "es": {
+    "ui.fillet_error_no_radius": "Ningún radio funciona en estas aristas, ni siquiera uno muy chico: esta forma todavía no se puede redondear. Prueba con menos aristas, o con otras."
+  },
+  "ar": {
+    "ui.fillet_error_no_radius": "لا يمكن إنشاء أي نصف قطر على هذه الحواف، ولا حتى نصف قطر صغير جدًا: لا يمكن تدوير هذا الشكل بعد. جرّب حوافًا أقل، أو حوافًا أخرى."
+  },
+  "he": {
+    "ui.fillet_error_no_radius": "אף רדיוס לא נבנה על הקצוות האלה, אפילו לא רדיוס קטן מאוד: עדיין אי אפשר לעגל את הצורה הזו. נסה פחות קצוות, או קצוות אחרים."
+  },
+  "ja": {
+    "ui.fillet_error_no_radius": "これらのエッジでは、ごく小さな半径でもフィレットを作成できません。この形状はまだ丸められません。エッジの数を減らすか、別のエッジを試してください。"
+  },
+  "vi": {
+    "ui.fillet_error_no_radius": "Không bán kính nào dựng được trên các cạnh này, kể cả bán kính rất nhỏ: hình dạng này chưa thể bo tròn. Hãy thử ít cạnh hơn, hoặc các cạnh khác."
+  },
+  "zh": {
+    "ui.fillet_error_no_radius": "这些边上任何半径都无法生成，即使是很小的半径：此形状暂时无法倒圆角。请尝试减少边数，或选择其他边。"
+  }
+}

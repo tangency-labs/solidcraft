@@ -2,8 +2,14 @@
 use super::*;
 use egui::{Event, Modifiers, PointerButton, RawInput};
 use std::cell::Cell;
+use std::sync::Arc;
 
 const HANDLES: Handles<'static> = Handles { marker: "test:marker", step: "test:" };
+
+thread_local! {
+    /// How many times a step's hover text was written.
+    static TIPS: Cell<usize> = const { Cell::new(0) };
+}
 
 fn bar(steps: usize, marker: usize) -> Bar<'static> {
     let t = Tokens::get();
@@ -19,16 +25,32 @@ fn bar(steps: usize, marker: usize) -> Bar<'static> {
     }
 }
 
+/// What the app does on the strip before a step, other than drawing steps.
+#[derive(Clone, Copy, Debug)]
+enum Between {
+    /// Something inline that draws nothing.
+    Inline,
+    /// Takes the strip's ui.
+    Ui,
+}
+
 /// The steps in order; `folded` draws one chip of the app's own for those slots instead.
 struct Steps {
     labels: Vec<&'static str>,
     folded: Option<(usize, usize)>,
+    /// Done just before the step in this slot.
+    between: Option<(usize, Between)>,
     /// Each step's state and whether it failed, by slot (default: neither).
     marks: Vec<(StepState, bool)>,
+    /// Each step's handle name kept ready, by slot (empty: the bar builds them).
+    ready: Vec<Arc<str>>,
+    /// The strip's scope, which the chips' ids and the drag's are made from.
+    scope: Option<egui::Id>,
 }
 
 impl Contents for Steps {
     fn entries(&mut self, strip: &mut Strip<'_, '_>) {
+        self.scope = Some(strip.ui().scope_id());
         let mut slot = 0;
         while let Some(label) = self.labels.get(slot).copied() {
             if let Some((start, end)) = self.folded.filter(|(start, _)| *start == slot) {
@@ -40,7 +62,17 @@ impl Contents for Steps {
                 slot = end;
                 continue;
             }
-            let tip = || format!("{label} tip");
+            match self.between.filter(|(at, _)| *at == slot).map(|(_, between)| between) {
+                Some(Between::Inline) => strip.inline(|_, _, x, _| x),
+                Some(Between::Ui) => {
+                    let _ = strip.ui();
+                }
+                None => {}
+            }
+            let tip = || {
+                TIPS.with(|tips| tips.set(tips.get() + 1));
+                format!("{label} tip")
+            };
             let (state, error) = self.marks.get(slot).copied().unwrap_or_default();
             strip.step(&Step {
                 id: slot as u64 + 1,
@@ -53,6 +85,7 @@ impl Contents for Steps {
                 warning: false,
                 ink: None,
                 tip: &tip,
+                handle: self.ready.get(slot),
             });
             slot += 1;
         }
@@ -65,9 +98,13 @@ struct Rig {
     rect: Rect,
     labels: Vec<&'static str>,
     folded: Option<(usize, usize)>,
+    between: Option<(usize, Between)>,
     marks: Vec<(StepState, bool)>,
+    /// The handle names the steps bring ready, by slot (empty: the bar builds them).
+    ready: Vec<Arc<str>>,
     time: Cell<f64>,
     hovered: Cell<Option<u64>>,
+    scope: Cell<Option<egui::Id>>,
 }
 
 impl Rig {
@@ -78,9 +115,12 @@ impl Rig {
             rect: Rect::from_min_size(pos2(0.0, 100.0), vec2(700.0, 40.0)),
             labels: labels.to_vec(),
             folded: None,
+            between: None,
             marks: Vec::new(),
+            ready: Vec::new(),
             time: Cell::new(0.0),
             hovered: Cell::new(None),
+            scope: Cell::new(None),
         };
         rig.frame(Vec::new());
         rig
@@ -104,9 +144,12 @@ impl Rig {
             ..Default::default()
         };
         let output = crate::test_support::raw_frame(&self.ctx, input, |ui| {
-            let mut steps = Steps { labels: self.labels.clone(), folded: self.folded, marks: self.marks.clone() };
+            let ready = self.ready.clone();
+            let mut steps =
+                Steps { labels: self.labels.clone(), folded: self.folded, between: self.between, marks: self.marks.clone(), ready, scope: None };
             let out = strip(ui, &self.bar, self.rect, self.rect, "test_strip", &mut steps);
             self.hovered.set(out.hovered);
+            self.scope.set(steps.scope);
             actions.extend(out.actions);
         });
         (actions, output)
@@ -309,4 +352,185 @@ fn a_steps_state_reaches_its_chip_and_the_floating_card_dots_the_last_done_step(
     rig.marks[3] = (StepState::default(), true);
     rig.frame(Vec::new());
     assert!(!dot(&rig), "only that step");
+}
+
+/// `n` steps named S0, S1…: 40 of them run well past the 700-point strip.
+fn many(n: usize) -> Vec<&'static str> {
+    (0..n).map(|k| &*Box::leak(format!("S{k}").into_boxed_str())).collect()
+}
+
+/// The labels of the steps whose chips a frame painted, in slot order.
+fn chips_painted(rig: &Rig, output: &egui::FullOutput) -> Vec<&'static str> {
+    let (rects, _) = painted(output);
+    let label_painted = |label: &&'static str| {
+        let rect = Rect::from_center_size(rig.at(&format!("test:{label}")), vec2(28.0, 28.0));
+        rects.iter().any(|r| r.rect == rect)
+    };
+    rig.labels.iter().copied().filter(label_painted).collect()
+}
+
+#[test]
+fn steps_that_bring_their_handles_publish_those_names_shared_at_the_same_points() {
+    let mut rig = Rig::new(&many(40), 20);
+    let built = solidcraft_ui_registry::handles("test:");
+    assert_eq!(built.len(), 40, "every step publishes its handle");
+    assert!(built.iter().any(|(_, at)| at.x > rig.rect.right()), "steps out of view among them");
+    // A spelling the bar never builds itself, so only the names brought can publish it.
+    rig.ready = rig.labels.iter().map(|label| Arc::from(format!("ready:{label}"))).collect();
+    let before: Vec<usize> = rig.ready.iter().map(Arc::strong_count).collect();
+    rig.frame(Vec::new());
+    let ready = solidcraft_ui_registry::handles("ready:");
+    let expected: Vec<(String, Pos2)> = built.iter().map(|(name, at)| (name.replacen("test:", "ready:", 1), *at)).collect();
+    assert_eq!(ready, expected, "the names brought, in the same order and at the same points");
+    assert!(solidcraft_ui_registry::handles("test:").is_empty(), "no name is built");
+    let after: Vec<usize> = rig.ready.iter().map(Arc::strong_count).collect();
+    assert_eq!(after, before.iter().map(|n| n + 1).collect::<Vec<_>>(), "the registry holds the names brought, not copies");
+    rig.ready = Vec::new();
+    rig.frame(Vec::new());
+    assert_eq!(solidcraft_ui_registry::handles("test:"), built, "built again as before");
+}
+
+/// Hovers `at` and holds the pointer still long enough for a tip to show; returns how many tips
+/// were written and the last frame's output.
+fn hover_still(rig: &Rig, at: Pos2) -> (usize, egui::FullOutput) {
+    TIPS.with(|tips| tips.set(0));
+    rig.frame(vec![Event::PointerMoved(at)]);
+    let mut output = None;
+    for _ in 0..4 {
+        rig.time.set(rig.time.get() + 0.5);
+        output = Some(rig.output(Vec::new(), Modifiers::NONE).1);
+    }
+    let output = output.unwrap_or_else(|| panic!("a frame ran"));
+    (TIPS.with(Cell::get), output)
+}
+
+#[test]
+fn a_step_out_of_view_keeps_its_handle_but_is_neither_painted_nor_hovered() {
+    let rig = Rig::new(&many(40), 40);
+    // A step in view, for comparison: painted, hovered, and its hover text written.
+    let s5 = rig.at("test:S5");
+    let (tips, output) = hover_still(&rig, s5);
+    assert!(tips > 0, "a step in view writes its hover text");
+    assert_eq!(rig.hovered.get(), Some(6), "and is hovered");
+    assert!(chips_painted(&rig, &output).contains(&"S5"), "and painted");
+    let s39 = rig.at("test:S39");
+    assert!(s39.x > rig.rect.right(), "the last step is out of view: {s39:?}");
+    let (tips, output) = hover_still(&rig, s39);
+    assert_eq!(tips, 0, "its hover text is not written");
+    let drawn = chips_painted(&rig, &output);
+    assert!(drawn.contains(&"S0") && drawn.contains(&"S20"), "the steps in view are painted: {drawn:?}");
+    assert!(!drawn.contains(&"S30") && !drawn.contains(&"S39"), "those out of view are not: {drawn:?}");
+    assert_eq!(rig.hovered.get(), None, "nor hovered");
+    assert_eq!(rig.at("test:S39"), s39, "it still keeps its place");
+}
+
+/// How many times one frame's steps out of view read the focus and the open popups.
+fn quiet_reads(rig: &Rig) -> usize {
+    QUIET_READS.with(|reads| reads.set(0));
+    rig.frame(Vec::new());
+    QUIET_READS.with(Cell::get)
+}
+
+#[test]
+fn steps_out_of_view_read_the_focus_and_popups_once_per_run() {
+    assert_eq!(quiet_reads(&Rig::new(&["A", "B", "C"], 2)), 0, "every step in view: no read");
+    let rig = Rig::new(&many(60), 60);
+    assert!(rig.at("test:S0").x > rig.rect.left() && rig.at("test:S59").x > rig.rect.right());
+    assert_eq!(quiet_reads(&rig), 1, "one run out of view after those in view: one read");
+    // Scrolled so steps in view sit between a run out of view on each side.
+    let over = rig.at("test:S5");
+    for _ in 0..20 {
+        let wheel = Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -100.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        rig.frame(vec![Event::PointerMoved(over), wheel]);
+        if rig.at("test:S5").x < rig.rect.left() - 30.0 {
+            break;
+        }
+    }
+    for _ in 0..30 {
+        rig.frame(Vec::new());
+    }
+    let (first, last) = (rig.at("test:S0"), rig.at("test:S59"));
+    assert!(first.x < rig.rect.left() - 20.0 && last.x > rig.rect.right() + 20.0, "out of view on both sides: {first:?} {last:?}");
+    assert_eq!(quiet_reads(&rig), 2, "a run out of view on each side of those in view: two reads");
+}
+
+/// A chip of the app's own, something inline or a use of the strip's ui between two runs of
+/// steps out of view can move the focus or open a popup: the run after it reads them again.
+#[test]
+fn what_the_app_draws_between_steps_out_of_view_makes_the_next_run_read_again() {
+    let mut rig = Rig::new(&many(60), 60);
+    assert!(rig.at("test:S30").x > rig.rect.right(), "S30 to S59 are out of view");
+    assert_eq!(quiet_reads(&rig), 1, "one run");
+    rig.folded = Some((40, 42));
+    assert_eq!(quiet_reads(&rig), 2, "a folded chip of the app's own between two runs");
+    rig.folded = None;
+    rig.between = Some((40, Between::Inline));
+    assert_eq!(quiet_reads(&rig), 2, "something inline between two runs");
+    rig.between = Some((40, Between::Ui));
+    assert_eq!(quiet_reads(&rig), 2, "the strip's ui taken between two runs");
+    rig.between = None;
+    assert_eq!(quiet_reads(&rig), 1, "one run again");
+}
+
+#[test]
+fn a_focused_or_dragged_step_out_of_view_stays_alive_and_an_open_popup_keeps_every_step() {
+    let rig = Rig::new(&many(40), 40);
+    let scope = rig.scope.get().unwrap_or_else(|| panic!("the strip was laid out"));
+    let alive = |rig: &Rig| {
+        let (_, output) = rig.output(Vec::new(), Modifiers::NONE);
+        chips_painted(rig, &output)
+    };
+    let plain = alive(&rig);
+    assert!(!plain.contains(&"S30") && !plain.contains(&"S35"));
+    // S31 (id 32) has the focus: it alone of those out of view is drawn.
+    let s31 = scope.with(("feat", 32u64));
+    rig.ctx.memory_mut(|m| m.request_focus(s31));
+    let focused = alive(&rig);
+    assert!(focused.contains(&"S31") && !focused.contains(&"S30") && !focused.contains(&"S32"), "{focused:?}");
+    assert!(rig.ctx.memory(|m| m.has_focus(s31)), "it keeps the focus while it is out of view");
+    rig.ctx.memory_mut(|m| m.surrender_focus(s31));
+    assert_eq!(alive(&rig), plain, "the focus gone, it is left out again");
+    // S35 (id 36) is being dragged.
+    let drag_id = scope.with("tl_drag");
+    rig.ctx.data_mut(|d| d.insert_temp(drag_id, Drag::Step(36)));
+    let dragged = alive(&rig);
+    assert!(dragged.contains(&"S35") && !dragged.contains(&"S34"), "{dragged:?}");
+    rig.ctx.data_mut(|d| d.remove::<Drag>(drag_id));
+    assert_eq!(alive(&rig), plain);
+    // Under an open popup every step is alive.
+    egui::Popup::open_id(&rig.ctx, egui::Id::unique("test popup"));
+    assert_eq!(alive(&rig), rig.labels, "every step is drawn under an open popup");
+}
+
+/// A strip narrower than its steps, scrolled to its end, shows the marker after the last step
+/// inside its clip: the marker is part of the scroll range, not cut off past it.
+#[test]
+fn scrolled_to_its_end_the_strip_shows_the_marker_after_the_last_step() {
+    let labels: Vec<&'static str> = (0..40).map(|i| &*Box::leak(format!("Step {i}").into_boxed_str())).collect();
+    let mut rig = Rig::new(&labels, labels.len());
+    rig.rect = Rect::from_min_size(pos2(0.0, 100.0), vec2(300.0, 40.0));
+    rig.frame(Vec::new());
+    let over = rig.rect.center();
+    for _ in 0..30 {
+        rig.time.set(rig.time.get() + 0.1);
+        let wheel = Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -2000.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        rig.frame(vec![Event::PointerMoved(over), wheel]);
+    }
+    rig.frame(Vec::new());
+    let marker = solidcraft_ui_registry::rect_of("test:marker").expect("the marker is drawn");
+    let last = rig.at("test:Step 39");
+    assert!(rig.rect.contains(last), "scrolled to the end: the last step {last:?} shows in {:?}", rig.rect);
+    assert!(marker.left() >= rig.rect.left() && marker.right() <= rig.rect.right(), "the marker {marker:?} lies inside the strip {:?}", rig.rect);
 }

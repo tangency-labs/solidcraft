@@ -137,18 +137,24 @@ struct PoleCorner {
     bound: f64,
     /// The UV tolerance "on the boundary" is measured with.
     uv_tol: f64,
+    /// The pole: the surface's point at the corner its singularity was tested at.
+    pole: Point3,
 }
 
 impl PoleCorner {
-    /// Whether the refined UV points `uvs` are on the degenerate boundary: the curve
-    /// reaches the pole.
-    fn reached(&self, uvs: [Point2; 2]) -> bool {
+    /// The refined UV point `uvs` on the surface with the pole.
+    fn uv(&self, uvs: [Point2; 2]) -> Point2 {
         let [uv0, uv1] = uvs;
-        let uv = if self.srf == SrfIndex::First {
+        if self.srf == SrfIndex::First {
             uv0
         } else {
             uv1
-        };
+        }
+    }
+
+    /// Whether the refined UV points `uvs` are on the degenerate boundary.
+    fn on_boundary(&self, uvs: [Point2; 2]) -> bool {
+        let uv = self.uv(uvs);
         let at = if self.on_v_boundary { uv.y } else { uv.x };
         (at - self.bound).abs() <= self.uv_tol
     }
@@ -1002,7 +1008,12 @@ impl SurfaceIntersector<'_> {
             {
                 let corner = guesses(pole.step);
                 // taken only when the curve reaches the pole there
-                if let Some(uvs) = refine(corner, true)?.filter(|uvs| pole.reached(*uvs)) {
+                let refined = refine(corner, true)?;
+                let reached = match refined {
+                    Some(uvs) => self.pole_reached(k, &pole, uvs)?,
+                    None => false,
+                };
+                if let Some(uvs) = refined.filter(|_| reached) {
                     step_size = pole.step;
                     [guess_uv0, guess_uv1] = corner;
                     next_uvs = uvs;
@@ -1090,6 +1101,28 @@ impl SurfaceIntersector<'_> {
         Ok(res)
     }
 
+    /// Whether the refined UV points `uvs` reach `pole`'s pole: on its degenerate boundary
+    /// ([`PoleCorner::on_boundary`]) and at the pole itself, the surface's point there within
+    /// `this_approx_tol_3d` of the point at the corner the singularity was tested at. The
+    /// singularity test reads one corner, and a boundary can be singular there and regular
+    /// elsewhere: a refined point on such a boundary away from the corner is not a pole. On a
+    /// boundary that collapses whole, every point of it is the pole, whatever its coordinate
+    /// along the boundary. A point the surface does not evaluate at is not reached.
+    ///
+    /// # Errors
+    ///
+    /// An unported callee or a cancellation in the evaluation.
+    fn pole_reached(&self, k: &Kernel, pole: &PoleCorner, uvs: [Point2; 2]) -> Result<bool> {
+        if !pole.on_boundary(uvs) {
+            return Ok(false);
+        }
+        match self.surface(pole.srf).evaluate_point(k, pole.uv(uvs)) {
+            Ok(at) => Ok((at - pole.pole).length() <= self.this_approx_tol_3d),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
+            Err(_) => Ok(false),
+        }
+    }
+
     /// Not upstream: the step of [`SurfaceIntersector::compute_next_point`] that reaches a
     /// pole, when the step was clipped at a boundary the curve does not reach on the way.
     ///
@@ -1112,13 +1145,14 @@ impl SurfaceIntersector<'_> {
     /// at that exit, collapsing along that boundary ([`Surface::is_singularity`] at
     /// `SM_EFF_ZERO`), the step to that exit, clipped to the other domain, is returned when
     /// it is longer than `step_size`, with that boundary: the caller takes the step only
-    /// when its refined point is on it ([`PoleCorner::reached`]), so a curve that passes
+    /// when its refined point is on it at the pole ([`SurfaceIntersector::pole_reached`]), so a curve that passes
     /// near the pole without reaching it keeps the clipped step. "On a boundary" is within
     /// `SM_EFF_ZERO` scaled by the domain, as `TraceCurve` scales its UV tolerance.
     ///
     /// # Errors
     ///
-    /// Those of the singularity test.
+    /// Those of the singularity test, and an unported callee or a cancellation in the
+    /// evaluation of the pole.
     fn pole_corner_step(
         &self,
         k: &Kernel,
@@ -1183,12 +1217,18 @@ impl SurfaceIntersector<'_> {
                 }
             }
             if corner_step > step_size {
+                let pole = match self.surface(s).evaluate_point(k, corner) {
+                    Ok(at) => at,
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                    Err(_) => continue,
+                };
                 return Ok(Some(PoleCorner {
                     step: corner_step,
                     srf: s,
                     on_v_boundary: collapse == SurfParamType::U,
                     bound: pole_bound,
                     uv_tol,
+                    pole,
                 }));
             }
         }
@@ -1941,6 +1981,42 @@ mod tests {
     fn intersector<'s>(k: &Kernel, a: &'s Surface, b: &'s Surface) -> SurfaceIntersector<'s> {
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         SurfaceIntersector::new(k, a, &d, b, &d, false).expect("intersector")
+    }
+
+    /// A refined point on the boundary the singularity was tested on, but away from the
+    /// tested corner, is not the pole where that boundary does not collapse: the first
+    /// plane's boundary v = 1 is regular, so of the points on it only the corner (0, 1)
+    /// itself is the corner's point. (Without the 3D check, `pole_reached` read only the
+    /// coordinate across the boundary and took (0.5, 1) as the pole.)
+    #[test]
+    fn a_point_on_a_regular_boundary_away_from_the_corner_is_not_the_pole() {
+        let k = Kernel::default();
+        let (a, b) = two_planes();
+        let si = intersector(&k, &a, &b);
+        let corner = Point2::new(0.0, 1.0);
+        let pole = PoleCorner {
+            step: 1.0,
+            srf: SrfIndex::First,
+            on_v_boundary: true,
+            bound: 1.0,
+            uv_tol: EFF_ZERO * 2.0,
+            pole: a.evaluate_point(&k, corner).expect("corner"),
+        };
+        let other = Point2::new(0.5, 0.5);
+        assert!(si
+            .pole_reached(&k, &pole, [corner, other])
+            .expect("at the corner"));
+        let along = [Point2::new(0.5, 1.0), other];
+        assert!(pole.on_boundary(along), "on the boundary");
+        assert!(
+            !si.pole_reached(&k, &pole, along).expect("along"),
+            "not the pole"
+        );
+        let off = [Point2::new(0.0, 0.9), other];
+        assert!(
+            !si.pole_reached(&k, &pole, off).expect("off"),
+            "off the boundary"
+        );
     }
 
     /// The crossing point of the two planes at `x`.
