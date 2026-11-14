@@ -194,12 +194,14 @@ fn two_large_cylinders_touching_along_a_line_union() {
 }
 
 /// The area two circles of radius `r` whose centres are `d` apart have in common.
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn lens_area(r: f64, d: f64) -> f64 {
     2.0 * r * r * (d / (2.0 * r)).acos() - 0.5 * d * (4.0 * r * r - d * d).sqrt()
 }
 
 /// A drill of radius 2.5 into the box face y = 0 along +y, centred at (x, z): its wall `depth`
 /// deep, then a 118° point; it starts 1 outside the face.
+#[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
 fn drill(x: f64, z: f64, depth: f64) -> Body {
     let (r, top) = (2.5, -1.0);
     let tip = r / 59f64.to_radians().tan();
@@ -238,6 +240,7 @@ fn drill(x: f64, z: f64, depth: f64) -> Body {
 /// to the issue's ε: from 1e-8 their points, which only the marching intersection meets, add
 /// edges (valid solids of the right volume).
 #[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn parallel_holes_a_hair_less_than_tangent_cut_as_touching() {
     all_fixes();
     let plate = || make_box([0.0, 0.0, 0.0], [20.0, 20.0, 10.0]).unwrap();
