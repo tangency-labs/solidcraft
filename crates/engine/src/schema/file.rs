@@ -766,6 +766,12 @@ pub struct OpenedFile {
     /// when its solids came in as one Import feature.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history: Option<String>,
+    /// A KiCad PCB opened from a project file: the board file that was read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board_path: Option<String>,
+    /// A KiCad PCB whose substrate came in as a solid rather than a mesh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board_solid: Option<bool>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
