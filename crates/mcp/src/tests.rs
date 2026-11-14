@@ -1873,17 +1873,21 @@ fn hostile_arguments_never_panic() {
     tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
     let defs = tool_definitions();
     let mut n = 0;
+    // A required path of a tool that writes points here, never into the crate.
+    let scratch = std::env::temp_dir().join(format!("solidcraft-mcp-hostile-{}", std::process::id()));
+    std::fs::create_dir_all(&scratch).unwrap();
     for def in &defs {
         let name = def["name"].as_str().unwrap();
         // Hostile strings are relative paths: don't let the sweep write files into the crate.
-        let writes = matches!(name, "save" | "screenshot" | "export");
+        let writes = matches!(name, "save" | "screenshot" | "export" | "export_views");
         let keys: Vec<String> = def["inputSchema"]["properties"].as_object().unwrap().keys().filter(|k| !(writes && *k == "path")).cloned().collect();
         for k in &keys {
             for v in hostile_values() {
                 let mut args = json!({});
                 // Fill the other required arguments with something plausible.
                 for r in def["inputSchema"]["required"].as_array().into_iter().flatten() {
-                    args[r.as_str().unwrap()] = json!("Body1");
+                    let r = r.as_str().unwrap();
+                    args[r] = if writes && r == "path" { json!(scratch.join("hostile.dxf").to_string_lossy()) } else { json!("Body1") };
                 }
                 args[k.as_str()] = v;
                 if name == "screenshot" && (k == "width" || k == "height") {
@@ -1896,6 +1900,7 @@ fn hostile_arguments_never_panic() {
         }
     }
     assert!(n > 100);
+    let _ = std::fs::remove_dir_all(&scratch);
     // Execute every command with hostile params through MCP too.
     let cmds = tool(&mut s, "list_commands", json!({}));
     for c in cmds.as_array().unwrap() {
@@ -4510,4 +4515,375 @@ fn execute_forwards_a_screw_head_to_a_hole_and_describes_it() {
         assert!(text.contains(names), "{text}");
     }
     assert!(rel(volume(&mut s), want) < 1e-6, "a refused hole changes nothing");
+}
+
+
+fn dxf_layers_and_extent(text: &str) -> (std::collections::BTreeMap<String, usize>, [f64; 2]) {
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let (mut layers, mut entity_layer) = (std::collections::BTreeMap::new(), None::<String>);
+    let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+    let mut in_entities = false;
+    for pair in lines.chunks(2) {
+        let [code, value] = pair else { continue };
+        match *code {
+            "0" => {
+                if let Some(l) = entity_layer.take() {
+                    *layers.entry(l).or_insert(0) += 1;
+                }
+                in_entities |= *value == "LINE" || *value == "LWPOLYLINE";
+                if *value == "LINE" || *value == "LWPOLYLINE" {
+                    entity_layer = Some(String::new());
+                }
+            }
+            "8" if entity_layer.is_some() => entity_layer = Some(value.to_string()),
+            "10" | "11" if entity_layer.is_some() => {
+                let x: f64 = value.parse().unwrap();
+                lo[0] = lo[0].min(x);
+                hi[0] = hi[0].max(x);
+            }
+            "20" | "21" if entity_layer.is_some() => {
+                let y: f64 = value.parse().unwrap();
+                lo[1] = lo[1].min(y);
+                hi[1] = hi[1].max(y);
+            }
+            _ => {}
+        }
+    }
+    assert!(in_entities, "no LINE or LWPOLYLINE entities");
+    (layers, [hi[0] - lo[0], hi[1] - lo[1]])
+}
+
+#[test]
+fn dfm_clearance_check_gap_and_collision() {
+    let mut s = server();
+    let make = |s: &mut Server, x: f64, name: &str| {
+        tool(
+            s,
+            "execute",
+            json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "operation": "new", "body_name": name}}),
+        );
+    };
+    make(&mut s, 0.0, "PartA");
+    make(&mut s, 10.15, "PartB");
+    let res = tool(&mut s, "dfm_clearance_check", json!({"body_a": "PartA", "body_b": "PartB", "min_clearance_mm": 0.25}));
+    assert_eq!(res["passed"], false, "{res}");
+    assert_eq!(res["is_colliding"], false, "{res}");
+    assert!((res["measured_gap_mm"].as_f64().unwrap() - 0.15).abs() < 1e-3, "{res}");
+    assert!(res["advice"].as_str().unwrap().contains("Widen gap"), "{res}");
+    // The default 0.25 mm passes a 1 mm gap.
+    make(&mut s, 21.15, "PartC");
+    let res = tool(&mut s, "dfm_clearance_check", json!({"body_a": "PartB", "body_b": "PartC"}));
+    assert_eq!(res["passed"], true, "{res}");
+    // Overlapping bodies collide.
+    make(&mut s, 25.0, "PartD");
+    let res = tool(&mut s, "dfm_clearance_check", json!({"body_a": "PartC", "body_b": "PartD"}));
+    assert_eq!(res["is_colliding"], true, "{res}");
+    assert_eq!(res["passed"], false, "{res}");
+}
+
+#[test]
+fn fdm_print_estimate_shell_infill_and_build_volume() {
+    let mut s = server();
+    tool(
+        &mut s,
+        "execute",
+        json!({"command": "solid.box", "params": {"length": 20, "width": 20, "height": 20, "corner": [0, 0, 0], "body_name": "Cube"}}),
+    );
+    let r = tool(&mut s, "fdm_print_estimate", json!({"infill_percent": 20}));
+    // Shell 2400 mm² × 1.2 mm = 2880 mm³, plus 20 % of the other 5120 mm³.
+    let printed = 2880.0 + 5120.0 * 0.2;
+    let body = &r["bodies"][0];
+    assert!(rel(body["printed_volume_mm3"].as_f64().unwrap(), printed) < 1e-9, "{r}");
+    assert!(rel(body["mass_g"].as_f64().unwrap(), printed / 1000.0 * 1.24) < 1e-9, "{r}");
+    let metres = printed / (PI * 0.875 * 0.875) / 1000.0;
+    assert!(rel(r["total"]["filament_m"].as_f64().unwrap(), metres) < 1e-9, "{r}");
+    assert_eq!(body["fits_as_placed"], true, "{r}");
+
+    // A 240 mm bar doesn't fit a 220 × 220 × 250 bed lying down, but does standing up.
+    tool(
+        &mut s,
+        "execute",
+        json!({"command": "solid.box", "params": {"length": 240, "width": 10, "height": 10, "corner": [0, 50, 0], "operation": "new", "body_name": "Bar"}}),
+    );
+    let r = tool(&mut s, "fdm_print_estimate", json!({"bodies": ["Bar"], "material": "PETG"}));
+    assert_eq!(r["bodies"][0]["fits_as_placed"], false, "{r}");
+    assert_eq!(r["bodies"][0]["fits_turned"], true, "{r}");
+    assert_eq!(r["density_g_cm3"], 1.27, "{r}");
+    let r = tool(&mut s, "fdm_print_estimate", json!({"bodies": ["Bar"], "build_volume_mm": [200, 200, 200]}));
+    assert_eq!(r["total"]["all_fit"], false, "{r}");
+
+    for bad in
+        [json!({"infill_percent": 150}), json!({"material": "Unobtainium"}), json!({"build_volume_mm": [0, 10, 10]}), json!({"bodies": ["Nope"]})]
+    {
+        let r = raw_tool(&mut s, "fdm_print_estimate", bad.clone());
+        assert!(r.get("error").is_some() || r["result"]["isError"] == json!(true), "{bad} -> {r}");
+    }
+}
+
+fn grounding_part(s: &mut Server) {
+    let res = tool(
+        s,
+        "batch",
+        json!({"commands": [
+            {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0], "body_name": "Block"}},
+            {"command": "solid.fillet", "params": {"edges": [[0, 0, 10]], "radius": 3}},
+            {"command": "solid.hole", "params": {"position": [20, 15, 20], "direction": [0, 0, -1], "diameter": 4.5, "depth": 10, "type": "counterbore", "cb_diameter": 7.5, "cb_depth": 4.5}},
+        ]}),
+    );
+    assert_eq!(res["ok"], json!(true), "grounding_part batch failed: {res}");
+}
+
+#[test]
+fn find_faces_selects_by_geometry_and_its_picks_drive_commands() {
+    let mut s = server();
+    grounding_part(&mut s);
+    let names = |r: &Value| r["matches"].as_array().unwrap().iter().map(|m| m["name"].as_str().unwrap_or("").to_owned()).collect::<Vec<_>>();
+
+    // Facing up: the top, the counterbore's floor and the blind drill's floor (z 10); the topmost is the top.
+    let up = tool(&mut s, "find_faces", json!({"body": "Block", "surface": "plane", "normal": [0, 0, 1]}));
+    assert_eq!(up["count"], 3, "{up}");
+    let top = tool(&mut s, "find_faces", json!({"body": "Block", "normal": [0, 0, 1], "extreme": {"direction": [0, 0, 1]}}));
+    assert_eq!(top["count"], 1, "{top}");
+    assert!((top["matches"][0]["pick"][2].as_f64().unwrap() - 20.0).abs() < 1e-6, "{top}");
+    let floor = tool(&mut s, "find_faces", json!({"body": "Block", "normal": [0, 0, 1], "extreme": {"direction": [0, 0, 1], "side": "min"}}));
+    assert!((floor["matches"][0]["pick"][2].as_f64().unwrap() - 10.0).abs() < 1e-6, "{floor}");
+    // Between them, by area: the counterbore's floor (a ring of 7.5 and 4.5 mm diameters). Face
+    // areas come from model.faces, a few percent low on faces bounded by circles: a ±5 % window.
+    let ring = PI * (3.75f64.powi(2) - 2.25f64.powi(2));
+    let cb = tool(&mut s, "find_faces", json!({"body": "Block", "normal": [0, 0, 1], "area_min": ring * 0.95, "area_max": ring * 1.05}));
+    assert_eq!(cb["count"], 1, "{cb}");
+    assert!((cb["matches"][0]["pick"][2].as_f64().unwrap() - 15.5).abs() < 1e-6, "{cb}");
+
+    // Cylinders: the drill and the counterbore are one each, whatever their walls are split into.
+    let drill = tool(&mut s, "find_faces", json!({"body": "Block", "surface": "cylinder", "radius": 2.25}));
+    assert_eq!(drill["distinct_cylinders"], 1, "{drill}");
+    let round = tool(&mut s, "find_faces", json!({"body": "Block", "radius": 3, "axis": [0, 0, -1]}));
+    assert_eq!(round["distinct_cylinders"], 1, "{round}");
+    let all = tool(&mut s, "find_faces", json!({"body": "Block", "surface": "cylinder", "radius_min": 2, "radius_max": 4}));
+    assert_eq!(all["distinct_cylinders"], 3, "{all}");
+
+    // The top face's edges: four straight sides, the fillet's arc and the counterbore's rim.
+    let top_name = names(&top).first().cloned().unwrap();
+    let rim = tool(&mut s, "find_faces", json!({"body": "Block", "kind": "edge", "of_face": top_name}));
+    let kinds: Vec<&str> = rim["matches"].as_array().unwrap().iter().filter_map(|m| m["type"].as_str()).collect();
+    assert_eq!(kinds.iter().filter(|k| **k == "line").count(), 4, "{rim}");
+    assert!(kinds.contains(&"arc"), "{rim}");
+    assert!(kinds.iter().any(|k| *k == "circle" || *k == "arc"), "{rim}");
+
+    // The vertical straight edges furthest along +X are the two at x = 40: round them with their picks.
+    let right = tool(
+        &mut s,
+        "find_faces",
+        json!({"body": "Block", "kind": "edge", "curve": "line", "direction": [0, 0, 1], "extreme": {"direction": [1, 0, 0]}}),
+    );
+    assert_eq!(right["count"], 2, "{right}");
+    let picks: Vec<Value> = right["matches"].as_array().unwrap().iter().map(|m| m["pick"].clone()).collect();
+    assert!(picks.iter().all(|p| (p[0].as_f64().unwrap() - 40.0).abs() < 1e-6), "{right}");
+    let before = volume(&mut s);
+    tool(&mut s, "execute", json!({"command": "solid.fillet", "params": {"edges": picks, "radius": 2}}));
+    assert!(rel(before - volume(&mut s), 2.0 * (4.0 - PI) * 20.0) < 1e-3);
+
+    // `near` sorts; `limit` caps what comes back but not the count.
+    let near = tool(&mut s, "find_faces", json!({"body": "Block", "near": [20, 15, 20], "limit": 1}));
+    assert_eq!(near["returned"], 1, "{near}");
+    assert!(near["count"].as_u64().unwrap() > 1, "{near}");
+
+    for bad in [
+        json!({"body": "Nope"}),
+        json!({"body": "Block", "normal": [0, 0, 0]}),
+        json!({"body": "Block", "kind": "vertex"}),
+        json!({"body": "Block", "extreme": {"direction": [0, 0, 1], "side": "up"}}),
+        json!({"body": "Block", "limit": 0}),
+    ] {
+        let r = raw_tool(&mut s, "find_faces", bad.clone());
+        assert!(r.get("error").is_some() || r["result"]["isError"] == json!(true), "{bad} -> {r}");
+    }
+}
+
+#[test]
+fn verify_design_checks_many_expectations_at_once() {
+    let mut s = server();
+    grounding_part(&mut s);
+    tool(
+        &mut s,
+        "execute",
+        json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5, "corner": [40.5, 0, 0], "operation": "new", "body_name": "Peg"}}),
+    );
+    let fillet = (9.0 - 9.0 * PI / 4.0) * 20.0;
+    let hole = PI * (3.75f64.powi(2) * 4.5 + 2.25f64.powi(2) * 5.5);
+    let r = tool(
+        &mut s,
+        "verify_design",
+        json!({"checks": [
+            {"check": "volume", "body": "Block", "equals": 24000.0 - fillet - hole},
+            {"check": "mass", "body": "Block", "min": 1.0},
+            {"check": "body_count", "equals": 2},
+            {"check": "bbox", "body": "Block", "size": [40, 30, 20], "fits": [220, 220, 250]},
+            {"check": "bbox", "size": [45.5, 30, 20]},
+            {"check": "timeline_ok"},
+            {"check": "clearance", "a": "Block", "b": "Peg", "min_mm": 0.25},
+            {"check": "no_interference"},
+            {"check": "count", "query": {"body": "Block", "surface": "cylinder", "radius": 2.25}, "of": "cylinders", "equals": 1},
+            {"check": "count", "query": {"body": "Block", "normal": [0, 0, 1]}, "equals": 3},
+        ]}),
+    );
+    assert_eq!(r["passed"], true, "{r}");
+    assert_eq!(r["total"], 10, "{r}");
+
+    let r = tool(
+        &mut s,
+        "verify_design",
+        json!({"checks": [
+            {"check": "volume", "body": "Block", "equals": 1000},
+            {"check": "clearance", "a": "Block", "b": "Peg", "min_mm": 1.0},
+            {"check": "teleport"},
+            {"check": "count", "query": {"body": "Block", "colour": "red"}, "equals": 1},
+            {"check": "volume", "body": "Nope", "min": 0},
+            {"check": "body_count", "min": 1},
+        ]}),
+    );
+    assert_eq!(r["passed"], false, "{r}");
+    assert_eq!(r["failed"], 5, "{r}");
+    let rows = r["checks"].as_array().unwrap();
+    assert!(rel(rows[0]["measured"].as_f64().unwrap(), 24000.0 - fillet - hole) < 1e-3, "{r}");
+    assert!((rows[1]["measured"].as_f64().unwrap() - 0.5).abs() < 1e-6, "{r}");
+    assert!(rows[2]["error"].as_str().unwrap().contains("unknown check"), "{r}");
+    assert!(rows[3]["error"].as_str().unwrap().contains("unknown query argument"), "{r}");
+    assert!(rows[4]["error"].is_string(), "{r}");
+    assert_eq!(rows[5]["passed"], true, "{r}");
+
+    // A collision fails no_interference.
+    tool(
+        &mut s,
+        "execute",
+        json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5, "corner": [38, 10, 0], "operation": "new", "body_name": "Clash"}}),
+    );
+    let r = tool(&mut s, "verify_design", json!({"checks": [{"check": "no_interference"}]}));
+    assert_eq!(r["passed"], false, "{r}");
+    for bad in [json!({"checks": []}), json!({"checks": "volume"})] {
+        let r = raw_tool(&mut s, "verify_design", bad.clone());
+        assert!(r.get("error").is_some() || r["result"]["isError"] == json!(true), "{bad} -> {r}");
+    }
+}
+
+#[test]
+fn export_views_writes_orthographic_dxfs_with_hidden_lines() {
+    use solidcraft_engine::io::vfs::PathScope;
+    let top = std::env::temp_dir().join(format!("solidcraft-mcp-views-{}", std::process::id()));
+    let (dir, outside) = (top.join("root"), top.join("outside"));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    // Only `dir` is the agent's, as `solidcraft-cli mcp` confines its agent.
+    let mut s = Server::new(Box::new(Headless::default())).with_path_scope(Some(PathScope::new([dir.clone()])));
+    tool(
+        &mut s,
+        "execute",
+        json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0], "body_name": "Block"}}),
+    );
+    tool(&mut s, "execute", json!({"command": "solid.hole", "params": {"position": [20, 15, 20], "diameter": 4.5, "depth": 20}}));
+    let base = dir.join("block.dxf");
+    let r = tool(&mut s, "export_views", json!({"path": base.to_string_lossy()}));
+    let views = r["views"].as_array().unwrap();
+    assert_eq!(views.iter().map(|v| v["view"].as_str().unwrap()).collect::<Vec<_>>(), ["front", "top", "right", "iso"], "{r}");
+    for (view, want) in [("front", [40.0, 20.0]), ("top", [40.0, 30.0]), ("right", [30.0, 20.0])] {
+        let file = dir.join(format!("block_{view}.dxf"));
+        let (layers, extent) = dxf_layers_and_extent(&std::fs::read_to_string(&file).unwrap());
+        assert!((extent[0] - want[0]).abs() < 0.02 && (extent[1] - want[1]).abs() < 0.02, "{view}: {extent:?} vs {want:?}");
+        let reported = views.iter().find(|v| v["view"] == view).unwrap()["size_mm"].clone();
+        assert!((reported[0].as_f64().unwrap() - want[0]).abs() < 1e-6, "{view}: {reported}");
+        assert!(layers.get("VISIBLE").copied().unwrap_or(0) >= 4, "{view}: {layers:?}");
+        if view != "top" {
+            // From the side the hole is behind the material: its walls are dashed.
+            assert!(layers.get("HIDDEN").copied().unwrap_or(0) >= 2, "{view}: {layers:?}");
+        }
+    }
+    assert!(dir.join("block_iso.dxf").exists());
+
+    // Hidden edges left out, one view.
+    let r = tool(&mut s, "export_views", json!({"path": dir.join("plain").to_string_lossy(), "views": ["front"], "hidden": "omit"}));
+    assert_eq!(r["views"].as_array().unwrap().len(), 1, "{r}");
+    let (layers, _) = dxf_layers_and_extent(&std::fs::read_to_string(dir.join("plain_front.dxf")).unwrap());
+    assert!(!layers.contains_key("HIDDEN"), "{layers:?}");
+
+    // Outside the agent's folders nothing is written.
+    let r = raw_tool(&mut s, "export_views", json!({"path": outside.join("x.dxf").to_string_lossy(), "views": ["top"]}));
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    assert!(!outside.join("x_top.dxf").exists());
+    for bad in [
+        json!({"path": base.to_string_lossy(), "views": []}),
+        json!({"path": base.to_string_lossy(), "views": ["top", "top"]}),
+        json!({"path": base.to_string_lossy(), "tolerance": 5}),
+    ] {
+        let r = raw_tool(&mut s, "export_views", bad.clone());
+        assert!(r.get("error").is_some() || r["result"]["isError"] == json!(true), "{bad} -> {r}");
+    }
+    tool(&mut s, "new_design", json!({}));
+    let r = raw_tool(&mut s, "export_views", json!({"path": base.to_string_lossy()}));
+    assert_eq!(r["result"]["isError"], json!(true), "no bodies: {r}");
+    let _ = std::fs::remove_dir_all(&top);
+}
+
+#[test]
+fn cad_status_reports_environment_and_health() {
+    let mut s = server();
+    let r = tool(&mut s, "cad_status", json!({}));
+    assert_eq!(r["status"], json!("ready"));
+    assert_eq!(r["backend"], json!("headless"));
+    assert_eq!(r["connected_to_gui"], json!(false));
+    assert_eq!(r["body_count"], json!(0));
+    assert_eq!(r["feature_count"], json!(0));
+    assert_eq!(r["timeline_ok"], json!(true));
+
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 20, "width": 20, "height": 10}}));
+    let r2 = tool(&mut s, "cad_status", json!({}));
+    assert_eq!(r2["body_count"], json!(1));
+    assert_eq!(r2["feature_count"], json!(1));
+    assert_eq!(r2["timeline_ok"], json!(true));
+}
+
+#[test]
+fn materials_list_and_assign() {
+    let mut s = server();
+    let list = tool(&mut s, "materials", json!({"action": "list"}));
+    let mats = list["materials"].as_array().unwrap();
+    assert!(mats.iter().any(|m| m["name"] == "Steel"), "Steel in materials: {mats:?}");
+
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 30, "width": 20, "height": 10, "body_name": "Part1"}}));
+    let assigned = tool(&mut s, "materials", json!({"action": "assign", "material": "Steel", "bodies": ["Part1"]}));
+    assert_eq!(assigned["material"]["material"], json!("Steel"));
+
+    let colored =
+        tool(&mut s, "materials", json!({"action": "assign", "appearance": "Custom Red", "color": [255, 0, 0], "opacity": 0.8, "bodies": ["Part1"]}));
+    assert!(colored.get("appearance").is_some());
+}
+
+#[test]
+fn artifacts_scans_and_filters_files() {
+    use solidcraft_engine::io::vfs::PathScope;
+    let top = std::env::temp_dir().join(format!("solidcraft-mcp-artifacts-{}", std::process::id()));
+    let (dir, outside) = (top.join("root"), top.join("outside"));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+
+    let mut s = Server::new(Box::new(Headless::default())).with_path_scope(Some(PathScope::new([dir.clone()])));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 40, "width": 25, "height": 15}}));
+
+    let part_path = dir.join("model.solidcraft");
+    let step_path = dir.join("model.step");
+    tool(&mut s, "save", json!({"path": part_path.to_string_lossy()}));
+    tool(&mut s, "export", json!({"path": step_path.to_string_lossy()}));
+
+    let all = tool(&mut s, "artifacts", json!({"dir": dir.to_string_lossy()}));
+    assert_eq!(all["count"], json!(2), "{all}");
+    let arts = all["artifacts"].as_array().unwrap();
+    assert!(arts.iter().any(|a| a["extension"] == "solidcraft" && a["kind"] == "design"));
+    assert!(arts.iter().any(|a| a["extension"] == "step" && a["kind"] == "model"));
+
+    let filtered = tool(&mut s, "artifacts", json!({"dir": dir.to_string_lossy(), "filter": ".step"}));
+    assert_eq!(filtered["count"], json!(1), "{filtered}");
+
+    let err = raw_tool(&mut s, "artifacts", json!({"dir": outside.to_string_lossy()}));
+    assert_eq!(err["result"]["isError"], json!(true), "outside agent scope: {err}");
+
+    let _ = std::fs::remove_dir_all(&top);
 }
