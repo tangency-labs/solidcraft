@@ -7479,7 +7479,14 @@ fn feature_tools_with_constructor(
             if let Some(path) = points {
                 return regions.iter().map(|r| Ok(tool(r, kernel::sweep_point_path_with(&ss.plane, r, &path, &ctl)?))).collect();
             }
-            regions.iter().map(|r| Ok(tool(r, kernel::sweep_with(&ss.plane, r, &segs, &ctl)?))).collect()
+            // A profile partway along an open path is swept from the path's start (#13330). A
+            // set direction keeps its own frame: that profile stays as drawn.
+            let plane = match ctl.orientation {
+                kernel::SweepOrientation::Perpendicular => profile_at_path_start(ps, path, start, &ss.plane, true)?,
+                kernel::SweepOrientation::Parallel => profile_at_path_start(ps, path, start, &ss.plane, false)?,
+                kernel::SweepOrientation::Direction(_) => ss.plane,
+            };
+            regions.iter().map(|r| Ok(tool(r, kernel::sweep_with(&plane, r, &segs, &ctl)?))).collect()
         }
         FeatureKind::Pipe { path_sketch, path, diameter, wall, .. } => {
             let ps =
@@ -7922,6 +7929,25 @@ pub(crate) fn path_segments_at(ps: &SolvedSketch, ids: &[String], start: Vec3, p
     if let Some(path) = path_points(ps, ids, start)? {
         return Ok(path.points().windows(2).map(|w| kernel::PathSeg::Line { a: w[0], b: w[1] }).collect());
     }
+    Ok(path_chain(ps, ids, start, profile)?.iter().map(|s| kernel::PathSeg::of_sketch(&ps.plane, s)).collect())
+}
+
+/// The profile on `profile` placed at the start of the path [`path_segments_at`] gives, as the
+/// sweep would carry it there, when the path is open and the profile stands partway along it
+/// (#13330): the sweep starts the path at the profile, so from anywhere else the tube would
+/// stand off the path by the distance between the two. Turned in the path's plane with the
+/// path's direction when `turn` (the profile turning with the path), only moved otherwise.
+/// Unchanged for a path through 3D sketch curves.
+pub(crate) fn profile_at_path_start(ps: &SolvedSketch, ids: &[String], start: Vec3, profile: &Plane, turn: bool) -> Result<Plane> {
+    if ids.is_empty() || ids.len() > 1000 || path_points(ps, ids, start)?.is_some() {
+        return Ok(*profile);
+    }
+    Ok(carried_to_open_paths_start(&path_chain(ps, ids, start, Some(profile))?, &ps.plane, profile, start, turn))
+}
+
+/// The path's curves as one chain of segments in `ps`'s plane, each in its direction of travel
+/// ([`path_segments_at`]).
+fn path_chain(ps: &SolvedSketch, ids: &[String], start: Vec3, profile: Option<&Plane>) -> Result<Vec<solidcore_record::Seg2>> {
     // Each curve as its exact pieces (Béziers, conics) where it has them, in its own direction
     // of travel. A curve is turned round whole: its pieces stay one run.
     let mut curves: Vec<Vec<solidcore_record::Seg2>> = Vec::with_capacity(ids.len());
@@ -7968,7 +7994,79 @@ pub(crate) fn path_segments_at(ps: &SolvedSketch, ids: &[String], start: Vec3, p
     if let Some(profile) = profile {
         segs = from_profile_on_closed_path(segs, &ps.plane, profile, start);
     }
-    Ok(segs.iter().map(|s| kernel::PathSeg::of_sketch(&ps.plane, s)).collect())
+    Ok(segs)
+}
+
+/// `profile` carried rigidly from where its plane crosses the open chain `segs` (in the plane
+/// `path`) nearest `start` to the chain's start: moved there and, when `turn`, turned about
+/// `path`'s normal as the chain's direction turns between the two. The crossing is where the
+/// plane cuts the chain, not the chain's point nearest `start`: a profile kept parallel need not
+/// stand square to the path. Unchanged when the chain is closed, the profile is already at its
+/// start, or its plane does not cross the chain.
+fn carried_to_open_paths_start(segs: &[solidcore_record::Seg2], path: &Plane, profile: &Plane, start: Vec3, turn: bool) -> Plane {
+    let (Some(first), Some(last)) = (segs.first(), segs.last()) else { return *profile };
+    let size: f64 = segs.iter().map(solidcore_record::Seg2::length).sum();
+    if !start.is_finite() || !(size > 0.0 && size.is_finite()) || last.end().dist(first.start()) <= 1e-5 {
+        return *profile;
+    }
+    let tol = (size * 1e-6).max(1e-6);
+    let Some((k, t, q)) = segs
+        .iter()
+        .enumerate()
+        .flat_map(|(k, s)| plane_crossings(s, path, profile, tol).into_iter().map(move |t| (k, t, path.to_world(s.point_at(t)))))
+        .min_by(|a, b| a.2.dist(start).total_cmp(&b.2.dist(start)))
+    else {
+        return *profile;
+    };
+    let to = path.to_world(first.start());
+    if profile.height(q).abs() > tol || q.dist(to) <= 1e-9 {
+        return *profile;
+    }
+    // The chain's direction of travel at the crossing and at its start.
+    let along = segs.get(k).and_then(|s| s.derivatives(t, 1)).and_then(|d| d.first().copied()).and_then(|d| d.normalized());
+    let (Some(along), Some(n)) = (along, path.normal().normalized()) else { return *profile };
+    let from = first.start_tangent();
+    let angle = if turn { (along.x * from.y - along.y * from.x).atan2(along.dot(from)) } else { 0.0 };
+    let (sin, cos) = angle.sin_cos();
+    let turned = |v: Vec3| v * cos + n.cross(v) * sin + n * (n.dot(v) * (1.0 - cos));
+    Plane { origin: to + turned(profile.origin - q), x: turned(profile.x), y: turned(profile.y) }
+}
+
+/// The parameters at which `plane` cuts the segment `seg` (in the plane `path`): each change of
+/// side between 64 even samples narrowed by halving, and samples within `tol` of it.
+fn plane_crossings(seg: &solidcore_record::Seg2, path: &Plane, plane: &Plane, tol: f64) -> Vec<f64> {
+    const SAMPLES: usize = 64;
+    let h = |t: f64| plane.height(path.to_world(seg.point_at(t)));
+    let mut out: Vec<f64> = Vec::new();
+    let mut push = |t: f64| {
+        if out.last().is_none_or(|&l| t - l > 1e-9) {
+            out.push(t);
+        }
+    };
+    let (mut t0, mut h0) = (0.0, h(0.0));
+    for i in 1..=SAMPLES {
+        let t1 = i as f64 / SAMPLES as f64;
+        let h1 = h(t1);
+        if h0.abs() <= tol {
+            push(t0);
+        } else if h0.signum() != h1.signum() && h1.abs() > tol {
+            let (mut a, mut b, ha) = (t0, t1, h0);
+            for _ in 0..60 {
+                let m = 0.5 * (a + b);
+                if h(m).signum() == ha.signum() {
+                    a = m;
+                } else {
+                    b = m;
+                }
+            }
+            push(0.5 * (a + b));
+        }
+        (t0, h0) = (t1, h1);
+    }
+    if h0.abs() <= tol {
+        push(t0);
+    }
+    out
 }
 
 /// `curves` (each a run of segments) put into one chain, when they are not end to end as listed.
