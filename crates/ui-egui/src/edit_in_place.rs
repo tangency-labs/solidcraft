@@ -504,7 +504,7 @@ pub(crate) fn tick(app: &mut SolveApp) {
     if app.edit_in_place.pending.is_some() && !app.file_load.busy() && app.network_prompt.is_none() && app.lock_prompts.is_empty() {
         app.edit_in_place.pending = None;
     }
-    let waiting = app.saving.is_some() || app.file_picker.is_some() || app.disk_prompt || app.tree.capture_prompt.is_some();
+    let waiting = app.file_picker_busy() || app.tree.capture_prompt.is_some();
     if !waiting && let Some(part) = app.edit_in_place.finish_after_save.take() {
         let shown = app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, &part));
         if shown && !app.session.is_dirty() {

@@ -36,7 +36,17 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM scratch AS site
 COPY --from=build /src/dist/web/ /
 
+# The folder endpoint is small and independent of the CAD/UI dependencies. Build it for
+# each target platform; the browser's wasm site above is still built only once.
+FROM rust:${RUST_VERSION}-alpine AS folder
+RUN apk add --no-cache musl-dev
+WORKDIR /src
+COPY . .
+RUN cargo build --locked --release -p solidcraft-web-folder
+
 FROM nginxinc/nginx-unprivileged:1.29-alpine
+COPY --from=folder /src/target/release/solidcraft-web-folder /usr/local/bin/
+COPY packaging/docker/25-server-folder.sh /docker-entrypoint.d/25-server-folder.sh
 COPY packaging/docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY LICENSE-MIT LICENSE-APACHE NOTICE THIRD-PARTY-LICENSES.txt /usr/share/doc/solidcraft/
 COPY --from=site / /srv/solidcraft/

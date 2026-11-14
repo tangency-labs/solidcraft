@@ -8,6 +8,17 @@ use solidcraft_engine::Session;
 
 use crate::SolveApp;
 
+/// Completion of a host-backed file write.
+pub type PersistFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>>>>;
+
+pub(crate) struct HostSave {
+    pub(crate) command: &'static str,
+    future: PersistFuture,
+    saved: Session,
+    result: Value,
+    pub(crate) reply: Option<(std::sync::mpsc::Sender<Value>, Value)>,
+}
+
 /// A save being written on a worker thread.
 pub struct Saving {
     command: &'static str,
@@ -26,12 +37,15 @@ impl Saving {
 
 /// Run `file.save` or `file.save_as` with `params`. On the desktop it runs on a worker and is
 /// taken up by [`tick`] (true: it is under way); in the browser, or when no thread can start, it
-/// runs here and is finished on return (false).
+/// runs here. A host-backed write stays under way until the host acknowledges it (true).
 pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
     // An assembly reading its links for a part edited in place takes them up when the read is
     // done: a save before then would record a design that is about to change as saved.
     if let Some(name) = crate::edit_in_place::refreshing_assembly(app) {
         app.set_status(solidcraft_ui_text::format("ui.edit_in_place_save_waits", &[("name", &name)]), true);
+        return false;
+    }
+    if app.file_picker_busy() || app.file_load_holds() {
         return false;
     }
     // A save keeps print faces only when the user keeps them (#11512).
@@ -61,12 +75,68 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
         }
         // No thread to write on: save here, as before.
     }
-    let _ = app.run(command, params);
+    save_here(app, command, params)
+}
+
+fn save_here(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
+    // The browser and a failed worker launch use the same engine save, including provenance.
+    let mut copy = app.session.scratch();
+    copy.path.clone_from(&app.session.path);
+    copy.signing_allowed = true;
+    let result = copy.execute(command, &params);
+    let cancelled = matches!(&result, Err(solidcraft_engine::EngineError::Cancelled(_)));
+    if result.is_ok() {
+        app.session.adopt_save(&copy);
+    }
+    complete(app, command, result.map_err(|e| e.to_string()), cancelled)
+}
+
+pub(crate) fn begin_programmatic(app: &mut SolveApp, command: &'static str, result: Value) {
+    if crate::webdav::managed(app) {
+        app.webdav.interactive.set(false);
+        begin_host_save_inner(app, command, result);
+    }
+}
+
+fn begin_host_save(app: &mut SolveApp, command: &'static str, result: Value) -> bool {
+    app.webdav.interactive.set(true);
+    begin_host_save_inner(app, command, result)
+}
+
+fn begin_host_save_inner(app: &mut SolveApp, command: &'static str, result: Value) -> bool {
+    let _language = crate::webdav::managed(app).then(|| solidcraft_ui_text::scope(&app.preferences.language));
+    if let Some(path) = app.session.path.clone()
+        && let Some(future) = crate::webdav::persist(app, &path).or_else(|| app.services.persist_save.as_ref().and_then(|persist| persist(&path)))
+    {
+        let mut saved = app.session.scratch();
+        saved.path.clone_from(&app.session.path);
+        app.session.mark_unsaved();
+        app.host_save = Some(HostSave { command, future, saved, result, reply: None });
+        return true;
+    }
     false
 }
 
 /// Take up a finished save (`wait`: wait for a running one).
 pub fn tick(app: &mut SolveApp, wait: bool) {
+    let _language = crate::webdav::managed(app).then(|| solidcraft_ui_text::scope(&app.preferences.language));
+    if let Some(pending) = app.host_save.as_mut() {
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        let std::task::Poll::Ready(result) = pending.future.as_mut().poll(&mut context) else { return };
+        let Some(HostSave { command, saved, result: value, reply, .. }) = app.host_save.take() else { return };
+        if result.is_ok() {
+            app.session.adopt_save(&saved);
+        }
+        if let Some((reply, success)) = reply {
+            let answer = match &result {
+                Ok(()) => success,
+                Err(error) => serde_json::json!({"ok": false, "error": error}),
+            };
+            let _ = reply.send(answer);
+        }
+        finish(app, command, result.map(|()| value), false);
+        crate::documents::saved_for_close(app);
+    }
     let Some(saving) = app.saving.as_ref() else { return };
     let outcome = if wait {
         saving.done.recv().ok()
@@ -86,6 +156,24 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
         Some((_, Err(e), cancelled)) => (Err(e), cancelled),
         None => (Err(format!("{command}: the save stopped")), false),
     };
+    if complete(app, command, r, cancelled) {
+        return;
+    }
+    crate::documents::saved_for_close(app);
+}
+
+/// Keep the engine's result until the host has durably written those same bytes.
+fn complete(app: &mut SolveApp, command: &'static str, r: Result<Value, String>, cancelled: bool) -> bool {
+    if let Ok(value) = &r
+        && begin_host_save(app, command, value.clone())
+    {
+        return true;
+    }
+    finish(app, command, r, cancelled);
+    false
+}
+
+fn finish(app: &mut SolveApp, command: &'static str, r: Result<Value, String>, cancelled: bool) {
     let outcome = match &r {
         Ok(_) => crate::operations::Outcome::Done,
         Err(_) if cancelled => crate::operations::Outcome::Cancelled,
@@ -93,23 +181,121 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
     };
     crate::operations::ended(app, &format!("save:{command}"), outcome);
     if cancelled {
-        // Not an error: the file is as it was, and the design still has its changes to save.
         let name = solidcraft_ui_text::tr_label(crate::command_label(command)).to_string();
         app.set_status(solidcraft_ui_text::format("operations.cancelled", &[("name", &name)]), false);
     } else {
         app.finish_command(command, &r);
-        // Saving a newer SolidCraft's file keeps what this version can't read, unless it was changed
-        // around: then the save says what went.
+        // Preserve the engine's newer-format warnings after host persistence, too.
         if let Some(first) = r.as_ref().ok().and_then(|v| v["warnings"].as_array()).and_then(|w| w.first()).and_then(serde_json::Value::as_str) {
             app.set_status(first, true);
         }
     }
-    crate::documents::saved_for_close(app);
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
+    #[test]
+    fn webdav_save_uses_preconditions_and_keeps_conflicts_unsaved() {
+        use crate::webdav::{Config, Response, Target, condition, connection};
+        let mut h = crate::scenario::Harness::new();
+        assert!(!h.app.preferences.webdav_enabled);
+        h.app.webdav.password = "original-secret".into();
+        h.app.prefs_window.shell.open = true;
+        h.frames(2);
+        h.app.webdav.password = "changed-secret".into();
+        crate::prefs::control(&mut h.app, &json!({"button": "cancel"})).unwrap();
+        assert_eq!(h.app.webdav.password, "original-secret");
+        assert!(!serde_json::to_string(&h.app.preferences).unwrap().contains("original-secret"));
+        assert_eq!(condition(None, false), vec![("If-None-Match".into(), "*".into())]);
+        assert_eq!(condition(Some("\"old\""), true), Vec::<(String, String)>::new());
+        let url = connection("https://solidcraft.io/dav/").unwrap();
+        let path = h.dir.join("remote.solidcraft").to_string_lossy().into_owned();
+        h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2})).unwrap();
+        h.app.run("file.save_as", json!({"path": path})).unwrap();
+        h.app.webdav.targets.borrow_mut().insert(
+            path.clone(),
+            Target { config: Config { base: url.clone(), user: "test".into(), password: String::new() }, url, etag: Some("\"old\"".into()) },
+        );
+        h.app.services.webdav_http = Some(std::rc::Rc::new(|request| {
+            assert_eq!(request.method, "PUT");
+            assert_eq!(request.headers, vec![("If-Match".into(), "\"old\"".into())]);
+            assert!(!request.body.is_empty());
+            Box::pin(async { Ok(Response { status: 412, etag: None, body: Vec::new() }) })
+        }));
+        assert!(super::save_here(&mut h.app, "file.save", json!({})));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while h.app.host_save.is_some() {
+            assert!(std::time::Instant::now() < deadline);
+            super::tick(&mut h.app, false);
+            std::thread::yield_now();
+        }
+        assert!(h.app.session.is_dirty());
+        assert!(*h.app.webdav.conflict.borrow());
+        assert_eq!(h.app.webdav.targets.borrow().get(&path).unwrap().etag.as_deref(), Some("\"old\""));
+        assert!(crate::webdav::strong_etag(Some("W/\"weak\"".into())).is_err());
+        *h.app.webdav.conflict.borrow_mut() = false;
+        let (request, response) = crate::control::ControlRequest::new("engine.execute", json!({"command": "file.save", "params": {}}));
+        h.app.preferences.language = "ja".into();
+        h.app.run_control(&h.ctx, request);
+        assert!(response.try_recv().is_err(), "the reply waits for the remote write");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while h.app.host_save.is_some() {
+            assert!(std::time::Instant::now() < deadline);
+            super::tick(&mut h.app, false);
+            std::thread::yield_now();
+        }
+        let reply = response.recv().unwrap();
+        assert_eq!(reply["ok"], false);
+        assert_eq!(reply["error"], solidcraft_ui_text::Locale::for_language("ja").text("webdav.error.conflict"));
+        h.app.preferences.language = "en".into();
+        assert!(h.app.session.is_dirty());
+        assert!(!*h.app.webdav.conflict.borrow(), "programmatic failures never open a dialog");
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let seen = calls.clone();
+        h.app.services.webdav_http = Some(std::rc::Rc::new(move |request| {
+            let call = seen.get();
+            seen.set(call + 1);
+            if call == 0 {
+                assert!(request.headers.is_empty(), "explicit overwrite skips the condition once");
+            } else {
+                assert_eq!(request.headers, vec![("If-Match".into(), "\"new\"".into())]);
+            }
+            Box::pin(async { Ok(Response { status: 204, etag: Some("\"new\"".into()), body: Vec::new() }) })
+        }));
+        h.app.webdav.overwrite = true;
+        for _ in 0..2 {
+            assert!(super::save_here(&mut h.app, "file.save", json!({})));
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while h.app.host_save.is_some() {
+                assert!(std::time::Instant::now() < deadline);
+                super::tick(&mut h.app, false);
+                std::thread::yield_now();
+            }
+            assert!(!h.app.session.is_dirty());
+        }
+        assert_eq!(calls.get(), 2);
+        assert!(!h.app.webdav.overwrite);
+
+        // A local or Server folder overwrite must not authorize a later WebDAV overwrite.
+        h.app.webdav.targets.borrow_mut().clear();
+        h.app.disk_prompt = true;
+        crate::open_elsewhere::answer_disk(&mut h.app, crate::open_elsewhere::DiskAnswer::Overwrite);
+        assert!(!h.app.webdav.overwrite);
+        super::tick(&mut h.app, true);
+        assert_eq!(calls.get(), 2, "the host save does not write to WebDAV");
+
+        h.app.preferences.webdav_enabled = false;
+        let reached = std::rc::Rc::new(std::cell::Cell::new(false));
+        let called = reached.clone();
+        h.app.services.pick_open = Some(Box::new(move |_| {
+            called.set(true);
+            Box::pin(async { None })
+        }));
+        h.app.pick_open(|_, _| {});
+        assert!(reached.get(), "the disabled value preserves the host picker");
+    }
 
     #[test]
     fn a_pending_save_blocks_feature_computation_and_completed_transaction_adoption() {
@@ -200,6 +386,147 @@ mod tests {
         assert_eq!(h.app.session.path.as_deref(), path.to_str());
         assert_eq!(h.app.session.doc.name, "Plate");
         assert!(h.app.session.is_dirty(), "the sphere is not in the file");
+    }
+
+    #[test]
+    fn host_save_waits_for_acknowledgement_and_failure_keeps_the_design_open() {
+        use std::{cell::RefCell, rc::Rc, task::Poll};
+        for success in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+            let answer = Rc::new(RefCell::new(None));
+            let reply = answer.clone();
+            h.app.services.persist_save = Some(Box::new(move |_| {
+                let reply = reply.clone();
+                Some(Box::pin(std::future::poll_fn(move |_| reply.borrow_mut().take().map_or(Poll::Pending, Poll::Ready))))
+            }));
+            let path = h.dir.join("server.solidcraft");
+            h.app.session.path = Some(path.to_string_lossy().into_owned());
+            crate::documents::request_quit(&mut h.app);
+            crate::documents::answer_prompt(&mut h.app, crate::documents::Answer::Save);
+            super::tick(&mut h.app, true);
+            assert!(h.app.host_save.is_some());
+            assert!(h.app.file_picker_busy() && h.app.session.is_dirty());
+            assert!(h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).is_err());
+            crate::documents::request_quit(&mut h.app);
+            assert!(!h.app.quit_requested);
+            *answer.borrow_mut() = Some(if success { Ok(()) } else { Err("HTTP 412".into()) });
+            super::tick(&mut h.app, false);
+            assert!(!h.app.file_picker_busy());
+            assert_eq!(h.app.session.is_dirty(), !success);
+            assert_eq!(h.app.quit_requested, success);
+        }
+    }
+
+    #[test]
+    fn host_save_preserves_signature_warnings_and_only_marks_the_uploaded_design_saved() {
+        use std::{cell::RefCell, rc::Rc, task::Poll};
+        for changed in [false, true] {
+            for warning in [false, true] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+                let answer = Rc::new(RefCell::new(None));
+                let reply = answer.clone();
+                h.app.services.persist_save = Some(Box::new(move |_| {
+                    let reply = reply.clone();
+                    Some(Box::pin(std::future::poll_fn(move |_| reply.borrow_mut().take().map_or(Poll::Pending, Poll::Ready))))
+                }));
+                let mut copy = h.app.session.scratch();
+                copy.path = Some(h.dir.join("Signed.sc").to_string_lossy().into_owned());
+                copy.provenance_chain = Some(solidcraft_engine::io::ProvenanceChain { records: vec![vec![1, 2, 3]], truncated: false });
+                copy.mark_saved();
+                let mut result = json!({"signature": {"user_id": "Folder signer", "fingerprint": "012345"}});
+                if warning {
+                    result["warnings"] = json!(["Newer design data was not kept"]);
+                }
+                let (finish, done) = std::sync::mpsc::channel();
+                h.app.saving = Some(super::Saving { command: "file.save_as", done, progress: Default::default() });
+                finish.send((copy, Ok(result), false)).unwrap();
+                let echoes = h.app.session.log.len();
+                super::tick(&mut h.app, false);
+                assert!(h.app.host_save.is_some() && h.app.session.is_dirty());
+                assert_eq!(h.app.session.log.len(), echoes, "no completed-save echo before acknowledgement");
+                let listed = crate::operations::control(&mut h.app, &json!({})).unwrap();
+                assert_eq!(listed["operations"][0]["key"], "save:file.save_as");
+                assert_eq!(listed["operations"][0]["cancellable"], false);
+                assert_eq!(listed["finished"].as_array().unwrap().len(), 0);
+                if changed {
+                    // A change bypassing the window guards is not part of the uploaded bytes.
+                    h.app.session.execute("solid.sphere", &json!({"diameter": 4})).unwrap();
+                }
+                *answer.borrow_mut() = Some(Ok(()));
+                super::tick(&mut h.app, false);
+                assert!(h.app.host_save.is_none());
+                assert_eq!(h.app.session.is_dirty(), changed);
+                assert_eq!(h.app.session.provenance_chain.as_ref().unwrap().records, vec![vec![1, 2, 3]]);
+                let (status, _, error) = h.app.status.as_ref().unwrap();
+                if warning {
+                    assert_eq!(status, "Newer design data was not kept");
+                    assert!(*error);
+                } else {
+                    assert!(status.contains("Folder signer"), "{status}");
+                    assert!(!error);
+                }
+                let listed = crate::operations::control(&mut h.app, &json!({})).unwrap();
+                assert_eq!(listed["finished"][0]["outcome"], "done");
+            }
+        }
+    }
+
+    #[test]
+    fn browser_save_uses_the_engine_save_before_waiting_for_the_host() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let path = h.dir.join("Browser.sc");
+        let persisted = std::rc::Rc::new(std::cell::Cell::new(false));
+        let seen = persisted.clone();
+        let expected = path.clone();
+        h.app.services.persist_save = Some(Box::new(move |path| {
+            assert_eq!(std::path::Path::new(path), expected);
+            let bytes = std::fs::read(path).unwrap();
+            let design = solidcraft_engine::io::read_design(&bytes).unwrap();
+            assert_eq!(design.name, "Browser");
+            assert_eq!(design.features.len(), 1);
+            seen.set(true);
+            Some(Box::pin(std::future::ready(Ok(()))))
+        }));
+        assert!(super::save_here(&mut h.app, "file.save_as", json!({"path": path.to_string_lossy()})));
+        assert!(persisted.get() && h.app.session.is_dirty());
+        assert!(!h.app.session.signing_allowed, "only the save copy can use the signing key");
+        super::tick(&mut h.app, false);
+        assert!(!h.app.session.is_dirty());
+        assert!(h.app.status.as_ref().unwrap().0.contains("Browser.sc"));
+    }
+
+    #[test]
+    fn a_script_and_signature_verification_wait_for_a_host_save() {
+        use std::{cell::RefCell, rc::Rc, task::Poll};
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let answer = Rc::new(RefCell::new(None));
+        let reply = answer.clone();
+        h.app.services.persist_save = Some(Box::new(move |_| {
+            let reply = reply.clone();
+            Some(Box::pin(std::future::poll_fn(move |_| reply.borrow_mut().take().map_or(Poll::Pending, Poll::Ready))))
+        }));
+        let path = h.dir.join("Uploaded.sc");
+        assert!(super::save_here(&mut h.app, "file.save_as", json!({"path": path.to_string_lossy()})));
+        assert!(!crate::verify_job::start(&mut h.app), "verification waits for the uploaded version");
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.app.control_rx = Some(rx);
+        let (req, reply) = crate::control::ControlRequest::new("engine.script", json!([{"command": "solid.sphere", "params": {"diameter": 4}}]));
+        tx.send(req).unwrap();
+        h.app.drain_control(&h.ctx);
+        assert!(reply.try_recv().is_err(), "held until the server acknowledges the save");
+        assert_eq!(h.app.session.doc.features.len(), 1);
+        *answer.borrow_mut() = Some(Ok(()));
+        super::tick(&mut h.app, false);
+        assert!(!h.app.session.is_dirty());
+        h.app.drain_control(&h.ctx);
+        assert!(reply.try_recv().is_ok());
+        assert_eq!(h.app.session.doc.features.len(), 2);
+        assert!(h.app.session.is_dirty(), "the script changed the design after it was saved");
     }
 
     /// #3044: Save writes on a worker while the window keeps drawing; the design waits (commands
