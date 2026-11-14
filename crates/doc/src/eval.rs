@@ -9180,20 +9180,51 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
     Ok(out)
 }
 
-/// One point on each face of a body (a triangle centre, so it lies on the face).
+/// One point on each face of a body.
 fn face_samples(b: &ModelBody) -> Vec<Vec3> {
-    let m = b.mesh();
-    let mut out: Vec<Option<Vec3>> = Vec::new();
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        let f = *f as usize;
-        if out.len() <= f {
-            out.resize(f + 1, None);
+    if b.body.is_mesh() {
+        return Vec::new();
+    }
+    let rec = b.body.record();
+    let mut out = Vec::with_capacity(rec.faces.len());
+    for face in &rec.faces {
+        let mut pt_found = None;
+        if let Ok(eval) = solidcraft_geom::brep::eval::SurfaceEval::new(face.parameters()) {
+            let [[u0, u1], [v0, v1]] = face.domain;
+            if u0.is_finite() && u1.is_finite() && v0.is_finite() && v1.is_finite() {
+                if let Some(p) = eval.point([(u0 + u1) * 0.5, (v0 + v1) * 0.5]) {
+                    if p.is_finite() {
+                        pt_found = Some(p);
+                    }
+                }
+            }
         }
-        if let (Some(slot @ None), Some([a, bb, c])) = (out.get_mut(f), m.tri(t)) {
-            *slot = Some((a + bb + c) * (1.0 / 3.0));
+        if pt_found.is_none() {
+            for lp in &face.loops {
+                let solidcore_record::brep::Loop::Edges { edges } = lp else { continue };
+                for u in edges {
+                    if let Some(edge) = rec.edges.get(u.edge as usize) {
+                        if let Ok(eval) = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()) {
+                            let [t0, t1] = edge.interval;
+                            if let Some(p) = eval.point((t0 + t1) * 0.5) {
+                                if p.is_finite() {
+                                    pt_found = Some(p);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if pt_found.is_some() {
+                    break;
+                }
+            }
+        }
+        if let Some(p) = pt_found {
+            out.push(p);
         }
     }
-    out.into_iter().flatten().collect()
+    out
 }
 
 /// The picked faces and every face joined to them smoothly (across tangent edges).

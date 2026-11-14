@@ -9,7 +9,6 @@ crates/doc/src/eval.rs:blend_edges_on finds a blend's edges on the display mesh
 crates/doc/src/eval.rs:edge_refs turns edge picks into references through the display mesh
 crates/doc/src/eval.rs:eval_feature places features by the display mesh (faces, edges, nearness)
 crates/doc/src/eval.rs:face_plane finds a sketch's face plane again on a mesh
-crates/doc/src/eval.rs:face_samples takes a point on each face from its mesh triangles
 crates/doc/src/eval.rs:faces_near finds the faces near a point by the display mesh
 crates/doc/src/eval.rs:feature_tools_with_constructor reaches a To Object extent by the display mesh
 crates/doc/src/eval.rs:height_at measures a point's height on a face by the display mesh
