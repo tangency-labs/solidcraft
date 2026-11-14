@@ -429,3 +429,83 @@ fn a_chamfer_whose_old_name_and_pick_fit_two_edges_asks_again() {
     let result = reopened.model.result(reopened.doc.features[bevel].id).unwrap();
     assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{:?}", result.error);
 }
+
+/// A 40 x 20 x 10 block, shelled open at the side face of its line `l1` (picked at (20, 0, 5)).
+/// Returns the shell's feature id.
+fn block_shelled_at_its_first_side(s: &mut Session) -> u64 {
+    run(s, "sketch.create", json!({"plane": "XY", "name": "S1"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.extrude", json!({"distance": 10, "name": "E1"}));
+    let id = run(s, "solid.shell", json!({"faces": [[20, 0, 5]], "thickness": 2}))["feature"].as_u64().unwrap_or(0);
+    assert_eq!(shell_error(s, id), None);
+    id
+}
+
+fn shell_error(s: &Session, id: u64) -> Option<String> {
+    s.model.result(id).and_then(|r| r.error.clone())
+}
+
+/// Delete `l1` and draw `line` in the sketch under the extrude.
+fn replace_first_side(s: &mut Session, line: [[f64; 2]; 2]) {
+    run(s, "sketch.edit", json!({"sketch": "S1"}));
+    run(s, "sketch.delete", json!({"entities": ["l1"]}));
+    run(s, "sketch.line", json!({"points": line}));
+    run(s, "sketch.finish", json!({}));
+}
+
+/// #16661: a side deleted and drawn again where it was is a new line with a new id, and the
+/// shell's saved face still finds the face on it.
+#[test]
+fn a_side_line_deleted_and_drawn_again_keeps_the_shells_face() {
+    let mut s = Session::default();
+    let shell = block_shelled_at_its_first_side(&mut s);
+    replace_first_side(&mut s, [[0.0, 0.0], [40.0, 0.0]]);
+    assert_eq!(shell_error(&s, shell), None);
+}
+
+/// A different line in its place is another face: the shell asks for it to be picked again, and a
+/// point pick through `timeline.edit` repairs the reference.
+#[test]
+fn a_different_line_in_its_place_asks_to_reselect_and_a_point_pick_repairs_it() {
+    let mut s = Session::default();
+    let shell = block_shelled_at_its_first_side(&mut s);
+    replace_first_side(&mut s, [[0.0, 0.0], [40.0, 6.0]]);
+    let error = shell_error(&s, shell).unwrap_or_default();
+    assert!(error.contains("reselect"), "{error}");
+    // An edit that sends no point leaves the stored name alone: it still fails.
+    let stored = s.doc.feature(shell).map(|f| f.face_names.clone()).unwrap_or_default();
+    s.execute("timeline.edit", &json!({"feature": shell, "set": {"thickness": 1}})).ok();
+    assert_eq!(s.doc.feature(shell).map(|f| f.face_names.clone()), Some(stored));
+    // Picking the face now on the other line stores its name ...
+    run(&mut s, "timeline.edit", json!({"feature": shell, "set": {"faces": [[20, 3, 5]]}}));
+    assert_eq!(shell_error(&s, shell), None);
+    // ... and the stored name is the new face's, so a reopened design finds it too.
+    let reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
+    assert_eq!(shell_error(&reopened, shell), None);
+}
+
+/// #16661: an edit that sends only `extent.distance` of an extrude that ends at a face sends no
+/// face point, so the stored face names stay; sending the `extent.to` point stores them fresh.
+#[test]
+fn an_extrude_to_a_face_keeps_its_names_when_only_the_distance_is_edited() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-5, -5], "p1": [5, 5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "operation": "join"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.circle.center", json!({"center": [8, 0], "radius": 1.5}));
+    run(&mut s, "sketch.finish", json!({}));
+    let id = run(&mut s, "solid.extrude", json!({"to": [5, 0, 20], "operation": "join"}))["feature"].as_u64().unwrap_or(0);
+    let marker = vec!["marker".to_string()];
+    let names = |s: &Session| s.doc.feature(id).map(|f| f.face_names.clone());
+    if let Some(f) = s.doc_mut().feature_mut(id) {
+        f.face_names = marker.clone();
+    }
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"extent.distance": 7}}));
+    assert_eq!(names(&s), Some(marker.clone()));
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"extent.to": [5, 0, 20]}}));
+    assert_ne!(names(&s), Some(marker));
+}
