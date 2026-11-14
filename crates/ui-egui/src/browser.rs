@@ -1409,17 +1409,17 @@ impl Actions {
 }
 
 /// Existing Browser content without placement, title or collapse chrome.
-pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
+pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool) {
     sync_reveals(app);
-    let render = crate::render_workspace::active(app);
-    if render {
+    let compact = compact || crate::render_workspace::active(app);
+    if compact {
         ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_compact_tree"), true));
     }
     if !crate::render_workspace::browser_mode(app, ui) {
         crate::edit_in_place::browser_strip(app, ui);
         browser_rows_hugging(app, ui);
     }
-    if render {
+    if compact {
         ui.ctx().data_mut(|data| data.remove::<bool>(egui::Id::unique("sc_compact_tree")));
     }
 }
