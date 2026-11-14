@@ -1265,8 +1265,9 @@ fn append_section(
     let mut cursor = if out.direction == Direction::Ltr { right(header) - edge_margin } else { header.origin.x + edge_margin };
     let take = |cursor: &mut f32, row: LogicalRect, extent: f32| {
         let x = if out.direction == Direction::Ltr { *cursor - extent } else { *cursor };
-        *cursor += if out.direction == Direction::Ltr { -extent } else { extent };
-        rect(x, row.origin.y + (row.size.height - extent) / 2.0, extent, extent)
+        let x = x.clamp(row.origin.x, (right(row) - extent).max(row.origin.x));
+        *cursor = if out.direction == Direction::Ltr { x } else { (x + extent).min(right(row)) };
+        rect(x, row.origin.y + (row.size.height - extent) / 2.0, extent.min(right(row) - x), extent)
     };
     let close = spec.features.hot_closable.then(|| take(&mut cursor, header, primary_extent));
     let collapse = collapsible.then(|| take(&mut cursor, header, primary_extent));
