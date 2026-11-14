@@ -23,13 +23,17 @@
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::boolean::api_brep::boolean_union;
+use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
-use solidcore::math::{Point2, Point3, BIG_DOUBLE};
+use solidcore::math::{Point2, Point3, Vec3, BIG_DOUBLE};
+use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::{get_edges, get_faces};
+use solidcore::sweep::api_brep::create_linear_sweep;
+use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::edgeuse::p1 as eu1;
@@ -220,4 +224,72 @@ fn boss_base_mitres_are_the_rounds_exact_plane_sections() {
         (v - BOSS_BASE_MITRE).abs() <= 1e-11 * BOSS_BASE_MITRE,
         "{v}"
     );
+}
+
+/// A one-unit-wide fin with underside z = 5 + 3y/4, joined to a 10 x 1 x 10 base.
+/// Its two root edges meet at (1, 0, 5). Their rounds continue past the fin's width.
+fn sloping_fin(k: &mut Kernel, mirrored: bool) -> Brep {
+    let sign = if mirrored { -1.0 } else { 1.0 };
+    let base_x = if mirrored { -10.0 } else { 0.0 };
+    let base = create_box(k, Point3::new(base_x, -1.0, 0.0), 10.0, 1.0, 10.0).unwrap();
+    let points = [
+        Point3::new(0.0, -0.5, 10.0),
+        Point3::new(0.0, 6.0, 10.0),
+        Point3::new(0.0, 6.0, 9.5),
+        Point3::new(0.0, -0.5, 4.625),
+        Point3::new(0.0, -0.5, 10.0),
+    ];
+    let curves: Vec<Curve> = points
+        .windows(2)
+        .map(|p| Curve::from(create_line_segment(p[0], p[1]).unwrap()))
+        .collect();
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    let fin = create_linear_sweep(k, &refs, Vec3::new(sign, 0.0, 0.0), 1.0, true).unwrap();
+    boolean_union(k, base, fin).unwrap()
+}
+
+/// Integrate the circular sections independently of the kernel. At height y = r t,
+/// q = sqrt(2t - t²), the side strip is r(1-q). The bottom strip is
+/// r(3t/4 + 1/2 - q), ending at t = 2/5, where the circle touches the sloping plane.
+/// Integrating the strips gives the quadratic term below. Their common rectangle
+/// and the sloping end of the side strip give integral_0^(2/5) (1-q)(1/2-q) dt
+/// - (3/4) integral_(2/5)^1 t(1-q) dt. The unrounded union is 100 + 30 - 13.5.
+fn sloping_fin_volume(radius: f64) -> f64 {
+    let angle = 0.75_f64.atan();
+    let strips = 5.5 - 1.5 * PI + 0.5 * angle;
+    let corner = 53.0 / 120.0 - 3.0 * PI / 8.0 + 9.0 * angle / 8.0;
+    116.5 + strips * radius.powi(2) + corner * radius.powi(3)
+}
+
+#[test]
+fn rounds_at_a_sloping_fin_root_are_independent_of_its_short_edge() {
+    for mirrored in [false, true] {
+        for reversed in [false, true] {
+            for radius in [1.0, 2.5] {
+                let mut k = all_fixes();
+                let mut b = sloping_fin(&mut k, mirrored);
+                let sign = if mirrored { -1.0 } else { 1.0 };
+                let mut at = [[0.5 * sign, 0.0, 5.0], [sign, 0.0, 7.5]];
+                if reversed {
+                    at.reverse();
+                }
+                round(&mut k, &mut b, &at, &[radius; 2]).unwrap();
+                b.refresh_cached_topology();
+                assert!(is_manifold_solid(&b).unwrap());
+                let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+                    .unwrap()
+                    .lines();
+                assert!(
+                    lines.is_empty(),
+                    "mirror={mirrored} reverse={reversed} r={radius}: {lines:?}"
+                );
+                let actual = volume(&k, &mut b);
+                let expected = sloping_fin_volume(radius);
+                assert!(
+                    (actual - expected).abs() < 1e-8 * expected,
+                    "mirror={mirrored} reverse={reversed} r={radius}: volume {actual}, expected {expected}"
+                );
+            }
+        }
+    }
 }
