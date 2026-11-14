@@ -2129,6 +2129,73 @@ fn parked_reveals_are_pruned_against_their_own_document_when_the_target_is_remov
     assert_no_pending_reveals(&h);
 }
 
+/// #14024: a linked component's row says which file it comes from and how that file is, asked
+/// beside the window: once for a design, and again when the window comes back to the front.
+#[test]
+fn a_linked_components_row_shows_the_state_of_its_file() {
+    fn answer(h: &mut Harness) {
+        h.frames(1);
+        for _ in 0..2000 {
+            if !h.app.tree.links.busy() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            h.frames(1);
+        }
+        h.frames(1);
+        assert!(!h.app.tree.links.busy(), "the answer never came");
+    }
+    fn back_to_the_front(h: &mut Harness) {
+        h.app.synthetic.push(egui::Event::WindowFocused(true));
+        answer(h);
+    }
+    let mut h = Harness::new();
+    h.frames(2);
+    assert!(!h.app.tree.links.busy(), "nothing is asked without a link");
+    let part = h.dir.join("part.solidcraft");
+    let mut source = solidcraft_engine::Session::default();
+    source.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+    source.execute("file.save", &json!({"path": part})).unwrap();
+    let component = h.app.run("component.insert_design", json!({"path": part})).unwrap()["component"].as_u64().unwrap();
+    // The frame asks, whichever layout paints the Browser, or none.
+    let ctx = h.ctx.clone();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| h.app.logic(ui.ctx()));
+    assert!(h.app.tree.links.busy(), "asked without painting the Browser");
+    answer(&mut h);
+
+    let link = h.app.tree.links.get(component).expect("the link's badge").clone();
+    assert_eq!((link.badge, link.note), ("link", None));
+    assert!(link.tooltip().contains("part.solidcraft"), "{}", link.tooltip());
+    assert_eq!(crate::browser_links::with_link(true, Some(&link)), ["pin", "link"]);
+    h.frames(5);
+    assert!(!h.app.tree.links.busy(), "the files are not read again every frame");
+
+    source.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+    source.execute("file.save", &json!({"path": part})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.tree.links.get(component).unwrap().note, None, "not looked at until the window returns");
+    back_to_the_front(&mut h);
+    let changed = h.app.tree.links.get(component).unwrap();
+    assert_eq!((changed.badge, changed.note), ("link_warning", Some("ui.link_changed")));
+
+    std::fs::remove_file(&part).unwrap();
+    back_to_the_front(&mut h);
+    let missing = h.app.tree.links.get(component).unwrap();
+    assert_eq!((missing.badge, missing.note), ("link_warning", Some("ui.link_missing")));
+
+    // A file that was not looked at may be fine: neutral, and the note says why.
+    let not_allowed = json!({"component": 7, "file": "//server/share/a.solidcraft", "found": null, "host": "server", "reason": "not allowed"});
+    let (id, network) = crate::browser_links::badge_of(&not_allowed).unwrap();
+    assert_eq!((id, network.badge, network.note), (7, "link_unchecked", Some("ui.link_not_checked_network")));
+    let device = json!({"component": 8, "file": "CON", "found": null, "reason": "names a device, not a file"});
+    let (_, device) = crate::browser_links::badge_of(&device).unwrap();
+    assert_eq!((device.badge, device.note), ("link_unchecked", Some("ui.link_not_checked")));
+
+    h.app.run("component.break_link", json!({"component": component})).unwrap();
+    h.frames(2);
+    assert!(h.app.tree.links.get(component).is_none(), "a design with no links shows no badge");
+}
+
 /// #7533: the first click of a double-click that comes a little after a click on the same name
 /// does not rename it; the double-click edits the feature, and a rename waits out the
 /// double-click delay.

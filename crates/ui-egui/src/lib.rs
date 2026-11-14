@@ -18,6 +18,7 @@ pub use solidcraft_ui_kit::blur;
 pub mod bom_panel;
 pub mod browser;
 pub mod browser_canvas;
+pub mod browser_links;
 pub mod browser_prompts;
 pub mod canvas;
 pub mod cli_link;
@@ -3541,6 +3542,7 @@ impl SolveApp {
         save_job::tick(self, false);
         verify_job::tick(self);
         edit_in_place::tick(self);
+        browser_links::refresh(self, ctx);
         let typing = ctx.egui_wants_keyboard_input();
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
             edit_in_place::back(self);

@@ -84,6 +84,25 @@ pub fn badge(p: &egui::Painter, r: Rect, name: &str, c: Color32) {
             p.circle_filled(head, 3.2, c);
             p.line_segment([head, pos2(r.left() + 1.5, r.bottom() - 1.0)], Stroke::new(1.6, c));
         }
+        "link" | "link_warning" | "link_unchecked" => {
+            // Two links of a chain, lying from the lower left to the upper right.
+            const LINK: [(f32, f32); 8] = [(1.4, -3.2), (3.2, -1.4), (2.7, -0.1), (-0.1, 2.7), (-1.4, 3.2), (-3.2, 1.4), (-2.7, 0.1), (0.1, -2.7)];
+            for shift in [vec2(-1.9, 1.9), vec2(1.9, -1.9)] {
+                let at = r.center() + shift;
+                p.add(egui::Shape::closed_line(LINK.iter().map(|(x, y)| at + vec2(*x, *y)).collect(), Stroke::new(1.1, c)));
+            }
+            // The state is also in the shape, for those who can't tell the colours apart.
+            let corner = pos2(r.right() - 2.0, r.bottom() - 2.0);
+            match name {
+                "link_warning" => {
+                    p.circle_filled(corner, 2.2, c);
+                }
+                "link_unchecked" => {
+                    p.circle_stroke(corner, 1.9, Stroke::new(1.0, c));
+                }
+                _ => {}
+            }
+        }
         _ => {}
     }
 }
