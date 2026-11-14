@@ -583,10 +583,10 @@ const STRETCH_SLIVER_ULPS: f64 = 1024.0;
 /// `stretch 2^-(j+1)` to `stretch 2^-j` from the end, the last one's near edge at `cut`
 /// (at most [`STRETCH_PIECES`] of them). On each, [`radius_clears_on_surface`] must clear
 /// half the growth line's value at the piece's near edge (`radius_tol 2^-(j+2)` on a whole
-/// dyadic piece; a quarter of the line's value at its far edge). This is a DEFINITION of
-/// the defect inside a zero-speed stretch, chosen in review: a radius below that is
-/// reported (`a_radius_below_half_the_growth_line_is_reported`: 0.4 times the line). A genuine
-/// zero-speed end has its radius on the line to first order, so the full line would leave
+/// dyadic piece; a quarter of the line's value at its far edge). This is a proposed
+/// DEFINITION of the defect inside a zero-speed stretch (the maintainer's decision): a
+/// radius below that is reported (`a_radius_below_half_the_growth_line_is_reported`: 0.4
+/// times the line). A genuine zero-speed end has its radius on the line to first order, so the full line would leave
 /// it no margin at the near edges. It is looser than WR-668's own check, which accepts the
 /// radius at the stretch's far end within half the tolerance of the line (at least
 /// `radius_tol / 2` there), where the outermost piece asks for `radius_tol / 4`.
@@ -3050,6 +3050,44 @@ mod tests {
             &[0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0],
         );
         assert!(!radius_clears_on_surface(&k, &jump, &plane, 0.0, 1.0, 1e-3).unwrap());
+    }
+
+    /// A G1 join whose control points are rounded keeps the pass-over: the straight run
+    /// `(0.7, 0.4) + i h (cos a, sin a)`, `i = 0..4`, `h = 1e-4`, on the unit plane as two
+    /// quadratic pieces joined at a double knot, each control point rounded on its own, so
+    /// that the knot's two legs are parallel only to the points' rounding (up to
+    /// `ulp(0.7) / h`, about 1e-12 rad). MEASURED by probe: the cross product's enclosure at
+    /// the knot reaches 1.3e-10 to 1.9e-10 of `|a| |b|` for the five directions, beyond
+    /// `64 ε` (1.4e-14), so a rule of `64 ε` alone would refuse every one of these
+    /// straight runs; the enclosures' widths term admits them (allowance 3.8e-10). The
+    /// near-G1 corner of 1e-8 rad in [`a_c0_corner_at_a_knot_is_not_cleared`] is still
+    /// refused.
+    #[test]
+    fn a_straight_run_with_rounded_control_points_clears() {
+        let k = Kernel::default();
+        let plane = Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let h = 1e-4;
+        for a in [0.3f64, 0.7, 1.1, 2.0, 2.9] {
+            let (sn, cs) = a.sin_cos();
+            let at = |i: f64| [0.7 + i * h * cs, 0.4 + i * h * sn];
+            let run = uv_quadratic(
+                &[at(0.0), at(1.0), at(2.0), at(3.0), at(4.0)],
+                &[0.0, 0.5, 1.0],
+                &[3, 2, 3],
+            );
+            assert!(
+                radius_clears_on_surface(&k, &run, &plane, 0.0, 1.0, 1e-3).unwrap(),
+                "{a}"
+            );
+        }
     }
 
     /// The half-line definition reports a real defect: the positive cubic of

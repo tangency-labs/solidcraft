@@ -17,8 +17,9 @@ at its ends (WR-668), where the radius vanishes with the speed, it must be at le
 growth line WR-668 reads there, `(tol / stretch) |t - t_end| / 2`, at the near edge of each
 of at most 52 dyadic pieces (`tol 2^-(j+2)` over the piece `stretch 2^-(j+1)` to
 `stretch 2^-j` from the end). A genuine zero-speed end has its radius on the line to first
-order, so the full line would leave it no margin. This margin is a DEFINITION of the defect
-inside a zero-speed stretch, chosen in review. It is looser than WR-668's own check, which wants at least
+order, so the full line would leave it no margin. This margin is a proposed DEFINITION of
+the defect inside a zero-speed stretch (the maintainer's decision). It is looser than
+WR-668's own check, which wants at least
 `tol / 2` at the stretch's far end, where the outermost piece asks for `tol / 4`. The
 pieces stop at a cut from the end, and the last piece's near edge is the cut. The cut is
 the largest of `ulp(t_end)` and `stretch 2^-52` (below which the pieces would round onto
