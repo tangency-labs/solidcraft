@@ -9977,7 +9977,7 @@ fn raw_explicit_extent_survives_collapse_sole_content_and_return_to_stack() {
     assert_eq!(raw.content.runtime.layout().layout().sections.iter().map(|section| section.weight).collect::<Vec<_>>(), weights);
     raw.content.dispatch(vec![Mutation::Close { instance: id("log-1") }]).unwrap();
     raw.frame(Vec::new(), false);
-    raw.click(HostControlTarget::Pointer(HostPointerTarget::Menu { instance: id("log-0") }), false);
+    raw.menu(id("log-0"));
     raw.click(HostControlTarget::Shared { instance: id("log-0"), action: HostSharedAction::ResetHeight }, false);
     raw.frame(Vec::new(), false);
     assert_eq!(raw.host.frame().unwrap().layout.sections[0].outer.size.height, 240.0);
