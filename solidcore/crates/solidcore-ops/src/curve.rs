@@ -1,7 +1,7 @@
 //! Free curves: a B-spline from the control points a designer places, one of its control points
 //! moved, the curve under an affine map, the curve seen in two views, its curvature comb, the
 //! blend from one curve's end to another's, circles and arcs, a curve extended at an end, two
-//! curves joined end to end, the point of a curve nearest a given point, and a planar curve
+//! curves joined end to end, the point of a curve nearest a given point or a ray, and a planar curve
 //! offset in its plane ([`offset_planar`]: the kernel's trimmed offset, its distance measured by
 //! [`solidcore::query::deviation::distance_deviation`]), and a curve on a sheet offset along its
 //! surface ([`offset_on_surface`]: the kernel's
@@ -856,6 +856,73 @@ pub fn crossings(
             });
         }
         Ok(Ok(out))
+    })?
+}
+
+/// The point of a free curve nearest a ray ([`closest_to_ray`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CurveRayPoint {
+    /// The curve's parameter there, the record's.
+    pub parameter: f64,
+    /// The curve's point there.
+    pub point: [f64; 3],
+    /// The ray's point nearest it.
+    pub on_ray: [f64; 3],
+    /// The distance between the two: the kernel solve's (not certified).
+    pub distance: f64,
+}
+
+/// The point of `curve` nearest the ray from `origin` along `direction`, over the record's own
+/// range (as [`closest_point`] takes it): a pick through the view lands on the curve drawn
+/// under the pointer in any view, where the curve point nearest one point of the ray does so
+/// only when that point is the nearest. The curve as the kernel's ([`from_parameters`]), the
+/// kernel's curve/ray solve ([`solidcore::query::curve::closest_point_to_ray`], the one an
+/// edge's pick uses) within `tolerance`, and its parameter as the record's
+/// ([`solidcore::curve::from_parameters::record_parameter`]: radians on a circle or ellipse).
+/// `None` where the solve finds no point.
+///
+/// # Errors
+/// [`Error::Argument`] for an origin or direction not finite or past the coordinate bound, a
+/// direction of no length, a tolerance not finite and positive, or a curve the record or the
+/// kernel's constructors refuse; the kernel's status otherwise.
+pub fn closest_to_ray(
+    curve: &Curve,
+    origin: [f64; 3],
+    direction: [f64; 3],
+    tolerance: f64,
+) -> Result<Option<CurveRayPoint>> {
+    if !coord_ok(&origin) || !coord_ok(&direction) || !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(Error::Argument);
+    }
+    if check_curve(curve, &mut Budget::input()).is_err() {
+        return Err(Error::Argument);
+    }
+    let range = own_range(curve).ok_or(Error::Argument)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    run("curve::closest_to_ray", |k| {
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let found = match solidcore::query::curve::closest_point_to_ray(
+            k,
+            &made.curve,
+            &made.interval,
+            point(origin),
+            point(direction),
+            tolerance,
+        ) {
+            Ok(found) => found,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        Ok(Ok(found.map(|f| CurveRayPoint {
+            parameter: record_parameter(&record, range, f.parameter, f.point),
+            point: [f.point.x, f.point.y, f.point.z],
+            on_ray: [f.on_ray.x, f.on_ray.y, f.on_ray.z],
+            distance: f.distance,
+        })))
     })?
 }
 
