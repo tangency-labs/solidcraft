@@ -501,7 +501,8 @@ fn quadric_pair(a: &Implicit, b: &Implicit, tolerance: f64) -> Option<PlanePair>
         }
         _ => return None,
     };
-    if !(off <= tolerance) {
+    // a centre or axis not proved within the tolerance (or not a number): not one axis
+    if off.is_nan() || off > tolerance {
         return None;
     }
     if gap.abs() + off <= tolerance {
