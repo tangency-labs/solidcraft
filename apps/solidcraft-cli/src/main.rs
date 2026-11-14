@@ -108,7 +108,7 @@ const USAGE_BENCH_EDIT: &str = "  solidcraft-cli bench-edit <script.json|recipe.
 /// `save-stress`'s lines in the usage: the file saved over and over.
 const USAGE_SAVE_STRESS: &str = "  solidcraft-cli save-stress <path> <rounds>\n";
 /// The flags every command takes, at the end of the top-level usage.
-const USAGE_DEBUG: &str = "  --debug, with any command: what SolidCraft logs (why a body has no display plan, why a save left its\n      model cache out), on stderr; RUST_LOG=error|warn|info|debug|trace sets one level for every crate\n  --max-file-size SIZE, with any command: read STEP and import files and design files up to SIZE for this run\n      (for example 2GB or 1500MB; at most 16GB; the defaults are 512 MB and 256 MB, and a smaller SIZE keeps them)\n";
+const USAGE_DEBUG: &str = "  --debug, with any command: what SolidCraft logs (why a body has no display plan, why a save left its\n      model cache out), on stderr; RUST_LOG=error|warn|info|debug|trace sets one level for every crate\n  --max-file-size SIZE, with any command: read STEP and import files and design files up to SIZE for this run\n      (for example 2GB or 1500MB; at most 16GB; the defaults are 512 MB and 256 MB, and a smaller SIZE keeps them)\n  --force-open, with any command: read a STEP file even when it may need more memory than half of this computer's\n      (32 times the file's size); without it such a file is refused, before it is read, naming the memory\n";
 
 const USAGE_PLUGIN_LIMITS: &str = "  --plugin-limits FILE.json, with local commands: user ceilings {max_fuel, max_memory_mib}; defaults 100000000000 / 128, invocation defaults remain 10000000 / 64 MiB. With mcp use --headless; connected desktops keep their own preferences.\n";
 
@@ -159,6 +159,11 @@ fn main() -> ExitCode {
     if let Err(e) = max_file_size(&mut args) {
         solidcraft_engine::note!("error: {e}");
         return ExitCode::FAILURE;
+    }
+    // `--force-open`: read STEP files whatever memory they may need (#15588).
+    if args.iter().any(|a| a == "--force-open") {
+        args.retain(|a| a != "--force-open");
+        solidcraft_engine::io::limits::set_open_anyway(true);
     }
     if let Err(e) = plugin_limits(&mut args) {
         eprintln!("error: {e}");
@@ -1125,6 +1130,10 @@ pub(crate) fn cmd_bench_open(args: &[String]) -> Result<(), String> {
     let t = std::time::Instant::now();
     let step = solidcraft_engine::io::is_step_path(path);
     let kind = if step { solidcraft_engine::io::limits::Kind::Step } else { solidcraft_engine::io::limits::Kind::Design };
+    // As `doc.open` does: refused before it is read when it may need more memory than there is.
+    if let Ok(size) = std::fs::metadata(path).map(|m| m.len()) {
+        solidcraft_engine::io::limits::check_memory(path, size, false).map_err(|e| format!("{path}: {e}"))?;
+    }
     let bytes = solidcraft_engine::io::limits::read(path, kind).map_err(|e| format!("{path}: {e}"))?;
     let read_ms = t.elapsed().as_secs_f64() * 1000.0;
     println!("{}", json!({"step": "read", "ms": read_ms, "bytes": bytes.len()}));

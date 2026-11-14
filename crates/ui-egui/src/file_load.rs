@@ -572,6 +572,8 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
+        // A STEP file that may need more memory than there is asks first (#15588).
+        let Some(request) = crate::open_memory::check_open(app, request) else { return Ok(()) };
         // A design open in another SolidCraft asks first (#5467).
         let Some(request) = crate::open_elsewhere::check_open(app, request) else { return Ok(()) };
         queue(app, request)

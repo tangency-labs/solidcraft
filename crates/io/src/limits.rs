@@ -5,7 +5,7 @@
 //! in force, so the size check still happens before a file is read. In the browser (wasm32) the
 //! defaults always apply: the web app's address space can't hold more.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// One megabyte as the limits count it (2^20 bytes, like the defaults).
 pub const MB: u64 = 1 << 20;
@@ -200,6 +200,55 @@ pub fn check(kind: Kind, size: u64) -> Result<(), String> {
     if size > kind.limit() { Err(too_large(kind, size)) } else { Ok(()) }
 }
 
+/// `--force-open` for this run: a STEP file that may need more memory than the machine can spare
+/// is read without being refused (#15588).
+static OPEN_ANYWAY: AtomicBool = AtomicBool::new(false);
+
+/// Read STEP files whatever memory they may need (`--force-open`), or check it again.
+pub fn set_open_anyway(on: bool) {
+    OPEN_ANYWAY.store(on, Ordering::Relaxed);
+}
+
+/// Whether this run reads STEP files whatever memory they may need (`--force-open`).
+pub fn open_anyway() -> bool {
+    OPEN_ANYWAY.load(Ordering::Relaxed)
+}
+
+/// The memory reading a `size`-byte file at `path` may need and the memory there is for it, in
+/// bytes, when that is more than the machine can spare (#15588). Only a STEP text (`.step`,
+/// `.stp`) is measured this way; an IGES, FreeCAD or Rhino file is not.
+pub fn memory_short(path: &str, size: u64) -> Option<(u64, u64)> {
+    let step = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"));
+    if !step {
+        return None;
+    }
+    match solidcraft_kernel::step_check_memory(usize::try_from(size).unwrap_or(usize::MAX)) {
+        Err(solidcore_record::step::p21::Error::NeedsMemory { needed, available }) => Some((needed as u64, available as u64)),
+        _ => None,
+    }
+}
+
+/// Refuse, before it is read, a `size`-byte STEP file that may need more memory than the machine
+/// can spare, naming the memory, unless the caller passed `force` or the run `--force-open`
+/// (#15588). A file over the size limit is refused for that first ([`check`]). The desktop app
+/// asks the person instead ([`memory_short`]).
+pub fn check_memory(path: &str, size: u64, force: bool) -> Result<(), String> {
+    check(Kind::Step, size)?;
+    if force || open_anyway() {
+        return Ok(());
+    }
+    match memory_short(path, size) {
+        Some((needed, available)) => Err(format!(
+            "{}. To open it anyway, pass `force: true` (or start solidcraft-cli with --force-open).",
+            solidcore_record::step::p21::Error::NeedsMemory { needed: needed as usize, available: available as usize }
+        )),
+        None => Ok(()),
+    }
+}
+
 /// [`crate::vfs::read`] with this kind's limit; a file over it is refused, before reading, with
 /// [`too_large`]'s message.
 pub fn read(path: &str, kind: Kind) -> std::io::Result<Vec<u8>> {
@@ -341,5 +390,34 @@ mod tests {
             assert!(set_preferred(preferred).is_err() && set_override(Some(2 * GB)).is_err());
             assert_eq!(effective(), FileLimits::DEFAULT);
         }
+    }
+    /// #15588: a STEP file that may need more memory than the machine can spare is named, with
+    /// that memory, before it is read, and read when the caller says so; other files aren't
+    /// measured this way.
+    #[test]
+    fn a_step_file_that_may_need_more_memory_than_there_is_is_refused_unless_forced() {
+        let peak = solidcore_record::step::p21::PEAK_PER_BYTE as u64;
+        // As if the machine could spare 64 MB: a 2 MB file is over it.
+        solidcraft_kernel::step_with_memory_to_spare(64 << 20, || {
+            assert_eq!(memory_short("small.step", MB), None);
+            let size = 2 * MB + 1;
+            assert_eq!(memory_short("big.step", size), Some((size * peak, 64 << 20)));
+            assert_eq!(memory_short("big.STP", size), Some((size * peak, 64 << 20)));
+            assert_eq!(memory_short("big.igs", size), None);
+            assert_eq!(memory_short("big.FCStd", size), None);
+            let message = check_memory("big.step", size, false).unwrap_err();
+            assert!(
+                message.starts_with(
+                    "STEP file needs about 64 MB of memory to read, more than the 64 MB available for it. To open it anyway, pass `force: true`"
+                ) && message.contains("--force-open"),
+                "{message}"
+            );
+            assert_eq!(check_memory("big.step", size, true), Ok(()));
+            assert_eq!(check_memory("small.step", MB, false), Ok(()));
+            // Over the size limit, that is what it is refused for, forced or not.
+            let over = Kind::Step.limit() + 1;
+            assert_eq!(check_memory("big.step", over, true), Err(too_large(Kind::Step, over)));
+            assert_eq!(check_memory("big.step", over, false), Err(too_large(Kind::Step, over)));
+        });
     }
 }

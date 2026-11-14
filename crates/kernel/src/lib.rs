@@ -225,7 +225,11 @@ pub use solidcraft_smlib::trace as smlib_trace;
 pub use splitface::{SplitTool, split_body, split_faces, split_faces_with_map};
 pub use step::step_export;
 /// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
-pub use step_in::p21::{max_bytes as step_max_bytes, set_max_bytes as set_step_max_bytes};
+/// The memory a STEP file may need, asked before it is opened (#15588).
+pub use step_in::p21::{
+    check_memory as step_check_memory, max_bytes as step_max_bytes, memory_to_spare as step_memory_to_spare, set_max_bytes as set_step_max_bytes,
+    with_memory_to_spare as step_with_memory_to_spare,
+};
 pub use step_in::{
     ImportIssue, ImportReport, ImportedBody, IssueKind, StepImport, StepNode, StepReading, step_cache_alive, step_import, step_import_shared,
     step_orientation_errors, step_validate,
