@@ -3244,14 +3244,11 @@ mod tests {
         expect(&cone(-1.0), 2, &[radius, pole]);
         // SM_LEVEL_GIVEN skips the base classes' checks
         expect(&cone(-1.0), LEVEL_GIVEN, &[radius, pole]);
-        // with the NURB form, the net through the apex also folds back
-        let fold = (
-            B_SPLINE_SURFACE_TYPE,
-            5,
-            "Bad NonMonotonic CPts",
-            "SmBSplineSurface Control Net doubles back on itself probably making a self intersecting surface",
-        );
-        expect(&with_nurb(cone(-1.0)), 2, &[fold, radius, pole]);
+        // with the NURB form the same two: it evaluates everywhere (u80), is closed in u
+        // (its turn) and open in v, and its net, read so, does not double back. (Before
+        // u80 none of its points evaluated; SMLib, comparing unset points, took it closed
+        // in v too and its net as doubling back, B-spline test 5.)
+        expect(&with_nurb(cone(-1.0)), 2, &[radius, pole]);
     }
 
     /// A ring of radial width 2.65 a hair off flat (heights 1.3e-5 and 2.1e-5, a revolved
