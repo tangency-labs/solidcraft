@@ -508,15 +508,18 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     // An offer (a newer release) sits before the right cluster, in the space up to the file
     // actions; labelled where Report a bug is (an icon-only one leaves it to fit by room).
     let mut controls_left = anchor - CLUSTER_BUTTONS - search_shift;
-    // The link pills end 6 before the assistant. They are left out where the tabs would keep less
-    // than one tab's room (216) beside them, so a narrow bar looks as it did without them.
-    let pills_w = pills_width(ui, &data.pills);
-    let pills_shown = !data.pills.is_empty() && controls_left - pills_w - tabs_start >= 216.0;
-    let pills_right = controls_left - 4.0;
-    if pills_shown {
-        controls_left -= pills_w;
-    }
     let offer = Rect::from_min_max(pos2(x, report.top()), pos2(controls_left - 2.0, report.bottom()));
+    // The link pills sit left of the offer pill (which stays beside the assistant: the app draws it
+    // in `offer`, and its width is last frame's) or, with none, of the assistant. They are left out
+    // where the tabs would keep less than one tab's room (216) beside them, so a narrow bar looks as
+    // it did without them.
+    let offered = solidcraft_ui_registry::rect_of("titlebar:update").map_or(0.0, |u| u.width() + 4.0);
+    let pills_w = pills_width(ui, &data.pills);
+    let pills_shown = !data.pills.is_empty() && controls_left - offered - pills_w - tabs_start >= 216.0;
+    let pills_right = controls_left - 4.0 - offered;
+    if pills_shown {
+        controls_left -= pills_w + offered;
+    }
     let offer_labeled = report_label || (data.report.icon_only && r.width() >= COMPACT);
     // Report a bug.
     let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click());
