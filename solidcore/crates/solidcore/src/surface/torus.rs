@@ -512,6 +512,77 @@ impl Torus {
         )
     }
 
+    /// Carry a stored support on this recognised parametrisation. Both converters must
+    /// use the support's circle, not the independently fitted circle recognition found.
+    pub(crate) fn on_support(
+        &mut self,
+        k: &Kernel,
+        placement: Axis2Placement,
+        major: f64,
+        minor: f64,
+        form: BSplineSurface,
+    ) -> Result<()> {
+        let domain = form.natural_uv_domain();
+        let generator = form
+            .create_iso_parametric_curve(
+                k,
+                if self.base.swap_uv {
+                    SurfParamType::V
+                } else {
+                    SurfParamType::U
+                },
+                if self.base.swap_uv {
+                    domain.v_min()
+                } else {
+                    domain.u_min()
+                },
+                IsoCurveOptions::default(),
+            )?
+            .curve;
+        let interval = generator.natural_interval();
+        let x = placement.x_axis();
+        let z = placement.z_axis();
+        let centre = placement.origin() + x * major;
+        let (v0, v1) = torus_gen_curve_interval(
+            [x, generator.evaluate_point(interval.min())? - centre],
+            [x, generator.evaluate_point(interval.max())? - centre],
+            z,
+            self.inside_out,
+            EFF_ZERO_DEG,
+        )?;
+        // The fitted sweep interval carries the fitted axis's error too. Its ends
+        // must come from the form's meridians about the installed support's axis.
+        let d = self.base.anal_uv_domain;
+        let (_, _, sweep) = sweep_frame(
+            placement.origin(),
+            z,
+            fitted_sides(&self.base.position, d.u_interval()),
+            meridians(&form, self.base.swap_uv)?,
+        )
+        .ok_or_else(|| {
+            SolidError::surface_failed(OP_REBUILD, "a meridian has no radial direction")
+        })?;
+        self.base.anal_uv_domain = Extent2d::from_bounds(sweep.min(), v0, sweep.max(), v1);
+        self.base.gen_curve = Some(Curve::from(Ellipse::new_circle(
+            k,
+            centre,
+            x,
+            z,
+            Extent1d::from_min_max(v0, v1),
+            minor,
+            &EllipseOptions {
+                dim: 3,
+                nurb: Some(&generator),
+                inside_out: self.inside_out,
+            },
+        )?));
+        self.base.position = placement;
+        self.major_radius = major;
+        self.minor_radius = minor;
+        self.base.base = form;
+        self.rebuild_polar_converter(k)
+    }
+
     /// `RebuildPolarConverter` with the torus's iso circles.
     pub(crate) fn rebuild_polar_converter(&mut self, k: &Kernel) -> Result<()> {
         let shape = self.shape();

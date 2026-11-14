@@ -1243,10 +1243,7 @@ impl AnalyticSupport {
                     minor_radius,
                 },
             ) => {
-                t.base.position = placement;
-                t.major_radius = major_radius;
-                t.minor_radius = minor_radius;
-                t.base.base = form.copy();
+                t.on_support(k, placement, major_radius, minor_radius, form.copy())?;
             }
             _ => return Err(not_form()),
         }
@@ -1715,8 +1712,9 @@ impl AnalyticSupport {
     /// sphere or torus as the kernel recognises it in the form ([`recognise`]: the
     /// recognisers `CopyAndAddAnalytics` runs), on the form's own frame, sweep, generator
     /// range and swap, so that it is the form's parametrisation, not only its point set.
-    /// Exact to rounding: a rational NURBS represents these surfaces exactly.
-    /// [`AnalyticSupport::build`] then checks the form against the derived surface.
+    /// Cylinders, cones and tori take their numbers from the form's control circles;
+    /// recognition supplies their conventions. A rational NURBS represents these surfaces
+    /// exactly. [`AnalyticSupport::build`] checks the form against the derived surface.
     ///
     /// # Errors
     ///
@@ -1806,9 +1804,87 @@ impl AnalyticSupport {
             (SupportKind::Cone, Self::Cone { .. }) => {
                 Self::revolved_from_rows(recognised, false, &net, form).ok_or_else(not_kind)
             }
+            (SupportKind::Torus, Self::Torus { placement, .. }) => {
+                // Use a Bezier patch: after knot insertion the first three controls of
+                // the whole net need not be an arc's endpoints and tangent intersection.
+                let patches = decompose_to_bez(form.gw_nurb().ok_or_else(not_kind)?)?;
+                let patch = patches
+                    .first()
+                    .and_then(|row| row.first())
+                    .ok_or_else(not_kind)?;
+                let net: Vec<Vec<Vec3>> = patch
+                    .rows()
+                    .map(|row| {
+                        row.iter()
+                            .map(|c| {
+                                let w = if c.w == NOW { 1.0 } else { c.w };
+                                Vec3::new(c.x, c.y, c.z) * (1.0 / w)
+                            })
+                            .collect()
+                    })
+                    .collect();
+                Self::torus_from_net(placement, &net).ok_or_else(not_kind)
+            }
             (kind, other) if other.kind() == kind => Ok(other),
             _ => Err(not_kind()),
         }
+    }
+
+    /// A torus's circles from its quadratic boundary control triangles, rather than a fit
+    /// through evaluated points. The sweep circle fixes the axis; the meridian circle
+    /// fixes the tube centre and radius together (The NURBS Book, sections 7.3 and 7.5).
+    fn torus_from_net(placement: Axis2Placement, net: &[Vec<Vec3>]) -> Option<Self> {
+        let at = |i: usize, j: usize| net.get(i).and_then(|r| r.get(j)).copied();
+        let circle = |p0: Vec3, p1: Vec3, p2: Vec3| -> Option<(Vec3, f64, Vec3, f64)> {
+            let leg = p1 - p0;
+            let chord = p2 - p0;
+            let tangent = leg.unitize().ok()?;
+            let across = chord.unitize().ok()?;
+            let normal = leg.cross(chord).unitize().ok()?;
+            let radius = leg.length() * tangent.dot(across) / tangent.cross(across).length();
+            let centre = p0 + normal.cross(tangent) * radius;
+            (radius.is_finite() && radius > 0.0).then_some((
+                centre,
+                radius,
+                normal,
+                leg.cross(chord).length(),
+            ))
+        };
+        let boundary = |along_u: bool, fixed: usize| {
+            if along_u {
+                circle(at(0, fixed)?, at(1, fixed)?, at(2, fixed)?)
+            } else {
+                circle(at(fixed, 0)?, at(fixed, 1)?, at(fixed, 2)?)
+            }
+        };
+        // Either boundary sweep can collapse on the axis. Use the boundary with
+        // the larger control triangle to recover each direction's plane robustly.
+        let strongest = |along_u| {
+            [0, 2]
+                .into_iter()
+                .filter_map(|fixed| boundary(along_u, fixed))
+                .max_by(|a, b| a.3.total_cmp(&b.3))
+        };
+        let a = strongest(true)?;
+        let b = strongest(false)?;
+        let sweep_along_u = a.2.dot(placement.z_axis()).abs() >= b.2.dot(placement.z_axis()).abs();
+        let sweep = if sweep_along_u { a } else { b };
+        // Keep the meridian at the start of the sweep: its centre defines the
+        // support's radial direction, including when its first point is on-axis.
+        let tube = boundary(!sweep_along_u, 0)?;
+        let mut axis = sweep.2;
+        if axis.dot(placement.z_axis()) < 0.0 {
+            axis = -axis;
+        }
+        let origin = sweep.0 + axis * (tube.0 - sweep.0).dot(axis);
+        let radial = tube.0 - origin;
+        let major_radius = radial.length();
+        let x = radial.unitize().ok()?;
+        Some(Self::Torus {
+            placement: Axis2Placement::from_stored(origin, x, axis.cross(x)),
+            major_radius,
+            minor_radius: tube.1,
+        })
     }
 
     /// A cylinder's or cone's numbers read straight off its NURBS form's control structure
