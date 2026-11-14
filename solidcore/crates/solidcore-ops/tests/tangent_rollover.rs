@@ -1280,7 +1280,7 @@ fn obliquely_cut_bar() -> Body {
 }
 
 /// The index of the edge of `b` passing within 1e-6 of `p`.
-fn edge_near(b: &Body, p: [f64; 3]) -> usize {
+fn edge_through(b: &Body, p: [f64; 3]) -> usize {
     use solidcore::query::api_queries::{edge_closest_point, get_edges};
     let (k, brep) = common::kernel_copy(b);
     let q = solidcore::math::Vec3::new(p[0], p[1], p[2]);
@@ -1353,7 +1353,7 @@ fn a_round_whose_balls_bend_back_between_the_ends_is_not_refused_past_an_end() {
         let [mid_v, mid_w] = cut_bar_end_distances(cut_bar_ball(r, t));
         assert!(mid_v > 0.9 && mid_w > 0.9, "r {r}: {mid_v}, {mid_w}");
         let body = input.copy().unwrap();
-        let e = edge_near(&body, crease);
+        let e = edge_through(&body, crease);
         match blend(&body, Blend::Round, &[e], &[r], &[], Corners::Filled) {
             Ok(_) => {
                 assert!(body.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
