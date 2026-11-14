@@ -9278,6 +9278,80 @@ pub(crate) fn sheet_face_plane_in_frame(doc: &Document, st: &ModelState, comp: u
     })
 }
 
+/// Distance from `at` to planar face `fi` of `rec`.
+fn planar_face_dist(rec: &solidcore_record::brep::Brep, fi: usize, fnrm: Vec3, centroid: Vec3, at: Vec3) -> f64 {
+    let h = (at - centroid).dot(fnrm).abs();
+    let p_proj = at - fnrm * (at - centroid).dot(fnrm);
+    let mut min_edge_dist = f64::INFINITY;
+    let mut pts = Vec::new();
+
+    if let Some(face) = rec.faces.get(fi) {
+        for lp in &face.loops {
+            let solidcore_record::brep::Loop::Edges { edges } = lp else { continue };
+            for u in edges {
+                let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+                for &vi in &edge.vertices {
+                    if let Some(v) = rec.vertices.get(vi as usize) {
+                        let pt = Vec3::from(v.point);
+                        min_edge_dist = min_edge_dist.min(p_proj.dist(pt));
+                        pts.push(pt);
+                    }
+                }
+                if let Ok(eval) = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()) {
+                    let [t0, t1] = edge.interval;
+                    for k in 1..8 {
+                        let t = t0 + (t1 - t0) * (k as f64 / 8.0);
+                        if let Some(pt) = eval.point(t) {
+                            min_edge_dist = min_edge_dist.min(p_proj.dist(pt));
+                            pts.push(pt);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if pts.is_empty() {
+        return at.dist(centroid);
+    }
+    let ref_axis = if fnrm.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+    let Some(u) = fnrm.cross(ref_axis).normalized() else { return at.dist(centroid) };
+    let v = fnrm.cross(u);
+    let flat = |q: Vec3| (q.dot(u), q.dot(v));
+    let mut sorted: Vec<(f64, f64)> = pts.into_iter().map(flat).collect();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    sorted.dedup();
+    if inside_hull(&sorted, flat(p_proj)) { h } else { (h * h + min_edge_dist * min_edge_dist).sqrt() }
+}
+
+/// Is `q` inside (or on) the convex hull of `sorted` points (sorted by x, then y)?
+fn inside_hull(sorted: &[(f64, f64)], q: (f64, f64)) -> bool {
+    let cross = |o: (f64, f64), a: (f64, f64), b: (f64, f64)| (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0);
+    let mut lower: Vec<(f64, f64)> = Vec::new();
+    for &p in sorted {
+        while lower.len() >= 2 && cross(lower[lower.len() - 2], lower[lower.len() - 1], p) <= 0.0 {
+            lower.pop();
+        }
+        lower.push(p);
+    }
+    let mut upper: Vec<(f64, f64)> = Vec::new();
+    for &p in sorted.iter().rev() {
+        while upper.len() >= 2 && cross(upper[upper.len() - 2], upper[upper.len() - 1], p) <= 0.0 {
+            upper.pop();
+        }
+        upper.push(p);
+    }
+    lower.pop();
+    upper.pop();
+    let hull: Vec<(f64, f64)> = lower.into_iter().chain(upper).collect();
+    if hull.len() < 3 {
+        return false;
+    }
+    hull.iter().enumerate().all(|(i, &a)| {
+        let b = hull[(i + 1) % hull.len()];
+        cross(a, b, q) >= -1e-6
+    })
+}
+
 /// The plane of the body face a sketch sits on, found again: the face its stored `name` finds,
 /// which must still be planar and face the picked plane's way (else the sketch fails, asking for
 /// its face to be picked again); without a name, among planar faces with the picked plane's
@@ -9303,20 +9377,14 @@ fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> 
     let mut best: Option<(f64, f64)> = None; // (distance from `at`, plane offset along n)
     for b in &st.bodies {
         let tol = (b.body.size() * 1e-3).max(1e-3);
-        let (Ok(faces), Ok(mesh)) = (b.body.faces(tol), b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol))) else { continue };
+        let Ok(faces) = b.body.faces(tol) else { continue };
+        let rec = b.body.record();
         for f in faces {
             let Some(fnrm) = f.plane_normal else { continue };
             if fnrm.dot(n) < 1.0 - 1e-6 {
                 continue;
             }
-            let d = mesh
-                .triangles
-                .iter()
-                .zip(&mesh.tri_face)
-                .filter(|(_, tf)| **tf as usize == f.index)
-                .filter_map(|(t, _)| mesh.tri(t))
-                .map(|[a, bb, c]| crate::project::closest_on_triangle(at, a, bb, c).dist(at))
-                .fold(f64::INFINITY, f64::min);
+            let d = planar_face_dist(rec, f.index, fnrm, f.centroid, at);
             if best.is_none_or(|x| d < x.0) {
                 best = Some((d, f.centroid.dot(n)));
             }
