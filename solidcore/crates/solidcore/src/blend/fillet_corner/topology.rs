@@ -61,7 +61,7 @@ use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
-use crate::math::{Point3, EFF_ZERO, EFF_ZERO_SQRT};
+use crate::math::{Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::surface::surface::Surface;
 use crate::topology::edge;
 use crate::topology::edgeuse::{p1 as eu1, p2 as eu2, p3 as eu3};
@@ -167,6 +167,94 @@ pub(crate) fn find_side_edgeuse(
         "side radial without CCW neighbour",
     )?;
     Ok((filleted_edge == eu1::edge(target, ccw)?).then_some(side))
+}
+
+/// The side edge of an `NByOne` corner that leaves `vertex` along the filleted edge's own
+/// tangent, if there is one (solidcraft#13156): the face between the two comes to a point at
+/// the vertex (a ledge whose inner boundary runs tangent into its rim), so the rail on that
+/// face crosses the side edge before the vertex and the corner has no topology to make there.
+/// A side edge whose faces meet tangentially at the vertex (a tangent seam) is not one: the
+/// corner ends on it as a tangent end. Tangents are compared within the corner's tangency
+/// tolerance; `None` for a corner of another kind, without a vertex, or whose edges give no
+/// tangent.
+///
+/// # Errors
+/// Those of the edge lookups and the curve evaluations.
+pub(crate) fn cusp_side_edge(
+    k: &Kernel,
+    target: &mut Brep,
+    corner: &FilletCorner,
+) -> Result<Option<EdgeId>> {
+    if corner.kind != FilletCornerKind::NByOne {
+        return Ok(None);
+    }
+    let (Some(vertex), Some(solver_eus), Some(all)) = (
+        corner.vertex,
+        corner.solver_eus.as_deref(),
+        corner.all_eus.as_deref(),
+    ) else {
+        return Ok(None);
+    };
+    let (Some(&filleted), Some(index)) = (
+        solver_eus.first(),
+        solver_eus
+            .first()
+            .and_then(|f| all.iter().position(|eu| eu == f)),
+    ) else {
+        return Ok(None);
+    };
+    let total = all.len();
+    if total < 3 {
+        return Ok(None);
+    }
+    let filleted_edge = edge_of(target, filleted)?;
+    let Some(along) = leaving_tangent(k, target, filleted_edge, vertex)? else {
+        return Ok(None);
+    };
+    let tol_deg = crate::math::rad_to_deg(corner.tangency_tol_radians);
+    let cos_tol = corner.tangency_tol_radians.cos();
+    for side in [
+        *need(
+            all.get((index + total - 1) % total),
+            "preceding side edge use",
+        )?,
+        *need(all.get((index + 1) % total), "following side edge use")?,
+    ] {
+        let side_edge = edge_of(target, side)?;
+        if side_edge == filleted_edge
+            || check_tangential_edgeuse_at_vertex(k, target, side, vertex, tol_deg)?
+        {
+            continue;
+        }
+        let Some(out) = leaving_tangent(k, target, side_edge, vertex)? else {
+            continue;
+        };
+        if along.dot(out) >= cos_tol {
+            return Ok(Some(side_edge));
+        }
+    }
+    Ok(None)
+}
+
+/// The unit tangent of `edge` at `vertex`, pointing away from the vertex; `None` without a
+/// curve or a tangent there.
+fn leaving_tangent(k: &Kernel, target: &Brep, e: EdgeId, vertex: VertexId) -> Result<Option<Vec3>> {
+    let Some(curve) = edge::curve(target, e)? else {
+        return Ok(None);
+    };
+    let ivl = edge::interval(target, e)?;
+    let at_start = edge::start_vertex(target, e)? == Some(vertex);
+    let t = if at_start { ivl.min() } else { ivl.max() };
+    let pv = curve.evaluate(k, t, 1, true, true)?;
+    let Some(&d) = pv.get(1) else {
+        return Ok(None);
+    };
+    let d = if at_start { d } else { d * -1.0 };
+    let len = d.length();
+    if !(len > EFF_ZERO) {
+        return Ok(None);
+    }
+    Ok(Some(d * (1.0 / len)))
 }
 
 fn find_closed_side_edgeuse(
