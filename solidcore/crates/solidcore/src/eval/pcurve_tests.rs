@@ -1853,6 +1853,9 @@ fn nonlinear_spline_pcurves_cross_a_rational_cylinders_quarter_knot() {
     assert!(lift_error(&surface, &curve, [0., 1.], pc) <= 0.5e-6);
     for t in [0., 0.25, 0.5, 0.75, 1.] {
         let uv = eval(pc, t).unwrap();
-        assert!((uv[1] - (2.0_f64 * t - 1.).powi(2)).abs() < 1e-6, "{t}: {uv:?}");
+        assert!(
+            (uv[1] - (2.0_f64 * t - 1.).powi(2)).abs() < 1e-6,
+            "{t}: {uv:?}"
+        );
     }
 }
