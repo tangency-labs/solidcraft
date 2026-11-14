@@ -87,6 +87,13 @@ pub(crate) struct Stats {
     pub started: usize,
     pub finished: usize,
     pub running: bool,
+    /// While running: edges done, edges to do, rays cast.
+    pub progress: [usize; 3],
+    /// Faces the rays were tested against, and how many were spline surfaces.
+    pub tests: usize,
+    pub spline_tests: usize,
+    /// The edge that took longest (ms), its body and edge number, rays and face tests.
+    pub slowest_edge: (f64, String, usize, usize, usize),
 }
 
 /// A prepared body, by the address of its record, with the body that holds that record.
@@ -106,6 +113,8 @@ pub(crate) struct ExactEdges {
 
 struct Job {
     view: u64,
+    /// How far the job is: edges to work out, edges done, rays cast (read while it runs).
+    progress: Arc<Progress>,
     cancel: Arc<AtomicBool>,
     result: Arc<Mutex<Option<(Option<EdgeLayer>, Stats)>>>,
     started: f64,
@@ -115,6 +124,13 @@ impl Drop for Job {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
     }
+}
+
+#[derive(Default)]
+struct Progress {
+    edges: std::sync::atomic::AtomicUsize,
+    done: std::sync::atomic::AtomicUsize,
+    rays: std::sync::atomic::AtomicUsize,
 }
 
 /// One shown body as a job sees it.
@@ -130,6 +146,8 @@ struct JobBody {
 }
 
 struct Draw {
+    /// The body's name (for the stats).
+    name: String,
     replaced: ReplacedLines,
     /// Where the body stands (`mesh` is the definition's).
     place: solidcraft_engine::doc::Mat,
@@ -172,6 +190,7 @@ pub(crate) fn update(app: &mut SolveApp, ctx: &egui::Context, proj: &crate::view
             let done = job.result.lock().ok().and_then(|mut r| r.take());
             let Some((layer, mut stats)) = done else {
                 e.stats.running = true;
+                e.stats.progress = [&job.progress.done, &job.progress.edges, &job.progress.rays].map(|a| a.load(Ordering::Relaxed));
                 ctx.request_repaint_after(std::time::Duration::from_millis(30));
                 return None;
             };
@@ -201,7 +220,7 @@ pub(crate) fn update(app: &mut SolveApp, ctx: &egui::Context, proj: &crate::view
     if let Ok(mut cache) = e.cache.lock() {
         cache.retain(|k, _| live.contains(k));
     }
-    let job = Job { view, cancel: Arc::new(AtomicBool::new(false)), result: Arc::new(Mutex::new(None)), started: now };
+    let job = Job { view, progress: Arc::default(), cancel: Arc::new(AtomicBool::new(false)), result: Arc::new(Mutex::new(None)), started: now };
     let input = Input {
         bodies,
         proj: *proj,
@@ -210,11 +229,11 @@ pub(crate) fn update(app: &mut SolveApp, ctx: &egui::Context, proj: &crate::view
         scene_key: app.viewport.key,
         snapshot_ms,
     };
-    let (cancel, result, cache, repaint) = (job.cancel.clone(), job.result.clone(), e.cache.clone(), ctx.clone());
+    let (cancel, result, cache, repaint, progress) = (job.cancel.clone(), job.result.clone(), e.cache.clone(), ctx.clone(), job.progress.clone());
     e.job = Some(job);
     #[cfg(not(target_arch = "wasm32"))]
     std::thread::spawn(move || {
-        let done = run(input, &cache, &cancel);
+        let done = run(input, &cache, &cancel, &progress);
         if !cancel.load(Ordering::Relaxed)
             && let Ok(mut r) = result.lock()
         {
@@ -223,7 +242,7 @@ pub(crate) fn update(app: &mut SolveApp, ctx: &egui::Context, proj: &crate::view
         }
     });
     #[cfg(target_arch = "wasm32")]
-    let _ = (input, cancel, result, cache, repaint);
+    let _ = (input, cancel, result, cache, repaint, progress);
     ctx.request_repaint_after(std::time::Duration::from_millis(30));
     None
 }
@@ -260,7 +279,7 @@ fn snapshot(app: &SolveApp, proj: &crate::viewport::Proj) -> (Vec<JobBody>, std:
         let draw = edges.get(&b.name).zip(arena.slots(&b.name)).map(|(replaced, slots)| {
             let mesh = b.mesh_in_place().0;
             let edges = (0..mesh.edges.len()).filter(|&i| mesh.edge_visible(i) && mesh.shaded_edge_visible(i)).collect();
-            Draw { replaced: replaced.clone(), place, edge: slots.edge, hidden: slots.hidden_edge, mesh, edges }
+            Draw { name: b.name.clone(), replaced: replaced.clone(), place, edge: slots.edge, hidden: slots.hidden_edge, mesh, edges }
         });
         out.push(JobBody { body: body.clone(), place, occludes: !looks.contains(&b.name), draw });
     }
@@ -278,7 +297,7 @@ struct Input {
 
 /// The job: prepare the bodies not prepared yet, then work out the edges on the screen, on as
 /// many threads as the machine has to spare.
-fn run(input: Input, cache: &Mutex<Cache>, cancel: &AtomicBool) -> (Option<EdgeLayer>, Stats) {
+fn run(input: Input, cache: &Mutex<Cache>, cancel: &AtomicBool, progress: &Progress) -> (Option<EdgeLayer>, Stats) {
     let t0 = crate::now_ms();
     let mut stats = Stats { snapshot_ms: input.snapshot_ms, ..Stats::default() };
     let stop = || cancel.load(Ordering::Relaxed);
@@ -408,13 +427,15 @@ fn run(input: Input, cache: &Mutex<Cache>, cancel: &AtomicBool) -> (Option<EdgeL
         .collect();
     stats.bodies = drawn.len();
     stats.edges = items.len();
+    progress.edges.store(items.len(), Ordering::Relaxed);
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let parts: Mutex<Vec<(EdgeLayer, usize, usize)>> = Mutex::new(Vec::new());
+    let parts: Mutex<Vec<(EdgeLayer, usize, usize, [usize; 2], (f64, String, usize, usize, usize))>> = Mutex::new(Vec::new());
     std::thread::scope(|s| {
         for _ in 0..threads {
             s.spawn(|| {
                 let mut layer = EdgeLayer::default();
-                let (mut rays, mut hidden_edges) = (0, 0);
+                let (mut rays, mut hidden_edges, mut tests) = (0, 0, [0usize; 2]);
+                let mut slowest = (0.0, String::new(), 0, 0, 0);
                 let f32s = |p: Vec3| [p.x as f32, p.y as f32, p.z as f32];
                 loop {
                     let i = next.fetch_add(1, Ordering::Relaxed);
@@ -424,12 +445,20 @@ fn run(input: Input, cache: &Mutex<Cache>, cancel: &AtomicBool) -> (Option<EdgeL
                     }
                     let spacing = |p: Vec3| SAMPLE_PX * mm_per_px(p);
                     let tol = |p: Vec3| CHORD_PX * mm_per_px(p);
+                    let t = crate::now_ms();
                     let pieces = match occluders.edge_pieces(pi, edge, eye, &spacing, &stop) {
                         Ok(p) => p,
                         // Not worked out: drawn whole, as before.
                         Err(_) => occlusion::EdgePieces { visible: occluders.edge_domain(pi, edge).into_iter().collect(), ..Default::default() },
                     };
                     rays += pieces.rays;
+                    tests = [tests[0] + pieces.tests, tests[1] + pieces.spline_tests];
+                    let ms = crate::now_ms() - t;
+                    if ms > slowest.0 {
+                        slowest = (ms, d.name.clone(), edge, pieces.rays, pieces.tests);
+                    }
+                    progress.done.fetch_add(1, Ordering::Relaxed);
+                    progress.rays.fetch_add(pieces.rays, Ordering::Relaxed);
                     if !pieces.hidden.is_empty() {
                         hidden_edges += 1;
                     }
@@ -447,7 +476,7 @@ fn run(input: Input, cache: &Mutex<Cache>, cancel: &AtomicBool) -> (Option<EdgeL
                     }
                 }
                 if let Ok(mut p) = parts.lock() {
-                    p.push((layer, rays, hidden_edges));
+                    p.push((layer, rays, hidden_edges, tests, slowest));
                 }
             });
         }
@@ -456,7 +485,12 @@ fn run(input: Input, cache: &Mutex<Cache>, cancel: &AtomicBool) -> (Option<EdgeL
         return (None, stats);
     }
     let mut layer = EdgeLayer { scene_key: input.scene_key, ..EdgeLayer::default() };
-    for (part, rays, hidden_edges) in parts.into_inner().unwrap_or_default() {
+    for (part, rays, hidden_edges, tests, slowest) in parts.into_inner().unwrap_or_default() {
+        stats.tests += tests[0];
+        stats.spline_tests += tests[1];
+        if slowest.0 > stats.slowest_edge.0 {
+            stats.slowest_edge = slowest;
+        }
         layer.lines.extend_from_slice(&part.lines);
         layer.hidden.extend_from_slice(&part.hidden);
         stats.rays += rays;

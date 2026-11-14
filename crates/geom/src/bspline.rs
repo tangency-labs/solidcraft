@@ -286,6 +286,51 @@ pub fn find_span(knots: &[f64], p: usize, n: usize, u: f64) -> Option<usize> {
     Some(k)
 }
 
+/// The highest degree [`NurbsSurface::eval_d1`] evaluates.
+pub const EVAL_D1_MAX_DEGREE: usize = 15;
+
+/// The `p + 1` basis functions of degree `p` that are not zero in knot span `span` at `x`, and
+/// their first derivatives (NURBS Book A2.3, for one derivative), in fixed arrays.
+fn basis_d1(kn: &[f64], p: usize, span: usize, x: f64) -> Option<([f64; EVAL_D1_MAX_DEGREE + 1], [f64; EVAL_D1_MAX_DEGREE + 1])> {
+    const M: usize = EVAL_D1_MAX_DEGREE + 1;
+    if p >= M {
+        return None;
+    }
+    // Below the diagonal (ndu[j][r], r < j): sums of knot distances; on and above it (ndu[r][j]):
+    // the basis functions of degree j.
+    let mut ndu = [[0.0f64; M]; M];
+    let (mut left, mut right) = ([0.0f64; M], [0.0f64; M]);
+    ndu[0][0] = 1.0;
+    for j in 1..=p {
+        left[j] = x - *kn.get((span + 1).checked_sub(j)?)?;
+        right[j] = *kn.get(span + j)? - x;
+        let mut saved = 0.0;
+        for r in 0..j {
+            ndu[j][r] = right[r + 1] + left[j - r];
+            let temp = if ndu[j][r] != 0.0 { ndu[r][j - 1] / ndu[j][r] } else { 0.0 };
+            ndu[r][j] = saved + right[r + 1] * temp;
+            saved = left[j - r] * temp;
+        }
+        ndu[j][j] = saved;
+    }
+    let (mut n, mut d) = ([0.0f64; M], [0.0f64; M]);
+    for r in 0..=p {
+        n[r] = ndu[r][p];
+        if p == 0 {
+            continue;
+        }
+        let mut v = 0.0;
+        if r >= 1 && ndu[p][r - 1] != 0.0 {
+            v += ndu[r - 1][p - 1] / ndu[p][r - 1];
+        }
+        if r < p && ndu[p][r] != 0.0 {
+            v -= ndu[r][p - 1] / ndu[p][r];
+        }
+        d[r] = p as f64 * v;
+    }
+    Some((n, d))
+}
+
 /// Insert the knot `u` once into a B-spline with degree `p`, knots and homogeneous control
 /// points (Boehm; NURBS Book eq. 5.10 / A5.1). `u` must lie in the domain `[knots[p],
 /// knots[n]]`; the curve is unchanged.
@@ -582,6 +627,47 @@ impl NurbsSurface {
             }
         }
         acc.project().ok_or_else(|| SplineError::Invalid("the surface's weights vanish there".into()))
+    }
+
+    /// The point at `(u, v)` and the first partial derivatives along u and v, in one pass and
+    /// without allocating (NURBS Book A2.3 for the basis functions and their derivatives, then
+    /// the quotient rule for the weights). `None` outside the domain, past degree
+    /// [`EVAL_D1_MAX_DEGREE`], or where the weights vanish.
+    pub fn eval_d1(&self, u: f64, v: f64) -> Option<[Vec3; 3]> {
+        let mut n = [[0.0; EVAL_D1_MAX_DEGREE + 1]; 2];
+        let mut dn = [[0.0; EVAL_D1_MAX_DEGREE + 1]; 2];
+        let mut spans = [0usize; 2];
+        for (d, x) in [u, v].into_iter().enumerate() {
+            let p = *self.degree.get(d)?;
+            if p > EVAL_D1_MAX_DEGREE {
+                return None;
+            }
+            let (count, kn) = (*self.count.get(d)?, self.knots.get(d)?);
+            let span = find_span(kn, p, count, x)?;
+            let x = x.clamp(*kn.get(p)?, *kn.get(count)?);
+            let (nd, dd) = basis_d1(kn, p, span, x)?;
+            n[d] = nd;
+            dn[d] = dd;
+            spans[d] = span;
+        }
+        let [pu, pv] = self.degree;
+        let (mut a, mut au, mut av) = (HPoint::ZERO, HPoint::ZERO, HPoint::ZERO);
+        for b in 0..=pv {
+            for c in 0..=pu {
+                let h = self.point(spans[0] - pu + c, spans[1] - pv + b);
+                let (nu, nv) = (n[0][c], n[1][b]);
+                a += h * (nu * nv);
+                au += h * (dn[0][c] * nv);
+                av += h * (nu * dn[1][b]);
+            }
+        }
+        if !(a.w.abs() > 1e-300) {
+            return None;
+        }
+        let s = Vec3::new(a.x / a.w, a.y / a.w, a.z / a.w);
+        let rule = |d: HPoint| Vec3::new((d.x - d.w * s.x) / a.w, (d.y - d.w * s.y) / a.w, (d.z - d.w * s.z) / a.w);
+        let out = [s, rule(au), rule(av)];
+        out.iter().all(|p| p.is_finite()).then_some(out)
     }
 
     /// The same surface with the knot `x` inserted once in direction `dir` ([`Dir::S`] = u).
@@ -895,6 +981,38 @@ pub(crate) mod tests {
         // A clamped surface interpolates its corner control points.
         let corner = c.eval(3.0, 1.5).unwrap();
         assert!(corner.dist(c.point(0, 0).project().unwrap()) < 1e-12);
+    }
+
+    #[test]
+    fn a_surface_point_and_its_partials_in_one_pass_match_the_point_and_finite_differences() {
+        // Rational, with interior knots (one doubled) and different degrees each way, and the
+        // domain's ends and knots among the samples.
+        let ku = vec![0.0, 0.0, 0.0, 0.0, 0.4, 0.7, 0.7, 1.0, 1.0, 1.0, 1.0];
+        let kv = vec![2.0, 2.0, 2.0, 2.5, 3.0, 3.0, 3.0];
+        let s = random_surface(23, ku, kv, [3, 2]);
+        let [du, dv] = s.domain();
+        let h = 1e-6;
+        let mut worst = [0.0f64; 3];
+        for i in 0..=20 {
+            for j in 0..=20 {
+                let u = du[0] + (du[1] - du[0]) * f64::from(i) / 20.0;
+                let v = dv[0] + (dv[1] - dv[0]) * f64::from(j) / 20.0;
+                let [p, su, sv] = s.eval_d1(u, v).unwrap();
+                worst[0] = worst[0].max(p.dist(s.eval(u, v).unwrap()));
+                let fd = |a: [f64; 2], b: [f64; 2]| (s.eval(b[0], b[1]).unwrap() - s.eval(a[0], a[1]).unwrap()) / (b[0] - a[0] + b[1] - a[1]);
+                // Central differences, away from the domain's ends and its knots (where the two
+                // one-sided slopes can differ).
+                let clear = |x: f64, k: &[f64]| k.iter().all(|q| (q - x).abs() > 2.0 * h);
+                if clear(u, &s.knots()[0]) {
+                    worst[1] = worst[1].max(su.dist(fd([u - h, v], [u + h, v])) / su.len().max(1.0));
+                }
+                if clear(v, &s.knots()[1]) {
+                    worst[2] = worst[2].max(sv.dist(fd([u, v - h], [u, v + h])) / sv.len().max(1.0));
+                }
+            }
+        }
+        assert!(worst[0] < 1e-12 && worst[1] < 1e-7 && worst[2] < 1e-7, "{worst:?}");
+        assert!(s.eval_d1(du[1] + 1.0, dv[0]).is_none(), "outside the domain");
     }
 
     #[test]

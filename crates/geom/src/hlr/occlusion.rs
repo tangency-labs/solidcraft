@@ -59,6 +59,9 @@ pub struct EdgePieces {
     pub hidden: Vec<[f64; 2]>,
     /// Rays cast for it.
     pub rays: usize,
+    /// Faces its rays were tested against, and how many of those were spline surfaces.
+    pub tests: usize,
+    pub spline_tests: usize,
 }
 
 /// Default for [`Occluders::touch`]: a point less than this deep under a face is on it (contact
@@ -209,7 +212,8 @@ impl<'a> Occluders<'a> {
         let size = e.faces.iter().filter_map(|f| def.faces.get(*f)).map(|f| (f.hi - f.lo).len()).fold(0., f64::max);
         let own_eps = (1e-9 * size).max(1e-12 * def.offset.len());
         let at = |t: f64| p.apply(e.curve.at(t));
-        let seen = |t: f64| self.seen(placement, &e.faces, own_eps, at(t), eye);
+        let tests = std::cell::Cell::new([0usize; 2]);
+        let seen = |t: f64| self.seen(placement, &e.faces, own_eps, at(t), eye, &tests);
         let [t0, t1] = e.curve.domain();
         if !(t0.is_finite() && t1.is_finite() && t1 >= t0) {
             return Err(HlrError::Invalid("edge range"));
@@ -265,11 +269,12 @@ impl<'a> Occluders<'a> {
                 _ => push(&mut out, s, [start, t1]),
             }
         }
+        [out.tests, out.spline_tests] = tests.get();
         Ok(out)
     }
 
     /// Whether `point` (scene coordinates) on placement `placement`'s faces `own` is seen.
-    fn seen(&self, placement: usize, own: &[usize], own_eps: f64, point: Vec3, eye: Eye) -> Seen {
+    fn seen(&self, placement: usize, own: &[usize], own_eps: f64, point: Vec3, eye: Eye, tests: &std::cell::Cell<[usize; 2]>) -> Seen {
         let (dir, far) = match eye {
             Eye::Along(d) => (-d, f64::INFINITY),
             Eye::At(q) => match (q - point).normalized() {
@@ -297,6 +302,8 @@ impl<'a> Occluders<'a> {
                 if !(range[1] >= range[0]) {
                     return;
                 }
+                let [n, splines] = tests.get();
+                tests.set([n + 1, splines + usize::from(matches!(f.surface, super::surface::S3::Nurbs(_)))]);
                 hits.clear();
                 f.surface.ray_as(&f.analytic, p0, dl, range, &mut hits);
                 for h in &hits {

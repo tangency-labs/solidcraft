@@ -45,6 +45,66 @@ pub(crate) struct Nurbs {
     blocks: Vec<(Vec3, Vec3, [usize; 2])>,
 }
 
+/// Where the ray (the origin of the plane across it) meets a cell's corners `q` (seen along the
+/// ray, in order round the cell) as cell coordinates `[s, t]` in `[0, 1]²`: inside one of its two
+/// triangles, or at the nearest point of them when the ray passes within a quarter of their
+/// extent; `None` farther out.
+fn seed_in_quad(q: &[[f64; 2]; 4]) -> Option<[f64; 2]> {
+    let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+    for p in q {
+        lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+        hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+    }
+    let pad = 0.25 * (hi[0] - lo[0]).max(hi[1] - lo[1]);
+    if !(lo[0] - pad <= 0. && hi[0] + pad >= 0. && lo[1] - pad <= 0. && hi[1] + pad >= 0.) {
+        return None;
+    }
+    // Two triangles, (00, 10, 11) and (00, 11, 01), with their corners' cell coordinates.
+    let tris = [([q[0], q[1], q[2]], [[0., 0.], [1., 0.], [1., 1.]]), ([q[0], q[2], q[3]], [[0., 0.], [1., 1.], [0., 1.]])];
+    let mut best: Option<(f64, [f64; 2])> = None;
+    for (t, st) in tris {
+        let (w, gap) = nearest_in_triangle(t);
+        let at = [st[0][0] * w[0] + st[1][0] * w[1] + st[2][0] * w[2], st[0][1] * w[0] + st[1][1] * w[1] + st[2][1] * w[2]];
+        if best.is_none_or(|(g, _)| gap < g) {
+            best = Some((gap, at));
+        }
+    }
+    best.filter(|(gap, _)| *gap <= pad).map(|(_, at)| at)
+}
+
+/// The weights of the point of triangle `t` nearest the origin, and its distance from it.
+fn nearest_in_triangle(t: [[f64; 2]; 3]) -> ([f64; 3], f64) {
+    let [a, b, c] = t;
+    let cross = |u: [f64; 2], v: [f64; 2]| u[0] * v[1] - u[1] * v[0];
+    let sub = |u: [f64; 2], v: [f64; 2]| [u[0] - v[0], u[1] - v[1]];
+    let area = cross(sub(b, a), sub(c, a));
+    if area.abs() > 1e-300 {
+        let (wa, wb) = (cross(sub(b, [0., 0.]), sub(c, [0., 0.])) / area, cross(sub(c, [0., 0.]), sub(a, [0., 0.])) / area);
+        let wc = 1. - wa - wb;
+        if wa >= 0. && wb >= 0. && wc >= 0. {
+            return ([wa, wb, wc], 0.);
+        }
+    }
+    // Outside (or flat): the nearest point of the three sides.
+    let side = |p: [f64; 2], q: [f64; 2]| {
+        let d = sub(q, p);
+        let l2 = d[0] * d[0] + d[1] * d[1];
+        let s = if l2 > 0. { (-(p[0] * d[0] + p[1] * d[1]) / l2).clamp(0., 1.) } else { 0. };
+        let x = [p[0] + d[0] * s, p[1] + d[1] * s];
+        (s, x[0].hypot(x[1]))
+    };
+    let (sab, gab) = side(a, b);
+    let (sbc, gbc) = side(b, c);
+    let (sca, gca) = side(c, a);
+    if gab <= gbc && gab <= gca {
+        ([1. - sab, sab, 0.], gab)
+    } else if gbc <= gca {
+        ([0., 1. - sbc, sbc], gbc)
+    } else {
+        ([sca, 0., 1. - sca], gca)
+    }
+}
+
 /// Cells to a side of a [`Nurbs::blocks`] block.
 const CELL_BLOCK: usize = 8;
 
@@ -1171,12 +1231,31 @@ impl Nurbs {
     }
 
     fn point(&self, uv: [f64; 2]) -> Vec3 {
-        let u = uv[0].clamp(self.dom[0][0], self.dom[0][1]);
-        let v = uv[1].clamp(self.dom[1][0], self.dom[1][1]);
-        self.s.eval(u, v).unwrap_or(Vec3::new(f64::NAN, f64::NAN, f64::NAN))
+        let [u, v] = self.clamp(uv);
+        match self.s.eval_d1(u, v) {
+            Some([p, _, _]) => p,
+            None => self.s.eval(u, v).unwrap_or(Vec3::new(f64::NAN, f64::NAN, f64::NAN)),
+        }
+    }
+
+    /// The point and its partials along u and v, in one evaluation where the degree allows.
+    fn point_partials(&self, uv: [f64; 2]) -> (Vec3, Vec3, Vec3) {
+        let [u, v] = self.clamp(uv);
+        match self.s.eval_d1(u, v) {
+            Some([p, su, sv]) => (p, su, sv),
+            None => {
+                let (su, sv) = self.partials_by_differences(uv);
+                (self.point(uv), su, sv)
+            }
+        }
     }
 
     fn partials(&self, uv: [f64; 2]) -> (Vec3, Vec3) {
+        let (_, su, sv) = self.point_partials(uv);
+        (su, sv)
+    }
+
+    fn partials_by_differences(&self, uv: [f64; 2]) -> (Vec3, Vec3) {
         let fd = |k: usize| {
             let h = (self.dom[k][1] - self.dom[k][0]) * 1e-6;
             let (mut a, mut b) = (uv, uv);
@@ -1206,8 +1285,8 @@ impl Nurbs {
             }
         };
         for _ in 0..40 {
-            let (su, sv) = self.partials(uv);
-            let r = self.point(uv) - p;
+            let (q, su, sv) = self.point_partials(uv);
+            let r = q - p;
             let (a, b, c) = (su.dot(su), su.dot(sv), sv.dot(sv));
             let det = a * c - b * b;
             if det.abs() <= 1e-300 {
@@ -1249,12 +1328,21 @@ impl Nurbs {
         }
         for (i, j) in candidates {
             let (a, b) = (self.grid_uv(i, j), self.grid_uv(i + 1, j + 1));
-            let mut uv = [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])];
+            // The cell's corners seen along the ray: a ray farther from their two triangles than
+            // a quarter of their extent misses the cell; else Newton starts where it meets them.
+            let corner = |x: usize, y: usize| self.grid.get(y * (g + 1) + x).map_or([f64::NAN; 2], |p| q2(*p));
+            let quad = [corner(i, j), corner(i + 1, j), corner(i + 1, j + 1), corner(i, j + 1)];
+            let Some(st) = seed_in_quad(&quad) else { continue };
+            let mut uv = [a[0] + (b[0] - a[0]) * st[0], a[1] + (b[1] - a[1]) * st[1]];
             let mut ok = false;
+            let far = [(b[0] - a[0]).abs(), (b[1] - a[1]).abs()];
             for _ in 0..40 {
-                let p = self.point(uv);
+                // A root more than a cell away is not this cell's (it is not kept below).
+                if uv[0] < a[0] - far[0] || uv[0] > b[0] + far[0] || uv[1] < a[1] - far[1] || uv[1] > b[1] + far[1] {
+                    break;
+                }
+                let (p, su, sv) = self.point_partials(uv);
                 let f = q2(p);
-                let (su, sv) = self.partials(uv);
                 let (j11, j12, j21, j22) = (su.dot(ep), sv.dot(ep), su.dot(eq), sv.dot(eq));
                 let det = j11 * j22 - j12 * j21;
                 if det.abs() <= 1e-300 {
