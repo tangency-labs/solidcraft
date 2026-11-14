@@ -40,8 +40,10 @@
 //!   `sm_FixBoundaryCurves`); flattening it would fold the trace into a cusp.
 //!   Exact boundary contacts flatten as upstream.
 //! - **Seam continuation.** A projected point across the seam keeps the same
-//!   seam side when the starting tangent runs along it. The
-//!   correction must still meet the existing 3D approximation bound.
+//!   seam side when the starting tangent runs along it. A crossing keeps the
+//!   existing 3D approximation bound; along the seam the two sides must be the
+//!   same 3D point (within `1e-6` of the step), so a wide tolerance cannot move an
+//!   end that is not on the seam.
 //! - **Statuses.** `CheckSeamJump`'s `SM_ERR_OUTSIDE_OF_DOMAIN` is an
 //!   [`IntersectFailure::OutsideDomain`] (status [`SM_ERR_OUTSIDE_OF_DOMAIN`]);
 //!   `sm_PopStack` / `sm_StackLook` on a short stack are an
@@ -585,6 +587,16 @@ impl DropPt {
         let along_seam = start.on_seam == Some(true)
             && start.entering_domain == Some(false)
             && start.leaving_domain == Some(false);
+        // A crossing keeps the approximation bound. Along a seam the two parameter
+        // sides must be the same 3D point, not merely a point within the tolerance,
+        // else a wide tolerance would move an end that is not on the seam.
+        let seam_bound = |crosses: bool, step: f64| {
+            if crosses {
+                approx_tol_3d
+            } else {
+                approx_tol_3d.min(EFF_ZERO_SQRT * (1.0 + step))
+            }
+        };
         let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
         let outside = || {
             SolidError::intersect(
@@ -628,7 +640,7 @@ impl DropPt {
                     u_domain.max()
                 };
                 let snapped_point = surface.evaluate_point(k, snapped_uv)?;
-                if snapped_point.distance(end_3d) <= approx_tol_3d {
+                if snapped_point.distance(end_3d) <= seam_bound(crosses_seam, step_3d.length()) {
                     end.uv_pd[0] = snapped_uv;
                 } else if crosses_seam {
                     return Err(outside());
@@ -666,7 +678,7 @@ impl DropPt {
                     v_domain.max()
                 };
                 let snapped_point = surface.evaluate_point(k, snapped_uv)?;
-                if snapped_point.distance(end_3d) <= approx_tol_3d {
+                if snapped_point.distance(end_3d) <= seam_bound(crosses_seam, step_3d.length()) {
                     end.uv_pd[0] = snapped_uv;
                 } else if crosses_seam {
                     return Err(outside());
