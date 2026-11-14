@@ -518,6 +518,7 @@ fn insert_airfoil(s: &mut Session, p: &Value) -> Result<Value> {
             deviation: fit.deviation,
             bulge: fit.bulge,
             info,
+            created: None,
             param_warnings: Vec::new(),
         },
     )
