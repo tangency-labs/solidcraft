@@ -239,13 +239,13 @@ mod tests {
         let outcome = resolve_enhancement(
             &providers,
             &EnhancementSelection::Provider(crate::backend::BackendId::new("fsr").unwrap()),
-            &[EnhancementInput::LinearHdrColor],
+            &[EnhancementInput::LinearHdrColor, EnhancementInput::Depth],
         )
         .unwrap();
         assert!(outcome.warnings.is_empty());
         let resolved = outcome.enhancement.unwrap();
         assert_eq!(resolved.provider.as_str(), "fsr");
-        assert_eq!(resolved.features, vec![EnhancementFeature::NativeAa, EnhancementFeature::Upscaling]);
+        assert_eq!(resolved.features, vec![EnhancementFeature::Upscaling, EnhancementFeature::NativeAa]);
     }
 
     #[test]
@@ -304,10 +304,11 @@ mod tests {
         let providers = vec![
             provider("dlss", Availability::Unavailable { reason: "no RTX".into() }, &[EnhancementFeature::Upscaling], &[]),
             provider("fsr", Availability::Available, &[EnhancementFeature::Upscaling], &[EnhancementInput::MotionVectors]),
+            provider("tsr", Availability::Available, &[EnhancementFeature::Upscaling], &[]),
         ];
         let outcome = resolve_enhancement(&providers, &EnhancementSelection::Auto, &[EnhancementInput::LinearHdrColor]).unwrap();
         let resolved = outcome.enhancement.unwrap();
-        assert_eq!(resolved.provider.as_str(), "fsr");
+        assert_eq!(resolved.provider.as_str(), "tsr");
         assert!(outcome.warnings[0].contains("selected automatically"));
     }
 
