@@ -939,7 +939,7 @@
     "render.quality_legacy_samples": "შენახული მნიშვნელობა: {samples} spp. ახალი არჩევანი შეზღუდულია {maximum} spp-ით.",
     "render.quality_preset_limit": "ეს პრესეტი აჭარბებს არჩევის ზღვარს (16384 spp). აირჩიეთ სემპლების რაოდენობა 16384-მდე.",
     "render.quality_summary": "{width} × {height} · სემპლი: {samples} · სიღრმე: {depth} · საწყისი რიცხვი: {seed} · {denoise}",
-    "render.shot_lens_cpu_progressive_reason": "CPU-ით ველის სიღრმის ჩართვამდე „სემპლირებაში“ გადადით პროგრესულ სემპლინგზე.",
+    "render.shot_lens_cpu_progressive_reason": "CPU-ით ველის სიღრმის ჩართვამდე „სემპლინგში“ გადადით პროგრესულ სემპლინგზე.",
     "render.shot_lens_raytrace_reason": "ველის სიღრმე ხელმისაწვდომია CPU-ის სხივების მიდევნებით და GPU-ის ტრაექტორიების მიდევნებით.",
     "render.size_8k_uhd": "8K UHD",
     "render.spot_axis": "გამოსხივების მიმართულება",
