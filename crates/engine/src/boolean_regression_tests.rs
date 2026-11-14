@@ -1887,3 +1887,23 @@ fn cut_removes_a_target_inside_its_tools() {
         }
     }
 }
+
+/// A long thin ellipse extruded off a flipped plane is a solid with positive volume. Its sketch
+/// loop is one closed spline; the kernel took the region outside the body from a ray aimed at one
+/// of its edges, which met the wall and the cap there but no edge, and classified the ray start
+/// by the wall alone: the body came out inside out ("no mass"), and an intersect or a pattern
+/// of it with this tool cut where it should have kept.
+#[test]
+fn a_long_thin_ellipse_extruded_from_a_flipped_plane_has_its_volume() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "XZ", "flip": true})),
+        ("sketch.ellipse", json!({"center": [0, 67.5], "major": [0, 135], "minor_radius": 5})),
+        ("solid.extrude", json!({"distance": "-4 mm"})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let want = std::f64::consts::PI * 67.5 * 5.0 * 4.0;
+    let got = volume(&s, "Body1");
+    assert!((got - want).abs() < 1e-3 * want, "volume {got}, an ellipse of semi-axes 67.5 and 5 over 4 mm is {want}");
+}

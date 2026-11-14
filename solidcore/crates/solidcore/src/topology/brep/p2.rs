@@ -1778,6 +1778,95 @@ pub fn local_curve_sector(
     }
 }
 
+/// Where a point on faces' common boundary lies: an edge of the faces or a vertex of it.
+struct SharedBoundary {
+    class: PointClassType,
+    object: EntityRef,
+    /// The edge's curve parameter of the point (of the edge the point is on, or ends in).
+    parameter: f64,
+}
+
+/// The edge, or the vertex at an end of it, that `point` lies on and that `face` shares with
+/// one of `others`: the edge of `face` that borders another of those faces and is nearest
+/// `point`, when `point` is within `tolerance` of its curve. `None` when `face` shares no
+/// edge with them or the point is not on one.
+///
+/// A ray aimed at an edge can meet both faces ending there, each in a point of its boundary,
+/// and report no hit on the edge itself: the faces are then at one distance. Which side of
+/// either face alone the ray start is on says nothing about the region it is in (it can be
+/// the far side of the one and the near side of the other), but the radial sectors of the edge
+/// do.
+///
+/// # Errors
+///
+/// Those of the topology reads and the point drops.
+fn shared_boundary_of_faces(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    others: &[FaceId],
+    point: Point3,
+) -> Result<Option<SharedBoundary>> {
+    // The point is on an edge only within the edge's own tolerance (the body's linear tolerance
+    // at least), not within the distance by which two face hits count as tied.
+    let mut nearest: Option<(f64, EdgeId, f64)> = None;
+    for e in crate::topology::topology_traverser::face_edges(b, face)? {
+        let faces = edge::faces(b, e, None)?;
+        if !faces.iter().any(|f| others.contains(f)) {
+            continue;
+        }
+        let record = b.edge(e)?;
+        let Some(curve) = record.curve.as_ref() else {
+            continue;
+        };
+        let tolerance = record.tolerance.max(b.tolerance());
+        let dropped = curve.drop_point(
+            k,
+            &record.interval,
+            point,
+            None,
+            tolerance,
+            None,
+            SolverOperation::Minimize,
+        )?;
+        if dropped.success
+            && dropped.distance <= tolerance
+            && nearest.is_none_or(|(d, ..)| dropped.distance < d)
+        {
+            nearest = Some((dropped.distance, e, dropped.parameter));
+        }
+    }
+    let Some((_, e, parameter)) = nearest else {
+        return Ok(None);
+    };
+    // At an end of the edge the point is at its vertex, which the faces around it classify.
+    let record = b.edge(e)?;
+    let tolerance = record.tolerance.max(b.tolerance());
+    let curve = record
+        .curve
+        .as_ref()
+        .ok_or_else(|| null_deref("edge without curve"))?;
+    for (end, vertex) in [
+        (record.interval.min(), edge::start_vertex(b, e)?),
+        (record.interval.max(), edge::end_vertex(b, e)?),
+    ] {
+        if let Some(vertex) = vertex {
+            if curve.evaluate_point(k, end)?.distance(point) <= tolerance {
+                return Ok(Some(SharedBoundary {
+                    class: PointClassType::Vertex,
+                    object: EntityRef::Vertex(vertex),
+                    parameter,
+                }));
+            }
+        }
+    }
+    Ok(Some(SharedBoundary {
+        class: PointClassType::Edge,
+        object: EntityRef::Edge(e),
+        parameter,
+    }))
+}
+
 /// What [`ray_fire`] found.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RayFireResult {
@@ -1971,6 +2060,31 @@ pub(crate) fn ray_fire_with_bbox_and_solver(
         0,
         best.start.solution_value,
     )?;
+
+    // Not upstream: a ray that meets the B-rep on a boundary shared by faces is classified
+    // against that boundary, not against one of the faces it ends.
+    if let EntityRef::Face(face) = hit {
+        let scaled_zero = EFF_ZERO_SQRT * 100.0 * (1.0 + radius);
+        let others: Vec<FaceId> = (0..solutions.len())
+            .filter_map(|ii| solutions.get(ii))
+            .filter(|this| {
+                (this.start.solution_value - best.start.solution_value).abs() < scaled_zero
+            })
+            .filter(|this| this.num_variables == best.num_variables)
+            .filter_map(|this| match this.objects[0].map(cache_entity) {
+                Some(Ok(EntityRef::Face(f))) if f != face => Some(f),
+                _ => None,
+            })
+            .collect();
+        if !others.is_empty() {
+            let point = start + best.start.solution_value * ray;
+            if let Some(found) = shared_boundary_of_faces(k, b, face, &others, point)? {
+                intersection.set_class_object(found.class, Some(found.object));
+                intersection.set_gap_3d(best.start.solution_value);
+                intersection.set_t_param(found.parameter, false);
+            }
+        }
+    }
 
     // make temporary [StartPoint,IntersectionPoint] line segement
     let end = start + best.start.solution_value * ray;
