@@ -11,7 +11,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<InsertStepParams>(), &["folder", "history", "matrix", "name", "names", "path", "tolerance", "up"]);
+    assert_keys(input_schema_for::<InsertStepParams>(), &["folder", "force", "history", "matrix", "name", "names", "path", "tolerance", "up"]);
 }
 
 #[test]
@@ -109,6 +109,10 @@ fn the_types_read_each_key_as_the_handler_does() {
             json!({"path": "a.step", "folder": 0}),
             "`folder` must be true (an import that brings more than one item goes into a `Group #N` history folder) or false (no folder)",
         ),
+        (
+            json!({"path": "a.step", "force": "yes"}),
+            "`force` must be true (read the file even if it may need more memory than this computer can spare) or false",
+        ),
         (json!({}), "`path` is required"),
         (json!({"path": " "}), "`path` is required"),
         (json!({"up": "x", "path": 5}), "`path` is required"),
@@ -167,6 +171,8 @@ fn the_schema_takes_what_the_handler_reads() {
         (json!({"path": "a.step", "up": "y", "names": "other"}), false),
         (json!({"path": "a.step", "folder": "yes"}), false),
         (json!({"path": "a.step", "folder": 1}), false),
+        (json!({"path": "a.step", "force": true}), true),
+        (json!({"path": "a.step", "force": "yes"}), false),
         // A matrix is shaped as `occurrence.move` publishes it; `matrix::rigid` still decides
         // whether it is a rigid move.
         (json!({"path": "a.step", "matrix": "turn it"}), false),

@@ -1275,7 +1275,8 @@ pub fn reopen_plan(app: &SolveApp, dir: Option<&std::path::Path>) -> (Vec<String
 /// sets every tick in a grouped prompt; `save_row` / `discard_row` answer one tab index;
 /// `save_prompt` lists the remaining rows and their current tab indices. `open_elsewhere`:
 /// read_only | anyway | cancel and `changed_on_disk`: save_copy | overwrite | cancel answer those
-/// questions (#5467).
+/// questions (#5467); `needs_memory`: anyway | cancel answers "this file may need more memory"
+/// (#15588).
 pub fn control(app: &mut SolveApp, p: &Value) -> Value {
     let i = p.get("index").and_then(Value::as_u64).map(|x| x as usize);
     match p.get("action").and_then(Value::as_str) {
@@ -1333,6 +1334,11 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Value {
         Some("cancel") => answer_lock(app, LockAnswer::Cancel),
         _ => {}
     }
+    match p.get("needs_memory").and_then(Value::as_str) {
+        Some("anyway") => crate::open_memory::answer_prompt(app, true),
+        Some("cancel") => crate::open_memory::answer_prompt(app, false),
+        _ => {}
+    }
     match p.get("changed_on_disk").and_then(Value::as_str) {
         Some("save_copy") => answer_disk(app, DiskAnswer::SaveCopy),
         Some("overwrite") => answer_disk(app, DiskAnswer::Overwrite),
@@ -1363,6 +1369,7 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Value {
         "batch": app.docs.batch,
         "read_only": app.session.read_only,
         "open_elsewhere": app.lock_prompts.len(),
+        "needs_memory": app.memory_prompts.len(),
         "changed_on_disk": app.disk_prompt,
     })
 }

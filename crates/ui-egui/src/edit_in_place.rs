@@ -491,6 +491,7 @@ fn can_finish(app: &SolveApp) -> bool {
         && app.docs.batch.is_none()
         && app.network_prompt.is_none()
         && app.lock_prompts.is_empty()
+        && app.memory_prompts.is_empty()
         && !app.disk_prompt
         && app.tree.capture_prompt.is_none()
         && !app.home.open
@@ -501,7 +502,12 @@ fn can_finish(app: &SolveApp) -> bool {
 /// part's own tab (a save that failed, was cancelled or went elsewhere leaves the edit as it was).
 pub(crate) fn tick(app: &mut SolveApp) {
     take_refresh(app);
-    if app.edit_in_place.pending.is_some() && !app.file_load.busy() && app.network_prompt.is_none() && app.lock_prompts.is_empty() {
+    if app.edit_in_place.pending.is_some()
+        && !app.file_load.busy()
+        && app.network_prompt.is_none()
+        && app.lock_prompts.is_empty()
+        && app.memory_prompts.is_empty()
+    {
         app.edit_in_place.pending = None;
     }
     let waiting = app.saving.is_some() || app.file_picker.is_some() || app.disk_prompt || app.tree.capture_prompt.is_some();

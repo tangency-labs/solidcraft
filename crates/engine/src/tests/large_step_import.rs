@@ -164,3 +164,26 @@ fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     assert_eq!(solidcraft_kernel::step_max_bytes(), 512 << 20, "the defaults put the parser's cap back");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #15588: a STEP file that may need more memory than the machine can spare is refused, before
+/// it is read, with the memory it needs, unless the caller says `force: true`; then it opens,
+/// and later rebuilds read its text again without asking.
+#[test]
+fn a_step_file_too_large_for_the_memory_opens_only_when_forced() {
+    let path = step_file("memory", 4);
+    let size = std::fs::metadata(&path).unwrap().len() as usize;
+    solidcraft_kernel::step_with_memory_to_spare(size, || {
+        for cmd in ["doc.open", "file.insert_step"] {
+            let mut s = Session::default();
+            let e = s.execute(cmd, &json!({"path": path})).unwrap_err().to_string();
+            assert!(e.contains("STEP file needs about") && e.contains("`force: true`"), "{cmd}: {e}");
+            assert!(s.doc.features.is_empty(), "{cmd}: nothing is read");
+            assert!(s.execute(cmd, &json!({"path": path, "force": "yes"})).is_err(), "{cmd}: `force` is a boolean");
+            s.execute(cmd, &json!({"path": path, "force": true})).unwrap();
+            assert_eq!(s.model.state().bodies.len(), 4, "{cmd}");
+            // A rebuild reads the Import feature's text again, and is not refused.
+            assert!(solidcraft_kernel::step_import(&step_text(&s)).is_ok(), "{cmd}");
+        }
+    });
+    let _ = std::fs::remove_file(path);
+}

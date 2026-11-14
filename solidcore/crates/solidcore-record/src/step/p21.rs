@@ -866,6 +866,20 @@ pub fn parse_with_budget(
     parse_limited(text, watch, limits)
 }
 
+/// Whether reading a STEP text of `len` bytes fits in `memory` bytes: [`Error::NeedsMemory`],
+/// naming [`PEAK_PER_BYTE`] times `len`, when it doesn't. A caller can ask this before it reads
+/// the file, and ask the person before going ahead anyway.
+pub fn check_memory(len: usize, memory: usize) -> Result<(), Error> {
+    let needed = len.saturating_mul(PEAK_PER_BYTE);
+    if needed > memory {
+        return Err(Error::NeedsMemory {
+            needed,
+            available: memory,
+        });
+    }
+    Ok(())
+}
+
 /// [`parse_with`] with the counts it refuses beyond given.
 fn parse_limited(
     text: &str,
@@ -878,13 +892,7 @@ fn parse_limited(
             limit: limits.bytes,
         });
     }
-    let needed = text.len().saturating_mul(PEAK_PER_BYTE);
-    if needed > limits.memory {
-        return Err(Error::NeedsMemory {
-            needed,
-            available: limits.memory,
-        });
-    }
+    check_memory(text.len(), limits.memory)?;
     let limits = limits.for_text(text.len());
     // Some writers start the file with a UTF-8 byte order mark.
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
@@ -1413,6 +1421,9 @@ FILE_NAME('a');junk').;ENDSEC;DATA;ENDSEC;END-ISO-10303-21;"
                 available: 1
             }
         );
+        // Asked before the file is read, the answer is the same.
+        assert_eq!(check_memory(text.len(), needed), Ok(()));
+        assert_eq!(check_memory(text.len(), needed - 1), Err(refused));
     }
 
     /// A text's counts are held to what a real file of its own length holds, so a hostile text

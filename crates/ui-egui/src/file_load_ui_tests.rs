@@ -1482,3 +1482,62 @@ fn a_waiting_stand_up_offer_follows_the_preferences_when_it_is_made() {
     assert!(w.app.stand_up_later.is_none() && w.app.stand_up.is_none(), "no estimate for an offer that won't be made");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #15588: opening or inserting a STEP file that may need more memory than the machine can spare
+/// asks first, naming the memory; Cancel reads nothing, Open Anyway reads it. A control-channel
+/// open never asks: its command refuses until it passes `force: true`.
+#[test]
+fn a_step_file_that_may_need_more_memory_asks_before_it_opens() {
+    let dir = scratch("needs-memory");
+    let path = dir.join("part.step");
+    let body =
+        solidcraft_engine::kernel::box_solid(solidcore_record::Vec3::new(0.0, 0.0, 0.0), solidcore_record::Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    std::fs::write(&path, solidcraft_engine::kernel::step_export(&[&body], "part").unwrap()).unwrap();
+    let path = path.to_string_lossy().to_string();
+    let size = std::fs::metadata(&path).unwrap().len() as usize;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let until_idle = |h: &mut crate::scenario::Harness| {
+        let began = std::time::Instant::now();
+        while !h.app.file_load.idle() {
+            assert!(began.elapsed() < std::time::Duration::from_secs(120), "the open went on");
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frames(3);
+    };
+    let bodies = |h: &crate::scenario::Harness| h.app.session.model.state().bodies.len();
+    solidcraft_engine::kernel::step_with_memory_to_spare(size, || {
+        // Open asks, naming the file; Cancel reads nothing.
+        crate::file_load::begin(&mut h.app, &path, false);
+        assert_eq!(h.app.memory_prompts.len(), 1);
+        assert!(h.app.file_load.idle(), "nothing is read while it asks");
+        h.frames(2);
+        assert!(h.widget("part.step may need more memory").is_some(), "the question is shown");
+        assert!(h.widget("Open Anyway").is_some() && h.widget("Cancel").is_some());
+        crate::open_memory::answer_prompt(&mut h.app, false);
+        h.frames(2);
+        assert!(h.app.memory_prompts.is_empty() && h.app.file_load.idle());
+        assert_eq!(bodies(&h), 0, "Cancel reads nothing");
+
+        // Open Anyway (as the control channel's `ui.documents` answers it) opens the file.
+        crate::file_load::begin(&mut h.app, &path, false);
+        let state = crate::documents::control(&mut h.app, &json!({"needs_memory": "anyway"}));
+        assert_eq!(state["needs_memory"], 0, "{state}");
+        until_idle(&mut h);
+        assert_eq!(bodies(&h), 1, "{:?}", h.app.status);
+
+        // Insert asks the same.
+        crate::file_load::begin(&mut h.app, &path, true);
+        assert_eq!(h.app.memory_prompts.len(), 1);
+        crate::open_memory::answer_prompt(&mut h.app, true);
+        until_idle(&mut h);
+        assert_eq!(bodies(&h), 2);
+    });
+    // With the memory there, nothing asks.
+    crate::file_load::begin(&mut h.app, &path, true);
+    assert!(h.app.memory_prompts.is_empty());
+    until_idle(&mut h);
+    assert_eq!(bodies(&h), 3);
+    let _ = std::fs::remove_dir_all(&dir);
+}

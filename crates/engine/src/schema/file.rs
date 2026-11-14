@@ -490,6 +490,11 @@ pub struct OpenParams {
     /// its parts) into a new history folder named `Group #N`. Default: false.
     #[serde(default)]
     pub folder: Option<bool>,
+    /// For a `.step` or `.stp` file (ignored for other files): one that may need more memory
+    /// than half of this computer's (32 times its size) is refused before it is read, naming the
+    /// memory; true reads it anyway. Default: false.
+    #[serde(default)]
+    pub force: Option<bool>,
     /// For a FreeCAD file only (ignored for other files): its sketches and features rebuilt as
     /// SolidCraft features, or only its solids as one Import feature. Default: features.
     #[serde(default)]

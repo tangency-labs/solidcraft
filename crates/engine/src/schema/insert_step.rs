@@ -59,6 +59,18 @@ fn folder_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error>
     value.as_bool().map(Some).ok_or_else(|| D::Error::custom(whole(FOLDER_MESSAGE)))
 }
 
+/// What `force` says when it is neither true nor false, as `step_options` has it.
+const FORCE_MESSAGE: &str = "`force` must be true (read the file even if it may need more memory than this computer can spare) or false";
+
+/// `force`: true or false, `null` as left out, with the handler's message for anything else.
+fn force_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    let value = Value::deserialize(d)?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    value.as_bool().map(Some).ok_or_else(|| D::Error::custom(whole(FORCE_MESSAGE)))
+}
+
 /// `matrix`: as given, `null` as left out, which is how the handler has it.
 fn matrix_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<MatrixParam>, D::Error> {
     let value = Value::deserialize(d)?;
@@ -98,6 +110,12 @@ pub struct InsertStepKeys {
     #[serde(default, deserialize_with = "folder_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
     pub folder: Option<bool>,
+    /// For a `.step` or `.stp` file: one that may need more memory than half of this computer's
+    /// (32 times its size) is refused before it is read, naming the memory; true reads it anyway.
+    /// Default: false.
+    #[serde(default, deserialize_with = "force_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub force: Option<bool>,
     /// For a FreeCAD file: its sketches and features rebuilt as SolidCraft features (the
     /// default), or only its solids as one Import feature.
     #[serde(default)]
