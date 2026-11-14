@@ -45,7 +45,6 @@
   "volume_lift_third_derivative_terms",
   "drop_curve_v_domain_degeneracy",
   "torus_check_spindle_apex",
-  "extent3d_contains_both_segment_endpoints",
   "local_surface_intersect_guards_max_boundary_retry",
   "cylinder_rebuild_mean_radius",
   "nurb_cylinder_inside_out_frame",
