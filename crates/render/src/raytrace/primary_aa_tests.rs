@@ -2262,7 +2262,8 @@ fn cpu_aging_point_zero_two_is_preserved_before_real_path_mis_and_sharp_metal_gu
         let d = (1.0 - cosine) / 2.0 + nh2 * a2;
         let distribution = a2 / (PI * d * d);
         let g1 = 2.0 * cosine / (cosine + (a2 + (1.0 - a2) * cosine * cosine).sqrt());
-        (distribution * g1 / 4.0, 0.5 * cosine / PI + 0.5 * distribution / 4.0)
+        // A pure metal: the path spends every base sample on the specular lobe.
+        (distribution * g1 / 4.0, distribution / 4.0)
     };
     let samples = 64;
     let light_pdf = 1.0 / (4.0 * PI);
@@ -2274,8 +2275,8 @@ fn cpu_aging_point_zero_two_is_preserved_before_real_path_mis_and_sharp_metal_gu
             let (response, pdf) = response_pdf(cosine);
             expected += response / light_pdf * light_pdf * light_pdf / (light_pdf * light_pdf + pdf * pdf);
         }
-        let [component, u] = progressive::variates(9, 0, ordinal, 0x5041_5448_3000);
-        let cosine = if component < 0.5 { (1.0 - u).sqrt() } else { ((1.0 - u) - a2 * u) / ((1.0 - u) + a2 * u) };
+        let [_, u] = progressive::variates(9, 0, ordinal, 0x5041_5448_3000);
+        let cosine = ((1.0 - u) - a2 * u) / ((1.0 - u) + a2 * u);
         if cosine > 0.0 {
             let (response, pdf) = response_pdf(cosine);
             expected += response / pdf * pdf * pdf / (pdf * pdf + light_pdf * light_pdf);

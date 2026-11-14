@@ -1015,21 +1015,18 @@ impl Surface {
             None => other.natural_uv_domain_with_nurb(k)?,
         };
 
-        // Not upstream (WR-536), opt-in `boolean2d_plane_covers_far_faces` (the fork's
-        // tangency-labs/smlib@67b8a1e): a plane is unbounded and its STEP parameterization
-        // affine, so it can grow to cover the other surface however far that lies from
+        // Not upstream (WR-536; the fork's tangency-labs/smlib@67b8a1e): a plane is
+        // unbounded and its STEP parameterization affine, so it can grow to cover the other surface however far that lies from
         // this face (two holes 1.5 m apart on a 3 m sheet, each face a few millimetres
         // wide). GetMaxAnalyticDomain's fixed reach of 100 widths is for B-splines, whose
         // extension degrades with distance; for a plane, grow the search domain to the
         // orthogonal projection of the other surface's bounding box, which holds every
         // point the checks below drop.
-        if k.fixes.boolean2d_plane_covers_far_faces {
-            if let SurfaceKind::Plane(plane) = self.kind() {
-                let mut other_box = other.calculate_tight_bounding_box(k, &other_dom)?;
-                other_box.expand_absolute(tol);
-                for corner in other_box.corners() {
-                    big_domain.add_point(plane.project_point_to_uv_domain(corner));
-                }
+        if let SurfaceKind::Plane(plane) = self.kind() {
+            let mut other_box = other.calculate_tight_bounding_box(k, &other_dom)?;
+            other_box.expand_absolute(tol);
+            for corner in other_box.corners() {
+                big_domain.add_point(plane.project_point_to_uv_domain(corner));
             }
         }
 
@@ -1771,7 +1768,10 @@ impl EvalNFunctions for FindPsNormalEnfo<'_> {
     ) -> Result<bool> {
         let k = self.kernel;
         let (Some(&u), Some(&v)) = (x.first(), x.get(1)) else {
-            return Err(SolidError::sm_err(OP_FIND_PS_NORMAL));
+            return Err(SolidError::surface_failed(
+                OP_FIND_PS_NORMAL,
+                "the solver's variables are fewer than two",
+            ));
         };
         if x.len() != 2 || f.len() != 2 {
             return Err(SolidError::invalid_input(
@@ -1789,7 +1789,10 @@ impl EvalNFunctions for FindPsNormalEnfo<'_> {
         let mu = su.length();
         let mv = sv.length();
         if mu < EFF_ZERO || mv < EFF_ZERO {
-            return Err(SolidError::sm_err(OP_FIND_PS_NORMAL));
+            return Err(SolidError::surface_failed(
+                OP_FIND_PS_NORMAL,
+                "a surface tangent has zero length",
+            ));
         }
 
         // get gap vector
@@ -1908,7 +1911,10 @@ impl EvalNFunctions for SssIntersectEnfo<'_> {
             .flatten()
             .any(|t| t.length_squared() < EFF_ZERO_SQ)
         {
-            return Err(SolidError::sm_err(OP_SSS_INTERSECT));
+            return Err(SolidError::surface_failed(
+                OP_SSS_INTERSECT,
+                "a surface tangent has zero length",
+            ));
         }
 
         // force near zero tangent components to equal zero to prevent matrix inversions
@@ -2182,5 +2188,40 @@ mod tests {
         // the union that follows then keeps the surface's own domain
         let orig = Extent2d::from_bounds(1.0, 1.0, 9.0, 9.0);
         assert_eq!(orig.union(&cleared), orig);
+    }
+
+    /// The solver evaluators' failures keep the operation, status, kind and entity of the bare
+    /// `Upstream` statuses they replace (a sample).
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::SurfaceFailure;
+        let samples: [(&'static str, SurfaceFailure, i32); 2] = [
+            (
+                OP_FIND_PS_NORMAL,
+                SurfaceFailure::Failed("a surface tangent has zero length"),
+                crate::error::SM_ERR,
+            ),
+            (
+                OP_SSS_INTERSECT,
+                SurfaceFailure::Failed("a surface tangent has zero length"),
+                crate::error::SM_ERR,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
+        }
     }
 }

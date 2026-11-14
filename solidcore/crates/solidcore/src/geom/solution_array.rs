@@ -1538,6 +1538,37 @@ impl<O: SolutionObject> SolutionArray<O> {
             .ok_or_else(|| bad_index("geom::solution_array::SolutionArray::get_at"))
     }
 
+    /// Solution `index`, borrowed (`GetAt` without the copy).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for an index past the size.
+    pub fn at(&self, index: usize) -> Result<&Solution<O>> {
+        self.data
+            .get(index)
+            .ok_or_else(|| bad_index("geom::solution_array::SolutionArray::at"))
+    }
+
+    /// Solutions `i` and `j` (`i < j`), both borrowed mutably.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] unless `i < j` and `j` is within the size.
+    pub fn pair_mut(&mut self, i: usize, j: usize) -> Result<(&mut Solution<O>, &mut Solution<O>)> {
+        const OP: &str = "geom::solution_array::SolutionArray::pair_mut";
+        if i >= j {
+            return Err(bad_index(OP));
+        }
+        let (lo, hi) = self
+            .data
+            .split_at_mut_checked(j)
+            .ok_or_else(|| bad_index(OP))?;
+        match (lo.get_mut(i), hi.first_mut()) {
+            (Some(a), Some(b)) => Ok((a, b)),
+            _ => Err(bad_index(OP)),
+        }
+    }
+
     /// Replaces solution `index` (`SetAt`).
     ///
     /// # Errors
@@ -2231,5 +2262,29 @@ mod tests {
         r.reset();
         assert_eq!(r.solution_type, SolutionType::Unknown);
         assert_eq!(r.start.parameters[0], 1.0);
+    }
+
+    /// `at` borrows what `get_at` copies; `pair_mut` hands out two distinct solutions and refuses
+    /// a pair out of order, the same index twice or an index past the size.
+    #[test]
+    fn borrowed_access() {
+        let mut a: SolutionArray<Obj> = SolutionArray::new();
+        a.add(&single(1.0, &[1.0]));
+        a.add(&single(2.0, &[2.0]));
+        a.add(&single(3.0, &[3.0]));
+        assert_eq!(*a.at(1).unwrap(), a.get_at(1).unwrap());
+        assert!(matches!(a.at(3), Err(SolidError::InvalidInput { .. })));
+        let (x, y) = a.pair_mut(0, 2).unwrap();
+        assert_eq!((x.start.solution_value, y.start.solution_value), (1.0, 3.0));
+        x.start.solution_value = 10.0;
+        y.start.solution_value = 30.0;
+        assert_eq!(a.get_at(0).unwrap().start.solution_value, 10.0);
+        assert_eq!(a.get_at(2).unwrap().start.solution_value, 30.0);
+        for (i, j) in [(1, 1), (2, 1), (0, 3)] {
+            assert!(matches!(
+                a.pair_mut(i, j),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
     }
 }

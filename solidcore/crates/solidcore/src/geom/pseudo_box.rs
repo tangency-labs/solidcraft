@@ -446,17 +446,17 @@ impl PseudoBox {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) for an undefined box or a singular basis
+    /// `SM_ERR` ([`GeomFailure`](crate::error::geom::GeomFailure)) for an undefined box or a singular basis
     /// (`SM_IS_ZERO(det)`).
     pub fn invert_absolute(&self, p: Point3) -> Result<Point3> {
         const OP: &str = "geom::pseudo_box::PseudoBox::invert_absolute";
         if !self.assert_defined() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::geom_failed(OP, "the box is not defined"));
         }
         let [b0, b1, b2] = self.basis;
         let det = determinant_3_vectors(b0, b1, b2);
         if is_zero(det) {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::geom_failed(OP, "the box's basis is singular"));
         }
         Ok(Vec3::new(
             determinant_3_vectors(p, b1, b2) / det,
@@ -1221,7 +1221,6 @@ fn add_rotated_edge_extrema(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kernel::Kernel;
 
     fn rotated_basis() -> [Vec3; 3] {
         let s = std::f64::consts::FRAC_1_SQRT_2;
@@ -1295,49 +1294,42 @@ mod tests {
         assert!(pb.set_interval(3, Extent1d::new()).is_err());
     }
 
-    /// Upstream quirk kept by `Extent3d::circumscribe`: the basis -> axis map is
-    /// read as axis -> basis. `Extent3d::circumscribe_with` reads it by basis behind
-    /// `Kernel::fixes.circumscribe_axis_map_by_basis` (WR-5).
+    /// `Extent3d::circumscribe` reads the basis -> axis map by basis (WR-5): a cycled
+    /// basis puts each interval on its basis's axis.
     #[test]
-    fn circumscribe_axis_cycle_quirk() {
+    fn circumscribe_axis_cycle_by_basis() {
         let ivl = Extent1d::from_min_max;
         let pb = PseudoBox::from_basis_intervals(
             [Vec3::Y, Vec3::Z, Vec3::X],
             [ivl(1.0, 2.0), ivl(3.0, 5.0), ivl(-7.0, -6.0)],
         );
         assert_eq!(pb.is_axis_aligned(), Some([2, 3, 1]));
-
-        // Pinned default: the map is read as axis -> basis, so basis 0's y interval
-        // lands on x, basis 1's z interval on y and basis 2's x interval on z.
-        let pinned = Extent3d::from_pseudo_box(&pb);
-        assert_eq!(pinned.min(), Vec3::new(3.0, -7.0, 1.0));
-        assert_eq!(pinned.max(), Vec3::new(5.0, -6.0, 2.0));
-
-        let mut k = Kernel::default();
-        k.fixes.circumscribe_axis_map_by_basis = true;
-        let fixed = Extent3d::from_pseudo_box_with(&pb, &k);
+        let fixed = Extent3d::from_pseudo_box(&pb);
         assert_eq!(fixed.min(), Vec3::new(-7.0, 1.0, 3.0));
         assert_eq!(fixed.max(), Vec3::new(-6.0, 2.0, 5.0));
 
-        // Controls: an identity basis and a pure sign flip read the same either way.
-        for (basis, intervals, map) in [
+        // Controls: an identity basis and a pure sign flip.
+        for (basis, map, min, max) in [
             (
                 [Vec3::X, Vec3::Y, Vec3::Z],
-                [ivl(1.0, 2.0), ivl(3.0, 5.0), ivl(-7.0, -6.0)],
                 [1, 2, 3],
+                Vec3::new(1.0, 3.0, -7.0),
+                Vec3::new(2.0, 5.0, -6.0),
             ),
             (
                 [-Vec3::X, Vec3::Y, -Vec3::Z],
-                [ivl(1.0, 2.0), ivl(3.0, 5.0), ivl(-7.0, -6.0)],
                 [-1, 2, -3],
+                Vec3::new(-2.0, 3.0, 6.0),
+                Vec3::new(-1.0, 5.0, 7.0),
             ),
         ] {
-            let control = PseudoBox::from_basis_intervals(basis, intervals);
+            let control = PseudoBox::from_basis_intervals(
+                basis,
+                [ivl(1.0, 2.0), ivl(3.0, 5.0), ivl(-7.0, -6.0)],
+            );
             assert_eq!(control.is_axis_aligned(), Some(map));
-            let pinned = Extent3d::from_pseudo_box(&control);
-            let fixed = Extent3d::from_pseudo_box_with(&control, &k);
-            assert_eq!(fixed.min(), pinned.min());
-            assert_eq!(fixed.max(), pinned.max());
+            let e = Extent3d::from_pseudo_box(&control);
+            assert_eq!((e.min(), e.max()), (min, max));
         }
     }
 

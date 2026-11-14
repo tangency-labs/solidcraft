@@ -482,7 +482,10 @@ impl<'s> SurfaceTracer<'s> {
     /// `SM_ERR_NULL_POINTER` for an empty curve.
     pub fn reverse_curve_direction(&mut self) -> Result<()> {
         if self.curve_points.is_empty() {
-            return Err(SolidError::null_pointer(OP_REVERSE));
+            return Err(SolidError::intersect_missing(
+                OP_REVERSE,
+                "the traced curve's points",
+            ));
         }
 
         // Grab points in m_vCurvePoints list into an array, and empty the list.
@@ -593,7 +596,10 @@ pub trait SurfaceTrace<'s> {
         step_size: Option<f64>,
     ) -> Result<()> {
         let _ = (k, uv, pnt, prev, step_size);
-        Err(SolidError::sm_err(OP_HOOK))
+        Err(SolidError::intersect_failed(
+            OP_HOOK,
+            "this tracer does not compute point values",
+        ))
     }
 
     /// `LocalPointSolve`: refines `guess` to a point of the traced curve near
@@ -610,7 +616,10 @@ pub trait SurfaceTrace<'s> {
         next: &mut TracePoint,
     ) -> Result<Option<Point2>> {
         let _ = (k, curr, guess, next);
-        Err(SolidError::sm_err(OP_HOOK))
+        Err(SolidError::intersect_failed(
+            OP_HOOK,
+            "this tracer does not step to a next point",
+        ))
     }
 
     /// `FindSolutionsOnBoundaryCurve`: approximate start points along the boundary
@@ -630,7 +639,10 @@ pub trait SurfaceTrace<'s> {
         param: SurfParamType,
     ) -> Result<SolutionArray<BoundaryCurve>> {
         let _ = (k, boundary, interval, side, param);
-        Err(SolidError::sm_err(OP_HOOK))
+        Err(SolidError::intersect_failed(
+            OP_HOOK,
+            "this tracer does not drop a boundary curve",
+        ))
     }
 
     /// `DoesPointLieOnCurve`: whether `uv` lies on the traced curve, refining it
@@ -1739,7 +1751,10 @@ where
                 } else if uv_curves.len() == 1 {
                     out.uv_curves.extend(uv_curves);
                 } else {
-                    return Err(SolidError::sm_err(OP_BOUNDARY));
+                    return Err(SolidError::intersect_failed(
+                        OP_BOUNDARY,
+                        "the boundary curve dropped onto neither one nor two uv curves",
+                    ));
                 }
 
                 // set other outputs
@@ -2036,11 +2051,9 @@ where
             }
 
             t.tracer_mut().curve_trace_direction = -1.0;
-            let back_start = *t
-                .tracer()
-                .curve_points
-                .last()
-                .ok_or(SolidError::null_pointer(OP_REVERSE))?;
+            let back_start = *t.tracer().curve_points.last().ok_or_else(|| {
+                SolidError::intersect_missing(OP_REVERSE, "the traced curve's last point")
+            })?;
             ignore_status(t.trace_curve(k, back_start, &out.curves_3d))?;
             ignore_status(t.reverse_curve_direction())?;
             t.tracer_mut().curve_trace_direction = 1.0;

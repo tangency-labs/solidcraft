@@ -1,4 +1,5 @@
-//! Associative sketch patterns. Editing retains ids at surviving instance indices.
+//! Associative sketch patterns. Editing retains ids at surviving instance indices; a changed
+//! seed list rebuilds every copy.
 
 use solidcraft_sketch::{SketchPattern, SketchPatternKind};
 
@@ -9,11 +10,11 @@ use crate::schema::sketch_modify::PatternResult;
 pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
     let cmd = if circular { "sketch.pattern.circular" } else { "sketch.pattern.rectangular" };
     let (out, info) = edit(s, p, cmd, true, |sk, doc| {
-        if sk.patterns.len() >= solidcraft_sketch::MAX_CONSTRAINTS {
+        if sk.patterns.len() >= solidcraft_sketch::limits::max_constraints() {
             return Err(bad(cmd, "too many sketch patterns"));
         }
         let old_index = str_(p, "pattern").and_then(|id| sk.patterns.iter().position(|x| x.id == id));
-        let old = if let Some(id) = str_(p, "pattern") {
+        let mut old = if let Some(id) = str_(p, "pattern") {
             let i = sk.patterns.iter().position(|x| x.id == id).ok_or_else(|| bad(cmd, "unknown sketch pattern"))?;
             Some(sk.patterns.remove(i))
         } else {
@@ -85,9 +86,27 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             .filter_map(|i| sk.curves.get(*i).map(|c| c.id.clone()))
             .chain(ps.iter().filter_map(|i| sk.points.get(*i).map(|p| p.id.clone())))
             .collect();
-        if let Some(old) = &old {
+        if let Some(old) = &mut old {
             if entity_ids != old.entities {
-                return Err(bad(cmd, "the seed entities of an existing pattern cannot be changed"));
+                // A changed seed list (#10649) rebuilds every copy: the old copies go, and the
+                // new ones get fresh ids. A copy cannot seed the pattern that makes it.
+                if old
+                    .instances
+                    .iter()
+                    .any(|instance| entity_ids.iter().any(|id| instance.curves.contains(id) || instance.points.iter().any(|(_, copy)| copy == id)))
+                {
+                    return Err(bad(cmd, "a pattern cannot copy its own copies"));
+                }
+                for instance in std::mem::take(&mut old.instances) {
+                    sk.constraints.retain(|c| !instance.constraints.contains(&c.id));
+                    let curves: Vec<_> = instance.curves.iter().filter_map(|id| sk.curve_index(id)).collect();
+                    sk.remove_curves(&curves);
+                    // A curve drawn from a copy's point keeps it: removing the point would take the curve.
+                    let kept: Vec<usize> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
+                    let points: Vec<_> =
+                        instance.points.iter().filter_map(|(_, id)| sk.resolve_point(id)).filter(|point| !kept.contains(point)).collect();
+                    sk.remove_points(&points);
+                }
             }
             if old.instances.len() >= MAX_COPIES {
                 return Err(bad(cmd, "too many stored pattern instances"));
@@ -181,7 +200,9 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             None => sk.fresh("pat")?,
         };
         let center_id = center.and_then(|i| sk.points.get(i)).map(|p| p.id.clone());
-        let index = old_index.unwrap_or(sk.patterns.len());
+        let reported_curve_count = entity_ids.iter().filter(|id| sk.curve_index(id).is_some()).count();
+        // Removing old copies can retire an earlier pattern seeded by one, so the old index may be past the end.
+        let index = old_index.unwrap_or(sk.patterns.len()).min(sk.patterns.len());
         let pattern = SketchPattern {
             id: id.clone(),
             entities: entity_ids,
@@ -190,15 +211,15 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             expressions,
             count_expression,
         };
-        sk.patterns.insert(index.min(sk.patterns.len()), pattern);
+        sk.patterns.insert(index, pattern);
         sk.update_pattern(index, kind)?;
         let pattern = sk.patterns.get(index).ok_or_else(|| bad(cmd, "missing sketch pattern"))?;
-        let curves: Vec<_> = pattern.instances.iter().flat_map(|i| i.curves.iter().cloned()).collect();
+        let curves: Vec<_> = pattern.instances.iter().flat_map(|instance| instance.curves.iter().take(reported_curve_count).cloned()).collect();
         let constraints: Vec<_> = pattern.instances.iter().flat_map(|i| i.constraints.iter().cloned()).collect();
         Ok((id, center_id, curves, constraints))
     })?;
     let (pattern, center, curves, constraints) = out;
-    reply(cmd, PatternResult { pattern, center, curves, constraints, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, PatternResult { pattern, center, curves, constraints, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 fn count(p: &Value, k: &str, cmd: &str) -> Result<usize> {

@@ -740,7 +740,7 @@ pub(super) fn setup_error(e: &SolidError) -> Output {
 /// an upstream status. An unported callee or any other Rust error (an invalid input
 /// included: it can be a limitation of the runner's handles) is not ignored.
 fn ignored_status(e: &SolidError) -> bool {
-    matches!(e, SolidError::Upstream { .. })
+    solidcore::error::upstream_status(e).is_some()
 }
 
 /// The face props `SetProps_Stage3` has built when it calls `ClassifyLoops`, and its
@@ -967,7 +967,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 {
                     SM_ERR_INVALID_INPUT
                 }
-                SolidError::Upstream { code, .. } if *code == SM_ERR => f64::from(SM_ERR),
+                e if solidcore::error::upstream_status(e) == Some(SM_ERR) => f64::from(SM_ERR),
                 _ => return Ok(Output::err(format!("rust_error: {e}"))),
             }
         }

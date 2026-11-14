@@ -1075,3 +1075,109 @@ fn a_refused_hole_names_the_value_at_fault() {
     let e = refused(json!({}));
     assert!(e.contains("needs `diameter`, `thread` (a tapped hole) or `clearance` (a bolt size)"), "{e}");
 }
+
+// ---- the run-on above the entry face (#10695) ----------------------------------------------
+
+fn body_volume(s: &mut Session, name: &str) -> f64 {
+    run(s, "inspect.measure", json!({"bodies": [name]})).ok().and_then(|m| m["bodies"][0]["volume_mm3"].as_f64()).unwrap_or(f64::NAN)
+}
+
+/// #10695: a counterbored hole down into a 500 mm plate leaves a bracket floating 3 mm above
+/// the plate whole. The tool's run-on above the entry face (1 % of the plate's size, 7 mm here)
+/// used to pocket the bracket from below.
+#[test]
+fn a_hole_leaves_a_body_floating_above_its_face_whole() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 500, "width": 500, "height": 10, "center": [0, 0, 5], "body_name": "Plate"})).unwrap();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "center": [0, 0, 15.5], "operation": "new", "body_name": "Bracket"}))
+        .unwrap();
+    let hole =
+        json!({"position": [0, 0, 10], "direction": [0, 0, -1], "diameter": 6, "depth": 5, "type": "counterbore", "cb_diameter": 11, "cb_depth": 2});
+    run(&mut s, "solid.hole", hole).unwrap();
+    let bracket = body_volume(&mut s, "Bracket");
+    assert!((bracket - 8000.0).abs() < 1e-3, "bracket {bracket}, want 8000");
+    assert!(solid_at(&s, Vec3::new(0.0, 0.0, 13.2)), "the bracket's underside over the hole is cut");
+    let plate = body_volume(&mut s, "Plate");
+    let want = 2_500_000.0 - cyl(5.5, 2.0) - cyl(3.0, 3.0);
+    assert!(close(plate, want, 2_500_000.0), "plate {plate}, want {want}");
+}
+
+/// #10695: a hole down into a plate from the face a separate block stands on leaves the block
+/// whole and drills the plate.
+#[test]
+fn a_hole_from_under_a_stacked_body_leaves_it_whole() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 200, "width": 200, "height": 10, "center": [0, 0, 5], "body_name": "Plate"})).unwrap();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "center": [0, 0, 15], "operation": "new", "body_name": "Block"}))
+        .unwrap();
+    run(&mut s, "solid.hole", json!({"position": [0, 0, 10], "direction": [0, 0, -1], "diameter": 6, "depth": 5})).unwrap();
+    let block = body_volume(&mut s, "Block");
+    assert!((block - 4000.0).abs() < 1e-3, "block {block}, want 4000");
+    assert!(solid_at(&s, Vec3::new(0.0, 0.0, 10.5)), "the block's foot over the hole is cut");
+    assert!(!solid_at(&s, Vec3::new(0.0, 0.0, 7.5)), "the plate is not drilled");
+    let plate = body_volume(&mut s, "Plate");
+    let want = 400_000.0 - cyl(3.0, 5.0);
+    assert!(close(plate, want, 400_000.0), "plate {plate}, want {want}");
+}
+
+/// #10695: a hole on the lower step of an L-shaped block, its circle reaching 1 mm under the
+/// upper step's wall, leaves the wall whole: only the hole below the step's face is taken.
+#[test]
+fn a_hole_beside_a_wall_of_its_own_body_leaves_the_wall_whole() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "center": [0, 0, 5], "body_name": "Block"})).unwrap();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 40, "height": 10, "center": [10, 0, 15], "operation": "join", "targets": ["Block"]}))
+        .unwrap();
+    run(&mut s, "solid.hole", json!({"position": [-2, 0, 10], "direction": [0, 0, -1], "diameter": 6, "depth": 5})).unwrap();
+    assert!(solid_at(&s, Vec3::new(0.5, 0.0, 10.3)), "the wall's foot over the hole is notched");
+    assert!(!solid_at(&s, Vec3::new(0.5, 0.0, 9.7)), "the hole under the wall's foot is not drilled");
+    let (got, _) = measure(&mut s).unwrap();
+    let want = 24_000.0 - cyl(3.0, 5.0);
+    assert!(close(got, want, 24_000.0), "volume {got}, want {want}");
+}
+
+/// #10695: a counterbore wider than the bore it is drilled from the floor of stops at that floor:
+/// the bore's wall above it stays as it was.
+#[test]
+fn a_counterbore_on_a_bore_floor_stops_at_the_floor() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "center": [0, 0, 10], "body_name": "Block"})).unwrap();
+    run(&mut s, "solid.hole", json!({"position": [0, 0, 20], "diameter": 5, "depth": 10})).unwrap();
+    let hole =
+        json!({"position": [0, 0, 10], "direction": [0, 0, -1], "diameter": 4, "depth": 5, "type": "counterbore", "cb_diameter": 8, "cb_depth": 2});
+    run(&mut s, "solid.hole", hole).unwrap();
+    assert!(solid_at(&s, Vec3::new(3.0, 0.0, 10.3)), "the bore's wall above the floor is cut");
+    assert!(!solid_at(&s, Vec3::new(3.0, 0.0, 9.7)), "the counterbore is not cut");
+    let (got, _) = measure(&mut s).unwrap();
+    let want = 32_000.0 - cyl(2.5, 10.0) - cyl(4.0, 2.0) - cyl(2.0, 3.0);
+    assert!(close(got, want, 32_000.0), "volume {got}, want {want}");
+}
+
+/// #10695: a countersink wider than the bore it is drilled from the floor of has its rim on that
+/// floor: the bore's wall above it is not stepped out.
+#[test]
+fn a_countersink_on_a_bore_floor_keeps_its_rim_on_the_floor() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+    run(&mut s, "solid.hole", json!({"position": [5, 5, 10], "diameter": 5, "depth": 5})).unwrap();
+    run(&mut s, "solid.hole", json!({"position": [5, 5, 5], "diameter": 2, "depth": 3, "type": "countersink", "cs_diameter": 6, "cs_angle": 90}))
+        .unwrap();
+    assert!(solid_at(&s, Vec3::new(7.9, 5.0, 5.05)), "the bore's wall above the floor is cut");
+    assert!(!solid_at(&s, Vec3::new(7.4, 5.0, 4.95)), "the countersink's rim is not on the floor");
+}
+
+/// #10695: on a round bar the counterbore's floor is measured from its rim's lowest point, so
+/// the hole's entry point lies just inside the bar: the bar's rise over it is the face being
+/// drilled, cut as before, not material standing over the face.
+#[test]
+fn a_counterbore_on_a_round_bar_drills_its_whole_rim() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 100, "height": 40, "name": "Bar"})).unwrap();
+    let hole = json!({"position": [100, 0, 20], "diameter": 3, "depth": 4, "type": "counterbore", "cb_diameter": 5, "cb_depth": 1});
+    run(&mut s, "solid.hole", hole).unwrap();
+    // On the axis, under the bar's surface (x 100) and over the rim's lowest point (x 99.969).
+    assert!(!solid_at(&s, Vec3::new(99.985, 0.0, 20.0)), "the bar's cap over the counterbore is left");
+    assert!(!solid_at(&s, Vec3::new(99.95, 0.0, 20.0)), "the counterbore is not cut");
+    // Beside the counterbore (radius 2.5), under the surface (x 99.964 at y 2.7).
+    assert!(solid_at(&s, Vec3::new(99.95, 2.7, 20.0)), "the bar beside the counterbore is cut");
+}

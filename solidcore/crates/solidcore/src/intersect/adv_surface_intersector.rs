@@ -78,6 +78,11 @@
 //!   that this class overrides, `ComputeSingularityPoint`, dispatches through the
 //!   base's `advanced` flag. The start point is a zero-filled arena point
 //!   (`GetNewElement`, [`TsectPnt::zeroed`]).
+//! - **Empty trace (WR-80).** `FindInteriorCurves` traces a curve back the other way
+//!   with the base's [`SurfaceIntersector::trace_back`], only when `TraceCurve`
+//!   produced points. Upstream also reverses the empty curve of a tangent or
+//!   coincidence start point that already lies on a found curve, which fails the whole intersection with
+//!   `SM_ERR_NULL_POINTER` (the fork's tangency-labs/smlib@0dbe681).
 //! - **Recursion.** `SolveBranch` nests at most once per tree node; deeper nesting
 //!   (cyclic tree links, which recurse forever upstream) is
 //!   [`SolidError::InvalidInput`], as is nesting past the base solver's
@@ -392,25 +397,28 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         caches: &'t mut [SurfaceCache<O>],
     ) -> Result<()> {
         if caches.is_empty() {
-            return Err(SolidError::null_pointer(OP_SET_CACHES));
+            return Err(SolidError::intersect_missing(
+                OP_SET_CACHES,
+                "a surface cache to intersect",
+            ));
         }
         let second = usize::from(caches.len() > 1);
         for i in [0, second] {
             let c = caches
                 .get_mut(i)
-                .ok_or(SolidError::null_pointer(OP_SET_CACHES))?;
+                .ok_or_else(|| SolidError::intersect_missing(OP_SET_CACHES, "the surface cache"))?;
             c.get_tree(k).map_err(|e| {
                 if e.is_unported_or_cancelled() {
                     e
                 } else {
-                    SolidError::null_pointer(OP_SET_CACHES)
+                    SolidError::intersect_missing(OP_SET_CACHES, "the surface cache's tree")
                 }
             })?;
         }
         let caches: &'t [SurfaceCache<O>] = caches;
-        let cache1 = caches
-            .first()
-            .ok_or(SolidError::null_pointer(OP_SET_CACHES))?;
+        let cache1 = caches.first().ok_or_else(|| {
+            SolidError::intersect_missing(OP_SET_CACHES, "the first surface cache")
+        })?;
         let cache2 = caches.get(second).unwrap_or(cache1);
         self.bind_caches(cache1, cache2)
     }
@@ -428,7 +436,11 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         cache1: &'t SurfaceCache<O>,
         cache2: &'t SurfaceCache<O>,
     ) -> Result<()> {
-        let tree = |c: &'t SurfaceCache<O>| c.tree().ok_or(SolidError::null_pointer(OP_SET_CACHES));
+        let tree = |c: &'t SurfaceCache<O>| {
+            c.tree().ok_or_else(|| {
+                SolidError::intersect_missing(OP_SET_CACHES, "the surface cache's tree")
+            })
+        };
         let t1 = tree(cache1)?;
         let t2 = tree(cache2)?;
         self.solver.trees[0] = Some(t1);
@@ -479,13 +491,11 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
 
     /// The `SmBezierPatch` of node `id` of tree `index` (`(SmBezierPatch*)m_pData`).
     fn patch(&self, index: usize, id: Option<NodeId>) -> Result<&'t BezierPatch<O>> {
-        let cache = self
-            .caches
-            .get(index)
-            .copied()
-            .flatten()
-            .ok_or(SolidError::null_pointer(OP_LOCAL))?;
-        let id = id.ok_or(SolidError::null_pointer(OP_LOCAL))?;
+        let cache = self.caches.get(index).copied().flatten().ok_or_else(|| {
+            SolidError::intersect_missing(OP_LOCAL, "the surface cache of the patch")
+        })?;
+        let id =
+            id.ok_or_else(|| SolidError::intersect_missing(OP_LOCAL, "the patch's tree node"))?;
         cache.patch(id)
     }
 
@@ -749,24 +759,10 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             }
 
             // init trace params
-            let input_trace_direction = self.base.curve_trace_direction;
             self.base.start_point = Some(start_tsp);
 
-            // do the trace
-            trace_curve(k, &mut self.base, start_tsp, &out.curves_3d)?;
-
-            // when appropriate - trace in the other direction as well
-            if !self.base.curve_is_closed
-                && !self.base.point(start_tsp)?.is_bounded()
-                && input_trace_direction == self.base.curve_trace_direction
-            {
-                self.base.reverse_curve_direction()?;
-                self.base.curve_trace_direction *= -1.0;
-                trace_curve(k, &mut self.base, start_tsp, &out.curves_3d)?;
-
-                // restore the curve direction (upstream multiplies by 1.0)
-                self.base.reverse_curve_direction()?;
-            }
+            // do the trace, and when appropriate in the other direction as well
+            trace_both_ways(k, &mut self.base, start_tsp, &out.curves_3d)?;
 
             // a low-angle start point only yields output when it traced a closed
             // loop that is not a single point within tolerance
@@ -927,13 +923,11 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
 
     /// `((SmBezierAux2d*)m_pData)->GetPolarBox()` of node `id` of tree `index`.
     fn polar_box(&self, k: &Kernel, index: usize, id: Option<NodeId>) -> Result<PolarBox> {
-        let cache = self
-            .caches
-            .get(index)
-            .copied()
-            .flatten()
-            .ok_or(SolidError::null_pointer(OP_GAUSS))?;
-        let id = id.ok_or(SolidError::null_pointer(OP_GAUSS))?;
+        let cache = self.caches.get(index).copied().flatten().ok_or_else(|| {
+            SolidError::intersect_missing(OP_GAUSS, "the surface cache of the patch")
+        })?;
+        let id =
+            id.ok_or_else(|| SolidError::intersect_missing(OP_GAUSS, "the patch's tree node"))?;
         // built lazily upstream; built without storing it here (the caches are
         // shared), which gives the same box
         cache.polar_box_unstored(k, id)
@@ -1248,6 +1242,29 @@ fn trace_curve(
     curves_3d: &[Curve],
 ) -> Result<()> {
     si.trace_curve(k, start, curves_3d)
+}
+
+/// The trace of `FindInteriorCurves` from the start point `start`: `TraceCurve`, then,
+/// for an open curve from an unbounded start point whose direction the trace did not
+/// reverse, the trace back the other way ([`SurfaceIntersector::trace_back`], the
+/// base's: not for a trace that produced no points, WR-80).
+fn trace_both_ways(
+    k: &Kernel,
+    si: &mut SurfaceIntersector<'_>,
+    start: TsectId,
+    curves_3d: &[Curve],
+) -> Result<()> {
+    let input_trace_direction = si.curve_trace_direction;
+    trace_curve(k, si, start, curves_3d)?;
+
+    // when appropriate - trace in the other direction as well
+    if !si.curve_is_closed
+        && !si.point(start)?.is_bounded()
+        && input_trace_direction == si.curve_trace_direction
+    {
+        si.trace_back(k, start, curves_3d)?;
+    }
+    Ok(())
 }
 
 /// `FlushCurve(r3DCurves, rSurface1UVCurves, rSurface2UVCurves, rCurveTypes,
@@ -1851,7 +1868,10 @@ impl SurfaceIntersector<'_> {
         }
 
         // a single singular direction is not a valid result
-        Err(SolidError::sm_err(OP_SING))
+        Err(SolidError::intersect_failed(
+            OP_SING,
+            "only one singular direction was found, which is not a valid result",
+        ))
     }
 
     /// The singularity/coincidence case of matching principal curvatures and
@@ -1972,6 +1992,102 @@ mod tests {
         let n = du.cross(dv).unitize().unwrap();
         let z = Vec3::new(0.0, 0.0, 0.0);
         [[z, dv, dvv], [du, duv, Vec3::UNDEF], [duu, Vec3::UNDEF, n]]
+    }
+
+    /// The plane `y = 0.5`, `(u, v)` in `[0, 1]^2` at `(u, 0.5, v - 0.5)`: it meets
+    /// [`plane`] (`z = 0`) at right angles in the line `(x, 0.5, 0)`, `x` in `[0, 1]`,
+    /// which is `(u, v) = (x, 0.5)` on both.
+    fn wall() -> Surface {
+        Surface::from(Plane::new(
+            Vec3::new(0.0, 0.5, -0.5),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ))
+    }
+
+    /// WR-80: a tangent start point that already lies on a found curve gives
+    /// `TraceCurve` nothing to add, so the curve stays empty and open (`curve_is_closed`
+    /// keeps what the last trace left, here the initial `false`) in the direction it
+    /// started in, from an unbounded start point: the trace-back condition of
+    /// `FindInteriorCurves` holds. Reversing the empty curve is `SM_ERR_NULL_POINTER`,
+    /// which failed the whole intersection; an empty trace is not traced back.
+    #[test]
+    fn tangent_start_on_a_found_curve_is_not_traced_back() {
+        let k = &Kernel::default();
+        let (a, b) = (plane(), wall());
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let mut si: AdvSurfaceIntersector<'_, '_, H> =
+            AdvSurfaceIntersector::new(k, &a, &d, &b, &d, false).unwrap();
+        // a single point curve already found at (0.5, 0.5, 0), on the line
+        let at = Vec3::new(0.5, 0.5, 0.0);
+        let found = [Curve::from(
+            BSplineCurve::create_degenerate_curve(3, at).unwrap(),
+        )];
+        let mut p = TsectPnt::new();
+        p.point_type = IntersectionPointType::TangentPoint;
+        p.curve_pv[0] = at;
+        let start = si.base.alloc_point(p);
+        assert!(!si.base.point(start).unwrap().is_bounded());
+        assert_eq!(si.base.curve_trace_direction, 1.0);
+        si.base.start_point = Some(start);
+
+        let r = trace_both_ways(k, &mut si.base, start, &found);
+        assert!(r.is_ok(), "the empty trace is traced back: {r:?}");
+        assert!(si.base.curve_points().is_empty());
+        assert!(!si.base.curve_is_closed);
+        assert_eq!(si.base.curve_trace_direction, 1.0);
+    }
+
+    /// A crossing start point inside both domains is traced both ways: from
+    /// `(0.5, 0.5, 0)` on the line `(x, 0.5, 0)` where [`plane`] and [`wall`] meet, the
+    /// curve reaches both ends, `x = 0` and `x = 1`, its points on the line and in order
+    /// along the first trace's direction (the start point's `crv_deriv`). The direction
+    /// stays negated, as upstream leaves it.
+    #[test]
+    fn crossing_start_is_traced_both_ways() {
+        let k = &Kernel::default();
+        let (a, b) = (plane(), wall());
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let mut si: AdvSurfaceIntersector<'_, '_, H> =
+            AdvSurfaceIntersector::new(k, &a, &d, &b, &d, false).unwrap();
+        let start = si.base.alloc_point(TsectPnt::zeroed());
+        si.base.curve_trace_direction = 1.0;
+        let mid = Point2::new(0.5, 0.5);
+        compute_point_values(k, &mut si.base, [mid, mid], start).unwrap();
+        assert_eq!(
+            si.base.point(start).unwrap().point_type,
+            IntersectionPointType::Crossing
+        );
+        si.base.start_point = Some(start);
+        let forward_x = si.base.point(start).unwrap().crv_deriv().x;
+        assert!(forward_x.abs() > 0.5, "{forward_x}");
+
+        trace_both_ways(k, &mut si.base, start, &[]).unwrap();
+        assert_eq!(si.base.curve_trace_direction, -1.0);
+        let xs: Vec<f64> = si
+            .base
+            .curve_points()
+            .iter()
+            .map(|&id| si.base.point(id).unwrap().crv_pos().x)
+            .collect();
+        let lo = xs.iter().copied().fold(f64::INFINITY, f64::min);
+        let hi = xs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        assert!(lo < 1e-6 && hi > 1.0 - 1e-6, "{xs:?}");
+        let in_order = if forward_x > 0.0 {
+            xs.windows(2).all(|w| w[1] > w[0])
+        } else {
+            xs.windows(2).all(|w| w[1] < w[0])
+        };
+        assert!(in_order, "{xs:?} against crv_deriv.x {forward_x}");
+        for &id in si.base.curve_points() {
+            let q = si.base.point(id).unwrap().crv_pos();
+            assert!(
+                (q.y - 0.5).abs() < 1e-9 && q.z.abs() < 1e-9,
+                "{q:?} is off the line"
+            );
+        }
     }
 
     #[test]

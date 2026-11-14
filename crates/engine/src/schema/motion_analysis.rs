@@ -102,6 +102,10 @@ pub struct InterferenceParams {
     /// Check the pairs of the design's contact sets instead (not with `occurrences`).
     #[serde(default)]
     pub contact_sets: Option<bool>,
+    /// Pairs left out, such as a pin in its hole: `[a, b]`, each an occurrence's id or name; a
+    /// pair of bodies is left out when one is under `a` and the other under `b`. Default: none.
+    #[serde(default)]
+    pub exclude_pairs: Option<Vec<[super::motion::PartRef; 2]>>,
     /// How many samples, from 2 to 1000 (rounded). Default: the study's steps + 1.
     #[serde(default, deserialize_with = "interference_samples", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "interference_samples_schema")]

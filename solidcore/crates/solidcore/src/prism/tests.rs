@@ -14,7 +14,9 @@ use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 use super::extrude::extrude_region;
 use super::measure::{equivalent, section};
 use super::profile::rational_curve;
-use super::profile::{check_regions, curve_on_frame, Loop2, ProfileRefusal, Region2, Seg2};
+use super::profile::{
+    check_regions, curve_on_frame, tapered_flange_ends, Loop2, ProfileRefusal, Region2, Seg2,
+};
 use super::read::{planar_curves, planar_pieces, PlanarPiece, Run};
 use super::sheet::{region_loops, sheet_regions};
 use crate::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
@@ -404,6 +406,44 @@ fn a_piece_made_a_curve_reads_back_as_itself() {
     }
 }
 
+/// A polynomial quadratic (a font's quadratic curve: a conic of weight 1) reads back as that
+/// conic, as a profile writes it, not as a degree-2 Bézier.
+#[test]
+fn a_polynomial_quadratic_reads_back_as_the_conic_of_weight_one() {
+    let k = Kernel::default();
+    let s = Seg2::Conic {
+        a: p(0.0, 0.0),
+        apex: p(1.0, 2.0),
+        b: p(3.0, 0.5),
+        w: 1.0,
+    };
+    let c = curve_on_frame(&k, &xy(), 0.0, &s).unwrap();
+    let iv = c.natural_interval();
+    for forward in [true, false] {
+        let back = read(&k, &c, iv, forward, &xy(), 1e-7).unwrap();
+        let [Seg2::Conic { a, apex, b, w }] = back[..] else {
+            panic!("{back:?}")
+        };
+        let (a0, b0) = if forward {
+            (s.start(), s.end())
+        } else {
+            (s.end(), s.start())
+        };
+        assert!(a.distance(a0) < 1e-12 && b.distance(b0) < 1e-12, "{back:?}");
+        assert!(apex.distance(p(1.0, 2.0)) < 1e-12 && w == 1.0, "{back:?}");
+    }
+    // the same parabola as a quadratic Bézier made a curve: the same conic back
+    let mut q = [p(0.0, 0.0); 10];
+    q[1] = p(1.0, 2.0);
+    q[2] = p(3.0, 0.5);
+    let c = curve_on_frame(&k, &xy(), 0.0, &Seg2::Bezier { n: 2, p: q }).unwrap();
+    let back = read(&k, &c, c.natural_interval(), true, &xy(), 1e-7).unwrap();
+    assert!(
+        matches!(back[..], [Seg2::Conic { w, .. }] if w == 1.0),
+        "{back:?}"
+    );
+}
+
 /// A curve moved off its definition is refused: a circle's net moved off the circle, a curve
 /// lifted off the frame's plane at one end, a run's end moved off the curve's.
 #[test]
@@ -617,6 +657,55 @@ fn sheets_combined_read_back_as_their_regions() {
         .all(|s| matches!(s, Seg2::Arc { .. })));
 }
 
+/// A disc's sheet read in a frame and in the same frame turned over (its y axis reversed, so
+/// the face is seen from below in one of them): a face seen from below has its loops reversed,
+/// each arc then starting at its old end, `start + sweep`, past π or under -π for one of the
+/// disc's two half-turns. Read either way, every arc starts at an angle in (-π, π], at the
+/// point the angle names on the circle, and the disc's area is its closed form.
+#[test]
+fn a_sheet_seen_from_below_starts_its_arcs_in_range() {
+    let mut k = Kernel::default();
+    let (c, r) = (p(3.0, -2.0), 4.0);
+    let disc = sheet(
+        &mut k,
+        &Region2 {
+            outer: circle(c, r),
+            holes: vec![],
+        },
+        1e-7,
+    );
+    let below = Frame {
+        origin: [0.0; 3],
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [0.0, -1.0, 0.0],
+    };
+    for (frame, centre) in [(xy(), c), (below, p(c.x, -c.y))] {
+        let got = sheet_regions(&k, &disc, &frame, 1e-7).unwrap();
+        assert_eq!(got.regions.len(), 1, "{got:?}");
+        let outer = &got.regions[0].outer;
+        let area = outer.signed_area().unwrap();
+        assert!((area.value - PI * r * r).abs() <= area.bound, "{area:?}");
+        assert_eq!(outer.segs.len(), 2, "{outer:?}");
+        for s in &outer.segs {
+            let Seg2::Arc {
+                center,
+                radius,
+                start,
+                ..
+            } = *s
+            else {
+                panic!("not an arc: {s:?}");
+            };
+            assert!(start > -PI && start <= PI, "{start}");
+            assert!(center.distance(centre) < 1e-12 && (radius - r).abs() < 1e-12);
+        }
+        // the loop still closes: each arc starts where the one before ends
+        for (a, b) in outer.segs.iter().zip(outer.segs.iter().cycle().skip(1)) {
+            assert!(a.end().distance(b.start()) < 1e-12, "{outer:?}");
+        }
+    }
+}
+
 fn drilled(k: &mut Kernel, radius: f64, shift: f64) -> Brep {
     let region = Region2 {
         outer: polygon(&[p(0.0, 0.0), p(20.0, 0.0), p(20.0, 20.0), p(0.0, 20.0)]),
@@ -722,4 +811,24 @@ fn discontinuous_splines_are_not_read() {
         assert!(read(&k, &c, c.natural_interval(), true, &xy(), 1e-5).is_none());
     }
     assert_eq!(refused, 2, "both jumps refused where they are made");
+}
+
+#[test]
+fn a_tapered_flange_changes_by_half_its_length_times_the_slope_tangent() {
+    // No slope: the given thickness at both ends.
+    assert_eq!(tapered_flange_ends(80.0, 14.0, 0.0), (14.0, 14.0));
+    // 45 degrees over an 80 mm inside length: 40 mm thinner at the toe, 40 mm thicker at the root.
+    let (toe, root) = tapered_flange_ends(80.0, 50.0, 45.0);
+    assert!(
+        (toe - 10.0).abs() < 1e-12 && (root - 90.0).abs() < 1e-12,
+        "{toe} {root}"
+    );
+    // A 5 degree taper flange channel (203 x 89, web 8.9, flange 14.2): the ends are the mean
+    // thickness less and plus 40.05 tan 5°, and they average back to it.
+    let (toe, root) = tapered_flange_ends(89.0 - 8.9, 14.2, 5.0);
+    let change = 40.05 * 5.0_f64.to_radians().tan();
+    assert!((toe - (14.2 - change)).abs() < 1e-12 && (root - (14.2 + change)).abs() < 1e-12);
+    assert!(((toe + root) / 2.0 - 14.2).abs() < 1e-12);
+    // A non-finite input gives a non-finite answer, never a panic.
+    assert!(tapered_flange_ends(f64::NAN, 1.0, 5.0).0.is_nan());
 }

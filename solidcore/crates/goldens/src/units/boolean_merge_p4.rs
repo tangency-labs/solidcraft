@@ -322,8 +322,8 @@ impl UnitDiff for Runner {
             Err(e) if e.is_unported() => {
                 Ok(Output::unported(&e).ok_or_else(|| error("missing deferral"))?)
             }
-            Err(SolidError::Upstream { code, .. }) => rust_snapshot(
-                code,
+            Err(e @ (SolidError::Upstream { .. } | SolidError::Failed(_))) => rust_snapshot(
+                e.sm_status().unwrap_or(solidcore::error::SM_ERR),
                 false,
                 &kernels,
                 primary.as_ref(),

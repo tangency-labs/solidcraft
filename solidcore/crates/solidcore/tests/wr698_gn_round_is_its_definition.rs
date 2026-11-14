@@ -1,5 +1,5 @@
-//! WR-698 (#2273, the fork's 4a10ed8): with `fillet_round_as_definition` (and
-//! `fillet_gn_section_generator`) the G^n section generator's round is its definition,
+//! WR-698 (#2273, the fork's 4a10ed8): with `fillet_round_as_definition` the G^n section
+//! generator's round is its definition,
 //! a procedural blend (`SmProceduralBlend`) on the certified net it built: its faces,
 //! the ball's offsets and sides, the section, the centre line as the leader, the feet's
 //! uv curves as the seeds and the certified bound. A face that is itself a blend by its
@@ -40,8 +40,6 @@ use solidcore::{Brep, Kernel};
 
 fn kernel(definition: bool) -> Kernel {
     let mut fixes = UpstreamFixes::default();
-    fixes.fillet_gn_section_generator = true;
-    fixes.fillet_surface_plane_curve_on_plane_equation = true;
     fixes.fillet_round_as_definition = definition;
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = fixes;
@@ -1034,11 +1032,10 @@ fn a_query_below_the_bound_takes_s_and_one_at_it_the_net() {
 
 // ---- #2487: the offset of a round built from its definition S ----------------------------
 
-/// The tilted pipe's root rounded r 2 by the ball's exact circle
-/// (`fillet_exact_arc_sections`): a procedural blend of order 1 on the plate's plane and
+/// The tilted pipe's root rounded r 2 by the ball's exact circle (every circular round's
+/// section): a procedural blend of order 1 on the plate's plane and
 /// the pipe's cylinder. Its surface.
 fn circle_root(k: &mut Kernel) -> (Brep, Surface) {
-    k.fixes.fillet_exact_arc_sections = true;
     let b = tilted_pipe_rounded(k, 1, 1, 1.0);
     let s = rounds_of(&b)
         .into_iter()
@@ -1159,7 +1156,7 @@ fn a_body_s_circle_round_offsets_to_its_round_of_r_minus_d() {
 }
 
 /// #2487: with every fix on the chamfered box offsets (it was refused with status 1001:
-/// the offset's fold certificate, `shell_one_construction`, raised the G2 rounds' rational
+/// the offset's fold certificate, S1's `certify_regular`, raised the G2 rounds' rational
 /// septic nets to degree 112, past its Bernstein forms' cap), to the same faces as with
 /// #2388's fix set.
 #[test]

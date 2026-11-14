@@ -181,7 +181,7 @@ pub trait PrimitiveCreationAccess: PrimitiveAccess {
     /// too); `SM_ERR_NULL_POINTER` for a tree that leaves no B-rep, where upstream would
     /// go on with a null `pSweepBrep`.
     fn boolean_trees(&mut self, breps: &mut Vec<BrepId>, tree: &[i64]) -> Result<()> {
-        const OP: &str = "SmMerge::BooleanTrees";
+        const OP: &str = "primitive::primitive_creation::p2::boolean_trees";
         let first = *breps
             .first()
             .ok_or_else(|| SolidError::invalid_input(OP, "no B-reps to combine"))?;
@@ -212,7 +212,10 @@ pub trait PrimitiveCreationAccess: PrimitiveAccess {
         }
         let count = operands.len();
         if count > breps.len() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(
+                OP,
+                "the Boolean tree returned more B-reps than it was given",
+            ));
         }
         let mut missing = false;
         for (&id, operand) in breps.iter().zip(operands) {
@@ -226,7 +229,10 @@ pub trait PrimitiveCreationAccess: PrimitiveAccess {
         }
         breps.truncate(count);
         if missing {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::primitive_missing(
+                OP,
+                "a B-rep the Boolean tree should leave",
+            ));
         }
         Ok(())
     }

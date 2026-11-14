@@ -29,6 +29,17 @@
 //! | [`NurbsFailure::Singular`]            | `NL_SEQ_ERR` (16)               |
 //! | [`NurbsFailure::Geometry`]            | `NL_GEO_ERR` (17)               |
 //! | [`NurbsFailure::DerivativeOrder`], [`NurbsFailure::NoDerivativeRows`] | `NL_MXD_ERR` (20) |
+//! | [`NurbsFailure::BSpline`]             | none: a [`BSplineFailure`]      |
+//!
+//! [`BSplineFailure`] describes the failures of the B-spline curve and surface methods
+//! built on those routines (`BSplineCurve`, `BSplineSurface`: fitting, skinning, Coons
+//! patches, trimming, evaluation); upstream they return an `SmStatus` (`SER(SM_ERR)`,
+//! `NER(...)`), which each records as its comparison status. A method whose NLib call
+//! fails keeps that call's failure as its cause ([`BSplineFailure::RoutineFailed`]). A
+//! check that refuses builds a typed cause with its numbers ([`BSplineFailure::EndsApart`],
+//! ...); a stage that fails with no reason the kernel names is a
+//! [`BSplineFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping
+//! the error of the call it made as its cause where it has one.
 //!
 //! Deviations: not upstream. A failure of a routine that has the data (a degree, an
 //! index, a parameter and its domain) carries it; the others are unit variants, and the
@@ -36,7 +47,7 @@
 //! `NL_KML_ERR`, `NL_CUR_REV`, `NL_FIL_ERR` and `NL_SCN_ERR` have no failure here: no
 //! routine of the port stores them.
 
-use super::{ErrorKind, Failure, Reason, SM_ERR};
+use super::{ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER};
 
 /// Why a NURBS routine fails.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -126,16 +137,126 @@ pub enum NurbsFailure {
         /// The largest order.
         max: usize,
     },
+    /// A B-spline curve or surface method failed (not an NLib routine itself).
+    BSpline(BSplineFailure),
+}
+
+/// Why a B-spline curve or surface method fails.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum BSplineFailure {
+    /// A NURBS routine the method calls failed; the failure's cause says why.
+    RoutineFailed,
+    /// The curve or surface holds no NURBS form to work on.
+    NoNurbsForm,
+    /// Something the method needs is missing, as the phrase says (e.g. "the boundary
+    /// curve").
+    Missing(&'static str),
+    /// The axis direction is a zero vector.
+    ZeroAxis,
+    /// The degree `given` is outside the range `[min, max]` the method handles.
+    DegreeOutside {
+        /// The degree asked for.
+        given: i64,
+        /// The smallest degree.
+        min: i64,
+        /// The largest degree.
+        max: i64,
+    },
+    /// The parameter is outside the domain `[lo, hi]`.
+    ParameterOutside {
+        /// The parameter.
+        parameter: f64,
+        /// The start of the domain.
+        lo: f64,
+        /// The end of the domain.
+        hi: f64,
+    },
+    /// The method failed, as the phrase says (e.g. "the end tangent is not given"): a site
+    /// not yet converted to a typed cause.
+    Failed(&'static str),
+    /// The curve's ends coincide (it is closed), so no scaling takes one end to the other.
+    EndsCoincide,
+    /// The ends to join are `distance` apart, farther than the tolerance.
+    EndsApart {
+        /// The distance between the ends.
+        distance: f64,
+        /// The tolerance they must be within.
+        tolerance: f64,
+    },
+    /// A stage of the method failed with no reason the kernel names: a defect
+    /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
+    /// reports (for the goldens only), where it was built, and the error of the call it made
+    /// where it has one.
+    StageFailed,
+}
+
+impl BSplineFailure {
+    /// The status the C++ method returns for the failure (a comparison detail).
+    pub(crate) const fn comparison_status(&self) -> i32 {
+        match self {
+            Self::Missing(_) => SM_ERR_NULL_POINTER,
+            Self::ZeroAxis => SM_ERR_INVALID_INPUT,
+            _ => SM_ERR,
+        }
+    }
+
+    /// The failure's stable [`ErrorKind`]: [`ErrorKind::StageFailed`] for
+    /// [`BSplineFailure::StageFailed`], a defect; the kind of its status otherwise.
+    #[must_use]
+    pub const fn kind(&self) -> ErrorKind {
+        match self {
+            Self::StageFailed => ErrorKind::StageFailed,
+            _ => ErrorKind::of_status(self.comparison_status()),
+        }
+    }
+}
+
+impl core::fmt::Display for BSplineFailure {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::RoutineFailed => f.write_str("a NURBS routine it calls failed"),
+            Self::NoNurbsForm => f.write_str("it holds no NURBS form"),
+            Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::ZeroAxis => f.write_str("the axis direction is a zero vector"),
+            Self::DegreeOutside { given, min, max } => {
+                write!(f, "degree {given} is outside [{min}, {max}]")
+            }
+            Self::ParameterOutside { parameter, lo, hi } => {
+                write!(
+                    f,
+                    "parameter {parameter} is outside the domain [{lo}, {hi}]"
+                )
+            }
+            Self::Failed(what) => f.write_str(what),
+            Self::EndsCoincide => f.write_str("the curve's ends coincide"),
+            Self::EndsApart {
+                distance,
+                tolerance,
+            } => write!(
+                f,
+                "the ends to join are {distance} apart, farther than the tolerance {tolerance}"
+            ),
+            Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
+        }
+    }
 }
 
 impl NurbsFailure {
-    /// The status the C++ reports for any of the failures (a comparison detail): its `Sm*`
-    /// callers surface an NLib failure as `SER(SM_ERR)`.
-    pub(crate) const COMPARISON_STATUS: i32 = SM_ERR;
-
-    /// The `NL_*_ERR` number the C++ stores for the failure (a comparison detail).
-    pub(crate) const fn nlib_number(&self) -> i32 {
+    /// The status the C++ reports for the failure (a comparison detail): the `Sm*`
+    /// callers surface an NLib failure as `SER(SM_ERR)`; a B-spline method's failure
+    /// has its own.
+    pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
+            Self::BSpline(b) => b.comparison_status(),
+            _ => SM_ERR,
+        }
+    }
+
+    /// The `NL_*_ERR` number the C++ stores for the failure (a comparison detail);
+    /// `None` for a B-spline method's failure, which stores none.
+    pub(crate) const fn nlib_number(&self) -> Option<i32> {
+        Some(match self {
             Self::CurveDefinition => 1,
             Self::SurfaceDefinition => 2,
             Self::Degree | Self::DegreeTooHigh { .. } => 3,
@@ -153,13 +274,15 @@ impl NurbsFailure {
             Self::Singular => 16,
             Self::Geometry => 17,
             Self::DerivativeOrder { .. } | Self::NoDerivativeRows => 20,
-        }
+            Self::BSpline(_) => return None,
+        })
     }
 
     /// The failure's stable [`ErrorKind`].
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
+            Self::BSpline(b) => b.kind(),
             Self::NotConverged => ErrorKind::NotConverged,
             Self::Parameter | Self::ParameterOutside { .. } => ErrorKind::OutsideDomain,
             _ => ErrorKind::Failed,
@@ -223,6 +346,7 @@ impl core::fmt::Display for NurbsFailure {
                     "derivative order {given} is above the largest order, {max}"
                 )
             }
+            Self::BSpline(b) => b.fmt(f),
         }
     }
 }
@@ -249,11 +373,39 @@ impl crate::SolidError {
         }
     }
 
-    /// True for the failure of a NURBS routine ([`Reason::Nurbs`]). The callers that
-    /// ignore an NLib failure's flag, as upstream does, drop it by this test.
+    /// True for the failure of a NURBS routine ([`Reason::Nurbs`], not a
+    /// [`BSplineFailure`]). The callers that ignore an NLib failure's flag, as upstream
+    /// does, drop it by this test.
     #[must_use]
     pub(crate) fn is_nurbs_failure(&self) -> bool {
-        self.nurbs_failure().is_some() || matches!(self, Self::Nlib { .. })
+        self.nurbs_failure()
+            .is_some_and(|n| !matches!(n, NurbsFailure::BSpline(_)))
+    }
+
+    /// [`crate::SolidError::Failed`] for a B-spline curve or surface method that fails
+    /// with `failure`.
+    #[must_use]
+    #[track_caller]
+    pub(crate) fn b_spline(operation: &'static str, failure: BSplineFailure) -> Self {
+        Failure::new(operation, NurbsFailure::BSpline(failure)).into_error()
+    }
+
+    /// Maps the error of a failed NLib call inside a B-spline method (upstream
+    /// `if (NL_YES == N_...) SER(SM_ERR)`) to a [`BSplineFailure::RoutineFailed`] of
+    /// `operation` that keeps the call's error as its cause. [`crate::SolidError::Unported`],
+    /// [`crate::SolidError::Cancelled`] and [`crate::SolidError::PreparationRequired`] pass
+    /// through unchanged: no upstream status stands for them, and callers match them at
+    /// the top. Use as `.map_err(SolidError::nurbs_routine(OP))`.
+    pub(crate) fn nurbs_routine(operation: &'static str) -> impl Fn(Self) -> Self {
+        move |e| match e {
+            Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
+            _ => Failure::new(
+                operation,
+                NurbsFailure::BSpline(BSplineFailure::RoutineFailed),
+            )
+            .caused_by(e)
+            .into_error(),
+        }
     }
 }
 
@@ -265,10 +417,50 @@ impl crate::SolidError {
 pub fn nlib_number(error: &crate::SolidError) -> Option<i32> {
     match error {
         crate::SolidError::Failed(f) => match &f.reason {
-            Reason::Nurbs(n) => Some(n.nlib_number()),
+            Reason::Nurbs(n) => n.nlib_number(),
             _ => None,
         },
-        crate::SolidError::Nlib { code, .. } => Some(code.code()),
         _ => None,
+    }
+}
+
+/// [`super::upstream_status`], kept at the path the goldens runners first read it from.
+pub use super::upstream_status;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SolidError;
+
+    #[test]
+    fn a_stage_failure_is_a_defect_and_a_typed_cause_keeps_its_status() {
+        super::super::tests::assert_stage_failure(
+            &SolidError::b_spline("nurbs::op", BSplineFailure::StageFailed),
+            "nurbs::op",
+            SM_ERR,
+        );
+        for cause in [
+            BSplineFailure::EndsCoincide,
+            BSplineFailure::EndsApart {
+                distance: 0.5,
+                tolerance: 0.01,
+            },
+        ] {
+            let e = SolidError::b_spline("nurbs::op", cause);
+            assert_eq!(e.upstream_status(), Some(SM_ERR), "{cause:?}");
+            assert_eq!(e.kind(), ErrorKind::Failed, "{cause:?}");
+            assert!(!e.is_defect() && e.is_status_answer(), "{cause:?}");
+        }
+    }
+
+    /// The NURBS routines describe their failures: their library code builds no bare
+    /// `Upstream` status, except the files listed (with the bare sites each may still hold)
+    /// whose conversion waits on other open work.
+    #[test]
+    fn the_nurbs_routines_build_no_bare_statuses() {
+        assert_eq!(
+            super::super::query::tests::bare_statuses_in("nurbs", 60),
+            [("nurbs/b_spline_curve/p1.rs".to_owned(), 23)]
+        );
     }
 }

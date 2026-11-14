@@ -44,6 +44,13 @@ fn headless_panel_single_batch_and_script_keep_one_backend_and_never_change_the_
     one.call("engine.script", json!({"commands":[{"command":"layout.save","params":{"name":"MCP saved"}},{"command":"layout.reset"}]})).unwrap();
     one.call("engine.execute", json!({"command":"layout.apply","params":{"name":"MCP saved"}})).unwrap();
     assert_eq!(one.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
+    // A layout batch refused before its first step ran nothing: `rolled_back` as a rollback that
+    // went back reports it (#10749).
+    let refused = json!([panel_mcp_steps()[1], {"command":"solid.boxx","params":{}}]);
+    let reply = one.call("engine.batch", json!({"commands":refused})).unwrap();
+    assert_eq!((&reply["completed"], &reply["rolled_back"]), (&json!(0), &json!(true)), "{reply}");
+    assert_eq!(one.call("engine.batch", json!({"commands":refused,"rollback":false})).unwrap()["rolled_back"], false);
+    assert_eq!(one.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
 }
 #[test]
 fn mcp_panel_tools_publish_structured_errors_and_committed_state_through_shared_backend() {
@@ -247,7 +254,8 @@ fn atomic_tool_layout_batches_never_emulate_an_unavailable_backend_with_document
         assert_eq!(tool["structuredContent"]["panel_error"]["rule"], "capability");
         assert_eq!(body["completed"], 0);
         assert_eq!(body["applied"], json!([]));
-        assert_eq!(body["rolled_back"], false);
+        // Nothing ran, so the design is where the batch started (#10749).
+        assert_eq!(body["rolled_back"], true);
         assert_eq!(backend.calls, vec![("engine.batch".into(), String::new())], "no checkpoint, inspection or single layout call");
         assert_eq!(backend.headless.panels.as_ref().unwrap().service.inspect(), before);
         assert_eq!(backend.headless.panels.as_ref().unwrap().catalogue.state(), &catalogue);
@@ -486,6 +494,8 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
         ("solidcraft-mechanisms", "SKILL.md", include_str!("../../../skills/solidcraft-mechanisms/SKILL.md")),
         ("solidcraft-checking", "SKILL.md", include_str!("../../../skills/solidcraft-checking/SKILL.md")),
         ("solidcraft-editing", "SKILL.md", include_str!("../../../skills/solidcraft-editing/SKILL.md")),
+        ("solidcraft-sheetmetal", "SKILL.md", include_str!("../../../skills/solidcraft-sheetmetal/SKILL.md")),
+        ("solidcraft-sheetmetal", "reference.md", include_str!("../../../skills/solidcraft-sheetmetal/reference.md")),
     ];
     for (skill, file, expected) in docs {
         let args = json!({"skill": skill, "file": file});
@@ -502,7 +512,7 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
 #[test]
 fn skill_reference_refuses_unknown_names_and_paths_with_available_choices() {
     let mut s = server();
-    let skills = ["solidcraft-checking", "solidcraft-editing", "solidcraft-mechanisms", "solidcraft-modeling"];
+    let skills = ["solidcraft-checking", "solidcraft-editing", "solidcraft-mechanisms", "solidcraft-modeling", "solidcraft-sheetmetal"];
     for skill in ["unknown", "../solidcraft-modeling", "/tmp/solidcraft-modeling"] {
         let r = raw_tool(&mut s, "skill_reference", json!({"skill": skill}));
         assert_eq!(r["result"]["isError"], true, "{r}");
@@ -551,6 +561,22 @@ fn export_tool_writes_a_urdf_package() {
     // effort and velocity reach file.export, which refuses a bad one.
     let r = raw_tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "effort": -1}));
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `format` accepts every format the extension does: iges, igs and stp were refused (#11806).
+#[test]
+fn export_tool_format_argument_accepts_iges() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-iges-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (format, expect) in [("iges", "Iges"), ("igs", "Iges"), ("stp", "Step")] {
+        let path = dir.join(format!("part-{format}.out"));
+        let r = tool(&mut s, "export", json!({"path": path.to_string_lossy(), "format": format}));
+        assert_eq!(r["format"], expect, "{format}: {r}");
+        assert!(std::fs::metadata(&path).unwrap().len() > 0, "{format}");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -936,6 +962,138 @@ fn check_parameters_tries_values_and_puts_the_design_back() {
     assert!(d["timeline"].as_array().unwrap().iter().all(|f| f["error"].is_null()), "{d}");
 }
 
+/// `bodies` and `summary` keep `check_parameters`'s reply small on a large design (#14162): only
+/// the bodies named are measured and their cylinders listed, and `measure` is the measure
+/// tool's summary. Without them the reply is as before; a bad `bodies` changes nothing.
+#[test]
+fn check_parameters_reports_only_the_bodies_asked_for_in_summary() {
+    let mut s = server();
+    parametric_box_with_cylinder(&mut s);
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0]}}));
+    tool(&mut s, "execute", json!({"command": "solid.cylinder", "params": {"radius": 2, "height": 10, "base": [200, 0, 0]}}));
+    let names: Vec<String> =
+        tool(&mut s, "measure", json!({}))["bodies"].as_array().unwrap().iter().map(|b| b["name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(names.len(), 3, "{names:?}");
+    let before = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+
+    // The default: every body measured in full, every cylinder.
+    let all = tool(&mut s, "check_parameters", json!({"set": {"len": 60}, "report": ["measure", "cylinders"]}));
+    assert_eq!(all["measure"]["body_count"], 3, "{all}");
+    assert!(all["measure"]["bodies"][0]["area_mm2"].is_number() && all["measure"]["bodies"][0]["kernel"].is_object(), "full measure: {all}");
+    assert_eq!(all["cylinders"].as_array().map(Vec::len), Some(2), "{all}");
+
+    let one = tool(&mut s, "check_parameters", json!({"set": {"len": 60}, "report": ["measure", "cylinders"], "bodies": ["Body1"], "summary": true}));
+    assert_eq!(one["restored"], true, "{one}");
+    let m = &one["measure"];
+    assert_eq!(m["bodies"].as_array().map(Vec::len), Some(1), "{one}");
+    let mut keys: Vec<&String> = m["bodies"][0].as_object().unwrap().keys().collect();
+    keys.sort();
+    assert_eq!(keys, ["bbox", "closed", "faces", "name", "volume_mm3"], "the measure tool's summary: {one}");
+    assert_eq!(m["bodies"][0]["name"], "Body1");
+    let v = m["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(rel(v, box_with_cylinder_volume(60.0)) < 5e-4, "{v}");
+    assert_eq!(m["bodies"][0]["bbox"], all["measure"]["bodies"][0]["bbox"], "{one}");
+    let cyl = one["cylinders"].as_array().unwrap();
+    assert!(cyl.len() == 1 && cyl[0]["body"] == "Body1", "{one}");
+    assert!(one.to_string().len() * 3 < all.to_string().len(), "{} vs {} bytes", one.to_string().len(), all.to_string().len());
+    // `summary` on its own summarises every body.
+    let sum = tool(&mut s, "check_parameters", json!({"set": {"len": 60}, "report": ["measure"], "summary": true}));
+    assert_eq!(sum["measure"]["bodies"].as_array().map(Vec::len), Some(3), "{sum}");
+    assert!(sum["measure"]["bodies"][0].get("area_mm2").is_none(), "{sum}");
+
+    // A body the design doesn't have: an error, and the design is put back.
+    for report in [json!(["measure"]), json!(["cylinders"])] {
+        let r = raw_tool(&mut s, "check_parameters", json!({"set": {"len": 60}, "report": report, "bodies": ["Nope"]}));
+        assert_eq!(r["result"]["isError"], json!(true), "{report}: {r}");
+        let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["restored"], true, "{body}");
+        let e = body["error"].as_str().unwrap();
+        assert!(e.contains("no body `Nope`") && e.contains("Body1"), "{body}");
+    }
+    // A `bodies` that is not a list of names, or a `summary` that is not a flag: refused first.
+    for args in [json!({"set": {"len": 60}, "bodies": "Body1"}), json!({"set": {"len": 60}, "summary": "yes"})] {
+        let r = raw_tool(&mut s, "check_parameters", args.clone());
+        assert_eq!(r["error"]["code"], -32602, "{args}: {r}");
+    }
+    for args in [json!({"set": {"len": 60}, "bodies": []}), json!({"set": {"len": 60}, "bodies": [5]}), json!({"set": {"len": 60}, "bodies": [""]})] {
+        let r = raw_tool(&mut s, "check_parameters", args.clone());
+        assert_eq!(r["result"]["isError"], json!(true), "{args}: {r}");
+        assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("`bodies` must be a list of body names"), "{args}: {r}");
+    }
+    assert!(rel(volume(&mut s), box_with_cylinder_volume(40.0) + 1000.0 + PI * 4.0 * 10.0) < 5e-4);
+    let after = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    assert_eq!(after["undo"], before["undo"], "{after}");
+}
+
+/// `timeline` and `bodies` keep `inspect_design` small on a large design (#14162), with and
+/// without compact output and as a batch step; left out, the call and its reply are as before.
+#[test]
+fn inspect_design_gives_a_timeline_summary_and_body_names_when_asked() {
+    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+        let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
+        parametric_box_with_cylinder(&mut s);
+        tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0]}}));
+        let base = json!({"measure": true, "sketches": false, "joints": false});
+        let with = |extra: Value| {
+            let mut a = base.clone();
+            a.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            a
+        };
+        let full = tool(&mut s, "inspect_design", base.clone());
+        assert_eq!(tool(&mut s, "inspect_design", with(json!({"timeline": true, "bodies": true}))), full, "{opts:?}");
+        assert!(full["timeline"][0]["ms"].is_number() && full["bodies"][0]["volume_mm3"].is_number(), "{full}");
+
+        let short = tool(&mut s, "inspect_design", with(json!({"timeline": "summary", "bodies": "names"})));
+        let rows = short["timeline"].as_array().unwrap();
+        assert_eq!(rows.len(), full["timeline"].as_array().unwrap().len(), "{short}");
+        for row in rows {
+            let mut keys: Vec<&String> = row.as_object().unwrap().keys().collect();
+            keys.sort();
+            assert_eq!(keys, ["id", "name", "type"], "{opts:?}: {row}");
+        }
+        assert_eq!(short["bodies"], json!(["Body1", "Body2"]), "{opts:?}: {short}");
+        assert_eq!(short["params"], full["params"]);
+        let gone = tool(&mut s, "inspect_design", with(json!({"timeline": false, "bodies": false})));
+        assert!(gone.get("timeline").is_none() && gone.get("bodies").is_none(), "{opts:?}: {gone}");
+
+        // A value the tool doesn't take is refused before anything is sent: a wrong type by the
+        // argument check, a word it doesn't know by the tool, which names every form (#15306).
+        let r = raw_tool(&mut s, "inspect_design", json!({"timeline": 1}));
+        assert_eq!(r["error"]["code"], -32602, "{opts:?}: {r}");
+        let refused = |s: &mut Server, args: Value, forms: &str| {
+            let r = raw_tool(s, "inspect_design", args);
+            assert_eq!(r["result"]["isError"], json!(true), "{opts:?}: {r}");
+            assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains(forms), "{opts:?}: {r}");
+        };
+        refused(&mut s, json!({"timeline": "full"}), "`timeline` must be true, false or \"summary\"");
+        // `bodies` takes a list with compact output, so its check names that form too.
+        let forms = if opts.compact { "list of body names, true, false or \"names\"" } else { "`bodies` must be true, false or \"names\"" };
+        refused(&mut s, json!({"bodies": "all"}), forms);
+
+        // As a batch step.
+        let r = tool(
+            &mut s,
+            "batch",
+            json!({"commands": [{"command": "inspect_design", "params": {"measure": false, "timeline": "summary", "bodies": "names"}}]}),
+        );
+        let step = &r["results"][0];
+        assert_eq!(step["bodies"], json!(["Body1", "Body2"]), "{opts:?}: {r}");
+        assert!(step["timeline"][0].get("ms").is_none(), "{opts:?}: {r}");
+    }
+
+    // Without the new arguments, document.inspect is asked exactly as before, so an app from
+    // before them answers as it always did.
+    let mut b = Answers { calls: Vec::new(), answer: Box::new(|_, _| Ok(json!({"timeline": [], "bodies": [], "sketches": []}))) };
+    crate::tools::call_tool(&mut b, "inspect_design", &json!({"sketches": false, "joints": false}));
+    crate::tools::call_tool_with(&mut b, "inspect_design", &json!({"joints": false}), crate::Options { compact: true });
+    crate::tools::call_tool_with(&mut b, "inspect_design", &json!({"joints": false, "bodies": ["B"]}), crate::Options { compact: true });
+    let sent: Vec<&Value> = b.calls.iter().filter(|(m, _)| m == "document.inspect").map(|(_, p)| p).collect();
+    assert_eq!(
+        sent,
+        [&json!({"measure": true}), &json!({"measure": true, "sketch_counts": true}), &json!({"measure": false, "sketch_counts": true})]
+    );
+}
+
 /// An unknown parameter name, a bad expression or a bad report list is an error that leaves the
 /// design untouched; `set` that is not an object is refused by argument checking; the tool is
 /// annotated as an edit (it changes the design and puts it back) and is not a batch step.
@@ -1125,6 +1283,44 @@ fn batch_stops_at_first_error_and_rolls_back() {
     assert!(r.to_string().contains("\"definition\""), "{r}");
 }
 
+/// Regression (#15865): a batch that went through forgot its own rollback checkpoint and every
+/// later one with it, so the id an `edit.checkpoint` step returned was gone when the reply came.
+#[test]
+fn a_checkpoint_taken_by_a_batch_step_outlives_the_batch() {
+    let mut s = server();
+    let r = tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}},
+            {"command": "edit.checkpoint", "params": {}},
+        ]}),
+    );
+    let id = r["results"][1]["checkpoint"].clone();
+    assert!(id.is_u64(), "{r}");
+    tool(&mut s, "batch", json!({"commands": [{"command": "solid.cylinder", "params": {"radius": 3, "height": 20, "operation": "cut"}}]}));
+    assert!(volume(&mut s) < 999.0);
+    let back = tool(&mut s, "execute", json!({"command": "edit.restore_checkpoint", "params": {"checkpoint": id}}));
+    assert_eq!(back["restored"], true, "{back}");
+    assert!(rel(volume(&mut s), 1000.0) < 1e-9);
+    // A batch that fails and rolls back uses up the checkpoint its step took.
+    let r = raw_tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "edit.checkpoint", "params": {}},
+            {"command": "solid.extrude", "params": {"distance": "bogus +"}},
+        ]}),
+    );
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["rolled_back"], true, "{body}");
+    let id = body["results"][0]["checkpoint"].clone();
+    assert!(id.is_u64(), "{body}");
+    let gone = raw_tool(&mut s, "execute", json!({"command": "edit.restore_checkpoint", "params": {"checkpoint": id}}));
+    assert_eq!(gone["result"]["isError"], true, "{gone}");
+    assert!(rel(volume(&mut s), 1000.0) < 1e-9);
+}
+
 /// #5853: a misspelled command, however late in the batch, refuses the batch before its first
 /// step: nothing runs, nothing is undone, and the error names the closest command.
 #[test]
@@ -1138,6 +1334,12 @@ fn batch_refuses_an_unknown_command_before_the_first_step() {
     assert_eq!((body["completed"].clone(), body["failed"]["index"].clone(), body["undone"].clone()), (json!(0), json!(20), json!(0)), "{body}");
     assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("closest: `solid.extrude`")), "{body}");
     assert_eq!((body["applied"].clone(), body["not_run"].as_array().map(Vec::len)), (json!([]), Some(21)), "{body}");
+    // Nothing ran, so the design is where the batch started (#10749); without `rollback` the
+    // reply claims no rollback, as at a step's turn.
+    assert_eq!(body["rolled_back"], true, "{body}");
+    let r = raw_tool(&mut s, "batch", json!({"commands": steps, "rollback": false}));
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((&body["completed"], &body["rolled_back"]), (&json!(0), &json!(false)), "{body}");
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
     assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["undo"], 0);
 }
@@ -1156,6 +1358,7 @@ fn batch_refuses_a_step_with_an_unknown_key() {
     let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!((body["completed"].clone(), body["failed"]["index"].clone()), (json!(0), json!(1)), "{body}");
     assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("unknown key `args`") && e.contains("`params`")), "{body}");
+    assert_eq!(body["rolled_back"], true, "nothing ran (#10749): {body}");
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
 }
 
@@ -2405,6 +2608,38 @@ fn compact_batch_reply_keeps_changed_bodies_and_created_ids() {
     assert!(rect["sides"].is_object(), "results that are not repeated stay: {r}");
 }
 
+/// A drawing of hundreds of curves comes back with hundreds of ids: a compact reply leaves each
+/// long `created` list out and counts it, the full reply has every id; 20 ids are still a list.
+#[test]
+fn compact_reply_counts_long_created_lists() {
+    let mut s = server();
+    let polyline = |n: usize| {
+        let points: Vec<String> = (0..=n).map(|i| format!("{i},{}", i % 2)).collect();
+        format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 10"><polyline points="{}"/></svg>"#, points.join(" "))
+    };
+    tool(&mut s, "execute", json!({"command": "sketch.create", "params": {"plane": "XY"}}));
+    let full = tool(&mut s, "execute", json!({"command": "sketch.insert_svg", "params": {"text": polyline(30)}}));
+    assert_eq!(full["created"]["curves"].as_array().map(Vec::len), Some(30), "{full}");
+    assert_eq!(full["created"]["points"].as_array().map(Vec::len), Some(31), "{full}");
+    tool(&mut s, "execute", json!({"command": "sketch.create", "params": {"plane": "XY"}}));
+    let short = tool(&mut s, "execute", json!({"command": "sketch.insert_svg", "params": {"text": polyline(30)}, "verbose": false}));
+    assert!(short["created"].get("curves").is_none() && short["created"].get("points").is_none(), "{short}");
+    assert_eq!((&short["created"]["curve_count"], &short["created"]["point_count"]), (&json!(30), &json!(31)), "{short}");
+    assert_eq!(short["curves"], json!(30), "the count outside `created` stays: {short}");
+    // Twenty curves are still listed.
+    tool(&mut s, "execute", json!({"command": "sketch.create", "params": {"plane": "XY"}}));
+    let twenty = tool(&mut s, "execute", json!({"command": "sketch.insert_svg", "params": {"text": polyline(20)}, "verbose": false}));
+    assert_eq!(twenty["created"]["curves"].as_array().map(Vec::len), Some(20), "{twenty}");
+    // The same in a batch.
+    let b = tool(
+        &mut s,
+        "batch",
+        json!({"commands": [{"command": "sketch.create", "params": {"plane": "XY"}}, {"command": "sketch.insert_svg", "params": {"text": polyline(30)}}], "verbose": false}),
+    );
+    let step = &b["results"][1];
+    assert!(step["created"].get("curves").is_none() && step["created"]["curve_count"] == json!(30), "{b}");
+}
+
 /// #531: a product model keeps an optional variant hidden in its default presentation. Hiding
 /// it must survive saving and reopening the design (suppressing it would change the design).
 #[test]
@@ -2505,6 +2740,36 @@ fn compact_sketch_replies_count_spline_poles() {
     let rectangle =
         tool(&mut s, "execute", json!({"command": "sketch.rectangle.two_point", "params": {"p0": [0, 20], "p1": [10, 30]}, "verbose": false}));
     assert_eq!(rectangle["created"]["points"].as_array().map(Vec::len), Some(4), "{rectangle}");
+}
+
+/// #15864: a compact `sketch.move_points` reply counts the moves and lists only the ones that
+/// missed their targets; the full reply still lists every move.
+#[test]
+fn compact_move_points_reply_lists_only_missed_moves() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "sketch.create", "params": {"plane": "XY", "name": "A"}}));
+    tool(
+        &mut s,
+        "execute",
+        json!({"command": "sketch.spline.fit_point", "params": {"points": [[10, 0], [0, 10], [-10, 0], [0, -10]], "periodic": true}}),
+    );
+    let moves =
+        json!([{"point": "p1", "to": [12, 0]}, {"point": "p2", "to": [0, 12]}, {"point": "p3", "to": [-12, 0]}, {"point": "p4", "to": [0, -12]}]);
+    let full = tool(&mut s, "execute", json!({"command": "sketch.move_points", "params": {"moves": moves}}));
+    assert_eq!(full["moved"].as_array().map(Vec::len), Some(4), "{full}");
+    let compact = tool(&mut s, "execute", json!({"command": "sketch.move_points", "params": {"moves": moves}, "verbose": false}));
+    assert_eq!((&compact["moved_count"], &compact["reached"]), (&json!(4), &json!(true)), "{compact}");
+    assert!(compact.get("moved").is_none() && compact.get("not_reached").is_none() && compact.get("created").is_none(), "{compact}");
+    assert!(compact.to_string().len() * 3 < full.to_string().len(), "compact is far smaller: {compact}");
+    // A point held by a fixed constraint cannot reach its target: only that move is listed.
+    tool(&mut s, "execute", json!({"command": "sketch.constraint.fix", "params": {"entities": ["p1"]}}));
+    let held = json!([{"point": "p1", "to": [20, 0]}, {"point": "p2", "to": [0, 14]}]);
+    let compact = tool(&mut s, "execute", json!({"command": "sketch.move_points", "params": {"moves": held}, "verbose": false}));
+    assert_eq!((&compact["moved_count"], &compact["reached"]), (&json!(2), &json!(false)), "{compact}");
+    let missed = compact["not_reached"].as_array().cloned().unwrap_or_default();
+    assert_eq!(missed.len(), 1, "{compact}");
+    assert_eq!((&missed[0]["point"], &missed[0]["to"]), (&json!("p1"), &json!([20.0, 0.0])), "{compact}");
+    assert!(missed[0]["at"].is_array() && missed[0].get("reached").is_none(), "{compact}");
 }
 
 /// A connected app sees exactly one engine call; no inventory inspection is needed.
@@ -2674,6 +2939,68 @@ fn instructions_recipe_builds_a_parametric_shelled_box() {
     axes(&mut s, 30.0, 20.0);
 }
 
+/// The worked example in `skills/solidcraft-sheetmetal/reference.md` is what agents copy: one
+/// request in words, one flange feature with segments, and the numbers the file states.
+#[test]
+fn sheetmetal_skill_example_builds_as_documented() {
+    let doc = include_str!("../../../skills/solidcraft-sheetmetal/reference.md");
+    let start = doc.find("{\"commands\":[").expect("the reference has a worked example");
+    let end = start + doc[start..].find("```").expect("the example's code block ends");
+    let example: Value = serde_json::from_str(&doc[start..end]).expect("the example is JSON");
+    let mut s = server();
+    tool(&mut s, "batch", example);
+    // AL2 rule (2 mm, K 0.5, R 1 mm); 200x100 base; 150 mm at 90 deg / 20 mm, 50 mm at 45 deg / 15 mm.
+    let setback45 = 3.0 * 22.5f64.to_radians().tan();
+    let want = 2.0 * (200.0 * 100.0 - 150.0 * 3.0 - 50.0 * setback45 + 150.0 * (PI + 17.0) + 50.0 * (PI / 2.0 + 15.0 - setback45));
+    let volume = tool(&mut s, "measure", json!({}))["total"]["volume_mm3"].as_f64().expect("a volume");
+    assert!((volume - want).abs() < 1e-4, "the reference states {want} mm3, the build gives {volume}");
+    // The volumes the reference publishes are the ones the arithmetic gives, so a wrong number in
+    // the reference fails here instead of passing beside a correct build.
+    let published = |text: &str, after: &str| -> f64 {
+        let mut from = 0;
+        loop {
+            let at = text[from..].find(after).map(|i| from + i).unwrap_or_else(|| panic!("the reference states `{after}`"));
+            let rest = text[at + after.len()..].trim_start();
+            let number: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+            if number.chars().any(|c| c.is_ascii_digit()) {
+                return number.parse().expect("a volume");
+            }
+            from = at + after.len();
+        }
+    };
+    let stated = published(doc, "folded volume ");
+    assert!((stated - want).abs() < 1e-6, "the reference states {stated} mm3 for the example, the arithmetic gives {want}");
+    let leg45 = 15.0 - setback45;
+    let want_three = 2.0 * (200.0 * 100.0 - 150.0 * 3.0 - 50.0 * setback45 + 100.0 * (PI + 17.0) + 50.0 * (PI + 12.0) + 50.0 * (PI / 2.0 + leg45));
+    let stated_three = published(doc, "volume of ");
+    assert!(
+        (stated_three - want_three).abs() < 1e-6,
+        "the reference states {stated_three} mm3 for the three-stretch variant, the arithmetic gives {want_three}"
+    );
+    let reply = tool(&mut s, "execute", json!({"command":"sheet.export_bend_table","params":{"format":"json"}}));
+    let table: Value = serde_json::from_str(reply["text"].as_str().expect("a JSON bend table")).expect("the bend table is JSON");
+    let bends = table["bends"].as_array().expect("bends");
+    assert_eq!(bends.len(), 2, "{table}");
+    let num = |b: &Value, k: &str, i: usize| b[k][i].as_f64().expect("a coordinate");
+    for (bend, (length, angle, allowance)) in bends.iter().zip([(150.0, 90.0, PI), (50.0, 45.0, PI / 2.0)]) {
+        assert!((bend["length"].as_f64().expect("a length") - length).abs() < 1e-9, "{table}");
+        assert!((bend["angle_deg"].as_f64().expect("an angle") - angle).abs() < 1e-9, "{table}");
+        assert!((bend["allowance"].as_f64().expect("an allowance") - allowance).abs() < 1e-9, "{table}");
+        assert_eq!(bend["direction"], "up", "{table}");
+    }
+    // The two bends' flat centre lines meet and cover the whole 200 mm edge, so the partition
+    // tiles it and the boundary sits where the request put it.
+    let span = |b: &Value| {
+        let xs = [num(b, "start", 0), num(b, "end", 0)];
+        (xs[0].min(xs[1]), xs[0].max(xs[1]), num(b, "start", 1) - num(b, "end", 1))
+    };
+    let (a0, a1, dy0) = span(&bends[0]);
+    let (b0, b1, dy1) = span(&bends[1]);
+    assert!((a1 - b0).abs() < 1e-6, "the bends meet: {table}");
+    assert!((a0.min(b0)).abs() < 1e-6 && (a1.max(b1) - 200.0).abs() < 1e-6, "the bends cover the edge: {table}");
+    assert!(dy0.abs() < 1e-9 && dy1.abs() < 1e-9, "the bend lines run along x: {table}");
+}
+
 /// The skill reference's sketch-plane table: where sketch (10, 20) lands and which way +distance goes.
 #[test]
 fn sketch_plane_axes_match_the_skill_reference() {
@@ -2770,6 +3097,8 @@ fn skills_name_only_real_tools_and_commands() {
         include_str!("../../../skills/solidcraft-mechanisms/reference.md"),
         include_str!("../../../skills/solidcraft-reporting/SKILL.md"),
         include_str!("../../../skills/solidcraft-reporting/reference/report-template.md"),
+        include_str!("../../../skills/solidcraft-sheetmetal/SKILL.md"),
+        include_str!("../../../skills/solidcraft-sheetmetal/reference.md"),
     ];
     let mut s = server();
     let tools: Vec<String> = tool_definitions().iter().filter_map(|t| t["name"].as_str()).map(str::to_owned).collect();
@@ -3068,6 +3397,59 @@ fn a_bridge_made_before_the_app_runs_connects_once_it_does() {
     app.join().unwrap();
 }
 
+/// #1989: the `cancel` tool sends `control.cancel` on the bridge's own connection, where the
+/// request still running waits, and reports what the app did: stopped, or why it can't be
+/// cancelled (a tool error). A bridge with no connection has nothing to cancel and sends nothing;
+/// headless calls always run to their end, so it refuses there.
+#[test]
+fn cancel_forwards_to_the_app_and_reports() {
+    use std::io::{BufRead, BufReader, Write};
+
+    let text = |r: &Value| r["content"][0]["text"].as_str().unwrap_or_default().to_string();
+    let mut never = crate::Remote::new("127.0.0.1:9", Some("0123456789abcdef0123456789abcdef"));
+    let r = crate::call_tool(&mut never, "cancel", &json!({}));
+    assert!(r["isError"] != json!(true) && text(&r).contains("nothing to cancel"), "{r}");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let app = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut lines = BufReader::new(stream.try_clone().unwrap());
+        let mut asked = Vec::new();
+        for reply in [
+            json!({"ok": true, "result": {"cancelled": 7, "method": "engine.execute", "outcome": "stopped", "note": "stopped: request 7 (`engine.execute`) was computing off the window thread; nothing was applied"}}),
+            json!({"ok": false, "cancellable": false, "error": "cannot be cancelled: request 8 (`engine.execute`) already runs in the app"}),
+        ] {
+            let mut line = String::new();
+            lines.read_line(&mut line).unwrap();
+            let req: Value = serde_json::from_str(&line).unwrap();
+            asked.push((req["method"].clone(), req["token"].clone()));
+            let mut reply = reply;
+            reply["id"] = req["id"].clone();
+            writeln!(&stream, "{reply}").unwrap();
+        }
+        asked
+    });
+    let mut remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap();
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert!(r["isError"] != json!(true), "{r}");
+    let body: Value = serde_json::from_str(&text(&r)).unwrap();
+    assert_eq!((&body["cancelled"], &body["outcome"]), (&json!(7), &json!("stopped")), "{body}");
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert!(r["isError"] == json!(true) && text(&r).starts_with("cannot be cancelled"), "{r}");
+    let asked = app.join().unwrap();
+    assert!(asked.iter().all(|(m, t)| m == "control.cancel" && t == "0123456789abcdef0123456789abcdef"), "{asked:?}");
+
+    let mut s = server();
+    let r = raw_tool(&mut s, "cancel", json!({}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    assert!(r["result"]["content"][0]["text"].as_str().is_some_and(|t| t.contains("headless")), "{r}");
+    let tools = crate::tools::tool_definitions();
+    let cancel = tools.iter().find(|t| t["name"] == "cancel").unwrap();
+    let a = &cancel["annotations"];
+    assert_eq!((&a["readOnlyHint"], &a["destructiveHint"], &a["openWorldHint"]), (&json!(false), &json!(false), &json!(false)), "{a}");
+}
+
 /// An app that quits while it runs a request may have applied it: the retry then finds nothing
 /// listening, and the error says the call may have run, not just that the app is not running.
 #[test]
@@ -3271,6 +3653,132 @@ fn running_is_asked_at_once_behind_a_request_still_running() {
     assert_eq!(seen.lock().unwrap().1, ["control.running"], "not behind the request still running");
     let e = remote.call("document.inspect", json!({})).unwrap_err();
     assert!(e.starts_with(STILL_RUNNING) && e.contains("earlier request"), "still outstanding: {e}");
+}
+
+/// #14007 over stdio: a `batch` the fake app holds, then a `running` call, sent once the app has
+/// the batch or (`back_to_back`) in the same write, before the server has taken the batch.
+/// Returns the reply ids in the order they came, and whether the app was asked `control.running`
+/// while it held the batch, which it can only be on a connection of its own: the fake app reads a
+/// connection's next request only after answering the last. The batch is held until the test has
+/// read the first reply (at most 10 s), so the order of the replies is not a race.
+fn running_during_a_held_batch(back_to_back: bool) -> (Vec<Value>, bool) {
+    use std::io::{BufRead, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+    let asked = std::sync::Arc::new(AtomicBool::new(false));
+    let release = std::sync::Arc::new(AtomicBool::new(false));
+    let (seen_running, released) = (asked.clone(), release.clone());
+    let (addr, seen) = scripted_app(move |req| match req["method"].as_str() {
+        Some("engine.batch") => {
+            let start = Instant::now();
+            while !released.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(10) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let held = seen_running.load(Ordering::SeqCst);
+            json!({"ok": true, "result": {"ok": true, "results": [{"ok": true, "result": {"running_seen_while_held": held}}]}})
+        }
+        Some("control.running") => {
+            seen_running.store(true, Ordering::SeqCst);
+            json!({"ok": true, "result": {"running": [{"id": 1, "method": "engine.batch", "steps": 1, "self": false}]}})
+        }
+        _ => json!({"ok": true, "result": null}),
+    });
+    let (stdin, mut to_server) = std::io::pipe().unwrap();
+    let (from_server, stdout) = std::io::pipe().unwrap();
+    let server = std::thread::spawn(move || {
+        let mut s = Server::new(Box::new(crate::Remote::new(&addr, None)));
+        s.serve(std::io::BufReader::new(stdin), stdout).unwrap();
+    });
+    let call =
+        |id: u64, name: &str, args: Value| json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": args}});
+    let steps = json!({"commands": [{"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}], "verbose": false});
+    if back_to_back {
+        write!(to_server, "{}\n{}\n", call(1, "batch", steps), call(2, "running", json!({}))).unwrap();
+    } else {
+        writeln!(to_server, "{}", call(1, "batch", steps)).unwrap();
+        let start = Instant::now();
+        while !seen.lock().unwrap().1.iter().any(|m| m == "engine.batch") && start.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        writeln!(to_server, "{}", call(2, "running", json!({}))).unwrap();
+    }
+    let mut replies = std::io::BufReader::new(from_server);
+    let mut read = || {
+        let mut line = String::new();
+        replies.read_line(&mut line).unwrap();
+        serde_json::from_str::<Value>(&line).unwrap()
+    };
+    let first = read();
+    release.store(true, Ordering::SeqCst);
+    let second = read();
+    drop(to_server);
+    server.join().unwrap();
+    for r in [&first, &second] {
+        assert_ne!(r["result"]["isError"], true, "{r}");
+    }
+    let batch = if first["id"] == 1 { &first } else { &second };
+    let held = batch["result"]["content"][0]["text"].as_str().unwrap_or_default().contains("\"running_seen_while_held\": true");
+    (vec![first["id"].clone(), second["id"].clone()], held)
+}
+
+/// #14007: a `running` call sent while a long `batch` is in the app is answered at once, on a
+/// connection of its own, not after the batch.
+#[test]
+fn running_answers_at_once_while_a_long_batch_runs() {
+    let (order, held) = running_during_a_held_batch(false);
+    assert_eq!(order, [json!(2), json!(1)], "`running` first");
+    assert!(held, "the app was asked `control.running` while it held the batch");
+}
+
+/// #14007: also when `running` comes in right behind the `batch`, before the server has taken
+/// the batch off its queue.
+#[test]
+fn running_sent_right_behind_a_batch_is_not_queued_behind_it() {
+    let (order, held) = running_during_a_held_batch(true);
+    assert_eq!(order, [json!(2), json!(1)], "`running` first");
+    assert!(held, "the app was asked `control.running` while it held the batch");
+}
+
+/// #1989 with #1618: `cancel` goes out at once, not behind the request still running as other
+/// calls are; once the app has removed or stopped it, later calls are sent without waiting for it
+/// and `pending` has nothing. One that can't be cancelled is still waited for.
+#[test]
+fn cancel_frees_the_bridge_from_a_request_still_running() {
+    use crate::backend::{Backend, STILL_RUNNING};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let stuck = std::sync::Arc::new(AtomicBool::new(false));
+    let on_window = stuck.clone();
+    let (addr, seen) = scripted_app(move |req| match req["method"].as_str() {
+        Some("engine.execute") if req["params"]["command"] == "solid.fillet" => running(),
+        Some("control.pending") => json!({"ok": true, "result": {"pending": 1, "method": "engine.execute", "done": false}}),
+        Some("control.cancel") if on_window.load(Ordering::SeqCst) => {
+            json!({"ok": false, "cancellable": false, "error": "cannot be cancelled: request 1 already runs in the app"})
+        }
+        Some("control.cancel") => json!({"ok": true, "result": {"cancelled": 1, "method": "engine.execute", "outcome": "stopped"}}),
+        _ => json!({"ok": true, "result": "ran"}),
+    });
+    let mut remote = crate::Remote::connect(&addr).unwrap();
+    remote.set_waits(quick_waits(20, 20));
+    let methods = |seen: &std::sync::Mutex<(usize, Vec<String>)>| std::mem::take(&mut seen.lock().unwrap().1);
+    assert!(remote.call("engine.execute", json!({"command": "solid.fillet"})).unwrap_err().starts_with(STILL_RUNNING));
+    methods(&seen);
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert_ne!(r["isError"], true, "{r}");
+    assert_eq!(methods(&seen), ["control.cancel"], "sent at once");
+    assert_eq!(remote.call("document.inspect", json!({})).unwrap(), "ran");
+    assert_eq!(methods(&seen), ["document.inspect"], "not behind the stopped request");
+    assert_eq!(remote.call("control.pending", json!({})).unwrap(), json!({"pending": null}));
+
+    // One the app can't cancel stays outstanding: the next call still waits for it.
+    stuck.store(true, Ordering::SeqCst);
+    assert!(remote.call("engine.execute", json!({"command": "solid.fillet"})).is_err());
+    methods(&seen);
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert_eq!(r["isError"], true, "{r}");
+    let e = remote.call("document.inspect", json!({})).unwrap_err();
+    assert!(e.starts_with(STILL_RUNNING) && e.contains("earlier request"), "{e}");
+    assert!(!methods(&seen).iter().any(|m| m == "document.inspect"));
+    assert_eq!(seen.lock().unwrap().0, 1, "one connection throughout");
 }
 
 /// A request still running after the wait is left to the `pending` tool: the error says so
@@ -3619,6 +4127,11 @@ fn a_bridged_server_checks_calls_at_its_param_check_level() {
     let reply: Value = serde_json::from_str(&text(&r)).unwrap();
     assert_eq!((&reply["failed"]["index"], &reply["completed"], &reply["not_run"]), (&json!(1), &json!(0), &json!([0, 1])), "{reply}");
     assert!(reply["failed"]["error"].as_str().unwrap_or_default().contains(warning), "{reply}");
+    // Nothing was sent, so the design is where the batch started (#10749).
+    assert_eq!((&reply["rolled_back"], &reply["applied"]), (&json!(true), &json!([])), "{reply}");
+    let r = raw_tool(&mut s, "batch", json!({"commands": [good, misspelt], "rollback": false}));
+    let reply: Value = serde_json::from_str(&text(&r)).unwrap();
+    assert_eq!(reply["rolled_back"], json!(false), "no rollback asked for: {reply}");
     assert_eq!(sent("engine.batch"), 0, "refused unsent");
 
     let mut s = bridged(ParamCheck::Warn);
@@ -3785,6 +4298,39 @@ fn inspect_text(s: &mut Server, args: Value) -> (bool, String) {
     (r["result"]["isError"] == json!(true), r["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string())
 }
 
+/// No tool schema has a list of types, and no argument of several types has an `enum`. Gemini
+/// refuses a list of types (#16257); some OpenAI-compatible endpoints (Moonshot) refuse every
+/// tool when an argument of several types has an `enum` (#15306), so the agent chat could not
+/// start a turn. Several types are an `anyOf`; the tool itself checks the words it takes.
+#[test]
+fn no_tool_schema_has_a_list_of_types() {
+    fn mixed(path: &str, schema: &Value, found: &mut Vec<String>) {
+        match schema {
+            Value::Object(o) => {
+                if o.get("type").is_some_and(Value::is_array) || (o.contains_key("anyOf") && o.contains_key("enum")) {
+                    found.push(path.to_string());
+                }
+                for (k, v) in o {
+                    mixed(&format!("{path}.{k}"), v, found);
+                }
+            }
+            Value::Array(items) => {
+                for (i, v) in items.iter().enumerate() {
+                    mixed(&format!("{path}[{i}]"), v, found);
+                }
+            }
+            _ => {}
+        }
+    }
+    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+        let mut found = Vec::new();
+        for def in crate::tool_definitions_with(opts) {
+            mixed(def["name"].as_str().unwrap_or("?"), &def["inputSchema"], &mut found);
+        }
+        assert!(found.is_empty(), "{opts:?}: {found:?}");
+    }
+}
+
 /// Off by default: `inspect_design` has its old arguments and returns every sketch in full,
 /// pretty-printed; `document.inspect` adds no sketch counts unless asked.
 #[test]
@@ -3793,7 +4339,7 @@ fn inspect_design_is_unchanged_without_compact_output() {
     let defs = tool_definitions();
     let def = defs.iter().find(|d| d["name"] == "inspect_design").unwrap();
     assert_eq!(def["inputSchema"]["properties"]["sketches"]["type"], "boolean", "{def}");
-    assert!(def["inputSchema"]["properties"].get("bodies").is_none(), "{def}");
+    assert_eq!(def["inputSchema"]["properties"]["bodies"]["anyOf"], json!([{"type": "boolean"}, {"type": "string"}]), "no list of names: {def}");
     let listed = call(&mut s, 1, "tools/list", json!({}));
     assert!(listed["result"]["tools"].as_array().unwrap().iter().any(|t| t == def), "tools/list serves the default definition");
 
@@ -3888,7 +4434,7 @@ impl crate::Backend for AppWithPrefs {
 fn inspect_design_is_compact(s: &mut Server) -> bool {
     let listed = call(s, 1, "tools/list", json!({}));
     let def = listed["result"]["tools"].as_array().and_then(|t| t.iter().find(|d| d["name"] == "inspect_design")).cloned().unwrap_or_default();
-    def["inputSchema"]["properties"]["bodies"].is_object()
+    def["inputSchema"]["properties"]["bodies"]["anyOf"].as_array().is_some_and(|t| t.iter().any(|alt| alt["type"] == "array"))
 }
 
 /// The app's Preferences turn compact output on for a bridged server; it asks until the app

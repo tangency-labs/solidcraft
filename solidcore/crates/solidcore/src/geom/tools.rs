@@ -391,7 +391,7 @@ fn edge_interval(brep: &Brep, e: EdgeId) -> Result<Extent1d> {
 /// `pE->GetCurve()`, `NER` on a missing curve.
 fn edge_curve(brep: &Brep, e: EdgeId) -> Result<&Curve> {
     crate::topology::edge::curve(brep, e)?
-        .ok_or(SolidError::null_pointer("geom::tools::edge_curve"))
+        .ok_or_else(|| SolidError::geom_missing("geom::tools::edge_curve", "the edge's curve"))
 }
 
 /// `pE->GetCurve()->EvaluatePoint(t)` (`NER` on a missing curve).
@@ -402,17 +402,20 @@ fn edge_curve_point(k: &Kernel, brep: &Brep, e: EdgeId, t: f64) -> Result<Point3
 /// First derivative from `pE->GetCurve()->Evaluate(t, 1, TRUE, ...)`.
 fn edge_curve_derivative(k: &Kernel, brep: &Brep, e: EdgeId, t: f64) -> Result<Vec3> {
     let pv = edge_curve(brep, e)?.evaluate(k, t, 1, true, true)?;
-    pv.get(1).copied().ok_or(SolidError::null_pointer(
-        "geom::tools::edge_curve_derivative",
-    ))
+    pv.get(1).copied().ok_or_else(|| {
+        SolidError::geom_missing(
+            "geom::tools::edge_curve_derivative",
+            "the curve's derivative",
+        )
+    })
 }
 
 /// First derivative from `pCurve->Evaluate(t, 1, TRUE, ...)`.
 fn curve_derivative(k: &Kernel, curve: &Curve, t: f64) -> Result<Vec3> {
     let pv = curve.evaluate(k, t, 1, true, true)?;
-    pv.get(1)
-        .copied()
-        .ok_or(SolidError::null_pointer("geom::tools::curve_derivative"))
+    pv.get(1).copied().ok_or_else(|| {
+        SolidError::geom_missing("geom::tools::curve_derivative", "the curve's derivative")
+    })
 }
 
 /// `pCurve->DropPoint(ivl, pt, NULL, tol, &guess, ...)` (local solve, `SM_SO_MINIMIZE`).

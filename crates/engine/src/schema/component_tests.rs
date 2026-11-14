@@ -4,12 +4,13 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use super::{
-    ActivateParams, ActivateResult, CapturePositionParams, CapturePositionResult, CopyParams, CopyResult, CreateParams, CreateResult, DeleteParams,
-    DeleteResult, DragParams, DragResult, EditInPlaceParams, FinishEditParams, FromBodiesParams, FromBodiesResult, GroundParams, GroundResult,
-    ListParams, ListResult, MoveBodiesParams, MoveBodiesResult, MoveFeaturesParams, MoveParams, MoveResult, MoveSketchesParams, MoveSketchesResult,
-    MoveSketchesToPartsParams, OccurrenceAlignParams, OccurrenceAlignResult, OccurrencePropertiesParams, OccurrencePropertiesResult, PasteNewParams,
-    PasteNewResult, PropertiesParams, PropertiesResult, RenameParams, RenameResult, ReparentItemsParams, RevertPositionParams, RevertPositionResult,
-    UnlockParams, UnlockResult,
+    ActivateParams, ActivateResult, CapturePositionParams, CapturePositionResult, CopyParams, CopyResult, CreateParams, CreateResult,
+    CycleColorParams, CycleColorResult, DeleteParams, DeleteResult, DragParams, DragResult, EditInPlaceParams, FinishEditParams, FromBodiesParams,
+    FromBodiesResult, GroundParams, GroundResult, HistoryVisibilityParams, HistoryVisibilityResult, ListParams, ListResult, MoveBodiesParams,
+    MoveBodiesResult, MoveFeaturesParams, MoveParams, MoveResult, MoveSketchesParams, MoveSketchesResult, MoveSketchesToPartsParams,
+    OccurrenceAlignParams, OccurrenceAlignResult, OccurrencePropertiesParams, OccurrencePropertiesResult, PasteNewParams, PasteNewResult,
+    PropertiesParams, PropertiesResult, RenameParams, RenameResult, ReparentItemsParams, RevertPositionParams, RevertPositionResult, UnlockParams,
+    UnlockResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -48,6 +49,8 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RenameParams>(), &["component", "name"]);
     assert_keys(input_schema_for::<DeleteParams>(), &["component"]);
     assert_keys(input_schema_for::<UnlockParams>(), &["component"]);
+    assert_keys(input_schema_for::<HistoryVisibilityParams>(), &["component"]);
+    assert_keys(input_schema_for::<CycleColorParams>(), &["component"]);
     assert_keys(input_schema_for::<CapturePositionParams>(), &[]);
     assert_keys(input_schema_for::<RevertPositionParams>(), &["occurrences"]);
     assert_keys(input_schema_for::<GroundParams>(), &["grounded", "occurrence", "path"]);
@@ -131,6 +134,13 @@ fn strict_keeps_todays_errors() {
         ("component.unlock", json!({})),
         ("component.unlock", json!({"component": [0]})),
         ("component.unlock", json!({"component": 0})),
+        ("component.hide_history", json!({})),
+        ("component.hide_history", json!({"component": false})),
+        ("component.hide_history", json!({"component": [0]})),
+        ("component.show_history", json!({"component": "no such part"})),
+        ("component.cycle_color", json!({})),
+        ("component.cycle_color", json!({"component": false})),
+        ("component.cycle_color", json!({"component": "no such part"})),
     ]);
 }
 
@@ -213,6 +223,30 @@ fn the_schemas_take_what_the_handlers_read() {
     assert_eq!(rename.as_value()["$defs"]["ComponentName"]["pattern"], crate::schema::types::not_blank_pattern());
     takes(input_schema_for::<DeleteParams>(), &[(json!({"component": 2}), true), (json!({}), false)]);
     takes(input_schema_for::<UnlockParams>(), &[(json!({"component": "rig"}), true), (json!({}), false)]);
+    takes(
+        input_schema_for::<HistoryVisibilityParams>(),
+        &[
+            (json!({"component": "Arm"}), true),
+            (json!({"component": 4}), true),
+            (json!({}), false),
+            (json!({"component": null}), false),
+            (json!({"component": true}), false),
+            (json!({"hidden": true}), false),
+        ],
+    );
+
+    takes(
+        input_schema_for::<CycleColorParams>(),
+        &[
+            (json!({"component": "Arm"}), true),
+            (json!({"component": 4}), true),
+            (json!({"component": 1.5}), true),
+            (json!({}), false),
+            (json!({"component": null}), false),
+            (json!({"component": [1]}), false),
+            (json!({"colour": "red"}), false),
+        ],
+    );
 }
 
 /// Keys the handlers read only in some cases are read only in those cases: `bodies` of
@@ -245,6 +279,10 @@ fn the_check_reads_keys_as_the_handlers_do() {
     assert_eq!(issues("component.properties", json!({"about": null})), none);
     assert_eq!(issues("component.properties", json!({"descendants": null})), ["`descendants` must be a boolean"]);
     assert_eq!(issues("component.properties", json!({"component": null})), ["`component` must be a component id or name"]);
+    assert_eq!(issues("component.hide_history", json!({"component": false})), ["`component` must be a component id or name"]);
+    assert_eq!(issues("component.show_history", json!({"component": null})), ["`component` must be a component id or name"]);
+    assert_eq!(issues("component.cycle_color", json!({"component": null})), ["`component` must be a component id or name"]);
+    assert_eq!(issues("component.cycle_color", json!({"component": [1]})), ["`component` must be a component id or name"]);
     assert_eq!(issues("component.rename", json!({"component": 0, "name": ""})), ["`name` must be 1…128 characters"]);
 }
 
@@ -252,6 +290,78 @@ fn matches(schema: schemars::Schema, id: &str, reply: &Value) {
     let schema = schema.as_value();
     assert!(conforms(schema, schema, reply), "{id}: {reply} doesn't match {schema}");
     assert!(reply.get("param_warnings").is_none(), "{id}: {reply}");
+}
+
+/// #16547: `component.hide_history` and `component.show_history` answer the component they changed
+/// and how its history sits now, in the JSON they returned before their types existed, and the
+/// published schema requires the one key they read.
+#[test]
+fn history_visibility_answers_the_component_and_the_flag() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let made = s.execute("component.create", &json!({"name": "Arm"})).unwrap();
+    let id = made["component"].as_u64().unwrap();
+    let schema = output_schema_for::<HistoryVisibilityResult>().as_value().clone();
+    let described = s.execute("engine.describe", &json!({"command": "component.hide_history"})).unwrap();
+    assert_eq!(described["input"]["required"], json!(["component"]), "the handler refuses a call without it");
+    assert_eq!(described["input"]["additionalProperties"], false);
+    let spec = crate::find_command("component.show_history").unwrap();
+    assert!(spec.contract.is_some() && spec.output.is_some() && spec.undoable, "both commands describe themselves and undo");
+
+    for (cmd, hidden) in [("component.hide_history", true), ("component.show_history", false), ("component.hide_history", true)] {
+        // Both the name and the id the command answered are calls the command takes.
+        for key in [json!("Arm"), json!(id)] {
+            let r = s.execute(cmd, &json!({"component": key})).unwrap_or_else(|e| panic!("{cmd} {key}: {e}"));
+            assert_eq!(r, json!({"component": id, "history_hidden": hidden}), "{cmd} changed the JSON it returned");
+            matches(output_schema_for::<HistoryVisibilityResult>(), cmd, &r);
+        }
+        assert_eq!(s.doc.components.iter().find(|c| c.id == id).unwrap().history_hidden, hidden);
+    }
+    // The design itself has no history to leave out, and a component that isn't there is refused.
+    for p in [json!({"component": 0}), json!({"component": "no such part"})] {
+        let said = s.execute("component.hide_history", &p).err().map(|e| e.to_string());
+        assert!(said.is_some(), "{p} should be refused");
+    }
+    // A key the command doesn't take is a warning, not a refusal, and the reply still matches.
+    let warned = s.execute("component.show_history", &json!({"component": id, "components": id})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(warned["param_warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("components")))), "{warned}");
+    assert!(conforms(&schema, &schema, &warned), "{warned} doesn't match {schema}");
+}
+
+/// #16559: `component.cycle_color` answers the component it changed and the colour it has now, as the
+/// three bytes the palette uses, and the published schema requires the one key it reads.
+#[test]
+fn cycle_color_answers_the_component_and_its_colour() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let made = s.execute("component.create", &json!({"name": "Arm"})).unwrap();
+    let id = made["component"].as_u64().unwrap();
+    let schema = output_schema_for::<CycleColorResult>().as_value().clone();
+    let described = s.execute("engine.describe", &json!({"command": "component.cycle_color"})).unwrap();
+    assert_eq!(described["input"]["required"], json!(["component"]), "the handler refuses a call without it");
+    assert_eq!(described["input"]["additionalProperties"], false);
+    let spec = crate::find_command("component.cycle_color").unwrap();
+    assert!(spec.contract.is_some() && spec.output.is_some() && spec.undoable, "the command describes itself and undoes");
+
+    // Both the name and the id the command answered are calls the command takes.
+    let mut previous = None;
+    for key in [json!("Arm"), json!(id)] {
+        let before = s.doc.component_identification_color(id);
+        let next = solidcraft_doc::component_color::next_color(before);
+        let r = s.execute("component.cycle_color", &json!({"component": key})).unwrap_or_else(|e| panic!("{key}: {e}"));
+        assert_eq!(r, json!({"component": id, "color": next}), "cycle_color changed the JSON it returned");
+        matches(output_schema_for::<CycleColorResult>(), "component.cycle_color", &r);
+        assert_eq!(crate::view::component_color(&s, id), Some(next), "the design holds the colour it answered");
+        assert_ne!(Some(next), previous, "a second call gives the next colour of the palette");
+        previous = Some(next);
+    }
+    assert!(s.colored_components.is_some(), "the Component Colors flag is on, as the window expects");
+    // The design itself has no colour to cycle, and a component that isn't there is refused.
+    for p in [json!({"component": 0}), json!({"component": "no such part"})] {
+        assert!(s.execute("component.cycle_color", &p).is_err(), "{p} should be refused");
+    }
+    // A key the command doesn't take is a warning, not a refusal, and the reply still matches.
+    let warned = s.execute("component.cycle_color", &json!({"component": id, "components": id})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(warned["param_warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("components")))), "{warned}");
+    assert!(conforms(&schema, &schema, &warned), "{warned} doesn't match {schema}");
 }
 
 /// A glTF file whose node `rig` holds a `Part` (one cube): imported, it is a component held
@@ -457,11 +567,10 @@ fn sketch_square(s: &mut Session) {
     run(s, "sketch.finish", json!({}));
 }
 
-/// `component.move_sketches.to_parts` (#10218): sketches drawn on a part's face while the design
-/// was active go to that part and stay where they are on the face; the others stay and say why;
-/// it is one undo step.
-#[test]
-fn sketches_move_to_the_part_whose_face_they_are_on() {
+/// A part (unplaced at the origin, moved to x = 30) with a box, the design active again, a
+/// sketch "OnFace" on the box's top face and a sketch "OnXY" on XY. Returns the session, the
+/// part, its placement and the two sketches.
+fn sketch_on_a_part_face() -> (Session, u64, u64, u64, u64) {
     let mut s = Session::default();
     let run = |s: &mut Session, c: &str, p: Value| s.execute(c, &p).unwrap_or_else(|e| panic!("{c}: {e}"));
     let part = run(&mut s, "component.create", json!({"name":"Part","parent":0,"grounded":false}));
@@ -477,6 +586,16 @@ fn sketches_move_to_the_part_whose_face_they_are_on() {
     sketch_square(&mut s);
     let on_xy = run(&mut s, "sketch.create", json!({"name":"OnXY","plane":"XY"}))["sketch"].as_u64().unwrap();
     sketch_square(&mut s);
+    (s, component, occurrence, on_face, on_xy)
+}
+
+/// `component.move_sketches.to_parts` (#10218): sketches drawn on a part's face while the design
+/// was active go to that part and stay where they are on the face; the others stay and say why;
+/// it is one undo step.
+#[test]
+fn sketches_move_to_the_part_whose_face_they_are_on() {
+    let run = |s: &mut Session, c: &str, p: Value| s.execute(c, &p).unwrap_or_else(|e| panic!("{c}: {e}"));
+    let (mut s, component, occurrence, on_face, on_xy) = sketch_on_a_part_face();
     let world_plane = |s: &Session| s.world_state().unwrap().sketch(on_face).unwrap().plane;
     let before = world_plane(&s);
     assert_eq!(s.doc.feature(on_face).unwrap().component, 0);
@@ -499,6 +618,19 @@ fn sketches_move_to_the_part_whose_face_they_are_on() {
     run(&mut s, "component.move_sketches.to_parts", json!({}));
     let again = run(&mut s, "component.move_sketches.to_parts", json!({"sketches":["OnFace"]}));
     assert_eq!((again["moved"].as_u64(), again["kept"][0]["reason"].as_str()), (Some(0), Some("already in its part")));
+}
+
+/// The sketch on the face goes to the part when another sketch is named like its id: the move
+/// passes the id on as a number, which a name never shadows (#9748).
+#[test]
+fn sketches_to_parts_moves_the_sketch_given_when_another_is_named_like_its_id() {
+    let run = |s: &mut Session, c: &str, p: Value| s.execute(c, &p).unwrap_or_else(|e| panic!("{c}: {e}"));
+    let (mut s, component, _, on_face, on_xy) = sketch_on_a_part_face();
+    run(&mut s, "timeline.rename", json!({"feature": on_xy, "name": on_face.to_string()}));
+    let out = run(&mut s, "component.move_sketches.to_parts", json!({"sketches": [on_face]}));
+    assert_eq!(out["moved"].as_u64(), Some(1), "{out}");
+    assert_eq!(s.doc.feature(on_face).unwrap().component, component);
+    assert_eq!(s.doc.feature(on_xy).unwrap().component, 0);
 }
 
 /// A sketch moved to its part while an exploded view moves the part saves the same picked point
@@ -812,7 +944,8 @@ fn the_schemas_take_what_the_occurrence_handlers_read() {
             (json!({"sketches": ["S"]}), false),
             (json!({"component": "B"}), false),
             (json!({"component": "B", "sketches": []}), false),
-            (json!({"component": "B", "sketches": [1]}), false),
+            (json!({"component": "B", "sketches": [1]}), true),
+            (json!({"component": "B", "sketches": [true]}), false),
         ],
     );
 }
@@ -867,6 +1000,13 @@ fn the_check_reads_the_occurrence_keys_as_the_handlers_do() {
         ["matrix must be 12 numbers (3x4, row by row) or 16 (4x4), flat or as rows"]
     );
     assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "translate": [1, 2]})), ["translate must contain three finite numbers"]);
+    // Length expressions in `translate` (#8192): read as the handler reads them.
+    assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "translate": ["0 mm", "dy", 0]})), none);
+    assert_eq!(
+        issues("occurrence.move", json!({"occurrence": 1, "translate": [true, "dy", 0]})),
+        ["translate entries must be numbers or length expressions"]
+    );
+    assert_eq!(issues("occurrence.copy", json!({"occurrence": 1, "translate": ["dy", 0, 0]})), ["translate must contain three finite numbers"]);
     assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "axis": null})), ["axis must contain three finite numbers"]);
     assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "origin": "x"})), ["origin must contain three finite numbers"]);
     assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "angle": null})), ["angle must be a number or angle expression"]);
@@ -902,8 +1042,11 @@ fn the_check_reads_the_occurrence_keys_as_the_handlers_do() {
         issues("component.move_bodies", json!({"component": 1, "bodies": ["A"], "from_path": null})),
         ["`from_path` must list 0..64 occurrence ids"]
     );
-    assert_eq!(issues("component.move_sketches", json!({"component": 1, "sketches": 5})), ["`sketches` must be a list of names; it is 5"]);
-    assert_eq!(issues("component.move_sketches", json!({"component": 1, "sketches": ["S", 3]})), ["`sketches` must list names; the entry 2 is 3"]);
+    assert_eq!(issues("component.move_sketches", json!({"component": 1, "sketches": 5})), ["`sketches` must be a list of names or ids; it is 5"]);
+    assert_eq!(
+        issues("component.move_sketches", json!({"component": 1, "sketches": ["S", true]})),
+        ["`sketches` must list names or ids; the entry 2 is true"]
+    );
     assert_eq!(issues("component.move_sketches", json!({"component": 1, "sketches": null})), ["`sketches` must list sketches"]);
     assert_eq!(issues("component.move_sketches", json!({"component": 1, "sketches": "S"})), none);
 }

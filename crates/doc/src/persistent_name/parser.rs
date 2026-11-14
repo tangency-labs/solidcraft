@@ -5,8 +5,13 @@ use super::*;
 
 impl FaceName {
     pub fn parse(s: &str) -> Result<FaceName, NameError> {
+        Self::parse_at(s, 0)
+    }
+
+    /// The name in `s`, its nesting `depth` deep.
+    pub(super) fn parse_at(s: &str, depth: usize) -> Result<FaceName, NameError> {
         let mut p = Parser::new(s)?;
-        let f = p.face(0)?;
+        let f = p.face(depth)?;
         p.end()?;
         Ok(f)
     }
@@ -14,8 +19,14 @@ impl FaceName {
 
 impl EdgeName {
     pub fn parse(s: &str) -> Result<EdgeName, NameError> {
+        Self::parse_at(s, 0)
+    }
+
+    /// The edge in `s`, its nesting `depth` deep.
+    pub(super) fn parse_at(s: &str, depth: usize) -> Result<EdgeName, NameError> {
         let mut p = Parser::new(s)?;
-        // A `~k` ending the text numbers this edge.
+        // A `~k` ending the text numbers this edge, not a blend's edge inside it: the text
+        // before it is read without it, and it goes back on the edge being read.
         let tie = match p.toks.last() {
             Some(Tok { kind: Kind::Tie(k), .. }) => {
                 let k = *k;
@@ -24,10 +35,28 @@ impl EdgeName {
             }
             _ => None,
         };
-        let e = p.edge(0, usize::MAX)?;
+        let e = p.edge(depth, usize::MAX)?;
         p.end()?;
         Ok(EdgeName { tie, ..e })
     }
+}
+
+/// The byte of the `)` closing the `(` before `from`.
+fn matching_close(s: &str, from: usize) -> Option<usize> {
+    let mut depth = 1usize;
+    for (i, b) in s.as_bytes().iter().enumerate().skip(from) {
+        match b {
+            b'(' => depth += 1,
+            b')' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 impl Role {
@@ -145,7 +174,22 @@ impl<'a> Parser<'a> {
             (Some(Kind::Feature(n)), Some(Kind::Colon)) => {
                 self.at += 2;
                 let feature = FeatureId(n);
-                if self.keyword("blend") {
+                let at = self.byte();
+                let rest = self.s.get(at..).unwrap_or_default();
+                if rest.starts_with("blend(") {
+                    let (inner, close) = self.nested_text(at + "blend(".len())?;
+                    let rounds = match number::<u32>(inner) {
+                        Some(k) => Rounds::Index(k),
+                        None => Rounds::Edge(Box::new(EdgeName::parse_at(inner, depth + 1)?)),
+                    };
+                    self.skip_past(close)?;
+                    FaceName { base: Base::Blend { feature, rounds }, suffixes: Vec::new() }
+                } else if rest.starts_with("inner(") {
+                    let (inner, close) = self.nested_text(at + "inner(".len())?;
+                    let offsets = FaceName::parse_at(inner, depth + 1)?;
+                    self.skip_past(close)?;
+                    FaceName { base: Base::Inner { feature, offsets: Box::new(offsets) }, suffixes: Vec::new() }
+                } else if self.keyword("blend") {
                     self.at += 2;
                     self.blend(feature, depth)?
                 } else if self.keyword("inner") {
@@ -170,6 +214,25 @@ impl<'a> Parser<'a> {
         };
         self.suffixes(&mut face, depth)?;
         Ok(face)
+    }
+
+    /// The text of a name nested in parentheses, from `from` to the `)` closing it, and the byte
+    /// of that `)`.
+    fn nested_text(&self, from: usize) -> Result<(&'a str, usize), NameError> {
+        let close = matching_close(self.s, from).ok_or(NameError::Expected { at: self.s.len(), what: "`)`" })?;
+        let text = self.s.get(from..close).ok_or(NameError::Expected { at: from, what: "a name" })?;
+        Ok((text, close))
+    }
+
+    /// The cursor after the `)` at byte `close`.
+    fn skip_past(&mut self, close: usize) -> Result<(), NameError> {
+        while self.at < self.toks.len() && self.toks[self.at].start <= close {
+            if self.toks[self.at].end > close + 1 {
+                return Err(NameError::Expected { at: close + 1, what: "the end of a nested name" });
+            }
+            self.at += 1;
+        }
+        Ok(())
     }
 
     /// A blend face of `feature`, the cursor after `blend:`.

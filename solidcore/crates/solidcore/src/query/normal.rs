@@ -209,7 +209,8 @@ fn degenerate() -> SolidError {
 /// What S is for `surface`, following curve-bounded surfaces to their basis.
 fn exact_of<'a>(k: &Kernel, surface: &'a Surface) -> Result<Exact<'a>> {
     let net = |b: &'a crate::nurbs::b_spline_surface::BSplineSurface| {
-        b.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))
+        b.gw_nurb()
+            .ok_or_else(|| SolidError::query_failed(OP, "the B-spline surface's NURBS net"))
     };
     let mut s = surface;
     for _ in 0..MAX_HOPS {
@@ -339,7 +340,8 @@ fn definition_jet(
             unsupported("a blend's definition that is not enclosed (only the ball's circle of one radius between NURBS faces is)")
         }
     })?;
-    let bs = as_b_spline(k, s)?.ok_or_else(|| SolidError::sm_err(OP))?;
+    let bs = as_b_spline(k, s)?
+        .ok_or_else(|| SolidError::query_failed(OP, "the surface's B-spline form"))?;
     let net = Nurbs::of(&bs)?;
     let ku = span(&net.u, net.p, net.nu.saturating_sub(1), uv.x)
         .ok_or_else(|| unsupported("(u, v) outside the blend's net"))?;

@@ -14,11 +14,20 @@ trust-unknown-source = []
 
 [dependencies]
 solidcore-record = { workspace = true }
+solidcore-tess = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
+solidcraft-format = { workspace = true }
+# Signed provenance records in a design container (`src/design/provenance.rs`).
+ciborium = { workspace = true }
+serde_bytes = { workspace = true }
+coset = { workspace = true }
+ed25519-dalek = { workspace = true }
+pgp = { workspace = true }
 solidcraft-profile = { workspace = true }
+solidcraft-sketch = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 zip = { workspace = true }
@@ -49,3 +58,5 @@ gethostname = { workspace = true }
 
 [dev-dependencies]
 solidcraft-testkit = { workspace = true }
+# Provenance tests sign with a software OpenPGP key, so they need no GnuPG or smartcard.
+rand = "0.8"

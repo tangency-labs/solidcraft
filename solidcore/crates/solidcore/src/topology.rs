@@ -823,6 +823,10 @@ pub struct Brep {
     /// (not upstream) Names this B-rep value for the notify records' seeding progress
     /// (`topology::brep::p3`); a clone is another value without one.
     progress_tag: topology::ProgressTag,
+    /// (not upstream) The objects removed from this B-rep value, so a notify record store
+    /// made exact for it drops only theirs at its next reset (`topology::brep::p3`); a
+    /// copy is another value with a log of its own.
+    removals: topology::RemovalLog,
     /// Edge/face/edge-use identities supplied when their geometry was bound. These
     /// record producer provenance; they are never inferred from an opaque geometry
     /// owner.
@@ -874,6 +878,7 @@ impl Brep {
             locked_bounding_box: self.locked_bounding_box,
             notify_identity: self.notify_identity.clone(),
             progress_tag: self.progress_tag.clone(),
+            removals: self.removals.clone(),
             geometry_owner_keys: self.geometry_owner_keys.clone(),
             attributes: self.attributes.clone(),
         }
@@ -911,6 +916,7 @@ impl Default for Brep {
             locked_bounding_box: None,
             notify_identity: IdentitySlot::default(),
             progress_tag: topology::ProgressTag::default(),
+            removals: topology::RemovalLog::default(),
             geometry_owner_keys: std::collections::BTreeMap::new(),
             attributes: AttributeStore::default(),
         }
@@ -1156,12 +1162,20 @@ impl Brep {
         for (id, face) in self.faces.iter() {
             if let (Some(original), Ok(face_copy)) = (face.surface.as_ref(), copy.face_mut(id)) {
                 if let Some(surface) = face_copy.surface.as_mut() {
-                    surface.share_cache_slot_of(original);
-                    face::p2::RescueSurfaceOwner::new(original).restore(surface);
+                    Self::stand_surface_for(surface, original);
                 }
             }
         }
         copy
+    }
+
+    /// Makes `copy`, a copy ([`Clone`]) of the face surface `original`, stand for it as the
+    /// face surfaces of [`Brep::clone_sharing_surface_caches`] do: it shares `original`'s
+    /// cache slot and keeps its owner. What a query makes on the copy from `&self` (a NURB
+    /// a cone makes on first use) stays on the copy.
+    pub(crate) fn stand_surface_for(copy: &mut Surface, original: &Surface) {
+        copy.share_cache_slot_of(original);
+        face::p2::RescueSurfaceOwner::new(original).restore(copy);
     }
 
     /// A private copy of this B-rep that stands for the B-rep itself where upstream
@@ -1808,6 +1822,16 @@ impl Brep {
         self.progress_tag.get()
     }
 
+    /// The tag naming this B-rep value for its removal log ([`topology::RemovalLog`]).
+    pub(crate) fn removal_tag(&mut self) -> Arc<()> {
+        self.removals.tag()
+    }
+
+    /// The objects removed from this B-rep value so far, in removal order.
+    pub(crate) fn removed_entities(&self) -> &[EntityRef] {
+        self.removals.removed()
+    }
+
     /// Appends a region record as is (no validation).
     pub fn add_region_record(&mut self, region: Region) -> Result<RegionId> {
         self.regions.insert(region)
@@ -1900,6 +1924,7 @@ impl Brep {
         self.shells
             .remove(id)
             .ok_or_else(|| not_found("topology::Brep::remove_shell_record", id))
+            .inspect(|_| self.removals.push(EntityRef::Shell(id)))
     }
 
     /// Deletes a region record (upstream `delete`; no unlinking: the caller resets the
@@ -1908,7 +1933,8 @@ impl Brep {
         let region = self
             .regions
             .remove(id)
-            .ok_or_else(|| not_found("topology::Brep::remove_region_record", id))?;
+            .ok_or_else(|| not_found("topology::Brep::remove_region_record", id))
+            .inspect(|_| self.removals.push(EntityRef::Region(id)))?;
         self.region_order.retain(|&x| x != id);
         Ok(region)
     }
@@ -1919,7 +1945,8 @@ impl Brep {
         let face = self
             .faces
             .remove(id)
-            .ok_or_else(|| not_found("topology::Brep::remove_face_record", id))?;
+            .ok_or_else(|| not_found("topology::Brep::remove_face_record", id))
+            .inspect(|_| self.removals.push(EntityRef::Face(id)))?;
         self.face_list.retain(|&x| x != id);
         self.geometry_owner_keys.remove(&EntityRef::Face(id));
         Ok(face)
@@ -1930,6 +1957,7 @@ impl Brep {
         self.loops
             .remove(id)
             .ok_or_else(|| not_found("topology::Brep::remove_loop_record", id))
+            .inspect(|_| self.removals.push(EntityRef::Loop(id)))
     }
 
     /// Deletes an edge record (upstream `m_pEdgeListHead->Remove` and `delete`): the
@@ -1938,7 +1966,8 @@ impl Brep {
         let edge = self
             .edges
             .remove(id)
-            .ok_or_else(|| not_found("topology::Brep::remove_edge_record", id))?;
+            .ok_or_else(|| not_found("topology::Brep::remove_edge_record", id))
+            .inspect(|_| self.removals.push(EntityRef::Edge(id)))?;
         self.edge_list.retain(|&x| x != id);
         self.geometry_owner_keys.remove(&EntityRef::Edge(id));
         Ok(edge)
@@ -1950,7 +1979,8 @@ impl Brep {
         let vertex = self
             .vertices
             .remove(id)
-            .ok_or_else(|| not_found("topology::Brep::remove_vertex_record", id))?;
+            .ok_or_else(|| not_found("topology::Brep::remove_vertex_record", id))
+            .inspect(|_| self.removals.push(EntityRef::Vertex(id)))?;
         self.vertex_list.retain(|&x| x != id);
         Ok(vertex)
     }
@@ -1960,6 +1990,7 @@ impl Brep {
         self.faceuses
             .remove(id)
             .ok_or_else(|| not_found("topology::Brep::remove_faceuse_record", id))
+            .inspect(|_| self.removals.push(EntityRef::Faceuse(id)))
     }
 
     /// Deletes a loop use record (upstream `delete`; no unlinking).
@@ -1967,6 +1998,7 @@ impl Brep {
         self.loopuses
             .remove(id)
             .ok_or_else(|| not_found("topology::Brep::remove_loopuse_record", id))
+            .inspect(|_| self.removals.push(EntityRef::Loopuse(id)))
     }
 
     /// Deletes an edge use record (upstream `delete`; no unlinking).
@@ -1974,7 +2006,8 @@ impl Brep {
         let record = self
             .edgeuses
             .remove(id)
-            .ok_or_else(|| not_found("topology::Brep::remove_edgeuse_record", id))?;
+            .ok_or_else(|| not_found("topology::Brep::remove_edgeuse_record", id))
+            .inspect(|_| self.removals.push(EntityRef::Edgeuse(id)))?;
         self.geometry_owner_keys.remove(&EntityRef::Edgeuse(id));
         Ok(record)
     }
@@ -1984,6 +2017,7 @@ impl Brep {
         self.vertexuses
             .remove(id)
             .ok_or_else(|| not_found("topology::Brep::remove_vertexuse_record", id))
+            .inspect(|_| self.removals.push(EntityRef::Vertexuse(id)))
     }
 
     /// Adds an empty shell.

@@ -834,6 +834,55 @@ fn a_point_beside_a_pole_is_one_within_its_reach() {
     assert_eq!(sphere.pole([0.3, FRAC_PI_2]).unwrap(), [true, false]);
 }
 
+/// At the threshold, r = reach / 2: a form whose circles are no wider than the reach is thin,
+/// not collapsed. A cylinder of radius 0.049, 0.05 or 0.051 at a reach of 0.1 (a pin's round in a
+/// file of 0.1 mm uncertainty) is a pole nowhere; a ball of radius 0.05 only at its exact poles, a torus's tube
+/// of radius 0.05 nowhere. A ball a little wider still has its poles within the reach.
+#[test]
+fn a_surface_no_wider_than_the_reach_is_thin_not_a_pole() {
+    let reach = 0.1;
+    // A cylinder just under, at and just over r = reach / 2: a pole nowhere.
+    for k in [0.49, 0.5, 0.51] {
+        let cylinder = SurfaceEval::new(&Surface::Cylinder {
+            frame: a_frame(),
+            radius: k * reach,
+        })
+        .unwrap();
+        assert_eq!(
+            cylinder.pole_within([0.3, 0.5], reach).unwrap(),
+            [false, false],
+            "r = {k} reach"
+        );
+    }
+    let ball = SurfaceEval::new(&Surface::Sphere {
+        frame: a_frame(),
+        radius: 0.5 * reach,
+    })
+    .unwrap();
+    assert_eq!(ball.pole_within([0.3, 0.2], reach).unwrap(), [false, false]);
+    assert_eq!(
+        ball.pole_within([0.3, FRAC_PI_2], reach).unwrap(),
+        [true, false]
+    );
+    let wider = SurfaceEval::new(&Surface::Sphere {
+        frame: a_frame(),
+        radius: 0.501 * reach,
+    })
+    .unwrap();
+    assert_eq!(wider.pole_within([0.3, 0.2], reach).unwrap(), [true, false]);
+    let torus = SurfaceEval::new(&Surface::Torus {
+        frame: a_frame(),
+        major_radius: 4.0,
+        minor_radius: 0.5 * reach,
+        tube_start: 0.0,
+    })
+    .unwrap();
+    assert_eq!(
+        torus.pole_within([0.3, 0.2], reach).unwrap(),
+        [false, false]
+    );
+}
+
 /// A curve's curvature vector, exactly, on every kind: a circle's is 1/R towards its centre (as
 /// a conic and as its rational quadratic B-spline); an ellipse's at its vertices is a/b² and
 /// b/a²; a line is straight; and the circle where a plane z = 3 cuts a sphere of radius 5 about
@@ -1255,6 +1304,69 @@ fn a_face_box_reaches_its_boundary_extremes() {
     );
 }
 
+/// One edge that winds 33 times round a cylinder (a plane's section of it, run on for 33 turns)
+/// is measured 33 turns wide: sampled at 32 points it would step a turn and a thirty-second at a
+/// time and read as one turn.
+#[test]
+fn an_edge_that_winds_more_than_sixteen_turns_is_measured_whole() {
+    let r = 20.0f64;
+    let cylinder = Surface::Cylinder {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let c = std::f64::consts::FRAC_1_SQRT_2;
+    let cut = Curve::Ellipse {
+        frame: Frame {
+            origin: [0., 0., 30.],
+            x_axis: [c, 0., c],
+            y_axis: [0., 1., 0.],
+        },
+        radii: [r * 2f64.sqrt(), r],
+    };
+    let turns = 33.0;
+    let [u, v] = form::extent(&cylinder, &[vec![(&cut, [0., turns * TAU], true)]], 1e-9)
+        .unwrap()
+        .expect("an extent");
+    assert!((u[1] - u[0] - turns * TAU).abs() < 1e-6, "{u:?}");
+    assert!(
+        (v[0] - 10.0).abs() < 1e-9 && (v[1] - 50.0).abs() < 1e-9,
+        "{v:?}"
+    );
+}
+
+/// An edge of a million turns is probed over a step of a whole turn at the start: that step
+/// projects back onto its start and would read as no winding, so the face's box would be one turn
+/// wide. The step is halved until it advances less than a quarter turn, and the edge is then
+/// refused as wound beyond what is measured.
+#[test]
+fn an_edge_of_a_million_turns_is_refused_not_read_as_one_turn() {
+    let r = 20.0f64;
+    let cylinder = Surface::Cylinder {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let c = std::f64::consts::FRAC_1_SQRT_2;
+    let cut = Curve::Ellipse {
+        frame: Frame {
+            origin: [0., 0., 30.],
+            x_axis: [c, 0., c],
+            y_axis: [0., 1., 0.],
+        },
+        radii: [r * 2f64.sqrt(), r],
+    };
+    let turns = 1.0e6;
+    let found = form::extent(&cylinder, &[vec![(&cut, [0., turns * TAU], true)]], 1e-9).unwrap();
+    assert!(found.is_none(), "{found:?}");
+}
+
 /// The flux of `p / 3` through a whole sphere is its volume.
 #[test]
 fn a_spheres_flux_is_its_volume() {
@@ -1449,4 +1561,29 @@ fn an_imported_pole_row_is_a_pole_within_the_extents_reach() {
         at_rounding.is_none_or(|[u, _]| (u[0] - 0.25).abs() > 1e-6 || (u[1] - 0.5).abs() > 1e-6),
         "at no reach the row is no pole: {at_rounding:?}"
     );
+}
+
+/// A whole turn whose seam lies a rounding short of a quarter line (as a file's seam on its
+/// frame's x axis measures, 2π − 2e-12 or −2e-12) has its form from that quarter line: four
+/// quarters that end where the seam's second use lies (#12760; from the quarter before, the
+/// form ended a quarter short of it and the face's last quarter was off its form).
+#[test]
+fn a_whole_turn_a_rounding_short_of_a_quarter_line_has_its_form_from_it() {
+    let cylinder = Surface::Cylinder {
+        frame: a_frame(),
+        radius: 21.2,
+    };
+    let u_knots = |s: &Surface| match s {
+        Surface::RationalSpline { u_knots, .. } => (
+            u_knots.first().copied().unwrap(),
+            u_knots.last().copied().unwrap(),
+        ),
+        _ => panic!("not a NURBS: {s:?}"),
+    };
+    for (start, q) in [(TAU - 2e-12, 4.0), (-2.2e-12, 0.0), (TAU + 2e-12, 4.0)] {
+        let (form, domain) =
+            form::surface_within(&cylinder, [[start, start + TAU], [0., 10.]], 2e-5).unwrap();
+        assert_eq!(u_knots(&form), (q, q + 4.0), "seam at {start}");
+        assert_eq!(domain[0], [q, q + 4.0], "seam at {start}");
+    }
 }

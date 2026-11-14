@@ -327,7 +327,7 @@ fn solidcore_case(name: &'static str) -> Got {
             let size = if sheet { area(&body, 1e-8) } else { volume(&body, 1e-8) }.unwrap_or_else(|e| panic!("{name}: size: {e}"));
             let n = counts(&body).unwrap();
             let (rec, _) = native(&to_arrays(&body).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-            solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+            solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
             let bx = bounds(&body).unwrap();
             Measured { size, bounds: bx, counts: n, kinds: kinds(&rec) }
         });
@@ -619,15 +619,16 @@ fn a_draft_moves_a_face() {
 
 /// The tip cut off a triangular prism, drafted about a plane 100 mm off so that the whole face goes
 /// out past where its neighbours meet: its edges vanish, `SM_ERR_OFFSET_EDGE_VANISHES` in SMLib,
-/// which the capi's `status` answers as `SMLIB_ERR_UNSUPPORTED`.
+/// refused with that reason (#13989), not as not supported.
 #[test]
-fn a_draft_past_the_neighbours_meeting_is_unsupported() {
+fn a_draft_past_the_neighbours_meeting_is_refused_as_an_edge_that_vanishes() {
     use crate::sweeps::{Curve, DraftCorner};
     let p = [[0.0, 0.0, 0.0], [20.0, 0.0, 0.0], [11.0, 18.0, 0.0], [9.0, 18.0, 0.0]];
     let profile: Vec<Curve> = (0..4).map(|i| Curve::Line { start: p[i], end: p[(i + 1) % 4] }).collect();
     let prism = super::sweep::extrude(&profile, [0.0, 0.0, 1.0], 10.0, 0.0, DraftCorner::default(), true).unwrap();
     let (tip, z, origin, angle) = ([[10.0, 18.0, 5.0]], [0.0, 0.0, 1.0], [0.0, 0.0, -100.0], (-2f64).to_radians());
-    assert_eq!(draft(&prism, &tip, TOL, origin, z, z, angle).err(), Some(Error::Unsupported));
+    let vanishes = solidcore_ops::Error::OffsetRefused { face: None, why: solidcore_ops::OffsetRefusal::EdgeVanishes };
+    assert_eq!(draft(&prism, &tip, TOL, origin, z, z, angle).err(), Some(Error::Refused(vanishes)));
 }
 
 /// A flat L of two faces thickened by 2 with mitred walls: 2 x 10 x (20 + 22).
@@ -643,7 +644,7 @@ fn an_l_sheet_thickens() {
 /// solidcore#2350's parabolic sheet: the quadratic Bézier (-10, 0), (0, 10), (10, 0) lofted 20
 /// along z, a B-spline face whose radius of curvature at its apex is 10. Thickened 11 towards
 /// its centre of curvature its offset folds there: solidcore's one construction refuses it
-/// naming 10, the largest wall that works (`fixes.shell_one_construction`); 2 builds.
+/// naming 10, the largest wall that works; 2 builds.
 #[test]
 fn a_wall_thicker_than_its_face_curves_is_refused_naming_the_largest() {
     use crate::sweeps::Curve;
