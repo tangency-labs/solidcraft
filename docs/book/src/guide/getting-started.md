@@ -413,11 +413,10 @@ and Z is up.
 
 ## Name and compatibility
 
-SolidCraft was renamed from an earlier working name. Since 0.5.0 everything uses the new
-name: the `solidcraft` and `solidcraft-cli` programs, `.solidcraft` designs (`.sc` since then), `SOLIDCRAFT_*`
-environment variables, settings folders and the `solidcraft` MCP server. Upgrading keeps
-working: designs, settings, recovery files, environment variables and CLI/MCP setups from
-earlier builds carry over. Every compatibility shim is listed in the
+SolidCraft was renamed from an earlier working name, and that name is gone: the `solidcraft`
+and `solidcraft-cli` programs, `.sc` designs, `SOLIDCRAFT_*` environment variables, settings
+folders and the `solidcraft` MCP server all use the current name. Designs saved by earlier
+builds still open, whatever their file extension. Every compatibility shim is listed in the
 [compatibility notes](https://github.com/tangency-labs/solidcraft/blob/main/docs/compatibility.md).
 
 Use the SolidCraft documentation and web-app URLs. GitHub redirects links to the renamed

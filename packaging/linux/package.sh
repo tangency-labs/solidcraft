@@ -38,7 +38,7 @@ case "$ARCH" in
   aarch64 | arm64) ARCH=aarch64; DEB_ARCH=arm64 ;;
   *) echo "unsupported architecture $ARCH" >&2; exit 2 ;;
 esac
-export SOLIDCRAFT_MAINTAINER="${SOLIDCRAFT_MAINTAINER:-${SOLVECRAFT_MAINTAINER:-SolidCraft contributors <https://github.com/bherbruck/solidcraft>}}"  # SOLVECRAFT_*: compatibility shim, see docs/compatibility.md
+export SOLIDCRAFT_MAINTAINER="${SOLIDCRAFT_MAINTAINER:-SolidCraft contributors <https://github.com/bherbruck/solidcraft>}"
 BASENAME="solidcraft-$VERSION-linux-$ARCH"
 
 echo "==> SolidCraft $VERSION for Linux $ARCH ($FORMATS)"
@@ -65,9 +65,7 @@ rm -rf "$WORK"
 # ---- stage an FHS tree (shared by every format) -------------------------------------------------
 install -Dm755 "$BIN/solidcraft" "$STAGE/usr/bin/solidcraft"
 install -Dm755 "$BIN/solidcraft-cli" "$STAGE/usr/bin/solidcraft-cli"
-# Compatibility shim (docs/compatibility.md): the old CLI name forwards to solidcraft-cli.
-install -Dm755 "$BIN/solvecraft-cli" "$STAGE/usr/bin/solvecraft-cli"
-strip "$STAGE/usr/bin/solidcraft" "$STAGE/usr/bin/solidcraft-cli" "$STAGE/usr/bin/solvecraft-cli" 2>/dev/null || true
+strip "$STAGE/usr/bin/solidcraft" "$STAGE/usr/bin/solidcraft-cli" 2>/dev/null || true
 install -Dm644 "$ROOT/assets/platforms/linux/$APP_ID.desktop" "$STAGE/usr/share/applications/$APP_ID.desktop"
 install -Dm644 "$ROOT/assets/platforms/linux/$APP_ID.mime.xml" "$STAGE/usr/share/mime/packages/$APP_ID.xml"
 mkdir -p "$STAGE/usr/share/metainfo"

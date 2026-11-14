@@ -149,8 +149,7 @@ jobs:
         run: |
           dpkg-deb --info dist/release/*.deb
           dpkg-deb --contents dist/release/*.deb | grep -E 'usr/bin/solidcraft$|usr/bin/solidcraft-cli$|metainfo|applications|THIRD-PARTY-LICENSES.txt'
-          # Compatibility shims (docs/compatibility.md): the old CLI name and the package rename.
-          dpkg-deb --contents dist/release/*.deb | grep -E 'usr/bin/solvecraft-cli$'
+          # Compatibility shim (docs/compatibility.md): the package rename.
           dpkg-deb --field dist/release/*.deb Replaces Conflicts Provides | grep -F solvecraft
           rpm -qip dist/release/*.rpm
           rpm -qlp dist/release/*.rpm | grep -E '/usr/bin/solidcraft$|THIRD-PARTY-LICENSES.txt'
@@ -438,7 +437,6 @@ jobs:
           path: |
             target/${{ matrix.target }}/release/solidcraft
             target/${{ matrix.target }}/release/solidcraft-cli
-            target/${{ matrix.target }}/release/solvecraft-cli
           if-no-files-found: error
 
   macos:
@@ -472,7 +470,7 @@ jobs:
       - name: Join, sign, package and check (dmg, CLI zip; the dmg is mounted and checked)
         run: |
           # Artifacts don't keep the executable bit.
-          chmod +x target/*-apple-darwin/release/solidcraft target/*-apple-darwin/release/solidcraft-cli target/*-apple-darwin/release/solvecraft-cli
+          chmod +x target/*-apple-darwin/release/solidcraft target/*-apple-darwin/release/solidcraft-cli
           packaging/macos/package.sh --arch universal --skip-build ${MACOS_SIGN_IDENTITY:+--sign}
       - name: Remove the signing keychain and API key
         if: always()
@@ -578,7 +576,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $stage = "target/windows-package/${{ matrix.arch }}"
-          foreach ($exe in 'solidcraft.exe', 'solidcraft-cli.exe', 'solvecraft-cli.exe') {
+          foreach ($exe in 'solidcraft.exe', 'solidcraft-cli.exe') {
             $signed = "target/windows-package/signed-exes-${{ matrix.arch }}/$exe"
             # The artifact configuration matches each file optionally, so check that every file
             # actually came back signed rather than trusting the request's success.

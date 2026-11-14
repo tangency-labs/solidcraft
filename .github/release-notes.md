@@ -14,11 +14,10 @@ and `ai.storyteller.solvecraft` up to 0.7): `flatpak update` offers to replace t
 `.deb`, `.rpm` and AppImage remove the old menu entry, and settings stay. On macOS the bundle ID
 changed too, so macOS asks once more for the permissions it had granted.
 
-**Upgrading from 0.5 or earlier.** 0.6 renamed SolveCraft to SolidCraft and made the zip
-container the default save format. `.solvecraft` designs, old settings folders and
-`SOLVECRAFT_*` variables are still picked up, and `solvecraft-cli` still forwards to
-`solidcraft-cli`. Want plain JSON? Use **File ▸ Save As JSON…** or `--save design.json`. On
-macOS, replace `SolveCraft.app` with `SolidCraft.app`. Details:
+**Old names.** The zip container is the default save format. Want plain JSON? Use
+**File ▸ Save As JSON…** or `--save design.json`. Designs saved by earlier versions, including
+`.solvecraft` files, still open; the `solvecraft-cli` command, `SOLVECRAFT_*` variables and the
+`.solvecraft` file association are gone. Details:
 [compatibility notes](https://github.com/bherbruck/solidcraft/blob/main/docs/compatibility.md).
 
 Documentation, the browser app and the Flatpak feed use the SolidCraft project Pages URLs.

@@ -10,8 +10,7 @@
 # hicolor icons into $XDG_DATA_HOME, refresh the icon cache, point Icon= at the
 # installed PNG (panels that skip the theme cache still show the mark; #10673),
 # then launch. Every failure here must leave the launch untouched. Opt out with
-# SOLIDCRAFT_NO_DESKTOP_INTEGRATION=1 (the pre-rename SOLVECRAFT_NO_DESKTOP_INTEGRATION
-# still works: compatibility shim, docs/compatibility.md), or for good with an empty
+# SOLIDCRAFT_NO_DESKTOP_INTEGRATION=1, or for good with an empty
 # file $XDG_DATA_HOME/solidcraft/no-desktop-integration. Nothing is installed either
 # when appimaged (go-appimage) already made an entry for this AppImage, or when a
 # launcher that manages AppImages (Gear Lever, AppImageLauncher) started it: it sets
@@ -51,7 +50,7 @@ install_cli() {
 }
 
 integrate() {
-  case "${SOLIDCRAFT_NO_DESKTOP_INTEGRATION:-${SOLVECRAFT_NO_DESKTOP_INTEGRATION:-}}" in
+  case "${SOLIDCRAFT_NO_DESKTOP_INTEGRATION:-}" in
     1 | true | yes) return 0 ;;
   esac
   # The AppImage runtime exports $APPIMAGE; without it (an extracted AppDir) there

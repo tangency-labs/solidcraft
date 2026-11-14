@@ -76,10 +76,6 @@ contents:
   - src: ${STAGE}/usr/bin/solidcraft-cli
     dst: /usr/bin/solidcraft-cli
     file_info: { mode: 0755 }
-  # Compatibility shim (docs/compatibility.md): the old CLI name forwards to solidcraft-cli.
-  - src: ${STAGE}/usr/bin/solvecraft-cli
-    dst: /usr/bin/solvecraft-cli
-    file_info: { mode: 0755 }
   - src: ${STAGE}/usr/share/
     dst: /usr/share/
     type: tree

@@ -332,7 +332,7 @@ and the API key secrets (`APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, `APPLE_API_ISSU
 When the `SIGNPATH_API_TOKEN` secret (the API token of the SignPath CI user) exists, the release
 workflow's Windows jobs Authenticode-sign through [SignPath Foundation](https://signpath.org)
 (organization `fa603ff4-c702-404b-8588-a524371c7a4e`, project `solidcraft`). Each architecture
-sends two signing requests: `solidcraft.exe`, `solidcraft-cli.exe` and `solvecraft-cli.exe` first,
+sends two signing requests: `solidcraft.exe` and `solidcraft-cli.exe` first,
 so the MSI, the portable zip and the plain `.exe` are made from signed binaries, then the MSI. Each
 request uploads the files as a workflow artifact, SignPath fetches and signs it, and the job checks
 that every file came back signed. Without the secret (forks) the jobs build unsigned as before.

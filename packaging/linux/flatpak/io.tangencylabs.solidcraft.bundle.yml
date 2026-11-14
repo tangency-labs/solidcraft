@@ -44,8 +44,6 @@ modules:
     build-commands:
       - install -Dm755 bin/solidcraft /app/bin/solidcraft
       - install -Dm755 bin/solidcraft-cli /app/bin/solidcraft-cli
-      # The old CLI name, forwarding to solidcraft-cli (compatibility shim, docs/compatibility.md).
-      - install -Dm755 bin/solvecraft-cli /app/bin/solvecraft-cli
       - install -Dm644 share/applications/io.tangencylabs.solidcraft.desktop /app/share/applications/io.tangencylabs.solidcraft.desktop
       - install -Dm644 share/mime/packages/io.tangencylabs.solidcraft.xml /app/share/mime/packages/io.tangencylabs.solidcraft.xml
       # Already has the release's version and date substituted by package.sh.

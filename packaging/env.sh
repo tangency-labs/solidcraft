@@ -6,8 +6,6 @@
 #   ROOT                    workspace root
 #   VERSION                 [workspace.package] version from Cargo.toml (override: SOLIDCRAFT_VERSION)
 #
-# Every SOLIDCRAFT_* override also accepts the pre-rename SOLVECRAFT_* name when the new one is
-# unset (compatibility shim, see docs/compatibility.md).
 #   DIST                    output directory for release artifacts (default: $ROOT/dist/release)
 #   SOLIDCRAFT_BUILD_DATE   UTC build date, YYYY-MM-DD
 #   CARGO_TARGET_DIR        cargo's target dir (default: $ROOT/target)
@@ -23,7 +21,7 @@ workspace_version() {
   ' "$ROOT/Cargo.toml"
 }
 
-VERSION="${SOLIDCRAFT_VERSION:-${SOLVECRAFT_VERSION:-$(workspace_version)}}"
+VERSION="${SOLIDCRAFT_VERSION:-$(workspace_version)}"
 if [ -z "$VERSION" ]; then
   echo "error: could not read [workspace.package] version from $ROOT/Cargo.toml" >&2
   exit 1
@@ -35,7 +33,7 @@ mkdir -p "$DIST"
 DIST="$(cd "$DIST" && pwd)"
 export DIST
 
-export SOLIDCRAFT_BUILD_DATE="${SOLIDCRAFT_BUILD_DATE:-${SOLVECRAFT_BUILD_DATE:-$(date -u +%Y-%m-%d)}}"
+export SOLIDCRAFT_BUILD_DATE="${SOLIDCRAFT_BUILD_DATE:-$(date -u +%Y-%m-%d)}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 # The reverse-DNS id: Flatpak app id, desktop, metainfo and MIME file names, icon name and the
 # window's Wayland app_id / X11 class. Earlier releases used ai.storyteller.solidcraft (0.8 until

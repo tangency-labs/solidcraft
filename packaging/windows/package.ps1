@@ -6,7 +6,6 @@
   Produces, in $env:DIST (default: dist/release):
     solidcraft-<version>-windows-<arch>.msi            per-machine installer (WiX v5)
     solidcraft-<version>-windows-<arch>-portable.zip   solidcraft.exe + solidcraft-cli.exe + licences
-                                                       (+ the solvecraft-cli.exe compatibility alias)
     SolidCraft-<version>-windows-<arch>.exe            the app alone (x64 only: a plain download)
 
   The binaries link the C runtime statically (+crt-static), so nothing else needs installing.
@@ -89,9 +88,7 @@ function Get-PeHeader([string] $Path) {
   return @{ Machine = [BitConverter]::ToUInt16($bytes, $pe + 4); Subsystem = [BitConverter]::ToUInt16($bytes, $pe + 0x5C) }
 }
 $Machine = switch ($Arch) { 'x64' { 0x8664 } 'x86' { 0x14C } 'arm64' { 0xAA64 } }
-# solvecraft-cli.exe: the old CLI name, forwarding to solidcraft-cli.exe (compatibility shim,
-# docs/compatibility.md). Built by `-p solidcraft-cli` with the CLI.
-foreach ($check in @(@('solidcraft.exe', 2), @('solidcraft-cli.exe', 3), @('solvecraft-cli.exe', 3))) {
+foreach ($check in @(@('solidcraft.exe', 2), @('solidcraft-cli.exe', 3))) {
   $h = Get-PeHeader (Join-Path $CheckDir $check[0])
   if ($h.Machine -ne $Machine) { throw "$($check[0]) is for machine 0x$('{0:X}' -f $h.Machine), expected 0x$('{0:X}' -f $Machine) ($Arch)" }
   if ($h.Subsystem -ne $check[1]) { throw "$($check[0]) has PE subsystem $($h.Subsystem), expected $($check[1])" }
@@ -112,7 +109,7 @@ function Get-DllImports([string] $Path) {
   if (-not $dumpbin) { throw 'cannot check the CLI imports: neither llvm-objdump nor dumpbin was found' }
   return & $dumpbin.FullName /nologo /dependents $Path | Select-String '^\s+(\S+\.dll)\s*$' | ForEach-Object { $_.Matches[0].Groups[1].Value }
 }
-foreach ($exe in 'solidcraft-cli.exe', 'solvecraft-cli.exe') {
+foreach ($exe in 'solidcraft-cli.exe') {
   $imports = @(Get-DllImports (Join-Path $CheckDir $exe))
   if ($imports.Count -eq 0) { throw "could not read the DLL imports of $exe" }
   if ($imports -contains 'opengl32.dll') {
@@ -124,7 +121,7 @@ foreach ($exe in 'solidcraft-cli.exe', 'solvecraft-cli.exe') {
 if ($Phase -ne 'package') {
   Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force -Path $Stage | Out-Null
-  Copy-Item (Join-Path $Bin 'solidcraft.exe'), (Join-Path $Bin 'solidcraft-cli.exe'), (Join-Path $Bin 'solvecraft-cli.exe') $Stage
+  Copy-Item (Join-Path $Bin 'solidcraft.exe'), (Join-Path $Bin 'solidcraft-cli.exe') $Stage
   foreach ($f in 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'THIRD-PARTY-LICENSES.txt') { Copy-Item (Join-Path $Root $f) $Stage }
 }
 if ($Phase -eq 'stage') {

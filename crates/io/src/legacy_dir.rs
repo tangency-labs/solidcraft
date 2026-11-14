@@ -86,16 +86,16 @@ mod tests {
     #[test]
     fn copies_legacy_folder_once_and_keeps_it() {
         let d = scratch("copy");
-        let old = d.join("solvecraft");
+        let old = d.join("old");
         std::fs::create_dir_all(old.join("recovery")).unwrap();
         std::fs::write(old.join("graphics.json"), "{\"msaa\":8}").unwrap();
-        std::fs::write(old.join("recovery").join("a.solvecraft"), "x").unwrap();
+        std::fs::write(old.join("recovery").join("a.sc"), "x").unwrap();
         let new = d.join("solidcraft");
         assert!(adopt_legacy_dir(&new, &old).unwrap());
         assert_eq!(std::fs::read_to_string(new.join("graphics.json")).unwrap(), "{\"msaa\":8}");
-        assert!(new.join("recovery").join("a.solvecraft").is_file());
+        assert!(new.join("recovery").join("a.sc").is_file());
         // The legacy folder is untouched.
-        assert!(old.join("graphics.json").is_file() && old.join("recovery").join("a.solvecraft").is_file());
+        assert!(old.join("graphics.json").is_file() && old.join("recovery").join("a.sc").is_file());
         // Once the current folder exists, nothing is copied again.
         std::fs::write(old.join("later.json"), "{}").unwrap();
         assert!(!adopt_legacy_dir(&new, &old).unwrap());
@@ -139,7 +139,7 @@ mod tests {
         assert!(!adopt_legacy_dir(&new, &d.join("missing")).unwrap());
         assert!(!new.exists());
         // An existing current folder is never overwritten.
-        let old = d.join("solvecraft");
+        let old = d.join("old");
         std::fs::create_dir_all(&old).unwrap();
         std::fs::write(old.join("p.json"), "old").unwrap();
         std::fs::create_dir_all(&new).unwrap();
