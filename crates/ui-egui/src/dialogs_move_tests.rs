@@ -1254,7 +1254,8 @@ fn offset_plane_through_a_snapped_middle_keeps_it_when_edited() {
     h.app.viewport.snapped = vec![(edge, SnapPoint { at: middle, kind: SnapKind::Middle, body: "Body1".into() })];
     let d = h.app.dialog.as_mut().unwrap();
     d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
-    d.inputs[1].items = vec![Sel::Vertex { body: "Body1".into(), point: middle }];
+    let through = d.inputs.iter_mut().find(|i| i.label == "Through point").expect("Through point");
+    through.items = vec![Sel::Vertex { body: "Body1".into(), point: middle }];
     let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(commands[0].1["through"]["type"], "snap", "{:?}", commands);
     h.step(&json!({ "key": "Enter" })).unwrap();
@@ -1269,7 +1270,7 @@ fn offset_plane_through_a_snapped_middle_keeps_it_when_edited() {
     let mut reopened = crate::dialogs::for_feature(&h.app, id, None).unwrap();
     let commands = crate::dialogs::apply_commands(&h.app, &reopened).unwrap();
     assert_eq!(commands[0].1["params"]["through"]["kind"], "middle", "{:?}", commands);
-    reopened.inputs[1].items.clear();
+    reopened.inputs.iter_mut().find(|i| i.label == "Through point").expect("Through point").items.clear();
     let commands = crate::dialogs::apply_commands(&h.app, &reopened).unwrap();
     assert!(commands[0].1["params"]["through"].is_null(), "{:?}", commands);
 }

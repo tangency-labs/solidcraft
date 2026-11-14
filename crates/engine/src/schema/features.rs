@@ -754,6 +754,9 @@ pub struct OffsetPlaneParams {
 }
 
 /// Add a construction plane: `base` turned by `angle` about an axis.
+///
+/// Optional `offset` or `through` first moves the base along its normal (same rules as Offset
+/// Plane), then the angle turns that parallel plane — one feature, no intermediate plane.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PlaneAtAngleParams {
@@ -764,12 +767,21 @@ pub struct PlaneAtAngleParams {
     pub axis: AxisLine,
     /// How far to turn, counterclockwise looking back along `axis`'s direction.
     pub angle: AngleExpr,
-    /// Use only the axis direction (projected onto `base`), not the axis as a full line.
-    /// When true, the plane turns about the line through `pivot` (or the base origin).
+    /// How far to move `base` along its normal before the turn (negative: the other way).
+    /// Omit for no offset; not with `through` (`null` counts as not given).
+    #[serde(default)]
+    pub offset: Option<LengthExpr>,
+    /// A point the parallel plane goes through instead of `offset`, then the angle turns that
+    /// plane. Same point kinds as Offset Plane. `null` counts as not given.
+    #[serde(default)]
+    pub through: Option<GeoRefParam>,
+    /// Use only the axis direction (projected onto the plane after any offset), not the axis as
+    /// a full line. When true, the plane turns about the line through `pivot` (or that plane's
+    /// origin).
     #[serde(default)]
     pub direction_only: Option<bool>,
     /// Pivot for `direction_only`: a vertex, sketch point, construction point or fixed point.
-    /// Omit to use the base plane's origin. `null` counts as not given.
+    /// Omit to use the (possibly offset) base plane's origin. `null` counts as not given.
     #[serde(default)]
     pub pivot: Option<GeoRefParam>,
     #[serde(flatten, deserialize_with = "feature_common")]

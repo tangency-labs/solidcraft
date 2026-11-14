@@ -419,6 +419,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     } else if matches!(d.kind, Kind::PatternRect { .. }) {
         // Each direction's pick shows in its own group, with its quantity and spacing (#9634).
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..1);
+    } else if matches!(d.kind, Kind::OffsetPlane { .. } | Kind::AnglePlane { .. }) {
+        // Shared Offset / Angle sections; which starts open differs by command (#12038).
+        enter |= offset_angle_plane_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     }
@@ -883,9 +886,89 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
     enter
 }
 
+/// Offset Plane and Plane at Angle share one form: Plane above Offset and Angle sections (#12038).
+/// Offset Plane opens Offset; Plane at Angle opens Angle. The other section starts collapsed
+/// unless it already has a value (edit / restore).
+fn offset_angle_plane_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames) -> bool {
+    let mut enter = false;
+    let offset_command = matches!(d.kind, Kind::OffsetPlane { .. });
+    crate::dialogs::input_rows_range(d, ui, s, names, 0..1);
+    let through = offset_through_point(d).is_some();
+    let offset_filled = match &d.kind {
+        Kind::OffsetPlane { offset, .. } | Kind::AnglePlane { offset, .. } => !offset.trim().is_empty(),
+        _ => false,
+    };
+    let angle_filled = match &d.kind {
+        Kind::OffsetPlane { angle, direction_only, .. } | Kind::AnglePlane { angle, direction_only, .. } => {
+            !angle.trim().is_empty() || *direction_only
+        }
+        _ => false,
+    };
+    // Offset Plane: Offset open; Plane at Angle: Offset collapsed unless a value is set.
+    let offset_open = offset_command || through || offset_filled;
+    // Plane at Angle: Angle open; Offset Plane: Angle collapsed unless a value is set.
+    let angle_open = !offset_command || angle_filled;
+    let through_i = d.inputs.iter().position(|i| i.label == "Through point");
+    let axis_i = d.inputs.iter().position(|i| i.label == "Axis");
+    let section_id = if offset_command { "plane_offset" } else { "plane_angle" };
+    let offset_section = format!("{section_id}_offset");
+    let turn_section = format!("{section_id}_turn");
+    // Seed open once (start / edit restore). Later header clicks must stick (#12038).
+    if !d.plane_sections_seeded {
+        d.plane_sections_seeded = true;
+        if offset_open {
+            let id = ui.make_persistent_id(&offset_section);
+            ui.ctx().data_mut(|data| data.insert_persisted(id, true));
+        }
+        if angle_open {
+            let id = ui.make_persistent_id(&turn_section);
+            ui.ctx().data_mut(|data| data.insert_persisted(id, true));
+        }
+    }
+    enter |= ui_kit::section(ui, &offset_section, "Offset", offset_open, |ui| {
+        let mut enter = false;
+        let through = offset_through_point(d).is_some();
+        match &mut d.kind {
+            Kind::OffsetPlane { offset, .. } | Kind::AnglePlane { offset, .. } if !through => {
+                // Hint "0": leave empty for no offset before the turn (Angle Plane).
+                // Offset Plane still defaults to "0 mm" in the kind.
+                enter |= hint_row(ui, "Offset", offset, "0");
+            }
+            _ => {}
+        }
+        if let Some(i) = through_i {
+            crate::dialogs::input_rows_range(d, ui, s, names, i..i + 1);
+        }
+        enter
+    })
+    .unwrap_or(false);
+    enter |= ui_kit::section(ui, &turn_section, "Angle", angle_open, |ui| {
+        let mut enter = false;
+        if let Some(i) = axis_i {
+            crate::dialogs::input_rows_range(d, ui, s, names, i..i + 1);
+        }
+        match &mut d.kind {
+            Kind::OffsetPlane { angle, direction_only, .. } | Kind::AnglePlane { angle, direction_only, .. } => {
+                // Empty angle on Offset Plane means a plain offset (no turn).
+                enter |= hint_row(ui, "Angle", angle, if offset_command { "none" } else { "45 deg" });
+                // Inline in Angle — no nested Options section (#12038).
+                ui_kit::checkbox_grid(ui, &mut [("Use axis direction only", direction_only)], 1);
+                const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
+                set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, *direction_only);
+            }
+            _ => {}
+        }
+        if let Some(i) = d.inputs.iter().position(|inp| inp.label == "Pivot") {
+            crate::dialogs::input_rows_range(d, ui, s, names, i..i + 1);
+        }
+        enter
+    })
+    .unwrap_or(false);
+    enter
+}
+
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
-    let through_point = offset_through_point(d).is_some();
     match &mut d.kind {
         Kind::Revolve { angle, operation, .. } => {
             let cur = usize::from(to_object_on(&d.inputs));
@@ -951,17 +1034,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 });
             }
         }
-        Kind::OffsetPlane { offset } => {
-            if !through_point {
-                enter |= expr_row(ui, "Distance", offset);
-            }
-        }
-        Kind::AnglePlane { angle, direction_only } => {
-            enter |= expr_row(ui, "Angle", angle);
-            ui_kit::options(ui, "plane_angle_options", &mut [("Use axis direction only", direction_only)]);
-            const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
-            set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, *direction_only);
-        }
+        // OffsetPlane / AnglePlane form rows are painted in `offset_angle_plane_rows` (#12038).
         // The angle turns the plane from its reference, so it shows once one is picked.
         Kind::TangentPlane { angle } => {
             if d.inputs.get(1).is_some_and(|inp| !inp.items.is_empty()) {

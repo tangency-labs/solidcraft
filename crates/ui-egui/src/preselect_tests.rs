@@ -2985,6 +2985,19 @@ fn midplane_asks_for_two_planes_then_builds_the_one_between_them() {
     assert!((pl.origin.z - 10.0).abs() < 1e-6, "{pl:?}");
 }
 
+/// Offset Plane still advances to Through point after Plane while Angle is empty (#12038).
+#[test]
+fn offset_plane_advances_to_through_point_not_axis() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.start("construct.plane.offset");
+    h.frames(1);
+    let d = h.app.dialog.as_mut().unwrap();
+    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Plane", "Axis", "Through point"]);
+    d.pick(&h.app.session, Sel::Plane { name: "XY".into() });
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[d.active].label, "Through point", "active={}; inputs={:?}", d.active, d.inputs);
+}
+
 /// Offset Plane through a point: a vertex picked as well as the plane puts the plane through
 /// it, the distance row goes away, and editing the plane shows both picks again.
 #[test]
@@ -2994,10 +3007,11 @@ fn offset_plane_through_a_picked_vertex() {
     h.app.start("construct.plane.offset");
     h.frames(1);
     let d = h.app.dialog.as_mut().unwrap();
-    assert_eq!(d.inputs.len(), 2);
+    assert!(d.inputs.iter().any(|i| i.label == "Axis"), "{:?}", d.inputs);
     d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
-    d.inputs[1].items = vec![Sel::Vertex { body: "Box".into(), point: Vec3::new(40.0, 30.0, 20.0) }];
-    assert!(d.primary().is_none(), "no distance to type or drag");
+    let through = d.inputs.iter_mut().find(|i| i.label == "Through point").unwrap();
+    through.items = vec![Sel::Vertex { body: "Box".into(), point: Vec3::new(40.0, 30.0, 20.0) }];
+    assert!(d.primary().is_none(), "no offset to type or drag when Through is set");
     let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(commands.first().map(|c| c.1.clone()), Some(json!({"base":"XY","through":{"vertex":[40.0,30.0,20.0]},"offset":null})));
     h.step(&json!({"key":"Enter"})).unwrap();
@@ -3008,7 +3022,8 @@ fn offset_plane_through_a_picked_vertex() {
     assert!(pl.normal().cross(Vec3::Z).len() < 1e-6 && (pl.origin.z - 20.0).abs() < 1e-6, "{pl:?}");
     let reopened = crate::dialogs::for_feature(&h.app, id, None).unwrap();
     assert_eq!(reopened.inputs[0].items, vec![Sel::Plane { name: "XY".into() }]);
-    assert!(matches!(reopened.inputs[1].items.as_slice(), [Sel::Vertex { body, .. }] if body == "Box"), "{:?}", reopened.inputs[1].items);
+    let through = reopened.inputs.iter().find(|i| i.label == "Through point").unwrap();
+    assert!(matches!(through.items.as_slice(), [Sel::Vertex { body, .. }] if body == "Box"), "{:?}", through.items);
 }
 
 /// Plane at Angle's "Use axis direction only" option shows a Pivot pick and sends both parameters (#12041).
@@ -3092,7 +3107,7 @@ fn check_offset_plane_wire_point(index: usize, point: Vec3) {
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
-        d.active = 1;
+        d.active = d.inputs.iter().position(|i| i.label == "Through point").expect("Through point");
     }
     h.frames(2);
     let [x, y] = h.at(&json!({"world":[point.x,point.y,point.z]})).unwrap();
@@ -3111,7 +3126,11 @@ fn check_offset_plane_wire_point(index: usize, point: Vec3) {
     let hit = hits.iter().find(|hit| matches!(hit, crate::viewport::Hit::SketchPoint3d { .. })).expect("pickable 3D point");
     let picked = h.app.dialog.as_ref().unwrap().candidate(&h.app.session, hit).expect("accepted point reference");
     assert_eq!(picked, Sel::SketchPoint { id: format!("{sketch}:{wire}:{index}") });
-    h.app.dialog.as_mut().unwrap().inputs[1].items = vec![picked];
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        let through = d.inputs.iter_mut().find(|i| i.label == "Through point").expect("Through point");
+        through.items = vec![picked];
+    }
     let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(commands[0].1["through"], json!({"sketch":sketch,"point":format!("{wire}:{index}")}));
     axis_point_evidence(&mut h, &format!("3d-node-offset-plane-{index}"));
@@ -3119,7 +3138,8 @@ fn check_offset_plane_wire_point(index: usize, point: Vec3) {
     let (feature, _, plane) = solidcraft_engine::view::construction_planes(&h.app.session).into_iter().next().unwrap();
     assert!((plane.origin.z - point.z).abs() < 1e-9);
     let reopened = crate::dialogs::for_feature(&h.app, feature, None).unwrap();
-    assert_eq!(reopened.inputs[1].items, vec![Sel::SketchPoint { id: format!("{sketch}:{wire}:{index}") }]);
+    let through = reopened.inputs.iter().find(|i| i.label == "Through point").expect("Through point");
+    assert_eq!(through.items, vec![Sel::SketchPoint { id: format!("{sketch}:{wire}:{index}") }]);
     h.call("ui.prefs", json!({"select_3d_curve_points":false}));
     assert!(!crate::viewport::standalone_points(&h.app).contains(&point));
 }
@@ -3170,7 +3190,7 @@ fn hole_keeps_planar_point_when_a_3d_wire_point_is_nearer() {
     // Deliberately share a point mask to isolate the dialog policy in the pick cache.
     // Switching without moving the cursor must invalidate the construction hit.
     let mut construction = crate::dialogs::Dialog::for_command(&h.app, "construct.plane.offset").unwrap();
-    construction.active = 1;
+    construction.active = construction.inputs.iter().position(|i| i.label == "Through point").expect("Through point");
     let accept = construction.active_input().unwrap().accept;
     let mut hole = crate::dialogs::Dialog::for_command(&h.app, "solid.hole").unwrap();
     if let Kind::Hole { opts, .. } = &mut hole.kind {
@@ -3233,7 +3253,7 @@ fn plane_tool_opens_as_the_method_its_picks_call_for() {
     let d = h.app.dialog.as_ref().unwrap();
     assert!(matches!(d.kind, Kind::OffsetPlane { .. }) && d.auto.is_some(), "{d:?}");
     assert_eq!(d.items(), vec![Sel::Plane { name: "XY".into() }], "the selection is the first pick");
-    assert!(h.app.dialog.as_mut().unwrap().primary().is_some_and(|(label, ..)| label == "Distance"), "Offset Plane's own value and handle");
+    assert!(h.app.dialog.as_mut().unwrap().primary().is_some_and(|(label, ..)| label == "Offset"), "Offset Plane's own value and handle");
     h.app.dialog.as_mut().unwrap().pick(&h.app.session, Sel::Plane { name: "Shelf".into() });
     h.frames(2);
     let d = h.app.dialog.as_ref().unwrap();
@@ -3257,6 +3277,88 @@ fn plane_tool_opens_as_the_method_its_picks_call_for() {
     let (_, _, pl) =
         solidcraft_engine::view::construction_planes(&h.app.session).into_iter().find(|(_, name, _)| name != "Shelf").expect("the midplane");
     assert!(pl.normal().cross(Vec3::Z).len() < 1e-6 && (pl.origin.z - 10.0).abs() < 1e-6, "{pl:?}");
+}
+
+/// Cleared Offset on an angled plane is null, not an empty expression (#12038 review).
+#[test]
+fn angled_plane_cleared_offset_is_null() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.start("construct.plane.offset");
+    h.frames(1);
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+    d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    if let Kind::OffsetPlane { angle, offset, .. } = &mut d.kind {
+        *angle = "45 deg".into();
+        *offset = String::new();
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        commands.first().map(|c| c.1.clone()),
+        Some(json!({
+            "base": "XY",
+            "axis": "X",
+            "angle": "45 deg",
+            "direction_only": false,
+            "offset": null
+        }))
+    );
+
+    h.app.dialog = None;
+    h.app.start("construct.plane.at_angle");
+    h.frames(1);
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+    d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    if let Kind::AnglePlane { offset, .. } = &mut d.kind {
+        *offset = String::new();
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands.first().and_then(|c| c.1.get("offset").cloned()), Some(json!(null)));
+}
+
+/// Plane at Angle with an Offset builds one nested feature and restores Offset on edit (#12038).
+#[test]
+fn plane_at_angle_offset_applies_and_reopens() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.start("construct.plane.at_angle");
+    h.frames(2);
+    let d = h.app.dialog.as_mut().unwrap();
+    assert!(matches!(&d.kind, Kind::AnglePlane { offset, .. } if offset.is_empty()), "{:?}", d.kind);
+    assert!(d.inputs.iter().any(|i| i.label == "Through point"), "{:?}", d.inputs);
+    d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+    d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    if let Kind::AnglePlane { angle, offset, .. } = &mut d.kind {
+        *angle = "45 deg".into();
+        *offset = "25 mm".into();
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        commands.first().map(|c| c.1.clone()),
+        Some(json!({
+            "base": "XY",
+            "axis": "X",
+            "angle": "45 deg",
+            "direction_only": false,
+            "offset": "25 mm"
+        }))
+    );
+    let (cmd, params) = commands.into_iter().next().unwrap();
+    h.app.dialog = None;
+    let id = h.app.run(&cmd, params).unwrap()["feature"].as_u64().unwrap();
+    assert_eq!(solidcraft_engine::view::construction_planes(&h.app.session).len(), 1);
+    let pl = solidcraft_engine::view::construction_planes(&h.app.session)
+        .into_iter()
+        .find(|(fid, _, _)| *fid == id)
+        .map(|(_, _, pl)| pl)
+        .expect("the plane");
+    // Offset 25 mm then 45° about X: origin stays on X, z and y split by √2/2.
+    let h45 = 25.0_f64 / 2.0_f64.sqrt();
+    assert!((pl.origin - Vec3::new(0.0, -h45, h45)).len() < 1e-3, "{pl:?}");
+    let reopened = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    assert!(matches!(&reopened.kind, Kind::AnglePlane { offset, .. } if offset == "25 mm"), "{:?}", reopened.kind);
+    assert!(matches!(reopened.inputs[0].items.as_slice(), [Sel::Plane { name }] if name == "XY"), "{:?}", reopened.inputs[0].items);
+    assert!(matches!(reopened.inputs[1].items.as_slice(), [Sel::Axis { name }] if name == "X"), "{:?}", reopened.inputs[1].items);
 }
 
 /// Plane at Angle draws the tilted plane while its dialog is open, when created and when edited,

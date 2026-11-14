@@ -132,14 +132,25 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::Draft { angle, .. }) {
             angle: String = "5 deg".into() => shown_expr(angle, ValueKind::Angle),
         } => json!({"angle": angle});
-        // A point picked as well puts the plane through it instead of at the distance.
-        OffsetPlane("construct.plane.offset", "OFFSET PLANE", [("Plane", PLANES | PLANAR_FACES, false), ("Through point", selection::VERTICES | selection::POINTS | selection::SNAP_POINTS, false)],
+        // Same capabilities as Plane at Angle; Offset section starts open, Angle collapsed (#12038).
+        OffsetPlane("construct.plane.offset", "OFFSET PLANE",
+            [("Plane", PLANES | PLANAR_FACES, false), ("Axis", AXIS_PICKS, false), ("Through point", selection::VERTICES | selection::POINTS | selection::SNAP_POINTS, false)],
             FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { distance, .. } }) {
             offset: String = "0 mm".into() => shown_expr(distance, ValueKind::Length),
+            // Empty angle keeps a plain offset; a filled angle runs Plane at Angle under the hood.
+            angle: String = String::new() => String::new(),
+            direction_only: bool = false => false,
         } => json!({"offset": offset});
-        AnglePlane("construct.plane.at_angle", "PLANE AT ANGLE", [("Plane", PLANES | PLANAR_FACES, false), ("Axis", AXIS_PICKS, false)],
-            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, direction_only, .. } }) {
+        // Same capabilities as Offset Plane; Offset section starts collapsed, Angle open (#12038).
+        AnglePlane("construct.plane.at_angle", "PLANE AT ANGLE",
+            [("Plane", PLANES | PLANAR_FACES, false), ("Axis", AXIS_PICKS, false), ("Through point", selection::VERTICES | selection::POINTS | selection::SNAP_POINTS, false)],
+            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { base, angle, direction_only, .. } }) {
             angle: String = "45 deg".into() => shown_expr(angle, ValueKind::Angle),
+            // Empty means no offset; a nested Offset restores its distance.
+            offset: String = String::new() => match base.as_ref() {
+                PlaneRef::Offset { distance, .. } => shown_expr(distance, ValueKind::Length),
+                _ => String::new(),
+            },
             direction_only: bool = false => *direction_only,
         } => json!({"angle": angle, "direction_only": direction_only});
         // With a reference plane, the plane touches where the face turns towards it (#8822).
@@ -609,6 +620,8 @@ pub struct Dialog {
     /// shown while this dialog is open, as an edited feature's sketch does, so its profiles can
     /// be picked even when an earlier feature uses the sketch and hides it.
     pub(crate) started_from_sketch: Option<u64>,
+    /// Offset/Angle section open state was seeded once for this dialog (#12038).
+    pub(crate) plane_sections_seeded: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -881,6 +894,7 @@ impl Dialog {
             anchor_hint: None,
             started_from_sketch: None,
             auto: None,
+            plane_sections_seeded: false,
         }
     }
 
@@ -1428,7 +1442,9 @@ impl Dialog {
 
     /// Make the first single input still empty (after the filled ones) active.
     fn advance(&mut self) {
-        if let Some(i) = self.inputs.iter().position(|i| i.items.is_empty()) {
+        // Offset Plane keeps Through point next after Plane while Angle is empty (#12038).
+        let skip_axis = matches!(&self.kind, Kind::OffsetPlane { angle, .. } if angle.trim().is_empty());
+        if let Some(i) = self.inputs.iter().position(|inp| inp.items.is_empty() && !(skip_axis && inp.label == "Axis")) {
             self.active = i;
         } else {
             self.active = self.active.min(self.inputs.len().saturating_sub(1));
@@ -1532,7 +1548,7 @@ impl Dialog {
             Kind::PatternCirc { angle, .. } => ("Angle", ValueKind::Angle, angle),
             Kind::Section { offset, .. } => ("Distance", ValueKind::Length, offset),
             Kind::OffsetPlane { .. } if through_point => return None,
-            Kind::OffsetPlane { offset } => ("Distance", ValueKind::Length, offset),
+            Kind::OffsetPlane { offset, .. } => ("Offset", ValueKind::Length, offset),
             Kind::PathPlane { t, .. } => ("Position (0 to 1)", ValueKind::Unitless, t),
             Kind::Rib { thickness, .. } => ("Thickness", ValueKind::Length, thickness),
             Kind::Emboss { depth, .. } => ("Depth", ValueKind::Length, depth),
@@ -5971,21 +5987,45 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             crate::dialogs_sweep::params(app, opts, sels(d, 2).first(), [sels(d, 3), sels(d, 4)], &mut p)?;
             ("solid.sweep", p)
         }
-        Kind::OffsetPlane { .. } => {
+        Kind::OffsetPlane { angle, offset, direction_only, .. } => {
             need(0, "a plane")?;
             let base = plane_arg(app, sels(d, 0).first())?;
-            match offset_through_point(d) {
-                // A null `offset` keeps the descriptor's distance out: the plane goes through the point.
-                Some(point) => {
-                    // A snap point saved before, picked again where it was: kept as saved.
-                    let through = match (point, d.extra.get("through")) {
-                        (Sel::Vertex { point, .. }, Some(saved)) if saved.get("at").and_then(vec3_of) == Some(*point) => saved.clone(),
-                        _ => construct_ref(app, point)?,
-                    };
-                    ("construct.plane.offset", json!({"base": base, "through": through, "offset": null}))
+            // With an angle, Offset Plane is Plane at Angle with the same nesting (#12038).
+            if !angle.trim().is_empty() {
+                let axis = match sels(d, 1).first() {
+                    Some(x) => axis_param(app, x)?,
+                    None => d.extra.get("axis").cloned().ok_or("pick an axis")?,
+                };
+                let mut p = json!({"base": base, "axis": axis, "angle": angle, "direction_only": direction_only});
+                match offset_through_point(d) {
+                    Some(point) => {
+                        p["through"] = construct_ref(app, point)?;
+                        p["offset"] = Value::Null;
+                    }
+                    None if !offset.trim().is_empty() => {
+                        p["offset"] = json!(offset);
+                    }
+                    // Null keeps fill_simple_params from inserting an empty offset expression.
+                    None => p["offset"] = Value::Null,
                 }
-                // A null `through` keeps a saved snap point (`extra`) out: the plane is at the distance.
-                None => ("construct.plane.offset", json!({"base": base, "through": null})),
+                if *direction_only && let Some(pivot) = angle_pivot(d) {
+                    p["pivot"] = construct_ref(app, pivot)?;
+                }
+                ("construct.plane.at_angle", p)
+            } else {
+                match offset_through_point(d) {
+                    // A null `offset` keeps the descriptor's distance out: the plane goes through the point.
+                    Some(point) => {
+                        // A snap point saved before, picked again where it was: kept as saved.
+                        let through = match (point, d.extra.get("through")) {
+                            (Sel::Vertex { point, .. }, Some(saved)) if saved.get("at").and_then(vec3_of) == Some(*point) => saved.clone(),
+                            _ => construct_ref(app, point)?,
+                        };
+                        ("construct.plane.offset", json!({"base": base, "through": through, "offset": null}))
+                    }
+                    // A null `through` keeps a saved snap point (`extra`) out: the plane is at the distance.
+                    None => ("construct.plane.offset", json!({"base": base, "through": null})),
+                }
             }
         }
         Kind::MeshConvert { tolerance } => {
@@ -6055,7 +6095,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 None => ("construct.plane.tangent", json!({"face": face, "angle": null})),
             }
         }
-        Kind::AnglePlane { direction_only, .. } => {
+        Kind::AnglePlane { direction_only, offset, .. } => {
             need(0, "a plane")?;
             let base = plane_arg(app, sels(d, 0).first())?;
             let axis = match sels(d, 1).first() {
@@ -6063,6 +6103,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 None => d.extra.get("axis").cloned().ok_or("pick an axis")?,
             };
             let mut p = json!({"base": base, "axis": axis, "direction_only": direction_only});
+            match angle_through_point(d) {
+                // A null `offset` keeps any descriptor distance out: the plane goes through the point first.
+                Some(point) => {
+                    p["through"] = construct_ref(app, point)?;
+                    p["offset"] = Value::Null;
+                }
+                None if !offset.trim().is_empty() => {
+                    p["offset"] = json!(offset);
+                }
+                // Explicit null: no offset before the turn (and no empty expression).
+                None => p["offset"] = Value::Null,
+            }
             if *direction_only && let Some(pivot) = angle_pivot(d) {
                 p["pivot"] = construct_ref(app, pivot)?;
             }
@@ -7203,17 +7255,23 @@ fn plane_arg(app: &SolveApp, sel: Option<&Sel>) -> Result<Value, String> {
     }
 }
 
-/// The point an Offset Plane dialog puts its plane through, when one is picked.
+/// The Through point on Offset Plane or Plane at Angle (#12038).
 pub(crate) fn offset_through_point(d: &Dialog) -> Option<&Sel> {
-    if !matches!(d.kind, Kind::OffsetPlane { .. }) {
+    if !matches!(d.kind, Kind::OffsetPlane { .. } | Kind::AnglePlane { .. }) {
         return None;
     }
-    sels(d, 1).first()
+    d.inputs.iter().find(|i| i.label == "Through point").and_then(|i| i.items.first())
 }
 
-/// Pivot pick on Plane at Angle when "Use axis direction only" is on.
+/// The Through point on Plane at Angle when offsetting before the turn (#12038).
+pub(crate) fn angle_through_point(d: &Dialog) -> Option<&Sel> {
+    offset_through_point(d).filter(|_| matches!(d.kind, Kind::AnglePlane { .. }))
+}
+
+/// Pivot pick when "Use axis direction only" is on (Offset Plane or Plane at Angle, #12038).
 pub(crate) fn angle_pivot(d: &Dialog) -> Option<&Sel> {
-    if !matches!(d.kind, Kind::AnglePlane { direction_only: true, .. }) {
+    let on = matches!(d.kind, Kind::AnglePlane { direction_only: true, .. } | Kind::OffsetPlane { direction_only: true, .. });
+    if !on {
         return None;
     }
     d.inputs.iter().find(|i| i.label == "Pivot").and_then(|i| i.items.first())
@@ -8083,7 +8141,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = plane_sel(s, base).into_iter().collect();
             }
-            if let Some(inp) = d.inputs.get_mut(1) {
+            if let Some(inp) = d.inputs.iter_mut().find(|i| i.label == "Through point") {
                 inp.items = point_sel(s, point).into_iter().collect();
             }
             if matches!(point.as_ref(), solidcraft_engine::doc::construct::GeoRef::Snap { .. }) {
@@ -8157,8 +8215,20 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { base, axis_origin, axis_dir, line, direction_only, pivot, .. } } => {
             let mut d = start("construct.plane.at_angle")?;
             d.kind = Kind::simple_restore(&f.kind)?;
+            // Nested Offset / ThroughPoint is the optional pre-angle move (#12038): pick the
+            // underlying plane and restore Through when that form was used.
+            let (plane_base, through) = match base.as_ref() {
+                PlaneRef::Offset { base, .. } => (base.as_ref(), None),
+                PlaneRef::ThroughPoint { base, point } => (base.as_ref(), Some(point.as_ref())),
+                other => (other, None),
+            };
             if let Some(inp) = d.inputs.first_mut() {
-                inp.items = plane_sel(s, base).into_iter().collect();
+                inp.items = plane_sel(s, plane_base).into_iter().collect();
+            }
+            if let Some(point) = through
+                && let Some(inp) = d.inputs.iter_mut().find(|i| i.label == "Through point")
+            {
+                inp.items = point_sel(s, point).into_iter().collect();
             }
             let pick = match line {
                 Some(g) => model_axis_sel(s, g),

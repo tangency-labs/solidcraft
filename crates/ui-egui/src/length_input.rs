@@ -170,7 +170,10 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         }
         D::Shell { thickness } => vec![thickness],
         D::PatternRect { spacing, spacing2, .. } => vec![spacing, spacing2],
-        D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
+        D::Section { offset, .. } => vec![offset],
+        // Empty Offset means no pre-angle move; only convert a typed length (#12038).
+        D::OffsetPlane { offset, .. } | D::AnglePlane { offset, .. } if !offset.trim().is_empty() => vec![offset],
+        D::OffsetPlane { .. } | D::AnglePlane { .. } => vec![],
         D::OffsetFaces { distance } => vec![distance],
         D::MeshConvert { tolerance } => vec![tolerance],
         D::Thread { length, .. } | D::Emboss { depth: length, .. } => vec![length],
