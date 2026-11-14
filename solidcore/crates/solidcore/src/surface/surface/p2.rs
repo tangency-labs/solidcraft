@@ -305,6 +305,7 @@ use crate::surface::surf_of_extrusion::SurfOfExtrusion;
 use crate::surface::surf_of_revolution::p3::intersect_revolved_into;
 use crate::surface::surf_of_revolution::{Revolved, SurfOfRevolution};
 use crate::surface::surface::p1::{StepSurface, SurfaceIntersectContext, SurfaceSolveContext};
+use crate::surface::surface::p3::SingularitiesMemo;
 use crate::surface::surface::p8::BoundaryMemo;
 use crate::surface::surface::p8::FaceSolveCache;
 use crate::surface::surface_cache::p1::SurfaceCache;
@@ -439,6 +440,9 @@ pub struct Surface {
     /// Not upstream: the memo of the natural boundary curves `CoincidenceCheck` makes
     /// (`BoundaryMemo`); a copy starts an empty one, an edit replaces it.
     boundary_memo: BoundaryMemo,
+    /// Not upstream: the memo of the singular sides `GetSingularities` finds
+    /// (`SingularitiesMemo`); a copy starts an empty one, an edit replaces it.
+    singularities_memo: SingularitiesMemo,
     /// Not upstream (#2485, #2488): a round of an exact class or a blend corner's face,
     /// this surface its net, keeps its definition here ([`Surface::procedural_blend`]). A
     /// copy, a piece, an extension and an edit of the parametrization carry it (the
@@ -630,6 +634,7 @@ impl Clone for Surface {
             notify_identity: IdentitySlot::new(),
             made_kind: MadeKindSlot::default(),
             boundary_memo: BoundaryMemo::new(),
+            singularities_memo: SingularitiesMemo::new(),
             definition: self.definition.clone(),
         };
         s.update_owned_bases();
@@ -958,6 +963,7 @@ impl Surface {
             notify_identity: IdentitySlot::new(),
             made_kind: self.made_kind.shared(),
             boundary_memo: BoundaryMemo::new(),
+            singularities_memo: SingularitiesMemo::new(),
             definition: None,
         })
     }
@@ -1054,6 +1060,7 @@ impl Surface {
             notify_identity: IdentitySlot::new(),
             made_kind: self.made_kind.shared(),
             boundary_memo: BoundaryMemo::new(),
+            singularities_memo: SingularitiesMemo::new(),
             definition: self.definition.clone(),
         }
     }
@@ -1219,6 +1226,7 @@ impl Surface {
             notify_identity: IdentitySlot::new(),
             made_kind: MadeKindSlot::default(),
             boundary_memo: BoundaryMemo::new(),
+            singularities_memo: SingularitiesMemo::new(),
             definition: None,
         }
     }
@@ -1580,6 +1588,11 @@ impl Surface {
         &self.boundary_memo
     }
 
+    /// The memo of the singular sides `GetSingularities` finds (see `SingularitiesMemo`).
+    pub(crate) const fn singularities_memo(&self) -> &SingularitiesMemo {
+        &self.singularities_memo
+    }
+
     /// The concrete kind: once a `const` query made a cone's, sphere's, torus's or
     /// surface of revolution's missing NURB ([`Surface::kind_with_nurb`]), the made kind
     /// kept on this surface (`MadeKindSlot`), as upstream keeps the made NURB on the
@@ -1611,6 +1624,7 @@ impl Surface {
         }
         // an edit makes another surface value: start an empty boundary memo
         self.boundary_memo = BoundaryMemo::new();
+        self.singularities_memo = SingularitiesMemo::new();
         &mut self.kind
     }
 
@@ -3267,6 +3281,7 @@ impl Surface {
     ) -> Result<()> {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
+        self.singularities_memo = SingularitiesMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.adjust_step_uv_domain(new_step_uv_domain),
             SurfaceKind::ProceduralBlend(pb) => {
@@ -3326,6 +3341,7 @@ impl Surface {
     fn reverse_kind(&mut self, k: &Kernel, param: SurfParamType) -> Result<()> {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
+        self.singularities_memo = SingularitiesMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.reverse(param),
             SurfaceKind::ProceduralBlend(s) => s.reverse(param),
@@ -3409,6 +3425,7 @@ impl Surface {
     fn reparameterize_kind(&mut self, k: &Kernel, new_domain: &Extent2d) -> Result<()> {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
+        self.singularities_memo = SingularitiesMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.reparameterize(new_domain),
             SurfaceKind::ProceduralBlend(s) => s.reparameterize(new_domain),
@@ -3474,6 +3491,7 @@ impl Surface {
     ) -> Result<()> {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
+        self.singularities_memo = SingularitiesMemo::new();
         let type_code = self.type_code();
         let Self {
             kind,
@@ -3614,6 +3632,7 @@ impl Surface {
     ) -> Result<()> {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
+        self.singularities_memo = SingularitiesMemo::new();
         // (#2485, #2488) a definition moves with its net; one that cannot move so (a scale
         // that is not uniform) refuses before the net moves. A sweep's (#2572) that cannot
         // follow the motion is left behind: the net moves as it did without it.
@@ -3710,6 +3729,7 @@ impl Surface {
     ) -> Result<()> {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
+        self.singularities_memo = SingularitiesMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.trim_with_domain_with(trim_domain, options),
             SurfaceKind::ProceduralBlend(pb) => {

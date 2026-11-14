@@ -4215,6 +4215,57 @@ fn hovering_a_picked_edge_keeps_it_lit_in_the_pick_colours() {
     }
 }
 
+/// Hovering a picked face redraws its boundary edges in hover colors,
+/// instead of drawing nothing, so the pointer resting on a picked face is clearly visible.
+#[test]
+fn hovering_a_picked_face_draws_hover_edges_and_preserves_selection_fill() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.frames(2);
+    let pick = crate::dialogs::face_sel(&h.app.session, Vec3::new(20.0, 15.0, 20.0)).unwrap();
+    let Sel::Face { body, index, point } = &pick else { panic!("a face, not {pick:?}") };
+    h.app.session.selection = vec![pick.clone()];
+    h.frames(2);
+
+    let t = solidcraft_theme::Tokens::get();
+    let sel_blue = crate::viewport::c4(t.sel_face);
+    let hover_edge = crate::viewport::c4(t.hover_edge);
+
+    let mut drawn = |hover: Option<crate::viewport::Hit>| -> (Vec<[u8; 4]>, Vec<[u8; 4]>) {
+        h.app.viewport.hover = hover;
+        let scene = crate::viewport::build_highlight(&h.app).merged();
+        let palette = scene.palette.entries().to_vec();
+        let lines: Vec<[u8; 4]> = scene
+            .lines
+            .chunks(crate::gpu::LINE_SIZE)
+            .filter(|c| c.len() == crate::gpu::LINE_SIZE)
+            .map(|c| {
+                let idx = u32::from_le_bytes(c[24..28].try_into().unwrap());
+                palette.get(idx as usize).copied().unwrap_or([0; 4])
+            })
+            .collect();
+        let tris: Vec<[u8; 4]> = scene
+            .tris
+            .chunks(crate::gpu::TRI_SIZE)
+            .filter(|c| c.len() == crate::gpu::TRI_SIZE)
+            .map(|c| {
+                let idx = u32::from_le_bytes(c[24..28].try_into().unwrap());
+                palette.get(idx as usize).copied().unwrap_or([0; 4])
+            })
+            .collect();
+        (lines, tris)
+    };
+
+    let hover = crate::viewport::Hit::Face { body: body.clone(), index: *index, point: *point };
+    let (picked_lines, picked_tris) = drawn(None);
+    let (hovered_lines, hovered_tris) = drawn(Some(hover));
+
+    assert!(hovered_lines.len() > picked_lines.len(), "hovering the picked face lights its perimeter edges");
+    assert!(hovered_lines.contains(&hover_edge), "perimeter edges are drawn with hover_edge");
+    assert_eq!(hovered_tris.len(), picked_tris.len(), "face fill triangles are not duplicated");
+    assert!(hovered_tris.contains(&sel_blue), "face retains its selection blue fill");
+}
+
 /// #3683: a body or feature row lights what the Browser and timeline rows light: the body, or
 /// the feature's geometry; leaving it puts the view back.
 #[test]
@@ -4490,4 +4541,37 @@ fn split_face_dialog_keeps_a_sketch_split_and_its_loops() {
     assert_eq!(p["loops"], json!(true));
     let (_, p) = commands_for("ByPlane");
     assert!(p.get("sketch").is_none() && p.get("loops").is_none(), "{p}");
+}
+
+/// #16400: Plane Through Three Points takes a point on a mesh body's surface, the exact point of
+/// the triangle under the pointer.
+#[test]
+fn three_point_plane_dialog_takes_points_on_a_mesh_body() {
+    let mut h = crate::scenario::Harness::new();
+    let path = h.dir.join("box.stl");
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0]})).unwrap();
+    h.app.run("file.save_mesh", json!({"path": path})).unwrap();
+    h.app.run("file.new", json!({})).unwrap();
+    h.app.run("file.insert_mesh", json!({"path": path})).unwrap();
+    h.app.fit_view();
+    h.app.start("construct.plane.three_points");
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0));
+    let proj = crate::viewport::projection(&h.app, rect);
+    for point in [[20.0, 15.0, 20.0], [10.0, 5.0, 20.0], [30.0, 5.0, 20.0]] {
+        let pos = proj.to_screen(Vec3::new(point[0], point[1], point[2])).unwrap();
+        let hits = crate::viewport::pick(&h.app, &proj, pos);
+        let mut d = h.app.dialog.take().unwrap();
+        let sel = hits.iter().find_map(|hit| d.candidate(&h.app.session, hit)).expect("a point on the mesh is accepted");
+        d.pick(&h.app.session, sel);
+        h.app.dialog = Some(d);
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    for key in ["a", "b", "c"] {
+        let p = commands[0].1[key]["point"].as_array().unwrap_or_else(|| panic!("{key} is a free point: {:?}", commands[0].1[key]));
+        assert!((p[2].as_f64().unwrap() - 20.0).abs() < 1e-6, "{key} lies on the top triangles: {p:?}");
+    }
+    for (cmd, params) in commands {
+        h.app.run(&cmd, params).unwrap();
+    }
+    assert_eq!(solidcraft_engine::view::construction_planes(&h.app.session).len(), 1);
 }

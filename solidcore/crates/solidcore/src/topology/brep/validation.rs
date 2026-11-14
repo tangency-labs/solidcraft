@@ -35,6 +35,7 @@ pub use assert_valid::{
 pub use coincidence::{contains_coincident_topology, CoincidenceResult};
 pub(crate) use pointers::validate_geometry;
 pub use pointers::validate_pointers;
+pub(crate) use pointers::validate_pointers_excluding;
 pub(crate) use soundness::lost_manifold;
 pub use soundness::{soundness, standing, volume_sign, Soundness, Standing};
 pub use wide_vertices::update_tolerances_after_boolean;
@@ -110,6 +111,7 @@ fn object_info(b: &Brep, object: Object) -> Result<(ObjectKey, i64, &'static str
 struct Reports<'a> {
     array: Option<&'a mut AssertArray>,
     level: u8,
+    failed: bool,
 }
 
 impl Reports<'_> {
@@ -177,6 +179,7 @@ impl Reports<'_> {
         tol: f64,
         value: f64,
     ) -> Result<bool> {
+        self.failed |= !passed;
         let Some(array) = self.array.as_deref_mut() else {
             return Ok(passed);
         };

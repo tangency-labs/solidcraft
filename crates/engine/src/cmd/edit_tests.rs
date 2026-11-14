@@ -1662,6 +1662,34 @@ fn a_move_before_a_long_history_of_one_body_fits_a_window_threads_stack() {
     assert!(moved.is_ok());
 }
 
+/// A fillet on the curved top edge of an extruded spline profile certifies its blend with
+/// series whose coefficient tables, held inline, filled a window thread's 1 MB stack before the
+/// kernel finished (#16147, #16489). On a thread with that stack, the design is built and the
+/// fillet's result is its own, not an aborted process.
+#[test]
+fn a_fillet_on_a_spline_edge_fits_a_window_threads_stack() {
+    let built = std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let mut s = Session::default();
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "profile"}));
+            run(&mut s, "sketch.spline.fit_point", json!({"points": [[10, 10], [15, 14], [20, 15.5], [25, 14], [30, 10]]}));
+            run(&mut s, "sketch.line", json!({"points": [[30, 10], [10, 10]]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": "profile", "distance": 20, "operation": "new", "name": "boss", "body_name": "boss"}));
+            run(
+                &mut s,
+                "solid.fillet",
+                json!({"body": "boss", "edges": [[20.0, 15.5, 20.0]], "radius": 1, "tangent_chain": false, "name": "top_fillet"}),
+            );
+            let fillet = s.doc.features.last().map(|f| f.id).unwrap();
+            assert!(s.model.result(fillet).is_some());
+        })
+        .unwrap()
+        .join();
+    assert!(built.is_ok());
+}
+
 #[test]
 fn timeline_joint_folders_are_mixed_saved_and_undoable() {
     let mut s = Session::default();
