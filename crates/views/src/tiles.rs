@@ -108,7 +108,68 @@ fn split(axis: Axis, ratio: f32, first: Tiles, second: Tiles) -> Tiles {
     Tiles::Split { axis, ratio: clamp_ratio(ratio), first: Box::new(first), second: Box::new(second) }
 }
 
+/// The id a cell with no view in it carries: the window offers to choose what to show there.
+pub const EMPTY: u64 = 0;
+
 impl Tiles {
+    /// A layout of exactly `preset` showing `views` in order, each place beyond them an empty
+    /// cell ([`EMPTY`]). None without a view.
+    pub fn preset_padded(preset: Preset, views: &[u64]) -> Option<Tiles> {
+        if views.is_empty() {
+            return None;
+        }
+        let leaf = |i: usize| Tiles::Leaf(views.get(i).copied().unwrap_or(EMPTY));
+        Some(match preset {
+            Preset::Single => leaf(0),
+            Preset::SideBySide => split(Axis::Row, 0.5, leaf(0), leaf(1)),
+            Preset::Stacked => split(Axis::Column, 0.5, leaf(0), leaf(1)),
+            Preset::LargeAndTwo => split(Axis::Row, 0.62, leaf(0), split(Axis::Column, 0.5, leaf(1), leaf(2))),
+            Preset::Grid => split(Axis::Column, 0.5, split(Axis::Row, 0.5, leaf(0), leaf(1)), split(Axis::Row, 0.5, leaf(2), leaf(3))),
+        })
+    }
+
+    /// How many empty cells the layout has.
+    pub fn empty_cells(&self) -> usize {
+        match self {
+            Tiles::Leaf(id) => usize::from(*id == EMPTY),
+            Tiles::Split { first, second, .. } => first.empty_cells() + second.empty_cells(),
+        }
+    }
+
+    /// Show `view` in the empty cell number `ordinal` (in reading order). False when there is no
+    /// such cell or `view` is shown already.
+    pub fn fill_empty(&mut self, ordinal: usize, view: u64) -> bool {
+        if view == EMPTY || self.contains(view) {
+            return false;
+        }
+        self.nth_empty(ordinal).map(|leaf| *leaf = Tiles::Leaf(view)).is_some()
+    }
+
+    /// Close the empty cell number `ordinal`: its neighbour takes the space. False when there is
+    /// no such cell or it is the only one.
+    pub fn remove_empty(&mut self, ordinal: usize) -> bool {
+        const GONE: u64 = u64::MAX;
+        if self.len() < 2 {
+            return false;
+        }
+        if self.nth_empty(ordinal).map(|leaf| *leaf = Tiles::Leaf(GONE)).is_none() {
+            return false;
+        }
+        self.remove_leaf(GONE);
+        true
+    }
+
+    fn nth_empty(&mut self, ordinal: usize) -> Option<&mut Tiles> {
+        match self {
+            Tiles::Leaf(id) if *id == EMPTY && ordinal == 0 => Some(self),
+            Tiles::Leaf(_) => None,
+            Tiles::Split { first, second, .. } => {
+                let before = first.empty_cells();
+                if ordinal < before { first.nth_empty(ordinal) } else { second.nth_empty(ordinal - before) }
+            }
+        }
+    }
+
     /// A layout of `preset` showing `views` in order. With fewer views than the preset shows, the
     /// largest preset that they fill; no views at all is not a layout (None).
     pub fn preset(preset: Preset, views: &[u64]) -> Option<Tiles> {
@@ -138,12 +199,13 @@ impl Tiles {
     /// The views shown, in reading order (left to right, top to bottom).
     pub fn views(&self) -> Vec<u64> {
         match self {
+            Tiles::Leaf(id) if *id == EMPTY => Vec::new(),
             Tiles::Leaf(id) => vec![*id],
             Tiles::Split { first, second, .. } => first.views().into_iter().chain(second.views()).collect(),
         }
     }
 
-    /// How many views are shown.
+    /// How many cells there are: the views shown and the empty cells.
     pub fn len(&self) -> usize {
         match self {
             Tiles::Leaf(_) => 1,
@@ -159,12 +221,12 @@ impl Tiles {
     /// Whether `view` is shown.
     pub fn contains(&self, view: u64) -> bool {
         match self {
-            Tiles::Leaf(id) => *id == view,
+            Tiles::Leaf(id) => *id == view && view != EMPTY,
             Tiles::Split { first, second, .. } => first.contains(view) || second.contains(view),
         }
     }
 
-    /// Where each view goes in `area`, with `gutter` between neighbours.
+    /// Where each cell goes in `area`, with `gutter` between neighbours: a view's id, or [`EMPTY`].
     pub fn rects(&self, area: Rect, gutter: f32) -> Vec<(u64, Rect)> {
         match self {
             Tiles::Leaf(id) => vec![(*id, area)],
@@ -283,6 +345,7 @@ impl Tiles {
     /// The saved form.
     pub fn to_json(&self) -> Value {
         match self {
+            Tiles::Leaf(id) if *id == EMPTY => json!({"empty": true}),
             Tiles::Leaf(id) => json!({"view": id}),
             Tiles::Split { axis, ratio, first, second } => json!({
                 "axis": if *axis == Axis::Row { "row" } else { "column" },
@@ -307,6 +370,9 @@ impl Tiles {
     fn read(value: &Value, depth: usize) -> Option<Tiles> {
         if depth > MAX_DEPTH {
             return None;
+        }
+        if value.get("empty").and_then(Value::as_bool) == Some(true) {
+            return Some(Tiles::Leaf(EMPTY));
         }
         if let Some(id) = value.get("view") {
             return id.as_u64().filter(|id| (1..=MAX_ID).contains(id)).map(Tiles::Leaf);
@@ -456,5 +522,21 @@ mod tests {
         assert_eq!(Tiles::from_json(&deep), None, "nesting is bounded");
         let wild = Tiles::from_json(&json!({"axis": "row", "ratio": 1.0e30, "first": {"view": 1}, "second": {"view": 2}})).unwrap();
         assert!(matches!(wild, Tiles::Split { ratio, .. } if ratio == 1.0 - MIN_RATIO), "a ratio out of range is held to the limit");
+    }
+
+    #[test]
+    fn an_empty_cell_is_filled_or_closed_and_is_saved() {
+        let mut tiles = Tiles::preset_padded(Preset::Grid, &[1, 2]).unwrap();
+        assert_eq!((tiles.len(), tiles.views(), tiles.empty_cells()), (4, vec![1, 2], 2));
+        assert!(!tiles.contains(EMPTY));
+        assert_eq!(Tiles::from_json(&tiles.to_json()), Some(tiles.clone()));
+        assert!(!tiles.fill_empty(0, 2), "a view shown already");
+        assert!(tiles.fill_empty(1, 7), "the second empty cell, in reading order");
+        assert_eq!(tiles.views(), vec![1, 2, 7]);
+        assert!(!tiles.fill_empty(1, 8), "there is one empty cell left, number 0");
+        assert!(tiles.remove_empty(0));
+        assert_eq!((tiles.len(), tiles.empty_cells()), (3, 0));
+        assert!(!tiles.remove_empty(0));
+        assert_eq!(Tiles::preset_padded(Preset::Grid, &[]), None);
     }
 }

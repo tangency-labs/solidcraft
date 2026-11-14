@@ -393,6 +393,8 @@ impl TabsRig {
             layout_menu: &[],
             layout_current: "",
             layout_tip: "Layout",
+        layout_fill: "",
+        layout_fill_heading: "",
             switcher_menu: &SWITCHER_MENU,
             tear_off_below: 40.0,
         };

@@ -189,9 +189,37 @@ pub(crate) fn next_tab() -> u64 {
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
+/// What a place of a layout shows when the design has no view for it yet (the Layout menu's
+/// "Empty cells show"). A choice for this session.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LayoutFill {
+    /// A new angle of the shown view: a copy of it.
+    #[default]
+    Angle,
+    /// The standard views in turn: front, right, top.
+    Standard,
+    /// An empty cell that asks what to show.
+    Picker,
+}
+
+impl LayoutFill {
+    pub const ALL: [LayoutFill; 3] = [LayoutFill::Angle, LayoutFill::Standard, LayoutFill::Picker];
+
+    /// The key the Layout menu's row has.
+    pub fn key(self) -> &'static str {
+        match self {
+            LayoutFill::Angle => "fill.angle",
+            LayoutFill::Standard => "fill.standard",
+            LayoutFill::Picker => "fill.picker",
+        }
+    }
+}
+
 /// The open designs: one slot per tab; the active tab's slot is empty (its design is in the app).
 #[derive(Default)]
 pub struct Documents {
+    /// What the places of a layout without a view show ([`LayoutFill`]).
+    pub(crate) layout_fill: LayoutFill,
     slots: Vec<Option<DocSlot>>,
     pub active: usize,
     /// A tab waiting for the answer to "save changes?".
@@ -879,16 +907,55 @@ pub fn view_layout(app: &mut SolveApp, preset: solidcraft_views::Preset) -> usiz
     if shown.kind != ViewKind::Model {
         return 1;
     }
-    if preset != solidcraft_views::Preset::Single {
+    let fill = app.docs.layout_fill;
+    if preset != solidcraft_views::Preset::Single && fill != LayoutFill::Picker {
         let have = app.docs.views.views().iter().filter(|view| view.kind == ViewKind::Model).count();
-        for _ in have..preset.tiles() {
-            if view_duplicate(app, shown.id).is_none() {
+        for n in have..preset.tiles() {
+            let copied = match fill {
+                LayoutFill::Standard => view_copy_at(app, FILL_ANGLES[(n - 1).min(FILL_ANGLES.len() - 1)]),
+                _ => view_duplicate(app, shown.id),
+            };
+            if copied.is_none() {
                 break;
             }
         }
         view_activate(app, shown.id);
     }
+    if fill == LayoutFill::Picker {
+        return change_views(app, |views| views.set_layout_padded(preset));
+    }
     change_views(app, |views| views.set_layout(preset))
+}
+
+/// The standard views the empty places of a layout get, in turn ([`LayoutFill::Standard`]).
+const FILL_ANGLES: [solidcraft_viewport::StandardView; 3] =
+    [solidcraft_viewport::StandardView::Front, solidcraft_viewport::StandardView::Right, solidcraft_viewport::StandardView::Top];
+
+/// A new Model view of the shown design looking from `angle`, next to the shown one, which stays
+/// the shown one. None when the design has no room for another view.
+fn view_copy_at(app: &mut SolveApp, angle: solidcraft_viewport::StandardView) -> Option<u64> {
+    let shown = app.docs.views.active().id;
+    let copy = view_duplicate(app, shown)?;
+    // The copy is shown now, its look in the app: turn it, and going back to the first keeps that.
+    app.cam.set_view(angle);
+    view_activate(app, shown);
+    Some(copy)
+}
+
+/// Show a new view looking from `angle` in the empty cell number `ordinal` of the layout.
+pub fn view_fill_angle(app: &mut SolveApp, ordinal: usize, angle: solidcraft_viewport::StandardView) -> Option<u64> {
+    let copy = view_copy_at(app, angle)?;
+    change_views(app, |views| views.fill_empty(ordinal, copy)).then_some(copy)
+}
+
+/// Show the open Model view `id` in the empty cell number `ordinal` of the layout.
+pub fn view_fill_open(app: &mut SolveApp, ordinal: usize, id: u64) -> bool {
+    change_views(app, |views| views.fill_empty(ordinal, id))
+}
+
+/// Close the empty cell number `ordinal` of the layout.
+pub fn view_close_empty(app: &mut SolveApp, ordinal: usize) -> bool {
+    change_views(app, |views| views.remove_empty(ordinal))
 }
 
 /// Show the Model view `id` beside the shown one, on `edge` of it; `None`: a new view that starts
@@ -2068,6 +2135,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             layout_menu: &layout_menu,
             layout_current,
             layout_tip: solidcraft_ui_text::tr_label("Show views together"),
+            layout_fill: app.docs.layout_fill.key(),
+            layout_fill_heading: solidcraft_ui_text::tr_label("Empty cells show"),
             switcher_menu: &SWITCHER_MENU,
             tear_off_below: TEAR_OFF_BELOW,
         };

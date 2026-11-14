@@ -329,6 +329,39 @@ impl ViewSet {
         self.tiles.as_ref().map_or(1, Tiles::len)
     }
 
+    /// Like [`Self::set_layout`], but a place without a view of its own is an empty cell, for the
+    /// window to ask what to show there. Returns how many cells the layout has.
+    pub fn set_layout_padded(&mut self, preset: Preset) -> usize {
+        let mut order: Vec<u64> = self.views.iter().filter(|view| view.kind == ViewKind::Model).map(|view| view.id).collect();
+        if !order.contains(&self.active) {
+            self.tiles = None;
+            return 1;
+        }
+        order.truncate(preset.tiles().max(1));
+        if !order.contains(&self.active)
+            && let Some(last) = order.last_mut()
+        {
+            *last = self.active;
+        }
+        self.tiles = Tiles::preset_padded(preset, &order).filter(|tiles| tiles.len() > 1);
+        self.tiles.as_ref().map_or(1, Tiles::len)
+    }
+
+    /// Show the Model view `id` in the empty cell number `ordinal` of the layout. False when
+    /// there is no such cell, or `id` is not a Model view that is not shown yet.
+    pub fn fill_empty(&mut self, ordinal: usize, id: u64) -> bool {
+        self.get(id).is_some_and(|view| view.kind == ViewKind::Model) && self.tiles.as_mut().is_some_and(|tiles| tiles.fill_empty(ordinal, id))
+    }
+
+    /// Close the empty cell number `ordinal`; a layout left with one cell is none.
+    pub fn remove_empty(&mut self, ordinal: usize) -> bool {
+        let removed = self.tiles.as_mut().is_some_and(|tiles| tiles.remove_empty(ordinal));
+        if removed && self.tiles.as_ref().is_some_and(|tiles| tiles.len() < 2) {
+            self.tiles = None;
+        }
+        removed
+    }
+
     /// Show the Model view `id` beside the active one, on `edge` of it. False when either is not a
     /// Model view, `id` is the active view or shown already, or four views are shown.
     pub fn show_beside(&mut self, id: u64, edge: Edge) -> bool {
