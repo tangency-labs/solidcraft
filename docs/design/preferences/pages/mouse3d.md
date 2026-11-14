@@ -22,6 +22,7 @@ page (`prefs/navigation.rs`) and `crates/ui-egui/src/space_mouse.rs`.
 |---|---|---|---|---|---|---|
 | Turn around: Model / View centre | Segmented | `Prefs.space_mouse_model_pivot` (Model = `true`) | View centre (`false`) | "Model: the model in the middle of the view." | none | |
 | Turn the view while a sketch is edited | Checkbox | `Prefs.space_mouse_sketch_orbit` | `false` | none | none | |
+| Keep the horizon level with the 3D mouse | Checkbox | `Prefs.space_mouse_horizon_lock` | `false` | "The view turns about the world's up axis and never rolls; a tilted view is eased level. Off: the cap's twist rolls the view." | none | |
 
 ## Axes
 

@@ -192,6 +192,7 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         ui.add_enabled_ui(app.preferences.space_mouse_enabled, |ui| {
             setting::space_mouse_sketch_orbit(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_sketch_orbit_tip"));
+            setting::space_mouse_horizon_lock(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_horizon_lock_tip"));
         });
     });
 }
