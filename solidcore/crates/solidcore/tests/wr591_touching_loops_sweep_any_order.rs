@@ -11,8 +11,8 @@
 //! plate and hole, 2 up: volume 118, the level 2 check clean, 10 faces of one loop each,
 //! two regions). These tests add the other 23 orders.
 //!
-//! Without the flag the cap plane is refused in 15 of the 24 orders, and the sweep still
-//! returns its eight side faces as an open skin. With it the plane is one loop of all eight
+//! Without the flag the cap plane is refused in 15 of the 24 orders, and the capped sweep
+//! returns the cap's failure (upstream returned its eight side faces as an open skin). With it the plane is one loop of all eight
 //! lines (area 59) in every order, and the swept body has ten faces, every edge manifold
 //! and the right area, the plate less the hole, volume 118, in every order. In 9 of them
 //! (rotations 4, 6 and 7 of each variant) the closed shell got no solid region (one void
@@ -187,12 +187,14 @@ fn is_plate(s: &Swept) -> bool {
 
 /// The defect WR-591 is about, pinned while the flag is opt-in, not a result to keep:
 /// without the flag the cap plane is refused in 15 orders (the loop ordering ends on a
-/// curve it already used, or runs round the hole the wrong way), and the capped sweep
-/// still returns `Ok`, the eight side faces as an open skin: no solid region, volume 0.
+/// curve it already used, or runs round the hole the wrong way). Upstream's capped sweep
+/// still returned `Ok`, the eight side faces as an open skin; the fork returns the cap's
+/// failure (c8f6a31, the curve `CreateLinearSweep`'s `SER(
+/// pBrep->CreatePlanarFacesWith3DCurves(m_pRegion, cr3DCurves, dTol, sStartFaces) )`).
 /// In the other orders the plane is the one loop. This test goes when the flag becomes
 /// the default.
 #[test]
-fn wr591_without_the_flag_the_capped_sweep_returns_an_open_skin() {
+fn wr591_without_the_flag_the_capped_sweep_refuses() {
     assert!(!Kernel::default().fixes.loops_go_on_round_the_vertex);
     let mut refused = Vec::new();
     for (variant, turn, curves) in orders() {
@@ -200,15 +202,13 @@ fn wr591_without_the_flag_the_capped_sweep_returns_an_open_skin() {
         match cap_loops(&k, &curves) {
             None => {
                 refused.push((variant, turn));
-                let s = sweep(&mut k, &curves);
-                assert_eq!(s.faces, 8, "variant {variant}, turn {turn}: {s:?}");
-                assert!(
-                    !s.edges_manifold && !s.manifold_solid && s.volume == 0.0,
-                    "variant {variant}, turn {turn}: {s:?}"
-                );
-                assert!(
-                    (s.area - (area() - 2.0 * 59.0)).abs() < 1e-9,
-                    "variant {variant}, turn {turn}: {s:?}"
+                let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+                let e = create_linear_sweep(&mut k, &refs, Vec3::new(0.0, 0.0, 1.0), 2.0, true)
+                    .expect_err("the cap is refused");
+                assert_eq!(
+                    e.sm_status(),
+                    Some(1001),
+                    "variant {variant}, turn {turn}: {e:?}"
                 );
             }
             Some((outer, loops, enclosed)) => {

@@ -21,7 +21,7 @@ use crate::boolean::merge::p4::{
     BooleanKernels, KernelManifoldIntersector, ManifoldIntersector, ManifoldKernelAdapter,
     ManifoldNotificationKeys,
 };
-use crate::error::{ignore_or_pass_on, EntityRef, Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::AttributeStore;
 use crate::geom::context::{Context, MarkLock};
 use crate::geom::object::ObjectRef;
@@ -141,7 +141,6 @@ fn finish_with(
     mut session: Session<'_, '_, '_>,
 ) -> Result<()> {
     // fork c8f6a31 (WR-662): Boolean2D's Relate and DeleteFaces are SER.
-    let p = k.fixes.sweep_statuses_pass_on;
     // intersect, merge, and relate the intersection geometry between the two topology graphs
     session.ti.intersect_insert_relate(
         &mut BooleanKernels {
@@ -197,7 +196,7 @@ fn finish_with(
                     })?;
                     marks_b.mark(k, Entity::Face(mate), mark_b);
                     // sTI.Relate(pF,pOFace), its status unchecked
-                    ignore_or_pass_on(session.ti.relate_faces(a, face, b, mate), p)?;
+                    session.ti.relate_faces(a, face, b, mate)?;
                 }
             }
             for edgeuse in edge::edgeuses(b, other, None, None)?.into_iter().step_by(2) {
@@ -279,18 +278,15 @@ fn finish_with(
             }
         }
         // sTI.DeleteFaces(sDelFaces), its status unchecked
-        ignore_or_pass_on(
-            session.ti.delete_faces(
-                &mut BooleanKernels {
-                    primary: k,
-                    other: None,
-                },
-                a,
-                session.attributes,
-                &delete,
-                None,
-            ),
-            p,
+        session.ti.delete_faces(
+            &mut BooleanKernels {
+                primary: k,
+                other: None,
+            },
+            a,
+            session.attributes,
+            &delete,
+            None,
         )?;
         if operation != Boolean2d::Merge {
             // pBrepA->StitchFaces(pBrepA->GetTolerance()): its glues notify A's own
