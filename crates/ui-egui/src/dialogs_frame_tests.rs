@@ -577,7 +577,7 @@ fn railed_box() -> SolveApp {
 /// The 960 × 600 model view `view.pick` answers for by default, as the mouse picker sees it.
 fn model_proj(app: &SolveApp) -> crate::viewport::Proj {
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 600.0));
-    crate::viewport::Proj { cam: app.cam, vp: app.cam.view_proj(960.0 / 600.0, crate::viewport::scene_radius(app)), rect }
+    crate::viewport::Proj { cam: app.cam, vp: app.cam.view_proj(960.0 / 600.0, crate::viewport::scene_radius(app)), rect, bounds: None }
 }
 
 fn model_body(st: &solidcraft_engine::doc::ModelState, name: &str) -> solidcraft_engine::doc::ModelBody {
