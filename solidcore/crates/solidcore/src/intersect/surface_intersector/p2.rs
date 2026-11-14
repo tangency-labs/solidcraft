@@ -239,6 +239,29 @@ fn normal_angle(p: &mut TsectPnt) -> Result<()> {
     Ok(())
 }
 
+/// The largest condition number of the chain-rule solve `[S_u S_v] (u', v') = T` at which
+/// [`SurfaceIntersector::near_a_pole_off_it`] keeps a point's own derivatives
+/// (`1 / SM_EFF_ZERO_SQRT`): the solve's relative error, about the unit roundoff times the
+/// condition number, stays near 1e-10.
+const MAX_CHAIN_RULE_CONDITION: f64 = 1.0 / EFF_ZERO_SQRT;
+
+/// Not upstream: whether the chain-rule solve `[S_u S_v] (u', v') = T` with columns `su`
+/// and `sv` is well conditioned. The condition number of the 3×2 matrix `J = [S_u S_v]` is
+/// `σ_max / σ_min = σ_max² / (σ_max σ_min) = σ_max² / |S_u × S_v|`, and
+/// `σ_max² ≤ |S_u|² + |S_v|²` (the Frobenius norm), so it is at most
+/// `(|S_u|² + |S_v|²) / |S_u × S_v|`. That bound must be at most
+/// [`MAX_CHAIN_RULE_CONDITION`]. The comparison takes the rounding of the two sides' few
+/// operations into account by a factor `1 + 16 ε` on the left, so a computed pass implies
+/// the bound up to that margin. Written to accept: a NaN, an infinite derivative or a
+/// vanishing cross product fails.
+fn chain_rule_well_conditioned(su: Vec3, sv: Vec3) -> bool {
+    let squares = su.length_squared() + sv.length_squared();
+    let area = su.cross(sv).length();
+    let lhs = squares * (1.0 + 16.0 * f64::EPSILON);
+    let rhs = MAX_CHAIN_RULE_CONDITION * area;
+    area > 0.0 && lhs.is_finite() && rhs.is_finite() && lhs <= rhs
+}
+
 const fn other(s: SrfIndex) -> SrfIndex {
     match s {
         SrfIndex::First => SrfIndex::Second,
@@ -701,7 +724,16 @@ impl SurfaceIntersector<'_> {
                     let (sing, sing_dir) = is_singularity(k, self.surface(s), uv)?;
                     // Not upstream: a point near a pole but off it keeps its own
                     // derivatives (`near_a_pole_off_it`)
-                    if sing && !self.near_a_pole_off_it(k, s, sing_dir, uv)? {
+                    if sing
+                        && !self.near_a_pole_off_it(
+                            k,
+                            s,
+                            sing_dir,
+                            uv,
+                            point.srf_du(s),
+                            point.srf_dv(s),
+                        )?
+                    {
                         // Not upstream: a point on the degenerate boundary is the pole
                         if self.place_at_pole(k, s, sing_dir, point)? {
                             return Ok(());
@@ -785,11 +817,15 @@ impl SurfaceIntersector<'_> {
     }
 
     /// Not upstream: whether `uv`, a point `IsSingularity` calls singular on surface `s`
-    /// (collapsing along `sing_dir`), lies near a pole but not on it: off the degenerate
-    /// boundary (by more than the UV tolerance `TestPoint` reads "on a boundary" with,
-    /// `100 SM_EFF_ZERO` scaled by the domain, as [`Self::place_at_pole`] reads it), on
-    /// the side of the natural domain nearer it across `sing_dir`, where that side is a
-    /// pole (`GetSingularities`: its samples within `SM_EFF_ZERO` of one another).
+    /// (collapsing along `sing_dir`), with first derivatives `su` and `sv` there, is a
+    /// regular point near a pole, which keeps its own derivatives: all of
+    /// - off the degenerate boundary, by more than the UV tolerance `TestPoint` reads "on a
+    ///   boundary" with (`100 SM_EFF_ZERO` scaled by the domain, as
+    ///   [`Self::place_at_pole`] reads it);
+    /// - regular, its chain-rule solve well conditioned ([`chain_rule_well_conditioned`]:
+    ///   the condition number of `[S_u S_v]` at most `1 / SM_EFF_ZERO_SQRT`);
+    /// - on the side of the natural domain nearer it across `sing_dir`, that side a pole
+    ///   (`GetSingularities`: its samples within `SM_EFF_ZERO` of one another).
     ///
     /// Such a point is not stepped back from (`StepBackFromSingularity`). `IsSingularity`
     /// calls a point singular when `|S_u|` is below `ZONE_TOL_3D` times `|S_v|` (both
@@ -798,16 +834,17 @@ impl SurfaceIntersector<'_> {
     /// its surface derivatives with those of a point stepped back along the span. Its UV
     /// tangent then no longer mapped onto its own 3D tangent: 0.04 to 0.66 rad off at the
     /// knots of a sphere/cylinder trace passing a pole 1e-5 to 2e-5 away, and a span test
-    /// reading the images' directions never passed however short the step. Near a pole
-    /// and off it the surface is regular (a pole is a collapsed side, so `S_u x S_v`
-    /// vanishes there only), the chain rule holds at the point itself
-    /// (`S_u u' + S_v v' = T` has its exact solution), and the point keeps its own
-    /// derivatives.
+    /// reading the images' directions never passed however short the step. At a point
+    /// whose solve is well conditioned, `S_u u' + S_v v' = T` has its solution at the point
+    /// itself to a relative error of about `u κ` (`u` the unit roundoff, `κ` the condition
+    /// number), at most about 1e-10, and the point keeps its own derivatives.
     ///
-    /// A point singular in the domain's interior (a fold or a crease of a B-spline,
-    /// where the derivative vanishes along a whole iso line) is not near a pole: there the
-    /// normal has no limit and the step-back stays, as upstream. So does a point when
-    /// `GetSingularities` fails (`false`).
+    /// Every other singular point is stepped back from, as upstream: a point on the
+    /// boundary, a point closer to the pole than the conditioning allows (about 3e-6 from
+    /// that sphere's pole), a point where the derivative vanishes or nearly vanishes in the
+    /// domain's interior (a fold or a crease of a B-spline, where the normal has no limit;
+    /// also when the interior line lies in the half of the domain nearer a pole side), a
+    /// point whose nearer side is not a pole, and a point where `GetSingularities` fails.
     ///
     /// # Errors
     ///
@@ -818,6 +855,8 @@ impl SurfaceIntersector<'_> {
         s: SrfIndex,
         sing_dir: SurfParamType,
         uv: Point2,
+        su: Vec3,
+        sv: Vec3,
     ) -> Result<bool> {
         let Some(dom) = self.uv_domains.get(s.index()).copied() else {
             return Ok(false);
@@ -830,7 +869,7 @@ impl SurfaceIntersector<'_> {
         };
         // (written to accept: a NaN parameter is not near a pole)
         let off_boundary = (across - lo).abs() > on_tol && (across - hi).abs() > on_tol;
-        if !off_boundary {
+        if !off_boundary || !chain_rule_well_conditioned(su, sv) {
             return Ok(false);
         }
         let surface = self.surface(s);
@@ -2191,11 +2230,24 @@ mod tests {
                         near += 1;
                     }
                     let (_, su, sv) = ball.evaluate_1st_derivatives(k, at, true, true).unwrap();
+                    // a knot too close to the pole for a well-conditioned solve is stepped
+                    // back from: its tangent need only be finite
+                    if !chain_rule_well_conditioned(su, sv) {
+                        if !(d2[1].x.is_finite() && d2[1].y.is_finite()) {
+                            worst = f64::NAN;
+                        }
+                        continue;
+                    }
                     let image = su * d2[1].x + sv * d2[1].y;
                     if image.length() == 0.0 || d3[1].length() == 0.0 {
                         continue;
                     }
-                    worst = worst.max(image.angle_between(d3[1]).unwrap());
+                    let turn = image.angle_between(d3[1]).unwrap();
+                    worst = if turn.is_nan() || worst.is_nan() {
+                        f64::NAN
+                    } else {
+                        worst.max(turn)
+                    };
                 }
             }
         }
@@ -2233,5 +2285,100 @@ mod tests {
             }
         }
         assert!(failed.is_empty(), "{failed:#?}");
+    }
+
+    /// The chain-rule solve is well conditioned 2e-5 from the pole of a sphere of radius
+    /// 6 (condition number about 3e5), and not 1e-10 from it (about 6e10), nor where a
+    /// derivative vanishes.
+    #[test]
+    fn the_chain_rule_solve_is_well_conditioned_only_off_a_pole() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::surface::sphere::Sphere;
+        let k = &Kernel::default();
+        let ball =
+            Surface::from(Sphere::create_canonical(k, &Axis2Placement::default(), 6.0).unwrap());
+        let dom = ball.natural_uv_domain_with_nurb(k).unwrap();
+        let at = |rho: f64| {
+            // the parameter across the pole side that puts the point `rho` from the pole
+            let v = dom.min().y + rho / 6.0 * (dom.max().y - dom.min().y) / PI;
+            let (_, su, sv) = ball
+                .evaluate_1st_derivatives(k, Point2::new(dom.u_interval().mid(), v), true, true)
+                .unwrap();
+            chain_rule_well_conditioned(su, sv)
+        };
+        assert!(at(2e-5));
+        assert!(!at(1e-10));
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        assert!(!chain_rule_well_conditioned(Vec3::ZERO, x));
+        assert!(!chain_rule_well_conditioned(Vec3::ZERO, Vec3::ZERO));
+        assert!(!chain_rule_well_conditioned(x, x));
+        assert!(!chain_rule_well_conditioned(
+            Vec3::new(f64::NAN, 0.0, 0.0),
+            x
+        ));
+    }
+
+    /// A fold in the half of the domain nearer a pole is not near a pole. The quadratic
+    /// patch whose first and last u rows coincide folds back along u = 1/2 (`S_u` vanishes
+    /// there), and its v = 1 side is a pole. A point on the fold at v = 0.9 is singular and
+    /// in the half nearer the pole, but its solve is singular: it is stepped back from.
+    /// A point 2e-5 from a sphere's pole keeps its own derivatives.
+    #[test]
+    fn a_fold_near_a_pole_side_is_stepped_back_from() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::b_spline_curve::p1::KnotType;
+        use crate::nurbs::b_spline_surface::{
+            BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
+        };
+        use crate::surface::sphere::Sphere;
+        let k = &Kernel::default();
+        let pole = Point3::new(0.0, 5.0, 0.0);
+        let points = [
+            Point3::new(0.0, 0.0, 0.0),
+            pole,
+            Point3::new(1.0, 0.0, 1.0),
+            pole,
+            Point3::new(0.0, 0.0, 0.0),
+            pole,
+        ];
+        let fold = Surface::from(
+            BSplineSurface::create_canonical(&CanonicalSurfaceData {
+                u_degree: 2,
+                v_degree: 1,
+                control_points: &points,
+                form: BSplineSurfaceForm::Unspecified,
+                u_multiplicities: &[3, 3],
+                v_multiplicities: &[2, 2],
+                u_knots: &[0.0, 1.0],
+                v_knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                uv_domain: None,
+            })
+            .unwrap(),
+        );
+        let other = plane([0.0, 0.0, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let si = SurfaceIntersector::new(k, &fold, &d, &other, &d, false).unwrap();
+        let uv = Point2::new(0.5, 0.9);
+        let (sing, dir) = is_singularity(k, &fold, uv).unwrap();
+        assert!(sing, "{dir:?}");
+        let (_, su, sv) = fold.evaluate_1st_derivatives(k, uv, true, true).unwrap();
+        assert!(!si
+            .near_a_pole_off_it(k, SrfIndex::First, dir, uv, su, sv)
+            .unwrap());
+
+        let ball =
+            Surface::from(Sphere::create_canonical(k, &Axis2Placement::default(), 6.0).unwrap());
+        let bd = ball.natural_uv_domain_with_nurb(k).unwrap();
+        let si = SurfaceIntersector::new(k, &ball, &bd, &other, &d, false).unwrap();
+        let v = bd.min().y + 2e-5 / 6.0 * (bd.max().y - bd.min().y) / PI;
+        let uv = Point2::new(bd.u_interval().mid(), v);
+        let (sing, dir) = is_singularity(k, &ball, uv).unwrap();
+        assert!(sing, "{dir:?}");
+        let (_, su, sv) = ball.evaluate_1st_derivatives(k, uv, true, true).unwrap();
+        assert!(si
+            .near_a_pole_off_it(k, SrfIndex::First, dir, uv, su, sv)
+            .unwrap());
     }
 }
