@@ -751,7 +751,11 @@ pub(crate) fn picked_group(app: &SolveApp) -> Option<u64> {
 pub(crate) fn toggle_picked_folder(app: &mut SolveApp) -> bool {
     let Some(pick) = app.tree.picked_folder.as_ref().filter(|pick| pick.current(app)) else { return false };
     let key = pick.key.clone();
-    toggle_folder(app, &key);
+    if key == "origin" {
+        app.set_origin_shown(!app.origin_shown());
+    } else {
+        toggle_folder(app, &key);
+    }
     true
 }
 
@@ -2110,6 +2114,10 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
             ..Default::default()
         },
     );
+    if r.clicked && !r.fold {
+        // The clicked Origin row is what V shows or hides, as for a folder (#14554).
+        pick_folder(app, key);
+    }
     if r.fold || r.clicked {
         toggle(app, key, false);
         if component && r.clicked {
