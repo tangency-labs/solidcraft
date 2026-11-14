@@ -100,16 +100,27 @@
 //!   counted as upstream. A vertex that ends a coincident edge lying on the curve (the
 //!   seam's own edge) is that edge's end, so its gap across the curve is bounded by the
 //!   vertex's tolerance, not by the fixed `1000 * SM_EFF_ZERO`: a near miss only past the
-//!   tolerance. A cut wall whose seam edge ends on a body edge 1e-7 to 1e-5 across the
+//!   tolerance. This applies at a shared interval boundary from either side of
+//!   its coincident edge. Whole-definition control-polygon strip bounds or native
+//!   derivative enclosures establish actual 3D across-seam coincidence. UV identity
+//!   only locates the comparison; samples cannot grant relief.
+//!   A cut wall whose seam edge ends on a body edge 1e-7 to 1e-5 across the
 //!   seam (the cut's sketch circle that far off the edge) read as a near miss; its loop
 //!   closes at the vertex within tolerance, and no sliver lies beside the seam.
 //! - **Recursion.** None.
 
 use std::borrow::Cow;
 
+use crate::blend::fillet_section::certificate::{
+    curve_derivs_over, nurbs_partials_over_box, NurbsCurve,
+};
+use crate::blend::fillet_section::interval::Ivl;
+use crate::blend::fillet_section::station::{span, Nurbs};
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{Curve, CurveKind};
+use crate::curve::native_affine::{exact_four_products_zero, of_line};
 use crate::error::{ignored, EntityRef, Result, SolidError};
+use crate::geom::expansion;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
@@ -128,7 +139,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::query::face::p1 as qf1;
 use crate::query::face::p2 as qf2;
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, VertexId};
 
 use super::p1::{
@@ -710,11 +721,10 @@ impl<O: ClassObject> CurveClassification<O> {
             None
         };
         let near_miss_dist_3d = EFF_ZERO * 1000.0;
-        // `on_curve`: the vertex ends a coincident edge that lies on the curve, so it is
-        // that edge's own end, and its gap across the curve is the edge's end gap, which
-        // the vertex's tolerance bounds (deviation, see the file header)
+        // Only a potentially missed vertex needs the whole-span evidence for
+        // its own-edge tolerance; ordinary endpoints require no extra drops.
         let vertex_misses =
-            |pc: &PointClassification<O>, t: f64, end: bool, on_curve: bool| -> Result<bool> {
+            |pc: &PointClassification<O>, t: f64, end: bool, own_edge: bool| -> Result<bool> {
                 if pc.point_class() != PointClassType::Vertex
                     || pc.gap_3d(k, geometry, surface)? < near_miss_dist_3d
                 {
@@ -724,6 +734,36 @@ impl<O: ClassObject> CurveClassification<O> {
                     Some(s) => self.gap_across_curve(k, geometry, pc, t, end, s)?,
                     None => None,
                 };
+                if across.is_some_and(|gap| gap < near_miss_dist_3d) {
+                    return Ok(false);
+                }
+                // A shared classification boundary is the same vertex from
+                // either neighboring interval. Its coincident edge may be on
+                // the other side of the interval being visited.
+                // The interval's own coincident edge keeps the relief it had; a shared
+                // boundary's other side is relieved only by the whole-definition proof.
+                let mut on_curve = own_edge;
+                if !on_curve && pc.object().is_some() {
+                    for adjacent in self.intervals() {
+                        let shared_start =
+                            adjacent.interval.min() == t && adjacent.start.object() == pc.object();
+                        let shared_end =
+                            adjacent.interval.max() == t && adjacent.end.object() == pc.object();
+                        if (shared_start || shared_end)
+                            && adjacent.mid.point_class() == PointClassType::Edge
+                            && adjacent.mid.gap_3d(k, geometry, surface)? < near_miss_dist_3d
+                            && self.coincident_span_lies_on_curve(
+                                k,
+                                geometry,
+                                adjacent,
+                                near_miss_dist_3d,
+                            )?
+                        {
+                            on_curve = true;
+                            break;
+                        }
+                    }
+                }
                 let threshold = if on_curve && !self.edge_runs_beside(k, geometry, pc)? {
                     max2(
                         near_miss_dist_3d,
@@ -739,17 +779,116 @@ impl<O: ClassObject> CurveClassification<O> {
             let mid = &ivl.mid;
             let coincident = mid.point_class() == PointClassType::Edge;
             let beside = coincident && mid.gap_3d(k, geometry, surface)? >= near_miss_dist_3d;
-            let on_curve = coincident && !beside;
-
-            if vertex_misses(&ivl.start, ivl.interval.min(), false, on_curve)?
+            let own_edge = coincident && !beside;
+            if vertex_misses(&ivl.start, ivl.interval.min(), false, own_edge)?
                 || beside
-                || vertex_misses(&ivl.end, ivl.interval.max(), true, on_curve)?
+                || vertex_misses(&ivl.end, ivl.interval.max(), true, own_edge)?
             {
                 return Ok(true);
             }
         }
 
         Ok(false)
+    }
+
+    /// Proves coincidence over the entire native edge definition, not at stations.
+    /// A positive-weight rational B-spline is a convex combination of its Euclidean
+    /// control points. Thus a strip containing every control point contains the
+    /// whole curve, regardless of degree, knot spacing or a bow between samples.
+    /// On a plane with an affine source the across-seam direction is constant;
+    /// `native_curve_in_strip` encloses its projection with outward arithmetic.
+    /// On a curved surface, an exact constant UV coordinate of every trim control
+    /// proves that the represented edge lies on the same isoparametric support as
+    /// the seam. A derivative remainder must additionally bound the actual stored
+    /// 3D edge's across-seam separation over every native knot span. This uses the
+    /// same native surface definition, never a cached approximation. Unproved
+    /// definitions receive no endpoint tolerance relief.
+    fn coincident_span_lies_on_curve(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        interval: &CurveInterval<O>,
+        threshold: f64,
+    ) -> Result<bool> {
+        let (Some(curve), Some(surface), Some(object)) = (
+            self.curve().and_then(|c| geometry.curve(c)),
+            self.surface1().and_then(|s| geometry.surface(s)),
+            interval.mid.object(),
+        ) else {
+            return Ok(false);
+        };
+        let other = if let Some((b, EntityRef::Edge(e))) = geometry.topology_entity(object) {
+            let edge = b.edge(e)?;
+            let Some(other) = edge.curve.as_ref() else {
+                return Ok(false);
+            };
+            // Identity is a proof even for definitions with no polynomial form.
+            if std::ptr::eq(curve, other) {
+                return Ok(true);
+            }
+            match curve.kind() {
+                CurveKind::CrvOnSurf(source) if same_native_surface(source.surface(), surface) => {
+                    for eu in &edge.edgeuses {
+                        let on_surface = crate::topology::edgeuse::p1::face(b, *eu)?
+                            .and_then(|f| b.face(f).ok())
+                            .and_then(|f| f.surface.as_ref())
+                            .is_some_and(|s| std::ptr::eq(s, surface));
+                        if !on_surface {
+                            continue;
+                        }
+                        let Some(trim) = b.edgeuse(*eu)?.uv_trim_curve.as_ref() else {
+                            continue;
+                        };
+                        if native_edge_on_iso(
+                            k,
+                            surface,
+                            source.uv_curve(),
+                            other,
+                            trim,
+                            edge.interval,
+                            threshold,
+                        )? {
+                            return Ok(true);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            other
+        } else {
+            let Some(other) = geometry.curve(object) else {
+                return Ok(false);
+            };
+            other
+        };
+        if surface.procedural_definition().is_some() {
+            return Ok(false);
+        }
+        k.check_cancelled(OP_GEOM)?;
+        let (origin, across) = match surface.kind() {
+            SurfaceKind::Plane(plane) => {
+                let Some(line) = of_line(curve, interval.interval) else {
+                    return Ok(false);
+                };
+                let (origin, tangent) = line.jet_over(Ivl::from(interval.interval.min()));
+                let axes = plane.position();
+                let normal =
+                    interval_cross(interval_point(axes.x_axis()), interval_point(axes.y_axis()));
+                (origin, interval_cross(normal, tangent))
+            }
+            SurfaceKind::Cone(_) => {
+                let Some(uv_curve) = self.uv_curve1().and_then(|c| geometry.curve(c)) else {
+                    return Ok(false);
+                };
+                let Some(frame) = ruling_frame(k, curve, uv_curve, surface, interval.interval)?
+                else {
+                    return Ok(false);
+                };
+                frame
+            }
+            _ => return Ok(false),
+        };
+        Ok(native_curve_in_strip(other, origin, across, threshold))
     }
 
     /// Whether an edge at the vertex end `pc` other than the curve's own edges runs beside
@@ -2807,6 +2946,664 @@ fn point_3d_classify_in<O: ClassObject>(
     r
 }
 
+/// Native surface identity is stricter than coincidence. A kept procedural
+/// definition cannot be certified from its net, even when those nets are equal.
+fn same_native_surface(a: &Surface, b: &Surface) -> bool {
+    if a.procedural_definition().is_some() || b.procedural_definition().is_some() {
+        return false;
+    }
+    match (a.kind(), b.kind()) {
+        (SurfaceKind::BSpline(a), SurfaceKind::BSpline(b)) => {
+            a.gw_nurb().is_some() && a.gw_nurb() == b.gw_nurb()
+        }
+        (SurfaceKind::Plane(a), SurfaceKind::Plane(b)) => {
+            a.position().canonical() == b.position().canonical() && a.uv_scale() == b.uv_scale()
+        }
+        _ => false,
+    }
+}
+
+/// Exact algebraic identity of the constant coordinate, including rational
+/// controls: `P_i.axis = fixed * w_i`. Positive basis weights then give that same
+/// coordinate for every parameter. No midpoint or fitted curve enters the proof.
+fn same_iso_support(source: &Curve, trim: &Curve) -> bool {
+    let CurveKind::Line(line) = source.kind() else {
+        return false;
+    };
+    let (axis, fixed) = if line.line_vector().x == 0.0 && line.line_vector().y != 0.0 {
+        (0, line.line_point().x)
+    } else if line.line_vector().y == 0.0 && line.line_vector().x != 0.0 {
+        (1, line.line_point().y)
+    } else {
+        return false;
+    };
+    let coordinate = |p: Vec3| if axis == 0 { p.x } else { p.y };
+    let varying = |p: Vec3| if axis == 0 { p.y } else { p.x };
+    let Some((lo, hi)) = line_coordinate_ends(line, varying) else {
+        return false;
+    };
+    // Also prove the entire trim lies within the source UV line's finite image.
+    // Multiplying by each positive weight avoids a rounded rational division.
+    let covered = |value: f64, weight: f64| {
+        let Some(low) = expansion::scale(&lo, weight) else {
+            return false;
+        };
+        let Some(high) = expansion::scale(&hi, weight) else {
+            return false;
+        };
+        expansion::sign(&expansion::sub(&[value], &low)) >= 0
+            && expansion::sign(&expansion::sub(&high, &[value])) >= 0
+    };
+    match trim.kind() {
+        CurveKind::Line(other) => {
+            let Some((a, b)) = line_coordinate_ends(other, varying) else {
+                return false;
+            };
+            coordinate(other.line_vector()) == 0.0
+                && coordinate(other.line_point()) == fixed
+                && expansion::sign(&expansion::sub(&a, &lo)) >= 0
+                && expansion::sign(&expansion::sub(&hi, &b)) >= 0
+        }
+        CurveKind::BSpline(other) => {
+            let Some(net) = convex_native_net(other) else {
+                return false;
+            };
+            !net.cpts().is_empty()
+                && net.cpts().iter().all(|p| {
+                    let w = if p.w == crate::nurbs::math::NOW {
+                        1.0
+                    } else {
+                        p.w
+                    };
+                    let value = if axis == 0 { p.x } else { p.y };
+                    w > 0.0
+                        && w.is_finite()
+                        && covered(if axis == 0 { p.y } else { p.x }, w)
+                        && exact_four_products_zero([
+                            (value, 1.0, false),
+                            (fixed, w, true),
+                            (0.0, 0.0, false),
+                            (0.0, 0.0, false),
+                        ])
+                })
+        }
+        _ => false,
+    }
+}
+
+/// Nonnegative partition-of-unity basis over the whole public native domain:
+/// finite ordered knots, clamped ends and no polynomial extrapolation. Positive
+/// rational weights are checked by the caller before using the convex hull.
+fn convex_native_net(spline: &BSplineCurve) -> Option<&crate::nurbs::crv_basic::Curve> {
+    let net = spline.gw_nurb()?;
+    let p = net.degree();
+    let n = net.cpts().len();
+    if spline.is_out_of_bounds_enabled()
+        || net.counts_are_valid().is_err()
+        || n <= p
+        || n.checked_add(p).and_then(|v| v.checked_add(1)) != Some(net.knots().len())
+        || net.knots().iter().any(|v| !v.is_finite())
+        || net.knots().windows(2).any(|v| v.first() > v.last())
+        || net.knots().first() != net.knots().get(p)
+        || net.knots().last() != net.knots().get(n)
+        || net.knots().first() >= net.knots().last()
+    {
+        return None;
+    }
+    Some(net)
+}
+
+/// Exact endpoints of one coordinate of a bounded native line, ordered by
+/// value. Its native parameter map traverses its complete stored STEP interval;
+/// reversing the map does not change this image. Expansions retain all product
+/// and sum rounding, including the three factors in the line displacement.
+fn line_coordinate_ends(
+    line: &crate::curve::line::Line,
+    coordinate: impl Fn(Vec3) -> f64,
+) -> Option<(Vec<f64>, Vec<f64>)> {
+    if !line.is_bounded()
+        || line.natural_interval().length() <= 0.0
+        || crate::geom::tol::is_zero(line.natural_interval().length())
+    {
+        return None;
+    }
+    let vector = expansion::product(coordinate(line.line_vector()), line.line_scale())?;
+    let endpoint = |step| {
+        let offset = expansion::scale(&vector, step)?;
+        Some(expansion::add(&[coordinate(line.line_point())], &offset))
+    };
+    let a = endpoint(line.step_interval().min())?;
+    let b = endpoint(line.step_interval().max())?;
+    if expansion::sign(&expansion::sub(&b, &a)) < 0 {
+        Some((b, a))
+    } else {
+        Some((a, b))
+    }
+}
+
+/// Exact native curve data, retaining homogeneous controls without the rounded
+/// Euclidean divide/remultiply performed by a convenience control-polygon API.
+enum SeamCurveDefinition {
+    Line(crate::curve::native_affine::LineDefinition),
+    Nurbs(NurbsCurve),
+}
+
+impl SeamCurveDefinition {
+    fn of(curve: &Curve, domain: Extent1d) -> Option<Self> {
+        let natural = curve.natural_interval();
+        if !(domain.min().is_finite()
+            && domain.max().is_finite()
+            && domain.min() < domain.max()
+            && domain.min() >= natural.min()
+            && domain.max() <= natural.max())
+        {
+            return None;
+        }
+        match curve.kind() {
+            CurveKind::Line(_) => of_line(curve, domain).map(Self::Line),
+            CurveKind::BSpline(bs) => {
+                let net = convex_native_net(bs)?;
+                if net.degree() == 0 || net.degree() > 18 {
+                    return None;
+                }
+                let mut pw = Vec::new();
+                for cp in net.cpts() {
+                    let w = if cp.w == crate::nurbs::math::NOW {
+                        1.0
+                    } else {
+                        cp.w
+                    };
+                    let z = if cp.z == crate::nurbs::math::NOZ {
+                        0.0
+                    } else {
+                        cp.z
+                    };
+                    if !(w > 0.0
+                        && w.is_finite()
+                        && cp.x.is_finite()
+                        && cp.y.is_finite()
+                        && z.is_finite())
+                    {
+                        return None;
+                    }
+                    pw.extend([cp.x, cp.y, z, w]);
+                }
+                Some(Self::Nurbs(NurbsCurve {
+                    p: net.degree(),
+                    n: net.cpts().len(),
+                    u: net.knots().to_vec(),
+                    pw,
+                }))
+            }
+            _ => None,
+        }
+    }
+
+    fn cuts(&self) -> &[f64] {
+        match self {
+            Self::Line(_) => &[],
+            Self::Nurbs(n) => &n.u,
+        }
+    }
+
+    fn jets(&self, t: Ivl, station: f64) -> Result<[[Ivl; 3]; 4]> {
+        let zero = [Ivl::from(0.0); 3];
+        match self {
+            Self::Line(line) => {
+                let (p, d) = line.jet_over(t);
+                Ok([p, d, zero, zero])
+            }
+            Self::Nurbs(n) => {
+                // The caller splits at every curve knot. Use this cell's one
+                // polynomial piece at both endpoints, including its left limit.
+                let piece = span(&n.u, n.p, n.n, station);
+                let d = curve_derivs_over(n, t, 3, Some(piece))?;
+                let mut out = [zero; 4];
+                for (to, from) in out.iter_mut().zip(d) {
+                    *to = [from.x, from.y, from.z];
+                }
+                Ok(out)
+            }
+        }
+    }
+}
+
+fn iv_add(a: [Ivl; 3], b: [Ivl; 3]) -> [Ivl; 3] {
+    let [ax, ay, az] = a;
+    let [bx, by, bz] = b;
+    [ax + bx, ay + by, az + bz]
+}
+
+fn iv_sub(a: [Ivl; 3], b: [Ivl; 3]) -> [Ivl; 3] {
+    let [ax, ay, az] = a;
+    let [bx, by, bz] = b;
+    [ax - bx, ay - by, az - bz]
+}
+
+fn iv_scale(a: [Ivl; 3], b: Ivl) -> [Ivl; 3] {
+    a.map(|v| v * b)
+}
+
+/// A whole-cell enclosure of g, g'' and the across-seam direction's length,
+/// where D = Q(t) - S(uv(t)), T = dS(uv(t))/dt, A = (Su x Sv) x T,
+/// and g = D.A. Surface partials through order three and trim derivatives
+/// through order three enclose every term of g'' by the product/chain rules.
+struct SeamGapCertificate<'a> {
+    edge: &'a SeamCurveDefinition,
+    trim: &'a SeamCurveDefinition,
+    surface: &'a Nurbs,
+    fixed: (usize, f64),
+}
+
+impl SeamGapCertificate<'_> {
+    fn over(&self, t: Ivl, station: f64) -> Result<(Ivl, Ivl, Ivl)> {
+        let q = self.edge.jets(t, station)?;
+        let mut uv = self.trim.jets(t, station)?;
+        // Exact UV identity has proved these coordinates, so retaining a
+        // dependency-widened interval here would lose the boundary identity.
+        for (order, value) in uv.iter_mut().enumerate() {
+            if let Some(v) = value.get_mut(self.fixed.0) {
+                *v = Ivl::from(if order == 0 { self.fixed.1 } else { 0.0 });
+            }
+        }
+        let [[u, v, _], [du, dv, _], [ddu, ddv, _], [dddu, dddv, _]] = uv;
+        let n = self.surface;
+        let (Some(&u0), Some(&u1), Some(&v0), Some(&v1)) =
+            (n.u.get(n.p), n.u.get(n.nu), n.v.get(n.q), n.v.get(n.nv))
+        else {
+            return Err(SolidError::invalid_input(
+                OP_GEOM,
+                "missing native surface domain",
+            ));
+        };
+        // Before this call, the complete native trim was proved inside this
+        // domain by exact homogeneous comparisons. Clamping only removes
+        // interval arithmetic's outward overshoot, never actual trim points.
+        let s = nurbs_partials_over_box(
+            n,
+            u.lo.max(u0),
+            u.hi.min(u1),
+            v.lo.max(v0),
+            v.hi.min(v1),
+            3,
+            2,
+        )?;
+        let partial = |i, j| {
+            let p = s.at(i, j);
+            [p.x, p.y, p.z]
+        };
+        let su = partial(1, 0);
+        let sv = partial(0, 1);
+        let along = |a, b| iv_add(iv_scale(a, du), iv_scale(b, dv));
+        let su1 = along(partial(2, 0), partial(1, 1));
+        let sv1 = along(partial(1, 1), partial(0, 2));
+        let second = |a, b, c, d, e| {
+            iv_add(
+                iv_add(iv_scale(a, du * du), iv_scale(b, Ivl::from(2.0) * du * dv)),
+                iv_add(
+                    iv_scale(c, dv * dv),
+                    iv_add(iv_scale(d, ddu), iv_scale(e, ddv)),
+                ),
+            )
+        };
+        let su2 = second(
+            partial(3, 0),
+            partial(2, 1),
+            partial(1, 2),
+            partial(2, 0),
+            partial(1, 1),
+        );
+        let sv2 = second(
+            partial(2, 1),
+            partial(1, 2),
+            partial(0, 3),
+            partial(1, 1),
+            partial(0, 2),
+        );
+        let p1 = along(su, sv);
+        let p2 = iv_add(
+            along(su1, sv1),
+            iv_add(iv_scale(su, ddu), iv_scale(sv, ddv)),
+        );
+        let p3 = iv_add(
+            along(su2, sv2),
+            iv_add(
+                iv_scale(
+                    iv_add(iv_scale(su1, ddu), iv_scale(sv1, ddv)),
+                    Ivl::from(2.0),
+                ),
+                iv_add(iv_scale(su, dddu), iv_scale(sv, dddv)),
+            ),
+        );
+        let normal = interval_cross(su, sv);
+        let normal1 = iv_add(interval_cross(su1, sv), interval_cross(su, sv1));
+        let normal2 = iv_add(
+            iv_add(interval_cross(su2, sv), interval_cross(su, sv2)),
+            iv_scale(interval_cross(su1, sv1), Ivl::from(2.0)),
+        );
+        let a = interval_cross(normal, p1);
+        let a1 = iv_add(interval_cross(normal1, p1), interval_cross(normal, p2));
+        let a2 = iv_add(
+            iv_add(interval_cross(normal2, p1), interval_cross(normal, p3)),
+            iv_scale(interval_cross(normal1, p2), Ivl::from(2.0)),
+        );
+        let [q0, q1, q2, _] = q;
+        let d = iv_sub(q0, partial(0, 0));
+        let d1 = iv_sub(q1, p1);
+        let d2 = iv_sub(q2, p2);
+        let g2 = interval_dot(d2, a) + Ivl::from(2.0) * interval_dot(d1, a1) + interval_dot(d, a2);
+        Ok((interval_dot(d, a), g2, interval_dot(a, a).sqrt()))
+    }
+}
+
+/// Prove the native trim's entire image stays in the surface domain. Convexity
+/// reduces this to homogeneous control comparisons, evaluated without rounding
+/// the rational division. Lines use their exact finite-image endpoints.
+fn trim_inside_surface(trim: &Curve, n: &Nurbs) -> bool {
+    let (Some(&u0), Some(&u1), Some(&v0), Some(&v1)) =
+        (n.u.get(n.p), n.u.get(n.nu), n.v.get(n.q), n.v.get(n.nv))
+    else {
+        return false;
+    };
+    let covered = |value: f64, weight: f64, lo: f64, hi: f64| {
+        let (Some(low), Some(high)) = (
+            expansion::product(lo, weight),
+            expansion::product(hi, weight),
+        ) else {
+            return false;
+        };
+        expansion::sign(&expansion::sub(&[value], &low)) >= 0
+            && expansion::sign(&expansion::sub(&high, &[value])) >= 0
+    };
+    match trim.kind() {
+        CurveKind::Line(line) => {
+            for (coordinate, lo, hi) in [(0, u0, u1), (1, v0, v1)] {
+                let Some((a, b)) =
+                    line_coordinate_ends(line, |p| if coordinate == 0 { p.x } else { p.y })
+                else {
+                    return false;
+                };
+                if expansion::sign(&expansion::sub(&a, &[lo])) < 0
+                    || expansion::sign(&expansion::sub(&[hi], &b)) < 0
+                {
+                    return false;
+                }
+            }
+            true
+        }
+        CurveKind::BSpline(bs) => convex_native_net(bs).is_some_and(|net| {
+            net.cpts().iter().all(|p| {
+                let w = if p.w == crate::nurbs::math::NOW {
+                    1.0
+                } else {
+                    p.w
+                };
+                w > 0.0 && w.is_finite() && covered(p.x, w, u0, u1) && covered(p.y, w, v0, v1)
+            })
+        }),
+        _ => false,
+    }
+}
+
+/// A certificate for the ACTUAL stored 3D edge, not merely its isoparametric
+/// pcurve. On each smooth native knot cell the scalar interpolation remainder
+/// gives |g(t)| <= max(|g(lo)|,|g(hi)|) + (hi-lo)^2/8 sup|g''|. Dividing this
+/// outward bound by inf|A| bounds across-seam displacement throughout that cell.
+/// UV identity is only a prerequisite locating the comparison on this seam.
+/// Unknown definitions, crossed surface knots below C2, poles and exhausted
+/// subdivision budgets refuse relief; samples alone never grant it.
+fn native_edge_on_iso(
+    k: &Kernel,
+    surface: &Surface,
+    source_uv: &Curve,
+    edge: &Curve,
+    trim: &Curve,
+    domain: Extent1d,
+    threshold: f64,
+) -> Result<bool> {
+    if !same_iso_support(source_uv, trim) || surface.procedural_definition().is_some() {
+        return Ok(false);
+    }
+    let (SurfaceKind::BSpline(surface), CurveKind::Line(source)) =
+        (surface.kind(), source_uv.kind())
+    else {
+        return Ok(false);
+    };
+    if surface.is_out_of_bounds_enabled() {
+        return Ok(false);
+    }
+    let Some(n) = ignored(Nurbs::of(surface))? else {
+        return Ok(false);
+    };
+    if n.p > 18
+        || n.q > 18
+        || n.u.iter().chain(&n.v).chain(&n.pw).any(|x| !x.is_finite())
+        || n.u.windows(2).any(|w| w.first() > w.last())
+        || n.v.windows(2).any(|w| w.first() > w.last())
+        || !trim_inside_surface(trim, &n)
+    {
+        return Ok(false);
+    }
+    let (Some(edge_def), Some(trim_def)) = (
+        SeamCurveDefinition::of(edge, domain),
+        SeamCurveDefinition::of(trim, domain),
+    ) else {
+        return Ok(false);
+    };
+    let fixed = if source.line_vector().x == 0.0 {
+        (0, source.line_point().x)
+    } else {
+        (1, source.line_point().y)
+    };
+    let certificate = SeamGapCertificate {
+        edge: &edge_def,
+        trim: &trim_def,
+        surface: &n,
+        fixed,
+    };
+    let mut cuts = vec![domain.min(), domain.max()];
+    cuts.extend(
+        edge_def
+            .cuts()
+            .iter()
+            .chain(trim_def.cuts())
+            .copied()
+            .filter(|t| *t > domain.min() && *t < domain.max()),
+    );
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup();
+    if cuts.len() > 4096 {
+        return Ok(false);
+    }
+    let mut work = Vec::new();
+    for ends in cuts.windows(2) {
+        if let [lo, hi] = ends {
+            work.push((*lo, *hi, 0_u32));
+        }
+    }
+    let mut visits = 0;
+    while let Some((lo, hi, depth)) = work.pop() {
+        k.check_cancelled(OP_GEOM)?;
+        visits += 1;
+        if visits > 4096 {
+            return Ok(false);
+        }
+        let mid = lo + (hi - lo) * 0.5;
+        if !(mid > lo && mid < hi) {
+            return Ok(false);
+        }
+        let Some((_, g2, length)) = ignored(certificate.over(Ivl::new(lo, hi), mid))? else {
+            return Ok(false);
+        };
+        let Some((glo, _, alo)) = ignored(certificate.over(Ivl::from(lo), mid))? else {
+            return Ok(false);
+        };
+        let Some((ghi, _, ahi)) = ignored(certificate.over(Ivl::from(hi), mid))? else {
+            return Ok(false);
+        };
+        // A certified bad endpoint already disproves whole-span coincidence.
+        // Endpoint observations can refuse relief, but never grant it.
+        if glo.mig() >= (Ivl::from(threshold) * alo).hi
+            || ghi.mig() >= (Ivl::from(threshold) * ahi).hi
+        {
+            return Ok(false);
+        }
+        let h = Ivl::from(hi) - Ivl::from(lo);
+        let bound = (Ivl::from(glo.mag().max(ghi.mag()))
+            + h * h * Ivl::from(g2.mag()) / Ivl::from(8.0))
+            / length;
+        if length.lo > 0.0 && bound.hi < threshold {
+            continue;
+        }
+        if depth >= 20 {
+            return Ok(false);
+        }
+        work.push((mid, hi, depth + 1));
+        work.push((lo, mid, depth + 1));
+    }
+    Ok(true)
+}
+
+fn interval_point(p: Vec3) -> [Ivl; 3] {
+    [p.x, p.y, p.z].map(Ivl::from)
+}
+
+fn interval_cross([ax, ay, az]: [Ivl; 3], [bx, by, bz]: [Ivl; 3]) -> [Ivl; 3] {
+    [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx]
+}
+
+fn interval_dot(a: [Ivl; 3], b: [Ivl; 3]) -> Ivl {
+    a.into_iter()
+        .zip(b)
+        .fold(Ivl::from(0.0), |sum, (a, b)| sum + a * b)
+}
+
+/// The origin and across-seam direction of a cone's or cylinder's seam over `domain`,
+/// as enclosures for [`native_curve_in_strip`]. The seam of such a surface is a
+/// ruling, a straight line along which the surface normal is constant, so the
+/// across-seam direction `n x t` is one vector for the whole seam. That is checked,
+/// not assumed: three stations must be collinear and share one normal that is
+/// perpendicular to the line, to far below any tolerance, or there is no frame and
+/// so no relief. The values are floating point, so each is widened by a relative
+/// margin of `1e-12`, orders above the rounding of these few operations.
+/// `None` for a seam that is no ruling or whose normal cannot be evaluated.
+fn ruling_frame(
+    k: &Kernel,
+    seam: &Curve,
+    uv_seam: &Curve,
+    surface: &Surface,
+    domain: Extent1d,
+) -> Result<Option<([Ivl; 3], [Ivl; 3])>> {
+    const MARGIN: f64 = 1e-12;
+    let stations = [domain.min(), domain.mid(), domain.max()];
+    let mut points = Vec::with_capacity(3);
+    let mut normals = Vec::with_capacity(3);
+    for t in stations {
+        let Some(point) = ignored(seam.evaluate_point(k, t))? else {
+            return Ok(None);
+        };
+        let Some(uv) = ignored(uv_seam.evaluate_point(k, t))? else {
+            return Ok(None);
+        };
+        let Some(normal) =
+            ignored(surface.evaluate_normal(k, Point2::new(uv.x, uv.y), Side::Left, Side::Left))?
+        else {
+            return Ok(None);
+        };
+        points.push(point);
+        normals.push(normal);
+    }
+    let (Some(&p0), Some(&p1), Some(&p2), Some(&n0), Some(&n1), Some(&n2)) = (
+        points.first(),
+        points.get(1),
+        points.get(2),
+        normals.first(),
+        normals.get(1),
+        normals.get(2),
+    ) else {
+        return Ok(None);
+    };
+    let line = p2 - p0;
+    let length = line.length();
+    if !(length > 0.0 && length.is_finite()) {
+        return Ok(None);
+    }
+    let direction = line / length;
+    let scale = 1.0 + length;
+    let straight = (p1 - p0).cross(direction).length() <= MARGIN * scale;
+    let same_normal = (n1 - n0).length() <= MARGIN && (n2 - n0).length() <= MARGIN;
+    let normal_length = n0.length();
+    if !(straight
+        && same_normal
+        && normal_length > 0.0
+        && (n0 / normal_length).dot(direction).abs() <= MARGIN)
+    {
+        return Ok(None);
+    }
+    let across = (n0 / normal_length).cross(direction);
+    let widen = |v: f64| Ivl::new(v - MARGIN * (1.0 + v.abs()), v + MARGIN * (1.0 + v.abs()));
+    Ok(Some((
+        [p0.x, p0.y, p0.z].map(widen),
+        [across.x, across.y, across.z].map(widen),
+    )))
+}
+
+/// Convex-hull strip bound. For `Q(t) = sum alpha_i(t) Q_i`, `alpha_i >= 0`,
+/// `sum alpha_i = 1`: `|(Q(t)-O).A|/|A| <= max_i |(Q_i-O).A|/|A|`.
+/// Every arithmetic operation is rounded outward, including rational division
+/// and the direction's length. Only native polynomial/rational definitions qualify.
+fn native_curve_in_strip(
+    curve: &Curve,
+    origin: [Ivl; 3],
+    across: [Ivl; 3],
+    threshold: f64,
+) -> bool {
+    let length = interval_dot(across, across).sqrt();
+    if !(length.lo > 0.0 && length.hi.is_finite()) {
+        return false;
+    }
+    let in_strip = |point: [Ivl; 3]| {
+        let [px, py, pz] = point;
+        let [ox, oy, oz] = origin;
+        let offset = [px - ox, py - oy, pz - oz];
+        (interval_dot(offset, across) / length).mag() < threshold
+    };
+    match curve.kind() {
+        CurveKind::Line(_) => {
+            let Some(line) = of_line(curve, curve.natural_interval()) else {
+                return false;
+            };
+            in_strip(line.jet_over(Ivl::from(curve.natural_interval().min())).0)
+                && in_strip(line.jet_over(Ivl::from(curve.natural_interval().max())).0)
+        }
+        CurveKind::BSpline(spline) => {
+            let Some(net) = convex_native_net(spline) else {
+                return false;
+            };
+            for cp in net.cpts() {
+                let w = if cp.w == crate::nurbs::math::NOW {
+                    1.0
+                } else {
+                    cp.w
+                };
+                if !(w > 0.0 && w.is_finite()) {
+                    return false;
+                }
+                let z = if cp.z == crate::nurbs::math::NOZ {
+                    0.0
+                } else {
+                    cp.z
+                };
+                if !in_strip([cp.x, cp.y, z].map(|v| Ivl::from(v) / Ivl::from(w))) {
+                    return false;
+                }
+            }
+            !net.cpts().is_empty()
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2861,6 +3658,173 @@ mod tests {
         }
         cc.set_curve(Some(H(0, K::Curve)), false);
         cc
+    }
+
+    #[test]
+    fn an_isoparametric_trim_does_not_certify_its_stored_edges_hidden_bow() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+
+        let k = Kernel::default();
+        let plane = Surface::from(BSplineSurface::from_nurb(
+            NurbSurface::new(
+                vec![
+                    vec![
+                        CPoint::new(0.0, 0.0, 0.0, NOW),
+                        CPoint::new(0.0, 1.0, 0.0, NOW),
+                    ],
+                    vec![
+                        CPoint::new(1.0, 0.0, 0.0, NOW),
+                        CPoint::new(1.0, 1.0, 0.0, NOW),
+                    ],
+                ],
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            false,
+        ));
+        let trim = line([0.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let domain = Extent1d::from_min_max(0.0, 1.0);
+        let bowed = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(
+                [
+                    (0.0, 0.0),
+                    (0.125, 2e-6),
+                    (0.25, 0.0),
+                    (0.5, 0.0),
+                    (0.75, 0.0),
+                    (1.0, 0.0),
+                ]
+                .into_iter()
+                .map(|(t, x)| CPoint::new(x, t, 0.0, NOW))
+                .collect(),
+                1,
+                vec![0.0, 0.0, 0.125, 0.25, 0.5, 0.75, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        ));
+        assert!(same_iso_support(&trim, &trim));
+        for t in [0.25, 0.5, 0.75] {
+            assert_eq!(bowed.evaluate_point(&k, t).unwrap().x, 0.0);
+        }
+        // The pcurve is the seam itself, but the stored 3D curve departs across
+        // the surface by twice the vertex zone between the old sample stations.
+        assert!(!native_edge_on_iso(&k, &plane, &trim, &bowed, &trim, domain, 1e-9).unwrap());
+        let normal_offset = line([0.0, 0.0, 1e-5], [0.0, 1.0, 1e-5]);
+        assert!(
+            native_edge_on_iso(&k, &plane, &trim, &normal_offset, &trim, domain, 1e-9).unwrap()
+        );
+
+        // A genuinely curved native isoparametric seam, S(0,v) = (0,v,v^2),
+        // exercises the surface chain derivatives as well as the planar case.
+        let curved = Surface::from(BSplineSurface::from_nurb(
+            NurbSurface::new(
+                [0.0, 1.0]
+                    .into_iter()
+                    .map(|u| {
+                        vec![
+                            CPoint::new(u, 0.0, 0.0, NOW),
+                            CPoint::new(u, 0.5, 0.0, NOW),
+                            CPoint::new(u, 1.0, 1.0, NOW),
+                        ]
+                    })
+                    .collect(),
+                1,
+                2,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            false,
+        ));
+        let parabola = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(
+                vec![
+                    CPoint::new(0.0, 0.0, 0.0, NOW),
+                    CPoint::new(0.0, 0.5, 0.0, NOW),
+                    CPoint::new(0.0, 1.0, 1.0, NOW),
+                ],
+                2,
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        ));
+        assert!(native_edge_on_iso(&k, &curved, &trim, &parabola, &trim, domain, 1e-9).unwrap());
+    }
+
+    #[test]
+    fn rational_isoparametric_identity_requires_the_whole_finite_image() {
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOZ};
+
+        let source = line([2.0, 0.0, 0.0], [2.0, 1.0, 0.0]);
+        let rational = |last_y: f64| {
+            Curve::from(BSplineCurve::from_nurb(
+                NurbCurve::new(
+                    [(0.0, 0.5), (0.25, 2.0), (0.75, 1.0), (last_y, 4.0)]
+                        .into_iter()
+                        .map(|(y, w)| CPoint::new(2.0 * w, y * w, NOZ, w))
+                        .collect(),
+                    3,
+                    vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+                )
+                .unwrap(),
+                2,
+                false,
+            ))
+        };
+        // Unequal positive weights preserve x = 2 exactly in homogeneous form.
+        assert!(same_iso_support(&source, &rational(1.0)));
+        // The same infinite isoparametric support does not prove coincidence
+        // with this finite source: the last endpoint extends beyond its image.
+        assert!(!same_iso_support(&source, &rational(1.25)));
+        assert!(!same_iso_support(
+            &source,
+            &line([2.0, 0.0, 0.0], [2.0, 1.25, 0.0]),
+        ));
+    }
+
+    #[test]
+    fn isoparametric_identity_refuses_a_trim_bowing_between_three_stations() {
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW, NOZ};
+
+        let k = Kernel::default();
+        let source = line([2.0, 0.0, 0.0], [2.0, 1.0, 0.0]);
+        let trim = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(
+                [
+                    (0.0, 2.0),
+                    (0.125, 2.000002),
+                    (0.25, 2.0),
+                    (0.5, 2.0),
+                    (0.75, 2.0),
+                    (1.0, 2.0),
+                ]
+                .into_iter()
+                .map(|(y, x)| CPoint::new(x, y, NOZ, NOW))
+                .collect(),
+                1,
+                vec![0.0, 0.0, 0.125, 0.25, 0.5, 0.75, 1.0, 1.0],
+            )
+            .unwrap(),
+            2,
+            false,
+        ));
+        for t in [0.25, 0.5, 0.75] {
+            assert_eq!(trim.evaluate_point(&k, t).unwrap().x, 2.0);
+        }
+        assert!(trim.evaluate_point(&k, 0.125).unwrap().x - 2.0 > 1e-6);
+        assert!(!same_iso_support(&source, &trim));
     }
 
     #[test]
@@ -2958,6 +3922,9 @@ mod tests {
         fn classification_vertex_point(&self, _vertex: H) -> Option<Point3> {
             Some(self.vertex)
         }
+        fn topology_zone_tol_3d(&self, _object: H) -> Option<f64> {
+            Some(1e-6)
+        }
     }
 
     /// Whether the circle's first quarter, ending at a vertex 1e-8 from its end point
@@ -3015,5 +3982,206 @@ mod tests {
         // no UV curve or no surface to measure across in: the whole gap counts
         assert!(quarter_ending_off([1.0, 0.0, 0.0], 5, 0));
         assert!(quarter_ending_off([1.0, 0.0, 0.0], 1, 5));
+    }
+
+    #[test]
+    fn agreement_at_three_stations_does_not_hide_a_spike_between_them() {
+        use crate::geom::extent2d::Extent2d;
+        use crate::math::Vec2;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let k = Kernel::default();
+        // A native piecewise-linear edge: every former station agrees exactly,
+        // but at t = 1/8 its gap is twice the 1e-6 vertex zone.
+        let edge = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(
+                vec![
+                    CPoint::new(0.0, 0.0, 0.0, NOW),
+                    CPoint::new(0.125, 2e-6, 0.0, NOW),
+                    CPoint::new(0.25, 0.0, 0.0, NOW),
+                    CPoint::new(0.5, 0.0, 0.0, NOW),
+                    CPoint::new(0.75, 0.0, 0.0, NOW),
+                    CPoint::new(1.0, 0.0, 0.0, NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 0.125, 0.25, 0.5, 0.75, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        ));
+        for t in [0.25, 0.5, 0.75] {
+            assert_eq!(edge.evaluate_point(&k, t).unwrap().y, 0.0);
+        }
+        assert!(edge.evaluate_point(&k, 0.125).unwrap().y > 1e-6);
+        let geo = SeamGeo {
+            curves: vec![line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]), edge],
+            plane: Surface::from(crate::surface::plane::Plane::new(
+                Vec3::ZERO,
+                Vec3::X,
+                Vec3::Y,
+                Vec2::new(1.0, 1.0),
+                &Extent2d::from_bounds(-1.0, -1.0, 2.0, 1.0),
+            )),
+            vertex: Point3::new(0.0, 1e-8, 0.0),
+        };
+        let mut cc = classification(&k, &[0.0, 1.0]);
+        cc.set_surface1(Some(H(0, K::Surface)));
+        cc.set_uv_curve1(Some(H(0, K::Curve)));
+        let ivl = cc.at_mut(0).unwrap();
+        ivl.mid
+            .set_class_object(PointClassType::Edge, Some(H(1, K::Edge)));
+        ivl.mid.set_gap_3d(0.0);
+        ivl.start
+            .set_class_object(PointClassType::Vertex, Some(H(0, K::Vertex)));
+        ivl.start.set_gap_3d(1e-8);
+        assert!(cc.has_near_misses(&k, &geo, false).unwrap());
+    }
+
+    #[test]
+    fn a_midpoint_coincidence_does_not_hide_a_bow_beside_the_seam() {
+        use crate::geom::extent2d::Extent2d;
+        use crate::math::Vec2;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let k = Kernel::default();
+        for normal_offset in [false, true] {
+            let control = |x, offset| {
+                if normal_offset {
+                    CPoint::new(x, 0.0, offset, NOW)
+                } else {
+                    CPoint::new(x, offset, 0.0, NOW)
+                }
+            };
+            // The edge agrees at both ends and the midpoint, but has opposite
+            // bows at the quarter stations, each inside the vertex's zone.
+            let bowed = Curve::from(BSplineCurve::from_nurb(
+                NurbCurve::new(
+                    vec![
+                        control(0.0, 0.0),
+                        control(1.0 / 3.0, -1e-5 / 6.0),
+                        control(2.0 / 3.0, 1e-5 / 6.0),
+                        control(1.0, 0.0),
+                    ],
+                    3,
+                    vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+                )
+                .unwrap(),
+                3,
+                false,
+            ));
+            let geo = SeamGeo {
+                curves: vec![
+                    line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+                    bowed,
+                    line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+                ],
+                plane: Surface::from(crate::surface::plane::Plane::new(
+                    Vec3::ZERO,
+                    Vec3::X,
+                    Vec3::Y,
+                    Vec2::new(1.0, 1.0),
+                    &Extent2d::from_bounds(-1.0, -1.0, 2.0, 1.0),
+                )),
+                vertex: Point3::new(0.0, 1e-8, 0.0),
+            };
+            for shared in [false, true] {
+                let params: &[f64] = if shared {
+                    &[-1.0, 0.0, 1.0]
+                } else {
+                    &[0.0, 1.0]
+                };
+                let mut cc = classification(&k, params);
+                cc.set_uv_curve1(Some(H(2, K::Curve)));
+                cc.set_surface1(Some(H(0, K::Surface)));
+                let own = usize::from(shared);
+                let ivl = cc.at_mut(own).unwrap();
+                ivl.mid
+                    .set_class_object(PointClassType::Edge, Some(H(1, K::Edge)));
+                ivl.mid.set_gap_3d(0.0);
+                ivl.start
+                    .set_class_object(PointClassType::Vertex, Some(H(0, K::Vertex)));
+                ivl.start.set_t_param(0.0, false);
+                ivl.start.set_gap_3d(1e-8);
+                if shared {
+                    let end = &mut cc.at_mut(0).unwrap().end;
+                    end.set_class_object(PointClassType::Vertex, Some(H(0, K::Vertex)));
+                    end.set_t_param(0.0, false);
+                    end.set_gap_3d(1e-8);
+                }
+                assert_eq!(
+                    cc.has_near_misses(&k, &geo, false).unwrap(),
+                    !normal_offset,
+                    "shared={shared}, normal_offset={normal_offset}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_seam_vertex_uses_its_coincident_interval_from_either_side() {
+        use crate::geom::extent2d::Extent2d;
+        use crate::math::Vec2;
+
+        let k = Kernel::default();
+        let mut geo = SeamGeo {
+            curves: vec![
+                line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+                line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+            ],
+            plane: Surface::from(crate::surface::plane::Plane::new(
+                Vec3::ZERO,
+                Vec3::X,
+                Vec3::Y,
+                Vec2::new(1.0, 1.0),
+                &Extent2d::from_bounds(-1.0, -1.0, 2.0, 1.0),
+            )),
+            vertex: Point3::new(0.5, 1e-8, 0.0),
+        };
+        for coincident in [0, 1] {
+            let mut cc = classification(&k, &[0.0, 0.5, 1.0]);
+            cc.set_uv_curve1(Some(H(1, K::Curve)));
+            cc.set_surface1(Some(H(0, K::Surface)));
+            for (i, end) in [(0, true), (1, false)] {
+                let ivl = cc.at_mut(i).unwrap();
+                let pc = if end { &mut ivl.end } else { &mut ivl.start };
+                pc.set_class_object(PointClassType::Vertex, Some(H(0, K::Vertex)));
+                pc.set_t_param(0.5, false);
+                pc.set_gap_3d(1e-8);
+            }
+            cc.at_mut(coincident)
+                .unwrap()
+                .mid
+                .set_class_object(PointClassType::Edge, Some(H(0, K::Edge)));
+            // The unknown interval ends at the coincident interval's own vertex,
+            // within its stored zone. Visiting that interval first must not
+            // turn the same shared boundary into a near miss.
+            assert!(!cc.has_near_misses(&k, &geo, false).unwrap());
+            geo.vertex.y = 2e-6;
+            cc.at_mut(0).unwrap().end.set_gap_3d(2e-6);
+            cc.at_mut(1).unwrap().start.set_gap_3d(2e-6);
+            assert!(cc.has_near_misses(&k, &geo, false).unwrap());
+            geo.vertex.y = 1e-8;
+            cc.at_mut(0).unwrap().end.set_gap_3d(1e-8);
+            cc.at_mut(1).unwrap().start.set_gap_3d(1e-8);
+            // A different vertex at the same parameter does not establish
+            // that this boundary ends the coincident interval.
+            let ivl = cc.at_mut(coincident).unwrap();
+            let boundary = if coincident == 0 {
+                &mut ivl.end
+            } else {
+                &mut ivl.start
+            };
+            boundary.set_class_object(PointClassType::Vertex, Some(H(9, K::Vertex)));
+            assert!(cc.has_near_misses(&k, &geo, false).unwrap());
+            // Without a coincident interval the same offset is a near miss.
+            cc.at_mut(coincident)
+                .unwrap()
+                .mid
+                .set_class_object(PointClassType::Unknown, None);
+            assert!(cc.has_near_misses(&k, &geo, false).unwrap());
+        }
     }
 }

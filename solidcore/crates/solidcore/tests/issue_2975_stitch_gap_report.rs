@@ -643,3 +643,114 @@ fn a_planar_conic_disc_in_a_holed_face_reports_its_gap() {
     assert!(entry.gap >= gap, "{entry:?}");
     check_edge_closure(&b, &gaps, "SmConic_TYPE", gap, 1e-12);
 }
+
+/// Two adjacent sheets have coincident shared curves lifted off their planes.
+/// Their stored zones overlap: the 0.004 mm displacement exceeds the body
+/// tolerance and the repair targets, but fits the incident local zones.
+fn locally_tolerant_sheets(k: &mut Kernel, gap: f64) -> Brep {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexEdgeGap, VertexFaceGap};
+    use solidcore::topology::brep::p4::stitch_faces;
+
+    let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT).unwrap();
+    add_square(k, &mut b, 0.0, 0.0);
+    add_square(k, &mut b, 1.0, 0.0);
+    b.set_tolerance(1e-5);
+    for f in b.face_list().to_vec() {
+        b.face_mut(f).unwrap().tolerance = 0.002;
+    }
+    for v in b.vertex_list().to_vec() {
+        b.vertex_mut(v).unwrap().tolerance = 0.006;
+    }
+    let translation = Axis2Placement::new(
+        Vec3::new(0.0, 0.0, gap),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+    );
+    // add_square's domain is in the plane's frame, which need not align
+    // its u coordinate with world x. Select the shared u = 1 edge in that frame.
+    let surface = b.face(b.face_list()[0]).unwrap().surface.as_ref().unwrap();
+    let shared_start = surface.evaluate_point(k, Point2::new(1.0, 0.0)).unwrap();
+    let shared_end = surface.evaluate_point(k, Point2::new(1.0, 1.0)).unwrap();
+    let mut lifted = 0;
+    for e in b.edge_list().to_vec() {
+        let data = b.edge_mut(e).unwrap();
+        data.tolerance = 0.005;
+        let curve = data.curve.as_mut().unwrap();
+        let a = curve.evaluate_point(k, data.interval.min()).unwrap();
+        let z = curve.evaluate_point(k, data.interval.max()).unwrap();
+        if (a.distance(shared_start) < 1e-12 && z.distance(shared_end) < 1e-12)
+            || (a.distance(shared_end) < 1e-12 && z.distance(shared_start) < 1e-12)
+        {
+            curve.transform(k, &translation, None).unwrap();
+            lifted += 1;
+        }
+    }
+    assert_eq!(lifted, 2);
+    // The fixture edits the stored geometry directly, so clear any gaps the
+    // face constructor measured before that edit.
+    for eu in b.edgeuses().iter().map(|(id, _)| id).collect::<Vec<_>>() {
+        let data = b.edgeuse_mut(eu).unwrap();
+        data.max_edge_face_gap = EdgeFaceGap::default();
+        data.edge_ccw_edge_gap = EdgeEdgeGap::default();
+    }
+    for vu in b.vertexuses().iter().map(|(id, _)| id).collect::<Vec<_>>() {
+        let data = b.vertexuse_mut(vu).unwrap();
+        data.vertex_edge_gap = VertexEdgeGap::default();
+        data.vertex_face_gap = VertexFaceGap::default();
+    }
+    let outcome = stitch_faces(k, &mut b, 1e-4, None, false).unwrap();
+    assert_eq!(outcome.stitched_edges, 1);
+    b.refresh_cached_topology();
+    assert_eq!(b.edge_list().len(), 7);
+    assert_eq!(b.vertex_list().len(), 6);
+    b
+}
+
+#[test]
+fn stitched_local_zones_are_valid_without_meeting_repair_targets() {
+    use solidcore::geom::assert_array::AssertArray;
+    use solidcore::topology::brep::validation::{
+        check_brep, validate_and_update_tolerances, CheckLevel,
+    };
+
+    let mut k = Kernel::default();
+    k.fixes.validate_tolerances_fixes_reported_gaps = true;
+    let mut b = locally_tolerant_sheets(&mut k, 0.004);
+    let report = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    assert!(report.is_valid(), "{:?}", report.lines());
+    assert_eq!(b.tolerance(), 1e-5);
+    for &e in b.edge_list() {
+        assert_eq!(b.edge(e).unwrap().tolerance, 0.005);
+    }
+    for &v in b.vertex_list() {
+        assert_eq!(b.vertex(v).unwrap().tolerance, 0.006);
+    }
+    // The explicit repair API retains its stricter targets, including in a
+    // validate-only call. Checking validity must not silently repair this model.
+    let mut repair = AssertArray::default();
+    let gaps = validate_and_update_tolerances(&mut k, &mut b, true, Some(&mut repair), 2).unwrap();
+    assert!(gaps.violated_or_updated);
+    assert!(repair.reports().iter().any(|report| !report.ok));
+    assert!((gaps.max_vertex_edge_gap - 0.004).abs() < 1e-12);
+
+    // The edge and face zones also admit a displacement larger than the
+    // edge radius alone, without changing either radius.
+    let mut overlap = locally_tolerant_sheets(&mut k, 0.006);
+    let report = check_brep(&mut k, &mut overlap, CheckLevel::Level2).unwrap();
+    assert!(report.is_valid(), "{:?}", report.lines());
+
+    // A displacement outside the combined 0.005 + 0.002 mm edge/face
+    // zones is still refused, with the same recorded tolerances.
+    let mut broken = locally_tolerant_sheets(&mut k, 0.008);
+    let report = check_brep(&mut k, &mut broken, CheckLevel::Level2).unwrap();
+    assert!(!report.is_valid());
+    assert!(
+        report
+            .lines()
+            .iter()
+            .any(|line| line.contains("SmBrep::Test #4 Bad Gap")),
+        "{:?}",
+        report.lines()
+    );
+}
