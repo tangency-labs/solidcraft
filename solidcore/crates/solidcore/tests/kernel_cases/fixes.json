@@ -55,7 +55,6 @@
   "revolve_analytic_profile_faces",
   "taper_tangent_corner_planes",
   "revolve_nested_shells_as_cavities",
-  "revolve_holed_profile_void",
   "revolve_splits_curves_on_axis",
   "loops_go_on_round_the_vertex",
   "mirror_curve_keeps_euclidean_control_points",

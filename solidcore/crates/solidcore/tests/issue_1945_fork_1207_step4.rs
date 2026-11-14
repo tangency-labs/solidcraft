@@ -71,7 +71,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.taper_tangent_corner_planes = true;
     k.fixes.revolve_nested_shells_as_cavities = true;
-    k.fixes.revolve_holed_profile_void = true;
     k.fixes.revolve_splits_curves_on_axis = true;
     k.fixes.loops_go_on_round_the_vertex = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
