@@ -239,39 +239,47 @@ fn normal_angle(p: &mut TsectPnt) -> Result<()> {
     Ok(())
 }
 
-/// The largest condition number of the chain-rule solve `[S_u S_v] (u', v') = T` at which
-/// [`SurfaceIntersector::near_a_pole_off_it`] keeps a point's own derivatives
-/// (`1 / SM_EFF_ZERO_SQRT`): the solve's relative error, about the unit roundoff times the
-/// condition number, stays near 1e-10.
-const MAX_CHAIN_RULE_CONDITION: f64 = 1.0 / EFF_ZERO_SQRT;
+/// The smallest `sin² θ`, `θ` the angle between `S_u` and `S_v`, at which
+/// [`SurfaceIntersector::near_a_pole_off_it`] keeps a point's own derivatives:
+/// `16 ε / 1e-10`, about 3.6e-5 (`sin θ` about 6e-3), so the chain-rule solve's relative
+/// error bound `16 ε / sin² θ` ([`chain_rule_well_conditioned`]) is at most 1e-10.
+const MIN_CHAIN_RULE_SIN_SQ: f64 = 16.0 * f64::EPSILON / 1e-10;
 
-/// Not upstream: whether the chain-rule solve `[S_u S_v] (u', v') = T` with columns `su`
-/// and `sv` is well conditioned. The condition number of the 3×2 matrix `J = [S_u S_v]` is
-/// `σ_max / σ_min = σ_max² / (σ_max σ_min) = σ_max² / |S_u × S_v|`, and
-/// `σ_max² ≤ |S_u|² + |S_v|²` (the Frobenius norm), so it is at most
-/// `(|S_u|² + |S_v|²) / |S_u × S_v|`. That bound must be at most
-/// [`MAX_CHAIN_RULE_CONDITION`].
+/// Not upstream: whether the UV tangent `ComputePointValues` solves at a point with first
+/// derivatives `su` and `sv` is accurate, so the point can keep its own derivatives.
 ///
-/// Rounding: the cross product cancels, so its error is absolute. Each component
-/// `a_y b_z - a_z b_y` is off by at most `γ_2 (|a_y b_z| + |a_z b_y|)`, and those sums have
-/// a Euclidean norm of at most `√2 |a| |b|`, so the computed cross product is within
-/// `√2 γ_2 |S_u| |S_v|` (below `3 ε |S_u| |S_v|`) of the exact one. Its length adds a
-/// relative error below `4 ε`. So the exact `|S_u × S_v|` is at least
-/// `area (1 - 8 ε) - 4 ε |S_u| |S_v|` (the computed lengths' own rounding is inside these
-/// margins), and that lower bound is what is compared. The sum of squares, a few
-/// additions and multiplications of non-negative terms, is within `1 + 16 ε` of the exact
-/// one, so the left side is raised by that factor. A computed pass therefore implies that
-/// the exact bound `(|S_u|² + |S_v|²) / |S_u × S_v|` is at most the limit. Written to
-/// accept: a NaN, an infinite derivative, or a cross product that does not clear its
-/// rounding fails.
+/// The tangent comes from `DropVectors`, which solves `S_u u' + S_v v' = T` by Cramer's
+/// rule on the Gram matrix `[S_u·S_u S_u·S_v; S_u·S_v S_v·S_v]`
+/// (`smgu_VecLinCombTwoVectors`). Its determinant is `|S_u|² |S_v|² sin² θ`, `θ` the angle
+/// between `S_u` and `S_v`. The products and dot products are each within a few `ε` of
+/// their exact values relative to `|S_u|² |S_v|²` (a dot product within `γ_3 |a| |b|`), and
+/// the determinant and the numerators cancel to `sin² θ` of that, so the solve's relative
+/// error is at most about `16 ε / sin² θ` (ARGUED: the operation count). It does not
+/// depend on the scaling of the columns: a pole, where `|S_u|` falls with the distance and
+/// `θ` stays a right angle on a sphere, costs nothing. Two conditions:
+/// - `sin² θ ≥ MIN_CHAIN_RULE_SIN_SQ`, so that bound is at most 1e-10;
+/// - `|S_u|²` and `|S_v|²` at least `SM_EFF_ZERO²`, below which `DropVectors` returns a zero
+///   tangent.
+///
+/// Rounding of the test itself: the cross product cancels, so its error is absolute. Each
+/// component `a_y b_z - a_z b_y` is off by at most `γ_2 (|a_y b_z| + |a_z b_y|)`, and those
+/// sums have a Euclidean norm of at most `√2 |a| |b|`, so the computed cross product is
+/// within `√2 γ_2 |S_u| |S_v|` (below `3 ε |S_u| |S_v|`) of the exact one. Its length adds
+/// a relative error below `4 ε`. So `sin θ` is at least
+/// `(area (1 - 8 ε) - 4 ε |S_u| |S_v|) / (|S_u| |S_v| (1 + 4 ε))` (the computed lengths' own
+/// rounding is inside these margins), and the square of that lower bound is what is
+/// compared. The γ model assumes no product is subnormal. A subnormal product adds an
+/// absolute error of at most `2^-1074`, and with both lengths at least `SM_EFF_ZERO`, the
+/// margin `4 ε |S_u| |S_v|` is at least about `1e-39`, far above it. Written to accept: a
+/// NaN, an infinite derivative, or a cross product that does not clear its rounding fails.
 fn chain_rule_well_conditioned(su: Vec3, sv: Vec3) -> bool {
-    let squares = su.length_squared() + sv.length_squared();
+    let (su_sq, sv_sq) = (su.length_squared(), sv.length_squared());
+    let lengths = su.length() * sv.length();
     let area = su.cross(sv).length();
-    let area_lo =
-        area * (1.0 - 8.0 * f64::EPSILON) - 4.0 * f64::EPSILON * su.length() * sv.length();
-    let lhs = squares * (1.0 + 16.0 * f64::EPSILON);
-    let rhs = MAX_CHAIN_RULE_CONDITION * area_lo;
-    area_lo > 0.0 && lhs.is_finite() && rhs.is_finite() && lhs <= rhs
+    let area_lo = area * (1.0 - 8.0 * f64::EPSILON) - 4.0 * f64::EPSILON * lengths;
+    let sin_lo = area_lo / (lengths * (1.0 + 4.0 * f64::EPSILON));
+    let long_enough = su_sq >= EFF_ZERO_SQ && sv_sq >= EFF_ZERO_SQ;
+    long_enough && area_lo > 0.0 && sin_lo.is_finite() && sin_lo * sin_lo >= MIN_CHAIN_RULE_SIN_SQ
 }
 
 const fn other(s: SrfIndex) -> SrfIndex {
@@ -834,8 +842,11 @@ impl SurfaceIntersector<'_> {
     /// - off the degenerate boundary, by more than the UV tolerance `TestPoint` reads "on a
     ///   boundary" with (`100 SM_EFF_ZERO` scaled by the domain, as
     ///   [`Self::place_at_pole`] reads it);
-    /// - regular, its chain-rule solve well conditioned ([`chain_rule_well_conditioned`]:
-    ///   the condition number of `[S_u S_v]` at most `1 / SM_EFF_ZERO_SQRT`);
+    /// - its derivatives the surface's own, not a replacement for a vanishing tangent
+    ///   (as `ComputePointValues` evaluates them);
+    /// - its UV tangent accurate ([`chain_rule_well_conditioned`]: `S_u` and `S_v` at an
+    ///   angle `θ` with `sin² θ` at least about 3.6e-5, and neither shorter than
+    ///   `SM_EFF_ZERO`);
     /// - on the side of the natural domain nearer it across `sing_dir`, that side a pole
     ///   (`GetSingularities`: its samples within `SM_EFF_ZERO` of one another).
     ///
@@ -846,17 +857,18 @@ impl SurfaceIntersector<'_> {
     /// its surface derivatives with those of a point stepped back along the span. Its UV
     /// tangent then no longer mapped onto its own 3D tangent: 0.04 to 0.66 rad off at the
     /// knots of a sphere/cylinder trace passing a pole 1e-5 to 2e-5 away, and a span test
-    /// reading the images' directions never passed however short the step. At a point
-    /// whose solve is well conditioned, `S_u u' + S_v v' = T` has its solution at the point
-    /// itself to a relative error of about `u κ` (`u` the unit roundoff, `κ` the condition
-    /// number), at most about 1e-10, and the point keeps its own derivatives.
+    /// reading the images' directions never passed however short the step. Where the
+    /// tangent passes [`chain_rule_well_conditioned`], `S_u u' + S_v v' = T` is solved at
+    /// the point itself to a relative error of at most about 1e-10 (ARGUED there), and the
+    /// point keeps its own derivatives. On a sphere `S_u` and `S_v` are perpendicular, so
+    /// every point off the boundary with `|S_u|` at least `SM_EFF_ZERO` passes.
     ///
     /// Every other singular point is stepped back from, as upstream: a point on the
-    /// boundary, a point closer to the pole than the conditioning allows (about 3e-6 from
-    /// that sphere's pole), a point where the derivative vanishes or nearly vanishes in the
-    /// domain's interior (a fold or a crease of a B-spline, where the normal has no limit;
-    /// also when the interior line lies in the half of the domain nearer a pole side), a
-    /// point whose nearer side is not a pole, and a point where `GetSingularities` fails.
+    /// boundary, a point where `|S_u|` or `|S_v|` is below `SM_EFF_ZERO` (on a fold or
+    /// crease of a B-spline, where the derivative vanishes along an interior iso line, also
+    /// when that line lies in the half of the domain nearer a pole side), a point where
+    /// `S_u` and `S_v` are within about 6e-3 rad of parallel, a point whose nearer side is
+    /// not a pole, and a point where `GetSingularities` fails.
     ///
     /// # Errors
     ///
@@ -881,10 +893,25 @@ impl SurfaceIntersector<'_> {
         };
         // (written to accept: a NaN parameter is not near a pole)
         let off_boundary = (across - lo).abs() > on_tol && (across - hi).abs() > on_tol;
-        if !off_boundary || !chain_rule_well_conditioned(su, sv) {
+        if !off_boundary {
             return Ok(false);
         }
         let surface = self.surface(s);
+        // the point's derivatives must be the surface's own: `ComputePointValues`
+        // evaluates with zero tangents replaced, and a replaced tangent (where `S_u`
+        // vanishes, as on a fold) does not solve the chain rule
+        let exact = match surface.evaluate(k, uv, 1, 1, LEFT_UPPER_EXACT) {
+            Ok(m) => m,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(false),
+        };
+        let own = |i: usize, j: usize| exact.get(i).and_then(|r| r.get(j)).copied();
+        let (Some(exact_su), Some(exact_sv)) = (own(1, 0), own(0, 1)) else {
+            return Ok(false);
+        };
+        if exact_su != su || exact_sv != sv || !chain_rule_well_conditioned(su, sv) {
+            return Ok(false);
+        }
         let natural = match surface.natural_uv_domain_with_nurb(k) {
             Ok(d) => d,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
@@ -2273,7 +2300,7 @@ mod tests {
     /// tangent no longer mapped onto its 3D tangent (0.04 to 0.66 rad off before this
     /// change, in each case below). There the chain rule holds at the point itself, so the
     /// image of the UV tangent is the 3D tangent up to rounding; the bound 1e-5 rad is a
-    /// margin over the worst measured with the change (2.3e-6, where `|S_u|` is 1e-4 of
+    /// margin over the worst measured with the change (2.2e-6, where `|S_u|` is 1e-4 of
     /// `|S_v|`), far below the turn before it.
     #[test]
     fn a_trace_point_near_a_pole_keeps_its_own_uv_tangent() {
@@ -2309,9 +2336,22 @@ mod tests {
         assert!(failed.is_empty(), "{failed:#?}");
     }
 
-    /// The chain-rule solve is well conditioned 2e-5 from the pole of a sphere of radius
-    /// 6 (condition number about 3e5), and not 1e-10 from it (about 6e10), nor where a
-    /// derivative vanishes.
+    /// The angle between `T` and the image `S_u u' + S_v v'` of the UV tangent that
+    /// `DropVectors` solves for `t` from `su` and `sv`.
+    fn solved_tangent_turn(su: Vec3, sv: Vec3, t: Vec3) -> f64 {
+        let d = drop_vectors(su, sv, &[t]).unwrap()[0];
+        (su * d.x + sv * d.y).angle_between(t).unwrap()
+    }
+
+    /// The tangent test against the solve it guards. On the r 6 ball `S_u` and `S_v` are
+    /// perpendicular, so points 2e-5, 1e-9 and 1e-11 from the pole pass, and their solved
+    /// tangents map onto `T` within 1e-9 rad (the bound the test stands for is 1e-10
+    /// relative). Just past the length limit (`|S_u|` below `SM_EFF_ZERO`, where
+    /// `DropVectors` returns a zero tangent), built by shortening the ball's `S_u`, the
+    /// test fails. On a plane whose `S_u` and
+    /// `S_v` meet at an angle `θ`, the test passes just above its limit `sin² θ` = 3.6e-5,
+    /// with the solved tangent within 1e-9 rad, and fails just below it, as at a vanishing,
+    /// parallel or NaN derivative.
     #[test]
     fn the_chain_rule_solve_is_well_conditioned_only_off_a_pole() {
         use crate::geom::axis2_placement::Axis2Placement;
@@ -2320,17 +2360,41 @@ mod tests {
         let ball =
             Surface::from(Sphere::create_canonical(k, &Axis2Placement::default(), 6.0).unwrap());
         let dom = ball.natural_uv_domain_with_nurb(k).unwrap();
-        let at = |rho: f64| {
+        let derivs = |rho: f64| {
             // the parameter across the pole side that puts the point `rho` from the pole
             let v = dom.min().y + rho / 6.0 * (dom.max().y - dom.min().y) / PI;
             let (_, su, sv) = ball
                 .evaluate_1st_derivatives(k, Point2::new(dom.u_interval().mid(), v), true, true)
                 .unwrap();
-            chain_rule_well_conditioned(su, sv)
+            (su, sv)
         };
-        assert!(at(2e-5));
-        assert!(!at(1e-10));
+        for rho in [2e-5, 1e-9, 1e-11] {
+            let (su, sv) = derivs(rho);
+            assert!(chain_rule_well_conditioned(su, sv), "{rho:e}");
+            // a direction mostly along the latitude circle, partly down the meridian
+            let t = (su.unitize_or_z() * 0.8 + sv.unitize_or_z() * 0.6).unitize_or_z();
+            let turn = solved_tangent_turn(su, sv, t);
+            assert!(turn <= 1e-9, "{rho:e}: {turn:e}");
+        }
+        // just past the length limit: the ball's derivatives 1e-9 from the pole with
+        // `S_u` shortened to half of SM_EFF_ZERO (the parameter cannot place a point that
+        // close to the pole), where `DropVectors` returns a zero tangent
+        let (su, sv) = derivs(1e-9);
+        let su = su.unitize_or_z() * (0.5 * EFF_ZERO);
+        assert!(!chain_rule_well_conditioned(su, sv));
+        assert_eq!(drop_vectors(su, sv, &[sv]).unwrap()[0], Vec2::new(0.0, 0.0));
+
         let x = Vec3::new(1.0, 0.0, 0.0);
+        let t = Vec3::new(0.0, 1.0, 0.0);
+        for (factor, passes) in [(1.05, true), (0.95, false)] {
+            let sin = (MIN_CHAIN_RULE_SIN_SQ * factor).sqrt();
+            let sv = Vec3::new((1.0 - sin * sin).sqrt(), sin, 0.0);
+            assert_eq!(chain_rule_well_conditioned(x, sv), passes, "{factor}");
+            if passes {
+                let turn = solved_tangent_turn(x, sv, t);
+                assert!(turn <= 1e-9, "{factor}: {turn:e}");
+            }
+        }
         assert!(!chain_rule_well_conditioned(Vec3::ZERO, x));
         assert!(!chain_rule_well_conditioned(Vec3::ZERO, Vec3::ZERO));
         assert!(!chain_rule_well_conditioned(x, x));
@@ -2343,8 +2407,10 @@ mod tests {
     /// A fold in the half of the domain nearer a pole is not near a pole. The quadratic
     /// patch whose first and last u rows coincide folds back along u = 1/2 (`S_u` vanishes
     /// there), and its v = 1 side is a pole. A point on the fold at v = 0.9 is singular and
-    /// in the half nearer the pole, but its solve is singular: it is stepped back from.
-    /// A point 2e-5 from a sphere's pole keeps its own derivatives.
+    /// in the half nearer the pole, but `S_u` vanishes there: the derivatives
+    /// `ComputePointValues` evaluates (zero tangents replaced) are not the surface's own,
+    /// and the point is stepped back from. A point 2e-5 from a sphere's pole keeps its own
+    /// derivatives.
     #[test]
     fn a_fold_near_a_pole_side_is_stepped_back_from() {
         use crate::geom::axis2_placement::Axis2Placement;
@@ -2385,7 +2451,8 @@ mod tests {
         let uv = Point2::new(0.5, 0.9);
         let (sing, dir) = is_singularity(k, &fold, uv).unwrap();
         assert!(sing, "{dir:?}");
-        let (_, su, sv) = fold.evaluate_1st_derivatives(k, uv, true, true).unwrap();
+        let m = fold.evaluate(k, uv, 1, 1, LEFT_UPPER).unwrap();
+        let (su, sv) = (m[1][0], m[0][1]);
         assert!(!si
             .near_a_pole_off_it(k, SrfIndex::First, dir, uv, su, sv)
             .unwrap());
@@ -2398,7 +2465,8 @@ mod tests {
         let uv = Point2::new(bd.u_interval().mid(), v);
         let (sing, dir) = is_singularity(k, &ball, uv).unwrap();
         assert!(sing, "{dir:?}");
-        let (_, su, sv) = ball.evaluate_1st_derivatives(k, uv, true, true).unwrap();
+        let m = ball.evaluate(k, uv, 1, 1, LEFT_UPPER).unwrap();
+        let (su, sv) = (m[1][0], m[0][1]);
         assert!(si
             .near_a_pole_off_it(k, SrfIndex::First, dir, uv, su, sv)
             .unwrap());
