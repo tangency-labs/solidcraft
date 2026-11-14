@@ -1211,6 +1211,11 @@ fn header_actions_below(
                 .is_some_and(|title| width < title + metrics.control_extent * (primary + count) as f32 + solidcraft_theme::Tokens::get().space_2))
 }
 
+pub(super) fn sole_side_section(layout: &Layout, section: &Section, available: &[InstanceId]) -> bool {
+    section.location.zone().side()
+        && layout.sections.iter().filter(|member| member.column == section.column && presented_instance(member, available).is_some()).count() == 1
+}
+
 fn append_section(
     out: &mut HostLayout,
     service: &LayoutService,
@@ -1446,6 +1451,16 @@ fn append_section(
             out,
             HostPointerTarget::Resize { section: section.id.clone(), edge },
             resize_rect(outer, edge.physical(section.location.zone(), out.direction), metrics.sash_width),
+            InputRole::Sash,
+            "ui.panel_host.resize",
+        );
+    }
+    if !section.collapsed && min.height < max.height && sole_side_section(proposed, section, &out.allocation_environment.available) {
+        let edge = HostResizeEdge::Bottom;
+        add_control(
+            out,
+            HostPointerTarget::Resize { section: section.id.clone(), edge },
+            resize_rect(outer, edge, metrics.sash_width),
             InputRole::Sash,
             "ui.panel_host.resize",
         );
