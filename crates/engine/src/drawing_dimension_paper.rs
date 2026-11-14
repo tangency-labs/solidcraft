@@ -17,7 +17,7 @@ use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::text::{Font, TextRun};
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
 use solidcraft_geom::prelude::*;
-use solidcraft_sketch::{DimFrame, DimSizes, DimText, Outcome, PaperFonts, TextStyle, dim_layout_sized};
+use solidcraft_sketch::{DimFrame, DimSizes, DimText, Outcome, PaperFonts, TextStyle, dim_layout_sized, encode_text};
 
 /// A dimension's sizes on paper, with its text above an unbroken line (ISO 129-1).
 const SIZES: DimSizes = DimSizes { arrow: 3.0, gap: 1.0, overshoot: 2.0, offset: 10.0, above: true };
@@ -192,6 +192,131 @@ fn pieces(dimension: &Dimension, resolved: &Resolved, on: &[Vec2], set: &impl Fn
     }
 }
 
+/// A point a dimension is dragged to on paper, from its view's centre as its group is laid out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Drag {
+    /// Where its text's centre goes.
+    Text(Vec2),
+    /// A point its dimension line passes through: an angle's arc, or the leader a radial one's text
+    /// turns on.
+    Line(Vec2),
+}
+
+impl Drag {
+    /// The same point seen from `origin`: a point of the sheet, from its view's centre there.
+    pub(crate) fn seen_from(self, origin: Vec2) -> Drag {
+        match self {
+            Drag::Text(p) => Drag::Text(p - origin),
+            Drag::Line(p) => Drag::Line(p - origin),
+        }
+    }
+}
+
+/// Why a dimension can't be laid out where it is dragged.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum NotDragged {
+    /// What it measures has no place on its view.
+    NoPlace,
+    /// A chain's texts each sit over their own member.
+    ChainText,
+    /// Between the ends of two silhouettes or faces: a line across them runs beyond one of them.
+    BetweenEnds,
+    /// Its text's size waits for a font to fall back to, and the drag needs it.
+    TextWaits,
+}
+
+/// The offset and text place that lay `dimension` out where `drag` puts it ([`pieces`] turned round),
+/// read as `resolved` on the view through `frame`, its text in the drawing's `lettering`: its text's
+/// centre at a [`Drag::Text`] point, its line through a [`Drag::Line`] one. A line drag keeps the
+/// text's place, but a radial one's text turns with its leader; an angle's offset keeps its sign.
+pub(crate) fn dragged(
+    dimension: &Dimension,
+    resolved: &Resolved,
+    frame: &ViewFrame,
+    lettering: &PaperFonts,
+    drag: Drag,
+) -> Result<(f64, TextPlace), NotDragged> {
+    let on: Vec<Vec2> = resolved.points.iter().map(|p| frame.to_paper(*p)).collect();
+    let (offset, place) = (dimension.offset_mm, dimension.text);
+    // The text's half size, which a linear one's lift above its line depends on.
+    let half = || {
+        let text = Text::set(resolved.text.as_deref(), TEXT_MM, lettering);
+        if text.pending { Err(NotDragged::TextWaits) } else { Ok(text.half) }
+    };
+    match (&dimension.kind, on.as_slice(), drag) {
+        (DimensionKind::Linear { direction, .. } | DimensionKind::Length { direction, .. }, &[a, b], _) => {
+            let dir = line_direction(*direction, b - a).ok_or(NotDragged::NoPlace)?;
+            linear_dragged(a, b, dir, place, drag, &half)
+        }
+        (DimensionKind::Cylinder { .. }, &[a0, a1, b0, b1], _) => across_dragged([a0, a1], [b0, b1], LinearDirection::Aligned, place, drag, &half),
+        (DimensionKind::Silhouettes { direction, .. } | DimensionKind::Faces { direction, .. }, &[a0, a1, b0, b1], _) => {
+            across_dragged([a0, a1], [b0, b1], *direction, place, drag, &half)
+        }
+        (DimensionKind::Chain { .. }, _, Drag::Text(_)) => Err(NotDragged::ChainText),
+        // Its members share the line `offset` from the middle of its two ends.
+        (DimensionKind::Chain { direction, .. }, points, Drag::Line(p)) => {
+            let (Some(first), Some(last)) = (points.first(), points.last()) else { return Err(NotDragged::NoPlace) };
+            let dir = line_direction(*direction, *last - *first).ok_or(NotDragged::NoPlace)?;
+            Ok((encode_text(&DimFrame::Linear { p0: *first, p1: *last, dir }, p).y, place))
+        }
+        // Its arc is the offset's size round the vertex, its text towards its place.
+        (DimensionKind::Angle { .. } | DimensionKind::Cone { .. }, &[a0, a1, b0, b1], _) => {
+            let vertex = meet([a0, a1], [b0, b1]).ok_or(NotDragged::NoPlace)?;
+            Ok(match drag {
+                Drag::Text(p) => (p.dist(vertex).copysign(offset), TextPlace::At([p.x, p.y])),
+                Drag::Line(p) => (p.dist(vertex).copysign(offset), place),
+            })
+        }
+        // Its text is the offset past the rim, towards its place.
+        (DimensionKind::Radial { .. } | DimensionKind::Sphere { .. }, &[centre, start, _, _], _) => Ok(match drag {
+            Drag::Text(p) => (p.dist(centre) - centre.dist(start), TextPlace::At([p.x, p.y])),
+            Drag::Line(p) => (offset, TextPlace::At([p.x, p.y])),
+        }),
+        _ => Err(NotDragged::NoPlace),
+    }
+}
+
+/// A line from `a` to `b` along `dir` ([`linear`]) dragged: through a line point, or with its text's
+/// centre on a text point, as far across as it is less the lift above the line the layout gives a text.
+fn linear_dragged(
+    a: Vec2,
+    b: Vec2,
+    dir: Vec2,
+    place: TextPlace,
+    drag: Drag,
+    half: &dyn Fn() -> Result<Vec2, NotDragged>,
+) -> Result<(f64, TextPlace), NotDragged> {
+    let frame = DimFrame::Linear { p0: a, p1: b, dir };
+    Ok(match drag {
+        Drag::Line(p) => (encode_text(&frame, p).y, place),
+        Drag::Text(p) => {
+            // The layout's own lift ([`dim_layout_sized`]), read from a text placed on the line's middle.
+            let lift = dim_layout_sized(&frame, DimText::At(Vec2::ZERO), &SIZES, half()?, [None, None]).text - (a + b) * 0.5;
+            (encode_text(&frame, p - lift).y, TextPlace::At([p.x, p.y]))
+        }
+    })
+}
+
+/// A line across two silhouettes or faces ([`across`]) dragged: on the side whose ends give an offset of
+/// that side's sign, as the layout picks the ends by the sign. Between them no offset draws it.
+fn across_dragged(
+    a: [Vec2; 2],
+    b: [Vec2; 2],
+    direction: LinearDirection,
+    place: TextPlace,
+    drag: Drag,
+    half: &dyn Fn() -> Result<Vec2, NotDragged>,
+) -> Result<(f64, TextPlace), NotDragged> {
+    for positive in [true, false] {
+        let (p, q, dir) = across_ends(a, b, direction, positive).ok_or(NotDragged::NoPlace)?;
+        let (offset, place) = linear_dragged(p, q, dir, place, drag, half)?;
+        if (offset >= 0.0) == positive {
+            return Ok((offset, place));
+        }
+    }
+    Err(NotDragged::BetweenEnds)
+}
+
 /// The unit direction a linear dimension's line runs in, on paper. Turned to run right, or up when
 /// it is upright, so a positive offset is above it or to its left whichever way round its points are.
 pub(crate) fn line_direction(direction: LinearDirection, seen: Vec2) -> Option<Vec2> {
@@ -236,17 +361,24 @@ fn chain(points: &[Vec2], direction: LinearDirection, offset: f64, resolved: &Re
 /// A line between two silhouettes or faces, each from one end to the other, at the ends on the side `offset`
 /// is on, so a positive one clears what it measures. `Aligned` runs straight across them.
 fn across(a: [Vec2; 2], b: [Vec2; 2], direction: LinearDirection, offset: f64, place: &TextPlace, text: Text) -> Option<Vec<Piece>> {
+    let (p, q, dir) = across_ends(a, b, direction, offset >= 0.0)?;
+    Some(vec![linear(p, q, dir, offset, place, text)])
+}
+
+/// The ends a line across two silhouettes or faces (each from one end to the other) runs between: on
+/// the side a `positive` offset is on, or a negative one. With the direction the line runs in.
+fn across_ends(a: [Vec2; 2], b: [Vec2; 2], direction: LinearDirection, positive: bool) -> Option<(Vec2, Vec2, Vec2)> {
     let [a0, a1] = a;
     let square = (a1 - a0).normalized()?.perp();
     let dir = line_direction(direction, square)?;
     let n = dir.perp();
-    let end = |[p, q]: [Vec2; 2]| if (p.dot(n) >= q.dot(n)) == (offset >= 0.0) { p } else { q };
-    Some(vec![linear(end(a), end(b), dir, offset, place, text)])
+    let end = |[p, q]: [Vec2; 2]| if (p.dot(n) >= q.dot(n)) == positive { p } else { q };
+    Some((end(a), end(b), dir))
 }
 
-/// The angle between two lines (each from one end to the other), at the point they meet on the view,
-/// `offset` out from it. `None` when they are parallel there, as they then never meet.
-fn angular(a: [Vec2; 2], b: [Vec2; 2], other_side: bool, offset: f64, place: &TextPlace, text: Text) -> Option<Piece> {
+/// Where two lines (each from one end to the other) meet on the view. `None` when they are parallel
+/// there, as they then never meet.
+fn meet(a: [Vec2; 2], b: [Vec2; 2]) -> Option<Vec2> {
     let [a0, a1] = a;
     let [b0, b1] = b;
     let (along_a, along_b) = ((a1 - a0).normalized()?, (b1 - b0).normalized()?);
@@ -254,7 +386,15 @@ fn angular(a: [Vec2; 2], b: [Vec2; 2], other_side: bool, offset: f64, place: &Te
     if turn.abs() < 1e-9 {
         return None;
     }
-    let vertex = a0 + along_a * ((b0 - a0).perp().dot(along_b) / turn);
+    Some(a0 + along_a * ((b0 - a0).perp().dot(along_b) / turn))
+}
+
+/// The angle between two lines (each from one end to the other), at the point they meet on the view,
+/// `offset` out from it. `None` when they are parallel there, as they then never meet.
+fn angular(a: [Vec2; 2], b: [Vec2; 2], other_side: bool, offset: f64, place: &TextPlace, text: Text) -> Option<Piece> {
+    let [a0, a1] = a;
+    let [b0, b1] = b;
+    let vertex = meet(a, b)?;
     let ray = |p: Vec2, q: Vec2| (if p.dist(vertex) >= q.dist(vertex) { p } else { q } - vertex).normalized();
     let (from_a, from_b) = (ray(a0, a1)?, ray(b0, b1)?);
     // The smaller angle between the lines, or with `other_side` the larger: the rays' own, or one ray

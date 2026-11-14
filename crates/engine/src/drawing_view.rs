@@ -20,6 +20,7 @@ use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep, ViewConfiguration};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
+use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_geom::{Aabb2, EPS};
 use solidcraft_render::VisualStyle;
 
@@ -578,6 +579,41 @@ pub fn frame(basis: Plane, scale: Scale, model: &Aabb2, centre: Vec2, cmd: &str)
 /// design ([`copy_for`]); the design is unchanged.
 pub fn on_sheet(s: &Session, drawing: &Drawing, id: u64, cmd: &str) -> Result<OnSheet> {
     on_sheet_from(&mut ViewSessions::new(s), drawing, id, cmd)
+}
+
+/// Where a saved view puts what it draws on its sheet ([`on_its_sheet`]).
+pub(crate) struct ViewOnSheet {
+    /// The frame its records are laid out through, centred on the view.
+    pub frame: ViewFrame,
+    /// The view's centre, in paper mm from the sheet's lower-left corner.
+    pub centre: Vec2,
+    /// Its sheet's size, in paper mm.
+    pub size: Vec2,
+    /// The line group its lines and records are drawn in.
+    pub line_group: LineGroup,
+}
+
+/// Where saved view `id` of `d` puts what it draws on its sheet, as the sheet draws it: its frame,
+/// centre, sheet size and line group, measured from where the design places its parts ([`on_sheet`];
+/// an occurrence move not captured yet is left out). Or, in the sheet's words
+/// ([`crate::drawing_scene::NOT_DRAWN`]), that it isn't drawn: no such view, a style the sheet can't
+/// draw yet, or nothing to measure.
+pub(crate) fn on_its_sheet(s: &Session, d: &Drawing, id: u64, cmd: &str) -> std::result::Result<ViewOnSheet, &'static str> {
+    use crate::drawing_scene::{NOT_DRAWN, designed};
+    let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
+    let s = copy.as_ref().unwrap_or(s);
+    let view = d.resolve_view(id).map_err(|_| NOT_DRAWN)?;
+    if not_drawable(view.visual_style.value, view.reference_style.value).or_else(|| not_drawable_apart(&view)).is_some() {
+        return Err(NOT_DRAWN);
+    }
+    let on = on_sheet(s, d, id, cmd).ok().filter(|on| on.unmeasured.is_none()).ok_or(NOT_DRAWN)?;
+    let sheet = d.views.iter().find(|v| v.id == id).and_then(|v| d.sheets.iter().find(|sheet| sheet.id == v.sheet));
+    let (Ok(through), Ok(centre), Some(Ok(size))) =
+        (frame(view.basis, view.scale.value, &on.extents.model, Vec2::ZERO, cmd), d.view_centre(id), sheet.map(|sheet| sheet.sheet.size_mm()))
+    else {
+        return Err(NOT_DRAWN);
+    };
+    Ok(ViewOnSheet { frame: through, centre, size, line_group: view.line_group.value })
 }
 
 /// [`on_sheet`], drawn from `sessions`: one read of several views makes each copy once.

@@ -13,7 +13,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RepairParams>(), &["dimension", "pick", "slot"]);
     assert_keys(
         input_schema_for::<DimensionSet>(),
-        &["decimals", "diameter", "direction", "offset_mm", "other_side", "override_text", "reading", "text"],
+        &["decimals", "diameter", "direction", "line_through_mm", "offset_mm", "other_side", "override_text", "reading", "text", "text_to_mm"],
     );
 }
 

@@ -944,7 +944,7 @@ fn places(v: &Value, at: String, out: &mut Vec<String>) {
 }
 
 /// A hostile value in each place of each command's parameters, at every depth (picks, paths,
-/// corners' edges, a chain's points, the edit's settings, the first add's `dry_run`): never a
+/// corners' edges, a chain's points, the edit's settings and drags, the first add's `dry_run`): never a
 /// panic, and the drawing keeps its rules.
 #[test]
 fn hostile_dimension_params_never_panic() {
@@ -997,6 +997,8 @@ fn hostile_dimension_params_never_panic() {
             json!({"dimension": id, "set": {"offset_mm": 5, "text": "centred", "decimals": 1, "override_text": null, "direction": "vertical",
             "reading": "projected"}}),
         ),
+        (EDIT, json!({"dimension": id, "set": {"text_to_mm": [210, 180], "decimals": 1}})),
+        (EDIT, json!({"dimension": chain, "set": {"line_through_mm": [150, 190], "direction": "horizontal"}})),
         (INSPECT, json!({"dimension": id})),
         (REPAIR, json!({"dimension": lost, "slot": "edge", "pick": {"edge": {"body": "Box", "index": 0}}})),
         (REPAIR, json!({"dimension": lost_chain, "slot": 1, "pick": {"corner": {"edges": [{"body": "Box", "index": 0}, {"point": [0, 0, 15]}]}}})),
@@ -2469,4 +2471,187 @@ fn an_exploded_view_measures_its_parts_where_it_draws_them() {
     let height = json!({"length": {"edge": {"point": [0, 0, 25], "path": [bolt]}}});
     reads_about(&add(&mut s, assembled, height.clone()), 10.0);
     reads_about(&add(&mut s, exploded, height), 10.0);
+}
+
+/// How far `p` is from the line `line` runs along, however far it runs.
+fn off_the_line(line: &[Vec2], p: Vec2) -> f64 {
+    let along = (line[1] - line[0]).normalized().unwrap();
+    (p - line[0]).dot(along.perp()).abs()
+}
+
+/// The centre of `reply`'s first text box: the mean of its corners.
+fn box_centre(reply: &Value) -> Vec2 {
+    layout_boxes(reply)[0].iter().fold(Vec2::ZERO, |sum, corner| sum + *corner) * 0.25
+}
+
+/// `added` edited by `set` (a drag), then inspected: what the edit changed, and the answer.
+fn drag_to(s: &mut Session, added: &Value, set: Value) -> (Value, Value) {
+    let changed = edit(s, &added["dimension"], set)["changed"].clone();
+    (changed, run(s, INSPECT, json!({"dimension": added["dimension"]})))
+}
+
+/// [`front_view`] with a hole of radius 6 through the box's middle, from front to back: its rim is at
+/// (200, 150) on the sheet, the view's centre.
+fn holed_front_view() -> (Session, u64) {
+    let (mut s, view) = front_view();
+    let drawing = s.drawing("test").unwrap().id;
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 42, "base": [40, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"]}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    (s, view)
+}
+
+/// A dimension's line dragged through a point of its sheet (`line_through_mm`, in paper mm from the
+/// sheet's lower-left corner) passes through it, where inspect's layout and so the sheet draw it. The
+/// top front edge's length (the edge at y 165 from x 160 to 240, its line 10 above it at 175) through
+/// (200, 190): offset 25, one undo step, its line from (160, 190) to (240, 190). Through (120, 140),
+/// below the edge and past its end: offset -25, its line at 140. Through (10, 140), on that line
+/// already: nothing changes, and no undo step.
+#[test]
+fn a_line_dragged_through_a_sheet_point_passes_through_it() {
+    let (mut s, view) = front_view();
+    let added = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
+    let steps = s.undo.len();
+    let at = Vec2::new;
+    for (to, offset, y) in [([200.0, 190.0], 25.0, 190.0), ([120.0, 140.0], -25.0, 140.0)] {
+        let (changed, read) = drag_to(&mut s, &added, json!({"line_through_mm": to}));
+        assert_eq!(changed, json!(["offset_mm"]), "{to:?}: {read}");
+        assert!((read["record"]["offset_mm"].as_f64().unwrap() - offset).abs() < 1e-9, "{to:?}: {read}");
+        let along = layout_lines(&read, "dimension_lines");
+        assert!(along.len() == 1 && same_points(&along[0], &[at(160.0, y), at(240.0, y)], 1e-9), "{to:?}: {read}");
+    }
+    assert_eq!(s.undo.len(), steps + 2, "one undo step each");
+    let bytes = s.drawing("test").unwrap().to_json().unwrap();
+    assert_eq!(drag_to(&mut s, &added, json!({"line_through_mm": [10, 140]})).0, json!([]));
+    assert_eq!((s.undo.len(), s.drawing("test").unwrap().to_json().unwrap()), (steps + 2, bytes), "nothing changed: no undo step");
+}
+
+/// Each kind's line goes through the point it is dragged through. A length, below the box; a chain
+/// up the box's front and right side, slanting from first to last, all its members' lines; the
+/// distance between the box's side faces (seen edge-on at x 160 and 240, from y 135 to 165), above
+/// the box, on their top ends, and below it, on their bottom ends. An angle between the top and the
+/// left front edges, which meet at (160, 165): its arc, round there, through the point. A hole's
+/// diameter, its rim round (200, 150): its text turned to the point, as far out as before.
+#[test]
+fn each_kind_takes_a_line_through_a_sheet_point() {
+    let (mut s, view) = holed_front_view();
+    let at = Vec2::new;
+    let length = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
+    let chain = add(&mut s, view, json!({"chain": {"points": [[0, 0, 0], [80, 0, 0], [80, 0, 30]]}}));
+    let faces = add(&mut s, view, json!({"faces": {"a": [0, 20, 15], "b": [80, 20, 15]}}));
+    for (added, p) in [(&length, at(185.0, 112.0)), (&chain, at(150.0, 190.0)), (&faces, at(200.0, 180.0)), (&faces, at(200.0, 120.0))] {
+        let (_, read) = drag_to(&mut s, added, json!({"line_through_mm": [p.x, p.y]}));
+        let lines = layout_lines(&read, "dimension_lines");
+        assert!(!lines.is_empty() && lines.iter().all(|line| off_the_line(line, p) < 1e-9), "{p:?}: {read}");
+    }
+
+    let angle = add(&mut s, view, json!({"angle": {"a": [40, 0, 30], "b": [0, 0, 15]}}));
+    let (p, vertex) = (at(200.0, 190.0), at(160.0, 165.0));
+    let (_, read) = drag_to(&mut s, &angle, json!({"line_through_mm": [p.x, p.y]}));
+    let arcs = layout_lines(&read, "dimension_lines");
+    assert!(!arcs.is_empty() && arcs.iter().flatten().all(|q| (q.dist(vertex) - p.dist(vertex)).abs() < 1e-9), "{read}");
+
+    let hole = json!({"body": "Box", "index": round_index(&s, [40.0, 0.0, 15.0], 6.0)});
+    let radial = add(&mut s, view, json!({"radial": {"edge": hole}}));
+    let (p, centre) = (at(230.0, 190.0), at(200.0, 150.0));
+    let (changed, read) = drag_to(&mut s, &radial, json!({"line_through_mm": [p.x, p.y]}));
+    assert_eq!(changed, json!(["text"]), "{read}");
+    let text = box_centre(&read);
+    assert!((text - centre).normalized().unwrap().dist((p - centre).normalized().unwrap()) < 1e-9, "{read}");
+    assert!((text.dist(centre) - (6.0 + read["record"]["offset_mm"].as_f64().unwrap())).abs() < 1e-9, "{read}");
+}
+
+/// A text dragged to a point of its sheet (`text_to_mm`) has its box's centre there: a length's, the
+/// distance between the side faces', an angle's and a hole's diameter's, each moved off its line; and
+/// a text of two lines, its box taller, as the length's.
+#[test]
+fn a_text_dragged_to_a_sheet_point_is_centred_there() {
+    let (mut s, view) = holed_front_view();
+    let at = Vec2::new;
+    let hole = json!({"body": "Box", "index": round_index(&s, [40.0, 0.0, 15.0], 6.0)});
+    let kinds = [
+        (json!({"length": {"edge": [40, 0, 30]}}), at(215.0, 185.0)),
+        (json!({"faces": {"a": [0, 20, 15], "b": [80, 20, 15]}}), at(230.0, 112.0)),
+        (json!({"angle": {"a": [40, 0, 30], "b": [0, 0, 15]}}), at(190.0, 140.0)),
+        (json!({"radial": {"edge": hole}}), at(130.0, 190.0)),
+    ];
+    for (kind, p) in kinds {
+        let added = add(&mut s, view, kind);
+        let (changed, read) = drag_to(&mut s, &added, json!({"text_to_mm": [p.x, p.y]}));
+        assert!(changed.as_array().unwrap().contains(&json!("text")), "{changed}");
+        assert!(box_centre(&read).dist(p) < 1e-9, "{p:?}: {read}");
+    }
+    let two_lines = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
+    edit(&mut s, &two_lines["dimension"], json!({"override_text": "SEE\nNOTE"}));
+    let p = at(170.0, 120.0);
+    let (_, read) = drag_to(&mut s, &two_lines, json!({"text_to_mm": [p.x, p.y]}));
+    let corners = &layout_boxes(&read)[0];
+    assert!(corners[3].dist(corners[0]) > 5.0 && box_centre(&read).dist(p) < 1e-9, "{read}");
+}
+
+/// A dragged text's place is kept from its view's centre, so it moves with its view: the view moved from
+/// (200, 150) to (212, 143) moves the text's centre by (12, -7).
+#[test]
+fn a_drag_keeps_its_place_when_the_view_moves() {
+    let (mut s, view) = front_view();
+    let added = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
+    drag_to(&mut s, &added, json!({"text_to_mm": [215, 185]}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"place": {"at": [212.0, 143.0]}}}));
+    let read = run(&mut s, INSPECT, json!({"dimension": added["dimension"]}));
+    assert!(box_centre(&read).dist(Vec2::new(227.0, 178.0)) < 1e-9, "{read}");
+}
+
+/// A drag lands where an exploded view draws its dimension (#13048): from the bolt's top corner, lifted
+/// 50 by Apart, across to the plate's top corner, horizontal; its line dragged through (300, 200)
+/// runs through it there, not 25 higher, where the design's own bolt would put it.
+#[test]
+fn a_drag_lands_where_an_exploded_view_draws_it() {
+    let (mut s, [_, exploded], bolt) = bolt_apart();
+    let tops = json!({"linear": {"a": {"point": [0, 0, 30], "path": [bolt]}, "b": [100, 0, 10], "direction": "horizontal"}});
+    let added = add(&mut s, exploded, tops);
+    let (_, read) = drag_to(&mut s, &added, json!({"line_through_mm": [300, 200]}));
+    let lines = layout_lines(&read, "dimension_lines");
+    assert!(!lines.is_empty() && lines.iter().flatten().all(|q| (q.y - 200.0).abs() < 1e-9), "{read}");
+}
+
+/// A drag with no place to put the dimension is refused, in words that say why, and the drawing and its
+/// undo steps are as they were: a chain's text (each sits on its member); a line between the side faces'
+/// ends (no offset draws it there); a drag with the fields it sets, or two drags; a point that puts the
+/// text or the line off the paper; a dimension whose view the sheet can't draw (shaded with lines); and
+/// one that lost its edge.
+#[test]
+fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
+    let (mut s, view) = front_view();
+    let length = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}))["dimension"].clone();
+    let chain = add(&mut s, view, json!({"chain": {"points": [[0, 0, 0], [80, 0, 0], [80, 0, 30]]}}))["dimension"].clone();
+    let faces = add(&mut s, view, json!({"faces": {"a": [0, 20, 15], "b": [80, 20, 15]}}))["dimension"].clone();
+    fn refuses(s: &mut Session, cases: &[(&Value, Value, &str)]) {
+        let (before, steps) = (s.drawing("test").unwrap().to_json().unwrap(), s.undo.len());
+        for (id, set, why) in cases {
+            let p = json!({"dimension": id, "set": set});
+            let e = s.execute(EDIT, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+            assert!(e.contains(why), "{p}: {e}");
+        }
+        assert_eq!((s.drawing("test").unwrap().to_json().unwrap(), s.undo.len()), (before, steps));
+    }
+    refuses(
+        &mut s,
+        &[
+            (&chain, json!({"text_to_mm": [200, 190]}), "a chain's texts sit on its members"),
+            (&faces, json!({"line_through_mm": [200, 150]}), "runs beyond their ends"),
+            (&length, json!({"text_to_mm": [200, 190], "text": "centred"}), "a drag sets `offset_mm` and `text` itself"),
+            (&length, json!({"line_through_mm": [200, 190], "offset_mm": 5}), "a drag sets `offset_mm` and `text` itself"),
+            (&length, json!({"text_to_mm": [200, 190], "line_through_mm": [200, 190]}), "a drag each"),
+            (&length, json!({"text_to_mm": [1e8, 0]}), "on paper"),
+            (&length, json!({"line_through_mm": [0, 1e8]}), "on paper"),
+        ],
+    );
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"visual_style": "shaded_visible"}}));
+    refuses(&mut s, &[(&length, json!({"line_through_mm": [200, 190]}), "its view isn't drawn")]);
+
+    let (mut s, drawing, dimension) = read_once();
+    lose_the_edge(&mut s);
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let lost = json!(ids::encode(dimension));
+    refuses(&mut s, &[(&lost, json!({"line_through_mm": [200, 190]}), "what it measures has no place to draw on its view")]);
 }
