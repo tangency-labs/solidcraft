@@ -1028,6 +1028,9 @@ fn a_line_meets_a_box_it_passes_through() {
     assert!(b.meets_line(Vec3::new(-5.0, 10.0, 10.0), Vec3::new(1.0, 1.0, 0.0)), "slanted through");
     assert!(b.meets_line(Vec3::new(20.0, 10.0, 0.0), Vec3::Z), "along a side");
     assert!(!b.meets_line(Vec3::new(30.0, 10.0, 0.0), Vec3::Z), "beside it");
+    // A millionth of the box's size beyond a side still counts, a ten-thousandth does not.
+    assert!(b.meets_line(Vec3::new(20.00001, 10.0, 0.0), Vec3::Z), "just past a side");
+    assert!(!b.meets_line(Vec3::new(20.002, 10.0, 0.0), Vec3::Z), "clear of a side");
     assert!(!b.meets_line(Vec3::new(10.0, 10.0, 0.0), Vec3::ZERO) && !Aabb3::EMPTY.meets_line(Vec3::ZERO, Vec3::Z));
 }
 

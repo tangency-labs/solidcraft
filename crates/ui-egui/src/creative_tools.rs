@@ -138,7 +138,14 @@ fn selected_bodies(app: &SolveApp) -> Option<Vec<String>> {
 fn overlapping(app: &SolveApp, a: &str, others: &[String]) -> bool {
     let st = crate::open_meshing::session_world(&app.session);
     let Some(ba) = st.body(a).map(|b| b.mesh().bounds()) else { return false };
-    others.iter().all(|o| st.body(o).map(|b| b.mesh().bounds()).is_some_and(|bo| ba.meets(&bo)))
+    // Boxes that only touch share no material: Join, Cut and Intersect there would do nothing,
+    // so the boxes must overlap by some depth on every axis.
+    let shares_material = |bo: &solidcraft_engine::geom::Aabb3| {
+        let common = ba.intersection(bo);
+        let depth = common.max - common.min;
+        depth.x > 0.0 && depth.y > 0.0 && depth.z > 0.0
+    };
+    others.iter().all(|o| st.body(o).map(|b| b.mesh().bounds()).is_some_and(|bo| shares_material(&bo)))
 }
 
 /// Join, Cut and Intersect for two or more overlapping bodies, applied at once on the first
@@ -290,6 +297,12 @@ mod tests {
         let h = two_boxes(40.0);
         assert!(booleans(&h.app).is_empty());
         assert!(ids(&h).iter().any(|i| i == "solid.combine"), "{:?}", ids(&h));
+    }
+
+    #[test]
+    fn two_bodies_that_only_touch_offer_no_join_cut_or_intersect() {
+        let h = two_boxes(20.0);
+        assert!(booleans(&h.app).is_empty(), "{:?}", ids(&h));
     }
 
     #[test]
