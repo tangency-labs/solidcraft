@@ -2429,6 +2429,73 @@ fn pipe_scale_offset_bounding_and_materials() {
     assert!(s.execute("material.assign", &json!({"bodies": ["Cube"], "material": "unobtainium"})).is_err());
 }
 
+/// A body stretched by a non-uniform `solid.scale` keeps its flat faces flat, so a boolean whose
+/// tool crosses a stretched side wall comes out right (#14409). The faces used to become free-form
+/// surfaces, and then a cylinder standing on the x side wall made the join and the cut fail SMLib's
+/// check and the intersect silently return the whole cylinder segment, twice the volume.
+#[test]
+fn booleans_across_the_walls_of_a_non_uniformly_scaled_body() {
+    let planes = |s: &Session, name: &str| {
+        let st = s.model.state();
+        let body = st.bodies.iter().find(|b| b.name == name).unwrap();
+        body.body.record().faces.iter().all(|f| matches!(f.surface, solidcore_record::brep::Surface::Plane { .. }))
+    };
+    let measured = |s: &mut Session, name: &str| run(s, "inspect.measure", json!({"bodies": [name]}))["total"]["volume_mm3"].as_f64().unwrap();
+    // A 20 x 20 x 10 box scaled by [a, b, c], and a cylinder r5 from z = -5 to 35, its axis at
+    // (x, 10 b): on the scaled box's x = 20 a wall for x = 20 a, through the middle for x = 10 a.
+    let combined = |factors: [f64; 3], x: f64, operation: &str| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "X"}));
+        run(&mut s, "solid.scale", json!({"bodies": ["X"], "factors": factors}));
+        assert!(planes(&s, "X"), "{factors:?}: the scaled box's faces are not all planes");
+        let base = [x, 10.0 * factors[1], -5.0];
+        run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 40, "base": base, "axis": "Z", "body_name": "Z"}));
+        run(&mut s, "solid.combine", json!({"target": "X", "tools": ["Z"], "operation": operation}));
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{factors:?} {operation}: {:?}", s.model.results);
+        let st = s.model.state();
+        let body = st.bodies.iter().find(|b| b.name == "X").unwrap();
+        assert!(body.body.validity().is_empty(), "{factors:?} {operation}: {:?}", body.body.validity());
+        let faces = body.body.face_count();
+        (measured(&mut s, "X"), faces)
+    };
+    // The cylinder through the middle crosses only the top and bottom.
+    let (got, _) = combined([1.0, 1.0, 2.0], 10.0, "join");
+    assert!(rel(got, 8000.0 + 500.0 * PI) < 1e-5, "{got}");
+    for factors in [[1.0, 1.0, 0.5], [1.0, 1.0, 2.0], [2.0, 1.0, 1.0], [1.0, 2.0, 1.0], [2.0, 2.0, 1.0], [1.5, 1.5, 0.4], [1.5, 1.5, 1.0]] {
+        let [a, b, c] = factors;
+        let (stretched, cylinder, inside) = (4000.0 * a * b * c, 1000.0 * PI, 125.0 * PI * c);
+        let x = 20.0 * a;
+        let (got, _) = combined(factors, x, "join");
+        assert!(rel(got, stretched + cylinder - inside) < 1e-5, "{factors:?} join: {got} vs {}", stretched + cylinder - inside);
+        let (got, faces) = combined(factors, x, "intersect");
+        assert!(rel(got, inside) < 1e-5, "{factors:?} intersect: {got} vs {inside}");
+        // A flat side, the wall (one face or two, by where the cylinder's seams fall), top and
+        // bottom; the whole cylinder segment that came out before had three.
+        assert!(faces >= 4, "{factors:?} intersect: {faces} faces, the flat side is missing");
+        let (got, _) = combined(factors, x, "cut");
+        assert!(rel(got, stretched - inside) < 1e-5, "{factors:?} cut: {got} vs {}", stretched - inside);
+    }
+    // An L prism extruded 12 and scaled to 24 tall joins a cylinder as the same prism extruded 24.
+    let l_prism = |distance: f64, factors: Option<[f64; 3]>| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "L"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 10], [10, 10], [10, 40], [0, 40]], "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "L", "distance": distance, "body_name": "X"}));
+        if let Some(factors) = factors {
+            run(&mut s, "solid.scale", json!({"bodies": ["X"], "factors": factors}));
+            assert!(planes(&s, "X"), "the scaled L prism's faces are not all planes");
+        }
+        run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 30, "base": [8, 12, -5], "axis": "Z", "body_name": "Z"}));
+        run(&mut s, "solid.combine", json!({"target": "X", "tools": ["Z"], "operation": "join"}));
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "L prism {factors:?}: {:?}", s.model.results);
+        measured(&mut s, "X")
+    };
+    let (scaled, built) = (l_prism(12.0, Some([1.0, 1.0, 2.0])), l_prism(24.0, None));
+    assert!(rel(scaled, built) < 1e-6, "{scaled} vs {built}");
+    assert!(scaled > 700.0 * 24.0, "{scaled}");
+}
+
 /// Regression: deleting a pipe's path sketch left the pipe in the timeline ("unknown sketch").
 #[test]
 fn deleting_a_path_sketch_deletes_its_pipe() {
