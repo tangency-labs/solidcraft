@@ -322,6 +322,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.tab_double_click_renames,
                 "tab_double_click_renames",
             );
+            windows_smooth_window_drag_row(app, ui, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE);
         });
         if let Some(rect) = crate::scenario::rect_of(&format!("dialog:section:{}", app.tr("prefs.layout_page.window"))) {
             crate::scenario::publish_target(&format!("dialog:section:{}", app.tr("prefs.layout")), rect);
@@ -586,6 +587,22 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         super::navbar::show(app, ui);
     });
+}
+
+/// Windows: nothing is drawn while the window is dragged by its title bar, so it moves smoothly
+/// (`windows_smooth_window_drag`); drawn only where the choice exists (`available`:
+/// [`WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE`]). It applies at once: no restart badge.
+pub(super) fn windows_smooth_window_drag_row(app: &mut SolveApp, ui: &mut egui::Ui, available: bool) {
+    if !available {
+        return;
+    }
+    layout_check(
+        ui,
+        app.tr("prefs.windows_smooth_window_drag"),
+        app.tr("prefs.windows_smooth_window_drag_help"),
+        &mut app.preferences.windows_smooth_window_drag,
+        "windows_smooth_window_drag",
+    );
 }
 
 /// Keep native checkbox responses and one real search target; guidance stays on hover.

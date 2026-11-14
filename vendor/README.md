@@ -113,15 +113,20 @@ SolidCraft changes:
   (the `wp::pointer_gestures` module); drop the example and test targets.
 - `src/event.rs`, `src/changelog/unreleased.md`: the platform notes of both events and the
   changelog entry.
-- `src/platform_impl/windows/event_loop.rs`, `window_state.rs`: Windows' modal move and size
-  loop (`WM_ENTERSIZEMOVE` … `WM_EXITSIZEMOVE`, entered when the title bar is dragged) no longer
-  makes the app render once per move step. While the window only moves (its size unchanged):
+- `src/platform_impl/windows/event_loop.rs`, `window_state.rs`, `mod.rs`, `src/platform/windows.rs`
+  (`set_quiet_window_move`): a process-wide switch with which Windows' modal move and size loop
+  (`WM_ENTERSIZEMOVE` … `WM_EXITSIZEMOVE`, entered when the title bar is dragged) no longer makes
+  the app render once per move step. It is off by default, which is winit's own behaviour, so
+  anything built on this copy is unchanged until it opts in; SolidCraft turns it on only when
+  Preferences > Layout's `windows_smooth_window_drag` is on (off by default). It is read at each
+  message, so a change applies at once, and a paint or a move held back before it is turned off is
+  still sent when the loop ends. With it on, while the window only moves (its size unchanged):
   `Moved` is coalesced and sent once, with the final position, at `WM_EXITSIZEMOVE`; `WM_PAINT`
   is validated without `RedrawRequested`, and one paint is requested when the loop ends; relative
-  raw mouse motion is not sent as device events. Before, every `WM_WINDOWPOSCHANGED` became
-  `Moved`, egui-winit asks for a repaint on `Moved`, and the redraw arrived as `WM_PAINT` inside
-  the loop, so each step ran a full frame that blocked on the swapchain (acquire waits of
+  raw mouse motion is not sent as device events. Off, as in winit, every `WM_WINDOWPOSCHANGED`
+  becomes `Moved`, egui-winit asks for a repaint on `Moved`, and the redraw arrives as `WM_PAINT`
+  inside the loop, so each step runs a full frame that blocks on the swapchain (acquire waits of
   50-110 ms were measured on D3D12), and a frame that asked for the next one (eframe repaints on
-  raw motion while it believes the press that started the drag is still held) kept a paint loop
-  spinning for the whole drag: the window moved at 10-40 fps. A resize, a snap or a DPI change
-  inside the loop (a size change) paints live, as before.
+  raw motion while it believes the press that started the drag is still held) keeps a paint loop
+  spinning for the whole drag: the window moves at 10-40 fps. A resize, a snap or a DPI change
+  inside the loop (a size change) paints live either way.
