@@ -709,3 +709,28 @@ fn a_horn_drafted_from_its_touching_tip_builds() {
     let v = volume(&k, &mut b, 1e-10);
     assert!((v - want).abs() <= 1e-11 * want, "volume {v} want {want}");
 }
+
+/// The upper half of a crescent between two circles touching inside each other at
+/// (1e8, 0), radii 1e8 and 1e8 - 1 with centres 1 apart, drafted 5 degrees inward over 1e-3:
+/// the tip's seam has parallel end tangents and a middle off its chord, which no conic fits,
+/// so the draft is refused rather than failing on the tangents' crossing.
+#[test]
+fn a_large_crescent_drafted_from_its_touching_tip_is_refused() {
+    let mut k = Kernel::default();
+    let (ra, dd) = (1e8, 1.0);
+    let cs = [
+        arc_in(&k, Point3::new(0.0, 0.0, 0.0), ra, Vec3::X, Vec3::Y, 180.0),
+        line(Point3::new(-ra, 0.0, 0.0), Point3::new(2.0 * dd - ra, 0.0, 0.0)),
+        arc_in(&k, Point3::new(dd, 0.0, 0.0), ra - dd, -Vec3::X, Vec3::Y, 180.0),
+    ];
+    let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+    let out = create_taper_extrude_with_corner(
+        &mut k,
+        &refs,
+        1e-3,
+        5.0,
+        3,
+        OffsetCornerType::CurveExtension,
+    );
+    assert!(matches!(out, Ok(TaperExtrude::Refused(_))), "{out:?}");
+}
