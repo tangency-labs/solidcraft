@@ -52,20 +52,20 @@
 //! insertion), the kernel's cancel token polled every 64 cells.
 
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BinaryHeap};
+use std::collections::BinaryHeap;
 
 use crate::blend::fillet_section::certificate::{
     curve_derivs_over, nurbs_partials_within_span, partials_hull, NurbsCurve,
 };
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::series::V3;
-use crate::blend::fillet_section::station::{as_b_spline, knot, span, Nurbs, Partials};
+use crate::blend::fillet_section::station::{knot, span, Nurbs, Partials};
 use crate::kernel::Kernel;
-use crate::mass::integrator::properties::region_material;
-use crate::nurbs::b_spline_curve::p1::BSplineCurve;
-use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::mass::closure::{
+    closing, segment, Closure, ClosureFace, ClosureRefusal, ClosureRefused, ClosureStrip,
+};
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
-use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId};
+use crate::topology::Brep;
 use crate::{Result, SolidError};
 
 const OP: &str = "mass::enclosure";
@@ -107,6 +107,9 @@ pub struct EnclosureCounts {
     pub ranged: usize,
     /// Strip cells (the gaps between faces).
     pub strips: usize,
+    /// Edge sides left without a side of opposite sense to pair with (or pairs whose
+    /// pcurves share no parameters), taken whole as openings (`mass::closure`).
+    pub unpaired: usize,
 }
 
 /// Why refinement ended.
@@ -179,9 +182,9 @@ pub enum VolumeSign {
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for a `width` that is not positive, a face whose sides are
-/// not one material region and one void, an edge whose face sides do not pair in opposite
-/// senses, two pcurves of an edge that share no parameters, or a loop's end that is not
-/// finite; [`SolidError::Unsupported`] for a surface or pcurve with no NURBS form, a face
+/// not one material region and one void, or a loop's end that is not finite (an edge whose
+/// face sides do not pair, or whose pcurves share no parameters, is an opening of the
+/// closed surface, `mass::closure`, not an error); [`SolidError::Unsupported`] for a surface or pcurve with no NURBS form, a face
 /// without trim loops, weights not proved positive at a point or along a trim, or a
 /// parameter box that is not finite; [`SolidError::UnsureRegion`];
 /// [`SolidError::Cancelled`]; those of the evaluations.
@@ -477,7 +480,7 @@ fn curve_spans(cn: &NurbsCurve) -> Vec<(usize, f64, f64)> {
 
 /// The control points' range in u and v of the curve's polynomial piece `span` (where the
 /// piece lies: its weights are positive).
-fn piece_hull(cn: &NurbsCurve, span: usize) -> (Ivl, Ivl) {
+pub(super) fn piece_hull(cn: &NurbsCurve, span: usize) -> (Ivl, Ivl) {
     let mut u = Ivl::new(f64::INFINITY, f64::NEG_INFINITY);
     let mut v = u;
     for i in (span + 1).saturating_sub(cn.p + 1)..=span {
@@ -555,7 +558,12 @@ fn piece_partials(
 /// The surface's partials up to order `lk` at every point of the box, from every piece it
 /// meets, hulled; `None` where a piece's weights are not proved positive over it
 /// ([`piece_partials`]).
-fn partials_over(cn: &Nurbs, u: Ivl, v: Ivl, lk: usize) -> Result<Option<Partials<Ivl>>> {
+pub(crate) fn partials_over(
+    cn: &Nurbs,
+    u: Ivl,
+    v: Ivl,
+    lk: usize,
+) -> Result<Option<Partials<Ivl>>> {
     let bad = || SolidError::Unsupported {
         operation: OP,
         reason: "a parameter box that is not finite",
@@ -611,7 +619,7 @@ fn partials_over(cn: &Nurbs, u: Ivl, v: Ivl, lk: usize) -> Result<Option<Partial
 
 /// [`partials_over`] where a point's box must be proved: the box is a point's enclosure,
 /// within a few roundings of it.
-fn partials_at(cn: &Nurbs, u: Ivl, v: Ivl, lk: usize) -> Result<Partials<Ivl>> {
+pub(super) fn partials_at(cn: &Nurbs, u: Ivl, v: Ivl, lk: usize) -> Result<Partials<Ivl>> {
     partials_over(cn, u, v, lk)?.ok_or(SolidError::Unsupported {
         operation: OP,
         reason: "a surface whose weights are not proved positive at a point",
@@ -646,14 +654,14 @@ fn g_integral(cn: &Nurbs, u: Ivl, a: f64, b: f64, z0: f64) -> Result<f64> {
 }
 
 /// The largest magnitude of a vector enclosure's length, bounded by its components' sum.
-fn mag3(v: [Ivl; 3]) -> f64 {
+pub(super) fn mag3(v: [Ivl; 3]) -> f64 {
     v.iter()
         .fold(Ivl::from(0.0), |sum, c| sum + Ivl::from(c.mag()))
         .hi
 }
 
 /// `hi - lo` of an interval, rounded up: a bound on its width.
-fn width(x: Ivl) -> f64 {
+pub(super) fn width(x: Ivl) -> f64 {
     (Ivl::from(x.hi) - Ivl::from(x.lo)).hi
 }
 
@@ -694,6 +702,29 @@ fn curve_series(d: &[V3<Ivl>], c: usize, n: usize) -> (Ivl, Bs) {
     (d.first().map_or(Ivl::whole(), pick), s)
 }
 
+/// The error of a face the closed surface refuses.
+fn refused_error(r: ClosureRefused) -> SolidError {
+    match r.why {
+        ClosureRefusal::UnsureRegion(region) => SolidError::UnsureRegion {
+            operation: OP,
+            region,
+        },
+        ClosureRefusal::NoNurbsForm
+        | ClosureRefusal::Unbounded
+        | ClosureRefusal::WeightsNotProved
+        | ClosureRefusal::TrimNotBounded => SolidError::Unsupported {
+            operation: OP,
+            reason: "a surface or pcurve with no NURBS form",
+        },
+        ClosureRefusal::NotOneMaterialSide
+        | ClosureRefusal::Thick
+        | ClosureRefusal::VolumePolicy => SolidError::invalid_input(
+            OP,
+            "a face whose sides are not one material region and one void",
+        ),
+    }
+}
+
 impl<'a> Work<'a> {
     fn new(k: &'a Kernel, b: &mut Brep) -> Result<Self> {
         let bbox = qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
@@ -711,29 +742,27 @@ impl<'a> Work<'a> {
             budget: CELL_BUDGET,
             counts: EnclosureCounts::default(),
         };
-        let mut sides: BTreeMap<EdgeId, Vec<(usize, NurbsCurve, bool)>> = BTreeMap::new();
-        // the closing pieces' and rounding gaps' lengths in 3D, and the greatest |z - z0|
-        // near them
-        let mut open_length = Ivl::from(0.0);
+        // the faces, strips and openings of the closed surface (`mass::closure`, shared
+        // with the estimate)
+        let closure = match Closure::of(k, b)? {
+            Ok(c) => c,
+            Err(refused) => return Err(refused_error(refused)),
+        };
+        let openings = closure.openings()?;
+        // the openings' and rounding gaps' lengths in 3D, and the greatest |z - z0| near
+        // them
+        let mut open_length = openings.length;
         let mut zcap = 0.0_f64;
-        let faces = crate::topology::brep::p1::faces(b, None)?;
-        for f in faces {
+        for face in &closure.faces {
             k.check_cancelled(OP)?;
-            w.add_face(k, b, f, &mut sides, &mut open_length, &mut zcap)?;
+            w.add_face(face, &mut open_length, &mut zcap)?;
         }
-        // each edge's face sides in pairs of opposite sense along it, a strip for each pair
-        // (two sides at a manifold edge; four where solids touch along it)
-        for (_, s) in sides {
-            let (forward, backward): (Vec<_>, Vec<_>) = s.into_iter().partition(|x| x.2);
-            if forward.len() != backward.len() || forward.is_empty() {
-                return Err(SolidError::invalid_input(
-                    OP,
-                    "an edge whose face sides do not pair in opposite senses",
-                ));
-            }
-            for (a, c) in forward.into_iter().zip(backward) {
-                w.add_strip((a.0, a.1), (c.0, c.1), &mut open_length, &mut zcap)?;
-            }
+        for strip in &closure.strips {
+            w.add_strip(strip)?;
+        }
+        w.counts.unpaired = closure.unpaired.len();
+        for x in &openings.strip_ends {
+            zcap = zcap.max((x[2] - Ivl::from(w.z0)).mag());
         }
         // the caps: closed curves of total length L, each within L of the points near it
         let l = open_length.hi;
@@ -742,84 +771,15 @@ impl<'a> Work<'a> {
         Ok(w)
     }
 
-    fn add_face(
-        &mut self,
-        k: &Kernel,
-        b: &mut Brep,
-        f: FaceId,
-        sides: &mut BTreeMap<EdgeId, Vec<(usize, NurbsCurve, bool)>>,
-        open_length: &mut Ivl,
-        zcap: &mut f64,
-    ) -> Result<()> {
-        use crate::topology::edgeuse::p1 as eu1;
-        let up = crate::topology::face::p2::upward_faceuse(b, f)?
-            .ok_or_else(|| SolidError::mass_missing(OP, "the face's upward faceuse"))?;
-        let mate = b
-            .faceuse(up)?
-            .mate
-            .ok_or_else(|| SolidError::mass_missing(OP, "the faceuse's mate"))?;
-        let material = |fu| -> Result<bool> {
-            match eu1::faceuse_region(b, fu)? {
-                Some(r) => region_material(b, r),
-                None => Ok(false),
-            }
-        };
-        let (mu, mm) = (material(up)?, material(mate)?);
-        if mu == mm {
-            return Err(SolidError::invalid_input(
-                OP,
-                "a face whose sides are not one material region and one void",
-            ));
-        }
-        let fu = if mu { up } else { mate };
-        let sign = if b.faceuse(fu)?.orientation == OrientType::Same {
-            -1.0
-        } else {
-            1.0
-        };
-        let surface = b
-            .face(f)?
-            .surface
-            .as_ref()
-            .ok_or_else(|| SolidError::mass_missing(OP, "the face's surface"))?;
-        let cn = match as_b_spline(k, surface)? {
-            Some(bs) => Nurbs::of(&bs)?,
-            None => {
-                return Err(SolidError::Unsupported {
-                    operation: OP,
-                    reason: "a surface with no NURBS form",
-                })
-            }
-        };
-        // the loops in the order and direction the integrator walks them
-        // (`create_oriented_trim_boundary`): the upward use's loops, each edge use's
-        // pcurve forward where it is `Same`, backward where `Opposite`
-        let mut loops: Vec<Vec<(EdgeId, NurbsCurve, f64)>> = Vec::new();
-        for lu in eu1::faceuse_loopuses(b, up, false, None)? {
-            if crate::topology::loopuse::is_vertex_loopuse(b, lu)? {
-                continue;
-            }
-            let mut lp = Vec::new();
-            for eu in eu1::loopuse_edgeuses(b, lu)? {
-                let dir = if eu1::orientation(b, eu)? == OrientType::Same {
-                    1.0
-                } else {
-                    -1.0
-                };
-                let e = b
-                    .edgeuse(eu)?
-                    .edge
-                    .ok_or_else(|| SolidError::mass_missing(OP, "the edgeuse's edge"))?;
-                lp.push((e, pcurve(k, b, eu)?, dir));
-            }
-            loops.push(lp);
-        }
+    /// Adds a face of the closed surface: its levels, its loops' cells (each closing
+    /// segment before its curve) and the rounding gaps at the segments' ends.
+    fn add_face(&mut self, cf: &ClosureFace, open_length: &mut Ivl, zcap: &mut f64) -> Result<()> {
         let face = self.faces.len();
         // the levels: the base below every trim, then the v knots between
         let (mut vlo, mut vhi) = (f64::INFINITY, f64::NEG_INFINITY);
-        for (_, c, _) in loops.iter().flatten() {
-            for (s, _, _) in curve_spans(c) {
-                let (_, v) = piece_hull(c, s);
+        for c in cf.loops.iter().flatten() {
+            for (s, _, _) in curve_spans(&c.cn) {
+                let (_, v) = piece_hull(&c.cn, s);
                 vlo = vlo.min(v.lo);
                 vhi = vhi.max(v.hi);
             }
@@ -836,55 +796,31 @@ impl<'a> Work<'a> {
             });
         }
         let mut levels = vec![vlo];
-        for &x in &cn.v {
+        for &x in &cf.cn.v {
             if x > vlo && x < vhi && levels.last().is_some_and(|&l| x > l) {
                 levels.push(x);
             }
         }
-        self.faces.push(FaceGeo { cn, levels, sign });
-        for lp in loops {
-            // each curve's start and end point (as walked), enclosed
-            let mut ends = Vec::new();
-            for (_, c, dir) in &lp {
-                let (t0, t1) = (knot(&c.u, c.p as isize), knot(&c.u, c.n as isize));
-                let (a, z) = if *dir > 0.0 { (t0, t1) } else { (t1, t0) };
-                let pa = curve_derivs_over(c, Ivl::from(a), 0, None)?;
-                let pz = curve_derivs_over(c, Ivl::from(z), 0, None)?;
-                let first = |d: &[V3<Ivl>]| {
-                    d.first()
-                        .copied()
-                        .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no point"))
-                };
-                ends.push((first(&pa)?, first(&pz)?));
-            }
-            let count = lp.len();
-            for (i, (e, c, dir)) in lp.into_iter().enumerate() {
+        self.faces.push(FaceGeo {
+            cn: cf.cn.clone(),
+            levels,
+            sign: cf.sign,
+        });
+        for lp in &cf.loops {
+            for (i, c) in lp.iter().enumerate() {
                 // the segment from the previous curve's end to this one's start
-                let before = if i == 0 {
-                    count.saturating_sub(1)
-                } else {
-                    i - 1
-                };
-                let prev = ends.get(before).map(|x| x.1);
-                let this = ends.get(i).map(|x| x.0);
-                if let (Some(p), Some(q)) = (prev, this) {
+                if let Some((p, q)) = closing(lp, i) {
                     let (a, z) = ([p.x.mid(), p.y.mid()], [q.x.mid(), q.y.mid()]);
                     // the rounding gaps between the exact ends and the segment's ends
                     for end in [p, q] {
                         self.rounding_gap(face, end, open_length, zcap)?;
                     }
                     if a != z {
-                        let seg = segment(a, z)?;
-                        let len = self.segment_length(face, &seg)?;
-                        *open_length = *open_length + len;
-                        self.add_piece(face, &seg, 1.0)?;
+                        // (its length is one of the closure's openings)
+                        self.add_piece(face, &segment(a, z)?, 1.0)?;
                     }
                 }
-                self.add_piece(face, &c, dir)?;
-                // the side's sense along the edge's curve on the closed surface: its walk
-                // times the face's sign
-                let forward = dir * sign > 0.0;
-                sides.entry(e).or_default().push((face, c, forward));
+                self.add_piece(face, &c.cn, c.dir)?;
             }
         }
         Ok(())
@@ -916,24 +852,6 @@ impl<'a> Work<'a> {
         let green = Ivl::from(du) * Ivl::from(g);
         self.fixed = self.fixed + Ivl::new(-green.hi, green.hi);
         Ok(())
-    }
-
-    /// A bound on the 3D length of a closing segment on face `face`: along a side of the net
-    /// whose control points are nearly one point (a pole), from their spread
-    /// ([`side_length`]); else from the partials over its box.
-    fn segment_length(&self, face: usize, seg: &NurbsCurve) -> Result<Ivl> {
-        let fg = self
-            .faces
-            .get(face)
-            .ok_or_else(|| SolidError::mass_failed(OP, "no such face"))?;
-        let (u, v) = piece_hull(seg, seg.p);
-        if let Some(len) = side_length(&fg.cn, u, v) {
-            return Ok(len);
-        }
-        let p = partials_at(&fg.cn, u, v, 1)?;
-        let (su, sv) = (p.at(1, 0), p.at(0, 1));
-        Ok(Ivl::from(mag3([su.x, su.y, su.z])) * Ivl::from(width(u))
-            + Ivl::from(mag3([sv.x, sv.y, sv.z])) * Ivl::from(width(v)))
     }
 
     /// Adds the cells of one pcurve on face `face`: each polynomial piece, cut where it may
@@ -1002,41 +920,15 @@ impl<'a> Work<'a> {
         Ok(())
     }
 
-    fn add_strip(
-        &mut self,
-        a: (usize, NurbsCurve),
-        c: (usize, NurbsCurve),
-        open_length: &mut Ivl,
-        zcap: &mut f64,
-    ) -> Result<()> {
-        let range = |cn: &NurbsCurve| (knot(&cn.u, cn.p as isize), knot(&cn.u, cn.n as isize));
-        let (ra, rc) = (range(&a.1), range(&c.1));
-        let (t0, t1) = (ra.0.max(rc.0), ra.1.min(rc.1));
-        if t0.partial_cmp(&t1) != Some(core::cmp::Ordering::Less) {
-            return Err(SolidError::invalid_input(
-                OP,
-                "an edge whose two pcurves share no parameters",
-            ));
-        }
+    /// Adds the cells of a strip of the closed surface, cut at both curves' knots (the
+    /// parts past its common parameters and its ends are among the closure's openings).
+    fn add_strip(&mut self, cs: &ClosureStrip) -> Result<()> {
+        let (t0, t1) = cs.t;
         let strip = self.strips.len();
-        self.strips.push(StripGeo { sides: [a, c] });
-        // the parts of either curve past the common parameters, and the strip's two ends
-        for side in 0..2 {
-            let (lo, hi) = if side == 0 { ra } else { rc };
-            for (x0, x1) in [(lo, t0), (t1, hi)] {
-                if x0 < x1 {
-                    let len = self.curve_length(strip, side, x0, x1)?;
-                    *open_length = *open_length + len;
-                }
-            }
-        }
-        for t in [t0, t1] {
-            let (x, y) = (self.point(strip, 0, t)?, self.point(strip, 1, t)?);
-            let d = [y[0] - x[0], y[1] - x[1], y[2] - x[2]];
-            *open_length = *open_length + Ivl::from(mag3(d));
-            *zcap = zcap.max((x[2] - Ivl::from(self.z0)).mag());
-        }
-        // cut at both curves' knots
+        let [a, c] = &cs.sides;
+        self.strips.push(StripGeo {
+            sides: [(a.face, a.cn.clone()), (c.face, c.cn.clone())],
+        });
         let sg = self
             .strips
             .get(strip)
@@ -1077,37 +969,6 @@ impl<'a> Work<'a> {
             self.push(it)?;
         }
         Ok(())
-    }
-
-    /// The 3D point of a strip's side `side` at `t`, enclosed.
-    fn point(&self, strip: usize, side: usize, t: f64) -> Result<[Ivl; 3]> {
-        let (face, cn) = self.strip_side(strip, side)?;
-        let d = curve_derivs_over(cn, Ivl::from(t), 0, None)?;
-        let p = d
-            .first()
-            .copied()
-            .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no point"))?;
-        let s = partials_at(&face.cn, p.x, p.y, 0)?.at(0, 0);
-        Ok([s.x, s.y, s.z])
-    }
-
-    /// A bound on the 3D length of a strip side's curve over `[t0, t1]`.
-    fn curve_length(&self, strip: usize, side: usize, t0: f64, t1: f64) -> Result<Ivl> {
-        let (face, cn) = self.strip_side(strip, side)?;
-        let d = curve_derivs_over(cn, Ivl::new(t0, t1), 1, None)?;
-        let (p, dp) = (
-            d.first()
-                .copied()
-                .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no point"))?,
-            d.get(1)
-                .copied()
-                .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no derivative"))?,
-        );
-        let s = partials_at(&face.cn, p.x, p.y, 1)?;
-        let (su, sv) = (s.at(1, 0), s.at(0, 1));
-        let speed = Ivl::from(mag3([su.x, su.y, su.z])) * Ivl::from(dp.x.mag())
-            + Ivl::from(mag3([sv.x, sv.y, sv.z])) * Ivl::from(dp.y.mag());
-        Ok(speed * (Ivl::from(t1) - Ivl::from(t0)))
     }
 
     fn strip_side(&self, strip: usize, side: usize) -> Result<(&FaceGeo, &NurbsCurve)> {
@@ -1649,7 +1510,7 @@ fn crossings(
 /// points are one point to rounding, the bound is of the order of rounding. A box off the
 /// side by rounding (a trim's end a few units in the last place from the knot) adds its
 /// distance times the mixed partial over the box between.
-fn side_length(cn: &Nurbs, u: Ivl, v: Ivl) -> Option<Ivl> {
+pub(super) fn side_length(cn: &Nurbs, u: Ivl, v: Ivl) -> Option<Ivl> {
     let (u, v, across) = on_side(cn, u, v)?;
     let along = side_speed_bound(cn, u, v)?;
     // off the side by `d` (rounding): the speed along it grows by at most `d` times the
@@ -1791,39 +1652,6 @@ fn side_speed_bound(cn: &Nurbs, u: Ivl, v: Ivl) -> Option<Ivl> {
     let speed = Ivl::from(2.0 * p as f64) / Ivl::from(shortest) * Ivl::from(wmax) / Ivl::from(wmin)
         * Ivl::from(delta);
     Some(speed * Ivl::from(width(along)))
-}
-
-/// The straight uv segment from `a` to `z` as a degree 1 curve on `[0, 1]`.
-fn segment(a: [f64; 2], z: [f64; 2]) -> Result<NurbsCurve> {
-    let ok = a.iter().chain(&z).all(|x| x.is_finite());
-    if !ok {
-        return Err(SolidError::invalid_input(
-            OP,
-            "a loop's end that is not finite",
-        ));
-    }
-    Ok(NurbsCurve {
-        p: 1,
-        n: 2,
-        u: vec![0.0, 0.0, 1.0, 1.0],
-        pw: vec![a[0], a[1], 0.0, 1.0, z[0], z[1], 0.0, 1.0],
-    })
-}
-
-/// An edge use's pcurve as NURBS data, made first where it is missing (as the integrator's
-/// trim boundary makes it).
-fn pcurve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<NurbsCurve> {
-    let fetch =
-        crate::topology::edgeuse::p3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
-    fetch.status?;
-    let c = crate::topology::edgeuse::p1::uv_trim_curve(b, eu)?
-        .0
-        .ok_or_else(|| SolidError::mass_missing(OP, "the edgeuse's pcurve"))?;
-    let bs: &BSplineCurve = c.b_spline_base().ok_or(SolidError::Unsupported {
-        operation: OP,
-        reason: "a pcurve with no NURBS form",
-    })?;
-    NurbsCurve::of(bs)
 }
 
 #[cfg(test)]

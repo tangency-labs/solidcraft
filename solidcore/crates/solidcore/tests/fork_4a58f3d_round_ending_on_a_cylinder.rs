@@ -204,7 +204,8 @@ fn a_round_ending_on_a_cylinder_meets_it_along_a_certified_rib() {
     assert!((removed - want).abs() <= 1e-6 * want, "{removed} vs {want}");
     assert_eq!(off.len(), 1, "{off:?}");
     assert!(off[0] <= tol, "{off:?} vs {tol}");
-    // the fork's printed values, to their last digit
-    assert!((removed - 16.714056916).abs() <= 5e-10, "{removed}");
+    // the fork prints 16.714056916, its faces' flux alone; it differs by
+    // the faces' gap flux (#14170: the strips across their gaps close the flux surface)
+    assert!((removed - 16.714_055_291_643).abs() <= 5e-10, "{removed}");
     assert!((off[0] - 4.22e-6).abs() <= 5e-9, "{off:?}");
 }

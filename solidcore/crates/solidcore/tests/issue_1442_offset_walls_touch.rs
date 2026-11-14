@@ -144,10 +144,11 @@ fn issue_1442_plate_hole_crossing_side_still_resolved() {
     let cavity = (37.0 * 37.0 - (pi * r * r - segment)) * 8.5;
     let want = 40.0 * 40.0 * 10.0 - pi * 2.0 * 2.0 * 10.0 - cavity;
     let v = volume(&k, &mut b).unwrap();
-    // to the integrator's 1e-6, and main's value (bit-identical with the flag on and off
-    // there) to 1e-12
+    // to the integrator's 1e-6, and the value measured here to 1e-12: since #14170 (the
+    // faces' flux closed across their gaps) 2.1e-9 below the closed form, where the faces'
+    // flux alone (4554.583387224843) was 7.1e-9 below
     assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
-    let pinned = 4_554.583_387_224_843_f64;
+    let pinned = 4_554.583_409_746_107_f64;
     assert!((v - pinned).abs() <= 1e-12 * pinned, "{v} vs {pinned}");
 }
 

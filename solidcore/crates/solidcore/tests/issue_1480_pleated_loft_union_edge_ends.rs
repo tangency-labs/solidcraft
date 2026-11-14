@@ -314,9 +314,10 @@ fn wr469_union_flag_alone_grows_eight_vertex_tolerances() {
         // crossing ridges' edges where they pass nearest their points (2.2476e-6 ->
         // 2.2417e-6 and 2.2381e-6 -> 2.2298e-6 off), not at the classifications'
         // parameters, 1.8e-8 along; topology, worst end gap and check are unchanged and
-        // the volume moves 4.0e-9 relative.
+        // the volume moves 4.0e-9 relative. Since #14170 (the faces' flux closed across
+        // their gaps) -3.0e-8 relative (from 44443.49387571212); no closed form.
         assert!(
-            close(u.volume, 44443.49387571212),
+            close(u.volume, 44443.49253850339),
             "{name} volume {:?}",
             u.volume
         );

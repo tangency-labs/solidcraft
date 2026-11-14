@@ -142,8 +142,14 @@ fn issue_1453_shelled_cylinder_edges_are_exact() {
         "upstream's marched rim"
     );
     assert!(stock.exact < stock.inner, "a marched inner edge");
+    // upstream's volume was 3.5e-7 over, the flux of the faces open along the marched rim;
+    // #14170 closes them across the gap (measured -3.6e-15): the marched edge above is what
+    // shows the march
     let over = stock.volume.unwrap() - want;
-    assert!(over > 1e-7 * want, "upstream's volume 3.5e-7 over: {over}");
+    assert!(
+        over.abs() <= 1e-12 * want,
+        "the closed faces' volume: {over}"
+    );
     let fixed = shelled(
         "issue_1453 cylinder",
         true,

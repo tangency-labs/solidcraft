@@ -350,7 +350,7 @@ fn wr741_e3_cone_minus_the_notched_tool() {
     assert!(is_manifold_solid(&r).unwrap());
     assert_eq!(r.face_list().len(), 8);
     let v = fine_volume(&k, &mut r);
-    assert!((v - 100_808.551_793).abs() < 1e-5, "{v}");
+    assert!((v - 100_808.552_462_546).abs() < 1e-5, "{v}");
     checks_clean(&mut k, &mut r);
 }
 
