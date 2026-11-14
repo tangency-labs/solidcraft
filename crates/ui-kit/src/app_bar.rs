@@ -281,7 +281,7 @@ pub fn search_rect(ctx: &egui::Context, shortcut: Option<&str>, bar: Rect, right
 /// A pill's width: pad, mark, label, ×.
 fn pill_width(ui: &egui::Ui, p: &Pill) -> f32 {
     let label = if p.labelled && !p.label.is_empty() {
-        5.0 + ui.painter().layout_no_wrap(p.label.to_string(), crate::type_face::semibold(12.0), p.ink).size().x
+        5.0 + ui.painter().layout_no_wrap(p.label.to_string(), crate::type_face::semibold(Tokens::get().font_label), p.ink).size().x
     } else {
         0.0
     };
@@ -332,7 +332,7 @@ fn pill(ui: &mut egui::Ui, bar: Rect, right: f32, p: &Pill, h: &Handles, actions
     crate::icons::paint_ink(ui.painter(), icon, p.icon, p.ink);
     if p.labelled && !p.label.is_empty() {
         // Centred on the capitals' height, not the line box, so the name sits level with the mark.
-        let galley = ui.painter().layout_no_wrap(p.label.to_string(), crate::type_face::semibold(12.0), p.ink);
+        let galley = ui.painter().layout_no_wrap(p.label.to_string(), crate::type_face::semibold(Tokens::get().font_label), p.ink);
         let top = rect.center().y - galley.size().y / 2.0 + 0.5;
         ui.painter().galley(pos2(snap(icon.right() + 5.0), snap(top)), galley, p.ink);
     }
@@ -485,16 +485,15 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     let separator_x = x - step + if compact { 19.0 } else { 24.0 };
     separator(ui, r, separator_x, "documents", h);
     let tabs_start = separator_x + 10.0;
-    let report_font = crate::type_face::semibold(12.0);
+    let report_font = FontId::proportional(t.font_button);
     let label_width = ui.painter().layout_no_wrap(data.report.label.to_string(), report_font.clone(), t.app_bar_text).size().x;
     // The version links to its release notes; measured here so Report a bug leaves it room.
     let version = data.version.map(|v| (v, ui.painter().layout_no_wrap(v.text.to_string(), FontId::proportional(t.font_small), t.app_bar_text)));
     let version_width = version.as_ref().map(|(_, galley)| galley.size().x);
-    let pills_w = pills_width(ui, &data.pills);
-    let (report, report_label) = report_rect(r, captions, tabs_start + pills_w, label_width, version_width, data.report.icon_only);
-    // The pills sit before Report a bug; Settings, Help, the search field and the assistant keep
-    // their places relative to `anchor`, the pills' left edge.
-    let anchor = report.left() - pills_w;
+    let (report, report_label) = report_rect(r, captions, tabs_start, label_width, version_width, data.report.icon_only);
+    // The right-hand controls keep their places; the link pills sit left of them, in the room the
+    // document tabs leave (see `pills_w` below).
+    let anchor = report.left();
     // Settings' left edge; the search field, when the bar holds it, sits just before it and moves
     // the assistant and the end of the document tabs left by its width.
     let gear_left = anchor - 68.0;
@@ -508,7 +507,15 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     }
     // An offer (a newer release) sits before the right cluster, in the space up to the file
     // actions; labelled where Report a bug is (an icon-only one leaves it to fit by room).
-    let controls_left = anchor - CLUSTER_BUTTONS - search_shift;
+    let mut controls_left = anchor - CLUSTER_BUTTONS - search_shift;
+    // The link pills end 6 before the assistant. They are left out where the tabs would keep less
+    // than one tab's room (216) beside them, so a narrow bar looks as it did without them.
+    let pills_w = pills_width(ui, &data.pills);
+    let pills_shown = !data.pills.is_empty() && controls_left - pills_w - tabs_start >= 216.0;
+    let pills_right = controls_left - 4.0;
+    if pills_shown {
+        controls_left -= pills_w;
+    }
     let offer = Rect::from_min_max(pos2(x, report.top()), pos2(controls_left - 2.0, report.bottom()));
     let offer_labeled = report_label || (data.report.icon_only && r.width() >= COMPACT);
     // Report a bug.
@@ -528,7 +535,7 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
             pos2(capsule_rect.left() + REPORT_TEXT_X, capsule_rect.center().y),
             Align2::LEFT_CENTER,
             data.report.label,
-            crate::type_face::semibold(12.0),
+            report_font,
             ink,
         );
         data.report.tip
@@ -539,9 +546,9 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     if response.backing_on_hover_text(tip).clicked() {
         actions.push(BarAction::Report);
     }
-    // The link pills, ending 4 before Report a bug.
-    let mut right = report.left() - PILL_GAP;
-    for p in data.pills.iter().rev() {
+    // The link pills, left of the assistant.
+    let mut right = pills_right;
+    for p in data.pills.iter().rev().filter(|_| pills_shown) {
         right = pill(ui, r, right, p, h, &mut actions);
     }
     // Settings sits immediately left of Help.

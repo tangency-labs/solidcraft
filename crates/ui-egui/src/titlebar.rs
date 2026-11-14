@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn the_link_pills_leave_the_caption_buttons_and_the_controls_alone() {
-        for width in [900.0, 960.0, 1280.0, 1600.0] {
+        for width in [1280.0, 1600.0] {
             let mut w = Win::new(width);
             w.app.home.open = false;
             w.frame(vec![]);
@@ -228,11 +228,9 @@ mod tests {
                 let x = rect(hide);
                 assert!(x.right() <= report.left() && x.left() >= donate.left(), "{width}: {hide} inside its pill");
             }
-            // Nothing else on the right crowds them.
-            for name in ["titlebar:preferences", "titlebar:assistant"] {
-                if let Some(r) = crate::scenario::rect_of(name) {
-                    assert!(r.right() <= donate.left() + 0.5, "{width}: {name} {r:?} overlaps {donate:?}");
-                }
+            // The pills sit left of the assistant and the other controls, which keep their places.
+            if let Some(a) = crate::scenario::rect_of("titlebar:assistant") {
+                assert!(discord.right() <= a.left(), "{width}: the pills overlap the assistant: {discord:?} {a:?}");
             }
             for (t, r) in &texts(&out) {
                 assert!(r.right() <= min.left() || r.top() >= min.bottom(), "`{t}` runs under the caption buttons at {width}");
@@ -244,6 +242,26 @@ mod tests {
             // Donate carries its name on a wide bar and drops it on a narrow one.
             let named = texts(&out).iter().any(|(t, r)| t == "Donate" && donate.contains_rect(*r));
             assert_eq!(named, width >= solidcraft_ui_kit::app_bar::PILL_LABEL_MIN, "{width}");
+        }
+    }
+
+    /// On a narrow bar the pills give way to the document tabs: they are left out, and where they
+    /// stay they clear the tabs and the caption buttons.
+    #[test]
+    fn narrow_bars_leave_the_pills_out_before_they_crowd_the_tabs() {
+        for width in [700.0, 900.0, 960.0, 1100.0] {
+            let mut w = Win::new(width);
+            w.app.home.open = false;
+            w.frame(vec![]);
+            w.frame(vec![]);
+            let [min, ..] = CAPTIONS.map(|c| w.caption(c));
+            let tabs = crate::scenario::rect_of("tab:design:0").expect("a tab");
+            for name in ["titlebar:kofi", "titlebar:discord"] {
+                if let Some(r) = crate::scenario::rect_of(name) {
+                    assert!(r.left() >= tabs.right() && r.right() <= min.left(), "{width}: {name} {r:?} crowds the tab {tabs:?}");
+                }
+            }
+            assert!(crate::scenario::rect_of("titlebar:report").is_some(), "{width}: Report a bug stays");
         }
     }
 
