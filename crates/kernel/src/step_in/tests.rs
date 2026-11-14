@@ -1625,6 +1625,115 @@ fn spindle_torus_lemon_with_a_negative_major_radius_imports_whole() {
     }
 }
 
+/// The part of a quarter disc (centre (2, 0), radius 1) turned about Z, bounded by the tube's
+/// inner upper quarter (the arc from the top over to the axis side), the cylinder of radius 2
+/// under the top, and the flat ring below, with the tube written as a SURFACE_OF_REVOLUTION of a
+/// rational B-spline circle (what some writers make of a torus): the face's tube angles run
+/// from 90 to 180 degrees, past its profile's own parameter range (0 to 1), which the face's
+/// range on the form must not be taken for. V = 2π(2 − 4/(3π))(π/4).
+#[test]
+fn torus_written_as_a_revolution_of_a_spline_circle_imports_whole() {
+    use std::f64::consts::PI;
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let mut t = String::from(HEAD);
+    t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
+    t += "#7=CARTESIAN_POINT('',(2.,0.,0.));\n#8=DIRECTION('',(0.,-1.,0.));\n#9=AXIS2_PLACEMENT_3D('',#7,#8,#3);\n";
+    // The profile: the tube's circle from (3, 0, 0) towards +Z, four rational quarter arcs.
+    let points = [(3., 0.), (3., 1.), (2., 1.), (1., 1.), (1., 0.), (1., -1.), (2., -1.), (3., -1.), (3., 0.)];
+    for (i, (x, z)) in points.iter().enumerate() {
+        t += &format!("#{}=CARTESIAN_POINT('',({x:.1},0.,{z:.1}));\n", 101 + i);
+    }
+    t += "#100=(BOUNDED_CURVE()B_SPLINE_CURVE(2,(#101,#102,#103,#104,#105,#106,#107,#108,#109),.UNSPECIFIED.,.U.,.U.)B_SPLINE_CURVE_WITH_KNOTS((3,2,2,2,3),(0.,0.25,0.5,0.75,1.),.UNSPECIFIED.)CURVE()GEOMETRIC_REPRESENTATION_ITEM()";
+    t += &format!("RATIONAL_B_SPLINE_CURVE((1.,{w:.16},1.,{w:.16},1.,{w:.16},1.,{w:.16},1.))REPRESENTATION_ITEM(''));\n");
+    t += "#110=AXIS1_PLACEMENT('',#1,#2);\n#5=SURFACE_OF_REVOLUTION('',#100,#110);\n#6=CYLINDRICAL_SURFACE('',#4,2.);\n";
+    t += "#10=CARTESIAN_POINT('',(2.,0.,1.));\n#11=VERTEX_POINT('',#10);\n#12=VERTEX_POINT('',#7);\n#13=CARTESIAN_POINT('',(1.,0.,0.));\n#14=VERTEX_POINT('',#13);\n";
+    t += "#16=CARTESIAN_POINT('',(0.,0.,1.));\n#17=AXIS2_PLACEMENT_3D('',#16,#2,#3);\n#18=CIRCLE('',#17,2.);\n#19=EDGE_CURVE('',#11,#11,#18,.T.);\n";
+    t += "#20=CIRCLE('',#4,2.);\n#21=EDGE_CURVE('',#12,#12,#20,.T.);\n#22=CIRCLE('',#4,1.);\n#23=EDGE_CURVE('',#14,#14,#22,.T.);\n";
+    t += "#24=VECTOR('',#2,1.);\n#25=LINE('',#7,#24);\n#26=EDGE_CURVE('',#12,#11,#25,.T.);\n#30=CIRCLE('',#9,1.);\n#31=EDGE_CURVE('',#11,#14,#30,.T.);\n";
+    t += "#50=ORIENTED_EDGE('',*,*,#21,.T.);\n#51=ORIENTED_EDGE('',*,*,#26,.T.);\n#52=ORIENTED_EDGE('',*,*,#19,.F.);\n#53=ORIENTED_EDGE('',*,*,#26,.F.);\n";
+    t += "#54=EDGE_LOOP('',(#50,#51,#52,#53));\n#55=FACE_OUTER_BOUND('',#54,.T.);\n#56=ADVANCED_FACE('',(#55),#6,.T.);\n";
+    t += "#40=DIRECTION('',(0.,0.,-1.));\n#41=AXIS2_PLACEMENT_3D('',#1,#40,#3);\n#42=PLANE('',#41);\n";
+    t += "#43=ORIENTED_EDGE('',*,*,#21,.F.);\n#44=EDGE_LOOP('',(#43));\n#45=FACE_OUTER_BOUND('',#44,.T.);\n";
+    t += "#46=ORIENTED_EDGE('',*,*,#23,.T.);\n#47=EDGE_LOOP('',(#46));\n#48=FACE_BOUND('',#47,.T.);\n#49=ADVANCED_FACE('',(#45,#48),#42,.T.);\n";
+    t += "#60=ORIENTED_EDGE('',*,*,#19,.T.);\n#61=ORIENTED_EDGE('',*,*,#31,.T.);\n#62=ORIENTED_EDGE('',*,*,#23,.F.);\n#63=ORIENTED_EDGE('',*,*,#31,.F.);\n";
+    t += "#64=EDGE_LOOP('',(#60,#61,#62,#63));\n#65=FACE_OUTER_BOUND('',#64,.T.);\n#66=ADVANCED_FACE('',(#65),#5,.T.);\n";
+    t += "#70=CLOSED_SHELL('',(#56,#49,#66));\n#71=MANIFOLD_SOLID_BREP('Quarter',#70);\n#72=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#71),#80);\n";
+    t += &context(80, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    // The area: the ring π(4 − 1), the cylinder 2π·2·1, and the tube 2π∫(2 + cos v)dv over
+    // [π/2, π] = 2π(π − 1).
+    let volume = 2.0 * PI * (2.0 - 4.0 / (3.0 * PI)) * (PI / 4.0);
+    let ring = PI * 3.0;
+    let wall = 2.0 * PI * 2.0;
+    let tube = 2.0 * PI * (PI - 1.0);
+    assert_closed_measures(&t, volume, ring + wall + tube, &[]);
+}
+
+/// A strip two turns round a cylinder, bounded by two helices (cubic B-splines, one Bezier arc
+/// every 15 degrees) and two lines along the axis: a thread's flank. A cylinder face covers at
+/// most a turn, and the reader once clamped the face's box to one, which put its edges 4 mm off
+/// the form it made ("an edge lies 3.9 mm off the face's surface"): it says what the face is.
+#[test]
+fn a_face_winding_two_turns_round_its_cylinder_is_refused_for_what_it_is() {
+    use std::f64::consts::TAU;
+    let (radius, pitch, width, turns) = (3.0f64, 1.0f64, 0.5f64, 2usize);
+    let rise = pitch / TAU;
+    let arcs = turns * 24;
+    let step = TAU * turns as f64 / arcs as f64;
+    let point = |angle: f64, z: f64| [radius * angle.cos(), radius * angle.sin(), z];
+    let slope = |angle: f64| [-radius * angle.sin(), radius * angle.cos(), rise];
+    let mut t = String::from(HEAD);
+    t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n#5=CYLINDRICAL_SURFACE('',#4,3.);\n";
+    // The helix from angle 0 at height `lift`: its control points, then the curve over them.
+    let mut next = 1000;
+    let mut helix = |t: &mut String, lift: f64| {
+        let mut controls = vec![point(0.0, lift)];
+        for k in 0..arcs {
+            let (a, b) = (k as f64 * step, (k + 1) as f64 * step);
+            let (pa, pb, ta, tb) = (point(a, rise * a + lift), point(b, rise * b + lift), slope(a), slope(b));
+            controls.push(std::array::from_fn(|i| pa[i] + step / 3.0 * ta[i]));
+            controls.push(std::array::from_fn(|i| pb[i] - step / 3.0 * tb[i]));
+            controls.push(pb);
+        }
+        let first = next;
+        for c in &controls {
+            *t += &format!("#{next}=CARTESIAN_POINT('',({:.16},{:.16},{:.16}));\n", c[0], c[1], c[2]);
+            next += 1;
+        }
+        let list: Vec<String> = (first..next).map(|i| format!("#{i}")).collect();
+        let mults: Vec<String> = (0..=arcs).map(|k| if k == 0 || k == arcs { "4" } else { "3" }.to_string()).collect();
+        let knots: Vec<String> = (0..=arcs).map(|k| format!("{:.16}", k as f64 / arcs as f64)).collect();
+        *t += &format!(
+            "#{next}=B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,({}),({}),.UNSPECIFIED.);\n",
+            list.join(","),
+            mults.join(","),
+            knots.join(",")
+        );
+        next += 1;
+        next - 1
+    };
+    let (low, high) = (helix(&mut t, 0.0), helix(&mut t, width));
+    let top = rise * TAU * turns as f64;
+    for (i, z) in [0.0, width, top, top + width].into_iter().enumerate() {
+        t += &format!("#{}=CARTESIAN_POINT('',({radius:.16},0.,{z:.16}));\n#{}=VERTEX_POINT('',#{});\n", 10 + 2 * i, 11 + 2 * i, 10 + 2 * i);
+    }
+    t += "#30=DIRECTION('',(0.,0.,1.));\n#31=VECTOR('',#30,1.);\n#32=LINE('',#10,#31);\n#33=LINE('',#14,#31);\n";
+    t += &format!(
+        "#40=EDGE_CURVE('',#11,#15,#{low},.T.);\n#41=EDGE_CURVE('',#15,#17,#33,.T.);\n#42=EDGE_CURVE('',#13,#17,#{high},.T.);\n#43=EDGE_CURVE('',#11,#13,#32,.T.);\n"
+    );
+    t += "#50=ORIENTED_EDGE('',*,*,#40,.T.);\n#51=ORIENTED_EDGE('',*,*,#41,.T.);\n#52=ORIENTED_EDGE('',*,*,#42,.F.);\n#53=ORIENTED_EDGE('',*,*,#43,.F.);\n";
+    t += "#54=EDGE_LOOP('',(#50,#51,#52,#53));\n#55=FACE_OUTER_BOUND('',#54,.T.);\n#56=ADVANCED_FACE('',(#55),#5,.T.);\n";
+    t += "#57=OPEN_SHELL('',(#56));\n#58=SHELL_BASED_SURFACE_MODEL('Strip',(#57));\n#59=SHAPE_REPRESENTATION('',(#58),#70);\n";
+    t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    let said = match step_import(&t) {
+        Err(e) => e.to_string(),
+        Ok(imp) => imp.warnings.join("; "),
+    };
+    assert!(said.contains("winds 2.0 turns about its axis"), "{said}");
+    assert!(!said.contains("off the face's surface"), "{said}");
+}
+
 /// Booleans and blends build the same body every time, so an export is byte-identical from
 /// run to run (an export once listed a boolean's faces in hash order of their addresses). The
 /// tee of oracle 35 with its rolling-ball fillet round the junction.

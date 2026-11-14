@@ -30,6 +30,11 @@ use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_8, TAU};
 /// Rounding room on an angle at a quarter's end.
 const SLACK: f64 = 1e-12;
 
+/// How far past one turn (as a fraction of it) a boundary's box may run and still be one turn:
+/// rounding and an edge's distance off its surface ([`extent`]); a wider one is a face that
+/// winds.
+const MORE_THAN_A_TURN: f64 = 0.01;
+
 /// The quarter arc's parameter `u` in `[0, 1]` at angle `ψ` in `[0, π/2]` from its start: the
 /// arc with ends `±π/4` from its bisector and middle weight `cos π/4` has
 /// `tan((ψ − π/4)/2) = tan(π/8)(2u − 1)`.
@@ -1052,14 +1057,19 @@ fn extent_in(
             *ixm(&mut hi, d) = ix(&hi, d).max(ix(&l_hi, d) + shift);
         }
     }
-    // At most one turn round a periodic direction; a boundary that never goes round it (a face
-    // bounded by its seam alone) covers the whole turn from there.
+    // At most one turn round a periodic direction, to rounding; a boundary that never goes round
+    // it (a face bounded by its seam alone) covers the whole turn from there. A boundary that
+    // goes round it more than a turn and a hundredth (a thread's flank winds several) keeps its
+    // box: clamped to a turn, the face's edges would lie off any form made over it.
     for d in 0..2 {
         if let Some(Some(per)) = period.get(d) {
-            *ixm(&mut hi, d) = if ix(&hi, d) - ix(&lo, d) <= 1e-9 * per {
+            let span = ix(&hi, d) - ix(&lo, d);
+            *ixm(&mut hi, d) = if span <= 1e-9 * per {
                 ix(&lo, d) + per
-            } else {
+            } else if span <= per * (1.0 + MORE_THAN_A_TURN) {
                 ix(&hi, d).min(ix(&lo, d) + per)
+            } else {
+                ix(&hi, d)
             };
         }
     }
