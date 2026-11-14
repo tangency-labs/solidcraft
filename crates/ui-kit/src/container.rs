@@ -42,7 +42,10 @@ pub(super) fn show_combo<R>(
     body: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
     if !crate::blur::enabled() || ui.ctx().viewport_id() != egui::ViewportId::ROOT {
-        return combo.show_ui(ui, body);
+        return combo.show_ui(ui, |ui| {
+            ui.visuals_mut().widgets.noninteractive.bg_stroke = crate::Menu::separator_stroke(&Tokens::get());
+            body(ui)
+        });
     }
     let popup = widget.with("popup");
     let slot = egui::ComboBox::is_open(ui.ctx(), widget)
@@ -50,6 +53,7 @@ pub(super) fn show_combo<R>(
         .flatten();
     let mut host = None;
     let shown = combo.show_ui(ui, |ui| {
+        ui.visuals_mut().widgets.noninteractive.bg_stroke = crate::Menu::separator_stroke(&Tokens::get());
         // ComboBox calls us inside its ScrollArea, whose content Frame has no
         // fill and whose clip omits popup padding and any scrollbar. Its parent
         // owns the actual native popup Frame; finish using the final Area rect.

@@ -1000,7 +1000,7 @@ fn file_rows(ui: &mut egui::Ui, rows: &[FileRow], chosen: &mut Option<String>, i
                 crate::Menu::button(ui, label, |ui| file_rows(ui, rows, chosen, true));
             }
             FileRow::Separator => {
-                ui.separator();
+                crate::Menu::separator(ui);
             }
         }
     }

@@ -2173,7 +2173,7 @@ fn sketch_create_menu(
                 crate::scenario::publish_handle(&format!("create_family:{}", f.label), response.response.rect.center());
             }
         }
-        ui.separator();
+        crate::ui_kit::Menu::separator(ui);
         let rest: Vec<_> = cmds.iter().copied().filter(|c| crate::sketch_families::family(c.id).is_none()).collect();
         dropdown_keys(app, ui, &rest);
         sketch_menu_rows(app, ui, &rest, width, menu, toggle);
@@ -3964,6 +3964,50 @@ mod dropdown_tests {
         }
         let box_ = solidcraft_engine::find_command("solid.box").unwrap();
         assert_eq!(skip_on_ribbon(vec![box_], &["solid.box"]).len(), 1, "a drop-down is never left empty");
+    }
+
+    #[test]
+    fn grouped_dropdowns_match_heading_layout_and_share_the_menu_separator() {
+        for theme in ["dark", "blueprint"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1280,"height":800}));
+            h.call("ui.prefs", json!({"theme": theme, "construct_menu_groups": true, "ribbon_icon_grid": false}));
+            for panel in ["panel:MODEL:MODIFY", "panel:MODEL:CONSTRUCT"] {
+                h.frames(4);
+                h.step(&json!({"click":{"handle":panel}})).unwrap();
+                h.frames(6);
+                let bounds = crate::scenario::rect_of("toolbar_dropdown").expect("the drop-down is open");
+                let mut output = h.ctx.run_ui(
+                    egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 800.0))), ..Default::default() },
+                    |ui| h.app.ui(ui),
+                );
+                output.textures_delta.clear();
+                let mut rules = Vec::new();
+                for clipped in &output.shapes {
+                    crate::ui_kit::test_support::each_shape(&clipped.shape, &mut |shape| {
+                        if let egui::Shape::LineSegment { points: [a, b], stroke } = shape
+                            && (a.y - b.y).abs() < 0.01
+                            && (b.x - a.x).abs() >= bounds.width() * 0.7
+                            && bounds.contains(*a)
+                            && bounds.contains(*b)
+                        {
+                            rules.push(*stroke);
+                        }
+                    });
+                }
+                assert_eq!(rules.len(), 1, "{theme} {panel}: expected only the footer separator, got {rules:?}");
+                let expected = crate::ui_kit::Menu::separator_stroke(&Tokens::get());
+                assert_eq!(rules[0], expected, "{theme} {panel}: expected shared menu separator stroke");
+                assert!(
+                    solidcraft_theme::contrast_ratio(rules[0].color, Tokens::get().dialog_body) >= crate::ui_kit::Menu::SEPARATOR_MIN_CONTRAST,
+                    "{theme} {panel}: separator {:?} blends into {:?}",
+                    rules[0],
+                    Tokens::get().dialog_body
+                );
+                h.step(&json!({"key":"Escape"})).unwrap();
+            }
+        }
     }
 }
 
