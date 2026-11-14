@@ -1959,7 +1959,7 @@ fn bad_corners_are_refused_with_the_reason() {
     for (p, why) in [
         (json!({}), "`members`"),
         (json!({"members": [bars[0]]}), "`members`"),
-        (json!({"members": [bars[0], bars[1], bars[2]]}), "`members`"),
+        (json!({"members": [bars[0], bars[1], bars[2], bars[3]]}), "`members`"),
         (json!({"members": bars[0]}), "`members`"),
         (json!({"members": [bars[0], bars[0]]}), "twice"),
         (json!({"members": [bars[0], {"feature": "Member1", "line": "l1"}]}), "twice"),
@@ -2039,5 +2039,99 @@ fn hostile_corners_are_refused_not_crashed() {
                 Err(_) => {}
             }
         }
+    }
+}
+
+/// A box corner of 45 × 45 bar at the origin: two rails 200 long along +X and +Y, and a post
+/// from the origin to `post`, its lines through the bars' middles. Returns (rails, post).
+fn box_corner(s: &mut Session, post: [f64; 3]) -> (Vec<String>, String) {
+    let rails = members_3d(s, "Rail", &[([0.0, 0.0, 0.0], [200.0, 0.0, 0.0]), ([0.0, 0.0, 0.0], [0.0, 200.0, 0.0])]);
+    let post = members_3d(s, "Post", &[([0.0, 0.0, 0.0], post)]);
+    (rails, post[0].clone())
+}
+
+#[test]
+fn a_post_ends_flat_under_two_mitred_rails() {
+    let mut s = Session::default();
+    let (rails, post) = box_corner(&mut s, [0.0, 0.0, -200.0]);
+    let r = run(&mut s, "frame.corner", json!({"members": [rails[0], rails[1], post]}));
+    assert_eq!(r["changed_bodies"], json!([rails[0], rails[1], post]), "{r}");
+    // The rails mitre as two members do: 45° cuts through the corner, each 2025 × 200, the X rail
+    // reaching 22.5 past the corner outside.
+    assert!((cut_angle(&s, &rails[0], 0, [1.0, 0.0, 0.0]) - 45.0).abs() < 1e-9);
+    assert!((cut_angle(&s, &rails[1], 0, [0.0, 1.0, 0.0]) - 45.0).abs() < 1e-9);
+    // The post ends square, on the rails' undersides at z = −22.5: 2025 × 177.5.
+    assert!(cut_angle(&s, &post, 0, [0.0, 0.0, -1.0]).abs() < 1e-9);
+    let bs = boxes(&mut s);
+    assert!(near3(bs[&rails[0]].0, [-22.5, -22.5, -22.5]) && near3(bs[&rails[0]].1, [200.0, 22.5, 22.5]), "{:?}", bs[&rails[0]]);
+    assert!(near3(bs[&post].0, [-22.5, -22.5, -200.0]) && near3(bs[&post].1, [22.5, 22.5, -22.5]), "{:?}", bs[&post]);
+    for b in bodies(&mut s) {
+        let want = BAR45 * if b.0 == post { 177.5 } else { 200.0 };
+        assert!(rel(b.1, want) < MEASURED, "{b:?} vs {want}");
+    }
+    // Nothing overlaps: joined, the three keep 2025 × (200 + 200 + 177.5) = 1,169,437.5.
+    run(&mut s, "solid.combine", json!({"target": rails[0], "tools": [rails[1], post]}));
+    let v = total_volume(&mut s);
+    assert!(rel(v, 1_169_437.5) < MEASURED, "{v}");
+}
+
+#[test]
+fn a_post_above_the_rails_stands_the_gap_back() {
+    let mut s = Session::default();
+    let (rails, post) = box_corner(&mut s, [0.0, 0.0, 200.0]);
+    run(&mut s, "frame.corner", json!({"members": [rails[0], rails[1], post], "gap": "2 mm"}));
+    // Each mitre face 1 back from the mitre plane, which leans 45° from the rail: each rail end
+    // moves 1 / cos 45° = √2, so a rail keeps 2025 × (200 − √2) = 402,136.218. The post's end is
+    // 2 above the rails' tops, at z = 24.5: 2025 × 175.5 = 355,387.5.
+    let bs = boxes(&mut s);
+    assert!(near3(bs[&post].0, [-22.5, -22.5, 24.5]) && near3(bs[&post].1, [22.5, 22.5, 200.0]), "{:?}", bs[&post]);
+    assert!(near3(bs[&rails[0]].0, [-22.5 + 2f64.sqrt(), -22.5, -22.5]), "{:?}", bs[&rails[0]]);
+    for b in bodies(&mut s) {
+        let want = if b.0 == post { 355_387.5 } else { 402_136.218 };
+        assert!(rel(b.1, want) < MEASURED, "{b:?} vs {want}");
+    }
+}
+
+#[test]
+fn a_splayed_leg_is_cut_on_the_rails_plane() {
+    // A leg 30° from vertical, leaning towards +Y: its line from the origin to
+    // (0, 200 sin 30°, −200 cos 30°). The plane z = −22.5 meets its middle line
+    // 22.5 / cos 30° = 25.981 along it, and the cut leans 30° from square:
+    // 2025 × (200 − 25.981) = 352,388.96.
+    let mut s = Session::default();
+    let (c, sn) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+    let (rails, post) = box_corner(&mut s, [0.0, 200.0 * sn, -200.0 * c]);
+    let f = run(&mut s, "frame.corner", json!({"members": [rails[0], rails[1], post]}))["feature"].clone();
+    assert!((cut_angle(&s, &post, 0, [0.0, sn, -c]) - 30.0).abs() < 1e-9);
+    let v = bodies(&mut s).into_iter().find(|b| b.0 == post).unwrap().1;
+    assert!(rel(v, 352_388.96) < MEASURED, "{v}");
+    assert!(rel(v, BAR45 * (200.0 - 22.5 / c)) < MEASURED, "{v}");
+    // The corner follows a redefined gap: the leg loses 3 / cos 30° more of its middle line.
+    let p = json!({"members": [rails[0], rails[1], post], "gap": 3});
+    run(&mut s, "timeline.redefine", json!({"feature": f, "command": "frame.corner", "params": p}));
+    let v = bodies(&mut s).into_iter().find(|b| b.0 == post).unwrap().1;
+    assert!(rel(v, BAR45 * (200.0 - 25.5 / c)) < MEASURED, "{v}");
+}
+
+#[test]
+fn bad_posts_are_refused_with_the_reason() {
+    let mut s = Session::default();
+    let (rails, post) = box_corner(&mut s, [0.0, 0.0, -200.0]);
+    // A third bar in the rails' plane, along the diagonal out of the corner; a post standing on
+    // the X rail 100 from the corner; a post running through the corner, 200 either side.
+    let flat = members_3d(&mut s, "Flat", &[([0.0, 0.0, 0.0], [-150.0, -150.0, 0.0])]);
+    let mid = members_3d(&mut s, "Mid", &[([100.0, 0.0, 0.0], [100.0, 0.0, -200.0])]);
+    let through = members_3d(&mut s, "Through", &[([0.0, 0.0, -200.0], [0.0, 0.0, 200.0])]);
+    for (p, why) in [
+        (json!({"members": [rails[0], rails[1], flat[0]]}), "lies in the plane"),
+        (json!({"members": [rails[0], rails[1], mid[0]]}), "doesn't end at the corner"),
+        (json!({"members": [rails[0], rails[1], through[0]]}), "doesn't end at the corner"),
+        (json!({"members": [rails[0], rails[1], rails[0]]}), "twice"),
+        (json!({"members": [rails[0], rails[1], post, mid[0]]}), "`members`"),
+    ] {
+        let before = s.doc.features.len();
+        let err = s.execute("frame.corner", &p).unwrap_err().to_string();
+        assert!(err.contains(why), "{p}: {err}");
+        assert_eq!(s.doc.features.len(), before, "{p}");
     }
 }

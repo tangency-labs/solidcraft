@@ -76,9 +76,38 @@ def c97_frame_mitre():
     }
 
 
+def c98_frame_table_corners():
+    """The 600 x 400 frame of 97-frame-mitre (45 x 45 bar, lines through the bars' centres, 2 gap)
+    on four legs of the same bar, 700 long, down from its corners. Each corner is one three-member
+    corner: the rails mitre as in 97, and the leg ends flat under them, 2 below their undersides,
+    at z = -22.5 - 2 = -24.5, so a leg is a box 45 x 45 x 675.5. The frame is symmetric about
+    x = 300 and y = 200."""
+    s, g = 45.0, 2.0
+    rails = c97_frame_mitre()
+    leg = 700.0 - (s / 2 + g)
+    legs_vol = 4 * s * s * leg
+    vol = rails["volume_mm3"] + legs_vol
+    # The rails' centre is on z = 0; each leg's at the middle of z = -24.5 ... -700.
+    z = legs_vol * -(700.0 + s / 2 + g) / 2 / vol
+    return {
+        "source": "analytic",
+        "method": "97-frame-mitre (V = 2025 (2000 - 8 sqrt 2)) plus 4 legs of 45 x 45 bar cut square 2 below the rails' "
+        "undersides: 700 - 22.5 - 2 = 675.5 long; V = 2025 (2000 - 8 sqrt 2) + 4 x 2025 x 675.5; area = 97's area + "
+        "4 (4 x 45 x 675.5 + 2 x 2025); centre of mass at x = 300, y = 200 by symmetry, z by moments (rails at 0, "
+        "legs at -362.25)",
+        "body_count": rails["body_count"] + 4,
+        "volume_mm3": vol,
+        "area_mm2": rails["area_mm2"] + 4 * (4 * s * leg + 2 * s * s),
+        "center_of_mass": [300.0, 200.0, z],
+        "bbox": {"min": [-s / 2, -s / 2, -700.0], "max": [600.0 + s / 2, 400.0 + s / 2, s / 2]},
+        "faces": rails["faces"] + 6 * 4,
+    }
+
+
 CASES = {
     "96-frame-tower": c96_frame_tower,
     "97-frame-mitre": c97_frame_mitre,
+    "98-frame-table-corners": c98_frame_table_corners,
 }
 
 

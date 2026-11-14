@@ -345,13 +345,16 @@ fn replace(st: &mut ModelState, at: usize, rec: &MemberRecord, ends: [Option<Pla
 /// Evaluate a `FrameCorner` feature: the two members meet where their middle lines cross, and
 /// each is rebuilt with its end nearer that point cut on the plane halfway between them (the
 /// plane through it square to the difference of their directions away from it), each cut face
-/// `gap / 2` back from that plane. The members keep their bodies' names and their records.
+/// `gap / 2` back from that plane. A third member (a post) ends flat against those two
+/// ([`post_end`]). The members keep their bodies' names and their records.
 pub(super) fn corner(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
     let FeatureKind::FrameCorner { members, kind, gap } = &f.kind else {
         return Err(DocError::Invalid("not a frame corner feature".into()));
     };
-    let [ra, rb] = members.as_slice() else {
-        return Err(DocError::Invalid("a corner takes two members".into()));
+    let (ra, rb, rc) = match members.as_slice() {
+        [ra, rb] => (ra, rb, None),
+        [ra, rb, rc] => (ra, rb, Some(rc)),
+        _ => return Err(DocError::Invalid("a corner takes two or three members".into())),
     };
     let gap = match gap {
         Some(e) => val(vals, e, Kind::Length)?,
@@ -366,6 +369,16 @@ pub(super) fn corner(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature
     if a.record == b.record {
         return Err(DocError::Invalid(format!("`{}` can't make a corner with itself", a.name)));
     }
+    let post = match rc {
+        Some(r) => {
+            let c = find(doc, vals, f, st, &mut layouts, r)?;
+            if c.record == a.record || c.record == b.record {
+                return Err(DocError::Invalid(format!("`{}` can't make a corner with itself", c.name)));
+            }
+            Some(c)
+        }
+        None => None,
+    };
     // Each member: its record, its layout, its line laid out, and its middle line.
     let mut sides = Vec::with_capacity(2);
     for m in &found {
@@ -449,10 +462,71 @@ pub(super) fn corner(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature
         }
         built.push((m.record, rec.clone(), ends, build(laid, lay, &ends, rec.feature)?));
     }
+    if let Some(c) = &post {
+        let rec = st.frame_members.get(c.record).cloned().ok_or_else(|| DocError::Invalid("member record".into()))?;
+        let lay = layouts.get(&c.feature).ok_or_else(|| DocError::Invalid("member layout".into()))?;
+        let laid = lay.member(&rec.line).ok_or_else(|| DocError::Unknown(format!("line `{}` of `{}`", rec.line, c.name)))?;
+        let rails = [(*ma, *la), (*mb, *lb)];
+        let (end, plane) = post_end((laid, lay, &rec.ends), rails, (at, wa, wb), gap, [&c.name, &a.name, &b.name])?;
+        let mut ends = rec.ends;
+        if let Some(e) = ends.get_mut(end) {
+            *e = Some(plane);
+        }
+        built.push((c.record, rec.clone(), ends, build(laid, lay, &ends, rec.feature)?));
+    }
     for (at, rec, ends, body) in built {
         replace(st, at, &rec, ends, body)?;
     }
     Ok(())
+}
+
+/// The end of a corner's post (a third member) at the corner, and the plane it is cut on. The two
+/// rails meet at `at`, running away from it along `wa` and `wb`; the post ends flat against them,
+/// on the plane parallel to theirs that touches the farther of their sections' bounding boxes on
+/// the post's side, `gap` back from it. So it overlaps neither rail, whatever their sizes.
+///
+/// The post's middle line must pass within its section's size of `at`, and its line must end
+/// within the post's size, the rails' depth and the gap of the foot of `at` on it: a post that a
+/// rail meets along its length (a T) is refused. A post in the rails' plane is refused too.
+fn post_end(
+    (laid, lay, ends): (&Laid, &Layout, &[Option<Plane>; 2]),
+    rails: [(&Laid, &Layout); 2],
+    (at, wa, wb): (Vec3, Vec3, Vec3),
+    gap: f64,
+    [post, rail_a, rail_b]: [&str; 3],
+) -> Result<(usize, Plane)> {
+    let size = |lay: &Layout| (lay.hi - lay.lo).len();
+    let (c0, t0, t1) = laid.axis(lay, ends)?;
+    // The foot of the corner on the post's middle line, and how far that line passes from it.
+    let t = laid.d.dot(at - c0);
+    let across = (c0 + laid.d * t).dist(at);
+    let n = wa.cross(wb).normalized().ok_or_else(|| DocError::Invalid(format!("`{rail_a}` and `{rail_b}` are parallel")))?;
+    // The post runs away from the corner from its end nearer the foot.
+    let (end, w, along) = if (t - t0).abs() <= (t1 - t).abs() { (0, laid.d, (t - t0).abs()) } else { (1, -laid.d, (t1 - t).abs()) };
+    let lean = n.dot(w);
+    if !(lean.abs() >= MIN_CROSSING) {
+        return Err(DocError::Invalid(format!("`{post}` lies in the plane of `{rail_a}` and `{rail_b}`: a post must leave it")));
+    }
+    // The rails' plane's normal towards the post's side.
+    let n = if lean > 0.0 { n } else { -n };
+    // How deep the rails reach towards the post: each rail runs square to `n`, so its section's
+    // corners at the line's start give its depth along the whole rail.
+    let mut depth = f64::NEG_INFINITY;
+    for (m, l) in rails {
+        for c in [l.lo, Vec2::new(l.hi.x, l.lo.y), l.hi, Vec2::new(l.lo.x, l.hi.y)] {
+            depth = depth.max(n.dot(m.plane.to_world(c) - at));
+        }
+    }
+    let rails_size = rails.iter().map(|(_, l)| size(l)).fold(0.0, f64::max);
+    if !(across <= size(lay) && along <= size(lay) + rails_size + gap) {
+        return Err(DocError::Invalid(format!(
+            "`{post}` doesn't end at the corner of `{rail_a}` and `{rail_b}`: the end of its line is {:.3} mm from it",
+            along.hypot(across)
+        )));
+    }
+    // The cut faces out of the post, towards the rails.
+    let plane = Plane::from_normal(at + n * (depth + gap), -n).ok_or_else(|| DocError::Invalid(format!("no corner plane for `{post}`")))?;
+    Ok((end, plane))
 }
 
 /// The member of feature `f` on line `line`, as its feature laid it out (before any trim): the

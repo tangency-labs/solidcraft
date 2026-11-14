@@ -643,12 +643,16 @@ fn schemas_cover_corner_parameters_and_results() {
         json!({"members": ["Bar", "Bar (2)"]}),
         json!({"members": ["Bar", {"feature": 3, "line": "l2"}], "kind": "mitre", "gap": "2 mm"}),
         json!({"members": [{"feature": "Members", "line": "l1"}, {"feature": "Members", "line": "l2"}], "gap": 1.5}),
+        json!({"members": ["Rail", "Rail (2)", "Post"], "gap": 2}),
     ] {
         assert!(serde_json::from_value::<CornerParams>(p.clone()).is_ok(), "{p}");
         assert!(conforms(schema.as_value(), schema.as_value(), &p), "{p}");
     }
-    for p in [json!({"members": ["Bar"]}), json!({"members": ["Bar", "Bar (2)", "Bar (3)"]}), json!({"members": ["Bar", "Bar (2)"], "kind": "miter"})]
-    {
+    for p in [
+        json!({"members": ["Bar"]}),
+        json!({"members": ["Bar", "Bar (2)", "Bar (3)", "Bar (4)"]}),
+        json!({"members": ["Bar", "Bar (2)"], "kind": "miter"}),
+    ] {
         assert!(!conforms(schema.as_value(), schema.as_value(), &p), "{p}");
     }
     let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };

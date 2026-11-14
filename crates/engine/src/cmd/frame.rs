@@ -1,7 +1,7 @@
 //! Frames and weldments (#4003). `frame.member` lays structural members along the lines of a frame
 //! sketch, their cross-section a built-in profile, a standard size or a profile sketch;
 //! `frame.trim` trims or extends them to other members (butt joints), planes and faces;
-//! `frame.corner` mitres two members that meet at their ends.
+//! `frame.corner` mitres two members that meet at their ends, and ends a third (a post) against them.
 //! `frame.profile.list` lists the built-in profiles and the standard sizes,
 //! `frame.profile.properties` works out a profile's section, and `frame.profile.insert` draws one
 //! into a sketch.
@@ -67,10 +67,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Each member's end that meets a target is rebuilt flat against it (a slanted face cuts it at a slant); a member keeps its body and name. Members changed by later features are refused as members or member targets; use a planar face target for a modified body. Every member must meet a target, and two targets may not move the same end. Returns the feature and the bodies it changed"
     )),
     CommandSpec::new("frame.corner", "Corner", crate::checked!("frame.corner", corner)).contract(&CORNER_CONTRACT).output(output_schema_for::<FeatureResult>).icon("frame_trim").enabled(not_in_sketch).params(concat!(
-        "members: [member, member] (the two members that meet at the corner: each a member's body name, or {feature: the frame member feature (name or id), line: its line's id}); ",
-        "kind?: mitre (default: both cut on the plane halfway between them); gap?: length expr (the weld gap between the two cut faces, default 0, at most 1 m). ",
-        "The members meet where the lines through the middle of their profiles cross, which must be at an end of each (within its profile's size); each member's end there is rebuilt cut on the corner plane, extending or shortening it, and keeps its body and name. ",
-        "Refused, with the reason, for parallel members, members whose middle lines pass apart or cross away from their ends, one member twice, and members changed by later features. Returns the feature and the bodies it changed"
+        "members: [member, member] or [member, member, post] (the members that meet at the corner: each a member's body name, or {feature: the frame member feature (name or id), line: its line's id}); ",
+        "kind?: mitre (default: the first two cut on the plane halfway between them); gap?: length expr (the weld gap between the cut faces, default 0, at most 1 m). ",
+        "The first two meet where the lines through the middle of their profiles cross, which must be at an end of each (within its profile's size); each member's end there is rebuilt cut on the corner plane, extending or shortening it, and keeps its body and name. ",
+        "A third member (a post, such as the leg under two rails) ends flat against the first two, on the plane parallel to theirs at the far side of their sections from it, `gap` back; its line must end at the corner and leave the rails' plane. ",
+        "Refused, with the reason, for parallel members, members whose middle lines pass apart or cross away from their ends, a post in the rails' plane or away from the corner, one member twice, and members changed by later features. Returns the feature and the bodies it changed"
     )),
     CommandSpec::new("frame.profile.list", "Profile Library", crate::checked!("frame.profile.list", list))
         .icon("library")
@@ -508,11 +509,11 @@ fn gap(s: &Session, p: &Value, cmd: &str) -> Result<Option<solidcraft_doc::Expr>
 fn corner(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "frame.corner";
     let members = match p.get("members") {
-        Some(Value::Array(a)) if a.len() == 2 => a.iter().map(|v| member_ref(s, v, cmd)).collect::<Result<Vec<_>>>()?,
-        _ => return Err(bad(cmd, "`members` must list the two members that meet (body names or {feature, line})")),
+        Some(Value::Array(a)) if (2..=3).contains(&a.len()) => a.iter().map(|v| member_ref(s, v, cmd)).collect::<Result<Vec<_>>>()?,
+        _ => return Err(bad(cmd, "`members` must list the two members that meet, and optionally a post (body names or {feature, line})")),
     };
-    if members.first() == members.get(1) {
-        return Err(bad(cmd, "`members` lists the same member twice: a corner needs two"));
+    if members.iter().enumerate().any(|(i, m)| members.iter().skip(i + 1).any(|o| o == m)) {
+        return Err(bad(cmd, "`members` lists the same member twice: a corner needs different members"));
     }
     let kind: CornerKind = match p.get("kind") {
         None | Some(Value::Null) => CornerKind::Mitre,

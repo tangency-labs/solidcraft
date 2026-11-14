@@ -20,7 +20,7 @@ faces) and mitre corners. Butt and end-trim corners, copes, gussets, welds and t
 4. **Trim them**: **Trim/Extend** (WELDMENTS › MODIFY, `frame.trim`) butts members against the
    members they meet, or trims or extends them to a plane or face (below).
 5. **Mitre the corners**: `frame.corner` cuts two members that meet at their ends on the plane
-   halfway between them (below).
+   halfway between them, and can end a third member (a post) flat against them (below).
 
 ```json
 {"command": "frame.member", "params": {"sketch": "Frame", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}}
@@ -191,7 +191,8 @@ each member keeps its body and its name.
 {"command": "frame.corner", "params": {"members": ["Rail (2)", "Rail (3)"], "gap": "2 mm"}}
 ```
 
-- `members`: the two members, each a member's body name or `{feature, line}`.
+- `members`: the two members, each a member's body name or `{feature, line}`, and optionally a
+  third, the post (below).
 - `kind`: `mitre` (the default; butt and end trim come later).
 - `gap`: the weld gap between the two cut faces, a length expression (default 0, at most 1 m).
   Each face stands half the gap back from the mitre plane, so an end moves along its member by
@@ -207,6 +208,26 @@ the reason, when the members are parallel, when their middle lines pass each oth
 meeting, when they cross away from a member's ends (a T: trim it instead), when one member is given
 twice, and, as for a trim, when a member was changed by a later feature. There is no dialog or ribbon
 button yet: the corner is a command for scripts, the CLI and MCP, and `timeline.redefine` changes it.
+
+### Three members: two rails and a post
+
+Where two rails and a post meet, as at the top corner of a table frame, list the post third:
+
+```json
+{"command": "frame.corner", "params": {"members": ["Rail", "Rail (2)", "Leg"], "gap": "2 mm"}}
+```
+
+The two rails mitre to each other as above. The post ends flat against them: its end is cut on
+the plane parallel to the rails' plane, at the far side of the rails' sections from the post, and
+`gap` back from it. With rails of two sizes, the post stops at the deeper one, so it overlaps
+neither. A post square to the rails is cut square; a splayed leg is cut at a slant. With 45 × 45
+bar on lines through the middles, a post along −Z from the corner ends at z = −22.5, the rails'
+undersides; a leg leaning 30° from vertical loses 22.5 / cos 30° = 25.98 of its line.
+
+The post's line must end at the corner (within the post's size, the rails' depth and the gap),
+and it must leave the rails' plane. A post standing on a rail away from its end, or running
+through the corner, is refused: trim it instead. A post that runs through with the rails butted
+against it is two trims. A three-way mitre, each end cut by two planes, is not supported yet.
 
 ## Built-in profiles
 
