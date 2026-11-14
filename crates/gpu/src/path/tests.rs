@@ -2164,15 +2164,26 @@ fn gpu_thin_lens_focus_and_defocus_match_geometric_oracle() {
                     assert!((actual - expected).len() < 4e-6, "fov={fov},uv=({ux},{uy}),slot={slot}: {actual:?} vs {expected:?}");
                 }
                 assert!((origin - eye - disk).len() < 3e-6);
-                let focus_hit = origin + direction * ((focal - origin).dot(back) / direction.dot(back));
-                assert!((focus_hit - focal).len() < 5e-6, "focus {focus_hit:?} != {focal:?}");
+                // How far a point `reach` along the ray may be from the f64 oracle when the ray is
+                // exact f32 work (#13425). The readback holds the origin biased by 16 and the
+                // direction biased by 2 (camera_reference), so each component is rounded to half
+                // the f32 spacing there: 2^-20 on [16, 32) and 2^-23 on [2, 4). The shader's own
+                // f32 arithmetic on the unit direction gets 2e-7 more (f32 epsilon is 1.2e-7).
+                // The direction's share grows with the reach, so a wide view's far corner
+                // (reach 15.7 at fov 2) is allowed more than the axis (reach 9).
+                let f32_limit = |reach: f64| 3f64.sqrt() * (2f64.powi(-20) + reach * 2f64.powi(-23)) + reach * 2e-7;
+                let reach = (focal - origin).dot(back) / direction.dot(back);
+                let focus_hit = origin + direction * reach;
+                assert!((focus_hit - focal).len() < f32_limit(reach), "fov={fov},uv=({ux},{uy}): focus {focus_hit:?} != {focal:?}");
                 // At axial depth z, signed displacement from the pinhole hit is
                 // disk*(1-z/focus). Check both sides, including the flip beyond focus.
                 for depth in [4.5, 18.0] {
                     let centre = eye - back * depth;
-                    let hit = origin + direction * ((centre - origin).dot(back) / direction.dot(back));
+                    let reach = (centre - origin).dot(back) / direction.dot(back);
+                    let hit = origin + direction * reach;
                     let pinhole = eye + (focal - eye) * (depth / lens.focus_distance_mm);
-                    assert!((hit - pinhole - disk * (1.0 - depth / lens.focus_distance_mm)).len() < 1e-5);
+                    let miss = (hit - pinhole - disk * (1.0 - depth / lens.focus_distance_mm)).len();
+                    assert!(miss < f32_limit(reach), "fov={fov},uv=({ux},{uy}),depth={depth}: off by {miss:e}");
                 }
             }
         }
