@@ -29,6 +29,7 @@ pub(super) struct Counts {
     pub digested: usize,
     pub mesh_digested: usize,
     pub joint_faces: usize,
+    pub faces_at: usize,
     pub measures: usize,
     pub body_searches: usize,
     pub feature_searches: usize,
@@ -48,6 +49,7 @@ thread_local! {
             digested: 0,
             mesh_digested: 0,
             joint_faces: 0,
+            faces_at: 0,
             measures: 0,
             body_searches: 0,
             feature_searches: 0,
@@ -223,6 +225,71 @@ fn an_edge_origin_measures_its_faces_once() {
         }
     });
     assert_eq!(work.joint_faces, 1, "a solve must not measure the faces again: {work:?}");
+}
+
+/// The summed area of `body`'s faces as [`ModelBody::faces_at`] measures them at `tol`.
+fn measured_area(body: &ModelBody, tol: f64) -> f64 {
+    body.faces_at(tol).unwrap().iter().map(|f| f.area).sum()
+}
+
+/// The viewport asks which faces a feature changed at every rebuild of its highlight: a body's
+/// faces are measured once per geometry and tolerance, snapshots share the measurement, and a
+/// replaced body never answers with the old one.
+#[test]
+fn face_measurements_are_made_once_per_body_and_tolerance() {
+    let mut state = ModelState::default();
+    state.bodies.push(ModelBody::new("Block".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap(), 0));
+    let snapshot = state.clone();
+    let work = counted(|| {
+        for _ in 0..8 {
+            assert_eq!(state.bodies[0].faces_at(0.01).unwrap().len(), 6);
+            assert!((measured_area(&state.bodies[0], 0.01) - 2200.0).abs() < 1e-6);
+            assert!((measured_area(&snapshot.bodies[0], 0.01) - 2200.0).abs() < 1e-6);
+        }
+    });
+    assert_eq!(work.faces_at, 1, "every rebuild and every snapshot shares one measurement: {work:?}");
+
+    // Another tolerance is another measurement, kept beside the first.
+    let work = counted(|| {
+        for tol in [0.02, 0.01, 0.02, 0.01] {
+            assert!((measured_area(&state.bodies[0], tol) - 2200.0).abs() < 1e-6);
+        }
+    });
+    assert_eq!(work.faces_at, 1, "{work:?}");
+
+    // Body is public; a clone's old measurement must never mask a direct replacement.
+    state.bodies[0].body = kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let work = counted(|| {
+        for _ in 0..3 {
+            assert!((measured_area(&state.bodies[0], 0.01) - 600.0).abs() < 1e-6);
+            assert!((measured_area(&snapshot.bodies[0], 0.01) - 2200.0).abs() < 1e-6);
+        }
+    });
+    assert_eq!(work.faces_at, 1, "only the replaced body is measured, and the snapshot keeps its own: {work:?}");
+}
+
+/// Face measurements take any tolerance and stay bounded: a hostile tolerance answers as the
+/// uncached measurement does, a body keeps [`super::FACES_KEPT`] measurements however many
+/// tolerances it is asked at, and a dropped one is made again with the same answer.
+#[test]
+fn face_measurements_are_bounded_and_take_any_tolerance() {
+    let body = ModelBody::new("Block".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap(), 0);
+    for tol in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 0.0, 1e300] {
+        let direct = body.body.faces(tol).map(|faces| faces.len()).map_err(|e| e.to_string());
+        for _ in 0..2 {
+            let cached = body.faces_at(tol).map(|faces| faces.len()).map_err(|e| e.to_string());
+            assert_eq!(cached, direct, "tolerance {tol}");
+        }
+    }
+    for k in 1..=3 * super::FACES_KEPT {
+        assert_eq!(body.faces_at(k as f64 * 1e-3).unwrap().len(), 6);
+    }
+    assert_eq!(body.faces.lock().unwrap().len(), super::FACES_KEPT, "the measurements kept are bounded");
+    let work = counted(|| {
+        assert!((measured_area(&body, 1e-3) - 2200.0).abs() < 1e-6);
+        assert!((measured_area(&body, 1e-3) - 2200.0).abs() < 1e-6);
+    });
+    assert_eq!(work.faces_at, 1, "a dropped measurement is made again, once: {work:?}");
 }
 
 /// `parts` imported files of two boxes each, every one in its own component placed away from

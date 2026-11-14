@@ -26,6 +26,14 @@ use crate::{AxisRef, DocError, Document, Feature, FeatureId, FeatureKind, HoleKi
 
 type JointFaces = (Body, kernel::Result<Arc<[kernel::FaceInfo]>>);
 
+/// A body's face measurements worked out so far ([`ModelBody::faces_at`]), the latest first:
+/// the chord tolerance (its bits), the body measured and what was found.
+type MeasuredFaces = Vec<(u64, Body, kernel::Result<Arc<[kernel::FaceInfo]>>)>;
+
+/// How many face measurements a body keeps ([`ModelBody::faces_at`]): callers ask at a
+/// tolerance worked out from the body, so one body is asked at very few.
+const FACES_KEPT: usize = 4;
+
 /// A body's isoparametric curves worked out so far ([`ModelBody::iso_lines`]), with the body they
 /// were worked out on: by face, count each way and display quality.
 type IsoLines = (Option<Body>, std::collections::HashMap<(usize, usize, usize), Arc<[kernel::IsoLine]>>);
@@ -47,6 +55,9 @@ pub struct ModelBody {
     /// Joint face measurements use their own tolerance, independent of display quality.
     /// Shared by snapshots of this geometry; the body identity guards direct replacement.
     joint_faces: Arc<OnceLock<JointFaces>>,
+    /// [`ModelBody::faces_at`] worked out so far. Shared by snapshots of this geometry; each
+    /// measurement's body guards direct replacement.
+    faces: Arc<std::sync::Mutex<MeasuredFaces>>,
     /// Lazy canonical reference triangles for a proper rigid occurrence placement.
     mesh_placement: Option<Arc<placed_mesh::PlacedMesh>>,
     /// For a mirrored copy: its faces as a world state shows them, a rigid move of the source's
@@ -150,6 +161,7 @@ impl ModelBody {
             feature,
             mesh: Arc::new(OnceLock::new()),
             joint_faces: Arc::new(OnceLock::new()),
+            faces: Default::default(),
             mesh_placement: None,
             mirrored_mesh: None,
             opposite_hand: Arc::new(OnceLock::new()),
@@ -204,6 +216,33 @@ impl ModelBody {
         };
         let (body, faces) = self.joint_faces.get_or_init(|| (self.body.clone(), measure()));
         if body.same(&self.body) { faces.clone().map_err(Into::into) } else { measure().map_err(Into::into) }
+    }
+
+    /// Face measurements ([`Body::faces`]) at chord tolerance `tol`, worked out once for this
+    /// geometry and tolerance. `Body::faces` meshes the whole body, and the viewport asks which
+    /// faces a feature changed at every rebuild of its highlight (every hover change): a picked
+    /// Move feature of a large assembly measured each moved body again each time, for seconds.
+    ///
+    /// A measurement depends on the body and the tolerance alone. Snapshots and scratch copies
+    /// of this geometry share it; a geometry edit makes a new body, which is measured anew. The
+    /// last [`FACES_KEPT`] are kept. A failure is kept too: a body never changes in place, so
+    /// the same body fails the same way each time.
+    pub fn faces_at(&self, tol: f64) -> kernel::Result<Arc<[kernel::FaceInfo]>> {
+        let key = tol.to_bits();
+        let same = |k: &u64, body: &Body| *k == key && body.same(&self.body);
+        let known = self.faces.lock().ok().and_then(|list| list.iter().find(|(k, body, _)| same(k, body)).map(|(_, _, found)| found.clone()));
+        if let Some(found) = known {
+            return found;
+        }
+        #[cfg(test)]
+        cost_tests::count(|c| c.faces_at += 1);
+        let found: kernel::Result<Arc<[kernel::FaceInfo]>> = self.body.faces(tol).map(Arc::from);
+        if let Ok(mut list) = self.faces.lock() {
+            list.retain(|(k, body, _)| !same(k, body));
+            list.insert(0, (key, self.body.clone(), found.clone()));
+            list.truncate(FACES_KEPT);
+        }
+        found
     }
 
     /// A box around the body without meshing it ([`Body::outline_bounds`]), worked out once.
@@ -10932,6 +10971,7 @@ impl PlacedBodies {
             fresh.mesh = placed.mesh.clone();
             fresh.measured = placed.measured.clone();
             fresh.joint_faces = placed.joint_faces.clone();
+            fresh.faces = placed.faces.clone();
             fresh.mesh_placement = placed.mesh_placement.clone();
             fresh.plan = placed.plan.clone();
             fresh.gpu_plan = placed.gpu_plan.clone();
