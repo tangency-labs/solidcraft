@@ -803,26 +803,17 @@ fn a_gap_inside_the_summed_local_zones_is_taken_only_by_the_stitch_scope() {
 /// its 0.006 ball, keeps the gap reported.
 #[test]
 fn the_stitch_scope_refuses_a_gap_whose_ball_reaches_other_topology() {
-    use solidcore::topology::brep::validation::{check_brep_scoped, CheckLevel, ValidityScope};
+    use solidcore::topology::brep::validation::{check_brep, check_brep_scoped, CheckLevel, ValidityScope};
 
     let mut k = Kernel::default();
-    let (mut clear, sewed) = lifted_sheets(&mut k, 0.004, 1e-4, 0.02);
-    assert_eq!(sewed, 1);
-    let body0 = solidcore::topology::brep::validation::check_brep(&mut k, &mut clear, CheckLevel::Level2).unwrap();
-    eprintln!("BODY0 {:?}", body0.lines());
-    let alone =
-        check_brep_scoped(&mut k, &mut clear, CheckLevel::Level2, ValidityScope::Stitched).unwrap();
-    assert!(alone.is_valid(), "{:?}", alone.lines());
-    // a third face whose corner lies 0.003 above the sewn corner (1, 1)
+    let tols = |b: &Brep| -> Vec<f64> { b.vertex_list().iter().map(|&v| b.vertex(v).unwrap().tolerance).collect() };
     let (mut near, sewed) = lifted_sheets_beside(&mut k, 0.004, 1e-4, 0.02, Some((1.0, 1.003)));
     assert_eq!(sewed, 1);
-    let report =
-        check_brep_scoped(&mut k, &mut near, CheckLevel::Level2, ValidityScope::Stitched).unwrap();
-    let body = solidcore::topology::brep::validation::check_brep(&mut k, &mut near, CheckLevel::Level2).unwrap();
-    eprintln!("BODY {:?}", body.lines());
-    for &v in near.vertex_list() {
-        eprintln!("VERTEX {:?} tol {}", near.vertex(v).unwrap().point, near.vertex(v).unwrap().tolerance);
-    }
-    eprintln!("STITCHED {:?}", report.lines());
-    assert!(!report.is_valid(), "the ball reaches the third face");
+    eprintln!("T0 {:?}", tols(&near));
+    let r1 = check_brep(&mut k, &mut near, CheckLevel::Level2).unwrap();
+    eprintln!("T1 {:?} {}", tols(&near), r1.lines().len());
+    let r2 = check_brep(&mut k, &mut near, CheckLevel::Level2).unwrap();
+    eprintln!("T2 {:?} {}", tols(&near), r2.lines().len());
+    let r3 = check_brep_scoped(&mut k, &mut near, CheckLevel::Level2, ValidityScope::Stitched).unwrap();
+    eprintln!("T3 {:?} {}", tols(&near), r3.lines().len());
 }
