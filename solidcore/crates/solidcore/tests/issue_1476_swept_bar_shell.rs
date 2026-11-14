@@ -15,11 +15,13 @@
 //!   with 1001 without it. With the defaults the shell takes another path and never
 //!   samples that many.
 //!
-//! Expected: one solid, V = 40 L - 28 (L - 0.5) = 1299.48668 with L = 60 + 15 pi. The
-//! port gives 1299.48231 with SolidCraft's fixes (3.4e-6 below; SolidCraft measured
-//! 1299.48275 on an older main), pinned to 1e-9; the operand's own volume is 1.2e-2 below
-//! its closed form. With the kernel's own defaults the volume is checked against the
-//! closed form only.
+//! Expected: one solid, V = 40 L - 28 (L - 0.5) = 1299.48668 with L = 60 + 15 pi, the ideal
+//! shape's. With SolidCraft's fixes the port gives the closed B-rep's volume, 1299.48310,
+//! origin-independent since #16735, pinned to 1e-9; the operand's own volume is 1.2e-2 below
+//! its closed form. (The earlier pin, 1299.48231, integrated one wall clamped, its trims
+//! 1.5e-6 past its plane's domain. #15946, closing the faces
+//! independently, pins 1299.4830955384505, 2e-15 from this pin.) With the kernel's own
+//! defaults the volume is checked against the closed form only.
 //!
 //! With `shell_edges_on_analytics_exact` (WR-545) on as well, as the SolidCraft rig runs
 //! it, `make_edges_on_analytics_exact` intersected the walls' face-owned surfaces without
@@ -205,7 +207,7 @@ fn issue_1476_swept_bar_shells() {
 #[test]
 #[ignore = "slow in debug builds (two 38 000-sample curve offsets)"]
 fn issue_1476_swept_bar_shells_with_solidcraft_fixes() {
-    assert_eq!(check(&solidcraft_fixes(), Some(1299.482314966473)), 16);
+    assert_eq!(check(&solidcraft_fixes(), Some(1299.4830955384534)), 16);
 }
 
 /// `shell_edges_on_analytics_exact` (WR-545) alone: `make_edges_on_analytics_exact`
@@ -234,7 +236,7 @@ fn issue_1476_swept_bar_shells_with_edges_on_analytics_exact() {
 fn issue_1476_swept_bar_shells_with_solidcraft_fixes_and_edges_on_analytics_exact() {
     let mut fixes = solidcraft_fixes();
     fixes.shell_edges_on_analytics_exact = true;
-    assert_eq!(check(&fixes, Some(1299.482314966473)), 18);
+    assert_eq!(check(&fixes, Some(1299.4830955384534)), 18);
 }
 
 /// The shell's volume is the closed B-rep's, origin-independent (#16735; adapted from
