@@ -400,6 +400,15 @@ pub enum PointClass {
     OnBoundary,
 }
 
+/// SMLib's class of a point as the kernel's.
+fn point_class(c: solidcraft_smlib::PointClass) -> PointClass {
+    match c {
+        solidcraft_smlib::PointClass::Inside => PointClass::Inside,
+        solidcraft_smlib::PointClass::Outside => PointClass::Outside,
+        solidcraft_smlib::PointClass::OnBoundary => PointClass::OnBoundary,
+    }
+}
+
 /// The kind of surface a face lies on, as a person modelling would name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SurfaceKind {
@@ -443,7 +452,7 @@ impl SurfaceKind {
             S::Cone { .. } => SurfaceKind::Cone,
             S::Sphere { .. } | S::BallPatch { .. } => SurfaceKind::Sphere,
             S::Torus { .. } => SurfaceKind::Torus,
-            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } => SurfaceKind::Freeform,
+            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } | S::Blend { .. } => SurfaceKind::Freeform,
         }
     }
 }
@@ -1081,28 +1090,20 @@ impl Body {
         Ok(b)
     }
 
-    /// The body's volume from a mesh at `tol`, measured once per (record, tolerance): clones of
-    /// a body share the measurement. `None` when the body cannot be meshed, or a face of it was
-    /// left out of the mesh (an open mesh has no volume).
-    pub fn volume_at(&self, tol: f64) -> Option<f64> {
-        let key = if tol.is_finite() && tol > 0.0 { tol } else { 0.05 };
-        let key = key.to_bits();
+    /// The body's volume: measured with exact mass properties via SMLib for B-rep bodies,
+    /// or from mesh triangles for mesh bodies.
+    pub fn volume_at(&self, _tol: f64) -> Option<f64> {
         if let Some(cell) = &self.volume
             && let Ok(cached) = cell.lock()
-            && let Some((cached_tol, volume)) = *cached
-            && cached_tol == key
+            && let Some((_, volume)) = *cached
         {
             return Some(volume);
         }
-        let mesh = self.mesh(&MeshTolerance::chord(f64::from_bits(key))).ok()?;
-        if self.faces_without_triangles(&mesh) > 0 {
-            return None;
-        }
-        let volume = mesh.measure().volume;
+        let volume = crate::measure(self).ok()?.volume;
         if let Some(cell) = &self.volume
             && let Ok(mut slot) = cell.lock()
         {
-            *slot = Some((key, volume));
+            *slot = Some((0, volume));
         }
         Some(volume)
     }
@@ -1277,20 +1278,6 @@ impl Body {
         plan.faces_with_triangles(self.face_count()).iter().filter(|h| !**h).count()
     }
 
-    /// Faces of the body with no triangles in its mesh `m` (left out by the mesher).
-    fn faces_without_triangles(&self, m: &Mesh) -> usize {
-        if self.is_mesh() {
-            return 0;
-        }
-        let mut has = vec![false; self.face_count()];
-        for f in &m.tri_face {
-            if let Some(h) = has.get_mut(*f as usize) {
-                *h = true;
-            }
-        }
-        has.iter().filter(|h| !**h).count()
-    }
-
     /// A mesh with its edges flagged for display (seams, tangent joins, protected creases).
     fn flagged(&self, mut m: Mesh) -> Result<Mesh> {
         if self.is_mesh() {
@@ -1303,15 +1290,26 @@ impl Body {
 
     /// Edges with polylines (index = the record's edge index).
     pub fn edges(&self, tol: f64) -> Result<Vec<EdgeInfo>> {
-        let m = self.mesh(&MeshTolerance::chord(tol))?;
-        Ok(m.edges
-            .into_iter()
-            .enumerate()
-            .map(|(index, points)| {
-                let (mid, length) = polyline_mid(&points);
-                EdgeInfo { index, points, mid, length }
-            })
-            .collect())
+        if let Some(mb) = &self.mesh {
+            let m = mb.to_mesh();
+            return Ok(m
+                .edges
+                .into_iter()
+                .enumerate()
+                .map(|(index, points)| {
+                    let (mid, length) = polyline_mid(&points);
+                    EdgeInfo { index, points, mid, length }
+                })
+                .collect());
+        }
+        let rec = self.record();
+        let mut out = Vec::with_capacity(rec.edges.len());
+        for (index, edge) in rec.edges.iter().enumerate() {
+            let points = edge_points(edge, tol)?;
+            let (mid, length) = polyline_mid(&points);
+            out.push(EdgeInfo { index, points, mid, length });
+        }
+        Ok(out)
     }
 
     /// How far [`Body::planar_edges`] lets a piece it reads as a line or an arc lie from the
@@ -1416,11 +1414,56 @@ impl Body {
             });
         }
         let class = self.smlib()?.classify_point([p.x, p.y, p.z]).map_err(|e| KernelError::smlib("SMLib point classification", e))?;
-        Ok(match class {
-            solidcraft_smlib::PointClass::Inside => PointClass::Inside,
-            solidcraft_smlib::PointClass::Outside => PointClass::Outside,
-            solidcraft_smlib::PointClass::OnBoundary => PointClass::OnBoundary,
-        })
+        Ok(point_class(class))
+    }
+
+    /// The point of face `face_index` nearest `point`, when `point` lies on that face itself
+    /// within `tolerance`, else `None`: solidcore decides it exactly on the face's surface and
+    /// trim ([`solidcore_ops::Body::point_on_face`]), no mesh. `None` too for a mesh body, an
+    /// index out of range, a point or tolerance that is not usable; `Err` for the kernel's
+    /// failure.
+    pub fn point_lies_on_face(&self, face_index: usize, point: Vec3, tolerance: f64) -> Result<Option<Vec3>> {
+        let Some((body, order)) = self.ops_body() else { return Ok(None) };
+        if face_index >= self.record.faces.len() {
+            return Ok(None);
+        }
+        match body.point_on_face(order, face_index, [point.x, point.y, point.z], tolerance) {
+            Ok(found) => Ok(found.map(|p| Vec3::new(p[0], p[1], p[2]))),
+            Err(solidcore_ops::Error::Argument) => Ok(None),
+            Err(e) => Err(KernelError::Failed(format!("point on face: {e}"))),
+        }
+    }
+
+    /// Where face `face_index` lies along `direction` when it is a plane square to it: its level
+    /// from `origin` and the face's own tolerance ([`solidcore_ops::Body::face_square_level`]),
+    /// exact, no mesh. `None` for a face that is not, a mesh body, an index out of range or a
+    /// direction or origin that is not usable; `Err` for the kernel's failure.
+    pub fn face_square_level(&self, face_index: usize, direction: Vec3, origin: Vec3) -> Result<Option<solidcore_ops::SquareFaceLevel>> {
+        let Some((body, order)) = self.ops_body() else { return Ok(None) };
+        if face_index >= self.record.faces.len() {
+            return Ok(None);
+        }
+        match body.face_square_level(order, face_index, [direction.x, direction.y, direction.z], [origin.x, origin.y, origin.z]) {
+            Ok(found) => Ok(found),
+            Err(solidcore_ops::Error::Argument) => Ok(None),
+            Err(e) => Err(KernelError::Failed(format!("face square level: {e}"))),
+        }
+    }
+
+    /// [`Body::classify_point`] for each of `points`, in order, through one classification of
+    /// the body: SMLib's copy of it and its search structures are made once for all the points,
+    /// where a call a point makes them again each time (on a large body far more work than a
+    /// point's own solve). The first point that cannot be classified fails them all.
+    pub fn classify_points(&self, points: &[Vec3]) -> Result<Vec<PointClass>> {
+        if let Some(p) = points.iter().find(|p| !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite())) {
+            return Err(KernelError::Invalid(format!("point classification: the point {p:?} is not finite")));
+        }
+        if self.mesh.is_some() || points.len() < 2 {
+            return points.iter().map(|&p| self.classify_point(p)).collect();
+        }
+        let at: Vec<[f64; 3]> = points.iter().map(|p| [p.x, p.y, p.z]).collect();
+        let classes = self.smlib()?.classify_points(&at).map_err(|e| KernelError::smlib("SMLib point classification", e))?;
+        classes.into_iter().map(|c| c.map(point_class).map_err(|e| KernelError::smlib("SMLib point classification", e))).collect()
     }
 
     /// B-rep faces (a mesh body is one face; [`crate::measure`] counts its triangles).

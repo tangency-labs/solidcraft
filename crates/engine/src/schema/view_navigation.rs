@@ -53,6 +53,27 @@ pub struct RenderBrowser {
     pub open: bool,
 }
 
+/// Show or hide one of the Render window's two panels: the Inspector (`view.render_inspector`) or
+/// the Shots strip (`view.shots_strip`). Both read the one flag the same way, so one contract
+/// describes both calls. Unlike the viewport toggles below, neither command has a toggle form: the
+/// flag is required, and the schema says so.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RenderPanelVisibilityParams {
+    /// True shows the panel, false hides it.
+    pub visible: bool,
+}
+
+/// What the two Render window panels answer: the flag they were given. The window applies it; it is
+/// per-document UI state and never saved with the design.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RenderPanelVisibilityResult {
+    pub visible: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// Latch or release the viewport's Zoom tool. With no flag, the UI toggles it.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -60,6 +81,52 @@ pub struct ZoomTool {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub on: Option<bool>,
+}
+
+/// Show or hide a viewport display setting: the Grid, the Ground Shadow or Continuous Orbit. The
+/// three commands read the one key the same way (`cmd/view_navigation.rs`'s `view_toggle`), so one
+/// contract describes all three. Omitting the key asks the UI to toggle the setting; `null` is not
+/// omitting it, which is what the handlers have always refused.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DisplayToggleParams {
+    /// True shows it or starts it, false hides it or stops it; omitted toggles it.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub on: Option<bool>,
+}
+
+/// What the viewport display toggles answer: the flag they were given, and nothing when the call
+/// asked for a toggle. The UI applies the echo; the setting is the app's, never saved in the design.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DisplayToggleResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Show or hide the navigation bar. A window setting the app keeps, not saved with the design; the
+/// same optional flag as the other viewport toggles, under the key this command uses.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NavigationBarParams {
+    /// True shows the bar, false hides it; omitted toggles it.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub visible: Option<bool>,
+}
+
+/// What `view.navigation_bar` answers: the flag it was given, and nothing when the call asked for
+/// a toggle.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct NavigationBarResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visible: Option<bool>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// Empty input for the read-only viewport effect query.
@@ -79,7 +146,7 @@ pub struct AngleReadoutParams {
     pub enabled: bool,
 }
 
-/// A boolean, with the `view.angle_readout` handler's message for anything else.
+/// A required display-setting boolean, preserving the handlers' messages for anything else.
 fn enabled_flag<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
     match Value::deserialize(d)? {
         Value::Bool(b) => Ok(b),
@@ -93,6 +160,24 @@ pub struct AngleReadoutResult {
     /// Whether the readout is shown now.
     pub enabled: bool,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Show long origin axes across the viewport, or keep the short axes. An application
+/// preference only: not saved with the design, not an undo step, and never opens a dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct OriginAxesAcrossViewParams {
+    /// True extends the axes across the view, false keeps the short axes.
+    #[serde(deserialize_with = "enabled_flag")]
+    pub enabled: bool,
+}
+
+/// The accepted origin-axis display setting, applied by the app.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OriginAxesAcrossViewResult {
+    pub enabled: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
@@ -520,6 +605,30 @@ pub struct AmbientOcclusionResult {
     pub param_warnings: Vec<String>,
 }
 
+reads!(perspective_enabled -> bool, "enabled must be a boolean");
+
+/// `view.perspective`: draw the view in perspective or orthographic. A display setting the app
+/// keeps, not saved with the design; a sketch being edited is always drawn orthographic.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = enabled_required)]
+pub struct PerspectiveParams {
+    // Optional in the type and required in the schema (`enabled_required`), as `mode` above.
+    /// True draws the view in perspective, false orthographic.
+    #[serde(default, deserialize_with = "perspective_enabled", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub enabled: Option<bool>,
+}
+
+/// What `view.perspective` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PerspectiveResult {
+    /// Whether the view is drawn in perspective now.
+    pub enabled: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What a navigation turns the camera by.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -780,6 +889,102 @@ pub struct NavigateResult {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// The camera tool the viewport latches: `view.tool`'s `tool`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum NavigationTool {
+    Orbit,
+    Pan,
+    Zoom,
+    /// No tool: releases the one that was latched.
+    None,
+}
+
+reads!(navigation_tool -> NavigationTool, "tool must be orbit, pan, zoom or none");
+
+/// `view.tool`: latch one of the viewport's camera tools, or `none` to release the one that is
+/// latched. A display setting the window applies; the design and the camera are not changed, and
+/// it never opens a dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = tool_required)]
+pub struct ToolParams {
+    // Optional in the type and required in the schema (`tool_required`): left out, the handler
+    // refuses it with its own message.
+    /// `orbit`, `pan`, `zoom` or `none`.
+    #[serde(default, deserialize_with = "navigation_tool", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "NavigationTool")]
+    pub tool: Option<NavigationTool>,
+}
+
+/// What `view.tool` returns: the tool the window latches.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ToolResult {
+    pub tool: NavigationTool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// How the model is drawn in the viewport: `view.visual_style`'s `style`. The order of the
+/// variants is the index the window uses for the style.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VisualStyle {
+    ShadedWithEdges,
+    Shaded,
+    Wireframe,
+    ShadedWithHiddenEdges,
+}
+
+impl VisualStyle {
+    /// The index the window keeps the style under, in the order the names are listed.
+    pub fn index(self) -> u8 {
+        match self {
+            VisualStyle::ShadedWithEdges => 0,
+            VisualStyle::Shaded => 1,
+            VisualStyle::Wireframe => 2,
+            VisualStyle::ShadedWithHiddenEdges => 3,
+        }
+    }
+}
+
+reads!(
+    visual_style_value -> VisualStyle,
+    "style must be shaded_with_edges, shaded, wireframe or shaded_with_hidden_edges"
+);
+
+/// `view.visual_style`: how the model is drawn in the viewport. A display setting the window
+/// applies; the design and the camera are not changed, and it never opens a dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = style_required)]
+pub struct VisualStyleParams {
+    // Optional in the type and required in the schema (`style_required`): left out, the handler
+    // refuses it with its own message.
+    /// `shaded_with_edges`, `shaded`, `wireframe` or `shaded_with_hidden_edges`.
+    #[serde(default, deserialize_with = "visual_style_value", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "VisualStyle")]
+    pub style: Option<VisualStyle>,
+}
+
+/// What `view.visual_style` returns: the style asked for and the index the window uses for it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct VisualStyleResult {
+    pub style: VisualStyle,
+    /// 0 for `shaded_with_edges`, 1 for `shaded`, 2 for `wireframe`, 3 for `shaded_with_hidden_edges`.
+    pub index: u8,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+fn tool_required(schema: &mut Schema) {
+    require(schema, "tool");
+}
+
+fn style_required(schema: &mut Schema) {
+    require(schema, "style");
 }
 
 #[cfg(test)]

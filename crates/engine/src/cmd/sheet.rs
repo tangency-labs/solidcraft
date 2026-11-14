@@ -16,10 +16,10 @@ use super::features::{add_feature, check_expr, feature_sketch, profiles, sketch_
 use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
-    BendDirection, BendTableFormat, BendTableParams, BendTableResult, ConvertParams, FlangeParams, FlatBend, FlatBore, FlatCircle, FlatPatternParams,
-    FlatPatternResult, FlatPerforation, FlatPerforationPattern, FlatPocket, FlatSegment, FlatShape, FoldParams, HemParams, ListedRule,
-    ManageRulesParams, ManageRulesResult, PathFlangeParams, PerforateParams, PocketSide, RuleFeatureError, RuleReply, RulesParams, RulesResult,
-    UnfoldParams,
+    BendDirection, BendTableFormat, BendTableParams, BendTableResult, ConvertParams, DxfFile, ExportDxfParams, ExportDxfResult, FlangeParams,
+    FlatBend, FlatBore, FlatCircle, FlatPatternParams, FlatPatternResult, FlatPerforation, FlatPerforationPattern, FlatPocket, FlatSegment,
+    FlatShape, FoldParams, HemParams, ListedRule, ManageRulesParams, ManageRulesResult, PathFlangeParams, PerforateParams, PocketSide,
+    RuleFeatureError, RuleReply, RulesParams, RulesResult, UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -37,6 +37,7 @@ const MANAGE_RULES_CONTRACT: TypedContract<ManageRulesParams> = TypedContract::n
 const PATH_FLANGE_CONTRACT: TypedContract<PathFlangeParams> = TypedContract::new();
 const FLAT_PATTERN_CONTRACT: TypedContract<FlatPatternParams> = TypedContract::new();
 const BEND_TABLE_CONTRACT: TypedContract<BendTableParams> = TypedContract::new();
+const EXPORT_DXF_CONTRACT: TypedContract<ExportDxfParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sheet.flange", "Flange", crate::checked!("sheet.flange", flange))
@@ -45,7 +46,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FLANGE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-        "base: sketch + profiles? (rule?, flip?) | contour: sketch + curves (open chain of lines) + distance (rule?, flip?, reverse?) | \
+        "base: sketch + profiles? (rule?, flip?) | contour: sketch + curves (open chain of lines and tangent arcs) + distance (rule?, flip?, reverse?) | \
          edge: edges: [[x,y,z] on top/bottom edges, or {point: [x,y,z], angle?, height?, segments?} for an edge with its own angle and height, \
          or split into 1…64 segments [{from, to, angle?, height?, flip?}] that tile the stretch the sheet still has there (from, to are \
          fractions 0…1 of it, first from 0, last to 1; consecutive segments that match make one bend)] + \
@@ -143,8 +144,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "body? → flat size, outline loops and cut-outs (flat coordinates, as point lists), cutout_shapes (the same cut-outs exactly, in the same order: {circle: {center, radius}} for a round hole, else {segments: [{line: [a, b]} | {arc: {center, radius, start_deg, sweep_deg}} | {polyline: [...]}]}), pockets (with their own cutout_shapes), bend lines and the bend table",
         ),
-    CommandSpec::new("sheet.export_dxf", "Export Flat Pattern as DXF", export_dxf).icon("dxf")
+    CommandSpec::new("sheet.export_dxf", "Export Flat Pattern as DXF", crate::checked!("sheet.export_dxf", export_dxf)).icon("dxf")
         .noundo()
+        .contract(&EXPORT_DXF_CONTRACT)
+        .output(output_schema_for::<ExportDxfResult>)
         .params(
             "body?, path?, curves?: exact|arcs (default exact: an ellipse as ELLIPSE, splines, text outlines and other Béziers as SPLINE; arcs: tangent arcs and lines within 0.001 mm, for machines that read only those), \
              text?: cut|etch (default cut: letters that text cut through the sheet are cut contours on layer TEXT; etch: single contours on layer ETCH and the sheet keeps its material there; text machined to a depth is always on ETCH), \
@@ -421,7 +424,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
             let curves = string_list(cmd, p, "curves")?;
             if curves.is_empty() || curves.len() > 1000 {
-                return Err(bad(cmd, "`curves` must list the open chain's lines"));
+                return Err(bad(cmd, "`curves` must list the open chain's lines and arcs"));
             }
             let distance = req_expr(cmd, p, "distance")?;
             check_expr(s, &distance, Kind::Length, cmd, "distance")?;
@@ -1156,26 +1159,53 @@ pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
     Ok(solidcraft_io::write_dxf_drawing(&layers, &entities)?)
 }
 
+/// A DXF export's `curves`: exact or arcs, in any case.
+pub(crate) fn dxf_curves(t: &str) -> Option<DxfCurves> {
+    match t.to_ascii_lowercase().as_str() {
+        "exact" => Some(DxfCurves::Exact),
+        "arcs" => Some(DxfCurves::Arcs),
+        _ => None,
+    }
+}
+
+/// Where a DXF export puts the letters text cut through the sheet: its `text` is cut or etch, in
+/// any case.
+pub(crate) fn dxf_text(t: &str) -> Option<DxfText> {
+    match t.to_ascii_lowercase().as_str() {
+        "cut" => Some(DxfText::Cut),
+        "etch" => Some(DxfText::Etch),
+        _ => None,
+    }
+}
+
+/// A DXF export's `layers`: false for a layer for each role, true for everything on layer 0, in
+/// any case.
+pub(crate) fn dxf_layers(t: &str) -> Option<bool> {
+    match t.to_ascii_lowercase().as_str() {
+        "roles" => Some(false),
+        "single" => Some(true),
+        _ => None,
+    }
+}
+
+/// A DXF export's `note_height`: how high a bend note's letters are, in mm, 0.1 to 100.
+pub(crate) fn dxf_note_height(mm: f64) -> Option<f64> {
+    (0.1..=100.0).contains(&mm).then_some(mm)
+}
+
 /// What a `sheet.export_dxf` call asks for; a value it cannot use is refused.
 fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
-    let curves = match str_(p, "curves").map(str::to_ascii_lowercase).as_deref() {
-        None | Some("exact") => DxfCurves::Exact,
-        Some("arcs") => DxfCurves::Arcs,
-        Some(_) => return Err(bad(cmd, "`curves` must be exact or arcs")),
+    let curves = match str_(p, "curves") {
+        None => DxfCurves::Exact,
+        Some(v) => dxf_curves(v).ok_or_else(|| bad(cmd, "`curves` must be exact or arcs"))?,
     };
     let text = match p.get("text").filter(|v| !v.is_null()) {
         None => DxfText::Cut,
-        Some(v) => match v.as_str().map(str::to_ascii_lowercase).as_deref() {
-            Some("cut") => DxfText::Cut,
-            Some("etch") => DxfText::Etch,
-            _ => return Err(bad(cmd, "`text` must be cut or etch")),
-        },
+        Some(v) => v.as_str().and_then(dxf_text).ok_or_else(|| bad(cmd, "`text` must be cut or etch"))?,
     };
     let height = match p.get("note_height").filter(|v| !v.is_null()) {
         None => 3.0,
-        Some(v) => {
-            v.as_f64().filter(|h| (0.1..=100.0).contains(h)).ok_or_else(|| bad(cmd, "`note_height` must be a number of mm from 0.1 to 100"))?
-        }
+        Some(v) => v.as_f64().and_then(dxf_note_height).ok_or_else(|| bad(cmd, "`note_height` must be a number of mm from 0.1 to 100"))?,
     };
     let bend_notes = match p.get("bend_notes").filter(|v| !v.is_null()) {
         None | Some(Value::Bool(false)) => None,
@@ -1189,11 +1219,7 @@ fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
     };
     let one_layer = match p.get("layers").filter(|v| !v.is_null()) {
         None => false,
-        Some(v) => match v.as_str().map(str::to_ascii_lowercase).as_deref() {
-            Some("roles") => false,
-            Some("single") => true,
-            _ => return Err(bad(cmd, "`layers` must be roles or single")),
-        },
+        Some(v) => v.as_str().and_then(dxf_layers).ok_or_else(|| bad(cmd, "`layers` must be roles or single"))?,
     };
     Ok(DxfOptions { curves, text, bend_notes, no_bend_lines, one_layer })
 }
@@ -1255,21 +1281,24 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
             let bends = sh.bends().len();
             if let Some(file) = paths.as_ref().and_then(|paths| paths.get(i)) {
                 solidcraft_io::vfs::write(file, text.as_bytes()).map_err(|e| EngineError::Other(format!("{file}: {e}")))?;
-                files.push(json!({"body": sh.body, "path": file, "bends": bends}));
+                files.push(DxfFile { body: sh.body.clone(), path: Some(file.clone()), dxf: None, bends });
             } else {
-                files.push(json!({"body": sh.body, "dxf": text, "bends": bends}));
+                files.push(DxfFile { body: sh.body.clone(), path: None, dxf: Some(text.clone()), bends });
             }
         }
-        return Ok(json!({"files": files}));
+        return serde_json::to_value(ExportDxfResult::Files { files, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(e.to_string()));
     }
     let sh = sheet_of(s, p, cmd)?;
     sh.flat_matches_body()?;
     let text = flat_dxf(&sh, &options)?;
-    if let Some(path) = path {
+    let bends = sh.bends().len();
+    let reply = if let Some(path) = path {
         solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-        return Ok(json!({"path": path, "bends": sh.bends().len()}));
-    }
-    Ok(json!({"dxf": text, "bends": sh.bends().len()}))
+        ExportDxfResult::Written { path: path.to_string(), bends, param_warnings: Vec::new() }
+    } else {
+        ExportDxfResult::Text { dxf: text, bends, param_warnings: Vec::new() }
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// A bend table's `format`: csv or json, in any case.

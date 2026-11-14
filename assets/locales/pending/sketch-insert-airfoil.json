@@ -1,0 +1,71 @@
+{
+  "ar": {
+    "cmd.sketch_insert_airfoil": "إدراج مقطع جناح",
+    "help.sketch.insert_airfoil": "يقرأ ملف إحداثيات مقطع جناح (.dat، بتنسيق Selig أو Lednicer) إلى رسم كمنحنى واحد يمر بكل نقطة، بطول الوتر الذي تحدده. استخدمه لرسم قطاعات الجناح لتشكيل جناح بالانتقال بينها.",
+    "insert_airfoil.chord": "الوتر",
+    "insert_airfoil.pivot": "نقطة الدوران",
+    "insert_airfoil.pivot_help": "حصة الوتر التي يضعها الموضع ويدور حولها الزاوية: 0 الحافة الأمامية، 0.25 ربع الوتر، 1 الحافة الخلفية.",
+    "insert_airfoil.filter": "إحداثيات مقطع الجناح"
+  },
+  "de": {
+    "cmd.sketch_insert_airfoil": "Tragflächenprofil einfügen",
+    "help.sketch.insert_airfoil": "Liest die Koordinatendatei eines Tragflächenprofils (.dat, Selig oder Lednicer) als eine Kurve durch jeden Punkt in eine Skizze ein, in der gewünschten Profiltiefe. Damit zeichnen Sie Flügelschnitte, aus denen ein Loft die Tragfläche bildet.",
+    "insert_airfoil.chord": "Profiltiefe",
+    "insert_airfoil.pivot": "Drehpunkt",
+    "insert_airfoil.pivot_help": "Anteil der Profiltiefe, den die Position setzt und um den der Winkel dreht: 0 ist die Nasenleiste, 0,25 der Viertelpunkt, 1 die Endleiste.",
+    "insert_airfoil.filter": "Tragflächenprofil-Koordinaten"
+  },
+  "en": {
+    "cmd.sketch_insert_airfoil": "Insert Airfoil",
+    "help.sketch.insert_airfoil": "Reads an airfoil coordinate file (.dat, Selig or Lednicer) into a sketch as one curve through every point, at the chord you set. Use it to draw wing sections that a loft turns into a wing.",
+    "insert_airfoil.chord": "Chord",
+    "insert_airfoil.pivot": "Pivot",
+    "insert_airfoil.pivot_help": "The share of the chord that the position places and the angle turns about: 0 is the leading edge, 0.25 the quarter chord, 1 the trailing edge.",
+    "insert_airfoil.filter": "Airfoil coordinates"
+  },
+  "en-GB": {
+    "cmd.sketch_insert_airfoil": "Insert Aerofoil",
+    "help.sketch.insert_airfoil": "Reads an aerofoil coordinate file (.dat, Selig or Lednicer) into a sketch as one curve through every point, at the chord you set. Use it to draw wing sections that a loft turns into a wing.",
+    "insert_airfoil.filter": "Aerofoil coordinates"
+  },
+  "he": {
+    "cmd.sketch_insert_airfoil": "הוספת פרופיל כנף",
+    "help.sketch.insert_airfoil": "קורא קובץ קואורדינטות של פרופיל כנף (‎.dat, בתבנית Selig או Lednicer) לתוך סקיצה כעקומה אחת העוברת דרך כל נקודה, באורך המיתר שנקבע. משמש לשרטוט חתכי כנף שמהם לופט בונה כנף.",
+    "insert_airfoil.chord": "מיתר",
+    "insert_airfoil.pivot": "נקודת סיבוב",
+    "insert_airfoil.pivot_help": "חלק המיתר שהמיקום מציב ושסביבו הזווית מסובבת: 0 הקצה הקדמי, 0.25 רבע המיתר, 1 הקצה האחורי.",
+    "insert_airfoil.filter": "קואורדינטות פרופיל כנף"
+  },
+  "ja": {
+    "cmd.sketch_insert_airfoil": "翼型を挿入",
+    "help.sketch.insert_airfoil": "翼型の座標ファイル (.dat、Selig または Lednicer 形式) を、指定した翼弦長で、すべての点を通る 1 本の曲線としてスケッチに読み込みます。ロフトで翼にする翼断面を描くときに使います。",
+    "insert_airfoil.chord": "翼弦長",
+    "insert_airfoil.pivot": "回転中心",
+    "insert_airfoil.pivot_help": "位置を置き角度で回す翼弦上の割合: 0 は前縁、0.25 は 1/4 翼弦、1 は後縁。",
+    "insert_airfoil.filter": "翼型座標"
+  },
+  "ko": {
+    "cmd.sketch_insert_airfoil": "에어포일 삽입",
+    "help.sketch.insert_airfoil": "에어포일 좌표 파일(.dat, Selig 또는 Lednicer 형식)을 지정한 시위 길이로, 모든 점을 지나는 곡선 하나로 스케치에 읽어 들입니다. 로프트로 날개를 만들 날개 단면을 그릴 때 사용합니다.",
+    "insert_airfoil.chord": "시위 길이",
+    "insert_airfoil.pivot": "회전 기준점",
+    "insert_airfoil.pivot_help": "위치를 놓고 각도로 회전하는 시위 위의 비율: 0은 앞전, 0.25는 1/4 시위, 1은 뒷전.",
+    "insert_airfoil.filter": "에어포일 좌표"
+  },
+  "vi": {
+    "cmd.sketch_insert_airfoil": "Chèn biên dạng cánh",
+    "help.sketch.insert_airfoil": "Đọc tệp tọa độ biên dạng cánh (.dat, định dạng Selig hoặc Lednicer) vào phác thảo thành một đường cong đi qua mọi điểm, theo dây cung bạn đặt. Dùng để vẽ các mặt cắt cánh mà lệnh loft dựng thành cánh.",
+    "insert_airfoil.chord": "Dây cung",
+    "insert_airfoil.pivot": "Điểm xoay",
+    "insert_airfoil.pivot_help": "Phần của dây cung mà vị trí đặt và góc xoay quanh: 0 là mép trước, 0,25 là một phần tư dây cung, 1 là mép sau.",
+    "insert_airfoil.filter": "Tọa độ biên dạng cánh"
+  },
+  "zh": {
+    "cmd.sketch_insert_airfoil": "插入翼型",
+    "help.sketch.insert_airfoil": "将翼型坐标文件（.dat，Selig 或 Lednicer 格式）按设定的弦长读入草图，成为一条经过每个点的曲线。用于绘制翼剖面，再用放样生成机翼。",
+    "insert_airfoil.chord": "弦长",
+    "insert_airfoil.pivot": "枢轴点",
+    "insert_airfoil.pivot_help": "位置所放置、角度所围绕旋转的弦长份额：0 为前缘，0.25 为四分之一弦，1 为后缘。",
+    "insert_airfoil.filter": "翼型坐标"
+  }
+}

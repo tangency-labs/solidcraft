@@ -585,11 +585,38 @@ fn a_rule_with_the_wrong_references_is_refused() {
         (json!({"type": "weld", "a": "Top", "b": "Bottom"}), "`type` must be"),
         (json!({"type": "mate", "a": "Top", "b": "Bottom", "offset": "1e999"}), ""),
     ];
+    // An orientation rule needs a direction on both sides: a point has only a position (its z is a
+    // default), with another point or with a face.
+    let point = json!({"occurrence": "Panel", "point": [0, 0, 2]});
+    let mut cases = cases.to_vec();
+    for kind in ["parallel", "perpendicular", "angle"] {
+        for b in [json!("Corner"), json!("Bottom")] {
+            cases.push((json!({"type": kind, "a": point.clone(), "b": b, "angle": 30}), "a point has no direction"));
+        }
+    }
     for (p, says) in cases {
         let e = s.execute("assembly.constraint.create", &p).expect_err(&p.to_string()).to_string();
         assert!(e.contains(says), "{p}: {e}");
     }
     assert!(s.doc.assembly.joints.is_empty());
+    // Two edges have the directions of their faces: they make a parallel (a plate's top front edge
+    // and a block's, both where the boxes were made).
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [30, 40, 50]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let r = constrain(
+        &mut s,
+        "parallel",
+        json!({"occurrence": "Plate", "edge": [50, 0, 10]}),
+        json!({"occurrence": "Block", "edge": [40, 40, 70]}),
+        json!({}),
+    );
+    assert!(clean(&r), "{r}");
+    assert_eq!(s.doc.assembly.joints.first().and_then(|j| j.constraint), Some(solidcraft_doc::joints::Constraint::Parallel));
 }
 
 /// A roller tangent on the panel keeps resting on it as its radius changes, and a gap edited in as

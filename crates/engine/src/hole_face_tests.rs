@@ -61,6 +61,26 @@ fn a_hole_the_face_no_longer_reaches_stays_where_it_was_placed_and_says_so() {
 }
 
 #[test]
+fn a_hole_placed_by_expressions_is_checked_where_they_evaluate_now_not_where_it_was_made() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "100 mm"}));
+    run(&mut s, "solid.box", json!({"length": "L", "width": 40, "height": 10, "center": [0, 0, 5], "name": "Plate", "body_name": "Plate"}));
+    // A window cut that moves with L: at L = 100 it spans x -5..25, at L = 180 it spans 35..65.
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 30, "width": 20, "height": 20, "center": ["L/2 - 40", 0, 5], "operation": "cut", "targets": ["Plate"], "name": "Window"}),
+    );
+    run(&mut s, "solid.hole", json!({"position": ["L/2 - 10", 0, 10], "diameter": 5, "name": "Hole"}));
+    assert_eq!(said(&s, "Hole"), "");
+    // The hole follows to x = 80, which is on the top face. Its made-at point, x = 40, now lies
+    // in the window: the hole must not say it stayed where it was placed.
+    change(&mut s, "L", "180 mm");
+    assert!(!solid_at(&s, 80.0, 0.0, 5.0) && solid_at(&s, 75.0, 0.0, 5.0), "the bore is at x = 80");
+    assert_eq!(said(&s, "Hole"), "");
+}
+
+#[test]
 fn a_slanted_hole_stays_on_its_axis_when_its_face_moves() {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "height", "expression": "20 mm"}));
@@ -487,6 +507,26 @@ fn a_hole_wider_than_the_part_says_it_removes_all_of_it() {
     run(&mut s, "solid.hole", json!({"position": [10, 10, 10], "diameter": "hd", "name": "H1"}));
     assert_eq!(said(&s, "H1"), "");
     assert_eq!(s.model.state().bodies.len(), 1);
+    change(&mut s, "hd", "100 mm");
+    assert!(s.model.state().bodies.is_empty());
+    assert!(said(&s, "H1").contains("the hole removes all of Body1"), "{}", said(&s, "H1"));
+    change(&mut s, "hd", "5 mm");
+    assert_eq!(said(&s, "H1"), "");
+}
+
+/// A hole across the part's width that touches none of its sides keeps the rest, in one piece and
+/// silently, and says so once a parameter widens it past the whole part. The same hole touching a
+/// side along a line is the case above.
+#[test]
+fn a_hole_across_the_part_clear_of_its_sides_keeps_the_rest_silently() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "hd", "expression": "40 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "name": "Plate"}));
+    run(&mut s, "solid.hole", json!({"position": [10, 15, 10], "diameter": "hd", "name": "H1"}));
+    assert_eq!(said(&s, "H1"), "");
+    assert_eq!(s.model.state().bodies.len(), 1);
+    // The plate less the part of the 40 mm circle inside it, 10 mm deep.
+    assert!((volume(&mut s) - 3623.4382).abs() < 1e-3, "{}", volume(&mut s));
     change(&mut s, "hd", "100 mm");
     assert!(s.model.state().bodies.is_empty());
     assert!(said(&s, "H1").contains("the hole removes all of Body1"), "{}", said(&s, "H1"));

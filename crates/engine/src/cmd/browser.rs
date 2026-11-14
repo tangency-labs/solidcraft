@@ -449,10 +449,6 @@ enum Shown {
     Joint(u64),
 }
 
-fn is_construction(k: &FeatureKind) -> bool {
-    matches!(k, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
-}
-
 /// The item a key names, or `None` when it names none; bodies are looked for in the placed model
 /// `world`.
 ///
@@ -507,7 +503,7 @@ fn shown_feature(world: &solidcraft_doc::ModelState, f: &solidcraft_doc::Feature
         }
         return Some(Shown::Sketch(f.id));
     }
-    if is_construction(&f.kind) {
+    if f.kind.is_construction() {
         return Some(Shown::Origin(f.name.clone()));
     }
     None
@@ -761,7 +757,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
         (Some(_), Some(_)) => return Err(bad(cmd, "give `items` or `folder`, not both")),
         (Some("bodies"), None) => s.world_state()?.bodies.iter().map(|b| Shown::Body(b.name.clone())).collect(),
         (Some("sketches"), None) => s.model.state().sketches.iter().map(|x| Shown::Sketch(x.feature)).collect(),
-        (Some("construction"), None) => s.doc.features.iter().filter(|f| is_construction(&f.kind)).map(|f| Shown::Origin(f.name.clone())).collect(),
+        (Some("construction"), None) => s.doc.features.iter().filter(|f| f.kind.is_construction()).map(|f| Shown::Origin(f.name.clone())).collect(),
         (Some("origin"), None) => crate::origins::ITEMS.iter().map(|o| Shown::Origin(o.to_string())).collect(),
         (Some("joints"), None) => s.doc.assembly.joints.iter().map(|j| Shown::Joint(j.id)).collect(),
         // Everything at once, for a single "show all" step: every body, sketch, construction
@@ -769,7 +765,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
         (Some("all"), None) => {
             let mut all: Vec<Shown> = s.world_state()?.bodies.iter().map(|b| Shown::Body(b.name.clone())).collect();
             all.extend(s.model.state().sketches.iter().map(|x| Shown::Sketch(x.feature)));
-            all.extend(s.doc.features.iter().filter(|f| is_construction(&f.kind)).map(|f| Shown::Origin(f.name.clone())));
+            all.extend(s.doc.features.iter().filter(|f| f.kind.is_construction()).map(|f| Shown::Origin(f.name.clone())));
             all.extend(crate::origins::ITEMS.iter().map(|o| Shown::Origin(o.to_string())));
             all.extend(s.doc.assembly.joints.iter().map(|j| Shown::Joint(j.id)));
             all
@@ -912,7 +908,7 @@ fn folder_has_items(s: &Session, component: u64, folder: &str) -> bool {
     match folder {
         "bodies" => s.model.state().bodies.iter().any(|b| s.doc.model_body_component(b) == component),
         "sketches" => s.doc.features.iter().any(|f| f.component == component && matches!(f.kind, FeatureKind::Sketch { .. })),
-        "construction" => s.doc.features.iter().any(|f| f.component == component && is_construction(&f.kind)),
+        "construction" => s.doc.features.iter().any(|f| f.component == component && f.kind.is_construction()),
         _ => false,
     }
 }
@@ -1594,6 +1590,21 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
     Ok(BodyRenamed { body: old, name: name.to_string(), renamed: Vec::new(), param_warnings: Vec::new() })
 }
 
+/// Whether sketch `id` fails on its new plane (`trial`) only for projections it lost, so the
+/// plane is no reason to refuse: a lost projection fails a sketch on any plane, and a name is
+/// looked up on its body, not on the plane, so no plane loses one more. On its old plane (`before`,
+/// the design with the old plane up to the sketch) it failed for the same projections or a subset
+/// of them, or it failed before reaching them (its own plane was lost).
+pub(crate) fn only_lost_before(before: &solidcraft_doc::Model, trial: &Session, id: u64) -> bool {
+    let Some(now) = trial.model.result(id).and_then(|r| r.lost_projections.clone()) else { return false };
+    let earlier = match before.result(id) {
+        Some(r) if r.error.is_some() && r.lost_projections.is_none() => true,
+        Some(r) => r.lost_projections.as_ref().is_some_and(|was| now.iter().all(|l| was.iter().any(|w| w.link == l.link))),
+        None => false,
+    };
+    earlier && trial.model.failed_sketch_shown(&trial.doc, id).is_some()
+}
+
 fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.redefine";
     let key = match p.get("sketch") {
@@ -1681,7 +1692,9 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     }
     trial.doc_mut().marker = Some(index + 1);
     trial.refresh();
-    if let Some(error) = trial.model.result(id).and_then(|result| result.error.as_ref()) {
+    if let Some(error) = trial.model.result(id).and_then(|result| result.error.as_ref())
+        && !only_lost_before(&baseline.model, &trial, id)
+    {
         return Err(bad(cmd, error.clone()));
     }
     trial.doc_mut().marker = marker;
@@ -2902,6 +2915,23 @@ mod tests {
         assert!(crate::view::sketch_shown(&s, pts) && !crate::view::sketch_shown(&s, plate));
         run(&mut s, "browser.visibility", json!({"items": [pts], "visible": false}));
         assert!(!crate::view::sketch_shown(&s, pts));
+    }
+
+    /// The Construction folder holds every kind of construction geometry and nothing else: hidden,
+    /// it hides a plane, an axis and a point, not the body or the sketch.
+    #[test]
+    fn the_construction_folder_is_planes_axes_and_points() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.point", json!({"point": [25, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Floor"}));
+        run(&mut s, "construct.axis.two_planes", json!({"a": "XZ", "b": "YZ", "name": "Spine"}));
+        run(&mut s, "construct.point.three_planes", json!({"a": "XY", "b": "XZ", "c": "YZ", "name": "Pin"}));
+        run(&mut s, "browser.visibility", json!({"folder": "construction", "visible": false}));
+        assert_eq!(s.visibility.hidden_origin, ["Floor", "Spine", "Pin"]);
+        assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.hidden_sketches.is_empty(), "{:?}", s.visibility);
     }
 
     #[test]

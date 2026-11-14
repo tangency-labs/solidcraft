@@ -10,6 +10,9 @@ the asynchronous protocol, image limits, captured revisions and PNG export. The 
 `ui.render` snapshot remains a separate route.
 
 Choose **Render** in the workspace switcher after finishing a modelling operation.
+A running Inspect tool that only picks what an analysis shows (Isocurve, Curvature Comb,
+Minimum Radius, Mass Center, Continuity) does not lock the switcher: choosing Render ends
+the tool as Esc does. Isocurve's curves stay on.
 The current integrated GPU renderer shows a separate product scene. Return to Design
 restores its camera, projection preference and existing viewport drawing policy.
 New native setups select CPU ray tracing with progressive sampling when the installed

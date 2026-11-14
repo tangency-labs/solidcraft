@@ -11,6 +11,11 @@
 //! | [`fill_n_sided_hole`], [`NSidedFill`]        | `N_FillNSidedHole`     |
 //!
 //! Deviations:
+//! - A piece of a sweep without rails along which the profile's first or last control
+//!   point stays within `MODEL_TOL` (a horn bend: the profile's end on the arc's centre)
+//!   is skinned at the trajectory parameters with C1 derivative constraints. G1
+//!   rescaling by that end's chord length would collapse its cross derivatives. Every
+//!   other piece is skinned as upstream.
 //! - Out-params become return values (the swept surface; the patches with the center
 //!   point and normal); the `NL_STACKS` arguments have no counterpart. The optional
 //!   arguments of `N_CreateSweepScale` (`curZ`, `curS`, `tflg`, `tc`, `deg`, `dir`,
@@ -31,6 +36,11 @@
 //!   arrays (`k` beyond the given derivative curves, a frame parameter past the
 //!   sampled ones, a polyline without segments) the functions return
 //!   [`SolidError::InvalidInput`].
+//! - Not upstream (the SolidCraft fork's upright sweep): `N_CreateSweepScale` takes an up
+//!   direction ([`SweepScaleOptions::up`]): z is the up direction made square to the
+//!   tangent at every section, the section is turned by the inverse start frame first, and
+//!   a trajectory whose tangent comes within [`MIN_UP_ACROSS`] (the sine) of the up
+//!   direction is refused (`Unsupported`): there is no upright there.
 //! - `N_CreateSweepScale`: a trajectory, cross section or sweep degree above `32767`
 //!   (upstream's `NL_DEGREE` is a `short`, so it cannot be expressed there) is
 //!   `InvalidInput`.
@@ -44,7 +54,8 @@ use crate::nurbs::crv_nurb::LinearSeg;
 use crate::nurbs::crv_tool::p2::make_compatible_adj_knots;
 use crate::nurbs::funcs_basic::CurveFunction;
 use crate::nurbs::geom::{
-    normalize, project_pt_plane, pt_along_vector, transform_matrix_from_axes, Frame, Plane,
+    dist_cpolygon, normalize, project_pt_plane, pt_along_vector, transform_matrix_from_axes, Frame,
+    Plane,
 };
 use crate::nurbs::index::{at, oob, put};
 use crate::nurbs::knots::Side;
@@ -68,6 +79,36 @@ const OP_FILL: &str = "nurbs::srf_adv::p6::fill_n_sided_hole";
 /// Upstream `MAXPTS` of `N_CreateSweepScale`: the most polyline segments per
 /// trajectory piece.
 const MAXPTS: usize = 1000;
+/// Not upstream: the least sine of the angle between an upright sweep's trajectory and its up
+/// direction (the controlled sweep's convention, `sweep::stations`' `min_across`).
+pub const MIN_UP_ACROSS: f64 = 1e-3;
+
+/// Not upstream: the frame's z of an upright sweep at the unit tangent `x`: `up` (unit) made
+/// square to `x`, refused where `x` comes within [`MIN_UP_ACROSS`] of it.
+fn upright_z(up: Vec3, x: Vec3) -> Result<Vec3> {
+    let w = up - x * up.dot(x);
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !(w.length() > MIN_UP_ACROSS) {
+        return Err(SolidError::Unsupported {
+            operation: OP_SWEEP,
+            reason: "a sweep kept upright along a path that runs along the up direction",
+        });
+    }
+    Ok(normalize(w)?.0)
+}
+
+/// Not upstream: the axes of the frame `(xl, yl, zl)` after the turn `(x0, y0, z0)^T` (the
+/// inverse of the start frame), the columns of `[xl yl zl] [x0 y0 z0]^T`.
+fn after_start(xl: Vec3, yl: Vec3, zl: Vec3, f0: (Vec3, Vec3, Vec3)) -> (Vec3, Vec3, Vec3) {
+    let (x0, y0, z0) = f0;
+    let col = |a: f64, b: f64, c: f64| xl * a + yl * b + zl * c;
+    (
+        col(x0.x, y0.x, z0.x),
+        col(x0.y, y0.y, z0.y),
+        col(x0.z, y0.z, z0.z),
+    )
+}
+
 /// Upstream `lto` of `N_FillNSidedHole`: the relative arc length tolerance.
 const LTO: f64 = 0.05;
 
@@ -121,6 +162,13 @@ pub struct SweepScaleOptions<'a> {
     pub dir: Direction,
     /// Sweeping tolerance (upstream `E > 0`).
     pub e: f64,
+    /// Not upstream (the SolidCraft fork's upright sweep): keep the sections upright. At
+    /// every section z is this direction made square to the trajectory's tangent
+    /// ([`ZSource::Up`]), and the cross section is taken as drawn at the trajectory's
+    /// start (turned by the inverse of the start frame first), so it stays as drawn there
+    /// and turns only about the up direction as the trajectory turns. `None`: upstream's z
+    /// (`cur_z`, else the projection normal method).
+    pub up: Option<Vec3>,
 }
 
 impl Default for SweepScaleOptions<'_> {
@@ -133,6 +181,7 @@ impl Default for SweepScaleOptions<'_> {
             deg: 3,
             dir: Direction::V,
             e: 1e-3,
+            up: None,
         }
     }
 }
@@ -211,6 +260,24 @@ pub struct SweepTrace {
     pub chain: Vec<f64>,
     /// The unit normal the chain began from.
     pub start_normal: Vec3,
+    /// Per piece of a sweep without rails: whether its skin is interpolated at the
+    /// trajectory parameters (a piece along which an end of the profile stays put),
+    /// rather than at the chord-length parameters of G1 skinning.
+    pub path_parameters: Vec<bool>,
+}
+
+/// Whether the first or the last control point of the placed sections stays within
+/// `MODEL_TOL` along the piece: the chord length G1 skinning rescales by is then no
+/// magnitude (`create_skin_srf_boundary_continuity` measures the same polygons).
+fn profile_end_is_fixed(sections: &[Curve]) -> Result<bool> {
+    let mut first = Vec::new();
+    let mut last = Vec::new();
+    for section in sections {
+        let points = section.cpts();
+        first.push(at(points, 0, OP_SWEEP)?);
+        last.push(at(points, section.n(), OP_SWEEP)?);
+    }
+    Ok(dist_cpolygon(&first) <= MODEL_TOL || dist_cpolygon(&last) <= MODEL_TOL)
 }
 
 /// [`create_sweep_scale`] that also reports its [`SweepTrace`] (and, as
@@ -274,7 +341,13 @@ fn sweep_scale(
         deg,
         dir,
         e,
+        up,
     } = *opt;
+    // not upstream: an upright sweep's unit up direction
+    let up = match up {
+        Some(u) => Some(normalize(u)?.0),
+        None => None,
+    };
 
     // Degrees upstream cannot express (`NL_DEGREE` is a `short`).
     super::degree(deg, OP)?;
@@ -374,7 +447,7 @@ fn sweep_scale(
     // Frame z vectors at (sub-sampled) parameters when curZ is not given.
     let mut tt: Vec<f64> = Vec::new();
     let mut zl_vecs: Vec<Vec3> = Vec::new();
-    if cur_z.is_none() {
+    if cur_z.is_none() && up.is_none() {
         tt.push(at(rf(&seg_pars, 0, OP)?, 0, OP)?);
         for (ii, sp) in seg_pars.iter().enumerate() {
             let np = sp.len() - 1;
@@ -426,6 +499,31 @@ fn sweep_scale(
         cur_cs0 = cur_c.clone();
         split = false;
     }
+
+    // Not upstream (the upright sweep): the start frame, and the section turned by its inverse
+    // so it is placed as drawn at the start.
+    let start_frame = match up {
+        Some(up) => {
+            let (_, x0) = cur_t.eval_tangent(cur_t.param_bounds().0, Side::Left)?;
+            let z0u = upright_z(up, x0)?;
+            Some((x0, z0u.cross(x0), z0u))
+        }
+        None => None,
+    };
+    let (cur_cs0, cur_cs1) = match start_frame {
+        Some((x0, y0, z0u)) => {
+            let world = Frame::new(Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z);
+            let back = transform_matrix_from_axes(Frame::new(Vec3::ZERO, x0, y0, z0u), world)?;
+            let mut c0 = cur_cs0;
+            c0.transform(&back)?;
+            let mut c1 = cur_cs1;
+            if let Some(c1) = c1.as_mut() {
+                c1.transform(&back)?;
+            }
+            (c0, c1)
+        }
+        None => (cur_cs0, cur_cs1),
+    };
 
     // Handle rationality correctly if interpolating the trajectory.
     let mut rat_t = false;
@@ -490,7 +588,9 @@ fn sweep_scale(
 
             let (ol, xl) = seg.eval_tangent(par, Side::Left)?;
 
-            let zl = if let Some(cz) = cur_z {
+            let zl = if let Some(up) = up {
+                upright_z(up, xl)?
+            } else if let Some(cz) = cur_z {
                 normalize(cz.eval(par, Side::Left)?)?.0
             } else {
                 while at(&tt, k1, OP)? < par {
@@ -506,18 +606,25 @@ fn sweep_scale(
             // sections.
             if let Some(placed) = placed.as_deref_mut() {
                 let slots = [0, n_placed / 2, n_placed.saturating_sub(1)];
+                // (not upstream: an upright sweep's section was turned by the inverse start
+                // frame first, so its placement is the frame after that turn)
+                let (px, py, pz) = match start_frame {
+                    Some(f0) => after_start(xl, yl, zl, f0),
+                    None => (xl, yl, zl),
+                };
                 for (slot, frame) in slots.iter().zip(placed.iter_mut()) {
                     if placed_at == *slot {
-                        *frame = Frame::new(ol, xl, yl, zl);
+                        *frame = Frame::new(ol, px, py, pz);
                     }
                 }
             }
             placed_at += 1;
 
             if jj == 0 || jj == np {
-                let zsrc = match cur_z {
-                    Some(cz) => ZSource::Curve(cz),
-                    None => ZSource::Samples {
+                let zsrc = match (up, cur_z) {
+                    (Some(up), _) => ZSource::Up(up),
+                    (None, Some(cz)) => ZSource::Curve(cz),
+                    (None, None) => ZSource::Samples {
                         z: zl,
                         prev: if k1 > 0 {
                             Some((at(&zl_vecs, k1 - 1, OP)?, at(&tt, k1 - 1, OP)?))
@@ -625,15 +732,28 @@ fn sweep_scale(
             let de0 =
                 cross_boundary_derivs_vector_field(rf(&sects1, np, OP)?, &ct11, Boundary::Bottom)?;
 
-            let (ts, rail) = if tflg {
+            // Without rails, G1 skinning rescales the cross derivatives by the chord
+            // length of the sections' first and last control points. Where either end
+            // stays within MODEL_TOL (the skinner's coincidence tolerance) over the
+            // piece, as at a horn bend where the profile's end sits on the arc's
+            // centre, that length is no magnitude and the rescaled derivatives collapse.
+            // Such a piece keeps the derivatives as computed, in the trajectory
+            // parameter, and is interpolated at those same parameters (C1).
+            let fixed_end = !tflg && !ruled && profile_end_is_fixed(&sects1)?;
+            if let Some(trace) = trace.as_mut() {
+                trace.path_parameters.push(fixed_end);
+            }
+            let (ts, rail, cnt) = if tflg {
                 let r = if tc == us {
                     [Some(seg.clone()), None]
                 } else {
                     [None, Some(seg.clone())]
                 };
-                (Some(sp.clone()), Some(r))
+                (Some(sp.clone()), Some(r), cnt)
+            } else if fixed_end {
+                (Some(sp.clone()), None, [BoundaryContinuity::C1; 2])
             } else {
-                (None, None)
+                (None, None, cnt)
             };
             // If ruled ignore end derivatives.
             let der = if ruled {
@@ -961,27 +1081,9 @@ fn limit_inner_cross_derivs(net: &mut Net, k: usize) -> Result<()> {
 /// the module notes.
 pub fn fill_n_sided_hole(
     cur: &mut [Curve],
-    der: Option<&mut [Option<Curve>]>,
-    eps: f64,
-    center: Option<(Vec3, Vec3)>,
-) -> Result<NSidedFill> {
-    fill_n_sided_hole_with(cur, der, eps, center, false)
-}
-
-/// [`fill_n_sided_hole`] with the opt-in fix of WR-461 (#1170): with `stay_inside`,
-/// the cross-boundary derivatives across the inner curves are shortened where their
-/// cubic blend from the opposite boundary would cross that boundary's tangent
-/// plane (see `limit_inner_cross_derivs`).
-///
-/// # Errors
-///
-/// As [`fill_n_sided_hole`].
-pub fn fill_n_sided_hole_with(
-    cur: &mut [Curve],
     mut der: Option<&mut [Option<Curve>]>,
     eps: f64,
     center: Option<(Vec3, Vec3)>,
-    stay_inside: bool,
 ) -> Result<NSidedFill> {
     const OP: &str = OP_FILL;
 
@@ -1406,9 +1508,10 @@ pub fn fill_n_sided_hole_with(
         net.make_compatible(i, k)?;
     }
 
-    if stay_inside {
-        limit_inner_cross_derivs(&mut net, k)?;
-    }
+    // Not upstream (WR-461, #1170): the cross-boundary derivatives across the inner
+    // curves are shortened where their cubic blend from the opposite boundary would cross
+    // that boundary's tangent plane.
+    limit_inner_cross_derivs(&mut net, k)?;
 
     // Fit bicubically blended Coons patches into each rectangular hole.
     let mut sur_a: Vec<Surface> = Vec::with_capacity(k + 1);
@@ -1544,6 +1647,106 @@ mod tests {
         assert_eq!(p, 2);
         let p0 = s.cpt(0, 0).unwrap().to_euclid();
         assert!(p0.length().is_finite());
+    }
+
+    /// A piece along which the profile's end stays put (a horn bend: profile radius equal
+    /// to the bend's, its seam on the bend's centre) is skinned at the path's parameters,
+    /// including a nonzero origin and a nonunit range; any other piece keeps the chord-length
+    /// parameters of G1 skinning. Either way the certificate compares the right points.
+    #[test]
+    fn only_a_fixed_profile_end_skins_at_the_path_parameter() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::geom::extent1d::Extent1d;
+        use crate::math::Point2;
+        use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::surface::procedural_sweep::ProceduralSweep;
+
+        let mut path = BSplineCurve::create_circle_segment(
+            3,
+            &Axis2Placement::IDENTITY,
+            10.0,
+            0.0,
+            90.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        path.edit_parameterization(&Extent1d::from_min_max(3.0, 11.0))
+            .unwrap();
+        // A circle of the bend's radius passes through the bend's centre (the origin);
+        // only a seam there leaves the profile's end in place. Which seam that is follows
+        // from the sweep's start frame, so read it from the net's own corners.
+        let mut horns = 0;
+        for (radius, start) in [
+            (0.75, 0.0),
+            (10.0, 0.0),
+            (10.0, -90.0),
+            (10.0, -180.0),
+            (10.0, -270.0),
+        ] {
+            let profile = BSplineCurve::create_circle_segment(
+                3,
+                &Axis2Placement::new(Vec3::ZERO, Vec3::Y, Vec3::Z),
+                radius,
+                start,
+                start + 360.0,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap();
+            let (net, trace) = BSplineSurface::create_sweep_surface_traced(
+                &profile, &path, None, false, 1e-6, None, None,
+            )
+            .unwrap();
+            let trace = trace.unwrap();
+            let domain = net.natural_uv_domain();
+            let horn = [domain.min().x, domain.max().x].iter().all(|&u| {
+                net.evaluate_point(Point2::new(u, domain.min().y))
+                    .unwrap()
+                    .length()
+                    <= 1e-9
+            });
+            assert_eq!(trace.path_parameters, vec![horn]);
+            if radius > 1.0 && !horn {
+                // the profile's interior meets the centre: a pole the face builder splits at
+                continue;
+            }
+            horns += usize::from(horn);
+            let definition = ProceduralSweep::create_path(&profile, &path, &trace, &net).unwrap();
+            let motion = definition.path().unwrap();
+            if horn {
+                assert_eq!(domain.u_interval(), path.natural_interval());
+                assert!(motion.nodes().iter().all(|&(v, t)| v == t));
+            } else {
+                assert_eq!(domain.u_interval(), Extent1d::from_min_max(0.0, 1.0));
+            }
+            let mut radial_error = 0.0_f64;
+            let mut definition_error = 0.0_f64;
+            for i in 0..32 {
+                let fraction = (f64::from(i) + 0.31) / 32.0;
+                let t = path.natural_interval().evaluate(fraction);
+                let u = domain.u_interval().evaluate(fraction);
+                for j in 0..16 {
+                    let v = profile
+                        .natural_interval()
+                        .evaluate((f64::from(j) + 0.27) / 16.0);
+                    let point = net.evaluate_point(Point2::new(u, v)).unwrap();
+                    if horn {
+                        let center = path.evaluate_point(t).unwrap();
+                        radial_error = radial_error.max((point.distance(center) - radius).abs());
+                    }
+                    definition_error = definition_error.max(
+                        point.distance(
+                            definition
+                                .evaluate_definition_point(Point2::new(u, v))
+                                .unwrap(),
+                        ),
+                    );
+                }
+            }
+            assert!(radial_error < 2e-5 * radius, "{radial_error}");
+            assert!(definition_error <= definition.bound(), "{definition_error}");
+        }
+        assert_eq!(horns, 1);
     }
 
     #[test]

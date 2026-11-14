@@ -840,3 +840,129 @@ fn degenerate_cone_and_torus_labels_are_valid_only_with_their_form() {
         );
     }
 }
+
+/// A small, structurally valid procedural blend definition (its numbers mean nothing: the
+/// record checks structure only).
+fn a_blend(depth: u32) -> blend::BlendDefinitionRecord {
+    use blend::*;
+    let form = NurbsSurfaceRecord {
+        u_degree: 1,
+        v_degree: 1,
+        u_count: 2,
+        v_count: 2,
+        u_knots: vec![0., 0., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: vec![[0., 0., 0.], [0., 1., 0.], [1., 0., 0.], [1., 1., 0.]],
+        weights: None,
+    };
+    let curve = |dim: u32| NurbsCurveRecord {
+        dim,
+        points_3d: dim == 3,
+        degree: 1,
+        knots: vec![0., 0., 1., 1.],
+        points: vec![[0., 0., 0.], [1., 0., 0.]],
+        weights: None,
+    };
+    let support = if depth > 1 {
+        SupportRecord::Blend(Box::new(ProceduralBlendRecord {
+            definition: a_blend(depth - 1),
+            net: form.clone(),
+        }))
+    } else {
+        SupportRecord::Nurbs {
+            kind: SupportKindRecord::Plane,
+            form: form.clone(),
+        }
+    };
+    BlendDefinitionRecord {
+        supports: [
+            support,
+            SupportRecord::Nurbs {
+                kind: SupportKindRecord::Plane,
+                form,
+            },
+        ],
+        sides: [1., 1.],
+        radius: RadiusRecord::Constant { offsets: [1., 1.] },
+        order: 1,
+        thumbweight: 0.,
+        leader: curve(3),
+        seeds: [curve(2), curve(2)],
+        bound: 1e-6,
+        map: ParameterMapRecord {
+            a: [0., 0.],
+            b: [1., 1.],
+            swapped: false,
+        },
+        chamfer: None,
+    }
+}
+
+fn blend_label(depth: u32) -> Surface {
+    Surface::Blend {
+        definition: Box::new(blend::BlendDefinition::Procedural(Box::new(a_blend(depth)))),
+    }
+}
+
+/// A blend face is its definition with its net as its NURBS form: it validates and round-trips
+/// number for number; without its net, or nested past three definitions, it is refused.
+#[test]
+fn a_blend_face_is_its_definition_on_its_net() {
+    let form = Surface::Spline {
+        u_knots: vec![-10., -10., 10., 10.],
+        v_knots: vec![-10., -10., 10., 10.],
+        points: vec![
+            vec![[-10., -10., 0.], [-10., 10., 0.]],
+            vec![[10., -10., 0.], [10., 10., 0.]],
+        ],
+    };
+    let mut b = sheet();
+    b.faces[0].surface = blend_label(3);
+    b.faces[0].nurbs = Some(form);
+    b.validate().unwrap_or_else(|e| panic!("{e}"));
+    let text = serde_json::to_string(&b).unwrap();
+    assert!(text.contains(r#""kind":"blend""#), "{text}");
+    let back: Brep = serde_json::from_str(&text).unwrap();
+    assert_eq!(back, b);
+    let mut bare = b.clone();
+    bare.faces[0].nurbs = None;
+    assert!(bare.validate().is_err(), "a blend without its net");
+    let mut deep = b.clone();
+    deep.faces[0].surface = blend_label(4);
+    assert!(deep.validate().is_err(), "nested past three definitions");
+    let mut damaged = b;
+    if let Surface::Blend { definition } = &mut damaged.faces[0].surface
+        && let blend::BlendDefinition::Procedural(d) = definition.as_mut()
+    {
+        d.bound = f64::NAN;
+    }
+    assert!(
+        damaged.validate().is_err(),
+        "a definition's numbers are finite"
+    );
+}
+
+/// A reader from before the blend label refuses a record that has one, by name, rather than
+/// misreading it: its surface kinds are a closed set, and an unknown kind is an error.
+#[test]
+fn an_older_reader_refuses_a_blend_face_by_name() {
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+    #[allow(dead_code)]
+    enum OlderSurface {
+        Plane {
+            origin: [f64; 3],
+            u_axis: [f64; 3],
+            v_axis: [f64; 3],
+        },
+        BallPatch {
+            center: [f64; 3],
+            radius: f64,
+        },
+    }
+    let label = serde_json::to_value(blend_label(1)).unwrap();
+    let error = serde_json::from_value::<OlderSurface>(label)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("unknown variant `blend`"), "{error}");
+}

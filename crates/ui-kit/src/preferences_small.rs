@@ -253,6 +253,10 @@ pub fn settings_block_body<R>(ui: &mut Ui, label: &str, hint: Option<&str>, labe
         let control_width = (width - label_width - t.space_14).max(0.0);
         ui.scope_builder(
             egui::UiBuilder::new()
+                // Two blocks with the same internal layout would otherwise share their controls'
+                // ids, so a later block's segmented control could stop an earlier one from taking
+                // clicks (#14121).
+                .id_salt(("settings_block", label))
                 .max_rect(Rect::from_min_size(ui.next_widget_position(), vec2(control_width, 0.0)))
                 .layout(Layout::top_down(Align::Min))
                 .ui_stack_info(egui::UiStackInfo::default().with_tag_value(super::layout::LABEL, label.to_string())),

@@ -968,6 +968,64 @@ fn construction_on_a_moved_body_moves_with_it() {
     assert!(on_line(o, d, Vec3::new(0.0, 0.0, 20.0)) && on_line(o, d, Vec3::new(0.0, 50.0, 20.0)), "{o:?} {d:?}");
 }
 
+/// #11469: a tangent plane picked on an inserted STL said only "no face at …", as if the pick
+/// had missed. A mesh body has no faces to pick; the error says the pick lies on one and what
+/// gives it faces (Convert Mesh), and a pick in empty space keeps the plain message.
+#[test]
+fn plane_tangent_on_a_mesh_body_says_it_has_no_faces() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mesh-tangent-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("cube.stl");
+    let mut cube = Session::default();
+    run(&mut cube, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [0, 0, 0], "body_name": "Cube"}));
+    run(&mut cube, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mesh = s.world_state().unwrap().bodies.iter().find(|b| b.body.is_mesh()).map(|b| b.name.clone()).expect("a mesh body");
+
+    let on = s.execute("construct.plane.tangent", &json!({"face": {"face": [10, 10, 20]}, "name": "T"})).expect_err("a mesh has no face").to_string();
+    assert!(on.contains(&mesh) && on.contains("mesh") && on.contains("Convert Mesh"), "{on}");
+    let off = s.execute("construct.plane.tangent", &json!({"face": {"face": [100, 100, 100]}, "name": "T"})).expect_err("nothing there").to_string();
+    assert!(off.contains("no face at") && !off.contains("Convert Mesh"), "{off}");
+}
+
+/// #11469, the converted path the report followed ("convert STL to body"): a finely tessellated
+/// cylinder 200 mm tall, inserted as STL and converted, takes a tangent plane on a facet at the
+/// picked point, with the facet's normal.
+#[test]
+fn plane_tangent_on_a_converted_mesh_facet() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mesh-converted-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("cyl.stl");
+    let mut src = Session::default();
+    run(&mut src, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 60, "height": 200, "body_name": "Cyl"}));
+    run(&mut src, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (name, mesh) =
+        s.world_state().unwrap().bodies.iter().find(|b| b.body.is_mesh()).map(|b| (b.name.clone(), b.body.clone())).expect("a mesh body");
+    // A side facet's centroid and normal, read from the mesh before it is converted.
+    let (pos, tris) = mesh.triangle_mesh().unwrap();
+    let (c, n) = tris
+        .iter()
+        .filter_map(|t| {
+            let [a, b, c] = t.map(|i| pos[i as usize]);
+            let n = (b - a).cross(c - a).normalized()?;
+            (n.z.abs() < 1e-6).then(|| ((a + b + c) * (1.0 / 3.0), n))
+        })
+        .next()
+        .expect("a side facet");
+    run(&mut s, "mesh.convert", json!({"body": name, "tolerance": "0.01 mm"}));
+    assert!(!s.world_state().unwrap().bodies.iter().any(|b| b.body.is_mesh()), "converted");
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [c.x, c.y, c.z]}, "name": "T"}));
+    let t = plane(&s, "T");
+    assert!(parallel(t.normal(), n) && on_plane(&t, c), "{t:?} vs facet at {c:?} normal {n:?}");
+}
+
 /// A feature named exactly like a component origin item stays reachable: at every resolver that
 /// takes a name the feature wins over the datum key (the #9128 mistake the plan calls out).
 /// Without the feature the same pick is the component origin's, saved as its datum.
@@ -1097,4 +1155,48 @@ fn planes_made_of_picks_in_a_moved_component_go_through_their_world_picks() {
             assert!(on_plane(&pl, p), "{cmd}: {p:?} on {pl:?}");
         }
     }
+}
+
+/// Snap points (#11228): a construction built from an edge's middle or a hole's centre keeps it
+/// as a reference on that edge or face, so it follows the model.
+#[test]
+fn snapped_centres_and_middles_follow_the_model() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "20 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": "h", "body_name": "Box"}));
+    run(&mut s, "solid.cylinder", json!({"base": [20, 15, -1], "radius": 4, "height": "h + 2 mm", "operation": "cut"}));
+    let snap = |of: Value, kind: &str, at: [f64; 3]| json!({"type": "snap", "of": of, "kind": kind, "at": at});
+    let top_front = json!({"type": "edge", "at": [10, 0, 20]});
+    run(&mut s, "construct.point.vertex", json!({"point": snap(top_front, "middle", [20.0, 0.0, 20.0]), "name": "Mid"}));
+    // The hole's wall: the centre of its top end, not its bottom one.
+    let wall = json!({"type": "face", "at": [24, 15, 10]});
+    run(&mut s, "construct.point.vertex", json!({"point": snap(wall, "centre", [20.0, 15.0, 20.0]), "name": "Top"}));
+    let side = json!({"type": "edge", "at": [40, 5, 20]});
+    run(&mut s, "construct.axis.two_points", json!({"a": snap(side, "middle", [40.0, 15.0, 20.0]), "b": {"vertex": [0, 0, 0]}, "name": "Diag"}));
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "50 mm"}));
+    assert!(near(point(&s, "Mid"), Vec3::new(20.0, 0.0, 50.0)), "{:?}", point(&s, "Mid"));
+    assert!(near(point(&s, "Top"), Vec3::new(20.0, 15.0, 50.0)), "{:?}", point(&s, "Top"));
+    let (o, d) = axis(&s, "Diag");
+    assert!(on_line(o, d, Vec3::new(40.0, 15.0, 50.0)) && on_line(o, d, Vec3::ZERO), "{o:?} {d:?}");
+    // A snap point of something with none of that kind is refused when it is built.
+    let bad = s.execute("construct.point.vertex", &json!({"point": snap(json!({"type": "origin"}), "middle", [0.0, 0.0, 0.0])}));
+    assert!(bad.is_err() || construction_points(&s).len() == 2, "{bad:?}");
+}
+
+/// #6959: a turn about a given `origin` carries the constructions built on the body about that
+/// origin too, not about the world origin, so they stay on the body.
+#[test]
+fn construction_on_a_body_turned_about_an_origin_turns_about_it_too() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "body_name": "Pin"}));
+    run(&mut s, "construct.axis.through_cylinder", json!({"face": {"face": [5, 0, 10]}, "name": "PinAxis"}));
+    run(&mut s, "construct.point.center", json!({"of": {"edge": [5, 0, 20]}, "name": "PinTop"}));
+    // A quarter turn about Y through the top centre (0, 0, 20): that centre stays put and the
+    // axis lies along X at height 20. About the world origin the top would go to (20, 0, 0).
+    run(&mut s, "solid.move", json!({"bodies": ["Pin"], "origin": [0, 0, 20], "axis": [0, 1, 0], "angle": "90 deg"}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    assert!(near(point(&s, "PinTop"), Vec3::new(0.0, 0.0, 20.0)), "{:?}", point(&s, "PinTop"));
+    let (o, d) = axis(&s, "PinAxis");
+    assert!(parallel(d, Vec3::X) && on_line(o, d, Vec3::new(-20.0, 0.0, 20.0)), "{o:?} {d:?}");
 }
