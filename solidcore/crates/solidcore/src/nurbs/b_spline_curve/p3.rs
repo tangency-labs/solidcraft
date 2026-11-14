@@ -2794,7 +2794,7 @@ mod tests {
     /// image's radius is its own) has, near the start, a radius on the growth line to first
     /// order (rate `12 |a|^3 / |a x b|` = 4.8, `a = P2 - P0`, `b = P3 - 3 P2 + 2 P0`). Its
     /// WR-668 stretch for the tolerance 1e-3 (2.1e-4) clears down to the rounding-level
-    /// sliver (about 1.7e-7 of the end). So does the reversed cubic's at its far end, on
+    /// sliver (about 2e-7 of the end). So does the reversed cubic's at its far end, on
     /// the domain [0, 1] and on [1000, 1001], a domain end far from 0 (where pieces cut at
     /// `2^-52` of the stretch would round onto the end).
     #[test]
