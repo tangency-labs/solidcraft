@@ -68,6 +68,10 @@
 //! - `static int cbiTol = 0` in `MergeCoincidentSurfaces` is a compile-time constant
 //!   upstream; only its `0` branch is ported. The `SM_DEBUG_CODE` and
 //!   `SM_VALIDATE_TOPOLOGY` blocks are compiled out upstream and not ported.
+//! - SolidCraft: split children from coincidence repairs are related together with
+//!   their endpoints. An unambiguous endpoint pairing must fit the stored intersection
+//!   tolerances; existing vertex mates survive coalescing, and deleted children leave
+//!   both the search and the later classification bookkeeping.
 //! - **Recursion.** None: `MergeCoincidentSurfaces` calls `MergeCurveOnSurfaces`,
 //!   which calls `MergeCurveClasses`; none calls back.
 
@@ -78,7 +82,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::SolutionObject;
-use crate::geom::tol::zone_tol3d;
+use crate::geom::tol::{xsect_tol_3d_from_zones, zone_tol3d};
 use crate::intersect::curve_class::p1::CurveClassification;
 use crate::intersect::curve_class::p4::ClassificationInit;
 use crate::intersect::curve_class::p6::{merge_into_object_mut, MergeIntervalBrep};
@@ -659,8 +663,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // valid). First remove any existing relationships from all new edges.
         for ii in 0..new_edges.len() + new_edges_other.len() {
             // look for a ThisEdge<->OtherEdge mapping for current target edge
-            let (new_e, other_new_e) =
-                self.new_edge_pair(ii, &new_edges, &new_edges_other, true)?;
+            let (new_e, other_new_e) = self.new_edge_pair(ii, &new_edges, &new_edges_other)?;
 
             // when old pNewE<->pOtherNewE mapping exists remove it (status unchecked)
             if new_e.is_some() && other_new_e.is_some() {
@@ -671,139 +674,167 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
         }
 
-        // Now update Relationships on all new edges.
-        for ii in 0..new_edges.len() + new_edges_other.len() {
-            // look for a ThisNewEdge<->OtherNewEdge mappings
-            let (new_e, other_new_e) =
-                self.new_edge_pair(ii, &new_edges, &new_edges_other, false)?;
-
-            // skip NewE/OtherNewE referenced in the classifications - they're handled later
-            let ref1 = crv_class1.is_referenced(new_e);
-            let ref2 = crv_class2.is_referenced(other_new_e);
-            if ref1 || ref2 {
-                continue;
-            }
-
-            // skip OtherNewE when it already has a mapping
-            if new_e.is_some() && other_new_e.is_some() {
-                continue;
-            }
-
-            // make new mapping between ThisNewEdge and OtherNewEdge nearest in 3D space
-            // to ThisNewEdge
-            if let Some(ne) = new_e {
-                let best = self.nearest_new_edge(k, brep, ne, &new_edges_other, crv_class2)?;
-                if let Some(best_o_edge) = best {
-                    self.relate(k, brep, Some(ne), Some(best_o_edge))?;
-                }
-            }
-
-            // make new mapping between OtherEdge and ThisEdge nearest in 3D space to
-            // OtherEdge
-            if let Some(one) = other_new_e {
-                let best = self.nearest_new_edge(k, brep, one, &new_edges, crv_class1)?;
-                if let Some(best_edge) = best {
-                    self.relate(k, brep, Some(best_edge), Some(one))?;
-                }
-            }
-        }
-
-        // Now update relationships between CurveClassification topology objects
         let mut squeezed = SqueezeVertices::default();
-        let mut did_last_end = false;
-        let mut squeeze_ok = true;
+        let status = (|| -> Result<()> {
+            // Now update Relationships on all new edges.
+            for ii in 0..new_edges.len() + new_edges_other.len() {
+                // look for a ThisNewEdge<->OtherNewEdge mappings
+                let (new_e, other_new_e) = self.new_edge_pair(ii, &new_edges, &new_edges_other)?;
 
-        // for every classification interval
-        for ii in 0..crv_class1.size() {
-            // See about relating Starts: Vertices.
-            let start_both_vertices = crv_class1.at(ii)?.start.point_class()
-                == PointClassType::Vertex
-                && crv_class2.at(ii)?.start.point_class() == PointClassType::Vertex;
-            if start_both_vertices && !did_last_end {
-                let v1 = Self::surviving_vertex(&squeezed, &mut crv_class1.at_mut(ii)?.start)?;
-                let v2 = Self::surviving_vertex(&squeezed, &mut crv_class2.at_mut(ii)?.start)?;
-
-                // when both this and other Brep are present (the usual case): if
-                // vertices have old mates - squeeze old and new mates
-                if self.brep.is_some() && self.other.is_some() {
-                    squeeze_ok = succeeded(self.check_for_squeeze_vertices_into(
-                        k,
-                        brep,
-                        v1,
-                        v2,
-                        &mut squeezed,
-                    ))?;
-                }
-
-                // remember if any edges were deleted by squeeze
-                if !squeezed.deleted_edges.is_empty() {
-                    out.topology_was_deleted = true;
-                }
-
-                // create the mate relationship between the two vertices
-                if squeeze_ok {
-                    self.relate(k, brep, Some(v1), Some(v2))?;
-                }
-            }
-
-            // See about relating Mids: Edges.
-            let mid_both_edges = crv_class1.at(ii)?.mid.point_class() == PointClassType::Edge
-                && crv_class2.at(ii)?.mid.point_class() == PointClassType::Edge;
-            if mid_both_edges {
-                let e1 = object_of(&crv_class1.at(ii)?.mid, ClassObjectKind::Edge)?;
-                let e2 = object_of(&crv_class2.at(ii)?.mid, ClassObjectKind::Edge)?;
-
-                // when neither edge has been deleted
-                if !contains(&squeezed.deleted_edges, &e1)
-                    && !contains(&squeezed.deleted_edges, &e2)
+                if new_e.is_some_and(|e| squeezed.deleted_edges.contains(&e))
+                    || other_new_e.is_some_and(|e| squeezed.deleted_edges.contains(&e))
                 {
-                    // create the Edge/Edge mate relationship
-                    if !succeeded(self.relate(k, brep, Some(e1), Some(e2)))? {
-                        self.repair_edge_relation(k, brep, e1, e2, &mut squeezed, out)?;
+                    continue;
+                }
+
+                // skip NewE/OtherNewE referenced in the classifications - they're handled later
+                let ref1 = crv_class1.is_referenced(new_e);
+                let ref2 = crv_class2.is_referenced(other_new_e);
+                if ref1 || ref2 {
+                    continue;
+                }
+
+                // skip OtherNewE when it already has a mapping
+                if new_e.is_some() && other_new_e.is_some() {
+                    continue;
+                }
+
+                // make new mapping between ThisNewEdge and OtherNewEdge nearest in 3D space
+                // to ThisNewEdge
+                if let Some(ne) = new_e {
+                    let candidates: Vec<_> = new_edges_other
+                        .iter()
+                        .copied()
+                        .filter(|e| !squeezed.deleted_edges.contains(e))
+                        .collect();
+                    let best =
+                        self.nearest_new_edge(k, brep, ne, &candidates, crv_class2, false)?;
+                    if let Some(best_o_edge) = best {
+                        self.relate_edges_with_vertices(k, brep, ne, best_o_edge, &mut squeezed)?;
+                    }
+                }
+
+                // make new mapping between OtherEdge and ThisEdge nearest in 3D space to
+                // OtherEdge
+                if let Some(one) = other_new_e {
+                    let candidates: Vec<_> = new_edges
+                        .iter()
+                        .copied()
+                        .filter(|e| !squeezed.deleted_edges.contains(e))
+                        .collect();
+                    let best =
+                        self.nearest_new_edge(k, brep, one, &candidates, crv_class1, true)?;
+                    if let Some(best_edge) = best {
+                        self.relate_edges_with_vertices(k, brep, best_edge, one, &mut squeezed)?;
                     }
                 }
             }
 
-            // See about relating Ends: Vertices.
-            let end_both_vertices = crv_class1.at(ii)?.end.point_class() == PointClassType::Vertex
-                && crv_class2.at(ii)?.end.point_class() == PointClassType::Vertex;
-            if end_both_vertices {
-                let v1 = Self::surviving_vertex(&squeezed, &mut crv_class1.at_mut(ii)?.end)?;
-                let v2 = Self::surviving_vertex(&squeezed, &mut crv_class2.at_mut(ii)?.end)?;
+            // Now update relationships between CurveClassification topology objects
+            out.topology_was_deleted |= !squeezed.deleted_vertices.is_empty();
+            let mut did_last_end = false;
+            let mut squeeze_ok = true;
 
-                // when both Brep and OtherBrep are present (the usual case)
-                if self.brep.is_some() && self.other.is_some() {
-                    squeeze_ok = succeeded(self.check_for_squeeze_vertices_into(
-                        k,
-                        brep,
-                        v1,
-                        v2,
-                        &mut squeezed,
-                    ))?;
+            // for every classification interval
+            for ii in 0..crv_class1.size() {
+                // See about relating Starts: Vertices.
+                let start_both_vertices = crv_class1.at(ii)?.start.point_class()
+                    == PointClassType::Vertex
+                    && crv_class2.at(ii)?.start.point_class() == PointClassType::Vertex;
+                if start_both_vertices && !did_last_end {
+                    let v1 = Self::surviving_vertex(&squeezed, &mut crv_class1.at_mut(ii)?.start)?;
+                    let v2 = Self::surviving_vertex(&squeezed, &mut crv_class2.at_mut(ii)?.start)?;
+
+                    // when both this and other Brep are present (the usual case): if
+                    // vertices have old mates - squeeze old and new mates
+                    if self.brep.is_some() && self.other.is_some() {
+                        squeeze_ok = succeeded(self.check_for_squeeze_vertices_into(
+                            k,
+                            brep,
+                            v1,
+                            v2,
+                            &mut squeezed,
+                        ))?;
+                    }
+
+                    // remember if any edges were deleted by squeeze
+                    if !squeezed.deleted_edges.is_empty() {
+                        out.topology_was_deleted = true;
+                    }
+
+                    // create the mate relationship between the two vertices
+                    if squeeze_ok {
+                        self.relate(k, brep, Some(v1), Some(v2))?;
+                    }
                 }
 
-                // remember if edges were deleted by Squeeze
-                if !squeezed.deleted_edges.is_empty() || !squeezed.deleted_vertices.is_empty() {
-                    out.topology_was_deleted = true;
+                // See about relating Mids: Edges.
+                let mid_both_edges = crv_class1.at(ii)?.mid.point_class() == PointClassType::Edge
+                    && crv_class2.at(ii)?.mid.point_class() == PointClassType::Edge;
+                if mid_both_edges {
+                    let e1 = object_of(&crv_class1.at(ii)?.mid, ClassObjectKind::Edge)?;
+                    let e2 = object_of(&crv_class2.at(ii)?.mid, ClassObjectKind::Edge)?;
+
+                    // when neither edge has been deleted
+                    if !contains(&squeezed.deleted_edges, &e1)
+                        && !contains(&squeezed.deleted_edges, &e2)
+                    {
+                        // create the Edge/Edge mate relationship
+                        let conflicts = self.other_mate(Some(e1)).is_some_and(|e| e != e2)
+                            || self.brep_mate(Some(e2)).is_some_and(|e| e != e1);
+                        if conflicts {
+                            self.repair_edge_relation(k, brep, e1, e2, &mut squeezed, out)?;
+                        } else {
+                            self.relate_edges_with_vertices(k, brep, e1, e2, &mut squeezed)?;
+                        }
+                    }
                 }
 
-                // create interval-end vertex/vertex mate relationship
-                if squeeze_ok {
-                    self.relate(k, brep, Some(v1), Some(v2))?;
-                }
+                // See about relating Ends: Vertices.
+                let end_both_vertices = crv_class1.at(ii)?.end.point_class()
+                    == PointClassType::Vertex
+                    && crv_class2.at(ii)?.end.point_class() == PointClassType::Vertex;
+                if end_both_vertices {
+                    let v1 = Self::surviving_vertex(&squeezed, &mut crv_class1.at_mut(ii)?.end)?;
+                    let v2 = Self::surviving_vertex(&squeezed, &mut crv_class2.at_mut(ii)?.end)?;
 
-                // remember the event
-                did_last_end = true;
-            } else {
-                // remember not creating interval-end vertex/vertex mate relationship
-                did_last_end = false;
+                    // when both Brep and OtherBrep are present (the usual case)
+                    if self.brep.is_some() && self.other.is_some() {
+                        squeeze_ok = succeeded(self.check_for_squeeze_vertices_into(
+                            k,
+                            brep,
+                            v1,
+                            v2,
+                            &mut squeezed,
+                        ))?;
+                    }
+
+                    // remember if edges were deleted by Squeeze
+                    if !squeezed.deleted_edges.is_empty() || !squeezed.deleted_vertices.is_empty() {
+                        out.topology_was_deleted = true;
+                    }
+
+                    // create interval-end vertex/vertex mate relationship
+                    if squeeze_ok {
+                        self.relate(k, brep, Some(v1), Some(v2))?;
+                    }
+
+                    // remember the event
+                    did_last_end = true;
+                } else {
+                    // remember not creating interval-end vertex/vertex mate relationship
+                    did_last_end = false;
+                }
             }
-        }
+            Ok(())
+        })();
 
         // Pass back deleted topology.
+        out.topology_was_deleted |=
+            !squeezed.deleted_vertices.is_empty() || !squeezed.deleted_edges.is_empty();
         out.deleted_edges = Some(squeezed.deleted_edges);
         out.deleted_vertices = Some(squeezed.deleted_vertices);
-        Ok(())
+        status
     }
 
     fn capture_curve_classes(
@@ -822,8 +853,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     }
 
     /// The (`pNewE`, `pOtherNewE`) pair at index `ii` of the two mate-rebuilding loops
-    /// over the new edges of both B-reps: a B-rep edge with its other mate
-    /// (`mate_brep_edges`) or with none, then each other edge with its B-rep mate. The
+    /// over the new edges of both B-reps: each B-rep edge with its other mate,
+    /// then each other edge with its B-rep mate. The
     /// mates are looked up when the loop reaches the index, after the edits of the
     /// earlier indices, as upstream.
     fn new_edge_pair(
@@ -831,15 +862,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         ii: usize,
         new_edges: &[O],
         new_edges_other: &[O],
-        mate_brep_edges: bool,
     ) -> Result<(Option<O>, Option<O>)> {
         if let Some(&e) = new_edges.get(ii) {
-            let other = if mate_brep_edges {
-                self.other_mate(Some(e))
-            } else {
-                None
-            };
-            Ok((Some(e), other))
+            Ok((Some(e), self.other_mate(Some(e))))
         } else {
             let o = *ii
                 .checked_sub(new_edges.len())
@@ -860,6 +885,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         edge: O,
         candidates: &[O],
         candidates_class: &CurveClassification<O>,
+        other_first: bool,
     ) -> Result<Option<O>> {
         // evaluate edge->MidPoint
         let (curve, ivl) = edge_curve_interval(brep, edge)?;
@@ -871,6 +897,18 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         for &cand in candidates {
             // skip edges referenced in the classification
             if candidates_class.is_referenced(Some(cand)) {
+                continue;
+            }
+
+            let (primary, other) = if other_first {
+                (cand, edge)
+            } else {
+                (edge, cand)
+            };
+            if self.other_mate(Some(primary)).is_some()
+                || self.brep_mate(Some(other)).is_some()
+                || self.edge_vertices(k, brep, primary, other)?.is_none()
+            {
                 continue;
             }
 
@@ -920,6 +958,121 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         Ok(best_edge)
     }
 
+    /// A child edge must cover the same endpoints as its mate. Midpoint drops alone
+    /// also match overlapping children with different extents near a surface seam.
+    /// Keep existing vertex mates, and reject an ambiguous endpoint assignment.
+    fn edge_vertices(
+        &self,
+        k: &Kernel,
+        brep: &impl IntersectorBrepP3<O>,
+        primary: O,
+        other: O,
+    ) -> Result<Option<[(O, O); 2]>> {
+        let a = brep
+            .edge_start_vertex(primary)?
+            .ok_or(dangling("edge without vertex"))?;
+        let b = brep
+            .edge_other_vertex(primary, Some(a))?
+            .ok_or(dangling("edge without vertex"))?;
+        let c = brep
+            .edge_start_vertex(other)?
+            .ok_or(dangling("edge without vertex"))?;
+        let d = brep
+            .edge_other_vertex(other, Some(c))?
+            .ok_or(dangling("edge without vertex"))?;
+        let close = |v, w| -> Result<bool> {
+            let tolerance = xsect_tol_3d_from_zones(k, tol_of(brep, v)?, tol_of(brep, w)?);
+            Ok(brep.vertex_point(v)?.distance(brep.vertex_point(w)?) <= tolerance)
+        };
+        let compatible = |v, w| -> Result<bool> {
+            if !close(v, w)? {
+                return Ok(false);
+            }
+            match (self.other_mate(Some(v)), self.brep_mate(Some(w))) {
+                (Some(vm), Some(wm)) => Ok(vm == w && wm == v),
+                (Some(vm), None) => close(vm, w),
+                (None, Some(wm)) => close(v, wm),
+                (None, None) => Ok(true),
+            }
+        };
+        let same = compatible(a, c)? && compatible(b, d)?;
+        let opposite = compatible(a, d)? && compatible(b, c)?;
+        match (same, opposite) {
+            (true, false) => Ok(Some([(a, c), (b, d)])),
+            (false, true) => Ok(Some([(a, d), (b, c)])),
+            (true, true) if a == b && c == d => Ok(Some([(a, c), (b, d)])),
+            _ => Ok(None),
+        }
+    }
+
+    /// Relate coincident edges together with their endpoints. When an
+    /// endpoint already has a mate, retain that pair and glue the unmatched vertex
+    /// into it, within the stored intersection tolerance checked above.
+    fn relate_edges_with_vertices(
+        &mut self,
+        k: &mut Kernel,
+        brep: &mut impl IntersectorBrepP3<O>,
+        primary: O,
+        other: O,
+        squeezed: &mut SqueezeVertices<O>,
+    ) -> Result<()> {
+        let pairs = self
+            .edge_vertices(k, brep, primary, other)?
+            .ok_or_else(|| {
+                SolidError::stage_failed(OP_CLASSES, "coincident edge endpoints do not correspond")
+            })?;
+        let first = pairs.first().copied();
+        for (i, (v, w)) in pairs.into_iter().enumerate() {
+            if i > 0 && first == Some((v, w)) {
+                continue;
+            }
+            if self.is_mated_pair(Some(v), Some(w)) {
+                continue;
+            }
+            let glue = match (self.other_mate(Some(v)), self.brep_mate(Some(w))) {
+                (Some(survivor), None) => Some((survivor, w, true)),
+                (None, Some(survivor)) => Some((survivor, v, false)),
+                (None, None) => None,
+                _ => {
+                    return Err(SolidError::stage_failed(
+                        OP_CLASSES,
+                        "conflicting coincident edge endpoint mates",
+                    ));
+                }
+            };
+            if let Some((survivor, deleted, is_other)) = glue {
+                let body = brep
+                    .vertex_brep(survivor)?
+                    .ok_or(dangling("missing coincident edge B-rep"))?;
+                let deleted_edge =
+                    brep.brep_combine_coincident_vertices(k, body, survivor, deleted)?;
+                squeezed.surviving_vertices.push(survivor);
+                squeezed.deleted_vertices.push(deleted);
+                if let Some(edge) = deleted_edge {
+                    let mate = if is_other {
+                        self.brep_mate(Some(edge))
+                    } else {
+                        self.other_mate(Some(edge))
+                    };
+                    if let Some(mate) = mate {
+                        let (a, b) = if is_other { (mate, edge) } else { (edge, mate) };
+                        self.remove_relationship(Some(a), Some(b))?;
+                    }
+                    squeezed.deleted_edges.push(edge);
+                }
+            } else {
+                self.relate(k, brep, Some(v), Some(w))?;
+            }
+        }
+        if squeezed.deleted_edges.contains(&primary) || squeezed.deleted_edges.contains(&other) {
+            return Err(SolidError::stage_failed(
+                OP_CLASSES,
+                "coincident edge collapsed during gluing",
+            ));
+        }
+        self.relate(k, brep, Some(primary), Some(other))
+    }
+
     /// Replaces a deleted vertex of a classification end by its surviving vertex
     /// (`sDeletedV.FindElement`, `SetClassObject(SM_PC_VERTEX, ..)`) and returns the
     /// end's vertex.
@@ -928,14 +1081,17 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         pc: &mut PointClassification<O>,
     ) -> Result<O> {
         let mut v = object_of(pc, ClassObjectKind::Vertex)?;
-        if let Some(found) = squeezed.deleted_vertices.iter().position(|&d| d == v) {
+        for _ in 0..=squeezed.deleted_vertices.len() {
+            let Some(found) = squeezed.deleted_vertices.iter().position(|&d| d == v) else {
+                pc.set_class_object(PointClassType::Vertex, Some(v));
+                return Ok(v);
+            };
             v = *squeezed
                 .surviving_vertices
                 .get(found)
                 .ok_or(dangling("deleted vertex without survivor"))?;
-            pc.set_class_object(PointClassType::Vertex, Some(v));
         }
-        Ok(v)
+        Err(dangling("cyclic deleted vertex survivors"))
     }
 
     /// The repair of a failed `Relate(pE1, pE2)` in `MergeCurveClasses`: when exactly
@@ -983,7 +1139,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         squeezed.deleted_edges.push(e1o);
                         brep.brep_delete_edge(k, brep_h, e1o)?;
                         out.topology_was_deleted = true;
-                        self.relate(k, brep, Some(e1), Some(e2))?;
+                        self.relate_edges_with_vertices(k, brep, e1, e2, squeezed)?;
                     }
                 }
             }
@@ -1022,7 +1178,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         squeezed.deleted_edges.push(e2o);
                         brep.brep_delete_edge(k, brep_h, e2o)?;
                         out.topology_was_deleted = true;
-                        self.relate(k, brep, Some(e1), Some(e2))?;
+                        self.relate_edges_with_vertices(k, brep, e1, e2, squeezed)?;
                     }
                 }
             }
@@ -1032,6 +1188,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     "the curve classifications could not be fixed",
                 ));
             }
+        } else {
+            return Err(SolidError::stage_failed(
+                OP_CLASSES,
+                "both coincident edges already have different mates",
+            ));
         }
         Ok(())
     }

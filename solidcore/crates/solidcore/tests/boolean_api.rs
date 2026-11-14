@@ -676,3 +676,76 @@ fn sphere_box_edge_cutting_a_shallow_cap() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+/// A through bore whose cap is almost coincident with a cylinder's cap. The two
+/// cylinder seams differ, and the bore axis tilts by 1e-5 radians. Both bore caps
+/// lie outside the stock, so every slice normal to the stock axis loses the same
+/// ellipse: area pi * r^2 / cos(theta).
+#[test]
+fn a_nearly_axial_bore_through_a_cylinder_with_step_tolerances() {
+    use solidcore::curve::curve::Curve;
+    use solidcore::curve::ellipse::Ellipse;
+    use solidcore::sweep::api_brep::create_linear_sweep;
+    use solidcore::topology::brep::{p1, p2, p5};
+
+    let mut k = rig_kernel();
+    let stock_frame = Axis2Placement::new(
+        Point3::new(-22.0005005683, 27.3286637536, -43.3425576331),
+        Vec3::new(
+            0.33541020646821096,
+            -0.4447535182170257,
+            -0.8304783569910354,
+        ),
+        Vec3::new(
+            0.7984072189295407,
+            0.6021178562052287,
+            -1.2617029737649332e-7,
+        ),
+    );
+    let bore_frame = Axis2Placement::new(
+        Point3::new(-22.000499999972, 27.328699999997, -43.342599999983),
+        Vec3::new(0.459987304432186, 0.748373023696032, 0.4778592859464696),
+        Vec3::new(-0.7337328686846232, 0.01728700041769954, 0.6792181071116936),
+    );
+    let mut stock = api::create_cylinder(&mut k, Point3::ZERO, 3.75, 11.0).unwrap();
+    p5::transform(&mut k, &mut stock, &stock_frame, None, false).unwrap();
+    // STEP's 0.005 mm intersection tolerance is a 0.0025 mm kernel zone.
+    p2::set_tolerance(&k, &mut stock, 0.0025, true, true).unwrap();
+    let circle =
+        Curve::from(Ellipse::create_canonical_circle(&k, &bore_frame, 2.4, None, None).unwrap());
+    let mut bore = create_linear_sweep(
+        &mut k,
+        &[Some(&circle)],
+        Vec3::new(0.5000477548925153, -0.6630527709169285, 0.5570576862465307),
+        12.9998,
+        true,
+    )
+    .unwrap();
+    p2::set_tolerance(&k, &mut bore, 1e-5, true, true).unwrap();
+    for operand in [&mut stock, &mut bore] {
+        solidcore::topology::integrity::check(operand).unwrap();
+        let check = check_brep(&mut k, operand, CheckLevel::Level2).unwrap();
+        assert!(check.is_valid(), "input: {:?}", check.lines());
+    }
+
+    let mut result = boolean_difference(&mut k, stock, bore).unwrap();
+    solidcore::topology::integrity::check(&result).unwrap();
+    let check = check_brep(&mut k, &mut result, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "{:?}", check.lines());
+    assert_eq!(p1::faces(&result, None).unwrap().len(), 4);
+    assert_eq!(p1::edges(&result, None).unwrap().len(), 6);
+    assert_eq!(p1::vertices(&result, None).unwrap().len(), 4);
+
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    let volume = brep_volume(&k, &mut result, 1e-9, &attrs).unwrap();
+    let expected = PI * 11.0 * (3.75_f64.powi(2) - 2.4_f64.powi(2) / 1e-5_f64.cos());
+    assert!(
+        (volume - expected).abs() / expected < VOLUME_REL_TOL,
+        "volume {volume} vs {expected}"
+    );
+}
