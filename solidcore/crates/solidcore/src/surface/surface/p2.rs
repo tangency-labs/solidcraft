@@ -930,9 +930,7 @@ impl Surface {
                 base: s.base().clone_for_evaluation(depth + 1)?,
                 major_radius: s.major_radius,
                 minor_radius: s.minor_radius,
-                // The copy constructor resets this flag; an evaluation copy must not.
                 inside_out: s.inside_out,
-                keeps_inside_out: s.keeps_inside_out,
             })),
             SurfaceKind::SurfOfRevolution(s) => {
                 SurfaceKind::SurfOfRevolution(Box::new(s.clone_for_evaluation(depth + 1)?))
@@ -3528,8 +3526,7 @@ impl Surface {
             // net the converter refuses leaves the surface as it was, with nothing notified;
             // then the surface itself is swapped with its notifications and takes the copy.
             // The copy is exact, as `clone_kind_exact`'s: the B-spline objects as they are
-            // (`Clone` fixes their knots up) and a torus's inside-out mark (`Clone` drops it
-            // without `keeps_inside_out`).
+            // (`Clone` fixes their knots up).
             SurfaceKind::Cone(s) => {
                 let mut swapped = s.clone();
                 swapped.rev = s.rev().clone_exact();
@@ -9123,23 +9120,31 @@ mod swap_definition_tests {
         .unwrap();
     }
 
-    /// WR-701: a swap keeps the surface as it was made, swapped: a torus marked inside out
-    /// whose copy constructor drops the mark (`keeps_inside_out` false) is still inside out
-    /// after the swap, as it was before the swap was made on a copy.
+    /// WR-701: a swap keeps the surface as it was made, swapped: a torus made inside out
+    /// (its generating circle inside out) is still inside out after the swap, which is made
+    /// on a copy and taken back, and its generator still agrees with it (`SmSurfOfRevolution`
+    /// Test #11).
     #[test]
     fn a_swap_keeps_an_inside_out_torus_inside_out() {
         let k = Kernel::default();
         let frame = Axis2Placement::default();
-        let mut torus =
-            Torus::create_canonical(&k, &frame, 4.0, 1.5, TorusOptions::default(), None).unwrap();
-        torus.inside_out = true;
-        torus.keeps_inside_out = false;
+        let opts = TorusOptions {
+            inside_out: true,
+            ..TorusOptions::default()
+        };
+        let torus = Torus::create_canonical(&k, &frame, 4.0, 1.5, opts, None).unwrap();
+        assert!(torus.inside_out, "made inside out");
         let mut s = Surface::from(torus);
         s.swap_uv(&k).unwrap();
         let SurfaceKind::Torus(t) = s.kind() else {
             panic!("a torus");
         };
         assert!(t.inside_out, "the swap dropped the torus's inside-out mark");
+        let generator = t.base().gen_curve().unwrap();
+        assert!(
+            generator.inside_out_bit(),
+            "the swap turned the generator over"
+        );
         assert!(t.base().swap_uv());
     }
 

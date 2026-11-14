@@ -896,6 +896,17 @@ impl Curve {
         &self.kind
     }
 
+    /// `GetInsideOut` of a curve derived from `SmBSplineCurve`: only lines and conic
+    /// circles and ellipses have the bit; every other kind is `false`.
+    #[must_use]
+    pub(crate) fn inside_out_bit(&self) -> bool {
+        match &self.kind {
+            CurveKind::Line(l) => l.inside_out(),
+            CurveKind::Ellipse(e) => e.inside_out(),
+            _ => false,
+        }
+    }
+
     /// Not upstream: points whose convex hull holds this curve over `interval`, each with
     /// the error bound of its coordinates: a line's two ends
     /// ([`Line::segment_over`](crate::curve::line::Line::segment_over)), a B-spline's

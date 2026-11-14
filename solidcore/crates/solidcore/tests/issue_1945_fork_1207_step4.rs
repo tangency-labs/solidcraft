@@ -105,7 +105,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.transform_scales_each_tolerance = true;
     k.fixes.transform_model_size_from_body_box = true;
     k.fixes.torus_signed_gen_curve_interval = true;
-    k.fixes.torus_keeps_inside_out = true;
     k.fixes.torus_major_radius_from_origin = true;
     k.fixes.torus_iso_circle_axis_from_midpoint = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
