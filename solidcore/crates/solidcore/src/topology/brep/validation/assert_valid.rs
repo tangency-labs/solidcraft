@@ -58,7 +58,7 @@ mod vertex;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use super::{object_info, validate_pointers, Object, SUCCESS};
+use super::{object_info, validate_pointers, validate_pointers_excluding, Object, SUCCESS};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::assert_array::{
     obj_type_string, AssertArray, AssertReport, ObjectKey, ReportSpec,

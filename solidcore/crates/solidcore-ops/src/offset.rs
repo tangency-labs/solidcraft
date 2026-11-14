@@ -34,22 +34,19 @@ use crate::body::{finish, Body, Expect};
 use crate::error::status as kernel_status;
 use crate::order::{self, Order};
 use crate::session::with_body;
-use crate::{Error, OffsetRefusal, Result};
+use crate::{Error, OffsetRefusal, RecordEntity, Result, Unsoundness};
 
 /// The largest offset distance or wall the operations take.
 const MAX_DISTANCE: f64 = 1e6;
 
-/// What [`Error::Unsupported`] says for an offset that moves a vertex past an edge's other end.
-const EDGE_VANISHES: &str = "a vertex moved past the other end of an edge";
-
 /// An offset's kernel error as the operation's: its offset refusal where it is one
 /// ([`typed`]), else as [`crate::error::status`].
-fn status(e: SolidError, index: &dyn Fn(FaceId) -> Option<usize>) -> Error {
+fn status(e: SolidError, index: &dyn Fn(EntityRef) -> Option<RecordEntity>) -> Error {
     typed(&e, index).unwrap_or_else(|| kernel_status(e))
 }
 
 /// A kernel error as ops' offset refusal, for a caller that holds no [`Order`] of the body (any
-/// face it names is unnamed): what the offset operations give for it ([`typed`]), `None` where
+/// entity it names is unnamed): what the offset operations give for it ([`typed`]), `None` where
 /// they give the kernel's status instead.
 #[must_use]
 pub fn refusal(e: &SolidError) -> Option<Error> {
@@ -57,9 +54,9 @@ pub fn refusal(e: &SolidError) -> Option<Error> {
 }
 
 /// The offset refusal a kernel error is, the one routing [`status`] and [`refusal`] share: a
-/// refusal the kernel gives a reason for by that reason ([`offset_refused`]), its face through
+/// refusal the kernel gives a reason for by that reason ([`offset_refused`]), its entity through
 /// `index`; one without by its kind ([`by_kind`]); `None` for any other error.
-fn typed(e: &SolidError, index: &dyn Fn(FaceId) -> Option<usize>) -> Option<Error> {
+fn typed(e: &SolidError, index: &dyn Fn(EntityRef) -> Option<RecordEntity>) -> Option<Error> {
     if let Some(Reason::Offset(o)) = e.failure().map(|f| &f.reason) {
         return Some(offset_refused(*o, e.entity(), index));
     }
@@ -68,32 +65,37 @@ fn typed(e: &SolidError, index: &dyn Fn(FaceId) -> Option<usize>) -> Option<Erro
 
 /// The operation's error for an offset refusal of `kind` that has one of its own: walls that
 /// touch ([`Error::WallsTouch`]), a wall that folds ([`Error::WallFolds`], no largest wall
-/// named), a vertex moved past an edge's other end ([`Error::Unsupported`]).
+/// named), a vertex moved past an edge's other end ([`Error::OffsetRefused`] with
+/// [`OffsetRefusal::EdgeVanishes`], no face named).
 fn by_kind(kind: ErrorKind) -> Option<Error> {
     match kind {
         ErrorKind::OffsetWallsTouch => Some(Error::WallsTouch),
         ErrorKind::OffsetFolds => Some(Error::WallFolds { largest: None }),
-        ErrorKind::OffsetEdgeVanishes => Some(Error::Unsupported(EDGE_VANISHES)),
+        ErrorKind::OffsetEdgeVanishes => Some(Error::OffsetRefused {
+            face: None,
+            why: OffsetRefusal::EdgeVanishes,
+        }),
         _ => None,
     }
 }
 
 /// The kernel's offset refusal `o` as the operation's error: walls that touch
 /// ([`Error::WallsTouch`]), a wall whose face's offset folds ([`Error::WallFolds`], with the
-/// largest wall the kernel names), a vertex moved past an edge's other end
-/// ([`Error::Unsupported`]), and every other reason as [`Error::OffsetRefused`] (#14783): why,
+/// largest wall the kernel names), and every other reason as [`Error::OffsetRefused`] (#14783,
+/// a vertex moved past an edge's other end among them, #13989): why,
 /// and the face the failure is about (`entity`, the reason's own unless the kernel set another)
-/// through `index` (`None` where it names none, or one `index` does not find). A reason this
-/// version does not name yet takes the error of its class where that has one ([`by_kind`]), as
-/// it did before it had a reason; it and a phrase are otherwise said by their class and in the
-/// kernel's words ([`unnamed`], #15035).
+/// through `index` (`None` where it names none, or one `index` does not find), and a body that
+/// fails what its input did not with the entity its check names through `index` too
+/// ([`unsound`]). A reason this version does not name yet takes the error of its class where
+/// that has one ([`by_kind`]), as it did before it had a reason; it and a phrase are otherwise
+/// said by their class and in the kernel's words ([`unnamed`], #15035).
 fn offset_refused(
     o: OffsetFailure,
     entity: Option<EntityRef>,
-    index: &dyn Fn(FaceId) -> Option<usize>,
+    index: &dyn Fn(EntityRef) -> Option<RecordEntity>,
 ) -> Error {
-    let face = match entity {
-        Some(EntityRef::Face(f)) => index(f),
+    let face = match entity.and_then(index) {
+        Some(RecordEntity::Face(i)) => Some(i),
         _ => None,
     };
     let why = match o {
@@ -103,7 +105,7 @@ fn offset_refused(
             }
         }
         OffsetFailure::WallsTouch { .. } => return Error::WallsTouch,
-        OffsetFailure::EdgeVanishes { .. } => return Error::Unsupported(EDGE_VANISHES),
+        OffsetFailure::EdgeVanishes { .. } => OffsetRefusal::EdgeVanishes,
         // (the kernel's fold kind also covers an offset not certified regular, which is no
         // fold: its own reason, #14783)
         OffsetFailure::NotCertified { distance, .. } => OffsetRefusal::NotCertified { distance },
@@ -126,7 +128,10 @@ fn offset_refused(
         OffsetFailure::FacesApart { .. } => OffsetRefusal::FacesApart,
         OffsetFailure::ReachUncertified { .. } => OffsetRefusal::ReachUncertified,
         OffsetFailure::LoopGapUncertified { .. } => OffsetRefusal::LoopGapUncertified,
-        OffsetFailure::Unsound { what } => OffsetRefusal::Unsound { what },
+        OffsetFailure::Unsound { what } => match unsound(what, index) {
+            Some(what) => OffsetRefusal::Unsound { what },
+            None => unnamed(&o),
+        },
         // the kernel's phrase causes (`OffsetFailure::is_phrase`), and a reason the kernel adds
         // later: still classed and said, never a bare status
         other => match by_kind(other.kind()) {
@@ -147,14 +152,57 @@ fn unnamed(o: &OffsetFailure) -> OffsetRefusal {
     }
 }
 
-/// A face's record index through `order`, the [`Order`] of the call's body.
-fn in_order(order: &Order) -> impl Fn(FaceId) -> Option<usize> + '_ {
-    move |f| order.faces.iter().position(|&x| x == f)
+/// What the kernel says a built body fails, as ops' [`Unsoundness`]: the entity it names through
+/// `index`. `None` for a reason this version does not name yet ([`unnamed`] says it).
+fn unsound(
+    what: solidcore::error::offset::Unsoundness,
+    index: &dyn Fn(EntityRef) -> Option<RecordEntity>,
+) -> Option<Unsoundness> {
+    use solidcore::error::offset::Unsoundness as K;
+    Some(match what {
+        K::Check { failures, first } => Unsoundness::Check { failures, first },
+        K::GeometryUnchecked => Unsoundness::GeometryUnchecked,
+        K::LoopOrientationUndecided => Unsoundness::LoopOrientationUndecided,
+        K::LoopGapNotClosable => Unsoundness::LoopGapNotClosable,
+        K::NotManifoldSolid => Unsoundness::NotManifoldSolid,
+        K::VolumeNotPositive => Unsoundness::VolumeNotPositive,
+        K::VolumeUndecided => Unsoundness::VolumeUndecided,
+        K::ToleranceBeyondBound {
+            entity,
+            tolerance,
+            bound,
+        } => Unsoundness::ToleranceBeyondBound {
+            entity: entity.and_then(index),
+            tolerance,
+            bound,
+        },
+        _ => return None,
+    })
 }
 
-/// A face's index among the faces of `b`, for a call that takes no [`Order`].
-fn in_list(b: &Brep) -> impl Fn(FaceId) -> Option<usize> + '_ {
-    move |f| b.face_list().iter().position(|&x| x == f)
+/// A face's, edge's or vertex's record index through `order`, the [`Order`] of the call's body
+/// (of an edge solids touch along, its first record edge, as [`Order::record_edges`] gives it).
+fn in_order(order: &Order) -> impl Fn(EntityRef) -> Option<RecordEntity> + '_ {
+    move |e| match e {
+        EntityRef::Face(f) => position(&order.faces, f).map(RecordEntity::Face),
+        EntityRef::Edge(x) => position(&order.edges, x).map(RecordEntity::Edge),
+        EntityRef::Vertex(v) => position(&order.vertices, v).map(RecordEntity::Vertex),
+        _ => None,
+    }
+}
+
+/// A face's index among the faces of `b`, for a call that takes no [`Order`]; an edge or vertex
+/// is unnamed (without the record, its index is not one the caller knows).
+fn in_list(b: &Brep) -> impl Fn(EntityRef) -> Option<RecordEntity> + '_ {
+    move |e| match e {
+        EntityRef::Face(f) => position(b.face_list(), f).map(RecordEntity::Face),
+        _ => None,
+    }
+}
+
+/// Where `x` is in `list`.
+fn position<T: PartialEq + Copy>(list: &[T], x: T) -> Option<usize> {
+    list.iter().position(|y| *y == x)
 }
 
 /// A distance or wall: finite, not zero, at most [`MAX_DISTANCE`] across.

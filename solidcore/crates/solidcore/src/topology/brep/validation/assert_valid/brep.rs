@@ -49,10 +49,14 @@ pub(super) fn brep(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, walk: bool) ->
     }
 
     // Old style checks: ValidatePointers() and ValidateAndUpdateTolerances().
-    let status = super::validate_pointers(k, b, cx.rep.array.as_deref_mut(), 0, walk, cx.keys)?;
+    let (status, exclusion_failed) =
+        super::validate_pointers_excluding(k, b, cx.rep.array.as_deref_mut(), 0, walk, cx.keys)?;
     if status != super::SUCCESS {
         return Ok(false);
     }
+    // Test #82 refused a vertex whose ball reaches other topology: reported above, and the
+    // body is not valid (the walk below still runs, so its reports are not cut short).
+    rtn &= !exclusion_failed;
 
     // old style ValidateAndUpdateTolerances check (no updating is done)
     let status = tolerances(k, b, cx)?;
@@ -270,6 +274,8 @@ pub(super) fn validate_and_update(
     result
 }
 
+use super::super::pointers::GROWTH_PAST_RATIO;
+
 fn validate_and_update_body(
     k: &mut Kernel,
     b: &mut Brep,
@@ -370,7 +376,16 @@ fn validate_and_update_body(
                     out.violated_or_updated = true;
                     if !validate_only {
                         let gap = 2.0 * edge_gap.unwrap_or(0.0).max(face_gap.unwrap_or(0.0));
-                        tvertex::set_tolerance(b, v, tol::zone_tol3d(k, gap), true, true)?;
+                        // A tolerance grows to absorb a rounding or intersection gap, not a
+                        // misplaced vertex: growth may pass the large/small size ratio of the
+                        // body (Test #82) only up to `GROWTH_PAST_RATIO` times it, and the
+                        // pointer check then keeps the vertex only if its ball reaches no
+                        // topology it does not bound (validity rule 7). A gap needing more is
+                        // left over its vertex for the check to report.
+                        let grown = tol::zone_tol3d(k, gap);
+                        if grown < GROWTH_PAST_RATIO * tol::LARGE_SMALL_SIZE_RATIO * b.tolerance() {
+                            tvertex::set_tolerance(b, v, grown, true, true)?;
+                        }
                     }
                 }
             }
@@ -417,8 +432,13 @@ fn validate_and_update_body(
             let e = super::super::required(eu1::edge(b, eu)?)?;
             if max_gap > tedge::tolerance(b, e)? {
                 out.violated_or_updated = true;
-                if !validate_only && max_gap < size / 800.0 {
-                    tedge::set_tolerance(b, e, tol::zone_tol3d(k, 2.0 * max_gap), true, true)?;
+                // (its vertices grow with it, so under the vertices' bound as well)
+                let grown = tol::zone_tol3d(k, 2.0 * max_gap);
+                if !validate_only
+                    && max_gap < size / 800.0
+                    && grown < tol::LARGE_SMALL_SIZE_RATIO * b.tolerance()
+                {
+                    tedge::set_tolerance(b, e, grown, true, true)?;
                 }
             }
 
