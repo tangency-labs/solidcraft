@@ -87,7 +87,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.oscillating_skips_failed_guesses = true;
     f.refine_cc_range_ends = true;
     f.flat_corners_test_bits = true;
-    f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
     f.taper_tangent_corner_planes = true;
     f.revolve_nested_shells_as_cavities = true;
@@ -95,7 +94,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.join_touching_loops = true;
     f.offset_resolve_crossing_loops = true;
     f.offset_analytic_mate_edges = true;
-    f.nurb_cylinder_inside_out_frame = true;
     f.local_operation_refuses_loose_tangent_edges = true;
     f.torus_major_radius_from_origin = true;
     f.fillet_nx1_opposite_continuation_side_edge = true;
@@ -114,7 +112,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_vertex_by_best_crossing = true;
     f.boolean_cleanup_removes_slits = true;
     f.classify_edge_interval = true;
-    f.ellipse_trim_seam_lines_span_cone_height = true;
     f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
     f.torus_signed_gen_curve_interval = true;
@@ -190,7 +187,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_corner_per_vertex_fan = true;
     f.fillet_rail_trim_at_near_knot = true;
     f.offset_keep_cavity_regions = true;
-    f.ellipse_step_interval_checks = true;
     f.corner_patch_face_side_twist = true;
     f.boolean_union_refuses_solid_leak = true;
     f.curve_loop_start_after_previous_end = true;

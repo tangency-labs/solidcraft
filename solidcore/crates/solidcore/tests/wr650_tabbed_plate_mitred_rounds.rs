@@ -170,11 +170,9 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.cover_wraps_across_closed_seam = true;
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.curve_loop_normal_from_area = true;
-    k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;
     k.fixes.edge_check_orders_tangent_faces = true;
-    k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.extrusion_origin_scaled_zero = true;
     k.fixes.face_tight_box_searches_trim = true;
     k.fixes.fillet_3x2_mixed_concave_side_edge = true;
@@ -216,7 +214,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.local_operation_step_walls = true;
     k.fixes.loops_go_on_round_the_vertex = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
-    k.fixes.nurb_cylinder_inside_out_frame = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_clip_right_side_out = true;
     k.fixes.offset_collapsed_rounds_mated = true;

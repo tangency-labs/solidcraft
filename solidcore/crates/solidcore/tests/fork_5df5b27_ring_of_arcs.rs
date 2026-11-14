@@ -5,14 +5,14 @@
 //! (9.0000000000985 and 9.0000000000757 in the fork's trace), and equalised them only within
 //! `SM_EFF_ZERO * (1 + r)`, which gave the cylinders a semi-angle their own check
 //! (`SmCylinder::Test #0 Zero SemiAngle`) refuses. `SwapUV` now keeps the cylinder as it was made
-//! (WR-701), so the ring checks clean at level 2 on the default kernel, and with
-//! `Kernel::fixes.cylinder_rebuild_mean_radius` too. That fix's rebuild is tested on its own in
+//! (WR-701), so the ring checks clean at level 2 on the default kernel, which also gives a
+//! rebuilt cylinder the mean of near-equal radii (WR-385). That rebuild is tested on its own in
 //! `surface/cone/p2.rs`.
 //!
 //! The arcs are built as the fork's capi `smlib_extrude` builds them (`arc` in
 //! `capi/src/smlib_sweeps.cpp`): the frame turned to the arc's start, the interval
 //! `[0, sweep]` in degrees. The arcs are `SmCylinder` walls only with
-//! `Kernel::fixes.linear_sweep_arc_is_cylinder` (WR-565, also in the fork), so both legs set it.
+//! `Kernel::fixes.linear_sweep_arc_is_cylinder` (WR-565, also in the fork), so the ring sets it.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -54,11 +54,10 @@ fn arc(
     Curve::from(Ellipse::create_canonical_circle(k, &frame, radius, Some(&degrees), None).unwrap())
 }
 
-/// The ring extruded with the WR-385 opt-in `fix`.
-fn ring(fix: bool) -> (Kernel, Brep) {
+/// The ring extruded.
+fn ring() -> (Kernel, Brep) {
     let mut k = Kernel::default();
     k.fixes.linear_sweep_arc_is_cylinder = true;
-    k.fixes.cylinder_rebuild_mean_radius = fix;
     let pi = core::f64::consts::PI;
     let mut curves = Vec::new();
     for radius in [10.0, 9.0] {
@@ -98,17 +97,7 @@ fn cylinder_semi_angles(b: &Brep) -> Vec<f64> {
 
 #[test]
 fn wr701_the_turned_hole_walls_stay_cylinders() {
-    let (mut k, mut b) = ring(false);
-    let angles = cylinder_semi_angles(&b);
-    assert_eq!(angles.len(), 2 * ARCS, "every arc's wall is an SmCylinder");
-    assert!(angles.iter().all(|&a| a == 0.0), "{angles:?}");
-    let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-    assert_eq!(check.failure_count(), 0, "{:?}", check.lines());
-}
-
-#[test]
-fn wr385_ring_of_arcs_checks_clean_with_the_fix() {
-    let (mut k, mut b) = ring(true);
+    let (mut k, mut b) = ring();
     let angles = cylinder_semi_angles(&b);
     assert_eq!(angles.len(), 2 * ARCS, "every arc's wall is an SmCylinder");
     assert!(angles.iter().all(|&a| a == 0.0), "{angles:?}");

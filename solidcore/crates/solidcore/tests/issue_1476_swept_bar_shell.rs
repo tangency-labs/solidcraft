@@ -90,13 +90,11 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.oscillating_skips_failed_guesses = true;
     f.refine_cc_range_ends = true;
     f.flat_corners_test_bits = true;
-    f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
     f.revolve_nested_shells_as_cavities = true;
     f.join_touching_loops = true;
     f.offset_resolve_crossing_loops = true;
     f.offset_analytic_mate_edges = true;
-    f.nurb_cylinder_inside_out_frame = true;
     f.offset_collapsed_rounds_mated = true;
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
@@ -107,7 +105,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.boolean_vertex_by_best_crossing = true;
     f.boolean_cleanup_removes_slits = true;
     f.classify_edge_interval = true;
-    f.ellipse_trim_seam_lines_span_cone_height = true;
     f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
     f.torus_signed_gen_curve_interval = true;
