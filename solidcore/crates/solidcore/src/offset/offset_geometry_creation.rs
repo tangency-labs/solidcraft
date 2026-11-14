@@ -170,6 +170,7 @@ use crate::blend::fillet_standard_solver::p1::CircularCrossSectionFsg;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{Curve, CurveKind, ELLIPSE_TYPE, LINE_TYPE};
 use crate::curve::curve::p8::CurveIntersectOptions;
+use crate::curve::line::{BoundedLineOptions, Line};
 use crate::error::offset::OffsetFailure;
 use crate::error::{Failure, Reason, Result, SolidError};
 use crate::geom::assert_array::ObjectKey;
@@ -1357,7 +1358,22 @@ fn create_analytic_extension(k: &Kernel, surface: &Surface, dist: f64) -> Result
 /// copy over the same span: from `marched`'s start point to its end point, the way
 /// round through its middle (all of a closed conic for a closed piece). `None` when no
 /// line or conic of `exact` runs through all three points within `tol`.
-fn exact_piece(k: &Kernel, marched: &Curve, exact: &[Curve], tol: f64) -> Result<Option<Curve>> {
+///
+/// Not the fork's: a line piece is anchored at its point nearest `near` (the model where
+/// the piece is mated; its start without one), its STEP parameter the arc length from
+/// there. The surfaces' line is anchored where the intersector placed it, which for an
+/// unbounded plane (a local operation's new face) is the middle of its extension, far from
+/// the model (1.3e6 from a pyramid of size 100): evaluated over a piece near the model,
+/// its STEP end points and those of its NURB then differed by the rounding at that size
+/// (1.2e-10 to 2.6e-10, past `SmLine` tests 2 and 3's 1e-10), and the body was refused as
+/// unsound.
+fn exact_piece(
+    k: &Kernel,
+    marched: &Curve,
+    exact: &[Curve],
+    tol: f64,
+    near: Option<Point3>,
+) -> Result<Option<Curve>> {
     let ivl = marched.natural_interval();
     // start, middle, end
     let p = [
@@ -1425,9 +1441,32 @@ fn exact_piece(k: &Kernel, marched: &Curve, exact: &[Curve], tol: f64) -> Result
                 Extent1d::from_min_max(t2, after(t0, t2)?)
             }
         };
+        if let CurveKind::Line(l) = candidate.kind() {
+            let (lo, hi) = (
+                candidate.evaluate_step_point(k, span.min())?,
+                candidate.evaluate_step_point(k, span.max())?,
+            );
+            // the NURB runs as the surfaces' line's does
+            let (start, end) = if l.inside_out() { (hi, lo) } else { (lo, hi) };
+            let length = start.distance(end);
+            let Ok(dir) = (end - start).unitize() else {
+                continue;
+            };
+            let anchor = near.map_or(start, |q| start + dir * dir.dot(q - start));
+            let from = dir.dot(start - anchor);
+            let line = Line::bounded(
+                anchor,
+                dir,
+                &Extent1d::from_min_max(from, from + length),
+                &BoundedLineOptions {
+                    dim: l.dim(),
+                    ..BoundedLineOptions::default()
+                },
+            );
+            return Ok(Some(Curve::from(line)));
+        }
         let mut copy = candidate.copy(k)?;
         match copy.kind_mut() {
-            CurveKind::Line(l) => l.adjust_step_interval(&span)?,
             CurveKind::Ellipse(e) => e.adjust_step_interval(k, &span, None)?,
             // (only lines and conics reach here)
             _ => return Err(sm_err(OP_EXACT_PIECE)),
@@ -1517,7 +1556,7 @@ pub fn make_edges_on_analytics_exact(
             }
             Ok(None) | Err(_) => continue,
         };
-        let Some(mut piece) = exact_piece(k, &trimmed, &exact.curves_3d, tol)? else {
+        let Some(mut piece) = exact_piece(k, &trimmed, &exact.curves_3d, tol, None)? else {
             continue;
         };
         // The piece runs as the edge does (exact_piece may give it end to start).
@@ -4040,12 +4079,18 @@ impl OffsetGeometryCreation {
                         Some(deg20_rad),
                     )?;
                     let tol = brep.brep_tolerance(edge)?;
+                    // where the pieces are mated: the edge's vertex, on the model
+                    let near = match brep.edge_vertex(edge)? {
+                        Some(v) => Some(brep.vertex_point(v)?),
+                        None => None,
+                    };
                     for ii in 0..ssi.curves_3d.len() {
                         let marched = ssi.curves_3d.get(ii).ok_or(dangling("curve index"))?;
                         if marched.is_degenerate(k, EFF_ZERO, None)? {
                             continue;
                         }
-                        let Some(piece) = exact_piece(k, marched, &exact.curves_3d, tol)? else {
+                        let Some(piece) = exact_piece(k, marched, &exact.curves_3d, tol, near)?
+                        else {
                             continue;
                         };
                         let mut uv: [Option<Curve>; 2] = [None, None];
