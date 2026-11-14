@@ -655,7 +655,8 @@ fn lifted_sheets(k: &mut Kernel, gap: f64, stitch_tol: f64, edge_zone: f64) -> (
     let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT).unwrap();
     add_square(k, &mut b, 0.0, 0.0);
     add_square(k, &mut b, 1.0, 0.0);
-    b.set_tolerance(1e-5);
+    // A body tolerance of 1e-4 puts the size ratio limit (1000x) at 0.1, above every zone here.
+    b.set_tolerance(1e-4);
     for f in b.face_list().to_vec() {
         b.face_mut(f).unwrap().tolerance = 0.002;
     }
