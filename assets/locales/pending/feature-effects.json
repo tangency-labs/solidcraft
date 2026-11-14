@@ -1,0 +1,90 @@
+{
+  "ar": {
+    "cmd.timeline.effects": "الأجسام المتأثرة",
+    "timeline.effects.body_component": "{body} — {component}",
+    "timeline.effects.changed": "تم تعديلها",
+    "timeline.effects.created": "تم إنشاؤها",
+    "timeline.effects.empty": "لا تُحدث هذه الميزة أي تغييرات على الأجسام.",
+    "timeline.effects.removed": "تمت إزالتها",
+    "timeline.effects.title": "الأجسام المتأثرة",
+    "timeline.effects.unavailable": "هذا الجسم غير موجود في النموذج الحالي.",
+    "timeline.effects.unevaluated": "لا تتوفر تغييرات محسوبة على الأجسام."
+  },
+  "de": {
+    "cmd.timeline.effects": "Betroffene Körper",
+    "timeline.effects.body_component": "{body} — {component}",
+    "timeline.effects.changed": "Geändert",
+    "timeline.effects.created": "Erstellt",
+    "timeline.effects.empty": "Dieses Feature hat keine Körperänderungen.",
+    "timeline.effects.removed": "Entfernt",
+    "timeline.effects.title": "Betroffene Körper",
+    "timeline.effects.unavailable": "Dieser Körper ist im aktuellen Modell nicht vorhanden.",
+    "timeline.effects.unevaluated": "Keine ausgewerteten Körperänderungen verfügbar."
+  },
+  "en": {
+    "cmd.timeline.effects": "Affected Bodies",
+    "timeline.effects.body_component": "{body} — {component}",
+    "timeline.effects.changed": "Changed",
+    "timeline.effects.created": "Created",
+    "timeline.effects.empty": "This feature has no body changes.",
+    "timeline.effects.removed": "Removed",
+    "timeline.effects.title": "Affected bodies",
+    "timeline.effects.unavailable": "This body is not in the current model.",
+    "timeline.effects.unevaluated": "No evaluated body changes are available."
+  },
+  "he": {
+    "cmd.timeline.effects": "גופים מושפעים",
+    "timeline.effects.body_component": "{body} — {component}",
+    "timeline.effects.changed": "שונו",
+    "timeline.effects.created": "נוצרו",
+    "timeline.effects.empty": "לתכונה זו אין שינויים בגופים.",
+    "timeline.effects.removed": "הוסרו",
+    "timeline.effects.title": "גופים מושפעים",
+    "timeline.effects.unavailable": "גוף זה אינו נמצא במודל הנוכחי.",
+    "timeline.effects.unevaluated": "אין שינויים מחושבים זמינים בגופים."
+  },
+  "ja": {
+    "cmd.timeline.effects": "影響を受けるボディ",
+    "timeline.effects.body_component": "{body} — {component}",
+    "timeline.effects.changed": "変更",
+    "timeline.effects.created": "作成",
+    "timeline.effects.empty": "このフィーチャーによるボディの変更はありません。",
+    "timeline.effects.removed": "削除",
+    "timeline.effects.title": "影響を受けるボディ",
+    "timeline.effects.unavailable": "このボディは現在のモデルに存在しません。",
+    "timeline.effects.unevaluated": "評価済みのボディの変更はありません。"
+  },
+  "ko": {
+    "cmd.timeline.effects": "영향을 받는 바디",
+    "timeline.effects.body_component": "{body} — {component}",
+    "timeline.effects.changed": "변경됨",
+    "timeline.effects.created": "생성됨",
+    "timeline.effects.empty": "이 피처에는 바디 변경 사항이 없습니다.",
+    "timeline.effects.removed": "제거됨",
+    "timeline.effects.title": "영향을 받는 바디",
+    "timeline.effects.unavailable": "이 바디는 현재 모델에 없습니다.",
+    "timeline.effects.unevaluated": "평가된 바디 변경 사항이 없습니다."
+  },
+  "vi": {
+    "cmd.timeline.effects": "Các thân khối bị ảnh hưởng",
+    "timeline.effects.body_component": "{body} — {component}",
+    "timeline.effects.changed": "Đã thay đổi",
+    "timeline.effects.created": "Đã tạo",
+    "timeline.effects.empty": "Tính năng này không làm thay đổi thân khối nào.",
+    "timeline.effects.removed": "Đã xóa",
+    "timeline.effects.title": "Các thân khối bị ảnh hưởng",
+    "timeline.effects.unavailable": "Thân khối này không có trong mô hình hiện tại.",
+    "timeline.effects.unevaluated": "Không có thay đổi thân khối đã được tính toán."
+  },
+  "zh": {
+    "cmd.timeline.effects": "受影响的实体",
+    "timeline.effects.body_component": "{body} — {component}",
+    "timeline.effects.changed": "已修改",
+    "timeline.effects.created": "已创建",
+    "timeline.effects.empty": "此特征没有实体更改。",
+    "timeline.effects.removed": "已移除",
+    "timeline.effects.title": "受影响的实体",
+    "timeline.effects.unavailable": "此实体不在当前模型中。",
+    "timeline.effects.unevaluated": "没有可用的已求值实体更改。"
+  }
+}

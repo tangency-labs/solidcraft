@@ -348,6 +348,7 @@ sketch.trim                       2D sketch only (the sketch solver and engine t
 sketch.trim.path                  2D sketch only (the sketch solver and engine tests); no kernel operation
 solid.cell_grid                   crates/engine/src/cmd/cell_grid_tests.rs (volumes against hand-derived values) and the planner tests in solidcore/crates/solidcore/src/cell_grid/tests.rs
 timeline.dependents               a listing of dependents
+timeline.effects                  read-only historical body effects; crates/engine/src/cmd/edit_tests.rs feature_effects_* and crates/engine/src/schema/inspect_tests.rs feature_effects_publish_schemas_and_check_their_contract
 timeline.export_script            writes the history as a script
 timeline.inspect                  a listing of the timeline
 timeline.play                     plays the history back in the view: no new geometry
