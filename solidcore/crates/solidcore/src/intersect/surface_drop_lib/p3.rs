@@ -173,6 +173,18 @@ const fn truthy(b: Option<bool>) -> bool {
     !matches!(b, Some(false))
 }
 
+/// A successful drop may still leave the surface or hit a pole in the
+/// curve's interior. Initial and restored endpoints obey the same rule.
+fn checked_endpoint_status(status: i32, end: &DropPt, interval: &Extent1d) -> i32 {
+    if (truthy(end.on_pole) || truthy(end.leaving_domain))
+        && !interval.is_value_on_boundary(end.t, EFF_ZERO).0
+    {
+        SM_ERR_OUTSIDE_OF_DOMAIN
+    } else {
+        status
+    }
+}
+
 /// An `SmBoolean` argument of `SmDropCurveFail::Set`.
 fn sm_bool(b: bool) -> i32 {
     i32::from(b)
@@ -1253,11 +1265,7 @@ impl Surface {
                 }
 
                 // leaving the domain or hitting a pole in the middle of the curve
-                if (truthy(end.on_pole) || truthy(end.leaving_domain))
-                    && !interval.is_value_on_boundary(end.t, EFF_ZERO).0
-                {
-                    ret_status = SM_ERR_OUTSIDE_OF_DOMAIN;
-                }
+                ret_status = checked_endpoint_status(ret_status, &end, interval);
 
                 if ret_status != SM_SUCCESS {
                     // walked off the edge of the surface close to the curve end
@@ -1361,20 +1369,22 @@ impl Surface {
                             endpoint_t,
                             &mut end,
                         ) {
-                            Ok(code) => code == SM_SUCCESS,
+                            Ok(code) => checked_endpoint_status(code, &end, interval) == SM_SUCCESS,
                             Err(e) if e.is_unported_or_cancelled() => return Err(e),
                             Err(_) => false,
                         };
-                    ignore_status(ivl.set_min_max(start.t, end.t))?;
+                    if endpoint_ready {
+                        ignore_status(ivl.set_min_max(start.t, end.t))?;
 
-                    // fix boundary tangents
-                    let _fix_bt_change = start.fix_boundary_tangents(
-                        &s_uv_domain,
-                        &mut end,
-                        uv_tol_x,
-                        uv_tol_y,
-                        approx_tol_3d,
-                    );
+                        // fix boundary tangents
+                        let _fix_bt_change = start.fix_boundary_tangents(
+                            &s_uv_domain,
+                            &mut end,
+                            uv_tol_x,
+                            uv_tol_y,
+                            approx_tol_3d,
+                        );
+                    }
 
                     // test the span
                     let acc = if endpoint_ready {
@@ -1730,6 +1740,45 @@ mod tests {
     }
 
     #[test]
+    fn successful_redrops_reject_interior_poles_and_domain_exits() {
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        for (pole, leaving, expected) in [
+            (Some(false), Some(false), SM_SUCCESS),
+            (Some(true), Some(false), SM_ERR_OUTSIDE_OF_DOMAIN),
+            (Some(false), Some(true), SM_ERR_OUTSIDE_OF_DOMAIN),
+            (Some(true), Some(true), SM_ERR_OUTSIDE_OF_DOMAIN),
+            (None, Some(false), SM_ERR_OUTSIDE_OF_DOMAIN),
+            (Some(false), None, SM_ERR_OUTSIDE_OF_DOMAIN),
+            (None, None, SM_ERR_OUTSIDE_OF_DOMAIN),
+        ] {
+            let mut end = DropPt::new(0.5, Some(false));
+            end.on_pole = pole;
+            end.leaving_domain = leaving;
+            assert_eq!(
+                checked_endpoint_status(SM_SUCCESS, &end, &interval),
+                expected
+            );
+            // Reaching a pole or leaving at a curve endpoint remains allowed,
+            // including the initial path's existing boundary roundoff allowance.
+            for t in [0.0, EFF_ZERO / 2.0, 1.0] {
+                end.t = t;
+                assert_eq!(
+                    checked_endpoint_status(SM_SUCCESS, &end, &interval),
+                    SM_SUCCESS
+                );
+            }
+        }
+        // Checking an ordinary endpoint must not turn a failed solve into success.
+        let mut end = DropPt::new(0.5, Some(false));
+        end.on_pole = Some(false);
+        end.leaving_domain = Some(false);
+        assert_eq!(
+            checked_endpoint_status(SM_ERR_NOT_CONVERGING, &end, &interval),
+            SM_ERR_NOT_CONVERGING
+        );
+    }
+
+    #[test]
     fn subdivided_tolerant_seam_traces_keep_their_parameter_side() {
         // A closed, nonperiodic triangular tube. The source crosses its seam
         // tangentially within the drop tolerance, but its initial three-degree
@@ -1753,7 +1802,7 @@ mod tests {
         )
         .unwrap();
         let surface = Surface::from(BSplineSurface::from_nurb(nurb, false));
-        let source = Curve::from(crate::nurbs::b_spline_curve::BSplineCurve::from_nurb(
+        let source = Curve::from(BSplineCurve::from_nurb(
             NurbCurve::new(
                 vec![
                     CPoint::new(1.0, 0.0, 0.0, NOW),

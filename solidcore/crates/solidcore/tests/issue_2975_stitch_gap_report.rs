@@ -649,6 +649,7 @@ fn a_planar_conic_disc_in_a_holed_face_reports_its_gap() {
 /// tolerance and the repair targets, but fits the incident local zones.
 fn locally_tolerant_sheets(k: &mut Kernel, gap: f64) -> Brep {
     use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexEdgeGap, VertexFaceGap};
     use solidcore::topology::brep::p4::stitch_faces;
 
     let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT).unwrap();
@@ -683,13 +684,13 @@ fn locally_tolerant_sheets(k: &mut Kernel, gap: f64) -> Brep {
     // face constructor measured before that edit.
     for eu in b.edgeuses().iter().map(|(id, _)| id).collect::<Vec<_>>() {
         let data = b.edgeuse_mut(eu).unwrap();
-        data.max_edge_face_gap = Default::default();
-        data.edge_ccw_edge_gap = Default::default();
+        data.max_edge_face_gap = EdgeFaceGap::default();
+        data.edge_ccw_edge_gap = EdgeEdgeGap::default();
     }
     for vu in b.vertexuses().iter().map(|(id, _)| id).collect::<Vec<_>>() {
         let data = b.vertexuse_mut(vu).unwrap();
-        data.vertex_edge_gap = Default::default();
-        data.vertex_face_gap = Default::default();
+        data.vertex_edge_gap = VertexEdgeGap::default();
+        data.vertex_face_gap = VertexFaceGap::default();
     }
     let outcome = stitch_faces(k, &mut b, 1e-4, None, false).unwrap();
     assert_eq!(outcome.stitched_edges, 1);
