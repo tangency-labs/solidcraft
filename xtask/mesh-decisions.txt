@@ -134,7 +134,6 @@ crates/kernel/src/lip.rs:face_at picks the planar face at a point by a mesh
 crates/kernel/src/offset_backend.rs:face_points takes a point per face from mesh triangles
 crates/kernel/src/offset_backend.rs:faces_under picks the face under each point by the nearest mesh triangle
 crates/kernel/src/offset_backend.rs:with_offsets tags offset faces by a mesh
-crates/kernel/src/polyhedron.rs:offset_faces picks the faces to offset by a mesh
 crates/kernel/src/provenance.rs:blend_origins traces blend faces by meshes
 crates/kernel/src/provenance.rs:extrude_origins traces extrusion faces by meshes
 crates/kernel/src/provenance.rs:face_tris reads face triangles for provenance
