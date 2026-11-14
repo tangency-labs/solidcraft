@@ -17,16 +17,36 @@ pub struct SectionParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Plane")]
     pub plane: Option<Plane>,
-    /// Signed distance along the original plane normal, in design units or an expression.
+    /// Signed distance against the original plane normal (positive cuts more away), in design units or an expression.
     pub offset: Option<LengthExpr>,
     /// World coordinate on a named plane's normal axis; mutually exclusive with offset.
     pub at: Option<LengthExpr>,
     pub flip: Option<bool>,
     pub hatch: Option<bool>,
     pub clear: Option<bool>,
+    /// Add the plane to the section instead of replacing it (at most 6 planes).
+    pub add: Option<bool>,
+    /// Move this plane (by id) to `plane`, keeping the others.
+    pub replace: Option<u64>,
+    /// Take this plane (by id) out of the section.
+    pub remove: Option<u64>,
+    /// Hide planes (by id): they stay in the section and cut nothing.
+    pub hide: Option<PlaneIds>,
+    /// Show hidden planes (by id) again.
+    pub show: Option<PlaneIds>,
+    /// The Analysis folder's eye: false hides the planes on show until true brings them back.
+    pub folder: Option<bool>,
+}
+/// One plane's id or a list of them.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum PlaneIds {
+    One(u64),
+    Many(Vec<u64>),
 }
 #[derive(Serialize, JsonSchema)]
 pub struct Section {
+    pub id: u64,
     pub origin: [f64; 3],
     pub normal: [f64; 3],
     pub hatch: bool,
@@ -38,6 +58,17 @@ pub struct Section {
 #[derive(Serialize, JsonSchema)]
 pub struct SectionResult {
     pub section: Option<Section>,
+    /// Every plane of the section, by id.
+    pub planes: Vec<SectionPlaneState>,
+    /// While the Analysis folder is hidden: the ids that come back with it.
+    pub folder: Option<Vec<u64>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+#[derive(Serialize, JsonSchema)]
+pub struct SectionPlaneState {
+    pub id: u64,
+    pub origin: [f64; 3],
+    pub normal: [f64; 3],
+    pub hidden: bool,
 }

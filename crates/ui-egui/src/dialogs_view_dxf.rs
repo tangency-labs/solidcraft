@@ -44,7 +44,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, dashed: &mut bool, tolerance: &mu
 }
 
 pub fn run(app: &mut SolveApp, dashed: bool, tolerance: f64, zero_origin: bool) -> Result<(), String> {
-    if crate::viewport::section_plane(app).is_some() {
+    if !crate::viewport::section_planes(app).is_empty() {
         return Err(app.tr_label("Turn off section analysis before exporting the view.").into());
     }
     if !solidcraft_engine::cmd::view_dxf_exportable(&app.session) {
