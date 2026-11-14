@@ -1932,7 +1932,7 @@ fn resize_preview(
         Ok((candidate, bounds))
     })();
     match result {
-        Ok((candidate, bounds)) => resized_preview(candidate, bounds, outer),
+        Ok((candidate, bounds)) => resized_preview(layout, candidate, bounds, outer),
         Err(reason) => HostPreview { rejection: Some(reason), ..HostPreview::empty(outer) },
     }
 }
@@ -1942,8 +1942,14 @@ fn project_resize(service: &LayoutService, reference: &HostLayout, candidate: &L
     resolve_host_projected(service, &proposed, reference)
 }
 
-fn resized_preview(candidate: LayoutAction, bounds: LogicalRect, original: LogicalRect) -> HostPreview {
-    HostPreview { action: if bounds == original { None } else { Some(candidate) }, ..HostPreview::empty(bounds) }
+fn resized_preview(layout: &HostLayout, candidate: LayoutAction, bounds: LogicalRect, original: LogicalRect) -> HostPreview {
+    // The pointer may resolve back onto the current width across a whole gap.
+    // Keep showing that valid landing without committing a no-op resize.
+    if bounds == original {
+        HostPreview { projected: Some(layout.clone()), ..HostPreview::empty(bounds) }
+    } else {
+        HostPreview { action: Some(candidate), ..HostPreview::empty(bounds) }
+    }
 }
 
 fn pair_preview(
@@ -1986,7 +1992,7 @@ fn pair_preview(
         Ok((original, bounds))
     })();
     match result {
-        Ok((candidate, bounds)) => resized_preview(candidate, bounds, outer),
+        Ok((candidate, bounds)) => resized_preview(layout, candidate, bounds, outer),
         Err(reason) => HostPreview { rejection: Some(reason), ..HostPreview::empty(outer) },
     }
 }
