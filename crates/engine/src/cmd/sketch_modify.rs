@@ -3782,8 +3782,14 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
 /// Move the points of the entities (in place) through `f`; circle radii scale by `k`.
 fn transform_in_place(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Vec2) -> Vec2, k: f64, cmd: &str) -> Result<()> {
     let pts = involved_points(sk, cs, ps);
-    if pts.iter().any(|q| sk.points.get(*q).is_some_and(|x| x.fixed || x.link.is_some())) {
-        return Err(bad(cmd, "fixed or projected geometry cannot move"));
+    // A point the sketch holds fixed, or one it projects from a body or another sketch, follows
+    // its source: it cannot move by itself. The refusal names the point and says which of the
+    // two it is, so the user knows what to move instead (#16164).
+    if let Some((id, reason)) = pts.iter().find_map(|q| {
+        let x = sk.points.get(*q)?;
+        (x.fixed || x.link.is_some()).then(|| (x.id.as_str(), if x.link.is_some() { "projected" } else { "fixed" }))
+    }) {
+        return Err(bad(cmd, format!("point `{id}` is {reason} and cannot move")));
     }
     // A point the origin holds goes where the move takes it: the coincidence that held it
     // there is dropped (#5034).
