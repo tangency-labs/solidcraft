@@ -108,8 +108,10 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let mut tile = ui.new_child(UiBuilder::new().id_salt(("view_tile", id)).max_rect(frame));
         tile.set_clip_rect(ui.clip_rect().intersect(if is_ground { area } else { frame }));
         app.viewport.tile = Some(slot(id));
+        app.viewport.card = !is_ground;
         if is_ground {
             app.viewport.bleed = Some(area);
+            app.viewport.window = Some(free);
             crate::viewport::show(app, &mut tile);
             if let Some(range) = app.viewport.backdrop.take() {
                 lay_under(ui.ctx(), layer, &slots, range);
@@ -120,6 +122,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             cards.push((id, frame));
         }
         app.viewport.tile = None;
+        app.viewport.card = false;
+        app.viewport.window = None;
     }
     // Drawn over the views: the shadow and frame of each card, and the focused view's name.
     let mut chosen = None;
@@ -138,9 +142,12 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.viewport.cards = cards;
     match chosen {
         Some((id, CardAction::Maximise)) => {
-            // This view alone: every other view of the design is closed.
+            // This view alone in the window; the others stay open, reached from the bar.
             crate::documents::focus_view(app, id);
-            crate::documents::view_close_others(app, id);
+            crate::documents::view_layout(app, solidcraft_views::Preset::Single);
+        }
+        Some((id, CardAction::Remove)) => {
+            crate::documents::view_unshow(app, id);
         }
         Some((id, CardAction::Close)) => {
             crate::documents::view_close(app, id);
@@ -155,8 +162,10 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 /// What a card's header buttons ask for.
 enum CardAction {
-    /// Keep only this view: the others are closed.
+    /// Keep only this view in the window: the others stay open, reached from the bar.
     Maximise,
+    /// Stop showing this view in the window; it stays open, reached from the bar.
+    Remove,
     Close,
 }
 
@@ -214,6 +223,7 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
         let resp = ui.interact(rect, ui.scope_id().with(("card_button", id, slot as i32)), Sense::click());
         let tip = match kind {
             CardAction::Maximise => solidcraft_ui_text::tr_label("Maximise this view"),
+            CardAction::Remove => solidcraft_ui_text::tr_label("Remove from this window"),
             CardAction::Close => solidcraft_ui_text::tr_label("Close view"),
         };
         let resp = resp.on_hover_text(tip);
@@ -231,6 +241,9 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
                     painter.line_segment([corner, corner + vec2(0.0, -sy * 3.5)], ink);
                 }
             }
+            CardAction::Remove => {
+                painter.line_segment([c + vec2(-4.5, 0.0), c + vec2(4.5, 0.0)], ink);
+            }
             CardAction::Close => {
                 painter.line_segment([c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)], ink);
                 painter.line_segment([c + vec2(-4.5, 4.5), c + vec2(4.5, -4.5)], ink);
@@ -242,6 +255,7 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
     };
     button(0.0, CardAction::Close);
     button(1.0, CardAction::Maximise);
+    button(2.0, CardAction::Remove);
     action
 }
 
