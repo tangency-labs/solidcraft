@@ -1,0 +1,106 @@
+{
+  "en": {
+    "ui.changeKeyboardShortcut": "Change Keyboard Shortcut…",
+    "ui.moreCommandOptions": "More: pin, keyboard shortcut, toolbar"
+  },
+  "ar": {
+    "ui.changeKeyboardShortcut": "تغيير اختصار لوحة المفاتيح…",
+    "ui.moreCommandOptions": "المزيد: تثبيت، اختصار لوحة المفاتيح، شريط الأدوات"
+  },
+  "cs": {
+    "ui.changeKeyboardShortcut": "Změnit klávesovou zkratku…",
+    "ui.moreCommandOptions": "Další: připnout, klávesová zkratka, panel nástrojů"
+  },
+  "da": {
+    "ui.changeKeyboardShortcut": "Skift tastaturgenvej…",
+    "ui.moreCommandOptions": "Mere: fastgør, tastaturgenvej, værktøjslinje"
+  },
+  "de": {
+    "ui.changeKeyboardShortcut": "Tastenkürzel ändern…",
+    "ui.moreCommandOptions": "Mehr: Anheften, Tastenkürzel, Werkzeugleiste"
+  },
+  "es": {
+    "ui.changeKeyboardShortcut": "Cambiar atajo de teclado…",
+    "ui.moreCommandOptions": "Más: fijar, atajo de teclado, barra de herramientas"
+  },
+  "fr": {
+    "ui.changeKeyboardShortcut": "Modifier le raccourci clavier…",
+    "ui.moreCommandOptions": "Plus : épingler, raccourci clavier, barre d’outils"
+  },
+  "gl": {
+    "ui.changeKeyboardShortcut": "Cambiar atallo de teclado…",
+    "ui.moreCommandOptions": "Máis: fixar, atallo de teclado, barra de ferramentas"
+  },
+  "he": {
+    "ui.changeKeyboardShortcut": "שינוי קיצור מקלדת…",
+    "ui.moreCommandOptions": "עוד: הצמדה, קיצור מקלדת, סרגל כלים"
+  },
+  "hu": {
+    "ui.changeKeyboardShortcut": "Billentyűparancs módosítása…",
+    "ui.moreCommandOptions": "Továbbiak: rögzítés, billentyűparancs, eszköztár"
+  },
+  "id": {
+    "ui.changeKeyboardShortcut": "Ubah Pintasan Keyboard…",
+    "ui.moreCommandOptions": "Lainnya: sematkan, pintasan keyboard, bilah alat"
+  },
+  "it": {
+    "ui.changeKeyboardShortcut": "Cambia scorciatoia da tastiera…",
+    "ui.moreCommandOptions": "Altro: aggiungi, scorciatoia da tastiera, barra degli strumenti"
+  },
+  "ja": {
+    "ui.changeKeyboardShortcut": "キーボードショートカットを変更…",
+    "ui.moreCommandOptions": "その他：固定、キーボードショートカット、ツールバー"
+  },
+  "ko": {
+    "ui.changeKeyboardShortcut": "바로 가기 키 변경…",
+    "ui.moreCommandOptions": "더 보기: 고정, 바로 가기 키, 도구 모음"
+  },
+  "ms": {
+    "ui.changeKeyboardShortcut": "Tukar Pintasan Papan Kekunci…",
+    "ui.moreCommandOptions": "Lagi: semat, pintasan papan kekunci, bar alat"
+  },
+  "nl": {
+    "ui.changeKeyboardShortcut": "Sneltoets wijzigen…",
+    "ui.moreCommandOptions": "Meer: vastzetten, sneltoets, werkbalk"
+  },
+  "pl": {
+    "ui.changeKeyboardShortcut": "Zmień skrót klawiaturowy…",
+    "ui.moreCommandOptions": "Więcej: przypnij, skrót klawiaturowy, pasek narzędzi"
+  },
+  "pt-BR": {
+    "ui.changeKeyboardShortcut": "Alterar atalho de teclado…",
+    "ui.moreCommandOptions": "Mais: fixar, atalho de teclado, barra de ferramentas"
+  },
+  "ro": {
+    "ui.changeKeyboardShortcut": "Schimbă comanda rapidă…",
+    "ui.moreCommandOptions": "Mai multe: fixare, comandă rapidă, bară de instrumente"
+  },
+  "ru": {
+    "ui.changeKeyboardShortcut": "Изменить сочетание клавиш…",
+    "ui.moreCommandOptions": "Ещё: закрепить, сочетание клавиш, панель инструментов"
+  },
+  "sv": {
+    "ui.changeKeyboardShortcut": "Ändra kortkommando…",
+    "ui.moreCommandOptions": "Mer: fäst, kortkommando, verktygsfält"
+  },
+  "tr": {
+    "ui.changeKeyboardShortcut": "Klavye kısayolunu değiştir…",
+    "ui.moreCommandOptions": "Daha fazla: sabitle, klavye kısayolu, araç çubuğu"
+  },
+  "uk": {
+    "ui.changeKeyboardShortcut": "Змінити комбінацію клавіш…",
+    "ui.moreCommandOptions": "Більше: закріпити, комбінація клавіш, панель інструментів"
+  },
+  "vi": {
+    "ui.changeKeyboardShortcut": "Đổi phím tắt…",
+    "ui.moreCommandOptions": "Thêm: ghim, phím tắt, thanh công cụ"
+  },
+  "zh": {
+    "ui.changeKeyboardShortcut": "更改键盘快捷键…",
+    "ui.moreCommandOptions": "更多：固定、键盘快捷键、工具栏"
+  },
+  "zh-TW": {
+    "ui.changeKeyboardShortcut": "變更鍵盤快速鍵…",
+    "ui.moreCommandOptions": "更多：釘選、鍵盤快速鍵、工具列"
+  }
+}
