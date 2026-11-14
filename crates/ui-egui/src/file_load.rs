@@ -99,6 +99,8 @@ pub struct Request {
     /// The Verify preference added `verify` to the options; unlike a caller's own option it must
     /// not stop an already-open design from being reused. Its check then runs separately.
     pub(crate) auto_verify: bool,
+    /// Open the file with an importer plugin (`file.import`) even when SolidCraft reads it too.
+    pub plugin_import: bool,
 }
 
 impl Request {
@@ -119,6 +121,7 @@ impl Request {
             tab: None,
             tries: 0,
             auto_verify: false,
+            plugin_import: false,
         }
     }
     /// It adds what it reads to the active design.
@@ -137,6 +140,7 @@ impl Request {
     }
     fn command(&self) -> (&'static str, Value) {
         match &self.kind {
+            Kind::Open if self.plugin_import => ("file.import", self.params()),
             Kind::Open => ("doc.open", self.params()),
             Kind::Insert if self.mesh || solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", self.params()),
             Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
@@ -600,7 +604,7 @@ pub(crate) fn queue(app: &mut SolveApp, mut request: Request) -> Result<(), Stri
 /// Answer each ordinary open separately, including queued requests for the same file.
 /// Validate the caller's scope before looking at existing sessions or resolving paths.
 fn reuse_open(app: &mut SolveApp, request: &Request) -> bool {
-    if request.kind != Kind::Open {
+    if request.kind != Kind::Open || request.plugin_import {
         return false;
     }
     let reused = solidcraft_engine::io::vfs::scoped(request.scope.clone(), || {
@@ -648,7 +652,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         return Some(req);
     };
     let kind = match id {
-        "doc.open" => Kind::Open,
+        "doc.open" | "file.import" => Kind::Open,
         "file.insert_step" | "file.insert_mesh" | "pointcloud.insert" => Kind::Insert,
         "file.export_view_dxf" => Kind::ExportDxf,
         "pointcloud.reload" => Kind::ReloadCloud,
@@ -709,6 +713,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         tab: None,
         tries: 0,
         auto_verify: false,
+        plugin_import: id == "file.import",
     };
     let _ = begin_request(app, request);
     None
@@ -817,6 +822,10 @@ fn start(app: &mut SolveApp) {
     // evaluated under the user's validation mode.
     scratch.set_command_check(app.session.command_check());
     scratch.set_validation(app.preferences.validation);
+    // A file an importer plugin reads opens with the plugins the user installed and left on.
+    scratch.plugin_state = app.session.plugin_state.clone();
+    scratch.disabled_plugins = app.session.disabled_plugins.clone();
+    scratch.plugin_limits = app.session.plugin_limits;
     crate::print_face_ui::sync(&mut scratch, &app.preferences);
     if insert {
         scratch.selection = app.session.selection.clone();
@@ -1723,6 +1732,11 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     }
                     if let Some(note) = &request.note {
                         app.set_status(note.clone(), false);
+                    }
+                    // A file an importer plugin opened: what it could not carry over. A program
+                    // that asked has it in the reply instead.
+                    if request.reply.is_none() {
+                        crate::import_report::offer(app, &made.result);
                     }
                 }
                 request.answer(Ok(made.result));

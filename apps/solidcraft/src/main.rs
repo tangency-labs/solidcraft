@@ -673,11 +673,21 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
                 dialog = dialog.add_filter(label, &case_variants(first));
             }
             // The groups come from the format registry, so a new format joins this dialog by itself.
-            let mut everything = io::formats::open_extensions(true);
+            // Installed importer plugins read more kinds of file: they join "everything" and add
+            // a group of their own, named after the plugin.
+            let plugins = io::formats::plugin_open_filters();
+            let mut everything: Vec<&str> = io::formats::open_extensions(true);
             everything.extend(["dxf", "svg"]);
+            for (_, exts) in &plugins {
+                everything.extend(exts.iter().map(String::as_str).filter(|e| !io::formats::open_extensions(true).contains(e)));
+            }
             dialog = dialog.add_filter(solidcraft_ui_text::tr("file.open.drawing_filter"), &case_variants(&everything));
             for (label, exts) in io::formats::import_filters(true) {
                 dialog = dialog.add_filter(label, &case_variants(&exts));
+            }
+            for (label, exts) in &plugins {
+                let exts: Vec<&str> = exts.iter().map(String::as_str).collect();
+                dialog = dialog.add_filter(label.as_str(), &case_variants(&exts));
             }
             let future = dialog.add_filter("All files", &["*"]).pick_file();
             let folder = open_folder.clone();

@@ -1170,6 +1170,17 @@ fn read_kicad_env_name(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, del
 
 fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_arg(p, "doc.open")?;
+    // A file SolidCraft does not read itself opens with the installed importer that claims its
+    // extension; `format` picks an importer even for a file SolidCraft reads.
+    let format = str_(p, "format");
+    if format.is_some() || !reads_natively(path) {
+        if let Some(importer) = crate::plugin::importer_for(s, path, format)? {
+            let options = p.get("options").filter(|o| !o.is_null()).cloned().unwrap_or_else(|| json!({}));
+            return reply(OpenResult::Imported(crate::plugin::import_file(s, &importer, path, &options)?));
+        }
+    } else if p.get("options").is_some_and(|v| !v.is_null()) {
+        return Err(bad("doc.open", "`options` applies to files an importer plugin opens"));
+    }
     if !solidcraft_io::is_step_path(path) && p.get("names").is_some_and(|v| !v.is_null()) {
         return Err(bad("doc.open", "`names` applies to STEP and IGES files only"));
     }
@@ -1286,6 +1297,15 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let saved = if solidcraft_io::has_design_provenance(path) { None } else { saved };
     let opened = Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation());
     opened_design(s, opened, path, read_only, disk, verify, None)
+}
+
+/// SolidCraft opens this file with its own readers (a design, drawing, CAD, mesh or point cloud file).
+fn reads_natively(path: &str) -> bool {
+    let extension = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+    super::drawing_import_command(path).is_some()
+        || solidcraft_io::is_kicad_path(path)
+        || solidcraft_io::formats::open_extensions(true).iter().any(|e| e.eq_ignore_ascii_case(&extension))
+        || matches!(extension.as_str(), "sc" | "solidcraft" | "json")
 }
 
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.

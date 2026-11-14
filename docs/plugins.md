@@ -166,8 +166,8 @@ running app commands, logging, progress and cancellation, named files, a clock, 
 entry. A plugin's `plugin.json` lists what it needs, for example
 `"capabilities": ["commands@0.1"]`; the host refuses an unknown or newer capability when it reads
 the manifest, with a plain message such as "needs commands 0.2; update SolidCraft or the plugin".
-`ui`, `viewport`, `formats` and `storage` arrive later as their own versioned interfaces. While a
-version is 0.x, a minor version may break the one before it.
+`formats@0.1` adds importers (below). `ui`, `viewport` and `storage` arrive later as their own
+versioned interfaces. While a version is 0.x, a minor version may break the one before it.
 
 ## Commands and permissions
 
@@ -176,9 +176,50 @@ past the open design are grouped (`file`, `doc`, `app`, `plugin`) and refused un
 manifest asks for the group in `permissions.command_groups` and the user grants it.
 File access requires approved folder grants. The reserved `net` permission is
 refused with a typed error. Traps, missing permissions, failed commands, limits
-and invalid manifest fields return structured errors. Later phases add
-import/export, author tooling and browser execution after the
-phase 1 design review.
+and invalid manifest fields return structured errors. Phase 2 adds importers (below);
+exporters, author tooling and browser execution follow.
+
+## Importers
+
+An importer turns a file of another format into a SolidCraft design. Its manifest says
+`"capabilities": ["formats@0.1"]`, and each of its entries has `"kind": "importer"` and the
+extensions it claims, lowercase without the dot:
+
+```json
+{"id": "sample", "name": "Sample", "version": "1.0.0", "capabilities": ["formats@0.1"],
+ "runtime": {"module": "sample.wasm", "commands": [],
+   "entries": [{"name": "convert", "kind": "importer", "extensions": ["smp"],
+                "input_schema": {"type": "object", "properties": {"units": {"type": "string", "enum": ["mm", "in"], "default": "mm"}}}}],
+   "limits": {"fuel": 100000000000, "memory_mib": 1024, "deadline_ms": 300000, "stack_kib": 16384},
+   "permissions": {"input_folder": true}}}
+```
+
+- **Opening.** `doc.open` opens a file SolidCraft does not read itself with the installed, enabled
+  importer that claims its extension. `file.import` always uses an importer, and `format`
+  (`plugin_id.entry`, listed in `plugin.list`'s `importers`) picks one for either command, for
+  example for a `.fcstd` file SolidCraft also reads. `options` passes the entry's declared options.
+  Two importers claiming one extension need `format`. File › Open offers the claimed extensions,
+  and the Plugins menu has each importer's entry: its dialog shows the options, then chooses the file.
+- **The world.** The component implements `importer-plugin`: it exports
+  `importer.import-file(entry, file, options)` and imports `source` (the file, read in chunks of at
+  most 1 MiB), `design` (where it writes a SolidCraft design file), `log`, `control` and `clock`.
+  It has no `commands` import: an importer makes a design, it does not edit the open one.
+- **The result.** The design opens as a new design that is not saved anywhere yet, named after
+  the file unless the design names itself. The call returns a loss report,
+  `{"summary": "...", "items": [{"severity": "info|degraded|dropped", "subject": "...", "message": "..."}], "details": {...}}`:
+  the app shows the summary and items in its Import report window; programs get it in the reply.
+  Nothing changes unless the whole import succeeds.
+- **Assemblies.** `source.read`, `source.size` and `source.resolve` with path `""` reach the file
+  being imported. Any other path is relative to that file's folder (an assembly's parts) and needs
+  the `input_folder` permission, which the install review shows. Hidden names, links and paths
+  outside the folder are refused; an import reads at most 1 GiB and writes a design of at most 256 MiB.
+- **Failures.** A trap fails that one import ("Sample failed on bracket.smp: ...") and the next
+  one gets a fresh instance. The compiled component stays in memory, so the next file opens
+  without compiling again; nothing compiled is written to disk.
+- **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
+  `stack_kib` up to 64 MiB. Its memory and fuel still have to fit the user's ceilings in
+  Preferences › Plugins. Build it for `wasm32-unknown-unknown` and wrap it with
+  `wasm-tools component new`: the host links no WASI, so a component that imports any is refused.
 
 ## Plugin data in a design
 

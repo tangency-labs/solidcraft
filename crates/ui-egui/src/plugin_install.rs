@@ -104,6 +104,14 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
         });
         lines.push(format("prefs.plugin_folder", &[("name", name), ("access", access)]));
     }
+    let opens = list(plugin.get("opens"));
+    if !opens.is_empty() {
+        let extensions = opens.iter().map(|e| std::format!(".{e}")).collect::<Vec<_>>().join(", ");
+        lines.push(format("plugin_install.opens", &[("extensions", &extensions)]));
+    }
+    if permissions.and_then(|p| p.get("input_folder")).and_then(Value::as_bool).unwrap_or(false) {
+        lines.push(tr("plugin_install.input_folder").to_string());
+    }
     if permissions.and_then(|p| p.get("clock")).and_then(Value::as_bool).unwrap_or(false) {
         lines.push(tr("plugin_install.clock").to_string());
     }

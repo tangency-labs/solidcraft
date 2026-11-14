@@ -15,6 +15,19 @@ pub const WIT: &str = include_str!("../wit/plugin.wit");
 pub const MAX_MANIFEST_BYTES: usize = 16 * 1024;
 pub const MAX_COMPONENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_JSON_BYTES: usize = 1024 * 1024;
+/// An importer's component may be larger: a real converter measured 28 to 42 MB (RFC 0002).
+pub const MAX_IMPORTER_COMPONENT_BYTES: usize = 64 * 1024 * 1024;
+/// The most one `source.read` or `design.write` call moves.
+pub const MAX_IMPORT_CHUNK_BYTES: usize = 1024 * 1024;
+/// The most an importer reads in one call: the file being imported and the files beside it.
+pub const MAX_IMPORT_INPUT_BYTES: u64 = 1024 * 1024 * 1024;
+/// The largest design an importer may write.
+pub const MAX_IMPORT_DESIGN_BYTES: usize = 256 * 1024 * 1024;
+/// A command entry finishes within 30 s; an importer converting a large assembly may take minutes.
+pub const MAX_COMMAND_DEADLINE_MS: u64 = 30_000;
+pub const MAX_IMPORTER_DEADLINE_MS: u64 = 600_000;
+/// The most extensions one importer entry claims.
+pub const MAX_EXTENSIONS: usize = 32;
 /// Memory32 has at most 65536 pages of 64 KiB.
 pub const MAX_MEMORY_MIB: usize = 4096;
 
@@ -46,7 +59,7 @@ pub enum HostError {
 /// The capabilities this host serves, as name and `major.minor`. Each is a set of WIT interfaces
 /// a plugin names in its manifest's `capabilities` list. While a major version is 0, a minor
 /// version may break the one before it, so 0.x matches only the same minor.
-pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1))];
+pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("formats", (0, 1))];
 
 fn capability_version(text: &str) -> Option<(u32, u32)> {
     let mut parts = text.split('.');
@@ -206,10 +219,13 @@ pub struct Limits {
     pub fuel: u64,
     pub memory_mib: usize,
     pub deadline_ms: u64,
+    /// The guest stack in KiB, when the default is too small (a real decoder needed about 16 MiB).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stack_kib: Option<u32>,
 }
 impl Default for Limits {
     fn default() -> Self {
-        Self { fuel: 10_000_000, memory_mib: 64, deadline_ms: 5000 }
+        Self { fuel: 10_000_000, memory_mib: 64, deadline_ms: 5000, stack_kib: None }
     }
 }
 impl Limits {
@@ -220,8 +236,11 @@ impl Limits {
         if !(1..=MAX_MEMORY_MIB).contains(&self.memory_mib) {
             return Err(invalid("runtime.limits.memory_mib", "must be 1..4096 (Wasm32)"));
         }
-        if !(1..=30_000).contains(&self.deadline_ms) {
-            return Err(invalid("runtime.limits.deadline_ms", "must be 1..30000"));
+        if !(1..=MAX_IMPORTER_DEADLINE_MS).contains(&self.deadline_ms) {
+            return Err(invalid("runtime.limits.deadline_ms", "must be 1..600000"));
+        }
+        if self.stack_kib.is_some_and(|kib| !(64..=65_536).contains(&kib)) {
+            return Err(invalid("runtime.limits.stack_kib", "must be 64..65536 (64 KiB to 64 MiB)"));
         }
         Ok(())
     }
@@ -235,6 +254,9 @@ pub struct Permissions {
     /// Sensitive command groups the plugin asks for, such as `file` or `doc`. Each is refused
     /// unless the app grants it too; which groups exist is the app's.
     pub command_groups: BTreeSet<String>,
+    /// An importer may read the other files in the folder of the file it imports (an assembly's
+    /// parts), through `source`. Nothing outside that folder, and only during that one import.
+    pub input_folder: bool,
     /// Reserved: refused in this API regardless of app grants.
     pub net: bool,
 }
@@ -281,13 +303,34 @@ fn empty_input_schema() -> Value {
     serde_json::json!({"type":"object","properties":{}})
 }
 
+/// What an entry is: a command the plugin runs on the open design, or an importer that turns a
+/// file of a claimed extension into a new design.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum EntryKind {
+    #[default]
+    Command,
+    Importer,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(from = "EntryDeclaration")]
 pub struct Entry {
     pub name: String,
+    pub kind: EntryKind,
+    /// The file extensions an importer claims: lowercase, without the dot. Empty for a command.
+    pub extensions: Vec<String>,
     pub effect: Effect,
     pub input_schema: Value,
     pub slots: Vec<UiSlot>,
+}
+
+impl Entry {
+    /// Whether this importer claims `path`'s extension (ignoring case).
+    pub fn claims(&self, path: &Path) -> bool {
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
+        self.kind == EntryKind::Importer && !extension.is_empty() && self.extensions.iter().any(|e| e.eq_ignore_ascii_case(extension))
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -301,6 +344,10 @@ enum EntryDeclaration {
 struct DeclaredEntry {
     name: String,
     #[serde(default)]
+    kind: EntryKind,
+    #[serde(default)]
+    extensions: Vec<String>,
+    #[serde(default)]
     effect: Effect,
     #[serde(default = "empty_input_schema")]
     input_schema: Value,
@@ -310,10 +357,22 @@ struct DeclaredEntry {
 impl From<EntryDeclaration> for Entry {
     fn from(value: EntryDeclaration) -> Self {
         match value {
-            EntryDeclaration::Legacy(name) => Self { name, effect: Effect::Edit, input_schema: empty_input_schema(), slots: Vec::new() },
-            EntryDeclaration::Declared(value) => {
-                Self { name: value.name, effect: value.effect, input_schema: value.input_schema, slots: value.slots }
-            }
+            EntryDeclaration::Legacy(name) => Self {
+                name,
+                kind: EntryKind::Command,
+                extensions: Vec::new(),
+                effect: Effect::Edit,
+                input_schema: empty_input_schema(),
+                slots: Vec::new(),
+            },
+            EntryDeclaration::Declared(value) => Self {
+                name: value.name,
+                kind: value.kind,
+                extensions: value.extensions,
+                effect: value.effect,
+                input_schema: value.input_schema,
+                slots: value.slots,
+            },
         }
     }
 }
@@ -349,6 +408,19 @@ pub struct RuntimeManifest {
     pub permissions: Permissions,
 }
 impl RuntimeManifest {
+    /// Whether this runtime is an importer (world `importer-plugin`). A runtime's entries are all
+    /// commands or all importers.
+    pub fn is_importer(&self) -> bool {
+        self.entries.first().is_some_and(|e| e.kind == EntryKind::Importer)
+    }
+    /// The largest component this runtime may ship.
+    pub fn max_component_bytes(&self) -> usize {
+        if self.is_importer() { MAX_IMPORTER_COMPONENT_BYTES } else { MAX_COMPONENT_BYTES }
+    }
+    /// The importer entry that claims `path`'s extension, if any.
+    pub fn importer_for(&self, path: &Path) -> Option<&Entry> {
+        self.entries.iter().find(|e| e.claims(path))
+    }
     pub fn validate(&self) -> Result<()> {
         if !valid_id(self.module.strip_suffix(".wasm").unwrap_or("")) {
             return Err(invalid("runtime.module", "must be one lowercase .wasm file name"));
@@ -361,6 +433,7 @@ impl RuntimeManifest {
             if !valid_id(&entry.name) || !names.insert(&entry.name) {
                 return Err(invalid("runtime.entries", "requires 1..32 distinct ids"));
             }
+            validate_kind(self, entry)?;
             let field = format!("runtime.entries.{}.input_schema", entry.name);
             if !entry.input_schema.is_object() || entry.input_schema.get("type").and_then(Value::as_str) != Some("object") {
                 return Err(invalid(&field, "entry inputs must be an object schema"));
@@ -378,7 +451,100 @@ impl RuntimeManifest {
             return Err(invalid("runtime.commands", "requires at most 128 exact command names"));
         }
         self.permissions.validate()?;
-        self.limits.validate()
+        self.limits.validate()?;
+        if self.is_importer() {
+            if !self.commands.is_empty() {
+                return Err(invalid("runtime.commands", "an importer runs no app commands; leave the list empty"));
+            }
+            if !self.permissions.files.is_empty() || !self.permissions.command_groups.is_empty() {
+                return Err(invalid("runtime.permissions", "an importer reads only its file and, with input_folder, the files beside it"));
+            }
+        } else {
+            if self.permissions.input_folder {
+                return Err(invalid("runtime.permissions.input_folder", "only an importer reads the folder of the file it imports"));
+            }
+            if self.limits.deadline_ms > MAX_COMMAND_DEADLINE_MS {
+                return Err(invalid("runtime.limits.deadline_ms", "must be 1..30000"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// An importer entry claims 1..32 distinct lowercase extensions and edits (it makes a design);
+/// a command claims none. One runtime does not mix the two: they are different worlds.
+fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
+    let field = format!("runtime.entries.{}", entry.name);
+    if runtime.entries.iter().any(|other| other.kind != entry.kind) {
+        return Err(invalid("runtime.entries", "entries are all commands or all importers; ship an importer as a plugin of its own"));
+    }
+    match entry.kind {
+        EntryKind::Command if !entry.extensions.is_empty() => Err(invalid(format!("{field}.extensions"), "only an importer claims file extensions")),
+        EntryKind::Command => Ok(()),
+        EntryKind::Importer => {
+            let mut seen = BTreeSet::new();
+            let valid = |e: &String| (1..=16).contains(&e.len()) && e.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+            if entry.extensions.is_empty() || entry.extensions.len() > MAX_EXTENSIONS || !entry.extensions.iter().all(|e| valid(e) && seen.insert(e))
+            {
+                return Err(invalid(
+                    format!("{field}.extensions"),
+                    "an importer claims 1..32 distinct lowercase extensions without the dot, such as \"f3d\"",
+                ));
+            }
+            if entry.effect != Effect::Edit {
+                return Err(invalid(format!("{field}.effect"), "an importer makes a design: its effect is edit"));
+            }
+            Ok(())
+        }
+    }
+}
+
+/// How bad one loss is: kept with a note, carried over in a lesser form, or left out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LossSeverity {
+    Info,
+    Degraded,
+    Dropped,
+}
+
+/// One thing an importer could not carry over as it was.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LossItem {
+    pub severity: LossSeverity,
+    /// What it is about: a feature, body or part name. May be empty.
+    #[serde(default)]
+    pub subject: String,
+    pub message: String,
+}
+
+/// What an importer returns besides the design: what it could not carry over. The host shows
+/// the summary and items to the user; `details` is the importer's own data, kept for programs.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LossReport {
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub items: Vec<LossItem>,
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub details: Value,
+}
+pub const MAX_LOSS_ITEMS: usize = 4096;
+impl LossReport {
+    pub fn validate(&self) -> Result<()> {
+        let text = |value: &str, max: usize| value.chars().count() <= max && !value.chars().any(char::is_control);
+        if !text(&self.summary, 240) {
+            return Err(HostError::InvalidInput { field: "loss_report.summary".into(), reason: "at most 240 printable characters".into() });
+        }
+        if self.items.len() > MAX_LOSS_ITEMS || !self.items.iter().all(|i| text(&i.subject, 256) && plain(&i.message, 1024)) {
+            return Err(HostError::InvalidInput {
+                field: "loss_report.items".into(),
+                reason: "at most 4096 items, each a printable message of at most 1024 characters and a subject of at most 256".into(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -452,7 +618,11 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
     }
     check_capabilities(&manifest.capabilities, app)?;
     if let Some(runtime) = &manifest.runtime {
-        if !manifest.capabilities.iter().any(|capability| capability.starts_with("commands@")) {
+        if runtime.is_importer() {
+            if !manifest.capabilities.iter().any(|capability| capability.starts_with("formats@")) {
+                return Err(invalid("capabilities", "an importer needs the formats capability: \"capabilities\": [\"formats@0.1\"]"));
+            }
+        } else if !manifest.capabilities.iter().any(|capability| capability.starts_with("commands@")) {
             return Err(invalid("capabilities", "a plugin with a runtime needs the commands capability: \"capabilities\": [\"commands@0.1\"]"));
         }
         runtime.validate()?;

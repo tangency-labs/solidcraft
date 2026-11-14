@@ -568,6 +568,8 @@ pub(crate) struct EntryDialog {
     pub(crate) error: Option<String>,
     /// A read entry's result, as indented JSON.
     pub(crate) result: Option<String>,
+    /// An importer's extensions: its button chooses the file to open, with these options.
+    pub(crate) opens: Option<Vec<String>>,
 }
 
 /// A run waiting for its reply.
@@ -584,6 +586,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         return;
     }
     let fields = form(&entry.input_schema);
+    let opens = (entry.kind == solidcraft_engine::plugin::EntryKind::Importer).then(|| entry.extensions.clone());
     app.plugin_menu.dialog = Some(EntryDialog {
         label: command_title(&plugin, entry),
         entry: entry.name.clone(),
@@ -594,6 +597,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         running: None,
         error: None,
         result: None,
+        opens,
     });
 }
 
@@ -626,6 +630,24 @@ pub(crate) fn run(app: &mut SolveApp) -> Result<(), String> {
         return Ok(());
     }
     let params = dialog.ready(app)?;
+    // An importer: choose the file, then open it as a new design on the file worker, as File ›
+    // Open does, with the options from this dialog.
+    if let Some(extensions) = dialog.opens.clone() {
+        let format = std::format!("{}.{}", dialog.plugin.id, dialog.entry);
+        app.plugin_menu.dialog = None;
+        let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
+        app.pick_open_for(&extensions, move |app, path| {
+            let Some(path) = path else { return };
+            let mut request = crate::file_load::Request::new(&path, crate::file_load::Kind::Open);
+            request.plugin_import = true;
+            request.options.insert("format".into(), json!(format));
+            request.options.insert("options".into(), params);
+            if let Err(error) = crate::file_load::begin_request(app, request) {
+                app.set_status(error, true);
+            }
+        });
+        return Ok(());
+    }
     let request = json!({"command":"plugin.run","params":{
         "path": dialog.plugin.path, "approval": dialog.plugin.approval, "entry": dialog.entry, "params": params}});
     let (req, reply) = solidcraft_control::ControlRequest::new("engine.execute", request);
@@ -690,7 +712,8 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // Just the command's own title ("Gears"): no plugin or menu name after it.
     let title = dialog.label.clone();
-    let (run_label, close_label) = (app.tr("ui.plugin_dialog_run").to_owned(), app.tr(if dialog.read { "ui.close" } else { "ui.cancel" }).to_owned());
+    let run_key = if dialog.opens.is_some() { "ui.plugin_dialog_choose_file" } else { "ui.plugin_dialog_run" };
+    let (run_label, close_label) = (app.tr(run_key).to_owned(), app.tr(if dialog.read { "ui.close" } else { "ui.cancel" }).to_owned());
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_plugin_entry"), "prefs_plugins", &title)
         .fields()
         .actions(&run_label, &close_label, None)

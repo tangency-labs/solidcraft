@@ -451,6 +451,22 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
     groups
 }
 
+/// The Open dialog's groups for installed importer plugins: (plugin name, lower-case extensions).
+/// The app sets them before it shows the dialog; hosts add them after the built-in groups.
+static PLUGIN_OPEN_FILTERS: std::sync::RwLock<Vec<(String, Vec<String>)>> = std::sync::RwLock::new(Vec::new());
+
+/// Set the importer plugins' Open dialog groups (see [`plugin_open_filters`]).
+pub fn set_plugin_open_filters(filters: Vec<(String, Vec<String>)>) {
+    if let Ok(mut current) = PLUGIN_OPEN_FILTERS.write() {
+        *current = filters;
+    }
+}
+
+/// The importer plugins' Open dialog groups the app last set.
+pub fn plugin_open_filters() -> Vec<(String, Vec<String>)> {
+    PLUGIN_OPEN_FILTERS.read().map(|filters| filters.clone()).unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

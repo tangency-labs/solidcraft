@@ -1,8 +1,8 @@
 //! One-shot plugins share the engine's command surface, file scope and undo history.
 use super::CommandSpec;
 use crate::schema::plugin::{
-    InspectParams, InspectResult, InstallParams, InstallResult, ListParams, ListResult, ListedPlugin, MeshParams, MeshResult, RemoveParams,
-    RemoveResult, RunParams, RunResult,
+    ImportParams, ImportedDesign, InspectParams, InspectResult, InstallParams, InstallResult, ListParams, ListResult, ListedPlugin, MeshParams,
+    MeshResult, RemoveParams, RemoveResult, RunParams, RunResult,
 };
 use crate::{
     Result, Session, checked,
@@ -13,6 +13,9 @@ use crate::{
 use serde_json::Value;
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("file.import", "Import with Plugin", checked!("file.import", import)).icon("import").noundo()
+        .contract(&TypedContract::<ImportParams>::new()).output(output_schema_for::<ImportedDesign>)
+        .params("path, format?: installed importer plugin_id.entry (default: the one claiming the file's extension; see plugin.list importers), options?: the importer's declared options; opens the file as a new, unsaved design made by the importer plugin and returns its loss_report; never opens a dialog"),
     CommandSpec::new("model.mesh", "Read Body Mesh", checked!("model.mesh", mesh)).icon("inspect").noundo().read_only()
         .contract(&TypedContract::<MeshParams>::new()).output(output_schema_for::<MeshResult>)
         .params("body, tolerance?: finite positive chord tolerance in mm (default 0.05); evaluated component-local mesh, at most 8192 vertices and 16384 triangles; no files or model changes"),
@@ -122,6 +125,7 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         commands: runtime.map(|r| r.commands.iter().cloned().collect()).unwrap_or_default(),
         entries: runtime.map(|r| r.entries.iter().map(|e| format!("{}.{}", manifest.id, e.name)).collect()).unwrap_or_default(),
         entry_points: runtime.map(|r| r.entries.clone()).unwrap_or_default(),
+        opens: runtime.map(|r| r.entries.iter().flat_map(|e| e.extensions.iter().cloned()).collect()).unwrap_or_default(),
         replaces,
         installed,
         folder: folder.to_string_lossy().into_owned(),
@@ -182,12 +186,24 @@ fn list(s: &mut Session, _p: &Value) -> Result<Value> {
                 .manifest
                 .runtime
                 .as_ref()
-                .map(|r| r.entries.iter().map(|e| format!("{}.{}", package.manifest.id, e.name)).collect())
+                .map(|r| {
+                    r.entries.iter().filter(|e| e.kind == plugin::EntryKind::Command).map(|e| format!("{}.{}", package.manifest.id, e.name)).collect()
+                })
                 .unwrap_or_default();
             plugins.push(ListedPlugin { disabled: s.disabled_plugins.contains(&package.manifest.id), manifest: package.manifest, commands });
         }
     }
-    serde_json::to_value(ListResult { plugins, param_warnings: vec![] }).map_err(|e| bad("plugin.list", e.to_string()))
+    serde_json::to_value(ListResult { plugins, importers: plugin::describe_importers(s), param_warnings: vec![] })
+        .map_err(|e| bad("plugin.list", e.to_string()))
+}
+
+fn import(s: &mut Session, p: &Value) -> Result<Value> {
+    let p: ImportParams = serde_json::from_value(p.clone()).map_err(|e| bad("file.import", e.to_string()))?;
+    let path = p.path.0;
+    let importer = plugin::importer_for(s, &path, p.format.as_deref())?
+        .ok_or_else(|| bad("file.import", "no installed, enabled importer plugin reads this file"))?;
+    let imported = plugin::import_file(s, &importer, &path, &p.options)?;
+    serde_json::to_value(imported).map_err(|e| bad("file.import", e.to_string()))
 }
 
 fn remove(_s: &mut Session, p: &Value) -> Result<Value> {

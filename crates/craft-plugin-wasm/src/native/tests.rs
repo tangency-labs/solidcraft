@@ -204,8 +204,10 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         limits: StoreLimitsBuilder::new().build(),
         failed: None,
         calls: 0,
+        max_calls: MAX_CALLS,
         log_bytes: 0,
         deadline: Instant::now() + Duration::from_secs(5),
+        import: None,
     }
 }
 #[test]
@@ -277,7 +279,7 @@ fn epoch_interrupt_is_distinct_from_fuel_exhaustion_in_diagnostics() {
     let engine = wasmtime::Engine::new(&config).unwrap();
     let module = wasmtime::Module::from_binary(&engine, &wat::parse_str(r#"(module (func (export "run") (loop br 0)))"#).unwrap()).unwrap();
     let mut store = wasmtime::Store::new(&engine, ());
-    let limits = Limits { fuel: 100_000, memory_mib: 1, deadline_ms: 5000 };
+    let limits = Limits { fuel: 100_000, memory_mib: 1, deadline_ms: 5000, stack_kib: None };
     store.set_fuel(limits.fuel).unwrap();
     store.set_epoch_deadline(1);
     let instance = wasmtime::Instance::new(&mut store, &module, &[]).unwrap();
@@ -553,5 +555,70 @@ fn file_access_authorizes_the_complete_path_for_reads_and_writes() {
         state.discard_writes();
     }
     assert_eq!(std::fs::read(root.join("denied.txt")).unwrap(), b"original");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+fn importer_manifest(input_folder: bool) -> Manifest {
+    craft_plugin::parse_manifest(
+        json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.1"],"runtime":{
+            "module":"sample.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"]}],
+            "limits":{"fuel":10000000,"memory_mib":2,"deadline_ms":2000},"permissions":{"input_folder":input_folder}
+        }})
+        .to_string()
+        .as_bytes(),
+        "sample",
+    )
+    .unwrap()
+}
+fn importer_component() -> Vec<u8> {
+    let (package, version) = API.split_once('@').unwrap();
+    wat::parse_str(include_str!("../importer_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap()
+}
+fn import(manifest: &Manifest, path: PathBuf, input_folder: bool) -> Result<crate::Imported> {
+    let request = crate::ImportRequest { path, input_folder };
+    crate::run_import(App::default(), manifest, &importer_component(), "convert", &json!({}), &request).1
+}
+fn import_folder(files: &[(&str, &[u8])]) -> PathBuf {
+    let root = std::env::temp_dir().join(format!("craft-plugin-import-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    for (name, bytes) in files {
+        std::fs::write(root.join(name), bytes).unwrap();
+    }
+    root
+}
+#[test]
+fn an_importer_streams_its_file_into_a_design_and_returns_its_loss_report() {
+    let root = import_folder(&[("bracket.smp", b"design bytes")]);
+    let imported = import(&importer_manifest(false), root.join("bracket.smp"), false).unwrap();
+    assert_eq!(imported.design, b"design bytes");
+    assert_eq!(imported.report.summary, "Copied the file");
+    assert_eq!(imported.report.items.len(), 1);
+    assert_eq!(imported.report.items[0].severity, craft_plugin::LossSeverity::Dropped);
+    // A command runtime cannot be run as an importer, nor an importer as a command.
+    assert!(matches!(import(&manifest(), root.join("bracket.smp"), false), Err(HostError::InvalidInput { .. })));
+    let mut app = App::default();
+    assert!(matches!(run(&mut app, &importer_manifest(false), &importer_component(), "convert", &json!({})), Err(HostError::InvalidInput { .. })));
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn reading_beside_the_file_needs_the_input_folder_permission_both_asked_and_granted() {
+    let root = import_folder(&[("assembly.smp", b"S"), ("part.bin", b"part bytes"), (".hidden.smp", b"x")]);
+    for (asked, granted) in [(false, true), (true, false)] {
+        let failure = import(&importer_manifest(asked), root.join("assembly.smp"), granted).unwrap_err();
+        assert!(matches!(&failure, HostError::PermissionDenied { permission } if permission.contains("input_folder")), "{failure}");
+    }
+    assert_eq!(import(&importer_manifest(true), root.join("assembly.smp"), true).unwrap().design, b"part bytes");
+    // A hidden file is never imported.
+    assert!(matches!(import(&importer_manifest(true), root.join(".hidden.smp"), true), Err(HostError::InvalidInput { .. })));
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn an_importer_trap_or_runaway_loop_fails_that_one_call_and_the_next_call_works() {
+    let root = import_folder(&[("trap.smp", b"T"), ("loop.smp", b"L"), ("fine.smp", b"fine")]);
+    let manifest = importer_manifest(false);
+    let failure = import(&manifest, root.join("trap.smp"), false).unwrap_err();
+    assert!(matches!(&failure, HostError::Trap { reason } if reason.contains("UnreachableCodeReached")), "{failure}");
+    assert!(matches!(import(&manifest, root.join("loop.smp"), false), Err(HostError::LimitExceeded { .. })));
+    assert_eq!(import(&manifest, root.join("fine.smp"), false).unwrap().design, b"fine");
     std::fs::remove_dir_all(root).unwrap();
 }
