@@ -1661,7 +1661,10 @@ mod tests {
             let mut model = solidcraft_doc::Model::new();
             model.evaluate(doc);
             assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
-            solidcraft_kernel::measure(&model.state().bodies[0].body).unwrap().volume
+            let body = &model.state().bodies[0].body;
+            // The evaluated body has the record's colour.
+            assert_eq!(body.color(), Some([0.2, 0.4, 0.6]));
+            solidcraft_kernel::measure(body).unwrap().volume
         };
         assert!((volume(&doc) - 6000.0).abs() < 1e-6);
         let bytes = write_design_container(&doc).unwrap();

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use solidcore_record::brep::Brep;
 
-use super::parallel::{Part, placed, solid_part};
+use super::parallel::{Part, placed, record_part};
 use super::{ImportIssue, ImportReport, ImportedBody, IssueKind, M4, StepImport, StepNode};
 use crate::{KernelError, Result};
 
@@ -101,8 +101,24 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
         // Each face known by its record body and its face in the file (from 1: a certificate
         // takes no 0), as a STEP import knows its faces by their entities.
         let item = k as u64 + 1;
-        let sources =
-            part.face_origin.iter().map(|f| Some(crate::FaceSource::Imported { item, face: f + 1, payload_sha256: None, producer: None })).collect();
+        let sources: Option<Vec<_>> = part
+            .face_origin
+            .iter()
+            .map(|f| Some(Some(crate::FaceSource::Imported { item, face: f.checked_add(1)?, payload_sha256: None, producer: None })))
+            .collect();
+        let Some(sources) = sources else {
+            let detail = format!("{label}: not imported: a face origin out of range");
+            report.issues.push(ImportIssue {
+                kind: IssueKind::NotImported,
+                item: Some(k as u64),
+                part: r.name.clone(),
+                faces: 0,
+                times: 1,
+                detail: detail.clone(),
+            });
+            warnings.push(detail);
+            continue;
+        };
         let body = body.with_color(r.color).with_face_sources(Some(Arc::new(sources)));
         if part.closed {
             report.solids += 1;
@@ -181,17 +197,7 @@ fn part_of(r: &RecordBody) -> std::result::Result<Part, String> {
     // A sheet is what its record is, whatever the file says: no bounded region but the
     // infinite one's.
     let sheet = r.sheet || r.brep.regions.len() <= 1;
-    let solid = solidcore_step::topology::Solid {
-        item: 0,
-        name: r.name.clone(),
-        product: None,
-        brep: r.brep.clone(),
-        face_origin: r.face_origin.clone(),
-        sheet,
-        notes: Vec::new(),
-        turned: Vec::new(),
-    };
-    solid_part(&solid).map_err(|f| f.msg)
+    record_part(&r.brep, &r.face_origin, sheet).map_err(|f| f.msg)
 }
 
 /// Every node's bodies index one of `count` bodies, and the tree is no deeper than an assembly

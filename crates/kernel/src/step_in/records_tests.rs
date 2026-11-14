@@ -88,6 +88,8 @@ fn a_broken_record_is_left_out_with_the_reason_and_the_others_still_come_in() {
     );
     assert!(with_broken(&|b| b.brep.edges[0].vertices[0] = 999).contains("invalid"));
     assert!(with_broken(&|b| b.placement = Some([[f64::NAN; 4]; 4])).contains("not finite"));
+    // A face origin that cannot be numbered from 1 (hostile: the file's own faces never reach it).
+    assert!(with_broken(&|b| b.face_origin[0] = u64::MAX).contains("face origin out of range"));
     // A product naming a body the import does not have refuses the whole import.
     let mut r = good;
     r.tree[0].bodies.push(7);
