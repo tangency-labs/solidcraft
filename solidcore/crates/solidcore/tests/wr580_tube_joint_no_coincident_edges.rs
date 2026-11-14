@@ -13,12 +13,16 @@
 //! `SmApiCreateCylinder` (seam at its frame's +X) turned about Z to put the seam where the
 //! bench's circle starts, about Y onto the axis, and moved to the base, as the
 //! `boolean.api_brep` fixture `issue_1519_bench_tubes.json` does on both sides. The union
-//! is run with `proto_edge_splits_at_captured_vertices` (WR-579, #1517) set in both runs,
-//! as the fork had it. At the default fixes (the C++ fixture's state, whose check record
-//! matches the C++ exactly) the union already succeeds with the coincident edges.
+//! was run with `proto_edge_splits_at_captured_vertices` (WR-579, #1517) set, as the fork
+//! had it, and without.
 //!
-//! Expected with `imprint_reuses_coincident_face_edge`: one manifold solid whose level-2
-//! check reports nothing.
+//! Expected: one manifold solid whose level-2 check reports nothing, whatever the two
+//! flags. The intersection curve is proved to be the circle's piece between the two
+//! vertices (each within the two's tolerance of the other over its whole length, by
+//! enclosure: docs/booleans.md, "One edge or two"), so the circle's edge is taken with no
+//! flag; `imprint_reuses_coincident_face_edge` adds only the edges
+//! `SmTools::FindCoincidentEdge` finds by sampling. At the default fixes upstream's union
+//! succeeds with the coincident edges.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -85,23 +89,17 @@ fn coincident(lines: &[String]) -> bool {
 
 #[test]
 fn wr580_tube_joint_no_coincident_edges() {
-    // the default fixes, which the boolean.api_brep fixture compares with the C++
-    let default = join(false, false).unwrap();
-    println!("default fixes: {default:?}");
-    assert!(
-        coincident(&default),
-        "upstream's union has no coincident edges at the default fixes: {default:?}"
-    );
-
-    let unfixed = join(true, false).unwrap();
-    println!("flag off: {unfixed:?}");
-    assert!(
-        coincident(&unfixed),
-        "upstream's union has no coincident edges: {unfixed:?}"
-    );
-
-    let fixed = join(true, true).unwrap();
-    println!("flag on: {fixed:?}");
-    // exactly nothing: no coincident edges and no other report
-    assert!(fixed.is_empty(), "the check fails: {fixed:?}");
+    for (split, fixed) in [(false, false), (true, false), (true, true)] {
+        let lines = join(split, fixed).unwrap();
+        println!("split {split}, reuse {fixed}: {lines:?}");
+        assert!(
+            !coincident(&lines),
+            "split {split}, reuse {fixed}: coincident edges: {lines:?}"
+        );
+        // exactly nothing: no coincident edges and no other report
+        assert!(
+            lines.is_empty(),
+            "split {split}, reuse {fixed}: the check fails: {lines:?}"
+        );
+    }
 }

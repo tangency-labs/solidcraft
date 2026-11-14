@@ -28,13 +28,23 @@
 //! bounds them over the curve. A curve of any other kind, or a hull that leaves the band,
 //! keeps the crossing.
 //!
+//! The strip's ends: the crossing is fixed only to the strip, so at each end of it the
+//! crossing's end and the ends of the edges bounding the strip are one contact point
+//! (docs/booleans.md, "One point or two"), though they lie farther apart than their
+//! tolerances. [`strip_contacts`] reads the strip from the face pairs' curve intervals before
+//! any of their proto vertices is made and declares each end a contact: the segment across the strip,
+//! widened by the tolerance within which its edges cover the crossing. Where an edge bounds
+//! the crossing on one side only (the other face goes on out of tolerance), the half strip
+//! between them is such a contact too, and the crossing stays an edge.
+//!
 //! | Rust | Upstream |
 //! |------|----------|
 //! | `TopologyIntersector::drop_crossings_in_coincident_strips` (crate) | none (own design) |
+//! | [`strip_contacts`] (super) | none (own design) |
 //!
 //! Deviations: not upstream at all; always on (its opt-in flag was retired).
 
-use crate::error::Result;
+use crate::error::{Result, SolidError};
 use crate::geom::solution_array::SolutionObject;
 use crate::geom::tol::{xsect_tol3d, zone_tol3d};
 use crate::intersect::point_class::{ClassObject, PointClassType};
@@ -42,25 +52,46 @@ use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, EFF_ZERO};
 use crate::nurbs::math::gamma;
 use crate::surface::surface::p2::SurfaceKind;
-use crate::topology::proto_topology::{EdgeDefId, ProtoEdgeId};
+use crate::topology::proto_topology::{DeclaredContact, EdgeDefId, ProtoEdgeId};
 
-use super::p1::{ignore_soft, TopologyIntersector};
+use super::p1::{can_imprint, ignore_soft, FaceIntersection, TopologyIntersector};
 use super::p2::IntersectorBrepP2;
 
 const OP_DROP_STRIP: &str =
     "boolean::topology_intersector::coincident_strip::drop_crossings_in_coincident_strips";
+const OP_STRIP_CONTACTS: &str = "boolean::topology_intersector::coincident_strip::strip_contacts";
 
-/// An edge definition as the strip test reads it: its proto edge, its source objects and
-/// their classification types in B-reps 1 and 2, the start and end of its curve over its
-/// interval, the points whose convex hull holds the curve there (`None`: no certified hull),
-/// and its tolerance.
-struct Def<O> {
-    pe: ProtoEdgeId,
-    ed: EdgeDefId,
+/// An edge definition (or a curve interval of a face pair that becomes one) as the strip
+/// test reads it: what it is (`id`: its proto edge and edge definition, or its index), its
+/// source objects and their classification types in B-reps 1 and 2, the start and end of its
+/// curve over its interval, the points whose convex hull holds the curve there (`None`: no
+/// certified hull), and its tolerance.
+struct Def<O, I> {
+    id: I,
     src: [(PointClassType, Option<O>); 2],
     ends: [Point3; 2],
     hull: Option<Vec<(Point3, f64)>>,
     tol: f64,
+}
+
+/// A face pair's intersection as `intersect_topology` keeps it until the proto topology is
+/// made: the two faces, whether their surfaces coincide, the intersection and its single
+/// points.
+pub(super) type FacePairIntersection<O> = (O, O, bool, FaceIntersection<O>, Vec<Point3>);
+
+/// One side of a strip: the offset of its bounding edge from the crossing line, and the
+/// tolerance within which that edge covers the crossing's length.
+#[derive(Clone, Copy)]
+struct Side {
+    off: Vec3,
+    end_tol: f64,
+}
+
+/// The strip about a crossing: the sides edge-on-face definitions give it, and the two sides
+/// that close it when it is bounded on both.
+struct Strip {
+    sides: Vec<Side>,
+    closed: Option<[Side; 2]>,
 }
 
 /// Origin and unit normal of a planar face's surface.
@@ -115,8 +146,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 };
                 let ivl = def.xsect_interval();
                 defs.push(Def {
-                    pe,
-                    ed,
+                    id: (pe, ed),
                     src: [
                         (def.src_topo_type(1), def.src_topo(1)),
                         (def.src_topo_type(2), def.src_topo(2)),
@@ -132,8 +162,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         }
         let mut doomed: Vec<(ProtoEdgeId, EdgeDefId)> = Vec::new();
         for crossing in &defs {
-            if in_coincident_strip(k, brep, crossing, &defs)? {
-                doomed.push((crossing.pe, crossing.ed));
+            if in_coincident_strip(k, brep, crossing, &defs)?.is_some_and(|s| s.closed.is_some()) {
+                doomed.push(crossing.id);
             }
         }
         let mut deleted = Vec::new();
@@ -153,6 +183,88 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         }
         Ok(deleted)
     }
+}
+
+/// The contact points of the coincident strips among the face pairs' curve intervals
+/// `intersections` (each a face pair, whether its surfaces coincide, its intersection and its
+/// single points), before any of their proto vertices is made (module docs, "The strip's
+/// ends"). Each
+/// interval that will become a proto edge (its ends and middle imprintable in both B-reps,
+/// its middle on no vertex) is read as an edge definition of tolerance `tol` (the manager's,
+/// which a new proto edge's definition gets); for each crossing in a strip, each end of it
+/// is one contact: the segment across the strip at that end, from one side's bounding edge
+/// to the other's, widened by the tolerance within which the sides cover the crossing.
+///
+/// # Errors
+///
+/// Those of the curve evaluations and of the strip test; [`SolidError::InvalidInput`] for a
+/// classification whose curve cannot be resolved.
+pub(super) fn strip_contacts<O: ClassObject + SolutionObject + Ord>(
+    k: &Kernel,
+    brep: &mut impl IntersectorBrepP2<O>,
+    intersections: &[FacePairIntersection<O>],
+    tol: f64,
+) -> Result<Vec<DeclaredContact>> {
+    k.check_cancelled(OP_STRIP_CONTACTS)?;
+    let tol = zone_tol3d(k, tol);
+    let mut defs = Vec::new();
+    for (_, _, _, fi, _) in intersections {
+        for (cc1, cc2) in fi.cc1.iter().zip(&fi.cc2) {
+            let curve = cc1.curve().and_then(|c| brep.curve(c)).ok_or_else(|| {
+                SolidError::invalid_input(OP_STRIP_CONTACTS, "curve handle cannot be resolved")
+            })?;
+            for ll in 0..cc1.size() {
+                let (ci1, ci2) = (cc1.at(ll)?, cc2.at(ll)?);
+                let imprintable = [ci1, ci2].iter().all(|ci| {
+                    can_imprint(ci.start.point_class())
+                        && can_imprint(ci.mid.point_class())
+                        && can_imprint(ci.end.point_class())
+                        && ci.mid.point_class() != PointClassType::Vertex
+                });
+                if !imprintable {
+                    continue;
+                }
+                let ivl = ci1.interval;
+                defs.push(Def {
+                    id: defs.len(),
+                    src: [
+                        (ci1.mid.point_class(), ci1.mid.object()),
+                        (ci2.mid.point_class(), ci2.mid.object()),
+                    ],
+                    ends: [
+                        curve.evaluate_point(k, ivl.min())?,
+                        curve.evaluate_point(k, ivl.max())?,
+                    ],
+                    hull: curve.hull_points_over(&ivl),
+                    tol,
+                });
+            }
+        }
+    }
+    let mut contacts = Vec::new();
+    for crossing in &defs {
+        let Some(strip) = in_coincident_strip(k, brep, crossing, &defs)? else {
+            continue;
+        };
+        for end in crossing.ends {
+            if let Some([a, b]) = strip.closed {
+                contacts.push(DeclaredContact {
+                    a: end + a.off,
+                    b: end + b.off,
+                    radius: a.end_tol.max(b.end_tol),
+                });
+            } else {
+                for side in &strip.sides {
+                    contacts.push(DeclaredContact {
+                        a: end,
+                        b: end + side.off,
+                        radius: side.end_tol,
+                    });
+                }
+            }
+        }
+    }
+    Ok(contacts)
 }
 
 /// The plane of `face` when its surface is planar with a valid normal.
@@ -215,9 +327,10 @@ fn edge_end_tol<O: ClassObject>(
     Ok(t0.max(t1))
 }
 
-/// Whether `face` has a boundary edge within intersection tolerance of `other_plane` that
-/// runs parallel to and covers the crossing line `(p0, dir, len)` on the side opposite to
-/// at least one offset in `opposite_defs`, with `face`'s interior toward the crossing.
+/// The strip sides `face` closes, when it has a boundary edge within intersection tolerance
+/// of `other_plane` that runs parallel to and covers the crossing line `(p0, dir, len)` on
+/// the side opposite to one of `opposite_defs`, with `face`'s interior toward the
+/// crossing: that edge's side and the opposite one.
 #[allow(clippy::too_many_arguments)]
 fn face_edge_bounds_strip<O: ClassObject>(
     k: &Kernel,
@@ -229,8 +342,8 @@ fn face_edge_bounds_strip<O: ClassObject>(
     dir: Vec3,
     len: f64,
     crossing_tol: f64,
-    opposite_defs: &[Vec3],
-) -> Result<bool> {
+    opposite_defs: &[Side],
+) -> Result<Option<[Side; 2]>> {
     for edge in brep.face_edges(face)? {
         let Some(ivl) = brep.edge_interval(edge) else {
             continue;
@@ -262,51 +375,53 @@ fn face_edge_bounds_strip<O: ClassObject>(
         let Some(off) = band_offset(p0, dir, len, ends, &hull, crossing_tol, end_tol) else {
             continue;
         };
-        if !opposite_defs.iter().any(|other| off.dot(*other) < 0.0) {
+        let Some(&opposite) = opposite_defs.iter().find(|other| off.dot(other.off) < 0.0) else {
             continue;
-        }
+        };
         if faces_inward(k, brep, edge, face, off)? {
-            return Ok(true);
+            return Ok(Some([Side { off, end_tol }, opposite]));
         }
     }
-    Ok(false)
+    Ok(None)
 }
 
-/// Whether `crossing`, a face/face edge definition of two planes, lies in a strip bounded
-/// on both sides by edges of the two faces within tolerance of the opposite plane, with at
-/// least one side represented by an edge-on-face definition in `defs` (module docs).
-fn in_coincident_strip<O: ClassObject>(
+/// The strip about `crossing`, a face/face edge definition of two planes (module docs): the
+/// sides given by edge-on-face definitions in `defs` (an edge of either face within
+/// tolerance of the other plane, parallel to and covering the crossing, the face's interior
+/// toward it), and the two sides that close it when edges of the two faces bound it on both
+/// sides; `None` when there is no such side.
+fn in_coincident_strip<O: ClassObject, I: PartialEq>(
     k: &Kernel,
     brep: &mut impl IntersectorBrepP2<O>,
-    crossing: &Def<O>,
-    defs: &[Def<O>],
-) -> Result<bool> {
+    crossing: &Def<O, I>,
+    defs: &[Def<O, I>],
+) -> Result<Option<Strip>> {
     let [(PointClassType::Face, Some(fa)), (PointClassType::Face, Some(fb))] = crossing.src else {
-        return Ok(false);
+        return Ok(None);
     };
     let (Some(pa), Some(pb)) = (plane_pos(brep, fa), plane_pos(brep, fb)) else {
-        return Ok(false);
+        return Ok(None);
     };
     let [p0, p1] = crossing.ends;
     let axis = p1 - p0;
     let len = axis.length();
     if len <= crossing.tol {
-        return Ok(false);
+        return Ok(None);
     }
     let dir = axis / len;
     // the crossing itself runs within its tolerance of its chord over its whole interval
     let Some(crossing_hull) = crossing.hull.as_deref() else {
-        return Ok(false);
+        return Ok(None);
     };
     if !crossing_hull
         .iter()
         .all(|&(q, e)| offset_bound(p0, dir, Vec3::ZERO, q, e) <= crossing.tol)
     {
-        return Ok(false);
+        return Ok(None);
     }
-    let mut def_on_fb = Vec::new();
-    let mut def_on_fa = Vec::new();
-    for def in defs.iter().filter(|d| d.ed != crossing.ed) {
+    let mut def_on_fb: Vec<Side> = Vec::new();
+    let mut def_on_fa: Vec<Side> = Vec::new();
+    for def in defs.iter().filter(|d| d.id != crossing.id) {
         let edge_side = match def.src {
             [(PointClassType::Edge, Some(e)), (PointClassType::Face, Some(f))]
                 if f == fb && brep.edge_is_connected_to_face(e, fa)? =>
@@ -334,55 +449,61 @@ fn in_coincident_strip<O: ClassObject>(
             continue;
         }
         if is_a_on_fb {
-            def_on_fb.push(off);
+            def_on_fb.push(Side { off, end_tol });
         } else {
-            def_on_fa.push(off);
+            def_on_fa.push(Side { off, end_tol });
         }
     }
     if def_on_fb.is_empty() && def_on_fa.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
-    if def_on_fb
-        .iter()
-        .any(|a| def_on_fa.iter().any(|b| a.dot(*b) < 0.0))
-    {
-        return Ok(true);
+    let mut strip = Strip {
+        sides: def_on_fa.iter().chain(&def_on_fb).copied().collect(),
+        closed: None,
+    };
+    for &a in &def_on_fb {
+        if let Some(&b) = def_on_fa.iter().find(|b| a.off.dot(b.off) < 0.0) {
+            strip.closed = Some([a, b]);
+            return Ok(Some(strip));
+        }
     }
     let fa_tol = zone_tol3d(k, brep.topology_tolerance(fa).unwrap_or(0.0));
     let fb_tol = zone_tol3d(k, brep.topology_tolerance(fb).unwrap_or(0.0));
-    if !def_on_fa.is_empty()
-        && face_edge_bounds_strip(
-            k,
-            brep,
-            fa,
-            pb,
-            fb_tol,
-            p0,
-            dir,
-            len,
-            crossing.tol,
-            &def_on_fa,
-        )?
-    {
-        return Ok(true);
+    if def_on_fa.is_empty() {
+        // no side to close
+    } else if let Some(sides) = face_edge_bounds_strip(
+        k,
+        brep,
+        fa,
+        pb,
+        fb_tol,
+        p0,
+        dir,
+        len,
+        crossing.tol,
+        &def_on_fa,
+    )? {
+        strip.closed = Some(sides);
+        return Ok(Some(strip));
     }
-    if !def_on_fb.is_empty()
-        && face_edge_bounds_strip(
-            k,
-            brep,
-            fb,
-            pa,
-            fa_tol,
-            p0,
-            dir,
-            len,
-            crossing.tol,
-            &def_on_fb,
-        )?
-    {
-        return Ok(true);
+    if def_on_fb.is_empty() {
+        // no side to close
+    } else if let Some(sides) = face_edge_bounds_strip(
+        k,
+        brep,
+        fb,
+        pa,
+        fa_tol,
+        p0,
+        dir,
+        len,
+        crossing.tol,
+        &def_on_fb,
+    )? {
+        strip.closed = Some(sides);
+        return Ok(Some(strip));
     }
-    Ok(false)
+    Ok(Some(strip))
 }
 
 /// The offset from the crossing line (through `p0` along unit `dir`, `len` long) of the

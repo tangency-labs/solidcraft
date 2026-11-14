@@ -97,6 +97,12 @@
 //!   ([`ProtoBrep::face_coincident_edge`], `SmTools::FindCoincidentEdge`) as the
 //!   definition's edge there instead of making a second one (the SMLib fork's
 //!   tangency-labs/smlib@81cd61a).
+//! - **Not upstream ("One edge or two", docs/booleans.md; own design).**
+//!   [`ProtoTopologyManager::imprint_edge_definition`] takes an edge the face of either
+//!   B-rep already has between the definition's two vertices as the definition's edge
+//!   there when the two are proved one curve by enclosure
+//!   ([`ProtoBrep::face_edge_proved_along`], [`crate::curve::proximity`]), with no flag;
+//!   WR-580's flag adds the edges `SmTools::FindCoincidentEdge` finds by sampling.
 //! - **Not upstream (WR-619, #1794; own design).**
 //!   [`ProtoTopologyManager::imprint_edge_definition`] makes no edge for a definition whose ends
 //!   are one proto vertex and one vertex in each B-rep, along a speck within that vertex's
@@ -134,7 +140,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
-use crate::geom::tol::{xsect_tol3d, ScaledZero};
+use crate::geom::tol::{xsect_tol3d, zone_tol3d, ScaledZero};
 use crate::intersect::curve_class::p6::MergeContext;
 use crate::intersect::curve_class::{CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
@@ -234,6 +240,28 @@ pub trait ProtoBrep<O>: ProtoGeometry<O> + ProtoTopology<O> {
     ///
     /// Those of the implementation's topology walk.
     fn vertex_common_edges(&self, v1: O, v2: O) -> Result<Vec<O>>;
+    /// Not upstream (docs/booleans.md, "One edge or two"): the edge of `face` between
+    /// `start` and `end` that is proved to be `curve` over `interval`: the two within
+    /// `tolerance` plus the edge's of each other over their whole lengths
+    /// ([`crate::geom::tools::find_edge_proved_along`]). An owner with no B-rep behind its
+    /// handles (the default body) has no such edge.
+    ///
+    /// # Errors
+    ///
+    /// Those of the search.
+    #[allow(clippy::too_many_arguments)] // the search's in-params
+    fn face_edge_proved_along(
+        &self,
+        _k: &Kernel,
+        _face: O,
+        _start: O,
+        _end: O,
+        _curve: &Curve,
+        _interval: Extent1d,
+        _tolerance: f64,
+    ) -> Result<Option<O>> {
+        Ok(None)
+    }
     /// Not upstream (WR-580, #1519; read only with
     /// `Kernel::fixes.imprint_reuses_coincident_face_edge`): `SmTools::FindCoincidentEdge`
     /// over `face`'s edges (`SmFace::GetEdges`) for an edge between `start` and `end` whose
@@ -1000,6 +1028,50 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         Ok(None)
     }
 
+    /// Not upstream (docs/booleans.md, "One edge or two"): the edge that the face of B-rep
+    /// `which` the definition `ed` lies in already has between `start` and `end`, the
+    /// definition's two vertices there, and that is proved to be the definition's curve:
+    /// each within the two's tolerance (the larger of the face's and the definition's, plus
+    /// the edge's) of the other over its whole length, or in a vertex's tolerance of it
+    /// ([`ProtoBrep::face_edge_proved_along`]). `None` for a definition on no face there,
+    /// one between a vertex and itself, and where no edge is proved.
+    ///
+    /// # Errors
+    ///
+    /// Those of the search; [`SolidError::InvalidInput`] for an unknown face handle.
+    fn face_edge_proved_to_be(
+        &self,
+        k: &Kernel,
+        brep: &impl ProtoBrep<O>,
+        ed: EdgeDefId,
+        which: i32,
+        start: O,
+        end: O,
+    ) -> Result<Option<O>> {
+        let d = self.ed_ref(ed)?;
+        if d.src_topo_type(which) != PointClassType::Face || start == end {
+            return Ok(None);
+        }
+        let (Some(curve), Some(face)) = (
+            d.xsect_curve_3d(),
+            as_kind(d.src_topo(which), ClassObjectKind::Face),
+        ) else {
+            return Ok(None);
+        };
+        let face_tol = brep
+            .topology_tolerance(face)
+            .ok_or(dangling("face handle is unknown"))?;
+        brep.face_edge_proved_along(
+            k,
+            face,
+            start,
+            end,
+            curve_of(brep, Some(curve))?,
+            d.xsect_interval(),
+            max2(face_tol, d.raw_tolerance()),
+        )
+    }
+
     /// The body of [`ProtoTopologyManager::imprint_edge_definition`]; `edited` is set
     /// before the first B-rep edit.
     fn imprint_edge_definition_inner(
@@ -1067,7 +1139,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let mut new_f1 = None;
         let mut old_f1 = None;
 
-        if type1 == PointClassType::Face {
+        // Not upstream (docs/booleans.md, "One edge or two"): an edge Brep1's face already
+        // has between the two vertices that is proved to be the curve is this edge there.
+        let along_edge1 = self.face_edge_proved_to_be(k, &*brep, ed, 1, start_vtx1, end_vtx1)?;
+        let d = self.ed_ref(ed)?;
+        if along_edge1.is_some() {
+            self.ed_mut(ed)?.set_final_edge(1, along_edge1);
+        } else if type1 == PointClassType::Face {
             old_f1 = as_kind(d.src_topo(1), ClassObjectKind::Face);
             let face = old_f1.ok_or_else(null)?;
             let face_tol = brep
@@ -1120,8 +1198,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // boundary there). That edge is this edge in Brep2: imprinted again, the face had
         // two coincident edges, and the merge put a copy of the boundary edge beside this
         // one in Brep1 (`SmFace` tests 33 and 34).
-        let mut along_edge2 = None;
-        if k.fixes.imprint_reuses_coincident_face_edge
+        //
+        // Not upstream (docs/booleans.md, "One edge or two"): where that edge is proved to
+        // be the curve (each within the two's tolerance of the other over its whole
+        // length, by enclosure) it is taken whatever the flag; the flag adds the edges
+        // `FindCoincidentEdge` finds by sampling.
+        let mut along_edge2 =
+            self.face_edge_proved_to_be(k, &*brep, ed, 2, start_vtx2, end_vtx2)?;
+        if along_edge2.is_none()
+            && k.fixes.imprint_reuses_coincident_face_edge
             && type2 == PointClassType::Face
             && start_vtx2 != end_vtx2
         {
@@ -2119,27 +2204,50 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             "position and deviation are uninitialised (no position found)",
         ))?;
 
-        let tol1 = zone_tol_of(k, brep, pc1.object())?;
-        let tol2 = zone_tol_of(k, brep, pc2.object())?;
-        let tol = max4(found.deviation, self.raw_tolerance(), tol1, tol2);
+        let tol = self.proto_vertex_tolerance_of_pcs(k, brep, found.deviation, pc1, pc2)?;
 
         let pv = self.new_proto_vertex_with_pcs(k, brep, pc1, pc2, found.position, tol)?;
         self.add_proto_vertex(pv);
         Ok(Some(pv))
     }
 
-    /// The listed proto vertex containing `position`, or a new listed one there with
-    /// the manager's tolerance (`FindOrCreateProtoVertex`); and whether it was
-    /// created.
+    /// The raw tolerance [`ProtoTopologyManager::create_proto_vertex`] gives a proto vertex
+    /// of the classifications `pc1`, `pc2` whose position deviates by `deviation`: the
+    /// largest of that deviation, the manager's tolerance and both objects' zone
+    /// tolerances.
     ///
     /// # Errors
     ///
-    /// Those of [`ProtoTopologyManager::find_proto_vertex`].
+    /// Those of the zone tolerances.
+    pub(crate) fn proto_vertex_tolerance_of_pcs(
+        &self,
+        k: &Kernel,
+        brep: &impl ProtoBrep<O>,
+        deviation: f64,
+        pc1: &PointClassification<O>,
+        pc2: &PointClassification<O>,
+    ) -> Result<f64> {
+        let tol1 = zone_tol_of(k, brep, pc1.object())?;
+        let tol2 = zone_tol_of(k, brep, pc2.object())?;
+        Ok(max4(deviation, self.raw_tolerance(), tol1, tol2))
+    }
+
+    /// The listed proto vertex containing `position`, or a new listed one there with
+    /// the manager's tolerance (`FindOrCreateProtoVertex`); and whether it was
+    /// created. Not upstream: a proto vertex is found only within the combined tolerance
+    /// of the two points ([`ProtoTopologyManager::find_proto_vertex_within`], the point's
+    /// being the manager's tolerance it would be created with).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`ProtoTopologyManager::find_proto_vertex_within`].
     pub fn find_or_create_proto_vertex(
         &mut self,
+        k: &Kernel,
         position: Point3,
     ) -> Result<(ProtoVertexId, bool)> {
-        let (found, _) = self.find_proto_vertex(position)?;
+        let found =
+            self.find_proto_vertex_within(k, position, zone_tol3d(k, self.raw_tolerance()))?;
         if let Some(pv) = found {
             return Ok((pv, false));
         }
@@ -3712,13 +3820,13 @@ mod tests {
         let geo = Geo::default();
         let mut m = manager();
         let (pv, created) = m
-            .find_or_create_proto_vertex(Point3::new(1.0, 0.0, 0.0))
+            .find_or_create_proto_vertex(&k, Point3::new(1.0, 0.0, 0.0))
             .unwrap();
         assert!(created);
         assert_eq!(m.proto_vertices(), &[pv]);
         // the same position finds the existing proto vertex
         assert_eq!(
-            m.find_or_create_proto_vertex(Point3::new(1.0, 0.0, 0.0))
+            m.find_or_create_proto_vertex(&k, Point3::new(1.0, 0.0, 0.0))
                 .unwrap(),
             (pv, false)
         );

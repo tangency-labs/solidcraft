@@ -22,6 +22,7 @@ use crate::intersect::point_class::{
 };
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
+use crate::nurbs::math::gamma;
 use crate::query::face::p2 as face_p2;
 use crate::topology::brep::p2 as brep_p2;
 use crate::topology::edgeuse::p1 as eu1;
@@ -2119,6 +2120,46 @@ pub struct ProtoTopologyManager<O> {
     /// whose collapsed speck definition `SmEdgeDefinition::Imprint` skipped, so
     /// `ImprintIntersections` grows each vertex's tolerance to cover the speck's span.
     skipped_speck_vertices: Vec<(O, f64, Point3, Point3)>,
+    /// Not upstream: the contact points a rule has proved one point
+    /// ([`ProtoTopologyManager::set_declared_contacts`]).
+    declared_contacts: Vec<DeclaredContact>,
+}
+
+/// Not upstream: a contact point that a rule of the intersector proves one point although
+/// it spans more than the combined tolerance of the points in it (docs/booleans.md, "One
+/// point or two"): every point within `radius` of the segment from `a` to `b`. Two points
+/// both in it may share a proto vertex however far apart they are
+/// ([`ProtoTopologyManager::find_proto_vertex_within`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DeclaredContact {
+    /// One end of the segment.
+    pub a: Point3,
+    /// The other end.
+    pub b: Point3,
+    /// How far from the segment its points reach.
+    pub radius: f64,
+}
+
+impl DeclaredContact {
+    /// Whether `p` is within the radius of the segment, by an upper bound of its distance:
+    /// the parameter of the nearest point is clamped to the segment, so any rounding of it
+    /// only moves that point along the segment (the distance is at least the true one, as
+    /// the true nearest point is no farther); the difference and the norm round by `γ_4`
+    /// of `|p - a| + |b - a|`. A NaN distance is out.
+    #[must_use]
+    pub fn holds(&self, p: Point3) -> bool {
+        let along = self.b - self.a;
+        let w = p - self.a;
+        let len2 = along.dot(along);
+        let t = if len2 > 0.0 {
+            (w.dot(along) / len2).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let distance = ((w - along * t).length() + gamma(4) * (w.length() + along.length()))
+            * (1.0 + gamma(2));
+        !(distance.is_nan() || distance > self.radius)
+    }
 }
 
 fn push_store<T>(store: &mut Vec<Option<T>>, item: T) -> Result<u32> {
@@ -2178,6 +2219,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             pf_store: Vec::new(),
             split_self_loops_on_vertices: true,
             skipped_speck_vertices: Vec::new(),
+            declared_contacts: Vec::new(),
         })
     }
 
@@ -2303,10 +2345,17 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
     /// Empties the three lists without deleting anything (`Reset`).
     pub fn reset(&mut self) {
+        self.declared_contacts.clear();
         self.pvs.clear();
         self.pes.clear();
         self.pfs.clear();
         self.skipped_speck_vertices.clear();
+    }
+
+    /// Not upstream: the contact points proved one point
+    /// ([`DeclaredContact`]), set before the face pairs' proto vertices are made.
+    pub fn set_declared_contacts(&mut self, contacts: Vec<DeclaredContact>) {
+        self.declared_contacts = contacts;
     }
 
     // ---- simple access ---------------------------------------------------------------
@@ -3338,6 +3387,53 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             }
         }
         Ok((ret_val, min_dist))
+    }
+
+    /// Not upstream: the closest listed proto vertex containing `position` (as
+    /// [`ProtoTopologyManager::find_proto_vertex`]) that is not provably farther from it than
+    /// their combined tolerance: the proto vertex's tolerance plus `tolerance`, the point's
+    /// (zone tolerance), unless a [`DeclaredContact`] holds both. The capture distance only
+    /// says where to look; two points farther apart than their tolerances reach are two
+    /// points (docs/booleans.md, "One point or two"), and a rule that proves them one
+    /// contact point declares it ([`ProtoTopologyManager::set_declared_contacts`]). The
+    /// distance is taken as at least its rounded value shrunk by `γ_4` (three differences,
+    /// three squares, a sum and a root), so only pairs proved apart are refused; a NaN
+    /// distance is apart.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a deleted listed proto vertex.
+    pub fn find_proto_vertex_within(
+        &self,
+        k: &Kernel,
+        position: Point3,
+        tolerance: f64,
+    ) -> Result<Option<ProtoVertexId>> {
+        let mut ret_val = None;
+        let mut min_dist = BIG_DOUBLE;
+        for &id in &self.pvs {
+            let pv = self.pv(Some(id))?;
+            if !face_p2::proto_vertex_contains_point(self, pv, position) {
+                continue;
+            }
+            let this_dist = face_p2::proto_vertex_distance_to(pv, position);
+            let combined = (pv.tolerance(k) + tolerance) * (1.0 + gamma(1));
+            let excess = this_dist * (1.0 - gamma(4)) - combined;
+            let apart = excess.is_nan() || excess > 0.0;
+            if apart
+                && !self
+                    .declared_contacts
+                    .iter()
+                    .any(|c| c.holds(position) && c.holds(pv.position))
+            {
+                continue;
+            }
+            if this_dist < min_dist {
+                ret_val = Some(id);
+                min_dist = this_dist;
+            }
+        }
+        Ok(ret_val)
     }
 
     /// The first edge definition (of the listed proto edges) whose B-rep `which`

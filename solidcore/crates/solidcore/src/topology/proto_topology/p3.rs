@@ -326,7 +326,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // sm_FindPositionFromPCs, status ignored; the position stays SM_UNDEF on failure
         // (passed on with `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
         let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
-        let found_pos = ignore_soft(passed_on(
+
+        let found_position = ignore_soft(passed_on(
             find_position_from_pcs(k, geometry, pc1, pc2),
             pass,
         )?)?;
@@ -364,10 +365,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 return Ok((None, false));
             }
         }
-        let position = found_pos.map_or(Vec3::UNDEF, |p| p.position);
+        let position = found_position.map_or(Vec3::UNDEF, |p| p.position);
 
-        // find closest ProtoVertex within m_dTol to sPt
-        let (found, _dist) = self.find_proto_vertex(position)?;
+        // find closest ProtoVertex within m_dTol to sPt (not upstream: and within the
+        // combined tolerance of the two points, the point's being the tolerance a proto
+        // vertex made of it would get)
+        let deviation = found_position.map_or(f64::NAN, |p| p.deviation);
+        let point_tol = self.proto_vertex_tolerance_of_pcs(k, geometry, deviation, pc1, pc2)?;
+        let found = self.find_proto_vertex_within(k, position, zone_tol3d(k, point_tol))?;
 
         // when nearby PV exists
         if let Some(pv) = found {
@@ -855,7 +860,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
 
         // Split ourself first, then all of our EdgeDefs. The status is ignored.
-        let (new_pv, created) = self.find_or_create_proto_vertex(crv_pt)?;
+        let (new_pv, created) = self.find_or_create_proto_vertex(k, crv_pt)?;
 
         // create new upper Split child ProtoEdge
         let new_pe = match self.copy_proto_edge(pe) {
