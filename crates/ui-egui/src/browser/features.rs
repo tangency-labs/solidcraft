@@ -1141,6 +1141,86 @@ mod tests {
         Sel::Face { body: body.into(), index: 0, point: solidcore_record::Vec3::ZERO }
     }
 
+    fn browser_section_collapsed(app: &SolveApp) -> bool {
+        use solidcraft_engine::panels::InstanceId;
+        app.panel_runtime().unwrap().layout().layout().containing(&InstanceId::new("browser").unwrap()).unwrap().collapsed
+    }
+
+    fn set_browser_section_collapsed(app: &mut SolveApp, collapsed: bool) {
+        use solidcraft_engine::panels::{InstanceId, LayoutAction, Mutation};
+        let section = app.panel_runtime().unwrap().layout().layout().containing(&InstanceId::new("browser").unwrap()).unwrap().id.clone();
+        app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::Collapse { section, collapsed }] })
+            .unwrap();
+    }
+
+    /// Find in Browser on a construction plane, axis or point (#15355): from the plane under the
+    /// pointer, from a picked axis, or from the plane's own Find in Browser in the Timeline, the
+    /// rows down to it in its component's Construction folder open (they start closed here) and
+    /// its row is drawn, scrolled to and selected.
+    #[test]
+    fn browser_find_reveals_a_construction_plane_axis_or_point_in_its_component() {
+        let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": true}))["ok"], true);
+        let part = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
+        let plane = h.app.run("construct.plane.offset", json!({"base":"XY","offset":30,"name":"Datum"})).unwrap()["feature"].as_u64().unwrap();
+        let axis = h.app.run("construct.axis.two_points", json!({"a":{"point":[0,0,0]},"b":{"point":[0,0,10]},"name":"Spindle"})).unwrap()["feature"]
+            .as_u64()
+            .unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        h.app.ui.show_browser = true;
+        let folder = format!("{}/construction", occurrence_key(&[part]));
+        let finds: [(&str, Box<dyn Fn(&mut SolveApp)>); 4] = [
+            (
+                "Datum",
+                Box::new(|app: &mut SolveApp| {
+                    // A right-click on the plane: it stays unpicked, the menu knows it as `menu.plane`.
+                    app.session.selection.clear();
+                    app.menu.plane = Some("Datum".into());
+                    let item = crate::context_menu::items(app, &Target::Viewport).into_iter().find(|item| item.id == "ui.findBrowser").unwrap();
+                    app.menu.plane = None;
+                    crate::context_menu::run_item(app, &item, pos2(0.0, 0.0));
+                }),
+            ),
+            (
+                "Spindle",
+                Box::new(|app: &mut SolveApp| {
+                    // A right-click on the axis leaves it unpicked too: the menu knows it as `menu.axis`.
+                    app.session.selection.clear();
+                    app.menu.axis = Some("Spindle".into());
+                    let item = crate::context_menu::items(app, &Target::Viewport).into_iter().find(|item| item.id == "ui.findBrowser").unwrap();
+                    app.menu.axis = None;
+                    crate::context_menu::run_item(app, &item, pos2(0.0, 0.0));
+                }),
+            ),
+            ("Spindle", Box::new(|app: &mut SolveApp| find_in_browser(app, Sel::Axis { name: "Spindle".into() }))),
+            ("Datum", Box::new(move |app: &mut SolveApp| crate::timeline::find_in_browser(app, plane))),
+        ];
+        for (label, find) in finds {
+            for key in [occurrence_key(&[part]), folder.clone()] {
+                h.app.tree.open_row(&key);
+                h.app.tree.collapsed.insert(key.clone());
+                h.app.tree.expanded.remove(&key);
+            }
+            // A collapsed Browser section opens again too.
+            set_browser_section_collapsed(&mut h.app, true);
+            h.frames(2);
+            assert!(!drawn_rows().iter().any(|(l, ..)| l == label), "{label} starts hidden");
+            find(&mut h.app);
+            assert!(!browser_section_collapsed(&h.app), "{label}");
+            let id = if label == "Datum" { plane } else { axis };
+            assert_eq!(h.app.tree.reveal_construction, Some(id), "{label}");
+            h.frames(2);
+            assert!(drawn_rows().iter().any(|(l, ..)| l == label), "{label}: {:?}", drawn_rows());
+            assert!(h.app.tree.reveal_construction.is_none(), "{label}: the row was drawn and scrolled to");
+            let sel = if label == "Datum" { Sel::Plane { name: label.into() } } else { Sel::Axis { name: label.into() } };
+            assert_eq!(h.app.session.selection, [sel], "{label}");
+        }
+        // The origin planes are not construction features: nothing to find.
+        h.app.session.selection.clear();
+        h.app.menu.plane = Some("XY".into());
+        assert!(!crate::context_menu::items(&h.app, &Target::Viewport).into_iter().any(|item| item.id == "ui.findBrowser"));
+    }
+
     #[test]
     fn browser_find_opens_the_collapsed_rows_above_the_body() {
         let mut h = Harness::new();

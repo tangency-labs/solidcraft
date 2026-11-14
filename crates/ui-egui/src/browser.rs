@@ -98,16 +98,54 @@ struct Found {
 /// what is inside it.
 fn find_in_tree(app: &mut SolveApp, body: &str) {
     app.tree.reveal_feature = None;
+    app.tree.reveal_construction = None;
     app.tree.reveal = Some(body.to_string());
     remember_reveal_source(app, body);
     let Some((component, source, path)) = body_placement(app, body) else { return };
+    open_found_rows(app, component, &path, "bodies", &source);
+    app.tree.found = Some(Found { body: body.to_string(), path, selection: app.session.selection.clone() });
+}
+
+/// Find in Browser for a construction plane, axis or point (#15355): select it, show the Browser
+/// and open the rows down to its row in its component's Construction folder (in the component's
+/// first placement), as [`reveal_body`] does for a body.
+pub(crate) fn reveal_construction(app: &mut SolveApp, id: u64) {
+    sync_reveals(app);
+    let Some(f) = app.session.doc.feature(id) else { return };
+    if !matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. }) {
+        return;
+    }
+    let (component, sel) = (f.component, construction_sel(f));
+    let _ = app.run("select.set", json!({ "items": [sel] }));
+    app.ui.show_browser = true;
+    reveal_shared_panel(app, "browser");
+    app.tree.reveal = None;
+    app.tree.reveal_feature = None;
+    app.tree.found = None;
+    app.tree.reveal_construction = Some(id);
+    // The design's own construction is in no placement; a component's is under its first one.
+    let path = if component == 0 {
+        Vec::new()
+    } else {
+        match app.session.doc.placements().into_iter().find(|(owner, _, _)| *owner == component) {
+            Some((_, path, _)) => path,
+            None => return,
+        }
+    };
+    open_found_rows(app, component, &path, "construction", &id.to_string());
+}
+
+/// Open the rows down to an item of `folder` (keyed `key` there) in the placement at `path` of
+/// `component`: the design, the placements, the folder and the groups around the item. While the
+/// rows start closed, the rows the last find opened close again unless they are on this path.
+fn open_found_rows(app: &mut SolveApp, component: u64, path: &[u64], folder: &str, key: &str) {
     let start_open = rows_start_open(app);
-    // A body of the design itself is in no placement: its folder is the design's (`c0`).
-    let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
+    // An item of the design itself is in no placement: its folder is the design's (`c0`).
+    let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(path) };
     let mut rows = vec![("c0".to_string(), true)];
     rows.extend((1..=path.len()).map(|depth| (occurrence_key(&path[..depth]), start_open)));
-    rows.push((format!("{scope}/bodies"), start_open));
-    rows.extend(group_chain(app, component, "bodies", &source).into_iter().map(|id| (format!("{scope}/g{id}"), start_open)));
+    rows.push((format!("{scope}/{folder}"), start_open));
+    rows.extend(group_chain(app, component, folder, key).into_iter().map(|id| (format!("{scope}/g{id}"), start_open)));
     // Rows that start open stay open after a find, as they always have: only rows that start
     // closed close again at the next one.
     if start_open {
@@ -127,7 +165,6 @@ fn find_in_tree(app: &mut SolveApp, body: &str) {
         }
     }
     app.tree.found_rows = opened;
-    app.tree.found = Some(Found { body: body.to_string(), path, selection: app.session.selection.clone() });
 }
 
 /// Another design is shown: the rows the last Find in Browser opened were that design's, and the
@@ -215,6 +252,9 @@ pub struct TreeState {
     found: Option<Found>,
     /// A native feature to reveal in its placed component's Features folder (Find in Timeline).
     pub(super) reveal_feature: Option<features::Reveal>,
+    /// Scroll to this construction plane's, axis's or point's row (its feature id): Find in
+    /// Browser on one in the 3D view (#15355). [`reveal_construction`] opens the rows above it.
+    reveal_construction: Option<u64>,
     /// The Move/Copy panel of an occurrence.
     pub occurrence_move: Option<OccMove>,
     /// The Redefine Sketch Plane panel (sketch id).
@@ -293,6 +333,7 @@ struct BodyRevealSource {
 pub(crate) struct PendingReveals {
     session: Option<u64>,
     body: Option<String>,
+    construction: Option<u64>,
     source: Option<BodyRevealSource>,
     feature: Option<features::Reveal>,
     timeline: Option<u64>,
@@ -302,6 +343,7 @@ pub(crate) fn discard_reveals(app: &mut SolveApp) {
     app.tree.reveal = None;
     app.tree.reveal_source = None;
     app.tree.reveal_feature = None;
+    app.tree.reveal_construction = None;
     app.tree.timeline_reveal = None;
     app.tree.view_pick = None;
     app.tree.reveal_session = Some(app.session.uid);
@@ -325,6 +367,7 @@ pub(crate) fn take_reveals(app: &mut SolveApp) -> PendingReveals {
     PendingReveals {
         session: Some(app.session.uid),
         body: app.tree.reveal.take(),
+        construction: app.tree.reveal_construction.take(),
         source: app.tree.reveal_source.take(),
         feature: app.tree.reveal_feature.take(),
         timeline: app.tree.timeline_reveal.take(),
@@ -335,6 +378,7 @@ pub(crate) fn restore_reveals(app: &mut SolveApp, pending: PendingReveals) {
     discard_reveals(app);
     if pending.session == Some(app.session.uid) {
         app.tree.reveal = pending.body;
+        app.tree.reveal_construction = pending.construction;
         app.tree.reveal_source = pending.source;
         app.tree.reveal_feature = pending.feature;
         app.tree.timeline_reveal = pending.timeline;
@@ -1581,6 +1625,11 @@ fn body_reveal(app: &SolveApp) -> Option<&str> {
     app.tree.content.browser_presentation().then_some(app.tree.reveal.as_deref()).flatten()
 }
 
+/// The construction row Find in Browser scrolls to, while the Browser shows its own rows.
+fn construction_reveal(app: &SolveApp) -> Option<u64> {
+    app.tree.content.browser_presentation().then_some(app.tree.reveal_construction).flatten()
+}
+
 /// A hidden or collapsed presentation retains its request. Removed targets expire here.
 pub(crate) fn prune_reveals(app: &mut SolveApp) {
     sync_reveals(app);
@@ -1610,6 +1659,9 @@ pub(crate) fn prune_reveals(app: &mut SolveApp) {
     }
     if app.tree.timeline_reveal.is_some_and(|id| app.session.doc.feature(id).is_none()) {
         app.tree.timeline_reveal = None;
+    }
+    if app.tree.reveal_construction.is_some_and(|id| app.session.doc.feature(id).is_none()) {
+        app.tree.reveal_construction = None;
     }
 }
 
@@ -3219,7 +3271,8 @@ fn entry_row(
     let pattern_key = e.patterns.as_deref();
     let start_open = rows_start_open(app);
     let patterns_open = pattern_key.is_some_and(|key| is_open(app, key, start_open));
-    let revealed = folder == "bodies" && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b));
+    let revealed = (folder == "bodies" && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b)))
+        || (folder == "construction" && construction_reveal(app).is_some_and(|id| e.key == id.to_string()));
     // Features under bodies (#11945): the body row folds open on the features that built it.
     let built_key = (folder == "bodies"
         && app.preferences.browser_body_features
@@ -3322,6 +3375,13 @@ fn entry_row(
         && crate::semantic_content::scroll_acknowledged(rows.ui(), rect)
     {
         app.tree.reveal = None;
+    }
+    if folder == "construction"
+        && construction_reveal(app).is_some_and(|id| e.key == id.to_string())
+        && let Some(rect) = r.rect
+        && crate::semantic_content::scroll_acknowledged(rows.ui(), rect)
+    {
+        app.tree.reveal_construction = None;
     }
     if r.eye {
         set_visible(app, folder, &[e], !visible);
