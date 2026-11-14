@@ -80,8 +80,11 @@ test('classifyPaths maps changed files to areas', () => {
   );
   assert.deepEqual(triage.classifyPaths(['crates/engine/src/cmd/x.rs', 'crates/engine/src/lib.rs']), []);
   assert.deepEqual(triage.classifyPaths(['solidcore/crates/solidcore/src/lib.rs']), ['area:kernel']);
-  // An engine command file takes its command family's area.
+  // An engine command or schema file takes its command family's area, singular or plural.
   assert.deepEqual(triage.classifyPaths(['crates/engine/src/cmd/file.rs', 'crates/engine/src/cmd/sketch_offset.rs']), ['area:io', 'area:sketch']);
+  assert.deepEqual(triage.classifyPaths(['crates/engine/src/cmd/joints.rs', 'crates/engine/src/schema/select.rs']), ['area:doc', 'area:ui']);
+  assert.deepEqual(triage.classifyPaths(['crates/engine/src/cmd/measure_sel.rs', 'crates/engine/src/tests.rs']), ['area:ui']);
+  assert.deepEqual(triage.classifyPaths(['skills/solidcraft-contributing/SKILL.md']), ['area:infra']);
   // Crates beside the first few: the viewport, the UI kit and theme, the formats, the renderer's helpers.
   assert.deepEqual(triage.classifyPaths(['crates/viewport/src/camera.rs', 'crates/ui-kit/src/panel.rs', 'assets/locales/pending/x.json']), ['area:ui']);
   assert.deepEqual(triage.classifyPaths(['crates/format/src/a.rs', 'crates/look/src/b.rs', 'assets/materials/c.json']), ['area:io', 'area:render']);
@@ -127,6 +130,17 @@ test('an opened PR is labelled from its paths and never gets needs-triage', asyn
   const pull_request = { number: 9, state: 'open', title: 'Sketch: thing', body: '', labels: [] };
   assert.deepEqual(await triage.handleOpened({ github, context: { repo, payload: { pull_request } } }), ['area:sketch']);
   assert.deepEqual(find(calls, 'addLabels')[1], { ...repo, issue_number: 9, labels: ['area:sketch'] });
+});
+
+test('a draft marked ready is labelled from its paths unless it already has an area', async () => {
+  let w = fake({ files: ['crates/sketch/src/solve.rs'] });
+  const pull_request = { number: 9, state: 'open', title: 'Sketch: thing', body: '', labels: labels(['approved-for-ci']) };
+  const ready = (pr) => ({ repo, payload: { action: 'ready_for_review', pull_request: pr } });
+  assert.deepEqual(await triage.handleOpened({ github: w.github, context: ready(pull_request) }), ['area:sketch']);
+  w = fake({ files: ['crates/sketch/src/solve.rs', 'crates/io/src/step.rs'] });
+  const sorted = { ...pull_request, labels: labels(['area:sketch']) };
+  assert.deepEqual(await triage.handleOpened({ github: w.github, context: ready(sorted) }), []);
+  assert.equal(all(w.calls, 'addLabels').length, 0);
 });
 
 test('a priority label clears needs-triage', async () => {
@@ -178,11 +192,13 @@ test('bots and other comments are ignored', async () => {
   assert.equal(calls.length, 0);
 });
 
-test('backfill only touches unlabelled items, and the dry run writes nothing', async () => {
+test('backfill touches unlabelled issues and PRs with no area, and the dry run writes nothing', async () => {
   const items = [
     { number: 1, title: 'EXTRUDE: operation failed', body: '', labels: [] },
     { number: 2, title: 'Already sorted', body: '', labels: labels(['bug']) },
     { number: 3, title: 'x', body: '', labels: [], pull_request: {} },
+    { number: 4, title: 'y', body: '', labels: labels(['area:ui']), pull_request: {} },
+    { number: 5, title: 'z', body: '', labels: labels(['approved-for-ci']), pull_request: {} },
   ];
   let w = fake({ items, files: ['crates/io/src/step.rs'] });
   const plan = await triage.backfill({ github: w.github, context: { repo }, dryRun: true });
@@ -191,10 +207,11 @@ test('backfill only touches unlabelled items, and the dry run writes nothing', a
     [
       [1, ['bug', 'area:kernel', 'needs-triage']],
       [3, ['area:io']],
+      [5, ['area:io']],
     ],
   );
   assert.equal(w.calls.length, 0);
   w = fake({ items, files: ['crates/io/src/step.rs'] });
   await triage.backfill({ github: w.github, context: { repo }, dryRun: false });
-  assert.deepEqual(all(w.calls, 'addLabels').map((c) => c[1].issue_number), [1, 3]);
+  assert.deepEqual(all(w.calls, 'addLabels').map((c) => c[1].issue_number), [1, 3, 5]);
 });

@@ -25,7 +25,7 @@ const PATH_AREAS = [
     /^(crates\/(ui-egui|ui-kit|ui-registry|ui-text|theme|display-units|viewport|viewport-egui|space-mouse|threedx-client|control|control-egui|mcp|mcp-server)|apps\/(solidcraft|solidcraft-web)|assets)\//,
     'area:ui',
   ],
-  [/^(\.github\/|xtask\/|scripts\/|tools\/|docs\/|packaging\/|apps\/solidcraft-cli\/|crates\/(derive|profile|testkit)\/|[^/]+\.md$)/, 'area:infra'],
+  [/^(\.github\/|xtask\/|scripts\/|skills\/|tools\/|docs\/|packaging\/|apps\/solidcraft-cli\/|crates\/(derive|profile|testkit)\/|[^/]+\.md$)/, 'area:infra'],
 ];
 
 // Command id prefix (the in-app reports quote it) → area.
@@ -51,6 +51,19 @@ const COMMAND_AREAS = {
   view: 'area:ui',
   browser: 'area:ui',
   selection: 'area:ui',
+};
+
+// An engine command or schema file is named after its command family (`cmd/file_import.rs` →
+// `file`, `cmd/joints.rs` → `joint`): the command table, plus families no report quotes.
+const ENGINE_FAMILIES = {
+  ...COMMAND_AREAS,
+  edit: 'area:doc',
+  face: 'area:kernel',
+  feature: 'area:kernel',
+  inspect: 'area:ui',
+  measure: 'area:ui',
+  script: 'area:doc',
+  select: 'area:ui',
 };
 
 // Words in an issue's title → area. Conservative: a miss leaves the issue for a person.
@@ -85,6 +98,10 @@ function section(body, name) {
 
 function labelNames(item) {
   return (item.labels || []).map((l) => (typeof l === 'string' ? l : l.name));
+}
+
+function hasArea(item) {
+  return labelNames(item).some((l) => l.startsWith('area:'));
 }
 
 function hasPriority(names) {
@@ -126,10 +143,10 @@ function classifyIssue(title, body) {
 function classifyPaths(paths) {
   const labels = new Set();
   for (const p of paths) {
-    // An engine command file is named after its command family: `cmd/file_import.rs` → `file`.
-    const family = /^crates\/engine\/src\/cmd\/([a-z]+)/.exec(p);
-    if (family && Object.hasOwn(COMMAND_AREAS, family[1])) {
-      labels.add(COMMAND_AREAS[family[1]]);
+    const word = (/^crates\/engine\/src\/(?:cmd|schema)\/([a-z]+)/.exec(p) || [])[1];
+    const family = [word, word && word.replace(/s$/, '')].find((w) => w && Object.hasOwn(ENGINE_FAMILIES, w));
+    if (family) {
+      labels.add(ENGINE_FAMILIES[family]);
       continue;
     }
     for (const [re, area] of PATH_AREAS) {
@@ -191,6 +208,8 @@ async function handleOpened({ github, context }) {
   const pull = context.payload.pull_request;
   const item = issue || (pull && { ...pull, pull_request: {} });
   if (!item || item.state !== 'open') return [];
+  // Marked ready: a claim opened with no paths. Once it has an area, a maintainer's removal stands.
+  if (context.payload.action === 'ready_for_review' && hasArea(item)) return [];
   const labels = await proposal(github, context, item);
   await apply(github, context, item.number, labels);
   return labels;
@@ -294,7 +313,8 @@ async function backfill({ github, context, dryRun = true }) {
   });
   const plan = [];
   for (const item of items) {
-    if (labelNames(item).length || item.locked) continue;
+    // A PR is labelled while it has no area, whatever else it carries (`approved-for-ci`, ...).
+    if (item.locked || (item.pull_request ? hasArea(item) : labelNames(item).length)) continue;
     const labels = await proposal(github, context, item);
     plan.push({ number: item.number, pull: Boolean(item.pull_request), title: item.title, labels });
     if (!dryRun) await apply(github, context, item.number, labels);
