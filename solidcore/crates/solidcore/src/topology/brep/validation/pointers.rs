@@ -41,7 +41,7 @@ use crate::math::{Point2, Vec3, EFF_ZERO, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{BrepFaceServices, FaceCaches};
-use crate::surface::surface::{p5::DropPointOptions, Surface};
+use crate::surface::surface::{p5::DropPointOptions, Surface, SurfaceKind};
 use crate::topology::brep::p1;
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge;
@@ -1365,8 +1365,18 @@ impl Obstacle<'_> {
     fn cell_box(&self, k: &Kernel, cell: &Cell) -> Result<Option<Extent3d>> {
         let (found, zone) = match (self, cell) {
             (Self::Face { surface, zone, .. }, Cell::Surface(c)) => (
-                exclusion_probe(surface.calculate_bounding_box(k, c, [true, false, false], true))?
+                match surface.kind() {
+                    // A plane's box over a cell is the hull of the cell's corners (the plane is
+                    // affine); its own bounding box is the whole plane.
+                    SurfaceKind::Plane(_) => plane_cell_box(k, surface, c)?,
+                    _ => exclusion_probe(surface.calculate_bounding_box(
+                        k,
+                        c,
+                        [true, false, false],
+                        true,
+                    ))?
                     .and_then(|boxes| boxes.normal_box),
+                },
                 *zone,
             ),
             (Self::Edge { curve, zone, .. }, Cell::Curve(c)) => (
@@ -1380,6 +1390,31 @@ impl Obstacle<'_> {
             found
         }))
     }
+}
+
+/// The box of the corners of `cell` on a plane, grown by a few ulps for the rounding of the
+/// evaluations; `None` when a corner cannot be had.
+fn plane_cell_box(k: &Kernel, surface: &Surface, cell: &Extent2d) -> Result<Option<Extent3d>> {
+    let (lo, hi) = (cell.min(), cell.max());
+    let mut corners = Vec::with_capacity(4);
+    for uv in [
+        Point2::new(lo.x, lo.y),
+        Point2::new(hi.x, lo.y),
+        Point2::new(lo.x, hi.y),
+        Point2::new(hi.x, hi.y),
+    ] {
+        match exclusion_probe(surface.evaluate_point(k, uv))? {
+            Some(p) if p.x.is_finite() && p.y.is_finite() && p.z.is_finite() => corners.push(p),
+            _ => return Ok(None),
+        }
+    }
+    let mut found = Extent3d::from_point(corners.first().copied().unwrap_or(Vec3::new(0.0, 0.0, 0.0)));
+    for p in corners.iter().skip(1) {
+        found.add_point(*p);
+    }
+    let scale = corners.iter().fold(1.0_f64, |m, p| m.max(p.x.abs()).max(p.y.abs()).max(p.z.abs()));
+    found.expand_absolute(scale * 1e-12);
+    Ok(Some(found))
 }
 
 /// The two halves of a cell (four quarters of a surface cell), or none when it cannot be split.
