@@ -400,6 +400,35 @@ pub fn tolerance(context: &units::Context) -> f64 {
     context.uncertainty.unwrap_or(DEFAULT_TOLERANCE).clamp(MIN_TOLERANCE, MAX_FIT_TOLERANCE)
 }
 
+/// A solid's tolerance over its shortest edge between two vertices, at most: SMLib takes an edge
+/// shorter than half its tolerance for no edge at all, and two edges closer than it for one.
+const FEATURE_MARGIN: f64 = 0.25;
+
+/// The tolerance a solid read at `stated` should have been read at instead, when it has
+/// features the stated one cannot tell apart: [`FEATURE_MARGIN`] of the shortest distance
+/// between the two vertices of an edge. `None` when `stated` already resolves every edge.
+///
+/// A file's uncertainty is one number for everything in it, and exporters write a round one
+/// (Fusion: 0.01 mm) beside geometry far finer (edges of 0.2 to 10 um in the same file). Taken
+/// as the solid's tolerance, such edges read as zero-length edges, coincident edges and loops
+/// that turn the wrong way, and the kernel refuses every operation on the solid.
+fn feature_tolerance(brep: &Brep, stated: f64) -> Option<f64> {
+    let mut shortest = f64::INFINITY;
+    for e in &brep.edges {
+        let [a, b] = e.vertices;
+        if a == b {
+            continue;
+        }
+        let (Some(p), Some(q)) = (brep.vertices.get(a as usize), brep.vertices.get(b as usize)) else { continue };
+        let d = (0..3).map(|k| (p.point[k] - q.point[k]).powi(2)).sum::<f64>().sqrt();
+        if d > 0.0 && d < shortest {
+            shortest = d;
+        }
+    }
+    let fine = (FEATURE_MARGIN * shortest).max(MIN_TOLERANCE);
+    (fine < stated).then_some(fine)
+}
+
 fn read_with<'a>(
     ex: &'a Exchange,
     reader: &mut Reader<'a>,
@@ -409,9 +438,41 @@ fn read_with<'a>(
     trims: Option<&dyn Trims>,
     left_out: &HashSet<u64>,
 ) -> R<Solid> {
+    let stated = tolerance(&context);
+    let before = *budget;
+    let first = read_at(ex, reader, item, stated, budget, trims, left_out)?;
+    let Some(fine) = feature_tolerance(&first.brep, stated) else { return Ok(first) };
+    // Read again at the tolerance its own features set; the faces count against the budget once.
+    let after = *budget;
+    *budget = before;
+    match read_at(ex, reader, item, fine, budget, trims, left_out) {
+        Ok(mut solid) => {
+            solid.notes.push(format!(
+                "the file states a tolerance of {stated} mm, but the part has edges as short as {:.3e} mm: read at {fine:.3e} mm",
+                fine / FEATURE_MARGIN
+            ));
+            Ok(solid)
+        }
+        // What cannot be read finer stays as the file states it.
+        Err(_) => {
+            *budget = after;
+            Ok(first)
+        }
+    }
+}
+
+fn read_at<'a>(
+    ex: &'a Exchange,
+    reader: &mut Reader<'a>,
+    item: u64,
+    tol: f64,
+    budget: &mut usize,
+    trims: Option<&dyn Trims>,
+    left_out: &HashSet<u64>,
+) -> R<Solid> {
     let e = entity(ex, item)?;
     let name = e.params().first().and_then(Param::as_str).unwrap_or("").to_string();
-    let mut b = Builder::new(ex, reader, tolerance(&context), budget, trims);
+    let mut b = Builder::new(ex, reader, tol, budget, trims);
     // The file's faces, edges, vertices and their geometry read into the builder.
     let (ids, kind) = item_shells(ex, item)?;
     let mut shells = Vec::with_capacity(ids.len());

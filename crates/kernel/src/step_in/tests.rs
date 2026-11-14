@@ -3592,3 +3592,31 @@ fn a_band_round_an_extruded_ellipse_imports_closed() {
     let roof = w.face(&[(top, false)], p1);
     assert_closed_solid(&w.solid(&[bands, floor, roof]), 3, std::f64::consts::PI * a * b * height);
 }
+
+/// A plate 4 µm thick in a file that states 0.01 mm, as exporters do beside geometry far finer:
+/// taken as the solid's tolerance, the plate's 4 µm edges are shorter than the tolerance can
+/// tell from a point, and SMLib's full check refuses the body. The reader reads such a solid
+/// again at a quarter of its shortest edge and says so; the body then passes the check.
+#[test]
+fn a_solid_with_edges_shorter_than_the_stated_tolerance_is_read_at_its_own() {
+    let plate = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 0.004)).unwrap();
+    let text = step_export(&[&plate], "test").unwrap();
+    let line = text.lines().find(|l| l.contains("UNCERTAINTY_MEASURE_WITH_UNIT")).unwrap();
+    let (head, rest) = line.split_once("LENGTH_MEASURE(").unwrap();
+    let (_, tail) = rest.split_once(')').unwrap();
+    let coarse = text.replace(line, &format!("{head}LENGTH_MEASURE(0.01){tail}"));
+    let imp = step_import(&coarse).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let note = "solid 'Body1': the file states a tolerance of 0.01 mm, but the part has edges as short as 4.000e-3 mm: read at 1.000e-3 mm";
+    assert_eq!(imp.warnings, [note]);
+    let body = &imp.bodies[0].body;
+    assert_eq!(body.record().tolerance, 1e-3);
+    let report = body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    let m = measure(body).unwrap();
+    assert!(rel(m.volume, 0.4) < 1e-9, "volume {}", m.volume);
+
+    // A file whose stated tolerance resolves every edge is read once, at what it states.
+    let imp = step_import(&text).unwrap_or_else(|e| panic!("{e}"));
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+}
