@@ -177,6 +177,7 @@ panel_dock_bottom	false
 panel_dock_left	false
 panel_dock_right	false
 panel_float	false
+panel_reset_height	false
 params	false
 paste	false
 path_flange	false

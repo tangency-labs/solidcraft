@@ -4372,8 +4372,8 @@ fn host_intersected_minimum_and_maximum_are_honoured_at_the_exact_capacity_bound
     let layout = host_layout(&h, 2000.0, 1600.0, Direction::Ltr);
     assert_eq!(
         layout.resolved.panels[0].outer.size,
-        Size { width: 300.0, height: 240.0 },
-        "sole Content keeps measured height within composite maxima"
+        Size { width: 300.0, height: 400.0 },
+        "a sole panel honours the manual size at the composite maximum"
     );
     assert_eq!(h.runtime.layout().layout().section(&section("editor-section")).unwrap().preferred_extent, Some(400.0));
 }
@@ -9969,12 +9969,26 @@ fn raw_explicit_extent_survives_collapse_sole_content_and_return_to_stack() {
     assert_eq!(raw.host.frame().unwrap().layout.sections[0].outer.size.height, 400.0);
     raw.content.dispatch(vec![Mutation::Close { instance: id("log-1") }]).unwrap();
     raw.frame(Vec::new(), false);
-    assert_eq!(raw.host.frame().unwrap().layout.sections[0].outer.size.height, 240.0, "sole Content reports bounded preferred outer height");
+    assert_eq!(raw.host.frame().unwrap().layout.sections[0].outer.size.height, 400.0, "a sole panel respects its explicit height");
     assert_eq!(raw.content.runtime.layout().layout().section(&section("section-0")).unwrap().preferred_extent, Some(400.0));
     raw.content.dispatch(vec![Mutation::Open { kind: PanelKind::new("fixture.log").unwrap(), instance: id("log-1"), destination: None }]).unwrap();
     raw.frame(Vec::new(), false);
     assert_eq!(raw.host.frame().unwrap().layout.sections.iter().map(|card| card.outer.size.height).collect::<Vec<_>>(), vec![400.0, 396.0]);
     assert_eq!(raw.content.runtime.layout().layout().sections.iter().map(|section| section.weight).collect::<Vec<_>>(), weights);
+    raw.content.dispatch(vec![Mutation::Close { instance: id("log-1") }]).unwrap();
+    raw.frame(Vec::new(), false);
+    raw.menu(id("log-0"));
+    raw.click(HostControlTarget::Shared { instance: id("log-0"), action: HostSharedAction::ResetHeight }, false);
+    raw.frame(Vec::new(), false);
+    assert_eq!(raw.host.frame().unwrap().layout.sections[0].outer.size.height, 240.0);
+    let base = raw.at(HostControlTarget::Pointer(HostPointerTarget::Resize { section: section("section-0"), edge: HostResizeEdge::Bottom }));
+    raw.frame(vec![egui::Event::PointerMoved(base)], false);
+    raw.pointer(base, true, false);
+    let end = base + egui::vec2(0.0, 80.0);
+    raw.frame(vec![egui::Event::PointerMoved(end)], false);
+    raw.pointer(end, false, false);
+    raw.frame(Vec::new(), false);
+    assert_eq!(raw.host.frame().unwrap().layout.sections[0].outer.size.height, 320.0);
 }
 
 #[test]
@@ -13836,6 +13850,14 @@ fn universal_sole_content_gap_is_navigable_while_declared_fill_uses_the_column()
     assert!(frame.layout.usable.contains_rect(logical_rect(gap)));
     assert!(!frame.layout.consumes_pointer(solidcraft_engine::panels::Point { x: gap.center().x, y: gap.center().y }));
     assert!(frame.layout.resolved.rails.is_empty() && frame.layout.overflow.is_empty());
+    let original = fill.outer.size.height;
+    let target = HostControlTarget::Pointer(HostPointerTarget::Resize { section: fill.section.clone(), edge: HostResizeEdge::Bottom });
+    let base = egui_rect(frame.controls.iter().find(|control| control.target == target).unwrap().bounds).center();
+    let result = h.call("ui.drag", serde_json::json!({"x0":base.x,"y0":base.y,"x1":base.x,"y1":base.y-100.0,"steps":8}));
+    assert_eq!(result["ok"], true);
+    h.frames(3);
+    let fill = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|section| section.instance.0 == "specimen-1").unwrap();
+    assert_eq!(fill.outer.size.height, original - 100.0);
 }
 
 #[test]

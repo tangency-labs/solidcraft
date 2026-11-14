@@ -786,6 +786,7 @@ fn target_observation(target: &HostControlTarget) -> Value {
                 HostSharedAction::Focus => json!({"type":"focus"}),
                 HostSharedAction::Close => json!({"type":"close"}),
                 HostSharedAction::Collapse => json!({"type":"collapse"}),
+                HostSharedAction::ResetHeight => json!({"type":"reset_height"}),
                 HostSharedAction::Move(zone) => json!({"type":"move","zone":zone}),
                 HostSharedAction::Join(section) => json!({"type":"join","section":section}),
                 HostSharedAction::Popout => json!({"type":"popout"}),

@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "ui.panel_host.reset_height": "إعادة ضبط الارتفاع"
+  },
+  "de": {
+    "ui.panel_host.reset_height": "Höhe zurücksetzen"
+  },
+  "en": {
+    "ui.panel_host.reset_height": "Reset height"
+  },
+  "he": {
+    "ui.panel_host.reset_height": "איפוס הגובה"
+  },
+  "ja": {
+    "ui.panel_host.reset_height": "高さをリセット"
+  },
+  "ko": {
+    "ui.panel_host.reset_height": "높이 재설정"
+  },
+  "vi": {
+    "ui.panel_host.reset_height": "Đặt lại chiều cao"
+  },
+  "zh": {
+    "ui.panel_host.reset_height": "重置高度"
+  }
+}
