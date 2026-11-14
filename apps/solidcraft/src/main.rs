@@ -119,6 +119,9 @@ struct App {
     dialog_folder: DialogFolder,
     /// Settings go to `app.ron` in the frame they change (#8275).
     prefs_writer: PrefsWriter,
+    /// Preferences › Layout's `windows_smooth_window_drag`, as winit was given it.
+    #[cfg(target_os = "windows")]
+    window_move: native_frame::WindowMove,
 }
 
 /// Settings written to the settings file soon after they change (#8275). eframe saves them
@@ -291,6 +294,9 @@ impl eframe::App for App {
             menu.tick(&mut self.solve, ctx);
         }
         self.solve.logic(ctx);
+        // Whether the window draws while it is dragged by its title bar: winit has it at once.
+        #[cfg(target_os = "windows")]
+        self.window_move.follow(self.solve.preferences.windows_smooth_window_drag);
         // The file chooser that opened is not the desktop's own: the user has to be told (#10159).
         #[cfg(target_os = "linux")]
         if let Some(reason) = desktop_chooser::take_reason() {
@@ -1344,6 +1350,13 @@ fn main() -> eframe::Result {
             {
                 app.set_status(format!("--theme-file: {e}"), true);
             }
+            // Before the first frame: a drag can start as soon as the window shows.
+            #[cfg(target_os = "windows")]
+            let window_move = {
+                let mut window_move = native_frame::WindowMove::default();
+                window_move.follow(app.preferences.windows_smooth_window_drag);
+                window_move
+            };
             mark("app state and prefs");
             let gpu = cc.wgpu_render_state.as_ref().map(|rs| LostWatch {
                 lost: rs.device_lost.clone(),
@@ -1516,6 +1529,8 @@ fn main() -> eframe::Result {
                 native_menu: None,
                 nav_bridge,
                 dialog_folder,
+                #[cfg(target_os = "windows")]
+                window_move,
             }))
         }),
     );
