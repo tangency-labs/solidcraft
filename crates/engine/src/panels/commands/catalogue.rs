@@ -70,6 +70,18 @@ impl CatalogueState {
         Self::hydrate_inner(bytes, registry, Some(defaults))
     }
 
+    /// Replace one workspace's remembered layout with its registered default.
+    pub fn reset_remembered_to_default(&mut self, workspace: &WorkspaceId, registry: &PanelRegistry) -> PanelResult<()> {
+        let descriptor = self.workspaces.get(workspace).ok_or_else(|| error(Rule::MissingTarget, "workspace is not registered"))?;
+        let stored =
+            self.builtins.get(&descriptor.default_preset).ok_or_else(|| error(Rule::MissingTarget, "workspace default is not registered"))?;
+        let raw = decode_retained_record(stored.bytes(), registry)?;
+        let mut envelope = stored.project_envelope(registry, &raw.layout.workspace)?;
+        envelope.layout.workspace = workspace.clone();
+        self.remembered.insert(workspace.clone(), StoredEnvelope::new(&envelope, None, registry)?);
+        self.validate()
+    }
+
     fn hydrate_inner(bytes: &[u8], registry: &PanelRegistry, lenient: Option<&Self>) -> PanelResult<(Self, Vec<SkippedEntry>)> {
         let mut skipped = Vec::new();
         if bytes.len() > MAX_CATALOGUE_SNAPSHOT_BYTES {
@@ -94,7 +106,8 @@ impl CatalogueState {
                 let record = match StoredEnvelope::from_record(raw.0, raw.1, registry) {
                     Ok(record) => record,
                     Err(_) if lenient.is_some() => {
-                        skipped.push(if builtin { SkippedEntry::Builtin(name) } else { SkippedEntry::User(name) });
+                        let raw = RawRecord { bytes: raw.0.to_vec(), rejected: raw.1.map(<[u8]>::to_vec) };
+                        skipped.push(if builtin { SkippedEntry::Builtin(name, raw) } else { SkippedEntry::User(name, raw) });
                         continue;
                     }
                     Err(reason) => return Err(reason),
@@ -129,7 +142,9 @@ impl CatalogueState {
                 Ok(record) => {
                     next.remembered.insert(workspace, record);
                 }
-                Err(_) if lenient.is_some() => skipped.push(SkippedEntry::Remembered(workspace)),
+                Err(_) if lenient.is_some() => {
+                    skipped.push(SkippedEntry::Remembered(workspace, RawRecord { bytes: raw.0.to_vec(), rejected: raw.1.map(<[u8]>::to_vec) }))
+                }
                 Err(reason) => return Err(reason),
             }
         }
@@ -139,17 +154,17 @@ impl CatalogueState {
         if let Some(defaults) = lenient {
             for entry in &skipped {
                 match entry {
-                    SkippedEntry::Builtin(name) => {
+                    SkippedEntry::Builtin(name, _) => {
                         if let Some(record) = defaults.builtins.get(name) {
                             next.builtins.insert(name.clone(), record.clone());
                         }
                     }
-                    SkippedEntry::Remembered(workspace) => {
+                    SkippedEntry::Remembered(workspace, _) => {
                         if let Some(record) = defaults.remembered.get(workspace) {
                             next.remembered.insert(workspace.clone(), record.clone());
                         }
                     }
-                    SkippedEntry::User(_) => {}
+                    SkippedEntry::User(..) => {}
                 }
             }
         }

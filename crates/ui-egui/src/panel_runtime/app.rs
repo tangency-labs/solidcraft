@@ -123,7 +123,7 @@ impl AppPanelRuntime {
             catalogue: self.catalogue.state().export()?,
             rejected: state.rejected.clone(),
             legacy: state.legacy.clone(),
-            reported: state.reported.clone(),
+            unread: state.unread.clone(),
         })
     }
     pub(super) fn preference_preset_names(&self) -> Vec<String> {
@@ -147,47 +147,49 @@ impl AppPanelRuntime {
             Err(reason) => reason,
         };
         let mut reset = self.preferences.as_ref().map(|state| state.reset.clone()).unwrap_or_default();
-        let original = record.value();
         let mut current = record;
         let mut changed = Vec::new();
+        let mut originals = Vec::new();
         if !self.native.capabilities().native_windows
-            && let Ok((redocked, names)) = super::preferences::redock_native_record(&current, self.runtime.layout().registry())
+            && let Ok((redocked, names, kept)) = super::preferences::redock_native_record(&current, self.runtime.layout().registry())
             && !names.is_empty()
         {
-            let (rejected, reported) = (current.rejected.clone(), current.reported.clone());
+            let (rejected, mut unread) = (current.rejected.clone(), current.unread.clone());
+            let (_, dropped) = super::preferences::merge_unread(&mut unread, kept.clone());
             current = redocked;
             current.rejected = rejected;
-            current.reported = reported;
+            current.unread = unread;
             changed = names;
+            originals = kept;
+            reset.extend((dropped > 0).then(|| format!("{dropped} older kept")));
         }
-        // Keep the saved record verbatim as the recovery copy, and remember what
-        // was reported so later starts stay quiet.
-        let remember = |record: &mut super::preferences::PreferenceRecord, names: &[String]| {
-            if record.rejected.is_none() {
-                record.rejected = Some(original.clone());
-            }
-            record.reported.extend(names.iter().filter(|name| !record.reported.contains(name)).cloned());
-        };
         if !changed.is_empty() {
-            let mut attempt = current.clone();
-            remember(&mut attempt, &changed);
-            if self.restore_preference_record(session, attempt).is_ok() {
+            if self.restore_preference_record(session, current.clone()).is_ok() {
                 reset.extend(changed);
                 if let Some(state) = &mut self.preferences {
                     state.reset = reset;
                 }
                 return Ok(());
             }
-            reset.extend(changed.iter().cloned());
+            reset.extend(changed);
         }
-        let mut names = changed;
-        names.push(current.selected.0.clone());
-        reset.push(current.selected.0.clone());
-        remember(&mut current, &names);
+        // The selected layout still cannot be placed: its default stands in and its
+        // saved bytes are kept as an unread entry. The recovery copy is left as it was.
+        let selected = current.selected.clone();
+        if let Ok(state) = current.catalogue(self.runtime.layout().registry())
+            && let Some(stored) = state.remembered(&selected)
+        {
+            let raw = commands::RawRecord { bytes: stored.bytes().to_vec(), rejected: stored.rejected().map(<[u8]>::to_vec) };
+            originals.push(super::preferences::UnreadEntry::from_raw("remembered", &selected.0, &raw));
+        }
+        super::preferences::merge_unread(&mut current.unread, originals);
+        let prior_rejected = current.rejected.clone();
         if self.reset_pending_preferences(session, current).is_err() {
             return Err(first);
         }
+        reset.push(selected.0);
         if let Some(state) = &mut self.preferences {
+            state.rejected = prior_rejected;
             state.reset = reset;
         }
         Ok(())
@@ -204,7 +206,7 @@ impl AppPanelRuntime {
             state.failed_environment = None;
             state.rejected = record.rejected;
             state.legacy = record.legacy;
-            state.reported = record.reported;
+            state.unread = record.unread;
         }
         Ok(())
     }
@@ -272,7 +274,7 @@ impl AppPanelRuntime {
             let original = record.value();
             state.rejected = record.rejected.or(Some(original));
             state.legacy = record.legacy;
-            state.reported = record.reported;
+            state.unread = record.unread;
             state.pending = None;
             state.failed = false;
             state.failed_environment = None;
@@ -1230,7 +1232,7 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
         .panel_runtime
         .as_ref()
         .and_then(|integration| integration.preferences.as_ref())
-        .is_some_and(|state| state.failed || (state.rejected.is_some() && state.reported.is_empty()) || !state.reset.is_empty())
+        .is_some_and(|state| state.failed || state.rejected.is_some() || !state.reset.is_empty())
     {
         super::preferences::report_notice(app);
     }

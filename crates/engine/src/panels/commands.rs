@@ -71,9 +71,16 @@ pub struct WorkspaceDescriptor {
 /// A stored layout that `CatalogueState::hydrate_lenient` could not read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SkippedEntry {
-    Builtin(String),
-    User(String),
-    Remembered(WorkspaceId),
+    Builtin(String, RawRecord),
+    User(String, RawRecord),
+    Remembered(WorkspaceId, RawRecord),
+}
+
+/// A stored layout exactly as read: its bytes and its recovery bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawRecord {
+    pub bytes: Vec<u8>,
+    pub rejected: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

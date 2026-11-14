@@ -33,9 +33,62 @@ pub(super) struct PreferenceRecord {
     pub rejected: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub legacy: Option<LegacyPanelPlacements>,
-    /// Entries already reported as reset. Their original bytes stay in `rejected`.
+    /// Stored layouts that could not be restored, kept verbatim so a save never
+    /// deletes them. Newest last; bounded by `MAX_REJECTED_RECORD_BYTES` in total.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub reported: Vec<String>,
+    pub unread: Vec<UnreadEntry>,
+}
+
+/// One stored layout that could not be restored, byte for byte.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct UnreadEntry {
+    /// `builtin`, `user`, `remembered` or `native`.
+    pub kind: String,
+    pub name: String,
+    #[serde(with = "catalogue_bytes")]
+    pub record: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<String>,
+}
+
+impl UnreadEntry {
+    fn new(kind: &str, name: &str, record: &[u8], recovery: Option<&[u8]>) -> Self {
+        Self { kind: kind.into(), name: name.into(), record: record.to_vec(), recovery: recovery.map(solidcraft_engine::doc::canvas::base64_encode) }
+    }
+    pub(super) fn from_raw(kind: &str, name: &str, raw: &commands::RawRecord) -> Self {
+        Self::new(kind, name, &raw.bytes, raw.rejected.as_deref())
+    }
+    pub(super) fn native(workspace: &WorkspaceId, bytes: &[u8]) -> Self {
+        Self::new("native", &workspace.0, bytes, None)
+    }
+    fn size(&self) -> usize {
+        self.kind.len() + self.name.len() + self.record.len().div_ceil(3) * 4 + self.recovery.as_ref().map_or(0, String::len)
+    }
+}
+
+/// Appends entries that are not already kept, newest last, and drops the oldest
+/// when the total would pass the cap. Returns the names of newly kept entries and
+/// how many entries could not be kept.
+pub(super) fn merge_unread(kept: &mut Vec<UnreadEntry>, incoming: Vec<UnreadEntry>) -> (Vec<String>, usize) {
+    let mut added = Vec::new();
+    for entry in incoming {
+        if kept.contains(&entry) {
+            continue;
+        }
+        added.push(entry.name.clone());
+        kept.push(entry);
+    }
+    let mut dropped = 0;
+    while kept.iter().map(UnreadEntry::size).sum::<usize>() > MAX_REJECTED_RECORD_BYTES && !kept.is_empty() {
+        kept.remove(0);
+        dropped += 1;
+    }
+    (added, dropped)
+}
+
+fn dropped_note(dropped: usize) -> Option<String> {
+    (dropped > 0).then(|| format!("{dropped} older kept"))
 }
 
 mod catalogue_bytes {
@@ -70,7 +123,7 @@ pub(super) struct PreferenceSession {
     pub failed_environment: Option<PreferenceEnvironment>,
     /// Entries reset at startup or first paint, for the precise notice.
     pub reset: Vec<String>,
-    pub reported: Vec<String>,
+    pub unread: Vec<UnreadEntry>,
 }
 
 pub(super) type PreferenceEnvironment = (LogicalRect, AllocationEnvironment, u64, RuntimeEnvironment, Vec<LogicalRect>, HostCapabilities);
@@ -281,34 +334,38 @@ impl PreferenceRecord {
             }
         }
         let mut reset = Vec::new();
-        let state = match defaults {
+        let mut state = match defaults {
             Some(defaults) => {
                 let (state, skipped) = commands::CatalogueState::hydrate_lenient(&record.catalogue, registry, defaults)?;
-                reset = skipped
-                    .into_iter()
-                    .map(|entry| match entry {
-                        commands::SkippedEntry::Builtin(name) | commands::SkippedEntry::User(name) => name,
-                        commands::SkippedEntry::Remembered(workspace) => workspace.0,
-                    })
-                    .collect();
+                let mut entries = Vec::new();
+                for entry in skipped {
+                    match entry {
+                        commands::SkippedEntry::Builtin(name, raw) => entries.push(UnreadEntry::from_raw("builtin", &name, &raw)),
+                        commands::SkippedEntry::User(name, raw) => entries.push(UnreadEntry::from_raw("user", &name, &raw)),
+                        commands::SkippedEntry::Remembered(workspace, raw) => entries.push(UnreadEntry::from_raw("remembered", &workspace.0, &raw)),
+                    }
+                }
+                if !entries.is_empty() {
+                    let (added, dropped) = merge_unread(&mut record.unread, entries);
+                    reset = added;
+                    reset.extend(dropped_note(dropped));
+                }
                 state
             }
             None => commands::CatalogueState::hydrate(&record.catalogue, registry)?,
         };
+        if defaults.is_some() && state.remembered(&record.selected).is_none() && state.summaries().iter().any(|item| item.id == record.selected) {
+            // The selected workspace's saved layout was unreadable: its registered default stands in.
+            state.reset_remembered_to_default(&record.selected, registry)?;
+            if !reset.contains(&record.selected.0) {
+                reset.push(record.selected.0.clone());
+            }
+        }
         if !state.summaries().iter().any(|item| item.id == record.selected) || state.remembered(&record.selected).is_none() {
             return Err(error(Rule::MissingTarget, "saved selected workspace has no remembered layout"));
         }
-        if !reset.is_empty() {
+        if defaults.is_some() && (!reset.is_empty() || !record.unread.is_empty()) {
             record.catalogue = state.export()?;
-            // The original record stays verbatim as the recovery copy, so a save
-            // never deletes what could not be read; later starts do not repeat the notice.
-            if record.rejected.is_none() {
-                let mut counter = CountBytes(0);
-                let fits = serde_json::to_writer(&mut counter, value).is_ok() && counter.0 <= MAX_REJECTED_RECORD_BYTES;
-                record.rejected = Some(if fits { value.clone() } else { Value::Null });
-            }
-            reset.retain(|name| !record.reported.contains(name));
-            record.reported.extend(reset.iter().cloned());
         }
         Ok((record, reset))
     }
@@ -318,10 +375,10 @@ impl PreferenceRecord {
     pub(super) fn value(&self) -> Value {
         let packed = solidcraft_engine::doc::canvas::base64_encode(&self.catalogue);
         let mut value = serde_json::json!({"version":self.version,"selected":self.selected,"catalogue":packed,"legacy":self.legacy});
-        if !self.reported.is_empty()
+        if !self.unread.is_empty()
             && let Some(object) = value.as_object_mut()
         {
-            object.insert("reported".into(), serde_json::json!(self.reported));
+            object.insert("unread".into(), serde_json::json!(self.unread));
         }
         if let Some(rejected) = &self.rejected
             && let Some(object) = value.as_object_mut()
@@ -375,19 +432,27 @@ fn portable_envelope(bytes: &[u8], envelope: LayoutEnvelope, registry: &PanelReg
 
 /// A saved record for a host without native windows: every Window placement
 /// falls back to its portable one, and each moved panel is named.
-pub(super) fn redock_native_record(record: &PreferenceRecord, registry: &PanelRegistry) -> PanelResult<(PreferenceRecord, Vec<String>)> {
+pub(super) fn redock_native_record(
+    record: &PreferenceRecord,
+    registry: &PanelRegistry,
+) -> PanelResult<(PreferenceRecord, Vec<String>, Vec<UnreadEntry>)> {
     let mut names = Vec::new();
+    let mut originals = Vec::new();
     let mut next = record.clone();
     next.catalogue = record
         .catalogue(registry)?
         .map_envelopes(registry, |bytes, envelope| {
+            let before = names.len();
             for section in envelope.layout.sections.iter().filter(|section| section.location.zone() == Zone::Window) {
                 names.extend(section.tabs.iter().map(|tab| format!("{} (Window)", tab.0)));
+            }
+            if names.len() > before {
+                originals.push(UnreadEntry::native(&envelope.layout.workspace, bytes));
             }
             portable_envelope(bytes, envelope, registry)
         })?
         .export()?;
-    Ok((next, names))
+    Ok((next, names, originals))
 }
 
 /// Capture before the generic preferences reader can discard an unreadable value.
@@ -491,17 +556,17 @@ pub(super) fn configure_preferences(
         catalogue: defaults.state().export()?,
         rejected: None,
         legacy: legacy.clone(),
-        reported: Vec::new(),
+        unread: Vec::new(),
     };
     let mut pending = None;
     let mut rejected = None;
     let mut reset = Vec::new();
-    let mut reported = Vec::new();
+    let mut unread = Vec::new();
     if let Some(raw) = &preferences.record {
         match PreferenceRecord::read_repairing(raw, registry, defaults.state()) {
             Ok((record, names)) => {
                 reset = names;
-                reported = record.reported.clone();
+                unread = record.unread.clone();
                 pending = Some(record);
             }
             Err(_) => {
@@ -516,9 +581,9 @@ pub(super) fn configure_preferences(
     }
     integration.install_preference_catalogue(
         PreferenceCatalogue(defaults.state().clone()),
-        PreferenceSession { pending, initial, rejected, failed: false, legacy, failed_environment: None, reset, reported },
+        PreferenceSession { pending, initial, rejected, failed: false, legacy, failed_environment: None, reset, unread },
     )?;
-    Ok(integration.preferences.as_ref().is_some_and(|state| (state.rejected.is_some() && state.reported.is_empty()) || !state.reset.is_empty()))
+    Ok(integration.preferences.as_ref().is_some_and(|state| state.rejected.is_some() || !state.reset.is_empty()))
 }
 
 /// Preferences Cancel uses the same admitted retained-controller transaction as
