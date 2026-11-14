@@ -1165,7 +1165,7 @@ impl Dialog {
                     at: None,
                     refs: Default::default(),
                 },
-                vec![SelInput::new("Profile", PROFILES, false)],
+                vec![SelInput::new("Profile", PROFILES, false), SelInput::new("Axis (optional)", AXIS_PICKS, false)],
             ),
             "solid.combine" => Dialog::new(
                 Kind::Combine { operation: 1, keep_tools: false },
@@ -6483,6 +6483,21 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             } else {
                 crate::primitive_placement::params(s, cmd, &d.extra, &mut p);
             }
+            // A picked axis is the line the coil turns about (#7286): a point on it and its
+            // direction. It replaces a typed or picked placement.
+            if *cmd == "solid.coil"
+                && let Some(x) = sels(d, 1).first()
+            {
+                let (origin, dir) = axis_of(app, x).ok_or(AXIS_PICK)?;
+                p.insert("base".into(), pt(origin));
+                p.insert("axis".into(), pt(dir));
+                p.remove("references");
+            }
+            // "Reverse direction": the coil grows the other way along its axis.
+            if *cmd == "solid.coil" && d.extra.get("reverse_direction").and_then(Value::as_bool).unwrap_or(false) {
+                let axis = p.get("axis").or_else(|| d.extra.get("axis")).and_then(coil_axis_vector).unwrap_or([0.0, 0.0, 1.0]);
+                p.insert("axis".into(), json!([0.0 - axis[0], 0.0 - axis[1], 0.0 - axis[2]]));
+            }
             p.insert("operation".into(), json!(OPS.get(*operation).copied().unwrap_or("new")));
             (cmd, Value::Object(p))
         }
@@ -6557,6 +6572,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             if fillet && !dense::fillet_option_applies(&d.extra, k) {
                 continue;
             }
+            // Only the Coil dialog reads this one; its effect is already in the axis.
+            if k == "reverse_direction" {
+                continue;
+            }
             m.entry(k.clone()).or_insert_with(|| v.clone());
         }
     }
@@ -6584,6 +6603,20 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
     }
     Ok(vec![(cmd.to_string(), params)])
+}
+
+/// A coil's axis as a vector: `[x, y, z]` numbers or the name `X`, `Y` or `Z`.
+fn coil_axis_vector(v: &Value) -> Option<[f64; 3]> {
+    match v {
+        Value::Array(a) if a.len() == 3 => Some([a[0].as_f64()?, a[1].as_f64()?, a[2].as_f64()?]),
+        Value::String(s) => match s.trim().to_ascii_uppercase().as_str() {
+            "X" => Some([1.0, 0.0, 0.0]),
+            "Y" => Some([0.0, 1.0, 0.0]),
+            "Z" => Some([0.0, 0.0, 1.0]),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// The corner of a box placed at `p`: standing on a face whose normal is along an axis (centred
@@ -7786,6 +7819,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             targets,
         } => {
             let mut d = start("solid.coil")?;
+            // The stored axis stays unless the person picks another one: a selection made
+            // before editing must not become the axis.
+            if let Some(input) = d.inputs.get_mut(1) {
+                input.items.clear();
+            }
             d.kind = Kind::Primitive {
                 cmd: "solid.coil",
                 fields: vec![

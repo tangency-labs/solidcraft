@@ -430,6 +430,21 @@ fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
     }
 }
 
+#[test]
+fn editing_a_coil_does_not_take_the_selection_as_its_axis() {
+    // #7286: a selection made before Edit Feature must not replace the stored axis.
+    let mut h = design("mm");
+    h.app
+        .run("solid.coil", json!({"diameter": 40, "revolutions": 4, "pitch": 8, "section_size": 3, "axis": "Y", "operation": "new"}))
+        .unwrap();
+    let id = h.app.session.doc.features.first().map(|f| f.id).unwrap();
+    h.app.session.selection = vec![solidcraft_engine::Sel::Axis { name: "X".into() }];
+    h.app.edit_feature(id);
+    h.frames(3);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(d.inputs.get(1).is_some_and(|i| i.items.is_empty()), "the stored axis stays");
+}
+
 /// #3271: cover secondary and optional lengths as well as each tool's primary canvas value.
 #[test]
 fn operation_length_defaults_follow_every_design_unit() {
