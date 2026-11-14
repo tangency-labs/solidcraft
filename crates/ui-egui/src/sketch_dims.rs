@@ -18,7 +18,9 @@ use crate::tools::Tool;
 use crate::viewport::Proj;
 use solidcraft_theme::Tokens;
 
-/// What an untyped construction line Length box shows: the line stays infinite.
+/// The placeholder an untyped construction line Length box shows: the line stays infinite.
+/// It is not a value in the box: the box holds the user's own expression, empty until they
+/// type one (#17052).
 const INFINITE: &str = "\u{221e}";
 
 /// One value box.
@@ -552,6 +554,8 @@ pub fn dimensions(t: &Tool) -> Value {
         .iter()
         .chain(&t.dims)
         .filter(|dimension| dimension.locked && is_dimension(t, dimension.label))
+        // A cleared construction Length is the infinite line again: it is no dimension (#17052).
+        .filter(|dimension| !(construction_length(t, dimension) && dimension.value.trim().is_empty()))
         .map(|dimension| (dimension.label.to_ascii_lowercase().replace(' ', "_"), json!(dimension.value)))
         .collect::<serde_json::Map<_, _>>();
     Value::Object(values)
@@ -697,13 +701,21 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     }
     let mut completed = false;
     let mut any_focused = false;
-    let view = app.viewport.layout.as_ref().map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive());
+    let layout = app.viewport.layout.as_ref();
+    let view =
+        layout.map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive()).map(|view| Room::new(view, layout.and_then(|l| l.usable.as_ref())));
     let field_frame = Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(tk.space_3 as i8, 1));
     let construction = solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some();
     for (b, (v, _)) in t.dims.iter_mut().zip(&lv) {
         if !b.locked {
-            // A construction line's untyped length is infinite, whatever the pointer does.
-            b.value = if construction && b.label == "Length" { INFINITE.to_owned() } else { fmt(app, b.label, b.kind, *v) };
+            // A construction line's Length box holds no value until the user types one: an
+            // unset length keeps the line infinite, and the box shows the ∞ as its placeholder
+            // (#17052), so a typed size is the whole value.
+            if construction && b.label == "Length" {
+                b.value.clear();
+            } else {
+                b.value = fmt(app, b.label, b.kind, *v);
+            }
         }
     }
     // Polygon values used to sit inside the radius, so both boxes covered a small polygon
@@ -760,10 +772,16 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
         let Some(sp) = proj.to_screen(plane.to_world(at)) else { continue };
         let id = egui::Id::unique(("sc_dim", i));
         let has_focus = ui.ctx().memory(|m| m.has_focus(id));
+        // What the box shows: the expression the user typed, or the ∞ of an untouched
+        // construction line's Length. The ∞ is a placeholder, not a value in the box (#17052).
+        let mut text = b.value.clone();
+        if construction && b.label == "Length" && text.is_empty() {
+            text = INFINITE.to_owned();
+        }
         // While a box follows the cursor its whole text is selected, so typing replaces it.
         if (has_focus || (focus && i == 0)) && !b.locked {
             let mut s = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
-            let n = b.value.chars().count();
+            let n = text.chars().count();
             s.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
             s.store(ui.ctx(), id);
         }
@@ -779,13 +797,15 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             |ui| {
                 let fill = if b.locked { tk.accent_soft } else { tk.panel };
                 Container::show_backing(ui, field_frame.fill(fill), |ui| {
-                    let r = crate::ui_kit::placement_field(ui, id, &mut b.value, b.label);
+                    let r = crate::ui_kit::placement_field(ui, id, &mut text, b.label);
                     // A completion gets first use of forward Tab. Shift+Tab always moves back;
                     // the box reached by egui's generic traversal must not complete its text.
-                    let changed =
-                        (source.is_none() || (source == Some(i) && tab != Some(true))) && crate::params_dialog::complete(ui, &r, &mut b.value);
+                    let changed = (source.is_none() || (source == Some(i) && tab != Some(true))) && crate::params_dialog::complete(ui, &r, &mut text);
                     completed |= changed && source == Some(i);
                     if r.changed() || changed {
+                        // The ∞ is a placeholder: what the user typed is the whole value, and a
+                        // cleared box is the infinite length again (#17052).
+                        b.value = text.replace(INFINITE, "");
                         b.locked = true;
                     }
                     if focus && i == 0 {
@@ -822,7 +842,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
 /// Retry first-field candidates when the second field cannot fit. Candidate count is bounded
 /// for the two fields. Only if the original candidates fail, also try axis-aligned
 /// neighbors and slides away from the line. An area too small to fit them can only clamp.
-fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<egui::Rect>, gap: f32) -> Vec<Pos2> {
+fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<Room>, gap: f32) -> Vec<Pos2> {
     let [start, end] = segment;
     let delta = end - start;
     let length = delta.length();
@@ -837,10 +857,7 @@ fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<e
     };
     let inside = |size: egui::Vec2, center: Pos2| {
         let pos = center - size * 0.5;
-        let pos = view.map_or(pos, |view| {
-            let inset = view.shrink(gap * 0.5);
-            pos.clamp(inset.min, (inset.max - size).max(inset.min))
-        });
+        let pos = view.map_or(pos, |view| view.inset(gap * 0.5).clamp(egui::Rect::from_min_size(pos, size)).min);
         egui::Rect::from_min_size(pos, size)
     };
     // Keep the existing 60-pixel cap on the Angle input's distance from the start.
@@ -865,6 +882,7 @@ fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<e
             }
         }
         if let Some(view) = view {
+            let view = view.view;
             candidates.extend([view.left_top(), view.right_top(), view.left_bottom(), view.right_bottom()]);
         }
         let mut rects = candidates.into_iter().map(|center| inside(size, center)).collect::<Vec<_>>();
@@ -904,7 +922,7 @@ fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<e
         }
         rects
     };
-    let usable = |rect: egui::Rect| view.is_none_or(|view| view.contains_rect(rect)) && clear(rect);
+    let usable = |rect: egui::Rect| view.is_none_or(|view| view.fits(rect)) && clear(rect);
     let mut placed: Vec<egui::Rect> = Vec::new();
     for (i, &size) in sizes.iter().enumerate() {
         let mut position = candidates(i, size, placed.last().copied(), false)
@@ -943,7 +961,7 @@ fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<e
 
 /// Stack the polygon inputs beside its screen bounds. Try each side before falling back to
 /// the drawing area's edge when the polygon fills the view; keep the boxes separate even then.
-fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Option<egui::Rect>, gap: f32) -> Vec<Pos2> {
+fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Option<Room>, gap: f32) -> Vec<Pos2> {
     let size =
         vec2(sizes.iter().map(|s| s.x).fold(0.0, f32::max), sizes.iter().map(|s| s.y).sum::<f32>() + gap * sizes.len().saturating_sub(1) as f32);
     let candidates = [
@@ -952,7 +970,7 @@ fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Optio
         egui::pos2(bounds.left() - gap - size.x, bounds.center().y - size.y * 0.5),
         egui::pos2(bounds.right() + gap, bounds.center().y - size.y * 0.5),
     ];
-    let inside = |pos: Pos2| view.map_or(pos, |view| pos.clamp(view.min, (view.max - size).max(view.min)));
+    let inside = |pos: Pos2| view.map_or(pos, |view| view.clamp(egui::Rect::from_min_size(pos, size)).min);
     let start = candidates
         .into_iter()
         .map(inside)
@@ -984,7 +1002,7 @@ pub(crate) fn over_tool_boxes(app: &SolveApp, ctx: &egui::Context, p: egui::Pos2
 /// The boxes at `positions` (top left, `None` for one not shown) with none covering another: a
 /// box that overlaps an earlier one moves below it, or above it when that leaves `view`. The
 /// first box of an overlap keeps its place, so the one that follows the cursor does not jump.
-fn apart(positions: &[Option<Pos2>], view: Option<egui::Rect>) -> Vec<Option<Pos2>> {
+fn apart(positions: &[Option<Pos2>], view: Option<Room>) -> Vec<Option<Pos2>> {
     const GAP: f32 = 2.0;
     let mut out = positions.to_vec();
     let rect = |p: Pos2| egui::Rect::from_min_size(p, BOX);
@@ -996,28 +1014,74 @@ fn apart(positions: &[Option<Pos2>], view: Option<egui::Rect>) -> Vec<Option<Pos
             }
             let below = Pos2::new(b.x, a.y + BOX.y + GAP);
             let above = Pos2::new(b.x, a.y - BOX.y - GAP);
-            let fits = |p: Pos2| view.is_none_or(|v| v.contains_rect(rect(p)));
+            let fits = |p: Pos2| view.is_none_or(|v| v.fits(rect(p)));
             out[j] = Some(if fits(below) || !fits(above) { below } else { above });
         }
     }
     out
 }
 
-/// Where a value box whose top left would be `pos` goes so it stays in the drawing area `view`:
+/// Where a tool's value boxes may go: the drawing area, or with the panel layout its whole free
+/// region. The drawing area alone is the region's largest rectangle, which can leave out open
+/// space beside a panel: a box there counted as off screen and was moved away from its shape
+/// (#17992).
+#[derive(Clone, Copy)]
+struct Room<'a> {
+    view: egui::Rect,
+    free: Option<&'a crate::panel_runtime::HostUsableRegion>,
+    /// Kept clear around a box.
+    margin: f32,
+}
+
+impl<'a> Room<'a> {
+    fn new(view: egui::Rect, free: Option<&'a crate::panel_runtime::HostUsableRegion>) -> Self {
+        Room { view, free, margin: 0.0 }
+    }
+
+    /// The same room with `margin` kept clear around each box.
+    fn inset(self, margin: f32) -> Self {
+        Room { margin, ..self }
+    }
+
+    /// Whether the box `r` is in the room.
+    fn fits(&self, r: egui::Rect) -> bool {
+        match self.free {
+            Some(free) => free.contains_rect(crate::panel_runtime::logical_rect(r.expand(self.margin))),
+            None => self.view.shrink(self.margin).contains_rect(r),
+        }
+    }
+
+    /// `r` when it is in the room, else the nearest place of its size that is; pushed into the
+    /// drawing area when the room has none.
+    fn clamp(&self, r: egui::Rect) -> egui::Rect {
+        if self.fits(r) {
+            return r;
+        }
+        let size = solidcraft_engine::panels::Size { width: r.width(), height: r.height() };
+        let centre = solidcraft_engine::panels::Point { x: r.center().x, y: r.center().y };
+        if let Some(placed) = self.free.and_then(|free| free.place_footprint(size, centre, self.margin)) {
+            // Already set in by the margin, at the box's own size.
+            return crate::panel_runtime::egui_rect(placed);
+        }
+        let inner = self.view.shrink(self.margin);
+        egui::Rect::from_min_size(r.min.clamp(inner.min, (inner.max - r.size()).max(inner.min)), r.size())
+    }
+}
+
+/// Where a value box whose top left would be `pos` goes so it stays in the room `view`:
 /// as it is when it fits; else mirrored through the pointer (a box set off the cursor, past the
 /// view's edge, goes to the cursor's other side, still clear of it, #2201); else pushed inside.
 /// A box that would still sit on the pointer moves beside it: there it would take the click meant
 /// for the next point, and the shape would wait for Enter (#12208).
-fn in_view(pos: Pos2, view: Option<egui::Rect>, pointer: Option<Pos2>) -> Pos2 {
+fn in_view(pos: Pos2, view: Option<Room>, pointer: Option<Pos2>) -> Pos2 {
     let Some(view) = view else { return pos };
-    let fits = |p: Pos2| view.contains_rect(egui::Rect::from_min_size(p, BOX));
+    let fits = |p: Pos2| view.fits(egui::Rect::from_min_size(p, BOX));
     let placed = if fits(pos) {
         pos
     } else if let Some(mirrored) = pointer.map(|c| c + (c - (pos + BOX * 0.5)) - BOX * 0.5).filter(|p| fits(*p)) {
         mirrored
     } else {
-        let max = (view.max - BOX).max(view.min);
-        pos.clamp(view.min, max)
+        view.clamp(egui::Rect::from_min_size(pos, BOX)).min
     };
     off_pointer(placed, pointer, fits)
 }

@@ -55,8 +55,7 @@ with a bug report.
 | Linux (Flatpak) | `~/.var/app/io.tangencylabs.solidcraft/data/solidcraft` | (the same folder) |
 
 On Windows, paste `%APPDATA%` or `%LOCALAPPDATA%` into the Explorer address bar to open the
-folder. Releases before the rename used `SolveCraft` folders next to these; SolidCraft only
-reads them, so you can leave them alone.
+folder.
 
 - The **`recovery`** folder holds autosaves of designs that were never saved. Rename the data
   folder rather than deleting it, so you can still open those autosaves (`.sc` files, or `.solidcraft` from earlier releases)
@@ -76,7 +75,7 @@ be opened at all, SolidCraft tries the software renderer once and otherwise show
 saying what failed (earlier versions closed without a word).
 
 On Windows, if the graphics API cannot create the window's renderer, SolidCraft tries the
-remaining APIs in order: Direct3D 12 → Vulkan → OpenGL, then software rendering. The status
+remaining APIs in order: Vulkan → Direct3D 12 → OpenGL, then software rendering. The status
 message and **Preferences › Graphics** say which API failed and why. The saved graphics
 preference stays unchanged. With an explicit `WGPU_BACKEND`, a failed start shows the error
 and exits without switching; change or remove that variable to try another API.
@@ -138,10 +137,12 @@ A graphics driver can crash the app while it starts, before SolidCraft can show 
 old Intel Vulkan driver, `igvk64.dll`, did). Windows' Event Viewer names the driver under
 *Windows Logs › Application* ("Faulting module name").
 
-From 0.11.1, SolidCraft on Windows starts Direct3D 12 first and loads no other graphics API
-when Direct3D 12 has a graphics card; Vulkan and then OpenGL are tried only on a computer
-without one. Earlier versions started Vulkan, Direct3D 12 and OpenGL together and preferred
-Vulkan.
+SolidCraft on Windows starts Vulkan first and loads no other graphics API when Vulkan has a
+graphics card. Direct3D 12 and then OpenGL are tried only on a computer without one (older Intel
+graphics, virtual machines, Remote Desktop). A Vulkan device that fails to start falls back to
+Direct3D 12, then to software rendering. From 0.11.1 until this change Direct3D 12 came first;
+before 0.11.1 the app started Vulkan, Direct3D 12 and OpenGL together. If the Vulkan driver
+crashes the app while it starts, choose **Direct3D 12** below.
 
 Choose **Preferences > Graphics > Graphics API** to select an API for the next start.
 The page shows the current API separately from the saved choice. **Automatic** keeps

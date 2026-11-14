@@ -1546,7 +1546,7 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
     run(&mut s, "timeline.rename", json!({"feature": "Shelf", "name": "Ledge"}));
     run(&mut s, "timeline.rename", json!({"feature": "Guide", "name": "Rail"}));
     assert_eq!(plane_link(&s), "Ledge");
-    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into() });
+    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into(), placement: None });
     assert_eq!(s.visibility.hidden_origin, ["Rail"]);
     assert_eq!(s.selection, [Sel::Plane { name: "Ledge".into() }]);
     assert!(warnings(&s).is_empty(), "{:?}", warnings(&s));
@@ -1559,7 +1559,7 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
         run(&mut s, "edit.undo", json!({}));
     }
     assert_eq!(plane_link(&s), "Shelf");
-    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into() });
+    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into(), placement: None });
     assert_eq!(s.visibility.hidden_origin, ["Guide"], "the hidden plane stays hidden");
     assert!(warnings(&s).is_empty(), "{:?}", warnings(&s));
     assert!((projected_z(&mut s) - 20.0).abs() < 1e-9);
@@ -1660,6 +1660,34 @@ fn a_move_before_a_long_history_of_one_body_fits_a_window_threads_stack() {
         .unwrap()
         .join();
     assert!(moved.is_ok());
+}
+
+/// A fillet on the curved top edge of an extruded spline profile certifies its blend with
+/// series whose coefficient tables, held inline, filled a window thread's 1 MB stack before the
+/// kernel finished (#16147, #16489). On a thread with that stack, the design is built and the
+/// fillet's result is its own, not an aborted process.
+#[test]
+fn a_fillet_on_a_spline_edge_fits_a_window_threads_stack() {
+    let built = std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let mut s = Session::default();
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "profile"}));
+            run(&mut s, "sketch.spline.fit_point", json!({"points": [[10, 10], [15, 14], [20, 15.5], [25, 14], [30, 10]]}));
+            run(&mut s, "sketch.line", json!({"points": [[30, 10], [10, 10]]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": "profile", "distance": 20, "operation": "new", "name": "boss", "body_name": "boss"}));
+            run(
+                &mut s,
+                "solid.fillet",
+                json!({"body": "boss", "edges": [[20.0, 15.5, 20.0]], "radius": 1, "tangent_chain": false, "name": "top_fillet"}),
+            );
+            let fillet = s.doc.features.last().map(|f| f.id).unwrap();
+            assert!(s.model.result(fillet).is_some());
+        })
+        .unwrap()
+        .join();
+    assert!(built.is_ok());
 }
 
 #[test]
@@ -1790,6 +1818,12 @@ fn assistant_toggle_is_refused_headlessly_without_changing_the_document() {
     assert_eq!((s.doc.to_json(), s.undo.len()), before);
     let spec = crate::find_command("ui.toggle_visibility").unwrap();
     assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("V"), "", false));
+    // Dialog OK likewise (#17416): it has no default key; the user binds one.
+    let error = s.execute("ui.dialog_ok", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("headless session"), "{error}");
+    assert_eq!((s.doc.to_json(), s.undo.len()), before);
+    let spec = crate::find_command("ui.dialog_ok").unwrap();
+    assert_eq!((spec.shortcut, spec.tab, spec.undoable), (None, "", false));
 }
 
 #[test]
@@ -2468,5 +2502,27 @@ fn hostile_params_and_stale_selections_never_fail_badly() {
     }
     for v in [json!(null), json!([]), json!("x"), json!(f64::MAX), json!({"detail": null})] {
         assert!(s.execute("selection.get", &v).is_ok(), "{v}");
+    }
+}
+
+/// A feature's or a folder's name is 1…128 characters, as the refusal says, not 128 bytes of its
+/// UTF-8: a hundred `ł` (200 bytes) is taken, 129 characters are not.
+#[test]
+fn feature_and_folder_names_count_characters_not_bytes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
+    let base = s.doc.find_feature("Base").unwrap().id;
+    let group = run(&mut s, "timeline.group", json!({"name": "Housing", "features": [base]}))["group"].as_u64().unwrap();
+    let long = "ł".repeat(100);
+    run(&mut s, "timeline.rename", json!({"feature": base, "name": long}));
+    assert_eq!(s.doc.features.iter().find(|f| f.id == base).map(|f| f.name.as_str()), Some(long.as_str()));
+    run(&mut s, "timeline.rename_group", json!({"group": group, "name": long}));
+    assert_eq!(s.doc.timeline_groups[0].name, long);
+    let too_long = "ł".repeat(129);
+    for (command, params) in
+        [("timeline.rename", json!({"feature": base, "name": too_long})), ("timeline.rename_group", json!({"group": group, "name": too_long}))]
+    {
+        let error = s.execute(command, &params).unwrap_err().to_string();
+        assert!(error.contains("1…128 characters"), "{command}: {error}");
     }
 }

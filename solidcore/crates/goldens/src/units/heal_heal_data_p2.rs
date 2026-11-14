@@ -2614,6 +2614,8 @@ fn rust_heal(
         }
     }
     if !stop {
+        #[cfg(test)]
+        certificates::keep(&b);
         if let Err(e) = dump(&h, &b, &mut o) {
             return Ok(match classify(e) {
                 Fail::Deferred(d) => d,
@@ -2847,9 +2849,187 @@ impl UnitDiff for Runner {
     }
 }
 
+/// The certificates of the healer's edge-face gaps (tests only): the B-rep a script's last
+/// state dump read is kept, and every edge use's cached maximum edge-face gap in it is
+/// enclosed by [`crate::certify::sampled_max`] over the gap function that computed it
+/// (`CalcMaxEdgeFaceGap`: 20 samples of the edge curve dropped onto the face's surface).
+#[cfg(test)]
+pub(crate) mod certificates {
+    use std::cell::RefCell;
+
+    use solidcore::geom::tol::{context_xsect_tol_3d, SmallTopoType};
+    use solidcore::heal::gap::GapFunction;
+    use solidcore::kernel::Kernel;
+    use solidcore::topology::edgeuse::p1 as eu1;
+    use solidcore::surface::surface::p4::NoObject;
+    use solidcore::surface::surface::p5::DropPointOptions;
+    use solidcore::topology::{Brep, EdgeuseId};
+
+    use crate::certify::Enclosure;
+
+    thread_local! {
+        static KEPT: RefCell<Option<Brep>> = const { RefCell::new(None) };
+    }
+
+    /// Keeps a copy of `b` (the B-rep of a script's last state dump).
+    pub(super) fn keep(b: &Brep) {
+        let copy = b.clone_standing_for_self().expect("a copy of the B-rep");
+        KEPT.with(|k| *k.borrow_mut() = Some(copy));
+    }
+
+    /// One cached edge-face gap and its enclosure.
+    #[derive(Debug)]
+    pub(crate) struct Certified {
+        pub(crate) edgeuse: EdgeuseId,
+        pub(crate) gap: f64,
+        pub(crate) enclosure: Enclosure,
+        /// How much nearer than a sample's foot the global solve found a surface point
+        /// (0: nowhere nearer than the rounding).
+        pub(crate) nearer: f64,
+    }
+
+    /// Runs `script` and encloses every cached edge-face gap of the B-rep its last dump
+    /// read; asserts each gap lies in its enclosure.
+    pub(crate) fn edge_face_gaps(name: &str, script: &super::Inputs) -> Vec<Certified> {
+        KEPT.with(|k| *k.borrow_mut() = None);
+        super::run_rust(script).expect("rust");
+        let b = KEPT
+            .with(|k| k.borrow_mut().take())
+            .expect("the script dumped its state");
+        let k = Kernel::default();
+        let tol = context_xsect_tol_3d(&k, None, SmallTopoType::NormalSize);
+        let mut out = Vec::new();
+        for (eu, r) in b.edgeuses().iter() {
+            let i = eu.index();
+            let cached = r.max_edge_face_gap;
+            if !cached.is_init() {
+                continue;
+            }
+            let edge = eu1::edge(&b, eu).expect("edge").expect("an edge");
+            let face = eu1::face(&b, eu).expect("face").expect("a face");
+            let e = b.edge(edge).expect("edge");
+            let curve = e.curve.as_ref().expect("curve");
+            let surface = b.face(face).expect("face").surface.as_ref().expect("surface");
+            let mut gf = GapFunction::crv_srf(tol, curve, &e.interval, surface, 20);
+            gf.max_gap_sample(&k, false).expect("samples");
+            let enclosure = crate::certify::sampled_max(&k, surface, None, gf.samples());
+            let gap = cached.gap_3d;
+            // each sample against the drop without a guess (the global solve): a point of
+            // the surface it finds nearer than the sample's foot, by more than both
+            // evaluations' rounding, shows the foot is not the nearest
+            let slack = crate::certify::evaluation_slack(&k, surface);
+            let domain = surface.natural_uv_domain_with_nurb(&k).expect("domain");
+            let mut nearer = 0.0_f64;
+            for smp in gf.samples() {
+                let p = smp.this_pos();
+                let own = p.distance(surface.evaluate_point(&k, smp.other_param()).expect("foot"));
+                let g = surface
+                    .drop_point::<NoObject>(&k, p, &domain, &DropPointOptions::default())
+                    .expect("drop");
+                let global = p.distance(surface.evaluate_point(&k, g.result_uv).expect("foot"));
+                if global + 2.0 * slack < own {
+                    nearer = nearer.max(own - global);
+                }
+            }
+            eprintln!(
+                "{name} edge use {i}: gap {gap:e} in [{:e}, {:e}], global nearer by {nearer:e}",
+                enclosure.lo, enclosure.hi
+            );
+            assert!(enclosure.holds(gap), "{name} edge use {i}: {gap:e} outside {enclosure:?}");
+            out.push(Certified {
+                edgeuse: eu,
+                gap,
+                enclosure,
+                nearer,
+            });
+        }
+        out
+    }
+
+    /// WR-56 (#17467): certifies a moved row, `case` of `runner`: every cached edge-face
+    /// gap of its last state is enclosed ([`edge_face_gaps`]), and each moved value is one
+    /// of them. `moved` holds (value before WR-56, value now) pairs.
+    pub(crate) fn moved_row(
+        runner: &dyn crate::UnitDiff,
+        name: &str,
+        moved: &[(f64, f64)],
+    ) -> Vec<Certified> {
+        let case = crate::case::regression_case(runner, name);
+        let script: super::Inputs = case.parse().expect("a heal script");
+        let gaps = edge_face_gaps(name, &script);
+        for &(before, now) in moved {
+            let g = gaps
+                .iter()
+                .find(|g| g.gap == now)
+                .unwrap_or_else(|| panic!("{name}: the moved gap {now:e} is not a cached edge-face gap"));
+            eprintln!(
+                "{name}: moved {before:e} -> {now:e} (edge use {}), enclosure [{:e}, {:e}], global nearer by {:e}, before {}",
+                g.edgeuse.index(),
+                g.enclosure.lo,
+                g.enclosure.hi,
+                g.nearer,
+                if before > g.enclosure.hi {
+                    "above it"
+                } else if before < g.enclosure.lo {
+                    "below it"
+                } else {
+                    "inside it"
+                }
+            );
+        }
+        gaps
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// WR-56 (#17467), the moved rows `gen0032` and `gen0145`: four edge-face gaps each,
+    /// certified by [`certificates::moved_row`]; the histogram counts that moved
+    /// (`edge_face_gap_3d_histogram`) follow from the gaps.
+    #[test]
+    fn wr56_moved_edge_face_gaps_are_enclosed() {
+        certificates::moved_row(
+            &Runner,
+            "gen0032",
+            &[
+                (7.064_593_721_351_148e-10, 8.962_217_842_032_441e-13),
+                (1.070_294_702_529_565e-10, 6.558_519_390_927_037e-16),
+                (3.270_780_043_664_496_7e-11, 5.838_830_508_321_343e-12),
+                (9.098_519_345_218_083e-11, 3.079_649_650_043_500_6e-13),
+            ],
+        );
+        // the rows whose moves the golden's digest rounds away (raw values, #17467)
+        certificates::moved_row(
+            &Runner,
+            "gen0351",
+            &[
+                (2.0767317355928055e-10, 8.764789528951374e-13),
+                (1.5912779970456078e-10, 4.77736737742518e-12),
+                (3.0757656499443756e-10, 1.9937349418342476e-10),
+            ],
+        );
+        certificates::moved_row(
+            &Runner,
+            "gen0400",
+            &[
+                (3.5228160701017763e-10, 4.2132799719446477e-13),
+                (1.6649539883817577e-10, 7.1758396745024e-13),
+                (2.9801982351038794e-10, 1.0106690836000339e-11),
+            ],
+        );
+        certificates::moved_row(
+            &Runner,
+            "gen0145",
+            &[
+                (2.031_211_356_018_369_2e-10, 6.116_470_867_822_804e-11),
+                (2.595_311_392_417_210_4e-10, 3.046_667_355_204_558_5e-11),
+                (2.479_893_709_029_926e-10, 4.238_809_335_201_859e-12),
+                (2.154_868_386_466_593_2e-10, 5.274_717_667_991_924e-11),
+            ],
+        );
+    }
 
     /// HANG-29: `--fuzz 30000` fuzz22334, a surface control point of `-1e300` in the
     /// B-rep block; the healer's caching did not return. The block contract refuses it

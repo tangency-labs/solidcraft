@@ -52,7 +52,7 @@
 //! ([`SetbackRefusal`]) and the session notes it. The executive's set-back fills
 //! (`m_vSetBackFills`) are the session's, passed in (WR-697). No recursion. Beside curved faces
 //! (solidcore#2343, built in solidcore from the fork's work in progress at 37c9e1d, no fork
-//! commit; with `Kernel::fixes.fillet_setback_beside_curved_faces` too): the curved faces
+//! commit): the curved faces
 //! are found apart from `corner_planes` (`corner_quadrics`); the
 //! fork's `SBSCALE` environment override of the rule is not taken; the executive's
 //! `CalcSetBackVert` is reached through [`SetbackSolvers`]; a failing call within a growth
@@ -260,12 +260,12 @@ pub struct SetBackFill {
 /// that no blend corner took (`SmFilletConvexNxNCorner`'s setback corner, to which
 /// `SmFilletConcaveNxNCorner` hands its own). The fork's dc757a6 deletes the N x N setback
 /// paths; solidcore keeps them (WR-697 addendum `setback-asked-not-built-refused`), as the
-/// Setback does not build every corner they do: a marked corner beside a curved face, and
-/// one [`classify_setback`] does not take (variable rounds, mixed convexity, edges tangent at
-/// the vertex). Three equal rounds of one convexity between planes, convex or concave, which
-/// a set-back vertex keeps from the Ball, are the Setback once a setback is set on their
-/// corner (solidcore#2933, classified when the corners are filleted: [`classify_setback`]'s
-/// `marked`).
+/// Setback does not build every corner they do: one [`classify_setback`] does not take
+/// (variable rounds, mixed convexity, edges tangent at the vertex, an ease or an open hole
+/// beside a curved face). Three equal rounds of one convexity, convex or concave, which a
+/// set-back vertex keeps from the Ball, are the Setback once a setback is set on their corner
+/// (solidcore#2933, classified when the corners are filleted), beside a curved face as
+/// between planes.
 #[must_use]
 pub fn builds_setback(corner: &FilletCorner) -> bool {
     match corner.blend {
@@ -758,8 +758,7 @@ fn corner_quadrics(
 }
 
 /// The corner's faces as the fill sees them: [`corner_planes`]'s where every face is a
-/// plane, else, with `fillet_setback_beside_curved_faces`, [`corner_quadrics`]'s (`true` with
-/// them: the corner is beside a curved face).
+/// plane, else [`corner_quadrics`]'s (`true` with them: the corner is beside a curved face).
 #[allow(clippy::too_many_arguments)]
 fn corner_faces(
     k: &Kernel,
@@ -772,11 +771,6 @@ fn corner_faces(
 ) -> Result<Option<(CornerPlanes, bool)>> {
     if let Some(planes) = corner_planes(k, b, vtx, all_eus, solvers, tol)? {
         return Ok(Some((planes, false)));
-    }
-    // beside a curved face only with its own flag: without it such a corner is the corner it
-    // was before (#2343)
-    if !k.fixes.fillet_setback_beside_curved_faces {
-        return Ok(None);
     }
     Ok(corner_quadrics(k, b, vtx, all_eus, solvers, tol, convex)?.map(|q| (q, true)))
 }
@@ -1130,12 +1124,11 @@ fn set_backs(
 /// ([`BlendCornerEvent::None`]). The fill's order with it: 2 for curvature-continuous
 /// sections or a setback with an ease, else 1.
 ///
-/// Not the fork (solidcore#2933): `marked` says the fill asked at the vertex is its mark's
+/// Not the fork (solidcore#2933): a fill asked at the vertex may be its mark's
 /// (`AddSetBackVertex`, the distance and ease set on the made corner with `SetSetBackDist`
 /// and `SetEaseDist`), which the session reads as one when the corners are filleted: three
 /// equal rounds there are then the Setback with its certified fill, not the N x N corner's
-/// `N_FillNSidedHole` patch. Beside a curved face such a corner stays the N x N corner, as
-/// before.
+/// `N_FillNSidedHole` patch, beside a curved face as between planes.
 ///
 /// # Errors
 ///
@@ -1151,7 +1144,6 @@ pub fn classify_setback(
     solvers: &dyn BallSolvers,
     tangency_tol_deg: f64,
     fills: &[SetBackFill],
-    marked: bool,
 ) -> Result<SetbackClass> {
     let nul = || {
         SolidError::blend_missing(
@@ -1251,11 +1243,6 @@ pub fn classify_setback(
     if curved && (kind != FilletSurfaceGeneratorType::Circular || !one_kind) {
         return none;
     }
-    // a mark's fill beside a curved face is not read (the N x N corner's, solidcore#2343)
-    if curved && marked {
-        return none;
-    }
-
     let asked = set_back_fill_of(fills, vtx);
     if asked.is_none() && !one_kind {
         return none;
