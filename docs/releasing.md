@@ -9,7 +9,7 @@ version bump and no patch release for every merge.
 ## Names and deployment
 
 Every release asset, binary, installer product name and package uses the SolidCraft name
-(`solidcraft-<version>-linux-<arch>.AppImage`, `SolidCraft-<version>-windows-x64.exe`,
+(`solidcraft-<version>-linux-<arch>.AppImage`, `solidcraft-<version>-windows-x64.exe`,
 `solidcraft-cli` archives, …). The old name survives only in the shims listed in
 [compatibility.md](compatibility.md) (the end-of-life Flatpak refs of the old Linux app ID, the legacy `.zsync` and `.flatpakrepo`
 copies, the deprecated old-name CLI alias); keep them until that document says they can go. Do not
