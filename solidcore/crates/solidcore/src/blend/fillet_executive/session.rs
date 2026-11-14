@@ -5550,6 +5550,11 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         else {
             return Err(invalid("solver edge is not a target edge"));
         };
+        // a sheet's edge bounds no material: its blend adds none (not the fork's, whose
+        // `IsConcaveEdge` fails there)
+        if !crate::blend::fillet_solver::p5::edge_bounds_material(self.target, edge)? {
+            return Ok(false);
+        }
         crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, edge)
     }
     fn geometry_generator_is_linear(&self, solver: FilletObject) -> Result<bool> {

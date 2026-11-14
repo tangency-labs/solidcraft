@@ -102,7 +102,7 @@
   },
   {
    "name": "disc_top_rounded_past_its_height",
-   "note": "The disc's top circle rounded r 2.5, taller than the 2 mm wall, which SolidCraft refuses. With the cliff overflow and the rail fixes it needs, the round is built as if the wall went on below the bottom and only what lies in the disc is removed. The pinned SMLib refuses it.",
+   "note": "The disc's top circle rounded r 2.5, taller than the 2 mm wall, which SolidCraft refuses. With the cliff overflow, the round is built as if the wall went on below the bottom and only what lies in the disc is removed. The pinned SMLib refuses it.",
    "fixes": [
     "fillet_trace_reaches_rails",
     "fillet_run_on_bspline_trims"

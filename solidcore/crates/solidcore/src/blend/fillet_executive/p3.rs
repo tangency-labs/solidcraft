@@ -100,9 +100,11 @@ pub enum NoRoomReason {
     /// fork's 410dfe1, WR-696).
     BallDoesNotFit,
     /// A rail leaves the face it rolls on between its ends (the fork's
-    /// `RailsFitTheirFaces`; WR-302). The executive no longer notes it: a blend whose rail
-    /// leaves its face is built as a cliff overflow or refused with the overflow's own
-    /// reason ([`Self::ConcaveOverflow`] and the others).
+    /// `RailsFitTheirFaces`; WR-302) where no cliff cuts the face off: a closed rail that
+    /// leaves past one end of the filleted edge and comes back past the other
+    /// (`RailsFit::wraps_past_both_ends`, tangency-labs/solidcore#2175). A rail that leaves
+    /// across a cliff is built as a cliff overflow or refused with the overflow's own reason
+    /// ([`Self::ConcaveOverflow`] and the others).
     RailLeavesFace,
     /// The blends take the whole of a face they roll on, some at an angle to it (the fork's
     /// `FacesOutlastTheirBlends`; `fixes.fillet_refuse_face_consuming_blends`, WR-320).
@@ -992,6 +994,32 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     fn solver_geom(&self, solver: O, index: usize) -> Result<Option<O>>;
     /// `SmFilletSolver::GetEdgeuse(0)->GetEdge()`.
     fn solver_edge(&self, solver: O) -> Result<O>;
+    /// The fork's `RailsFitTheirFaces(rbFit, rbRollsOver, rbIntoMaterial)` for `solver`
+    /// ([`SolverGeometryAccess::geometry_rails_fit_judged`]). Only an accessor with a live
+    /// pseudo-B-rep can judge it.
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] without live context.
+    fn solver_rails_fit_judged(&mut self, k: &mut Kernel, solver: O) -> Result<RailsFit> {
+        let _ = (k, solver);
+        Err(SolidError::unported(
+            "SmFilletSolver::RailsFitTheirFaces (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
+    /// The fork's `EndSectionsFitTheirFaces` for `solver`
+    /// ([`SolverGeometryAccess::geometry_end_sections_fit`]). Only an accessor with a live
+    /// pseudo-B-rep can judge it.
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] without live context.
+    fn solver_end_sections_fit(&mut self, k: &mut Kernel, solver: O) -> Result<bool> {
+        let _ = (k, solver);
+        Err(SolidError::unported(
+            "SmFilletSolver::EndSectionsFitTheirFaces (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
     /// `SmFilletSolver::GetThisApproxTol3d`.
     fn solver_approx_tolerance(&self, solver: O) -> Result<f64>;
     /// `SmFilletGeom::m_pFilletSurface->GetOwner()`, cast to face.
@@ -2740,6 +2768,22 @@ where
     fn geometry_edge(&self, solver: O) -> Result<O> {
         ExecutiveAccess::solver_edge(self, solver)
     }
+    fn geometry_rails_fit_judged(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        _executive: &FilletExecutive<O>,
+    ) -> Result<RailsFit> {
+        ExecutiveAccess::solver_rails_fit_judged(self, k, solver)
+    }
+    fn geometry_end_sections_fit(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        _executive: &FilletExecutive<O>,
+    ) -> Result<bool> {
+        ExecutiveAccess::solver_end_sections_fit(self, k, solver)
+    }
 }
 
 /// The `SmStitch` switches passed to [`ExecutiveAccess::do_stitching`]. `Default` is
@@ -2995,6 +3039,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut concave_overflow = false;
         let mut round_into_material = false;
         let mut rolls_over = false;
+        let mut wraps = false;
         let mut overflowing = Vec::new();
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
@@ -3002,6 +3047,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             let judged = access.geometry_rails_fit_judged(k, solver, self)?;
             if judged.rolls_over {
                 rolls_over = true;
+            }
+            if judged.wraps_past_both_ends {
+                wraps = true;
             }
             // the fork's tangency-labs/smlib@a307480: an end section that runs off its end
             // face overflows it the same way
@@ -3062,7 +3110,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             return Err(failure());
         }
         if overflow {
-            let why = if concave_overflow {
+            let why = if wraps {
+                // not the fork's (tangency-labs/solidcore#2175): no cliff cuts the face off;
+                // it is smaller than the blend beyond both ends of the edge
+                Some((NoRoomReason::RailLeavesFace, "Fillet Error: a rail leaves the face it rolls on (the blend is larger than the faces allow)"))
+            } else if concave_overflow {
                 Some((NoRoomReason::ConcaveOverflow, "Fillet Error: a rail leaves the face it rolls on (the blend is larger than the faces allow, and adds material)"))
             } else if round_into_material {
                 Some((NoRoomReason::RoundIntoMaterial, "Fillet Error: a round's rail leaves the face it rolls on into the body's material (beyond a wall)"))

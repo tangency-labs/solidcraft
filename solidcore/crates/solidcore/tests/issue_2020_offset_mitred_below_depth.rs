@@ -43,6 +43,7 @@ use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::surface::plane::Plane;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::face::p2 as face2;
 use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId};
 use solidcore::Kernel;
@@ -230,6 +231,8 @@ fn default_kernel_builds_the_depths_below_the_floor() {
         assert_eq!(ex.refusal(), OffsetFacesRefusal::None, "d {d}");
         assert!(brep_is_manifold_solid(&b).unwrap(), "d {d}");
         assert_eq!(b.face_list().len(), 6, "d {d}");
+        let lines = check_brep(k, &mut b, CheckLevel::Level2).unwrap().lines();
+        assert!(lines.is_empty(), "d {d}: {lines:?}");
         let v = volume(k, &mut b);
         let want = analytic(d);
         assert!(
