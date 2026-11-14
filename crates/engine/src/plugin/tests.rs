@@ -614,6 +614,7 @@ mod native {
                         package_hash: Some(read_package(&f.path()).unwrap().approval),
                         command_groups: BTreeSet::new(),
                         folders: s.plugin_state.file_grants.clone(),
+                        memory_mib: None,
                     },
                 );
                 let scope = solidcraft_io::vfs::PathScope::default().with_design_folder(&f.0);
@@ -1118,6 +1119,32 @@ mod install_zip {
                 && !s.plugin_state.packages.contains_key("sample")
                 && !s.disabled_plugins.contains("sample")
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn approved_memory_raises_the_ceiling_for_that_exact_package_only() {
+        let (mut s, root) = session("memory");
+        let mut m = manifest();
+        m["runtime"]["limits"]["memory_mib"] = json!(1024);
+        let path = put(&root, "memory.zip", &zip(&[("plugin.json", &serde_json::to_vec(&m).unwrap()), ("plugin.wasm", b"inert bytes")]));
+        let dry = s.execute("plugin.install", &json!({"path":path,"dry_run":true})).unwrap();
+        assert_eq!((dry["limits"]["memory_mib"].as_u64(), dry["host_limits"]["max_memory_mib"].as_u64()), (Some(1024), Some(128)));
+        for wrong in [json!(512), json!(2048), json!(0), json!(-1), json!("1024")] {
+            assert!(s.execute("plugin.install", &json!({"path":path,"approve":{"memory_mib":wrong}})).is_err(), "{wrong}");
+            assert!(s.plugin_state.grants.is_empty() && !root.join("plugins").exists());
+        }
+        s.execute("plugin.install", &json!({"path":path,"approve":{"memory_mib":1024}})).unwrap();
+        let approval = read_package(&root.join("plugins/sample").to_string_lossy()).unwrap().approval;
+        assert_eq!(s.plugin_state.grants["sample"].memory_mib, Some(1024));
+        assert_eq!(host_limits_for(&s, "sample", &approval).max_memory_mib, 1024);
+        assert_eq!(host_limits_for(&s, "sample", "another package").max_memory_mib, 128);
+        assert_eq!(s.plugin_limits.max_memory_mib, 128, "the user's ceiling for other plugins is unchanged");
+        let inspected = s.execute("plugin.inspect", &json!({"path":root.join("plugins/sample")})).unwrap();
+        assert_eq!(inspected["within_host_limits"], true);
+        // Reinstalling without approving memory takes the grant away.
+        s.execute("plugin.install", &json!({"path":path,"replace":true})).unwrap();
+        assert_eq!(host_limits_for(&s, "sample", &approval).max_memory_mib, 128);
         std::fs::remove_dir_all(root).unwrap();
     }
 

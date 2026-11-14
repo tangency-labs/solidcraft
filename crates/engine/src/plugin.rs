@@ -34,6 +34,10 @@ pub struct Grants {
     pub command_groups: BTreeSet<String>,
     #[serde(default)]
     pub folders: Vec<FileGrant>,
+    /// Memory, in MiB, the user let this package use above the app's ceiling for plugins: what
+    /// its manifest asks for, approved at install. Bound to `package_hash` like the rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_mib: Option<usize>,
 }
 
 /// Trusted host state, never loaded from a design or supplied by guest code.
@@ -165,6 +169,18 @@ pub fn read_package(path: &str) -> Result<Package> {
     Ok(Package { manifest, approval: package_hash(&bytes, &component), component })
 }
 
+/// The ceilings a package runs under: the app's, raised to the memory the user approved for this
+/// exact manifest and component at install. A grant for another package hash raises nothing.
+pub fn host_limits_for(session: &Session, id: &str, approval: &str) -> HostLimits {
+    let mut limits = session.plugin_limits;
+    if let Some(memory) =
+        session.plugin_state.grants.get(id).filter(|grants| grants.package_hash.as_deref() == Some(approval)).and_then(|grants| grants.memory_mib)
+    {
+        limits.max_memory_mib = limits.max_memory_mib.max(memory.min(MAX_MEMORY_MIB));
+    }
+    limits
+}
+
 pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
     let mut digest = Sha256::new();
     digest.update(b"solidcraft-plugin-approval-v1\0");
@@ -187,7 +203,7 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
         .into());
     }
     let rt = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
-    session.plugin_limits.check(&rt.limits)?;
+    host_limits_for(session, &package.manifest.id, &package.approval).check(&rt.limits)?;
     if !rt.entries.iter().any(|e| e.name == entry) {
         return Err(error("unknown entry"));
     }

@@ -64,8 +64,16 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
                 write: folder.get("write").and_then(Value::as_bool).unwrap_or(false),
             })
             .collect(),
+        memory_mib: memory_request(&plugin, app.preferences.plugin_max_memory_mib),
     };
     app.plugin_install.ask = Some(Ask { path, plugin, grants });
+}
+
+/// The memory the plugin asks for, in MiB, when that is more than the user's ceiling for plugins:
+/// Install approves it for this package. Within the ceiling there is nothing to approve.
+pub(crate) fn memory_request(plugin: &Value, ceiling: usize) -> Option<usize> {
+    let asked = plugin.pointer("/limits/memory_mib").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok())?;
+    (asked > ceiling && asked <= solidcraft_engine::plugin::MAX_MEMORY_MIB).then_some(asked)
 }
 
 fn text(plugin: &Value, key: &str) -> String {
@@ -129,11 +137,18 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::text(ui, &summary, ui_kit::Text::Report("plugin_install_summary", false));
                 }
                 ui_kit::text(ui, tr("plugin_install.asks"), ui_kit::Text::Report("plugin_install_asks", false));
-                if lines.is_empty() {
+                if lines.is_empty() && ask.grants.memory_mib.is_none() {
                     ui_kit::text(ui, tr("plugin_install.asks_nothing"), ui_kit::Text::Hint("plugin_install_nothing"));
                 }
                 for (i, line) in lines.iter().enumerate() {
                     ui.push_id(i, |ui| ui_kit::text(ui, &std::format!("• {line}"), ui_kit::Text::Hint("plugin_install_permission")));
+                }
+                if let Some(memory) = ask.grants.memory_mib {
+                    let line = format(
+                        "plugin_install.memory",
+                        &[("memory", &memory.to_string()), ("limit", &app.preferences.plugin_max_memory_mib.to_string())],
+                    );
+                    ui_kit::text(ui, &std::format!("• {line}"), ui_kit::Text::Hint("plugin_install_memory"));
                 }
                 for grant in &mut ask.grants.folders {
                     let access = tr(match (grant.read, grant.write) {
@@ -210,7 +225,7 @@ fn install_now(app: &mut SolveApp, ask: &Ask) {
     if let Err(error) = crate::plugins::start_package(
         app,
         "plugin.install",
-        json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders}}),
+        json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"memory_mib":ask.grants.memory_mib}}),
         crate::plugins::PackageAction::Install,
     ) {
         app.set_status(format("plugin_install.failed", &[("error", &error)]), true);
@@ -275,6 +290,14 @@ mod tests {
                 "project (read and write)"
             ]
         );
+    }
+
+    #[test]
+    fn plugin_install_asks_for_memory_only_above_the_ceiling() {
+        assert_eq!(memory_request(&json!({"limits":{"memory_mib":1024}}), 128), Some(1024));
+        assert_eq!(memory_request(&json!({"limits":{"memory_mib":64}}), 128), None);
+        assert_eq!(memory_request(&json!({"limits":{"memory_mib":99999}}), 128), None);
+        assert_eq!(memory_request(&json!({}), 128), None);
     }
 
     #[test]

@@ -21,7 +21,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("path: plugin package folder; returns inert manifest and approval hash covering manifest and component; runs no plugin code"),
     CommandSpec::new("plugin.install", "Install Plugin", checked!("plugin.install", install)).icon("import").noundo().doc_only()
         .contract(&TypedContract::<InstallParams>::new()).output(output_schema_for::<InstallResult>)
-        .params("path: plugin .zip, approval?: exact hash from a reviewed dry run (mismatch refuses installation), archive?: exact .zip hash from that dry run (any changed file refuses installation), replace?: bool (required to replace an installed plugin of the same id), dry_run?: bool, approve?: {command_groups, folders: [{name, path, read, write}]}; validates requested approvals and checks the .zip (one plugin, safe paths, size caps, manifest) and unpacks it into the plugins folder; runs no plugin code"),
+        .params("path: plugin .zip, approval?: exact hash from a reviewed dry run (mismatch refuses installation), archive?: exact .zip hash from that dry run (any changed file refuses installation), replace?: bool (required to replace an installed plugin of the same id), dry_run?: bool, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?: exactly the manifest's limits.memory_mib, allowed above the user's ceiling for this package}; validates requested approvals and checks the .zip (one plugin, safe paths, size caps, manifest) and unpacks it into the plugins folder; runs no plugin code"),
     CommandSpec::new("plugin.list", "List Plugins", checked!("plugin.list", list)).icon("inspect").noundo().doc_only()
         .contract(&TypedContract::<ListParams>::new()).output(output_schema_for::<ListResult>)
         .params("List inspected and installed plugin manifests, namespaced entries, declared effects and input schemas; no plugin code runs"),
@@ -36,11 +36,12 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let p: InspectParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.inspect", e.to_string()))?;
     let package = plugin::read_package(&p.path)?;
     s.plugin_state.packages.insert(package.manifest.id.clone(), p.path.clone());
-    let limits_error = package.manifest.runtime.as_ref().and_then(|r| s.plugin_limits.check(&r.limits).err()).map(|e| e.to_string());
+    let limits = plugin::host_limits_for(s, &package.manifest.id, &package.approval);
+    let limits_error = package.manifest.runtime.as_ref().and_then(|r| limits.check(&r.limits).err()).map(|e| e.to_string());
     serde_json::to_value(InspectResult {
         manifest: package.manifest,
         approval: package.approval,
-        host_limits: s.plugin_limits,
+        host_limits: limits,
         within_host_limits: limits_error.is_none(),
         limits_error,
         param_warnings: vec![],
@@ -116,6 +117,8 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         description: manifest.description.clone(),
         capabilities: manifest.capabilities.clone(),
         permissions: runtime.map(|r| r.permissions.clone()).unwrap_or_default(),
+        limits: runtime.map(|r| r.limits.clone()),
+        host_limits: s.plugin_limits,
         commands: runtime.map(|r| r.commands.iter().cloned().collect()).unwrap_or_default(),
         entries: runtime.map(|r| r.entries.iter().map(|e| format!("{}.{}", manifest.id, e.name)).collect()).unwrap_or_default(),
         entry_points: runtime.map(|r| r.entries.clone()).unwrap_or_default(),

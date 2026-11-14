@@ -237,6 +237,7 @@ pub(crate) fn valid_grants(grants: &solidcraft_engine::plugin::Grants) -> bool {
     let mut names = std::collections::BTreeSet::new();
     grants.command_groups.len() <= solidcraft_engine::plugin::COMMAND_GROUPS.len()
         && grants.command_groups.iter().all(|group| solidcraft_engine::plugin::COMMAND_GROUPS.contains(&group.as_str()))
+        && grants.memory_mib.is_none_or(|memory| (1..=solidcraft_engine::plugin::MAX_MEMORY_MIB).contains(&memory))
         && grants.folders.len() <= 32
         && grants.folders.iter().all(|grant| {
             let path = grant.folder.to_string_lossy();

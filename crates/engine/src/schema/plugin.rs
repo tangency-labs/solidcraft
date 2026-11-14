@@ -120,6 +120,12 @@ pub struct InstallResult {
     pub capabilities: Vec<String>,
     /// What it asks for: command groups, named folders, the clock.
     pub permissions: craft_plugin::Permissions,
+    /// The fuel, memory and time it asks for. Memory above `host_limits` is approved at install
+    /// (`approve.memory_mib`); fuel is not, and must fit `host_limits`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<craft_plugin::Limits>,
+    /// The app's ceilings for plugins, before any approval.
+    pub host_limits: craft_plugin::HostLimits,
     /// App commands it calls.
     pub commands: Vec<String>,
     /// Its entries, as namespaced commands (`id.entry`).
@@ -158,6 +164,10 @@ pub struct InstallApproval {
     pub command_groups: std::collections::BTreeSet<String>,
     #[serde(default)]
     pub folders: Vec<ApprovedFolder>,
+    /// Memory in MiB to allow above the app's ceiling for plugins: exactly the manifest's
+    /// `runtime.limits.memory_mib`. Omitted: the plugin runs under the app's ceiling.
+    #[serde(default)]
+    pub memory_mib: Option<usize>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -178,6 +188,7 @@ impl From<InstallApproval> for crate::plugin::Grants {
                 .into_iter()
                 .map(|f| craft_plugin::FileGrant { name: f.name, folder: f.path, read: f.read, write: f.write })
                 .collect(),
+            memory_mib: approve.memory_mib,
         }
     }
 }

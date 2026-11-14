@@ -36,7 +36,7 @@ file pickers or permission dialogs. The commands expose input and output schemas
 
 | Command | Input | Output |
 |---|---|---|
-| `plugin.install` | `{path, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}]}}` | `{id, name, version, description, capabilities, permissions, commands, entries, entry_points, replaces?, installed, folder}` |
+| `plugin.install` | `{path, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?}}` | `{id, name, version, description, capabilities, permissions, limits?, host_limits, commands, entries, entry_points, replaces?, installed, folder}` |
 | `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
 | `plugin.remove` | `{id}` | `{id, removed: true}` |
 
@@ -48,6 +48,7 @@ namespaced command ids. Replacing an installed plugin requires `replace: true`.
 
 Approval grants may only narrow manifest requests. An unrequested group, folder name or access mode
 returns a typed error. Each folder approval contains `name`, an absolute local `path`, `read` and `write`.
+`memory_mib` approves exactly the manifest's requested memory above the user's ceiling, for that package hash.
 Omitting `approve` grants nothing, including on replacement. Providing `approve` replaces that plugin's
 stored set; stale grants cannot survive replacement. The engine stores grants after publication and
 `plugin.run` checks them against the manifest. Desktop preferences persist the grants per plugin id.

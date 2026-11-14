@@ -1,5 +1,6 @@
 {
   "ar": {
+    "plugin_install.memory": "ما يصل إلى {memory} ميبيبايت من الذاكرة. تحصل الإضافات على {limit} ميبيبايت ما لم تسمح بالمزيد.",
     "prefs.plugin_busy": "جارٍ قراءة حزمة الإضافة أو تحديثها…",
     "prefs.plugin_cancel": "إلغاء",
     "prefs.plugin_entries": "نقاط الدخول ومواضعها",
@@ -23,6 +24,7 @@
     "ui.plugin_management_standalone": "شغّل تثبيت الإضافات وإزالتها كأوامر منفصلة، خارج الدُفعات والبرامج النصية."
   },
   "de": {
+    "plugin_install.memory": "Bis zu {memory} MiB Arbeitsspeicher. Plugins erhalten {limit} MiB, sofern Sie nicht mehr erlauben.",
     "prefs.plugin_busy": "Plugin-Paket wird gelesen oder aktualisiert…",
     "prefs.plugin_cancel": "Abbrechen",
     "prefs.plugin_entries": "Einstiegspunkte und Platzierung",
@@ -46,6 +48,7 @@
     "ui.plugin_management_standalone": "Führen Sie die Installation und Entfernung von Plugins als einzelne Befehle aus, außerhalb von Stapelbefehlen und Skripten."
   },
   "en": {
+    "plugin_install.memory": "Up to {memory} MiB of memory. Plugins get {limit} MiB unless you allow more.",
     "prefs.plugin_busy": "Reading or updating a plugin package…",
     "prefs.plugin_cancel": "Cancel",
     "prefs.plugin_entries": "Entries and placement",
@@ -74,6 +77,7 @@
     "prefs.plugin_slot_ribbon": "Ribbon: {name} (unrecognised tabs appear under Plugins)"
   },
   "he": {
+    "plugin_install.memory": "עד {memory} MiB של זיכרון. תוספים מקבלים {limit} MiB אלא אם תאפשר יותר.",
     "prefs.plugin_busy": "קריאה או עדכון של חבילת תוסף…",
     "prefs.plugin_cancel": "ביטול",
     "prefs.plugin_entries": "נקודות כניסה ומיקום",
@@ -97,6 +101,7 @@
     "ui.plugin_management_standalone": "יש להפעיל התקנה והסרה של תוספים כפקודות נפרדות, מחוץ לאצוות ולסקריפטים."
   },
   "ja": {
+    "plugin_install.memory": "最大 {memory} MiB のメモリ。許可しない限り、プラグインが使えるのは {limit} MiB です。",
     "prefs.plugin_busy": "プラグインパッケージを読み込みまたは更新しています…",
     "prefs.plugin_cancel": "キャンセル",
     "prefs.plugin_entries": "エントリーと配置",
@@ -120,6 +125,7 @@
     "ui.plugin_management_standalone": "プラグインのインストールと削除は、バッチやスクリプトの外で個別のコマンドとして実行してください。"
   },
   "ko": {
+    "plugin_install.memory": "최대 {memory}MiB의 메모리. 더 허용하지 않으면 플러그인은 {limit}MiB를 사용합니다.",
     "prefs.plugin_busy": "플러그인 패키지를 읽거나 업데이트하는 중…",
     "prefs.plugin_cancel": "취소",
     "prefs.plugin_entries": "진입점과 배치",
@@ -143,6 +149,7 @@
     "ui.plugin_management_standalone": "플러그인 설치와 제거는 배치 및 스크립트 밖에서 별도의 명령으로 실행하세요."
   },
   "vi": {
+    "plugin_install.memory": "Tối đa {memory} MiB bộ nhớ. Plugin chỉ được dùng {limit} MiB trừ khi bạn cho phép nhiều hơn.",
     "prefs.plugin_busy": "Đang đọc hoặc cập nhật gói plugin…",
     "prefs.plugin_cancel": "Hủy",
     "prefs.plugin_entries": "Điểm vào và vị trí",
@@ -166,6 +173,7 @@
     "ui.plugin_management_standalone": "Chạy việc cài đặt và gỡ plugin bằng các lệnh riêng, ngoài các lô lệnh và tập lệnh."
   },
   "zh": {
+    "plugin_install.memory": "最多 {memory} MiB 内存。除非您允许更多，插件只能使用 {limit} MiB。",
     "prefs.plugin_busy": "正在读取或更新插件包…",
     "prefs.plugin_cancel": "取消",
     "prefs.plugin_entries": "入口与位置",

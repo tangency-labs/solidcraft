@@ -31,8 +31,11 @@ code. SolidCraft retains approval, cancellation and plugin preferences.
 One confirmation screen shows its name, version, summary, requested permissions and entry placements.
 Each command group explains its access in plain words: files, designs, application settings or other plugins.
 Enter an absolute local path for each requested folder. Each folder shows its requested read/write access.
-**Install** approves the displayed command groups and folders, publishes the package and stores the
-approvals; **Cancel** changes nothing. Installation never runs plugin code.
+When the plugin asks for more memory than the ceiling in **Preferences > Plugins** (128 MiB unless
+changed), the screen says how much it asks for and what the ceiling is.
+**Install** approves the displayed command groups, folders and memory, publishes the package and stores the
+approvals; **Cancel** changes nothing. Installation never runs plugin code. Approved memory applies to
+that exact package only: a replaced or changed package asks again. Fuel still has to fit the ceiling.
 
 Programs use the same `plugin.install` command without opening dialogs:
 
@@ -42,13 +45,16 @@ Programs use the same `plugin.install` command without opening dialogs:
   "approval": "COPY_THE_APPROVAL_FROM_THE_REVIEWED_DRY_RUN",
   "approve": {
     "command_groups": ["file"],
-    "folders": [{"name": "exports", "path": "/home/user/exports", "read": false, "write": true}]
+    "folders": [{"name": "exports", "path": "/home/user/exports", "read": false, "write": true}],
+    "memory_mib": 1024
   }
 }
 ```
 
 Approvals may only narrow the manifest's requests. An unrequested group, folder name or access mode
-returns a typed refusal. Omitting `approve` grants no groups or folders, including when replacing a plugin.
+returns a typed refusal. `memory_mib` is either omitted (the plugin runs under the app's ceiling) or
+exactly the manifest's `runtime.limits.memory_mib`.
+Omitting `approve` grants no groups, folders or memory, including when replacing a plugin.
 Providing `approve` replaces that plugin id's stored approvals; grants the new manifest no longer requests
 cannot survive replacement. `plugin.run` checks stored grants against the current manifest on every call.
 A package copied into the plugin directory by hand also starts with no grants.
@@ -60,7 +66,8 @@ Send both as `approval` and `archive` when installing the reviewed package. A ch
 a typed `invalid_input` error for `approval` or `archive` before any files or grants are written. The dialog always
 sends both hashes; programmatic callers may omit it to install directly without a prior review.
 Replacing an installed plugin with the same id requires `"replace": true`.
-The response includes name, version, description, capabilities, permissions, app commands,
+The response includes name, version, description, capabilities, permissions, requested `limits`, the app's
+`host_limits`, app commands,
 namespaced `entries`, declared `entry_points` with input schemas and slots, replacement information,
 the target `folder` and whether it was `installed`. A dry run reports `installed: false`.
 Dry-run description is the package review path; there is no separate review command or folder installer.
@@ -85,7 +92,7 @@ The command surface exposes management without opening dialogs:
 
 | Command | Parameters | Result |
 |---|---|---|
-| `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}]}}` | Package description and installation status, including declared `entry_points` |
+| `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?}}` | Package description and installation status, including declared `entry_points` |
 | `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
 | `plugin.remove` | `{id}` | `{id, removed: true}` |
 
