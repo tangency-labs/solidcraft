@@ -757,12 +757,6 @@ pub struct UpstreamFixes {
     /// `GlobalCurveSolve` searches are returned too, as the fork does (tangency-labs/smlib
     /// c8f6a31; changed by #2009 group C, WR-662). Off by default for pinned compatibility.
     pub planar_path_sweep_statuses: bool,
-    /// The B-rep's own edits, its `StitchAndOrient`, the offset and shell stitches and the
-    /// Boolean merge, stitch and topology-intersection passes pass on the statuses SMLib
-    /// drops: a failed list edit, evaluation, trim, stitch or orientation returns its error
-    /// instead of the operation carrying on and reporting success (WR-658, #2009 group A;
-    /// tangency-labs/smlib 60a8a51, 4803d6d, e7ebc8d). Off by default for pinned parity.
-    pub brep_edit_statuses_pass_on: bool,
     /// The loop, vertex, edge use, face, curve and surface queries pass on the statuses
     /// SMLib drops where the call returns a status, and the classifying queries answer
     /// only from what they computed: a value that could not be evaluated is no evidence

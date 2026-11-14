@@ -333,13 +333,8 @@ pub fn transform_matrix_with_notifications(
 
     // Low work case: No sheer or reflection?
     if row0.dot(row1).abs() < EFF_ZERO {
-        // a failed AngleBetween reports 0
-        let angle_check = match row0.cross(row1).angle_between(row2) {
-            Ok(a) => a,
-            // (fork 60a8a51 passes the status on: `SER`)
-            Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
-            Err(_) => 0.0,
-        };
+        // a failed AngleBetween reports 0 upstream (fork 60a8a51 passes the status on: `SER`)
+        let angle_check = row0.cross(row1).angle_between(row2)?;
 
         if angle_check <= EFF_ZERO_RAD {
             let row0_len = row0.length();
@@ -411,10 +406,7 @@ pub fn transform_matrix_with_notifications(
     let scale_v = Vec3::new(vx_len, vy_len, vz_len);
     let origin = Vec3::new(0.0, 0.0, 0.0);
     // upstream ignores SetCanonical's status
-    ignore_status(crate::error::passed_on(
-        transform_v.set_canonical(origin, vx / vx_len, vy / vy_len),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    transform_v.set_canonical(origin, vx / vx_len, vy / vy_len)?;
 
     let utx = row(&ut, 0)?;
     let uty = row(&ut, 1)?;
@@ -429,20 +421,11 @@ pub fn transform_matrix_with_notifications(
 
     // Transforms below are rigid, need to check if we require a mirror to fix the
     // handedness of the orthonormal decomposition.
-    let angle_v = match vx.cross(vy).angle_between(vz) {
-        Ok(a) => a,
-        // (fork 60a8a51 passes the status on: `SER`)
-        Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
-        Err(_) => 0.0,
-    };
+    // (fork 60a8a51 passes both statuses on: `SER`)
+    let angle_v = vx.cross(vy).angle_between(vz)?;
     let mirror_v = angle_v > HALF_PI;
 
-    let angle_ut = match utx.cross(uty).angle_between(utz) {
-        Ok(a) => a,
-        // (fork 60a8a51 passes the status on: `SER`)
-        Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
-        Err(_) => 0.0,
-    };
+    let angle_ut = utx.cross(uty).angle_between(utz)?;
     let mirror_ut = angle_ut > HALF_PI;
 
     let mut worst = None;
@@ -468,10 +451,7 @@ pub fn transform_matrix_with_notifications(
     }
 
     if mirror_ut {
-        ignore_status(crate::error::passed_on(
-            transform_ut.set_canonical(origin, utx / utx_len, uty / uty_len),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        transform_ut.set_canonical(origin, utx / utx_len, uty / uty_len)?;
         fold_status(
             &mut worst,
             transform_with_notifications(
@@ -491,10 +471,7 @@ pub fn transform_matrix_with_notifications(
         let v_x = Vec3::new(1.0, 0.0, 0.0);
         let v_y = Vec3::new(0.0, 1.0, 0.0);
 
-        ignore_status(crate::error::passed_on(
-            transform_ut.set_canonical(disp, v_x, v_y),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        transform_ut.set_canonical(disp, v_x, v_y)?;
         // the defaults: no scale, bScaleTol = TRUE
         fold_status(
             &mut worst,
@@ -502,10 +479,7 @@ pub fn transform_matrix_with_notifications(
         )?;
     } else {
         // transform without mirror
-        ignore_status(crate::error::passed_on(
-            transform_ut.set_canonical(disp, utx / utx_len, uty / uty_len),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        transform_ut.set_canonical(disp, utx / utx_len, uty / uty_len)?;
         fold_status(
             &mut worst,
             transform_with_notifications(

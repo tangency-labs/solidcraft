@@ -180,7 +180,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.planar_path_profile_placement_statuses = true;
     f.fillet_trim_status = true;
     f.plane_recognition_origin_after_axes = true;
-    f.brep_edit_statuses_pass_on = true;
     f.fillet_run_on_bspline_trims = true;
     f.query_statuses_pass_on = true;
     f.sweep_statuses_pass_on = true;

@@ -197,19 +197,16 @@ struct NewtonResult {
 }
 
 /// `seed` grown by half its size on each side (`tp_Newton`'s `sLocA`/`sLocB`).
-fn grown(seed: &Extent2d, pass_on: bool) -> Result<Extent2d> {
+fn grown(seed: &Extent2d) -> Result<Extent2d> {
     let mut loc = *seed;
     let grow = seed.size();
-    // (the status is ignored: the extent is kept; fork e7ebc8d passes it on: `SER`)
-    let set = loc.set_min_max_coords(
+    // (upstream ignores the status and keeps the extent; fork e7ebc8d passes it on: `SER`)
+    loc.set_min_max_coords(
         seed.min().x - 0.5 * grow.x,
         seed.min().y - 0.5 * grow.y,
         seed.max().x + 0.5 * grow.x,
         seed.max().y + 0.5 * grow.y,
-    );
-    if pass_on {
-        set?;
-    }
+    )?;
     Ok(loc)
 }
 
@@ -231,8 +228,8 @@ fn tp_newton(
 ) -> Result<Option<NewtonResult>> {
     // a seed only has to find a contact near its own patch pair: give up when the
     // iteration leaves the seed patches grown by half their size each side
-    let loc_a = grown(seed_a, k.fixes.brep_edit_statuses_pass_on)?;
-    let loc_b = grown(seed_b, k.fixes.brep_edit_statuses_pass_on)?;
+    let loc_a = grown(seed_a)?;
+    let loc_b = grown(seed_b)?;
 
     let mut converged = false;
     let size_a = dom_a.size();

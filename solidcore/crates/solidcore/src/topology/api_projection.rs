@@ -90,11 +90,7 @@ fn unit_normal(normal: Vec3) -> Result<Vec3> {
 /// `pBrep->CalculateBoundingBox(BBox)` with its status ignored (the box then stays
 /// empty), and the length of its diagonal.
 fn box_and_length(k: &Kernel, brep: &Brep) -> Result<(Extent3d, f64)> {
-    let bbox = ignored(crate::error::passed_on(
-        qbrep::calculate_bounding_box(k, brep, BoundingBoxOptions::default()),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .unwrap_or_else(Extent3d::new);
+    let bbox = qbrep::calculate_bounding_box(k, brep, BoundingBoxOptions::default())?;
     let diagonal = bbox.size();
     let length = diagonal.length();
     Ok((bbox, length))
@@ -177,10 +173,7 @@ pub fn project_brep_onto_plane(
 
     let mut plane = Axis2Placement::default();
     // (status ignored upstream; fork 4803d6d passes it on: `SER`)
-    let set = plane.set_canonical(plane_origin, y, z);
-    if k.fixes.brep_edit_statuses_pass_on {
-        set?;
-    }
+    plane.set_canonical(plane_origin, y, z)?;
 
     let invert_plane = plane.invert();
 

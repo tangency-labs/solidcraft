@@ -2081,14 +2081,11 @@ impl OffsetGeometryCreation {
                         )?);
                     }
                     // SetCanonical's status is ignored upstream (fork 4803d6d: `SER`)
-                    let set = placement.set_canonical(
+                    placement.set_canonical(
                         placement.origin(),
                         ref_frame.z_axis(),
                         ref_frame.x_axis(),
-                    );
-                    if k.fixes.brep_edit_statuses_pass_on {
-                        set?;
-                    }
+                    )?;
                 }
             } // end 1 bounding edge check
 
@@ -2509,19 +2506,13 @@ impl OffsetGeometryCreation {
                 let c = brep
                     .curve_mut(c3)
                     .ok_or(dangling("curve handle cannot be resolved"))?;
-                let _ = ignore_soft(crate::error::passed_on(
-                    c.reverse_parameterization(k, &ivl),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                c.reverse_parameterization(k, &ivl)?;
                 let uv = uv_curve.ok_or(dangling("null UV curve reversed"))?;
                 let ivl = curve_of(brep, uv)?.natural_interval();
                 let c = brep
                     .curve_mut(uv)
                     .ok_or(dangling("curve handle cannot be resolved"))?;
-                let _ = ignore_soft(crate::error::passed_on(
-                    c.reverse_parameterization(k, &ivl),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                c.reverse_parameterization(k, &ivl)?;
             } // end Edge and Input curve running in opposite directions check
 
             // set input curves as Edge geometry (deleting the pre-existing curve and the
@@ -2967,25 +2958,21 @@ impl OffsetGeometryCreation {
                     // (neither status is checked upstream: a failed evaluation leaves its
                     // output at SmPoint3d's SM_UNDEF_DOUBLE default)
                     let undef = Vec3::new(UNDEF_DOUBLE, UNDEF_DOUBLE, UNDEF_DOUBLE);
-                    let pv = ignore_soft(crate::error::passed_on(
-                        curve_of(brep, curve_3d)?.evaluate(k, sol.start.param(0)?, 1, true, true),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    let pv = curve_of(brep, curve_3d)?.evaluate(
+                        k,
+                        sol.start.param(0)?,
+                        1,
+                        true,
+                        true,
+                    )?;
                     let uv = Point2::new(sol.start.param(1)?, sol.start.param(2)?);
-                    let normal = ignore_soft(crate::error::passed_on(
-                        surface_of(brep, ext_surface)?.evaluate_normal(
-                            k,
-                            uv,
-                            Side::Left,
-                            Side::Left,
-                        ),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?
-                    .unwrap_or(undef);
-                    let tangent = pv
-                        .and_then(|pv| pv.get(1).copied())
-                        .unwrap_or(undef)
-                        .unitize_or_z();
+                    let normal = surface_of(brep, ext_surface)?.evaluate_normal(
+                        k,
+                        uv,
+                        Side::Left,
+                        Side::Left,
+                    )?;
+                    let tangent = pv.get(1).copied().unwrap_or(undef).unitize_or_z();
                     let angle_rad = tangent.angle_between(normal)?;
                     let angle_deg = angle_rad * 180.0 / PI;
                     // Four-face vertex splitting (WR-666, the fork's
@@ -5090,14 +5077,8 @@ impl OffsetGeometryCreation {
             if dropped.success {
                 // Trim CenterLine to Start dropPoint (both statuses ignored; the trim may
                 // snap sCenterIvl by tol to existing knots)
-                let _ = ignore_soft(crate::error::passed_on(
-                    center_ivl.set_min_max(dropped.parameter, center_ivl.max()),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
-                let _ = ignore_soft(crate::error::passed_on(
-                    center_line.trim(k, &mut center_ivl, TrimMode::Notify),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                center_ivl.set_min_max(dropped.parameter, center_ivl.max())?;
+                center_line.trim(k, &mut center_ivl, TrimMode::Notify)?;
             }
         } // end Rail1/CenterLine StartPoint gapSize check
 
@@ -5127,14 +5108,8 @@ impl OffsetGeometryCreation {
             // when Rail1Curve EndPoint dropped to CenterLine
             if dropped.success {
                 // Trim CenterLine to End dropPoint
-                let _ = ignore_soft(crate::error::passed_on(
-                    center_ivl.set_min_max(center_ivl.min(), dropped.parameter),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
-                let _ = ignore_soft(crate::error::passed_on(
-                    center_line.trim(k, &mut center_ivl, TrimMode::Notify),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                center_ivl.set_min_max(center_ivl.min(), dropped.parameter)?;
+                center_line.trim(k, &mut center_ivl, TrimMode::Notify)?;
             }
         } // end Rail1/CenterLine EndPoint gapSize check
 
@@ -6138,10 +6113,7 @@ impl<O: ClassObject + SolutionObject> LocalOperationGeometryCreation<O> {
                 let s = brep
                     .surface_mut(new_surface)
                     .ok_or(dangling("surface handle cannot be resolved"))?;
-                let _ = ignore_soft(crate::error::passed_on(
-                    s.reparameterize(k, &old_domain),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                s.reparameterize(k, &old_domain)?;
             }
             // Copy pS, when possible as an analytic surface (the listed surface is deleted)
             let mut analytic = surface_of(brep, new_surface)?.copy_and_add_analytics(k)?;
