@@ -680,7 +680,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     let input_rect = rect;
     let rect = crate::render_workspace::camera_rect(app, rect);
     let picking = caps.pick;
-    let (hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, primary_released, delta) = ui.input(|i| {
+    let (hover, scroll, mods, middle, secondary_raw, primary_down, primary_pressed, primary_released, delta) = ui.input(|i| {
         (
             i.pointer.hover_pos(),
             i.smooth_scroll_delta.y,
@@ -696,7 +696,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     let hover = hover.filter(|p| !crate::frame::dock_dragging(ui.ctx()) && !crate::shell::covered(app, *p));
     let delta = unwrapped_delta(app, delta);
     // The right button belongs to the marking menu while it is open.
-    let secondary_down = secondary_down && app.viewport.context_menu.is_none();
+    let secondary_down = secondary_raw && app.viewport.context_menu.is_none();
     // The axis view handles its own clicks; the model underneath must not see them.
     let axes = if caps.orbit { axis_rect(app, input_rect) } else { Rect::NOTHING };
     // So is the View angles readout under it (#6032).
@@ -726,6 +726,9 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     app.viewport.mouse = hover.filter(|_| inside);
     // Sketch snap suppression is set once in `viewport::show` from preferences.
     middle_double_click(app, ui, inside);
+    // CATIA's middle click: the point under the pointer comes to the middle of the view, which is
+    // also what the next orbit turns about. A double-click (Home or Fit) keeps its own meaning.
+    middle_click_recentre(app, ui, inside, rect);
     // The 3D mouse's motion this frame, with what this page's camera may do.
     device(app, rect, caps);
 
@@ -948,16 +951,41 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // left one does (`primary_nav`): letting go of Shift partway through a Shift+middle orbit
     // doesn't turn the rest into a pan (#9557). Off in Preferences, the keys held decide on every
     // frame, as before.
+    // CATIA's two-button ladder, when the preset carries one: while the anchor is down, a side
+    // button held turns the view and, let go with the anchor still down, zooms. The gear changes
+    // under a hand that never lifts the anchor, at any point of the drag. The latch remembers
+    // that a side button has been pressed, so the zoom gear outlives its release; letting the
+    // anchor go ends the whole gesture.
+    let chord = button.and_then(|b| crate::prefs::chord_anchor(app).filter(|chord| chord.is_anchor(b)));
+    let side_down = chord.is_some_and(|chord| {
+        chord.sides.iter().any(|side| match side {
+            crate::prefs::NavButton::Left => primary_down,
+            crate::prefs::NavButton::Middle => middle,
+            crate::prefs::NavButton::Right => secondary_raw,
+        })
+    });
     let button_mode = match button {
         Some(b) if dragging && app.viewport.axis_drag.is_none() => {
-            let kept = app.viewport.button_nav.filter(|(held, _)| *held == b && app.preferences.nav_drag_keeps_mode);
-            let mode = kept.map_or_else(|| crate::prefs::nav_mode(app, b, mods), |(_, mode)| mode);
+            let mode = if let Some(chord) = chord {
+                // A side button pressed at any time during the drag arms the zoom gear.
+                if side_down {
+                    app.viewport.chord_latched = true;
+                }
+                chord.mode(side_down, app.viewport.chord_latched, crate::prefs::nav_mode(app, b, mods))
+            } else {
+                // The plain binding table, with `nav_drag_keeps_mode`'s memory of the starting
+                // mode (#9557).
+                let kept = app.viewport.button_nav.filter(|(held, _)| *held == b && app.preferences.nav_drag_keeps_mode);
+                kept.map_or_else(|| crate::prefs::nav_mode(app, b, mods), |(_, mode)| mode)
+            };
             app.viewport.button_nav = Some((b, mode));
             mode
         }
         Some(_) => None,
         None => {
             app.viewport.button_nav = None;
+            // The anchor is up: the next drag starts in the anchor's own gear (pan).
+            app.viewport.chord_latched = false;
             None
         }
     };
@@ -1409,6 +1437,52 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
     if let Some(p) = pivot {
         app.cam.place(p, displayed.frame_coords(p));
     }
+}
+
+/// A click of a two-button preset's anchor (CATIA's middle button): the point picked, or the
+/// middle of the bodies in view over empty space, comes to the centre of the view. The camera's
+/// target is what the view turns about, so the next orbit turns about that point. Only a click
+/// counts: a drag pans or turns, and the second click of a double-click (Home or Fit) is left
+/// alone.
+fn middle_click_recentre(app: &mut SolveApp, ui: &egui::Ui, inside: bool, rect: Rect) {
+    let Some(chord) = crate::prefs::chord_anchor(app).filter(|chord| chord.recentre) else { return };
+    // The anchor must be the middle button for a middle click to mean anything here.
+    if !chord.is_anchor(crate::prefs::NavButton::Middle) {
+        return;
+    }
+    let (pressed, released, pos, double) = ui.input(|i| {
+        (
+            i.pointer.button_pressed(egui::PointerButton::Middle),
+            i.pointer.button_released(egui::PointerButton::Middle),
+            i.pointer.latest_pos(),
+            i.pointer.button_double_clicked(egui::PointerButton::Middle),
+        )
+    });
+    // Where the button went down, kept here rather than read from egui's click: a drag whose
+    // pointer jumps on its last frame is still classified as a click, and a click that travelled
+    // is not one.
+    if pressed {
+        app.viewport.chord_press = pos;
+    }
+    let Some(start) = app.viewport.chord_press else { return };
+    if !released {
+        return;
+    }
+    app.viewport.chord_press = None;
+    let Some(at) = pos else { return };
+    // A click that moved is a pan or a turn, and a double-click is Home or Fit.
+    if !inside || double || start.distance(at) > crate::prefs::CLICK_WOBBLE {
+        return;
+    }
+    // The picked point, else the middle of the bodies in view: the same choice an orbit makes
+    // when it turns about the cursor.
+    let proj = crate::viewport::projection(app, rect);
+    let pivot = pivot_under(app, &proj, at);
+    app.cancel_view_animation();
+    app.viewport.orbit_pivot = Some(pivot);
+    // `place` keeps `p` at the given place in the camera's frame: the frame's origin is the
+    // middle of the view, so `p` lands there with the distance unchanged.
+    app.cam.place(pivot, Vec3::ZERO);
 }
 
 /// A middle-button double-click goes Home (or fits, or nothing: Preferences › Navigation). Only

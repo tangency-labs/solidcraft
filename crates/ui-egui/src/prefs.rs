@@ -88,6 +88,60 @@ const fn bind(button: NavButton, keys: NavKeys, mode: NavMode) -> NavBinding {
     NavBinding { button, keys, mode }
 }
 
+/// A two-button navigation, as CATIA's: while `anchor` is held, a side button changes the drag's
+/// gear. Pressed and held it does `held` (turn the view); pressed and let go with the anchor
+/// still down it does `tapped` (zoom), and pressing it again turns the view again — the drag
+/// changes gear without the hand ever lifting the anchor. The anchor on its own does what its
+/// binding says (pan, in CATIA).
+#[derive(Clone, Copy, Debug)]
+pub struct NavChord {
+    /// The button that must stay down (CATIA: the middle one).
+    pub anchor: NavButton,
+    /// The buttons that change the gear (CATIA: left or right, whichever is handier).
+    pub sides: &'static [NavButton],
+    /// Side button held down: what the drag does until it is let go.
+    pub held: NavMode,
+    /// Side button let go, anchor still down: what the drag does until it is pressed again.
+    pub tapped: NavMode,
+    /// A click of the anchor with no drag moves the picked point to the centre of the view.
+    pub recentre: bool,
+}
+
+impl NavChord {
+    /// Whether `button` is the chord's anchor, the button the ladder watches.
+    pub fn is_anchor(&self, button: NavButton) -> bool {
+        self.anchor == button
+    }
+
+    /// Whether `button` is one of the side buttons.
+    pub fn is_side(&self, button: NavButton) -> bool {
+        self.sides.contains(&button)
+    }
+
+    /// What the drag does this frame, given the side buttons' state, whether one has been pressed
+    /// since the anchor went down (the latch, which survives letting go), and the anchor's own
+    /// binding. A pure function, so the ladder is tested without a window.
+    pub fn mode(&self, side_down: bool, latched: bool, anchor: Option<NavMode>) -> Option<NavMode> {
+        if side_down {
+            Some(self.held)
+        } else if latched {
+            Some(self.tapped)
+        } else {
+            anchor
+        }
+    }
+}
+
+/// CATIA V5's mouse: the middle button alone pans, the middle button plus a side button turns
+/// the view, and letting the side button go with the middle one still down zooms. A bare middle
+/// click brings the picked point to the middle of the view.
+pub const CATIA_CHORD: NavChord =
+    NavChord { anchor: NavButton::Middle, sides: &[NavButton::Left, NavButton::Right], held: NavMode::Orbit, tapped: NavMode::Zoom, recentre: true };
+
+/// How far the pointer may move and still count as a click (points): egui's own click tolerance,
+/// used to tell a bare click (which recentres the view) from a drag that pans or turns it.
+pub const CLICK_WOBBLE: f32 = 6.0;
+
 /// A mouse mapping: its bindings, most specific first (the first one whose button is dragged
 /// with all its keys held wins).
 pub struct NavPreset {
@@ -103,6 +157,8 @@ pub struct NavPreset {
     pub middle_double_click: Option<&'static str>,
     /// Choosing the preset sets "Right drag orbits" (`None` leaves it as it is).
     pub right_drag_orbits: Option<bool>,
+    /// A two-button ladder on top of the bindings (`None`: a plain one-button preset).
+    pub chord: Option<NavChord>,
     pub bindings: &'static [NavBinding],
 }
 
@@ -110,6 +166,13 @@ impl NavPreset {
     /// What dragging `button` with `mods` held does, if anything.
     pub fn mode(&self, button: NavButton, mods: Modifiers) -> Option<NavMode> {
         self.bindings.iter().find(|b| b.button == button && b.keys.held(mods)).map(|b| b.mode)
+    }
+
+    /// The mode of a drag of this preset's anchor button, with the chord's gear applied: `None`
+    /// for a one-button preset, or for a button that is not the chord's anchor.
+    pub fn chord_mode(&self, button: NavButton, side_down: bool, latched: bool, mods: Modifiers) -> Option<NavMode> {
+        let chord = self.chord.filter(|chord| chord.is_anchor(button))?;
+        chord.mode(side_down, latched, self.mode(button, mods))
     }
 }
 
@@ -126,6 +189,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        chord: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Orbit), bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
     },
     NavPreset {
@@ -137,6 +201,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         // Picked here, the right button is left to the context menu and mouse gestures (#6492).
         middle_double_click: Some("fit"),
         right_drag_orbits: Some(false),
+        chord: None,
         bindings: &[
             bind(Middle, NavKeys::CTRL, Pan),
             bind(Middle, NavKeys::SHIFT, Zoom),
@@ -154,7 +219,21 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: true,
         middle_double_click: None,
         right_drag_orbits: None,
+        chord: None,
         bindings: &[bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::NONE, Orbit)],
+    },
+    // CATIA V5's mouse: a two-button ladder on top of a plain middle-drag pan.
+    NavPreset {
+        id: "catia",
+        label: "CATIA",
+        help: "Middle drag pans; hold middle and hold left or right to orbit; press and release that side button with middle still held to zoom; Shift+middle orbits and Ctrl+middle zooms; middle double-click fits, a middle click centres the view",
+        reverse_zoom: false,
+        // CATIA zooms in by pushing the pointer away, which is the drag up this build already does.
+        reverse_drag_zoom: false,
+        middle_double_click: Some("fit"),
+        right_drag_orbits: None,
+        chord: Some(CATIA_CHORD),
+        bindings: &[bind(Middle, NavKeys::SHIFT, Orbit), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Pan)],
     },
     NavPreset {
         id: "nx",
@@ -167,6 +246,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: Some("fit"),
         right_drag_orbits: Some(false),
+        chord: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
     },
     NavPreset {
@@ -177,6 +257,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        chord: None,
         bindings: &[
             bind(Middle, NavKeys::SHIFT, Orbit),
             bind(Middle, NavKeys::CTRL, Zoom),
@@ -192,6 +273,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        chord: None,
         bindings: &[
             bind(Left, NavKeys::SHIFT_ALT, Orbit),
             bind(Middle, NavKeys::SHIFT_ALT, Pan),
@@ -209,6 +291,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        chord: None,
         bindings: &[
             bind(Left, NavKeys::ALT, Orbit),
             bind(Middle, NavKeys::ALT, Pan),
@@ -224,6 +307,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        chord: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
     },
     NavPreset {
@@ -234,6 +318,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        chord: None,
         bindings: &[bind(Right, NavKeys::SHIFT, Pan), bind(Right, NavKeys::NONE, Orbit), bind(Middle, NavKeys::NONE, Pan)],
     },
     NavPreset {
@@ -244,6 +329,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        chord: None,
         bindings: &[
             bind(Left, NavKeys::NONE, Orbit),
             bind(Right, NavKeys::SHIFT, Zoom),
@@ -262,6 +348,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         right_drag_orbits: None,
         // Ctrl+left orbit is the drag from empty space every preset has: as a binding it would
         // also take a Ctrl+click on geometry, which adds to the selection.
+        chord: None,
         bindings: &[bind(Left, NavKeys::SHIFT_ALT, Zoom), bind(Left, NavKeys::ALT, Pan)],
     },
     NavPreset {
@@ -272,6 +359,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        chord: None,
         bindings: &[bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
     },
 ];
@@ -2621,6 +2709,19 @@ pub fn nav_mode(app: &SolveApp, button: NavButton, mods: Modifiers) -> Option<Na
         return None;
     }
     mode
+}
+
+/// Whether a right press now belongs to the preset's chord rather than to the context menu: the
+/// chord's anchor (the middle button, in CATIA) is held and the right button is one of its sides.
+/// Read before the menu opens, so holding the anchor turns the view instead of opening a menu
+/// under the hand.
+pub fn chord_takes_right(app: &SolveApp, middle_down: bool) -> bool {
+    middle_down && nav_preset(&app.preferences.nav).chord.is_some_and(|chord| chord.is_anchor(NavButton::Middle) && chord.is_side(NavButton::Right))
+}
+
+/// The chord's shape, when the preset carries one (for the drag ladder and the recentre).
+pub fn chord_anchor(app: &SolveApp) -> Option<NavChord> {
+    nav_preset(&app.preferences.nav).chord
 }
 
 /// +1, or −1 when horizontal scrolling pans the other way (#2007).
@@ -10713,6 +10814,31 @@ mod tests {
         assert_eq!(h.app.preferences.dialog_buttons, DialogButtons::Bottom);
         h.call("ui.prefs", json!({"button": "cancel"}));
         assert_eq!(h.app.preferences.dialog_buttons, DialogButtons::Top);
+    }
+
+    /// CATIA's ladder, walked end to end: the anchor alone pans, a side button held turns the
+    /// view, letting it go with the anchor still down zooms, pressing it again turns the view
+    /// again, and letting the anchor go starts the next drag over.
+    #[test]
+    fn the_catia_chord_changes_gear_under_a_held_anchor() {
+        let catia = nav_preset("catia");
+        let chord = catia.chord.expect("CATIA carries a chord");
+        assert_eq!(chord.anchor, NavButton::Middle);
+        assert!(chord.is_side(NavButton::Left) && chord.is_side(NavButton::Right));
+        assert!(chord.recentre, "a middle click brings the picked point to the middle of the view");
+        // The anchor alone does what its binding says (pan).
+        assert_eq!(chord.mode(false, false, Some(NavMode::Pan)), Some(NavMode::Pan));
+        // A side button pressed and held turns the view.
+        assert_eq!(chord.mode(true, false, Some(NavMode::Pan)), Some(NavMode::Orbit));
+        // Let go with the anchor still down: zoom, and it stays zoom until pressed again.
+        assert_eq!(chord.mode(false, true, Some(NavMode::Pan)), Some(NavMode::Zoom));
+        assert_eq!(chord.mode(true, true, Some(NavMode::Pan)), Some(NavMode::Orbit));
+        // The preset resolves through the same ladder, and only for its anchor.
+        assert_eq!(catia.chord_mode(NavButton::Middle, true, false, Modifiers::NONE), Some(NavMode::Orbit));
+        assert_eq!(catia.chord_mode(NavButton::Right, true, false, Modifiers::NONE), None);
+        // A one-button preset is untouched by any of it.
+        assert_eq!(nav_preset("fusion").chord_mode(NavButton::Middle, true, false, Modifiers::NONE), None);
+        assert!(nav_preset("fusion").chord.is_none());
     }
 
     #[test]
