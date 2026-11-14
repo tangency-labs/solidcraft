@@ -83,9 +83,15 @@ impl Canvas {
 
 impl crate::Document {
     /// A canvas's plane in the world: resolved in its component's frame, then placed where the
-    /// component's occurrence puts it.
-    pub fn canvas_plane(&self, vals: &std::collections::BTreeMap<String, crate::expr::Value>, c: &Canvas) -> crate::Result<Plane> {
-        let p = self.resolve_plane(vals, &c.plane, 0)?;
+    /// component's occurrence puts it. Use the evaluated state so planes built from sketch
+    /// points, paths or other model geometry resolve as they do when the canvas is inserted.
+    pub fn canvas_plane(
+        &self,
+        vals: &std::collections::BTreeMap<String, crate::expr::Value>,
+        c: &Canvas,
+        state: &crate::ModelState,
+    ) -> crate::Result<Plane> {
+        let p = self.resolve_plane_in(vals, &c.plane, 0, c.component, Some(state))?;
         let m = self.component_transform(c.component);
         if crate::is_identity(&m) {
             return Ok(p);
