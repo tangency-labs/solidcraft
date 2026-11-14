@@ -41,7 +41,6 @@
   "flat_corners_test_bits",
   "surface_continuity_checks_last_v_knot",
   "good_drop_result_distances_in_order",
-  "twist_simple_duw_sign",
   "volume_lift_third_derivative_terms",
   "drop_curve_v_domain_degeneracy",
   "torus_check_spindle_apex",

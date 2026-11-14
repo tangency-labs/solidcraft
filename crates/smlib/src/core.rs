@@ -213,7 +213,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.mirror_curve_keeps_euclidean_control_points = true;
     f.fillet_corner_variable_radius_rail_on_opposite_fillet = true;
     f.dupin_bottom_hyperbola_axis = true;
-    f.twist_simple_duw_sign = true;
     f.offset_swap_uv_extended_distance = true;
     f.validation_does_not_make_uv_trims = true;
     f.analytic_corner_failure_is_false = true;

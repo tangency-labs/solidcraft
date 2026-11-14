@@ -207,7 +207,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "torus_signed_gen_curve_interval",
     "transform_model_size_from_body_box",
     "transform_scales_each_tolerance",
-    "twist_simple_duw_sign",
     "uv_trim_corner_end_points_only",
     "validate_tolerances_fixes_reported_gaps",
     "validation_does_not_make_uv_trims",
