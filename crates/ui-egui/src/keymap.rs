@@ -23,6 +23,7 @@ pub const RESERVED: &[&str] = &[
     "Backspace",
     "Ctrl+Z",
     "Ctrl+Y",
+    "Ctrl+Shift+Z",
     "Ctrl+S",
     "Ctrl+Shift+S",
     "Ctrl+N",
