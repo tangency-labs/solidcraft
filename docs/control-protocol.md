@@ -950,6 +950,7 @@ listed, or is `null`.
 
 One setting per line, sorted by name. A change that adds a setting adds its own line in order, so two such changes only meet when their settings are neighbours.
 
+- `accent` (default `""`: the theme's own; `#rrggbb`: that accent over a theme that sets `accepts_accent`, for the accent, its soft tint, the selected row, chips, the primary action, the selection in the view and the File view's primary action; the tabs' own accents stay the theme's; any other theme ignores it and keeps the value; anything else is an error)
 - `angle_decimals`
 - `assembly_move_handles` (default true): explicit Assembly Move uses the permitted joint-motion handles; false keeps the previous Move panel.
 - `auto_operation` (default true: feature windows choose Join, New Body or Cut from what their material touches until one is picked; false: each keeps the operation it opens with, Extrude its own Join or Cut)

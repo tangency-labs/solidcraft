@@ -40,6 +40,9 @@ thread_local! {
     /// The application bar's logo in the theme's accent instead of its own logo colours
     /// (Preferences › Interface › Logo), per thread like the rest.
     static LOGO_ACCENT: Cell<bool> = const { Cell::new(false) };
+    /// The accent chosen in Preferences over the theme's own ([`set_accent`]), per thread like
+    /// the rest. `None`: the theme's accent, also whenever the theme does not accept one.
+    static ACCENT: Cell<Option<Color32>> = const { Cell::new(None) };
     /// The 3D view's own dark or light when Preferences give it one ([`ViewportTheme`], #4146),
     /// per thread like the rest. `None`: the view is as dark as the window.
     static VIEWPORT_DARK: Cell<Option<bool>> = const { Cell::new(None) };
@@ -58,6 +61,7 @@ pub struct Environment {
     pub vision: ColorVision,
     pub custom_generation: u64,
     pub logo: bool,
+    pub accent: Option<Color32>,
     pub viewport: Option<bool>,
     pub background: Option<[u8; 3]>,
 }
@@ -70,13 +74,15 @@ impl Environment {
             vision: vision(),
             custom_generation: CUSTOM_GENERATION.get(),
             logo: LOGO_ACCENT.get(),
+            accent: ACCENT.get(),
             viewport: VIEWPORT_DARK.get(),
             background: viewport_background(),
         }
     }
 
-    /// A window palette with this state's logo accent and colour vision mode on top.
+    /// A window palette with this state's chosen accent, logo accent and colour vision mode on top.
     pub fn window(self, tokens: Tokens) -> Tokens {
+        let tokens = self.accent.map_or(tokens, |a| tokens.with_accent(a, self.dark));
         let tokens = if self.logo { tokens.with_accent_logo() } else { tokens };
         tokens.with_vision(self.dark, self.vision)
     }
@@ -399,6 +405,28 @@ pub fn set_logo_accent(on: bool) -> bool {
     LOGO_ACCENT.with(|c| c.replace(on) != on)
 }
 
+/// Use `accent` (opaque) over the active theme's own accent, or the theme's (`None`). Returns whether
+/// that changed anything (the visuals follow on the next [`apply`]).
+pub fn set_accent(accent: Option<Color32>) -> bool {
+    ACCENT.with(|c| c.replace(accent) != accent)
+}
+
+/// The accent [`set_accent`] last chose on this thread (`None`: the theme's own).
+pub fn accent() -> Option<Color32> {
+    ACCENT.get()
+}
+
+/// An icon ramp's three shades of `accent`: lighter, the accent itself, darker.
+pub fn accent_icon_shades(accent: Color32) -> [Color32; 3] {
+    [accent.lerp_to_gamma(Color32::WHITE, 0.15), accent, accent.lerp_to_gamma(Color32::BLACK, 0.25)]
+}
+
+/// `#rrggbb` as an opaque accent; anything else (an empty preference: the theme's) is `None`.
+pub fn parse_accent(s: &str) -> Option<Color32> {
+    let hex = s.trim().strip_prefix('#').filter(|h| h.len() == 6)?;
+    Color32::from_hex(&format!("#{hex}")).ok()
+}
+
 /// The theme file palette [`set_custom`] last set on this thread.
 pub fn custom() -> Option<Custom> {
     CUSTOM.get()
@@ -561,6 +589,68 @@ pub fn contrast_ratio(a: Color32, b: Color32) -> f64 {
     };
     let (a, b) = (luminance(a), luminance(b));
     (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+/// The File view's colours a theme leaves unset follow the theme's own panel, border, accent and
+/// text, not its base's fixed blue rail and grey cards (#4868). Each ink is whichever candidate
+/// reads best on the fills it sits on.
+pub fn file_view_from_theme(t: &mut Tokens, dark: bool, set: impl Fn(&str) -> bool) {
+    let fallback = t.text;
+    let best = |inks: &[Color32], fills: &[Color32]| {
+        let worst = |ink: Color32| fills.iter().map(|f| contrast_ratio(ink, *f)).fold(f64::INFINITY, f64::min);
+        inks.iter().copied().max_by(|a, b| worst(*a).total_cmp(&worst(*b))).unwrap_or(fallback)
+    };
+    if !set("file_background") {
+        t.file_background = t.panel;
+    }
+    if !set("file_surface") {
+        t.file_surface = t.dialog_bg;
+    }
+    if !set("file_border") {
+        t.file_border = t.border;
+    }
+    let inks = [t.on_accent, t.text, t.panel, t.app_bar, t.form_ink];
+    let (rail_set, hover_set) = (set("file_rail"), set("file_rail_hover"));
+    if !rail_set {
+        // The accent deepened as the built-in palettes deepen theirs (Dark's rail is about 0.55 of
+        // its accent, Light's about 0.85), toward the theme's own darkest colour.
+        let (toward, k) = if dark { (t.app_bar, 0.45) } else { (t.text, 0.15) };
+        t.file_rail = t.accent.lerp_to_gamma(toward, k);
+    }
+    if !hover_set {
+        t.file_rail_hover = t.file_rail.lerp_to_gamma(t.accent, 0.25);
+    }
+    if !set("file_rail_ink") {
+        t.file_rail_ink = best(&inks, &[t.file_rail, t.file_rail_hover]);
+    }
+    // A rail still too mid-toned for any ink goes further from the ink until the ink reads.
+    let away = best(&inks, &[t.file_rail_ink]);
+    for _ in 0..10 {
+        let reads = |fill: Color32| contrast_ratio(t.file_rail_ink, fill) >= 4.5;
+        if (rail_set || reads(t.file_rail)) && (hover_set || reads(t.file_rail_hover)) {
+            break;
+        }
+        if !rail_set {
+            t.file_rail = t.file_rail.lerp_to_gamma(away, 0.1);
+        }
+        if !hover_set {
+            t.file_rail_hover = t.file_rail_hover.lerp_to_gamma(away, 0.1);
+        }
+    }
+    if !set("file_primary") {
+        t.file_primary = t.accent_soft;
+    }
+    if !set("file_primary_border") {
+        t.file_primary_border = t.accent;
+    }
+    if !set("file_primary_ink") {
+        t.file_primary_ink = best(&[t.accent, t.text, t.on_accent], &[t.file_primary, t.file_background]);
+    }
+    if !set("file_dim") {
+        // Dim where dim text still reads on the page and the cards, else the plain text colour.
+        let on = [t.file_surface, t.file_background];
+        t.file_dim = if on.iter().all(|f| contrast_ratio(t.text_dim, *f) >= 4.5) { t.text_dim } else { best(&[t.text, t.form_ink], &on) };
+    }
 }
 
 /// Composite a translucent foreground over an opaque background in sRGB for contrast checks.
@@ -1509,8 +1599,50 @@ impl Tokens {
     pub fn themed(dark: bool, mode: ColorVision) -> Tokens {
         let custom = CUSTOM.get().filter(|c| c.dark == dark).map(|c| c.tokens);
         let t = custom.unwrap_or(if dark { Tokens::dark() } else { Tokens::light() });
+        let t = ACCENT.get().map_or(t, |a| t.with_accent(a, dark));
         let t = if LOGO_ACCENT.get() { t.with_accent_logo() } else { t };
         t.with_vision(dark, mode)
+    }
+
+    /// These tokens with `accent` in place of the theme's: the accent and its soft tint, the
+    /// selected row, ink on the accent, chips, the primary form button, the selection in the view,
+    /// and the File view's rail and primary action. The tabs' own accents (Sketch, Surface, …)
+    /// stay the theme's. The icons take it in `icons::theme_palette` (ui-kit), from [`accent`].
+    pub fn with_accent(self, accent: Color32, dark: bool) -> Tokens {
+        let mut t = self;
+        let accent = accent.to_opaque();
+        // The panel behind a translucent theme's tint is the theme's own colour, unmultiplied.
+        let panel = t.panel.to_opaque();
+        t.accent = accent;
+        t.accent_soft = panel.lerp_to_gamma(accent, if dark { 0.3 } else { 0.18 });
+        t.selected_bg = t.accent_soft;
+        // Ink on the soft tint: the accent lifted (dark) or deepened (light) until it reads.
+        let (toward, mut k) = if dark { (Color32::WHITE, 0.35) } else { (Color32::BLACK, 0.35) };
+        t.selected_ink = accent.lerp_to_gamma(toward, k);
+        while contrast_ratio(t.selected_ink, t.accent_soft) < 4.5 && k < 1.0 {
+            k += 0.1;
+            t.selected_ink = accent.lerp_to_gamma(toward, k.min(1.0));
+        }
+        // A tint that the lift cannot read on (a pale tint over a translucent mid-grey panel):
+        // black or white, whichever reads better.
+        if contrast_ratio(t.selected_ink, t.accent_soft) < 4.5 {
+            t.selected_ink = if contrast_ratio(Color32::BLACK, t.accent_soft) >= contrast_ratio(Color32::WHITE, t.accent_soft) {
+                Color32::BLACK
+            } else {
+                Color32::WHITE
+            };
+        }
+        t.on_accent = if contrast_ratio(Color32::BLACK, accent) >= contrast_ratio(Color32::WHITE, accent) { Color32::BLACK } else { Color32::WHITE };
+        t.chip = accent;
+        t.form_primary = accent;
+        t.form_primary_fill = accent;
+        t.sel_face = accent;
+        t.sel_edge = accent;
+        // The File view's rail and primary action follow the new accent, as they follow a theme's.
+        file_view_from_theme(&mut t, dark, |k| {
+            !matches!(k, "file_rail" | "file_rail_hover" | "file_rail_ink" | "file_primary" | "file_primary_ink" | "file_primary_border")
+        });
+        t
     }
 
     /// These tokens with the logo's three faces in shades of the accent: lighter, the accent

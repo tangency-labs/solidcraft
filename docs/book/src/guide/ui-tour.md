@@ -525,6 +525,14 @@ malformed values are refused with the overlay's one-based position. An overlay m
 `colors`, `radii`, `borders` and `icon_palette`; all their existing key and value checks apply.
 Overlays only select literal tables: there are no scripts, expressions or interpolation.
 
+The optional boolean `accepts_accent` (default `false`) lets the Accent preference apply over the
+theme. Under the themes, **Accent** then puts another accent colour over it: the theme's own (the
+default), one of eight presets, or any colour from the colour picker. It recolours the accent, the
+selected row, the primary buttons, the selection in the view and the File view's primary action;
+the Sketch, Surface and other tabs keep their own colours. A theme without the field does not
+show the row and ignores a saved accent, which is kept for a theme that accepts one. No built-in
+theme accepts an accent.
+
 The optional integer `requires` defaults to 1; this app supports levels through 2. A larger level
 loads the authored base value tables, disables options and overlays, and exposes a
 `needs_newer` flag through the theme API for future UI. The theme-definition API can export

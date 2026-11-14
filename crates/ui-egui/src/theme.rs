@@ -615,4 +615,52 @@ mod tests {
             assert_eq!(ctx.global_style().visuals, before, "restoring a no-option theme must release the surface fills");
         }
     }
+
+    /// An accent chosen in Preferences, over each built-in theme: the accent family takes it, ink
+    /// on the accent and on its soft tint reads (4.5:1), the File view's primary action follows,
+    /// and the tabs' own accents stay the theme's.
+    #[test]
+    fn a_chosen_accent_replaces_the_accent_family_and_stays_readable() {
+        let mut bases: Vec<(String, solidcraft_theme::Tokens, bool)> =
+            vec![("dark".into(), solidcraft_theme::Tokens::dark(), true), ("light".into(), solidcraft_theme::Tokens::light(), false)];
+        for f in crate::theme_files::builtin() {
+            bases.push((f.id.clone(), crate::theme_files::resolve(f), f.base.is_dark()));
+        }
+        // A dark theme whose panel is a translucent mid grey: a white accent's tint is pale there.
+        let mut translucent = solidcraft_theme::Tokens::dark();
+        translucent.panel = egui::Color32::from_rgba_unmultiplied(128, 128, 128, 128);
+        bases.push(("translucent grey".into(), translucent, true));
+        let mut accents: Vec<egui::Color32> = ["#3b82f6", "#44d62c", "#14b8a6", "#8b5cf6", "#ec4899", "#ef4444", "#f97316", "#eab308"]
+            .iter()
+            .filter_map(|h| solidcraft_theme::parse_accent(h))
+            .collect();
+        accents.extend([egui::Color32::WHITE, egui::Color32::BLACK, egui::Color32::from_gray(118), egui::Color32::from_rgb(255, 255, 0)]);
+        for (id, base, dark) in &bases {
+            for a in &accents {
+                let t = base.with_accent(*a, *dark);
+                assert_eq!((t.accent, t.form_primary, t.sel_edge, t.file_primary_border), (*a, *a, *a, *a), "{id} {a:?}");
+                assert_eq!(t.selected_bg, t.accent_soft, "{id} {a:?}");
+                for (name, ink, ground) in [("selected_ink", t.selected_ink, t.accent_soft), ("on_accent", t.on_accent, t.accent)] {
+                    let ratio = solidcraft_theme::contrast_ratio(ink, ground);
+                    assert!(ratio >= 4.5, "{id} {a:?}: {name} is {ratio:.2}:1");
+                }
+                assert_eq!(t.file_primary, t.accent_soft, "{id} {a:?}: the File view's primary action follows");
+                for tab in ["SKETCH", "SURFACE", "SHEET METAL"] {
+                    assert_eq!(
+                        crate::workspace::tab_accent(&t, tab).color,
+                        crate::workspace::tab_accent(base, tab).color,
+                        "{id}: {tab} keeps its own accent"
+                    );
+                }
+                // The icons' base ramp is the accent's shades; the tabs' ramps and roles stay.
+                let own = crate::icon_svg::theme_palette(*dark).unwrap_or_default();
+                solidcraft_theme::set_accent(Some(*a));
+                let icons = crate::icon_svg::theme_palette(*dark).expect("an accent gives the icons a palette");
+                solidcraft_theme::set_accent(None);
+                let ramp = icons.accents[0].expect("base ramp");
+                assert_eq!(ramp[1], [a.r(), a.g(), a.b()], "{id} {a:?}: the icons take the accent");
+                assert_eq!((&icons.accents[1..], icons.roles), (&own.accents[1..], own.roles), "{id} {a:?}");
+            }
+        }
+    }
 }

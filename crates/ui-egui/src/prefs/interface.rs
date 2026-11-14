@@ -1,6 +1,42 @@
 //! Appearance and Layout settings composition, using shared controls and previews.
 use super::*;
 
+/// The accent presets, as `#rrggbb`: blue, green, teal, purple, pink, red, orange and amber.
+const ACCENTS: [&str; 8] = ["#3b82f6", "#44d62c", "#14b8a6", "#8b5cf6", "#ec4899", "#ef4444", "#f97316", "#eab308"];
+
+/// Accent: the theme's own, a preset, or any colour from the shared picker, for a theme that accepts one.
+fn accent_row(app: &mut SolveApp, ui: &mut egui::Ui) {
+    ui_kit::row(ui, app.tr("prefs.accent"), |ui| {
+        // The chip at its own height: at the button's minimum (the row's) or with the settings
+        // page's vertical padding it spills out of its frame and pushes the colour field below
+        // the row, which clips them.
+        ui.spacing_mut().interact_size.y = 0.0;
+        ui.spacing_mut().button_padding.y = 0.0;
+        let own = app.preferences.accent.is_empty();
+        let chip = ui_kit::choice_chip(ui, "accent_theme", app.tr("prefs.accent_theme"), own);
+        crate::scenario::publish_target("prefs:accent:theme", chip.rect);
+        if chip.clicked() {
+            app.preferences.accent.clear();
+        }
+        // Any other colour: the shared picker, starting from the accent on now.
+        let on = solidcraft_theme::parse_accent(&app.preferences.accent).unwrap_or(Tokens::get().accent);
+        let mut rgb = [on.r(), on.g(), on.b()];
+        if ui_kit::color_field(ui, &mut rgb).changed() {
+            app.preferences.accent = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
+        }
+    });
+    // The presets wrap on their own lines: a row clips its controls to one line.
+    ui_kit::swatch_grid(ui, &ACCENTS, |ui, hex| {
+        let Some(color) = solidcraft_theme::parse_accent(hex) else { return };
+        let chosen = app.preferences.accent.eq_ignore_ascii_case(hex);
+        let swatch = ui_kit::color_swatch(ui, egui::Id::unique(("sc_accent", hex)), color, chosen, hex, ());
+        crate::scenario::publish_target(&format!("prefs:accent:{hex}"), swatch.rect);
+        if swatch.clicked() {
+            app.preferences.accent = (*hex).to_string();
+        }
+    });
+}
+
 pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     ui_kit::settings_page(ui, |ui| {
         ui_kit::settings_heading_with_tag(
@@ -111,6 +147,9 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         app.preferences.logo_accent = selected == 1;
                     }
                 });
+                if active_theme_file(app).is_some_and(|f| f.accepts_accent) {
+                    accent_row(app, ui);
+                }
                 // A theme file another tool writes, reloaded when it changes (#7573).
                 follow_row(app, ui);
             });

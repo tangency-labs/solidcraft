@@ -94,6 +94,9 @@ pub struct ThemeFile {
     /// Conditional value tables, applied in file order with later entries winning by key.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub overlays: Vec<Overlay>,
+    /// Whether the Accent preference applies over this theme's colours (default: no).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub accepts_accent: bool,
     /// Levels newer than [`REQUIREMENTS_LEVEL`] disable options and overlays.
     #[serde(default = "default_requirements_level", skip_serializing_if = "is_default_requirements_level")]
     pub requires: u64,
@@ -126,6 +129,7 @@ impl Default for ThemeFile {
             tabs: BTreeMap::new(),
             options: Vec::new(),
             overlays: Vec::new(),
+            accepts_accent: false,
             requires: default_requirements_level(),
         }
     }
@@ -605,6 +609,10 @@ fn read_value(v: &Value, unknown: UnknownTabs) -> Result<ThemeFile, String> {
         None => default_requirements_level(),
         Some(value) => value.as_u64().ok_or("`requires` must be a nonnegative integer")?,
     };
+    let accepts_accent = match v.get("accepts_accent") {
+        None => false,
+        Some(value) => value.as_bool().ok_or("`accepts_accent` must be true or false")?,
+    };
     let layer = parse_layer(v)?;
     let tabs = parse_tabs(v.get("tabs"), unknown)?;
     let options = if requires > REQUIREMENTS_LEVEL { Vec::new() } else { parse_options(v.get("options"))? };
@@ -623,6 +631,7 @@ fn read_value(v: &Value, unknown: UnknownTabs) -> Result<ThemeFile, String> {
         tabs,
         options,
         overlays,
+        accepts_accent,
         requires,
     })
 }
@@ -1225,72 +1234,9 @@ pub fn resolve_base(theme: &ThemeFile) -> Tokens {
     }
     // A file that sets no colours is its base palette, exactly.
     if !theme.colors.is_empty() {
-        file_view_from_theme(&mut t, theme.base.is_dark(), |k| theme.colors.contains_key(k));
+        solidcraft_theme::file_view_from_theme(&mut t, theme.base.is_dark(), |k| theme.colors.contains_key(k));
     }
     t
-}
-
-/// The File view's colours a theme leaves unset follow the theme's own panel, border, accent and
-/// text, not its base's fixed blue rail and grey cards (#4868). Each ink is whichever candidate
-/// reads best on the fills it sits on.
-fn file_view_from_theme(t: &mut Tokens, dark: bool, set: impl Fn(&str) -> bool) {
-    use solidcraft_theme::contrast_ratio;
-    let fallback = t.text;
-    let best = |inks: &[Color32], fills: &[Color32]| {
-        let worst = |ink: Color32| fills.iter().map(|f| contrast_ratio(ink, *f)).fold(f64::INFINITY, f64::min);
-        inks.iter().copied().max_by(|a, b| worst(*a).total_cmp(&worst(*b))).unwrap_or(fallback)
-    };
-    if !set("file_background") {
-        t.file_background = t.panel;
-    }
-    if !set("file_surface") {
-        t.file_surface = t.dialog_bg;
-    }
-    if !set("file_border") {
-        t.file_border = t.border;
-    }
-    let inks = [t.on_accent, t.text, t.panel, t.app_bar, t.form_ink];
-    let (rail_set, hover_set) = (set("file_rail"), set("file_rail_hover"));
-    if !rail_set {
-        // The accent deepened as the built-in palettes deepen theirs (Dark's rail is about 0.55 of
-        // its accent, Light's about 0.85), toward the theme's own darkest colour.
-        let (toward, k) = if dark { (t.app_bar, 0.45) } else { (t.text, 0.15) };
-        t.file_rail = t.accent.lerp_to_gamma(toward, k);
-    }
-    if !hover_set {
-        t.file_rail_hover = t.file_rail.lerp_to_gamma(t.accent, 0.25);
-    }
-    if !set("file_rail_ink") {
-        t.file_rail_ink = best(&inks, &[t.file_rail, t.file_rail_hover]);
-    }
-    // A rail still too mid-toned for any ink goes further from the ink until the ink reads.
-    let away = best(&inks, &[t.file_rail_ink]);
-    for _ in 0..10 {
-        let reads = |fill: Color32| contrast_ratio(t.file_rail_ink, fill) >= 4.5;
-        if (rail_set || reads(t.file_rail)) && (hover_set || reads(t.file_rail_hover)) {
-            break;
-        }
-        if !rail_set {
-            t.file_rail = t.file_rail.lerp_to_gamma(away, 0.1);
-        }
-        if !hover_set {
-            t.file_rail_hover = t.file_rail_hover.lerp_to_gamma(away, 0.1);
-        }
-    }
-    if !set("file_primary") {
-        t.file_primary = t.accent_soft;
-    }
-    if !set("file_primary_border") {
-        t.file_primary_border = t.accent;
-    }
-    if !set("file_primary_ink") {
-        t.file_primary_ink = best(&[t.accent, t.text, t.on_accent], &[t.file_primary, t.file_background]);
-    }
-    if !set("file_dim") {
-        // Dim where dim text still reads on the page and the cards, else the plain text colour.
-        let on = [t.file_surface, t.file_background];
-        t.file_dim = if on.iter().all(|f| contrast_ratio(t.text_dim, *f) >= 4.5) { t.text_dim } else { best(&[t.text, t.form_ink], &on) };
-    }
 }
 
 /// A complete theme file of a palette and its icon palette: every key, so it is a starting point for a new theme.
@@ -1358,6 +1304,9 @@ pub fn export_file(theme: &ThemeFile) -> Value {
         }
         if !theme.overlays.is_empty() {
             obj.insert("overlays".into(), json!(theme.overlays));
+        }
+        if theme.accepts_accent {
+            obj.insert("accepts_accent".into(), json!(true));
         }
         if !is_default_requirements_level(&theme.requires) {
             obj.insert("requires".into(), json!(theme.requires));

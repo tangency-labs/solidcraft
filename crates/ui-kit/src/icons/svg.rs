@@ -731,8 +731,15 @@ pub fn theme_palette_state() -> Option<(bool, Palette)> {
 }
 
 /// The applied theme file's icon palette for a dark or light drawing, or `None` when the theme is not for that base.
+/// An accent chosen in Preferences (`solidcraft_theme::set_accent`) gives the icons' own colour (the base ramp, which
+/// the Model tab's icons use) its shades; the tabs' own ramps (Sketch, Surface, …) stay the theme's.
 pub fn theme_palette(dark: bool) -> Option<Palette> {
-    THEME_PALETTE.get().filter(|(base, _)| *base == dark).map(|(_, palette)| palette)
+    let palette = THEME_PALETTE.get().filter(|(base, _)| *base == dark).map(|(_, palette)| palette);
+    let Some(accent) = solidcraft_theme::accent() else { return palette };
+    let rgb = |c: egui::Color32| [c.r(), c.g(), c.b()];
+    let mut palette = palette.unwrap_or_default();
+    palette.accents[0] = Some(solidcraft_theme::accent_icon_shades(accent).map(rgb));
+    Some(palette)
 }
 
 impl Palette {
