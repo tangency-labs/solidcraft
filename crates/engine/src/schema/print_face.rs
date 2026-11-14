@@ -3,7 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::types::Point3;
+use super::types::{Point3, StringList};
 
 /// Mark the flat face of a body at a point as the body's print face, or clear it. A slicer
 /// export (`file.send_to_slicer`, `file.save_mesh` with `slicer`, `file.open_in_easyprint`), and an
@@ -39,9 +39,9 @@ pub struct PrintFaceResult {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PrintFacesParams {
-    /// The bodies to check, by name. Default: every body of the design.
+    /// The bodies to check: a name or a list of names. Default: every body of the design.
     #[serde(default)]
-    pub bodies: Option<Vec<String>>,
+    pub bodies: Option<StringList>,
 }
 
 /// Whether a body has a print face.

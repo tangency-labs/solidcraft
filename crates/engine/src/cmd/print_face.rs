@@ -29,7 +29,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .read_only()
         .contract(&PRINT_FACES_CONTRACT)
         .output(crate::schema::output_schema_for::<PrintFacesResult>)
-        .params("bodies?: [names] (default every body) → {bodies: [{body, status: set | none | lost, face?, problem?}], all_set}: whether each body has a print face (body.print_face) that an export would lay it on; lost: one was marked but the face is gone or no longer flat (problem says why). all_set is true when at least one body was checked and every one is set. Read-only"),
+        .params("bodies?: name | [names] (default every body) → {bodies: [{body, status: set | none | lost, face?, problem?}], all_set}: whether each body has a print face (body.print_face) that an export would lay it on; lost: one was marked but the face is gone or no longer flat (problem says why). all_set is true when at least one body was checked and every one is set. Read-only"),
 ];
 
 const PRINT_FACE_CONTRACT: crate::schema::TypedContract<crate::schema::print_face::PrintFaceParams> = crate::schema::TypedContract::new();
@@ -379,6 +379,20 @@ mod tests {
         assert!(e.contains("bodies"), "{e}");
         let r = run(&mut Session::default(), "body.print_faces", json!({}));
         assert_eq!(r, json!({"bodies": [], "all_set": false}));
+    }
+
+    #[test]
+    fn print_faces_takes_one_name_as_a_list_of_one_with_strict_checks_too() {
+        // A plain name is the repository's shorthand for a list of one (`params::string_list`);
+        // the contract accepts it as well, so strict parameter checks don't refuse it.
+        for check in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
+            let mut s = block();
+            s.param_check = check;
+            let r = run(&mut s, "body.print_faces", json!({"bodies": "Block"}));
+            assert_eq!(r["bodies"], json!([{"body": "Block", "status": "none"}]), "{check:?}: {r}");
+            let e = s.execute("body.print_faces", &json!({"bodies": 3})).unwrap_err().to_string();
+            assert!(e.contains("bodies"), "{check:?}: {e}");
+        }
     }
 
     #[test]
