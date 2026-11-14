@@ -716,6 +716,8 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
         if let Some(format) = format {
             params["format"] = json!(format);
         }
+        // GLB only, and not read for the other formats.
+        params["hierarchy"] = json!(app.preferences.glb_export_hierarchy);
         if app.run("file.export", params).is_ok() {
             app.set_status(format!("Exported {path}"), false);
         }

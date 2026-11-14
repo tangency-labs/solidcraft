@@ -2142,13 +2142,14 @@ fn export_to(
     bodies: &[String],
     parts: &[(String, Vec<String>)],
     quality: solidcraft_io::MeshQuality,
+    hierarchy: bool,
 ) -> Result<Value> {
     if format == Format::Obj {
         // The colours of the bodies go in a material library beside the mesh file.
         return export_obj(s, path, bodies, quality);
     }
     if format == Format::Glb {
-        return export_glb(s, cmd, path, bodies, quality);
+        return export_glb(s, cmd, path, bodies, quality, hierarchy);
     }
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // A design with components exports as a STEP assembly; otherwise bodies as placed.
@@ -2274,13 +2275,25 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if lay_on_print_faces(p, cmd, format)? {
         return export_laid(s, path, format, &bodies, &parts, quality);
     }
-    export_to(s, cmd, path, format, &bodies, &parts, quality)
+    export_to(s, cmd, path, format, &bodies, &parts, quality, hierarchy(p, cmd, format)?)
+}
+
+/// `hierarchy` (GLB only, not read for the other formats): true, the default, writes each
+/// occurrence as a named node holding its part's bodies; false writes every body under the root
+/// in world coordinates, as SolidCraft 0.40 did.
+fn hierarchy(p: &Value, cmd: &str, format: Format) -> Result<bool> {
+    match p.get("hierarchy") {
+        _ if format != Format::Glb => Ok(true),
+        None | Some(Value::Null) => Ok(true),
+        Some(Value::Bool(b)) => Ok(*b),
+        Some(_) => Err(bad(cmd, "`hierarchy` must be true or false")),
+    }
 }
 
 fn export_step(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export_step";
     let path = path_arg(p, cmd)?;
-    export_to(s, cmd, path, Format::Step, &string_list(cmd, p, "bodies")?, &[], solidcraft_io::MeshQuality::default())
+    export_to(s, cmd, path, Format::Step, &string_list(cmd, p, "bodies")?, &[], solidcraft_io::MeshQuality::default(), true)
 }
 
 fn export_stl(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2290,7 +2303,7 @@ fn export_stl(s: &mut Session, p: &Value) -> Result<Value> {
     if lay_on_print_faces(p, cmd, Format::StlBinary)? {
         return export_laid(s, path, Format::StlBinary, &bodies, &[], quality);
     }
-    export_to(s, cmd, path, Format::StlBinary, &bodies, &[], quality)
+    export_to(s, cmd, path, Format::StlBinary, &bodies, &[], quality, true)
 }
 
 fn export_3mf(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2301,13 +2314,13 @@ fn export_3mf(s: &mut Session, p: &Value) -> Result<Value> {
     if lay_on_print_faces(p, cmd, Format::ThreeMf)? {
         return export_laid(s, path, Format::ThreeMf, &bodies, &parts, quality);
     }
-    export_to(s, cmd, path, Format::ThreeMf, &bodies, &parts, quality)
+    export_to(s, cmd, path, Format::ThreeMf, &bodies, &parts, quality, true)
 }
 
 fn export_obj_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export_obj";
     let path = path_arg(p, cmd)?;
-    export_to(s, cmd, path, Format::Obj, &string_list(cmd, p, "bodies")?, &[], mesh_quality(p, cmd)?)
+    export_to(s, cmd, path, Format::Obj, &string_list(cmd, p, "bodies")?, &[], mesh_quality(p, cmd)?, true)
 }
 
 fn export_urdf_cmd(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2345,7 +2358,7 @@ fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io
 /// Written atomically, so a refusal or a failed write leaves a file already there as it was. A
 /// body a render setup gives an image texture or optics is refused: the file has no place for
 /// them, and writing the body without them would show it wrongly.
-fn export_glb(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality) -> Result<Value> {
+fn export_glb(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality, hierarchy: bool) -> Result<Value> {
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     let world = s.world_state()?;
@@ -2361,7 +2374,22 @@ fn export_glb(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: so
             ));
         }
     }
-    let bytes = solidcraft_io::export_glb(&s.doc, &s.model.state(), &world, bodies, &name, quality)?;
+    // The occurrences as the world state placed them: a part moved but not yet committed is where
+    // the move left it, so its node and its mesh's frame agree with the world.
+    let moved;
+    let doc = if s.pending_moves.is_empty() {
+        &*s.doc
+    } else {
+        let mut d = (*s.doc).clone();
+        for o in &mut d.occurrences {
+            if let Some(m) = s.pending_moves.get(&o.id) {
+                o.transform = *m;
+            }
+        }
+        moved = d;
+        &moved
+    };
+    let bytes = solidcraft_io::export_glb(doc, &s.model.state(), &world, bodies, &name, quality, hierarchy)?;
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{:?}", Format::Glb)}))
 }
@@ -2472,7 +2500,7 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
     if lay {
         return export_laid_to(s, path, format, &bodies, &parts, quality);
     }
-    export_to(s, cmd, path, format, &bodies, &parts, quality)
+    export_to(s, cmd, path, format, &bodies, &parts, quality, true)
 }
 
 /// The browser build can't start a program.
@@ -2749,8 +2777,11 @@ mod tests {
         let half = std::f64::consts::FRAC_1_SQRT_2;
         assert_eq!(root["rotation"], json!([-half, 0.0, 0.0, half]));
         let v3 = |v: &Value| -> [f64; 3] { [0, 1, 2].map(|i| v[i].as_f64().unwrap()) };
-        // A node's placement as a matrix (`m[col][row]`) from its translation and rotation.
+        // A node's placement (`m[col][row]`): its `matrix`, else its translation and rotation.
         let local = |n: &Value| -> solidcraft_doc::Mat {
+            if let Some(m) = n.get("matrix").and_then(Value::as_array) {
+                return std::array::from_fn(|c| std::array::from_fn(|r| m[c * 4 + r].as_f64().unwrap()));
+            }
             let t = n.get("translation").map_or([0.0; 3], v3);
             let [x, y, z, w] = n.get("rotation").map_or([0.0, 0.0, 0.0, 1.0], |q| [0, 1, 2, 3].map(|i| q[i].as_f64().unwrap()));
             [
@@ -2828,6 +2859,66 @@ mod tests {
         s.execute("file.export", &json!({"path": path("loose.glb"), "bodies": ["Loose"]})).unwrap();
         let one = glb_bodies(&glb_json(&std::fs::read(path("loose.glb")).unwrap()));
         assert_eq!(one.iter().map(|(n, _, _)| n.as_str()).collect::<Vec<_>>(), ["Loose"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #5296: a part moved but not yet committed is written where the move left it, through its
+    /// occurrence's node, with its mesh still in its part's frame, so both copies of the part have
+    /// the same mesh. `hierarchy: false` writes the bodies flat under the root, as 0.40 did.
+    #[test]
+    fn a_glb_export_places_a_moved_part_through_its_node() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-glb-moved-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = |n: &str| dir.join(n).to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("component.create", &json!({"name": "Bracket"})).unwrap();
+        s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 10, "body_name": "Base"})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("occurrence.copy", &json!({"component": "Bracket", "translate": [0, 40, 0]})).unwrap();
+        let second = s.doc.occurrences.iter().find(|o| o.name == "Bracket:2").unwrap();
+        let mut moved = second.transform;
+        moved[3][0] += 100.0;
+        let id = second.id;
+        s.pending_moves.insert(id, moved);
+
+        s.execute("file.export", &json!({"path": path("moved.glb")})).unwrap();
+        let g = glb_json(&std::fs::read(path("moved.glb")).unwrap());
+        let node = |name: &str| g["nodes"].as_array().unwrap().iter().find(|n| n["name"] == name).unwrap_or_else(|| panic!("no node {name}")).clone();
+        let m = node("Bracket:2")["matrix"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>();
+        assert!((m[12] - 100.0).abs() < 1e-9 && (m[13] - 40.0).abs() < 1e-9, "{m:?}");
+        // Both copies' meshes are the part as the part has it.
+        let local = |occurrence: &str| {
+            let kids = node(occurrence)["children"].as_array().unwrap().clone();
+            let body = &g["nodes"][kids[0].as_u64().unwrap() as usize];
+            let mesh = &g["meshes"][body["mesh"].as_u64().unwrap() as usize];
+            let a = &g["accessors"][mesh["primitives"][0]["attributes"]["POSITION"].as_u64().unwrap() as usize];
+            [&a["min"], &a["max"]].map(|v| [0, 1, 2].map(|i| v[i].as_f64().unwrap()))
+        };
+        for occurrence in ["Bracket:1", "Bracket:2"] {
+            let [lo, hi] = local(occurrence);
+            assert!(
+                lo.iter().zip([0.0, 0.0, 0.0]).chain(hi.iter().zip([20.0, 20.0, 10.0])).all(|(a, b)| (a - b).abs() < 1e-3),
+                "{occurrence}: {lo:?} {hi:?}"
+            );
+        }
+        let mut found: Vec<([f64; 3], [f64; 3])> = glb_bodies(&g).iter().map(|(_, lo, hi)| (*lo, *hi)).collect();
+        found.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert!((found[1].0[0] - 100.0).abs() < 1e-3 && (found[1].0[1] - 40.0).abs() < 1e-3, "{found:?}");
+
+        s.execute("file.export", &json!({"path": path("flat.glb"), "hierarchy": false})).unwrap();
+        let flat = glb_json(&std::fs::read(path("flat.glb")).unwrap());
+        assert!(flat["nodes"].as_array().unwrap().iter().all(|n| n.get("matrix").is_none()));
+        let mut flat_found: Vec<([f64; 3], [f64; 3])> = glb_bodies(&flat).iter().map(|(_, lo, hi)| (*lo, *hi)).collect();
+        flat_found.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(flat_found.len(), 2);
+        for (a, b) in found.iter().zip(&flat_found) {
+            assert!(a.0.iter().chain(&a.1).zip(b.0.iter().chain(&b.1)).all(|(x, y)| (x - y).abs() < 1e-3), "{a:?} != {b:?}");
+        }
+        let e = s.execute("file.export", &json!({"path": path("bad.glb"), "hierarchy": "yes"})).unwrap_err().to_string();
+        assert!(e.contains("hierarchy"), "{e}");
+        // GLB only: other formats don't read it, so any value is ignored there.
+        s.execute("file.export", &json!({"path": path("part.obj"), "hierarchy": "yes"})).unwrap();
+        assert!(std::fs::metadata(path("part.obj")).is_ok_and(|m| m.len() > 0));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

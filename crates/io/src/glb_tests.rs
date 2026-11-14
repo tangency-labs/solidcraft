@@ -31,7 +31,7 @@ fn model(body_count: usize) -> (Document, Model) {
 }
 
 fn export(doc: &Document, model: &Model) -> Vec<u8> {
-    export_glb(doc, &model.state(), &model.state(), &[], "GLB box", MeshQuality::Standard).unwrap()
+    export_glb(doc, &model.state(), &model.state(), &[], "GLB box", MeshQuality::Standard, true).unwrap()
 }
 
 /// Validate references with gltf, retaining raw JSON for untyped extensions.
@@ -392,7 +392,7 @@ fn transparent_body_is_refused_with_its_name() {
     let (mut doc, model) = model(1);
     let name = model.state().bodies[0].name.clone();
     doc.appearances.bodies.insert(name.clone(), Look::custom([255, 0, 0], 0.5));
-    assert_invalid(export_glb(&doc, &model.state(), &model.state(), &[], "test", MeshQuality::Standard), &[&name, "transparent"]);
+    assert_invalid(export_glb(&doc, &model.state(), &model.state(), &[], "test", MeshQuality::Standard, true), &[&name, "transparent"]);
 }
 
 /// Transparent authored faces cannot silently become opaque.
@@ -401,14 +401,14 @@ fn transparent_face_is_refused_with_face_context() {
     let (mut doc, model) = model(1);
     let name = model.state().bodies[0].name.clone();
     face(&mut doc, &name, Look::custom([0, 255, 0], 0.5));
-    assert_invalid(export_glb(&doc, &model.state(), &model.state(), &[], "test", MeshQuality::Standard), &[&name, "face", "transparent"]);
+    assert_invalid(export_glb(&doc, &model.state(), &model.state(), &[], "test", MeshQuality::Standard, true), &[&name, "face", "transparent"]);
 }
 
 /// A filter matching no body reports an empty export.
 #[test]
 fn nonexistent_body_filter_returns_empty() {
     let (doc, model) = model(1);
-    assert!(matches!(export_glb(&doc, &model.state(), &model.state(), &["nope".into()], "test", MeshQuality::Standard), Err(IoError::Empty)));
+    assert!(matches!(export_glb(&doc, &model.state(), &model.state(), &["nope".into()], "test", MeshQuality::Standard, true), Err(IoError::Empty)));
 }
 
 /// A body filter selects exactly its named mesh from a two-body design.
@@ -416,7 +416,7 @@ fn nonexistent_body_filter_returns_empty() {
 fn named_body_filter_exports_only_selected_mesh() {
     let (doc, model) = model(2);
     let name = model.state().bodies[1].name.clone();
-    let bytes = export_glb(&doc, &model.state(), &model.state(), std::slice::from_ref(&name), "test", MeshQuality::Standard).unwrap();
+    let bytes = export_glb(&doc, &model.state(), &model.state(), std::slice::from_ref(&name), "test", MeshQuality::Standard, true).unwrap();
     let (doc, _) = parse(&bytes);
     assert_eq!(doc["meshes"].as_array().unwrap().len(), 1);
     assert_eq!(doc["meshes"][0]["name"], name);
@@ -579,7 +579,7 @@ fn assembly() -> (Document, Model, ModelState) {
 
 fn export_assembly(bodies: &[String]) -> (Document, Model, ModelState, Vec<u8>) {
     let (doc, model, world) = assembly();
-    let bytes = export_glb(&doc, &model.state(), &world, bodies, "Galvanometer", MeshQuality::Standard).unwrap();
+    let bytes = export_glb(&doc, &model.state(), &world, bodies, "Galvanometer", MeshQuality::Standard, true).unwrap();
     (doc, model, world, bytes)
 }
 
@@ -608,13 +608,14 @@ fn an_assembly_writes_each_occurrence_as_a_named_node_holding_its_bodies() {
     let bodies: Vec<&Value> = kids.iter().map(|k| &doc["nodes"][*k]["name"]).filter(|n| n.as_str() == Some(frame_body.as_str())).collect();
     assert_eq!(bodies.len(), 1, "the frame's own body sits in the frame's node");
     assert!(kids.contains(&first) && kids.contains(&second));
-    let half = std::f64::consts::FRAC_1_SQRT_2;
-    let t = first_node["translation"].as_array().unwrap();
-    let q = first_node["rotation"].as_array().unwrap();
-    for (got, want) in t.iter().zip([100.0, 0.0, 0.0]).chain(q.iter().zip([0.0, 0.0, half, half])) {
-        near(got.as_f64().unwrap(), want);
+    // Column-major placements, as the occurrences have them: a quarter turn about Z then 100 mm
+    // along X, and 50 mm along Y.
+    let matrix = |node: &Value| node["matrix"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>();
+    let quarter = [0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 100.0, 0.0, 0.0, 1.0];
+    for (got, want) in matrix(first_node).into_iter().zip(quarter) {
+        near(got, want);
     }
-    near(second_node["translation"][1].as_f64().unwrap(), 50.0);
+    near(matrix(second_node)[13], 50.0);
     for needle in [first_node, second_node] {
         let kids = children_of(needle);
         assert_eq!(kids.len(), 1);
@@ -684,7 +685,7 @@ fn a_chosen_body_brings_only_its_own_occurrences() {
     let second = doc.occurrences.iter().find(|o| o.name == "Needle:2").unwrap().id;
     let name = doc.body_frames(&model.state()).into_iter().find(|(_, _, path, _)| path.last() == Some(&second)).unwrap().0;
     assert!(world.bodies.iter().any(|b| b.name == name), "{name} is not a world body");
-    let bytes = export_glb(&doc, &model.state(), &world, std::slice::from_ref(&name), "one", MeshQuality::Standard).unwrap();
+    let bytes = export_glb(&doc, &model.state(), &world, std::slice::from_ref(&name), "one", MeshQuality::Standard, true).unwrap();
     let (gltf, _) = parse(&bytes);
     let names: Vec<&str> = gltf["nodes"].as_array().unwrap().iter().filter_map(|n| n["name"].as_str()).collect();
     assert!(names.contains(&"Frame:1") && names.contains(&"Needle:2"), "{names:?}");
@@ -704,4 +705,28 @@ fn an_exported_assembly_imports_as_components_again() {
     assert_eq!(parent("Needle:1"), Some(slot("Frame:1")));
     assert_eq!(parent("Needle:2"), Some(slot("Frame:1")));
     assert_eq!(plan.bodies.len(), 3);
+}
+
+/// Without `hierarchy` an assembly is written as SolidCraft 0.40 wrote it: every body a node of the
+/// root under its world name, its mesh where the world has it, and no occurrence nodes.
+#[test]
+fn without_hierarchy_an_assembly_is_flat_in_world_coordinates() {
+    let (doc, model, world) = assembly();
+    let bytes = export_glb(&doc, &model.state(), &world, &[], "flat", MeshQuality::Standard, false).unwrap();
+    let (gltf, bin) = parse(&bytes);
+    let children = children_of(&gltf["nodes"][0]);
+    assert_eq!(children.len(), world.bodies.len());
+    assert_eq!(gltf["nodes"].as_array().unwrap().len(), world.bodies.len() + 1, "no occurrence nodes");
+    for (child, body) in children.iter().zip(&world.bodies) {
+        let node = &gltf["nodes"][*child];
+        assert_eq!(node["name"], body.name.as_str());
+        assert!(node.get("matrix").is_none() && node.get("children").is_none());
+        let mesh = &gltf["meshes"][node["mesh"].as_u64().unwrap() as usize];
+        assert_eq!(mesh["name"], body.name.as_str());
+        let got = bounds(vectors(&gltf, &bin, &mesh["primitives"][0]["attributes"]["POSITION"]));
+        let want = bounds(export_mesh_at(&body.body, MeshQuality::Standard).unwrap().positions);
+        for i in 0..3 {
+            assert!((got.0[i] - want.0[i]).abs() < 1e-4 && (got.1[i] - want.1[i]).abs() < 1e-4, "{}: {got:?} != {want:?}", body.name);
+        }
+    }
 }

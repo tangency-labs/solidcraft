@@ -1605,6 +1605,10 @@ preference_settings! {
     /// design's and the exported body's names (`export_name`). Empty: each export offers the name
     /// it did before (the design's, or the first body's for a mesh).
     export_name: String = String::new(), PAGE_DESIGN;
+    /// GLB export writes each component occurrence as a named node holding its part's bodies, so a
+    /// viewer can move each part on its own (#5296). Off: every body under the root in world
+    /// coordinates, named as the model names it, as SolidCraft 0.40 wrote it.
+    glb_export_hierarchy: bool = true, PAGE_DESIGN => check_id_help("ui.glb_export_hierarchy", "ui.glb_export_hierarchy_help");
     /// Save as mesh: the last format (`stl` or `3mf`). Older versions also kept a "send to slicer"
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
     /// and they are ignored.

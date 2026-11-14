@@ -1681,6 +1681,36 @@ mod tests {
         assert_eq!(h.app.session.doc.to_json(), original, "export leaves the design unchanged");
     }
 
+    /// #5296: the GLB tile writes an assembly's occurrences as named nodes; with the
+    /// `glb_export_hierarchy` preference off it writes the flat file of SolidCraft 0.40.
+    #[test]
+    fn the_glb_tile_follows_the_hierarchy_preference() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("component.create", serde_json::json!({"name":"Bracket"})).unwrap();
+        h.app.run("solid.box", serde_json::json!({"length":10,"width":12,"height":14})).unwrap();
+        h.app.run("component.activate", serde_json::json!({"component":"root"})).unwrap();
+        h.app.run("occurrence.copy", serde_json::json!({"component":"Bracket","translate":[0,40,0]})).unwrap();
+        let nodes = |h: &mut crate::scenario::Harness| -> Vec<serde_json::Value> {
+            h.app.home.show(0);
+            click_file(h, "home:export");
+            click_file(h, "home:export:glb");
+            h.settle();
+            let glb = std::fs::read(h.dir.join(format!("{}.glb", h.app.session.doc.name))).unwrap_or_default();
+            assert!(glb.starts_with(b"glTF"), "{} bytes", glb.len());
+            let len = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
+            let json: serde_json::Value = serde_json::from_slice(&glb[20..20 + len]).unwrap();
+            json["nodes"].as_array().unwrap().clone()
+        };
+        assert!(h.app.preferences.glb_export_hierarchy, "on by default");
+        let tree = nodes(&mut h);
+        let names: Vec<&str> = tree.iter().filter_map(|n| n["name"].as_str()).collect();
+        assert!(names.contains(&"Bracket:1") && names.contains(&"Bracket:2"), "{names:?}");
+        h.app.preferences.glb_export_hierarchy = false;
+        let flat = nodes(&mut h);
+        assert_eq!(flat.len(), 3, "the root and the two placed bodies");
+        assert!(flat.iter().all(|n| n.get("matrix").is_none() && n["name"] != "Bracket:1"), "{flat:?}");
+    }
+
     #[test]
     fn file_view_recovery_reuses_dirty_design_protection_and_keeps_the_entry() {
         let mut h = crate::scenario::Harness::new();
