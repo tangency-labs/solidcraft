@@ -2774,24 +2774,41 @@ impl SurfaceSheet {
         if !(tol.is_finite() && tol >= 0.0) || !picks.iter().all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
             return err("the corner picks and tolerance must be finite");
         }
-        let query = solidcraft_geom::brep::query::Query::new(body.record());
-        let bend = |point| {
-            let mut bends = query
-                .faces_at(point, tol)
-                .into_iter()
-                .filter_map(|(_, face)| self.parts.get(face).and_then(Option::as_ref).and_then(|part| self.bend_joint_for_part(&part.part)));
-            let first = bends.next().ok_or_else(|| DocError::Invalid("the picked face has no unique flange bend".into()))?;
-            if bends.any(|joint| joint != first) {
-                return err("the picked face has more than one flange bend");
+        if body.is_mesh() {
+            return err("pick corner joins on an exact sheet body");
+        }
+        let query_error = |error: solidcore_ops::Error| DocError::Invalid(format!("could not query the selected sheet: {error}"));
+        let (query, order) = solidcore_ops::Body::from_record(body.record(), true).map_err(query_error)?;
+        let points = picks.map(|point| [point.x, point.y, point.z]);
+        let mut joints = [None, None];
+        for face in 0..body.face_count() {
+            let distances = query.face_distances(&order, face, &points).map_err(query_error)?;
+            if distances.len() != points.len() {
+                return err("the corner face query was not answered");
             }
-            Ok(first)
+            for (saved, distance) in joints.iter_mut().zip(distances) {
+                let Some(distance) = distance.filter(|distance| distance.is_finite() && *distance >= 0.0) else {
+                    return err("the corner face query was not answered");
+                };
+                if distance > tol {
+                    continue;
+                }
+                let Some(joint) = self.parts.get(face).and_then(Option::as_ref).and_then(|part| self.bend_joint_for_part(&part.part)) else {
+                    continue;
+                };
+                if saved.is_some_and(|before| before != joint) {
+                    return err("the picked face has more than one flange bend");
+                }
+                *saved = Some(joint);
+            }
+        }
+        let [Some(first), Some(second)] = joints else {
+            return err("the picked face has no unique flange bend");
         };
-        let [first, second] = picks;
-        let joints = [bend(first)?, bend(second)?];
-        if joints.first() == joints.get(1) {
+        if first == second {
             return err("pick faces of two different flange bends");
         }
-        Ok(joints)
+        Ok([first, second])
     }
 
     /// Whether the line from `a` to `b` lies on a face of one of the sheet's flat panels, across
@@ -4362,7 +4379,6 @@ mod tests {
     use solidcraft_develop::{
         Anchor, Bend, CornerRelief, Datum, Joint, JointKind, Panel, Relief, Rigid2, Rigid3, Sheet, Tail, ZoneEnds, develop, fold,
     };
-    use solidcraft_geom::prelude::*;
 
     use super::*;
 
@@ -4703,7 +4719,7 @@ mod tests {
         .unwrap();
         let mut body = crate::ModelBody::new(sheet.body.clone(), solid, 1).with_lineage(Some(lineage.clone()));
         body.names = crate::naming::NameCell::traced(
-            Some(Arc::new(crate::naming::NamingOrigin { feature, before: Arc::new(state), depth: 1, mats: Vec::new(), sheets: Vec::new() })),
+            Some(Arc::new(crate::naming::NamingOrigin { feature, before: Arc::new(state), depth: 1, mats: Vec::new() })),
             Some(Arc::new(lineage)),
         );
         body

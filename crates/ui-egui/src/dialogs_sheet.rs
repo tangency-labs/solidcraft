@@ -760,8 +760,8 @@ pub(crate) fn corner_overlap_error(doc: &solidcraft_engine::doc::Document, kind:
     match crate::length_input::eval(doc, overlap, ValueKind::Length) {
         Ok(amount) if amount.is_finite() && amount > 0.0 && thickness.is_none_or(|limit| amount <= limit) => None,
         Ok(_) => Some(match thickness {
-            Some(limit) => crate::i18n::tr("ui.surface_corner_overlap_limit").replace("{thickness}", &crate::length_input::shown(doc, limit)),
-            None => crate::i18n::tr("ui.surface_corner_overlap_positive").to_owned(),
+            Some(limit) => solidcraft_ui_text::tr("ui.surface_corner_overlap_limit").replace("{thickness}", &crate::length_input::shown(doc, limit)),
+            None => solidcraft_ui_text::tr("ui.surface_corner_overlap_positive").to_owned(),
         }),
         Err(error) => Some(error.to_string()),
     }
