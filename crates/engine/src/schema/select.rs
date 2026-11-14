@@ -1,5 +1,5 @@
-//! Contracts and result types for the selection commands in `cmd/edit.rs`: `select.set` and
-//! `select.clear`.
+//! Contracts and result types for the selection commands in `cmd/edit.rs`: `select.set`,
+//! `select.filter` and `select.clear`.
 //!
 //! `select.set` reads `items` and `add` from the raw JSON. Each item reads as the handler reads
 //! it ([`read_item`] is the handler's own first step, so a call the handler takes is a call the
@@ -141,6 +141,62 @@ pub struct SelectClearParams {}
 pub struct SelectClearResult {
     /// How many items are selected now: always 0.
     pub selected: usize,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// How fine the window lets a click pick: the three words `select.filter` takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SelectMode {
+    /// A whole body.
+    Body,
+    /// One face of a body.
+    Face,
+    /// One placed component.
+    Component,
+}
+
+impl SelectMode {
+    /// The mode a call names, or none for a word that isn't one. The handler and the contract both
+    /// read through this, so they refuse the same words with the same message.
+    pub fn parse(word: &str) -> Option<Self> {
+        match word {
+            "body" => Some(Self::Body),
+            "face" => Some(Self::Face),
+            "component" => Some(Self::Component),
+            _ => None,
+        }
+    }
+}
+
+fn mode_required(schema: &mut Schema) {
+    super::motion::require(schema, "mode");
+}
+
+/// Reads `mode` as the handler reads it: one of the three words, refused with its message.
+fn select_mode<'de, D: Deserializer<'de>>(d: D) -> Result<Option<SelectMode>, D::Error> {
+    super::view_navigation::read_with(d, "mode must be body, face or component", |v| v.as_str().and_then(SelectMode::parse))
+}
+
+/// `select.filter`: the pick granularity the window uses. `mode` is optional in the type, so the
+/// check leaves its refusal to the handler, and required in the schema, because the handler refuses a
+/// call without it. The headless engine only echoes the mode; the window keeps it as its own state.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = mode_required)]
+pub struct SelectFilterParams {
+    /// How fine a click picks: a whole body, one of its faces, or one placed component.
+    #[serde(default, deserialize_with = "select_mode", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SelectMode")]
+    pub mode: Option<SelectMode>,
+}
+
+/// What `select.filter` returns: the mode it was given.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SelectFilterResult {
+    /// The mode the window picks at now.
+    pub mode: SelectMode,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

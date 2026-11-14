@@ -17,7 +17,10 @@ use crate::schema::edit::{
     TimelineReordered, TimelineReorderedMany, TimelineRollToParams, TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult,
     TimelineUngroupParams, TimelineUngrouped,
 };
-use crate::schema::select::{PartialPick, SelectClearParams, SelectClearResult, SelectItem, SelectSetParams, SelectSetResult, read_item};
+use crate::schema::select::{
+    PartialPick, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem, SelectMode, SelectSetParams,
+    SelectSetResult, read_item,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
@@ -204,7 +207,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SELECT_SET_CONTRACT)
         .output(output_schema_for::<SelectSetResult>)
         .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool; face/edge: body plus point [x,y,z] in world mm or index (both also accepted); a point uses Measure's pick tolerance, an index supplies a point on the item; invalid partial picks leave the selection unchanged"),
-    CommandSpec::new("select.filter", "Selection filter", select_filter).icon("select").noundo().doc_only()
+    CommandSpec::new("select.filter", "Selection filter", crate::checked!("select.filter", select_filter)).icon("select").noundo().doc_only()
+        .contract(&SELECT_FILTER_CONTRACT).output(output_schema_for::<SelectFilterResult>)
         .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
     CommandSpec::new("select.clear", "Clear Selection", crate::checked!("select.clear", select_clear))
         .icon("select")
@@ -216,6 +220,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 ];
 
 const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
+const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract::new();
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
@@ -1598,10 +1603,8 @@ fn select_filter(_s: &mut Session, p: &Value) -> Result<Value> {
         mode: String,
     }
     let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("select.filter", e.to_string()))?;
-    if !matches!(request.mode.as_str(), "body" | "face" | "component") {
-        return Err(bad("select.filter", "mode must be body, face or component"));
-    }
-    Ok(json!({"mode": request.mode}))
+    let mode = SelectMode::parse(&request.mode).ok_or_else(|| bad("select.filter", "mode must be body, face or component"))?;
+    reply("select.filter", SelectFilterResult { mode, param_warnings: Vec::new() })
 }
 
 fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
