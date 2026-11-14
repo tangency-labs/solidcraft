@@ -3,6 +3,7 @@
 //! the tokens equal what was drawn before, and that a new colour cannot skip them.
 
 use egui::Color32;
+use quote::ToTokens;
 use solidcraft_engine::view::colors;
 use solidcraft_viewport::Rgb;
 
@@ -170,6 +171,17 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("ui_kit/icons/mod.rs", 1, "the white tint that carries an icon image's opacity"),
     ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),
     ("ui_kit/menu.rs", 1, "a menu entry's swatch: the colour is document data"),
+    // Hidden below a mid-file test helper until #13497.
+    ("blur_native.rs", 1, "a panel fill given the platform blur's alpha: the fill is the theme's"),
+    ("file_load.rs", 1, "the black dimming behind the file-loading card"),
+    ("issue_report.rs", 1, "a shrunk screenshot's averaged pixels: image data"),
+    (
+        "viewport.rs",
+        9,
+        "colours from data (a component's, a face's or a body's appearance, the analysis legend), tokens given an alpha or \
+         blended (the selected origin plane, the section rim), the grey ring of the origin point and of a component's origin, and the yellow of a sketch \
+         path's first point, which should become a token",
+    ),
 ];
 
 const COLOUR_LITERALS: &[&str] = &[
@@ -203,6 +215,113 @@ const COLOUR_LITERALS: &[&str] = &[
     "Color32::LIGHT_YELLOW",
 ];
 
+/// How many colour literals the code of a source file holds, outside its test-only items. The
+/// file is read as Rust and its tokens are matched without their spacing, so the code after a
+/// test helper in the middle of the file is counted too (#13497).
+fn colour_literals(src: &str) -> Result<usize, String> {
+    let mut file = syn::parse_file(src).map_err(|e| format!("does not parse as Rust: {e}"))?;
+    drop_test_items(&mut file.items);
+    let code: String = file.into_token_stream().to_string().split_whitespace().collect();
+    Ok(COLOUR_LITERALS.iter().map(|p| code.matches(p).count()).sum())
+}
+
+/// Test code and the kit's test fixtures (`#[cfg(any(test, feature = "test-support"))]`) are not drawn.
+fn test_only(attrs: &[syn::Attribute]) -> bool {
+    crate::font_literals_tests::test_only(attrs)
+        || attrs.iter().any(|a| {
+            a.path().is_ident("cfg")
+                && a.meta.require_list().is_ok_and(|l| l.tokens.to_string().replace(' ', "") == r#"any(test,feature="test-support")"#)
+        })
+}
+
+/// Drop the `#[cfg(test)]` and `#[test]` items, in inline modules and impl blocks too.
+fn drop_test_items(items: &mut Vec<syn::Item>) {
+    items.retain(|item| !test_only(item_attrs(item)));
+    for item in items {
+        match item {
+            syn::Item::Mod(m) => {
+                if let Some((_, inner)) = &mut m.content {
+                    drop_test_items(inner);
+                }
+            }
+            syn::Item::Impl(i) => i.items.retain(|item| !test_only(impl_item_attrs(item))),
+            syn::Item::Trait(t) => t.items.retain(|item| !test_only(trait_item_attrs(item))),
+            _ => {}
+        }
+    }
+}
+
+fn item_attrs(item: &syn::Item) -> &[syn::Attribute] {
+    use syn::Item;
+    match item {
+        Item::Const(i) => &i.attrs,
+        Item::Enum(i) => &i.attrs,
+        Item::ExternCrate(i) => &i.attrs,
+        Item::Fn(i) => &i.attrs,
+        Item::ForeignMod(i) => &i.attrs,
+        Item::Impl(i) => &i.attrs,
+        Item::Macro(i) => &i.attrs,
+        Item::Mod(i) => &i.attrs,
+        Item::Static(i) => &i.attrs,
+        Item::Struct(i) => &i.attrs,
+        Item::Trait(i) => &i.attrs,
+        Item::TraitAlias(i) => &i.attrs,
+        Item::Type(i) => &i.attrs,
+        Item::Union(i) => &i.attrs,
+        Item::Use(i) => &i.attrs,
+        _ => &[],
+    }
+}
+
+fn trait_item_attrs(item: &syn::TraitItem) -> &[syn::Attribute] {
+    use syn::TraitItem;
+    match item {
+        TraitItem::Const(i) => &i.attrs,
+        TraitItem::Fn(i) => &i.attrs,
+        TraitItem::Macro(i) => &i.attrs,
+        TraitItem::Type(i) => &i.attrs,
+        _ => &[],
+    }
+}
+
+fn impl_item_attrs(item: &syn::ImplItem) -> &[syn::Attribute] {
+    use syn::ImplItem;
+    match item {
+        ImplItem::Const(i) => &i.attrs,
+        ImplItem::Fn(i) => &i.attrs,
+        ImplItem::Macro(i) => &i.attrs,
+        ImplItem::Type(i) => &i.attrs,
+        _ => &[],
+    }
+}
+
+/// A test helper in the middle of a file hides neither the code after it nor that code's
+/// colours (#13497); the test-only items themselves are not counted.
+#[test]
+fn a_colour_after_a_mid_file_test_helper_is_counted() {
+    let src = r#"
+fn before() -> Color32 { Color32::from_rgb(1, 2, 3) }
+#[cfg(test)]
+fn helper() -> Color32 { Color32::RED }
+fn after() -> Color32 { Color32::from_gray(7) }
+impl Paint {
+    #[cfg(test)]
+    fn sample() -> Color32 { Color32::BLUE }
+    fn ink() -> Vec<Color32> { vec![Color32::WHITE] }
+}
+trait Shade {
+    #[cfg(test)]
+    fn sample() -> Color32 { Color32::GOLD }
+    fn shade() -> Color32 { Color32::from_gray(9) }
+}
+#[cfg(test)]
+mod tests {
+    fn more() -> Color32 { Color32::BLACK }
+}
+"#;
+    assert_eq!(colour_literals(src), Ok(4));
+}
+
 #[test]
 fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -229,10 +348,7 @@ fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
         if src.trim_start().starts_with("#![cfg(test)]") {
             return;
         }
-        // Code from the first test-only item on (test code and the kit's test fixtures) is not drawn.
-        let code = src.split("#[cfg(test)]").next().unwrap_or(&src);
-        let code = code.split(r#"#[cfg(any(test, feature = "test-support"))]"#).next().unwrap_or(code);
-        let n: usize = COLOUR_LITERALS.iter().map(|p| code.matches(p).count()).sum();
+        let n = colour_literals(&src).unwrap_or_else(|e| panic!("{relative}: {e}"));
         let allowed = ALLOWED_LITERALS.iter().find(|(f, _, _)| *f == relative).map_or(0, |(_, n, _)| *n);
         if n > allowed {
             found.push(format!("{relative}: {n} colour literal(s), at most {allowed} allowed"));

@@ -71,6 +71,9 @@ syn = { workspace = true, features = ["visit"] }
 # The catalog guard reads every UI source file as Rust tokens; already in the tree through
 # crates/derive and the workspace lockfile.
 proc-macro2 = { workspace = true }
+# Prints the colour guard's parsed source without its test-only items; already in the tree
+# through syn and crates/derive.
+quote = { workspace = true }
 
 # Pictures pasted into the agent chat; already in the tree, with the same features, through
 # egui-winit's clipboard.
