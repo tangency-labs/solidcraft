@@ -942,7 +942,6 @@
 {"case":"tess0030","deferred":null,"error":null,"ints":{"record":[2,0,1,2,33,33],"status":[0]},"topology":null,"values":{"points":{"blocks":[[-563.8966988111431,3335.650251257834,-100447.79388479715]],"n":198}}}
 {"case":"tess0031","deferred":null,"error":null,"ints":{"record":{"blocks":[[555,13265]],"n":62},"status":[0]},"topology":null,"values":{"points":{"blocks":[[165.09945496501803,221.94654146044104,13829.77721587924]],"n":180}}}
 {"case":"tess0032","deferred":null,"error":null,"ints":{"record":[4,0,1,2,3,4,2,2,2,2],"status":[0]},"topology":null,"values":{"points":{"blocks":[[102.78976117428624,139.3597432379766,1507.6963305617708]],"n":24}}}
-{"case":"tess0033","deferred":null,"error":null,"ints":{"record":{"blocks":[[253,4783]],"n":34},"status":[0]},"topology":null,"values":{"points":{"blocks":[[-0.17422728070603558,0.18513840306764595,-24.47599205421997],[-0.032028777953993635,0.032028777953993635,-0.7426274771472992]],"n":303}}}
 {"case":"tess0034","deferred":null,"error":null,"ints":{"record":[4,0,1,2,3,4,2,2,2,2],"status":[0]},"topology":null,"values":{"points":{"blocks":[[-46.62606282066554,113.96037149482322,-352.30010118829176]],"n":24}}}
 {"case":"tess0035","deferred":null,"error":null,"ints":{"record":[0,0],"status":[1007]},"topology":null,"values":{"points":[]}}
 {"case":"tess0036","deferred":null,"error":null,"ints":{"record":[0,0],"status":[1007]},"topology":null,"values":{"points":[]}}
