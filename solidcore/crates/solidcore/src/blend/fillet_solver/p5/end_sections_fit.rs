@@ -27,7 +27,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point3, BIG_DOUBLE};
 use crate::topology::{edge, edgeuse::p1 as eu, vertex, Brep, FaceId};
 
-use super::rails_fit::is_concave_edge;
+use super::rails_fit::{edge_bounds_material, is_concave_edge};
 
 /// `smos_Min(a, b)`: `a < b ? a : b`.
 fn smos_min(a: f64, b: f64) -> f64 {
@@ -143,6 +143,13 @@ impl FilletSolver {
             .ok_or_else(|| SolidError::blend_missing(OP, "the solver's first edge use"))?;
         let fil_edge = eu::edge(target, fil_eu)?
             .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge use's edge"))?;
+        // A sheet's edge bounds no material: no end section can run off its end face under
+        // material, and there is no body to subtract an overflow from, so the corner trims
+        // the fillet as it does any other (not the fork's, whose `IsConcaveEdge` fails there,
+        // and the fillet with it).
+        if !edge_bounds_material(target, fil_edge)? {
+            return Ok(true);
+        }
         let concave = is_concave_edge(k, target, fil_edge)?;
         let approx_tol = solver.solver().this_approx_tol_3d();
         let ang_tol = solver.solver().this_ang_tol_rad();

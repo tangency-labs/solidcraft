@@ -175,3 +175,26 @@ fn side_face_intersection_makes_the_face_trimmed_cache() {
         "{result:?}"
     );
 }
+
+/// Rounds of a sheet's edges (`blend.fillet_executive_p3`'s `stubs4-*` cases): a sheet's
+/// edges bound no material, so no end section runs off its end face under material and
+/// the cliff overflow's end-section check passes them by. They build, as they do without
+/// that check (on the fork the check's `IsConcaveEdge` fails on a sheet, and the round
+/// with it).
+#[test]
+fn sheet_rounds_build() {
+    for (file, edge, faces) in [
+        ("Fillet/shell_fillet.smb", 0, 4),
+        ("Fillet/shell_fillet.smb", 3, 4),
+        ("Fillet/shell_fillet.smb", 4, 4),
+        ("Fillet/coons_01_03_29.smb", 0, 5),
+        ("Fillet/test5.smb", 2, 5),
+        ("Fillet/sphere_plane.smb", 3, 3),
+    ] {
+        let Some((result, n)) = round(file, 0.5, &[edge]) else {
+            return;
+        };
+        assert!(result.is_ok(), "{file} e{edge}: {result:?}");
+        assert_eq!(n, faces, "{file} e{edge}");
+    }
+}
