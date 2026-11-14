@@ -6,7 +6,7 @@ SolidCraft is a clean-room, pure-Rust parametric 3D CAD app. This file is a rout
 Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelled `help wanted`, `good first issue`, `needs-triage`; architecture in `docs/architecture.md`.
 
 ## Hard rules (what enforces each)
-- Integrations with other platforms or services need the maintainer's yes first: `skills/solidcraft-ground-rules/SKILL.md`.
+- Integrations with other platforms or services need the maintainer's yes first: `skills/solidcraft-contributing/SKILL.md`.
 - Independent: never copy another product's code, icons, text or templates; never drive or take data from commercial CAD. `skills/solidcraft-ground-rules/SKILL.md`.
 - No GPL/LGPL/AGPL code, not even reading it (OpenCASCADE, FreeCAD, SolveSpace, CadQuery, LibreCAD, QCAD): `cargo xtask licences --check`.
 - Every asset is original or openly licensed with a row in ATTRIBUTION.md; read `assets/AGENTS.md` before icon work: `cargo xtask assets`, `cargo xtask icons`.

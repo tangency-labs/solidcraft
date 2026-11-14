@@ -287,3 +287,7 @@ prefer a documentation or small isolated task, targeted tests and existing build
 artifacts; explain any missing checks. Preserve work before temporary storage
 expires and ask before publishing it. Always push only to the person's fork,
 never to upstream.
+
+## Integrations with other platforms
+
+No integrations with other platforms or services (someone's cloud, sync, hosting, WebDAV or Nextcloud, accounts, embedding the app in another product, host-page/postMessage file bridges, community servers) unless you asked the maintainer first and got a yes; they are reserved for the maintainer, and unasked PRs are closed. Established distribution and OS mechanisms are fine (Flatpak, Snap, winget, Homebrew, AUR, OS keyrings, file dialogs). The only official external host is the ArtCraft launcher, which just downloads our release binaries.

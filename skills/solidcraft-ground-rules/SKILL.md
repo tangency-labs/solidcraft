@@ -14,10 +14,6 @@ The rules that cannot be broken in a PR. `AGENTS.md` lists them in one line each
 - Do not drive, script, automate or extract data from commercial CAD products (Fusion, SolidWorks, Onshape, ...) for this project: no test data, measurements, command lists, ids or files produced with them.
 - Command ids are our own: dotted, lower-case `<area>.<thing>[.<variant>]`, never another product's id.
 
-## Integrations with other platforms
-
-No integrations with other platforms or services (someone's cloud, sync, hosting, WebDAV or Nextcloud, accounts, embedding the app in another product, host-page/postMessage file bridges, community servers) unless you asked the maintainer first and got a yes; they are reserved for the maintainer, and unasked PRs are closed. Established distribution and OS mechanisms are fine (Flatpak, Snap, winget, Homebrew, AUR, OS keyrings, file dialogs). The only official external host is the ArtCraft launcher, which just downloads our release binaries.
-
 ## No GPL, LGPL or AGPL code
 - Do not read, copy or link OpenCASCADE, FreeCAD (including planegcs), SolveSpace, CadQuery/OCP, LibreCAD or QCAD. Do not even read their sources.
 - `tools/freecad-oracle/` runs FreeCAD as a separate program through its public scripting API to compute reference values. Nothing from FreeCAD is linked, vendored or shipped. The sketch solver and the blend operations are our own.
