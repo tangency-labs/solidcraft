@@ -358,7 +358,9 @@ pub const WGPU_BACKEND_ENV: &str = "WGPU_BACKEND";
 /// - `preference` (`graphics.json`'s `backend`: `dx12`, `vulkan`, `gl` or a comma list; `auto`
 ///   or empty for the order above): those backends, on any system.
 /// - Elsewhere than Windows: `None`.
-/// - No hardware adapter at all: D3D12 (WARP, Windows' software renderer).
+/// - No hardware adapter at all: D3D12 (WARP, Windows' software renderer). On Windows an AMD
+///   adapter on the OpenGL backend does not count as hardware — the scene draws nothing there
+///   ([`counts_as_hardware`]).
 pub fn choose_backends(
     windows: bool,
     env_set: bool,
@@ -434,6 +436,21 @@ pub fn float_depth_everywhere(options: &eframe::egui_wgpu::WgpuConfiguration) ->
 /// The order backends are tried in on Windows.
 pub const WINDOWS_ORDER: [eframe::wgpu::Backends; 3] = [eframe::wgpu::Backends::DX12, eframe::wgpu::Backends::VULKAN, eframe::wgpu::Backends::GL];
 
+/// Whether an adapter counts as usable hardware for the automatic Windows backend order.
+///
+/// On Windows, an AMD adapter that wgpu offers on the OpenGL backend starts a device, but
+/// its scene passes draw nothing: the view shows only the egui-drawn origin dot, and the
+/// screen flashes black on every repaint (#11357, #11834, #12994, #16453). Such an adapter
+/// does not count as hardware, so the automatic order falls through to the next backend and
+/// ends at the software renderer, which draws everything (`--safe-mode` showed the planes,
+/// axes and grid on the reporters' machines). An explicit `WGPU_BACKEND` or a `graphics.json`
+/// `backend` preference is never second-guessed; other backends and other systems are
+/// untouched.
+pub fn counts_as_hardware(windows: bool, backend: eframe::wgpu::Backend, name: &str) -> bool {
+    let amd = ["amd", "radeon", "ati"].iter().any(|k| name.to_ascii_lowercase().contains(k));
+    !(windows && backend == eframe::wgpu::Backend::Gl && amd)
+}
+
 /// Whether `backends` (started on their own, nothing else) have a hardware adapter.
 pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
     let mut desc = eframe::wgpu::InstanceDescriptor::new_without_display_handle();
@@ -444,7 +461,10 @@ pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
     let adapters = pollster::block_on(instance.enumerate_adapters(backends));
     let found: Vec<String> = adapters.iter().map(|a| format!("{} ({:?})", a.get_info().name, a.get_info().device_type)).collect();
     log::info!("graphics: {backends:?} adapters: {found:?}");
-    adapters.iter().any(|a| a.get_info().device_type != eframe::wgpu::DeviceType::Cpu)
+    let windows = cfg!(target_os = "windows");
+    adapters
+        .iter()
+        .any(|a| a.get_info().device_type != eframe::wgpu::DeviceType::Cpu && counts_as_hardware(windows, a.get_info().backend, &a.get_info().name))
 }
 
 /// The environment variable that switches wgpu's indirect-call validation on or off.
@@ -1121,6 +1141,27 @@ mod tests {
         // Elsewhere: wgpu's own choice.
         assert_eq!(choose_backends(false, false, false, None, never), None);
         assert_eq!(choose_backends(false, false, false, Some("auto"), never), None);
+    }
+
+    #[test]
+    fn an_amd_opengl_adapter_on_windows_is_not_usable_hardware() {
+        use eframe::wgpu::{Backend, Backends};
+        // The reporters' cards: the device starts, but the scene draws nothing (#11357,
+        // #11834, #12994, #16453).
+        for name in ["AMD Radeon HD 5450", "AMD Radeon HD 7500 Series", "AMD Radeon HD 5700 Series", "ATI Radeon HD 2600 XT"] {
+            assert!(!counts_as_hardware(true, Backend::Gl, name), "{name}");
+        }
+        // Other backends draw fine, and other systems never had the fault.
+        assert!(counts_as_hardware(true, Backend::Dx12, "AMD Radeon HD 5450"));
+        assert!(counts_as_hardware(true, Backend::Vulkan, "AMD Radeon HD 5450"));
+        assert!(counts_as_hardware(false, Backend::Gl, "AMD Radeon HD 5450"));
+        // Non-AMD OpenGL adapters are untouched.
+        assert!(counts_as_hardware(true, Backend::Gl, "Intel(R) HD Graphics 530"));
+        assert!(counts_as_hardware(true, Backend::Gl, "NVIDIA Quadro P2200"));
+        // The automatic order on such a machine ends at the software renderer: GL is passed
+        // over, and no backend with a usable GPU is left.
+        let probe = |b: Backends| b == Backends::GL;
+        assert_eq!(choose_backends(true, false, false, None, probe), Some(Backends::DX12));
     }
 
     #[test]
