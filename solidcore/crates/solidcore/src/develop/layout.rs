@@ -2089,15 +2089,16 @@ fn clamped_rates(points: &[Vec2], h: f64, start: Vec2, end: Vec2) -> Vec<Vec2> {
 /// The relief a corner cuts from the flat: centered where its two bends' zones' center lines
 /// cross. `None` where either bend has no zone, or the two run alike.
 fn corner_cut(dev: &Development, corner: &Corner) -> Option<Region2> {
-    let center_line = |j: usize| {
-        let z = dev.zones.iter().find(|z| z.joint == j)?;
+    let [ja, jb] = corner.joints;
+    let zone = |j: usize| dev.zones.iter().find(|z| z.joint == j);
+    let (za, zb) = (zone(ja)?, zone(jb)?);
+    let center_line = |z: &Zone| {
         let [n0, n1] = z.near;
         let [f0, f1] = z.far;
         let (a, b) = ((n0 + f0) * 0.5, (n1 + f1) * 0.5);
         Some((a, (b - a).normalized()?))
     };
-    let [ja, jb] = corner.joints;
-    let ((p, u), (q, w)) = (center_line(ja)?, center_line(jb)?);
+    let ((p, u), (q, w)) = (center_line(za)?, center_line(zb)?);
     let cross = u.cross(w);
     let r = corner.size / 2.0;
     if !(cross.abs() > 1e-9 && r > 0.0) {
@@ -2110,21 +2111,23 @@ fn corner_cut(dev: &Development, corner: &Corner) -> Option<Region2> {
         CornerRelief::Notch | CornerRelief::Tear => return None,
     };
     let outer = if round {
+        // Two arcs that meet only in the gap past the corner ([`gap_span`]), a quarter of
+        // the way in from each side of it: the relief takes all the material there, so the
+        // points where its arcs meet, which become vertices of the flat's outline, lie on no
+        // outline it leaves, and no wall it leaves is split at one. Where the circle reaches no
+        // gap, two halves from 0.
+        let [s1, s2] = gap_span(za, zb, c, r).map_or([0.0, PI], |[lo, hi]| {
+            let in_by = (hi - lo) / 4.0;
+            [lo + in_by, hi - in_by]
+        });
+        let arc = |start: f64, sweep: f64| Seg2::Arc {
+            center: c,
+            radius: r,
+            start,
+            sweep,
+        };
         Loop2 {
-            segs: vec![
-                Seg2::Arc {
-                    center: c,
-                    radius: r,
-                    start: 0.0,
-                    sweep: PI,
-                },
-                Seg2::Arc {
-                    center: c,
-                    radius: r,
-                    start: PI,
-                    sweep: PI,
-                },
-            ],
+            segs: vec![arc(s1, s2 - s1), arc(s2, TAU - (s2 - s1))],
         }
     } else {
         // Its sides run along the two bends, each `r` from the center.
@@ -2140,6 +2143,35 @@ fn corner_cut(dev: &Development, corner: &Corner) -> Option<Region2> {
         outer: ccw(outer),
         holes: Vec::new(),
     })
+}
+
+/// The angles round `c` at which the circle of radius `r` lies in the gap past the corner of
+/// two bends' zones `a` and `b`: beyond both zones' far lines, away from the panel both bends
+/// hold. `[lo, hi]` with `lo < hi`, or `None` where the bends share no panel or the circle
+/// doesn't reach past both lines at once.
+///
+/// A point `c + r (cos θ, sin θ)` lies past a zone's far line where `cos(θ − τ) > d / r`: `τ`
+/// the angle of the zone's way out (from its near line to its far one, away from the shared
+/// panel), `d` the far line's distance from `c` that way. So within `acos(d / r)` of `τ`.
+fn gap_span(a: &Zone, b: &Zone, c: Vec2, r: f64) -> Option<[f64; 2]> {
+    let shared = a.panels.iter().find(|p| b.panels.contains(p))?;
+    let past = |z: &Zone| -> Option<(f64, f64)> {
+        let ([n0, n1], [f0, f1]) = (z.near, z.far);
+        let (near, far) = ((n0 + n1) * 0.5, (f0 + f1) * 0.5);
+        let way = if z.panels.first() == Some(shared) {
+            far - near
+        } else {
+            near - far
+        };
+        let out = way.normalized()?;
+        let d = (far - c).dot(out);
+        (d < r).then(|| (out.angle(), (d / r).max(-1.0).acos()))
+    };
+    let ((ta, wa), (tb, wb)) = (past(a)?, past(b)?);
+    // `b`'s way taken within a half turn of `a`'s.
+    let tb = ta + (tb - ta + PI).rem_euclid(TAU) - PI;
+    let (lo, hi) = ((ta - wa).max(tb - wb), (ta + wa).min(tb + wb));
+    (hi > lo).then_some([lo, hi])
 }
 
 /// Where along a bend a panel's outline lies inside the band from `line` to `line + depth`

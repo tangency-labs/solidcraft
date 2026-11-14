@@ -784,17 +784,18 @@ fn contour_flat(s: &mut Session) -> (Value, [f64; 2]) {
 /// thick, K 0.4. The arc is a roll that keeps its own radius, joined to the lines by seams: the
 /// flat has no bend. Its material on the right of the travel (counterclockwise round the arc) lies
 /// outside the arc, so the drawn arc is the roll's inside, R 8, and its outside R 10. The develop
-/// engine lays a roll out at its neutral surface, K·T from its inside (`Flatten::Roll`: R + K·T
-/// with the material outward, R − (1 − K)·T inward), here 8 + 0.8 = 8.8: the flat is
-/// 30 + (π/2)·8.8 + 20 = 63.823008 long and 50 across. Flipped, the material lies inside the arc:
-/// the drawn arc is the roll's outside, R 8, its inside 6, its neutral surface 6.8, and the flat
-/// 30 + (π/2)·6.8 + 20 = 60.681415 long. The folded volume is the lines' 2·50·(30 + 20) = 5000 and
-/// the roll's ring sector, (π/2)(10² − 8²)/2·50 = 450π (flipped (π/2)(8² − 6²)/2·50 = 350π):
-/// 6413.716694 (6099.557429). That is the flat's area times T plus (½ − K)·T²·(π/2)·50 = 10π, as
-/// for a bend.
+/// engine lays a roll out at its neutral surface, which for a roll lies at mid-thickness, K 0.5
+/// whatever the rule's K (`ROLL_K` in `Flatten::of`: R + 0.5·T with the material outward,
+/// R − 0.5·T inward), here 8 + 1 = 9: the flat is 30 + (π/2)·9 + 20 = 64.137167 long and 50
+/// across. Flipped, the material lies inside the arc: the drawn arc is the roll's outside, R 8,
+/// its inside 6, its neutral surface 7, and the flat 30 + (π/2)·7 + 20 = 60.995574 long. The
+/// folded volume is the lines' 2·50·(30 + 20) = 5000 and the roll's ring sector,
+/// (π/2)(10² − 8²)/2·50 = 450π (flipped (π/2)(8² − 6²)/2·50 = 350π): 6413.716694 (6099.557429).
+/// With the neutral surface at mid-thickness that is the flat's area times T exactly:
+/// 2·50·(50 + 4.5π) = 5000 + 450π (flipped 2·50·(50 + 3.5π) = 5000 + 350π).
 #[test]
 fn a_contour_flange_rolls_a_tangent_arc_at_its_own_radius() {
-    for (flip, neutral, ring) in [(false, 8.8, 450.0 * PI), (true, 6.8, 350.0 * PI)] {
+    for (flip, neutral, ring) in [(false, 9.0, 450.0 * PI), (true, 7.0, 350.0 * PI)] {
         let mut s = Session::default();
         curved_contour_rule(&mut s);
         run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
@@ -805,16 +806,16 @@ fn a_contour_flange_rolls_a_tangent_arc_at_its_own_radius() {
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "sheet.flange", json!({"type": "contour", "sketch": "Profile", "curves": ["l1", arc, "l2"], "distance": 50, "flip": flip}));
         let (f, sides) = contour_flat(&mut s);
-        // 30 + (π/2)·8.8 + 20 = 63.823008 by 50 (flipped 30 + (π/2)·6.8 + 20 = 60.681415 by 50).
+        // 30 + (π/2)·9 + 20 = 64.137167 by 50 (flipped 30 + (π/2)·7 + 20 = 60.995574 by 50).
         let length = 30.0 + FRAC_PI_2 * neutral + 20.0;
         assert!((sides[0] - 50.0).abs() < 1e-6 && (sides[1] - length).abs() < 1e-6, "flip {flip}: {sides:?} vs {length}");
         assert_eq!(f["bends"].as_array().map(Vec::len), Some(0), "flip {flip}: {f}");
         assert_eq!(f["rolls"].as_u64(), Some(1), "flip {flip}: {f}");
         // 5000 + 450π = 6413.716694 (flipped 5000 + 350π = 6099.557429), which is
-        // 2·63.823008·50 + 10π = 6382.300768 + 31.415927 (flipped 6068.141502 + 31.415927).
+        // 2·64.137167·50 = 6413.716694 (flipped 2·60.995574·50 = 6099.557429).
         let v = volume(&mut s);
         assert!(rel(v, 5000.0 + ring) < 1e-9, "flip {flip}: {v} vs {}", 5000.0 + ring);
-        assert!(rel(v, 2.0 * length * 50.0 + 0.1 * 4.0 * FRAC_PI_2 * 50.0) < 1e-9, "flip {flip}: {v}");
+        assert!(rel(v, 2.0 * length * 50.0) < 1e-9, "flip {flip}: {v}");
     }
 }
 
@@ -823,8 +824,8 @@ fn a_contour_flange_rolls_a_tangent_arc_at_its_own_radius() {
 /// right of the (counterclockwise) travel, outside the arc, the drawn arc is its inside: Ri 20,
 /// Ro 22, and the volume (π/2)(Ro² − Ri²)·50 = (π/2)·84·50 = 2100π = 6597.344573. Flipped, the
 /// material lies inside the arc: Ro 20, Ri 18, (π/2)·76·50 = 1900π = 5969.026042. Its flat is the
-/// roll laid out at its neutral radius Ri + K·T: 50 by π·20.8 = 65.345127 (flipped π·18.8 =
-/// 59.061942).
+/// roll laid out at its neutral radius, at mid-thickness for a roll (K 0.5, not the rule's 0.4),
+/// Ri + 0.5·T: 50 by π·21 = 65.973446 (flipped π·19 = 59.690260).
 #[test]
 fn a_contour_flange_of_one_half_turn_is_a_half_pipe() {
     for (flip, ri) in [(false, 20.0), (true, 18.0)] {
@@ -841,8 +842,8 @@ fn a_contour_flange_of_one_half_turn_is_a_half_pipe() {
         let want = FRAC_PI_2 * (ro * ro - ri * ri) * 50.0;
         let v = volume(&mut s);
         assert!(rel(v, want) < 1e-9, "flip {flip}: {v} vs {want}");
-        // 50 by π·(Ri + 0.4·2): π·20.8 = 65.345127 (flipped π·18.8 = 59.061942).
-        let around = PI * (ri + 0.4 * 2.0);
+        // 50 by π·(Ri + 0.5·2): π·21 = 65.973446 (flipped π·19 = 59.690260).
+        let around = PI * (ri + 0.5 * 2.0);
         assert!((sides[0] - 50.0).abs() < 1e-6 && (sides[1] - around).abs() < 1e-6, "flip {flip}: {sides:?} vs {around}");
         assert_eq!(f["bends"].as_array().map(Vec::len), Some(0), "flip {flip}: {f}");
     }

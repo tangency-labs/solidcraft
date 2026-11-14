@@ -302,10 +302,12 @@ fn a_rolls_flat_has_lines_where_it_starts_and_ends_and_halfway_between() {
     let length = |l: &(String, [f64; 2], [f64; 2])| (l.2[0] - l.1[0]).hypot(l.2[1] - l.1[1]);
     assert!(lines.iter().all(|l| (length(l) - 40.0).abs() < 1e-6), "{lines:?}");
     // The middle line lies halfway across the roll's flat, which is half a turn round its neutral
-    // surface wide.
+    // surface wide. A roll's neutral surface lies at mid-thickness (K 0.5, not the rule's 0.44):
+    // 48 + 0.5 · 2 = 49 from the axis, so the flat is π · 49 = 153.938040 wide, the middle line
+    // 76.969020 from either end.
     let line = |k: &str| lines.iter().find(|l| l.0 == k).map(|l| Vec2::new(0.5 * (l.1[0] + l.2[0]), 0.5 * (l.1[1] + l.2[1]))).unwrap_or_default();
     let (a, m, b) = (line("start"), line("middle"), line("end"));
-    let wide = PI * (48.0 + 0.44 * T);
+    let wide = PI * (48.0 + 0.5 * T);
     assert!((a.dist(b) - wide).abs() < 1e-6 && (a.dist(m) - wide / 2.0).abs() < 1e-6, "{a:?} {m:?} {b:?}");
     // Its row in the report, as a bend has one: inside radius, turn, width and length.
     let row = &flat["roll_table"][0];

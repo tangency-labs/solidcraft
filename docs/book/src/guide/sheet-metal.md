@@ -19,8 +19,10 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
   cylinder modeled between two flat faces is a bend, at the rule's radius, while its inside
   radius is short of 10^0.7 (about 5) of the rule's thicknesses, and a roll from there; other
   cylinders and cones are rolls. A roll keeps its own radius. The line between the two is where
-  DIN 6935's correction of the neutral fiber, 0.65 + 0.5·lg(R/T), reaches 1; bends and rolls
-  alike are developed with the rule's K-factor. A roll's flat pattern has its lines where it
+  DIN 6935's correction of the neutral fiber, 0.65 + 0.5·lg(R/T), reaches 1. A bend is
+  developed with the rule's K-factor, your press brake's; a roll is formed, and is developed
+  with its neutral fiber at mid-thickness (K 0.5), where DIN 6935 puts it from that ratio on.
+  A roll's flat pattern has its lines where it
   starts and ends and halfway between, and the DXF draws them on a `ROLL` layer. The sheet is
   every face of the body but the ones skipped (`skip`), or the faces picked (`face`, `faces`) and
   every face a bend joins to them. A surface body has no thickness of its own: its faces are the

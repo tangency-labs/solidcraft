@@ -110,7 +110,9 @@ fn a_channel_converts_with_its_modelled_corners_as_bends() {
 
 /// A roll keeps its modeled radius, whatever the rule's: a channel rounded R 12 inside (six
 /// thicknesses, past a bend's) flattens to its walls' flat stretches and two quarter turns at
-/// 12 + K x T, where a bend would take the rule's R 2.
+/// their neutral radius, where a bend would take the rule's R 2. A roll's neutral surface lies at
+/// mid-thickness (K 0.5, not the rule's 0.4): 12 + 0.5 · 2 = 13. The flat is
+/// 2 · (30 − 14) + (80 − 28) + π · 13 = 124.840704 by 60.
 #[test]
 fn a_roll_keeps_its_modeled_radius() {
     let (t, k, r) = (2.0, 0.4, 12.0);
@@ -119,7 +121,7 @@ fn a_roll_keeps_its_modeled_radius() {
     bent_section(&mut s, &[(0.0, 30.0), (0.0, 0.0), (80.0, 0.0), (80.0, 30.0)], t, r, 60.0);
     // A bent section is sheet metal already: Recognize reads it (#6748).
     let c = recognize(&s, "Section", ConvertRule { thickness: t, k_factor: k, bend_radius: 2.0, ..TEST }, &[], &[]).unwrap_or_else(|e| panic!("{e}"));
-    let across = 2.0 * (30.0 - (r + t)) + (80.0 - 2.0 * (r + t)) + PI * (r + k * t);
+    let across = 2.0 * (30.0 - (r + t)) + (80.0 - 2.0 * (r + t)) + PI * (r + 0.5 * t);
     let got = size(&c);
     assert!(same_size(got, (across, 60.0), 1e-6), "{got:?} vs {across}");
 }
@@ -240,7 +242,9 @@ fn a_conversion_shows_in_the_flat_pattern() {
     assert!(s.model.results.iter().all(|x| x.error.is_none()), "{:?}", s.model.results.iter().map(|x| &x.error).collect::<Vec<_>>());
     let sheet = section(&s);
     assert!((sheet - modeled).abs() < 1e-6 * modeled, "the folded sheet is the channel: {sheet} vs {modeled}");
-    let across = 2.0 * (30.0 - (r + t)) + (80.0 - 2.0 * (r + t)) + PI * (r + k * t);
+    // Each roll laid out at mid-thickness (K 0.5, not the rule's 0.4), 12 + 0.5 · 2 = 13 from its
+    // axis: 2 · (30 − 14) + (80 − 28) + π · 13 = 124.840704 by 60.
+    let across = 2.0 * (30.0 - (r + t)) + (80.0 - 2.0 * (r + t)) + PI * (r + 0.5 * t);
     let flat = run(&mut s, "sheet.flat_pattern", json!({"body": "Section"}));
     let size = |f: &Value| (f["flat_size_mm"][0].as_f64().unwrap_or(0.0), f["flat_size_mm"][1].as_f64().unwrap_or(0.0));
     let (w, h) = size(&flat);
@@ -734,7 +738,11 @@ fn a_tombstone_rips_along_its_round_as_along_its_sides() {
 /// A rolled surface needs no flat face, and nothing about it is primary. A half pipe of radius
 /// 20, 30 long, drawn as a surface, rolls out to its neutral width; a whole pipe, smooth all
 /// round, is ripped open at one seam (where its walk closes) and rolls out less the rip's gap,
-/// cut on the roll.
+/// cut on the roll. The material lies inside the surface, 18 to 20 from the axis, and a roll's
+/// neutral surface lies at mid-thickness (K 0.5, not the rule's 0.44): 20 − 0.5 · 2 = 19. The half
+/// pipe's flat is π · 19 = 59.690260 by 30, 1790.707813 in area; the whole pipe's, its gap 0.5 on
+/// the surface of radius 20 and so 0.5 · 19/20 = 0.475 on the neutral one, 2π · 19 − 0.475 =
+/// 118.905521 by 30, 3567.165625.
 #[test]
 fn a_pipe_rolls_out_from_its_surface_alone() {
     let mut s = Session::default();
@@ -747,7 +755,7 @@ fn a_pipe_rolls_out_from_its_surface_alone() {
     let curve = arc["created"]["curves"][0].clone();
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "surface.extrude", json!({"sketch": "Arc", "curves": [curve], "distance": "30 mm", "name": "Half", "body_name": "Half"}));
-    let neutral = 20.0 - (1.0 - TEST.k_factor) * TEST.thickness;
+    let neutral = 20.0 - 0.5 * TEST.thickness;
     for (name, width) in [("Half", PI * neutral), ("Pipe", 2.0 * PI * neutral - TEST.gap * neutral / 20.0)] {
         let c = convert(&s, name, TEST, &[], &[], false).unwrap_or_else(|e| panic!("{name}: {e}"));
         let flat = c.flat().unwrap_or_else(|e| panic!("{name}: {e}"));

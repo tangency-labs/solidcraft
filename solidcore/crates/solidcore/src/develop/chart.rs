@@ -26,6 +26,14 @@ const MAX_SPIRAL_PIECES: usize = 4096;
 /// Parameters this close are one: a line of one angle on a cone, or of one distance.
 const PARAM_TOL: f64 = 1e-12;
 
+/// Where a roll's neutral surface lies through the thickness, as a K-factor: at mid-thickness.
+/// A roll is formed, not braked, so the rule's K (its press brake's) is not a roll's. DIN 6935
+/// puts the neutral fiber k·T/2 from the inside, k = 0.65 + 0.5·lg(R/T) up to 1, which it
+/// reaches at R/T = 10^0.7 (about 5): from there on, the radius at which Convert takes a
+/// modelled corner for a roll, the fiber lies at T/2. Every roll and rolled cone is developed
+/// at that K.
+pub(crate) const ROLL_K: f64 = 0.5;
+
 /// From a panel's parameters to its neutral surface laid flat.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Flatten {
@@ -47,14 +55,14 @@ pub(crate) enum Flatten {
 
 impl Flatten {
     pub(crate) fn of(surface: &Surface, sheet: &Sheet) -> Result<Flatten, PanelRefusal> {
-        let (t, k) = (sheet.thickness, sheet.k_factor);
+        let (t, k) = (sheet.thickness, ROLL_K);
         match surface {
             Surface::Plane => Ok(Flatten::Same),
             &Surface::Cylinder {
                 radius,
                 material_inward,
             } => {
-                // The neutral surface lies K x T from the inside of the roll.
+                // The neutral surface lies ROLL_K x T from the inside of the roll.
                 let neutral = if material_inward {
                     radius - (1.0 - k) * t
                 } else {

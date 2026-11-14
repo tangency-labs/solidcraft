@@ -965,9 +965,10 @@ enum Role {
 /// reaches 1, the standard's line between a bend whose neutral fiber moves toward the inside and
 /// one gentle enough that it stays halfway through. Here the ratio only sorts a modeled cylinder:
 /// short of it, a bend at the planes' virtual sharp with the rule's radius, whatever radius the
-/// body has; from it on, a roll that keeps the modeled radius. Bends and rolls alike are developed
-/// with the rule's K-factor (`solidcraft_develop`'s `Bend::allowance` and `Flatten::of`), never
-/// with DIN 6935's. The thicknesses are the sheet's, the rule's, as the sheet is made at it; the
+/// body has; from it on, a roll that keeps the modeled radius. A bend is developed with the rule's
+/// K-factor (`Bend::allowance`), its press brake's; a roll with its neutral fiber at mid-thickness
+/// (K 0.5, solidcore's `ROLL_K`), where DIN 6935 puts it from this ratio on. The thicknesses are
+/// the sheet's, the rule's, as the sheet is made at it; the
 /// inside radius is read from the body as modelled (`modelled_t`, see `read_surfaces`).
 const ROLL_FROM: f64 = 5.011_872_336_272_722;
 

@@ -629,8 +629,9 @@ fn a_bend_modelled_with_another_radius_takes_the_rules() {
 /// Whether a cylinder modelled between two planes is a bend or a roll is its inside radius in the
 /// rule's thicknesses (Convert reads no thickness of the body's): short of 10^0.7 (about 5), where
 /// DIN 6935's correction of the neutral fiber reaches 1, a bend, bent with the rule's radius; from
-/// there a roll, which keeps the model's radius and has its lines in the flat. Both are developed
-/// with the rule's K-factor. T 2: the line is at 2 · 10^0.7 = 10.0237, so an inside radius of 10
+/// there a roll, which keeps the model's radius and has its lines in the flat. A bend is developed
+/// with the rule's K-factor, a roll at K 0.5 (DIN 6935's mid-thickness). T 2: the line is at
+/// 2 · 10^0.7 = 10.0237, so an inside radius of 10
 /// is a bend and one of 10.05 a roll.
 #[test]
 fn a_modelled_corner_is_a_bend_short_of_about_five_thicknesses_and_a_roll_from_there() {
@@ -2042,7 +2043,7 @@ fn trays_of_its_own_sheet_metal_convert_back() {
     // A round relief's edge on a bend is a circle of the flat folded round the bend: its angle
     // round the bend runs as the circle's sine does along it, which no spline holds exactly. The
     // kernel folds it as degree-7 pieces within FOLD_TOL times the edge's size of the fold
-    // (FOLD_TOL = 1e-7, crates/kernel/src/sew.rs, as close as a folded edge's own chain keeps to
+    // (FOLD_TOL = 1e-7, solidcore's eval/folded.rs, as close as a folded edge's own chain keeps to
     // the fold), and the converted tray reads its reliefs back from those pieces. So the round
     // trip keeps a round relief to that tolerance, not to a rounding: each of its arcs on a bend
     // may lie up to off = 1e-7 x 120 mm from the circle (120 mm, the tray's largest coordinate,
