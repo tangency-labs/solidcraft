@@ -63,7 +63,7 @@ pub(crate) fn three_views_of(mut s: Session) -> (Session, [u64; 3]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, label: None })]);
         id
     };
     let front_settings =
@@ -184,8 +184,10 @@ fn an_edit_is_one_undo_step_and_names_its_followers() {
     let turned = edit_view(&mut s, front, json!({"view": "top", "scale": "1:5"}));
     assert_eq!(turned["changed"], json!(["scale", "view"]));
     assert_eq!(turned["followers"], json!([ids::encode(top), ids::encode(right)]), "by id");
-    assert_eq!(edit_view(&mut s, right, json!({"place": {"at": [320.0, 150.0]}}))["changed"], json!(["place"]));
-    assert_eq!(edit_view(&mut s, top, json!({"reference_shown_percent": 5.0}))["changed"], json!(["reference_shown_percent"]));
+    assert_eq!(edit_view(&mut s, right, json!({"place": {"at": [320.0, 150.0]}}))["changed"], json!(["place", "label"]), "and given its letter");
+    // The top view was placed apart without a letter (built above, not by a command): its first edit gives it one.
+    let edited = edit_view(&mut s, top, json!({"reference_shown_percent": 5.0}));
+    assert_eq!(edited["changed"], json!(["reference_shown_percent", "label"]));
     assert_eq!(inspect_view(&mut s, top)["reference_shown_percent"], 5.0);
     for percent in [-1.0, 100.001, 1e308] {
         assert!(edit_refused(&mut s, top, json!({"reference_shown_percent": percent})).contains("reference_shown_percent"), "{percent}");
@@ -3066,4 +3068,85 @@ fn a_left_out_part_says_where_each_kind_of_setter_set_it() {
     assert_eq!(set_on(SetBy::Sheet), " (set on its sheet)");
     assert_eq!(set_on(SetBy::Drawing), " (set on the drawing)");
     assert_eq!((set_on(SetBy::This), set_on(SetBy::Default)), (String::new(), String::new()));
+}
+
+/// A view placed apart from its projection place is given the first free letter (#13044), as
+/// `projected`, `edit` and `move_to_sheet` place it; a base view and a view lined up with its parent
+/// get none, and a view lined up again keeps its own. A copy that doesn't need a letter never takes
+/// its original's. With letters not reused, a deleted view's letter never comes back.
+#[test]
+fn a_view_placed_apart_is_given_a_letter() {
+    let mut s = block_drawing();
+    let (base, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let (lined, right) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "right"}));
+    assert!(base.get("letter").is_none() && lined.get("letter").is_none(), "{base} {lined}");
+    let above = json!({"parent": ids::encode(front), "side": "above", "place": {"at": [200.0, 250.0]}});
+    let (apart, top) = create(&mut s, PROJECTED, above.clone());
+    assert_eq!(apart["letter"], "A");
+    let letter = |s: &Session, id: u64| saved(s, id).label.map(|label| label.letter);
+    let edited = edit_view(&mut s, right, json!({"place": {"at": [350.0, 150.0]}}));
+    assert_eq!(edited["changed"], json!(["place", "label"]));
+    assert_eq!(letter(&s, right).as_deref(), Some("B"));
+    edit_view(&mut s, right, json!({"place": {"aligned": 300.0}}));
+    assert_eq!(letter(&s, right).as_deref(), Some("B"), "lined up again, it keeps its letter");
+    let second = second_sheet(&mut s);
+    let (_, below) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "below"}));
+    to_sheet(&mut s, MOVE, json!({"view": ids::encode(below), "sheet": ids::encode(second), "break_alignment": true}));
+    assert_eq!(letter(&s, below).as_deref(), Some("C"), "moved apart");
+    // A projected view copied alone is a base view, and the linked views copied with a view are lined up.
+    let alone = listed(&to_sheet(&mut s, COPY, json!({"view": ids::encode(top), "sheet": ids::encode(second)})))[0];
+    let with = json!({"view": ids::encode(front), "sheet": ids::encode(second), "position_mm": [100.0, 100.0], "with_linked": true});
+    let linked = listed(&to_sheet(&mut s, COPY, with))[1];
+    assert_eq!((letter(&s, alone), letter(&s, linked)), (None, None), "no letter, never the original's");
+    run(&mut s, "drawing.set", json!({"view_letters_reuse": false}));
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    d.views.retain(|v| v.id != top);
+    s.doc_mut().put_drawing(Arc::new(d));
+    assert_eq!(create(&mut s, PROJECTED, above).0["letter"], "D", "A isn't given again");
+    assert_eq!(run(&mut s, "drawing.inspect", json!({}))["view_letters"], json!({"reuse": false, "given": 4}));
+}
+
+/// A label's parts are typed over, hidden and moved by `drawing.view.edit`, one undo step each, and
+/// inspect answers them with what the label reads and its box on the sheet: above the view until it
+/// is moved, then at its offset from the view's centre. A letter another view holds, a view with no
+/// label and hostile parts are refused, changing nothing.
+#[test]
+fn a_labels_parts_are_typed_over_hidden_and_moved() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2", "position_mm": [150.0, 150.0]}));
+    let (_, top) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above", "place": {"at": [150.0, 230.0]}}));
+    let label = inspect_view(&mut s, top)["label"].clone();
+    assert_eq!((label["letter"].clone(), label["text"].clone(), label["needed"].clone()), (json!("A"), json!("VIEW A"), json!(true)));
+    let middle = |label: &Value| (point(&label["box_mm"]["min"]) + point(&label["box_mm"]["max"])) * 0.5;
+    // The top view is 50 x 25 at 1:2 round (150, 230): its boundary's top is at 242.5.
+    assert!(point(&label["box_mm"]["min"]).y > 242.5 && (middle(&label).x - 150.0).abs() < 1.0, "{label}");
+    assert!(inspect_view(&mut s, front).get("label").is_none(), "a base view has none");
+    let steps = s.undo.len();
+    let edited = edit_view(&mut s, top, json!({"label": {"words": "", "name": "BRACKET END", "offset": [0.0, -30.0]}}));
+    assert_eq!((edited["changed"].clone(), s.undo.len()), (json!(["label"]), steps + 1));
+    let label = inspect_view(&mut s, top)["label"].clone();
+    assert_eq!((label["text"].clone(), label["offset"].clone()), (json!("A\nBRACKET END"), json!([0.0, -30.0])));
+    assert!(middle(&label).dist(Vec2::new(150.0, 200.0)) < 1.0, "{label}");
+    edit_view(&mut s, top, json!({"label": {"offset": null, "shown": false}}));
+    let label = inspect_view(&mut s, top)["label"].clone();
+    assert_eq!((label["letter"].clone(), label["shown"].clone(), label["text"].clone()), (json!("A"), json!(false), Value::Null));
+    assert!(label.get("box_mm").is_none() && label.get("offset").is_none(), "{label}");
+    let (_, other) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "right", "place": {"at": [300.0, 150.0]}}));
+    let before = s.drawing("test").unwrap().clone();
+    let held = edit_refused(&mut s, other, json!({"label": {"letter": "A"}}));
+    assert!(held.contains(&format!("view {} has the letter A", ids::encode(top))), "{held}");
+    assert!(edit_refused(&mut s, front, json!({"label": {"name": "X"}})).contains("it has no label"));
+    for (bad, why) in [
+        (json!({"letter": "a"}), "its letter is one to three capital letters A to Z"),
+        (json!({"letter": "ABCD"}), "its letter is one to three capital letters A to Z"),
+        (json!({"letter": "A1"}), "its letter is one to three capital letters A to Z"),
+        (json!({"words": "two\nlines"}), "a label is one line"),
+        (json!({"name": "x".repeat(5000)}), "a label is one line"),
+        (json!({"offset": [1e9, 0.0]}), "its label's offset is at most 5000 mm"),
+        (json!({"colour": "red"}), "colour"),
+    ] {
+        let message = edit_refused(&mut s, other, json!({"label": bad}));
+        assert!(message.contains(why), "{bad}: {message}");
+    }
+    assert_eq!(*s.drawing("test").unwrap(), before);
 }

@@ -22,6 +22,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Vec2};
+use solidcraft_geom::cell::check_label;
+use solidcraft_geom::drawing_sheet::view_letter;
 use solidcraft_geom::drawing_view::{ProjectedSide, Scale, is_paper_coordinate, projected_basis};
 use solidcraft_geom::paper::MAX_SIDE_MM;
 use solidcraft_geom::paper::line::LineGroup;
@@ -62,6 +64,114 @@ pub struct View {
     /// parts, each side on its own: 0 to [`MAX_REFERENCE_SHOWN_PERCENT`], each view its own.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub reference_shown_percent: f64,
+    /// Its label (#13044), from when it is first placed apart from its projection place
+    /// ([`Drawing::give_letter`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<ViewLabel>,
+}
+
+/// The most letters a view's letter has: `ZZZ` is the last one given.
+pub const MAX_LETTERS: usize = 3;
+/// What a new label prints before its letter: English capitals, as a new parts list's headings are,
+/// typed over after.
+pub const VIEW_WORDS: &str = "VIEW";
+/// What a new label prints before its scale.
+pub const SCALE_WORDS: &str = "SCALE";
+
+/// A view's label (#13044): its letter, which a section line, a detail's circle or a note names the
+/// view by, and what it prints. Made when the view is given its letter, then typed over; drawn while
+/// the view needs it ([`View::needs_letter`]) and it is `shown`, above the view unless moved.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ViewLabel {
+    /// One to [`MAX_LETTERS`] capitals A to Z.
+    pub letter: String,
+    /// What it prints before its letter, [`VIEW_WORDS`] when made; empty: the letter alone.
+    pub words: String,
+    /// What it prints before its scale, [`SCALE_WORDS`] when made.
+    pub scale_words: String,
+    /// A name, on a line of its own under its letter's; empty: none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub show_letter: bool,
+    /// Its view's scale, shown when it isn't its sheet's ([`Drawing::sheet_scale`]).
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub show_scale: bool,
+    /// Whether it is on the sheet: a hidden label keeps the view's letter.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub shown: bool,
+    /// Where its middle sits from its view's centre, in paper millimetres, so it moves with the view;
+    /// none: above the view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<[f64; 2]>,
+}
+
+impl ViewLabel {
+    /// A new label of `letter`, printing [`VIEW_WORDS`] and [`SCALE_WORDS`].
+    pub fn new(letter: String) -> ViewLabel {
+        ViewLabel {
+            letter,
+            words: VIEW_WORDS.into(),
+            scale_words: SCALE_WORDS.into(),
+            name: String::new(),
+            show_letter: true,
+            show_scale: true,
+            shown: true,
+            offset: None,
+        }
+    }
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_yes(v: &bool) -> bool {
+    *v
+}
+
+/// How a drawing gives its views their letters ([`Drawing::give_letter`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ViewLetters {
+    /// Whether a letter a deleted view held is given again (the default), or never.
+    pub reuse: bool,
+    /// How far along the sequence letters have been given: a letter is given past this when letters
+    /// aren't reused. Counted either way, so stopping reuse later still skips what was given before.
+    pub given: u32,
+}
+
+impl Default for ViewLetters {
+    fn default() -> ViewLetters {
+        ViewLetters { reuse: true, given: 0 }
+    }
+}
+
+impl ViewLetters {
+    pub fn is_default(&self) -> bool {
+        *self == ViewLetters::default()
+    }
+
+    /// The next [`view_letter`] that none of `used` is: the first, or the first
+    /// past those given when letters aren't reused. It counts as given. Only as many places as `used`
+    /// holds, and one more, are looked at: at most that many can be taken. Refused past
+    /// [`MAX_LETTERS`] letters.
+    pub fn next<'a>(&mut self, used: impl IntoIterator<Item = &'a str>) -> Result<String> {
+        let used: BTreeSet<&str> = used.into_iter().collect();
+        let start = if self.reuse { 0 } else { self.given };
+        let place = |k: usize| {
+            let i = start.checked_add(u32::try_from(k).ok()?)?;
+            Some((i, view_letter(usize::try_from(i).ok()?)?))
+        };
+        match (0..=used.len()).filter_map(place).find(|(_, letter)| !used.contains(letter.as_str())) {
+            Some((i, letter)) if letter.len() <= MAX_LETTERS => {
+                self.given = self.given.max(i.saturating_add(1));
+                Ok(letter)
+            }
+            _ => Err(DocError::Invalid("every view letter up to ZZZ has been given".into())),
+        }
+    }
 }
 
 /// What a view draws, and from where.
@@ -142,6 +252,16 @@ pub struct ResolvedView {
 
 fn is_zero(v: &f64) -> bool {
     *v == 0.0
+}
+
+impl View {
+    /// Whether its label names it: it stands apart from its projection place, a projected view placed
+    /// at a point. A base view is the principal view and a view lined up with its parent is where its
+    /// projection puts it, so neither needs one (ISO 128-30). Each later kind of view placed apart
+    /// (auxiliary, section, detail) adds its arm here.
+    pub fn needs_letter(&self) -> bool {
+        matches!((self.kind, self.place), (ViewKind::Projected { .. }, ViewPlace::At(_)))
+    }
 }
 
 /// What occurrence paths a view may choose, saved or asked for: at most [`MAX_PATHS`] in each list
@@ -277,6 +397,15 @@ impl Drawing {
         require(place, || format!("its place is at most {MAX_SIDE_MM} mm from the sheet's origin"))?;
         check_occurrence_paths(view.settings.occurrences.as_deref().unwrap_or_default(), view.settings.hide.as_deref().unwrap_or_default())?;
         view.settings.pose.as_ref().map_or(Ok(()), check_pose)?;
+        if let Some(label) = &view.label {
+            let letter = (1..=MAX_LETTERS).contains(&label.letter.len()) && label.letter.bytes().all(|b| b.is_ascii_uppercase());
+            require(letter, || "its letter is one to three capital letters A to Z".into())?;
+            for text in [&label.words, &label.scale_words, &label.name] {
+                check_label(text).map_err(|e| DocError::Invalid(e.to_string()))?;
+            }
+            let offset = label.offset.is_none_or(|[x, y]| is_paper_coordinate(x) && is_paper_coordinate(y));
+            require(offset, || format!("its label's offset is at most {MAX_SIDE_MM} mm from the view's centre"))?;
+        }
         match view.kind {
             ViewKind::Base { source, view: direction } => {
                 let drawn = || format!("it draws source {}, which the drawing doesn't have", ids::encode(source));
@@ -356,6 +485,67 @@ impl Drawing {
     fn chain_of(&self, id: u64) -> Result<Vec<&View>> {
         chain(id, |id| self.view(id))
     }
+
+    /// Gives view `id` its letter when it needs one ([`View::needs_letter`]) and has none, or holds one
+    /// another view holds (a copy): the next of [`ViewLetters::next`], the one rule every command that
+    /// places a view apart calls. Its label's words, name and place are kept. Nothing for a view the
+    /// drawing hasn't.
+    pub fn give_letter(&mut self, id: u64) -> Result<()> {
+        let Some(view) = self.view(id) else { return Ok(()) };
+        let held = |letter: &str| self.views.iter().any(|other| other.id != id && other.label.as_ref().is_some_and(|label| label.letter == letter));
+        if !view.needs_letter() || view.label.as_ref().is_some_and(|label| !held(&label.letter)) {
+            return Ok(());
+        }
+        let mut given = self.view_letters;
+        let letter = given.next(self.views.iter().filter_map(|v| v.label.as_ref()).map(|label| label.letter.as_str()))?;
+        let Some(view) = self.view_index(id).and_then(|at| self.views.get_mut(at)).map(Arc::make_mut) else { return Ok(()) };
+        match &mut view.label {
+            Some(label) => label.letter = letter,
+            None => view.label = Some(ViewLabel::new(letter)),
+        }
+        self.view_letters = given;
+        Ok(())
+    }
+
+    /// What view `id`'s label reads, a line for each part shown: its words and letter (`VIEW B`), its
+    /// name, then its scale when that isn't its sheet's ([`Drawing::sheet_scale`]), written as the
+    /// sheet's scale field writes it (`SCALE 2:1`). None when it draws no label: it has none, doesn't
+    /// need one, is hidden, or shows no part.
+    pub fn label_text(&self, id: u64) -> Option<String> {
+        let view = self.view(id).filter(|view| view.needs_letter())?;
+        let label = view.label.as_ref().filter(|label| label.shown)?;
+        let after = |words: &str, what: String| if words.is_empty() { what } else { format!("{words} {what}") };
+        let scale = self.resolve_view(id).ok().map(|resolved| resolved.scale.value).filter(|scale| self.sheet_scale(view.sheet) != Some(*scale));
+        let lines: Vec<String> = [
+            label.show_letter.then(|| after(&label.words, label.letter.clone())),
+            Some(label.name.clone()).filter(|name| !name.is_empty()),
+            scale.filter(|_| label.show_scale).map(|scale| after(&label.scale_words, scale.to_string())),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        (!lines.is_empty()).then(|| lines.join("\n"))
+    }
+
+    /// The scale sheet `sheet`'s views draw at, as its scale field reads it: the one its base views
+    /// share (a view at a scale of its own carries that in its label), else, with no base view, the
+    /// one all its views draw at. None when they differ, or it has no view.
+    pub fn sheet_scale(&self, sheet: u64) -> Option<Scale> {
+        let on_sheet = || self.views.iter().filter(move |v| v.sheet == sheet);
+        let mut base = on_sheet().filter(|v| matches!(v.kind, ViewKind::Base { .. })).peekable();
+        if base.peek().is_some() {
+            shared(base.map(|v| v.settings.scale))
+        } else {
+            shared(on_sheet().map(|v| self.resolve_view(v.id).ok().map(|r| r.scale.value)))
+        }
+    }
+}
+
+/// The one scale all of `scales` are, so neither the order the views were placed in nor their ids
+/// decide it: none when there are none, or when one is unknown or differs.
+fn shared(mut scales: impl Iterator<Item = Option<Scale>>) -> Option<Scale> {
+    let first = scales.next()??;
+    scales.all(|scale| scale == Some(first)).then_some(first)
 }
 
 #[cfg(test)]

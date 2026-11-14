@@ -579,6 +579,69 @@ pub struct ViewSet {
     #[serde(deserialize_with = "super::present")]
     #[schemars(with = "bool")]
     pub linked: Option<bool>,
+    /// Its label's parts (a view placed apart from its projection place has one).
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "LabelSet")]
+    pub label: Option<LabelSet>,
+}
+
+/// The parts of a view's label `drawing.view.edit` changes, each only when given (#13044).
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct LabelSet {
+    /// Its letter: one to three capitals, one no other view of the drawing holds.
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "String")]
+    pub letter: Option<String>,
+    /// The words before its letter (`VIEW`); "" for the letter alone.
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "String")]
+    pub words: Option<String>,
+    /// The words before its scale (`SCALE`).
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "String")]
+    pub scale_words: Option<String>,
+    /// A name under its letter's line; "" for none.
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "String")]
+    pub name: Option<String>,
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "bool")]
+    pub show_letter: Option<bool>,
+    /// Its scale, shown when it isn't its sheet's.
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "bool")]
+    pub show_scale: Option<bool>,
+    /// Whether it is drawn at all: false takes it off the sheet, and the view keeps its letter.
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "bool")]
+    pub shown: Option<bool>,
+    /// Where its middle sits from the view's centre, in paper millimetres; null puts it back above the view.
+    #[serde(deserialize_with = "super::present")]
+    pub offset: Option<Option<[f64; 2]>>,
+}
+
+/// A view's label as inspect answers it (#13044).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LabelResult {
+    pub letter: String,
+    pub words: String,
+    pub scale_words: String,
+    pub name: String,
+    pub show_letter: bool,
+    pub show_scale: bool,
+    pub shown: bool,
+    /// From the view's centre; none: above the view.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<[f64; 2]>,
+    /// Whether the view needs its label: it is placed apart from its projection place.
+    pub needed: bool,
+    /// What it reads on the sheet, a line for each part shown; null when it isn't drawn.
+    pub text: Option<String>,
+    /// The box round it on the sheet, when it is drawn and its text is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub box_mm: Option<BoxResult>,
 }
 
 /// Where a setting's value comes from.
@@ -726,6 +789,9 @@ pub struct InspectResult {
     pub dimensions: Vec<String>,
     /// Its balloons' ids, in id order.
     pub balloons: Vec<String>,
+    /// Its label, when it has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<LabelResult>,
     pub choices: ChoicesResult,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -884,6 +950,9 @@ pub struct CreateResult {
     /// The scale it draws at: given or fitted for a base view, its parent's for a projected one.
     pub scale: ScaleResult,
     pub boundary_mm: BoxResult,
+    /// The letter it was given, placed apart from its projection place.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub letter: Option<String>,
     /// It, when its boundary leaves the sheet's drawing space; it isn't moved back in.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outside: Vec<OutsideResult>,

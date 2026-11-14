@@ -38,7 +38,7 @@ use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::balloon::Balloon;
 use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, reading_label};
 use solidcraft_doc::drawing::note::Note;
-use solidcraft_doc::drawing::view::{ResolvedView, SetBy, Setting, View, ViewKind, ViewPlace, check_occurrence_paths, check_pose};
+use solidcraft_doc::drawing::view::{ResolvedView, SetBy, Setting, View, ViewKind, ViewLabel, ViewPlace, check_occurrence_paths, check_pose};
 use solidcraft_doc::drawing_view::{
     Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides,
 };
@@ -62,9 +62,9 @@ use crate::params::bad;
 use crate::schema::drawing_view::{
     AccuracyResult, AlongParam, AngleFromParam, BaseParams, BoxResult, ChoicesResult, ConfigurationParam, ConfigurationResult, CopyParams,
     CreateResult, DPI_RANGE, DrawnJointResult, DrawnRowResult, EditParams, EditResult, ExplodedParam, ExtentsResult, FromResult, InspectParams,
-    InspectResult, LineResult, LinesStatusResult, MeasureParam, MeasurementResult, MoveParams, OutsideResult, PathSegResult, PictureResult,
-    PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams, ScaleResult, SceneResult, SettingResult, SettingsResult, SnapshotParams,
-    SnapshotResult, SourceResult, StudyPoseParam, StudyStepResult, ToSheetResult, ViewLineParam, ViewResult, ViewSet,
+    InspectResult, LabelResult, LabelSet, LineResult, LinesStatusResult, MeasureParam, MeasurementResult, MoveParams, OutsideResult, PathSegResult,
+    PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams, ScaleResult, SceneResult, SettingResult, SettingsResult,
+    SnapshotParams, SnapshotResult, SourceResult, StudyPoseParam, StudyStepResult, ToSheetResult, ViewLineParam, ViewResult, ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -477,6 +477,23 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         }),
         dimensions: d.dimensions.iter().filter(|dimension| dimension.view == view.id).map(|dimension| ids::encode(dimension.id)).collect(),
         balloons: d.balloons.iter().filter(|balloon| balloon.view == view.id).map(|balloon| ids::encode(balloon.id)).collect(),
+        label: view.label.as_ref().map(|label| LabelResult {
+            letter: label.letter.clone(),
+            words: label.words.clone(),
+            scale_words: label.scale_words.clone(),
+            name: label.name.clone(),
+            show_letter: label.show_letter,
+            show_scale: label.show_scale,
+            shown: label.shown,
+            offset: label.offset,
+            needed: view.needs_letter(),
+            text: d.label_text(view.id),
+            box_mm: d
+                .view_centre(view.id)
+                .ok()
+                .and_then(|centre| crate::drawing_scene::label_box(d, view.id, centre, placed.boundary))
+                .map(|label| BoxResult { min: label.min.into(), max: label.max.into() }),
+        }),
         choices: ChoicesResult {
             visual_style: VisualStyle::ALL.iter().map(|s| snake_name(*s)).collect(),
             scale: PRESETS.iter().map(ToString::to_string).collect(),
@@ -582,6 +599,12 @@ struct Found {
 fn change(d: &mut Drawing, id: u64, set: &ViewSet, found: &Found) -> Result<Vec<String>> {
     let resolved = d.resolve_view(id).map_err(|e| bad(EDIT, e.to_string()))?;
     let at = d.view_index(id).ok_or_else(|| bad(EDIT, format!("the drawing has no view {}", ids::encode(id))))?;
+    // A letter names one view: the drawing's own rule lets a hand edit double one, an edit never does.
+    if let Some(letter) = set.label.as_ref().and_then(|parts| parts.letter.as_ref())
+        && let Some(holder) = d.views.iter().find(|v| v.id != id && v.label.as_ref().is_some_and(|label| label.letter == *letter))
+    {
+        return Err(bad(EDIT, format!("view {} has the letter {letter}", ids::encode(holder.id))));
+    }
     let Some(view) = d.views.get_mut(at).map(std::sync::Arc::make_mut) else { return Ok(Vec::new()) };
     let before = view.clone();
     let base = matches!(view.kind, ViewKind::Base { .. });
@@ -648,7 +671,36 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet, found: &Found) -> Result<Vec<
             PlaceParam::Aligned(along) => ViewPlace::Aligned(along),
         };
     }
-    Ok(changed_fields(&before, view))
+    // Placed apart, it needs a letter; then its label is typed over.
+    d.give_letter(id).map_err(|e| bad(EDIT, e.to_string()))?;
+    if let Some(parts) = &set.label {
+        let label = d.views.get_mut(at).map(Arc::make_mut).and_then(|view| view.label.as_mut());
+        type_over(label.ok_or_else(|| bad(EDIT, "it has no label: a view placed apart from its projection place has one"))?, parts);
+    }
+    Ok(d.view(id).map(|after| changed_fields(&before, after)).unwrap_or_default())
+}
+
+/// `parts` typed over `label`, each part only when given.
+fn type_over(label: &mut ViewLabel, parts: &LabelSet) {
+    let texts = [
+        (&mut label.letter, &parts.letter),
+        (&mut label.words, &parts.words),
+        (&mut label.scale_words, &parts.scale_words),
+        (&mut label.name, &parts.name),
+    ];
+    for (text, given) in texts {
+        if let Some(given) = given {
+            text.clone_from(given);
+        }
+    }
+    for (flag, given) in [(&mut label.show_letter, parts.show_letter), (&mut label.show_scale, parts.show_scale), (&mut label.shown, parts.shown)] {
+        if let Some(given) = given {
+            *flag = given;
+        }
+    }
+    if let Some(offset) = parts.offset {
+        label.offset = offset;
+    }
 }
 
 /// The names of the fields that differ between `a` and `b`, two states of one view.
@@ -669,6 +721,7 @@ fn changed_fields(a: &View, b: &View) -> Vec<String> {
         ("reference_shown_percent", a.reference_shown_percent != b.reference_shown_percent),
         ("view", a.kind != b.kind),
         ("place", a.place != b.place),
+        ("label", a.label != b.label),
     ];
     fields.into_iter().filter(|(_, changed)| *changed).map(|(name, _)| name.to_string()).collect()
 }
@@ -917,6 +970,7 @@ fn move_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
             view.sheet = sheet;
             view.place = place;
         }
+        d.give_letter(id).map_err(|e| bad(MOVE, e.to_string()))?;
         Ok((sheet, moved))
     })?;
     let outside = crate::drawing_view::outside(s, s.drawing(MOVE)?, &views, MOVE)?;
@@ -985,9 +1039,16 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
                 ViewKind::Projected { parent, side } => view.kind = ViewKind::Projected { parent: copy_of(parent).unwrap_or(parent), side },
                 ViewKind::Base { .. } => {}
             }
+            // A copy never shares its original's letter: one that needs a letter is given its own below.
+            if !view.needs_letter() {
+                view.label = None;
+            }
             made.push(Arc::new(view));
         }
         d.add_views(made);
+        for copy in &copies {
+            d.give_letter(*copy).map_err(|e| bad(COPY, e.to_string()))?;
+        }
         let copied: Vec<Arc<Dimension>> = measured
             .iter()
             .zip(&dimension_copies)
@@ -1048,7 +1109,8 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let place = ViewPlace::At([position.x, position.y]);
     let kind = ViewKind::Base { source, view: direction };
-    let mut view = View { id, sheet, kind, place, settings, reference_shown_percent: request.reference_shown_percent.unwrap_or(0.0) };
+    let percent = request.reference_shown_percent.unwrap_or(0.0);
+    let mut view = View { id, sheet, kind, place, settings, reference_shown_percent: percent, label: None };
     // The record's rules first, at 1:1 unless a scale is given, so a bad direction, percent or place
     // is refused as the record says; then what it shows; then the fitted scale, which is saved. With
     // nothing to measure, 1:1.
@@ -1095,7 +1157,7 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
         None => ViewPlace::Aligned(side.along(parent_centre)),
     };
     let kind = ViewKind::Projected { parent, side };
-    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0 };
+    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None };
     if request.place.is_none() {
         // Staged on its parent's centre to measure it, then moved along the free axis until its
         // boundary is the gap past its parent's.
@@ -1112,7 +1174,7 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.edit_drawing(PROJECTED, |d| {
         d.add_views([Arc::new(view)]);
-        Ok(())
+        d.give_letter(id).map_err(|e| bad(PROJECTED, e.to_string()))
     })?;
     created(s, PROJECTED, id, false)
 }
@@ -1121,7 +1183,8 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
 /// its boundary, and itself when it leaves its sheet's drawing space.
 fn created(s: &Session, cmd: &str, id: u64, fitted: bool) -> Result<Value> {
     let d = s.drawing(cmd)?;
-    let sheet_id = find(d, id, cmd)?.sheet;
+    let view = find(d, id, cmd)?;
+    let (sheet_id, letter) = (view.sheet, view.label.as_ref().map(|label| label.letter.clone()));
     let sheet = crate::drawing_view::sheet(d, sheet_id, cmd)?;
     let scale = d.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?.scale.value;
     let placed = crate::drawing_view::on_sheet(s, d, id, cmd)?;
@@ -1131,6 +1194,7 @@ fn created(s: &Session, cmd: &str, id: u64, fitted: bool) -> Result<Value> {
         sheet: ids::encode(sheet_id),
         scale: ScaleResult { text: scale.to_string(), factor: scale.factor(), fitted },
         boundary_mm: BoxResult { min: placed.boundary.min.into(), max: placed.boundary.max.into() },
+        letter,
         outside: outside_results(outside),
         param_warnings: Vec::new(),
     };
