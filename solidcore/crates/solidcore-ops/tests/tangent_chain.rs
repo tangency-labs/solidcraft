@@ -1,4 +1,4 @@
-//! `tangent::tangent_chain_ordered` and `tangent_face_chain_ordered` (#3141), on record order.
+//! `blend::tangent_chain` and `tangent::tangent_face_chain_ordered` (#3141), on record order.
 //!
 //! A stadium prism: two straight walls and two half-cylinders, 4 high. Its top outline is
 //! four edges each running on tangentially into the next, so a pick of one top edge chains
@@ -19,9 +19,10 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore_ops::blend::tangent_chain;
 use solidcore_ops::boolean::{boolean, BooleanOp};
 use solidcore_ops::sweep::{extrude, Curve, DraftCorner};
-use solidcore_ops::tangent::{tangent_chain_ordered, tangent_face_chain_ordered};
+use solidcore_ops::tangent::tangent_face_chain_ordered;
 use solidcore_ops::{make_box, Body};
 use solidcore_record::brep::{Brep as Record, Surface};
 use std::f64::consts::{FRAC_PI_2, PI};
@@ -30,8 +31,8 @@ const H: f64 = 4.0;
 /// SolidCraft's smooth-edge angle, the caller's: half a degree.
 const ANGLE: f64 = 0.5 * PI / 180.0;
 
-fn stadium() -> Body {
-    let profile = [
+fn stadium_profile() -> [Curve; 4] {
+    [
         Curve::Line {
             start: [0.0, 0.0, 0.0],
             end: [20.0, 0.0, 0.0],
@@ -56,7 +57,11 @@ fn stadium() -> Body {
             start: FRAC_PI_2,
             end: 1.5 * PI,
         },
-    ];
+    ]
+}
+
+fn stadium() -> Body {
+    let profile = stadium_profile();
     extrude(
         &profile,
         [0.0, 0.0, 1.0],
@@ -117,7 +122,7 @@ fn a_stadium_s_top_outline_is_one_chain() {
     let b = stadium();
     let (r, order) = b.to_record().unwrap();
     let front = edge(&r, [0.0, 0.0, H], [20.0, 0.0, H]);
-    let chain = tangent_chain_ordered(&b, &order, &[front], &[], ANGLE).unwrap();
+    let chain = tangent_chain(&b, Some(&order), &[front], &[], ANGLE).unwrap();
     assert!(chain.undecided.is_empty(), "{chain:?}");
     assert_eq!(chain.members.len(), 4, "{chain:?}");
     assert_eq!(chain.members[0], front);
@@ -130,7 +135,7 @@ fn a_passed_over_edge_stops_the_chain() {
     let (r, order) = b.to_record().unwrap();
     let front = edge(&r, [0.0, 0.0, H], [20.0, 0.0, H]);
     let back = edge(&r, [20.0, 10.0, H], [0.0, 10.0, H]);
-    let chain = tangent_chain_ordered(&b, &order, &[front], &[back], ANGLE).unwrap();
+    let chain = tangent_chain(&b, Some(&order), &[front], &[back], ANGLE).unwrap();
     assert_eq!(chain.members.len(), 3, "{chain:?}");
     assert!(!chain.members.contains(&back));
 }
@@ -140,7 +145,7 @@ fn a_box_edge_chains_alone() {
     let b = make_box([0.0; 3], [10.0, 6.0, H]).unwrap();
     let (r, order) = b.to_record().unwrap();
     let front = edge(&r, [0.0, 0.0, H], [10.0, 0.0, H]);
-    let chain = tangent_chain_ordered(&b, &order, &[front], &[], ANGLE).unwrap();
+    let chain = tangent_chain(&b, Some(&order), &[front], &[], ANGLE).unwrap();
     assert_eq!(chain.members, vec![front]);
     assert!(chain.undecided.is_empty());
 }
@@ -173,6 +178,13 @@ fn a_box_face_chains_alone() {
 /// The plate of side `plate` with the stadium boss on top.
 fn plate_with_stadium(plate: f64) -> Body {
     let base = make_box([-plate / 2.0, -plate / 2.0, 0.0], [plate, plate, 10.0]).unwrap();
+    boolean(base, stadium_boss(), BooleanOp::Union)
+        .unwrap()
+        .unwrap()
+}
+
+/// The 50 x 10 stadium boss about y = 0, from z = 10 to 20.
+fn stadium_boss() -> Body {
     let z = 10.0;
     let profile = [
         Curve::Line {
@@ -200,7 +212,7 @@ fn plate_with_stadium(plate: f64) -> Body {
             end: 1.5 * PI,
         },
     ];
-    let boss = extrude(
+    extrude(
         &profile,
         [0.0, 0.0, 1.0],
         10.0,
@@ -208,8 +220,7 @@ fn plate_with_stadium(plate: f64) -> Body {
         DraftCorner::default(),
         true,
     )
-    .unwrap();
-    boolean(base, boss, BooleanOp::Union).unwrap().unwrap()
+    .unwrap()
 }
 
 #[test]
@@ -218,7 +229,7 @@ fn one_pick_follows_the_boss_rim_at_any_part_size() {
         let b = plate_with_stadium(plate);
         let (r, order) = b.to_record().unwrap();
         let back = edge(&r, [20.0, 5.0, 20.0], [-20.0, 5.0, 20.0]);
-        let chain = tangent_chain_ordered(&b, &order, &[back], &[], ANGLE).unwrap();
+        let chain = tangent_chain(&b, Some(&order), &[back], &[], ANGLE).unwrap();
         assert!(chain.undecided.is_empty(), "plate {plate}: {chain:?}");
         assert_eq!(chain.members.len(), 4, "plate {plate}: {chain:?}");
         let at_top = |i: usize| {
@@ -232,4 +243,111 @@ fn one_pick_follows_the_boss_rim_at_any_part_size() {
             "plate {plate}: {chain:?}"
         );
     }
+}
+
+/// A prism on (0, 0), (10, 0), (20, 10 tan a), (20, 12), (0, 12), `a` 0.3 degrees: its walls
+/// at (10, 0) meet `a` apart. A pick of the wall on y = 0 joins the next wall at half a degree,
+/// not at 0.2 degrees, and at 0.3 degrees, the angle itself, the kernel decides neither: the
+/// edge between them is listed undecided and joins nothing.
+#[test]
+fn walls_at_the_asked_angle_are_listed_undecided() {
+    // 10 tan(0.3 degrees), as a literal: ops tests use no float methods
+    let rise = 0.052_360_356_057_001_275;
+    let pts = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [20.0, rise, 0.0],
+        [20.0, 12.0, 0.0],
+        [0.0, 12.0, 0.0],
+    ];
+    let profile: Vec<Curve> = (0..5)
+        .map(|i| Curve::Line {
+            start: pts[i],
+            end: pts[(i + 1) % 5],
+        })
+        .collect();
+    let b = extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        H,
+        0.0,
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap();
+    let (r, order) = b.to_record().unwrap();
+    let front: Vec<usize> = plane_along(&r, [0.0, 1.0, 0.0])
+        .into_iter()
+        .filter(|&f| match r.faces[f].surface {
+            Surface::Plane { origin, .. } => origin[1].abs() < 1e-9,
+            _ => false,
+        })
+        .collect();
+    assert_eq!(front.len(), 1, "{front:?}");
+    let kink = edge(&r, [10.0, 0.0, 0.0], [10.0, 0.0, H]);
+    // 0.5, 0.2 and 0.3 degrees in radians
+    let (half, fifth, level) = (
+        0.008_726_646_259_971_648,
+        0.003_490_658_503_988_659,
+        0.005_235_987_755_982_988,
+    );
+    let at = |angle: f64| tangent_face_chain_ordered(&b, &order, &front, angle).unwrap();
+    let wide = at(half);
+    assert_eq!(wide.members.len(), 2, "{wide:?}");
+    assert!(wide.undecided.is_empty(), "{wide:?}");
+    let narrow = at(fifth);
+    assert_eq!(narrow.members, front, "{narrow:?}");
+    assert!(narrow.undecided.is_empty(), "{narrow:?}");
+    let level = at(level);
+    assert_eq!(level.members, front, "{level:?}");
+    assert_eq!(level.undecided, vec![kink], "{level:?}");
+}
+
+/// The stadium as a sheet (extruded without caps): its top edges have one face each, so a pick
+/// of one chains nothing more: an edge not between two faces does not join.
+#[test]
+fn a_sheet_s_one_face_edges_do_not_join() {
+    let profile = stadium_profile();
+    let b = extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        H,
+        0.0,
+        DraftCorner::default(),
+        false,
+    )
+    .unwrap();
+    let (r, order) = b.to_record().unwrap();
+    let front = edge(&r, [0.0, 0.0, H], [20.0, 0.0, H]);
+    let chain = tangent_chain(&b, Some(&order), &[front], &[], ANGLE).unwrap();
+    assert_eq!(chain.members, vec![front], "{chain:?}");
+    assert!(chain.undecided.is_empty(), "{chain:?}");
+}
+
+/// A plate 80 x 40 x 10 at y >= 0 with the 50 x 10 stadium boss, 10 tall, on its top about
+/// y = 0, so the boss's front half overhangs the plate's front face. The boss's base outline at
+/// z = 10 is concave where it stands on the plate (the back straight and the back halves of its
+/// end arcs) and convex where it overhangs (the boss's underside meets its wall). At
+/// (+-25, 0, 10) each end arc's back quarter runs on tangentially into its front quarter, of
+/// the other convexity: a pick of the back straight chains the back straight and the two back
+/// quarters, and stops there.
+#[test]
+fn a_chain_stops_where_it_would_turn_over() {
+    let base = make_box([-40.0, 0.0, 0.0], [80.0, 40.0, 10.0]).unwrap();
+    let b = boolean(base, stadium_boss(), BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let (r, order) = b.to_record().unwrap();
+    let back = edge(&r, [20.0, 5.0, 10.0], [-20.0, 5.0, 10.0]);
+    let chain = tangent_chain(&b, Some(&order), &[back], &[], ANGLE).unwrap();
+    assert!(chain.undecided.is_empty(), "{chain:?}");
+    assert_eq!(chain.members.len(), 3, "{chain:?}");
+    for &e in &chain.members {
+        for v in r.edges[e].vertices {
+            let q = r.vertices[v as usize].point;
+            assert!((q[2] - 10.0).abs() < 1e-9 && q[1] > -1e-9, "{e}: {q:?}");
+        }
+    }
+    let front = edge(&r, [-20.0, -5.0, 10.0], [20.0, -5.0, 10.0]);
+    assert!(!chain.members.contains(&front), "{chain:?}");
 }

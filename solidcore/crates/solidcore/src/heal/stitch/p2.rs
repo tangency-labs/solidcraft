@@ -187,11 +187,11 @@ impl RadialGlue {
             }
         }
         let axis = self.axis.unitize()?;
-        let start = Self::leaving(k, b, first)?.project_to_plane(axis);
+        let start = Self::into_face(k, b, first)?.project_to_plane(axis);
         let side = axis.cross(start);
         // the angle round the axis from the first face to a face
         let angle = |k: &mut Kernel, b: &mut Brep, at: (EdgeId, f64)| -> Result<f64> {
-            let w = Self::leaving(k, b, at)?.project_to_plane(axis);
+            let w = Self::into_face(k, b, at)?.project_to_plane(axis);
             let a = w.dot(side).atan2(w.dot(start));
             Ok(if a < 0.0 { a + 2.0 * PI } else { a })
         };
@@ -268,8 +268,9 @@ impl RadialGlue {
 
     /// The direction a lamina edge's face leaves the edge at a curve parameter: the
     /// binormal of the edge's first edge use, which points into the face whichever face
-    /// use it is in.
-    fn leaving(k: &Kernel, b: &mut Brep, (e, t): (EdgeId, f64)) -> Result<Vec3> {
+    /// use it is in. Not the direction an edge leaves a vertex in
+    /// ([`crate::query::edge_turn::leaving`]): this one is across the edge, into its face.
+    fn into_face(k: &Kernel, b: &mut Brep, (e, t): (EdgeId, f64)) -> Result<Vec3> {
         let eu = edge::edgeuses(b, e, None, None)?
             .first()
             .copied()
@@ -1718,15 +1719,13 @@ pub fn solid_stitch_start(k: &Kernel, b: &Brep) -> Result<(f64, f64)> {
 /// compare, no edge splitting and manifold gluing, from a tenth of the B-rep tolerance,
 /// doubling it while lamina edges remain and it is below 1/200 of the bounding box
 /// diagonal. The result is a solid when no lamina edge is left and the B-rep has more
-/// than one region. With
-/// [`UpstreamFixes::stitch_solid_nests_cavities`](crate::kernel::UpstreamFixes::stitch_solid_nests_cavities)
-/// (WR-569) such a solid is then made a nested solid model, so a closed shell inside
-/// another bounds a void.
+/// than one region. Such a solid is then made a nested solid model, so a closed shell
+/// inside another bounds a void (WR-569; upstream leaves it solid).
 ///
 /// # Errors
 ///
 /// Those of `CalculateBoundingBox` and [`Stitch::do_stitching`];
-/// [`SolidError::InvalidInput`] past [`MAX_TOL_DOUBLINGS`]; with the opt-in, those of
+/// [`SolidError::InvalidInput`] past [`MAX_TOL_DOUBLINGS`]; those of
 /// `FindAndSetInfiniteRegion`.
 pub fn stitch_into_solid(k: &mut Kernel, b: &mut Brep) -> Result<AdvancedStitch> {
     stitch_into_solid_with(k, b, None)
@@ -1789,18 +1788,16 @@ pub(crate) fn stitch_into_solid_with(
     }
 
     if num_lamina == 0 && bp1::regions(b, None)?.len() > 1 {
-        // Not upstream (WR-569, opt-in; the fork's tangency-labs/smlib@351c57c): the
-        // stitching found the infinite region but left the regions inside nested closed
-        // shells solid, each shell where the glue put it. A solid is a nested solid model:
-        // inside the outer shell is material, inside a shell within it a void, and so on,
-        // each region's outer shell first.
-        if k.fixes.stitch_solid_nests_cavities {
-            let old = b.editing_enabled();
-            b.set_editing_enabled(false);
-            let r = find_and_set_infinite_region(k, b, None, SetRegionVoidType::NestedSolid, None);
-            b.set_editing_enabled(old);
-            r?;
-        }
+        // Not upstream (WR-569; the fork's tangency-labs/smlib@351c57c): the stitching
+        // found the infinite region but left the regions inside nested closed shells
+        // solid, each shell where the glue put it. A solid is a nested solid model: inside
+        // the outer shell is material, inside a shell within it a void, and so on, each
+        // region's outer shell first.
+        let old = b.editing_enabled();
+        b.set_editing_enabled(false);
+        let r = find_and_set_infinite_region(k, b, None, SetRegionVoidType::NestedSolid, None);
+        b.set_editing_enabled(old);
+        r?;
         out.produces_a_solid = true;
     }
     Ok(out)
@@ -2094,14 +2091,12 @@ mod tests {
     }
 
     /// A cube of side 10 with a cube cavity of side 4, as twelve loose faces: the stitch
-    /// closes both shells. With the opt-in (WR-569, the fork's
-    /// tangency-labs/smlib@351c57c) the region inside the inner shell is a void, as is the
-    /// infinite region; upstream leaves it solid.
+    /// closes both shells. The region inside the inner shell is a void (WR-569, the fork's
+    /// tangency-labs/smlib@351c57c), as is the infinite region; upstream leaves it solid.
     #[test]
     fn stitched_solid_cavity_is_a_void() {
-        let build = |fix: bool| {
+        let build = || {
             let mut k = Kernel::default();
-            k.fixes.stitch_solid_nests_cavities = fix;
             let mut b = crate::topology::brep::p3::new_brep(
                 &mut k,
                 crate::geom::tol::USE_DEFAULT,
@@ -2117,9 +2112,7 @@ mod tests {
             b
         };
         // the infinite region and the cavity are voids, between them the material
-        assert_eq!(void_count(&build(true)), 2);
-        // upstream: only the infinite region
-        assert_eq!(void_count(&build(false)), 1);
+        assert_eq!(void_count(&build()), 2);
     }
 
     /// (#2506) Four loose faces end on the z axis from the origin to (0, 0, 1): two half

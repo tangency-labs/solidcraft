@@ -15,7 +15,8 @@
 //! | [`Curve::local_point_solve`], [`PointSolveOptions`] | `SmCurve::LocalPointSolve`                     |
 //! | [`Curve::local_curve_solve`], [`local_curve_solve`] | `SmCurve::LocalCurveSolve`                     |
 //! | [`local_curve_intersect`], [`CurveIntersection`]  | `SmCurve::LocalCurveIntersect`                   |
-//! | `CurvePropertyGs::local_solve_branch` ([`GlobalSolve::local_solve`] of [`CurvePropertyGs`]) | `SmCurvePropertyGS::LocalSolve` |
+//! | [`CurvePropertyGs::local_solve_branch_with_note`], [`CurvePropertyNote`] | `SmCurvePropertyGS::LocalSolve` |
+//! | [`CurvePropertyGs::local_solve_branch`] ([`GlobalSolve::local_solve`] of [`CurvePropertyGs`]) | `SER(LocalSolve(...))` in `SmGlobalSolver::SolveIt` |
 //! | `EvalFunction for` [`FindPcExtremaEfo`]           | `SmFindPCExtremaEFO::Evaluate`                   |
 //! | [`BestLineFitEnfo`]                               | `SmBestLineFitENFO` (class, constructor, `HasIntervals`, `SetIntervals`, `Evaluate`) |
 //! | `EvalNFunctions for` [`CcTangentIntEnfo`]         | `SmCCTangentIntENFO::Evaluate` (co-ported, unit `curve.curve_p5`) |
@@ -53,13 +54,17 @@
 //!   `SmProjectedCurve`s of both curves and needs [`Curve`] operands: it is
 //!   [`Curve::local_curve_solve`]; the generic function returns `InvalidInput` for it.
 //!   Option vectors and values an operation dereferences without a `NULL` check are
-//!   `InvalidInput` when missing; upstream's `NER` checks stay `SM_ERR_NULL_POINTER`.
+//!   `InvalidInput` when missing; upstream's `NER` checks stay `SM_ERR_NULL_POINTER` (a ray
+//!   solve's missing options are [`CurveFailure::PointSolveOptionMissing`]: that status, the
+//!   caller's error, not a defect).
 //! - **Property solver.** `SmCurvePropertyGS::LocalSolve` reads the curve back from
 //!   the tree node's owner object; here the solver carries it
 //!   ([`CurvePropertyGs::curve`], `InvalidInput` when not set) and the solution
 //!   objects are the tree's owner handle. `return TRUE` from the `SmStatus` function
-//!   (a projected corner at the rotation origin) is status `1`
-//!   ([`SolidError::Upstream`]). A node without data is `SM_ERR_NULL_POINTER`
+//!   (a projected corner at the rotation origin) is not an error: the local solve
+//!   returns [`CurvePropertyNote::CornerOnViewAxis`] with its result, and the solver's
+//!   step ([`CurvePropertyGs::local_solve_branch`]) stops on it as `SolveIt`'s `SER`
+//!   does (a curve failure whose comparison status is `1`). A node without data is `SM_ERR_NULL_POINTER`
 //!   (`NER`); a node whose data is not a leaf span is `InvalidInput` (upstream casts
 //!   whatever `m_pData` holds).
 //! - **`SmFindPCExtremaEFO::Evaluate`** is implemented for [`Curve`] (it calls the
@@ -103,7 +108,11 @@ use crate::curve::curve::p4::{
 };
 use crate::curve::curve::p5::{find_additional_cp_guess, is_periodic, local_property_analysis};
 use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
-use crate::error::{ignore_or_pass_on, ignored, ignored_or_pass_on, passed_on, Result, SolidError};
+use crate::error::curve::{CurveFailure, PointSolveOption};
+use crate::error::{
+    ignore_or_pass_on, ignored, ignored_or_pass_on, passed_on, Failure, Result, SolidError,
+    SM_ERR_NULL_POINTER,
+};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::geom_utility::p1::line_closest_point;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -314,7 +323,10 @@ pub fn compute_crvs_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
         let domain = crv.natural_interval();
 
         if crv.is_linear(k, EFF_ZERO, false)?.linear && num_curves == 1 {
-            return Err(SolidError::sm_err(OP_NORMAL));
+            return Err(SolidError::curve(
+                OP_NORMAL,
+                CurveFailure::SingleLinearCurve,
+            ));
         }
 
         let mut t = 0.0;
@@ -380,7 +392,10 @@ fn compute_crvs_area_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
     for curve in curves {
         let domain = curve.natural_interval();
         if curve.is_linear(k, EFF_ZERO, false)?.linear && curves.len() == 1 {
-            return Err(SolidError::sm_err(OP_NORMAL));
+            return Err(SolidError::curve(
+                OP_NORMAL,
+                CurveFailure::SingleLinearCurve,
+            ));
         }
         let count = if curve.number_control_points()? == 2 {
             1_u32
@@ -858,7 +873,10 @@ impl EvalFunction for FindPcExtremaEfo<'_, Curve> {
         } else {
             while pv[1].length_squared() > 1.0e4 {
                 if pv[1].x.is_infinite() || pv[1].y.is_infinite() || pv[1].z.is_infinite() {
-                    return Err(SolidError::sm_err(OP_PC));
+                    return Err(SolidError::curve(
+                        OP_PC,
+                        CurveFailure::InfiniteTangent { t },
+                    ));
                 }
                 // (not upstream) an infinite tangent never scales down: see
                 // MAX_PC_SCALE_STEPS
@@ -888,7 +906,7 @@ impl EvalFunction for FindPcExtremaEfo<'_, Curve> {
                 out.found_answer = true;
                 return Ok(());
             }
-            return Err(SolidError::sm_err(OP_PC));
+            return Err(SolidError::curve(OP_PC, CurveFailure::ZeroTangent { t }));
         } // end zero tangent check
 
         let v_dot_v = sv.dot(sv);
@@ -943,7 +961,10 @@ impl EvalFunction for FindPcExtremaEfo<'_, Curve> {
             // for SM_SO_MINIMIZE = SUCCESS
             //     SM_SO_MAXIMIZE = FAILURE
             if self.solver_operation == SolverOperation::Maximize {
-                return Err(SolidError::sm_err(OP_PC));
+                return Err(SolidError::curve(
+                    OP_PC,
+                    CurveFailure::PointOnCurveWhenMaximising { t },
+                ));
             }
             out.found_answer = true;
             return Ok(());
@@ -1157,6 +1178,13 @@ pub struct PointSolveOptions<'a> {
     pub vectors: Option<&'a [Vec3]>,
 }
 
+/// A ray solve called without a required option (upstream `NER` on it): the caller's
+/// error, with the status the C++ reports.
+#[track_caller]
+fn missing_ray_option(option: PointSolveOption) -> SolidError {
+    SolidError::curve(OP_POINT, CurveFailure::PointSolveOptionMissing { option })
+}
+
 impl Curve {
     /// The parameter in `interval` near `guess` solving `op` for `test_point`
     /// (`SmCurve::LocalPointSolve`): the closest / farthest point or a normal foot
@@ -1171,8 +1199,8 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` for a ray without distance tolerance or vectors;
-    /// `InvalidInput` for an empty vector array or a missing target distance;
+    /// [`CurveFailure::PointSolveOptionMissing`] (status `SM_ERR_NULL_POINTER`, kind
+    /// `InvalidInput`) for a ray without distance tolerance or vectors; `InvalidInput` for an empty vector array or a missing target distance;
     /// `SM_ERR` when the at-distance solver fails; those of the evaluations and of
     /// `LocalPropertyAnalysis`. A failing Newton iteration of the other operations is no
     /// answer, as upstream.
@@ -1195,8 +1223,10 @@ impl Curve {
             // check inputs
             let dist_tol = opts
                 .distance_tolerance
-                .ok_or(SolidError::null_pointer(OP_POINT))?;
-            let vectors = opts.vectors.ok_or(SolidError::null_pointer(OP_POINT))?;
+                .ok_or_else(|| missing_ray_option(PointSolveOption::DistanceTolerance))?;
+            let vectors = opts
+                .vectors
+                .ok_or_else(|| missing_ray_option(PointSolveOption::Vectors))?;
             let vec0 = *vectors
                 .first()
                 .ok_or(SolidError::invalid_input(OP_POINT, "empty option vectors"))?;
@@ -1272,7 +1302,11 @@ impl Curve {
                 Ok(r) => r,
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 // some sort of error in solver
-                Err(_) => return Err(SolidError::sm_err(OP_POINT)),
+                Err(e) => {
+                    return Err(Failure::new(OP_POINT, CurveFailure::StageFailed)
+                        .caused_by(e)
+                        .into_error());
+                }
             };
             if r.found {
                 let t0 = r.x.first().copied().unwrap_or(0.0);
@@ -1948,6 +1982,34 @@ where
 
 // ---- SmCurvePropertyGS::LocalSolve ------------------------------------------------------
 
+/// A note [`CurvePropertyGs::local_solve_branch_with_note`] returns with its result. It is
+/// not a failure of the local solve: the caller decides whether to stop on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CurvePropertyNote {
+    /// For an angle property, a corner of the span's pseudo box projects onto the view
+    /// origin (within `SM_EFF_ZERO`), where it has no angle: the local solve ends there.
+    /// Upstream returns `TRUE` (status `1`) here.
+    CornerOnViewAxis,
+}
+
+impl CurvePropertyNote {
+    /// The error of a caller that stops on this note, as upstream's callers stop on the
+    /// status `1` (`SER`): a failure of the local solve whose comparison status
+    /// ([`SolidError::sm_status`]) is `1`.
+    #[must_use]
+    pub fn into_error(self) -> SolidError {
+        match self {
+            Self::CornerOnViewAxis => Failure::new(
+                OP_GS,
+                CurveFailure::Failed("a pseudo box corner projects onto the view origin"),
+            )
+            .with_status(1)
+            .into_error(),
+        }
+    }
+}
+
 impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
     /// `SmCurvePropertyGS::LocalSolve` on the curve leaf `branch[0]` (always returns
     /// `rbNeedsMoreSubdivision` false): for the angle properties the span is skipped
@@ -1958,14 +2020,37 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
     /// from the span middle (and its ends and quarters for the other properties) adds
     /// the solutions found, a span with three exact guesses becoming a range.
     ///
+    /// This is the solver's step ([`GlobalSolve::local_solve`]), which stops on the
+    /// note of [`CurvePropertyGs::local_solve_branch_with_note`] as upstream's
+    /// `SmGlobalSolver::SolveIt` stops on the status `1` (`SER`): the note's error
+    /// ([`CurvePropertyNote::into_error`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`CurvePropertyGs::local_solve_branch_with_note`], and its note's error.
+    pub fn local_solve_branch(&mut self, k: &Kernel, branch: &Branch) -> Result<bool> {
+        match self.local_solve_branch_with_note(k, branch)? {
+            (_, Some(note)) => Err(note.into_error()),
+            (needs_more_subdivision, None) => Ok(needs_more_subdivision),
+        }
+    }
+
+    /// [`CurvePropertyGs::local_solve_branch`] with its note on the success path: for
+    /// the angle properties, a pseudo box corner that projects onto the view origin ends
+    /// the local solve at once with [`CurvePropertyNote::CornerOnViewAxis`] (upstream
+    /// `return TRUE` from the `SmStatus` function), with no more subdivision.
+    ///
     /// # Errors
     ///
     /// `SM_ERR_NULL_POINTER` for a node without data, `InvalidInput` for a missing
     /// branch node, curve, option vector or value or a node that is not a curve
-    /// leaf; status `1` for a projected pseudo box corner at the origin of the angle
-    /// properties; those of the evaluations, `LocalPropertyAnalysis` and
+    /// leaf; those of the evaluations, `LocalPropertyAnalysis` and
     /// `sm_FindAdditionalCpGuess`.
-    pub fn local_solve_branch(&mut self, k: &Kernel, branch: &Branch) -> Result<bool> {
+    pub fn local_solve_branch_with_note(
+        &mut self,
+        k: &Kernel,
+        branch: &Branch,
+    ) -> Result<(bool, Option<CurvePropertyNote>)> {
         // init output
         let needs_more_subdivision = false;
 
@@ -1974,7 +2059,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
         let tree = self.base.tree(0)?;
         let curve_node = tree.node(curve_node_id)?;
         if matches!(curve_node.data, NodeData::None) {
-            return Err(SolidError::null_pointer(OP_GS));
+            return Err(SolidError::curve_stage_failed(OP_GS, SM_ERR_NULL_POINTER));
         }
         let bez_span = *tree.curve_span(curve_node)?;
         let owner = tree.owner_object()?;
@@ -2001,11 +2086,10 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
                 vec = o1.cross(vec).cross(o1); // Project to view plane
                 if vec.length_squared() < EFF_ZERO {
                     // (`return TRUE` from an SmStatus function)
-                    return Err(SolidError::Upstream {
-                        operation: OP_GS,
-                        code: 1,
-                        entity: None,
-                    });
+                    return Ok((
+                        needs_more_subdivision,
+                        Some(CurvePropertyNote::CornerOnViewAxis),
+                    ));
                 }
                 let vec = vec.unitize()?;
                 let cos_theta = property_angle(prop, o1, o2, vec)?;
@@ -2019,7 +2103,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
             if (min_cos_theta * min_cos_theta.abs()) + EFF_ZERO_SQRT
                 > self.base.best_answer_so_far_sq
             {
-                return Ok(needs_more_subdivision);
+                return Ok((needs_more_subdivision, None));
             }
         } // end angle cases
 
@@ -2027,7 +2111,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
         // if sIvl is not completely inside of m_crInterval
         let mut conts = bez_span.aux.conts;
         if ivl.are_disjoint(&self.interval, 0.0) {
-            return Ok(needs_more_subdivision);
+            return Ok((needs_more_subdivision, None));
         }
 
         if ivl.min() <= self.interval.min() {
@@ -2042,7 +2126,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
             ivl = ivl.intersect(&self.interval)?;
             // Check for zero length intervals
             if are_same(ivl.max(), ivl.min()) {
-                return Ok(needs_more_subdivision);
+                return Ok((needs_more_subdivision, None));
             }
         }
 
@@ -2119,7 +2203,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
                                         SortKey::ByFirstParameter,
                                         true,
                                     )?;
-                                    return Ok(needs_more_subdivision);
+                                    return Ok((needs_more_subdivision, None));
                                 }
                             } // end max interval value value check
 
@@ -2197,7 +2281,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
 
             // If we did not find a solution the first time then stop
             if this_ii == 0 && !found {
-                return Ok(needs_more_subdivision);
+                return Ok((needs_more_subdivision, None));
             }
             if !found {
                 continue; // If fail don't save answer
@@ -2241,7 +2325,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
                 set_param(&mut sol.end, 0, ivl.max())?;
                 sol.end.solution_value = sol.start.solution_value;
                 self.add_sorted_solution(&sol, SortKey::ByFirstParameter, true)?;
-                return Ok(needs_more_subdivision);
+                return Ok((needs_more_subdivision, None));
             }
 
             if matches!(
@@ -2263,7 +2347,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
         } // end iter every guess point
 
         // all done
-        Ok(needs_more_subdivision)
+        Ok((needs_more_subdivision, None))
     }
 }
 
@@ -2291,6 +2375,44 @@ mod tests {
             &Extent1d::from_min_max(a, b),
             &BoundedLineOptions::default(),
         ))
+    }
+
+    /// The curve property solver's status 1 (upstream `return TRUE`: a pseudo box corner
+    /// on the view axis of an angle property) comes back as
+    /// [`CurvePropertyNote::CornerOnViewAxis`], and the global solve stops on it with the
+    /// status 1 it returned before.
+    #[test]
+    fn issue_15020_the_corner_note_stops_the_global_solve_with_status_1() {
+        use crate::curve::curve::p7::PropertyAnalysisOptions;
+        use crate::curve::curve::CurvePropertyType;
+        use crate::geom::solution_array::OperandObject;
+        let k = Kernel::default();
+        // a line along the view direction: every pseudo box corner is on the view axis
+        let c = line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.0, 1.0);
+        let vecs = [Vec3::ZERO, Vec3::X, Vec3::Z];
+        let opts: PropertyAnalysisOptions<'_, OperandObject> = PropertyAnalysisOptions {
+            opt_vectors: &vecs,
+            ..PropertyAnalysisOptions::default()
+        };
+        let e = c
+            .global_property_analysis(
+                &k,
+                &Extent1d::from_min_max(0.0, 1.0),
+                CurvePropertyType::MinimizeDirectedAngle,
+                1e-6,
+                &opts,
+            )
+            .unwrap_err();
+        assert_eq!(e.sm_status(), Some(1));
+        assert_eq!(e.upstream_status(), Some(1));
+        assert_eq!(e.operation(), OP_GS);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert!(e.curve_failure().is_some());
+        assert_eq!(
+            CurvePropertyNote::CornerOnViewAxis.into_error(),
+            e,
+            "the solve stops with the note's error"
+        );
     }
 
     #[test]
@@ -2445,10 +2567,13 @@ mod tests {
         let zero_area = |r: Result<Vec3>| matches!(r, Err(SolidError::InvalidInput { .. }));
         assert!(zero_area(compute_crvs_normal(&k, &[])));
         assert!(zero_area(compute_crvs_normal(&k, &collinear)));
-        assert!(matches!(
-            compute_crvs_normal(&k, &[a]),
-            Err(SolidError::Upstream { code: SM_ERR, .. })
-        ));
+        let single = compute_crvs_normal(&k, &[a]).unwrap_err();
+        assert_eq!(
+            single.curve_failure(),
+            Some(&CurveFailure::SingleLinearCurve)
+        );
+        assert_eq!(single.upstream_status(), Some(SM_ERR));
+        assert!(single.is_status_answer());
     }
 
     /// The fork's be45e8d evaluates its samples with `SER(EvaluatePoint)`: a curve whose
@@ -2475,7 +2600,7 @@ mod tests {
         k.fixes.curve_loop_normal_from_area = true;
         assert!(matches!(
             compute_crvs_normal(&k, &curves),
-            Err(SolidError::Upstream { code: SM_ERR, .. })
+            Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
         ));
     }
 
@@ -2524,6 +2649,55 @@ mod tests {
         assert!((sol.start.parameters[0] - 0.5).abs() < 1e-8);
     }
 
+    /// A ray solve without its distance tolerance or its vectors is the caller's error, naming
+    /// the option left out, with the C++'s `NER` status: never a stage failure (a defect).
+    #[test]
+    fn a_ray_solve_without_an_option_names_it_and_is_no_defect() {
+        let k = &Kernel::default();
+        let c = hermite(
+            [0.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [1.0, -1.0, 0.0],
+        );
+        let ivl = c.natural_interval();
+        let dir = [Vec3::new(0.0, -1.0, 0.0)];
+        for op in [
+            SolverOperation::Rayfire,
+            SolverOperation::Signed3dDirectedMinimize,
+        ] {
+            for (opts, option) in [
+                (
+                    PointSolveOptions {
+                        vectors: Some(&dir),
+                        ..PointSolveOptions::default()
+                    },
+                    PointSolveOption::DistanceTolerance,
+                ),
+                (
+                    PointSolveOptions {
+                        distance_tolerance: Some(1e-6),
+                        ..PointSolveOptions::default()
+                    },
+                    PointSolveOption::Vectors,
+                ),
+            ] {
+                let e = c
+                    .local_point_solve::<()>(k, &ivl, op, Vec3::new(1.0, 2.0, 0.0), &opts, 0.4)
+                    .unwrap_err();
+                assert_eq!(
+                    e.curve_failure(),
+                    Some(&CurveFailure::PointSolveOptionMissing { option }),
+                    "{op:?}"
+                );
+                assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{op:?}");
+                assert!(!e.is_defect(), "{op:?} {option:?}");
+                assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+                assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+            }
+        }
+    }
+
     #[test]
     fn point_extrema_rejects_overflowed_hermite_tangent_without_scaling_forever() {
         let k = &Kernel::default();
@@ -2543,10 +2717,12 @@ mod tests {
             SolverOperation::Minimize,
         );
         let mut value = FunctionValue::default();
-        assert!(matches!(
-            evaluator.evaluate(0.25, &mut value, true),
-            Err(SolidError::Upstream { code: 1001, .. })
-        ));
+        let infinite = evaluator.evaluate(0.25, &mut value, true).unwrap_err();
+        assert_eq!(
+            infinite.curve_failure(),
+            Some(&CurveFailure::InfiniteTangent { t: 0.25 })
+        );
+        assert_eq!(infinite.upstream_status(), Some(1001));
         let (found, _): (bool, Solution<()>) = c
             .local_point_solve(
                 k,

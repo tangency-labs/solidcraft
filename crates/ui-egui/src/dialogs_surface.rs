@@ -229,7 +229,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
             let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
             vec![
                 SelInput::new("Profiles or curves", PROFILES | CURVES, true),
-                SelInput::new("Path", CURVES, true),
+                SelInput::new("Path", CURVES | EDGES, true),
                 crate::dialogs_sweep::direction_input(),
                 rail,
                 rail2,
@@ -580,11 +580,17 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             need(0, "profiles or curves to sweep")?;
             need(1, "the path")?;
             let mut p = sheet_picks(app, items(inputs, 0))?;
-            let path: Vec<String> = items(inputs, 1).curve_ids();
-            p["path_sketch"] = json!(
-                crate::dialogs::picks_sketch(app, items(inputs, 1), p["sketch"].as_u64()).ok_or("the path curves must be in one other sketch")?
-            );
-            p["path"] = json!(path);
+            // The path is a chain of a body's edges or the curves of a sketch (#2216).
+            if let Some((body, edges)) = crate::dialogs_sweep::edge_path(items(inputs, 1))? {
+                p["path_body"] = json!(body);
+                p["path_edges"] = json!(edges);
+            } else {
+                let path: Vec<String> = items(inputs, 1).curve_ids();
+                p["path_sketch"] = json!(
+                    crate::dialogs::picks_sketch(app, items(inputs, 1), p["sketch"].as_u64()).ok_or("the path curves must be in one other sketch")?
+                );
+                p["path"] = json!(path);
+            }
             crate::dialogs_sweep::params(app, opts, items(inputs, 2).first(), [items(inputs, 3), items(inputs, 4)], &mut p)?;
             ("surface.sweep", p)
         }
@@ -904,6 +910,8 @@ fn tool_sel(app: &SolveApp, plane: &PlaneRef, tool: Option<&FaceAt>) -> Option<S
 pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
     let s = &app.session;
     let edge = |p: &solidcraft_engine::doc::Position| crate::dialogs::edge_sel(s, p.0);
+    // Stored values the dialog shows no box for, sent back unchanged on OK.
+    let mut kept = Map::new();
     let (k, fill): (Surf, Vec<Vec<Sel>>) = match kind {
         FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric } => {
             let (pick, stored) = match axis {
@@ -930,14 +938,33 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             }
             return Some((Kind::Surface(k), ins, extra));
         }
-        FeatureKind::SurfaceSweep { sketch, profiles, curves, path_sketch, path, orientation, twist, scale, rails, rail_fit, .. } => {
+        FeatureKind::SurfaceSweep {
+            sketch,
+            profiles,
+            curves,
+            path_sketch,
+            path,
+            path_body,
+            path_edges,
+            orientation,
+            twist,
+            scale,
+            rails,
+            rail_fit,
+            ..
+        } => {
             let (opts, direction) = crate::dialogs_sweep::SweepOpts::of(orientation, twist, scale, *rail_fit, frame);
             let [rail, rail2] = crate::dialogs_sweep::rail_sels(rails, s.active_sketch);
             (
                 Surf::Sweep(opts),
                 vec![
                     sheet_sels(app, sketch.0, profiles.as_ref(), curves),
-                    path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect(),
+                    // The path is a chain of a body's edges or the curves of a sketch (#2216).
+                    // A body's edge is looked for on the body the path was picked on (#2216).
+                    match path_body {
+                        Some(body) => path_edges.iter().filter_map(|p| crate::dialogs::edge_sel_on(s, Some(body.0.as_str()), p.0)).collect(),
+                        None => path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect(),
+                    },
                     direction.into_iter().collect(),
                     rail,
                     rail2,
@@ -1194,17 +1221,30 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 vec![crate::dialogs::face_sel(s, face.point.0).into_iter().collect(), picked],
             )
         }
-        FeatureKind::SplitFace { faces, plane, tool, .. } => (
-            Surf::SplitFace,
-            vec![faces.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect(), tool_sel(app, plane, tool.as_ref()).into_iter().collect()],
-        ),
+        FeatureKind::SplitFace { faces, plane, tool, sketch, loops, .. } => {
+            // The dialog has no box for a sketch: a split by sketch curves keeps its sketch and
+            // `loops` as they were, so OK on the dialog does not turn it into a split by a plane.
+            if let Some(sketch) = sketch {
+                kept.insert("sketch".into(), json!(sketch.0));
+                if *loops {
+                    kept.insert("loops".into(), json!(true));
+                }
+            }
+            (
+                Surf::SplitFace,
+                vec![
+                    faces.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect(),
+                    tool_sel(app, plane, tool.as_ref()).into_iter().collect(),
+                ],
+            )
+        }
         _ => return None,
     };
     let mut ins = inputs(&k);
     for (inp, items) in ins.iter_mut().zip(fill) {
         inp.items = items;
     }
-    Some((Kind::Surface(k), ins, Map::new()))
+    Some((Kind::Surface(k), ins, kept))
 }
 
 #[cfg(test)]

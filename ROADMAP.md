@@ -21,7 +21,7 @@ scripts and AI agents can drive the same commands you use.
 - Sheet metal with flat patterns and DXF export, and a plastic-enclosure subset.
 - A Render workspace with GPU rendering, studio lighting, materials and image export
   (first release in 0.22.0).
-- Import and export of STEP, IGES, 3MF, STL, OBJ and DXF, and FreeCAD and Rhino files.
+- Import and export of STEP, IGES, 3MF, STL, OBJ and DXF, GLB export for viewers and renderers, and FreeCAD and Rhino files.
 - Autosave and crash recovery, and the browser build of the same app.
 
 The full list of commands is in [docs/features.md](docs/features.md). Release notes for each
@@ -590,7 +590,7 @@ completed drawings publish atomically. The browser still exports synchronously.
   use the sketch-normal direction for each selected profile, including To Object and curved
   target trimming, independently of the selected axis sign.
 - Cylindrical emboss/deboss wraps bounded orthogonal line profiles, including holes, concave
-  outlines and nested islands, onto complete exterior cylinders or coaxial sleeves with exact
+  outlines and nested islands, onto complete cylinders, outside or bores, or coaxial sleeves with exact
   radial walls. New features infer a unique eligible cylinder when the face field is empty;
   ambiguous targets require an explicit face. Saved target
   and author occurrence paths retain the chosen placements; missing/split faces refuse rather

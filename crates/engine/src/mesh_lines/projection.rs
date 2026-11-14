@@ -73,6 +73,13 @@ impl View {
         Ok(projected)
     }
 
+    /// Where the world origin lands in the view's right and up, so a drawing can be shifted to
+    /// put its zero there.
+    pub(crate) fn world_origin(&self) -> Result<Vec2, &'static str> {
+        let p = self.project(Vec3::new(0., 0., 0.))?;
+        Ok(Vec2::new(p.x, p.y))
+    }
+
     /// How far behind a surface a line must be to count as covered, in the depth `project` gives.
     pub(super) fn depth_eps(&self, eps: f64) -> f64 {
         self.perspective.map_or(eps, |distance| 1e-8 / distance)

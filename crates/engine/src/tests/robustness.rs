@@ -161,8 +161,8 @@ fn shell_of_a_body_in_two_pieces() {
     ]));
 }
 
-/// A shell thicker than a step under a notch would turn the cavity inside out: a clear "not
-/// supported yet" error instead of a failed boolean.
+/// A shell thicker than a step under a notch would turn the cavity inside out: refused with
+/// the reason (an edge of the offset closes to nothing) instead of a failed boolean.
 #[test]
 fn shell_thicker_than_a_step_says_so() {
     let mut s = Session::default();
@@ -173,7 +173,7 @@ fn shell_thicker_than_a_step_says_so() {
         s.execute(c, &p).unwrap();
     }
     let e = s.execute("solid.shell", &json!({"faces": [[18.75, 35.0, 2.5]], "thickness": 1.5})).unwrap_err();
-    assert!(e.to_string().contains("not supported yet"), "{e}");
+    assert!(e.to_string().contains("an edge of its offset closes to nothing"), "{e}");
 }
 
 fn total_volume(s: &Session) -> f64 {

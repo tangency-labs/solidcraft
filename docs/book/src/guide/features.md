@@ -159,8 +159,8 @@ angular placement when opened, edited or copied; creating another revolve uses t
 To Object follows that same direction for each selected profile, including curved target faces.
 Pick a target away from the axis so its angular position is defined.
 
-For cylindrical **Emboss**, select a supported exterior cylinder face and a tangent sketch
-profile. **Deboss** cuts radially into the wall. Orthogonal line profiles, including holes and
+For cylindrical **Emboss**, select a supported cylinder face (outside, or a bore) and a tangent sketch
+profile. **Deboss** cuts radially into the wall (outwards from a bore, which an Emboss raises towards the axis; a Deboss that would break through the outer wall is refused). Orthogonal line profiles, including holes and
 concave outlines, wrap with exact radial walls; the profile must stay clear of seams and ends.
 Complete cylinders and coaxial sleeves are supported. Capture pending component positions
 before applying. The feature stores the selected target and author occurrence paths, so edits
@@ -208,6 +208,20 @@ a Single hole is placed:
 The Hole dialog draws a section through the hole as its options make it (type, extents, drill
 point, tapped) and puts each size in a field beside the dimension it sets; hovering a field, or
 typing in it, lights its dimension.
+
+**Hole Tap Type** is **Simple** (type the diameter), **Clearance** (a hole a bolt passes
+through) or **Tapped** (a thread). With Clearance, pick the bolt **Size** (M1.6 to M64) and the
+**Fit** (Close, Normal or Loose): the hole takes the ISO 273 clearance diameter, shown in
+**Clearance diameter** as a default you can change, the way **Tap drill diameter** works for a
+tapped hole; the section shows the bolt's shank through the hole. Scripts use `clearance: "M4"`
+with `fit: "normal"` on `solid.hole`. The hole stores its diameter, not the bolt: **Edit Feature**
+opens it as a Simple hole of that diameter.
+
+With **Hole Type** Counterbore and Clearance, **Screw head** sizes the counterbore for a cap
+screw: a socket head (ISO 4762) or a button head (ISO 7380-1) of the bolt's size. It fills
+**Counterbore Ø** and **Counterbore depth** with the head's diameter and height plus 0.5 mm each
+side and below; change either to use your own. Scripts use `head: "ISO 4762"` with `clearance`
+on `solid.hole`.
 
 The **Thread** feature's **Hand** is **Right** (the default), **Left**, or **Both** (a right- and
 a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "left"` (or `"right"`,

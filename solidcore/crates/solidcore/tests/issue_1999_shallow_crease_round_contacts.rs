@@ -104,7 +104,6 @@ fn shallow_crease_round_contact_profiles() {
                         *k.fixes.flag_mut(name).unwrap() = true;
                     }
                 }
-                k.fixes.curve_check_zero_speed_tangent_end = true;
             }
             if profile == "all_fixes" {
                 k.fixes = UpstreamFixes::all();

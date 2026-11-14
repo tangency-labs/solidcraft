@@ -22,6 +22,7 @@ use crate::schema::motion::{
     FindLimitsResult, MotionListParams, MotionStudies, MotionStudyDeleteParams, MotionStudyDeleted, MotionStudyInfo, MotionStudyKeyInfo,
     MotionStudyParams, MotionStudySaved,
 };
+use crate::schema::motion_animation::{AnimationExported, ExportAnimationParams};
 use crate::schema::motion_play::{
     DriveReport, ExportParams, PartPose, PlayParams, Pose, StudyExport, StudyExported, StudyPlayed, StudySample, UnmovedJoint,
 };
@@ -67,6 +68,7 @@ const EXPLODE_LIST_CONTRACT: TypedContract<ExplodeListParams> = TypedContract::n
 const EXPLODE_DELETE_CONTRACT: TypedContract<ExplodeDeleteParams> = TypedContract::new();
 const PLAY_CONTRACT: TypedContract<PlayParams> = TypedContract::new();
 const EXPORT_CONTRACT: TypedContract<ExportParams> = TypedContract::new();
+const EXPORT_ANIMATION_CONTRACT: TypedContract<ExportAnimationParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("contact.enable_sets", "Enable Contact Sets", crate::checked!("contact.enable_sets", enable_sets))
@@ -138,8 +140,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPORT_CONTRACT)
         .output(output_schema_for::<StudyExported>)
         .params("study; samples? (default steps + 1); path? (.json or .csv) → occurrence positions per step (the design is not changed)"),
-    CommandSpec::new("motion.export_animation", "Export Motion Animation", animation::export).icon("export").noundo().params(
-        "study: id|name, or joint: id|name with from and to (degrees for angles, mm for distances, or expressions) and index?, or \
+    CommandSpec::new("motion.export_animation", "Export Motion Animation", crate::checked!("motion.export_animation", animation::export))
+        .icon("export")
+        .noundo()
+        .contract(&EXPORT_ANIMATION_CONTRACT)
+        .output(output_schema_for::<AnimationExported>)
+        .params(
+            "study: id|name, or joint: id|name with from and to (degrees for angles, mm for distances, or expressions) and index?, or \
          view: id|name (an exploded view, coming apart from the assembled placement) with back? (default false; true: back together \
          too, exploded at the middle frame of an odd count); path: a .gif file, or a folder for PNG frames (frame-0001.png, \
          frame-0002.png, …); samples? (frames, 2…1000; default the study's steps + 1, 100 for a joint, 41 for a view or 81 with \
@@ -149,7 +156,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          axes) - draws the study as it plays, the joint as it is driven or the view as it explodes, with the headless renderer → \
          path, format, frames, width, height, fps (GIF), bytes, renderer, stopped_at, stopped_by_loop, stopped_by_contact (the \
          design is not changed, nor its placements)",
-    ),
+        ),
     CommandSpec::new("motion.trace", "Motion Trace", crate::checked!("motion.trace", trace))
         .at("SOLID", "ASSEMBLE")
         .icon("trace")
@@ -640,7 +647,7 @@ fn closest(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 /// longer close: the values are moved from where they are toward `want` as far as they go. The
 /// `given` values (joint, index) are driven; in a closed loop the others follow. Returns the
 /// answer and the last solve.
-fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSet<(u64, usize)>) -> Result<(Value, joints::Solution)> {
+pub(super) fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSet<(u64, usize)>) -> Result<(Value, joints::Solution)> {
     drive_with_contact_within(s, want, given, false)
 }
 
@@ -1418,8 +1425,8 @@ fn centres(s: &Session) -> Vec<(u64, Vec3)> {
     for o in s.doc.occurrences.iter().filter(|o| o.parent == 0) {
         let mut bounds = Aabb3::EMPTY;
         for (_, b) in bodies.iter().filter(|(path, _)| path.first() == Some(&o.id)) {
-            if let Ok(m) = b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * 1e-2).max(1e-2))) {
-                bounds = bounds.union(&m.bounds());
+            if let Ok(bb) = b.exact_bounds() {
+                bounds = bounds.union(&bb);
             }
         }
         if !bounds.is_empty() {

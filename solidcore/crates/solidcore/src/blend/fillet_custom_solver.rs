@@ -672,11 +672,16 @@ fn initial_setup(
             &GlobalPointSolveOptions::<ObjectHandle>::default(),
         )?;
         if sols.len() != 1 {
-            return Err(SolidError::sm_err(op));
+            return Err(SolidError::blend_failed(
+                op,
+                "the point does not drop onto the other edge once",
+            ));
         }
         let mut t = sols
             .get(0)
-            .ok_or_else(|| SolidError::sm_err(op))?
+            .ok_or_else(|| {
+                SolidError::blend_failed(op, "the point does not drop onto the other edge once")
+            })?
             .start
             .param(0)?;
 
@@ -728,12 +733,14 @@ fn initial_setup(
             EFF_ZERO_SQ,
         )?;
         if sols.len() != 1 {
-            return Err(SolidError::sm_err(op));
+            return Err(SolidError::blend_failed(
+                op,
+                "the point does not drop onto the second surface once",
+            ));
         }
-        uv2 = sols
-            .first()
-            .copied()
-            .ok_or_else(|| SolidError::sm_err(op))?;
+        uv2 = sols.first().copied().ok_or_else(|| {
+            SolidError::blend_failed(op, "the point does not drop onto the second surface once")
+        })?;
     }
 
     let base1 = surface1.base_surface();
@@ -746,8 +753,13 @@ fn initial_setup(
 
     let (plane_orig, plane_normal) = if let Some((curve, t)) = fillet_edge {
         let pv = curve.evaluate(k, t, 1, true, true)?;
-        let p = pv.first().copied().ok_or_else(|| SolidError::sm_err(op))?;
-        let d = pv.get(1).copied().ok_or_else(|| SolidError::sm_err(op))?;
+        let p = pv
+            .first()
+            .copied()
+            .ok_or_else(|| SolidError::blend_failed(op, "the filleted edge has no point"))?;
+        let d = pv.get(1).copied().ok_or_else(|| {
+            SolidError::blend_failed(op, "the filleted edge has no first derivative")
+        })?;
         (p, d)
     } else {
         (pnt, normal1.cross(normal2))
@@ -832,7 +844,7 @@ fn drop_vector(k: &Kernel, base: &Surface, uv: Point2, v: Vec3, op: &'static str
     drop_vectors_at(k, base, uv, Side::Left, Side::Left, &[v])?
         .first()
         .copied()
-        .ok_or_else(|| SolidError::sm_err(op))
+        .ok_or_else(|| SolidError::blend_failed(op, "the vector does not drop onto the surface"))
 }
 
 // ---- SmEiffelTowerFS ------------------------------------------------------------------
@@ -932,7 +944,10 @@ impl EiffelTowerFs {
             )?
         };
         if !found {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the fillet cross section has no solution",
+            ));
         }
         let fs = &self.base;
         let base1 = surface1.base_surface();
@@ -1054,7 +1069,10 @@ impl EiffelTowerFs {
             || dug_len_sq < EFF_ZERO_SQ
             || dvg_len_sq < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "a base surface has a zero derivative",
+            ));
         }
 
         // get baseSurface SurfaceNormals at current solution points
@@ -1063,7 +1081,10 @@ impl EiffelTowerFs {
 
         // failure: zero length SurfaceNormal
         if nf.length_squared() < EFF_ZERO_SQ || ng.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "a base surface normal is zero",
+            ));
         }
 
         // get derivatives of SurfaceNormals
@@ -1213,12 +1234,14 @@ fn cross_section(
     let points =
         segment_segment_intersect(p3, p1, mid_p3s2, mid_p3s2 + bisector * radius, ANALYTIC_TOL)?;
     if points.len() != 1 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the bisector does not meet the segment once",
+        ));
     }
-    let p2 = points
-        .first()
-        .copied()
-        .ok_or_else(|| SolidError::sm_err(OP))?;
+    let p2 = points.first().copied().ok_or_else(|| {
+        SolidError::blend_failed(OP, "the bisector does not meet the segment once")
+    })?;
     let v2 = s2 - p2;
     let v3 = p3 - p2;
     // Compute center of the arc #2
@@ -1282,7 +1305,10 @@ impl EiffelTowerCrossSectionFsg {
         let knots2 = rail2.knots(None)?.0;
         let totals_cross_sections = knots.len();
         if totals_cross_sections != knots2.len() || totals_cross_sections != fillet_points.len() {
-            return Err(SolidError::sm_err(OP)); // Curves not compatible
+            return Err(SolidError::blend_failed(
+                OP,
+                "the rails and cross sections are not compatible",
+            )); // Curves not compatible
         }
 
         let mut cross_sections: Vec<BSplineCurve> = Vec::new();
@@ -1309,10 +1335,10 @@ impl EiffelTowerCrossSectionFsg {
 
         let first = cross_sections
             .first()
-            .ok_or_else(|| SolidError::sm_err(OP))?;
+            .ok_or_else(|| SolidError::blend_failed(OP, "there are no cross sections"))?;
         let last = cross_sections
             .last()
-            .ok_or_else(|| SolidError::sm_err(OP))?;
+            .ok_or_else(|| SolidError::blend_failed(OP, "there are no cross sections"))?;
 
         if sweep {
             // Create linear sweep surface
@@ -1371,7 +1397,9 @@ impl EiffelTowerCrossSectionFsg {
                     (first, ivl.min())
                 };
                 let pv = rail1.evaluate(t, 1, true, false)?;
-                let tangent = pv.get(1).copied().ok_or_else(|| SolidError::sm_err(OP))?;
+                let tangent = pv.get(1).copied().ok_or_else(|| {
+                    SolidError::blend_failed(OP, "the rail has no first derivative")
+                })?;
                 let gen_curve = gen_curve.copy();
                 let crv_ivl = gen_curve.natural_interval();
                 let mut surf =
@@ -1439,6 +1467,7 @@ impl EiffelTowerCrossSectionFsg {
                 d1.as_ref().map(SurfOfExtrusion::base),
             ]),
             degree: 3,
+            section_params: None,
         };
         BSplineSurface::create_skinned_surface(k, &cross_sections, opts)
     }
@@ -1532,7 +1561,10 @@ impl SecantConstantRadiusFs {
             )?
         };
         if !found {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the fillet cross section has no solution",
+            ));
         }
         let fs = &self.base;
         let base1 = surface1.base_surface();
@@ -1618,7 +1650,10 @@ impl SecantConstantRadiusFs {
         // get baseSurface1 surface normal and check its size
         let n = duf2.cross(dvf2);
         if n.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the first base surface's normal is zero",
+            ));
         }
         let orient0 = fs.orientation(0)?;
         let n = n.unitize()? * orient0;
@@ -1643,7 +1678,10 @@ impl SecantConstantRadiusFs {
         // get baseSurface surface normal value
         let n2 = dug2.cross(dvg2);
         if n2.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the second base surface's normal is zero",
+            ));
         }
         let orient1 = fs.orientation(1)?;
         let n2 = n2.unitize()? * orient1;
@@ -1665,7 +1703,10 @@ impl SecantConstantRadiusFs {
             || dug2_len_sq < EFF_ZERO_SQ
             || dvg2_len_sq < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "a base surface has a zero derivative",
+            ));
         }
 
         // set sDiff = distance between OffsetSurface1 and baseSurface2
@@ -2089,6 +2130,10 @@ fn constant_radius_setup_offset_values(
 /// are `blend.fillet_standard_solver_p1`'s, `IsKindOf` and `LoadInitialValues`
 /// `_p2`'s, so none falls through to the base.
 impl FilletSolverOps for ConstantRadiusAssistedFs {
+    fn uses_constant_offset_equations(&self) -> bool {
+        true
+    }
+
     fn solver(&self) -> &FilletSolver {
         &self.solver
     }
@@ -2324,6 +2369,7 @@ mod tests {
         let mut fs = assisted_parallel_planes();
         let mut distance = -17.0;
         let ops: &mut dyn FilletSolverOps = &mut fs;
+        assert!(ops.uses_constant_offset_equations());
         assert_eq!(ops.jacobian_size().expect("size"), 4);
         assert!(!ops.offset_radii_can_change().expect("fixed radii"));
         assert_eq!(
@@ -2341,6 +2387,14 @@ mod tests {
             .expect("assisted type"));
         assert_eq!(fs.surface(0).expect("first rail").offset_distance(), 1.0);
         assert_eq!(fs.surface(1).expect("second rail").offset_distance(), -2.0);
+    }
+
+    #[test]
+    fn custom_constraints_do_not_inherit_affine_offset_equations() {
+        let tower = EiffelTowerFs::new(assisted_parallel_planes(), 0.5);
+        let secant = SecantConstantRadiusFs::new(assisted_parallel_planes(), 0.5);
+        assert!(!tower.uses_constant_offset_equations());
+        assert!(!secant.uses_constant_offset_equations());
     }
 
     #[test]

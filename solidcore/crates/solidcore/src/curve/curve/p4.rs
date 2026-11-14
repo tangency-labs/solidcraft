@@ -1373,7 +1373,10 @@ impl<'a, C: CurveEvaluate + ?Sized> CurvePropertyEfo<'a, C> {
     /// The option vectors after upstream's `NULL` check (`SER(SM_ERR)`).
     fn checked_vec(&self, i: usize) -> Result<Vec3> {
         if self.opt_vectors.is_none() {
-            return Err(SolidError::sm_err(OP_EFO));
+            return Err(SolidError::curve_failed(
+                OP_EFO,
+                "the property function has no option vectors",
+            ));
         }
         self.vec(i)
     }
@@ -1388,8 +1391,9 @@ impl<'a, C: CurveEvaluate + ?Sized> CurvePropertyEfo<'a, C> {
 
     /// The property value after upstream's `NULL` check (`SER(SM_ERR)`).
     fn checked_value(&self) -> Result<f64> {
-        self.property_value
-            .ok_or_else(|| SolidError::sm_err(OP_EFO))
+        self.property_value.ok_or_else(|| {
+            SolidError::curve_failed(OP_EFO, "the property function has no property value")
+        })
     }
 
     /// `m_crCurve.Evaluate(dT, n, TRUE, sC, non_zero)` into four entries.
@@ -1401,7 +1405,8 @@ impl<'a, C: CurveEvaluate + ?Sized> CurvePropertyEfo<'a, C> {
 impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
     // `signal_errors` only chooses whether upstream prints the error.
     fn evaluate(&mut self, t: f64, out: &mut FunctionValue, _signal_errors: bool) -> Result<()> {
-        let err = || SolidError::sm_err(OP_EFO);
+        let err =
+            || SolidError::curve_failed(OP_EFO, "the property function cannot be evaluated there");
 
         // init output
         out.f = 0.0;
@@ -1963,11 +1968,18 @@ impl<'a, C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> CcTangentIntEnf
 
         // if we have a zero length tangent then we must fail
         if tan_len_sq2 < EFF_ZERO || tan_len_sq1 < EFF_ZERO {
-            return Err(SolidError::sm_err(OP_TAN));
+            return Err(SolidError::curve_failed(
+                OP_TAN,
+                "a curve has a zero-length tangent",
+            ));
         }
 
-        let ufp = pvv1[1].unitize().map_err(|_| SolidError::sm_err(OP_TAN))?;
-        let ugp = pvv2[1].unitize().map_err(|_| SolidError::sm_err(OP_TAN))?;
+        let ufp = pvv1[1]
+            .unitize()
+            .map_err(|_| SolidError::curve_failed(OP_TAN, "a curve's tangent does not unitize"))?;
+        let ugp = pvv2[1]
+            .unitize()
+            .map_err(|_| SolidError::curve_failed(OP_TAN, "a curve's tangent does not unitize"))?;
         let ufpp = pvv1[1].unitized_derivative(pvv1[2]);
         let ugpp = pvv2[1].unitized_derivative(pvv2[2]);
         let gap_vec = pvv1[0] - pvv2[0];
@@ -2225,7 +2237,10 @@ impl<C: CurveEvaluate + ?Sized> EvalNFunctions for CpDistAtEnfo<'_, C> {
 
         // if we have a zero length tangent then we must fail
         if tan_len_sq1 < EFF_ZERO {
-            return Err(SolidError::sm_err(OP_DIST_AT));
+            return Err(SolidError::curve_failed(
+                OP_DIST_AT,
+                "the curve has a zero-length tangent",
+            ));
         }
 
         // gap = C(s) - TestPoint

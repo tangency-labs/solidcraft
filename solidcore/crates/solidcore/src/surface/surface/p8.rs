@@ -74,9 +74,9 @@ use crate::curve::curve::p5::CurveMemoKey;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::line::Line;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{
     ignore_or_pass_on, ignore_status, ignored, ignored_or_pass_on, passed_on, Result, SolidError,
-    SM_ERR_INVALID_INPUT,
 };
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -471,6 +471,205 @@ fn boundary_intersections(
 
 // ---- SmSurface members ------------------------------------------------------------------------
 
+/// Not upstream: a cone (a cylinder is a cone of semi-angle 0) or a sphere as the points
+/// at distance `|radius(p)|` from its axis (from its centre for a sphere), the radius
+/// affine in the height along the axis.
+#[derive(Clone, Copy)]
+struct Revolved {
+    /// A point of the axis, the sphere's centre.
+    origin: Point3,
+    /// The unit axis; `None` for a sphere.
+    axis: Option<Vec3>,
+    /// The radius at `origin`.
+    radius: f64,
+    /// The radius's change per unit of height along `axis` (0 for a sphere).
+    slope: f64,
+}
+
+impl Revolved {
+    /// The cone's axis, radius and slope.
+    fn cone(c: &crate::surface::cone::p1::Cone) -> Self {
+        Self {
+            origin: c.rev.position.origin(),
+            axis: Some(c.rev.position.z_axis()),
+            radius: c.base_radius(),
+            slope: c.tan_semi_angle(),
+        }
+    }
+
+    /// The sphere of centre and radius `ball`.
+    const fn ball(ball: (Point3, f64)) -> Self {
+        Self {
+            origin: ball.0,
+            axis: None,
+            radius: ball.1,
+            slope: 0.0,
+        }
+    }
+
+    /// The part of `v` across the axis (all of it for a sphere).
+    fn across(&self, v: Vec3) -> Vec3 {
+        self.axis.map_or(v, |a| v - a * v.dot(a))
+    }
+
+    /// The radius at the height of `p`.
+    fn radius_at(&self, p: Point3) -> f64 {
+        self.radius
+            + self
+                .axis
+                .map_or(0.0, |a| self.slope * (p - self.origin).dot(a))
+    }
+}
+
+/// Not upstream: an upper bound on the distance from any point of either surface inside
+/// `region` to the other surface, from the definitions alone (no sampling). NaN or
+/// infinite where it cannot bound: an undefined region, a region reaching an axis (or a
+/// centre), or a radius changing sign in it (a cone's apex).
+///
+/// With `d_x(p)` the distance from `p` to the axis of `x` (to its centre) and `r_x(p)` its
+/// radius at `p`'s height, a point of `a` has `d_a = |r_a|`, and its distance to `b` is at
+/// most `|d_b - |r_b||` (the generator of `b` in the half plane through `p` is part of `b`,
+/// and the gap along the radius is at least the gap to that line). On `a` that is
+/// `|G + |r_a| - |r_b||` with `G = d_b - d_a`. Over the box with centre `c`:
+/// - `|r_a| - |r_b|` is affine where both radii keep their signs, so `|G(c) + |r_a| - |r_b||`
+///   is convex and largest at a corner.
+/// - `G(p) - G(c)` is at most `L · e_a + sin θ · e` (mean value theorem), with `e` the largest
+///   corner distance from `c`, `e_a` the largest across `a`'s axis, `θ` the angle between
+///   the axes and `L` a bound on `|u_b - u_a|`, the difference of the unit radial directions
+///   (`∇d_x = u_x`): `|u_b - u_a| ≤ 2 |w| / ρ` for the radial vectors' difference `w` (affine
+///   in `p`, at most `|w(c)| + sin θ · e`) and `ρ`, the larger lower bound on the two radial
+///   distances in the box; both must be positive (`e_b` may stand for `e_a`).
+///
+/// The bound is symmetric in `a` and `b`. Two cylinders through the same points whose axes
+/// part by `δ` stay within `≈ δ · s / R` of each other over a patch of width `s` at radius
+/// `R`.
+fn revolved_separation_bound(a: Revolved, b: Revolved, region: &Extent3d) -> f64 {
+    if !region.is_defined() {
+        return f64::NAN;
+    }
+    let c = region.mid();
+    let corners = region.corners();
+    let (qa, qb) = (a.across(c - a.origin), b.across(c - b.origin));
+    let (mut e, mut e_a, mut e_b) = (0.0_f64, 0.0_f64, 0.0_f64);
+    for &p in &corners {
+        let v = p - c;
+        e = e.max(v.length());
+        e_a = e_a.max(a.across(v).length());
+        e_b = e_b.max(b.across(v).length());
+    }
+    let sin_theta = match (a.axis, b.axis) {
+        (Some(x), Some(y)) => x.cross(y).length(),
+        _ => 0.0,
+    };
+    // both radial directions are defined over the whole box
+    let (rho_a, rho_b) = (qa.length() - e_a, qb.length() - e_b);
+    if rho_a.is_nan() || rho_b.is_nan() || rho_a <= 0.0 || rho_b <= 0.0 {
+        return f64::NAN;
+    }
+    let rho = rho_a.max(rho_b);
+    let lip = 2.0 * ((qb - qa).length() + sin_theta * e) / rho;
+    let g = qb.length() - qa.length();
+    // the radii's signs at the centre hold at every corner, or there is no bound
+    let (sa, sb) = (a.radius_at(c).signum(), b.radius_at(c).signum());
+    let mut at_corners = 0.0_f64;
+    for &p in &corners {
+        let (ra, rb) = (a.radius_at(p) * sa, b.radius_at(p) * sb);
+        if ra.is_nan() || rb.is_nan() || ra <= 0.0 || rb <= 0.0 {
+            return f64::NAN;
+        }
+        at_corners = at_corners.max((g + ra - rb).abs());
+    }
+    at_corners + lip * e_a.min(e_b) + sin_theta * e
+}
+
+/// Not upstream: the most boxes [`revolved_within`] reads before it gives up.
+const REVOLVED_MAX_BOXES: usize = 256;
+
+/// Not upstream: whether the box surely holds no point within `tol` of the surface: the
+/// distances from its points to the axis (the centre) and the radii at their heights do not
+/// overlap. A NaN anywhere answers no (the box is kept).
+fn revolved_misses(s: Revolved, region: &Extent3d, tol: f64) -> bool {
+    let c = region.mid();
+    let q = s.across(c - s.origin).length();
+    let mut reach = 0.0_f64;
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for p in region.corners() {
+        let (across, r) = (s.across(p - c).length(), s.radius_at(p));
+        if across.is_nan() || r.is_nan() {
+            return false;
+        }
+        reach = reach.max(across);
+        lo = lo.min(r);
+        hi = hi.max(r);
+    }
+    // |r| over the box: the radius is affine, so it runs between its corner values
+    let (r_lo, r_hi) = if lo > 0.0 {
+        (lo, hi)
+    } else if hi < 0.0 {
+        (-hi, -lo)
+    } else {
+        (0.0, hi.max(-lo))
+    };
+    (q - reach).max(0.0) > r_hi + tol || q + reach < r_lo - tol
+}
+
+/// Not upstream: whether the surfaces `a` and `b` stay within `tol` of each other at every
+/// point of either inside `region`. The box is halved across the axes (along the side the
+/// surfaces vary most over) until [`revolved_separation_bound`] is within `tol` on each part
+/// that may hold a point of either surface (not [`revolved_misses`]); at most
+/// [`REVOLVED_MAX_BOXES`] boxes are read, and a part still undecided then answers no. A part
+/// holding a point of one surface farther than `tol` from the other never passes, as the
+/// bound is never below the separation it bounds.
+fn revolved_within(a: Revolved, b: Revolved, tol: f64, region: &Extent3d) -> bool {
+    if !region.is_defined() || region.has_negative_volume() {
+        return false;
+    }
+    let mut todo = vec![*region];
+    let mut read = 0_usize;
+    while let Some(part) = todo.pop() {
+        read += 1;
+        if read > REVOLVED_MAX_BOXES {
+            return false;
+        }
+        if revolved_misses(a, &part, tol) && revolved_misses(b, &part, tol) {
+            continue;
+        }
+        // a NaN bound is no bound: the part is halved
+        let bound = revolved_separation_bound(a, b, &part);
+        let undecided = bound.is_nan() || bound > tol;
+        if !undecided {
+            continue;
+        }
+        // halve the side whose length counts most across the axes
+        let (min, max) = (part.min(), part.max());
+        let mut best = (0_usize, 0.0_f64);
+        for i in 0..3 {
+            let mut unit = Vec3::new(0.0, 0.0, 0.0);
+            if let Ok(x) = unit.component_mut(i) {
+                *x = 1.0;
+            }
+            let weight = (part.max_at(i) - part.min_at(i))
+                * a.across(unit).length().max(b.across(unit).length());
+            if weight > best.1 {
+                best = (i, weight);
+            }
+        }
+        if best.1.is_nan() || best.1 <= tol {
+            return false;
+        }
+        let half = 0.5 * (part.min_at(best.0) + part.max_at(best.0));
+        let (mut upper_min, mut lower_max) = (min, max);
+        for (point, value) in [(&mut upper_min, half), (&mut lower_max, half)] {
+            if let Ok(x) = point.component_mut(best.0) {
+                *x = value;
+            }
+        }
+        todo.push(Extent3d::from_points(min, lower_max));
+        todo.push(Extent3d::from_points(upper_min, max));
+    }
+    true
+}
+
 impl Surface {
     /// The interior knots of both directions where the surface continuity is at most
     /// `max_continuity` (exactly, with `at_continuity`): `(u knots, v knots)`
@@ -495,14 +694,15 @@ impl Surface {
             // note: can't say knots.len() - 1
             let mut i = 1;
             while i + 1 < knots.len() {
-                let c = continuities
-                    .get(i)
-                    .copied()
-                    .ok_or(SolidError::sm_err(OP_KNOTS))?;
+                let c = continuities.get(i).copied().ok_or_else(|| {
+                    SolidError::surface_failed(OP_KNOTS, "a knot has no continuity")
+                })?;
                 if (!at_continuity && (c as i32) <= (max_continuity as i32))
                     || (at_continuity && c == max_continuity)
                 {
-                    out.push(knots.get(i).copied().ok_or(SolidError::sm_err(OP_KNOTS))?);
+                    out.push(knots.get(i).copied().ok_or_else(|| {
+                        SolidError::surface_failed(OP_KNOTS, "a continuity has no knot")
+                    })?);
                 }
                 i += 1;
             }
@@ -548,6 +748,12 @@ impl Surface {
     /// - Torus: coaxial, centres and both radii within `tol_3d`. A torus whose major
     ///   radius is within `tol_3d` of 0 is the sphere of its minor radius and is
     ///   compared with spheres as such.
+    ///
+    /// Two cones, or two spheres, that fail that comparison are still the same surface
+    /// inside `region` when an enclosed bound on their separation over the parts of
+    /// `region` that may hold them keeps them within `tol_3d` there (not upstream): two arcs drawn through the same end points about centres a little apart
+    /// (cylinders whose axes part by 8.4e-5) stay within 1e-10 of each other over the
+    /// sliver they share, though not over their whole circles.
     #[must_use]
     pub fn same_analytic_surface(
         &self,
@@ -572,7 +778,12 @@ impl Surface {
             (SurfaceKind::Cone(a), SurfaceKind::Cone(b)) => {
                 let (pa, pb) = (&a.rev.position, &b.rev.position);
                 if !pa.are_coaxial(pb, tol, reach) {
-                    return Some(false);
+                    return Some(revolved_within(
+                        Revolved::cone(a),
+                        Revolved::cone(b),
+                        tol,
+                        region,
+                    ));
                 }
                 // The second cone on the first's axis: its radius at the first's origin
                 // and its slope per unit of the first's height.
@@ -600,7 +811,11 @@ impl Surface {
                         .iter()
                         .all(|h| ((r0 + s0 * h) - (r + s * h)).abs() <= tol)
                 };
-                Some(close(radius, slope) || close(-radius, -slope))
+                Some(
+                    close(radius, slope)
+                        || close(-radius, -slope)
+                        || revolved_within(Revolved::cone(a), Revolved::cone(b), tol, region),
+                )
             }
             (SurfaceKind::Torus(a), SurfaceKind::Torus(b)) => {
                 let (pa, pb) = (&a.base.position, &b.base.position);
@@ -620,8 +835,32 @@ impl Surface {
             }
             // A sphere against a sphere or a hole-less torus; any other pair is left to the
             // caller.
-            _ => ball(self).zip(ball(other)).map(|(x, y)| same_ball(x, y)),
+            _ => ball(self).zip(ball(other)).map(|(x, y)| {
+                same_ball(x, y)
+                    || revolved_within(Revolved::ball(x), Revolved::ball(y), tol, region)
+            }),
         }
+    }
+
+    /// Not upstream: whether `other` is of another kind than this surface among plane, cone
+    /// (a cylinder is a cone of semi-angle 0), sphere and torus. Two such surfaces share no
+    /// region: where they touch tangentially they part as the square of the distance from
+    /// the contact, and they count as one only over a patch on which they stay within the
+    /// tolerance (a sphere cap thinner than it on a plane), which is a distance for the
+    /// caller to measure, never a property of their directions at the contact. `false` for
+    /// two surfaces of one kind ([`Surface::same_analytic_surface`] compares those), for a
+    /// kind with no definition to compare, and for a sphere against a torus (a torus with no
+    /// hole is a sphere).
+    #[must_use]
+    pub fn is_other_analytic_kind(&self, other: &Self) -> bool {
+        // plane, cone, then the two a torus with no hole joins
+        let rank = |s: &Self| match s.kind() {
+            SurfaceKind::Plane(_) => Some(0_u8),
+            SurfaceKind::Cone(_) => Some(1),
+            SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => Some(2),
+            _ => None,
+        };
+        rank(self).zip(rank(other)).is_some_and(|(a, b)| a != b)
     }
 
     /// `SmSurface::CoincidenceCheck` (the base body): a plane `other` runs its own
@@ -675,7 +914,10 @@ impl Surface {
         if domain0.size().length_squared() < EFF_ZERO_SQ
             || domain1.size().length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP_COINC));
+            return Err(SolidError::surface_failed(
+                OP_COINC,
+                "a surface has an empty domain",
+            ));
         }
 
         // Check bounding boxes (statuses ignored; passed on with the opt-in fix,
@@ -1142,7 +1384,10 @@ impl Surface {
         let mut def = if let Some(d) = opt_ds_def {
             let mut def = *d;
             if !def.is_from_surface_boundary_curve() {
-                return Err(SolidError::sm_err(OP_BLEND));
+                return Err(SolidError::surface_failed(
+                    OP_BLEND,
+                    "the blend definition is not from a surface boundary curve",
+                ));
             }
             def.tangency_type = TangencyType::DirToReferenceCurve;
             def.start_angle_deg = 0.0; // no rotations about boundary curves wanted
@@ -1246,7 +1491,12 @@ impl Surface {
             }
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // a NULL blend surface
-            Err(_) => return Err(SolidError::sm_err(OP_BLEND)),
+            Err(_) => {
+                return Err(SolidError::surface_failed(
+                    OP_BLEND,
+                    "the blend surface could not be made",
+                ))
+            }
         };
         Ok(Self::from(blend))
     }
@@ -1274,7 +1524,7 @@ impl Surface {
         match cache.get_tree(k) {
             Ok(_) => Ok(cache),
             Err(e) if e.is_unported_or_cancelled() => Err(e),
-            Err(_) => Err(SolidError::null_pointer(op)),
+            Err(_) => Err(SolidError::surface_missing(op, "the surface cache's tree")),
         }
     }
 
@@ -1288,7 +1538,7 @@ impl Surface {
         let mut cache = match get_surface_cache::<O>(k, self, handle) {
             Ok(c) => c,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::null_pointer(op)),
+            Err(_) => return Err(SolidError::surface_missing(op, "the surface's cache")),
         };
         // the solves' GetTree (NER): a reused cache whose tree is not built yet
         // (the surface's cache slot) builds it now
@@ -1715,11 +1965,10 @@ impl Surface {
         // check input - LineVector must be NonZero
         // (`SER(SM_ERR_INVALID_INPUT)`: the exact status, which callers may ignore)
         if line_vector.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::Upstream {
-                operation: OP_LINE,
-                code: SM_ERR_INVALID_INPUT,
-                entity: None,
-            });
+            return Err(SolidError::surface(
+                OP_LINE,
+                SurfaceFailure::InvalidValue("the line direction is the zero vector"),
+            ));
         }
 
         // init output
@@ -1737,7 +1986,7 @@ impl Surface {
                 owned = match source.build(k) {
                     Ok(c) => c,
                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    Err(_) => return Err(SolidError::null_pointer(OP_LINE)),
+                    Err(_) => return Err(SolidError::surface_missing(OP_LINE, "the face's cache")),
                 };
                 face_cache = Some(source);
                 // the face's source ran the trimmed cache's own GetTree: the base
@@ -1747,7 +1996,7 @@ impl Surface {
                 match held.as_deref_mut() {
                     Some(c) if has_tree => &*c,
                     Some(c) => Self::held_cache(k, c, OP_LINE)?,
-                    None => return Err(SolidError::null_pointer(OP_LINE)),
+                    None => return Err(SolidError::surface_missing(OP_LINE, "the face's cache")),
                 }
             }
             LineCacheSource::Caller(c) => {
@@ -1759,7 +2008,9 @@ impl Surface {
                 match held.as_deref_mut() {
                     Some(c) if ready => &*c,
                     Some(c) => Self::held_cache(k, c, OP_LINE)?,
-                    None => return Err(SolidError::null_pointer(OP_LINE)),
+                    None => {
+                        return Err(SolidError::surface_missing(OP_LINE, "the surface's cache"))
+                    }
                 }
             }
             LineCacheSource::Fresh => {
@@ -1800,8 +2051,12 @@ impl Surface {
         let face_queries = context
             .as_deref()
             .and_then(SurfaceSolveContext::face_queries);
-        let tree = cache.tree().ok_or(SolidError::null_pointer(OP_LINE))?;
-        let top = tree.top_node().ok_or(SolidError::null_pointer(OP_LINE))?;
+        let tree = cache
+            .tree()
+            .ok_or_else(|| SolidError::surface_missing(OP_LINE, "the cache's tree"))?;
+        let top = tree
+            .top_node()
+            .ok_or_else(|| SolidError::surface_missing(OP_LINE, "the tree's top node"))?;
         let tree_box = tree.node(top)?.bbox;
 
         // scale LineVec so that its length is about 1 to improve solution tolerances
@@ -1842,7 +2097,9 @@ impl Surface {
         )?;
         // restore the original scaling to solution parameters
         for ii in 0..sols.len() {
-            let sol = sols.get_mut(ii).ok_or(SolidError::null_pointer(OP_LINE))?;
+            let sol = sols
+                .get_mut(ii)
+                .ok_or_else(|| SolidError::surface_missing(OP_LINE, "the solution"))?;
             *sol.start.param_mut(0)? /= scale;
             if sol.solution_type == SolutionType::RangeOfValues {
                 *sol.end.param_mut(0)? /= scale;
@@ -2229,7 +2486,10 @@ impl Surface {
                     if last_end.param(0)? < curr_start.param(0)? {
                         last_sol.end = curr_sol.end;
                         if last_sol.start.param(0)? > last_sol.end.param(0)? {
-                            return Err(SolidError::sm_err(OP_LINE));
+                            return Err(SolidError::surface_failed(
+                                OP_LINE,
+                                "a merged solution interval is reversed",
+                            ));
                         }
                     }
                 } else {
@@ -2427,7 +2687,9 @@ impl Surface {
 
             // set output values
             for ii in 0..sols.len() {
-                let sol = sols.get_mut(ii).ok_or(SolidError::null_pointer(OP_CURVE))?;
+                let sol = sols
+                    .get_mut(ii)
+                    .ok_or_else(|| SolidError::surface_missing(OP_CURVE, "the solution"))?;
                 sol.num_objects = 2;
                 sol.objects[0] = curve_handle;
                 sol.objects[1] = surface_handle;
@@ -2446,8 +2708,13 @@ impl Surface {
             if curve.is_line(k, 10, EFF_ZERO)?.is_some() {
                 // get Line value at param=0.0 avoiding interval boundary problems
                 let pv = curve.evaluate(k, interval.min(), 1, true, false)?;
-                let p0 = pv.first().copied().ok_or(SolidError::sm_err(OP_CURVE))?;
-                let d1 = pv.get(1).copied().ok_or(SolidError::sm_err(OP_CURVE))?;
+                let p0 = pv
+                    .first()
+                    .copied()
+                    .ok_or_else(|| SolidError::surface_failed(OP_CURVE, "the line has no point"))?;
+                let d1 = pv.get(1).copied().ok_or_else(|| {
+                    SolidError::surface_failed(OP_CURVE, "the line has no direction")
+                })?;
                 let line_point = p0 - interval.min() * d1;
 
                 // pass call to global surface/line intersect
@@ -2480,7 +2747,9 @@ impl Surface {
 
                 // for every solution set the object values
                 for ii in 0..sols.len() {
-                    let sol = sols.get_mut(ii).ok_or(SolidError::null_pointer(OP_CURVE))?;
+                    let sol = sols
+                        .get_mut(ii)
+                        .ok_or_else(|| SolidError::surface_missing(OP_CURVE, "the solution"))?;
                     sol.num_objects = 2;
                     sol.objects[0] = curve_handle;
                     sol.objects[1] = surface_handle;
@@ -2632,16 +2901,16 @@ impl Surface {
             .and_then(SurfaceSolveContext::face_queries);
         let surface_tree = surface_cache
             .tree()
-            .ok_or(SolidError::null_pointer(OP_CURVE))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_CURVE, "the surface cache's tree"))?;
         let curve_cache =
             match crate::curve::curve::p5::make_curve_cache::<O>(k, curve, curve_handle) {
                 Ok(c) => c,
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => return Err(SolidError::null_pointer(OP_CURVE)),
+                Err(_) => return Err(SolidError::surface_missing(OP_CURVE, "the curve's cache")),
             };
         let curve_tree = curve_cache
             .tree()
-            .ok_or(SolidError::null_pointer(OP_CURVE))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_CURVE, "the curve cache's tree"))?;
 
         // instance the Solver
         let mut gs = super::p1::CsiGlobalSolver::new(
@@ -2741,8 +3010,10 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
             .get(1)
             .copied()
             .flatten()
-            .ok_or(SolidError::null_pointer(OP_SP))?;
-        let cache = self.surface_cache.ok_or(SolidError::null_pointer(OP_SP))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_SP, "the branch's surface patch"))?;
+        let cache = self
+            .surface_cache
+            .ok_or_else(|| SolidError::surface_missing(OP_SP, "the surface cache"))?;
         let patch = cache.patch(surface_id)?.clone();
         let test_pnt = point_node.bbox.min();
         let tree1 = self.base.tree(1)?;
@@ -3019,7 +3290,10 @@ impl Surface {
             self.find_degen_param_for_direction(k, sing_uv, diff_vec, true, sing_dir, tol)?;
         if !degen.converged {
             // Probably out of bounds (SM_TR_OUT_OF_BOUNDS / SM_TR_UNABLE_TO_CONVERGE).
-            return Err(SolidError::sm_err(OP_INVERT));
+            return Err(SolidError::surface_failed(
+                OP_INVERT,
+                "the degenerate parameter toward the point did not converge",
+            ));
         }
         sing_uv = degen.uv;
 
@@ -3136,7 +3410,10 @@ impl Surface {
 
         // Error if zero line vector.
         if line_vector.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::sm_err(OP_LOCAL_LINE));
+            return Err(SolidError::surface_failed(
+                OP_LOCAL_LINE,
+                "the line direction is the zero vector",
+            ));
         }
 
         let mut uv = uv_domain.clamp_point(uv_guess);
@@ -3150,10 +3427,12 @@ impl Surface {
         let pvv = |s: &Self, uv: Point2| -> Result<(Vec3, Vec3, Vec3)> {
             let m = s.evaluate(k, uv, 1, 1, flags)?;
             let at = |i: usize, j: usize| {
-                m.get(i)
-                    .and_then(|r| r.get(j))
-                    .copied()
-                    .ok_or(SolidError::sm_err(OP_LOCAL_LINE))
+                m.get(i).and_then(|r| r.get(j)).copied().ok_or_else(|| {
+                    SolidError::surface_failed(
+                        OP_LOCAL_LINE,
+                        "the evaluation has too few derivatives",
+                    )
+                })
             };
             Ok((at(0, 0)?, at(1, 0)?, at(0, 1)?))
         };
@@ -3478,7 +3757,10 @@ pub fn intersect_srf_bndry_crv(
     // around. When the boundary curve is in the surface, then the regular intersector
     // will work just fine, so just act like nothing happened.
     let pv = iso.evaluate(k, guess_t, 1, true, true)?;
-    let tangent = pv.get(1).copied().ok_or(SolidError::sm_err(OP_BNDRY))?;
+    let tangent = pv
+        .get(1)
+        .copied()
+        .ok_or_else(|| SolidError::surface_failed(OP_BNDRY, "the boundary curve has no tangent"))?;
     let srf_norm = surface.evaluate_normal(k, guess_uv, Side::Right, Side::Right)?;
     if srf_norm.is_perpendicular_to(tangent, 0.05) {
         return Ok(out); // no solutions
@@ -3502,7 +3784,9 @@ pub fn intersect_srf_bndry_crv(
         out.t = f.t;
         out.deviation = f.deviation;
         let pv = iso.evaluate(k, f.t, 1, true, true)?;
-        let tangent = pv.get(1).copied().ok_or(SolidError::sm_err(OP_BNDRY))?;
+        let tangent = pv.get(1).copied().ok_or_else(|| {
+            SolidError::surface_failed(OP_BNDRY, "the boundary curve has no tangent")
+        })?;
         let normal = surface.evaluate_normal(k, f.uv, Side::Left, Side::Left)?;
 
         // when the angle curveTangent/SurfaceNormal angle is perpendicular to +/-5 deg
@@ -3587,7 +3871,7 @@ mod tests {
         // `SER(SM_ERR_INVALID_INPUT)`, the exact status
         assert_eq!(
             r.err().and_then(|e| e.sm_status()),
-            Some(SM_ERR_INVALID_INPUT)
+            Some(crate::error::SM_ERR_INVALID_INPUT)
         );
         assert!(s
             .local_line_intersect(

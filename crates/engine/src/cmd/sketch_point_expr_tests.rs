@@ -448,3 +448,39 @@ fn a_plain_corner_on_the_origin_still_snaps_to_it() {
     run(&mut s, "sketch.finish", json!({}));
     no_trouble(&s);
 }
+
+/// Centre, major axis end and minor radius of the ellipse in sketch `S` whose id is `id`, as
+/// the solved sketch stores them.
+fn ellipse_at(s: &Session, id: &str) -> (Vec2, Vec2, f64) {
+    let f = s.doc.find_feature("S").unwrap().id;
+    let st = s.model.state();
+    let sk = &st.sketch(f).unwrap().sketch;
+    match sk.curves.iter().find(|c| c.id == id).map(|c| &c.kind) {
+        Some(solidcraft_sketch::CurveKind::Ellipse { c, m, r }) => (sk.points[*c].pos, sk.points[*m].pos, *r),
+        _ => (Vec2::new(f64::NAN, f64::NAN), Vec2::new(f64::NAN, f64::NAN), f64::NAN),
+    }
+}
+
+#[test]
+fn an_ellipse_typed_with_expressions_follows_its_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    // Centre, major axis end and minor radius as in sketch.line points and circle sizes.
+    let r = run(&mut s, "sketch.ellipse", json!({"center": ["W / 2", 0], "major": ["W", 0], "minor_radius": "W / 4"}));
+    let id = r["curves"][0].as_str().unwrap_or_default().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S", "distance": 10}));
+    no_trouble(&s);
+    let (c, m, r) = ellipse_at(&s, &id);
+    assert!(c == Vec2::new(20.0, 0.0) && m == Vec2::new(40.0, 0.0) && (r - 10.0).abs() < 1e-9, "{c:?} {m:?} {r}");
+    assert!((volume(&mut s) - std::f64::consts::PI * 20.0 * 10.0 * 10.0).abs() < 1e-3);
+    run(&mut s, "parameters.change", json!({"name": "W", "expression": "60 mm"}));
+    no_trouble(&s);
+    let (c, m, r) = ellipse_at(&s, &id);
+    assert!(c == Vec2::new(30.0, 0.0) && m == Vec2::new(60.0, 0.0) && (r - 15.0).abs() < 1e-9, "{c:?} {m:?} {r}");
+    assert!((volume(&mut s) - std::f64::consts::PI * 30.0 * 15.0 * 10.0).abs() < 1e-3);
+    let mut r = reopened(&s);
+    no_trouble(&r);
+    assert!((volume(&mut r) - std::f64::consts::PI * 30.0 * 15.0 * 10.0).abs() < 1e-3);
+}

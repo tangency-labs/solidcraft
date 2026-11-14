@@ -198,37 +198,6 @@ mod tests {
     /// waits on other work).
     #[test]
     fn the_sweep_routines_build_no_bare_statuses() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files = vec![root.join("sweep.rs")];
-        let mut dirs = vec![root.join("sweep")];
-        while let Some(dir) = dirs.pop() {
-            for entry in std::fs::read_dir(dir).expect("read dir") {
-                let path = entry.expect("entry").path();
-                if path.is_dir() {
-                    dirs.push(path);
-                } else if path.extension().is_some_and(|x| x == "rs") {
-                    files.push(path);
-                }
-            }
-        }
-        files.sort();
-        assert!(files.len() > 20, "{files:?}");
-        for path in files {
-            let text = std::fs::read_to_string(&path)
-                .expect("read")
-                .replace("\r\n", "\n");
-            let library = text
-                .find("\n#[cfg(test)]\nmod ")
-                .map_or(text.as_str(), |at| &text[..at]);
-            let bare: usize = [
-                "SolidError::sm_err(",
-                "SolidError::null_pointer(",
-                "SolidError::Upstream {",
-            ]
-            .iter()
-            .map(|needle| library.matches(needle).count())
-            .sum();
-            assert_eq!(bare, 0, "bare statuses in {}", path.display());
-        }
+        super::super::bare_scan::assert_waiting("sweep", 21, &[]);
     }
 }

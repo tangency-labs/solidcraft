@@ -1,5 +1,5 @@
 //! Contracts and result types for the commands in `cmd/sketch_3d.rs`: `sketch.line3d`,
-//! `sketch.spline3d`, `sketch.point3d` and `sketch.move3d`.
+//! `sketch.spline3d`, `sketch.arc3d`, `sketch.point3d` and `sketch.move3d`.
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether the sketch has 3D Sketch on, a wire
@@ -18,6 +18,7 @@ use solidcore_record::Vec3;
 use super::check::whole;
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
+use super::sketch_shapes::Created;
 use super::types::Point3;
 use crate::params;
 
@@ -47,6 +48,32 @@ pub struct Spline3dParams {
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "DrawnPoints")]
     pub points: Option<DrawnPoints>,
+    /// The sketch to draw in: its feature id or its name. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+/// Draw an exact circular arc through three world points: it starts at `start`, bends
+/// through `through` and ends at `end`. Needs 3D Sketch on for the sketch
+/// (`sketch.options` with `sketch_3d: true`). One undo step. Three points on one line, or
+/// two that are the same point, stay the handler's to refuse.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = ends_required)]
+pub struct Arc3dParams {
+    // Optional in the type and required in the schema, as `Line3dParams::points`: left out,
+    // the handler refuses the call with its own "`start` must be a point [x, y, z]".
+    /// The arc's first end, as a world point [x, y, z] in mm.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "WorldPoint")]
+    pub start: Option<WorldPoint>,
+    /// A point the arc bends through, between its two ends, as a world point [x, y, z] in mm.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "WorldPoint")]
+    pub through: Option<WorldPoint>,
+    /// The arc's other end, as a world point [x, y, z] in mm.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "WorldPoint")]
+    pub end: Option<WorldPoint>,
     /// The sketch to draw in: its feature id or its name. Default: the one being edited.
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
@@ -107,6 +134,12 @@ fn points_required(schema: &mut Schema) {
 
 fn point_required(schema: &mut Schema) {
     require(schema, "point");
+}
+
+fn ends_required(schema: &mut Schema) {
+    require(schema, "start");
+    require(schema, "through");
+    require(schema, "end");
 }
 
 fn move_required(schema: &mut Schema) {
@@ -248,13 +281,17 @@ impl JsonSchema for FitIndex {
     }
 }
 
-/// What `sketch.line3d` and `sketch.spline3d` return.
+/// What `sketch.line3d`, `sketch.spline3d` and `sketch.arc3d` return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct Curves3dResult {
-    /// The ids of the curves drawn: one per segment for a line, one for a spline.
+    /// The ids of the curves drawn: one per segment for a line, one for a spline or an arc.
     pub curves: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`, and
+    /// `wires` when there are any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -267,6 +304,10 @@ pub struct Point3dResult {
     pub point: String,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`, and
+    /// `wires` when there are any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

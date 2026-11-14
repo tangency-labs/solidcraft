@@ -113,7 +113,9 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
         ("MODEL", "CONSTRUCT") => &[
             CommandGroup {
                 label: "ui.construct_planes",
+                // Plane, Axis and Point (method from the picks) lead their own heading.
                 ids: &[
+                    "construct.plane",
                     "construct.plane.offset",
                     "construct.plane.at_angle",
                     "construct.plane.midplane",
@@ -128,6 +130,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
             CommandGroup {
                 label: "ui.construct_axes",
                 ids: &[
+                    "construct.axis",
                     "construct.axis.through_cylinder",
                     "construct.axis.normal_to_face",
                     "construct.axis.two_planes",
@@ -138,6 +141,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
             CommandGroup {
                 label: "ui.construct_points",
                 ids: &[
+                    "construct.point",
                     "construct.point.vertex",
                     "construct.point.two_edges",
                     "construct.point.three_planes",
@@ -221,7 +225,13 @@ pub const SECTIONS: &[Section] = &[
         ids: &["solid.move", "solid.mirror", "solid.pattern.rectangular", "solid.align", "solid.pattern.circular", "solid.pattern.path"],
     },
     Section { tab: "MODEL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
-    Section { tab: "MODEL", panel: "CONSTRUCT", promoted: 1, ids: &["construct.plane.offset"] },
+    // Plane, Axis and Point work out the method from the picks; the methods follow in the menu.
+    Section {
+        tab: "MODEL",
+        panel: "CONSTRUCT",
+        promoted: 3,
+        ids: &["construct.plane", "construct.axis", "construct.point", "construct.plane.offset"],
+    },
     // Only while a linked design is edited in place, pinned at the right as FINISH SKETCH is.
     Section { tab: "MODEL", panel: "FINISH EDITING", promoted: 1, ids: &["component.finish_edit"] },
     // Sketches drive surfaces too: New Sketch leads the tab, as on MODEL and SHEET METAL.
@@ -244,6 +254,7 @@ pub const SECTIONS: &[Section] = &[
             "joint.as_built",
             "joint.origin",
             "joint.rigid_group",
+            "assembly.constraint.create",
             "joint.limits",
             "joint.gear",
             "joint.rack_pinion",
@@ -277,7 +288,7 @@ pub const SECTIONS: &[Section] = &[
         ids: &["file.insert_step", "file.insert_mesh", "pointcloud.insert", "component.insert_design", "file.save_mesh", "file.send_to_slicer"],
     },
     Section { tab: "INSERT", panel: "IMAGES", promoted: 3, ids: &["canvas.insert", "canvas.decal", "canvas.edit"] },
-    Section { tab: "INSERT", panel: "2D", promoted: 2, ids: &["sketch.insert_dxf", "sketch.insert_svg"] },
+    Section { tab: "INSERT", panel: "2D", promoted: 2, ids: &["sketch.insert_dxf", "sketch.insert_svg", "sketch.insert_airfoil"] },
     Section { tab: "INSERT", panel: "LIBRARY", promoted: 3, ids: &["parts.fastener", "parts.library", "parts.resize", "parts.insert"] },
     Section { tab: "INSERT", panel: "LINKS", promoted: 2, ids: &["component.update_links", "component.break_link"] },
     Section { tab: "INSPECT", panel: "MEASURE", promoted: 3, ids: &["inspect.measure", "inspect.center_of_mass", "component.properties"] },
@@ -397,6 +408,7 @@ pub const SECTIONS: &[Section] = &[
             "sketch.fit_curves_to_section",
             "sketch.insert_dxf",
             "sketch.insert_svg",
+            "sketch.insert_airfoil",
             "canvas.insert",
         ],
     },
@@ -920,11 +932,13 @@ mod tests {
         let mut previous = 0;
         for (_, c) in &grouped {
             assert!(seen.insert(c.id), "duplicate {}", c.id);
-            let rank = if c.id.starts_with("construct.plane.") {
+            // The tool that picks its method from the selection leads its entity's heading.
+            let entity = |e: &str| c.id == format!("construct.{e}") || c.id.starts_with(&format!("construct.{e}."));
+            let rank = if entity("plane") {
                 0
-            } else if c.id.starts_with("construct.axis.") {
+            } else if entity("axis") {
                 1
-            } else if c.id.starts_with("construct.point.") {
+            } else if entity("point") {
                 2
             } else {
                 panic!("ungrouped {}", c.id)
@@ -932,11 +946,13 @@ mod tests {
             assert!(rank >= previous, "out of order: {}", c.id);
             previous = rank;
         }
-        assert_eq!(grouped[0].1.id, "construct.plane.offset");
-        assert_eq!(grouped[1].1.id, "construct.plane.at_angle");
+        assert_eq!(grouped[0].1.id, "construct.plane");
+        assert_eq!(grouped[1].1.id, "construct.plane.offset");
+        assert_eq!(grouped[2].1.id, "construct.plane.at_angle");
         assert!(ungrouped("MODEL", "CONSTRUCT", &commands).is_empty());
         // Removing pinned tools must not leave an empty heading or lose other commands.
-        let without_planes: Vec<_> = commands.iter().copied().filter(|c| !c.id.starts_with("construct.plane.")).collect();
+        let without_planes: Vec<_> =
+            commands.iter().copied().filter(|c| c.id != "construct.plane" && !c.id.starts_with("construct.plane.")).collect();
         let grouped = grouped_commands("MODEL", "CONSTRUCT", &without_planes);
         assert_eq!(grouped.iter().filter_map(|(h, _)| *h).collect::<Vec<_>>(), ["ui.construct_axes", "ui.construct_points"]);
         assert_eq!(grouped.len(), without_planes.len());
@@ -1012,6 +1028,17 @@ mod tests {
         assert_eq!(plain.iter().map(|(_, c)| c.id).collect::<Vec<_>>(), commands.iter().map(|c| c.id).collect::<Vec<_>>());
     }
 
+    /// The Joints section's buttons stay as they were when Constrain joined it (#6061): Constrain
+    /// is in the section's menu, after the four promoted commands, so no one's default ribbon changes.
+    #[test]
+    fn constrain_joins_the_joints_menu_without_changing_its_buttons() {
+        let specs = solidcraft_engine::command_specs();
+        let (commands, count) = layout("ASSEMBLE", "JOINTS", &specs).unwrap();
+        let ids: Vec<&str> = commands.iter().map(|c| c.id).collect();
+        assert_eq!(ids.get(..count), Some(&["joint.create", "joint.as_built", "joint.origin", "joint.rigid_group"][..]), "{ids:?}");
+        assert!(ids.iter().skip(count).any(|id| *id == "assembly.constraint.create"), "{ids:?}");
+    }
+
     #[test]
     fn promoted_long_labels_have_compact_ribbon_names() {
         let specs = solidcraft_engine::command_specs();
@@ -1071,7 +1098,7 @@ mod tests {
             ("CREATE", vec!["solid.extrude", "solid.revolve", "solid.hole"]),
             ("MODIFY", vec!["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull"]),
             ("ARRANGE", vec!["solid.move", "solid.mirror", "solid.pattern.rectangular"]),
-            ("CONSTRUCT", vec!["construct.plane.offset"]),
+            ("CONSTRUCT", vec!["construct.plane", "construct.axis", "construct.point"]),
         ] {
             let (cmds, n) = layout("MODEL", panel, &specs).unwrap();
             assert_eq!(cmds.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), expected);

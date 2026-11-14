@@ -412,8 +412,10 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             .first()
             .copied()
             .flatten()
-            .ok_or(SolidError::null_pointer(OP_LSI))?;
-        let cache = self.surface_cache.ok_or(SolidError::null_pointer(OP_LSI))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_LSI, "the branch's surface node"))?;
+        let cache = self
+            .surface_cache
+            .ok_or_else(|| SolidError::surface_missing(OP_LSI, "the surface cache"))?;
         let patch = cache.patch(surface_id)?.clone();
         let tree = self.base.tree(0)?;
         let parent = original_surface(tree, &surface_node)?;
@@ -538,6 +540,41 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             return Ok(false);
         }
 
+        // Not upstream. A ray has no roots behind its start: only the forward part of the
+        // interval is a candidate. Left whole, a leaf that a ray grazes (it crosses the
+        // convex patch twice) seeded its solve from the middle of the interval, which can
+        // settle on the root behind the start; that root is dropped below and the root
+        // ahead was never looked for, so the ray missed a wall it leaves by.
+        let mut clipped = false;
+        if self.ray_fire {
+            // (a band behind the start as wide as the one the interval is expanded by, so a
+            // root on the surface the ray starts on is found where it was, and dropped below
+            // where it was, rather than clamped to the end of the interval)
+            let behind =
+                EFF_ZERO * (1.0 + self.line_point.max_dimension()) + 2.0 * self.base.tolerance_3d;
+            // A ray that starts on the surface has its root at the start, which the
+            // classification of a point on a face leaves to the leaf solve as it was: the
+            // interval is kept whole there.
+            let on_surface = bound_ivl.min() < -behind && {
+                let natural = srf_eval.natural_uv_domain_with_nurb(k)?;
+                ignored(surface_local_point_solve::<O>(
+                    k,
+                    srf_eval,
+                    &natural,
+                    SolverOperation::Minimize,
+                    self.line_point,
+                    uv_domain.evaluate(0.5, 0.5),
+                ))?
+                .is_some_and(|(found, near)| {
+                    found && near.start.solution_value < self.base.tolerance_3d
+                })
+            };
+            if bound_ivl.min() < -behind && !on_surface {
+                bound_ivl = Extent1d::from_min_max(-behind, bound_ivl.max());
+                clipped = true;
+            }
+        }
+
         // no work - if given, m_cpLineInterval doesn't overlap sBoxIvl
         if let Some(line_ivl) = &self.line_interval {
             if line_ivl.are_disjoint(&bound_ivl, 0.0) {
@@ -570,7 +607,9 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             )?
             .first()
             .copied()
-            .ok_or(SolidError::sm_err(OP_LSI))
+            .ok_or_else(|| {
+                SolidError::surface_failed(OP_LSI, "the tangent plane drop gave no point")
+            })
         };
         let mut first_uv = drop(first_uv_guess, first_t)?;
 
@@ -713,7 +752,9 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         let natural = cache.surface().natural_uv_domain_with_nurb(k)?;
         for j in 0..2 {
             // Handle curve discontinuities
-            if t_conts.get(j).copied().is_some_and(at_most_c0) {
+            // (the clip's own end is no end of the line: a ray's root at its start is the
+            // leaf solve's, as before the clip)
+            if t_conts.get(j).copied().is_some_and(at_most_c0) && !(j == 0 && clipped) {
                 let t = if j == 1 {
                     leaf.interval.max()
                 } else {
@@ -960,10 +1001,10 @@ impl<O: SolutionObject> CombineContext<'_, O> {
         };
         let tree = self
             .curve_tree
-            .ok_or(SolidError::null_pointer(OP_COMBINE))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_COMBINE, "the curve tree"))?;
         let cache = self
             .surface_cache
-            .ok_or(SolidError::null_pointer(OP_COMBINE))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_COMBINE, "the surface cache"))?;
         Ok(Some((
             tree.curve_aux(n1)?.interval,
             cache.aux(id2)?.uv_domain,
@@ -1329,7 +1370,10 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
         };
         // the packed indices never pass the array (shrinking only)
         if last >= solutions.len() {
-            return Err(SolidError::sm_err(OP_COMBINE));
+            return Err(SolidError::surface_failed(
+                OP_COMBINE,
+                "the packed solution index is past the end of the solutions",
+            ));
         }
         solutions.set_size(last + 1);
     }
@@ -1545,7 +1589,9 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                 let pv = curve.evaluate(k, p(&sol.start, 0)?, 1, true, true)?;
                 let uv = Point2::new(p(&sol.start, 1)?, p(&sol.start, 2)?);
                 let normal = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
-                let tangent = pv.get(1).copied().ok_or(SolidError::sm_err(OP_COMBINE))?;
+                let tangent = pv.get(1).copied().ok_or_else(|| {
+                    SolidError::surface_failed(OP_COMBINE, "the curve gave no tangent")
+                })?;
                 if !tangent.is_perpendicular_to(normal, 2.0) {
                     tmp.add(sol);
                 }
@@ -1721,5 +1767,40 @@ mod tests {
         )
         .unwrap();
         assert!(sols.is_empty());
+    }
+
+    /// The line and curve intersection failures keep the operation, status, kind and entity of the bare
+    /// `Upstream` statuses they replace (a sample).
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::SurfaceFailure;
+        let samples: [(&'static str, SurfaceFailure, i32); 2] = [
+            (
+                OP_LSI,
+                SurfaceFailure::Missing("the surface cache"),
+                crate::error::SM_ERR_NULL_POINTER,
+            ),
+            (
+                OP_COMBINE,
+                SurfaceFailure::Failed("the curve gave no tangent"),
+                crate::error::SM_ERR,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
+        }
     }
 }

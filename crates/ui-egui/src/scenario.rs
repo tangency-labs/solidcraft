@@ -84,6 +84,31 @@ fn scratch_dir() -> PathBuf {
     d
 }
 
+fn widget_centres(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], text: &str) -> Vec<[f64; 2]> {
+    let centre = |n: &egui::accesskit::Node| n.bounds().filter(|b| b.x1 > b.x0 && b.y1 > b.y0).map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0]);
+    let mut exact: Vec<_> = nodes
+        .iter()
+        .rev()
+        .filter(|(_, n)| n.label() == Some(text) || n.value() == Some(text))
+        .filter_map(|(_, n)| centre(n).map(|at| (!n.supports_action(egui::accesskit::Action::Click), at)))
+        .collect();
+    if !exact.is_empty() {
+        // AccessKit node order is not paint order. A tooltip can repeat its button's text;
+        // prefer the click target, but retain plain labels for row and visibility lookups.
+        exact.sort_by_key(|(passive, _)| *passive);
+        return exact.into_iter().map(|(_, at)| at).collect();
+    }
+    // A menu button's label ends with its shortcut ("Save Ctrl+S").
+    nodes
+        .iter()
+        .rev()
+        .filter(|(_, n)| {
+            n.role() == egui::accesskit::Role::Button && n.label().is_some_and(|l| l.strip_prefix(text).is_some_and(|r| r.starts_with(' ')))
+        })
+        .filter_map(|(_, n)| centre(n))
+        .collect()
+}
+
 /// The app in a headless egui context.
 pub struct Harness {
     pub app: SolveApp,
@@ -91,6 +116,8 @@ pub struct Harness {
     /// The last frame's platform output (with its accessibility tree: dialog widgets are found
     /// by their text there).
     pub output: egui::PlatformOutput,
+    /// Every URL a frame asked the platform to open, until [`Harness::take_opened`].
+    pub opened: Vec<String>,
     /// The last frame's painted shapes.
     pub shapes: Vec<egui::epaint::ClippedShape>,
     /// Files the scenario saves and opens live here; file pickers answer from it.
@@ -122,6 +149,8 @@ impl Drop for Harness {
 
 impl Harness {
     pub fn new() -> Harness {
+        // Test-owned reuse store: never the developer's per-user data folder.
+        solidcraft_engine::use_import_cache_dir(std::env::temp_dir().join(format!("solidcraft-scenario-imports-{}", std::process::id())));
         solidcraft_ui_text::pin_system_language();
         let mut h = Harness {
             app: SolveApp::new(Session::default(), Services::default()),
@@ -131,6 +160,7 @@ impl Harness {
                 ctx
             },
             output: Default::default(),
+            opened: Vec::new(),
             shapes: Vec::new(),
             dir: scratch_dir(),
             next_file: Rc::new(RefCell::new(None)),
@@ -191,8 +221,17 @@ impl Harness {
         });
         // Nothing is painted: drop the frame's texture changes.
         out.textures_delta.clear();
+        self.opened.extend(out.platform_output.commands.iter().filter_map(|c| match c {
+            egui::OutputCommand::OpenUrl(u) => Some(u.url.clone()),
+            _ => None,
+        }));
         self.output = out.platform_output;
         self.shapes = out.shapes;
+    }
+
+    /// The URLs opened since the last call.
+    pub fn take_opened(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.opened)
     }
 
     pub fn frames(&mut self, n: usize) {
@@ -292,8 +331,8 @@ impl Harness {
         out
     }
 
-    /// The centre of the visible widget whose label or value is `text` (the last one drawn wins:
-    /// popups are drawn after what opened them).
+    /// The centre of the visible widget whose label or value is `text`, preferring click targets
+    /// over matching text labels such as tooltips.
     pub fn widget(&self, text: &str) -> Option<[f64; 2]> {
         self.widgets(text).into_iter().next()
     }
@@ -335,25 +374,10 @@ impl Harness {
         Err(format!("widget `{text}` could not be revealed in its page"))
     }
 
-    /// Centres of the visible widgets whose label or value is `text`, last drawn first.
+    /// Centres of the visible widgets whose label or value is `text`, with click targets first.
     pub fn widgets(&self, text: &str) -> Vec<[f64; 2]> {
         let Some(tree) = self.output.accesskit_update.as_ref() else { return Vec::new() };
-        let centre =
-            |n: &egui::accesskit::Node| n.bounds().filter(|b| b.x1 > b.x0 && b.y1 > b.y0).map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0]);
-        let exact: Vec<[f64; 2]> =
-            tree.nodes.iter().rev().filter(|(_, n)| n.label() == Some(text) || n.value() == Some(text)).filter_map(|(_, n)| centre(n)).collect();
-        if !exact.is_empty() {
-            return exact;
-        }
-        // A menu button's label ends with its shortcut ("Save Ctrl+S").
-        tree.nodes
-            .iter()
-            .rev()
-            .filter(|(_, n)| {
-                n.role() == egui::accesskit::Role::Button && n.label().is_some_and(|l| l.strip_prefix(text).is_some_and(|r| r.starts_with(' ')))
-            })
-            .filter_map(|(_, n)| centre(n))
-            .collect()
+        widget_centres(&tree.nodes, text)
     }
 
     /// A step's point on screen.
@@ -853,7 +877,7 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                         .collect()
                 });
                 // Workspace panels (docks and strips) are laid out against the viewport, not sized like dialogs.
-                let panels: Vec<egui::Rect> = h.app.shell.workspace_panels.values().map(|(rect, _)| *rect).collect();
+                let panels: Vec<egui::Rect> = h.app.shell.workspace_panels.values().copied().collect();
                 for (id, r) in rects {
                     if panels.iter().any(|p| (p.min - r.min).abs().max_elem() < 1.0 && (p.max - r.max).abs().max_elem() < 1.0) {
                         continue;

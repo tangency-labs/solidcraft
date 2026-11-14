@@ -11,7 +11,6 @@
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
-use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::math::{Vec2, Vec3, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -70,7 +69,8 @@ pub enum Implicit {
 }
 
 impl Implicit {
-    /// How far `x` is from this surface.
+    /// How far `x` is from this surface: the whole surface, not a bounded patch of it
+    /// (`offset_faces::on_target`).
     #[must_use]
     pub fn distance(&self, x: Vec3) -> f64 {
         // the axial and radial parts of `x` about an axis through `o`
@@ -181,7 +181,9 @@ impl BPoly {
 ///
 /// `SM_ERR` without NURB data; those of the Bézier decomposition.
 pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
-    let nurb = form.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let nurb = form
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
     for row in decompose_to_bez(nurb)? {
         for patch in row {
             let (p, q) = patch.degrees();
@@ -208,7 +210,10 @@ pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
 ///
 /// `SM_ERR` without NURB data; those of the Bézier decomposition.
 pub fn curve_lies_on(curve: &BSplineCurve, a: &Implicit) -> Result<bool> {
-    let nurb = curve.nurb.as_ref().ok_or_else(|| SolidError::sm_err(OP))?;
+    let nurb = curve
+        .nurb
+        .as_ref()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline curve has no NURB"))?;
     for seg in nurb.decompose_bez()? {
         if !bezier_on(seg.degree(), 0, seg.cpts().iter(), a) {
             return Ok(false);
@@ -439,48 +444,6 @@ pub fn check_exact_net(k: &Kernel, net: &Surface, check: &ExactNetCheck) -> Resu
     Ok(())
 }
 
-/// The number of intervals [`net_miss`] samples a net at, each way.
-const MISS_SAMPLES: u32 = 16;
-
-/// How far `net` strays from the class's `surface`, sampled over its domain. A guard, not a
-/// certificate: [`check_exact_net`] is the proof, and a net that passes only this keeps no
-/// definition. It tells a net that the class's rounding leaves off the surface from one
-/// built wrongly. Being sampled ([`MISS_SAMPLES`] intervals each way), it can miss a
-/// deviation between its samples; it bounds nothing, and decides only whether a net its
-/// certificate refused is kept bare or is an error.
-///
-/// # Errors
-///
-/// Those of the evaluations.
-pub fn net_miss(k: &Kernel, net: &Surface, surface: &ClassSurface) -> Result<f64> {
-    let dom = net.natural_uv_domain_with_nurb(k)?;
-    let (lo, hi) = (dom.min(), dom.max());
-    let mut worst = 0.0_f64;
-    for i in 0..=MISS_SAMPLES {
-        for j in 0..=MISS_SAMPLES {
-            let (fu, fv) = (
-                f64::from(i) / f64::from(MISS_SAMPLES),
-                f64::from(j) / f64::from(MISS_SAMPLES),
-            );
-            let uv = Point2::new(lo.x + (hi.x - lo.x) * fu, lo.y + (hi.y - lo.y) * fv);
-            let x = net.evaluate_point(k, uv)?;
-            let miss = match surface {
-                ClassSurface::Implicit(a) => a.distance(x),
-                ClassSurface::Canal {
-                    spine, map, radius, ..
-                } => {
-                    let w = if map.along_v { uv.y } else { uv.x };
-                    let ivl = spine.natural_interval();
-                    let s = (map.a + map.b * w).max(ivl.min()).min(ivl.max());
-                    ((x - spine.evaluate_point(s)?).length() - *radius).abs()
-                }
-            };
-            worst = worst.max(miss);
-        }
-    }
-    Ok(worst)
-}
-
 /// A Bezier segment of a rational curve, Bernstein polynomials of degree `(p, 0)`: the
 /// homogeneous `(Y - O V)` components and the weight `V`.
 type CurveSegment = ([BPoly; 3], BPoly);
@@ -490,13 +453,13 @@ fn curve_segments(curve: &BSplineCurve) -> Result<(Vec<CurveSegment>, Vec3)> {
     let nurb = curve
         .nurb
         .as_ref()
-        .ok_or_else(|| SolidError::sm_err(OP_EXACT))?;
+        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the B-spline curve has no NURB"))?;
     let w_of = |w: f64| if w == NOW { 1.0 } else { w };
     let origin = nurb
         .cpts()
         .first()
         .map(|c| Vec3::new(c.x, c.y, c.z) * (1.0 / w_of(c.w)))
-        .ok_or_else(|| SolidError::sm_err(OP_EXACT))?;
+        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the curve has no control points"))?;
     let mut out = Vec::new();
     for seg in nurb.decompose_bez()? {
         let p = seg.degree();
@@ -883,13 +846,15 @@ fn lies_on_canal(
     map: &LeaderMap,
     radius: f64,
 ) -> Result<bool> {
-    let nurb = form.gw_nurb().ok_or_else(|| SolidError::sm_err(OP_EXACT))?;
+    let nurb = form
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the B-spline surface has no NURB"))?;
     let (segs, o) = curve_segments(spine)?;
     let spine_breaks = spine
         .nurb
         .as_ref()
         .map(|n| breaks(n.knots()))
-        .ok_or_else(|| SolidError::sm_err(OP_EXACT))?;
+        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the spine has no NURB"))?;
     let (ub, vb) = (breaks(nurb.u_knots()), breaks(nurb.v_knots()));
     let along = if map.along_v { &vb } else { &ub };
     // the rounding of placing a span on the spine: of a + b w and of the spine's knots
@@ -1234,19 +1199,43 @@ impl AnalyticSupport {
     fn on_form(&self, k: &Kernel, form: &BSplineSurface) -> Result<Surface> {
         let form = form.copy();
         let mut surface = recognise(k, self.kind(), &form)?.ok_or_else(not_form)?;
-        // the recognised surface must be of this support's kind; the numbers recognition
-        // recomputed are not compared with the support's, because it recomputes them from
-        // the control points and so reproduces a support's own numbers only to rounding
-        // (#2554) -- `lies_on` above and `evaluates_as` below are what prove the two agree
-        if Self::of(&surface).map(|a| a.kind()) != Some(self.kind()) {
-            return Err(not_form());
-        }
+        // Recover the generator's height interval from its actual endpoints. The
+        // recogniser supplies the swap and inside-out conventions, but its fitted
+        // height datum and span can retain amplified circle-centre rounding.
+        let axial_anchors = match (self, surface.kind()) {
+            (Self::Cylinder { .. } | Self::Cone { .. }, SurfaceKind::Cone(c)) => {
+                let d = form.natural_uv_domain();
+                let end = if c.rev.swap_uv {
+                    Vec2::new(d.u_max(), d.v_min())
+                } else {
+                    Vec2::new(d.u_min(), d.v_max())
+                };
+                let anchor = |uv| -> Result<(Vec3, f64)> {
+                    Ok((
+                        form.evaluate_point(uv)?,
+                        surface.convert_uv_from_nurbs_to_step(k, uv)?.y,
+                    ))
+                };
+                Some([anchor(d.min())?, anchor(end)?])
+            }
+            _ => None,
+        };
+        // the recognised surface gives its conventions only (its frame turn, sweep, generator
+        // direction and swap), as in `derive`: the kind and the numbers are this support's. The
+        // numbers recognition recomputed are not compared with the support's, because it
+        // recomputes them from the control points and so reproduces a support's own numbers
+        // only to rounding (#2554), and far from the world origin it reads a cylinder as a cone
+        // of an angle of rounding -- `lies_on` above and `evaluates_as` below are what prove
+        // the two agree. A cylinder or cone takes a recognised cone's, a sphere a sphere's, a
+        // torus a torus's.
         // this support's own numbers on the recognised parametrisation, which the generator
         // and the sweep converter carry, so that `of` reads the support back unchanged
         match (surface.kind_mut(), *self) {
             (SurfaceKind::Cone(c), Self::Cylinder { placement, radius }) => {
-                on_axis_from(&mut c.rev, placement)?;
+                on_axis_from(&mut c.rev, placement, axial_anchors.ok_or_else(not_form)?)?;
                 c.base_radius = radius;
+                c.semi_angle_deg = 0.0;
+                c.cylinder = true;
                 c.rev.base = form.copy();
             }
             (
@@ -1257,7 +1246,7 @@ impl AnalyticSupport {
                     semi_angle_deg,
                 },
             ) => {
-                on_axis_from(&mut c.rev, placement)?;
+                on_axis_from(&mut c.rev, placement, axial_anchors.ok_or_else(not_form)?)?;
                 c.base_radius = base_radius;
                 c.semi_angle_deg = semi_angle_deg;
                 c.rev.base = form.copy();
@@ -1275,10 +1264,7 @@ impl AnalyticSupport {
                     minor_radius,
                 },
             ) => {
-                t.base.position = placement;
-                t.major_radius = major_radius;
-                t.minor_radius = minor_radius;
-                t.base.base = form.copy();
+                t.on_support(k, placement, major_radius, minor_radius, form.copy())?;
             }
             _ => return Err(not_form()),
         }
@@ -1294,25 +1280,41 @@ fn not_form() -> SolidError {
     )
 }
 
-/// A cylinder's or cone's recognised parametrisation carried by the support's own
-/// `placement`: its heights are measured along the axis from the placement's origin, so the
-/// recognised heights move by how far along the axis the recognised origin lies from it.
-/// The record puts a frame's origin anywhere on the axis (a hole's at the solid's floor, its
-/// form from the face's own bottom); the point at each parameter is then unchanged, which
-/// [`evaluates_as`] proves. A placement off the axis or turned about it is not the form's
-/// parametrisation, and is refused there.
-///
-/// The generator line's parameters are the heights too, so it moves with them: its STEP
-/// interval stays the surface's v interval, as the kernel's check requires
-/// (`SmSurfOfRevolution::Test` #2, `SmCone::Test` #1), and its points stay where they are.
+/// Carry the recognised generator's conventions onto the support's own axis. Its
+/// endpoint heights are projected from the form, avoiding a fitted circle centre's
+/// axial rounding in either the height datum or span. The original converted heights
+/// determine their order for inside-out surfaces. The generator line is reparameterised
+/// with the same affine map, keeping its NURBS points and matching the surface interval.
+/// A placement off the axis or turned about it is still refused by `evaluates_as`.
 fn on_axis_from(
     rev: &mut crate::surface::surf_of_revolution::SurfOfRevolution,
     placement: Axis2Placement,
+    anchors: [(Vec3, f64); 2],
 ) -> Result<()> {
     use crate::curve::curve::CurveKind;
-    let h = (rev.position.origin() - placement.origin()).dot(placement.z_axis());
+    use crate::geom::extent1d::Extent1d;
+    let [(p0, h0), (p1, h1)] = anchors;
+    let project = |p: Vec3| (p - placement.origin()).dot(placement.z_axis());
+    let (lo, hi) = if h0 < h1 {
+        (project(p0), project(p1))
+    } else {
+        (project(p1), project(p0))
+    };
     let d = rev.anal_uv_domain;
-    rev.anal_uv_domain = Extent2d::from_bounds(d.u_min(), d.v_min() + h, d.u_max(), d.v_max() + h);
+    let old_length = d.v_max() - d.v_min();
+    let new_length = hi - lo;
+    if old_length <= 0.0 || new_length <= 0.0 {
+        return Err(not_form());
+    }
+    let scale = new_length / old_length;
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(not_form());
+    }
+    let offset = lo - scale * d.v_min();
+    if !offset.is_finite() {
+        return Err(not_form());
+    }
+    rev.anal_uv_domain = Extent2d::from_bounds(d.u_min(), lo, d.u_max(), hi);
     rev.position = placement;
     match rev
         .gen_curve
@@ -1320,7 +1322,13 @@ fn on_axis_from(
         .map(crate::curve::curve::Curve::kind_mut)
     {
         Some(CurveKind::Line(line)) => {
-            line.shift_step_parameter(h);
+            let line_scale = line.line_scale() / scale;
+            if !line_scale.is_finite() || line_scale == 0.0 {
+                return Err(not_form());
+            }
+            line.set_line_scale(line_scale);
+            line.shift_step_parameter(offset);
+            line.set_analytic_domain(Extent1d::from_min_max(lo, hi));
             Ok(())
         }
         _ => Err(SolidError::invalid_input(
@@ -1704,9 +1712,9 @@ fn euclidean_net(form: &BSplineSurface) -> Result<(Vec<Vec<Vec3>>, usize, usize)
     let mut net = vec![Vec::new(); nu];
     for (i, row) in net.iter_mut().enumerate() {
         for j in 0..nv {
-            let c = cps
-                .get(i * nv + j)
-                .ok_or_else(|| SolidError::sm_err(OP_DERIVE))?;
+            let c = cps.get(i * nv + j).ok_or_else(|| {
+                SolidError::surface_failed(OP_DERIVE, "the control point is outside the net")
+            })?;
             let w = if c.w == NOW { 1.0 } else { c.w };
             row.push(Vec3::new(c.x, c.y, c.z) * (1.0 / w));
         }
@@ -1747,8 +1755,9 @@ impl AnalyticSupport {
     /// sphere or torus as the kernel recognises it in the form ([`recognise`]: the
     /// recognisers `CopyAndAddAnalytics` runs), on the form's own frame, sweep, generator
     /// range and swap, so that it is the form's parametrisation, not only its point set.
-    /// Exact to rounding: a rational NURBS represents these surfaces exactly.
-    /// [`AnalyticSupport::build`] then checks the form against the derived surface.
+    /// Cylinders, cones and tori take their numbers from the form's control circles;
+    /// recognition supplies their conventions. A rational NURBS represents these surfaces
+    /// exactly. [`AnalyticSupport::build`] checks the form against the derived surface.
     ///
     /// # Errors
     ///
@@ -1824,11 +1833,264 @@ impl AnalyticSupport {
         // a surface of revolution: the analytic surface the kernel recognises in the form
         // (on the form's own frame, sweep and generator ranges and swap), of the label's
         // kind; `build` checks it evaluates as the form
-        recognise(k, kind, form)?
+        let recognised = recognise(k, kind, form)?
             .as_ref()
             .and_then(Self::of)
-            .filter(|a| a.kind() == kind)
-            .ok_or_else(not_kind)
+            .ok_or_else(not_kind)?;
+        match (kind, recognised) {
+            // a cylinder's or cone's numbers read off the form's control structure, on the
+            // recogniser's conventions; a cylinder the recogniser reads as a cone of an angle
+            // of rounding (1e-10 degrees far from the origin) is the cylinder its rows are
+            (SupportKind::Cylinder, Self::Cylinder { .. } | Self::Cone { .. }) => {
+                Self::revolved_from_rows(recognised, true, &net, form).ok_or_else(not_kind)
+            }
+            (SupportKind::Cone, Self::Cone { .. }) => {
+                Self::revolved_from_rows(recognised, false, &net, form).ok_or_else(not_kind)
+            }
+            (SupportKind::Torus, Self::Torus { placement, .. }) => {
+                // Use a Bezier patch: after knot insertion the first three controls of
+                // the whole net need not be an arc's endpoints and tangent intersection.
+                let patches = decompose_to_bez(form.gw_nurb().ok_or_else(not_kind)?)?;
+                let patch = patches
+                    .first()
+                    .and_then(|row| row.first())
+                    .ok_or_else(not_kind)?;
+                let net: Vec<Vec<Vec3>> = patch
+                    .rows()
+                    .map(|row| {
+                        row.iter()
+                            .map(|c| {
+                                let w = if c.w == NOW { 1.0 } else { c.w };
+                                Vec3::new(c.x, c.y, c.z) * (1.0 / w)
+                            })
+                            .collect()
+                    })
+                    .collect();
+                Self::torus_from_net(placement, &net).ok_or_else(not_kind)
+            }
+            (kind, other) if other.kind() == kind => Ok(other),
+            _ => Err(not_kind()),
+        }
+    }
+
+    /// A torus's circles from its quadratic boundary control triangles, rather than a fit
+    /// through evaluated points. The sweep circle fixes the axis; the meridian circle
+    /// fixes the tube centre and radius together (The NURBS Book, sections 7.3 and 7.5).
+    fn torus_from_net(placement: Axis2Placement, net: &[Vec<Vec3>]) -> Option<Self> {
+        let at = |i: usize, j: usize| net.get(i).and_then(|r| r.get(j)).copied();
+        let circle = |p0: Vec3, p1: Vec3, p2: Vec3| -> Option<(Vec3, f64, Vec3, f64)> {
+            let leg = p1 - p0;
+            let chord = p2 - p0;
+            let tangent = leg.unitize().ok()?;
+            let across = chord.unitize().ok()?;
+            let normal = leg.cross(chord).unitize().ok()?;
+            let radius = leg.length() * tangent.dot(across) / tangent.cross(across).length();
+            let centre = p0 + normal.cross(tangent) * radius;
+            (radius.is_finite() && radius > 0.0).then_some((
+                centre,
+                radius,
+                normal,
+                leg.cross(chord).length(),
+            ))
+        };
+        let boundary = |along_u: bool, fixed: usize| {
+            if along_u {
+                circle(at(0, fixed)?, at(1, fixed)?, at(2, fixed)?)
+            } else {
+                circle(at(fixed, 0)?, at(fixed, 1)?, at(fixed, 2)?)
+            }
+        };
+        // Either boundary sweep can collapse on the axis. Use the boundary with
+        // the larger control triangle to recover each direction's plane robustly.
+        let strongest = |along_u| {
+            [0, 2]
+                .into_iter()
+                .filter_map(|fixed| boundary(along_u, fixed))
+                .max_by(|a, b| a.3.total_cmp(&b.3))
+        };
+        let a = strongest(true)?;
+        let b = strongest(false)?;
+        let sweep_along_u = a.2.dot(placement.z_axis()).abs() >= b.2.dot(placement.z_axis()).abs();
+        let sweep = if sweep_along_u { a } else { b };
+        // Keep the meridian at the start of the sweep: its centre defines the
+        // support's radial direction, including when its first point is on-axis.
+        let tube = boundary(!sweep_along_u, 0)?;
+        let mut axis = sweep.2;
+        if axis.dot(placement.z_axis()) < 0.0 {
+            axis = -axis;
+        }
+        let origin = sweep.0 + axis * (tube.0 - sweep.0).dot(axis);
+        let radial = tube.0 - origin;
+        let major_radius = radial.length();
+        let x = radial.unitize().ok()?;
+        Some(Self::Torus {
+            placement: Axis2Placement::from_stored(origin, x, axis.cross(x)),
+            major_radius,
+            minor_radius: tube.1,
+        })
+    }
+
+    /// A cylinder's or cone's numbers read straight off its NURBS form's control structure
+    /// (#15010): the form's circles are its rows across the generator, each a rational arc
+    /// whose endpoint tangent and chord recover its centre and radius together. A cylinder
+    /// keeps that pair from the first row; averaging independently recovered radii breaks
+    /// their correlated rounding on shallow arcs. The axis is a cylinder's columns' direction
+    /// (its generators) through the first row's centre, or a cone's circular-row normal. The
+    /// origin is the point of the axis nearest the recogniser's, the x axis the recogniser's
+    /// made square to it, and the cone's angle the radii's change along it. No fitting and
+    /// no long chains: the numbers are the stored control points' to their rounding. The
+    /// recognisers' chained computations tilt the axis by about 1e-13 (an ulp of the origin's
+    /// size), which a form
+    /// far from the world origin turns into a parametrisation `build` refuses. The
+    /// recogniser's frame turn, sweep, generator direction and swap are kept: they are
+    /// conventions, not numbers. A row collapsed to one point (a cone's apex) is the axis's
+    /// point of radius 0. `None` where the form gives no such rows (fewer than two circles,
+    /// or a degenerate tangent and chord).
+    fn revolved_from_rows(
+        recognised: Self,
+        cylinder: bool,
+        net: &[Vec<Vec3>],
+        form: &BSplineSurface,
+    ) -> Option<Self> {
+        let (placement_r, semi_r) = match recognised {
+            Self::Cylinder { placement, .. } => (placement, 0.0),
+            Self::Cone {
+                placement,
+                semi_angle_deg,
+                ..
+            } => (placement, semi_angle_deg),
+            _ => return None,
+        };
+        let axis_r = placement_r.z_axis();
+        let (nu, nv) = (net.len(), net.first().map_or(0, Vec::len));
+        let at = |i: usize, j: usize| net.get(i).and_then(|r| r.get(j)).copied();
+        // the circles run along the direction whose rows stay square to the axis
+        let spread = |along_v: bool| {
+            let (rows, len) = if along_v { (nu, nv) } else { (nv, nu) };
+            let mut worst = 0.0_f64;
+            for r in 0..rows {
+                let first = if along_v { at(r, 0) } else { at(0, r) };
+                for c in 0..len {
+                    let p = if along_v { at(r, c) } else { at(c, r) };
+                    if let (Some(p), Some(f)) = (p, first) {
+                        worst = worst.max((p - f).dot(axis_r).abs());
+                    }
+                }
+            }
+            worst
+        };
+        let along_v = spread(true) <= spread(false);
+        let (rows, len) = if along_v { (nu, nv) } else { (nv, nu) };
+        // Each row's circle from its first rational quadratic arc, control points p0, p1,
+        // p2 (The NURBS Book, sections 7.3 and 7.5): the angle between its first tangent
+        // leg and chord is half the sweep, so r = |leg| cot(half sweep). Build the centre
+        // from p0 along the inward normal by r: the radius and centre then reproduce p0
+        // together, without a shallow arc's circumcentre rounding shifting it off its frame.
+        let degree = form.degree(if along_v {
+            crate::nurbs::b_spline_surface::SurfParamType::V
+        } else {
+            crate::nurbs::b_spline_surface::SurfParamType::U
+        });
+        if degree != 2 || len < 3 {
+            return None;
+        }
+        let circle = |r: usize| -> Option<(Vec3, f64, Vec3)> {
+            let point = |c: usize| if along_v { at(r, c) } else { at(c, r) };
+            let (p0, p1, p2) = (point(0)?, point(1)?, point(2)?);
+            // a row collapsed to one point is a cone's apex: a point of the axis, of radius
+            // 0. Its control points are one stored point, apart only by the rounding of
+            // dividing each homogeneous point by its weight (`euclidean_net`: within
+            // `gamma_4` of its size)
+            let size = (0..len)
+                .filter_map(point)
+                .fold(0.0_f64, |a, q| a.max(q.length()));
+            let collapsed = (0..len)
+                .filter_map(point)
+                .all(|q| (q - p0).length() <= gamma(4) * size);
+            if collapsed {
+                return Some((p0, 0.0, Vec3::ZERO));
+            }
+            let leg = p1 - p0;
+            let chord = p2 - p0;
+            let normal = leg.cross(chord);
+            let unit = |v: Vec3| {
+                let length = v.length();
+                (length > 0.0 && length.is_finite()).then(|| v * (1.0 / length))
+            };
+            let tangent = unit(leg)?;
+            let across = unit(chord)?;
+            let inward = unit(normal)?.cross(tangent);
+            let radius = leg.length() * tangent.dot(across) / tangent.cross(across).length();
+            let centre = p0 + inward * radius;
+            (centre.x.is_finite() && centre.y.is_finite() && centre.z.is_finite() && radius > 0.0)
+                .then_some((centre, radius, normal))
+        };
+        let circles: Vec<(Vec3, f64, Vec3)> = (0..rows).filter_map(circle).collect();
+        if circles.len() < 2 {
+            return None;
+        }
+        let (&(c0, r0, _), &(c1, r1, _)) = (circles.first()?, circles.last()?);
+        let along = c1 - c0;
+        // a cylinder's axis runs along its generators, which are the form's columns: each
+        // column's first and last control points differ by the stored extrusion, exactly for
+        // an extruded circle. Deriving an axis from the circle centres can amplify their
+        // rounding: on a 20 mm arc of radius 77.6 mm the old centres' line tilted by
+        // 1.3e-14, which `build` refused. A cone's
+        // axis is normal to its circular rows. Use the largest control-polygon normal
+        // to avoid amplifying the centres' rounding by the rows' short separation.
+        let axis_vector = if cylinder {
+            let point = |r: usize, c: usize| if along_v { at(r, c) } else { at(c, r) };
+            let last = rows.checked_sub(1)?;
+            (0..len).try_fold(Vec3::new(0.0, 0.0, 0.0), |g, c| {
+                Some(g + (point(last, c)? - point(0, c)?))
+            })?
+        } else {
+            circles
+                .iter()
+                .map(|&(_, _, normal)| normal)
+                .max_by(|a, b| a.length_squared().total_cmp(&b.length_squared()))?
+        };
+        let length = axis_vector.length();
+        if length.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+            return None;
+        }
+        let mut axis = axis_vector * (1.0 / length);
+        if axis.dot(axis_r) < 0.0 {
+            axis *= -1.0;
+        }
+        let origin = c0 + axis * (placement_r.origin() - c0).dot(axis);
+        let xr = placement_r.x_axis();
+        let x = xr - axis * xr.dot(axis);
+        let x = x * (1.0 / x.length());
+        let y = axis.cross(x);
+        let placement = Axis2Placement::from_stored(origin, x, y);
+        let finite = [origin, x, y]
+            .iter()
+            .all(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite());
+        if !finite {
+            return None;
+        }
+        if cylinder {
+            // Keep the first row's centre and radius together. On a shallow arc their
+            // rounding is correlated: averaging radii from other rows while retaining c0
+            // moves the cylinder off its own endpoints, even with joint circle recovery.
+            return Some(Self::Cylinder {
+                placement,
+                radius: r0,
+            });
+        }
+        // the radius changes by tan(angle) per unit along the axis
+        let tan = (r1 - r0) / along.dot(axis);
+        let semi_angle_deg = tan.atan().to_degrees();
+        if semi_r != 0.0 && (semi_angle_deg > 0.0) != (semi_r > 0.0) {
+            return None;
+        }
+        let base_radius = r0 + tan * (origin - c0).dot(axis);
+        Some(Self::Cone {
+            placement,
+            base_radius,
+            semi_angle_deg,
+        })
     }
 
     /// Not a support's kind (#2485): the surface of revolution a NURBS form is, as the
