@@ -2,7 +2,8 @@
 //! face): its record has each face's surface with u and v swapped, the face still used as it was
 //! in its shell, so its normal at each point is the other way; its edges are the same edges,
 //! renumbered by the record's walk, which the returned map follows; turned over twice it is the
-//! sheet again; an analytic sheet keeps its label; a closed body is refused and left as it was.
+//! sheet again; an analytic sheet keeps its label; a closed body, or an order that is not the
+//! body's, is refused and the body left as it was.
 
 #![allow(
     clippy::unwrap_used,
@@ -247,4 +248,19 @@ fn a_closed_body_is_refused_and_left_as_it_was() {
     let (before, order) = body.to_record().unwrap();
     assert!(matches!(body.turn_over(&order), Err(Error::Unsupported(_))));
     assert_eq!(body.to_record().unwrap().0, before);
+}
+
+#[test]
+fn a_foreign_order_is_refused_and_the_sheet_left_as_it_was() {
+    let (body, order) = Body::from_record(&sheet(), true).unwrap();
+    let (before, _) = body.to_record().unwrap();
+    let (_, foreign) = make_box([0.0; 3], [1.0, 2.0, 3.0])
+        .unwrap()
+        .to_record()
+        .unwrap();
+    assert_eq!(body.turn_over(&foreign).err(), Some(Error::Argument));
+    assert_eq!(body.to_record().unwrap().0, before);
+    // the right order still turns it over
+    let t = body.turn_over(&order).unwrap();
+    faces_turned("the bumped sheet after a refusal", &before, &t.record, true);
 }
