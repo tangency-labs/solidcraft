@@ -1,0 +1,10 @@
+{
+  "en": {
+    "prefs.history_last_stops_at_component": "Go to end stops at the component's end",
+    "prefs.history_last_stops_at_component_note": "With History steps by component on, Go to end and Go forward stop after the active component's last feature, and later features of other components stay rolled back. Off: they go to the end of the design."
+  },
+  "it": {
+    "prefs.history_last_stops_at_component": "«Vai alla fine» si ferma alla fine del componente",
+    "prefs.history_last_stops_at_component_note": "Con i passi della cronologia per componente, «Vai alla fine» e «Avanti» si fermano dopo l'ultima lavorazione del componente attivo, e le lavorazioni successive degli altri componenti restano tornate indietro. Disattivato: vanno alla fine del progetto."
+  }
+}
