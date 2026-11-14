@@ -1397,3 +1397,36 @@ fn a_corner_round_whose_rail_ends_past_w_off_the_side_is_refused_as_on_main() {
         other => panic!("no fixes: {other:?}"),
     }
 }
+
+/// A real miss of the segment certificate alone: [`arm_boss_foot_only`] with a slot 1 x 1
+/// through the side, y -78.5 to -77.5, z 4.5 to 5.5, from x = -37 to -30, between W
+/// (y -75.68) and the rail's end R = (-36, -80, 5) of the corner round r4 = 15. R stays inside
+/// the side, but the slot's edges on the side cross the cap edge's place from W to R, so the
+/// turned-back end is not taken and main's outcome stands: without the corpus's fixes
+/// refused, naming 10.68 (the closed form less the fit margin); with them it fails as on main
+/// (status 1001, not asserted beyond failing). MEASURED: with only the certificate removed,
+/// the turned-back end is taken and the round without the corpus's fixes fails with status
+/// 1001 instead.
+#[test]
+fn a_corner_round_whose_cap_edge_crosses_a_slot_in_the_side_is_refused_as_on_main() {
+    let r4 = 15.0;
+    let b = arm_boss_foot_only();
+    let slot = make_box([-37.0, -78.5, 4.5], [7.0, 1.0, 1.0]).unwrap();
+    let b = boolean(b, slot, BooleanOp::Subtract).unwrap().unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    let w = top_end_on_side();
+    assert!(
+        -65.0 - r4 < -78.5 && -77.5 < w,
+        "the slot lies between W and R"
+    );
+    assert!(corner_round(&b, r4, true).is_err(), "corpus: built");
+    match corner_round(&b, r4, false) {
+        Err(Error::TooLarge {
+            size, why: None, ..
+        }) => assert!(
+            size < CORNER_ROUND_REACHES_W && size > CORNER_ROUND_REACHES_W - 1e-4,
+            "no fixes: fit {size}, the closed form {CORNER_ROUND_REACHES_W} less the fit margin"
+        ),
+        other => panic!("no fixes: {other:?}"),
+    }
+}

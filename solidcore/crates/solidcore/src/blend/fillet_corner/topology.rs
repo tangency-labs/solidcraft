@@ -740,7 +740,8 @@ impl FilletCorner {
                         rolled,
                         solver.tangency_tolerance,
                     )?,
-                    // a failure in the decision finds nothing: the corner is main's
+                    // a failure in the decision finds nothing: the corner is main's (main
+                    // never asks this decision's queries)
                     None if mixed => match nx1_end::rail_passes_side_edge_end(
                         k,
                         target,
@@ -751,7 +752,11 @@ impl FilletCorner {
                         vertex,
                     ) {
                         Ok(found) => found,
-                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                        // only Unported and a cancellation pass on: any other failure,
+                        // `FaceTrimsUnavailable` from the classification included, declines
+                        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                            return Err(e)
+                        }
                         Err(_) => None,
                     },
                     _ => None,

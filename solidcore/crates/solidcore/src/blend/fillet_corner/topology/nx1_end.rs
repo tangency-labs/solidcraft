@@ -535,24 +535,29 @@ impl SegmentFrame {
 
 /// Whether the boundary edge `edge_id` of S is proved not to cross the open segment of
 /// `frame` (from W, the vertex `far`, to R), with the points in `frame`'s coordinates (a
-/// along, h across) and `err` the rounding of each coordinate (`gamma(16)` of the largest
-/// coordinate involved: the subtraction, the three-term dot product, and the quotient by a
-/// weight):
-/// - an edge with no end at W must keep clear by more than the tolerance plus `err`: its
+/// along, h across) and `err` the rounding of each coordinate: `gamma(16)` of the largest
+/// coordinate involved (the subtraction, the three-term dot product, and the quotient by a
+/// weight), plus, for a B-spline whose edge is a part of its NURB, the extraction's: its knot
+/// insertions leave each homogeneous coefficient within `gamma(16 (p + 1))` of the NURB's
+/// largest (as [`crate::query::distance_bound`] counts them), carried through the quotient by
+/// the smallest weight less that error.
+/// - An edge with no end at W must keep clear by more than the tolerance plus `err`: its
 ///   points (a line's ends, a B-spline's Euclidean control points, which hold its curve in
 ///   their hull where the weights are positive) all lie before W, all past R, or all on one
-///   side of the segment's line, each by more than that;
-/// - an edge with an end at W lies on one side of the segment's line, within `err` (every
-///   point's `h >= -err`, or every point's `h <= err`): it then never reaches the other side,
-///   so it cannot cross the segment, though it may touch it (as a curve leaving W tangent to
-///   E). A line from W running along the segment's line toward R (its far end within the
-///   tolerance of the line, ahead of W) lies on the segment and is not clear.
+///   side of the segment's line, each by more than that.
+/// - An edge with an end at W must lie in one closed half-plane of the segment's line,
+///   within `err` (every point's `h >= -err`, or every point's `h <= err`): it then never
+///   reaches the other side by more than `err`, so it does not cross the segment. It may
+///   touch the line h = 0 (within `err`) anywhere along the segment, not only at W; touching
+///   is not crossing, and that is all this proves. A line from W running along the segment's
+///   line toward R (its far end within the tolerance of the line, ahead of W) lies on the
+///   segment and is not clear.
 ///
 /// A curve of another kind, a 2D or non-finite net, or a weight not proved positive is not
 /// proved.
 ///
 /// # Errors
-/// Those of the topology queries, the recogniser and the evaluations.
+/// Those of the topology queries, the recogniser, the extraction and the evaluations.
 fn edge_clear_of_segment(
     k: &Kernel,
     target: &Brep,
@@ -568,6 +573,9 @@ fn edge_clear_of_segment(
     let ivl = edge::interval(target, edge_id)?;
     let at_w = edge::start_vertex(target, edge_id)? == Some(far)
         || edge::end_vertex(target, edge_id)? == Some(far);
+    // the extraction's error on the homogeneous coefficients, and the smallest weight
+    let mut extract_err = 0.0_f64;
+    let mut w_min = f64::INFINITY;
     let points: Vec<Point3> = if curve.is_line(k, 3, CURVE_TOL)?.is_some() {
         vec![
             curve.evaluate_point(k, ivl.min())?,
@@ -588,6 +596,15 @@ fn edge_clear_of_segment(
             return Ok(false);
         }
         let segment = if first < lo || hi < last {
+            let largest = nurb
+                .cpts()
+                .iter()
+                .flat_map(|c| {
+                    let wt = if c.w == NOW { 1.0 } else { c.w };
+                    [c.x.abs(), c.y.abs(), c.z.abs(), wt.abs()]
+                })
+                .fold(0.0_f64, f64::max);
+            extract_err = gamma(16 * (nurb.degree() + 1)) * largest;
             nurb.extract_seg(lo, hi)?
         } else {
             nurb.clone()
@@ -598,11 +615,12 @@ fn edge_clear_of_segment(
                 return Ok(false);
             }
             let wt = if c.w == NOW { 1.0 } else { c.w };
-            // positive weights keep the curve in the hull (the weights are the net's own)
+            // weights proved positive keep the curve in the hull
             let finite = c.x.is_finite() && c.y.is_finite() && c.z.is_finite();
-            if !(finite && crate::geom::certified::above(wt, 0.0)) {
+            if !(finite && crate::geom::certified::above(wt - extract_err, 0.0)) {
                 return Ok(false);
             }
+            w_min = w_min.min(wt);
             out.push(Point3::new(c.x / wt, c.y / wt, c.z / wt));
         }
         out
@@ -618,7 +636,17 @@ fn edge_clear_of_segment(
     if !size.is_finite() {
         return Ok(false);
     }
-    let err = gamma(16) * size;
+    // the extraction's error carried through the quotient by a weight (as
+    // `RailPiece::ball` widens it), then the frame's own rounding
+    let carried = if extract_err > 0.0 {
+        extract_err * (1.0 + size) / (w_min - extract_err)
+    } else {
+        0.0
+    };
+    let err = gamma(16) * size + carried;
+    if !err.is_finite() {
+        return Ok(false);
+    }
     let coords: Vec<(f64, f64)> = points.iter().map(|&p| frame.coords(p)).collect();
     let clear = frame.tol + err;
     if at_w {
