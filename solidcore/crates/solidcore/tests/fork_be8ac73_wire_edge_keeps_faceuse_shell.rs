@@ -7,11 +7,9 @@
 //! and a vertex shell after it, so the region lists `[outside of the cube, wire, vertex]`.
 //! A new edge from the wire's free end to a cube corner joins the wire shell (start) to
 //! the cube's outside faceuse shell (end). Upstream keeps the wire shell's object, which
-//! takes the cube's six face uses; with
-//! `UpstreamFixes::boolean_wire_edge_keeps_faceuse_shell` the cube's shell is kept and
-//! takes the wires. Either way the region lists the joined shell first, then the vertex
-//! shell, and the joined shell holds the same six face uses in the same order and both
-//! wire edges.
+//! takes the cube's six face uses; the port keeps the cube's shell, which takes the
+//! wires. The region lists the joined shell first, then the vertex shell, and the joined
+//! shell holds the same six face uses in the same order and both wire edges.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -49,9 +47,8 @@ struct Joined {
     new_edges: [EdgeId; 2],
 }
 
-fn join(fix: bool) -> Joined {
+fn join() -> Joined {
     let mut k = Kernel::default();
-    k.fixes.boolean_wire_edge_keeps_faceuse_shell = fix;
     let mut b = create_box(&mut k, Vec3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let infinite = b.infinite_region().unwrap();
     assert_eq!(b.region(infinite).unwrap().shells.len(), 1);
@@ -99,27 +96,15 @@ fn join(fix: bool) -> Joined {
     }
 }
 
-fn check_common(j: &Joined) {
+#[test]
+fn fix_keeps_the_faceuse_shell() {
+    let j = join();
     assert_eq!(j.shells.len(), 2);
     assert_eq!(j.shells[1], j.vertex_shell);
     assert_eq!(j.faceuses, j.cube_faceuses);
     let mut expected = j.new_edges.to_vec();
     expected.sort_unstable();
     assert_eq!(j.wires, expected);
-}
-
-#[test]
-fn upstream_keeps_the_wire_shell() {
-    let j = join(false);
-    check_common(&j);
-    assert_eq!(j.shells[0], j.wire_shell);
-    assert_ne!(j.shells[0], j.cube_shell);
-}
-
-#[test]
-fn fix_keeps_the_faceuse_shell() {
-    let j = join(true);
-    check_common(&j);
     assert_eq!(j.shells[0], j.cube_shell);
     assert_ne!(j.shells[0], j.wire_shell);
 }

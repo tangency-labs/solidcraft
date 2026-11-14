@@ -95,7 +95,7 @@ const NO_KERNEL: [&str; 14] = [
     "hold_a_kernel",
 ];
 
-const ANSWERING: [&str; 63] = [
+const ANSWERING: [&str; 66] = [
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -133,6 +133,7 @@ const ANSWERING: [&str; 63] = [
     "stitch",
     "offset_sheet",
     "classify_point",
+    "classify_points",
     "mass_properties",
     "bounds",
     "edge_face_distance",
@@ -141,6 +142,7 @@ const ANSWERING: [&str; 63] = [
     "tagged",
     "history",
     "check",
+    "check_owned",
     "make_cylinder",
     "make_sphere",
     "make_cone",
@@ -159,6 +161,7 @@ const ANSWERING: [&str; 63] = [
     "loft_to_point",
     "screw_sweep",
     "screw_sweep_radial",
+    "screw_sweep_with_options",
 ];
 
 /// Every `pub fn` of the files that hold the crate's kernel entry points is accounted for.
@@ -249,6 +252,7 @@ fn every_entry_point_answers() {
     says("stitch", sheet.stitch(0.1));
     says("offset_sheet", sheet.offset_sheet(1.0));
     says("classify_point", a.classify_point([1.0; 3]));
+    says("classify_points", a.classify_points(&[[1.0; 3], [f64::NAN; 3]]));
     says("mass_properties", a.mass_properties(1e-6));
     says("bounds", a.bounds());
     says("edge_face_distance", a.edge_face_distance(0, 0));
@@ -256,6 +260,7 @@ fn every_entry_point_answers() {
     says("is_manifold_solid", a.is_manifold_solid());
     says("history", says("tagged", a.tagged(0)).unwrap().history());
     says("check", a.check(CheckLevel::All));
+    says("check_owned", a.try_clone().and_then(|c| c.check_owned(CheckLevel::All)));
     says("make_cylinder", Brep::make_cylinder([0.0; 3], 1.0, 1.0));
     says("make_sphere", Brep::make_sphere([0.0; 3], 1.0));
     says("make_cone", Brep::make_cone([0.0; 3], 2.0, 1.0, 1.0));
@@ -278,6 +283,17 @@ fn every_entry_point_answers() {
     says("loft_to_point", Brep::loft_to_point(&lines, p(5.0, 5.0, 12.0)));
     says("screw_sweep", Brep::screw_sweep(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, 0.01));
     says("screw_sweep_radial", Brep::screw_sweep_radial(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, &[(0.0, 0.0), (1.0, 0.0)], 0.01));
+    says(
+        "screw_sweep_with_options",
+        Brep::screw_sweep_with_options(
+            &lines,
+            p(30.0, 0.0, 0.0),
+            p(0.0, 0.0, 1.0),
+            12.0,
+            1.0,
+            crate::sweeps::ScrewSweepOptions { law: None, join_spline_walls: true, tolerance: 0.01 },
+        ),
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -339,15 +355,15 @@ fn a_failing_solidcore_call_leaves_a_dump_and_names_itself() {
 /// ending them 0.1 um short) is held at that tolerance.
 #[test]
 fn a_pcurve_smlib_ends_within_the_edges_tolerance_is_mapped_onto_our_interval() {
+    use solidcore_ops::pcurve::TrimEdge;
     use solidcore_record::brep::{Curve, Curve2};
-    use solidcraft_geom::brep::pcurve::TrimEdge;
     let line = Curve::Line { start: [0.0, 0.0, 0.0], end: [2.0, 0.0, 0.0] };
     let edge = TrimEdge { curve: &line, nurbs: None, interval: [0.0, 1.0], vertices: [0, 1], tolerance: 1e-5 };
     let theirs = [0.0, 1.0 - 2e-8];
     let pc = Curve2::Spline { knots: vec![0.0, 0.0, theirs[1], theirs[1]], points: vec![[0.0, 0.0], [1.0, 0.0]] };
     let mapped = crate::pcurves::on_our_interval(pc.clone(), &edge, theirs, edge.tolerance).unwrap();
     assert_eq!(mapped.interval(), Some([0.0, 1.0]));
-    assert_eq!(solidcraft_geom::brep::pcurve::eval(&mapped, 1.0), Some([1.0, 0.0]));
+    assert_eq!(solidcore_ops::pcurve::eval(&mapped, 1.0), Some([1.0, 0.0]));
     // 0.02 mm along the edge is past its 1e-5 mm.
     let err = crate::pcurves::on_our_interval(pc, &edge, [0.0, 0.99], edge.tolerance).unwrap_err();
     assert!(err.contains("SMLib moved an edge's interval") && err.contains("tolerance"), "{err}");
@@ -355,7 +371,7 @@ fn a_pcurve_smlib_ends_within_the_edges_tolerance_is_mapped_onto_our_interval() 
     let short = Curve2::Spline { knots: vec![0.0, 0.0, 0.99, 0.99], points: vec![[0.0, 0.0], [1.0, 0.0]] };
     let held = crate::pcurves::on_our_interval(short, &edge, [0.0, 0.99], 0.03).unwrap();
     assert_eq!(held.interval(), Some([0.0, 1.0]));
-    assert_eq!(solidcraft_geom::brep::pcurve::eval(&held, 1.0), Some([1.0, 0.0]));
+    assert_eq!(solidcore_ops::pcurve::eval(&held, 1.0), Some([1.0, 0.0]));
 }
 
 /// An edge whose curve runs 2.5 um past its vertex and its face's patch (as Poppy Humanoid's
@@ -365,8 +381,8 @@ fn a_pcurve_smlib_ends_within_the_edges_tolerance_is_mapped_onto_our_interval() 
 /// own interval, ending at the patch's corner.
 #[test]
 fn an_edge_a_few_um_past_its_patch_keeps_its_interval() {
+    use solidcore_ops::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
     use solidcore_record::brep::{Curve, Surface};
-    use solidcraft_geom::brep::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
     // S(u, v) = (10u, 10v, 2v^2), bicubic
     let g = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0];
     let z = [0.0, 0.0, 2.0 / 3.0, 2.0];
@@ -397,7 +413,7 @@ fn an_edge_a_few_um_past_its_patch_keeps_its_interval() {
     let pcs = crate::pcurves::SmlibTrims.trims(&face).unwrap();
     let pc = &pcs[0][0];
     assert_eq!(pc.interval(), Some([0.0, 1.0]));
-    let [u, v] = solidcraft_geom::brep::pcurve::eval(pc, 1.0).unwrap();
+    let [u, v] = solidcore_ops::pcurve::eval(pc, 1.0).unwrap();
     assert!((u - 1.0).abs() < 1e-9 && v.abs() < 1e-9, "{u} {v}");
 }
 
@@ -433,22 +449,25 @@ fn answered<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
 /// or still open, blocked here on a channel, while another makes and measures a body of its own.
 #[test]
 fn a_kernel_call_that_does_not_end_holds_up_no_other_call() {
-    let (release, held) = call_held_open("held_open");
+    let (release, held) = call_held_open("held_open_by_no_other_call");
     let volume = answered(|| {
         let a = Brep::make_box([0.0; 3], [10.0; 3]).unwrap();
         let b = Brep::make_box([5.0, 0.0, 0.0], [10.0; 3]).unwrap();
         a.boolean(&b, BooleanOp::Union).unwrap().unwrap().volume(1e-7).unwrap()
     });
     assert!((volume - 1500.0).abs() < 1e-6, "{volume}");
-    assert!(current_call().is_some_and(|c| c.contains("held_open")), "the call still runs");
+    assert!(current_call().is_some_and(|c| c.contains("held_open_by_no_other_call")), "the call still runs");
     // And one holds up no other held open beside it.
-    let (release_too, held_too) = call_held_open("held_open_too");
-    assert!(current_call().is_some_and(|c| c.contains("held_open") && c.contains("held_open_too")));
+    let (release_too, held_too) = call_held_open("held_open_too_by_no_other_call");
+    assert!(current_call().is_some_and(|c| c.contains("held_open_by_no_other_call") && c.contains("held_open_too_by_no_other_call")));
     for (release, held) in [(release, held), (release_too, held_too)] {
         release.send(()).unwrap();
         held.join().unwrap().unwrap();
     }
-    assert!(!current_call().is_some_and(|c| c.contains("held_open")), "neither is in flight any more");
+    assert!(
+        !current_call().is_some_and(|c| c.contains("held_open_by_no_other_call") || c.contains("held_open_too_by_no_other_call")),
+        "neither is in flight any more"
+    );
 }
 
 /// Bodies are made and used on whichever kernel is free, at the same time on several threads, and
@@ -456,7 +475,7 @@ fn a_kernel_call_that_does_not_end_holds_up_no_other_call() {
 /// kernel is used once it is free, and two bodies from different kernels go into one boolean.
 #[test]
 fn bodies_move_between_kernels_and_calls_run_side_by_side() {
-    let (release, held) = call_held_open("held_open");
+    let (release, held) = call_held_open("held_open_beside_moved_bodies");
     let on_second = answered(|| Brep::make_box([5.0, 0.0, 0.0], [10.0; 3]).unwrap());
     release.send(()).unwrap();
     held.join().unwrap().unwrap();
@@ -490,7 +509,7 @@ fn bodies_move_between_kernels_and_calls_run_side_by_side() {
 /// away and the other call and later ones go on.
 #[test]
 fn a_panic_beside_a_running_call_costs_only_its_own_kernel() {
-    let (release, held) = call_held_open("held_open");
+    let (release, held) = call_held_open("held_open_beside_a_panic");
     let r: Result<()> = core::run("panicking", |_| panic!("on purpose"));
     assert!(matches!(r, Err(Error::Internal(_))), "{r:?}");
     let v = answered(|| Brep::make_box([0.0; 3], [2.0; 3]).unwrap().volume(1e-7).unwrap());
@@ -566,6 +585,51 @@ fn a_stopped_call_ends_at_its_next_check_and_holds_up_nothing() {
     assert!((v - 1000.0).abs() < 1e-6, "{v}");
 }
 
+/// Work entered under a token while another is over it stops when either does (#10577): a
+/// dialog's Cancel stops the kernel work of its design's job, and the design's own token, and
+/// later work under it, go on.
+#[test]
+fn a_token_under_another_stops_when_either_does() {
+    let looping = |design: stop::Stop, dialog: stop::Stop| {
+        let (started, is_started) = std::sync::mpsc::channel();
+        let running = std::thread::spawn(move || {
+            design.within(|| {
+                dialog.within(|| {
+                    core::run("nested_stop", |k| {
+                        let _ = started.send(());
+                        loop {
+                            k.check_cancelled("nested_stop")?;
+                            std::thread::yield_now();
+                        }
+                    })
+                })
+            })
+        });
+        is_started.recv().unwrap();
+        running
+    };
+    // The inner token stopped: the work stops, the design's token does not.
+    let (design, dialog) = (stop::Stop::new(), stop::Stop::new());
+    let running = looping(design.clone(), dialog.clone());
+    dialog.stop();
+    let result: Result<()> = answered(move || running.join().unwrap());
+    assert!(result.is_err_and(|e| e.to_string().contains("cancel")));
+    assert!(!design.is_stopped());
+    assert!(design.within(|| Brep::make_box([0.0; 3], [1.0; 3])).is_ok(), "later work under the design's token runs");
+    // The outer token stopped: the work stops too.
+    let (design, dialog) = (stop::Stop::new(), stop::Stop::new());
+    let running = looping(design.clone(), dialog.clone());
+    design.stop();
+    let result: Result<()> = answered(move || running.join().unwrap());
+    assert!(result.is_err_and(|e| e.to_string().contains("cancel")));
+    assert!(!dialog.is_stopped(), "the token entered beneath is not stopped itself");
+    // A token stopped before the work is entered under it: refused before it starts.
+    let (design, dialog) = (stop::Stop::new(), stop::Stop::new());
+    dialog.stop();
+    assert!(design.within(|| dialog.within(|| Brep::make_box([0.0; 3], [1.0; 3]))).is_err());
+    assert!(dialog.within(|| design.within(|| Brep::make_box([0.0; 3], [1.0; 3]))).is_err(), "either way round");
+}
+
 /// Every call starts with the same draws of random rays, whatever its kernel did before: what
 /// depends on them answers the same on any kernel of the pool.
 #[test]
@@ -576,4 +640,87 @@ fn every_call_starts_clean_on_any_kernel() {
     let held = hold_a_kernel();
     assert_eq!(core::run("draw", draw).unwrap(), first, "another kernel");
     drop(held);
+}
+
+/// The sites in this crate that still make a bare status ([`Error::Status`], "SMLib failed (status
+/// n)") for a failure that has no type yet: a set that only shrinks. A failure solidcore-ops types
+/// travels as its refusal ([`Error::Refused`]), never as a new status; a site that goes lowers its
+/// file's count here (a file that reaches none drops its line). Counted in the crate's code: every
+/// use of `Error::Status`, called or point-free (`.map_err(Error::Status)`), but not in comments,
+/// match patterns, `*tests.rs` files or the top-level `#[cfg(test)] mod name { .. }` blocks (a
+/// `#[cfg(test)]` item of another kind, or a `mod name;` declaration, hides no code).
+#[test]
+fn status_sites_only_shrink() {
+    const SITES: &[(&str, usize)] =
+        &[("core/blend.rs", 9), ("core/measure.rs", 1), ("core/offset.rs", 7), ("core/split.rs", 3), ("core/ssi.rs", 1), ("core/sweep.rs", 6)];
+    /// The lines of `text` outside its top-level inline test modules (rustfmt closes one with a
+    /// `}` alone at the start of a line).
+    fn code_lines(text: &str) -> Vec<&str> {
+        let lines: Vec<&str> = text.lines().collect();
+        let (mut out, mut i) = (Vec::new(), 0);
+        while i < lines.len() {
+            let next = lines.get(i + 1).copied().unwrap_or("");
+            let inline_mod = ["mod ", "pub mod ", "pub(crate) mod "].iter().any(|p| next.starts_with(p)) && next.ends_with(" {");
+            if lines[i] == "#[cfg(test)]" && inline_mod {
+                i += 2;
+                while i < lines.len() && lines[i] != "}" {
+                    i += 1;
+                }
+                i += 1;
+                continue;
+            }
+            out.push(lines[i]);
+            i += 1;
+        }
+        out
+    }
+    /// The uses of `Error::Status` in `line` that make a status (not a match pattern).
+    fn uses(line: &str) -> usize {
+        const NAME: &str = "Error::Status";
+        line.match_indices(NAME)
+            .filter(|(i, _)| {
+                let rest = &line[i + NAME.len()..];
+                if rest.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+                    return false;
+                }
+                let Some(args) = rest.strip_prefix('(') else { return true };
+                let after = args.find(')').map_or("", |j| args[j + 1..].trim_start());
+                !(after.starts_with("=>") || after.starts_with("if ") || after.starts_with('|'))
+            })
+            .count()
+    }
+    fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, usize)>) {
+        let mut entries: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+        entries.sort();
+        for p in entries {
+            if p.is_dir() {
+                walk(&p, root, out);
+                continue;
+            }
+            let name = p.file_name().unwrap().to_string_lossy().into_owned();
+            if !name.ends_with(".rs") || name.ends_with("tests.rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&p).unwrap();
+            let n: usize = code_lines(&text).into_iter().filter(|l| !l.trim_start().starts_with("//")).map(uses).sum();
+            if n > 0 {
+                out.push((p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"), n));
+            }
+        }
+    }
+    // the counter itself: a point-free use counts, a pattern does not, nor a test module
+    assert_eq!(uses("    .map_err(Error::Status)?;"), 1);
+    assert_eq!(uses("        Error::Status(s) => s,"), 0);
+    assert_eq!(uses("        Err(Error::Status(1001))"), 1);
+    let module = "fn a() {}\n#[cfg(test)]\nmod tests {\n    fn b() { Error::Status(1) }\n}\nfn c() {}\n#[cfg(test)]\nmod more_tests;\n#[cfg(test)]\nconst X: u8 = 0;";
+    assert_eq!(code_lines(module), ["fn a() {}", "fn c() {}", "#[cfg(test)]", "mod more_tests;", "#[cfg(test)]", "const X: u8 = 0;"]);
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut found = Vec::new();
+    walk(&root, &root, &mut found);
+    let expected: Vec<(String, usize)> = SITES.iter().map(|&(f, n)| (f.to_owned(), n)).collect();
+    for (file, n) in &found {
+        let listed = SITES.iter().find(|(f, _)| f == file).map_or(0, |&(_, m)| m);
+        assert!(*n <= listed, "{file} makes {n} bare statuses, {listed} listed: carry the typed refusal (Error::Refused), not a new status");
+    }
+    assert_eq!(found, expected, "fewer bare statuses than listed: lower the counts in SITES");
 }

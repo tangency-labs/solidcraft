@@ -25,12 +25,17 @@ use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::query::face::p2 as face_p2;
 use crate::topology::brep::p2 as brep_p2;
 use crate::topology::edgeuse::p1 as eu1;
+use crate::topology::proto_topology::p2::EXACT_TOL_FACTOR;
 use crate::topology::topology as topo;
 use crate::topology::{edge, vertex, vertexuse, Brep, EdgeId, VertexId};
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 
 const OP: &str = "topology::proto_topology::p1";
+
+/// The factor of `CanCombineEdgeDefinitions`: the distance allowed between the curves of
+/// two combinable edge definitions, in units of their summed tolerances (upstream's).
+pub const ED_TOL_FACTOR: f64 = 5.0;
 const OP_POSITION: &str = "topology::proto_topology::p1::find_position_from_pcs";
 const OP_EVALUATE: &str = "topology::proto_topology::p1::ProtoTopologyManager::proto_edge_evaluate";
 const OP_SRC_TOPO: &str = "topology::proto_topology::p1::VertexDefinition::set_src_topo";
@@ -39,11 +44,7 @@ const OP_END: &str = "topology::proto_topology::p1::ProtoTopologyManager::end_po
 const OP_COMBINE: &str =
     "topology::proto_topology::p1::ProtoTopologyManager::can_combine_edge_definitions";
 
-// Upstream `SmStatus` value `SM_ERR_INVALID_INPUT`.
-use crate::error::SM_ERR_INVALID_INPUT;
-
-// Upstream `SmStatus` value `SM_ERR_ASSERT_FAILURE`.
-use crate::error::SM_ERR_ASSERT_FAILURE;
+use crate::error::topology::TopologyFailure;
 
 /// `SmProtoTopologyManager_TYPE` (`TOPO_BASE_TYPE + 680`).
 pub const MANAGER_TYPE: i64 = 16680;
@@ -250,15 +251,6 @@ impl SolutionObject for CurveHandle {
     }
 }
 
-/// An upstream status other than `SM_ERR` / `SM_ERR_NULL_POINTER`.
-const fn status(operation: &'static str, code: i32) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code,
-        entity: None,
-    }
-}
-
 /// A dereference of a null pointer or a deleted object upstream (undefined
 /// behaviour).
 const fn dangling(reason: &'static str) -> SolidError {
@@ -403,7 +395,10 @@ pub fn find_position_from_pcs<O: ClassObject>(
 
     // error - both Parameters are not Set
     if !found1 && !found2 {
-        return Err(SolidError::sm_err(OP_POSITION));
+        return Err(SolidError::topology_failed(
+            OP_POSITION,
+            "neither point classification has its parameters set",
+        ));
     }
 
     if found1 {
@@ -518,6 +513,77 @@ pub fn are_same_curve<O: Copy + PartialEq>(
 
     // return TRUE when DropPoint() succeeded and DropDist < dTol
     Ok(dropped.is_some_and(|d| d.success && d.distance < tol))
+}
+
+/// Not upstream (#15718): whether two edge definitions on lines are one piece within
+/// `tol`, decided over both whole pieces: each end of the first definition's interval lies
+/// within `tol` of the second's segment (the piece itself, not its infinite line), and
+/// each end of the second's within `tol` of the first's ([`end_within_segment`], rounding
+/// counted). The distance from a point to a segment is convex in the point (a segment is
+/// convex), so along a piece its maximum is reached at one of the piece's ends: the four
+/// end checks bound every point of each piece within `tol` of the other piece, in both
+/// directions (their Hausdorff distance). Two pieces of one line shifted along it by more
+/// than `tol` are therefore two pieces, as two crossing pieces are; upstream's
+/// [`are_same_curve`] drops one midpoint onto the other's curve instead. `false` when either
+/// curve is not a line or either piece has zero length (nothing combined: the definitions
+/// are kept).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a missing curve; those of the end evaluations.
+fn exact_lines_coincide<O: Copy>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    d1: &EdgeDefinition<O>,
+    d2: &EdgeDefinition<O>,
+    tol: f64,
+) -> Result<bool> {
+    use crate::curve::curve::CurveKind;
+    let c1 = curve_of(geometry, d1.xsect_curve_3d)?;
+    let c2 = curve_of(geometry, d2.xsect_curve_3d)?;
+    let line = |c: &Curve| matches!(c.kind(), CurveKind::Line(_));
+    if !line(c1) || !line(c2) {
+        return Ok(false);
+    }
+    let ends = |c: &Curve, ivl: &Extent1d| -> Result<[Point3; 2]> {
+        Ok([
+            c.evaluate_point(k, ivl.min())?,
+            c.evaluate_point(k, ivl.max())?,
+        ])
+    };
+    let p1 = ends(c1, &d1.xsect_interval)?;
+    let p2 = ends(c2, &d2.xsect_interval)?;
+    Ok(p1.iter().all(|&p| end_within_segment(p, p2, tol))
+        && p2.iter().all(|&p| end_within_segment(p, p1, tol)))
+}
+
+/// Not upstream (#15718): whether `p` lies within `tol` of the segment `seg`, with an upper
+/// bound of the distance: the distance to the nearer end when the computed foot falls
+/// outside the segment (an end is a point of the segment, so that bounds the distance
+/// whatever the foot's rounding), and otherwise the distance to the segment's line plus the
+/// rounding of the foot and the line distance (the differences carry a few units in the
+/// last place of the coordinates, amplified by `|p - a| / |b - a|`). `false` for a segment
+/// of zero length and for any NaN.
+fn end_within_segment(p: Point3, seg: [Point3; 2], tol: f64) -> bool {
+    use crate::nurbs::math::gamma;
+    let [a, b] = seg;
+    let along = b - a;
+    let length = along.length();
+    let usable = length > 0.0;
+    if !usable {
+        return false;
+    }
+    let w = p - a;
+    let s = w.dot(along) / (length * length);
+    let scale = p.length() + a.length() + b.length();
+    let bound = if s <= 0.0 {
+        p.distance(a) + gamma(8) * (p.length() + a.length())
+    } else if s >= 1.0 {
+        p.distance(b) + gamma(8) * (p.length() + b.length())
+    } else {
+        w.cross(along).length() / length + gamma(16) * scale * (1.0 + w.length() / length)
+    };
+    bound < tol
 }
 
 /// `sm_AreConnected(const SmVertex*, const SmFace*)`.
@@ -804,7 +870,10 @@ pub fn find_ed_on_degen_face<O: Copy + PartialEq>(
     let brep1 = topology.edge_brep(edge1)?;
     let brep2 = topology.edge_brep(edge2)?;
     if brep1 != brep2 {
-        return Err(status(OP_DEGEN, SM_ERR_ASSERT_FAILURE));
+        return Err(SolidError::topology(
+            OP_DEGEN,
+            TopologyFailure::Inconsistent("the edges are on different B-reps"),
+        ));
     }
 
     // Find shared faces (FindCommonElements: the second list's faces found in the first)
@@ -1171,7 +1240,10 @@ impl<O: ClassObject> VertexDefinition<O> {
         } else if which == 2 {
             self.pc2.set_class_object(t, topo);
         } else {
-            return Err(SolidError::sm_err(OP_SRC_TOPO));
+            return Err(SolidError::topology_failed(
+                OP_SRC_TOPO,
+                "the source B-rep is neither 1 nor 2",
+            ));
         }
         Ok(())
     }
@@ -1815,7 +1887,10 @@ impl ProtoVertex {
                 self.vertex_defs.remove(i);
                 Ok(())
             }
-            None => Err(SolidError::sm_err(OP)),
+            None => Err(SolidError::topology_failed(
+                OP,
+                "the vertex definition is not listed",
+            )),
         }
     }
 
@@ -1830,7 +1905,10 @@ impl ProtoVertex {
                 self.proto_edges.remove(i);
                 Ok(())
             }
-            None => Err(SolidError::sm_err(OP)),
+            None => Err(SolidError::topology_failed(
+                OP,
+                "the proto edge is not listed",
+            )),
         }
     }
 }
@@ -1987,7 +2065,10 @@ impl ProtoEdge {
                 self.edge_defs.remove(i);
                 Ok(())
             }
-            None => Err(SolidError::sm_err(OP)),
+            None => Err(SolidError::topology_failed(
+                OP,
+                "the edge definition is not listed",
+            )),
         }
     }
 
@@ -2009,7 +2090,10 @@ impl ProtoEdge {
         if deleted {
             Ok(())
         } else {
-            Err(SolidError::sm_err(OP))
+            Err(SolidError::topology_failed(
+                OP,
+                "the proto vertex is neither end",
+            ))
         }
     }
 }
@@ -2111,6 +2195,11 @@ pub struct ProtoTopologyManager<O> {
     /// whose collapsed speck definition `SmEdgeDefinition::Imprint` skipped, so
     /// `ImprintIntersections` grows each vertex's tolerance to cover the speck's span.
     skipped_speck_vertices: Vec<(O, f64, Point3, Point3)>,
+    /// Not upstream (#15718): pairs (B-rep 1's edge, B-rep 2's edge) of line edges whose
+    /// two ends lie within their intersection tolerance of each other, end for end: one
+    /// coincident interval, so a point where the two cross is no event and gets no vertex
+    /// definition ([`ProtoTopologyManager::set_coincident_edges`]).
+    coincident_edges: Vec<(O, O)>,
 }
 
 fn push_store<T>(store: &mut Vec<Option<T>>, item: T) -> Result<u32> {
@@ -2170,6 +2259,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             pf_store: Vec::new(),
             split_self_loops_on_vertices: true,
             skipped_speck_vertices: Vec::new(),
+            coincident_edges: Vec::new(),
         })
     }
 
@@ -2189,9 +2279,29 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.split_self_loops_on_vertices = split;
     }
 
+    /// Sets the coincident line edge pairs (B-rep 1's edge, B-rep 2's edge): two straight
+    /// edges whose ends lie within their intersection tolerance of each other, end for end,
+    /// are within it of each other everywhere (the vector between points at the same
+    /// fraction along both is affine in it, so its length is convex and its ends bound it),
+    /// one coincident interval.
+    /// Where they cross is where two coincident pieces cross within their tolerance, not a
+    /// feature: [`ProtoTopologyManager::find_or_create_proto_vertex_pcs`] makes no vertex
+    /// definition for a point classified on one edge of a pair in each B-rep. The
+    /// Boolean's topology intersector sets them before intersecting. Not upstream
+    /// (#15718).
+    pub fn set_coincident_edges(&mut self, pairs: Vec<(O, O)>) {
+        self.coincident_edges = pairs;
+    }
+
+    /// Whether `(edge1, edge2)` (of B-reps 1 and 2) is a coincident line edge pair
+    /// ([`ProtoTopologyManager::set_coincident_edges`]). Not upstream.
+    #[must_use]
+    pub fn are_coincident_edges(&self, edge1: O, edge2: O) -> bool {
+        self.coincident_edges.contains(&(edge1, edge2))
+    }
+
     /// Final vertices `(vertex, max_gap, speck_start, speck_end)` whose collapsed speck
-    /// definition `SmEdgeDefinition::Imprint` skipped under
-    /// `Kernel::fixes.imprint_skips_collapsed_definition` (WR-619). Not upstream.
+    /// definition `SmEdgeDefinition::Imprint` skipped (WR-619). Not upstream.
     #[must_use]
     pub fn skipped_speck_vertices(&self) -> &[(O, f64, Point3, Point3)] {
         &self.skipped_speck_vertices
@@ -2810,7 +2920,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         } else if which_pv == pe.end_pv {
             d.xsect_interval.max()
         } else {
-            return Err(SolidError::sm_err(OP_END));
+            return Err(SolidError::topology_failed(
+                OP_END,
+                "the proto vertex is neither end of the proto edge",
+            ));
         };
         eval_point_passed(k, curve_of(geometry, d.xsect_curve_3d)?, t)
     }
@@ -3112,7 +3225,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         } else if which_pv == e.end_pv {
             self.proto_edge_end_position(k, geometry, pe, false)
         } else {
-            Err(SolidError::sm_err(OP_END))
+            Err(SolidError::topology_failed(
+                OP_END,
+                "the proto vertex is neither end of the proto edge",
+            ))
         }
     }
 
@@ -3163,7 +3279,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let e = self.pe(Some(pe))?;
         let num_eds = e.edge_defs.len();
         if num_eds == 0 {
-            return Err(status(OP_EVALUATE, SM_ERR_INVALID_INPUT));
+            return Err(SolidError::topology_invalid_value(
+                OP_EVALUATE,
+                "the proto edge has no edge definitions",
+            ));
         }
 
         let mut sum_pts = Vec3::new(0.0, 0.0, 0.0);
@@ -3388,7 +3507,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 self.pvs.remove(i);
                 Ok(())
             }
-            None => Err(SolidError::sm_err(OP)),
+            None => Err(SolidError::topology_failed(
+                OP,
+                "the proto vertex is not listed",
+            )),
         }
     }
 
@@ -3406,7 +3528,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             Some(i) => {
                 self.pes.remove(i);
             }
-            None => return Err(SolidError::sm_err(OP)),
+            None => {
+                return Err(SolidError::topology_failed(
+                    OP,
+                    "the proto edge is not listed",
+                ))
+            }
         }
 
         // remove End PV->PE back pointers (statuses ignored, passed on with the flag)
@@ -3509,9 +3636,29 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         ed1: EdgeDefId,
         ed2: EdgeDefId,
     ) -> Result<u64> {
+        self.can_combine_edge_definitions_within(k, geometry, ed1, ed2, ED_TOL_FACTOR)
+    }
+
+    /// [`ProtoTopologyManager::can_combine_edge_definitions`] with the distance allowed
+    /// between the two curves `factor` times the definitions' summed tolerances
+    /// (upstream's [`ED_TOL_FACTOR`], or 1 for exactly placed definitions; see
+    /// `proto_topology::p2`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`ProtoTopologyManager::can_combine_edge_definitions`].
+    pub fn can_combine_edge_definitions_within(
+        &self,
+        k: &Kernel,
+        geometry: &(impl ClassGeometry<O> + ProtoTopology<O>),
+        ed1: EdgeDefId,
+        ed2: EdgeDefId,
+        factor: f64,
+    ) -> Result<u64> {
         let d1 = self.ed(ed1)?;
         let d2 = self.ed(ed2)?;
-        let null = || SolidError::null_pointer(OP_COMBINE);
+        let null =
+            || SolidError::topology_missing(OP_COMBINE, "the edge definition's source topology");
         let t11 = d1.src_topo1.ok_or_else(null)?;
         let t12 = d1.src_topo2.ok_or_else(null)?;
         let t21 = d2.src_topo1.ok_or_else(null)?;
@@ -3532,16 +3679,24 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // Check distance: if they're too far apart, we can't combine them. (Upstream
         // compares the second curve over the first definition's interval.)
         let domain1 = d1.xsect_interval;
-        let tol = (d1.tolerance(k) + d2.tolerance(k)) * 5.0;
-        if !are_same_curve(
-            k,
-            geometry,
-            d1.xsect_curve_3d,
-            &domain1,
-            d2.xsect_curve_3d,
-            &domain1,
-            tol,
-        )? {
+        let tol = (d1.tolerance(k) + d2.tolerance(k)) * factor;
+        let same = if factor == EXACT_TOL_FACTOR {
+            // Not upstream (#15718): at the exact radius both definitions are lines
+            // (`edge_combine_factor`), and the decision is a certificate over both whole
+            // pieces, not upstream's one midpoint.
+            exact_lines_coincide(k, geometry, d1, d2, tol)?
+        } else {
+            are_same_curve(
+                k,
+                geometry,
+                d1.xsect_curve_3d,
+                &domain1,
+                d2.xsect_curve_3d,
+                &domain1,
+                tol,
+            )?
+        };
+        if !same {
             return Ok(0);
         }
 
@@ -3736,6 +3891,34 @@ mod tests {
         let b = H(100, ClassObjectKind::Other);
         let e = Brep::new();
         ProtoTopologyManager::new(k, (b, &e), (b, &e), b, 1e-5, 1e-3, -1.0).unwrap()
+    }
+
+    /// Unlisting what is not listed is an `SM_ERR` that says so.
+    #[test]
+    fn unlisting_a_missing_entry_is_a_typed_failure() {
+        let k = Kernel::default();
+        let mut m = manager(&k);
+        let pv = m.new_proto_vertex(Point3::ZERO, 1e-5).unwrap();
+        let e = m
+            .proto_vertex_mut(pv)
+            .unwrap()
+            .remove_vertex_definition(VertexDefId::from_index(7))
+            .unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::Failed(
+                "the vertex definition is not listed"
+            ))
+        );
+        let e = m
+            .remove_proto_vertex(ProtoVertexId::from_index(99))
+            .unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::Failed("the proto vertex is not listed"))
+        );
     }
 
     #[test]

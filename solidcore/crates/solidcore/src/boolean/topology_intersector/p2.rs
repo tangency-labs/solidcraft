@@ -118,26 +118,33 @@
 //!   blocks are not built upstream and not ported.
 //! - **Recursion.** None.
 
-use crate::curve::curve::p2::Curve;
+use crate::curve::curve::p2::{Curve, CurveKind};
+use crate::error::boolean::BooleanStage;
 use crate::error::{Result, SolidError};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{SolutionObject, SolutionType};
+use crate::geom::tol::xsect_tol_3d_from_zones;
 use crate::intersect::curve_class::p1::CurveClassification;
 use crate::intersect::curve_class::p2::ResetOptions;
 use crate::intersect::point_class::{
-    ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
+    object_zone_tol_3d, ClassGeometry, ClassObject, ClassObjectKind, PointClassType,
+    PointClassification,
 };
 use crate::intersect::topology_solver::p1::{CurveRef, TopologySolver};
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
 use crate::math::{max2, max3, min2, Point3, BIG_DOUBLE, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::math::gamma;
 use crate::surface::surface::p2::TsectCurveType;
 use crate::topology::brep::validation::spatial::SpatialIndex;
 use crate::topology::proto_topology::p3::Mates;
-use crate::topology::proto_topology::{ProtoEdgeId, ProtoTopologyManager, ProtoVertexId};
+use crate::topology::proto_topology::{
+    ProtoBrep, ProtoEdgeId, ProtoTopologyManager, ProtoVertexId,
+};
 
+use super::coincident_strip::crossing_inside_coincident_pair;
 use super::p1::{
     add_unique, brep_make_edge_in_face, can_imprint, cc_insert_topology_intersections, contains,
     eval_curve_point, face_face_intersect_curves, find_common_elements, ignore_soft,
@@ -252,10 +259,18 @@ impl<O: Ord + Copy> MapMates<O> {
     /// `RemoveRelationship`: `SM_ERR` unless the two are a mated pair.
     fn remove(&mut self, brep_entity: Option<O>, other_entity: Option<O>) -> Result<()> {
         let (Some(b), Some(o)) = (brep_entity, other_entity) else {
-            return Err(SolidError::sm_err(OP_REMOVE));
+            return Err(SolidError::boolean_stage_failed(
+                OP_REMOVE,
+                BooleanStage::Relate,
+                "the two entities are not a related pair",
+            ));
         };
         if self.other(Some(b)) != Some(o) {
-            return Err(SolidError::sm_err(OP_REMOVE));
+            return Err(SolidError::boolean_stage_failed(
+                OP_REMOVE,
+                BooleanStage::Relate,
+                "the two entities are not a related pair",
+            ));
         }
         if let Some(m) = self.b_to_o.as_mut() {
             m.remove(&b);
@@ -440,8 +455,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
             for ii in 0..c.curves_3d.len() {
                 let c3 = c.curves_3d.get(ii).copied().flatten();
-                let copy =
-                    Self::b_spline_copy(geometry, c3)?.ok_or(SolidError::sm_err(OP_REGISTER))?;
+                let copy = Self::b_spline_copy(geometry, c3)?.ok_or_else(|| {
+                    SolidError::stage_failed(
+                        OP_REGISTER,
+                        "a curve could not be copied for the intersection",
+                    )
+                })?;
                 if let Some(slot) = c.curves_3d.get_mut(ii) {
                     *slot = Some(copy);
                 }
@@ -478,7 +497,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         other_entity: Option<O>,
     ) -> Result<()> {
         if !self.is_mated_pair(brep_entity, other_entity) {
-            return Err(SolidError::sm_err(OP_REMOVE));
+            return Err(SolidError::boolean_stage_failed(
+                OP_REMOVE,
+                BooleanStage::Relate,
+                "the two entities are not a related pair",
+            ));
         }
         if let (Some(m), Some(b)) = (self.b_to_o.as_mut(), brep_entity) {
             m.remove(&b);
@@ -560,7 +583,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let dist_old = p.distance(brep.vertex_point(other_v)?);
             let dist_new = p.distance(brep.vertex_point(other_vertex)?);
             if dist_new > dist_old + EFF_ZERO_SQRT {
-                return Err(SolidError::sm_err(OP_SQUEEZE));
+                return Err(SolidError::boolean_stage_failed(
+                    OP_SQUEEZE,
+                    BooleanStage::Relate,
+                    "the existing relation of the vertex is better",
+                ));
             }
 
             self.remove_relationship(Some(brep_vertex), Some(other_v))?;
@@ -591,7 +618,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let dist_old = p.distance(brep.vertex_point(brep_v)?);
             let dist_new = p.distance(brep.vertex_point(brep_vertex)?);
             if dist_new > dist_old + EFF_ZERO_SQRT {
-                return Err(SolidError::sm_err(OP_SQUEEZE));
+                return Err(SolidError::boolean_stage_failed(
+                    OP_SQUEEZE,
+                    BooleanStage::Relate,
+                    "the existing relation of the vertex is better",
+                ));
             }
 
             self.remove_relationship(Some(brep_v), Some(other_vertex))?;
@@ -778,12 +809,18 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // when no largerThanTol common edge is found between V1 and V2
                 if !found_common_edge {
                     // Have a good candidate for squeezing
-                    let other_v1 = self
-                        .other_mate(Some(v1))
-                        .ok_or(SolidError::null_pointer(OP_FIX_GAPS))?;
-                    let other_v2 = self
-                        .other_mate(Some(v2))
-                        .ok_or(SolidError::null_pointer(OP_FIX_GAPS))?;
+                    let other_v1 = self.other_mate(Some(v1)).ok_or_else(|| {
+                        SolidError::entity_missing(
+                            OP_FIX_GAPS,
+                            "a related vertex in the other B-rep",
+                        )
+                    })?;
+                    let other_v2 = self.other_mate(Some(v2)).ok_or_else(|| {
+                        SolidError::entity_missing(
+                            OP_FIX_GAPS,
+                            "a related vertex in the other B-rep",
+                        )
+                    })?;
                     // (the casts to SmVertex* are used by CombineCoincidentVertices)
                     Self::as_vertex(Some(other_v1))?;
                     Self::as_vertex(Some(other_v2))?;
@@ -989,11 +1026,23 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         deleted_edges: &mut Vec<O>,
     ) -> Result<bool> {
         // check input
-        let brep_vertex = brep_vertex.ok_or(SolidError::null_pointer(OP_CLOSE_LOOP))?;
+        let brep_vertex = brep_vertex.ok_or_else(|| {
+            SolidError::boolean_entity_missing(
+                OP_CLOSE_LOOP,
+                BooleanStage::CloseLoop,
+                "a vertex to close the loop at",
+            )
+        })?;
 
         // find mating vertex in m_pOther brep
         let other_vertex = Self::cast(self.other_mate(Some(brep_vertex)), ClassObjectKind::Vertex)
-            .ok_or(SolidError::null_pointer(OP_CLOSE_LOOP))?;
+            .ok_or_else(|| {
+                SolidError::boolean_entity_missing(
+                    OP_CLOSE_LOOP,
+                    BooleanStage::CloseLoop,
+                    "a vertex of the other B-rep related to the loop's vertex",
+                )
+            })?;
 
         // init output
         let mut made_new_topology = false;
@@ -1259,6 +1308,36 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let other = self
             .other
             .ok_or(invalid(OP_INSERT_RELATE, "no other B-rep"))?;
+
+        // Not upstream (#15718): a vertex of one operand within the intersection tolerance
+        // of a line edge of the other, off that edge's ends and off its line by more than
+        // rounding (a near miss), is one point with its drop on
+        // the edge, decided once here (the edge split there) for every curve through it;
+        // and two line edges whose ends then lie within their intersection tolerance of
+        // each other, end for end, are one coincident interval, where a crossing of the two
+        // is no event (`ProtoTopologyManager::set_coincident_edges`). Both precede the
+        // capture distance below, which the split vertices bound like every other.
+        self.vertices_on_edges = split_edges_at_vertices(k, brep, this, other)?;
+        for (v, nv) in split_edges_at_vertices(k, brep, other, this)? {
+            self.vertices_on_edges.push((nv, v));
+        }
+        let coincident_edges = coincident_line_edges(k, brep, this, other)?;
+
+        // A proto vertex's ball never reaches two distinct vertices of one operand. Two
+        // vertices a distance d apart are never both closer than d / 2 to one point, so the
+        // capture distance stays below half the smallest distance between two vertices of
+        // either operand; it never drops below the intersection tolerance, within which
+        // points are one. Upstream's capture distance is unbounded: with a STEP file's
+        // tolerances (0.01 everywhere) it is 10 mm, every vertex of a 30 mm rim was captured
+        // into one proto vertex, and the rim minus its own copy failed in the merge.
+        let mut nearest = f64::INFINITY;
+        for b in [brep.brep_arena(this)?, brep.brep_arena(other)?] {
+            nearest = nearest.min(nearest_vertex_pair_distance(b)?);
+        }
+        if nearest.is_finite() {
+            capture_distance = capture_distance.min(max2(0.5 * nearest, topo_int_tol));
+        }
+
         let mut mgr = ProtoTopologyManager::new(
             k,
             (this, brep.brep_arena(this)?),
@@ -1272,17 +1351,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // WR-214, tangency-labs/solidcore#480): a self-loop proto edge on a vertex is
         // dropped, not split onto that vertex. Off (the default), upstream's split.
         mgr.set_split_self_loops_on_vertices(!k.fixes.proto_edge_self_loop_on_vertex_degenerate);
+        mgr.set_coincident_edges(coincident_edges);
         self.proto_topo_mgr = Some(mgr);
 
         // Intersect Topology; if that didn't work, quit before we mess up the Breps.
         let mut deleted = self.intersect_topology(k, brep)?;
-
-        // Not upstream unless opted in (`Kernel::fixes.boolean_coincident_strip_drops_crossing`,
-        // WR-614, tangency-labs/solidcore#1794): the crossing line of two planes within
-        // tolerance of each other across a strip bounded by their edges is not an edge.
-        if k.fixes.boolean_coincident_strip_drops_crossing {
-            deleted.extend(self.drop_crossings_in_coincident_strips(k, brep)?);
-        }
 
         // Resolve Intersections; if that didn't work, quit before we mess up the Breps.
         deleted.extend(self.resolve_intersections(k, brep)?);
@@ -1406,6 +1479,16 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             ignore_soft(intersect_wire_lamina_edges(
                 k, brep, other, this, do_lamina, true, approx_tol, mgr,
             ))?;
+
+            // Not upstream: each operand vertex put on the other's edge and the vertex made
+            // there are one proto vertex before any curve is classified.
+            for &(v1, v2) in &self.vertices_on_edges {
+                let mut pc1 = PointClassification::new(object_zone_tol_3d(k, &*brep, Some(v1))?);
+                pc1.set_class_object(PointClassType::Vertex, Some(v1));
+                let mut pc2 = PointClassification::new(object_zone_tol_3d(k, &*brep, Some(v2))?);
+                pc2.set_class_object(PointClassType::Vertex, Some(v2));
+                ignore_soft(mgr.find_or_create_proto_vertex_pcs(k, brep, &mut pc1, &mut pc2))?;
+            }
         }
 
         // Opt-in (WR-527, #1526/#1527): each face's bounding box, for skipping the pairs
@@ -1486,6 +1569,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 let (are_coincident, _coincident_distance) =
                     surface_coincidence_check(k, brep, surf1, surf2, tol, false)?;
                 let mut coinc_pes = Vec::new();
+
+                // Not upstream (#15718; replaces WR-614's removal after the fact): two planes
+                // whose crossing lies inside a coincident pair of their faces make no curve,
+                // no edge definition and no vertex definitions for it
+                if !are_coincident && crossing_inside_coincident_pair(k, brep, f1, f2)? {
+                    continue;
+                }
 
                 let ang_tol_deg = 20.0;
                 let mut uv_curves1 = Vec::new();
@@ -1758,7 +1848,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // error condition - curveClassifications not homogenized
         if cc_brep.size() != cc_other.size() {
-            return Err(SolidError::sm_err(OP_CLASS_MATES));
+            return Err(SolidError::stage_failed(
+                OP_CLASS_MATES,
+                "the curve classifications differ in length",
+            ));
         }
 
         // for every interval (the index restarts at 0 after a change)
@@ -1908,7 +2001,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let (success_o, drop_param_o, dist_to_curve_o) = drop(&pc_o)?;
 
         if !success_b && !success_o {
-            return Err(SolidError::sm_err(OP_SPLIT_PAIR));
+            return Err(SolidError::boolean_stage_failed(
+                OP_SPLIT_PAIR,
+                BooleanStage::Split,
+                "neither vertex of the pair can be dropped onto the other's curve",
+            ));
         }
 
         // pick a common curve parameter for the saved PointClasses: favor the ThisBrep
@@ -2095,7 +2192,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 edges2.push(Some(e2));
                 edges2.extend(split.new_edges2.iter().copied());
                 if edges1.len() > MAX_EDGE_LIST || edges2.len() > MAX_EDGE_LIST {
-                    return Err(SolidError::sm_err(OP_EDGE_EDGE));
+                    return Err(SolidError::boolean_stage_failed(
+                        OP_EDGE_EDGE,
+                        BooleanStage::Split,
+                        "the edges split too many times",
+                    ));
                 }
 
                 // Update tolerances (statuses unchecked).
@@ -2401,7 +2502,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                             ) => return Err(err),
                             Err(_) => {
                                 if !ignore_problems {
-                                    return Err(SolidError::sm_err(OP_EDGE_FACE_COIN));
+                                    return Err(SolidError::boolean_stage_failed(OP_EDGE_FACE_COIN, BooleanStage::Coincidence, "the coincidence of an edge with a face could not be resolved"));
                                 }
                             }
                         }
@@ -2460,6 +2561,220 @@ fn teardown_reads_freed<O: ClassObject>(mgr: &ProtoTopologyManager<O>) -> bool {
     lists
         .iter()
         .any(|(_, l)| l.iter().any(|e| freed.contains(e)))
+}
+
+/// Not upstream: splits each line edge of `edge_brep` at the drop of every vertex of
+/// `vertex_brep` that lies within the intersection tolerance of the edge (the sum of the two
+/// zone tolerances, the kernel's identity radius) off the edge's ends, and returns the pairs
+/// (the vertex, the vertex made on the edge). A point's distance to a line, and its drop,
+/// are closed forms exact to rounding, so the decision "this vertex is on that edge" is made
+/// once, before any intersection curve is classified, and every curve through the vertex
+/// reads it from the topology instead of deciding it again at its own end (where one curve
+/// saw the vertex on the edge and the next did not, and the intersection left a second edge
+/// a tolerance from the first). Only a near miss is split: a vertex on the edge's line to
+/// its rounding is its own drop, every curve through it meets the edge at the vertex itself
+/// and upstream's vertex/edge classification already decides it once (splitting the
+/// operands at every T-junction of piecewise boxes refused their booleans). A vertex within
+/// that tolerance of an edge's end is that end's coincident vertex, which the vertex/vertex
+/// steps handle; a vertex near two edges
+/// takes the first in the B-rep's list. Edges whose boxes lie farther than the tolerance from
+/// the vertex are never solved ([`SpatialIndex`]).
+///
+/// # Errors
+///
+/// Those of the topology walks, the zone tolerances, the curve evaluations and the split.
+fn split_edges_at_vertices<O: ClassObject + SolutionObject + Ord>(
+    k: &mut Kernel,
+    brep: &mut impl IntersectorBrepP2<O>,
+    vertex_brep: O,
+    edge_brep: O,
+) -> Result<Vec<(O, O)>> {
+    // the other operand's line edges (each with the pieces splits have made of it so far)
+    // and their zone tolerances
+    let mut pieces: Vec<(Vec<O>, f64)> = Vec::new();
+    let mut boxes = Vec::new();
+    let mut widest = 0.0_f64;
+    for e in brep.brep_edges(edge_brep)? {
+        let Some((curve, ivl)) = line_edge(&*brep, e) else {
+            continue;
+        };
+        let ends = (
+            curve.evaluate_point(k, ivl.min())?,
+            curve.evaluate_point(k, ivl.max())?,
+        );
+        let zone = object_zone_tol_3d(k, &*brep, Some(e))?;
+        widest = widest.max(zone);
+        boxes.push(Some(Extent3d::from_points(ends.0, ends.1)));
+        pieces.push((vec![e], zone));
+    }
+    if pieces.is_empty() {
+        return Ok(Vec::new());
+    }
+    let search = SpatialIndex::new(boxes);
+    let mut pairs = Vec::new();
+    for v in brep.brep_vertices(vertex_brep)? {
+        k.check_cancelled(OP_INSERT_RELATE)?;
+        let point = brep.vertex_point(v)?;
+        let v_zone = object_zone_tol_3d(k, &*brep, Some(v))?;
+        let reach = xsect_tol_3d_from_zones(k, v_zone, widest);
+        let mut found = None;
+        'lines: for ii in search.boxes_in_box(&Extent3d::from_points(point, point), reach) {
+            let Some((subs, zone)) = pieces.get(ii) else {
+                continue;
+            };
+            let tol = xsect_tol_3d_from_zones(k, v_zone, *zone);
+            for &e in subs {
+                let Some((curve, ivl)) = line_edge(&*brep, e) else {
+                    continue;
+                };
+                let ends = (
+                    curve.evaluate_point(k, ivl.min())?,
+                    curve.evaluate_point(k, ivl.max())?,
+                );
+                // the rounding of a distance between these points, or of the drop onto the
+                // line through them (the drop and the line evaluation, a few roundings of
+                // the coordinates)
+                let rounding = gamma(16) * (point.length() + ends.0.length() + ends.1.length());
+                // on an end: that end's vertex, not a point inside the edge (a split needs
+                // both ends certainly farther than the tolerance; a NaN refuses it)
+                if !(ends.0.distance(point) - rounding >= tol
+                    && ends.1.distance(point) - rounding >= tol)
+                {
+                    break 'lines;
+                }
+                let dropped =
+                    curve.drop_point(k, &ivl, point, None, tol, None, SolverOperation::Minimize)?;
+                // A vertex on the line to its rounding is its own drop: every curve through it
+                // meets the edge at the vertex itself, so there is no second point to decide.
+                let exact = dropped.distance <= rounding;
+                if dropped.success
+                    && !exact
+                    && dropped.distance + rounding < tol
+                    && ivl.min() < dropped.parameter
+                    && dropped.parameter < ivl.max()
+                {
+                    found = Some((ii, e, dropped.parameter));
+                    break 'lines;
+                }
+            }
+        }
+        if let Some((ii, e, t)) = found {
+            let (a, z, nv) = brep.make_vertex_split_edge(k, edge_brep, e, t)?;
+            if let Some((subs, _)) = pieces.get_mut(ii) {
+                subs.retain(|&x| x != e);
+                subs.push(a);
+                subs.push(z);
+            }
+            pairs.push((v, nv));
+        }
+    }
+    Ok(pairs)
+}
+
+/// Not upstream (#15718): the pairs (an edge of `this`, an edge of `other`) of line edges
+/// whose ends lie within their intersection tolerance of each other, end for end (the
+/// start of one at the start or the end of the other, and the other two ends likewise),
+/// each distance with its rounding counted. The vector between points at the same fraction
+/// along two segments is an affine function of the fraction, so its length is convex and
+/// the end distances bound the distance everywhere:
+/// the two are one coincident interval, a certificate, not a sample. An edge whose ends
+/// are within twice that tolerance of each other is too short to pair its ends one way
+/// only, and is left out. Edges whose boxes lie farther apart than the tolerance are never
+/// compared ([`SpatialIndex`]).
+///
+/// # Errors
+///
+/// Those of the topology walks, the zone tolerances and the curve evaluations.
+fn coincident_line_edges<O: ClassObject + SolutionObject + Ord>(
+    k: &Kernel,
+    brep: &impl IntersectorBrepP2<O>,
+    this: O,
+    other: O,
+) -> Result<Vec<(O, O)>> {
+    let segments = |b: O| -> Result<Vec<(O, [Point3; 2], f64)>> {
+        let mut out = Vec::new();
+        for e in brep.brep_edges(b)? {
+            let Some((curve, ivl)) = line_edge(brep, e) else {
+                continue;
+            };
+            let ends = [
+                curve.evaluate_point(k, ivl.min())?,
+                curve.evaluate_point(k, ivl.max())?,
+            ];
+            out.push((e, ends, object_zone_tol_3d(k, brep, Some(e))?));
+        }
+        Ok(out)
+    };
+    let theirs = segments(other)?;
+    if theirs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let widest = theirs.iter().fold(0.0_f64, |w, s| w.max(s.2));
+    let search = SpatialIndex::new(
+        theirs
+            .iter()
+            .map(|s| Some(Extent3d::from_points(s.1[0], s.1[1])))
+            .collect::<Vec<_>>(),
+    );
+    let rounded = |p: Point3, q: Point3| p.distance(q) + gamma(8) * (p.length() + q.length());
+    let mut pairs = Vec::new();
+    for (e, [a0, a1], zone) in segments(this)? {
+        k.check_cancelled(OP_INSERT_RELATE)?;
+        let reach = xsect_tol_3d_from_zones(k, zone, widest);
+        for ii in search.boxes_in_box(&Extent3d::from_points(a0, a1), reach) {
+            let Some(&(f, [b0, b1], their_zone)) = theirs.get(ii) else {
+                continue;
+            };
+            let tol = xsect_tol_3d_from_zones(k, zone, their_zone);
+            let within = |p: Point3, q: Point3| rounded(p, q) < tol;
+            if !(rounded(a0, a1) > 2.0 * tol && rounded(b0, b1) > 2.0 * tol) {
+                continue;
+            }
+            if (within(a0, b0) && within(a1, b1)) || (within(a0, b1) && within(a1, b0)) {
+                pairs.push((e, f));
+            }
+        }
+    }
+    Ok(pairs)
+}
+
+/// The curve and interval of `e` when its curve is a line.
+fn line_edge<O: ClassObject>(
+    brep: &impl IntersectorBrepP2<O>,
+    e: O,
+) -> Option<(&Curve, crate::geom::extent1d::Extent1d)> {
+    let curve = ProtoBrep::edge_curve(brep, e)
+        .flatten()
+        .and_then(|c| ClassGeometry::curve(brep, c))?;
+    if !matches!(curve.kind(), CurveKind::Line(_)) {
+        return None;
+    }
+    Some((curve, ProtoBrep::edge_interval(brep, e)?))
+}
+
+/// The smallest distance between two distinct vertices of `b` (by their points);
+/// infinite with fewer than two vertices. The points are swept along x, so a pair is
+/// compared only while its x gap is below the best distance found so far.
+///
+/// # Errors
+///
+/// Those of the vertex list and the vertex records.
+fn nearest_vertex_pair_distance(b: &crate::topology::Brep) -> Result<f64> {
+    let mut points = Vec::new();
+    for v in crate::topology::brep::p1::vertices(b, None)? {
+        points.push(crate::topology::vertex::point(b, v)?);
+    }
+    points.sort_by(|p, q| p.x.total_cmp(&q.x));
+    let mut nearest = f64::INFINITY;
+    for (i, p) in points.iter().enumerate() {
+        for q in points.iter().skip(i + 1) {
+            if q.x - p.x >= nearest {
+                break;
+            }
+            nearest = nearest.min(p.distance(*q));
+        }
+    }
+    Ok(nearest)
 }
 
 #[cfg(test)]

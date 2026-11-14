@@ -13,8 +13,9 @@
 //! So the offset refuses it, naming why (#2350; owner ruling): a face whose offset is proved
 //! to collapse is refused before anything is built (`OffsetFailure::Collapses`, radius 2).
 //! Face 2's profile also bends with radius 1.53 towards the inset (at u = 2.68 of 0..4.37),
-//! so its offset folds: a folding face comes out inside out and the executive takes it
-//! away (`offset_shell_lamina_face_delete`'s inset 2.5), so it is not refused.
+//! so its offset folds, and face 2 comes before face 5: kept as a shell face only face 0,
+//! the inset is refused at face 2 (`OffsetFailure::Folds`, the largest wall 1.53, D5);
+//! kept with face 2 as well, at face 5's collapse.
 //!
 //! When #2350 builds the offset as one construction (exact offsets and mitres: the faces
 //! beside a collapsed round meet across it), this becomes the sound-body assertion it
@@ -110,7 +111,7 @@ fn inset_by_the_rounds_radius_is_refused_naming_why() {
         return;
     };
     let faces = bp1::faces(&part, None).unwrap();
-    let e = inset_by_two(&mut k, &mut part, &[faces[0]]).unwrap_err();
+    let e = inset_by_two(&mut k, &mut part, &[faces[0], faces[2]]).unwrap_err();
     assert_eq!(e.kind(), ErrorKind::OffsetCollapses, "{e}");
     let OffsetFailure::Collapses {
         face,
@@ -124,4 +125,30 @@ fn inset_by_the_rounds_radius_is_refused_naming_why() {
     assert_eq!(distance.abs(), 2.0);
     assert!((radius - 2.0).abs() < 1e-9, "radius {radius}");
     assert!(e.to_string().contains("collapses"), "{e}");
+}
+
+#[test]
+fn inset_past_face_2s_radius_is_refused_naming_its_largest_wall() {
+    let mut k = Kernel::default();
+    let Some(mut part) = extrusion(&mut k) else {
+        return;
+    };
+    let faces = bp1::faces(&part, None).unwrap();
+    let e = inset_by_two(&mut k, &mut part, &[faces[0]]).unwrap_err();
+    assert_eq!(e.kind(), ErrorKind::OffsetFolds, "{e}");
+    let OffsetFailure::Folds {
+        face,
+        distance,
+        largest,
+    } = offset_failure(&e)
+    else {
+        panic!("{e}");
+    };
+    assert_eq!(face, faces[2]);
+    assert_eq!(distance.abs(), 2.0);
+    // face 2's least radius of curvature on the inset side, measured: 1.5331125921683275
+    assert!(
+        (largest - 1.533_112_592_168_327_5).abs() < 1e-9,
+        "largest {largest}"
+    );
 }

@@ -10,8 +10,8 @@
 //! Each body is a ball (r 10) cut by a half space, shelled open at the flat face by +1
 //! or -1, with and without an offset solid. One cut is at the equator and one through
 //! the poles, so the rim crosses the sphere's seam differently. The ninth body is the
-//! two stitched quarter-sphere sheets thickened by +1. All runs have
-//! `offset_closed_curve_trim_arc` (#403) on, so each half of a closed rim keeps its own
+//! two stitched quarter-sphere sheets thickened by +1. All runs rely on
+//! `TrimExtendedEdge` taking the arc where its base edge runs (WR-463), so each half of a closed rim keeps its own
 //! arc. Every result is a manifold solid of the spherical shell's volume
 //! 2/3 π (`r_out³` − `r_in³`), to the accuracy the volume integration is asked for (1e-6;
 //! the results come within 1.4e-6 relative).
@@ -48,9 +48,7 @@ use solidcore::{Brep, FaceId, Kernel};
 const REL: f64 = 1e-5;
 
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.offset_closed_curve_trim_arc = true;
-    k
+    Kernel::default()
 }
 
 fn shell_options(distance: f64, create_offset_solid: bool) -> ShellOptions {

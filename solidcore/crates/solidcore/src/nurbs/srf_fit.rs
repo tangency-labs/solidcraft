@@ -26,7 +26,7 @@
 //! - Out-params become return values: parameters as `Vec<f64>`, surfaces as new
 //!   [`Surface`]s and functions as new [`SurfaceFunction`]s (so the `NL_STO_ERR` of
 //!   `N_SrfSizeArrays` / `N_SFuncSizeArrays` for a too small caller object cannot
-//!   occur). Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR`
+//!   occur). Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the upstream `NL_*_ERR`
 //!   number; partly written outputs are not returned.
 //! - `N_FitSrfInterpParams` always returns `NL_NO`: when every row (column) has a
 //!   total chord length of at most `NL_MTOL` it only records `NL_INP_ERR` in the
@@ -40,7 +40,7 @@
 //!   [`interp_given_knots`] / [`func_interp`] return `InvalidInput` there.
 //! - An overflowing `n + p + 1` / `m + q + 1` knot count cannot equal the knot
 //!   vector's last index, so `N_FitSrfToPtsKnots` reports the same `NL_INP_ERR`
-//!   knot-count mismatch (`NlibCode::Input`) instead of upstream's undefined signed
+//!   knot-count mismatch (`NurbsFailure::Input`) instead of upstream's undefined signed
 //!   `NL_INDEX` sum. The checked sums are compared only; they size no allocation and
 //!   index no array. Every count that fits keeps the upstream sum, comparison order
 //!   and outcome; a count that does not fit the signed index stays `InvalidInput`.
@@ -51,7 +51,7 @@
 //!   u and v passes, as upstream; its uninitialised (`malloc`) entries are `0.0`.
 //! - The `NL_STACKS` arguments and the routine-name strings have no counterpart.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::crv_fit::p1::{
     cpts_from_srf_data, interp_knot_vector, knot_vector_approx, DataDir, FitPoint, ParamMethod,
@@ -138,7 +138,7 @@ fn chord_dir<P: FitPoint>(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when every column (then the u parameters are reported first)
+/// [`NurbsFailure::Input`] when every column (then the u parameters are reported first)
 /// or every row has total length at most `NL_MTOL` (always for `n == 0` or `m == 0`
 /// with chord-length or centripetal parameters); `InvalidInput` for an empty grid or
 /// a row shorter than the first.
@@ -170,12 +170,12 @@ pub fn param_values<P: FitPoint>(a: &[Vec<P>], par: ParamMethod) -> Result<(Vec<
 
     // Get u-directional parameters (the points P[i][j], i = 0..=n, of column j).
     if !chord_dir(&mut u, &mut dist, n, m, par, |j, i| at2(a, i, j, OP), OP)? {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     // Get v-directional parameters (the points P[i][j], j = 0..=m, of row i).
     if !chord_dir(&mut v, &mut dist, m, n, par, |i, j| at2(a, i, j, OP), OP)? {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     Ok((u, v))
 }
@@ -246,7 +246,7 @@ fn interp_matrix(
         let (j, nb) = basis(knt, p, at(t, i, op)?, op)?;
         let l = j - i - 1;
         if l < 0 || l + p >= ub {
-            return Err(SolidError::nlib(op, NlibCode::Input));
+            return Err(SolidError::nurbs(op, NurbsFailure::Input));
         }
         for k in 0..=p {
             mset(&mut cm, i, l + k, at(&nb, k, op)?, op)?;
@@ -263,7 +263,7 @@ fn interp_matrix(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `knu` / `knv` do not have `n + p + 2` / `m + q + 2`
+/// [`NurbsFailure::Input`] when `knu` / `knv` do not have `n + p + 2` / `m + q + 2`
 /// knots (an overflowing `n + p + 1` / `m + q + 1` sum cannot reach the last index,
 /// so it is the same mismatch), `p > n`, `q > m`, or a basis span falls outside the
 /// matrix band; `InvalidInput` for an empty grid, a short row, too few parameters,
@@ -289,10 +289,10 @@ pub fn interp_given_knots<P: FitPoint>(
     let rs = n.checked_add(p).and_then(|t| t.checked_add(1));
     let ss = m.checked_add(q).and_then(|t| t.checked_add(1));
     if Some(r) != rs || Some(s) != ss {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     if p > n || q > m {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let us = copy_knots(knu, r, OP)?;
     let vs = copy_knots(knv, s, OP)?;
@@ -415,7 +415,7 @@ fn normal_matrix(
     }
 
     if sj < n - 2 || at(end, 0, OP)? == -1 {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     for i in 0.max(ej + 1)..=n - 2 {
         put(end, i, r - 2, OP)?;
@@ -488,7 +488,7 @@ fn rhs<P: FitPoint>(a: &Block, rk: &[P], n: i64, band: &Band, out: &mut [P]) -> 
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `n > r`, `n < 1`, `p > n` (likewise `m`, `s`, `q`) or
+/// [`NurbsFailure::Input`] when `n > r`, `n < 1`, `p > n` (likewise `m`, `s`, `q`) or
 /// some interior basis function gets no sample; the errors of [`param_values`],
 /// [`knot_vector_approx`], [`KnotVector::basis_eval`],
 /// [`KnotVector::basis_i_eval`] and of the LU decompositions and solves;
@@ -507,10 +507,10 @@ pub fn lst_sq_approx(
 
     // Check for error (upstream's further checks are implied by these).
     if n > r || n < 1 || p > n {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     if m > s || m < 1 || q > m {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let mut pw = alloc2(n, m, CPoint::default(), OP)?;
 
@@ -676,7 +676,7 @@ fn func_matrix(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `p > n` or `q > m`; errors of
+/// [`NurbsFailure::Input`] when `p > n` or `q > m`; errors of
 /// [`KnotVector::basis_eval`] and of the LU decompositions and solves;
 /// `InvalidInput` for an empty or ragged value grid, too few parameters, `p == 0`,
 /// or a basis span that puts a matrix entry outside upstream's matrix block.
@@ -694,7 +694,7 @@ pub fn func_interp(
 
     // Check for function memory.
     if p > n || q > m {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     // Compute knot vectors.
@@ -795,10 +795,7 @@ mod tests {
         let one = grid(0, 2, |_, j| [j, 0.0, 0.0]);
         assert!(matches!(
             param_values(&one, ParamMethod::ChordLength),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
         let z = grid(2, 2, |_, _| [1.0, 1.0, 1.0]);
         assert_eq!(
@@ -815,7 +812,7 @@ mod tests {
     }
 
     /// An overflowing u count `n + p + 1` cannot equal `knu`'s last index, so the
-    /// comparison is the `NL_INP_ERR` mismatch (`NlibCode::Input`); `q = 1` makes the
+    /// comparison is the `NL_INP_ERR` mismatch (`NurbsFailure::Input`); `q = 1` makes the
     /// v count `m + q + 1 = 3` match `knv`, so only the u sum is under test.
     #[test]
     fn huge_u_degree_is_rejected_as_input_mismatch() {
@@ -825,10 +822,7 @@ mod tests {
         let kn = KnotVector::from_slice(&[0.0, 0.0, 1.0, 1.0]).unwrap();
         assert!(matches!(
             interp_given_knots(&a, &u, &v, &kn, &kn, huge_count(), 1),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 
@@ -844,10 +838,7 @@ mod tests {
         let kn = KnotVector::from_slice(&[0.0, 0.0, 1.0, 1.0]).unwrap();
         assert!(matches!(
             interp_given_knots(&a, &u, &v, &kn, &kn, 1, huge_count()),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 
@@ -900,10 +891,7 @@ mod tests {
                 3,
                 2,
             ),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 

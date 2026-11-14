@@ -839,7 +839,7 @@ fn eu_state(k: &Kernel, b: &Brep, eu: Option<EdgeuseId>, out: &mut Vec<f64>) -> 
 
 fn status_of(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        up_err if solidcore::error::upstream_status(up_err).is_some() => f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1)),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => NULL_DEREF as f64,
         _ => -9.0,
     }

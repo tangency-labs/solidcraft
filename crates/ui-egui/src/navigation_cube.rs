@@ -346,7 +346,7 @@ mod tests {
     use super::*;
     #[cfg(test)]
     use crate::icons::navigation::{LABEL_PIXELS, face_text};
-    use solidcraft_engine::render::{StandardView, UpAxis};
+    use solidcraft_viewport::{StandardView, UpAxis};
 
     fn paint_frame(ctx: &egui::Context, paint: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
         let mut output = ctx.run_ui(egui::RawInput::default(), paint);
@@ -712,9 +712,14 @@ mod tests {
             if handle == "navigation_cube:front" {
                 assert!(h.app.cam.back().dist(-Vec3::Y) < 1e-6);
             }
-            assert!(h.app.cam.target.dist(Vec3::new(110.0, 10.0, 10.0)) < 1e-6, "{handle}: looks at the middle of the model, {:?}", h.app.cam.target);
+            let layout = h.app.viewport.layout.as_ref().unwrap();
+            let bounds = crate::viewport::view_bounds(&h.app);
+            let expected = crate::viewport_layout::framing_centre(h.app.cam, &bounds, layout).unwrap();
+            let projected = crate::viewport::projection(&h.app, layout.viewport).to_screen(bounds.center()).unwrap();
+            assert!(projected.distance(expected) < 1.5, "frames the model at {expected:?}, got {projected:?}");
             assert!(h.app.cam.distance < from.distance / 2.0, "{handle}: {} vs {}", h.app.cam.distance, from.distance);
         }
+        h.call("ui.prefs", json!({"navigator_fit":false}));
         // Home, then a face, a corner or an arrow: the zoom and the centre stay; only the
         // direction changes.
         let click = |h: &mut crate::scenario::Harness, handle: &str| {

@@ -1,0 +1,536 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/12117",
+ "test": "none: open on SolidCraft 0.30.1 (truck); the report's script",
+ "summary": "Joining a cylinder to the end of a thin strap's leg, with the cylinder's flat faces in the leg's two faces and its diameter equal to the strap's width, so that it rounds the leg's end, failed on SolidCraft 0.30.1 with 'boolean Union: the operation failed: no result' (#12117). The report's script: on the YZ plane, a half circle R40 about (y, z) = (0, 50), clockwise from (-40, 50) over the top to (40, 50), and a line from there down to (40, 0), extruded as a thin wall 2.5 thick centred on that path and 20 symmetric about x = 0; then a cylinder D20 x 2.5 along +Y from (0, 38.75, 0), joined. Here the strap is the thin wall's closed outline on the yz plane (arcs R41.25 and R38.75 about (0, 50), the leg's two lines at y = 38.75 and 41.25 down to z = 0, the flat end at y = -41.25..-38.75), extruded from x = -10 to 10. The cylinder's flat faces are the leg's faces y = 38.75 and 41.25, and its side touches the strap's sides x = +-10 along the lines through z = 0. The other cases are the report's variants: the cylinder 2.4 tall (one face flush), D19.9 (clear of the sides), a U-shaped strap (line, half circle, line), and the leg alone as a box. Replayed with solidcraft-cli built on GitHub's runners (fork SychPL/solidcraft branch fork-ci-12117, run 42684136310): v0.30.1 fails the report's join and the U-shaped strap's, builds the 2.4 tall and D19.9 variants only after a boolean retry (tool displacement 1.98e-4 mm), and builds the box leg; main 42918fe5 and v0.40.0-rc.2 build all five, within 2e-6 of the expected volumes. On solidcore every case passes within 1e-7, with no fixes and with all of SolidCraft's fixes (kernel_cases/fixes.json, a fork probe), so the cases carry no fixes: they guard a flush, tangent join that SolidCraft's truck kernel could not do. Volumes are closed form: the strap is its wall's mid-line (the half circle, pi*40, and the 50 mm leg) times 2.5 x 20, as a thin wall round a circular arc holds its mid-line's length times its thickness; plus the half of the disc below z = 0, pi*r^2/2 times the cylinder's height, the other half lying inside the leg. Tolerance 0.001 mm^3: above the volume integral's 1e-8 relative accuracy (at most 1.2e-4 mm^3 here), and below what moving the cylinder 1e-5 mm along y, out of the leg's faces, would change in the report's join (pi*50*1e-5 = 0.0016 mm^3). The result is one lump and a manifold solid.",
+ "cases": [
+  {
+   "name": "round_end_flush_on_the_leg",
+   "note": "The report's join: the D20 x 2.5 cylinder's flat faces lie in the leg's faces (y = 38.75 and 41.25) and its sides touch the strap's sides x = +-10 at z = 0. solidcraft-cli on GitHub's runners (fork run 42684136310): v0.30.1 fails it ('boolean Union: the operation failed: no result'); main 42918fe5 and v0.40.0-rc.2 build it, 9175.884391.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "strap",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        50.0
+       ],
+       "radius": 41.25,
+       "start_deg": 0.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        -41.25,
+        50.0
+       ],
+       "to": [
+        -38.75,
+        50.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        50.0
+       ],
+       "radius": 38.75,
+       "start_deg": 0.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        38.75,
+        50.0
+       ],
+       "to": [
+        38.75,
+        0.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        38.75,
+        0.0
+       ],
+       "to": [
+        41.25,
+        0.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        41.25,
+        0.0
+       ],
+       "to": [
+        41.25,
+        50.0
+       ]
+      }
+     ],
+     "plane": "yz",
+     "origin": [
+      -10.0,
+      0.0,
+      0.0
+     ],
+     "distance": 20.0
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      38.75,
+      0.0
+     ],
+     "axis": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 10.0,
+     "height": 2.5
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "strap",
+     "b": "boss"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 9175.884388878,
+     "tol": 0.001,
+     "formula": "2.5*20*(pi*40 + 50) (the strap: its wall's mid-line, a half circle R40 and a 50 mm leg, times 2.5 x 20) + pi*10^2/2*2.5 (the half of the disc below the leg's end); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "boss_2_4_tall_one_face_flush",
+   "note": "The report's first variant: the cylinder 2.4 mm tall, so only its face at y = 38.75 lies in the leg's face. solidcraft-cli on GitHub's runners (fork run 42684136310): v0.30.1 builds it after a boolean retry (tool displacement 1.98e-4 mm); main 42918fe5 and v0.40.0-rc.2 build it, 9160.176427.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "strap",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        50.0
+       ],
+       "radius": 41.25,
+       "start_deg": 0.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        -41.25,
+        50.0
+       ],
+       "to": [
+        -38.75,
+        50.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        50.0
+       ],
+       "radius": 38.75,
+       "start_deg": 0.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        38.75,
+        50.0
+       ],
+       "to": [
+        38.75,
+        0.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        38.75,
+        0.0
+       ],
+       "to": [
+        41.25,
+        0.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        41.25,
+        0.0
+       ],
+       "to": [
+        41.25,
+        50.0
+       ]
+      }
+     ],
+     "plane": "yz",
+     "origin": [
+      -10.0,
+      0.0,
+      0.0
+     ],
+     "distance": 20.0
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      38.75,
+      0.0
+     ],
+     "axis": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 10.0,
+     "height": 2.4
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "strap",
+     "b": "boss"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 9160.17642561,
+     "tol": 0.001,
+     "formula": "2.5*20*(pi*40 + 50) + pi*10^2/2*2.4; tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "boss_19_9_wide_not_touching_the_sides",
+   "note": "The report's second variant: D19.9, so the cylinder no longer touches the strap's sides. solidcraft-cli on GitHub's runners (fork run 42684136310): v0.30.1 builds it after the same retry; main 42918fe5 and v0.40.0-rc.2 build it, 9171.967217.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "strap",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        50.0
+       ],
+       "radius": 41.25,
+       "start_deg": 0.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        -41.25,
+        50.0
+       ],
+       "to": [
+        -38.75,
+        50.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        50.0
+       ],
+       "radius": 38.75,
+       "start_deg": 0.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        38.75,
+        50.0
+       ],
+       "to": [
+        38.75,
+        0.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        38.75,
+        0.0
+       ],
+       "to": [
+        41.25,
+        0.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        41.25,
+        0.0
+       ],
+       "to": [
+        41.25,
+        50.0
+       ]
+      }
+     ],
+     "plane": "yz",
+     "origin": [
+      -10.0,
+      0.0,
+      0.0
+     ],
+     "distance": 20.0
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      38.75,
+      0.0
+     ],
+     "axis": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 9.95,
+     "height": 2.5
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "strap",
+     "b": "boss"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 9171.967215538,
+     "tol": 0.001,
+     "formula": "2.5*20*(pi*40 + 50) + pi*9.95^2/2*2.5; tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "u_strap_round_end_flush",
+   "note": "The report's U-shaped strap (line, half circle, line), the same cylinder at the right leg's end. solidcraft-cli on GitHub's runners (fork run 42684136310): v0.30.1 fails it the same way; main 42918fe5 and v0.40.0-rc.2 build it, 11675.884391.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "strap",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        50.0
+       ],
+       "radius": 41.25,
+       "start_deg": 0.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        -41.25,
+        50.0
+       ],
+       "to": [
+        -41.25,
+        0.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -41.25,
+        0.0
+       ],
+       "to": [
+        -38.75,
+        0.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -38.75,
+        0.0
+       ],
+       "to": [
+        -38.75,
+        50.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        50.0
+       ],
+       "radius": 38.75,
+       "start_deg": 0.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        38.75,
+        50.0
+       ],
+       "to": [
+        38.75,
+        0.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        38.75,
+        0.0
+       ],
+       "to": [
+        41.25,
+        0.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        41.25,
+        0.0
+       ],
+       "to": [
+        41.25,
+        50.0
+       ]
+      }
+     ],
+     "plane": "yz",
+     "origin": [
+      -10.0,
+      0.0,
+      0.0
+     ],
+     "distance": 20.0
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      38.75,
+      0.0
+     ],
+     "axis": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 10.0,
+     "height": 2.5
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "strap",
+     "b": "boss"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 11675.884388878,
+     "tol": 0.001,
+     "formula": "2.5*20*(pi*40 + 100) + pi*10^2/2*2.5; tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "box_leg_round_end_flush",
+   "note": "Control from the report: the leg alone as a box (x -10..10, y 38.75..41.25, z 0..50), the same cylinder. solidcraft-cli on GitHub's runners (fork run 42684136310): v0.30.1, main 42918fe5 and v0.40.0-rc.2 build it (2892.699082 on main and rc.2).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "strap",
+     "origin": [
+      -10.0,
+      38.75,
+      0.0
+     ],
+     "size": [
+      20.0,
+      2.5,
+      50.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      38.75,
+      0.0
+     ],
+     "axis": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 10.0,
+     "height": 2.5
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "strap",
+     "b": "boss"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 2892.699081699,
+     "tol": 0.001,
+     "formula": "20*2.5*50 + pi*10^2/2*2.5; tol 0.001 mm^3"
+    }
+   }
+  }
+ ]
+}

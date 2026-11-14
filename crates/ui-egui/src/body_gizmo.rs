@@ -430,7 +430,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: cra
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_engine::render::{StandardView, UpAxis};
+    use solidcraft_viewport::{StandardView, UpAxis};
 
     fn boxed() -> crate::scenario::Harness {
         let mut h = crate::scenario::Harness::new();

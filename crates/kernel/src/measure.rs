@@ -56,21 +56,20 @@ const ACCURACY: f64 = solidcraft_smlib::MEASURE_ACCURACY;
 /// measured from its triangles, exactly.
 pub fn measure(b: &Body) -> Result<BodyMeasure> {
     let _span = solidcraft_profile::span("kernel", "measure");
-    if let Some((pos, tris)) = b.triangle_mesh() {
+    if let Some(mb) = &b.mesh {
         // Exact for a mesh body; topology counts are facets, sides and vertices.
-        let m = b.mesh(&crate::MeshTolerance::chord(1.0))?;
-        let mm = m.measure();
-        let edges = b.mesh.as_ref().map(|m| m.edge_count()).unwrap_or(0);
-        let merged =
-            TopoCounts { faces: tris.len(), edges, vertices: pos.len(), face_types: [("mesh".to_string(), tris.len())].into_iter().collect() };
+        let (mm, bbox) = mb.measure();
+        let edges = mb.edge_count();
+        let (nf, nv) = (mb.face_count(), mb.vertex_count());
+        let merged = TopoCounts { faces: nf, edges, vertices: nv, face_types: [("mesh".to_string(), nf)].into_iter().collect() };
         return Ok(BodyMeasure {
             volume: mm.volume,
             area: mm.area,
             centroid: mm.centroid,
-            bbox: m.bounds(),
-            faces: tris.len(),
+            bbox,
+            faces: nf,
             edges,
-            vertices: pos.len(),
+            vertices: nv,
             shells: 1,
             merged,
             measured_by: "mesh",
@@ -78,7 +77,6 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
         });
     }
     let m = measure_mass(b)?;
-    let topo = b.mesh(&crate::MeshTolerance::chord((b.size() * 1e-3).max(1e-3)))?;
     Ok(BodyMeasure {
         volume: m.volume,
         area: m.area,
@@ -88,7 +86,7 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
         edges: b.edge_count(),
         vertices: b.vertex_count(),
         shells: b.shell_count(),
-        merged: merged_topology(b, &topo)?,
+        merged: merged_topology(b)?,
         measured_by: m.measured_by,
         notes: m.notes,
     })
@@ -133,6 +131,20 @@ mod tests {
         let got = measure_mass(&ring).unwrap().volume;
         assert!((got - want).abs() < 1e-3 * want, "{got} against {want}");
         assert!(measure(&ring).unwrap().merged.faces > 0);
+    }
+
+    /// A body's exact box is measured once and its clones share it; a moved copy is a new body
+    /// and measures its own.
+    #[test]
+    fn exact_box_is_kept_per_record() {
+        let post = cylinder(Vec3::ZERO, Vec3::Z, 1.5, 10.0).unwrap();
+        let clone = post.clone();
+        let first = post.exact_bounds().unwrap();
+        assert_eq!(*clone.bounds.lock().unwrap(), Some(first));
+        assert_eq!(clone.exact_bounds().unwrap(), first);
+        let moved = transform(&post, Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0).unwrap();
+        let b = moved.exact_bounds().unwrap();
+        assert!((b.min.x - first.min.x - 5.0).abs() < 1e-9 && (b.max.x - first.max.x - 5.0).abs() < 1e-9, "{b:?} against {first:?}");
     }
 
     /// A cube 1000 mm from the origin with one 0.5 mm² facet left out: about the box's centre

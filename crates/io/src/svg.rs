@@ -424,6 +424,51 @@ fn not_drawn(name: &str, a: &[(String, String)]) -> bool {
             .is_some_and(|s| s.split(';').filter_map(|d| d.split_once(':')).any(|(k, v)| k.trim().eq_ignore_ascii_case("display") && none(v)))
 }
 
+/// The root element's transformation (user units to millimetres, y flipped) and its sheet in
+/// user units (`viewBox`, else `width` and `height` as a box at the origin), when it has one.
+fn root_transform(a: &[(String, String)]) -> (Tf, Option<[f64; 4]>) {
+    let vb = attr(a, "viewBox").map(numbers).filter(|v| v.len() == 4);
+    let (w, h) = (attr(a, "width").and_then(length_mm), attr(a, "height").and_then(length_mm));
+    let (sx, sy, ox, oy, sheet) = match (vb, w, h) {
+        (Some(v), Some(w), Some(h)) if v[2] > 0.0 && v[3] > 0.0 => (w / v[2], h / v[3], v[0], v[1], Some([v[0], v[1], v[2], v[3]])),
+        (Some(v), _, _) => (PX_MM, PX_MM, v[0], v[1], (v[2] > 0.0 && v[3] > 0.0).then_some([v[0], v[1], v[2], v[3]])),
+        (None, Some(w), Some(h)) if w > 0.0 && h > 0.0 => (PX_MM, PX_MM, 0.0, 0.0, Some([0.0, 0.0, w / PX_MM, h / PX_MM])),
+        _ => (PX_MM, PX_MM, 0.0, 0.0, None),
+    };
+    (Tf([sx, 0.0, 0.0, -sy, -ox * sx, oy * sy]), sheet)
+}
+
+/// The sheet of an SVG drawing in millimetres, in the coordinates its geometry comes out in: the
+/// root's `viewBox` (else its `width` and `height`) through the same transformation. None when
+/// the file gives no sheet.
+pub fn svg_sheet(text: &str) -> Option<(Vec2, Vec2)> {
+    if text.len() > MAX_DRAWING_BYTES {
+        return None;
+    }
+    let mut rd = Reader::from_reader(text.as_bytes());
+    rd.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut elements = 0;
+    while elements < MAX_ENTITIES {
+        match rd.read_event_into(&mut buf) {
+            Ok(Event::Start(e) | Event::Empty(e)) => {
+                elements += 1;
+                if e.local_name().as_ref() == b"svg" {
+                    let (tf, sheet) = root_transform(&attrs(&e));
+                    let [x, y, w, h] = sheet?;
+                    let (a, b) = (tf.apply(Vec2::new(x, y)), tf.apply(Vec2::new(x + w, y + h)));
+                    let (lo, hi) = (Vec2::new(a.x.min(b.x), a.y.min(b.y)), Vec2::new(a.x.max(b.x), a.y.max(b.y)));
+                    return (lo.is_finite() && hi.is_finite() && hi.x > lo.x && hi.y > lo.y).then_some((lo, hi));
+                }
+            }
+            Ok(Event::Eof) | Err(_) => return None,
+            _ => {}
+        }
+        buf.clear();
+    }
+    None
+}
+
 /// Read the geometry of an SVG document (millimetres, y up). `scale` multiplies the result.
 pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
     if text.len() > MAX_DRAWING_BYTES {
@@ -490,14 +535,7 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
             None => parent,
         };
         if name == "svg" && root.is_none() {
-            // Root: user units to millimetres, y flipped.
-            let vb = attr(&a, "viewBox").map(numbers).filter(|v| v.len() == 4);
-            let (sx, sy, ox, oy) = match (vb, attr(&a, "width").and_then(length_mm), attr(&a, "height").and_then(length_mm)) {
-                (Some(v), Some(w), Some(h)) if v[2] > 0.0 && v[3] > 0.0 => (w / v[2], h / v[3], v[0], v[1]),
-                (Some(v), _, _) => (PX_MM, PX_MM, v[0], v[1]),
-                _ => (PX_MM, PX_MM, 0.0, 0.0),
-            };
-            let r = Tf([sx, 0.0, 0.0, -sy, -ox * sx, oy * sy]);
+            let (r, _) = root_transform(&a);
             root = Some(r);
             tf = r;
         }
@@ -637,6 +675,21 @@ pub fn svg_nothing_to_import(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The sheet: the viewBox in the millimetres `width` and `height` give, else in pixels; only
+    /// `width` and `height` make a sheet at the origin; without either there is none.
+    #[test]
+    fn the_sheet_follows_the_root_like_the_geometry() {
+        let close = |a: Vec2, b: Vec2| (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9;
+        let both = svg_sheet(r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 200 100"/>"#).unwrap();
+        assert!(close(both.0, Vec2::new(0.0, -50.0)) && close(both.1, Vec2::new(100.0, 0.0)), "{both:?}");
+        let vb = svg_sheet(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 20 200 100"/>"#).unwrap();
+        assert!(close(vb.0, Vec2::new(0.0, -100.0 * PX_MM)) && close(vb.1, Vec2::new(200.0 * PX_MM, 0.0)), "{vb:?}");
+        let wh = svg_sheet(r#"<svg xmlns="http://www.w3.org/2000/svg" width="30mm" height="20mm"/>"#).unwrap();
+        assert!(close(wh.0, Vec2::new(0.0, -20.0)) && close(wh.1, Vec2::new(30.0, 0.0)), "{wh:?}");
+        assert!(svg_sheet(r#"<svg xmlns="http://www.w3.org/2000/svg"><rect width="3" height="4"/></svg>"#).is_none());
+        assert!(svg_sheet(r#"<svg viewBox="0 0 0 10"/>"#).is_none(), "a sheet without area is none");
+    }
 
     /// The parser recurses over groups and reads numbers out of a document the user did not write,
     /// so none of these may panic: `catch_unwind` turns one into a failed test, the way

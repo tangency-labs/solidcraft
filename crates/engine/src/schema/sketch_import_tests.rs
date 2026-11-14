@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 use solidcraft_io::MAX_DRAWING_BYTES;
 
-use super::{DrawingInserted, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams};
+use super::{DrawingBoundsParams, DrawingBoundsResult, DrawingInserted, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -11,6 +11,13 @@ const DXF: &str = "0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n0\n20\n0\n11\n30\n21\n0
 
 const SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10"><rect x="0" y="0" width="20" height="10"/><text x="2" y="5" font-size="3">Hi</text></svg>"#;
 
+/// An SVG with geometry but no sheet: no viewBox, no width and no height.
+const SVG_NO_SHEET: &str = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="4" height="3"/></svg>"#;
+
+/// An SVG that names no size is read at 96 dpi: one of its user units is this many mm, which is
+/// what `solidcraft_io` scales by.
+const PX_MM: f64 = 25.4 / 96.0;
+
 fn temp_dir(tag: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("solidcraft-12508-{tag}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -19,10 +26,11 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    let insert = ["align", "angle", "at", "height", "name", "path", "plane", "scale", "sketch", "text", "tolerance", "width"];
+    let insert = ["align", "angle", "at", "fixed", "height", "name", "path", "plane", "scale", "size_from", "sketch", "text", "tolerance", "width"];
     assert_keys(input_schema_for::<InsertDxfParams>(), &insert);
     assert_keys(input_schema_for::<InsertSvgParams>(), &insert);
     assert_keys(input_schema_for::<ExportDxfParams>(), &["join", "layer", "layers", "path", "sketch", "units"]);
+    assert_keys(input_schema_for::<DrawingBoundsParams>(), &["format", "path", "text"]);
 }
 
 /// Strict gives the handlers' messages for the calls they refuse for a key (a missing `path` and
@@ -41,6 +49,14 @@ fn strict_keeps_todays_errors() {
         ("sketch.insert_svg", json!({})),
         ("sketch.insert_svg", json!({"path": " "})),
         ("sketch.insert_svg", json!({"text": null})),
+        ("sketch.drawing_bounds", json!({})),
+        ("sketch.drawing_bounds", json!({"path": ""})),
+        ("sketch.drawing_bounds", json!({"path": "  "})),
+        ("sketch.drawing_bounds", json!({"path": 5})),
+        ("sketch.drawing_bounds", json!({"path": null})),
+        ("sketch.drawing_bounds", json!({"path": "x".repeat(4096)})),
+        ("sketch.drawing_bounds", json!({"text": too_big})),
+        ("sketch.drawing_bounds", json!({"text": null})),
         ("sketch.export_dxf", json!({"sketch": true})),
         ("sketch.export_dxf", json!({"sketch": [1]})),
         ("sketch.export_dxf", json!({"sketch": -1})),
@@ -95,6 +111,14 @@ fn strict_keeps_the_handlers_own_refusals() {
         ("sketch.export_dxf", json!({"layers": "all"})),
         ("sketch.export_dxf", json!({"layers": true})),
         ("sketch.export_dxf", json!({"join": "yes"})),
+        ("sketch.drawing_bounds", json!({"text": "0\nEOF\n", "format": "dxf"})),
+        ("sketch.drawing_bounds", json!({"text": "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"})),
+        // With `text` and no `format` there is no file name to go by, so the drawing is read as
+        // an SVG: a DXF given that way is refused, today and in strict.
+        ("sketch.drawing_bounds", json!({"text": DXF})),
+        ("sketch.drawing_bounds", json!({"path": "no-such-drawing-15973.dxf"})),
+        ("sketch.drawing_bounds", json!({"text": SVG, "format": "dxf"})),
+        ("sketch.drawing_bounds", json!({"text": DXF, "format": "png"})),
     ] {
         let error = |level: ParamCheck| {
             let mut s = Session { param_check: level, ..Session::default() };
@@ -133,6 +157,9 @@ fn the_types_read_like_the_handler() {
     assert_eq!(issues(json!({"text": "x", "height": -1})), ["`height` must be a positive number (mm)"]);
     assert_eq!(issues(json!({"text": "x", "angle": "1"})), ["`angle` must be a number (degrees)"]);
     assert_eq!(issues(json!({"text": "x", "align": "left"})), ["`align` must be \"origin\" or \"center\""]);
+    assert_eq!(issues(json!({"text": "x", "size_from": "sheet"})), ["`size_from` must be \"geometry\" or \"viewbox\""]);
+    assert!(issues(json!({"text": "x", "size_from": "viewbox", "fixed": true})).is_empty());
+    assert_eq!(issues(json!({"text": "x", "fixed": "yes"})).len(), 1);
     assert_eq!(issues(json!({"path": " "})), ["give `path` or `text`"]);
     assert_eq!(issues(json!({"text": "x", "sketch": true})), ["`sketch` must be an id or a name"]);
     assert_eq!(issues(json!({"text": "x", "wdth": 5})), ["unknown key `wdth`; did you mean `width`?"]);
@@ -197,6 +224,81 @@ fn the_schemas_take_what_the_handlers_read() {
     );
 }
 
+/// `sketch.drawing_bounds` answers with the box around the drawing, in millimetres, and with the
+/// SVG's sheet when the file names one: the same JSON the handler built by hand before it built
+/// its reply from `DrawingBoundsResult`. No `sheet` key for a DXF or for an SVG that says no
+/// sheet; an SVG's y axis points down, so its boxes come back in SolidCraft's y-up ones, and its
+/// user units are scaled by the size the file names (a file that names none is read at 96 dpi).
+#[test]
+fn drawing_bounds_replies_as_its_output_schema_says() {
+    let dir = temp_dir("bounds");
+    let sheet_file = dir.join("plate.svg");
+    let plain_file = dir.join("nosheet.svg");
+    std::fs::write(&sheet_file, SVG).unwrap();
+    std::fs::write(&plain_file, SVG_NO_SHEET).unwrap();
+    let (sheet_path, plain_path) = (sheet_file.to_string_lossy().into_owned(), plain_file.to_string_lossy().into_owned());
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let bounds = |s: &mut Session, p: Value| {
+        let r = s.execute("sketch.drawing_bounds", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+        matches(output_schema_for::<DrawingBoundsResult>(), &r);
+        // The session adds `created` to a `sketch.*` reply outside the handler; the schema
+        // describes what the handler builds.
+        let mut own = r.clone();
+        own.as_object_mut().unwrap().remove("created");
+        own
+    };
+
+    // A DXF, named as one: the box around its lines, and no sheet.
+    let r = bounds(&mut s, json!({"text": DXF, "format": "dxf"}));
+    assert_eq!(r, json!({"min": [0.0, 0.0], "max": [30.0, 20.0], "width": 30.0, "height": 20.0}), "{r}");
+    // An SVG with a viewBox: the box around its geometry, and the sheet the viewBox names. The
+    // file's y axis points down, so both boxes come back in SolidCraft's y-up ones.
+    let r = bounds(&mut s, json!({"text": SVG}));
+    assert_eq!(r["sheet"], json!({"min": [0.0, -10.0], "max": [20.0, 0.0], "width": 20.0, "height": 10.0}), "{r}");
+    assert_eq!(r["min"], json!([0.0, -10.0]), "{r}");
+    assert_eq!(r["max"], json!([20.0, 0.0]), "{r}");
+    assert_eq!((r["width"].as_f64(), r["height"].as_f64()), (Some(20.0), Some(10.0)), "{r}");
+    // `text` wins, so the `path` next to it is never read: this is the SVG's box, not the file's.
+    let r = bounds(&mut s, json!({"path": plain_path, "text": SVG}));
+    assert_eq!(r["width"], json!(20.0), "{r}");
+    // An SVG with no sheet named: no `sheet` key at all, and its user units read at 96 dpi,
+    // because the file says no other size.
+    let r = bounds(&mut s, json!({"path": plain_path}));
+    assert_eq!(r["min"], json!([PX_MM, -4.0 * PX_MM]), "{r}");
+    assert_eq!(r["max"], json!([5.0 * PX_MM, -PX_MM]), "{r}");
+    assert!(r["width"].as_f64().is_some_and(|w| (w - 4.0 * PX_MM).abs() < 1e-9), "{r}");
+    assert!(r["height"].as_f64().is_some_and(|h| (h - 3.0 * PX_MM).abs() < 1e-9), "{r}");
+    assert!(r.get("sheet").is_none(), "{r}");
+    // `format` says which reader the drawing is read with, in any case, and anything but `dxf`
+    // reads an SVG; null reads as left out.
+    for p in [
+        json!({"path": sheet_path, "format": "SVG"}),
+        json!({"path": sheet_path, "format": "not a format I know"}),
+        json!({"path": sheet_path, "format": null}),
+        json!({"text": DXF, "format": "dxf"}),
+        json!({"text": DXF, "format": "DXF"}),
+    ] {
+        let r = bounds(&mut s, p);
+        assert!(r["width"].as_f64().is_some_and(|w| w > 0.0), "{r}");
+    }
+    let r = bounds(&mut s, json!({"path": plain_path, "format": "SVG"}));
+    assert!(r["width"].as_f64().is_some_and(|w| (w - 4.0 * PX_MM).abs() < 1e-9), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // A misspelt key runs in warn and says so; the reply still matches. Strict refuses it, and so
+    // does a `format` that is not text, which the handler would read as left out.
+    let p = json!({"text": SVG, "frmats": "dxf"});
+    let r = s.execute("sketch.drawing_bounds", &p).unwrap();
+    assert!(r["param_warnings"].as_array().is_some_and(|w| w.iter().any(|m| m.as_str().is_some_and(|m| m.contains("`frmats`")))), "{r}");
+    matches(output_schema_for::<DrawingBoundsResult>(), &r);
+    s.param_check = ParamCheck::Strict;
+    let error = s.execute("sketch.drawing_bounds", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`frmats`"), "{error}");
+    let error = s.execute("sketch.drawing_bounds", &json!({"text": DXF, "format": 5})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`format`"), "{error}");
+}
+
 fn matches(schema: schemars::Schema, r: &Value) {
     let schema = schema.as_value();
     assert!(conforms(schema, schema, r), "{r} doesn't match {schema}");
@@ -226,6 +328,11 @@ fn replies_match_the_output_schema() {
     };
     let insert_keys: std::collections::BTreeSet<String> = ["created_sketch", "curves", "info", "sketch", "texts"].map(String::from).into();
 
+    // A drawing fixed where it is put: the reply says how many points, and matches the schema.
+    let r = run(&mut s, "sketch.insert_svg", json!({"text": SVG, "fixed": true, "size_from": "geometry"}));
+    matches(output_schema_for::<DrawingInserted>(), &r);
+    assert_eq!(r["fixed"], json!(4), "{r}");
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
     // With no sketch being edited: a new one is made, on the plane and with the name given.
     let r = run(&mut s, "sketch.insert_dxf", json!({"text": DXF, "plane": "XZ", "name": "Plate", "at": [5, 5]}));
     matches(output_schema_for::<DrawingInserted>(), &r);

@@ -11,6 +11,7 @@
 //! The snapshot is scaled so its longest side is 2 and packed as 16-bit whole numbers of
 //! 1/10000 ([`snapshot`]): every body is the same size in the gizmo, and the stored form stays
 //! small. Faces and edges keep their identities, so the gizmo can light one face and outline it.
+use solidcraft_engine::geom::MeshGeom;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 

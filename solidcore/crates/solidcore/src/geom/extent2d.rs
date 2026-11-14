@@ -1004,10 +1004,12 @@ mod tests {
         );
         assert!(!e1.is_point_on_boundary(p(1.1, 2.1), EFF_ZERO).0);
 
-        assert_eq!(
-            e1.contains_periodic_point(p(8.9, 3.0), 4.0, 0.0, 0.2),
-            (true, p(1.0, 3.0))
-        );
+        // u = 8.9 is 0.9 a period down, within the tolerance of [1, 3]: it keeps 0.9
+        // (WR-509, #1518; upstream's MyTest expects the start, 1.0)
+        let (inside, q) = e1.contains_periodic_point(p(8.9, 3.0), 4.0, 0.0, 0.2);
+        assert!(inside);
+        assert!((q.x - 0.9).abs() <= 1e-12, "{}", q.x);
+        assert_eq!(q.y, 3.0);
         assert!(!e1.contains_periodic_point(p(8.9, 3.0), 4.0, 0.0, 0.0).0);
 
         assert_eq!(e1.evaluate(0.5, 0.5), p(2.0, 3.0));

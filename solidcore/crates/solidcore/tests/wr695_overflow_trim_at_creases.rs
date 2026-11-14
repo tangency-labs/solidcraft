@@ -16,7 +16,6 @@
 )]
 
 use solidcore::blend::fillet_executive::session::FilletSession;
-use solidcore::blend::fillet_geom::p1::FilletErrorType;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -48,7 +47,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
-    brep_volume(k, b, 1e-7, &attrs).unwrap()
+    brep_volume(k, b, 1e-10, &attrs).unwrap()
 }
 
 /// The area of the section a round of radius `r` removes between faces `w` and `h` wide
@@ -134,12 +133,11 @@ fn blend(
 
 /// Asserts a build of `faces` faces whose volume is `expected` within `rel` relative.
 fn assert_builds(outcome: &Outcome, expected: f64, rel: f64, faces: usize) {
-    let Outcome::Built {
-        volume: v,
-        faces: n,
-    } = outcome
-    else {
-        panic!("expected a build at {expected}, got {outcome:?}");
+    let (v, n) = match outcome {
+        Outcome::Built { volume, faces } => (volume, faces),
+        Outcome::Refused(code, comment) => {
+            panic!("expected a build at {expected}, refused (code {code}): {comment}")
+        }
     };
     assert!(
         (v - expected).abs() <= rel * expected,
@@ -205,9 +203,9 @@ fn cube_20(k: &mut Kernel) -> Brep {
     create_box(k, Point3::ZERO, 20.0, 20.0, 20.0).unwrap()
 }
 
-/// The relative volume tolerance against the closed form. [`volume`] integrates at 1e-7 and
-/// reaches 1.8e-10 relative at worst over these six bodies (the bar's round, measured on
-/// 2026-11-04); this leaves that a factor of five.
+/// The relative volume tolerance against the closed form. [`volume`] integrates at 1e-10,
+/// whose error (WR-472's scale: the accuracy times the body's own size) is below it; the
+/// six bodies reached 1.8e-10 relative at worst (the bar's round, measured on 2026-11-04).
 const CLOSED_REL: f64 = 1e-9;
 
 /// The relative tolerance of the one case with no closed form here, the round trimmed at a
@@ -239,20 +237,18 @@ fn step_round_trimmed_at_its_crease() {
     );
 }
 
-/// The stepped bar's inner step edge chamfered 4: the chamfer runs past both faces the
-/// step meets, its creases and rails enclose no part of the body and every face is
-/// reached: the fork refuses it, `SM_FILERR_BAD_MERGE` (fork 8832ead's every-face case).
-/// The subtraction builds it, 1700 - 160.
+/// The stepped bar's inner step edge chamfered 4: the chamfer's leg runs past the step's foot
+/// under the wall. The trim builds it as the subtraction does, the step's plane carried on to the
+/// leg, 1700 - 160 (the fork refuses it, `SM_FILERR_BAD_MERGE`, fork 8832ead's every-face case:
+/// its extension's material probe misses the 1 wide strip and the walls beside are not fenced).
 #[test]
-fn chamfer_reaching_every_face_is_refused() {
+fn chamfer_past_the_step_foot_builds_as_the_subtraction() {
     let (s, t) = (p(10.0, 5.0, 0.0), p(10.0, 5.0, 20.0));
-    let Outcome::Refused(code, comment) = blend(true, stepped_bar, s, t, 4.0, true) else {
-        panic!("the trim builds the every-face chamfer");
-    };
-    assert_eq!(code, FilletErrorType::BadMerge as i32);
-    assert!(
-        comment.contains("reaches every face of the body"),
-        "{comment}"
+    assert_builds(
+        &blend(true, stepped_bar, s, t, 4.0, true),
+        1540.0,
+        CLOSED_REL,
+        9,
     );
     assert_builds(
         &blend(false, stepped_bar, s, t, 4.0, true),

@@ -18,12 +18,19 @@ pub struct ControlRequest {
     /// Chat requests already admitted by the gate may outlive a tab switch. This turn's
     /// validity follows them through queues, computation and cursor animation.
     pub chat_turn: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Where the request is, shared with the connection that sent it so it can cancel it
+    /// (`control.cancel`, #1989).
+    pub ticket: std::sync::Arc<crate::Ticket>,
+    /// Told apart from every other request of this run: names its row while it waits.
+    pub serial: u64,
 }
 
 impl ControlRequest {
     pub fn new(method: impl Into<String>, params: Value) -> (Self, std::sync::mpsc::Receiver<ControlResponse>) {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let (tx, rx) = std::sync::mpsc::channel();
-        (Self { method: method.into(), params, reply: tx, started: Default::default(), chat_turn: None }, rx)
+        let serial = NEXT.fetch_add(1, Ordering::Relaxed);
+        (Self { method: method.into(), params, reply: tx, started: Default::default(), chat_turn: None, ticket: Default::default(), serial }, rx)
     }
 
     /// Answer a request whose agent chat turn has ended, and say so: such a request is not run.

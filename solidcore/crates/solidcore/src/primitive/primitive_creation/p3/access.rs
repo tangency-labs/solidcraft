@@ -50,9 +50,27 @@ pub trait PrimitiveAccess: SweepAccess {
         tolerance: f64,
         faces: &mut Vec<FaceId>,
     ) -> Result<()> {
+        self.planar_faces_with_edges(region, curves, tolerance, faces)
+            .map(drop)
+    }
+    /// [`PrimitiveAccess::planar_faces`], also returning the edge made from each curve
+    /// with that curve's slot in `curves` (not upstream: the skin's face sources,
+    /// tangency-labs/solidcore#3139). The faces are those `planar_faces` makes.
+    fn planar_faces_with_edges(
+        &mut self,
+        region: RegionRef,
+        curves: &mut Vec<Option<Curve>>,
+        tolerance: f64,
+        faces: &mut Vec<FaceId>,
+    ) -> Result<Vec<(EdgeId, usize)>> {
+        let slots: Vec<usize> = curves
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| c.as_ref().map(|_| i))
+            .collect();
         let input: Vec<Curve> = curves.iter().flatten().cloned().collect();
-        *faces = with_face_env(self, region.0, |kernel, model, fenv| {
-            crate::topology::brep::p8::create_planar_faces_with_3d_curves(
+        let (made, edges) = with_face_env(self, region.0, |kernel, model, fenv| {
+            crate::topology::brep::p8::create_planar_faces_with_3d_curves_and_edges(
                 kernel,
                 model,
                 Some(region.1),
@@ -61,11 +79,16 @@ pub trait PrimitiveAccess: SweepAccess {
                 fenv,
             )
         })?;
+        *faces = made;
         // consumed on success: the B-rep owns every curve, each slot stays empty
         for slot in curves.iter_mut() {
             *slot = None;
         }
-        Ok(())
+        // (the tracing adds no failure: an edge whose curve has no slot is left out)
+        Ok(edges
+            .into_iter()
+            .filter_map(|(e, i)| slots.get(i).map(|&slot| (e, slot)))
+            .collect())
     }
     /// Create one planar face from its boundary curves
     /// (`SmBrep::CreatePlanarFaceWith3DCurves`).
@@ -92,7 +115,12 @@ pub trait PrimitiveAccess: SweepAccess {
     fn wire(&mut self, brep: BrepId, curve: &mut Option<Curve>) -> Result<EdgeId> {
         let input = curve
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer("primitive::primitive_creation::p3::wire"))?
+            .ok_or_else(|| {
+                SolidError::primitive_missing(
+                    "primitive::primitive_creation::p3::wire",
+                    "the wire's curve",
+                )
+            })?
             .clone();
         let interval = input.natural_interval();
         // under the primitive's own notification environment, like every face it
@@ -199,6 +227,16 @@ pub trait PrimitiveAccess: SweepAccess {
     fn face_composites(&mut self, face: FaceRef) -> Result<Vec<CompositeCurve>> {
         self.with_brep_mut(face.0, |kernel, model, _, _| {
             crate::topology::face::p3::create_composites(kernel, model, face.1)
+        })
+    }
+    /// [`PrimitiveAccess::face_composites`], each composite with the edge of each
+    /// segment (not upstream: the skin's face sources, tangency-labs/solidcore#3139).
+    fn face_composites_with_edges(
+        &mut self,
+        face: FaceRef,
+    ) -> Result<Vec<(CompositeCurve, Vec<EdgeId>)>> {
+        self.with_brep_mut(face.0, |kernel, model, _, _| {
+            crate::topology::face::p3::create_composites_with_edges(kernel, model, face.1)
         })
     }
     /// Face's normal bounding box for the rotational axis check.

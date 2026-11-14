@@ -207,7 +207,7 @@ impl Surface {
             Surface::Revolution { profile, angle, .. } => [*angle, profile.extent()],
             Surface::PlacedRevolution { profile, forward: true, .. } => [profile.extent(), turn],
             Surface::PlacedRevolution { profile, forward: false, .. } => [turn, profile.extent()],
-            Surface::Spline { .. } | Surface::RationalSpline { .. } => brep::label::surface_natural(&self.label()).map(range),
+            Surface::Spline { .. } | Surface::RationalSpline { .. } => solidcore_ops::label::surface_natural(&self.label()).map(range),
             // Nothing reads a plane's domain; this is around anything a fixture draws on one.
             Surface::Plane { .. } | Surface::PlaneThrough { .. } => [[-1e12, 1e12]; 2],
         }
@@ -2771,12 +2771,12 @@ fn a_form_turned_against_its_label_keeps_the_face_on_the_loops_side() {
         domain: [domain[1], domain[0]],
         loops: vec![backward.clone()],
     };
-    assert_eq!(brep::label::form_turns(&turned), Some(true));
+    assert_eq!(solidcore_ops::label::form_turns(&turned), Some(true));
     let north = trim::build(&turned, &curves, &chart, 64);
     assert_eq!((north.contains([1., 1.]), north.contains([1., -1.])), (Some(true), Some(false)));
     let (form, domain) = brep::form::surface(&label, [[0., tau], [-half, 0.]]).unwrap();
     let plain = rec::Face { surface: label, nurbs: Some(form), domain, loops: vec![backward] };
-    assert_eq!(brep::label::form_turns(&plain), Some(false));
+    assert_eq!(solidcore_ops::label::form_turns(&plain), Some(false));
     let south = trim::build(&plain, &curves, &chart, 64);
     assert_eq!((south.contains([1., 1.]), south.contains([1., -1.])), (Some(false), Some(true)));
 }

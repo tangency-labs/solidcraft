@@ -499,6 +499,25 @@ fn redefine_panel_names_the_plane_a_sketch_is_on() {
     assert_eq!(plane_description(&h.app.session.doc, &PlaneRef::Flipped { base: xy, about_y: false }), "The XY plane, from its other side");
 }
 
+/// The panel's "Current plane" value wraps and its row grows: a name longer than the control
+/// column is shown on every line it takes, not clipped to the first.
+#[test]
+fn redefine_panel_current_plane_row_grows_for_a_long_plane_name() {
+    use crate::scenario;
+    let mut h = Harness::new();
+    let name = "Bracket mounting plane offset above the base plate";
+    h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 10, "name": name})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane": name})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    crate::browser::redefine_sketch(&mut h.app, sketch);
+    h.frames(5);
+    let row = scenario::rect_of("dialog:row:Current plane").expect("the panel names the current plane");
+    let control = scenario::rect_of("dialog:control:Current plane").unwrap();
+    assert!(row.height() > solidcraft_theme::Tokens::get().control_height, "the long name wraps and the row grows: {row:?}");
+    assert!(row.contains_rect(control));
+    assert!(scenario::rect_of("dialog:field:Plane").unwrap().top() >= row.bottom(), "the Plane field sits below the grown row");
+}
+
 /// Preferences › Sketch › "Sketching on a part's face makes that part active" (#10215): a face of
 /// a part's body picked for Create Sketch while the design is active puts the sketch in the part,
 /// which stays active; off, the sketch belongs to the design.

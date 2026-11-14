@@ -10,6 +10,9 @@
 //! A feature that adds or removes a tool body (join, cut, intersect) shows only its tool. That
 //! is all its preview builds: its boolean, which can take seconds (a text joined onto a part),
 //! runs once, on OK, and an error it finds shows then, the dialog staying open.
+//!
+//! A Mirror of bodies shows its copies as green see-through ghosts, joined or not, and says
+//! whether a copy meets the body it was made from: the dialog sets its operation from that.
 
 use solidcraft_engine::geom::prelude::*;
 use std::hash::{Hash, Hasher};
@@ -38,6 +41,8 @@ pub struct Colors {
     /// A body the preview creates (New Body), so it doesn't look like a join.
     pub new_body: [u8; 4],
     pub removed: [u8; 4],
+    /// A Mirror's copies: the proposed-geometry green, as see-through as removed material.
+    pub mirrored: [u8; 4],
     pub edge: [u8; 4],
     /// Whether a moved component's old place is drawn as a ghost (Drive Joints' Show ghost).
     pub ghost: bool,
@@ -59,6 +64,10 @@ impl Colors {
             added: c(t.preview_add),
             new_body: c(t.preview_new),
             removed: c(t.preview_cut),
+            mirrored: {
+                let ([r, g, b, _], [.., a]) = (c(t.preview_sketch), c(t.preview_cut));
+                [r, g, b, a]
+            },
             edge: c(t.body_edge),
             ghost: true,
             tint_new: true,
@@ -68,7 +77,7 @@ impl Colors {
 
     fn for_tool(t: &Tokens, tab: &str, active: bool) -> Colors {
         let mut colors = Self::from_tokens(t);
-        let accent = solidcraft_theme::TabAccent::for_tab(t, tab);
+        let accent = crate::workspace::tab_accent(t, tab);
         if active && accent.color != t.accent {
             colors.added = accent.color.to_srgba_unmultiplied();
             colors.new_body = t.body.lerp_to_gamma(accent.color, 0.45).to_srgba_unmultiplied();
@@ -101,6 +110,12 @@ pub struct Built {
     /// The reply of a previewed drive that stopped short of the asked values (the dialog says
     /// where and why, in the UI's language).
     pub stopped: Option<serde_json::Value>,
+    /// For a Mirror of bodies: whether a copy meets the body it was made from, with the key of
+    /// the bodies and plane it was worked out for ([`mirror_key`]).
+    pub mirror_meets: Option<(u64, bool)>,
+    /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
+    /// how free the part is with the constraint it shows.
+    pub placed: Option<serde_json::Value>,
 }
 
 type Job = Result<Built, String>;
@@ -109,6 +124,10 @@ type Job = Result<Built, String>;
 /// them, a new job waits for the running one as before, so a quick series of picks keeps at
 /// most this many kernel computations going beside the current one.
 const DETACHED: usize = 2;
+
+/// How long a joint pose for a slider value since moved past may keep computing (#14264). Past
+/// it, the pose is cancelled and the latest value starts, so only the latest keeps solving.
+const STALE_MOTION_MS: f64 = 500.0;
 
 #[derive(Default)]
 pub struct PreviewState {
@@ -125,6 +144,9 @@ pub struct PreviewState {
     running_tool: bool,
     /// Inputs of a joint or distance preview, excluding only its driven values.
     running_stream_key: Option<u64>,
+    /// The running job is a joint pose (see [`motion_key`]): once obsolete, it gets
+    /// [`STALE_MOTION_MS`].
+    running_motion: bool,
     /// Bodies the preview stands in for (hidden in the model scene).
     pub replaced: Vec<String>,
     /// The preview scene for the GPU and its key (changes whenever the scene does).
@@ -146,8 +168,15 @@ pub struct PreviewState {
     pub applied: Option<(f64, f64)>,
     /// The reply of a previewed drive that stopped short (see [`Built::stopped`]).
     pub stopped: Option<serde_json::Value>,
+    /// The reply of a previewed assembly constraint (see [`Built::placed`]).
+    pub placed: Option<serde_json::Value>,
     /// The radius splines the previewed fillet tapered its edges with.
     pub tapered: Vec<(Vec3, solidcraft_engine::kernel::Taper)>,
+    /// Whether the previewed Mirror's copy meets its body (see [`Built::mirror_meets`]).
+    pub mirror_meets: Option<(u64, bool)>,
+    /// The bodies and plane ([`mirror_key`]) the Mirror dialog last set its operation for: an
+    /// operation picked by hand afterwards stays until they change.
+    pub mirror_decided: Option<u64>,
     straight: crate::extrude_preview::StraightPreview,
     moving: crate::move_preview::MovePreview,
     /// PreviewReselect: Primary held - hide the preview and restore replaced bodies for picks.
@@ -180,7 +209,10 @@ impl PreviewState {
         self.error = None;
         self.applied = None;
         self.stopped = None;
+        self.placed = None;
         self.tapered.clear();
+        self.mirror_meets = None;
+        self.mirror_decided = None;
         self.sketches.clear();
         self.busy = false;
         self.rolled_back = false;
@@ -216,7 +248,9 @@ impl PreviewState {
                 self.error = b.error;
                 self.applied = b.applied;
                 self.stopped = b.stopped;
+                self.placed = b.placed;
                 self.tapered = b.tapered;
+                self.mirror_meets = b.mirror_meets;
                 self.set_scene(b.scene);
             }
             // The current inputs make no feature: the last good geometry would contradict
@@ -227,7 +261,10 @@ impl PreviewState {
                 self.error = Some(e);
                 self.applied = None;
                 self.stopped = None;
+                self.placed = None;
                 self.tapered.clear();
+                self.mirror_meets = None;
+                self.mirror_decided = None;
             }
         }
     }
@@ -235,9 +272,16 @@ impl PreviewState {
     /// Errors validate only the current inputs. Keep the last good geometry while
     /// computing new inputs, but never let an obsolete result block their Apply.
     fn poll(&mut self, key: u64, stream_key: Option<u64>) {
+        self.poll_at(key, stream_key, crate::now_ms());
+    }
+
+    fn poll_at(&mut self, key: u64, stream_key: Option<u64>, now: f64) {
         if self.shown_key != Some(key) {
             self.sketches.clear();
             self.error = None;
+            // A constraint's reply says how free its part is with the inputs it was for: with other
+            // picks it would describe the wrong rule, so the dialog falls back to the saved design.
+            self.placed = None;
         }
         if let Some((k, rx)) = &self.running {
             let k = *k;
@@ -252,6 +296,7 @@ impl PreviewState {
                 let intermediate = good && (self.running_tool || stream_key.is_some() && self.running_stream_key == stream_key);
                 self.running_stream_key = None;
                 self.running_tool = false;
+                self.running_motion = false;
                 // A held slider, a dragged arrow or an animation may advance faster than the
                 // worker. Show completed joint/distance results from the same setup, and tools built for
                 // inputs since changed, then compute the latest. Errors still require an exact
@@ -270,7 +315,10 @@ impl PreviewState {
         // wait as before. At most `DETACHED` jobs are left behind; while they run, the next
         // obsolete one is waited for as before.
         let other_setup = !self.running_tool && stream_key.is_some() && self.running_stream_key.is_some() && self.running_stream_key != stream_key;
-        if self.running.as_ref().is_some_and(|(k, _)| *k != key) && other_setup && self.detached.len() < DETACHED {
+        // A joint pose for a value the slider has left, still running after `STALE_MOTION_MS`:
+        // stop it and start the latest value (#14264).
+        let stale_motion = self.running_motion && stream_key.is_some() && now - self.started >= STALE_MOTION_MS;
+        if self.running.as_ref().is_some_and(|(k, _)| *k != key) && (other_setup || stale_motion) && self.detached.len() < DETACHED {
             self.detach();
         }
     }
@@ -287,6 +335,7 @@ impl PreviewState {
         }
         self.running_tool = false;
         self.running_stream_key = None;
+        self.running_motion = false;
     }
 }
 
@@ -307,6 +356,8 @@ fn motion_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
                     | "joint.rack_pinion"
                     | "joint.screw"
                     | "joint.cam"
+                    | "assembly.constraint.create"
+                    | "assembly.constraint.edit"
             )
         })
     {
@@ -372,6 +423,16 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
 /// Keep the preview in step with the open dialog: start a computation when its inputs changed,
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
+    // A Mirror's operation follows whether a copy meets the body it was made from: Join when one
+    // overlaps or touches its body, New Body when none does. It is set once for each pick of
+    // bodies and plane, so an operation picked by hand afterwards stays until they change.
+    if let Some((key, meets)) = app.preview.mirror_meets
+        && app.preview.mirror_decided != Some(key)
+        && let Some(d) = app.dialog.as_mut().filter(|d| matches!(d.kind, crate::dialogs::Kind::Mirror))
+    {
+        d.extra.insert("combine".into(), Value::Bool(meets));
+        app.preview.mirror_decided = Some(key);
+    }
     let cmds = match app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).map(|d| crate::dialogs::preview_commands(app, d)) {
         Some(Ok(c)) if !c.is_empty() => c,
         _ if crate::sketch_attachment_ui::commands(app).is_some() => crate::sketch_attachment_ui::commands(app).unwrap_or_default(),
@@ -399,6 +460,7 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     if pv.running.is_none() && pv.shown_key != Some(key) {
         pv.started = crate::now_ms();
         pv.running_stream_key = stream_key;
+        pv.running_motion = motion_key(&cmds, app.session.revision, colors).is_some();
         let mut straight = std::mem::take(&mut app.preview.straight);
         let mut job = straight.compute(app, &cmds, colors);
         app.preview.straight = straight;
@@ -497,6 +559,9 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
     if let Some(job) = crate::dialogs_assembly::world_preview(s, cmds, colors) {
         return job;
     }
+    if let Some(p) = mirror_of(cmds) {
+        return compute_mirror(s, p, colors);
+    }
     match as_new_body(cmds) {
         Some(_) => {
             let mut b = compute_tool(s, cmds, colors)?;
@@ -586,6 +651,91 @@ pub(crate) fn extrusion_target_error(s: &Session, cmds: &[(String, Value)], befo
     None
 }
 
+/// The parameters of the Mirror of bodies the commands make (not a Mirror of features, whose
+/// copies replay the features' own operations, nor an edit of one).
+fn mirror_of(cmds: &[(String, Value)]) -> Option<&Value> {
+    match cmds {
+        [(command, p)] if command == "solid.mirror" && p.get("bodies").is_some() => Some(p),
+        _ => None,
+    }
+}
+
+/// The bodies and plane of a Mirror's parameters, apart from its operation: what the dialog's
+/// automatic operation is set for once.
+fn mirror_key(p: &Value) -> u64 {
+    let mut picks = p.clone();
+    if let Value::Object(m) = &mut picks {
+        m.remove("combine");
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    picks.to_string().hash(&mut h);
+    h.finish()
+}
+
+/// A Mirror of bodies as its preview shows it, joined or not: each copy a green see-through
+/// ghost where the view shows the bodies, the bodies themselves left as they are (lit as
+/// picked). A join runs once, on OK. Whether a copy meets the body it was made from comes with
+/// it, on the exact geometry ([`Session::mirror_meets`]).
+fn compute_mirror(s: &Session, p: &Value, colors: Colors) -> Job {
+    let mut apart = p.clone();
+    if let Value::Object(m) = &mut apart {
+        m.insert("combine".into(), Value::Bool(false));
+    }
+    let preview = s.preview_world(&[("solid.mirror".to_string(), apart)]).map_err(|e| e.to_string())?;
+    let sources: Vec<String> = solidcraft_engine::params::string_list_or_default(p, "bodies");
+    let mut b = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build_copies(&preview.before, &preview.after, &sources, colors)))
+        .map_err(|_| "the preview failed".to_string())?;
+    b.bounds = state_bounds(&preview.after);
+    b.mirror_meets = s.mirror_meets(p).ok().flatten().map(|meets| (mirror_key(p), meets));
+    Ok(b)
+}
+
+/// The bodies `after` has and `before` hasn't (a Mirror's copies) as green see-through ghosts,
+/// with their outlines. A copy's triangles that lie on one of the `sources` it was made from
+/// are left out: there the copy is the body's own surface (mirrored about one of its faces, or
+/// a symmetric body about its middle), and the two meshes would fight in slivers.
+fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: Colors) -> Built {
+    let mut sc = GpuScene::default();
+    let fill = sc.color(c.mirrored);
+    let edge = sc.color([c.mirrored[0], c.mirrored[1], c.mirrored[2], 255]);
+    let kept: Vec<SurfaceIndex> = sources.iter().filter_map(|n| before.body(n)).filter_map(|b| SurfaceIndex::new(&b.mesh())).collect();
+    for a in after.bodies.iter().filter(|a| before.body(&a.name).is_none()) {
+        let m = a.mesh();
+        for t in &m.triangles {
+            let Some(corners) = m.tri(t) else { continue };
+            if kept.iter().any(|k| on_surface(k, corners)) {
+                continue;
+            }
+            for k in t {
+                let i = *k as usize;
+                if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
+                    sc.ghost_tri(p.to_f32(), n.to_f32(), fill);
+                }
+            }
+        }
+        // Depth-tested, as a body's own edges: the renderer draws no on-top line of a preview.
+        for (ei, e) in m.edges.iter().enumerate() {
+            if m.shaded_edge_visible(ei) {
+                for w in e.windows(2) {
+                    sc.line(w[0].to_f32(), w[1].to_f32(), edge, 1.3, false);
+                }
+            }
+        }
+    }
+    Built {
+        scene: sc,
+        sketches: Vec::new(),
+        replaced: Vec::new(),
+        error: None,
+        bounds: Aabb3::EMPTY,
+        applied: None,
+        tapered: Vec::new(),
+        stopped: None,
+        mirror_meets: None,
+        placed: None,
+    }
+}
+
 fn state_bounds(st: &ModelState) -> Aabb3 {
     st.bodies.iter().fold(Aabb3::EMPTY, |b, x| b.union(&x.mesh().bounds()))
 }
@@ -630,6 +780,8 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         applied: None,
         tapered: Vec::new(),
         stopped: None,
+        mirror_meets: None,
+        placed: None,
     }
 }
 
@@ -778,7 +930,18 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         }
     }
     let sketches = after.sketches.iter().filter_map(|sketch| sketch_changes(before.sketch(sketch.feature), sketch)).collect();
-    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
+    Built {
+        scene: sc,
+        sketches,
+        replaced,
+        error: None,
+        bounds: Aabb3::EMPTY,
+        applied: None,
+        tapered: Vec::new(),
+        stopped: None,
+        mirror_meets: None,
+        placed: None,
+    }
 }
 
 /// Does the triangle lie on the surface `index` holds: its corners, the middles of its sides
@@ -1020,11 +1183,11 @@ mod tests {
                         assert_eq!(colors.removed, base.removed);
                         assert_eq!(colors.body, base.body);
                         assert_eq!(colors.edge, base.edge);
-                        if !active || solidcraft_theme::TabAccent::for_tab(&t, tab).color == t.accent {
+                        if !active || crate::workspace::tab_accent(&t, tab).color == t.accent {
                             assert_eq!(colors.added, base.added);
                             assert_eq!(colors.new_body, base.new_body);
                         } else {
-                            let accent = solidcraft_theme::TabAccent::for_tab(&t, tab);
+                            let accent = crate::workspace::tab_accent(&t, tab);
                             assert_eq!(colors.added, accent.color.to_srgba_unmultiplied());
                             assert_ne!(colors.new_body, colors.added);
                         }
@@ -1040,6 +1203,7 @@ mod tests {
             added: [2, 2, 2, 255],
             new_body: [4, 4, 4, 255],
             removed: [3, 3, 3, 100],
+            mirrored: [6, 6, 6, 100],
             edge: [0, 0, 0, 255],
             ghost: true,
             tint_new: true,
@@ -1094,6 +1258,8 @@ mod tests {
             applied: None,
             tapered: Vec::new(),
             stopped: None,
+            mirror_meets: None,
+            placed: None,
         }
     }
 
@@ -1124,6 +1290,55 @@ mod tests {
         pv.poll(4, Some(42));
         assert_eq!(pv.shown_key, Some(4), "release catches up to the exact final pose");
         assert!(pv.running.is_none());
+    }
+
+    /// A constraint's reply belongs to the inputs it was computed for: when they change (other picks
+    /// in the Constrain dialog), it goes with the old error, and is kept while they stand.
+    #[test]
+    fn a_constraint_reply_goes_when_the_inputs_change() {
+        let mut pv = PreviewState { shown_key: Some(1), placed: Some(serde_json::json!({"dof": []})), ..PreviewState::default() };
+        pv.poll_at(1, None, 0.0);
+        assert!(pv.placed.is_some(), "the same inputs keep their reply");
+        pv.poll_at(2, None, 0.0);
+        assert!(pv.placed.is_none(), "other inputs drop the old reply");
+    }
+
+    /// A pose for a value the slider has left gets 500 ms (#14264): before that it keeps running
+    /// (and shows when done); past it, it is cancelled and the latest value may start.
+    #[test]
+    fn a_stale_joint_pose_is_cancelled_after_its_budget() {
+        let start = |pv: &mut PreviewState| {
+            let (tx, rx) = std::sync::mpsc::channel::<Job>();
+            let progress = Arc::new(Progress::default());
+            pv.running = Some((1, rx));
+            pv.running_progress = Some(progress.clone());
+            pv.running_stream_key = Some(42);
+            pv.running_motion = true;
+            pv.started = 1000.0;
+            (tx, progress)
+        };
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.poll_at(2, Some(42), 1000.0 + STALE_MOTION_MS - 1.0);
+        assert!(pv.running.is_some(), "within the budget the pose keeps running");
+        assert!(!progress.is_cancelled());
+        pv.poll_at(2, Some(42), 1000.0 + STALE_MOTION_MS);
+        assert!(pv.running.is_none(), "past the budget the latest value can start");
+        assert!(progress.is_cancelled(), "the stale pose is asked to stop");
+        assert_eq!(pv.detached.len(), 1);
+
+        // The latest value itself is never cancelled, however long it takes.
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.poll_at(1, Some(42), 1000.0 + 10.0 * STALE_MOTION_MS);
+        assert!(pv.running.is_some() && !progress.is_cancelled());
+
+        // Other streamed previews (a fillet radius) keep waiting for their running job.
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.running_motion = false;
+        pv.poll_at(2, Some(42), 1000.0 + 10.0 * STALE_MOTION_MS);
+        assert!(pv.running.is_some() && !progress.is_cancelled());
     }
 
     #[test]
@@ -1315,6 +1530,78 @@ mod tests {
                 scene.palette.get(crate::gpu::PaletteIndex(i)) == Some(col)
             })
             .count()
+    }
+
+    /// A Mirror of bodies previews its copy as a green see-through ghost, joined or not, never a
+    /// solid New Body yellow, and says whether the copy meets its body, for the picks of bodies
+    /// and plane apart from the operation.
+    #[test]
+    fn a_mirror_previews_its_copy_as_a_ghost_and_says_whether_it_meets() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+        let c = colors();
+        let mirror = |x: f64, combine: bool| {
+            ("solid.mirror".to_string(), json!({"bodies": ["Block"], "plane": {"origin": [x, 0, 0], "normal": [1, 0, 0]}, "combine": combine}))
+        };
+        for combine in [false, true] {
+            let b = compute(&s, &[mirror(30.0, combine)], c).unwrap();
+            assert!(count(&b.scene, &b.scene.ghost, 28, c.mirrored) > 0, "join {combine}: the copy, green and see-through");
+            // Its outline in the lines the renderer draws for a preview (it draws no on-top ones).
+            let outline = [c.mirrored[0], c.mirrored[1], c.mirrored[2], 255];
+            assert!(count(&b.scene, &b.scene.lines, crate::gpu::LINE_SIZE, outline) > 0, "join {combine}: the copy's outline");
+            assert!(b.scene.overlay.is_empty(), "join {combine}: nothing the renderer leaves out");
+            assert_eq!(count(&b.scene, &b.scene.tris, 28, c.new_body), 0, "join {combine}: no solid new body");
+            assert!(b.replaced.is_empty(), "join {combine}: the body is left as it is");
+            assert_eq!(b.mirror_meets.map(|(_, meets)| meets), Some(false), "join {combine}: apart");
+        }
+        let on_face = compute(&s, &[mirror(10.0, false)], c).unwrap();
+        assert_eq!(on_face.mirror_meets.map(|(_, meets)| meets), Some(true), "mirrored about its own face");
+        let through = compute(&s, &[mirror(7.0, false)], c).unwrap();
+        assert_eq!(through.mirror_meets.map(|(_, meets)| meets), Some(true), "mirrored through itself");
+        assert_eq!(mirror_key(&mirror(30.0, false).1), mirror_key(&mirror(30.0, true).1), "the operation is not a pick");
+        assert_ne!(mirror_key(&mirror(30.0, false).1), mirror_key(&mirror(10.0, false).1));
+    }
+
+    /// The Mirror dialog sets its operation from where the copy lands: Join when it touches or
+    /// overlaps its body, New Body when it is apart. Once for each pick of bodies and plane, so
+    /// an operation picked by hand stays until the picks change.
+    #[test]
+    fn the_mirror_dialog_joins_a_copy_that_meets_its_body() {
+        use crate::scenario::Harness;
+        use solidcraft_engine::Sel;
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base": "YZ", "offset": 30, "name": "Far"})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base": "YZ", "offset": 10, "name": "Face"})).unwrap();
+        h.app.start("solid.mirror");
+        let pick = |h: &mut Harness, plane: &str| {
+            let d = h.app.dialog.as_mut().unwrap();
+            d.inputs[0].items = vec![Sel::Body { name: "Block".into() }];
+            d.inputs[1].items = vec![Sel::Plane { name: plane.into() }];
+        };
+        // The operation once the preview of the current picks is in and has set it.
+        let operation = |h: &mut Harness| {
+            let began = std::time::Instant::now();
+            loop {
+                h.frame();
+                let decided = h.app.preview.mirror_meets.is_some_and(|(key, _)| h.app.preview.mirror_decided == Some(key));
+                if !h.app.preview.busy && decided {
+                    break;
+                }
+                assert!(began.elapsed() < std::time::Duration::from_secs(60), "the preview did not finish");
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            h.frames(2);
+            h.app.dialog.as_ref().and_then(|d| d.extra.get("combine")).and_then(Value::as_bool)
+        };
+        pick(&mut h, "Face");
+        assert_eq!(operation(&mut h), Some(true), "about its own face: Join");
+        h.app.dialog.as_mut().unwrap().extra.insert("combine".into(), json!(false));
+        assert_eq!(operation(&mut h), Some(false), "New Body picked by hand stays");
+        pick(&mut h, "Far");
+        assert_eq!(operation(&mut h), Some(false), "apart: New Body");
+        pick(&mut h, "Face");
+        assert_eq!(operation(&mut h), Some(true), "about its face again: Join");
     }
 
     #[test]

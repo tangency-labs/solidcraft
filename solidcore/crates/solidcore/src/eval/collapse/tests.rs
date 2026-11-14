@@ -568,3 +568,148 @@ fn a_swapped_mapped_revolution_and_a_producer_tolerance_row() {
     assert_eq!(collapse(&s, [0.0, 0.3], 0.0).unwrap(), Collapse::Neither);
     assert_eq!(collapse(&s, [0.0, 0.3], 1e-6).unwrap(), Collapse::V);
 }
+
+// ---- Off the knot range (`collapse_near`, `SurfaceEval::pole_within`) ----
+
+/// The degree (1, 1) polynomial patch on knots `[lo, lo, hi, hi]` along u and v whose corners
+/// are `p00, p10, p01, p11` (first index u).
+fn bilinear(u: (f64, f64), v: (f64, f64), corners: [[f64; 3]; 4]) -> EvalSurface {
+    let h = |p: [f64; 3]| [p[0], p[1], p[2], 1.0];
+    EvalSurface::nurbs(
+        [1, 1],
+        [vec![u.0, u.0, u.1, u.1], vec![v.0, v.0, v.1, v.1]],
+        [2, 2],
+        corners.iter().map(|p| h(*p)).collect(),
+    )
+}
+
+/// The patch `scale × (u, v, 0)` over `u` × `v`: speed `scale` along both, no pole.
+fn flat(u: (f64, f64), v: (f64, f64), scale: f64) -> EvalSurface {
+    let p = |a: f64, b: f64| [scale * a, scale * b, 0.0];
+    bilinear(u, v, [p(u.0, v.0), p(u.1, v.0), p(u.0, v.1), p(u.1, v.1)])
+}
+
+fn off_range(r: Result<Collapse, EvalError>) -> bool {
+    matches!(r, Err(EvalError::OffRange(m)) if m.starts_with("OffRangeBeyondReach"))
+}
+
+#[test]
+fn a_point_past_the_range_is_asked_at_the_range_with_the_reach_less_its_shift() {
+    // Speed 10 along u: 1e-5 past u = 1 shifts the surface by 1e-4, so δ = 2e-4.
+    let s = flat((0.0, 1.0), (0.0, 1.0), 10.0);
+    let uv = [1.0 + 1e-5, 0.5];
+    let (near, delta) = onto_range(&s, uv).unwrap().unwrap();
+    assert_eq!(near, [1.0, 0.5]);
+    let want = 2.0 * (uv[0] - 1.0) * 10.0;
+    assert!(
+        (want..=want * (1.0 + 1e-9)).contains(&delta),
+        "{delta} {want}"
+    );
+    assert!(
+        collapse(&s, uv, 1e-3).is_err(),
+        "collapse itself still refuses it"
+    );
+    // Under the reach: answered, as at the range's end.
+    assert_eq!(collapse_near(&s, uv, 1e-3).unwrap(), Collapse::Neither);
+    // At or over it, and at no reach: refused by name, never answered.
+    assert!(off_range(collapse_near(&s, uv, 2e-4)));
+    assert!(off_range(collapse_near(&s, uv, 1e-4)));
+    assert!(off_range(collapse_near(&s, uv, 0.0)));
+    // On the range, and past it by rounding only: collapse's own answer.
+    for q in [[0.5, 0.5], [1.0 + 1e-12, 0.5]] {
+        assert_eq!(onto_range(&s, q).unwrap(), None);
+        assert_eq!(collapse_near(&s, q, 1e-3), collapse(&s, q, 1e-3));
+    }
+    // Below the range too, and off both ways at once (each partial's bound grown by the
+    // other direction's continuation).
+    let (near, delta) = onto_range(&s, [-1e-5, 0.5]).unwrap().unwrap();
+    assert_eq!(near, [0.0, 0.5]);
+    assert!((2e-4..=2e-4 * (1.0 + 1e-9)).contains(&delta), "{delta}");
+    let (near, delta) = onto_range(&s, [1.0 + 1e-6, 1.0 + 1e-6]).unwrap().unwrap();
+    assert_eq!(near, [1.0, 1.0]);
+    let o = (1.0 + 1e-6) - 1.0;
+    let want = 2.0 * 2.0 * o * 10.0 * (1.0 + 2.0 * o);
+    assert!(
+        (want..=want * (1.0 + 1e-9)).contains(&delta),
+        "{delta} {want}"
+    );
+}
+
+#[test]
+fn a_pole_past_the_range_is_a_pole_within_the_reach() {
+    // The side u = 1 is one point (10, 5, 0): collapsed along v there. The u partial's
+    // coefficients are (10, 5, 0) and (10, −5, 0), of length √125.
+    let s = bilinear(
+        (0.0, 1.0),
+        (0.0, 1.0),
+        [
+            [0.0, 0.0, 0.0],
+            [10.0, 5.0, 0.0],
+            [0.0, 10.0, 0.0],
+            [10.0, 5.0, 0.0],
+        ],
+    );
+    let uv = [1.0 + 1e-6, 0.3];
+    let (_, delta) = onto_range(&s, uv).unwrap().unwrap();
+    let want = 2.0 * (uv[0] - 1.0) * 125f64.sqrt();
+    assert!(
+        (want..=want * (1.0 + 1e-9)).contains(&delta),
+        "{delta} {want}"
+    );
+    assert_eq!(collapse_near(&s, uv, 1e-3).unwrap(), Collapse::V);
+    assert!(off_range(collapse_near(&s, uv, 2e-6)));
+}
+
+#[test]
+fn a_rational_net_past_the_range_is_refused() {
+    let mut rows = vec![
+        vec![([0.0, 0.0, 0.0], 1.0), ([0.0, 1.0, 0.0], 1.0)],
+        vec![([1.0, 0.0, 0.0], 1.0), ([1.0, 1.0, 0.0], 2.0)],
+    ];
+    let s = spline([1, 1], &rows);
+    assert!(matches!(
+        collapse_near(&s, [1.1, 0.5], 1.0),
+        Err(EvalError::OffRange(_))
+    ));
+    rows[1][1].1 = 1.0;
+    let s = spline([1, 1], &rows);
+    assert_eq!(
+        collapse_near(&s, [1.0 + 1e-3, 0.5], 1.0).unwrap(),
+        Collapse::Neither
+    );
+}
+
+#[test]
+fn the_step_faces_whose_pcurves_end_past_their_patch_are_answered() {
+    // 278_moon_buggy faces #6105 and #6165: speed 25.4, v 1.8087e-5 past its range, at a
+    // vertex reach of 2.54e-3 (δ ≈ 9.2e-4).
+    let moon = flat(
+        (0.076579574233648, 14.393741175797247),
+        (2.314966172279155, 7.627145784997975),
+        25.4,
+    );
+    for uv in [
+        [2.080136380739515, 7.62716387189905],
+        [2.0801363807395163, 7.627163871899048],
+    ] {
+        let (_, delta) = onto_range(&moon, uv).unwrap().unwrap();
+        assert!(delta < 1e-3, "{delta}");
+        assert_eq!(
+            collapse_near(&moon, uv, 2.54e-3).unwrap(),
+            Collapse::Neither
+        );
+    }
+    // 291_tork faces #22815, #24450, #24132 and #25564: speed 10, u 9.765e-8 past ±0.3556 on
+    // either side, at a reach of 1e-3.
+    let r = 0.355599999999977;
+    let tork = flat((-r, r), (-r, r), 10.0);
+    for uv in [
+        [0.35560009764949707, 2.8421709430403982e-14],
+        [0.35560009764920997, -3.552713678800497e-14],
+        [-0.35560009764949985, -2.0605739337042883e-14],
+        [-0.3556000976491943, 3.339550858072468e-14],
+    ] {
+        assert!(collapse(&tork, uv, 1e-3).is_err());
+        assert_eq!(collapse_near(&tork, uv, 1e-3).unwrap(), Collapse::Neither);
+    }
+}

@@ -20,6 +20,23 @@ fn shaft() -> Harness {
     h
 }
 
+#[test]
+fn a_new_thread_leaves_the_flank_layout_out_and_an_edit_keeps_its_saved_layout() {
+    for continuous in [false, true] {
+        let mut h = shaft();
+        h.app.session.selection = vec![thread_face(&h.app, "Body1")];
+        h.app.dialog = crate::dialogs::Dialog::for_command(&h.app, "solid.thread");
+        // Continuous flanks are the command's default, so a new thread's dialog never sends the field.
+        assert_eq!(params(&h).get("continuous_flanks"), None);
+        // A saved thread (an old design's has the historical layout) keeps its layout when edited.
+        h.app.run("solid.thread", json!({"face": [4,0,5], "designation": "M8", "continuous_flanks": continuous})).unwrap();
+        let saved = h.app.session.doc.features.last().unwrap().kind.clone();
+        let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.thread").unwrap();
+        crate::dialogs_thread::reopen(&mut d, &h.app.session, &saved);
+        assert_eq!(d.extra["continuous_flanks"], json!(continuous));
+    }
+}
+
 fn click(h: &mut Harness, handles: &[&str]) {
     for handle in handles {
         h.step(&json!({"click":{"handle":handle}})).unwrap_or_else(|e| panic!("{handle}: {e}"));

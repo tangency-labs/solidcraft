@@ -21,7 +21,7 @@ scripts and AI agents can drive the same commands you use.
 - Sheet metal with flat patterns and DXF export, and a plastic-enclosure subset.
 - A Render workspace with GPU rendering, studio lighting, materials and image export
   (first release in 0.22.0).
-- Import and export of STEP, IGES, 3MF, STL, OBJ and DXF, and FreeCAD and Rhino files.
+- Import and export of STEP, IGES, 3MF, STL, OBJ and DXF, GLB export for viewers and renderers, and FreeCAD and Rhino files.
 - Autosave and crash recovery, and the browser build of the same app.
 
 The full list of commands is in [docs/features.md](docs/features.md). Release notes for each

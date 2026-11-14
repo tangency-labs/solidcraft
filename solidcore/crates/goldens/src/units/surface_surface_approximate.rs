@@ -194,7 +194,9 @@ fn build(k: &Kernel, rd: &mut Rd<'_>, kind: usize) -> Result<Surface, HarnessErr
 /// The `SmStatus` of a Rust error.
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }

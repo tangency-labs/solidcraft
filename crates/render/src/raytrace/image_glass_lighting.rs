@@ -84,7 +84,7 @@ impl Context {
 fn model_error(error: impl std::fmt::Display) -> JobError {
     JobError::new(ErrorCode::InvalidScene, error.to_string())
 }
-pub(super) fn begin(task: &ImageTask, state: &mut State, event: Event) -> bool {
+pub(super) fn begin(task: &TransportContext<'_>, state: &mut State, event: Event) -> bool {
     if !vertex_lighting(task, state)
         || (task.caustics.is_empty() && task.lights.lights().is_empty() && task.options.punctual_lights.as_ref().is_none_or(Vec::is_empty))
     {
@@ -110,7 +110,7 @@ pub(super) fn begin(task: &ImageTask, state: &mut State, event: Event) -> bool {
     state.stage = Stage::GlassLighting;
     true
 }
-fn scattering(task: &ImageTask, index: usize) -> job::Result<crate::transmission::subsurface::Subsurface> {
+fn scattering(task: &TransportContext<'_>, index: usize) -> job::Result<crate::transmission::subsurface::Subsurface> {
     task.options
         .dielectrics
         .get(index)
@@ -118,7 +118,7 @@ fn scattering(task: &ImageTask, index: usize) -> job::Result<crate::transmission
         .filter(|scattering| scattering.active())
         .ok_or_else(|| invalid("CPU hard-source HG receiver lost its medium"))
 }
-fn gather(task: &ImageTask, state: &mut State, event: Event) -> job::Result<Option<Vec3>> {
+fn gather(task: &TransportContext<'_>, state: &mut State, event: Event) -> job::Result<Option<Vec3>> {
     match event {
         Event::Interface(event) => {
             let input = task.options.dielectrics.get(event.index).ok_or_else(|| invalid("CPU rough photon receiver disappeared"))?;
@@ -154,7 +154,7 @@ fn gather(task: &ImageTask, state: &mut State, event: Event) -> job::Result<Opti
         }
     }
 }
-fn response(task: &ImageTask, state: &State, event: Event, direction: Vec3) -> job::Result<(f64, Option<usize>)> {
+fn response(task: &TransportContext<'_>, state: &State, event: Event, direction: Vec3) -> job::Result<(f64, Option<usize>)> {
     match event {
         Event::Interface(event) => {
             let geometric_cosine = direction.dot(event.geometric);
@@ -185,7 +185,7 @@ fn response(task: &ImageTask, state: &State, event: Event, direction: Vec3) -> j
         }
     }
 }
-fn cursor(task: &ImageTask, state: &State, event: Event, ray: Ray) -> job::Result<TraceCursor> {
+fn cursor(task: &TransportContext<'_>, state: &State, event: Event, ray: Ray) -> job::Result<TraceCursor> {
     match event {
         Event::Interface(event) => {
             let region = task.glass.first().ok_or_else(|| invalid("CPU hard-source optical certificate missing"))?.region(event.index)?;
@@ -195,7 +195,7 @@ fn cursor(task: &ImageTask, state: &State, event: Event, ray: Ray) -> job::Resul
     }
 }
 fn queue(
-    task: &ImageTask,
+    task: &TransportContext<'_>,
     state: &mut State,
     context: &mut Context,
     direction: Vec3,
@@ -235,7 +235,7 @@ fn queue(
     context.phase = Phase::Trace;
     Ok(())
 }
-fn attenuate(task: &ImageTask, context: &mut Context, to: Vec3) -> job::Result<()> {
+fn attenuate(task: &TransportContext<'_>, context: &mut Context, to: Vec3) -> job::Result<()> {
     if let Some(index) = context.medium {
         let input = task.options.dielectrics.get(index).ok_or_else(|| invalid("CPU hard-source shadow medium disappeared"))?;
         let distance = context.from.dist(to);
@@ -247,7 +247,7 @@ fn attenuate(task: &ImageTask, context: &mut Context, to: Vec3) -> job::Result<(
     context.from = to;
     Ok(())
 }
-fn advance(task: &mut ImageTask, state: &mut State, context: &mut Context) -> job::Result<()> {
+fn advance(task: &mut TransportContext<'_>, state: &mut State, context: &mut Context) -> job::Result<()> {
     if context.phase == Phase::Trace {
         let looks = &task.looks;
         let inputs = &task.options.dielectrics;
@@ -255,21 +255,16 @@ fn advance(task: &mut ImageTask, state: &mut State, context: &mut Context) -> jo
             .cursor
             .as_mut()
             .ok_or_else(|| invalid("CPU hard-source shadow cursor missing"))?
-            .step_ordered(
-                task.bvh.as_ref().ok_or_else(|| invalid("CPU hard-source shadow BVH missing"))?,
-                &mut task.work,
-                &task.cancel,
-                |new, old| {
-                    let optical = |hit: super::super::super::Hit| {
-                        looks.get(hit.primitive_index).is_some_and(|look| inputs.iter().any(|input| input.body_index == look.body_index))
-                    };
-                    match (optical(new), optical(old)) {
-                        (false, true) => true,
-                        (true, false) => false,
-                        _ => new.primitive_index < old.primitive_index,
-                    }
-                },
-            )
+            .step_ordered(task.bvh.as_ref().ok_or_else(|| invalid("CPU hard-source shadow BVH missing"))?, task.work, task.cancel, |new, old| {
+                let optical = |hit: super::super::super::Hit| {
+                    looks.get(hit.primitive_index).is_some_and(|look| inputs.iter().any(|input| input.body_index == look.body_index))
+                };
+                match (optical(new), optical(old)) {
+                    (false, true) => true,
+                    (true, false) => false,
+                    _ => new.primitive_index < old.primitive_index,
+                }
+            })
             .map_err(error)?;
         if let Some(hit) = result {
             state.cursor = None;
@@ -278,7 +273,7 @@ fn advance(task: &mut ImageTask, state: &mut State, context: &mut Context) -> jo
         }
         return Ok(());
     }
-    task.work.tick(&task.cancel).map_err(error)?;
+    task.work.tick(task.cancel).map_err(error)?;
     match context.phase {
         Phase::Gather => {
             if let Some(value) = gather(task, state, context.event)? {
@@ -330,8 +325,8 @@ fn advance(task: &mut ImageTask, state: &mut State, context: &mut Context) -> jo
                 let ray = state.shadow_ray.ok_or_else(|| invalid("CPU hard-source visibility ray missing"))?;
                 let hit = PreparedScene {
                     bvh: task.bvh.as_ref().ok_or_else(|| invalid("CPU hard-source visibility BVH missing"))?,
-                    primitives: &task.looks,
-                    source: &task.scene,
+                    primitives: task.looks,
+                    source: task.scene,
                 }
                 .resolve_hit(ray, raw)
                 .map_err(error)?;
@@ -352,8 +347,8 @@ fn advance(task: &mut ImageTask, state: &mut State, context: &mut Context) -> jo
             let ray = state.shadow_ray.ok_or_else(|| invalid("CPU hard-source visibility ray missing"))?;
             let hit = PreparedScene {
                 bvh: task.bvh.as_ref().ok_or_else(|| invalid("CPU hard-source visibility BVH missing"))?,
-                primitives: &task.looks,
-                source: &task.scene,
+                primitives: task.looks,
+                source: task.scene,
             }
             .resolve_hit(ray, context.hit.ok_or_else(|| invalid("CPU hard-source visibility hit missing"))?)
             .map_err(error)?;
@@ -421,7 +416,7 @@ fn advance(task: &mut ImageTask, state: &mut State, context: &mut Context) -> jo
     }
     Ok(())
 }
-pub(super) fn step(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
+pub(super) fn step(task: &mut TransportContext<'_>, state: &mut State) -> job::Result<()> {
     let mut context = state.glass_lighting.take().ok_or_else(|| invalid("CPU hard-source vertex context missing"))?;
     let result = advance(task, state, &mut context);
     if result.is_ok() && context.phase == Phase::Done {

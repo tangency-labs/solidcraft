@@ -20,6 +20,10 @@ class Repo:
         self.git("config", "user.email", "t@example.com")
         self.git("config", "user.name", "t")
         self.git("config", "commit.gpgsign", "false")
+        # No background gc or maintenance: a detached `git gc --auto` writing into .git while
+        # tearDown deletes the directory fails the test ("Directory not empty: '.git'").
+        self.git("config", "gc.auto", "0")
+        self.git("config", "maintenance.auto", "false")
 
     def git(self, *args):
         return subprocess.run(["git", *args], cwd=self.root, capture_output=True, text=True, check=True).stdout.strip()

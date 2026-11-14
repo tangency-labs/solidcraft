@@ -1,6 +1,6 @@
 //! #2401 (carried over from tangency-labs/smlib#91; the generic blend, hub #2243): the
 //! refusals that had no size through the fit name the largest size that builds, each decided
-//! from its own geometry, with `fixes.fillet_gn_section_generator` (WR-685/WR-696):
+//! from its own geometry (WR-685/WR-696):
 //!
 //! - **An open end of an overflow** (`CutFilletAtOpenEnd`'s refusals, and a blend the trim
 //!   keeps no length of where no corner takes any): the overflow is absent below the size at
@@ -40,13 +40,12 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel, SolidError};
 
-/// SolidCraft's set of fixes, `fillet_gn_section_generator` as given.
-fn kernel(gn: bool) -> Kernel {
-    let mut k = Kernel::default();
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_gn_section_generator = gn;
-    k.fixes = fixes;
-    k
+/// SolidCraft's set of fixes.
+fn kernel() -> Kernel {
+    Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    }
 }
 
 fn pick(k: &Kernel, b: &Brep, q: Point3) -> EdgeId {
@@ -173,7 +172,7 @@ const TOP_EDGE: Point3 = Point3::new(10.0, 9.0, 30.0);
 #[test]
 fn an_overflow_past_a_cylindrical_end_names_where_it_stays_on_its_faces() {
     for r in [12.0, 10.01] {
-        let mut k = kernel(true);
+        let mut k = kernel();
         let mut b = arc_ended_box(&mut k);
         let m = margin(&k, &b, TOP_EDGE);
         let got = blend(&mut k, &mut b, &[TOP_EDGE], r, 1);
@@ -187,7 +186,7 @@ fn an_overflow_past_a_cylindrical_end_names_where_it_stays_on_its_faces() {
 /// is 3.5e-4 off).
 #[test]
 fn an_overflow_past_a_cylindrical_end_builds_at_its_named_size() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = arc_ended_box(&mut k);
     let fit = 10.0 - margin(&k, &b, TOP_EDGE);
     blend(&mut k, &mut b, &[TOP_EDGE], fit, 1).unwrap();
@@ -222,7 +221,7 @@ fn chamfered_top_volume(w: f64, h: f64, d: f64) -> f64 {
 #[test]
 fn chamfers_taking_a_square_top_name_its_depth() {
     for d in [5.0, 5.01] {
-        let mut k = kernel(true);
+        let mut k = kernel();
         let mut b = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
         let m = margin(&k, &b, top_edges(10.0, 10.0)[0]);
         let got = blend(&mut k, &mut b, &top_edges(10.0, 10.0), d, 0);
@@ -233,7 +232,7 @@ fn chamfers_taking_a_square_top_name_its_depth() {
 /// The named size builds: the fork's closed form, `100 d - d (100 + s^2 + 10 s) / 3` off.
 #[test]
 fn chamfers_taking_a_square_top_build_at_the_named_size() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
     let fit = 5.0 - margin(&k, &b, top_edges(10.0, 10.0)[0]);
     blend(&mut k, &mut b, &top_edges(10.0, 10.0), fit, 0).unwrap();
@@ -246,12 +245,12 @@ fn chamfers_taking_a_square_top_build_at_the_named_size() {
 /// margin, and that builds.
 #[test]
 fn chamfers_taking_a_rectangular_top_name_its_depth_and_build_there() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = create_box(&mut k, Point3::ZERO, 10.0, 6.0, 10.0).unwrap();
     let m = margin(&k, &b, top_edges(10.0, 6.0)[0]);
     let got = blend(&mut k, &mut b, &top_edges(10.0, 6.0), 3.5, 0);
     let fit = assert_refused(got, NoRoomReason::FaceConsumed, 3.0 - m);
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = create_box(&mut k, Point3::ZERO, 10.0, 6.0, 10.0).unwrap();
     blend(&mut k, &mut b, &top_edges(10.0, 6.0), fit, 0).unwrap();
     assert_one_sound_solid(&mut k, &mut b, chamfered_top_volume(10.0, 6.0, fit), 1e-9);
@@ -293,7 +292,7 @@ const MIDDLE: Point3 = Point3::new(41.17486688363082, -20.413218067968561, 9.415
 /// margin (open: below 2 the round's offset is a cylinder again).
 #[test]
 fn the_middle_edge_at_its_round_s_radius_is_refused_as_a_collapsed_offset() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = arc_wall_plate_rounded(&mut k);
     let m = margin(&k, &b, MIDDLE);
     let got = blend(&mut k, &mut b, &[MIDDLE], 2.0, 1);
@@ -304,7 +303,7 @@ fn the_middle_edge_at_its_round_s_radius_is_refused_as_a_collapsed_offset() {
 /// round's radius, which closed would be 2 itself, refused above; open, 2 less the margin.
 #[test]
 fn the_middle_edge_past_its_round_s_radius_names_that_radius_open() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = arc_wall_plate_rounded(&mut k);
     let m = margin(&k, &b, MIDDLE);
     let got = blend(&mut k, &mut b, &[MIDDLE], 2.5, 1);
@@ -319,7 +318,7 @@ fn the_middle_edge_past_its_round_s_radius_names_that_radius_open() {
 /// crossing (16/3) less the corner ball's (4 pi / 3).
 #[test]
 fn the_tray_s_seams_at_their_rounds_radius_build() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = create_box(&mut k, Point3::ZERO, 25.0, 25.0, 10.0).unwrap();
     let bottom = [
         Point3::new(12.5, 0.0, 0.0),
@@ -354,7 +353,7 @@ fn the_tray_s_seams_at_their_rounds_radius_build() {
 /// (1 - pi/4) 25 along 287 or 90, each corner (pi/2) (62.5 - 125/3).
 #[test]
 fn the_cornered_block_s_rim_at_its_corners_radius_builds() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = create_box(&mut k, Point3::ZERO, 297.0, 100.0, 60.0).unwrap();
     let corners = [(0.0, 0.0), (297.0, 0.0), (0.0, 100.0), (297.0, 100.0)]
         .map(|(x, y)| Point3::new(x, y, 30.0));
@@ -376,24 +375,21 @@ fn the_cornered_block_s_rim_at_its_corners_radius_builds() {
     assert_one_sound_solid(&mut k, &mut b, before - removed, 1e-7);
 }
 
-// ---- without the flag ------------------------------------------------------------------
+// ---- an overflow the trim keeps nothing of, no corner taking any of its edge ----------
 
-/// Without `fillet_gn_section_generator` none of these is sized or judged early: the square
-/// top's chamfers fail as before (`SM_ERR`, no refusal), as does the middle edge at r2.
+/// A 10 cube's lone top edge x = 10, z = 10 chamfered 30: the chord runs past both faces,
+/// the edge's ends are open ends (no other edge is blended there, so no corner takes any of
+/// it) and the trim keeps none of it. Refused as an overflow that keeps nothing (class 129;
+/// before, under corners taking the whole edge, 110), naming the overflow's own bound, where
+/// the rails stay on their faces, unchanged: the faces' width 10 (open) less the margin.
 #[test]
-fn without_the_flag_the_classes_fail_as_before() {
-    let mut k = kernel(false);
+fn a_chamfer_the_trim_keeps_nothing_of_names_where_it_stays_on_its_faces() {
+    let at = Point3::new(10.0, 5.0, 10.0);
+    let mut k = kernel();
     let mut b = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
-    let got = blend(&mut k, &mut b, &top_edges(10.0, 10.0), 5.0, 0);
-    assert!(
-        matches!(got, Err(SolidError::Upstream { code: 1001, .. })),
-        "{got:?}"
-    );
-    let mut k = kernel(false);
-    let mut b = arc_wall_plate_rounded(&mut k);
-    let got = blend(&mut k, &mut b, &[MIDDLE], 2.0, 1);
-    assert!(
-        matches!(got, Err(SolidError::Upstream { code: 1001, .. })),
-        "{got:?}"
-    );
+    let m = margin(&k, &b, at);
+    let got = blend(&mut k, &mut b, &[at], 30.0, 0);
+    assert_refused(got, NoRoomReason::OverflowKeepsNothing, 10.0 - m);
+    let class = solidcore::error::blend::no_room_class(NoRoomReason::OverflowKeepsNothing);
+    assert_eq!(class as u16, 129);
 }

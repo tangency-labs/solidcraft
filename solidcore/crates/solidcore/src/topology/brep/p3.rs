@@ -116,7 +116,8 @@
 use std::borrow::Cow;
 
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{EntityRef, Result, SolidError, SM_ERR_INVALID_INPUT};
+use crate::error::topology::TopologyFailure;
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::{AttributeHandle, ObjectKey};
 use crate::geom::context::{
     is_reserved_key, Context, IdentitySlot, MarkLock, MarkType, ALL_MARKS, MAX_BREP_SERIAL,
@@ -155,22 +156,19 @@ use crate::topology::{
 
 const OP: &str = "topology::brep::p3";
 
-// Upstream `SM_ERR_ASSERT_FAILURE` (`SmMessages.h`).
-use crate::error::SM_ERR_ASSERT_FAILURE;
-
 /// Upstream dereferences null here (no `NER`): the FFI guard rejects the input.
 const fn null_deref(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-/// `NER(ptr)` on a null pointer: upstream returns `SM_ERR_NULL_POINTER`.
-const fn ner() -> SolidError {
-    SolidError::null_pointer(OP)
+/// `NER(ptr)` on a null pointer: `what` is missing (upstream `SM_ERR_NULL_POINTER`).
+fn ner(what: &'static str) -> SolidError {
+    SolidError::topology_missing(OP, what)
 }
 
-/// `SER_MSG(SM_ERR, ..)` / `SER(SM_ERR)`.
-const fn ser() -> SolidError {
-    SolidError::sm_err(OP)
+/// `SER_MSG(SM_ERR, ..)` / `SER(SM_ERR)`: the routine could not continue, as `what` says.
+fn ser(what: &'static str) -> SolidError {
+    SolidError::topology_failed(OP, what)
 }
 
 /// A call whose status upstream does not check (no `SER`, or a `void` `Notify`): only
@@ -515,8 +513,8 @@ const fn brep_arg(b: &Brep) -> Option<NotifyArg> {
 
 /// The edge use's vertex (`pEU->GetVertexuse()->GetVertex()`), `NER` on each.
 fn eu_vertex(b: &Brep, eu: EdgeuseId) -> Result<(VertexuseId, VertexId)> {
-    let vu = eu1::vertexuse(b, eu)?.ok_or_else(ner)?;
-    let v = vertexuse::vertex(b, vu)?.ok_or_else(ner)?;
+    let vu = eu1::vertexuse(b, eu)?.ok_or_else(|| ner("the edge use's vertex use"))?;
+    let v = vertexuse::vertex(b, vu)?.ok_or_else(|| ner("the vertex use's vertex"))?;
     Ok((vu, v))
 }
 
@@ -761,28 +759,102 @@ pub(crate) fn seed_records(
     records.or_default(p2::brep_ref(b).key);
 }
 
-/// Leaves `records` exactly as [`seed_records`] does on an empty map (a default record
-/// for every object of `b`, and for the B-rep), whatever it held before: records of
-/// objects that are still there are reset in place and the rest is added or dropped, so
-/// an edit that notifies through the same B-rep again reuses most of the map.
-fn reseed_records(
+/// [`seed_records`] that visits only the objects `b` gained since this store last seeded
+/// this B-rep value under this key scheme ([`seed_records_once`]), so seeding before each
+/// of many small edits of a large B-rep walks each object once, not once per edit. The
+/// store ends exactly as [`seed_records`] leaves it. The progress is shared with the
+/// edits [`with_caller_identities`] runs on `b` under the same keys.
+pub(crate) fn seed_records_since(
     records: &mut crate::topology::topology::NotifyRecords,
-    b: &Brep,
+    b: &mut Brep,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
 ) {
-    // The B-rep first: kernel keys (kind 0) and `entities` (by kind, then slot) come
-    // out ascending, so the sort is skipped, as it gives the same vector either way.
-    let mut keys: Vec<ObjectKey> = std::iter::once(p2::brep_ref(b).key)
-        .chain(entities(b).map(|e| key_of(e).key))
-        .collect();
-    if !keys.is_sorted() {
-        keys.sort_unstable();
+    let id = progress_id(b, b.notify_serial(), key_of);
+    let instance = b.progress_tag();
+    if seed_records_once(records, (id, instance), b, key_of).is_err() {
+        seed_records(records, b, key_of);
     }
-    keys.dedup();
-    // (not upstream) only the records the last edits changed are reset and only the
-    // difference in keys is removed or added, so a stitch's many edits do not each
-    // rebuild the whole map
-    records.reset_to_keys(&keys);
+}
+
+/// How [`reseed_records`] names a B-rep's objects: `key_of` for the objects, `brep_key`
+/// for the B-rep, `entity_of` for `key_of`'s inverse on keys, and `serial`, the B-rep's
+/// serial as the edits that follow read it (for their seeding progress id).
+pub(crate) struct KeyScheme<'a> {
+    /// An object's key.
+    pub(crate) key_of: &'a dyn Fn(EntityRef) -> ObjectRef,
+    /// The object `key_of` gives a key, if any.
+    pub(crate) entity_of: &'a dyn Fn(ObjectKey) -> Option<EntityRef>,
+    /// The B-rep's own key.
+    pub(crate) brep_key: ObjectKey,
+    /// The B-rep's serial in the edits' context, if it has one.
+    pub(crate) serial: Option<u64>,
+}
+
+/// Leaves `records` exactly as [`seed_records`] does on an empty map under `scheme` (a
+/// default record for every object of `b`, and for the B-rep, and no other), whatever it
+/// held before.
+///
+/// Not upstream: upstream's records live on the objects. When the store was last left
+/// so for this very B-rep value under the same scheme, only what changed since is
+/// visited: the records handed out since, the objects removed since (the value's
+/// removal log) and the slots added since. Every other record is still the default
+/// record of an object that is still live. Otherwise the whole key set is matched in
+/// one walk. So the many edits of a stitch or a sweep each cost what they change, not
+/// the size of the B-rep.
+pub(crate) fn reseed_records(
+    records: &mut topo::NotifyRecords,
+    b: &mut Brep,
+    scheme: &KeyScheme<'_>,
+) {
+    let id = progress_id(b, scheme.serial, scheme.key_of);
+    let instance = b.progress_tag();
+    let slots = slot_counts(b);
+    let key_of = |e: EntityRef| (scheme.key_of)(e).key;
+    let value = b.removal_tag();
+    let b = &*b;
+    let removals = b.removed_entities();
+    let same = |mark: &topo::ReseedMark| {
+        mark.scheme == id
+            && std::sync::Arc::ptr_eq(&mark.value, &value)
+            && mark.removed <= removals.len()
+            && mark.slots.iter().zip(slots).all(|(&then, now)| then <= now)
+    };
+    if let Some((since, changed)) = records.changed_since(same) {
+        for &e in removals.get(since.removed..).unwrap_or_default() {
+            records.settle(key_of(e), false);
+        }
+        for (kind, (from, to)) in since.slots.into_iter().zip(slots).enumerate() {
+            for index in (from..to).map_while(|i| u32::try_from(i).ok()) {
+                if is_live(b, kind, index) {
+                    records.settle(key_of(kind_entity(kind, index)), true);
+                }
+            }
+        }
+        for key in changed {
+            let live = key == scheme.brep_key
+                || (scheme.entity_of)(key).is_some_and(|e| b.is_live_entity(e) && key_of(e) == key);
+            records.settle(key, live);
+        }
+    } else {
+        // The B-rep first: kernel keys (kind 0) and `entities` (by kind, then slot)
+        // come out ascending, so the sort is skipped, as it gives the same vector
+        // either way.
+        let mut keys: Vec<ObjectKey> = std::iter::once(scheme.brep_key)
+            .chain(entities(b).map(key_of))
+            .collect();
+        if !keys.is_sorted() {
+            keys.sort_unstable();
+        }
+        keys.dedup();
+        records.reset_to_keys(&keys);
+    }
+    let mark = topo::ReseedMark {
+        scheme: id,
+        value,
+        slots,
+        removed: removals.len(),
+    };
+    records.made_exact(mark, instance);
 }
 
 /// The kinds of topology keys with their class type codes (`GetType`), by kind number:
@@ -1219,22 +1291,23 @@ fn seed_records_once(
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
 ) -> Result<()> {
     let brep_key = p2::brep_ref(b).key;
-    let (map, progress) = records
+    let slots = slot_counts(b);
+    let (_, progress) = records
         .progress_for(progress.0, progress.1)
         .ok_or(RESERVED_KEY)?;
-    let kinds = slot_counts(b)
-        .into_iter()
-        .zip(progress.seeded_to.iter_mut())
-        .enumerate();
-    for (kind, (slots, seeded_to)) in kinds {
-        for index in (*seeded_to..slots).map_while(|i| u32::try_from(i).ok()) {
-            if is_live(b, kind, index) {
-                map.entry(key_of(kind_entity(kind, index)).key).or_default();
-            }
-        }
+    let from = progress.seeded_to;
+    for (seeded_to, slots) in progress.seeded_to.iter_mut().zip(slots) {
         *seeded_to = slots.max(*seeded_to);
     }
-    map.entry(brep_key).or_default();
+    // (through the store's own methods, so a reset sees what was added)
+    for (kind, (from, to)) in from.into_iter().zip(slots).enumerate() {
+        for index in (from..to).map_while(|i| u32::try_from(i).ok()) {
+            if is_live(b, kind, index) {
+                records.or_default(key_of(kind_entity(kind, index)).key);
+            }
+        }
+    }
+    records.or_default(brep_key);
     Ok(())
 }
 
@@ -1284,7 +1357,13 @@ pub(crate) fn kernel_named_edit<R>(
     let label = b.key();
     b.set_key(topology_ref(serial, brep_entity()).key);
     let mut records = std::mem::take(&mut k.notify_records);
-    reseed_records(&mut records, b, &key_of);
+    let scheme = KeyScheme {
+        key_of: &key_of,
+        entity_of: &|key| topology_entity(serial, key),
+        brep_key: p2::brep_ref(b).key,
+        serial: Some(serial),
+    };
+    reseed_records(&mut records, b, &scheme);
     let mut attributes = crate::geom::attribute::AttributeStore::default();
     // (not upstream) the B-rep's own attributes, under the edit's identities
     let seeded = p2::seed_brep_attributes(&mut attributes, b.take_attributes(), &key_of);
@@ -1337,13 +1416,26 @@ pub(crate) fn rebind_geometry_owners(
     session: impl Fn(EntityRef) -> ObjectRef,
     to: impl Fn(EntityRef) -> ObjectRef,
 ) -> Result<()> {
-    let edges: Vec<EdgeId> = b.edges().ids().collect();
+    // (not upstream) the candidates are found by reading, and only they are written (and
+    // asked again), so an edit that bound nothing writes nothing: every edit of a stitch
+    // ends here
+    let owned = |e: EntityRef, owner: Option<ObjectRef>| owner == Some(session(e));
+    let edges: Vec<EdgeId> = b
+        .edges()
+        .iter()
+        .filter(|(id, edge)| {
+            let e = EntityRef::Edge(*id);
+            edge.curve
+                .as_ref()
+                .is_some_and(|curve| owned(e, curve.owner()))
+        })
+        .map(|(id, _)| id)
+        .collect();
     for edge in edges {
         let e = EntityRef::Edge(edge);
-        let from = session(e);
         let new_owner = to(e);
         let rebound = b.edge_mut(edge)?.curve.as_mut().is_some_and(|curve| {
-            let matched = curve.owner() == Some(from);
+            let matched = owned(e, curve.owner());
             if matched {
                 curve.set_owner(Some(new_owner), None);
             }
@@ -1353,17 +1445,26 @@ pub(crate) fn rebind_geometry_owners(
             b.set_geometry_owner_key(e, Some(new_owner));
         }
     }
-    let edgeuses: Vec<EdgeuseId> = b.edgeuses().ids().collect();
+    let edgeuses: Vec<EdgeuseId> = b
+        .edgeuses()
+        .iter()
+        .filter(|(id, eu)| {
+            let e = EntityRef::Edgeuse(*id);
+            eu.uv_trim_curve
+                .as_ref()
+                .is_some_and(|curve| owned(e, curve.owner()))
+        })
+        .map(|(id, _)| id)
+        .collect();
     for eu in edgeuses {
         let e = EntityRef::Edgeuse(eu);
-        let from = session(e);
         let new_owner = to(e);
         let rebound = b
             .edgeuse_mut(eu)?
             .uv_trim_curve
             .as_mut()
             .is_some_and(|curve| {
-                let matched = curve.owner() == Some(from);
+                let matched = owned(e, curve.owner());
                 if matched {
                     curve.set_owner(Some(new_owner), None);
                 }
@@ -1373,13 +1474,22 @@ pub(crate) fn rebind_geometry_owners(
             b.set_geometry_owner_key(e, Some(new_owner));
         }
     }
-    let faces: Vec<FaceId> = b.faces().ids().collect();
+    let faces: Vec<FaceId> = b
+        .faces()
+        .iter()
+        .filter(|(id, face)| {
+            let e = EntityRef::Face(*id);
+            face.surface
+                .as_ref()
+                .is_some_and(|surface| owned(e, surface.owner()))
+        })
+        .map(|(id, _)| id)
+        .collect();
     for face in faces {
         let e = EntityRef::Face(face);
-        let from = session(e);
         let new_owner = to(e);
         let rebound = b.face_mut(face)?.surface.as_mut().is_some_and(|surface| {
-            let matched = surface.owner() == Some(from);
+            let matched = owned(e, surface.owner());
             if matched {
                 surface.set_owner(Some(new_owner));
             }
@@ -1507,11 +1617,7 @@ fn api_brep_copy_mapped(
     reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
 ) -> Result<Brep> {
     let Some(brep) = brep else {
-        return Err(SolidError::Upstream {
-            operation: OP,
-            code: SM_ERR_INVALID_INPUT,
-            entity: None,
-        });
+        return Err(SolidError::topology_invalid_value(OP, "no B-rep was given"));
     };
     // (not upstream: upstream names objects by their addresses) a source naming that
     // gives `brep`'s objects the keys `env.key_of` gives them names the copy's objects
@@ -2368,7 +2474,7 @@ fn merge_brep_in(
                     let new_curve = c.copy(k)?;
                     // m_pUVTrimCurve = SM_CAST_PTR(SmBSplineCurve, pNewCurve); NER(..)
                     if curve_bspline_base(&new_curve).is_none() {
-                        return Err(ner());
+                        return Err(ner("the B-spline form of the copied UV trim curve"));
                     }
                     Some(new_curve)
                 }
@@ -2803,12 +2909,12 @@ fn delete_face_in(
 
     // check state - m_bEditingEnabled must be on
     if !b.editing_enabled() {
-        return Err(ser());
+        return Err(ser("editing is not enabled"));
     }
 
     // Check if face is in brep
     if !p1::faces(b, None)?.contains(&f) {
-        return Err(ser());
+        return Err(ser("the face is not in the B-rep"));
     }
 
     // tell Brep it's about to change
@@ -2846,10 +2952,10 @@ fn delete_face_in(
     let mut verts: Vec<Option<VertexId>> = face_vertices(b, f)?.into_iter().map(Some).collect();
     let orig_vertices: Vec<VertexId> = verts.iter().flatten().copied().collect();
 
-    let fu = face2::upward_faceuse(b, f)?.ok_or_else(ner)?;
+    let fu = face2::upward_faceuse(b, f)?.ok_or_else(|| ner("the face's upward face use"))?;
     let other_fu = eu1::faceuse_mate(b, fu)?.ok_or(null_deref("face use without mate"))?;
 
-    let mut shell = eu1::faceuse_shell(b, fu)?.ok_or_else(ner)?;
+    let mut shell = eu1::faceuse_shell(b, fu)?.ok_or_else(|| ner("the face use's shell"))?;
     let mut other_shell = eu1::faceuse_shell(b, other_fu)?;
 
     // Take care of the case where we have two Regions being combined as a result of
@@ -2860,8 +2966,10 @@ fn delete_face_in(
         if let Some(keep) = region_to_keep {
             if Some(keep) == other_region {
                 // Swap shells -- keep the specified Region
-                shell = eu1::faceuse_shell(b, other_fu)?.ok_or_else(ner)?;
-                other_shell = Some(eu1::faceuse_shell(b, fu)?.ok_or_else(ner)?);
+                shell =
+                    eu1::faceuse_shell(b, other_fu)?.ok_or_else(|| ner("the face use's shell"))?;
+                other_shell =
+                    Some(eu1::faceuse_shell(b, fu)?.ok_or_else(|| ner("the face use's shell"))?);
             }
         } else {
             let other_r = other_region.ok_or(null_deref("shell without region"))?;
@@ -2870,8 +2978,10 @@ fn delete_face_in(
                     && eu1::shell_region(b, shell)? != b.infinite_region())
             {
                 // Swap shells -- keep the infinite (or void) region.
-                shell = eu1::faceuse_shell(b, other_fu)?.ok_or_else(ner)?;
-                other_shell = Some(eu1::faceuse_shell(b, fu)?.ok_or_else(ner)?);
+                shell =
+                    eu1::faceuse_shell(b, other_fu)?.ok_or_else(|| ner("the face use's shell"))?;
+                other_shell =
+                    Some(eu1::faceuse_shell(b, fu)?.ok_or_else(|| ner("the face use's shell"))?);
             }
         }
         let os = other_shell.ok_or(null_deref("face use without shell"))?;
@@ -2883,7 +2993,7 @@ fn delete_face_in(
         let surviving = eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
         let del_region = eu1::shell_region(b, os)?.ok_or(null_deref("shell without region"))?;
         if surviving == del_region {
-            return Err(ser()); // Should not happen
+            return Err(ser("the two shells are in the same region")); // Should not happen
         }
         ignore_soft(crate::error::passed_on(
             shell::region_remove_shell(b, del_region, os),
@@ -2940,9 +3050,10 @@ fn delete_face_in(
         if lu1::is_vertex_loopuse(b, lu)? {
             // Single vertex loop - either remove vertexuses belonging to loops or change
             // them to shell vertexuses.
-            let vu = lu1::vertexuse(b, lu)?.ok_or_else(ner)?;
-            let v = vertexuse::vertex(b, vu)?.ok_or_else(ner)?;
-            let other_vu = lu1::vertexuse(b, other_lu)?.ok_or_else(ner)?;
+            let vu = lu1::vertexuse(b, lu)?.ok_or_else(|| ner("the loop use's vertex use"))?;
+            let v = vertexuse::vertex(b, vu)?.ok_or_else(|| ner("the vertex use's vertex"))?;
+            let other_vu =
+                lu1::vertexuse(b, other_lu)?.ok_or_else(|| ner("the loop use's vertex use"))?;
             let n_vus = vertex::vertexuses(b, v)?.len();
             // Remove vertexuses from the vertex.
             vertex_remove_vertexuse(b, v, other_vu)?;
@@ -2975,10 +3086,10 @@ fn delete_face_in(
                 if any_edgeuse.is_none() {
                     any_edgeuse = Some(eu);
                 }
-                let mate = eu1::mate(b, eu)?.ok_or_else(ner)?;
-                let e = eu1::edge(b, eu)?.ok_or_else(ner)?;
+                let mate = eu1::mate(b, eu)?.ok_or_else(|| ner("the edge use's mate"))?;
+                let e = eu1::edge(b, eu)?.ok_or_else(|| ner("the edge use's edge"))?;
                 if eu1::face(b, mate)? != eu1::face(b, eu)? {
-                    return Err(ser());
+                    return Err(ser("the edge use and its mate are on different faces"));
                 }
 
                 if edge::is_lamina(b, e)? {
@@ -3264,7 +3375,10 @@ fn delete_face_nesting(
 
         if faceuses.is_empty() && !edgeuses.is_empty() {
             // Wire shell
-            let eu = edgeuses.first().copied().ok_or_else(ser)?;
+            let eu = edgeuses
+                .first()
+                .copied()
+                .ok_or_else(|| ser("the wire shell has no edge use"))?;
             set_shell_head(b, new_shell, ShellMembers::Edgeuse(eu))?;
             set_shell_type(b, new_shell, ShellType::Wire)?;
         } else if faceuses.is_empty() && edgeuses.is_empty() {
@@ -3312,7 +3426,7 @@ fn delete_face_nesting(
                 None => false,
             };
         if !ok {
-            return Err(ser());
+            return Err(ser("the face use shell was not emptied into new shells"));
         }
     }
 
@@ -3382,7 +3496,10 @@ pub fn remove_slit_loops_where_solids_touch(
         // inner loops only
         let loops = face2::loops(b, f, false, None)?;
         for &l in loops.iter().skip(1) {
-            let lu = b.loop_(l)?.loopuse.ok_or_else(ner)?;
+            let lu = b
+                .loop_(l)?
+                .loopuse
+                .ok_or_else(|| ner("the loop's loop use"))?;
             let uses = lu1::edgeuses(b, lu, None, None)?;
             if uses.len() < 2 {
                 continue;
@@ -3390,7 +3507,7 @@ pub fn remove_slit_loops_where_solids_touch(
             // every edge used twice by the loop, and bounding another face too
             let mut slit = true;
             for &eu in &uses {
-                let e = eu1::edge(b, eu)?.ok_or_else(ner)?;
+                let e = eu1::edge(b, eu)?.ok_or_else(|| ner("the edge use's edge"))?;
                 let mut in_loop = 0usize;
                 for &other in &uses {
                     if eu1::edge(b, other)? == Some(e) {
@@ -3409,15 +3526,15 @@ pub fn remove_slit_loops_where_solids_touch(
 
             // take the loop off its face, then its edge uses and vertex uses off their
             // edges and vertices
-            let other_lu = lu1::other_loopuse(b, lu)?.ok_or_else(ner)?;
+            let other_lu = lu1::other_loopuse(b, lu)?.ok_or_else(|| ner("the loop use's mate"))?;
             b.face_mut(f)?.loops.retain(|&x| x != l);
             for x in [lu, other_lu] {
-                let fu = lu1::faceuse(b, x)?.ok_or_else(ner)?;
+                let fu = lu1::faceuse(b, x)?.ok_or_else(|| ner("the loop use's face use"))?;
                 faceuse_remove_loopuse(b, fu, x)?;
             }
             for eu in uses {
-                let mate = eu1::mate(b, eu)?.ok_or_else(ner)?;
-                let e = eu1::edge(b, eu)?.ok_or_else(ner)?;
+                let mate = eu1::mate(b, eu)?.ok_or_else(|| ner("the edge use's mate"))?;
+                let e = eu1::edge(b, eu)?.ok_or_else(|| ner("the edge use's edge"))?;
                 edge_remove_edgeuse(b, e, eu)?;
                 edge_remove_edgeuse(b, e, mate)?;
                 let (vu1, v1) = eu_vertex(b, eu)?;
@@ -3464,7 +3581,8 @@ pub fn split_disconnected_shells(k: &mut Kernel, b: &mut Brep) -> Result<()> {
                 if all.len() < 2 {
                     break;
                 }
-                let face = eu1::faceuse_face(b, first)?.ok_or_else(ner)?;
+                let face =
+                    eu1::faceuse_face(b, first)?.ok_or_else(|| ner("the face use's face"))?;
                 let Some(&start) = face_vertices(b, face)?.first() else {
                     break;
                 };
@@ -3871,12 +3989,12 @@ fn squeeze_edge_in(
 
     // check intput - pSurvivingVertex must be one of the edge's vertices
     if v1 != Some(survivor) && v2 != Some(survivor) {
-        return Err(ser());
+        return Err(ser("the surviving vertex is not on the edge"));
     }
 
     // check input - edge cannot be a closed loop
     if v1 == v2 {
-        return Err(ser());
+        return Err(ser("the edge is a closed loop"));
     }
 
     // notify Brep and edge they are about to be modified
@@ -3926,20 +4044,32 @@ fn squeeze_edge_in(
             // other side of the vertex that's being deleted.
             let edges = vertex::edges(b, del_vertex, None)?;
             if edges.len() < 2 {
-                return Err(ser());
+                return Err(ser("the vertex has fewer than two edges"));
             }
             let (e0, e1) = (
-                edges.first().copied().ok_or_else(ser)?,
-                edges.get(1).copied().ok_or_else(ser)?,
+                edges
+                    .first()
+                    .copied()
+                    .ok_or_else(|| ser("the vertex has fewer than two edges"))?,
+                edges
+                    .get(1)
+                    .copied()
+                    .ok_or_else(|| ser("the vertex has fewer than two edges"))?,
             );
             let surviving_edge = if e0 == e { e1 } else { e0 };
             let surviving_eus = edge::edgeuses(b, surviving_edge, None, None)?;
             if surviving_eus.len() < 2 {
-                return Err(ser());
+                return Err(ser("the surviving edge has fewer than two edge uses"));
             }
             let (s0, s1) = (
-                surviving_eus.first().copied().ok_or_else(ser)?,
-                surviving_eus.get(1).copied().ok_or_else(ser)?,
+                surviving_eus
+                    .first()
+                    .copied()
+                    .ok_or_else(|| ser("the surviving edge has fewer than two edge uses"))?,
+                surviving_eus
+                    .get(1)
+                    .copied()
+                    .ok_or_else(|| ser("the surviving edge has fewer than two edge uses"))?,
             );
             let surviving_eu = if eu1::orientation(b, eu)? == eu1::orientation(b, s0)? {
                 s0
@@ -4220,12 +4350,13 @@ fn turn_to_nurbs_in(
                 continue;
             }
             let SurfaceKind::OffsetSurface(offset) = surface.kind() else {
-                return Err(ner());
+                return Err(ner("the offset surface"));
             };
 
             // it is an offset surface (ApproximateOffsetSurface's
             // GetOrCreateGwNurbPointer makes a missing NURB; NER there without one)
-            let base = with_nurb(k, offset.base_surface())?.ok_or_else(ner)?;
+            let base = with_nurb(k, offset.base_surface())?
+                .ok_or_else(|| ner("the NURBS form of the offset's base surface"))?;
 
             // offset tolerance should be quite large compared to brep tol
             let approx_tol_3d = b.tolerance() * 10.0;
@@ -4280,7 +4411,11 @@ fn turn_to_nurbs_in(
         }
         // new SmBSplineSurface(*pBSS): the copy constructor's GetOrCreateGwNurbPointer
         // makes a missing NURB first
-        let new_bss = Surface::from(with_nurb(k, surface)?.ok_or_else(ner)?.into_owned());
+        let new_bss = Surface::from(
+            with_nurb(k, surface)?
+                .ok_or_else(|| ner("the NURBS form of the surface"))?
+                .into_owned(),
+        );
         let face_ref = (env.key_of)(EntityRef::Face(f));
         p2::replace_surface(k, b, env, f, new_bss, face_ref, OldSurface::Delete, true)?;
     }
@@ -4288,7 +4423,11 @@ fn turn_to_nurbs_in(
     // for every Brep->Curve
     let edges = p1::curve_owners(b, None, edge_owner)?;
     for e in edges {
-        let curve = b.edge(e)?.curve.as_ref().ok_or_else(ner)?;
+        let curve = b
+            .edge(e)?
+            .curve
+            .as_ref()
+            .ok_or_else(|| ner("the edge's curve"))?;
         if curve.type_code() == BSplineCurve::TYPE {
             // SetCurve(pCurve, FALSE) with the edge's own curve: nothing happens
             continue;
@@ -4341,11 +4480,12 @@ fn turn_to_nurbs_in(
         }
 
         // Must have a BSplineCurve here
-        let bsc = bsc.ok_or_else(ner)?;
+        let bsc = bsc.ok_or_else(|| ner("the edge's B-spline curve"))?;
 
         // Update the edge: drop the old curve (TRUE = delete preExisting Curve)
         // (the new curve exists while the old one does: distinct identities)
-        let old_ref = edge_curve_ref(k, b, env, e)?.ok_or_else(ner)?;
+        let old_ref =
+            edge_curve_ref(k, b, env, e)?.ok_or_else(|| ner("the edge's curve reference"))?;
         let mut bsc = bsc;
         let r = curve_identity(issuer(&mut k.context, env.context.as_deref_mut()), &mut bsc)?;
         edge::set_curve(
@@ -4483,6 +4623,10 @@ fn orient_body(
     let mut faceuses_processed = 0usize;
     let mut swap_faces: Vec<FaceId> = Vec::new();
     let in_swap = |f: FaceId| faces_to_swap_uv.is_some_and(|l| l.contains(&f));
+    // The B-rep's bounding sphere radius, taken at the first ray vote. The loop only swaps
+    // faces' UVs, which moves no vertex or edge curve, so the box is the same for every
+    // face: one box per pass, not one per face (that was faces x faces on a large part).
+    let mut radius: Option<f64> = None;
 
     // Check orientation of each face
     for &face in &faces {
@@ -4518,7 +4662,17 @@ fn orient_body(
         let (reverse_votes, same_votes) = if just_unify_normals {
             (0u32, 10u32)
         } else {
-            match orient_ray_votes(k, b, env, marks, mark, face, normals_outward, tolerance)? {
+            match orient_ray_votes(
+                k,
+                b,
+                env,
+                marks,
+                mark,
+                face,
+                normals_outward,
+                tolerance,
+                &mut radius,
+            )? {
                 RayVotes::Skip => continue,
                 RayVotes::Votes {
                     reverse,
@@ -4558,11 +4712,12 @@ fn orient_body(
             faceuses.clear();
             eu1::faceuse_collect_adjacent(k, b, start, &mut faceuses, Some(angle))?;
             if faceuses.len() > remaining {
-                return Err(SolidError::Upstream {
-                    operation: OP,
-                    code: SM_ERR_ASSERT_FAILURE,
-                    entity: None,
-                });
+                return Err(SolidError::topology(
+                    OP,
+                    TopologyFailure::Inconsistent(
+                        "more face uses are connected than faces remain to be oriented",
+                    ),
+                ));
             }
         }
         faceuses_processed += faceuses.len();
@@ -4651,6 +4806,7 @@ fn orient_ray_votes(
     face: FaceId,
     normals_outward: bool,
     tolerance: f64,
+    radius: &mut Option<f64>,
 ) -> Result<RayVotes> {
     // five more or less random points
     let test_param = [0.234_567, 0.567_891, 0.789_123, 0.156_789, 0.856_789];
@@ -4658,9 +4814,17 @@ fn orient_ray_votes(
     // Random vector
     let ray_vec = Vec3::new(1.23456, 2.34567, 3.45678).unitize()?;
 
-    // Brep BoundingBox and BoundingSphere
-    let bbox = brep_bounding_box(k, b, true, false, true)?;
-    let radius = bbox.sphere_bound().radius;
+    // Brep BoundingBox and BoundingSphere (once per orient pass: `radius` keeps it)
+    let radius = if let Some(r) = *radius {
+        r
+    } else {
+        k.work_counters.add_orient_box();
+        let r = brep_bounding_box(k, b, true, false, true)?
+            .sphere_bound()
+            .radius;
+        *radius = Some(r);
+        r
+    };
 
     let fu = face2::upward_faceuse(b, face)?.ok_or(null_deref("face without face use"))?;
     let other_fu = eu1::faceuse_mate(b, fu)?.ok_or(null_deref("face use without mate"))?;
@@ -4683,7 +4847,7 @@ fn orient_ray_votes(
     let fu = face2::upward_faceuse(b, face)?.ok_or(null_deref("face without face use"))?;
     let edgeuses = eu1::faceuse_edgeuses(b, fu, false, None)?;
     if edgeuses.is_empty() {
-        return Err(ser()); // Face needs to have at least one edge
+        return Err(ser("the face has no edges")); // Face needs to have at least one edge
     }
 
     let mut reverse = 0u32;
@@ -4765,7 +4929,9 @@ fn orient_ray_votes(
                 crate::geom::global_solver::SolutionRequested::Single,
                 &mut sols,
             )?;
-            let sol = *sols.get(0).ok_or_else(ser)?;
+            let sol = *sols
+                .get(0)
+                .ok_or_else(|| ser("the solver returned no solution"))?;
             let uv = crate::math::Point2::new(sol.start.param(0)?, sol.start.param(1)?);
             let normal = surface.evaluate_normal(
                 k,
@@ -4891,7 +5057,9 @@ fn brep_curve_solve(
         )?;
         let mut out = Vec::new();
         for i in 0..sols.len() {
-            let s = sols.get(i).ok_or_else(ser)?;
+            let s = sols
+                .get(i)
+                .ok_or_else(|| ser("the solver solution is missing"))?;
             out.push((s.num_variables, s.start.param(0)?));
         }
         Ok(out)
@@ -4972,8 +5140,11 @@ mod tests {
             assert!(!k.context.is_mark_locked(MarkType::Mark2));
             assert!(!k.context.is_mark_locked(MarkType::Mark3));
             if fail_after_notifications {
+                let e = result.as_ref().unwrap_err();
+                assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
                 assert!(
-                    matches!(result, Err(SolidError::Upstream { code, .. }) if code == crate::error::SM_ERR_NULL_POINTER)
+                    matches!(e.topology_failure(), Some(TopologyFailure::Missing(_))),
+                    "{e:?}"
                 );
                 assert!(b.face(face).is_ok());
                 assert_eq!(records[&face_ref.key].user_index1(), 73);
@@ -5557,13 +5728,15 @@ mod tests {
     fn api_copy_of_null_is_invalid_input() {
         let mut k = Kernel::default();
         let r = with_env(|env| api_brep_copy(&mut k, env, None, &source_key));
-        assert!(matches!(
-            r,
-            Err(SolidError::Upstream {
-                code: SM_ERR_INVALID_INPUT,
-                ..
-            })
-        ));
+        let e = r.expect_err("no B-rep");
+        assert_eq!(
+            e.upstream_status(),
+            Some(crate::error::SM_ERR_INVALID_INPUT)
+        );
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::InvalidValue("no B-rep was given"))
+        );
     }
 
     #[test]
@@ -5593,7 +5766,12 @@ mod tests {
                 DeleteFaceOptions::default(),
             )
         });
-        assert!(matches!(r, Err(SolidError::Upstream { code: 1001, .. })));
+        let e = r.unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::Failed("editing is not enabled"))
+        );
         b.set_editing_enabled(true);
         b.remove_from_face_list(f);
         let r = with_env(|env| {
@@ -5606,7 +5784,12 @@ mod tests {
                 DeleteFaceOptions::default(),
             )
         });
-        assert!(matches!(r, Err(SolidError::Upstream { code: 1001, .. })));
+        let e = r.unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::Failed("the face is not in the B-rep"))
+        );
         assert!(DeleteFaceOptions::default().do_region_nesting);
     }
 
@@ -6100,6 +6283,176 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Orienting a solid's faces fires its ray votes face by face, and each vote took the box
+    /// of the whole B-rep, so one pass on a large part cost faces x vertices. The faces only
+    /// have their UVs swapped in the pass, which moves no vertex or edge, so the box is taken
+    /// once per pass. A box's 6 faces each vote (each lies between the solid and the outside):
+    /// one box, and the faces keep their orientation.
+    #[test]
+    fn orienting_a_solid_takes_its_box_once_per_pass() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let faces = b.face_list().to_vec();
+        let ups = |b: &Brep| {
+            faces
+                .iter()
+                .map(|&f| face2::upward_faceuse(b, f).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let before = ups(&b);
+        b.set_editing_enabled(true);
+        let mut marks = Marks::default();
+        k.work_counters.reset();
+        let r = with_env(|env| {
+            orient_trimmed_surfaces(&mut k, &mut b, env, &mut marks, true, false, None)
+        });
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(faces.len(), 6);
+        assert_eq!(k.work_counters.orient_boxes(), 1);
+        assert_eq!(ups(&b), before);
+    }
+
+    /// `reseed_records` leaves the store exactly as a fresh seeding of the B-rep leaves an
+    /// empty map, whatever happened since the last reset: records handed out and changed,
+    /// a foreign key, objects removed (one whose record was changed, one added and removed
+    /// in between) and added. After another edit of the same B-rep value under the same
+    /// scheme it asks the key of only what changed (the scheme's progress id asks one
+    /// per kind); a removed record, a copy put back and another scheme walk it all.
+    /// Seeding before each small edit of a large part walked every object of the part each
+    /// time, which made a fillet's merge cost edits x objects. `seed_records_since` visits
+    /// only the objects added since, and leaves the store as a full seeding would.
+    #[test]
+    fn seed_records_since_visits_only_new_objects() {
+        use crate::topology::topology::NotifyRecords;
+        use std::cell::Cell;
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let asked = Cell::new(0_usize);
+        let key_of = |e: EntityRef| {
+            asked.set(asked.get() + 1);
+            topology_ref(7, e)
+        };
+        let full = |b: &Brep| {
+            let mut fresh = NotifyRecords::new();
+            seed_records(&mut fresh, b, &|e| topology_ref(7, e));
+            fresh
+        };
+        let mut records = NotifyRecords::new();
+        // (the progress id asks one key per kind)
+        seed_records_since(&mut records, &mut b, &key_of);
+        assert!(asked.get() > entity_count(&b));
+        assert_eq!(records, full(&b));
+
+        // nothing new: no object is visited
+        asked.set(0);
+        seed_records_since(&mut records, &mut b, &key_of);
+        assert_eq!(asked.get(), KINDS);
+
+        // a record the caller changed is kept, as `seed_records` keeps it
+        let face = b.face_list()[0];
+        records
+            .get_mut(&topology_ref(7, EntityRef::Face(face)).key)
+            .unwrap()
+            .set_user_index1(5);
+
+        // one object added: only it is visited
+        let added = b.add_vertex(Point3::new(5.0, 5.0, 5.0)).unwrap();
+        asked.set(0);
+        seed_records_since(&mut records, &mut b, &key_of);
+        assert_eq!(asked.get(), KINDS + 1);
+        assert!(records.contains_key(&topology_ref(7, EntityRef::Vertex(added)).key));
+        let mut want = full(&b);
+        want.get_mut(&topology_ref(7, EntityRef::Face(face)).key)
+            .unwrap()
+            .set_user_index1(5);
+        assert_eq!(records, want);
+
+        // a removed record makes the next seeding visit everything again
+        records.remove(&topology_ref(7, EntityRef::Vertex(added)).key);
+        seed_records_since(&mut records, &mut b, &key_of);
+        assert_eq!(records, want);
+    }
+
+    #[test]
+    fn reseed_records_equals_a_fresh_seeding() {
+        use crate::topology::topology::NotifyRecords;
+        use std::cell::Cell;
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let asked = Cell::new(0_usize);
+        let reseed = |records: &mut NotifyRecords, b: &mut Brep, serial: u64| {
+            let key_of = |e: EntityRef| {
+                asked.set(asked.get() + 1);
+                topology_ref(serial, e)
+            };
+            let scheme = KeyScheme {
+                key_of: &key_of,
+                entity_of: &|key| topology_entity(serial, key),
+                brep_key: topology_ref(serial, brep_entity()).key,
+                serial: Some(serial),
+            };
+            asked.set(0);
+            reseed_records(records, b, &scheme);
+            let fresh: NotifyRecords = entities(b)
+                .chain([brep_entity()])
+                .map(|e| (topology_ref(serial, e).key, topo::Topology::default()))
+                .collect();
+            assert_eq!(*records, fresh);
+            asked.get()
+        };
+        let objects = entity_count(&b);
+        let per_kind = KINDS;
+        let mut records = NotifyRecords::new();
+        assert!(reseed(&mut records, &mut b, 7) > objects);
+        assert_eq!(reseed(&mut records, &mut b, 7), per_kind);
+
+        // changed records and a foreign key
+        let face = b.face_list()[0];
+        let vertex = b.vertex_list()[0];
+        let key = |e| topology_ref(7, e).key;
+        records
+            .get_mut(&key(EntityRef::Face(face)))
+            .unwrap()
+            .set_user_index1(5);
+        records
+            .or_default(key(EntityRef::Vertex(vertex)))
+            .set_user_index1(6);
+        records.insert(
+            topology_ref(8, EntityRef::Face(face)).key,
+            topo::Topology::default(),
+        );
+        assert!(reseed(&mut records, &mut b, 7) <= per_kind + 3);
+
+        // removals (one with a changed record) and additions, one removed again
+        records
+            .get_mut(&key(EntityRef::Vertex(vertex)))
+            .unwrap()
+            .set_user_index1(9);
+        b.remove_vertex_record(vertex).unwrap();
+        b.remove_face_record(face).unwrap();
+        let added = b.add_vertex(Point3::new(5.0, 5.0, 5.0)).unwrap();
+        let gone = b.add_vertex(Point3::new(6.0, 6.0, 6.0)).unwrap();
+        b.remove_vertex_record(gone).unwrap();
+        let _ = added;
+        assert!(reseed(&mut records, &mut b, 7) <= per_kind + 6);
+
+        // a record removed by hand, a copy put back and another scheme start again
+        records.remove(&key(EntityRef::Edge(b.edge_list()[0])));
+        assert!(reseed(&mut records, &mut b, 7) > per_kind + 6);
+        let refused: Result<()> =
+            b.with_rollback(|b| b.add_vertex(Point3::ZERO).map(|_| ()), |_| false);
+        refused.unwrap();
+        assert!(reseed(&mut records, &mut b, 7) > per_kind + 6);
+        assert_eq!(reseed(&mut records, &mut b, 7), per_kind);
+        assert!(reseed(&mut records, &mut b, 8) > per_kind + 6);
     }
 }
 

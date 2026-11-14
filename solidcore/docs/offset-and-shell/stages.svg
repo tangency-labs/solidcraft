@@ -8,7 +8,7 @@
     <path d="M40 105 L210 105 L210 190 L40 190 Z" fill="#dce9f5" stroke="#555555" stroke-linecap="round" stroke-linejoin="round"/>
     <text transform="matrix(1 0 0 1 50 130)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">S1 face offsets</tspan></text>
     <text transform="matrix(1 0 0 1 50 153)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">exact or certified</tspan></text>
-    <text transform="matrix(1 0 0 1 50 173)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">built, opt-in</tspan></text>
+    <text transform="matrix(1 0 0 1 50 173)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">built</tspan></text>
     <g>
       <g>
         <path d="M213 146.25 L226.5 146.25 C226.914 146.25 227.25 146.586 227.25 147 C227.25 147.414 226.914 147.75 226.5 147.75 L213 147.75 C212.586 147.75 212.25 147.414 212.25 147 C212.25 146.586 212.586 146.25 213 146.25" fill="#000000"/>
@@ -49,7 +49,7 @@
     <text transform="matrix(1 0 0 1 820 130)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">S5 extraction</tspan></text>
     <text transform="matrix(1 0 0 1 820 153)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">the result&apos;s faces</tspan></text>
     <text transform="matrix(1 0 0 1 820 173)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">open</tspan></text>
-    <text transform="matrix(1 0 0 1 40 255)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">Today&apos;s executive (offset_executive), which runs S1 under shell_one_construction</tspan></text>
+    <text transform="matrix(1 0 0 1 40 255)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">Today&apos;s executive (offset_executive), which runs S1</tspan></text>
     <path d="M40 270 L210 270 L210 355 L40 355 Z" fill="#f0f0f0" stroke="#555555" stroke-linecap="round" stroke-linejoin="round"/>
     <text transform="matrix(1 0 0 1 50 295)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">face offsets</tspan></text>
     <text transform="matrix(1 0 0 1 50 318)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">analytic kinds exact,</tspan></text>

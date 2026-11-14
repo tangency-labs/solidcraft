@@ -203,6 +203,9 @@ jobs:
       - name: Kernel rig
         env:
           KERNEL_CASES_REPORT: ${{ github.workspace }}/reports/kernel-rig/table.md
+          # each case in a process of its own, one per vCPU of this job's 4-vCPU runner, with a
+          # CPU-time hang limit
+          KERNEL_CASES_JOBS: "4"
         # run as cargo test runs it: from the crate's directory
         run: |
           mkdir -p reports/kernel-rig
@@ -229,6 +232,20 @@ jobs:
           workspaces: ". -> bin"
       - run: rustup target add wasm32-unknown-unknown
       - run: cargo check -p solidcore --target wasm32-unknown-unknown
+
+  # Each package builds on the Rust release its `rust-version` declares (scripts/ci/
+  # check-rust-version.sh). Downstream users build on older pinned toolchains than
+  # rust-toolchain.toml's, and nothing else here runs one.
+  rust-version:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+      - run: scripts/ci/check-rust-version.sh
 
   # Same packaging check the release workflow runs before publishing (no secrets).
   publish-dry-run:

@@ -166,11 +166,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         app.tree.redefine_draft = Some(draft);
         return;
     }
-    let side = if crate::sketch_palette::editing(app) && crate::sketch_palette::fits_beside_a_dialog(app, ctx) {
-        crate::frame::Side::Left
-    } else {
-        crate::frame::Side::Right
-    };
+    let side = crate::frame::Side::Right;
     let top = crate::shell::panel_top(app, viewport, viewport.bottom(), side);
     let docked = egui::pos2(side.anchor_x(viewport), top);
     let moved = crate::frame::dock_offset(ctx, "sc_redefine");
@@ -207,12 +203,9 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                 );
                 let saved_plane = match &status {
                     FaceAttachmentStatus::Healthy { plane, target, path } => {
-                        ui_kit::row(ui, "Attachment", |ui| {
-                            ui.label(solidcraft_ui_text::format(
-                                "sketch_panel.attached",
-                                &[("body", &target.body), ("path", &path_label(app, path))],
-                            ));
-                        });
+                        let attached =
+                            solidcraft_ui_text::format("sketch_panel.attached", &[("body", &target.body), ("path", &path_label(app, path))]);
+                        ui_kit::value_row(ui, "Attachment", &attached);
                         Some(*plane)
                     }
                     FaceAttachmentStatus::Lost { message, repair_plane } => {
@@ -241,9 +234,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                         // Name the plane it's on now: an origin or construction plane (#5103).
                         if let Some(FeatureKind::Sketch { plane: on, .. }) = app.session.doc.feature(sketch).map(|f| &f.kind) {
                             let now = plane_description(&app.session.doc, on);
-                            ui_kit::row(ui, "Current plane", |ui| {
-                                ui.label(now);
-                            });
+                            ui_kit::value_row(ui, "Current plane", &now);
                         }
                         ui.label(solidcraft_ui_text::tr_label("Sketch plane has no body-face attachment."));
                         *plane
@@ -349,7 +340,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         cancel |= closed || action == ui_kit::Action::Cancel;
         apply |= action == ui_kit::Action::Ok;
     });
-    app.viewport.dialog_rect = response.filter(|_| !app.universal_panel_host_enabled() || painted).map(|r| r.response.rect);
+    app.viewport.dialog_rect = response.filter(|_| painted).map(|r| r.response.rect);
     if let Some(rect) = app.viewport.dialog_rect {
         crate::scenario::publish_rect("dialog:outer", rect);
         crate::scenario::publish_rect("dialog:card", rect);

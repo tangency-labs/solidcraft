@@ -16,6 +16,7 @@ use solidcraft_engine::{
 };
 
 use super::{ImageMethod, ribbon};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, ui_kit};
 
 const LONGEST_EDGE: u32 = 512;
@@ -651,7 +652,7 @@ pub(crate) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         help.push_str("\n\n");
         help.push_str(app.tr("render.adaptive.preview_help"));
     }
-    let note = ui_kit::StageBar::note_bounded(ui, &status, max_width).on_hover_text(help);
+    let note = ui_kit::StageBar::note_bounded(ui, &status, max_width).backing_on_hover_text(help);
     crate::scenario::publish_target("render:live:status", note.rect);
     ui_kit::StageBar::separator(ui);
 }

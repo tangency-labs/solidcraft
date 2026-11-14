@@ -337,7 +337,13 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let ok = match surface.assert_valid(&k, want_reports.then_some(&mut reports), level, ObjectKey(1)) {
         Ok(ok) => ok,
         Err(e) => {
-            return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())));
+            // a status answer is recorded by its operation and status, as `Upstream` printed
+            // it, so a B-spline failure's own wording does not move the row
+            let text = match solidcore::error::nurbs::upstream_status(&e) {
+                Some(code) => format!("{}: upstream status {code}", e.operation()),
+                None => e.to_string(),
+            };
+            return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(text)));
         }
     };
     let mut v = vec![f64::from(u8::from(ok)), reports.len() as f64];
