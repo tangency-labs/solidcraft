@@ -6,8 +6,9 @@
 //! on a hovered drop-down row pins or unpins; the toolbar's own menu (the plus after the tabs,
 //! or right-click its empty space or a tab) shows or hides each tab, and has Customize Toolbar…
 //! (a window listing every command of the tab with a check box) and Reset Toolbar; Reset Toolbar
-//! restores the tab. The buttons are kept with the preferences and exported or imported with the
-//! keyboard shortcuts; hidden tabs are kept in the `hidden_toolbar_tabs` preference.
+//! restores the tab. The window also has Reset All Tabs, which asks first and then runs
+//! `view.toolbar_reset_all`. The buttons are kept with the preferences and exported or imported
+//! with the keyboard shortcuts; hidden tabs are kept in the `hidden_toolbar_tabs` preference.
 //!
 //! The quick-access bar (#10223) is kept here too: the commands a command's menu added to the
 //! application bar, after Save, Undo and Redo, in the order the user dragged them into. It is
@@ -35,6 +36,8 @@ pub struct ToolbarCustom {
     pub quick_access: Vec<String>,
     /// The Customize Toolbar window is open (not kept).
     pub customizing: bool,
+    /// The window asks whether to reset every tab (#11471; not kept).
+    pub confirm_reset_all: bool,
 }
 
 /// Most commands the quick-access bar holds.
@@ -360,6 +363,14 @@ pub fn reset(app: &mut SolveApp, tab: &str) {
     app.toolbar_custom.gallery_buttons.remove(&format!("{WORKSPACE}/{tab}"));
 }
 
+/// Every tab's buttons back to their defaults (`view.toolbar_reset_all`). Only the Design
+/// workspace has a customisable toolbar, so this is the whole workspace. Hidden tabs stay hidden.
+pub fn reset_all(app: &mut SolveApp) {
+    let prefix = format!("{WORKSPACE}/");
+    app.toolbar_custom.panels.retain(|k, _| !k.starts_with(&prefix));
+    app.toolbar_custom.gallery_buttons.retain(|k, _| !k.starts_with(&prefix));
+}
+
 /// The menu of a command (toolbar button, drop-down row, S box row).
 pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
     let tab = app.ui.tab.clone();
@@ -487,6 +498,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     let tab = app.ui.tab.clone();
     let mut changes: Vec<(&'static str, bool)> = Vec::new();
     let mut reset_tab = false;
+    let mut ask_all = false;
     let t = solidcraft_theme::Tokens::get();
     // This long card grows as sections open. A top-left pivot keeps its controls at their
     // published positions instead of shifting them after egui measures the taller content.
@@ -526,9 +538,14 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                             });
                         }
                     });
-                let reset = ui_kit::button(ui, solidcraft_ui_text::tr_label("Reset Toolbar"), ui_kit::Button::Normal);
-                crate::scenario::publish_target("customize:reset", reset.rect);
-                reset_tab |= reset.clicked();
+                ui.horizontal(|ui| {
+                    let reset = ui_kit::button(ui, solidcraft_ui_text::tr_label("Reset Toolbar"), ui_kit::Button::Normal);
+                    crate::scenario::publish_target("customize:reset", reset.rect);
+                    reset_tab |= reset.clicked();
+                    let reset_all = ui_kit::button(ui, app.tr("toolbar.reset_all_tabs"), ui_kit::Button::Normal);
+                    crate::scenario::publish_target("customize:reset_all", reset_all.rect);
+                    ask_all |= reset_all.clicked();
+                });
             });
     for (id, on) in changes {
         if on {
@@ -542,7 +559,37 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     if reset_tab {
         reset(app, &tab);
     }
+    app.toolbar_custom.confirm_reset_all |= ask_all;
     app.toolbar_custom.customizing = !closed && action != ui_kit::Action::Cancel;
+    if !app.toolbar_custom.customizing {
+        app.toolbar_custom.confirm_reset_all = false;
+    }
+    confirm_reset_all(app, ctx);
+}
+
+/// Asks before Reset All Tabs; Reset runs `view.toolbar_reset_all`, Cancel keeps every button.
+fn confirm_reset_all(app: &mut SolveApp, ctx: &egui::Context) {
+    if !app.toolbar_custom.confirm_reset_all {
+        return;
+    }
+    let (closed, action) =
+        ui_kit::Confirm::new(egui::Id::unique("sc_toolbar_reset_confirm"), "restore", solidcraft_ui_text::tr_label("Reset Toolbar"))
+            .tone(ui_kit::Tone::Warning)
+            .actions(app.tr("toolbar.reset"), "Cancel", None)
+            .show(ctx, true, |ui| {
+                ui_kit::text(ui, app.tr("toolbar.reset_all_tabs_confirm"), ui_kit::Text::Report("reset", false));
+            });
+    match action {
+        ui_kit::Action::Ok => {
+            app.toolbar_custom.confirm_reset_all = false;
+            if let Err(e) = app.run("view.toolbar_reset_all", json!({})) {
+                app.set_status(e, true);
+            }
+        }
+        ui_kit::Action::Cancel => app.toolbar_custom.confirm_reset_all = false,
+        _ if closed => app.toolbar_custom.confirm_reset_all = false,
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -620,5 +667,93 @@ mod migration_tests {
         assert!(!custom.panels["DESIGN/MODEL/CREATE"].contains(&"solid.extrude".into()));
         assert!(!custom.panels["DESIGN/MANAGE/RULES"].contains(&"plastic.manage_rules".into()));
         assert_eq!(custom.panels["DESIGN/SKETCH/CONSTRAIN"], vec!["sketch.dimension"]);
+    }
+}
+
+#[cfg(test)]
+mod reset_tests {
+    use super::*;
+    use crate::scenario::{Harness, handle_at, rect_of};
+
+    /// A real click at `at`, then frames for the window to answer it.
+    fn click(h: &mut Harness, at: egui::Pos2) {
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        h.frames(2);
+    }
+
+    /// The customised panels, as `"<workspace>/<tab>/<panel>"` keys.
+    fn design_keys(h: &Harness) -> Vec<String> {
+        h.app.toolbar_custom.panels.keys().cloned().collect()
+    }
+
+    /// Customised buttons on the Model tab and on the Inspect tab.
+    fn customised() -> Harness {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width": 1800, "height": 1000}));
+        h.app.ui.tab = "MODEL".into();
+        pin(&mut h.app, "MODEL", "solid.sweep").unwrap();
+        h.app.toolbar_custom.panels.insert(format!("{WORKSPACE}/INSPECT/MEASURE"), vec![]);
+        assert!(design_keys(&h).iter().any(|k| k.starts_with("DESIGN/MODEL/")), "{:?}", design_keys(&h));
+        h
+    }
+
+    /// Reset Toolbar still resets this tab at once (#11471 keeps it); Reset All Tabs asks first,
+    /// Cancel keeps every button and the window, and Reset puts every tab back.
+    #[test]
+    fn reset_toolbar_resets_this_tab_and_reset_all_tabs_asks_first() {
+        let mut h = customised();
+        let customized = design_keys(&h);
+        h.app.toolbar_custom.customizing = true;
+        h.frames(3);
+
+        click(&mut h, rect_of("customize:reset_all").unwrap().center());
+        assert!(h.app.toolbar_custom.confirm_reset_all);
+        assert_eq!(design_keys(&h), customized, "nothing is reset before the answer");
+        click(&mut h, handle_at("dialog:Cancel").unwrap());
+        assert!(!h.app.toolbar_custom.confirm_reset_all);
+        assert_eq!(design_keys(&h), customized, "Cancel keeps every button");
+        assert!(h.app.toolbar_custom.customizing, "Cancel answers the question, not the window");
+
+        click(&mut h, rect_of("customize:reset").unwrap().center());
+        assert!(!h.app.toolbar_custom.confirm_reset_all, "Reset Toolbar asks nothing");
+        assert_eq!(design_keys(&h), vec![format!("{WORKSPACE}/INSPECT/MEASURE")], "only the Model tab is reset");
+
+        click(&mut h, rect_of("customize:reset_all").unwrap().center());
+        click(&mut h, handle_at("dialog:Reset").unwrap());
+        assert!(design_keys(&h).is_empty(), "every tab is reset");
+        assert!(!h.app.toolbar_custom.confirm_reset_all);
+    }
+
+    /// Escape while Reset All Tabs asks answers the question without resetting, and reopening the
+    /// window shows no leftover question.
+    #[test]
+    fn escape_drops_the_reset_all_question() {
+        let mut h = customised();
+        let customized = design_keys(&h);
+        h.app.toolbar_custom.customizing = true;
+        h.frames(3);
+        click(&mut h, rect_of("customize:reset_all").unwrap().center());
+        assert!(h.app.toolbar_custom.confirm_reset_all);
+        h.call("ui.key", json!({"key": "Escape"}));
+        h.frames(2);
+        assert!(!h.app.toolbar_custom.confirm_reset_all, "the question is gone");
+        assert_eq!(design_keys(&h), customized, "nothing is reset");
+        h.app.toolbar_custom.customizing = true;
+        h.frames(3);
+        assert!(!h.app.toolbar_custom.confirm_reset_all);
+        assert!(handle_at("dialog:Reset").is_none(), "no leftover question when the window opens again");
+    }
+
+    /// Agents and scripts reach Reset All Tabs as a command through `engine.execute`, with no
+    /// dialog; command search does not offer it to people, who use the window's button.
+    #[test]
+    fn engine_execute_resets_every_tab_without_a_dialog() {
+        let mut h = customised();
+        let reply = h.call("engine.execute", json!({"command": "view.toolbar_reset_all", "params": {}}));
+        assert_eq!(reply["result"], json!({}), "{reply}");
+        assert!(design_keys(&h).is_empty(), "every tab is reset");
+        assert!(!h.app.toolbar_custom.confirm_reset_all && !h.app.toolbar_custom.customizing, "nothing asks or opens");
+        assert!(h.call("engine.execute", json!({"command": "view.toolbar_reset_all", "params": {"tab": "MODEL"}}))["error"].is_string());
+        assert!(crate::workspace::AGENT_ONLY.contains(&"view.toolbar_reset_all"));
     }
 }
