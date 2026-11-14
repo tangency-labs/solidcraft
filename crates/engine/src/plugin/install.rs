@@ -38,6 +38,11 @@ pub enum InstallError {
 #[derive(Debug)]
 pub struct Unpacked {
     pub manifest: Manifest,
+    /// Hash of the exact manifest and component that will be published.
+    pub approval: String,
+    /// SHA-256 of the whole `.zip` as read, so an install can insist on exactly the archive that was
+    /// reviewed: `approval` covers only the manifest and component, not the plugin's other files.
+    pub archive: String,
     /// Paths relative to the plugin's folder.
     pub files: Vec<safe_zip::File>,
 }
@@ -78,12 +83,18 @@ pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
         crate::EngineError::Plugin(e) => InstallError::Manifest(e),
         e => InstallError::Manifest(HostError::InvalidManifest { field: "manifest".into(), reason: e.to_string() }),
     })?;
-    if let Some(runtime) = &manifest.runtime
-        && !files.iter().any(|f| f.path == runtime.module)
-    {
-        return Err(InstallError::MissingModule(runtime.module.clone()));
-    }
-    Ok(Unpacked { manifest, files })
+    let component = if let Some(runtime) = &manifest.runtime {
+        files
+            .iter()
+            .find(|f| f.path == runtime.module)
+            .map(|f| f.bytes.as_slice())
+            .ok_or_else(|| InstallError::MissingModule(runtime.module.clone()))?
+    } else {
+        &[]
+    };
+    let approval = super::package_hash(text, component);
+    let archive = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(zip));
+    Ok(Unpacked { manifest, approval, archive, files })
 }
 
 /// The installed plugin of this id: its name and version, if its folder holds a readable manifest.
@@ -109,6 +120,14 @@ pub fn install(plugin: &Unpacked, plugins: &Path, replace: bool) -> Result<PathB
     let target = plugins.join(id);
     if !replace && let Some((name, version)) = installed(plugins, id) {
         return Err(InstallError::AlreadyInstalled { id: id.clone(), name, version });
+    }
+    // Preflight logical destinations before the staging folder writes or a replacement deletes.
+    // Checking only the plugin folder would bypass a scoped caller's hidden-file restrictions.
+    for path in std::iter::once(target.clone()).chain(plugin.files.iter().map(|file| target.join(&file.path))) {
+        solidcraft_io::vfs::check_new(&path.to_string_lossy()).map_err(|e| InstallError::Io(e.to_string()))?;
+    }
+    if target.exists() {
+        super::package::check_remove_tree(&target).map_err(|e| InstallError::Io(e.to_string()))?;
     }
     std::fs::create_dir_all(plugins).map_err(io)?;
     // A hidden name: the plugins list skips it while it is written.

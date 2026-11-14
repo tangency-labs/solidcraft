@@ -211,6 +211,7 @@ enum Work {
     Plugin {
         prepared: Receiver<Result<solidcraft_engine::ComputedCommands, String>>,
         disabled: std::collections::BTreeSet<String>,
+        grants: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants>,
         limits: solidcraft_engine::plugin::HostLimits,
         level: Option<solidcraft_engine::schema::ParamCheck>,
     },
@@ -555,6 +556,7 @@ impl SolveApp {
     /// Take a control request off the window thread when it computes long (see the module
     /// notes). Returns it when it should simply run here now.
     pub(crate) fn offload_control(&mut self, ctx: &egui::Context, req: ControlRequest) -> Option<ControlRequest> {
+        let req = crate::plugins::offload_control(self, ctx, req)?;
         crate::plugins::sync_policy(self);
         if cfg!(not(target_arch = "wasm32"))
             && matches!(req.method.as_str(), "engine.execute" | "command")
@@ -608,7 +610,13 @@ impl SolveApp {
             self.control_job = Some(ControlJob {
                 label: label(self, "plugin.run"),
                 req,
-                work: Work::Plugin { prepared, disabled: self.preferences.disabled_plugins.clone(), limits: self.session.plugin_limits, level },
+                work: Work::Plugin {
+                    prepared,
+                    disabled: self.preferences.disabled_plugins.clone(),
+                    grants: self.preferences.plugin_grants.clone(),
+                    limits: self.session.plugin_limits,
+                    level,
+                },
                 done,
                 started: crate::now_ms(),
                 steps: None,
@@ -793,7 +801,7 @@ impl SolveApp {
         }
         let Some(job) = self.control_job.take() else { return };
         ctx.request_repaint();
-        if let Work::Plugin { prepared, disabled, limits, level } = &job.work {
+        if let Work::Plugin { prepared, disabled, grants, limits, level } = &job.work {
             if !job.req.ticket.back() {
                 let _ = job.req.reply.send(stopped_reply(&job.label, true));
                 return;
@@ -801,6 +809,7 @@ impl SolveApp {
             let result = if self.file_load_holds()
                 || self.file_picker.is_some()
                 || disabled != &self.preferences.disabled_plugins
+                || grants != &self.preferences.plugin_grants
                 || *limits != crate::plugins::host_limits(&self.preferences)
             {
                 Err(self.tr("ui.plugin_context_changed").to_string())

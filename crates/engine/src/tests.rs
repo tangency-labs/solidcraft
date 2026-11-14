@@ -1176,6 +1176,12 @@ fn hostile_params_never_panic() {
                         // call behind one lock, so building the box for each of the ~3000 calls
                         // ran one after another on every thread (over half an hour in CI).
                         let mut start = Session::default();
+                        // Hostile plugin ids must never name packages in the user's real install folder.
+                        start.plugin_state.plugins_dir = Some(solidcraft_io::vfs::temp_dir().join(format!(
+                            "solidcraft-hostile-plugins-{}-{}",
+                            std::process::id(),
+                            id.replace('.', "-")
+                        )));
                         let _ = start.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10}));
                         let _ = start.execute("sketch.create", &json!({"plane": "XY"}));
                         let _ = start.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [5, 5]}));

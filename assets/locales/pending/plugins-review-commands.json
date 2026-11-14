@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "cmd.plugin.remove": "إزالة الإضافة"
+  },
+  "de": {
+    "cmd.plugin.remove": "Plugin entfernen"
+  },
+  "en": {
+    "cmd.plugin.remove": "Remove Plugin"
+  },
+  "he": {
+    "cmd.plugin.remove": "הסרת תוסף"
+  },
+  "ja": {
+    "cmd.plugin.remove": "プラグインを削除"
+  },
+  "ko": {
+    "cmd.plugin.remove": "플러그인 제거"
+  },
+  "vi": {
+    "cmd.plugin.remove": "Gỡ plugin"
+  },
+  "zh": {
+    "cmd.plugin.remove": "移除插件"
+  }
+}
