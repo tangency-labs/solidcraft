@@ -46,6 +46,22 @@ use crate::session::run;
 use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
 
+/// A whole-curve bound on the distance of a cubic Bezier from its endpoint segment.
+/// The kernel measures each inner control point against the finite segment. The
+/// convex hull property bounds the entire cubic by the larger distance, including
+/// control points beyond the endpoints and curves whose endpoints coincide.
+///
+/// # Errors
+/// [`Error::Argument`] if a coordinate is not finite or exceeds the coordinate bound.
+pub fn cubic_chord_bound(points: [[f64; 3]; 4]) -> Result<f64> {
+    if !points.iter().all(|p| coord_ok(p)) {
+        return Err(Error::Argument);
+    }
+    Ok(solidcore::curve::hermite_curve::cubic_chord_bound(
+        points.map(point),
+    ))
+}
+
 /// Which end of a curve a blend meets, and how ([`blend_curve`]).
 pub use solidcore::curve::blend::{Contact, End};
 
@@ -924,6 +940,30 @@ mod tests {
         [10.0, 10.0, 0.0],
         [0.0, 10.0, 0.0],
     ];
+
+    #[test]
+    fn cubic_chord_bound_covers_control_points_beyond_and_between_endpoints() {
+        let bound = |p| cubic_chord_bound(p).unwrap();
+        assert_eq!(
+            bound([[0., 0., 0.], [1., 0., 0.], [2., 0., 0.], [3., 0., 0.]]),
+            0.
+        );
+        assert_eq!(
+            bound([[0., 0., 0.], [1., 2., 0.], [2., -1., 0.], [3., 0., 0.]]),
+            2.
+        );
+        assert_eq!(
+            bound([[0., 0., 0.], [-2., 0., 0.], [4., 0., 0.], [3., 0., 0.]]),
+            2.
+        );
+        assert_eq!(
+            bound([[0., 0., 0.], [0., 3., 0.], [0., 0., 4.], [0., 0., 0.]]),
+            4.
+        );
+        assert_eq!(bound([[1., 2., 3.]; 4]), 0.);
+        assert!(cubic_chord_bound([[f64::NAN, 0., 0.]; 4]).is_err());
+        assert!(cubic_chord_bound([[f64::INFINITY, 0., 0.]; 4]).is_err());
+    }
 
     #[test]
     fn a_cubic_through_four_points_is_clamped_on_its_end_points() {

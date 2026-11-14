@@ -13,6 +13,9 @@ use crate::{IoError, Result};
 
 const MAX_DEPTH: usize = 256;
 const PX_MM: f64 = 25.4 / 96.0;
+// One micrometre in sketch coordinates. The control hull bounds the whole
+// replacement, including poorly parameterised, nearly straight cubics.
+const CUBIC_LINE_TOL_MM: f64 = 1e-3;
 
 /// Affine map [a c e; b d f].
 #[derive(Clone, Copy, Debug)]
@@ -192,7 +195,17 @@ impl Out {
         if a.dist(b) > 1e-12 { self.push(Geom2::Line(a, b)) } else { Ok(()) }
     }
     fn cubic(&mut self, t: Tf, p: [Vec2; 4]) -> Result<()> {
-        self.push(Geom2::Spline { pts: p.iter().map(|q| t.apply(*q)).collect(), control: true, degree: 3 })
+        let p = p.map(|q| t.apply(q));
+        if !p.iter().all(|q| q.is_finite()) {
+            return Err(IoError::Invalid(OUT_OF_RANGE.into()));
+        }
+        // Measure after the SVG transform, so the bound is in millimetres. Use
+        // the finite chord: a collinear curve can still overshoot its endpoints.
+        // If the kernel cannot bound these coordinates, retain the original curve.
+        if solidcore_ops::curve::cubic_chord_bound(p.map(|q| [q.x, q.y, 0.0])).is_ok_and(|bound| bound <= CUBIC_LINE_TOL_MM) {
+            return self.line(Tf::ID, p[0], p[3]);
+        }
+        self.push(Geom2::Spline { pts: p.to_vec(), control: true, degree: 3 })
     }
     fn quad(&mut self, t: Tf, a: Vec2, c: Vec2, b: Vec2) -> Result<()> {
         let (a, c, b) = (t.apply(a), t.apply(c), t.apply(b));
@@ -749,6 +762,90 @@ mod tests {
         // Plain pixels.
         let g = read_svg(r#"<svg><line x1="0" y1="0" x2="96" y2="0"/></svg>"#).unwrap();
         assert!(matches!(g[0], Geom2::Line(a, b) if (a.dist(b) - 25.4).abs() < 1e-9));
+    }
+
+    #[test]
+    fn cubic_simplification_is_bounded_in_transformed_millimetres() {
+        let read = |path, transform| {
+            read_svg(&format!(r#"<svg width="10mm" height="10mm" viewBox="0 0 10 10"><path transform="{transform}" d="{path}"/></svg>"#)).unwrap()
+        };
+        assert!(read("M1 1 C1 1 1 1 1 1", "").is_empty());
+        assert!(matches!(read("M0 0 C1 0.0005 2 0.0005 3 0", "").as_slice(), [Geom2::Line(_, _)]));
+        let path = "M0 0 C1 0.0005 2 0.0005 3 0";
+        let large = read(path, "scale(10)");
+        assert!(matches!(&large[..], [Geom2::Spline { pts, control: true, degree: 3 }] if
+            pts == &vec![Vec2::new(0., 0.), Vec2::new(10., -0.005), Vec2::new(20., -0.005), Vec2::new(30., 0.)]));
+        // Equal endpoints and collinearity alone do not make a curve degenerate.
+        for path in ["M0 0 C10 10 -10 10 0 0", "M0 0 C-10 0 20 0 1 0"] {
+            assert!(matches!(read(path, "").as_slice(), [Geom2::Spline { .. }]));
+        }
+    }
+
+    /// Synthetic outlines: e/f used to fail the extrusion check; g/h already worked.
+    #[test]
+    fn imported_cubic_outlines_extrude() {
+        use solidcore_record::{Loop2, Plane, Region2, Seg2};
+
+        let cases = [
+            (
+                "e",
+                327620.806030599,
+                1,
+                "M200 200 L2000 200 L2000 1500 C 1990 1500.01, 1980 1500.02, 1900 1500.03 C 1899.99 1500.031, 1899.98 1500.032, 1800 1500 L200 1500 Z",
+            ),
+            (
+                "f",
+                348691.6189236112,
+                1,
+                "M200 200 L2000 200 C 2100 200, 2200 300, 2200 400 C 2200.001 400.002, 2200.002 400.001, 2200 500 L2000 1500 L200 1500 Z",
+            ),
+            (
+                "g",
+                327620.3181003479,
+                0,
+                "M200 200 L2000 200 L2000 1500 L1000.0001 1500 C 1000.0002 1500.0001, 1000.0001 1500.0002, 1000 1500.0001 L200 1500 Z",
+            ),
+            (
+                "h",
+                330664.92026605905,
+                2,
+                "M200 200 L2000 200 L2000 1500 C 1500 1500, 1200 1600, 1000 1500 C 900 1450, 1100 1600, 1000 1499.99 L200 1500 Z",
+            ),
+        ];
+        let mut failures = Vec::new();
+        // Expected volumes: integrate (x dy - y dx)/2 over the line/cubic
+        // polynomials, multiply by (25.4/96)^2 and the 2 mm extrusion depth.
+        for (name, expected_volume, splines, path) in cases {
+            let svg = format!(r#"<svg width="2480px" height="3508px" viewBox="0 0 2480 3508"><path d="{path}"/></svg>"#);
+            let geometry = read_svg(&svg).unwrap();
+            assert_eq!(geometry.iter().filter(|g| matches!(g, Geom2::Spline { .. })).count(), splines, "{name}");
+            let segs = geometry
+                .iter()
+                .map(|g| match g {
+                    Geom2::Line(a, b) => Seg2::Line { a: *a, b: *b },
+                    Geom2::Spline { pts, control: true, degree: 3 } => {
+                        let [p0, p1, p2, p3] = pts.as_slice() else { panic!("four cubic controls") };
+                        Seg2::Cubic { p0: *p0, p1: *p1, p2: *p2, p3: *p3 }
+                    }
+                    other => panic!("unexpected imported geometry: {other:?}"),
+                })
+                .collect();
+            let region = Region2 { outer: Loop2 { segs }, holes: Vec::new() };
+            match solidcraft_kernel::extrude(&Plane::XY, &[region], 0.0, 2.0) {
+                Ok(bodies) => {
+                    assert_eq!(bodies.len(), 1, "{name}");
+                    let measured = solidcraft_kernel::measure_mass(&bodies[0]).unwrap();
+                    println!("{name}: expected {expected_volume:.9} mm3, measured {:.9} mm3", measured.volume);
+                    assert!((measured.volume - expected_volume).abs() < 0.005, "{name}: {measured:?}");
+                    let check = solidcraft_kernel::validity(&bodies[0]);
+                    if !check.ok() || !matches!(check.smlib, Some(solidcraft_kernel::SmlibCheck::Valid)) {
+                        failures.push(format!("{name}: {check:?}"));
+                    }
+                }
+                Err(e) => failures.push(format!("{name}: {e}")),
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     /// #9641: a file with nothing to import says why (an embedded picture, shapes from another
