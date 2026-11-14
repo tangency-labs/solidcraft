@@ -4,6 +4,7 @@
 //! `documents::apply_view`, the one place that knows what a kind means for the window.
 
 use serde_json::{Value, json};
+use solidcraft_viewport::ViewSpec;
 
 /// Most views one design keeps open (and most a saved set may hold).
 pub const MAX_VIEWS: usize = 64;
@@ -59,7 +60,7 @@ impl ViewKind {
 }
 
 /// One view of a design.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DesignView {
     /// Unique within its design for as long as the set lives; never reused.
     pub id: u64,
@@ -68,10 +69,13 @@ pub struct DesignView {
     pub name: String,
     /// The sketch or sheet this view shows (its id); none for Model, Render and Animation.
     pub subject: Option<String>,
+    /// How this view looks at the model (its own camera). None until the view is first left: the
+    /// front end then shows it from where the design looks now.
+    pub spec: Option<ViewSpec>,
 }
 
 /// The views of a design in tab order, the active one, and the views closed lately.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ViewSet {
     views: Vec<DesignView>,
     active: u64,
@@ -89,7 +93,7 @@ impl Default for ViewSet {
 impl ViewSet {
     /// A design's first views: one Model view, active.
     pub fn new() -> Self {
-        let model = DesignView { id: 1, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None };
+        let model = DesignView { id: 1, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None };
         ViewSet { views: vec![model], active: 1, closed: Vec::new(), next_id: 2 }
     }
 
@@ -142,7 +146,7 @@ impl ViewSet {
         }
         let id = self.take_id();
         let name = self.default_name(kind);
-        self.views.push(DesignView { id, kind, name, subject });
+        self.views.push(DesignView { id, kind, name, subject, spec: None });
         self.active = id;
         id
     }
@@ -196,7 +200,7 @@ impl ViewSet {
         self.views.retain(&keep);
         if self.views.is_empty() {
             let id = self.take_id();
-            self.views.push(DesignView { id, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None });
+            self.views.push(DesignView { id, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None });
         }
         if self.get(self.active).is_none() {
             self.active = fallback.or_else(|| self.views.first().map(|view| view.id)).unwrap_or(self.active);
@@ -239,6 +243,17 @@ impl ViewSet {
         Some(id)
     }
 
+    /// Keep `spec` as how the view `id` looks at the model. False when there is no such view.
+    pub fn set_spec(&mut self, id: u64, spec: ViewSpec) -> bool {
+        match self.views.iter_mut().find(|view| view.id == id) {
+            Some(view) => {
+                view.spec = Some(spec);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Give the view with `id` a new name: trimmed, 1 to `MAX_NAME` characters, no control
     /// characters. False when the name or the view is not acceptable.
     pub fn rename(&mut self, id: u64, name: &str) -> bool {
@@ -259,8 +274,8 @@ impl ViewSet {
         if self.views.len() >= MAX_VIEWS {
             return None;
         }
-        let (kind, subject) = (self.views[i].kind, self.views[i].subject.clone());
-        let copy = DesignView { id: self.take_id(), kind, name: self.default_name(kind), subject };
+        let (kind, subject, spec) = (self.views[i].kind, self.views[i].subject.clone(), self.views[i].spec);
+        let copy = DesignView { id: self.take_id(), kind, name: self.default_name(kind), subject, spec };
         self.active = copy.id;
         self.views.insert(i + 1, copy);
         Some(self.active)
@@ -278,7 +293,8 @@ impl ViewSet {
 
     /// The set as saved with the design.
     pub fn to_json(&self) -> Value {
-        let view_json = |view: &DesignView| json!({"id": view.id, "kind": view.kind.key(), "name": view.name, "subject": view.subject});
+        let view_json =
+            |view: &DesignView| json!({"id": view.id, "kind": view.kind.key(), "name": view.name, "subject": view.subject, "spec": view.spec});
         json!({
             "active": self.active,
             "next_id": self.next_id,
@@ -367,7 +383,10 @@ fn view_from_json(value: &Value) -> Option<DesignView> {
         Some(Value::String(subject)) if subject.len() <= MAX_SUBJECT => Some(subject.clone()),
         Some(_) => return None,
     };
-    Some(DesignView { id, kind, name, subject })
+    // A spec that does not read back, or holds numbers a camera cannot use, is dropped: the view
+    // then starts from where the design looks.
+    let spec = value.get("spec").and_then(|spec| serde_json::from_value::<ViewSpec>(spec.clone()).ok()).filter(ViewSpec::is_valid);
+    Some(DesignView { id, kind, name, subject, spec })
 }
 
 #[cfg(test)]
@@ -635,5 +654,27 @@ mod tests {
         assert_eq!(repaired.index_of(3), Some(2));
         assert_eq!(repaired.reopen(), None);
         assert!(repaired.open(ViewKind::Sheet, None, false) > 9);
+    }
+    #[test]
+    fn a_views_spec_is_kept_copied_and_saved() {
+        let mut set = ViewSet::new();
+        let first = set.active().id;
+        let camera = solidcraft_viewport::Camera { yaw: 0.5, ..Default::default() };
+        assert!(set.set_spec(first, ViewSpec::new(camera)));
+        assert!(!set.set_spec(99, ViewSpec::new(camera)));
+        let copy = set.duplicate(first).unwrap();
+        assert_eq!(set.get(copy).unwrap().spec, Some(ViewSpec::new(camera)));
+        let back = ViewSet::from_json(&set.to_json()).unwrap();
+        assert_eq!(back, set);
+    }
+
+    #[test]
+    fn a_saved_spec_with_unusable_numbers_is_dropped_not_drawn() {
+        let mut saved = ViewSet::new().to_json();
+        let camera = solidcraft_viewport::Camera { distance: -5.0, ..Default::default() };
+        saved["views"][0]["spec"] = serde_json::to_value(ViewSpec::new(camera)).unwrap();
+        assert_eq!(ViewSet::from_json(&saved).unwrap().active().spec, None);
+        saved["views"][0]["spec"] = json!("nonsense");
+        assert_eq!(ViewSet::from_json(&saved).unwrap().active().spec, None);
     }
 }
