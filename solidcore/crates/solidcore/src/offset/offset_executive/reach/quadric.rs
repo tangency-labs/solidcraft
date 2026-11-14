@@ -99,6 +99,13 @@ pub(super) fn value_and_gradient(q: &Implicit, x: I3) -> Option<(Ivl, I3)> {
     evaluate(q, enclosed(x)).map(|(f, g, _)| (f.v, values(g)))
 }
 
+/// Whether every point of `x` is on the quadric's own nappe where it is on its implicit
+/// equation: a cone's radius `r + t z` there proved non-negative (the equation holds the
+/// other nappe too), as [`meet`] asks of its roots; a sphere's always.
+pub(super) fn on_nappe(q: &Implicit, x: I3) -> bool {
+    evaluate(q, enclosed(x)).is_some_and(|(_, _, r)| r.v.lo >= 0.0)
+}
+
 /// A plane through a displacement `d`, `normal.d = height`, based at `point`.
 #[derive(Clone, Copy)]
 pub(super) struct Section {

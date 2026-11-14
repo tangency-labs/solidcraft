@@ -663,3 +663,88 @@ fn a_wall_thicker_than_its_face_curves_is_refused_naming_the_largest() {
     assert!((largest - 10.0).abs() < 1e-9, "{largest}");
     assert!(thicken(&sheet, 2.0, false).is_ok() && thicken(&sheet, -2.0, false).is_ok());
 }
+
+/// A thread's flank moved along its normal (#15661, #15715, #16866): an M12 x 1.75 groove, its
+/// walls joined across the turns as a modelled thread's are, cut one pitch deep into a 6 rod; the
+/// lower flank, one B-spline face between the root and crest cylinders and the caps, moves out
+/// and in. Its new surface is the offset of the flank's net, and how far the root and crest must
+/// reach to meet it is proved, so the body builds, and the volume it gains is the closed form.
+///
+/// The flank is the screw surface `z = f(r) + c ψ` (`c = P / 2π`, `ψ` the turn from the
+/// profile's plane), `f(r) = low − t (r − root)` with `t = tan 30°`. Its unit normal out of the
+/// body is `(−f′ e_r − (c / r) e_ψ + e_z) / L`, `L = √(1 + t² + c² / r²)`, so the point at radius
+/// `s` moves to radius `r′ = √(a² + b²)`, `a = s + d t / L`, `b = d c / (s L)`, turned by
+/// `−atan2(b, a)` and raised by `d / L`: the offset is the screw surface
+/// `z = g(r′) + c ψ` with `g(r′) = f(s) + d / L + c atan2(b, a)`. Between the caps, `H` apart,
+/// each radius's strip `f ≤ z − c ψ ≤ g` turns through `H / c`, so the volume gained is
+/// `(H / c) ∫ (g − f) r dr` from the root to the crest. Each flank, the old and the moved, lies
+/// within the sweep's tolerance of its screw surface, so the volume is within twice that times
+/// the flank's area `(H / c) ∫ L r dr` (the screw surface's area element is `L r dr dψ`).
+#[test]
+fn a_thread_flank_moves_beside_its_root_and_crest() {
+    use super::sweep::screw_sweep;
+    use crate::check::CheckLevel;
+    use crate::sweeps::Curve as Profile;
+    use std::f64::consts::TAU;
+    let (pitch, crest, height) = (1.75, 6.0, 1.75);
+    // H = √3 / 2 P; the root at 6 − 5H/8 and the profile out past the crest at 6 + P/20, the
+    // flanks at 30° to the radius: each rises (out − root) tan 30° across them
+    let tooth = 3f64.sqrt() / 2.0 * pitch;
+    let (root, out, t) = (crest - 5.0 * tooth / 8.0, crest + pitch / 20.0, (PI / 6.0).tan());
+    let flank = (out - root) * t;
+    let (low, high) = (-pitch - pitch / 8.0, -pitch + pitch / 8.0);
+    let corners = [[0.0, root, low], [0.0, out, low - flank], [0.0, out, high + flank], [0.0, root, high]];
+    let groove: Vec<Profile> = (0..4).map(|i| Profile::Line { start: corners[i], end: corners[(i + 1) % 4] }).collect();
+    // three turns from z below -0.9 carry the groove past both caps (its top above 2.6)
+    let tolerance = pitch * 1e-4;
+    let tool = screw_sweep(&groove, [0.0; 3], [0.0, 0.0, 1.0], pitch, 3.0, None, tolerance, true).unwrap();
+    let rod = make_cylinder([0.0; 3], crest, height).unwrap();
+    let thread = super::boolean::boolean(&rod, &tool, BooleanOp::Subtract).unwrap().unwrap();
+    let before = volume(&thread, 1e-8).unwrap();
+    let c = pitch / TAU;
+    let f = |r: f64| low - t * (r - root);
+    let normal_length = |r: f64| (1.0 + t * t + c * c / (r * r)).sqrt();
+    // a point of the lower flank halfway across it, at mid height: turned by ψ about +z from
+    // the profile's plane (the +y half of x = 0)
+    let r = 0.5 * (root + crest);
+    let psi = (0.5 * height - f(r)) / c;
+    let pick = [-r * psi.sin(), r * psi.cos(), 0.5 * height];
+    // composite Simpson's rule over [a, b] in 2n steps
+    let simpson = |g: &dyn Fn(f64) -> f64, a: f64, b: f64| {
+        let n = 2000;
+        let h = (b - a) / f64::from(2 * n);
+        let inner: f64 = (1..2 * n).map(|i| g(a + h * f64::from(i)) * if i % 2 == 1 { 4.0 } else { 2.0 }).sum();
+        (g(a) + g(b) + inner) * h / 3.0
+    };
+    let area = height / c * simpson(&|r| normal_length(r) * r, root, crest);
+    for d in [0.3, -0.2] {
+        // the moved point's radius, height above `c ψ` and `r′²/2`'s rate along `s`
+        let moved = |s: f64| {
+            let l = normal_length(s);
+            let l_s = -c * c / (s * s * s) / l;
+            let (a, b) = (s + d * t / l, d * c / (s * l));
+            let a_s = 1.0 - d * t * l_s / (l * l);
+            let b_s = -d * c * (l + s * l_s) / (s * l * s * l);
+            ((a * a + b * b).sqrt(), f(s) + d / l + c * b.atan2(a), a * a_s + b * b_s)
+        };
+        // the radius whose point moves to `r`, by bisection (`r′` rises with `s`)
+        let from = |r: f64| {
+            let (mut lo, mut hi) = (r - 2.0 * d.abs(), r + 2.0 * d.abs());
+            for _ in 0..200 {
+                let m = 0.5 * (lo + hi);
+                if moved(m).0 < r { lo = m } else { hi = m }
+            }
+            0.5 * (lo + hi)
+        };
+        let gained = simpson(&|s| moved(s).1 * moved(s).2, from(root), from(crest));
+        let lost = (low + t * root) * (crest * crest - root * root) / 2.0 - t * (crest.powi(3) - root.powi(3)) / 3.0;
+        let want = height / c * (gained - lost);
+        let body = offset_faces(&thread, &[pick], TOL, d).unwrap_or_else(|e| panic!("d {d}: {e}"));
+        let report = super::check(&body, CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "d {d}: {report}");
+        let after = volume(&body, 1e-8).unwrap();
+        let bound = 2.0 * tolerance * area + 1e-8 * (before + after);
+        let got = after - before;
+        assert!((got - want).abs() <= bound, "d {d}: the volume changed by {got}, the closed form {want} (within {bound})");
+    }
+}
