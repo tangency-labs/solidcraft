@@ -1,0 +1,958 @@
+{
+ "description": "A 80 x 75 x 48 block with a two-circle stadium cut through it, then a rectangle cut from one side to the opposite face, flush with the top and back. The rectangle's tool meets the faces the earlier cut left; one Boolean failed in SmMerge::MakeFaceuse's radial-sector search ('no radial edge use classifies the face's edge use', #15247, #16237). The evaluator retries such a cut as two tool pieces split through the middle, which partitions the tool exactly: the result is the block less the rectangle and the stadium, 80597.52280638895 mm3.",
+ "commands": [
+  {
+   "command": "timeline.add",
+   "params": {
+    "feature": {
+     "id": 1,
+     "name": "Sketch1",
+     "plane": {
+      "base": {
+       "name": "XZ",
+       "type": "origin"
+      },
+      "type": "flipped"
+     },
+     "sketch": {
+      "constraints": [
+       {
+        "id": "k1",
+        "l": 0,
+        "type": "horizontal"
+       },
+       {
+        "id": "k2",
+        "l": 2,
+        "type": "horizontal"
+       },
+       {
+        "id": "k3",
+        "l": 1,
+        "type": "vertical"
+       },
+       {
+        "id": "k4",
+        "l": 3,
+        "type": "vertical"
+       },
+       {
+        "id": "k5",
+        "p": 0,
+        "q": 1,
+        "type": "coincident"
+       },
+       {
+        "id": "k6",
+        "l": 1,
+        "param": "d1",
+        "type": "length",
+        "value": 48.0
+       },
+       {
+        "id": "k7",
+        "l": 0,
+        "param": "d2",
+        "type": "length",
+        "value": 80.0
+       }
+      ],
+      "counters": {
+       "k": 7,
+       "l": 4,
+       "p": 4
+      },
+      "curves": [
+       {
+        "a": 1,
+        "b": 2,
+        "construction": false,
+        "id": "l1",
+        "type": "line"
+       },
+       {
+        "a": 2,
+        "b": 3,
+        "construction": false,
+        "id": "l2",
+        "type": "line"
+       },
+       {
+        "a": 3,
+        "b": 4,
+        "construction": false,
+        "id": "l3",
+        "type": "line"
+       },
+       {
+        "a": 4,
+        "b": 1,
+        "construction": false,
+        "id": "l4",
+        "type": "line"
+       }
+      ],
+      "points": [
+       {
+        "fixed": true,
+        "id": "origin",
+        "pos": [
+         0.0,
+         0.0
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "p1",
+        "pos": [
+         0.0,
+         0.0
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "p2",
+        "pos": [
+         80.0,
+         0.0
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "p3",
+        "pos": [
+         80.0,
+         48.0
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "p4",
+        "pos": [
+         0.0,
+         48.0
+        ]
+       }
+      ]
+     },
+     "suppressed": false,
+     "type": "sketch"
+    },
+    "params": [
+     {
+      "expression": "48",
+      "name": "d1",
+      "unit": "mm"
+     },
+     {
+      "expression": "80",
+      "name": "d2",
+      "unit": "mm"
+     }
+    ]
+   }
+  },
+  {
+   "command": "timeline.add",
+   "params": {
+    "feature": {
+     "body_names": [
+      "Body1"
+     ],
+     "extent": {
+      "convention": "total_distance",
+      "direction": "positive",
+      "distance": "75"
+     },
+     "id": 2,
+     "name": "Extrude1",
+     "operation": "new_body",
+     "param_names": [
+      "d3"
+     ],
+     "profiles": {
+      "loops": [
+       [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      ],
+      "type": "curves"
+     },
+     "sketch": 1,
+     "suppressed": false,
+     "type": "extrude"
+    }
+   }
+  },
+  {
+   "command": "timeline.add",
+   "params": {
+    "feature": {
+     "id": 3,
+     "name": "Sketch2",
+     "plane": {
+      "anchor": {
+       "author_path": [],
+       "component": 0,
+       "coordinates": [
+        0.0,
+        0.0
+       ],
+       "path": [],
+       "target": {
+        "body": "Body1",
+        "certificate": {
+         "high": true,
+         "holes": [],
+         "kind": "extrude_cap",
+         "outer": [
+          "l1",
+          "l2",
+          "l3",
+          "l4"
+         ],
+         "sketch": 1
+        },
+        "name": "F2:cap:high:ed6121d9bed14d3fd103f347231990d103349f33b7874ad292d3c4d3539266c3",
+        "origin_feature": 2,
+        "point": [
+         0.0,
+         -75.0,
+         0.0
+        ]
+       },
+       "x_axis": [
+        1.0,
+        0.0
+       ]
+      },
+      "at": [
+       56.9796233150754,
+       -75.0,
+       40.818045923271995
+      ],
+      "name": "F2:top",
+      "plane": {
+       "origin": [
+        0.0,
+        -75.0,
+        0.0
+       ],
+       "x_dir": [
+        1.0,
+        0.0,
+        -0.0
+       ],
+       "y_dir": [
+        0.0,
+        0.0,
+        1.0
+       ]
+      },
+      "type": "face"
+     },
+     "sketch": {
+      "constraints": [
+       {
+        "id": "k1",
+        "l": 2,
+        "p": 5,
+        "type": "midpoint"
+       },
+       {
+        "id": "k2",
+        "l": 4,
+        "type": "vertical"
+       },
+       {
+        "c": 5,
+        "id": "k3",
+        "param": "d4",
+        "type": "diameter",
+        "value": 32.0
+       },
+       {
+        "a": 5,
+        "b": 6,
+        "id": "k4",
+        "type": "equal"
+       },
+       {
+        "id": "k5",
+        "l": 4,
+        "p": 8,
+        "q": 7,
+        "type": "symmetric"
+       },
+       {
+        "id": "k6",
+        "p": 8,
+        "q": 7,
+        "type": "horizontal_points"
+       },
+       {
+        "id": "k7",
+        "p": 7,
+        "param": "d5",
+        "q": 8,
+        "text": [
+         -4.0,
+         -33.5
+        ],
+        "type": "distance",
+        "value": 38.0
+       },
+       {
+        "id": "k8",
+        "l": 7,
+        "type": "horizontal"
+       },
+       {
+        "id": "k9",
+        "l": 9,
+        "type": "horizontal"
+       },
+       {
+        "id": "k10",
+        "l": 8,
+        "type": "vertical"
+       },
+       {
+        "id": "k11",
+        "l": 10,
+        "type": "vertical"
+       },
+       {
+        "c": 8,
+        "id": "k12",
+        "p": 7,
+        "type": "point_on_curve"
+       },
+       {
+        "c": 10,
+        "id": "k13",
+        "p": 8,
+        "type": "point_on_curve"
+       },
+       {
+        "a": 9,
+        "b": 5,
+        "id": "k14",
+        "type": "tangent"
+       },
+       {
+        "a": 7,
+        "b": 5,
+        "id": "k15",
+        "type": "tangent"
+       },
+       {
+        "id": "k16",
+        "l": 9,
+        "p": 4,
+        "param": "d6",
+        "text": [
+         -2.2499999836373803,
+         -12.0
+        ],
+        "type": "point_line_distance",
+        "value": 4.0
+       }
+      ],
+      "counters": {
+       "c": 2,
+       "j": 1,
+       "k": 16,
+       "l": 9,
+       "p": 9
+      },
+      "curves": [
+       {
+        "a": 1,
+        "b": 2,
+        "construction": false,
+        "id": "l1",
+        "link": "j1",
+        "type": "line"
+       },
+       {
+        "a": 2,
+        "b": 3,
+        "construction": false,
+        "id": "l2",
+        "link": "j1",
+        "type": "line"
+       },
+       {
+        "a": 4,
+        "b": 1,
+        "construction": false,
+        "id": "l3",
+        "link": "j1",
+        "type": "line"
+       },
+       {
+        "a": 3,
+        "b": 4,
+        "construction": false,
+        "id": "l4",
+        "link": "j1",
+        "type": "line"
+       },
+       {
+        "a": 5,
+        "b": 6,
+        "construction": true,
+        "id": "l5",
+        "infinite": true,
+        "type": "line"
+       },
+       {
+        "c": 7,
+        "construction": false,
+        "id": "c1",
+        "r": 16.000000000005386,
+        "type": "circle"
+       },
+       {
+        "c": 8,
+        "construction": false,
+        "id": "c2",
+        "r": 16.00000000000592,
+        "type": "circle"
+       },
+       {
+        "a": 9,
+        "b": 10,
+        "construction": false,
+        "id": "l6",
+        "type": "line"
+       },
+       {
+        "a": 10,
+        "b": 11,
+        "construction": false,
+        "id": "l7",
+        "type": "line"
+       },
+       {
+        "a": 11,
+        "b": 12,
+        "construction": false,
+        "id": "l8",
+        "type": "line"
+       },
+       {
+        "a": 12,
+        "b": 9,
+        "construction": false,
+        "id": "l9",
+        "type": "line"
+       }
+      ],
+      "links": [
+       {
+        "auto_face": true,
+        "face_name": "F2:cap:high:ed6121d9bed14d3fd103f347231990d103349f33b7874ad292d3c4d3539266c3",
+        "id": "j1",
+        "kind": "project",
+        "source": {
+         "at": [
+          26.666666666666668,
+          -75.0,
+          16.0
+         ],
+         "body": "Body1",
+         "type": "face"
+        }
+       }
+      ],
+      "points": [
+       {
+        "fixed": true,
+        "id": "origin",
+        "pos": [
+         0.0,
+         0.0
+        ]
+       },
+       {
+        "fixed": true,
+        "id": "p1",
+        "link": "j1",
+        "pos": [
+         0.0,
+         48.0
+        ]
+       },
+       {
+        "fixed": true,
+        "id": "p2",
+        "link": "j1",
+        "pos": [
+         0.0,
+         0.0
+        ]
+       },
+       {
+        "fixed": true,
+        "id": "p3",
+        "link": "j1",
+        "pos": [
+         80.0,
+         0.0
+        ]
+       },
+       {
+        "fixed": true,
+        "id": "p4",
+        "link": "j1",
+        "pos": [
+         80.0,
+         48.0
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "p5",
+        "pos": [
+         40.0,
+         48.0
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "l5.end",
+        "pos": [
+         39.999999999999986,
+         58.0000000000042
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "c1.center",
+        "pos": [
+         59.00000000000004,
+         27.999999999962483
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "c2.center",
+        "pos": [
+         21.000000000000036,
+         27.99999999996244
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "p6",
+        "pos": [
+         21.000000000000043,
+         11.999999999941522
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "p7",
+        "pos": [
+         59.00000000000005,
+         11.999999999946878
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "p8",
+        "pos": [
+         59.00000000000005,
+         43.99999999997816
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "p9",
+        "pos": [
+         21.000000000000043,
+         43.99999999996653
+        ]
+       }
+      ]
+     },
+     "suppressed": false,
+     "type": "sketch"
+    },
+    "params": [
+     {
+      "expression": "32",
+      "name": "d4",
+      "unit": "mm"
+     },
+     {
+      "expression": "38",
+      "name": "d5",
+      "unit": "mm"
+     },
+     {
+      "expression": "4",
+      "name": "d6",
+      "unit": "mm"
+     }
+    ]
+   }
+  },
+  {
+   "command": "timeline.add",
+   "params": {
+    "feature": {
+     "extent": {
+      "convention": "total_distance",
+      "direction": "negative",
+      "distance": "75 mm",
+      "to": [
+       45.50845326167382,
+       0.0,
+       12.805902954496503
+      ]
+     },
+     "face_names": [
+      "F2:start"
+     ],
+     "id": 4,
+     "name": "Extrude2",
+     "operation": "cut",
+     "param_names": [
+      "d7"
+     ],
+     "profiles": {
+      "indices": [
+       3,
+       2,
+       1,
+       5,
+       4
+      ],
+      "type": "indices"
+     },
+     "sketch": 3,
+     "suppressed": false,
+     "type": "extrude"
+    }
+   }
+  },
+  {
+   "command": "timeline.add",
+   "params": {
+    "feature": {
+     "id": 5,
+     "name": "Sketch3",
+     "plane": {
+      "anchor": {
+       "author_path": [],
+       "component": 0,
+       "coordinates": [
+        0.0,
+        0.0
+       ],
+       "path": [],
+       "target": {
+        "body": "Body1",
+        "certificate": {
+         "curve": "l2",
+         "kind": "extrude_side",
+         "sketch": 1
+        },
+        "name": "F2:side:l2",
+        "origin_feature": 2,
+        "point": [
+         80.0,
+         0.0,
+         0.0
+        ]
+       },
+       "x_axis": [
+        0.0,
+        -1.0
+       ]
+      },
+      "at": [
+       79.99999999999999,
+       -47.933223761795034,
+       5.376385224862588
+      ],
+      "name": "F2:side:l2",
+      "plane": {
+       "origin": [
+        80.0,
+        0.0,
+        0.0
+       ],
+       "x_dir": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "y_dir": [
+        0.0,
+        0.0,
+        1.0
+       ]
+      },
+      "type": "face"
+     },
+     "sketch": {
+      "constraints": [
+       {
+        "id": "k1",
+        "l": 4,
+        "type": "horizontal"
+       },
+       {
+        "id": "k2",
+        "l": 6,
+        "type": "horizontal"
+       },
+       {
+        "id": "k3",
+        "l": 5,
+        "type": "vertical"
+       },
+       {
+        "id": "k4",
+        "l": 7,
+        "type": "vertical"
+       },
+       {
+        "id": "k5",
+        "p": 4,
+        "q": 7,
+        "type": "coincident"
+       },
+       {
+        "id": "k6",
+        "l": 0,
+        "p": 8,
+        "param": "d8",
+        "text": [
+         0.0,
+         15.0
+        ],
+        "type": "point_line_distance",
+        "value": 10.0
+       },
+       {
+        "id": "k7",
+        "l": 1,
+        "p": 5,
+        "param": "d9",
+        "text": [
+         -0.75,
+         -90.49999999988906
+        ],
+        "type": "point_line_distance",
+        "value": 12.0
+       }
+      ],
+      "counters": {
+       "j": 1,
+       "k": 7,
+       "l": 8,
+       "p": 8
+      },
+      "curves": [
+       {
+        "a": 1,
+        "b": 2,
+        "construction": false,
+        "id": "l1",
+        "link": "j1",
+        "type": "line"
+       },
+       {
+        "a": 3,
+        "b": 1,
+        "construction": false,
+        "id": "l2",
+        "link": "j1",
+        "type": "line"
+       },
+       {
+        "a": 4,
+        "b": 2,
+        "construction": false,
+        "id": "l3",
+        "link": "j1",
+        "type": "line"
+       },
+       {
+        "a": 3,
+        "b": 4,
+        "construction": false,
+        "id": "l4",
+        "link": "j1",
+        "type": "line"
+       },
+       {
+        "a": 5,
+        "b": 6,
+        "construction": false,
+        "id": "l5",
+        "type": "line"
+       },
+       {
+        "a": 6,
+        "b": 7,
+        "construction": false,
+        "id": "l6",
+        "type": "line"
+       },
+       {
+        "a": 7,
+        "b": 8,
+        "construction": false,
+        "id": "l7",
+        "type": "line"
+       },
+       {
+        "a": 8,
+        "b": 5,
+        "construction": false,
+        "id": "l8",
+        "type": "line"
+       }
+      ],
+      "links": [
+       {
+        "auto_face": true,
+        "face_name": "F2:side:l2",
+        "id": "j1",
+        "kind": "project",
+        "source": {
+         "at": [
+          80.0,
+          -25.0,
+          16.0
+         ],
+         "body": "Body1",
+         "type": "face"
+        }
+       }
+      ],
+      "points": [
+       {
+        "fixed": true,
+        "id": "origin",
+        "pos": [
+         0.0,
+         0.0
+        ]
+       },
+       {
+        "fixed": true,
+        "id": "p1",
+        "link": "j1",
+        "pos": [
+         -75.0,
+         0.0
+        ]
+       },
+       {
+        "fixed": true,
+        "id": "p2",
+        "link": "j1",
+        "pos": [
+         -75.0,
+         48.0
+        ]
+       },
+       {
+        "fixed": true,
+        "id": "p3",
+        "link": "j1",
+        "pos": [
+         0.0,
+         0.0
+        ]
+       },
+       {
+        "fixed": true,
+        "id": "p4",
+        "link": "j1",
+        "pos": [
+         0.0,
+         48.0
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "p5",
+        "pos": [
+         -65.0,
+         12.0
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "p6",
+        "pos": [
+         0.0,
+         12.0
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "p7",
+        "pos": [
+         0.0,
+         48.0
+        ]
+       },
+       {
+        "fixed": false,
+        "id": "p8",
+        "pos": [
+         -65.0,
+         48.0
+        ]
+       }
+      ]
+     },
+     "suppressed": false,
+     "type": "sketch"
+    },
+    "params": [
+     {
+      "expression": "10",
+      "name": "d8",
+      "unit": "mm"
+     },
+     {
+      "expression": "12",
+      "name": "d9",
+      "unit": "mm"
+     }
+    ]
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "direction": "negative",
+    "distance": "80 mm",
+    "exact_regions": true,
+    "operation": "cut",
+    "profiles": [
+     1
+    ],
+    "sketch": 5,
+    "to": [
+     5.684341886080802e-14,
+     -56.05962522793294,
+     25.47609109319336
+    ]
+   }
+  }
+ ]
+}

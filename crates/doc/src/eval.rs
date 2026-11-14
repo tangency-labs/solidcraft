@@ -109,6 +109,67 @@ struct Cut {
 /// Cuts a body remembers.
 const CUTS_KEPT: usize = 2;
 
+/// A cut the kernel cannot merge in one Boolean is retried in pieces: the tool is split by a
+/// plane through its middle, and the pieces cut one after the other. On a closed tool the pieces
+/// partition it exactly, so the regularized result is the same as one cut; only the merge sees
+/// simpler operands. This is for `SmMerge::MakeFaceuse`'s radial-sector failure (#15247, #16237),
+/// where a tool meets the faces of an earlier cut, or lies flush with the body, and one pass
+/// cannot classify the tool's face.
+fn cut_with_split_fallback(left: Option<Traced>, tool: &Traced, bop: BoolOp, depth: u32) -> Result<Option<Traced>> {
+    let Some(a) = left else { return Ok(None) };
+    match kernel::boolean(&a.body, &tool.body, bop) {
+        Ok(result) => Ok(result.map(|r| Traced::step(r, &[&a, tool]))),
+        Err(e) if bop == BoolOp::Cut && depth < 3 && is_radial_sector_failure(&e) => {
+            let Some(pieces) = split_tool_for_cut(tool) else { return Err(e.into()) };
+            let mut left = Some(a);
+            for piece in pieces {
+                left = cut_with_split_fallback(left, &piece, bop, depth + 1)?;
+                if left.is_none() {
+                    break;
+                }
+            }
+            Ok(left)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Whether a Boolean failed in `SmMerge::MakeFaceuse`'s radial-sector search. The kernel's
+/// message is the only place this precise refusal is visible; the split retry is offered for no
+/// other failure.
+fn is_radial_sector_failure(e: &kernel::KernelError) -> bool {
+    matches!(e, kernel::KernelError::Failed(m)
+        if m.contains("boolean::merge::p2::make_faceuse")
+            && m.contains("no radial edge use classifies"))
+}
+
+/// `tool` split in two by a plane through the middle of its longest side. The plane is inside
+/// the tool (its exact box), so the pieces are closed and together are the tool. `None` when the
+/// tool is a mesh, has no finite box, or the split gives fewer than two pieces.
+fn split_tool_for_cut(tool: &Traced) -> Option<Vec<Traced>> {
+    if tool.body.is_mesh() {
+        return None;
+    }
+    let b = tool.body.exact_bounds().ok()?;
+    if b.is_empty() || !b.min.is_finite() || !b.max.is_finite() {
+        return None;
+    }
+    let size = b.max - b.min;
+    let axis = if size.x >= size.y && size.x >= size.z {
+        Vec3::X
+    } else if size.y >= size.z {
+        Vec3::Y
+    } else {
+        Vec3::Z
+    };
+    let plane = Plane::from_normal((b.min + b.max) * 0.5, axis)?;
+    let pieces = kernel::split_by_plane(&tool.body, &plane).ok()?;
+    if pieces.len() < 2 {
+        return None;
+    }
+    Some(pieces.into_iter().map(|p| Traced::step(p, &[tool])).collect())
+}
+
 impl ModelBody {
     /// This body, an operand of the feature being evaluated, cut (`bop`) by `tools` in turn;
     /// `None` when nothing is left. A body of the model before the feature, cut by tools that all
@@ -126,10 +187,7 @@ impl ModelBody {
         }
         let mut left = Some(self.traced());
         for t in tools {
-            left = match left {
-                Some(a) => kernel::boolean(&a.body, &t.body, bop)?.map(|r| Traced::step(r, &[&a, t])),
-                None => None,
-            };
+            left = cut_with_split_fallback(left, t, bop, 0)?;
         }
         if let Some(key) = key
             && let Ok(mut cuts) = self.cuts.lock()

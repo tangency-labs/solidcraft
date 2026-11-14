@@ -1291,6 +1291,24 @@ fn cut_up_to_the_plate_top_face_opens_the_hole() {
     assert!((removed - want).abs() < 0.01, "removed {removed} mm³, want {want}");
 }
 
+/// #15247 / #16237: a cut whose tool meets the faces of an earlier cut and is flush with the
+/// body fails in `SmMerge::MakeFaceuse`'s radial-sector search when one pass tries to merge the
+/// whole tool. The evaluator retries the cut with the tool split through its middle; the two
+/// pieces partition it exactly, so the result is the regularized cut and is a closed solid.
+#[test]
+fn cut_flush_with_an_earlier_cut_builds_in_pieces() {
+    let s = replay(include_str!("../../../examples/regressions/cut_flush_with_earlier_cut.json"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let body = s.model.state().body("Body1").expect("Body1").body.clone();
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    assert_eq!(body.shell_count(), 1);
+    // The block less the two-circle stadium (through y) and the rectangle (through x):
+    // 136481.42104983493 - 65 * (42 * 32 - 2 * pi * 16^2 / 2 + 4 * 80) mm3.
+    let expected = 136_481.421_049_834_93 - 65.0 * (42.0 * 32.0 - std::f64::consts::PI * 16.0 * 16.0 + 4.0 * 80.0);
+    let got = volume(&s, "Body1");
+    assert!((got - expected).abs() < 1e-3, "{got} mm3, expected {expected}");
+}
+
 fn replay_value(script: &Value) -> Session {
     let mut s = Session::default();
     s.run_script(script).unwrap();
