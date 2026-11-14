@@ -62,6 +62,10 @@ pub enum Mo {
         error: Option<String>,
         /// The chart and the collision check by the timeline.
         analysis: Box<plot::Analysis>,
+        /// Only the playback controls, on a narrow card, so the model stays in view (#14069).
+        compact: bool,
+        /// The keyed joints' values at the step shown, (name, "100 deg"), for the compact card.
+        readout: Vec<(String, String)>,
     },
     Explode {
         name: String,
@@ -91,6 +95,11 @@ impl Mo {
     /// A table that needs the wide dialog.
     pub fn wide(&self) -> bool {
         matches!(self, Mo::Configurations { .. } | Mo::MotionStudy { .. })
+    }
+
+    /// Drawn on the wide card: a table, unless a study shows only its playback controls.
+    pub fn wide_card(&self) -> bool {
+        self.wide() && !matches!(self, Mo::MotionStudy { compact: true, .. })
     }
 }
 
@@ -125,6 +134,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
                 saved: None,
                 error: None,
                 analysis: Box::default(),
+                compact: false,
+                readout: Vec::new(),
             },
             // A point to plot, and the parts to check for collisions (each optional).
             vec![
@@ -395,12 +406,31 @@ fn moved(base: &BTreeMap<u64, Mat>, before: &Session, after: &Session) -> BTreeM
     out
 }
 
-/// The study's pose at `step`, computed on a scratch copy, over `base` ([`moved`]).
-fn study_pose(app: &SolveApp, params: &Value, step: u32, base: &BTreeMap<u64, Mat>) -> Result<BTreeMap<u64, Mat>, String> {
+/// The study's pose at `step`, computed on a scratch copy, over `base` ([`moved`]), and the
+/// keyed joints' values there ([`readout`]).
+fn study_pose(app: &SolveApp, params: &Value, step: u32, base: &BTreeMap<u64, Mat>) -> Result<(BTreeMap<u64, Mat>, Vec<(String, String)>), String> {
     let mut sc = app.session.scratch();
     let id = scratch_study(&mut sc, params)?;
-    sc.execute("motion.play", &json!({"study": id, "step": step})).map_err(|e| e.to_string())?;
-    Ok(moved(base, &app.session, &sc))
+    let played = sc.execute("motion.play", &json!({"study": id, "step": step})).map_err(|e| e.to_string())?;
+    Ok((moved(base, &app.session, &sc), readout(&app.session, &played)))
+}
+
+/// Each driven joint of `motion.play`'s answer as (name, "value unit"); the values of a joint
+/// with several, such as a cylindrical one, after each other.
+pub fn readout(s: &Session, played: &Value) -> Vec<(String, String)> {
+    let joints = played["values"].as_array().into_iter().flatten();
+    joints
+        .filter_map(|j| {
+            let id = j["joint"].as_u64()?;
+            let name = s.doc.assembly.joints.iter().find(|x| x.id == id).map_or_else(|| id.to_string(), |x| x.name.clone());
+            let values: Vec<String> = j["values"]
+                .as_array()?
+                .iter()
+                .filter_map(|v| Some(crate::dialogs_assembly::num((v["value"].as_f64()? * 100.0).round() / 100.0, v["unit"].as_str()?)))
+                .collect();
+            Some((name, values.join(", ")))
+        })
+        .collect()
 }
 
 /// Save the study being edited as an animated GIF, seen from the viewport's camera. Drawn on a
@@ -553,10 +583,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
 
 /// The Motion Study rows; true when Enter was pressed in a value.
 fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [SelInput], t: Tokens) -> bool {
-    let Mo::MotionStudy { name, study, steps, tracks, step, playing, looping, speed, shown, saved, error, analysis } = k else { return false };
+    let Mo::MotionStudy { name, study, steps, tracks, step, playing, looping, speed, shown, saved, error, analysis, compact, readout } = k else {
+        return false;
+    };
     let mut enter = false;
     // An existing study opens to edit (and to chart); New makes another from these keys.
-    // By id: two studies may share a name.
+    // By id: two studies may share a name. Compact offers it too, to switch studies as they play.
     let studies: Vec<(String, String)> = app.session.doc.assembly.studies.iter().map(|m| (m.id.to_string(), m.name.clone())).collect();
     if !studies.is_empty() {
         let labels: Vec<&str> = std::iter::once("New study").chain(studies.iter().map(|(_, n)| n.as_str())).collect();
@@ -571,8 +603,10 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
             }
         }
     }
-    text_row(ui, "Name", name, "");
-    enter |= expr_row(ui, "Steps", steps);
+    if !*compact {
+        text_row(ui, "Name", name, "");
+        enter |= expr_row(ui, "Steps", steps);
+    }
     let total = steps.trim().parse::<u32>().unwrap_or(100).clamp(1, 100_000);
     let moving = joints_moving(app);
     if moving.is_empty() {
@@ -610,123 +644,151 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
                 *playing = false;
             }
             ui.add_space(t.space_6);
-            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Loop"), looping);
             let names: Vec<String> = SPEEDS.iter().map(|x| format!("{x}×")).collect();
             let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            if *compact {
+                // The speed at the row's right end; Loop goes to the card's foot.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.allocate_ui(vec2(t.control_height * 2.5, t.control_height), |ui| combo(ui, "ms_speed", &refs, speed));
+                });
+                return;
+            }
+            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Loop"), looping);
             ui.allocate_ui(vec2(t.form_label_width, t.control_height), |ui| combo(ui, "ms_speed", &refs, speed));
-        });
-    });
-    form_row(ui, "Step", |ui| {
-        ui.horizontal(|ui| {
-            // The slider shows whole steps. It gets a rounded copy: an integer slider rounds its
-            // value every frame, which would drop the part of a step that playback has gained.
-            let mut whole = step.round().min(f64::from(total));
-            let slid = crate::ui_kit::slider(
-                ui,
-                &mut whole,
-                0.0..=f64::from(total),
-                crate::ui_kit::Slider { show_value: false, integer: true, ..Default::default() },
-            );
-            if slid.changed() {
-                *step = whole;
-            }
-            if slid.dragged() {
-                *playing = false;
+            if crate::ui_kit::button(ui, solidcraft_ui_text::tr("motion.compact"), crate::ui_kit::Button::Small)
+                .backing_on_hover_text(solidcraft_ui_text::tr("motion.compact_help"))
+                .clicked()
+            {
+                *compact = true;
             }
         });
     });
-    crate::ui_kit::caption(ui, "Step", &format!("{} / {total}", step.round() as u32));
+    // Playback moves on before the slider and its count are drawn, so they show this frame's step.
     if *playing {
         let dt = f64::from(ui.input(|i| i.stable_dt).min(0.1));
         let fps = STEPS_PER_S * SPEEDS.get(*speed).copied().unwrap_or(1.0);
         (*step, *playing) = advance(*step, dt * fps, total, *looping);
         ui.ctx().request_repaint();
     }
-    // The chart and the collision check, by the timeline.
-    let study_now = study_params(&app.session, name, study.as_deref(), steps, tracks);
-    plot::rows(app, ui, analysis, &study_now, step, playing, total, inputs);
-    // Tracks: a row per keyed joint value, its keys on a strip under the steps.
-    let now = step.round() as u32;
-    let mut remove: Option<usize> = None;
-    for (ti, tr) in tracks.iter_mut().enumerate() {
-        let labels: Vec<String> = moving.iter().map(|(_, n, _)| n.clone()).collect();
-        let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-        let mut pos = moving.iter().position(|(i, _, _)| *i == tr.joint).unwrap_or(0);
-        form_row(ui, &solidcraft_ui_text::format("motion.track_name", &[("number", &(ti + 1).to_string())]), |ui| {
-            ui.horizontal(|ui| {
-                let width = (ui.available_width() - t.control_height - t.space_8).max(0.0);
-                ui.allocate_ui(vec2(width, t.control_height), |ui| combo(ui, &format!("ms_joint{ti}"), &refs, &mut pos));
-                if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("×"), crate::ui_kit::Button::Small)
-                    .backing_on_hover_text(solidcraft_ui_text::tr_label("Remove the track"))
-                    .clicked()
-                {
-                    remove = Some(ti);
-                }
-            });
-        });
-        if let Some((ji, _, kind)) = moving.get(pos) {
-            tr.joint = *ji;
-            let dofs = kind.dofs();
-            if dofs.len() > 1 {
-                form_row(ui, "  Of", |ui| {
-                    let caps: Vec<&str> = dofs.to_vec();
-                    combo(ui, &format!("ms_idx{ti}"), &caps, &mut tr.index);
-                });
-            } else {
-                tr.index = 0;
-            }
+    let counter = format!("{} / {total}", step.round() as u32);
+    let mut step_slider = |ui: &mut egui::Ui| {
+        // The slider shows whole steps. It gets a rounded copy: an integer slider rounds its
+        // value every frame, which would drop the part of a step that playback has gained.
+        let mut whole = step.round().min(f64::from(total));
+        let slid = crate::ui_kit::slider(
+            ui,
+            &mut whole,
+            0.0..=f64::from(total),
+            crate::ui_kit::Slider { show_value: false, integer: true, ..Default::default() },
+        );
+        if slid.changed() {
+            *step = whole;
         }
-        form_row(ui, "  Keys", |ui| {
-            key_strip(ui, tr, total, now, &t);
+        if slid.dragged() {
+            *playing = false;
+        }
+    };
+    if *compact {
+        // The full card's width for the slider, with the step count on its line.
+        ui.horizontal(|ui| {
+            let room = (ui.available_width() - t.form_label_width * 0.75).max(0.0);
+            ui.allocate_ui(vec2(room, t.control_height), &mut step_slider);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(RichText::new(&counter).color(t.text_dim)));
         });
-        // The key at this step, if any: its value.
-        if let Some(p) = tr.points.iter_mut().find(|(s, _)| *s == now) {
-            // The key's value (Enter commits it; OK makes the study).
-            let _ = expr_row(ui, "Value", &mut p.1);
+    } else {
+        form_row(ui, "Step", |ui| {
+            ui.horizontal(step_slider);
+        });
+        crate::ui_kit::caption(ui, "Step", &counter);
+    }
+    let now = step.round() as u32;
+    let mut export = false;
+    // Compact shows only the playback above; the pose below is still shown.
+    if !*compact {
+        // The chart and the collision check, by the timeline.
+        let study_now = study_params(&app.session, name, study.as_deref(), steps, tracks);
+        plot::rows(app, ui, analysis, &study_now, step, playing, total, inputs);
+        // Tracks: a row per keyed joint value, its keys on a strip under the steps.
+        let mut remove: Option<usize> = None;
+        for (ti, tr) in tracks.iter_mut().enumerate() {
+            let labels: Vec<String> = moving.iter().map(|(_, n, _)| n.clone()).collect();
+            let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+            let mut pos = moving.iter().position(|(i, _, _)| *i == tr.joint).unwrap_or(0);
+            form_row(ui, &solidcraft_ui_text::format("motion.track_name", &[("number", &(ti + 1).to_string())]), |ui| {
+                ui.horizontal(|ui| {
+                    let width = (ui.available_width() - t.control_height - t.space_8).max(0.0);
+                    ui.allocate_ui(vec2(width, t.control_height), |ui| combo(ui, &format!("ms_joint{ti}"), &refs, &mut pos));
+                    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("×"), crate::ui_kit::Button::Small)
+                        .backing_on_hover_text(solidcraft_ui_text::tr_label("Remove the track"))
+                        .clicked()
+                    {
+                        remove = Some(ti);
+                    }
+                });
+            });
+            if let Some((ji, _, kind)) = moving.get(pos) {
+                tr.joint = *ji;
+                let dofs = kind.dofs();
+                if dofs.len() > 1 {
+                    form_row(ui, "  Of", |ui| {
+                        let caps: Vec<&str> = dofs.to_vec();
+                        combo(ui, &format!("ms_idx{ti}"), &caps, &mut tr.index);
+                    });
+                } else {
+                    tr.index = 0;
+                }
+            }
+            form_row(ui, "  Keys", |ui| {
+                key_strip(ui, tr, total, now, &t);
+            });
+            // The key at this step, if any: its value.
+            if let Some(p) = tr.points.iter_mut().find(|(s, _)| *s == now) {
+                // The key's value (Enter commits it; OK makes the study).
+                let _ = expr_row(ui, "Value", &mut p.1);
+            }
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Key here"), crate::ui_kit::Button::Small)
+                        .backing_on_hover_text(solidcraft_ui_text::tr_label("Add a key at this step with the joint's value now"))
+                        .clicked()
+                        && !tr.points.iter().any(|(s, _)| *s == now)
+                    {
+                        let unit = app
+                            .session
+                            .doc
+                            .assembly
+                            .joints
+                            .get(tr.joint)
+                            .map(|j| if j.kind.is_angle(tr.index) { "deg" } else { crate::length_input::unit(&app.session.doc) })
+                            .unwrap_or(crate::length_input::unit(&app.session.doc));
+                        tr.points.push((now, format!("0 {unit}")));
+                        tr.points.sort_by_key(|p| p.0);
+                    }
+                    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Delete key"), crate::ui_kit::Button::Small).clicked() {
+                        tr.points.retain(|(s, _)| *s != now);
+                    }
+                });
+            });
+        }
+        if let Some(i) = remove {
+            tracks.remove(i);
         }
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
-                if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Key here"), crate::ui_kit::Button::Small)
-                    .backing_on_hover_text(solidcraft_ui_text::tr_label("Add a key at this step with the joint's value now"))
+                if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Add Key"), crate::ui_kit::Button::Normal)
+                    .backing_on_hover_text(solidcraft_ui_text::tr_label("Key a joint's value at this step"))
                     .clicked()
-                    && !tr.points.iter().any(|(s, _)| *s == now)
+                    && let Some((ji, _, kind)) = moving.first()
                 {
-                    let unit = app
-                        .session
-                        .doc
-                        .assembly
-                        .joints
-                        .get(tr.joint)
-                        .map(|j| if j.kind.is_angle(tr.index) { "deg" } else { crate::length_input::unit(&app.session.doc) })
-                        .unwrap_or(crate::length_input::unit(&app.session.doc));
-                    tr.points.push((now, format!("0 {unit}")));
-                    tr.points.sort_by_key(|p| p.0);
+                    let unit = if kind.is_angle(0) { "deg" } else { crate::length_input::unit(&app.session.doc) };
+                    tracks.push(Track { joint: *ji, index: 0, points: vec![(now, format!("0 {unit}"))] });
                 }
-                if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Delete key"), crate::ui_kit::Button::Small).clicked() {
-                    tr.points.retain(|(s, _)| *s != now);
-                }
+                export = crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export Animation…"), crate::ui_kit::Button::Normal)
+                    .backing_on_hover_text(solidcraft_ui_text::tr_label("Save the study as an animated GIF, seen as the viewport shows it"))
+                    .clicked();
             });
         });
     }
-    if let Some(i) = remove {
-        tracks.remove(i);
-    }
-    let mut export = false;
-    ui.vertical(|ui| {
-        ui.horizontal(|ui| {
-            if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Add Key"), crate::ui_kit::Button::Normal)
-                .backing_on_hover_text(solidcraft_ui_text::tr_label("Key a joint's value at this step"))
-                .clicked()
-                && let Some((ji, _, kind)) = moving.first()
-            {
-                let unit = if kind.is_angle(0) { "deg" } else { crate::length_input::unit(&app.session.doc) };
-                tracks.push(Track { joint: *ji, index: 0, points: vec![(now, format!("0 {unit}"))] });
-            }
-            export = crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export Animation…"), crate::ui_kit::Button::Normal)
-                .backing_on_hover_text(solidcraft_ui_text::tr_label("Save the study as an animated GIF, seen as the viewport shows it"))
-                .clicked();
-        });
-    });
     // Show the pose at this step (again when the step or the keys change).
     let params = study_params(&app.session, name, study.as_deref(), steps, tracks);
     if export {
@@ -745,17 +807,53 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
         // The moves from before the dialog showed anything (it keeps them in `saved`).
         let base = saved.as_ref().unwrap_or(&app.session.pending_moves);
         match params.and_then(|p| study_pose(app, &p, now, base)) {
-            Ok(m) => {
+            Ok((m, values)) => {
                 display(app, saved, m);
+                *readout = values;
                 *error = None;
             }
-            Err(e) => *error = Some(e),
+            Err(e) => {
+                readout.clear();
+                *error = Some(e);
+            }
         }
         *shown = Some((u64::from(now), key));
+    }
+    if *compact {
+        // What the editor's analysis needs no room for while the study plays: each keyed joint's
+        // value at this step (drawn after the pose above, so it is this step's), and the
+        // collisions found when the editor checked.
+        // A joint a line: its name, and its value against the card's right edge.
+        ui.vertical(|ui| {
+            for (joint, value) in readout.iter() {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(joint).color(t.text_dim));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(RichText::new(value).color(t.text)));
+                });
+            }
+        });
+        let study_now = study_params(&app.session, name, study.as_deref(), steps, tracks);
+        plot::compact_collisions(app, ui, analysis, &study_now, inputs, step, playing, &t);
     }
     if let Some(e) = error {
         ui.vertical(|ui| {
             ui.label(RichText::new(solidcraft_ui_text::tr_label(e)).color(t.text_dim));
+        });
+    }
+    if *compact {
+        // The card's foot: Loop, and back to the editor on the right. In a row, so the
+        // right-to-left part takes the row's height and not the card's.
+        ui.add_space(t.space_6);
+        ui.horizontal(|ui| {
+            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Loop"), looping);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if crate::ui_kit::button(ui, solidcraft_ui_text::tr("motion.show_editor"), crate::ui_kit::Button::Small)
+                    .backing_on_hover_text(solidcraft_ui_text::tr("motion.show_editor_help"))
+                    .clicked()
+                {
+                    *compact = false;
+                }
+            });
         });
     }
     enter
@@ -932,6 +1030,59 @@ mod tests {
         assert_eq!(displaced(&h), 0, "and the last step puts it back again");
     }
 
+    /// Compact folds the study to its playback controls on a narrow card, so the model stays in
+    /// view; playback runs on and shows its poses, and Show editor brings the keys back as they
+    /// were (#14069).
+    #[test]
+    fn compact_study_keeps_playing_on_a_narrow_card() {
+        let mut h = crate::scenario::Harness::new();
+        for (name, x) in [("A", 0), ("B", 30)] {
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("component.create", json!({ "name": name })).unwrap();
+            h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+        }
+        let a = json!({"occurrence": "A:1", "face": [10, 10, 10]});
+        h.app.run("joint.create", json!({"type": "revolute", "a": a, "b": {"occurrence": "B:1", "face": [40, 10, 0]}})).unwrap();
+        h.app.start("motion.study");
+        h.frames(3);
+        show_step(&mut h, 0.0);
+        let keys = |h: &crate::scenario::Harness| match h.app.dialog.as_ref().map(|d| &d.kind) {
+            Some(Kind::Motion(Mo::MotionStudy { tracks, .. })) => tracks.clone(),
+            _ => panic!("no Motion Study dialog"),
+        };
+        let before = keys(&h);
+        let wide = crate::dialogs::card_width(h.app.dialog.as_ref().unwrap());
+        assert!(h.widget("Add Key").is_some(), "the editor shows its keys");
+
+        h.step(&json!({"widget": "Compact"})).unwrap();
+        h.frames(2);
+        assert!(h.widget("Add Key").is_none(), "compact hides the keys");
+        assert!(h.widget("Show editor").is_some());
+        assert!(crate::dialogs::card_width(h.app.dialog.as_ref().unwrap()) < wide, "compact is a narrow card");
+        // Loop and speed stay, and so do the picks for the chart and the collision check.
+        assert!(h.widget("Loop").is_some(), "compact keeps Loop");
+        assert!(h.widget("Point").is_some(), "compact keeps the picks");
+        let Some(Kind::Motion(Mo::MotionStudy { step, playing, looping, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!() };
+        (*step, *playing, *looping) = (0.0, true, false);
+        h.frames(12);
+        let Some(Kind::Motion(Mo::MotionStudy { step, readout, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!() };
+        assert!(*step >= 3.0, "playback runs on while compact (at step {step})");
+        // The hinge's angle at the step shown: 90° at step 0, 0° at step 10.
+        let angle = 90.0 - 9.0 * step.round();
+        assert_eq!(readout.len(), 1, "{readout:?}");
+        assert_eq!(readout[0].1, crate::dialogs_assembly::num(angle, "deg"), "{readout:?} at step {step}");
+        assert!(h.widget(&readout[0].0).is_some() && h.widget(&readout[0].1).is_some(), "the joint and its value are shown");
+        assert!(h.widget(&format!("{} / 10", step.round())).is_some(), "the step count is by the slider");
+        // Step 0 turns the hinge to 90°; the steps played since show it turning on.
+        assert_ne!(displaced(&h), 0, "the pose is shown");
+
+        h.step(&json!({"widget": "Show editor"})).unwrap();
+        h.frames(2);
+        assert!(h.widget("Add Key").is_some(), "the editor is back");
+        assert_eq!(crate::dialogs::card_width(h.app.dialog.as_ref().unwrap()), wide);
+        assert_eq!(keys(&h), before, "the keys are as they were");
+    }
+
     /// What a dialog shows goes away when it closes; an exploded view applied with OK stays.
     #[test]
     fn shown_poses_are_put_back() {
@@ -959,6 +1110,8 @@ mod tests {
                     saved,
                     error: None,
                     analysis: Box::default(),
+                    compact: false,
+                    readout: Vec::new(),
                 }
             } else {
                 Mo::Explode { name: "E".into(), scale: 1.0, shown: None, saved, error: None }
