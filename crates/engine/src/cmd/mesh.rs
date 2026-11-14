@@ -764,7 +764,15 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let prefix = identifier(str_(p, "prefix").unwrap_or(&body));
     let (steps, bodies) = loft_steps(p, &found, &body, &prefix);
-    let features = if bool_(p, "plan_only").unwrap_or(false) { Vec::new() } else { run_steps(s, &steps, cmd)? };
+    let features = if bool_(p, "plan_only").unwrap_or(false) {
+        Vec::new()
+    } else {
+        run_steps(s, &steps, cmd).map_err(|err| {
+            let failure = err.to_string();
+            let advice = loft_advice(&failure);
+            crate::EngineError::Other(format!("{failure}. {advice}"))
+        })?
+    };
     let out = MeshLoftResult {
         body,
         along: found
@@ -792,6 +800,20 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
         features,
     };
     serde_json::to_value(out).map_err(|err| crate::EngineError::Other(err.to_string()))
+}
+
+/// What to try when the kernel refuses a lofted surface, or the intersection of two of them.
+///
+/// The kernel says what the geometry did and not what to do about it, which on a silhouette loft
+/// leaves a caller staring at a gap tolerance with no idea which knob to turn. The answer is
+/// nearly always one of the same few, so say them: a sliver section at a tip, a profile with more
+/// points than the shape has detail, or a direction the silhouette changes abruptly along.
+fn loft_advice(failure: &str) -> &'static str {
+    if failure.contains("solid.combine") {
+        "Intersecting two lofted shapes is the hardest step of all: read one axis at a time and intersect the bodies yourself, or ask for fewer          points so each loft is a simpler surface."
+    } else {
+        "Try a larger margin, which drops the sliver sections at the tips; fewer points, which makes a simpler surface; or another axis, because a          shape whose silhouette changes abruptly along one direction often lofts cleanly along another."
+    }
 }
 
 /// The commands that build the lofts, in order: every section's sketch, then the loft through
@@ -838,4 +860,17 @@ fn loft_steps(p: &Value, found: &Silhouetted, body: &str, prefix: &str) -> (Vec<
         steps.push(step("solid.combine", json!({"targets": [first], "tools": rest, "operation": "intersect"})));
     }
     (steps, bodies)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::loft_advice;
+
+    #[test]
+    fn a_refused_loft_says_what_to_try_next() {
+        let surface = loft_advice("step 48 of the rebuild, `solid.loft`: SMLib loft: Bad Gap");
+        assert!(surface.contains("margin") && surface.contains("points") && surface.contains("another axis"), "{surface}");
+        let boolean = loft_advice("step 86 of the rebuild, `solid.combine`: SMLib boolean: upstream status 1001");
+        assert!(boolean.contains("one axis at a time"), "{boolean}");
+    }
 }
