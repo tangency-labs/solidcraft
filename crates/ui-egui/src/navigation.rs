@@ -2248,6 +2248,41 @@ mod tests {
     }
 
     #[test]
+    fn onshape_right_drag_orbits_and_modified_right_or_middle_drag_pans() {
+        for (button, ctrl, cmd, pans) in
+            [("right", false, false, false), ("right", true, false, true), ("right", false, true, true), ("middle", false, false, true)]
+        {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            crate::prefs::choose_nav_preset(&mut h.app.preferences, crate::prefs::nav_preset("solidworks"));
+            crate::prefs::choose_nav_preset(&mut h.app.preferences, crate::prefs::nav_preset("onshape"));
+            h.app.preferences.orbit_cursor_wrap = false;
+            let before = h.app.cam;
+            let at = h.app.viewport.rect.expect("viewport").center();
+            let button_key = if button == "right" { egui::PointerButton::Secondary } else { egui::PointerButton::Middle };
+            let modifiers = egui::Modifiers { ctrl, command: ctrl || cmd, mac_cmd: cmd, ..Default::default() };
+            // Use native modifier state: the control channel's drag helper only carries Ctrl.
+            h.app.synthetic.push(egui::Event::PointerMoved(at));
+            h.app.synthetic.push(egui::Event::PointerButton { pos: at, button: button_key, pressed: true, modifiers });
+            let end = at + egui::vec2(50.0, 40.0);
+            for step in 1..=20 {
+                h.app.synthetic.push(egui::Event::PointerMoved(at + (end - at) * (step as f32 / 20.0)));
+            }
+            h.app.synthetic.push(egui::Event::PointerButton { pos: end, button: button_key, pressed: false, modifiers });
+            h.frames(30);
+            if pans {
+                assert_eq!(h.app.cam.back(), before.back(), "{button}, Ctrl={ctrl}, Cmd={cmd}: pan preserves orientation");
+                assert_ne!(h.app.cam.target, before.target, "{button}, Ctrl={ctrl}, Cmd={cmd}: pan moves the target");
+            } else {
+                assert_ne!(h.app.cam.back(), before.back(), "a plain right drag orbits after switching from SolidWorks");
+            }
+            assert_eq!(h.app.cam.distance, before.distance);
+            assert!(h.app.viewport.context_menu.is_none(), "a navigation drag does not open the context menu");
+            assert!(h.app.session.undo.is_empty() && h.app.session.selection.is_empty());
+        }
+    }
+
+    #[test]
     fn right_drag_orbits_off_leaves_the_camera_to_the_middle_button() {
         use serde_json::json;
         let mut h = crate::scenario::Harness::new();
