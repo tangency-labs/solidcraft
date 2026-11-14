@@ -37,13 +37,13 @@
 //!   upstream. A STEP inversion of the cone that fails in
 //!   the generator solve returns the error (upstream keeps the location it had already
 //!   classified); its other failures leave `SM_LT_EXTERIOR`, as upstream.
-//! - **Seam lines of the ellipse trim (WR-490).** Upstream's
-//!   `sm_GetEllipseTrimIntervals` evaluates the two seam lines on the given domain's v
-//!   range. A face trimmed along its axis then loses the seam crossing that lies in its
-//!   trimmed-off part. Here the seam lines span the cone's whole height and only their
-//!   sweep comes from the domain; the face's own trims are applied by its caller. Since
-//!   v1.0.1 the trim circles sit at the domain's v limits and the segments are classified
-//!   against the domain, so such an ellipse keeps its part inside the domain either way.
+//! - **Seam lines of the ellipse trim (WR-490).** `sm_GetEllipseTrimIntervals`
+//!   evaluates the two seam lines on the given domain's v range, as upstream. Before
+//!   v1.0.1 a face trimmed along its axis lost the seam crossing in its trimmed-off part;
+//!   since v1.0.1 the trim circles sit at the domain's v limits and the segments are
+//!   classified against the domain, so the ellipse keeps its part inside the domain.
+//!   Seam lines over the cone's whole height (the retired opt-in) added crossings
+//!   outside the domain, which split off zero-length or outside intervals.
 //!   See `plan/upstream-issues/WR-490--ellipse-trim-seam-lines-on-trimmed-domain.md`.
 //! - **Offset factory.** The apex-truncation branch dereferences the result of
 //!   `CreateCanonical` without checking its status (a `NULL` cone crashes, a
@@ -1595,14 +1595,11 @@ pub fn ellipse_trim_intervals(
     let center_top = cone.rev.position.origin() + top_height * cone_axis;
 
     // get cone corners [StartLine start, StartLine end, EndLine start EndLine end]
-    // (statuses ignored). Not upstream (WR-490): the seam lines span the cone's whole
-    // height, as the classification does; only their sweep comes from `uv_domain`
-    // (upstream takes their v range from `uv_domain` too).
-    let seam_domain = {
-        let cone_v = cone.rev.anal_uv_domain.v_interval();
-        let sweep = anal_uv_domain.u_interval();
-        Extent2d::from_bounds(sweep.min(), cone_v.min(), sweep.max(), cone_v.max())
-    };
+    // (statuses ignored). The seam lines run over the domain's v range, as upstream:
+    // since v1.0.1 the trim circles sit at that range's limits, so a seam crossing
+    // outside it is not needed (WR-490), and one taken there would only split the
+    // ellipse at a point outside the domain.
+    let seam_domain = anal_uv_domain;
     let corner = |u: f64, v: f64| -> Result<Point3> {
         Ok(ignored(cone.evaluate_step_point(seam_domain.evaluate(u, v)))?.unwrap_or(Vec3::UNDEF))
     };
@@ -2464,9 +2461,9 @@ mod tests {
         assert!(ivls.is_ok());
     }
 
-    /// WR-490: total length (deg) of the trim intervals of an ellipse on a cylinder r 10,
-    /// h 100 trimmed to v >= 30, and of the same ellipse on the natural domain.
-    fn ellipse_on_a_trimmed_cylinder() -> (f64, f64) {
+    /// WR-490: the trim intervals of an ellipse on a cylinder r 10, h 100 trimmed to
+    /// v >= 30, and the total length (deg) of the same ellipse's on the natural domain.
+    fn ellipse_on_a_trimmed_cylinder() -> (Vec<Extent1d>, f64) {
         // A face already joined to another body: the ellipse of a plane through the axis
         // point (0, 0, 50) that meets the seam (x = 10, y = 0) only at its lowest point,
         // z = 20, in the trimmed-off part. Upstream takes the seam lines from the trimmed
@@ -2511,8 +2508,8 @@ mod tests {
             1e-6,
         )
         .unwrap();
-        let total = |v: &[Extent1d]| v.iter().map(Extent1d::length).sum::<f64>();
-        (total(&ivls), total(&natural))
+        let total = natural.iter().map(Extent1d::length).sum::<f64>();
+        (ivls, total)
     }
 
     /// The part of the ellipse of [`ellipse_on_a_trimmed_cylinder`] inside the trimmed
@@ -2523,15 +2520,21 @@ mod tests {
 
     #[test]
     fn seam_crossing_below_a_trimmed_domain_keeps_the_ellipse() {
-        // WR-490: the seam lines span the cylinder's height; the trim circles sit at the
-        // trim domain's v limits, so the part of the ellipse inside the trimmed domain
-        // (the C++ 1.0.1 gives the same: surface.cone_p2 case wr490_ellipse_on_cylinder_trimmed_v30)
+        // WR-490: the trim circles sit at the trim domain's v limits, so the part of the
+        // ellipse inside the trimmed domain, one interval with no zero-length piece at the
+        // seam crossing z = 20 below it (the C++ 1.0.1 gives the same: surface.cone_p2
+        // case wr490_ellipse_on_cylinder_trimmed_v30)
         let (trimmed, natural) = ellipse_on_a_trimmed_cylinder();
         assert!((natural - 360.0).abs() < 1e-9);
-        assert!(
-            (trimmed - ellipse_part_above_v30()).abs() < 1e-9,
-            "{trimmed}"
-        );
+        let total = trimmed.iter().map(Extent1d::length).sum::<f64>();
+        assert!((total - ellipse_part_above_v30()).abs() < 1e-9, "{trimmed:?}");
+        // z = 50 - 30 cos t = 30 at t = acos(2/3): the one interval between those angles
+        let edge = (2.0_f64 / 3.0).acos().to_degrees();
+        let [only] = trimmed.as_slice() else {
+            panic!("one interval expected: {trimmed:?}");
+        };
+        assert!((only.min() - edge).abs() < 1e-9, "{trimmed:?}");
+        assert!((only.max() - (360.0 - edge)).abs() < 1e-9, "{trimmed:?}");
     }
 
     /// The control points and knots of two NURBs agree bit for bit.
