@@ -683,6 +683,29 @@ pub(crate) fn set_back_frame(
     set_back_dist: f64,
     op: &'static str,
 ) -> Result<(Point3, Point3)> {
+    let (curve, _, end_param) = set_back_params(k, target, e, cp_vertex, set_back_dist, op)?;
+    let pv = curve.evaluate(k, end_param, 1, true, true)?;
+    let orig = pv
+        .first()
+        .copied()
+        .ok_or_else(|| SolidError::blend_failed(op, "the set-back point has no position"))?;
+    let normal = pv
+        .get(1)
+        .copied()
+        .ok_or_else(|| SolidError::blend_failed(op, "the set-back point has no tangent"))?;
+    Ok((orig, normal))
+}
+
+/// Edge `e`'s curve and the parameters on it of [`set_back_frame`]'s walk: where it starts
+/// (the end `cp_vertex` marks, as there) and the point `set_back_dist` along it.
+pub(crate) fn set_back_params<'b>(
+    k: &Kernel,
+    target: &'b Brep,
+    e: EdgeId,
+    cp_vertex: Option<VertexId>,
+    set_back_dist: f64,
+    op: &'static str,
+) -> Result<(&'b Curve, f64, f64)> {
     let curve =
         edge::curve(target, e)?.ok_or_else(|| SolidError::blend_missing(op, "the edge's curve"))?;
     let owner_zone_tol_3d = Some(edge::tolerance(target, e)?);
@@ -694,16 +717,7 @@ pub(crate) fn set_back_frame(
         (ivl.max(), -set_back_dist)
     };
     let end_param = arc_length_param(k, curve, start, length, owner_zone_tol_3d, op)?;
-    let pv = curve.evaluate(k, end_param, 1, true, true)?;
-    let orig = pv
-        .first()
-        .copied()
-        .ok_or_else(|| SolidError::blend_failed(op, "the set-back point has no position"))?;
-    let normal = pv
-        .get(1)
-        .copied()
-        .ok_or_else(|| SolidError::blend_failed(op, "the set-back point has no tangent"))?;
-    Ok((orig, normal))
+    Ok((curve, start, end_param))
 }
 
 /// `SM_CAST_PTR(SmBSplineCurve, ..)` succeeds: the kinds derived from

@@ -44,7 +44,7 @@
 //! | `curved_least` (private)     | `sm_SbCurvedLeast` (37c9e1d)                          |
 //! | `gather_ends` (private)      | `BuildSetBackFill`'s `gather`                         |
 //! | `grow_curved` (private)      | `BuildSetBackFill`'s growth beside curved faces (37c9e1d) |
-//! | `springs_on_faces`, `springs_refusal` (private) | none (solidcore#2343 (d))          |
+//! | `springs_on_faces`, `springs_refusal`, `largest_clear_scale`, `pieces_hold`, `edge_to_setback` (private) | none (solidcore#2343 (d)) |
 //!
 //! Deviations: the Setback's own members are kept in [`SetbackCorner`] on the corner
 //! ([`FilletCorner::setback`]) from its creation (`SetFillOrder`) until its patches are
@@ -66,7 +66,11 @@
 //! setback that takes one off its face is refused, naming the largest that keeps every one
 //! on its face, or none where none down to the rails' crossing does or the growth's
 //! setbacks take one off (solidcore#2343 (d); the fork's ruling checked the curve's parameter-plane
-//! control triangle instead, and built no check).
+//! control triangle instead, and built no check). Likewise the piece the corner takes out of
+//! each face, between its spring curve and the vertex, is checked to hold no other edge or
+//! loop of the face ([`crate::blend::blend_corner::piece`], #2343 (d) condition 2); a setback
+//! whose piece holds one, or is not shown not to, is refused, naming the largest at which
+//! neither condition fails.
 //!
 //! [`FilletCorner::setback`]: crate::blend::fillet_corner::p3::FilletCorner::setback
 
@@ -74,12 +78,15 @@ use std::sync::Arc;
 
 use crate::blend::blend_corner::ball::{solver_of_edgeuse_or_mate, BallSolvers};
 use crate::blend::blend_corner::on_face::{self, Clearance};
+use crate::blend::blend_corner::piece::{
+    restrict, section_trace, CornerPiece, Decision, OtherEdge,
+};
 use crate::blend::blend_corner::swept::fmt_g;
 use crate::blend::blend_corner::{BlendCorner, BlendCornerEvent};
 use crate::blend::blend_refusal::{BlendRefusal, SetbackTooLongWhy, SetbackTooShortWhy};
 use crate::blend::blend_setback::{
     bisect_thousandths, certified_scale, containment_kept, distances, fill_hole_counted,
-    fill_hole_probe, spring_curve, Edge, Face, FaceKind, Fill, FillStats, Probe, Round,
+    fill_hole_probe, spring_curve, Edge, Face, FaceKind, FacePlane, Fill, FillStats, Probe, Round,
     SpringCurve,
 };
 use crate::blend::fillet_corner::p1::{face_by_two_edgeuses, test_g1_continuity};
@@ -90,7 +97,7 @@ use crate::blend::fillet_geom::p1::{
     CornerLookup, FilStatus, FilletBrep, FilletCornerId, FilletEdgeType, FilletErrorType,
     FilletGeomId, FilletVertexType,
 };
-use crate::blend::fillet_geom::p2::set_back_frame;
+use crate::blend::fillet_geom::p2::{set_back_frame, set_back_params};
 use crate::blend::fillet_geom::p4::set_edge_curve;
 use crate::blend::fillet_solver::p1::{FilletSolverType, FilletSurfaceGeneratorType};
 use crate::blend::fillet_solver::p5::is_concave_edge;
@@ -2029,10 +2036,15 @@ fn grow_curved<S: SetbackSolvers>(
         growth.planes,
         growth.tol,
     )?;
-    if springs == Springs::Leave {
+    if matches!(springs, Springs::Leave | Springs::Holds) {
+        let what = if springs == Springs::Leave {
+            "a spring curve is not shown to stay on its face"
+        } else {
+            "the corner's piece of a face is not shown to hold no other edge or loop of it"
+        };
         return Ok(Err(SetbackRefusal::no_room(
             format!(
-                "Fillet Error: the setback corner's fill stays no more concave than its faces only from {} times its setbacks, where a spring curve is not shown to stay on its face: no setback builds",
+                "Fillet Error: the setback corner's fill stays no more concave than its faces only from {} times its setbacks, where {what}: no setback builds",
                 fmt_g(hi)
             ),
             Some(0.0),
@@ -2080,6 +2092,9 @@ enum Springs {
     /// One is not made: [`spring_curve`] refuses the rails' ends (the fill, which makes it
     /// from the same ends, says why).
     Unmade,
+    /// Each keeps clear, but the corner's piece of a face holds another edge or loop of the
+    /// face, or is not shown not to ([`pieces_hold`]; solidcore#2343 (d), condition 2).
+    Holds,
 }
 
 /// The derivative along `v` of `face`'s unit normal field ([`Face::distance`]'s normal, out
@@ -2287,7 +2302,201 @@ fn springs_on_faces(
             }
         }
     }
-    Ok(Springs::Clear)
+    // condition 2: what the corner takes out of each face holds no other edge of it
+    Ok(
+        match pieces_hold(k, target, pseudo, corner, planes, &springs, tol, &nul)? {
+            Decision::Clear => Springs::Clear,
+            Decision::Blocked | Decision::Undecided => Springs::Holds,
+        },
+    )
+}
+
+/// [`edge_to_setback`]'s answer: the restricted pieces with their rounding, the setback point
+/// and the edge's tangent there.
+type EdgeRun = (Vec<(Vec<on_face::Hom>, f64)>, Point3, Vec3);
+
+/// Blended edge `e`'s curve from the corner's vertex `vtx` to its setback point, as the rational
+/// Bezier pieces of its B-spline restricted there ([`restrict`]), each with its rounding, and
+/// the setback point and the edge's tangent there ([`set_back_frame`]'s, which the end section
+/// is square to). `None` where the curve has no hull ([`on_face::bezier_spans`]) or its
+/// pieces do not run from the vertex to the setback point within the edge's tolerance and
+/// `tol` (a curve whose parameter is not its B-spline's).
+fn edge_to_setback(
+    k: &Kernel,
+    target: &Brep,
+    corner: &FilletCorner,
+    vtx: VertexId,
+    e: EdgeId,
+    tol: f64,
+) -> Result<Option<EdgeRun>> {
+    let setback = corner.set_back_dist_along(target, e)?;
+    let (curve, from, to) = set_back_params(k, target, e, Some(vtx), setback, OP_FILL)?;
+    let (at, along) = set_back_frame(k, target, e, Some(vtx), setback, OP_FILL)?;
+    let Some(spans) = on_face::bezier_spans(k, curve)? else {
+        return Ok(None);
+    };
+    let parts = restrict(&spans, from, to);
+    let near = tol + edge::tolerance(target, e)?;
+    let euclid = |h: &on_face::Hom| Point3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]);
+    let (Some(first), Some(last)) = (
+        parts.first().and_then(|(p, _)| p.first()),
+        parts.last().and_then(|(p, _)| p.last()),
+    ) else {
+        return Ok(None);
+    };
+    let vpoint = vertex::point(target, vtx)?;
+    let from_vertex = euclid(first).distance(vpoint) <= near && euclid(last).distance(at) <= near;
+    if !from_vertex {
+        return Ok(None);
+    }
+    Ok(Some((parts, at, along)))
+}
+
+/// The rational Bezier pieces of an edge's curve over its own interval `[lo, hi]`
+/// ([`restrict`]) and their largest rounding past [`on_face::clear_of`]'s count, where they
+/// run from the edge's first point to its last of `points` within `near` (the curve's
+/// parameter its B-spline's); otherwise the whole curve's pieces, which hold the edge.
+fn edge_pieces(
+    spans: &[on_face::Span],
+    lo: f64,
+    hi: f64,
+    points: &[Point3],
+    near: f64,
+) -> (Vec<Vec<on_face::Hom>>, f64) {
+    let euclid = |h: &on_face::Hom| Point3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]);
+    let parts = restrict(spans, lo, hi);
+    let ends = (
+        parts.first().and_then(|(p, _)| p.first()).map(euclid),
+        parts.last().and_then(|(p, _)| p.last()).map(euclid),
+    );
+    if let ((Some(a), Some(b)), Some(&pa), Some(&pb)) = (ends, points.first(), points.last()) {
+        if a.distance(pa) <= near && b.distance(pb) <= near {
+            let off = parts.iter().fold(0.0f64, |m, (_, o)| m.max(*o));
+            return (parts.into_iter().map(|(p, _)| p).collect(), off);
+        }
+    }
+    (spans.iter().map(|(_, p)| p.clone()).collect(), 0.0)
+}
+
+/// solidcore#2343 (d), condition 2: whether the corner's piece of each face
+/// ([`CornerPiece`]) holds another edge or loop of the face, at the setbacks its vertices are
+/// placed at, its spring curves `springs` ([`corner_springs`]). On face `F_f` the piece runs
+/// from the vertex along the blended edge after `F_f` to its setback point, along that
+/// blend's end section on the face to its rail end `S_f` ([`section_trace`]), along the
+/// spring curve to `M_f`, along the end section of the blend before `F_f` to its setback
+/// point, and back along that blend's edge to the vertex; each other edge of the face (not at
+/// the vertex, its seam edges once) is decided against it ([`CornerPiece::decide`]), with the
+/// gap the spring curves keep ([`springs_on_faces`]). [`Decision::Undecided`] where a side is
+/// not made or the plane does not map it.
+#[allow(clippy::too_many_arguments)]
+fn pieces_hold(
+    k: &Kernel,
+    target: &Brep,
+    pseudo: &FilletBrep,
+    corner: &FilletCorner,
+    planes: &CornerPlanes,
+    springs: &[SpringCurve],
+    tol: f64,
+    nul: &dyn Fn() -> SolidError,
+) -> Result<Decision> {
+    let vtx = corner.vertex.ok_or_else(nul)?;
+    let all = corner.all_eus.as_ref().ok_or_else(nul)?;
+    let n = planes.faces.len();
+    if springs.len() != n {
+        return Ok(Decision::Undecided);
+    }
+    let point = |i: usize| -> Result<Point3> {
+        pseudo.vertex_point(*corner.vertices.get(i).ok_or_else(nul)?)
+    };
+    for (f, ((&face_id, face), spring)) in planes
+        .faces
+        .iter()
+        .zip(&planes.planes)
+        .zip(springs)
+        .enumerate()
+    {
+        let before = (f + n - 1).checked_rem(n).ok_or_else(nul)?;
+        let (s_f, m_f) = (point(3 * f + 2)?, point(3 * f)?);
+        let Ok(plane) = FacePlane::new(face, s_f, m_f) else {
+            return Ok(Decision::Undecided);
+        };
+        let after_edge = eu1::edge(target, *all.get(f).ok_or_else(nul)?)?.ok_or_else(nul)?;
+        let before_edge = eu1::edge(target, *all.get(before).ok_or_else(nul)?)?.ok_or_else(nul)?;
+        let (Some((after, e_after, along_after)), Some((before_parts, e_before, along_before))) = (
+            edge_to_setback(k, target, corner, vtx, after_edge, tol)?,
+            edge_to_setback(k, target, corner, vtx, before_edge, tol)?,
+        ) else {
+            return Ok(Decision::Undecided);
+        };
+        let (Some(section_after), Some(section_before)) = (
+            section_trace(face, along_after, e_after, s_f, tol),
+            section_trace(face, along_before, e_before, m_f, tol),
+        ) else {
+            return Ok(Decision::Undecided);
+        };
+        let mut piece = CornerPiece::new(plane);
+        let mut made = true;
+        for (part, off) in after {
+            made &= piece.push(part, off, false);
+        }
+        made &= piece.push(section_after.0, section_after.1, false);
+        made &= piece.push(spring.from_p.curve.clone(), 0.0, true);
+        let mut from_q = spring.from_q.curve.clone();
+        from_q.reverse();
+        made &= piece.push(from_q, 0.0, true);
+        let (mut back, off) = section_before;
+        back.reverse();
+        made &= piece.push(back, off, false);
+        for (mut part, off) in before_parts.into_iter().rev() {
+            part.reverse();
+            made &= piece.push(part, off, false);
+        }
+        if !made {
+            return Ok(Decision::Undecided);
+        }
+        let mut others = Vec::new();
+        let mut seen = Vec::new();
+        for e in face4::edges(target, face_id, None, false, None)? {
+            if seen.contains(&e) {
+                continue;
+            }
+            seen.push(e);
+            // an edge at the vertex is left out, as condition 1 leaves it out: at a Setback
+            // corner the face meets the vertex between its two blended edges only, which
+            // bound the piece themselves (the piece's sides along them stop at their
+            // setbacks, and (a) checks the rest of the face's edges against those sides). A
+            // seam ending at the vertex, or a third edge of the face's loop there, is not
+            // expected at a Setback corner and is not checked.
+            if edge::start_vertex(target, e)? == Some(vtx)
+                || edge::end_vertex(target, e)? == Some(vtx)
+            {
+                continue;
+            }
+            let Some(curve) = edge::curve(target, e)? else {
+                return Ok(Decision::Undecided);
+            };
+            let Some(spans) = on_face::bezier_spans(k, curve)? else {
+                return Ok(Decision::Undecided);
+            };
+            let ivl = edge::interval(target, e)?;
+            let mut points = Vec::new();
+            for t in [ivl.min(), ivl.mid(), ivl.max()] {
+                points.push(curve.evaluate_point(k, t)?);
+            }
+            let edge_tol = edge::tolerance(target, e)?;
+            let (pieces, off) = edge_pieces(&spans, ivl.min(), ivl.max(), &points, tol + edge_tol);
+            others.push(OtherEdge {
+                pieces,
+                gap: tol + edge_tol + off,
+                points,
+            });
+        }
+        match piece.decide(k, &others)? {
+            Decision::Clear => {}
+            other => return Ok(other),
+        }
+    }
+    Ok(Decision::Clear)
 }
 
 /// How many times [`springs_refusal`] halves the last cell of its grid of thousandths at
@@ -2298,24 +2507,61 @@ const REFINE: usize = 30;
 const SPRING_LEAVES: &str =
     "takes a setback corner's spring curve off its face (it comes within the tolerances of another edge of the face, or is not shown not to)";
 
-/// solidcore#2343 (d): where a spring curve leaves its face at the corner's setbacks
-/// ([`springs_on_faces`]), the refusal naming the largest common scale of them at which every
-/// spring curve stays inside its face, to the corner's tolerance. The growth's bisection on
-/// the grid of thousandths ([`bisect_thousandths`], each trial placing the setback vertices
-/// again as the growth does) brackets it between 1 and the least scale at which every setback
-/// reaches its edge's least, where the rails cross; the last grid cell is then halved until
-/// it is shorter than the tolerance along every edge ([`REFINE`] halvings at most). Each
-/// search assumes a spring curve on its face at a scale stays on it at every smaller one (the
-/// curve shrinks toward the vertex with its setbacks), as the growth assumes certification
-/// monotone: checked on the cases, not proved. The scale named is always one the check itself
-/// found clear (the bisection's `hi - 1` is an index it was asked about and cleared, or `lo`;
+/// What a setback whose corner's piece of a face holds another edge does, for
+/// [`setback_too_long`].
+const PIECE_HOLDS: &str =
+    "takes a piece out of a face at the setback corner that holds another edge or loop of the face (or is not shown not to)";
+
+/// The largest scale of a setback corner's setbacks (`growth`'s base) at which `off` finds
+/// nothing wrong, to the corner's tolerance: the growth's bisection on the grid of thousandths
+/// ([`bisect_thousandths`]) brackets it between 1 and `least_scale`, the least at which every
+/// setback reaches its edge's least, where the rails cross; the last grid cell is then halved
+/// until it is shorter than the tolerance along every edge ([`REFINE`] halvings at most). The
+/// search assumes that what `off` checks, clear at a scale, stays clear at every smaller one:
+/// checked on the cases, not proved. The scale named is always one `off` itself found clear
+/// (the bisection's `hi - 1` is an index it was asked about and cleared, or the grid's first;
 /// each halving keeps its cleared end), so it is sound even where that assumption fails: it
-/// can only be smaller than need be. One asked for is refused as
-/// [`BlendRefusal::SetbackTooLong`] naming that scale times it; the rule's, naming those
-/// setbacks. None at or above the least: no setback builds. A trial whose vertices are not
-/// placed counts as off its face, which again can only make the scale named smaller; whether
-/// the fill certifies there is the fill's to say when that setback is asked. `None` where
-/// every spring curve stays on its face, or one is not made (the fill says why).
+/// can only be smaller than need be. `None` where none at or above `least_scale` is clear.
+fn largest_clear_scale(
+    growth: &Growth<'_>,
+    least_scale: f64,
+    mut off: impl FnMut(f64) -> Result<bool>,
+) -> Result<Option<f64>> {
+    let longest = growth.base.iter().fold(0.0f64, |m, &s| smax(m, s));
+    let lo = (1..1000).find(|&i| f64::from(i) >= 1000.0 * least_scale);
+    Ok(match lo {
+        Some(lo) if !off(f64::from(lo) / 1000.0)? => {
+            // hi - 1: lo, or an index the bisection asked about and found clear
+            let hi = bisect_thousandths(lo, 1000, |i| off(f64::from(i) / 1000.0))?;
+            let (mut clear, mut out) = (f64::from(hi - 1) / 1000.0, f64::from(hi) / 1000.0);
+            for _ in 0..REFINE {
+                if (out - clear) * longest <= growth.tol {
+                    break;
+                }
+                let mid = 0.5 * (clear + out);
+                if off(mid)? {
+                    out = mid;
+                } else {
+                    clear = mid;
+                }
+            }
+            Some(clear)
+        }
+        _ => None,
+    })
+}
+
+/// solidcore#2343 (d): where a spring curve leaves its face at the corner's setbacks, or the
+/// corner's piece of a face holds another edge of it ([`springs_on_faces`]: conditions 1 and
+/// 2), the refusal naming the largest common scale of them at which neither happens, to the
+/// corner's tolerance ([`largest_clear_scale`], each trial placing the setback vertices again
+/// as the growth does). One asked for is refused as [`BlendRefusal::SetbackTooLong`] naming
+/// that scale times it, [`SetbackTooLongWhy::SpringLeaves`] or
+/// [`SetbackTooLongWhy::PieceHoldsEdge`] by which condition the asked setbacks fail; the
+/// rule's, naming those setbacks. None at or above the least: no setback builds. A trial whose
+/// vertices are not placed counts as failing, which again can only make the scale named
+/// smaller; whether the fill certifies there is the fill's to say when that setback is asked.
+/// `None` where both hold, or a spring curve is not made (the fill says why).
 #[allow(clippy::too_many_arguments)]
 fn springs_refusal<S: SetbackSolvers>(
     k: &Kernel,
@@ -2329,9 +2575,21 @@ fn springs_refusal<S: SetbackSolvers>(
 ) -> Result<Option<SetbackRefusal>> {
     let err = || SolidError::blend_failed(OP_FILL, "the spring curves could not be checked");
     let at_base = springs_on_faces(k, target, pseudo, corner, planes, tol)?;
-    if at_base != Springs::Leave {
-        return Ok(None);
-    }
+    let (why, test, none, rule) = match at_base {
+        Springs::Clear | Springs::Unmade => return Ok(None),
+        Springs::Leave => (
+            SPRING_LEAVES,
+            SetbackTooLongWhy::SpringLeaves,
+            "Fillet Error: no setback at or above where the rails cross keeps the setback corner's spring curves on their faces",
+            "the rule's setbacks take a setback corner's spring curve off its face (it comes within the tolerances of another edge of the face, or is not shown not to): setbacks of",
+        ),
+        Springs::Holds => (
+            PIECE_HOLDS,
+            SetbackTooLongWhy::PieceHoldsEdge,
+            "Fillet Error: no setback at or above where the rails cross keeps the setback corner's spring curves on their faces and takes no other edge or loop of a face",
+            "the rule's setbacks take a piece out of a face at the setback corner that holds another edge or loop of the face (or is not shown not to): setbacks of",
+        ),
+    };
     let vtx = corner.vertex.ok_or_else(err)?;
     let asked = set_back_fill_of(fills, vtx);
     let sb = corner.setback.as_ref().ok_or_else(err)?;
@@ -2351,53 +2609,27 @@ fn springs_refusal<S: SetbackSolvers>(
         most: vec![BIG_DOUBLE; base.len()],
         base,
     };
-    let longest = growth.base.iter().fold(0.0f64, |m, &s| smax(m, s));
-    let mut leaves_at = |scale: f64| -> Result<bool> {
+    let fit = largest_clear_scale(&growth, least_scale, |scale| {
         Ok(match growth.place(pseudo, corner, solvers, scale)? {
             Some(_) => springs_on_faces(k, target, pseudo, corner, planes, tol)? != Springs::Clear,
             None => true,
         })
-    };
-    let lo = (1..1000).find(|&i| f64::from(i) >= 1000.0 * least_scale);
-    let fit = match lo {
-        Some(lo) if !leaves_at(f64::from(lo) / 1000.0)? => {
-            // hi - 1: lo, or an index the bisection asked about and found clear
-            let hi = bisect_thousandths(lo, 1000, |i| leaves_at(f64::from(i) / 1000.0))?;
-            let (mut clear, mut off) = (f64::from(hi - 1) / 1000.0, f64::from(hi) / 1000.0);
-            for _ in 0..REFINE {
-                if (off - clear) * longest <= tol {
-                    break;
-                }
-                let mid = 0.5 * (clear + off);
-                if leaves_at(mid)? {
-                    off = mid;
-                } else {
-                    clear = mid;
-                }
-            }
-            Some(clear)
-        }
-        _ => None,
-    };
+    })?;
     let Some(fit) = fit else {
-        return Ok(Some(SetbackRefusal::no_room(
-            "Fillet Error: no setback at or above where the rails cross keeps the setback corner's spring curves on their faces",
-            Some(0.0),
-        )));
+        return Ok(Some(SetbackRefusal::no_room(none, Some(0.0))));
     };
     if let Some(a) = asked {
-        return Ok(Some(setback_too_long(
-            a,
-            vtx,
-            fit * a.setback,
-            SPRING_LEAVES,
-            SetbackTooLongWhy::SpringLeaves,
-        )));
+        return Ok(Some(setback_too_long(a, vtx, fit * a.setback, why, test)));
     }
     let list: Vec<String> = growth.base.iter().map(|&s| fmt_g(fit * s)).collect();
     Ok(Some(SetbackRefusal::not_built(format!(
-        "Fillet Error: the rule's setbacks take a setback corner's spring curve off its face (it comes within the tolerances of another edge of the face, or is not shown not to): setbacks of {} keep every spring curve on its face",
-        list.join(", ")
+        "Fillet Error: {rule} {} keep every spring curve on its face{}",
+        list.join(", "),
+        if test == SetbackTooLongWhy::PieceHoldsEdge {
+            " and take no other edge or loop of a face"
+        } else {
+            ""
+        }
     ))))
 }
 
