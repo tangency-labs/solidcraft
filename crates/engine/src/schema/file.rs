@@ -902,6 +902,32 @@ pub struct RecoveryDiscardResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Write the open design, or a design file, as a `.zip` that issue trackers accept. A copy: the
+/// open design keeps its file and saved state.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SaveForSharingParams {
+    /// The `.zip` to write: the design container, which is a ZIP, under a name an issue tracker
+    /// takes. `doc.open` opens it.
+    pub path: String,
+    /// A design file to save instead of the open design (a crash report's design); a JSON design
+    /// becomes a container. A blank value counts as left out.
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+/// What `file.save_for_sharing` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SaveForSharingResult {
+    /// The file written.
+    pub path: String,
+    /// Its size in bytes.
+    pub bytes: usize,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `file.export` returns: what the export command of the format returns.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(untagged)]

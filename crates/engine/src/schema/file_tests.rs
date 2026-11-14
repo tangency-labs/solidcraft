@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use super::{
     Export3mfParams, ExportMeshParams, ExportParams, ExportStepParams, ExportStlParams, ExportUrdfParams, FileExportResult, NewerFileReport,
     OpenElsewhere, OpenParams, OpenResult, OpenedDesign, RecoverParams, RecoverResult, RecoveryDiscardParams, RecoveryDiscardResult,
-    RecoveryListParams, RecoveryListResult,
+    RecoveryListParams, RecoveryListResult, SaveForSharingParams,
 };
 use crate::Session;
 use crate::recovery::Autosaver;
@@ -30,6 +30,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RecoveryListParams>(), &["dir"]);
     assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id"]);
     assert_keys(input_schema_for::<RecoveryDiscardParams>(), &["all", "dir", "id"]);
+    assert_keys(input_schema_for::<SaveForSharingParams>(), &["path", "source"]);
 }
 
 /// The words the open contract takes are the ones the handler's readers take, and its limits

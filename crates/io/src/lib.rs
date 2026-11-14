@@ -25,6 +25,7 @@ pub use design::{
     read_drawing_file, write_design_container, write_design_container_with_cache, write_design_container_with_compression,
     write_design_container_with_preview, write_design_container_with_provenance, write_design_container_with_thumbnail, write_drawing_container,
 };
+pub use design::{SHARED_DESIGN_EXT, is_shared_design_path, shared_design_name};
 pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
 pub mod limits;

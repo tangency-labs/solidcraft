@@ -90,6 +90,14 @@ fn screenshot(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) -> bool {
     retake
 }
 
+/// The design to attach: GitHub takes no `.sc` file, so it is saved as a `.zip` (#4019).
+fn design(app: &mut SolveApp, draft: &Draft, ui: &mut Ui) {
+    ui_kit::text(ui, solidcraft_ui_text::tr("issue.attach_design"), ui_kit::Text::Note("design"));
+    if ui_kit::button(ui, solidcraft_ui_text::tr("issue.save_design"), ui_kit::Button::Enabled(app.services.pick_save.is_some())).clicked() {
+        super::save_design(app, draft.design.clone());
+    }
+}
+
 /// Returns whether to retake the screenshot and whether the user closed the form.
 pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -> (bool, bool) {
     let mut retake = false;
@@ -227,6 +235,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                             draft.opened_github = false;
                         }
                         retake = screenshot(app, draft, ui);
+                        design(app, draft, ui);
                         ui_kit::text(
                             ui,
                             tr_label("App/system information and command settings are included. Review private details before sharing."),

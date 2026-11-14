@@ -28,7 +28,7 @@ use crate::schema::file::GpgKeyInfo;
 use crate::schema::file::{
     ExportResult, GpgKeysParams, GpgKeysResult, NewerFileReport, OpenElsewhere, OpenResult, OpenedDesign, OpenedDrawing, OpenedFile,
     OpenedPointCloud, RecoverParams, RecoverResult, RecoveredDesign, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams,
-    RecoveryListResult, SignatureRecord, SignatureReport, VerifyParams, VerifyResult,
+    RecoveryListResult, SaveForSharingParams, SaveForSharingResult, SignatureRecord, SignatureReport, VerifyParams, VerifyResult,
 };
 use crate::schema::insert_mesh::{InsertMeshParams, MeshInserted};
 use crate::schema::insert_step::{InsertStepParams, StepInserted};
@@ -56,7 +56,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&OPEN_CONTRACT)
         .output(output_schema_for::<OpenResult>)
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
+        .params("path: a .zip holding one design (opens unsaved), .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -95,6 +95,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&GPG_KEYS_CONTRACT)
         .output(output_schema_for::<GpgKeysResult>)
         .params("→ {available, keys: [{fingerprint, key_id, user_id, on_card}]}: the GnuPG secret keys a save can sign with (desktop only)"),
+    CommandSpec::new("file.save_for_sharing", "Save Design to Share (.zip)", crate::checked!("file.save_for_sharing", save_for_sharing))
+        .icon("save")
+        .noundo()
+        .contract(&SAVE_FOR_SHARING_CONTRACT)
+        .output(output_schema_for::<SaveForSharingResult>)
+        .params("path: the .zip to write (e.g. bracket.sc.zip): the design container, which is a ZIP, under a name issue trackers such as GitHub accept (they take no .sc); doc.open opens it; source?: a design file to save instead of the open design (a crash report's design.sc; a JSON design becomes a container) → path, bytes. A copy: the open design keeps its file and saved state"),
     CommandSpec::new("doc.recovery_list", "Recoverable Designs", crate::checked!("doc.recovery_list", recovery_list)).icon("restore")
         .noundo()
         .contract(&RECOVERY_LIST_CONTRACT)
@@ -230,6 +236,7 @@ const NEW_DESIGN_CONTRACT: TypedContract<NewDesignParams> = TypedContract::new()
 const EXPORT_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportParams> = crate::schema::TypedContract::new();
 const SAVE_CONTRACT: TypedContract<SaveParams> = TypedContract::new();
 const SAVE_AS_CONTRACT: TypedContract<SaveAsParams> = TypedContract::new();
+const SAVE_FOR_SHARING_CONTRACT: TypedContract<SaveForSharingParams> = TypedContract::new();
 const VERIFY_CONTRACT: TypedContract<VerifyParams> = TypedContract::new();
 const GPG_KEYS_CONTRACT: TypedContract<GpgKeysParams> = TypedContract::new();
 const EXPORT_STEP_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportStepParams> = crate::schema::TypedContract::new();
@@ -1284,14 +1291,26 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     // A file with provenance is evaluated from its timeline, never from a cache the signature
     // does not cover.
     let saved = if solidcraft_io::has_design_provenance(path) { None } else { saved };
-    let opened = Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation());
+    let shared = solidcraft_io::is_shared_design_path(path);
+    let opened = if shared {
+        // Component links are relative to the zip, which the session then forgets (saving asks where).
+        let mut doc = doc;
+        super::component_link::resolve_design_links(&mut doc, Some(path));
+        Session::opened_validating(doc, saved.as_ref(), s.validation()).located(None)
+    } else {
+        Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation())
+    };
     opened_design(s, opened, path, read_only, disk, verify, None)
 }
 
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
 fn read_design(s: &mut Session, path: &str) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
     let (mut doc, saved) = solidcraft_io::read_design_file(path, s.open_preview.take()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    if let Some(stem) = default_name_for(&doc.name, path) {
+    // A design shared as a zip (#4019) takes the name of the design in it, and has no file of its
+    // own yet: saving asks where, rather than replacing the zip.
+    let shared = solidcraft_io::is_shared_design_path(path);
+    let named_after = if shared { solidcraft_io::shared_design_name(path) } else { path.to_string() };
+    if let Some(stem) = default_name_for(&doc.name, &named_after) {
         doc.name = stem;
     }
     Ok((doc, saved))
@@ -1309,7 +1328,8 @@ fn opened_design(
     checked: Option<Option<solidcraft_io::ProvenanceReport>>,
 ) -> Result<Value> {
     s.replace_design(opened);
-    s.disk = disk;
+    // A design shared as a zip has no file of its own to watch (#4019).
+    s.disk = if solidcraft_io::is_shared_design_path(path) { None } else { disk };
     s.read_only = read_only;
     s.provenance_chain = solidcraft_io::read_design_provenance_chain_file(path);
     // A staged open checks on its worker before it lands; the report is then just taken here.
@@ -2063,6 +2083,49 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
         bool_(p, "sign").unwrap_or(false),
         str_(p, "signing_key"),
     )
+}
+
+/// The open design, or the design file `source`, as a `.zip` for an issue tracker that takes no
+/// `.sc` attachment (#4019). A design container is a ZIP already, so it is written as it
+/// is; a JSON design becomes a container first. A copy: the session keeps its file and saved state.
+fn save_for_sharing(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.save_for_sharing";
+    let path = path_arg(p, cmd)?;
+    if !solidcraft_io::is_shared_design_path(path) {
+        return Err(bad(cmd, "`path` must be a .zip file"));
+    }
+    solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
+    // A copy never replaces the open design's own file (named directly or through a link).
+    if let Some(open) = s.path.as_deref()
+        && (open == path || matches!((std::fs::canonicalize(open), std::fs::canonicalize(path)), (Ok(a), Ok(b)) if a == b))
+    {
+        return Err(bad(cmd, "`path` is the open design's own file; share to a different .zip"));
+    }
+    let bytes = match str_(p, "source").filter(|x| !x.trim().is_empty()) {
+        Some(source) => {
+            let bytes =
+                solidcraft_io::vfs::read(source, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| EngineError::Other(format!("{source}: {e}")))?;
+            // Only a design is shared.
+            let doc = solidcraft_io::read_design(&bytes).map_err(|e| EngineError::Other(format!("{source}: {e}")))?;
+            let container = solidcraft_io::is_design_container(&bytes)
+                && solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes)).is_ok_and(|r| r.is_container());
+            if container { bytes } else { solidcraft_io::write_design_container_with_compression(&doc, solidcraft_io::DesignCompression::Compact)? }
+        }
+        // Without the evaluated model: the zip is smaller, and the design rebuilds the same.
+        // Links to component files are rebased to the folder the zip is saved in.
+        None => {
+            // Like Save: a move not captured yet isn't in the document, so the copy would disagree with the view.
+            if s.moved_uncaptured() {
+                return Err(EngineError::Other(format!(
+                    "{path}: a component is moved and not captured yet; component.capture_position keeps the move and component.revert_position puts it back, then share"
+                )));
+            }
+            s.design_container_at(Some(path), solidcraft_io::DesignCompression::Compact, false, false)?
+        }
+    };
+    solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    serde_json::to_value(SaveForSharingResult { path: path.to_string(), bytes: bytes.len(), param_warnings: Vec::new() })
+        .map_err(|e| EngineError::Other(format!("{cmd}: {e}")))
 }
 
 fn default_design_format(path: &str) -> &'static str {
@@ -3983,6 +4046,54 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("solidcraft-name-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_design_saved_for_sharing_opens_from_its_zip_unsaved() {
+        let dir = name_dir("share");
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
+        let file = dir.join(format!("bracket.{}", solidcraft_io::DESIGN_EXT));
+        s.execute("file.save_as", &json!({"path":file})).unwrap();
+        let zip = dir.join(format!("bracket.{}.zip", solidcraft_io::DESIGN_EXT));
+        s.execute("file.save_for_sharing", &json!({"path":zip})).unwrap();
+        assert!(solidcraft_io::is_design_container(&std::fs::read(&zip).unwrap()), "the container itself, not a zip in a zip");
+        assert_eq!(s.path.as_deref(), Some(&*file.to_string_lossy()), "a copy: the design keeps its file");
+        let mut opened = Session::default();
+        let r = opened.execute("doc.open", &json!({"path":zip})).unwrap();
+        assert_eq!((r["name"].as_str(), opened.path.as_deref()), (Some("bracket"), None), "saving the opened design asks where");
+        assert_eq!(opened.doc.features, s.doc.features);
+        assert_eq!(opened.model.state().bodies.len(), 1);
+        // A design file renamed to .zip opens as it is.
+        let renamed = dir.join(format!("renamed.{}.zip", solidcraft_io::DESIGN_EXT));
+        std::fs::copy(&file, &renamed).unwrap();
+        let mut opened = Session::default();
+        opened.execute("doc.open", &json!({"path":renamed})).unwrap();
+        assert_eq!((opened.doc.features.clone(), opened.path.clone()), (s.doc.features.clone(), None));
+        // A crash report's design is saved as it is, a JSON one as a container; anything but a
+        // design or a .zip path is refused.
+        let wrapped = dir.join("crash.zip");
+        s.execute("file.save_for_sharing", &json!({"path":wrapped, "source":file})).unwrap();
+        assert_eq!(std::fs::read(&wrapped).unwrap(), std::fs::read(&file).unwrap());
+        let json_file = dir.join("bracket.json");
+        s.execute("file.export", &json!({"path":json_file})).unwrap();
+        s.execute("file.save_for_sharing", &json!({"path":wrapped, "source":json_file})).unwrap();
+        let shared = std::fs::read(&wrapped).unwrap();
+        assert!(solidcraft_io::is_design_container(&shared));
+        assert_eq!(solidcraft_io::read_design(&shared).unwrap().features, s.doc.features);
+        std::fs::write(dir.join("notes.txt"), "not a design").unwrap();
+        assert!(s.execute("file.save_for_sharing", &json!({"path":wrapped, "source":dir.join("notes.txt")})).is_err());
+        assert!(s.execute("file.save_for_sharing", &json!({"path":dir.join(format!("bracket.{}", solidcraft_io::DESIGN_EXT))})).is_err());
+        // The open design's own file is never the copy, and a move not captured yet is refused.
+        let own = dir.join("own.zip");
+        s.execute("file.save_as", &json!({"path":own})).unwrap();
+        let before = std::fs::read(&own).unwrap();
+        assert!(s.execute("file.save_for_sharing", &json!({"path":own})).is_err());
+        assert_eq!(std::fs::read(&own).unwrap(), before);
+        s.pending_moves.insert(1, solidcraft_doc::IDENTITY);
+        assert!(s.execute("file.save_for_sharing", &json!({"path":dir.join("moved.zip")})).is_err());
+        assert!(!dir.join("moved.zip").exists());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
