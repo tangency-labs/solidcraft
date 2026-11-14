@@ -1,17 +1,17 @@
-Raise sketch text or a logo out of a face, or sink it in: an engraved part number, a serial or rev letter, a logo, or raised lettering on a casting pattern. It works on flat faces and wraps around round ones.
+Raise sketch text or a logo out of a face, or sink it in: an engraved part number, a serial or rev letter, a logo, or raised lettering on a casting pattern. It works on flat faces, and straight-line outlines can wrap around a cylinder.
 
 #### Before you start
 
 - You need a body and a sketch with closed profiles to emboss, usually text made with the sketch's Text tool. Sketch it on or parallel to the face it goes on.
 - Deboss sinks the profiles into the face: that's engraving. Emboss raises them out of it.
-- Text sketched on a plane tangent to a cylinder wraps around the cylinder. Pick the cylinder's wall as the Target Face to say which one when there is more than one.
+- Only profiles made of straight lines running along and around the cylinder (orthogonal lines, such as a rectangular label or flat) wrap around it, sketched on a plane tangent to it. Text with curves or diagonals doesn't wrap; engrave it on a flat face instead. Pick the cylinder's wall as the Target Face to say which one when there is more than one.
 
 #### Options
 
 | Choice in the dialog | Meaning | Example or reason to choose it |
 | --- | --- | --- |
 | Profiles | The sketch profiles to emboss: the letters or the logo outline. | The text "PN 1234-A". |
-| Target Face (optional) | The face the profiles go on. Leave it empty to use the face under the sketch. | The outside of a shaft, to wrap a part number around it. |
+| Target Face (optional) | The face the profiles go on. Leave it empty to use the face under the sketch. | The outside of a shaft, to wrap a rectangular label area around it. |
 | Depth | How deep the profiles sink in, or how high they stand out. It starts at 1 in the design's unit. | 0.005 in to 0.010 in for engraving. |
 | Type | Emboss raises the profiles out of the face. Deboss sinks them into it. It starts at Emboss. | Deboss for an engraved part number. |
 
