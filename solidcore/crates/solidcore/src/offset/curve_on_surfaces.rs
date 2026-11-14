@@ -7,7 +7,6 @@
 //! | Rust                     | Upstream |
 //! |--------------------------|----------|
 //! | [`curve_on_surfaces`]    | none     |
-//! | [`measured_off`]         | none     |
 //!
 //! **The bound.** For a curve `C` and a surface `S`, split the curve's parameter range into
 //! segments `[a, b]`, each inside one polynomial piece of `C`. At both ends take any surface
@@ -31,12 +30,23 @@
 //! formula (outside it the offset may evaluate an extension).
 //!
 //! The interpolation bound needs `g` once continuously differentiable: the segments are cut
-//! at the curve's knots, and a surface with an interior knot of multiplicity at least its
-//! degree (a crease in its parameters; for an offset, one less) is not checked.
+//! at the curve's knots, and where the line `w` crosses a crease line of the surface (an
+//! interior knot of multiplicity at least its degree, for an offset one less: there the
+//! parameterisation is not continuously differentiable, as at the quarter arcs of a
+//! rational cylinder), at a point on that line exactly, so each piece lies in one closed
+//! patch; a piece that still crosses one is not proved there.
 //!
-//! Deviations: none (no upstream counterpart). Only a B-spline curve on B-spline surfaces or
-//! offsets of them is checked; anything else is not proved (`false`). Recursion: none (an
-//! explicit stack, at most [`MAX_DEPTH`] halvings of each knot span).
+//! **Planes and cones.** A plane or a cone (a cylinder is one) is bounded in closed form by
+//! its distance function instead (module `analytic`): a line by its segment, an ellipse by
+//! the rational NURB it evaluates through, a B-spline as above.
+//!
+//! The curve is taken as the kernel evaluates it: a B-spline, an ellipse's NURB, a line's
+//! analytic segment (`Line::segment_over`, rounding included).
+//!
+//! Deviations: none (no upstream counterpart). Checked: a B-spline or ellipse on B-spline
+//! nets or offsets of them, and a line, ellipse or B-spline on planes and cones; anything
+//! else is not proved (`false`). Recursion: none (an explicit stack, at most [`MAX_DEPTH`]
+//! halvings of each knot span).
 
 use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
 use crate::blend::fillet_section::interval::{round_down, round_up, Ivl};
@@ -49,9 +59,16 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::mass::enclosure::partials_over;
+use crate::math::Point3;
+use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::math::CPoint;
 use crate::query::api_queries::surface_closest_point;
 use crate::surface::surface::p2::SurfaceKind;
 use crate::surface::surface::Surface;
+
+mod analytic;
+
+use analytic::{on_analytic, Analytic, Path};
 
 const OP: &str = "offset::curve_on_surfaces";
 
@@ -114,108 +131,179 @@ pub fn curve_on_surfaces(
     surfaces: [&Surface; 2],
     tol: f64,
 ) -> Result<bool> {
-    let CurveKind::BSpline(bs) = curve.kind() else {
-        return Ok(false);
-    };
-    let Ok(cn) = NurbsCurve::of(bs) else {
-        return Ok(false);
-    };
     if !(tol > 0.0 && interval.min().is_finite() && interval.max().is_finite()) {
         return Ok(false);
     }
+    // the curve as the kernel evaluates it: a B-spline, an ellipse through its rational
+    // NURB, a line by its analytic segment
+    let nurbs = match curve.kind() {
+        CurveKind::BSpline(bs) => NurbsCurve::of(bs).ok(),
+        CurveKind::Ellipse(e) => NurbsCurve::of(&e.base).ok(),
+        _ => None,
+    };
+    let segment = match curve.kind() {
+        CurveKind::Line(l) => l.segment_over(&interval).map(|[(p, e), (q, f)]| {
+            let boxed = |p: Point3, e: f64| V3 {
+                x: Ivl::checked(p.x - e, p.x + e),
+                y: Ivl::checked(p.y - e, p.y + e),
+                z: Ivl::checked(p.z - e, p.z + e),
+            };
+            [boxed(p, e), boxed(q, f)]
+        }),
+        _ => None,
+    };
+    // a line on a net: its rounded segment as a degree 1 B-spline over [0, 1], and the
+    // slack its ends' rounding takes (each coordinate within e, so a point within 2 e)
+    let segment_curve = match curve.kind() {
+        CurveKind::Line(l) => l.segment_over(&interval).and_then(|[(p, e), (q, f)]| {
+            let pw = [
+                CPoint::new(p.x, p.y, p.z, 1.0),
+                CPoint::new(q.x, q.y, q.z, 1.0),
+            ];
+            let bs = BSplineCurve::from_data(3, 1, 3, 1, &pw, &[0.0, 0.0, 1.0, 1.0]).ok()?;
+            let sn = NurbsCurve::of(&bs).ok()?;
+            let slack = round_up(2.0 * e.max(f));
+            Some((Curve::from(bs), sn, slack))
+        }),
+        _ => None,
+    };
     for s in surfaces {
-        let Some(c) = Checked::of(k, s) else {
-            return Ok(false);
+        let proved = if let Some(a) = Analytic::of(s) {
+            match (&nurbs, segment) {
+                (Some(cn), _) => on_analytic(k, &Path::Nurbs(cn), &a, interval, tol)?,
+                (None, Some(seg)) => on_analytic(
+                    k,
+                    &Path::Segment(seg),
+                    &a,
+                    Extent1d::from_min_max(0.0, 1.0),
+                    tol,
+                )?,
+                (None, None) => false,
+            }
+        } else {
+            match (&nurbs, &segment_curve, Checked::of(k, s)) {
+                (Some(cn), _, Some(c)) => on_surface(k, cn, curve, s, &c, interval, tol)?,
+                // a line: its rounded segment, within the line's rounding less
+                (None, Some((seg, sn, slack)), Some(c)) => {
+                    let unit = Extent1d::from_min_max(0.0, 1.0);
+                    let inner = round_down(tol - slack);
+                    inner > 0.0 && on_surface(k, sn, seg, s, &c, unit, inner)?
+                }
+                _ => false,
+            }
         };
-        if creased(&c) || !on_surface(k, &cn, curve, s, &c, interval, tol)? {
+        if !proved {
             return Ok(false);
         }
     }
     Ok(true)
 }
 
-/// The points [`measured_off`] measures: this many evenly spaced interior parameters.
-pub const MEASURED_POINTS: usize = 33;
-
-/// Whether `curve` over `interval` is measured farther than `tol` from either of `surfaces`
-/// at one of [`MEASURED_POINTS`] evenly spaced interior parameters, by the distance to the
-/// surface's closest point (MEASURED, not certified: a closest point that is only local
-/// overstates the distance, and a gap between the points is missed). A point whose curve
-/// point or closest point is not found is not evidence either way.
-///
-/// # Errors
-///
-/// [`SolidError::Cancelled`](crate::error::SolidError::Cancelled) when the kernel's cancel
-/// token fires (polled once per point).
-pub fn measured_off(
-    k: &Kernel,
-    curve: &Curve,
-    interval: Extent1d,
-    surfaces: [&Surface; 2],
-    tol: f64,
-) -> Result<bool> {
-    let (a, b) = (interval.min(), interval.max());
-    if !(a.is_finite() && b.is_finite() && b > a) {
-        return Ok(false);
-    }
-    #[allow(clippy::cast_precision_loss)] // MEASURED_POINTS is small
-    let steps = (MEASURED_POINTS + 1) as f64;
-    for i in 1..=MEASURED_POINTS {
-        k.check_cancelled(OP)?;
-        #[allow(clippy::cast_precision_loss)] // i <= MEASURED_POINTS
-        let t = a + (b - a) * (i as f64) / steps;
-        let Ok(p) = curve.evaluate_point(k, t) else {
-            continue;
-        };
-        for s in surfaces {
-            if let Ok(c) = surface_closest_point(k, s, p) {
-                if c.closest.point.distance(p) > tol {
-                    return Ok(true);
-                }
-            }
-        }
-    }
-    Ok(false)
-}
-
-/// Whether the net has an interior knot of multiplicity at least its degree (one less for
-/// an offset, whose normal takes one more derivative) in either direction.
-fn creased(c: &Checked) -> bool {
+/// The net's crease lines: its distinct interior knots of multiplicity at least its degree
+/// (one less for an offset, whose normal takes one more derivative), in u and in v. Across
+/// one the surface's parameterisation is not continuously differentiable.
+fn crease_lines(c: &Checked) -> (Vec<f64>, Vec<f64>) {
     let less = usize::from(c.offset.is_some());
-    let crease = |knots: &[f64], p: usize| {
-        let limit = p.saturating_sub(less);
+    let lines = |knots: &[f64], p: usize| {
+        let limit = p.saturating_sub(less).max(1);
         let interior = knots
             .get(p + 1..knots.len().saturating_sub(p + 1))
             .unwrap_or(&[]);
-        if interior.is_empty() {
-            return false;
-        }
-        if limit <= 1 {
-            return true;
-        }
-        let mut run = 1;
-        for w in interior.windows(2) {
-            if let [a, b] = w {
-                if a == b {
-                    run += 1;
-                    if run >= limit {
-                        return true;
-                    }
-                } else {
-                    run = 1;
-                }
+        let mut out: Vec<f64> = Vec::new();
+        let mut run = 0;
+        for (i, &x) in interior.iter().enumerate() {
+            run = if i > 0 && interior.get(i - 1) == Some(&x) {
+                run + 1
+            } else {
+                1
+            };
+            if run >= limit && out.last() != Some(&x) {
+                out.push(x);
             }
         }
-        false
+        out
     };
-    crease(&c.net.u, c.net.p) || crease(&c.net.v, c.net.q)
+    (lines(&c.net.u, c.net.p), lines(&c.net.v, c.net.q))
 }
 
-/// A surface parameter of the point nearest `p`'s, `None` where none is found.
-fn foot(k: &Kernel, s: &Surface, t: f64, curve: &Curve) -> Option<Point2> {
+/// The segment `[a, b]` with surface points `wa`, `wb` cut where the straight line between
+/// them crosses a crease line: the nodes `(t, w)`, ends included, each cut point on its line
+/// exactly (any surface point at a node gives the bound).
+fn cut_at_creases(
+    lines: &(Vec<f64>, Vec<f64>),
+    a: f64,
+    b: f64,
+    wa: Point2,
+    wb: Point2,
+) -> Vec<(f64, Point2)> {
+    let (mut sa, mut sb) = (wa, wb);
+    let mut cuts: Vec<(f64, Point2)> = Vec::new();
+    for (axis, ls) in [(0, &lines.0), (1, &lines.1)] {
+        let (ca, cb) = if axis == 0 {
+            (wa.x, wb.x)
+        } else {
+            (wa.y, wb.y)
+        };
+        for &l in ls {
+            if !(ca.min(cb) < l && l < ca.max(cb)) {
+                continue;
+            }
+            let lam = (l - ca) / (cb - ca);
+            let on_line = |w: &mut Point2| {
+                if axis == 0 {
+                    w.x = l;
+                } else {
+                    w.y = l;
+                }
+            };
+            // a crossing that rounds onto an end moves that end's point onto the line
+            if lam.is_nan() || lam <= 0.0 {
+                on_line(&mut sa);
+                continue;
+            }
+            if lam >= 1.0 {
+                on_line(&mut sb);
+                continue;
+            }
+            let w = if axis == 0 {
+                Point2::new(l, wa.y + lam * (wb.y - wa.y))
+            } else {
+                Point2::new(wa.x + lam * (wb.x - wa.x), l)
+            };
+            cuts.push((lam, w));
+        }
+    }
+    cuts.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let mut nodes = vec![(a, sa)];
+    for (lam, w) in cuts {
+        nodes.push((a + lam * (b - a), w));
+    }
+    nodes.push((b, sb));
+    nodes
+}
+
+/// Whether the parameter box of `p`, `q` holds no crease line inside it (it lies in one
+/// closed patch).
+fn in_one_patch(lines: &(Vec<f64>, Vec<f64>), p: Point2, q: Point2) -> bool {
+    let open = |ls: &[f64], x: f64, y: f64| ls.iter().all(|&l| !(x.min(y) < l && l < x.max(y)));
+    open(&lines.0, p.x, q.x) && open(&lines.1, p.y, q.y)
+}
+
+/// A surface parameter of the surface point nearest the curve's at `t`, `None` where none
+/// is found: of the point's parameters (a seam or a pole has several), the one nearest
+/// `near` when given, so a segment's two feet are taken on the same side of a seam.
+fn foot(k: &Kernel, s: &Surface, t: f64, curve: &Curve, near: Option<Point2>) -> Option<Point2> {
     let p = curve.evaluate_point(k, t).ok()?;
-    let uv = *surface_closest_point(k, s, p).ok()?.uvs.first()?;
-    (uv.x.is_finite() && uv.y.is_finite()).then_some(uv)
+    let uvs = surface_closest_point(k, s, p).ok()?.uvs;
+    let finite = |uv: &&Point2| uv.x.is_finite() && uv.y.is_finite();
+    match near {
+        None => uvs.iter().find(finite).copied(),
+        Some(w) => uvs
+            .iter()
+            .filter(finite)
+            .min_by(|x, y| x.distance(w).total_cmp(&y.distance(w)))
+            .copied(),
+    }
 }
 
 type IV3 = V3<Ivl>;
@@ -372,6 +460,7 @@ fn on_surface(
     interval: Extent1d,
     tol: f64,
 ) -> Result<bool> {
+    let lines = crease_lines(c);
     // the knot spans inside the interval
     let (lo, hi) = (interval.min(), interval.max());
     let mut cuts = vec![lo];
@@ -396,16 +485,29 @@ fn on_surface(
         }
         while let Some((a, b, depth)) = stack.pop() {
             k.check_cancelled(OP)?;
-            let (Some(wa), Some(wb)) = (foot(k, s, a, curve), foot(k, s, b, curve)) else {
+            let wa = foot(k, s, a, curve, None);
+            let (Some(wa), Some(wb)) = (wa, foot(k, s, b, curve, wa)) else {
                 return Ok(false);
             };
-            let ok = match (gap_at(cn, c, a, wa), gap_at(cn, c, b, wb)) {
+            match (gap_at(cn, c, a, wa), gap_at(cn, c, b, wb)) {
                 (Some(ga), Some(gb)) if ga.max(gb) > tol => return Ok(false),
-                (Some(ga), Some(gb)) => {
-                    bend(cn, c, a, b, wa, wb).is_some_and(|e| round_up(ga.max(gb) + e) <= tol)
-                }
+                (Some(_), Some(_)) => {}
                 _ => return Ok(false),
-            };
+            }
+            // each piece between crease lines on its own (its `g` is smooth there)
+            let nodes = cut_at_creases(&lines, a, b, wa, wb);
+            let ok = nodes.windows(2).all(|w| {
+                let [(ta, pa), (tb, pb)] = w else {
+                    return false;
+                };
+                ta < tb
+                    && in_one_patch(&lines, *pa, *pb)
+                    && match (gap_at(cn, c, *ta, *pa), gap_at(cn, c, *tb, *pb)) {
+                        (Some(ga), Some(gb)) => bend(cn, c, *ta, *tb, *pa, *pb)
+                            .is_some_and(|e| round_up(ga.max(gb) + e) <= tol),
+                        _ => false,
+                    }
+            });
             if ok {
                 continue;
             }
@@ -423,9 +525,7 @@ fn on_surface(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::b_spline_surface::p1::BSplineSurface;
-    use crate::nurbs::math::CPoint;
 
     /// The plane z = `z` over `[0, 10]^2` as a bilinear B-spline in `[0, 1]^2`.
     fn plane(z: f64) -> Surface {
@@ -472,19 +572,204 @@ mod tests {
         assert!(curve_on_surfaces(&k, &arc(0.0), ivl, [&a, &c], 2e-3).expect("check"));
     }
 
-    /// A curve in both planes is not measured off; 1e-3 off one of them it is, at the
-    /// tolerance below the gap and not above it.
+    /// A line on a net is checked by its rounded segment.
     #[test]
-    fn a_curve_off_a_plane_is_measured_off_it() {
+    fn a_line_on_a_net_is_proved_and_one_off_it_is_not() {
+        use crate::curve::line::Line;
         let k = Kernel::default();
-        let (a, c) = (plane(0.0), plane(1e-3));
+        let line = |z: f64| {
+            let l = Line::create_line_segment(
+                3,
+                Point3::new(1.0, 2.0, z),
+                Point3::new(8.0, 9.0, z),
+                None,
+            )
+            .expect("line");
+            let c = Curve::from(l);
+            let ivl = c.natural_interval();
+            (c, ivl)
+        };
+        let a = plane(0.0);
+        let (l, ivl) = line(0.0);
+        assert!(curve_on_surfaces(&k, &l, ivl, [&a, &a], 1e-6).expect("check"));
+        let (l, ivl) = line(1e-3);
+        assert!(!curve_on_surfaces(&k, &l, ivl, [&a, &a], 1e-6).expect("check"));
+    }
+
+    /// A bilinear net folded along u = 1/2 (z = 0 for x <= 5, z = x - 5 beyond), and a
+    /// polyline on it crossing the fold at (5, 5, 0), its knot there (the parameter where
+    /// its segments meet).
+    fn folded_and_polyline(off: f64) -> (Surface, Curve) {
+        let pw = vec![
+            vec![
+                CPoint::new(0.0, 0.0, 0.0, 1.0),
+                CPoint::new(0.0, 10.0, 0.0, 1.0),
+            ],
+            vec![
+                CPoint::new(5.0, 0.0, 0.0, 1.0),
+                CPoint::new(5.0, 10.0, 0.0, 1.0),
+            ],
+            vec![
+                CPoint::new(10.0, 0.0, 5.0, 1.0),
+                CPoint::new(10.0, 10.0, 5.0, 1.0),
+            ],
+        ];
+        let s = Surface::from(
+            BSplineSurface::from_data(
+                2,
+                1,
+                1,
+                1,
+                4,
+                3,
+                &pw,
+                &[0., 0., 0.5, 1., 1.],
+                &[0., 0., 1., 1.],
+            )
+            .expect("folded"),
+        );
+        let pts = [
+            CPoint::new(1.0, 3.0, 0.0, 1.0),
+            CPoint::new(5.0, 5.0, off, 1.0),
+            CPoint::new(9.0, 7.0, 4.0, 1.0),
+        ];
+        let c = Curve::from(
+            BSplineCurve::from_data(3, 2, 4, 1, &pts, &[0., 0., 0.5, 1., 1.]).expect("polyline"),
+        );
+        (s, c)
+    }
+
+    /// A curve crossing a crease of its net is checked piece by piece, cut where its
+    /// parameter line crosses the crease: proved on the fold, not 1e-3 off it.
+    #[test]
+    fn a_curve_across_a_crease_is_checked_piece_by_piece() {
+        let k = Kernel::default();
         let ivl = Extent1d::from_min_max(0.0, 1.0);
-        assert!(!measured_off(&k, &arc(0.0), ivl, [&a, &a], 1e-6).expect("measure"));
-        assert!(measured_off(&k, &arc(0.0), ivl, [&a, &c], 1e-6).expect("measure"));
-        assert!(!measured_off(&k, &arc(0.0), ivl, [&a, &c], 2e-3).expect("measure"));
-        // an empty interval measures nothing
-        let empty = Extent1d::from_min_max(0.5, 0.5);
-        assert!(!measured_off(&k, &arc(0.0), empty, [&a, &c], 1e-6).expect("measure"));
+        let (s, c) = folded_and_polyline(0.0);
+        assert!(curve_on_surfaces(&k, &c, ivl, [&s, &s], 1e-6).expect("check"));
+        let (s, c) = folded_and_polyline(1e-3);
+        assert!(!curve_on_surfaces(&k, &c, ivl, [&s, &s], 1e-6).expect("check"));
+    }
+
+    mod analytic_kinds {
+        use super::super::*;
+        use crate::curve::ellipse::{Ellipse, EllipseOptions};
+        use crate::curve::line::Line;
+        use crate::geom::vector2d::Vec2;
+        use crate::math::Vec3;
+        use crate::surface::cone::Cone;
+        use crate::surface::plane::Plane;
+
+        const X: Vec3 = Vec3::new(1.0, 0.0, 0.0);
+        const Y: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+        const Z: Vec3 = Vec3::new(0.0, 0.0, 1.0);
+
+        /// The plane through `o` spanned by `x` and `y`, unit scales, over `[-100, 100]^2`.
+        fn plane(o: Point3, x: Vec3, y: Vec3) -> Surface {
+            let dom = Extent2d::from_bounds(-100.0, -100.0, 100.0, 100.0);
+            Surface::from(Plane::new(o, x, y, Vec2::new(1.0, 1.0), &dom))
+        }
+
+        fn line(a: Point3, b: Point3) -> (Curve, Extent1d) {
+            let c = Curve::from(Line::create_line_segment(3, a, b, None).expect("line"));
+            let ivl = c.natural_interval();
+            (c, ivl)
+        }
+
+        fn circle(k: &Kernel, center: Point3, r: f64) -> (Curve, Extent1d) {
+            let e = Ellipse::new_circle(
+                k,
+                center,
+                X,
+                Y,
+                Extent1d::from_min_max(0.0, 360.0),
+                r,
+                &EllipseOptions::default(),
+            )
+            .expect("circle");
+            let c = Curve::from(e);
+            let ivl = c.natural_interval();
+            (c, ivl)
+        }
+
+        /// The cone about the z axis of radius `r` at z = 0 and semi-angle `deg`.
+        fn cone(k: &Kernel, r: f64, deg: f64) -> Surface {
+            Surface::from(
+                Cone::new_unbounded(k, Point3::ZERO, X, Y, r, deg, false, false).expect("cone"),
+            )
+        }
+
+        #[test]
+        fn a_line_in_two_planes_is_proved_and_one_off_them_is_not() {
+            let k = Kernel::default();
+            let (a, b) = (
+                plane(Point3::ZERO, X, Y),
+                plane(Point3::new(5.0, 0.0, 0.0), Y, Z),
+            );
+            let (l, ivl) = line(Point3::new(5.0, 0.0, 0.0), Point3::new(5.0, 10.0, 0.0));
+            assert!(curve_on_surfaces(&k, &l, ivl, [&a, &b], 1e-9).expect("check"));
+            let (l, ivl) = line(Point3::new(5.0, 0.0, 1e-3), Point3::new(5.0, 10.0, 1e-3));
+            assert!(!curve_on_surfaces(&k, &l, ivl, [&a, &b], 1e-6).expect("check"));
+            assert!(curve_on_surfaces(&k, &l, ivl, [&a, &b], 2e-3).expect("check"));
+        }
+
+        /// A foot outside a bounded plane's domain is not proved.
+        #[test]
+        fn a_line_beyond_a_bounded_plane_is_not_proved() {
+            let k = Kernel::default();
+            let a = plane(Point3::ZERO, X, Y);
+            let (l, ivl) = line(Point3::new(50.0, 0.0, 0.0), Point3::new(150.0, 0.0, 0.0));
+            assert!(!curve_on_surfaces(&k, &l, ivl, [&a, &a], 1e-6).expect("check"));
+        }
+
+        /// A cross-section circle and a ruling of a cylinder are proved on it; a circle of
+        /// radius 1e-3 more is not.
+        #[test]
+        fn a_cylinders_circle_and_ruling_are_proved_on_it() {
+            let k = Kernel::default();
+            let cyl = cone(&k, 5.0, 0.0);
+            let top = plane(Point3::new(0.0, 0.0, 2.0), X, Y);
+            let (c, ivl) = circle(&k, Point3::new(0.0, 0.0, 2.0), 5.0);
+            assert!(curve_on_surfaces(&k, &c, ivl, [&cyl, &top], 1e-9).expect("check"));
+            let (c, ivl) = circle(&k, Point3::new(0.0, 0.0, 2.0), 5.001);
+            assert!(!curve_on_surfaces(&k, &c, ivl, [&cyl, &top], 1e-6).expect("check"));
+            let side = plane(Point3::ZERO, X, Z);
+            let (l, ivl) = line(Point3::new(5.0, 0.0, -3.0), Point3::new(5.0, 0.0, 7.0));
+            assert!(curve_on_surfaces(&k, &l, ivl, [&cyl, &side], 1e-9).expect("check"));
+        }
+
+        /// The circle at height 4 of a cone of semi-angle 30 degrees has radius
+        /// `2 + 4 tan 30`.
+        #[test]
+        fn a_cones_circle_is_proved_on_it() {
+            let k = Kernel::default();
+            let c30 = cone(&k, 2.0, 30.0);
+            let top = plane(Point3::new(0.0, 0.0, 4.0), X, Y);
+            let r = 2.0 + 4.0 * (30.0f64).to_radians().tan();
+            let (c, ivl) = circle(&k, Point3::new(0.0, 0.0, 4.0), r);
+            assert!(curve_on_surfaces(&k, &c, ivl, [&c30, &top], 1e-9).expect("check"));
+            let (c, ivl) = circle(&k, Point3::new(0.0, 0.0, 4.0), r + 1e-3);
+            assert!(!curve_on_surfaces(&k, &c, ivl, [&c30, &top], 1e-6).expect("check"));
+        }
+
+        /// A circle about a cylinder's axis is not proved: the axis is where the distance
+        /// is not smooth.
+        #[test]
+        fn a_curve_through_a_cylinders_axis_is_not_proved() {
+            let k = Kernel::default();
+            let cyl = cone(&k, 5.0, 0.0);
+            let (l, ivl) = line(Point3::new(-5.0, 0.0, 0.0), Point3::new(5.0, 0.0, 0.0));
+            assert!(!curve_on_surfaces(&k, &l, ivl, [&cyl, &cyl], 1.0).expect("check"));
+        }
+
+        /// A plane holding a number that is not one proves nothing.
+        #[test]
+        fn a_plane_that_is_not_a_number_proves_nothing() {
+            let k = Kernel::default();
+            let a = plane(Point3::new(f64::NAN, 0.0, 0.0), X, Y);
+            let (l, ivl) = line(Point3::new(5.0, 0.0, 0.0), Point3::new(5.0, 10.0, 0.0));
+            assert!(!curve_on_surfaces(&k, &l, ivl, [&a, &a], 1.0).expect("check"));
+        }
     }
 
     /// An offset of a net is checked through its normal: the arc in z = 0.5 lies on the

@@ -1060,7 +1060,10 @@ pub fn add_to_curve(
 }
 
 /// [`add_to_curve`] whose flush fixes the polygon up as [`flush_curve_bounded`] does with
-/// `bound` (not upstream).
+/// `bound` (not upstream). The span's own pole straightening (a span starting or ending on
+/// a pole whose polygon is a dog-leg moves its pole end along the pole, upstream's code
+/// below) happens before the polygon is fixed up and is not bounded: `bound` covers only
+/// the boundary moves of [`super::boundary_moves::fix_boundary_curves_bounded`].
 ///
 /// # Errors
 ///

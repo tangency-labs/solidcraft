@@ -311,9 +311,9 @@ fn unique_cone_meeting(k: &Kernel, first: &Surface, second: &Surface) -> Result<
 enum KeepOld<'s> {
     /// Always (upstream).
     OnMatchingEnds,
-    /// Unless the old curve is measured farther than the edge's tolerance from one of both
-    /// surfaces and not proved within it (not upstream: `MateEdges`, whose new curve is
-    /// their intersection; see [`OffsetGeometryCreation::replace_edge_curves_in`]).
+    /// Only where the old curve is proved within the edge's tolerance of both surfaces (not
+    /// upstream: `MateEdges`, whose new curve is their intersection; see
+    /// [`OffsetGeometryCreation::replace_edge_curves_in`]).
     IfOnSurfaces([&'s Surface; 2]),
 }
 
@@ -2463,14 +2463,11 @@ impl OffsetGeometryCreation {
     /// edge), each face's own offset edge ends at the intersection's ends but leaves it in
     /// between (by up to 0.032 for the hood corner sheet of
     /// `tests/issue_1502_thicken_rim_halves.rs` thickened by 2), and keeping them leaves the
-    /// two offset faces apart along the edge. So `MateEdges` installs the intersection when
-    /// the old edge is measured off either extended surface by more than its tolerance
-    /// ([`crate::offset::curve_on_surfaces::measured_off`]) and not proved within it
-    /// ([`crate::offset::curve_on_surfaces::curve_on_surfaces`], which wins over the
-    /// measurement: a closest point that is only local overstates the distance). Otherwise
-    /// it keeps the edge, as upstream: installing the intersection is upstream's own path for
-    /// ends that do not match, the measurement only chooses it, and it never accepts an edge
-    /// upstream would not.
+    /// two offset faces apart along the edge. So `MateEdges` keeps the old edge only where it
+    /// is proved within its tolerance of both extended surfaces
+    /// ([`crate::offset::curve_on_surfaces::curve_on_surfaces`]: closed form on planes and
+    /// cones, interval bounds on B-spline nets and their offsets) and otherwise installs the
+    /// intersection, upstream's own path for ends that do not match.
     #[allow(clippy::too_many_arguments)] // `ReplaceEdgeCurves` and the choice above
     fn replace_edge_curves_in<O: ClassObject + SolutionObject>(
         k: &Kernel,
@@ -2514,11 +2511,12 @@ impl OffsetGeometryCreation {
                 Ok(match keep {
                     KeepOld::OnMatchingEnds => true,
                     KeepOld::IfOnSurfaces(surfaces) => {
-                        let old = curve_of(brep, eu_curve)?;
-                        !crate::offset::curve_on_surfaces::measured_off(
-                            k, old, edge_ivl, surfaces, edge_tol,
-                        )? || crate::offset::curve_on_surfaces::curve_on_surfaces(
-                            k, old, edge_ivl, surfaces, edge_tol,
+                        crate::offset::curve_on_surfaces::curve_on_surfaces(
+                            k,
+                            curve_of(brep, eu_curve)?,
+                            edge_ivl,
+                            surfaces,
+                            edge_tol,
                         )?
                     }
                 })

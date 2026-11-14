@@ -62,6 +62,11 @@
 //! deviation it measured while tracing (that deviation is sampled, as upstream's span test
 //! samples it; only the moves are bounded).
 //!
+//! Not bounded: the straightening of a dog-leg span that starts or ends on a pole
+//! (`sm_AddToCurve`'s pole fix-up, upstream code in
+//! [`super::p2::add_to_curve_bounded`]) moves the span before the polygon is fixed up
+//! here, and its move is not part of the bound.
+//!
 //! Deviations: not upstream (above). Used for B-spline surfaces and offsets of them;
 //! elsewhere the drop keeps upstream's [`super::p1::fix_boundary_curves`].
 
