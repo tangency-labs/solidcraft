@@ -1,6 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <title>Trim</title>
-  <path d="M22 10L22 54M42 10L42 54" fill="none" stroke="#8e9faf" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M7 32L22 32M42 32L57 32" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M28 32L36 32" fill="none" stroke="#8e9faf" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M16 8L16 56" fill="none" stroke="#8e9faf" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M48 8L48 56" fill="none" stroke="#8e9faf" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M4 20L16 20" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M48 20L60 20" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M16 20L48 20" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3 4.2"/>
+  <path d="M30.00 23.00L30.00 44.50L35.25 39.75L38.75 47.50L42.50 45.75L39.00 38.25L46.00 38.25Z" fill="none" stroke="#ffffff" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M30.00 23.00L30.00 44.50L35.25 39.75L38.75 47.50L42.50 45.75L39.00 38.25L46.00 38.25Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
 </svg>

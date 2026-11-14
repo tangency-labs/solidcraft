@@ -1,4 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <title>Select</title>
-  <path d="M18 7L18 50L28.5 40.5L35.5 56L43 52.5L36 37.5L50 37.5Z" fill="currentColor" stroke="currentColor" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24.00 6.72L38.96 15.36L24.00 24.00L9.04 15.36Z" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M9.04 15.36L24.00 24.00L24.00 41.28L9.04 32.64Z" fill="#328bd3" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M38.96 15.36L24.00 24.00L24.00 41.28L38.96 32.64Z" fill="#236ead" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M33.00 33.00L33.00 57.08L38.88 51.76L42.80 60.44L47.00 58.48L43.08 50.08L50.92 50.08Z" fill="none" stroke="#ffffff" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M33.00 33.00L33.00 57.08L38.88 51.76L42.80 60.44L47.00 58.48L43.08 50.08L50.92 50.08Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
 </svg>

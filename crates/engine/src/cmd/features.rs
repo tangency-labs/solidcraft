@@ -112,7 +112,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("edges: [[x,y,z] | {body, index}] ; distance: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is cut with it; false: exactly the picked edges); distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?: the body the edges are on (without it, each point is looked up on every placed body, shown or hidden, and a point on edges of 2 bodies is refused, naming them)"),
     CommandSpec::new("solid.combine", "Combine", crate::checked!("solid.combine", combine))
         .at("SOLID", "MODIFY")
-        .icon("combine")
+        .icon("boolean_union")
         .contract(&COMBINE_CONTRACT)
         .output(output_schema_for::<CombineResult>)
         .params("target: body; tools: [body]; operation?: join|cut|intersect; touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
@@ -210,7 +210,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.move", "Move/Copy", crate::checked!("solid.move", move_bodies))
         .at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch)
         .contract(&MOVE_CONTRACT).output(output_schema_for::<MoveResult>)
-        .params("bodies: [names]; translate?: [x,y,z] (length exprs or numbers, applied after rotation); axis?: [x,y,z] (default: world Z with origin, else the body's component's Z, world Z at the root); angle?: angle expr; origin?: [x,y,z] (length exprs or numbers in world coordinates; default: the body's component's origin, the world origin at the root); matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); tolerance?: matrix rotation tolerance (default 1e-9, at most 1e-3); copy?: bool (default false; true keeps originals and transforms copies); occurrences?: [occurrence paths, root first] (only with copy: copies each component independently and transforms the copies in world space; reply lists them in occurrences); name?, body_name?, body_names?"),
+        .params("bodies: [names]; translate?: [x,y,z] (length exprs or numbers, applied after rotation); axis?: [x,y,z] (default: world Z with origin, else the body's component's Z, world Z at the root); angle?: angle expr; origin?: [x,y,z] (length exprs or numbers in world coordinates; default: the body's component's origin, the world origin at the root); matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); tolerance?: matrix rotation tolerance (default 1e-9, at most 1e-3); copy?: bool (default false; true keeps originals and transforms copies); carry?: [construction names or ids] (also moved with the bodies, e.g. a Center Pole at fixed points); leave?: [construction names or ids] (built on the bodies but left where they are); occurrences?: [occurrence paths, root first] (only with copy: copies each component independently and transforms the copies in world space; reply lists them in occurrences); name?, body_name?, body_names?"),
 ];
 
 /// Where an extrude starts and which way is positive: a point inside the (first) profile or
@@ -2544,6 +2544,8 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
             rotate_axis: p.get("axis").and_then(vec3).map(Dir),
             angle: expr(p, "angle"),
             copy,
+            carry: construction_ids(s, cmd, p, "carry")?,
+            leave: construction_ids(s, cmd, p, "leave")?,
         },
     )?;
     if copy {
@@ -2551,6 +2553,32 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
         super::print_face::copies_keep_print_faces(s, &reply, &bodies);
     }
     Ok(reply)
+}
+
+/// The construction features listed under `key` (names or feature ids), by id; empty when absent.
+fn construction_ids(s: &Session, cmd: &str, p: &Value, key: &str) -> Result<Vec<u64>> {
+    let Some(list) = p.get(key) else { return Ok(Vec::new()) };
+    let Some(list) = list.as_array() else { return Err(bad(cmd, format!("`{key}` must list construction features"))) };
+    list.iter()
+        .map(|v| {
+            let f = match v {
+                Value::Number(n) => n.as_u64().and_then(|id| s.doc.feature(id)),
+                Value::String(name) => s.doc.find_feature(name),
+                _ => None,
+            };
+            match f {
+                Some(f)
+                    if matches!(
+                        f.kind,
+                        FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. } | FeatureKind::ConstructionPlane { .. }
+                    ) =>
+                {
+                    Ok(f.id)
+                }
+                _ => Err(bad(cmd, format!("`{key}`: {v} is not a construction feature"))),
+            }
+        })
+        .collect()
 }
 
 /// A copy keeps the look and the material of the body it came from (#6423): the copy is the same

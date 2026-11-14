@@ -319,8 +319,11 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_ribbon_search"), search));
             }
             // A newer release: its Update button stays before the right cluster.
+            // The Creative switch sits left of it, at the right of the free space that remains.
             let update = crate::update::button(app, ui, out.offer, out.offer_labeled);
-            let tabs_end = update.map_or(out.controls_left, |u| u.left()) - 8.0;
+            let span = update.map_or(out.offer, |u| Rect::from_min_max(out.offer.min, pos2(u.left() - 6.0, out.offer.bottom())));
+            let creative = if design_shown(app) { crate::creative_mode::bar_switch(app, ui, span) } else { None };
+            let tabs_end = creative.or(update).map_or(out.controls_left, |u| u.left()) - 8.0;
             // Narrow title bars can fit only part of the tab strip. Its hit regions must not
             // extend into the persistent report and window controls.
             let tabs_rect = Rect::from_min_max(pos2(out.tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));

@@ -1,17 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <title>Disable contact</title>
-  <path d="M23.33 16.99L40.67 27L40.67 47.01L23.33 37Z" fill="#b8c3cf"/>
-  <path d="M58 16.99L40.67 27L40.67 47.01L58 37Z" fill="#8e9faf"/>
-  <path d="M40.67 6.98L58 16.99L40.67 27L23.33 16.99Z" fill="#e2e8ef"/>
-  <path d="M40.67 6.98L58 16.99L58 37L40.67 47.01L23.33 37L23.33 16.99Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M23.33 16.99L40.67 27L58 16.99" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M40.67 27L40.67 47.01" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M6 27L23.33 37L23.33 57.02L6 47.01Z" fill="#b8c3cf"/>
-  <path d="M40.67 27L23.33 37L23.33 57.02L40.67 47.01Z" fill="#8e9faf"/>
-  <path d="M23.33 16.99L40.67 27L23.33 37L6 27Z" fill="#e2e8ef"/>
-  <path d="M23.33 16.99L40.67 27L40.67 47.01L23.33 57.02L6 47.01L6 27Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M6 27L23.33 37L40.67 27" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M23.33 37L23.33 57.02" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M3.42 24.50L16.41 32.00L16.41 47.00L3.42 39.50Z" fill="#b8c3cf"/>
+  <path d="M29.40 24.50L16.41 32.00L16.41 47.00L29.40 39.50Z" fill="#b8c3cf"/>
+  <path d="M16.41 17.00L29.40 24.50L16.41 32.00L3.42 24.50Z" fill="#e2e8ef"/>
+  <path d="M16.41 17.00L29.40 24.50L29.40 39.50L16.41 47.00L3.42 39.50L3.42 24.50Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M3.42 24.50L16.41 32.00L29.40 24.50M16.41 32.00L16.41 47.00" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M34.60 24.50L47.59 32.00L47.59 47.00L34.60 39.50Z" fill="#b8c3cf"/>
+  <path d="M60.58 24.50L47.59 32.00L47.59 47.00L60.58 39.50Z" fill="#8e9faf"/>
+  <path d="M47.59 17.00L60.58 24.50L47.59 32.00L34.60 24.50Z" fill="#e2e8ef"/>
+  <path d="M47.59 17.00L60.58 24.50L60.58 39.50L47.59 47.00L34.60 39.50L34.60 24.50Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M34.60 24.50L47.59 32.00L60.58 24.50M47.59 32.00L47.59 47.00" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
   <path d="M12 53L52 11" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
   <path d="M12 53L52 11" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
 </svg>

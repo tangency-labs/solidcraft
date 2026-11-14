@@ -163,6 +163,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
         });
+        ui_kit::settings_section(ui, "creative_mode", app.tr("prefs.creative_mode.section"), |ui| {
+            super::sketch::check(ui, "creative_mode", "prefs.creative_mode", Some("prefs.creative_mode_help"), &mut app.preferences.creative_mode);
+        });
     });
 }
 

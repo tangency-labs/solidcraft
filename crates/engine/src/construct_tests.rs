@@ -968,6 +968,33 @@ fn construction_on_a_moved_body_moves_with_it() {
     assert!(on_line(o, d, Vec3::new(0.0, 0.0, 20.0)) && on_line(o, d, Vec3::new(0.0, 50.0, 20.0)), "{o:?} {d:?}");
 }
 
+/// A Move's `carry` takes along an axis held by fixed points (a Center Pole), and its `leave`
+/// keeps one built on the body where it was; both survive a reopen.
+#[test]
+fn move_carries_and_leaves_the_constructions_it_lists() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "body_name": "Pin"}));
+    run(&mut s, "construct.axis.through_cylinder", json!({"face": {"face": [5, 0, 10]}, "name": "PinAxis"}));
+    run(&mut s, "construct.axis.two_points", json!({"a": {"point": [0, 0, 0]}, "b": {"point": [0, 0, 20]}, "name": "Pole"}));
+    let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap();
+    run(&mut s, "solid.move", json!({"bodies": [body], "translate": [30, 0, 0], "carry": ["Pole"], "leave": ["PinAxis"]}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let check = |s: &Session| {
+        let (o, d) = axis(s, "Pole");
+        assert!(parallel(d, Vec3::Z) && on_line(o, d, Vec3::new(30.0, 0.0, 0.0)), "the pole went with the pin: {o:?} {d:?}");
+        let (o, d) = axis(s, "PinAxis");
+        assert!(parallel(d, Vec3::Z) && on_line(o, d, Vec3::ZERO), "the pin axis stayed: {o:?} {d:?}");
+    };
+    check(&s);
+    let reopened = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    let mut cold = Session::new(reopened);
+    cold.refresh();
+    check(&cold);
+    let error = s.execute("solid.move", &json!({"bodies": ["Pin"], "carry": ["Nope"]})).unwrap_err();
+    assert!(error.to_string().contains("not a construction feature"), "{error}");
+}
+
 /// #11469: a tangent plane picked on an inserted STL said only "no face at …", as if the pick
 /// had missed. A mesh body has no faces to pick; the error says the pick lies on one and what
 /// gives it faces (Convert Mesh), and a pick in empty space keeps the plain message.

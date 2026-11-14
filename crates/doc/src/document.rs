@@ -2148,6 +2148,14 @@ pub enum FeatureKind {
         /// of each instead of moving them in place.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         copy: bool,
+        /// Constructions (by feature id) carried along with the bodies although they are not
+        /// built only on them, such as a Center Pole placed at fixed points.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        carry: Vec<u64>,
+        /// Constructions (by feature id) built on the moved bodies that stay where they are
+        /// instead of following them.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        leave: Vec<u64>,
     },
     /// A non-parametric base feature: bodies imported from a STEP file. The STEP text is kept
     /// in the design (it is the B-rep), so the design reopens without the original file.

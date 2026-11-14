@@ -309,6 +309,8 @@ pub struct ViewportState {
     pub(crate) occurrence_drag: Option<crate::occurrence_drag::Drag>,
     /// Extrude by pulling a face or profile.
     pub(crate) drag_extrude: crate::drag_extrude::State,
+    /// Fillet by pulling an edge (Creative Mode).
+    pub(crate) drag_fillet: crate::drag_fillet::State,
     /// The plane the grid was last drawn on while Preferences ▸ Grid follows the view is on
     /// (#1470), kept so the choice is hysteretic near the thresholds (#1993).
     pub(crate) grid_plane: std::sync::Mutex<GridPlane>,
@@ -6169,8 +6171,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .collect();
             let _ = app.run("select.set", json!({ "items": items, "add": add }));
         }
-        // Double-click a face: edit a linked component in place, activate another component, or
-        // else open the editor of the feature that made the face (as the Browser's row does).
+        // Double-click a face: edit a linked component in place, activate another component, in
+        // Creative Mode move the body, or else open the editor of the feature that made the face
+        // (as the Browser's row does).
         if resp.double_clicked()
             && !held
             && !dim_edit
@@ -6181,7 +6184,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && let Some(Hit::Face { body, index, point }) = app.viewport.hover.clone()
             && !crate::edit_in_place::double_click_face(app, &body)
         {
-            app.edit_feature_of_face(&body, index, point);
+            // In Creative Mode a double-click picks the body up to move it instead.
+            if !crate::creative_mode::move_body(app, &body) {
+                app.edit_feature_of_face(&body, index, point);
+            }
         }
         // A right-click, unless the same press opened the mouse gestures' ring: it finishes a
         // tool, confirms a dialog's input (when that preference is on), or opens the menu. egui's
@@ -6401,6 +6407,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !crate::joint_drag::start(app, &proj, a)
         {
             crate::drag_extrude::press(app, &proj, a);
+            crate::drag_fillet::press(app, &proj, a);
         }
         if resp.dragged_by(egui::PointerButton::Primary)
             && let Some(p) = hover
@@ -6435,9 +6442,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && let Some(p) = hover
     {
         crate::drag_extrude::to(app, &proj, p);
+        crate::drag_fillet::to(app, &proj, p);
     }
     if resp.drag_stopped() || !primary_down {
         crate::drag_extrude::end(app);
+        crate::drag_fillet::end(app);
     }
     // Box selection: a primary drag on the model when no navigation mode is on.
     if app.tool.is_none()
@@ -6450,6 +6459,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !joint_handle_pointer
         && !crate::occurrence_drag::active(app)
         && !crate::drag_extrude::started(app)
+        && !crate::drag_fillet::started(app)
         && !crate::dim_view::dragging()
         && !crate::sketch3d::dragging()
         && !crate::sketch_text_handles::dragging(app)

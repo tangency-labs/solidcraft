@@ -32,6 +32,8 @@ pub mod control_job;
 mod control_params;
 pub mod control_switch;
 pub mod crash_ui;
+pub mod creative_mode;
+pub(crate) mod creative_tools;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
@@ -64,6 +66,7 @@ mod dimension_create_ui_tests;
 mod dock_dialog_ui_tests;
 pub mod documents;
 pub mod drag_extrude;
+pub mod drag_fillet;
 pub mod drag_snap;
 pub mod easyprint_ui;
 pub mod edit_clipboard;
@@ -3847,6 +3850,8 @@ impl SolveApp {
         if render_workspace::active(self) {
             render_workspace::inspector_panel::owner_overlays(self, ui.ctx());
             render_ui::overlays(self, ui);
+        } else {
+            creative_mode::overlays(self, ui);
         }
         // Refresh persistent chrome before the host's early confirmation pair.
         self.viewport.host_windows = ui_kit::Container::host_window_regions(ui.ctx());

@@ -130,3 +130,119 @@ fn two_distances_chamfer_has_an_arrow_along_each_face() {
         h.app.dialog = None;
     }
 }
+
+/// A box's top front edge, seen from the iso view: its faces are the top (+z) and the front
+/// (-y), so out of the material is (0, -1, 1) / sqrt 2.
+fn creative_box(creative: bool) -> Harness {
+    let mut h = Harness::new();
+    h.app.preferences.creative_mode = creative;
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "fit"}})).unwrap();
+    h.settle();
+    h
+}
+
+/// Drag from `from` 4 mm out of the material (or into it with `push`) and release; the name of
+/// the feature it added, if any.
+fn drag_across(h: &mut Harness, from: [f64; 3], push: bool) -> Option<String> {
+    let features = h.app.session.doc.features.len();
+    let s = std::f64::consts::FRAC_1_SQRT_2 * 4.0 * if push { -1.0 } else { 1.0 };
+    h.step(&json!({"drag": [{"world": from}, {"world": [20, -s, 20.0 + s]}]})).unwrap();
+    h.frames(6);
+    h.settle();
+    assert!(h.app.dialog.is_none(), "the release applied it");
+    (h.app.session.doc.features.len() > features).then(|| h.app.session.doc.features.last().unwrap().name.clone())
+}
+
+/// In Creative Mode, pulling an edge out of the material rounds it, and the release applies the
+/// fillet: no window is left waiting for OK.
+#[test]
+fn in_creative_mode_pulling_an_edge_out_fillets_it() {
+    let mut h = creative_box(true);
+    let name = drag_across(&mut h, [20.0, 0.0, 20.0], false);
+    assert!(name.as_deref().is_some_and(|n| n.starts_with("Fillet")), "{name:?}");
+    let measured = h.app.session.execute("inspect.measure", &json!({})).unwrap();
+    assert!(measured["bodies"][0]["faces"].as_u64().unwrap_or(0) > 6, "the edge is rounded: {measured}");
+}
+
+/// Pushing the same edge into the material cuts it flat: a chamfer.
+#[test]
+fn in_creative_mode_pushing_an_edge_in_chamfers_it() {
+    let mut h = creative_box(true);
+    let name = drag_across(&mut h, [20.0, 0.0, 20.0], true);
+    assert!(name.as_deref().is_some_and(|n| n.starts_with("Chamfer")), "{name:?}");
+}
+
+/// A press just beside the edge, on its top face, still grabs the edge rather than pulling the
+/// face.
+#[test]
+fn a_press_just_beside_an_edge_still_grabs_it() {
+    let mut h = creative_box(true);
+    let name = drag_across(&mut h, [20.0, 0.6, 20.0], false);
+    assert!(name.as_deref().is_some_and(|n| n.starts_with("Fillet")), "{name:?}");
+}
+
+/// Without Creative Mode the same pull is a box selection: nothing is filleted.
+#[test]
+fn pulling_an_edge_does_nothing_without_creative_mode() {
+    let mut h = creative_box(false);
+    let features = h.app.session.doc.features.len();
+    let s = std::f64::consts::FRAC_1_SQRT_2 * 4.0;
+    h.step(&json!({"drag": [{"world": [20, 0, 20]}, {"world": [20, -s, 20.0 + s]}]})).unwrap();
+    h.frames(6);
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.features.len(), features);
+}
+
+/// The edges the last fillet or chamfer took.
+fn last_blend_edges(h: &Harness) -> usize {
+    match &h.app.session.doc.features.last().unwrap().kind {
+        solidcraft_engine::doc::FeatureKind::Fillet { edges, .. } | solidcraft_engine::doc::FeatureKind::Chamfer { edges, .. } => edges.len(),
+        other => panic!("not a blend: {other:?}"),
+    }
+}
+
+/// With the top face selected, pulling one of its edges rounds all four: the selected face stands
+/// for its edges.
+#[test]
+fn with_a_face_selected_pulling_one_of_its_edges_fillets_them_all() {
+    let mut h = creative_box(true);
+    h.step(&json!({"click": {"world": [20, 15, 20]}})).unwrap();
+    h.settle();
+    assert!(matches!(h.app.session.selection.as_slice(), [Sel::Face { .. }]), "{:?}", h.app.session.selection);
+    let name = drag_across(&mut h, [20.0, 0.0, 20.0], false);
+    assert!(name.as_deref().is_some_and(|n| n.starts_with("Fillet")), "{name:?}");
+    assert_eq!(last_blend_edges(&h), 4);
+    let measured = h.app.session.execute("inspect.measure", &json!({})).unwrap();
+    assert_eq!(measured["bodies"][0]["faces"].as_u64(), Some(10), "four rounds round the top: {measured}");
+}
+
+/// Pushing an edge of the selected face in chamfers every edge of it.
+#[test]
+fn with_a_face_selected_pushing_one_of_its_edges_chamfers_them_all() {
+    let mut h = creative_box(true);
+    h.step(&json!({"click": {"world": [20, 15, 20]}})).unwrap();
+    h.settle();
+    let name = drag_across(&mut h, [20.0, 0.0, 20.0], true);
+    assert!(name.as_deref().is_some_and(|n| n.starts_with("Chamfer")), "{name:?}");
+    assert_eq!(last_blend_edges(&h), 4);
+}
+
+/// An edge that is not on the selected face is taken alone: the selection gives way to it.
+#[test]
+fn an_edge_off_the_selected_face_is_taken_alone() {
+    let mut h = creative_box(true);
+    // The front face (-y) is selected; the top front edge is on it, so drag a top edge that is
+    // not: the right one (x = 40), across to +x.
+    h.step(&json!({"click": {"world": [20, 0, 10]}})).unwrap();
+    h.settle();
+    assert!(matches!(h.app.session.selection.as_slice(), [Sel::Face { .. }]), "{:?}", h.app.session.selection);
+    let features = h.app.session.doc.features.len();
+    let s = std::f64::consts::FRAC_1_SQRT_2 * 4.0;
+    h.step(&json!({"drag": [{"world": [40, 15, 20]}, {"world": [40.0 + s, 15, 20.0 + s]}]})).unwrap();
+    h.frames(6);
+    h.settle();
+    assert_eq!(h.app.session.doc.features.len(), features + 1);
+    assert_eq!(last_blend_edges(&h), 1);
+}

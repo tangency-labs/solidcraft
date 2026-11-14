@@ -549,7 +549,7 @@ fn check_width(ui: &egui::Ui, label: &str, help: bool) -> f32 {
 }
 
 /// Standard checkbox, its hover help, and its existing field target.
-fn check(ui: &mut egui::Ui, key: &str, label: &str, help: Option<&str>, value: &mut bool) -> egui::Response {
+pub(super) fn check(ui: &mut egui::Ui, key: &str, label: &str, help: Option<&str>, value: &mut bool) -> egui::Response {
     let help = help.map(solidcraft_ui_text::tr);
     ui.horizontal_top(|ui| {
         let t = Tokens::get();

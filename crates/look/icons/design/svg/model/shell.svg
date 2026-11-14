@@ -1,13 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <title>Shell</title>
-  <path d="M5.56 18.26L32 33.53L32 61L5.56 45.74Z" fill="#b8c3cf"/>
-  <path d="M58.44 18.26L32 33.53L32 61L58.44 45.74Z" fill="#8e9faf"/>
-  <path d="M32 3L58.44 18.26L32 33.53L5.56 18.26Z" fill="#e2e8ef"/>
-  <path d="M32 3L58.44 18.26L58.44 45.74L32 61L5.56 45.74L5.56 18.26Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M5.56 18.26L32 33.53L58.44 18.26" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M32 33.53L32 61" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M32 26.66L32 9.87L46.54 18.26L46.54 18.26Z" fill="#328bd3"/>
-  <path d="M32 26.66L32 26.66L32 9.87L17.46 18.26L17.46 18.26Z" fill="#236ead"/>
-  <path d="M32 9.87L46.54 18.26L32 26.66L17.46 18.26Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M32 9.87L32 26.66" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <defs>
+    <clipPath id="shell-opening"><path d="M32.00 8.83L48.76 18.50L32.00 28.17L15.24 18.50Z"/></clipPath>
+  </defs>
+  <path d="M8.62 18.50L32.00 32.00L32.00 59.00L8.62 45.50Z" fill="#b8c3cf"/>
+  <path d="M55.38 18.50L32.00 32.00L32.00 59.00L55.38 45.50Z" fill="#8e9faf"/>
+  <path d="M32.00 5.00L55.38 18.50L32.00 32.00L8.62 18.50ZM32.00 8.83L48.76 18.50L32.00 28.17L15.24 18.50Z" fill="#e2e8ef" fill-rule="evenodd"/>
+  <path d="M32.00 5.00L55.38 18.50L55.38 45.50L32.00 59.00L8.62 45.50L8.62 18.50Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.62 18.50L32.00 32.00L55.38 18.50M32.00 32.00L32.00 59.00" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <g clip-path="url(#shell-opening)">
+  <path d="M32.00 32.45L48.76 42.12L32.00 51.80L15.24 42.12Z" fill="#b9ddf8"/>
+  <path d="M32.00 8.83L15.24 18.50L15.24 42.12L32.00 32.45Z" fill="#236ead"/>
+  <path d="M32.00 8.83L48.76 18.50L48.76 42.12L32.00 32.45Z" fill="#328bd3"/>
+  <path d="M32.00 8.83L32.00 32.45" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+  <path d="M32.00 8.83L48.76 18.50L32.00 28.17L15.24 18.50Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
 </svg>
