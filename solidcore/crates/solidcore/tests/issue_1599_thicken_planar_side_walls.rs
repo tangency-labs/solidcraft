@@ -1,11 +1,11 @@
 //! tangency-labs/solidcore#1599 (WR-564; the fork's tangency-labs/smlib#62): thickening a
-//! sheet upstream builds each side wall as the ruled surface between a lamina edge and its
-//! offset (`BuildSideWallOfEdgeuse` / `CreateEdgeEdgeBlend`), and never puts a flat one on
-//! its plane. A cylinder sheet (r 10, 20 high) thickened by +2 or -2 is a tube whose end
-//! rings were each the line between the circle and its offset turned about the axis: flat,
-//! but an `SmSurfOfRevolution`, not an `SmPlane`.
+//! sheet builds each side wall as the ruled surface between a lamina edge and its offset
+//! (`BuildSideWallOfEdgeuse` / `CreateEdgeEdgeBlend`), and never puts a flat one on its
+//! plane. A cylinder sheet (r 10, 20 high) thickened by +2 or -2 is a tube whose end rings
+//! are each the line between the circle and its offset turned about the axis: flat, but
+//! an `SmSurfOfRevolution`, not an `SmPlane`.
 //!
-//! Here every planar wall goes onto its plane
+//! With `UpstreamFixes::thicken_planar_side_walls` every planar wall goes onto its plane
 //! and the ring's seam (the old surface's, now a slit through the ring) is deleted, so
 //! each end is an `SmPlane` ring with two loops, and the volume is π (R² − r²) 20 (to the
 //! 1e-6 accuracy the volume integration is asked for; it comes out within 6e-9).
@@ -79,8 +79,9 @@ fn cylinder_sheet(k: &mut Kernel) -> Brep {
     b
 }
 
-fn thicken(distance: f64) -> (Kernel, Brep) {
+fn thicken(fix: bool, distance: f64) -> (Kernel, Brep) {
     let mut k = Kernel::default();
+    k.fixes.thicken_planar_side_walls = fix;
     let mut sheet = cylinder_sheet(&mut k);
     assert_eq!(sheet.face_list().len(), 1);
     let mut notifications = Notifications::new(&mut sheet);
@@ -135,7 +136,7 @@ fn expected_volume(distance: f64) -> f64 {
 #[test]
 fn issue_1599_tube_end_rings_are_planes() {
     for distance in [2.0, -2.0] {
-        let (k, mut tube) = thicken(distance);
+        let (k, mut tube) = thicken(true, distance);
         let (classes, plane_loops) = kinds(&tube);
         assert_eq!(
             classes.iter().filter(|c| **c == "SmPlane").count(),
@@ -151,5 +152,27 @@ fn issue_1599_tube_end_rings_are_planes() {
             (v - want).abs() <= 1e-7 * want,
             "{distance}: volume {v} want {want}"
         );
+    }
+}
+
+/// Without the opt-in (SMLib's behaviour) the rings stay surfaces of revolution: the
+/// same four faces, a closed solid, no plane.
+#[test]
+fn issue_1599_without_the_opt_in_rings_are_surfaces_of_revolution() {
+    for distance in [2.0, -2.0] {
+        let (_, tube) = thicken(false, distance);
+        let (classes, plane_loops) = kinds(&tube);
+        assert!(plane_loops.is_empty(), "{distance}: {classes:?}");
+        assert_eq!(
+            classes,
+            vec![
+                "SmCylinder",
+                "SmCylinder",
+                "SmSurfOfRevolution",
+                "SmSurfOfRevolution"
+            ],
+            "{distance}"
+        );
+        assert!(brep_is_manifold_solid(&tube).unwrap());
     }
 }

@@ -300,6 +300,7 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.taper_tangent_corner_planes = true;
+    k.fixes.thicken_planar_side_walls = true;
     k.fixes.torus_check_spindle_apex = true;
     k.fixes.torus_iso_circle_axis_from_midpoint = true;
     k.fixes.torus_major_radius_from_origin = true;

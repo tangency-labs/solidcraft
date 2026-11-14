@@ -175,6 +175,7 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "surface_parallel_to_vector_checks",
     "sweep_statuses_pass_on",
     "taper_tangent_corner_planes",
+    "thicken_planar_side_walls",
     "torus_check_spindle_apex",
     "torus_iso_circle_axis_from_midpoint",
     "torus_major_radius_from_origin",

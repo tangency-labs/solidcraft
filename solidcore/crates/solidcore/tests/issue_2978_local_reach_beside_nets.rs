@@ -335,6 +335,38 @@ fn two_curved_nets_given_tilted_planes_are_sound_or_refused_unchanged() {
     ]);
 }
 
+/// `fc0006`: face 13 given its own tangent plane, which is the plane it lies on: the local
+/// operation moves nothing and hands back the body it was given, a manifold solid of the
+/// input's volume. WR-531's point caps (a sphere about a vertex with one edge) belong to
+/// shells and offsets; built here they made the operation fail (`SM_ERR`, 1001, from
+/// `CreateArcFromPoints`), whatever plane it was given (`fc0000`, `fc0008`, `fc0025`).
+#[test]
+fn a_flat_face_given_its_own_plane_leaves_the_body_unchanged() {
+    let mut k = Kernel::default();
+    let Some(mut b) = solid(&mut k, "nurb_fillet.smb") else {
+        return;
+    };
+    let before = (
+        volume(&mut k, &mut b).unwrap(),
+        bp1::faces(&b, None).unwrap().len(),
+        b.edge_list().len(),
+        b.vertex_list().len(),
+    );
+    moved(&mut k, &mut b, &[(13, 0.0, [0.0; 3])]).unwrap();
+    assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
+    let after = (
+        volume(&mut k, &mut b).unwrap(),
+        bp1::faces(&b, None).unwrap().len(),
+        b.edge_list().len(),
+        b.vertex_list().len(),
+    );
+    assert_eq!((after.1, after.2, after.3), (before.1, before.2, before.3));
+    assert!(
+        (after.0 - before.0).abs() <= AGREE * before.0,
+        "{after:?} vs {before:?}"
+    );
+}
+
 /// Sam-47515301's quarter revolution on #13722, as SolidCraft built it: the profile
 /// `r = B(15, 21, 20, 15)`, `z = 90 t` (a cubic Bézier over `t` in [0, 1]) closed along the
 /// axis and by the caps `z = 0` and `z = 90`, turned 90° about z. Its five faces: the

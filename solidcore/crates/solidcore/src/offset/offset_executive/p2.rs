@@ -435,7 +435,9 @@ impl OffsetExecutive {
                 // stop when no lamina edges remain or the next tolerance exceeds
                 // abs(distance) / 2.0. Preserve retained input on MergeBrep error,
                 // but report ownership transferred on a later stitch error.
-                // the sheet's faces as copied into the shell (#978, #1599; not upstream)
+                // the sheet's faces as copied into the shell (#978, #1599; only with an opt-in)
+                let side_walls =
+                    options.merge_sheet_side_walls || kernel.fixes.thicken_planar_side_walls;
                 let mut sheet_faces: Vec<FaceId> = Vec::new();
                 {
                     let source = required(input.as_ref(), OP_SHELL)?;
@@ -446,10 +448,10 @@ impl OffsetExecutive {
                         key_of: notifications.result_key_of,
                     };
                     // SER(pBrepShell->MergeBrep(*pBrepToShell)): default maps (NULL)
-                    // and bAddAnalytics = TRUE; not upstream, the sheet-to-copy map is kept
+                    // and bAddAnalytics = TRUE; the opt-in keeps the sheet-to-copy map
                     // (the fork's MergeBrep(*pBrepToShell, NULL, &sSheetToCopy): original to copy)
                     let mut sheet_to_copy = CopyBrepMap::new();
-                    let reverse_map = Some(&mut sheet_to_copy);
+                    let reverse_map = side_walls.then_some(&mut sheet_to_copy);
                     NotifyState::from_kernel_stores(&mut stores).with_kernel_env(
                         kernel,
                         |kernel, env| {
@@ -465,11 +467,13 @@ impl OffsetExecutive {
                             )
                         },
                     )?;
-                    for f in bp1::faces(source, None)? {
-                        match sheet_to_copy.get_at(Some(EntityRef::Face(f)))? {
-                            Some(EntityRef::Face(copy)) => sheet_faces.push(copy),
-                            _ => {
-                                return Err(SolidError::null_pointer(OP_SHELL));
+                    if side_walls {
+                        for f in bp1::faces(source, None)? {
+                            match sheet_to_copy.get_at(Some(EntityRef::Face(f)))? {
+                                Some(EntityRef::Face(copy)) => sheet_faces.push(copy),
+                                _ => {
+                                    return Err(SolidError::null_pointer(OP_SHELL));
+                                }
                             }
                         }
                     }
@@ -522,14 +526,16 @@ impl OffsetExecutive {
                     }
                     ii += 1;
                 }
-                // SER_DELETE: an error drops the shell
-                merge_sheet_side_walls(
-                    kernel,
-                    &mut shell,
-                    &sheet_faces,
-                    options.merge_sheet_side_walls,
-                    notifications,
-                )?;
+                if side_walls {
+                    // SER_DELETE: an error drops the shell
+                    merge_sheet_side_walls(
+                        kernel,
+                        &mut shell,
+                        &sheet_faces,
+                        options.merge_sheet_side_walls,
+                        notifications,
+                    )?;
+                }
                 make_shell_edges_exact(kernel, &mut shell, notifications)?;
                 return Ok(shell);
             }
@@ -1001,8 +1007,14 @@ impl OffsetExecutive {
             // out. The point's offset is the sphere about it through that circle, as the
             // unextended offset builds it (BuildOffsetOfVertex: a strut vertex with one arc
             // to blend), a face of its whole surface the merge joins to the offset face along
-            // the circle.
-            for vertex in bp1::vertices(original, None)? {
+            // the circle. (A local operation moves faces onto new surfaces and builds no
+            // vertex offsets: there is no offset distance about a point to cap.)
+            let capped = if self.operation() == OffsetOperation::LocalOperation {
+                Vec::new()
+            } else {
+                bp1::vertices(original, None)?
+            };
+            for vertex in capped {
                 kernel.check_cancelled(OP_EXTENDED)?;
                 if crate::topology::vertex::edges(original, vertex, None)?.len() != 1 {
                     continue;
@@ -2158,15 +2170,17 @@ fn collapse_offset_status<T>(result: Result<T>) -> Result<T> {
     })
 }
 
-/// The SolidCraft fork's sheet-thicken side walls (`ShellBrep`'s sheet branch after the
-/// stitch): the walls are the faces other than the sheet's own (`sheet_faces`, the
-/// sheet's copies) along an edge of the sheet. Every wall goes onto its plane
-/// ([`put_planar_face_on_its_plane`]), in the shell's face order, and its old surface's
-/// seams are deleted (WR-564, #1599; the fork's tangency-labs/smlib#62; upstream keeps
-/// each wall as the ruled surface between the lamina edge and its offset). With `merge`
-/// (tangency-labs/solidcore#978; opt-in [`ShellOptions::merge_sheet_side_walls`]) every
-/// topological edge between two walls then goes (the others, and every topological
-/// vertex, are kept). Editing is enabled meanwhile.
+/// The SolidCraft fork's sheet-thicken wall merge (`ShellBrep`'s sheet branch after the
+/// stitch, tangency-labs/solidcore#978; opt-in [`ShellOptions::merge_sheet_side_walls`]):
+/// the walls are the faces other than the sheet's own (`sheet_faces`, the sheet's copies)
+/// along an edge of the sheet; every topological edge between two walls goes (the others,
+/// and every topological vertex, are kept), each wall it bounds first going onto its plane
+/// ([`put_planar_face_on_its_plane`]). Editing is enabled meanwhile.
+///
+/// With [`crate::kernel::UpstreamFixes::thicken_planar_side_walls`] (WR-564, #1599; the
+/// fork's tangency-labs/smlib#62) every wall goes onto its plane first, in the shell's
+/// face order, and its old surface's seams are deleted; the walls are then merged only
+/// with `merge` (the #978 opt-in).
 ///
 /// # Errors
 ///
@@ -2210,15 +2224,25 @@ fn merge_sheet_side_walls(
             }
         }
     }
+    let every_wall = kernel.fixes.thicken_planar_side_walls;
+    if merging.is_empty() && !every_wall {
+        return Ok(());
+    }
 
     // SmTemporaryChangeValue<SmBoolean> sEditing(pBrepShell->m_bEditingEnabled, TRUE)
     let editing = shell.editing_enabled();
     shell.set_editing_enabled(true);
     let result = (|| {
-        // every wall onto its plane, in GetFaces order (#1599)
-        for f in bp1::faces(shell, None)? {
-            if walls.contains(&f) {
-                put_planar_face_on_its_plane(kernel, shell, f, notifications)?;
+        if every_wall {
+            // every wall onto its plane, in GetFaces order (#1599)
+            for f in bp1::faces(shell, None)? {
+                if walls.contains(&f) {
+                    put_planar_face_on_its_plane(kernel, shell, f, true, notifications)?;
+                }
+            }
+        } else {
+            for &f in &merging {
+                put_planar_face_on_its_plane(kernel, shell, f, false, notifications)?;
             }
         }
         if !merge || merging.is_empty() {
@@ -2242,9 +2266,9 @@ fn merge_sheet_side_walls(
 /// with as much again round them; `ReplaceSurface(.., FALSE, NULL, TRUE)` remakes its
 /// UV trim curves. A face on a plane, or on a surface that is not planar, is left.
 ///
-/// The face's edges that are seams of its old surface (`SmEdge::IsSeam`, found before
-/// the replacement) are deleted after it (WR-564, #1599; the fork's
-/// tangency-labs/smlib#62): a surface closed round on itself (the wall
+/// With `delete_seams` (WR-564, #1599; the fork's tangency-labs/smlib#62) the face's
+/// edges that are seams of its old surface (`SmEdge::IsSeam`, found before the
+/// replacement) are deleted after it: a surface closed round on itself (the wall
 /// between a circle and its offset about one axis, a flat ring) bounds the face along
 /// its seam too, which on the plane is a slit through the ring; `DeleteEdge` splits the
 /// loop into the ring's outer and inner circles.
@@ -2257,6 +2281,7 @@ fn put_planar_face_on_its_plane(
     kernel: &mut Kernel,
     b: &mut Brep,
     f: FaceId,
+    delete_seams: bool,
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<()> {
     use crate::nurbs::knots::Side;
@@ -2315,11 +2340,13 @@ fn put_planar_face_on_its_plane(
         crate::math::Point2::new(u_max + margin, v_max + margin),
     );
 
-    // the old surface's seams (#1599)
+    // the old surface's seams (#1599; only with the opt-in)
     let mut seams: Vec<EdgeId> = Vec::new();
-    for e in crate::topology::face::p4::edges(&*b, f, None, false, None)? {
-        if crate::topology::edge::is_seam_of_surface(kernel, b, e, f)? {
-            seams.push(e);
+    if delete_seams {
+        for e in crate::topology::face::p4::edges(&*b, f, None, false, None)? {
+            if crate::topology::edge::is_seam_of_surface(kernel, b, e, f)? {
+                seams.push(e);
+            }
         }
     }
 

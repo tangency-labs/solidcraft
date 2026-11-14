@@ -139,6 +139,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.torus_check_spindle_apex = true;
     f.local_operation_step_walls = true;
     f.edge_check_orders_tangent_faces = true;
+    f.thicken_planar_side_walls = true;
     f.fillet_knife_edge_rounds = true;
     f.revolution_round_offset_collapses = true;
     f.fillet_chamfer_cone_stored_as_cone = true;
