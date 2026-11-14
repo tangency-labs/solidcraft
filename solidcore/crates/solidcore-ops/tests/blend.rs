@@ -327,6 +327,77 @@ fn blends_turn_round_a_corner_a_ten_thousandth_of_a_degree_off_straight() {
     }
 }
 
+/// #16627: the plate of [`blends_turn_round_a_shallow_sharp_corner`] with corners a thousandth
+/// to a hundredth of a degree off straight, both top edges rounded r 1 or chamfered 1. Each
+/// result passes every check, each round lies on its own closed-form cylinder, and the volume
+/// taken off is the mitred corner's closed form within the sibling tests' 1e-6. Where the two
+/// blends' sections at the corner stand 1 x kink apart, a Join puts one vertex there for both,
+/// which the check holds within the B-rep's intersection tolerance (2e-5): concave corners
+/// 1.5e-3 and 2e-3 degrees off straight (2.6e-5 and 3.5e-5 apart) used to be joined and failed
+/// `SmVertex`'s gap test; now they are mitred. The bound is 2e-5 rad, 1.146e-3 degrees:
+/// 1.14e-3 still joins, 1.15e-3 is mitred (`wr697_end_and_join.rs` asserts which). Asymmetric
+/// chamfers (setbacks 1 and 0.5 either way round) stand at most their larger setback times the
+/// kink apart and pass the check on both sides of the bound too.
+#[test]
+fn blends_join_at_a_near_straight_corner_only_within_the_vertex_check() {
+    all_fixes();
+    let round = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
+    let chamfer = (0.5, 1.0 / 6.0);
+    for kink in [1e-3, 1.14e-3, 1.15e-3, 1.5e-3, 2e-3] {
+        for convex in [false, true] {
+            for (top, side) in [(1.0, 0.5), (0.5, 1.0)] {
+                let (b, edges) = shallow_corner_plate(kink, convex);
+                let along: Vec<usize> = edges
+                    .iter()
+                    .map(|&e| {
+                        let faces = edge_faces_along(&b, e, [0.0, 0.0, 1.0]).unwrap();
+                        if faces[0].1 > faces[1].1 {
+                            faces[0].0
+                        } else {
+                            faces[1].0
+                        }
+                    })
+                    .collect();
+                chamfer_sides(&b, &edges, &along, top, ChamferSecond::Distance(side))
+                    .unwrap_or_else(|e| {
+                        panic!("chamfer {top} x {side} at {kink} degrees (convex {convex}): {e:?}")
+                    });
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(
+                    report.is_valid(),
+                    "chamfer {top} x {side} at {kink} degrees (convex {convex}): {report}"
+                );
+            }
+        }
+    }
+    for kink in [1e-3, 1.14e-3, 1.15e-3, 1.5e-3, 2e-3, 3e-3, 5e-3, 1e-2] {
+        for convex in [false, true] {
+            for (kind, (a, m)) in [(Blend::Round, round), (Blend::Chamfer, chamfer)] {
+                let (b, edges) = shallow_corner_plate(kink, convex);
+                let before = volume(&b);
+                blend(&b, kind, &edges, &[1.0], &[], Corners::Filled).unwrap_or_else(|e| {
+                    panic!("{kind:?} at a {kink} degree corner (convex {convex}): {e:?}")
+                });
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(
+                    report.is_valid(),
+                    "{kind:?} at a {kink} degree corner (convex {convex}): {report}"
+                );
+                if kind == Blend::Round {
+                    rounds_on_their_cylinders(&b, kink, convex);
+                }
+                let corner = 2.0 * m * (kink.to_radians() / 2.0).tan();
+                let want = 90.0 * a + if convex { -corner } else { corner };
+                let off = before - volume(&b);
+                assert!(
+                    rel(off, want) < 1e-6,
+                    "{kind:?} at a {kink} degree corner (convex {convex}): {off} off, want {want}"
+                );
+            }
+        }
+    }
+}
+
 /// A sketch outline with a near-tangent corner, the whole top rim rounded: a four-sided plate 5
 /// thick, its top outline 40 along x, then 40 on at 3.8 degrees off it (two lines meeting at
 /// 176.2 degrees), then back to (0, -30) and up to the start. All four top edges rounded r 1.5
@@ -1763,5 +1834,99 @@ fn a_round_on_a_revolved_torus_end_edge_survives_reload() {
             (actual - expected).abs() < 1e-4,
             "r{radius}: {actual} vs {expected}"
         );
+    }
+}
+
+/// The plate of [`shallow_corner_plate`] drafted `draft` degrees in (its walls meet the cap at
+/// z = 0, its outline, at 90 - `draft` degrees), with the record indices of the two edges of
+/// that cap at the kink.
+fn drafted_corner_plate(kink: f64, draft: f64) -> (Body, [usize; 2]) {
+    let t = kink.to_radians();
+    let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+    let p = [
+        [0.0, 0.0],
+        [50.0, 0.0],
+        [50.0 + 40.0 * u[0], 40.0 * u[1]],
+        [50.0 + 40.0 * u[0] + 30.0 * n[0], 40.0 * u[1] + 30.0 * n[1]],
+        [0.0, -30.0],
+    ];
+    let profile: Vec<Curve> = (0..p.len())
+        .map(|i| {
+            let (a, b) = (p[i], p[(i + 1) % p.len()]);
+            Curve::Line {
+                start: [a[0], a[1], 0.0],
+                end: [b[0], b[1], 0.0],
+            }
+        })
+        .collect();
+    let b = extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        2.0,
+        draft.to_radians(),
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap();
+    let edges = [
+        edge_at(&b, [25.0, 0.0, 0.0]),
+        edge_at(&b, [50.0 + 20.0 * u[0], 20.0 * u[1], 0.0]),
+    ];
+    (b, edges)
+}
+
+/// #16627: chamfers joined at a near-straight corner leave the shared section `2 o tan(a / 2)`
+/// off, `o` their offset from the side faces and `a` the angle between those faces (the corner
+/// of each chamfer's offset planes lies on its side face's offset at `o`; the shared one where
+/// the two offsets cross), not their setbacks. A chamfer of setbacks `d` on one face and `d'`
+/// on the other of a wedge of angle `w` stands `(d' - d cos w) / sin w` off the first: on a 120
+/// degree wedge setbacks 1 stand sqrt 3 off. The Join is bounded by the largest offset, so
+/// chamfers of setbacks 1, 1 x 0.5 and 0.5 x 1 on wedges of 60 and 120 degrees (walls drafted
+/// 30 degrees either way) pass the check at 0.97, 1.03 and 1.5 of the kink where that offset
+/// reaches the intersection tolerance 2e-5. Bounded by the setbacks, the setbacks 1 on the 120
+/// degree wedge would be joined at 1.5 (`a` 1.73e-5 rad), leaving the vertex sqrt 3 * a =
+/// 3.0e-5 off: forced to the Join at 2e-3 degrees, the check finds it 5.2359878e-5 off,
+/// sqrt 3 * a to eight digits.
+#[test]
+fn chamfers_join_at_a_near_straight_corner_within_their_offsets() {
+    all_fixes();
+    for draft in [30.0_f64, -30.0] {
+        // the walls meet the cap at w: cos w = -n_cap . n_wall
+        let w = (90.0 - draft).to_radians();
+        let (cw, sw) = (w.cos(), w.sin());
+        let d = draft.to_radians();
+        for (top, side) in [(1.0, 1.0), (1.0, 0.5), (0.5, 1.0)] {
+            let offsets = [(side - cw * top) / sw, (top - cw * side) / sw];
+            let size = offsets[0].max(offsets[1]);
+            let a_max = 2.0 * (2e-5 / (2.0 * size)).atan();
+            let k_max = ((a_max.cos() - d.sin().powi(2)) / d.cos().powi(2))
+                .acos()
+                .to_degrees();
+            for f in [0.97, 1.03, 1.5] {
+                let kink = f * k_max;
+                let (b, edges) = drafted_corner_plate(kink, draft);
+                let what = format!("chamfer {top} x {side}, draft {draft}, {kink} degrees");
+                if top == side {
+                    blend(&b, Blend::Chamfer, &edges, &[top], &[], Corners::Filled)
+                        .unwrap_or_else(|e| panic!("{what}: {e:?}"));
+                } else {
+                    let along: Vec<usize> = edges
+                        .iter()
+                        .map(|&e| {
+                            let faces = edge_faces_along(&b, e, [0.0, 0.0, -1.0]).unwrap();
+                            if faces[0].1 > faces[1].1 {
+                                faces[0].0
+                            } else {
+                                faces[1].0
+                            }
+                        })
+                        .collect();
+                    chamfer_sides(&b, &edges, &along, top, ChamferSecond::Distance(side))
+                        .unwrap_or_else(|e| panic!("{what}: {e:?}"));
+                }
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(report.is_valid(), "{what}: {report}");
+            }
+        }
     }
 }
