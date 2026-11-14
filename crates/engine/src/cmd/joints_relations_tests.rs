@@ -585,11 +585,38 @@ fn a_rule_with_the_wrong_references_is_refused() {
         (json!({"type": "weld", "a": "Top", "b": "Bottom"}), "`type` must be"),
         (json!({"type": "mate", "a": "Top", "b": "Bottom", "offset": "1e999"}), ""),
     ];
+    // An orientation rule needs a direction on both sides: a point has only a position (its z is a
+    // default), with another point or with a face.
+    let point = json!({"occurrence": "Panel", "point": [0, 0, 2]});
+    let mut cases = cases.to_vec();
+    for kind in ["parallel", "perpendicular", "angle"] {
+        for b in [json!("Corner"), json!("Bottom")] {
+            cases.push((json!({"type": kind, "a": point.clone(), "b": b, "angle": 30}), "a point has no direction"));
+        }
+    }
     for (p, says) in cases {
         let e = s.execute("assembly.constraint.create", &p).expect_err(&p.to_string()).to_string();
         assert!(e.contains(says), "{p}: {e}");
     }
     assert!(s.doc.assembly.joints.is_empty());
+    // Two edges have the directions of their faces: they make a parallel (a plate's top front edge
+    // and a block's, both where the boxes were made).
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [30, 40, 50]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let r = constrain(
+        &mut s,
+        "parallel",
+        json!({"occurrence": "Plate", "edge": [50, 0, 10]}),
+        json!({"occurrence": "Block", "edge": [40, 40, 70]}),
+        json!({}),
+    );
+    assert!(clean(&r), "{r}");
+    assert_eq!(s.doc.assembly.joints.first().and_then(|j| j.constraint), Some(solidcraft_doc::joints::Constraint::Parallel));
 }
 
 /// A roller tangent on the panel keeps resting on it as its radius changes, and a gap edited in as
@@ -643,4 +670,167 @@ fn a_tangent_constraint_follows_its_faces_radius() {
         assert!(clean(&r), "R {radius}: {r}");
         assert!((axis(&s) - want).abs() < 1e-6, "R {radius}, gap {gap:?}: axis at {}, expected {want}", axis(&s));
     }
+}
+
+// assembly.constraint.edit: a constraint's rule, gap, angle, facing or suppression changed in place.
+
+/// A plate (100 x 100 x 10) and a 20 mm block above it at (30, 40, 50), the plate grounded; the
+/// block's bottom mated to the plate's top as `Mate1`.
+fn plate_and_block() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [30, 40, 50]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let plate = occ(&s, "Plate");
+    run(&mut s, "occurrence.ground", json!({"occurrence": plate, "grounded": true}));
+    let r = constrain(
+        &mut s,
+        "mate",
+        json!({"occurrence": "Plate", "face": [5, 5, 10]}),
+        json!({"occurrence": "Block", "face": [31, 41, 50]}),
+        json!({}),
+    );
+    assert!(clean(&r), "{r}");
+    s
+}
+
+/// The block's lowest and highest z, from its eight corners.
+fn block_z(s: &Session) -> (f64, f64) {
+    let mut zs = Vec::new();
+    for x in [30.0, 50.0] {
+        for y in [40.0, 60.0] {
+            for z in [50.0, 70.0] {
+                zs.push(place(s, "Block", Vec3::new(x, y, z)).z);
+            }
+        }
+    }
+    (zs.iter().copied().fold(f64::INFINITY, f64::min), zs.iter().copied().fold(f64::NEG_INFINITY, f64::max))
+}
+
+fn near_z(got: (f64, f64), want: (f64, f64)) -> bool {
+    (got.0 - want.0).abs() < 1e-6 && (got.1 - want.1).abs() < 1e-6
+}
+
+fn edit_rule(s: &mut Session, p: Value) -> Value {
+    run(s, "assembly.constraint.edit", p)
+}
+
+/// One constraint changed from Mate to Distance to Flush: each rule places the block where its
+/// numbers say, the gap carries over to the next rule, and the joint is the kind its rule needs.
+#[test]
+fn a_constraints_rule_changes_in_place() {
+    let mut s = plate_and_block();
+    assert!(near_z(block_z(&s), (10.0, 30.0)), "mate: {:?}", block_z(&s));
+    // Distance 15: the bottom 15 mm above the top, still facing it.
+    let r = edit_rule(&mut s, json!({"constraint": "Mate1", "type": "distance", "offset": 15}));
+    assert!(clean(&r) && dof_of(&r, &s, "Block") == Some(3), "{r}");
+    assert!(near_z(block_z(&s), (25.0, 45.0)), "distance: {:?}", block_z(&s));
+    // Flush keeps the 15 mm gap: the bottom turned to face up, 15 mm above the top.
+    let r = edit_rule(&mut s, json!({"constraint": "Mate1", "type": "flush"}));
+    assert!(clean(&r) && dof_of(&r, &s, "Block") == Some(3), "{r}");
+    assert!(near_z(block_z(&s), (5.0, 25.0)), "flush, 15 mm: {:?}", block_z(&s));
+    // Flush at 0: the bottom in the top's plane, the block below it.
+    edit_rule(&mut s, json!({"constraint": "Mate1", "offset": 0}));
+    assert!(near_z(block_z(&s), (-10.0, 10.0)), "flush, 0: {:?}", block_z(&s));
+    let j = s.doc.assembly.joints.iter().find(|j| j.name == "Mate1").unwrap();
+    use solidcraft_doc::joints::{Constraint, JointKind};
+    assert_eq!((j.kind, j.flip, j.constraint), (JointKind::Planar, true, Some(Constraint::Flush)));
+    // Saved and reopened, the new rule stays.
+    let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(back.assembly.joints.iter().find(|j| j.name == "Mate1").and_then(|j| j.constraint), Some(Constraint::Flush));
+    // Turned over again without a type: back to facing the top, 0 mm off it.
+    edit_rule(&mut s, json!({"constraint": "Mate1", "flip": true}));
+    assert!(near_z(block_z(&s), (10.0, 30.0)), "turned over: {:?}", block_z(&s));
+}
+
+/// A new gap moves the block straight across it: not turned, not slid.
+#[test]
+fn an_offset_edit_moves_the_part_only_across_the_gap() {
+    let mut s = plate_and_block();
+    let corners = [Vec3::new(30.0, 40.0, 50.0), Vec3::new(50.0, 40.0, 50.0), Vec3::new(30.0, 60.0, 70.0)];
+    let before = corners.map(|c| place(&s, "Block", c));
+    let r = edit_rule(&mut s, json!({"constraint": "Mate1", "offset": 5}));
+    assert!(clean(&r), "{r}");
+    for (c, was) in corners.into_iter().zip(before) {
+        let got = place(&s, "Block", c);
+        assert!(near(got, was + Vec3::new(0.0, 0.0, 5.0), 1e-6), "{c:?}: {got:?}, was {was:?}");
+    }
+}
+
+/// A rule the references don't fit, a plain joint, a missing angle: refused with why, the joint
+/// as it was.
+#[test]
+fn an_edit_that_does_not_fit_is_refused_and_changes_nothing() {
+    let mut s = plate_and_block();
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "parallel", "name": "parallel Top-Bottom", "a": {"occurrence": "Plate", "face": [5, 5, 10]}, "b": {"occurrence": "Block", "face": [31, 41, 10]}}),
+    );
+    let joints = s.doc.assembly.joints.clone();
+    let z = block_z(&s);
+    for (p, says) in [
+        (json!({"constraint": "Mate1", "type": "insert"}), "insert needs two round edges"),
+        (json!({"constraint": "Mate1", "type": "tangent"}), "tangent needs a planar face and a round face"),
+        (json!({"constraint": "Mate1", "type": "angle"}), "angle needs `angle`"),
+        (json!({"constraint": "Mate1", "type": "weld"}), "`type` must be"),
+        (json!({"constraint": "parallel Top-Bottom", "offset": 1}), "was made as a joint"),
+        (json!({"constraint": "Nothing"}), "no joint"),
+    ] {
+        let e = s.execute("assembly.constraint.edit", &p).expect_err(&p.to_string()).to_string();
+        assert!(e.contains(says), "{p}: {e}");
+        assert_eq!(s.doc.assembly.joints, joints, "{p}");
+        assert!(near_z(block_z(&s), z), "{p}");
+    }
+}
+
+/// Suppressed, the constraint places nothing and the block is free; brought back, it sits on the
+/// plate again.
+#[test]
+fn a_constraint_suppressed_and_brought_back() {
+    let mut s = plate_and_block();
+    let block = occ(&s, "Block");
+    run(&mut s, "occurrence.move", json!({"occurrence": block, "translate": [0, 0, 40]}));
+    let r = edit_rule(&mut s, json!({"constraint": "Mate1", "suppressed": true}));
+    assert!(s.doc.assembly.joints.iter().all(|j| j.suppressed), "{r}");
+    assert_eq!(dof_of(&r, &s, "Block"), Some(6), "{r}");
+    let r = edit_rule(&mut s, json!({"constraint": "Mate1", "suppressed": false}));
+    assert!(clean(&r) && dof_of(&r, &s, "Block") == Some(3), "{r}");
+    assert!(near_z(block_z(&s), (10.0, 30.0)), "back: {:?}", block_z(&s));
+}
+
+/// A tangent's gap carries over its radius: changed to 2 mm, then the rule mapped again, the
+/// roller's axis stays a radius and 2 mm above the panel.
+#[test]
+fn a_tangent_keeps_its_gap_through_an_edit() {
+    let mut s = panel();
+    run(&mut s, "component.create", json!({"name": "Roller"}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, 600, 50], "axis": [1, 0, 0], "radius": 4, "height": 30, "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    constrain(&mut s, "tangent", json!("Top"), json!({"occurrence": "Roller", "circle": [0, 604, 50]}), json!({}));
+    let axis = |s: &Session| place(s, "Roller", Vec3::new(0.0, 600.0, 50.0)).z;
+    edit_rule(&mut s, json!({"constraint": "Tangent1", "offset": 2}));
+    assert!((axis(&s) - 8.0).abs() < 1e-6, "{}", axis(&s));
+    let r = edit_rule(&mut s, json!({"constraint": "Tangent1", "type": "tangent"}));
+    assert!(clean(&r), "{r}");
+    assert!((axis(&s) - 8.0).abs() < 1e-6, "{}", axis(&s));
+}
+
+/// A rule changed to one kept as another kind of joint (a mate is planar, a parallel rule is not)
+/// keeps a tag, with the new rule; the same change through joint.edit makes it a plain joint.
+#[test]
+fn a_rule_change_keeps_the_tag_where_joint_edit_drops_it() {
+    use solidcraft_doc::joints::{Constraint, JointKind};
+    let mut s = plate_and_block();
+    let r = edit_rule(&mut s, json!({"constraint": "Mate1", "type": "parallel"}));
+    assert!(clean(&r), "{r}");
+    let rule = |s: &Session| s.doc.assembly.joints.iter().find(|j| j.name == "Mate1").map(|j| (j.kind, j.constraint));
+    assert_eq!(rule(&s), Some((JointKind::Parallel, Some(Constraint::Parallel))));
+    // Started where its parts are: the block didn't move.
+    assert!(near_z(block_z(&s), (10.0, 30.0)), "{:?}", block_z(&s));
+    run(&mut s, "joint.edit", json!({"joint": "Mate1", "type": "planar"}));
+    assert_eq!(rule(&s), Some((JointKind::Planar, None)));
 }

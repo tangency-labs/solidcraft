@@ -19,10 +19,9 @@
 //! | [`join_shells_at_vertex`]               | `SmBrep::JoinShellsAtVertex`                   |
 //!
 //! Deviations:
-//! - **661f79c.** With `Kernel::fixes.glue_vertices_joins_every_region` (WR-607) the
-//!   glue joins the shells of every region, and `DoRemoval` neither calls
-//!   `JoinShellsAtVertex` nor clips the tangent faces' domains to their surfaces', as
-//!   the fork after 661f79c; without it, as 52bfef0.
+//! - **661f79c.** The glue joins the shells of every region (WR-607), and `DoRemoval`
+//!   neither calls `JoinShellsAtVertex` nor clips the tangent faces' domains to their
+//!   surfaces', as the fork after 661f79c (not as 52bfef0).
 //! - **Ownership.** The new curves are owned values moved into the B-rep (upstream's
 //!   pointers, cleared once the B-rep has them). Each B-rep edit notifies through the
 //!   kernel's callbacks (`with_kernel_callbacks`). As the fork, a new curve's owner is set
@@ -33,7 +32,10 @@
 //!   use), the port returns [`SolidError::InvalidInput`].
 //! - No recursion.
 
-use super::{bspline_part, glue_edges, ner, null, own_edge_curve, set_vertex_point, sm_err, OP};
+use super::{
+    bspline_part, bspline_part_with_nurb, glue_edges, ner, null, own_edge_curve, set_vertex_point,
+    sm_err, OP,
+};
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
 use crate::error::{ignore_status, Result, SolidError};
@@ -429,7 +431,10 @@ impl RingFilletRemoval {
             return Err(sm_err());
         };
         if bspline_part(&sharp).is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::blend_missing(
+                OP,
+                "the sharp curve's B-spline form",
+            ));
         }
 
         // Run as rail 0.
@@ -477,7 +482,10 @@ impl RingFilletRemoval {
             };
             let mut side_curve = ner(edge::curve(b, side)?)?.clone();
             if bspline_part(&side_curve).is_none() {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::blend_missing(
+                    OP,
+                    "the side curve's B-spline form",
+                ));
             }
             let none = CurveIntersectOptions::<NoObject>::default();
             let mut solutions = sharp.global_curve_intersect(
@@ -519,7 +527,7 @@ impl RingFilletRemoval {
                 } else {
                     end - reach_param
                 };
-                let part = ner(bspline_part(&side_curve))?;
+                let part = ner(bspline_part_with_nurb(&side_curve)?)?;
                 let longer = Curve::from(ner(part.create_extended_curve(
                     far,
                     ContinuityType::CInfinity,
@@ -579,7 +587,10 @@ impl RingFilletRemoval {
         if start_at > ivl.min() + snap && start_at < ivl.max() - snap {
             let mut before = sharp.clone();
             if bspline_part(&before).is_none() {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::blend_missing(
+                    OP,
+                    "the sharp curve's B-spline form",
+                ));
             }
             let mut after_ivl = crate::geom::extent1d::Extent1d::from_min_max(start_at, ivl.max());
             let mut before_ivl = crate::geom::extent1d::Extent1d::from_min_max(ivl.min(), start_at);
@@ -631,11 +642,14 @@ impl RingFilletRemoval {
             }
             let extended = if uv.natural_interval().contains_value(new_t, 0.0) {
                 if bspline_part(uv).is_none() {
-                    return Err(SolidError::null_pointer(OP));
+                    return Err(SolidError::blend_missing(
+                        OP,
+                        "the UV curve's B-spline form",
+                    ));
                 }
                 uv.clone()
             } else {
-                let part = ner(bspline_part(uv))?;
+                let part = ner(bspline_part_with_nurb(uv)?)?;
                 Curve::from(ner(part.create_extended_curve(
                     new_t,
                     ContinuityType::CInfinity,
@@ -672,7 +686,6 @@ impl RingFilletRemoval {
     /// `DoRemoval`: the fillet goes, its rails become the sharp edge.
     #[allow(clippy::too_many_lines)]
     fn do_removal(&mut self, k: &mut Kernel, b: &mut Brep) -> Result<()> {
-        let every_region = k.fixes.glue_vertices_joins_every_region;
         let new_edge_curve = ner(self.new_edge_curve.take())?;
         with_kernel_callbacks(k, b, |_k, b, env| {
             let this = Some(NotifyArg::Object(brep_p2::brep_ref(b)));
@@ -784,20 +797,16 @@ impl RingFilletRemoval {
         })?;
         self.rails[1] = Some(survive_edge);
 
-        if !every_region {
-            // Deleting the fillet split each shell it alone held together (the boss's top
-            // from the rest) into one for each part; joined again along the sharp edge
-            // they are one shell.
-            join_shells_at_vertex(k, b, Some(survive_vtx))?;
-        }
-
         // UV trims of the sharp edge on both tangent faces, and their domains to take
         // them in.
         let uses = b.edge(survive_edge)?.edgeuses.clone();
         for &eu in &uses {
             get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
             if eu1::uv_trim_curve(b, eu)?.0.is_none() {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::blend_missing(
+                    OP,
+                    "the edge use's UV trim curve",
+                ));
             }
         }
         for ii in 0..2 {
@@ -810,15 +819,7 @@ impl RingFilletRemoval {
                 let p = uv.evaluate_point(k, uv_ivl.evaluate(f64::from(kk) / 16.0))?;
                 face_domain.add_point(Point2::new(p.x, p.y));
             }
-            if every_region {
-                crate::topology::face::p2::set_uv_domain(b, face, &face_domain)?;
-            } else {
-                // The face lies within its surface's domain (nothing was continued).
-                let surf_domain = ner(crate::topology::face::p2::surface(b, face)?)?
-                    .natural_uv_domain_with_nurb(k)?;
-                let in_surface = face_domain.intersect(&surf_domain)?;
-                crate::topology::face::p2::set_uv_domain(b, face, &in_surface)?;
-            }
+            crate::topology::face::p2::set_uv_domain(b, face, &face_domain)?;
         }
         Ok(())
     }

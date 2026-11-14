@@ -8,6 +8,7 @@
 //! | [`validate_pointers`] | `SmBrep::ValidatePointers` |
 //! | [`contains_coincident_topology`] | `SmBrep::ContainsCoincidentTopology` |
 //! | [`soundness`], [`standing`], [`volume`] | (not upstream) the check at level 2, the manifold test and the volume |
+//! | [`update_tolerances_after_boolean`] | (not upstream) a boolean result's tolerance update, wide vertices centred first |
 //! | `check_edge_geometry` | `SmEdge::ValidateGeometry(FALSE)` |
 //! | `check_edgeuse_geometry` | `sm_CheckEdgeuseGeometry` |
 //!
@@ -25,6 +26,7 @@ mod coincidence;
 mod pointers;
 mod soundness;
 pub(crate) mod spatial;
+mod wide_vertices;
 
 pub use assert_valid::{
     assert_valid, check_brep, check_brep_with_keys, curve_assert_valid,
@@ -33,8 +35,10 @@ pub use assert_valid::{
 pub use coincidence::{contains_coincident_topology, CoincidenceResult};
 pub(crate) use pointers::validate_geometry;
 pub use pointers::validate_pointers;
+pub(crate) use pointers::validate_pointers_excluding;
 pub(crate) use soundness::lost_manifold;
 pub use soundness::{soundness, standing, volume_sign, Soundness, Standing};
+pub use wide_vertices::update_tolerances_after_boolean;
 
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::assert_array::{AssertArray, AssertReport, ObjectKey, ReportSpec};
@@ -107,6 +111,7 @@ fn object_info(b: &Brep, object: Object) -> Result<(ObjectKey, i64, &'static str
 struct Reports<'a> {
     array: Option<&'a mut AssertArray>,
     level: u8,
+    failed: bool,
 }
 
 impl Reports<'_> {
@@ -174,6 +179,7 @@ impl Reports<'_> {
         tol: f64,
         value: f64,
     ) -> Result<bool> {
+        self.failed |= !passed;
         let Some(array) = self.array.as_deref_mut() else {
             return Ok(passed);
         };

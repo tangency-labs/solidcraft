@@ -7,6 +7,7 @@
  {"expect": {"sketching": true, "sketch_curves": {"own": 1}, "errors": 0}},
 
  {"note": "Starting the command opens the window and commits nothing. Picking the circle and the centre point still commits nothing."},
+ {"call": "ui.camera", "params": {"target": [20, 35, 0], "distance": 220}},
  {"start": "sketch.pattern.circular"},
  {"expect": {"dialog": "PatternCirc", "sketch_curves": {"own": 1}, "errors": 0}},
  {"click": {"sketch": [40, 0]}},

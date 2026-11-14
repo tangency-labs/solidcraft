@@ -62,6 +62,13 @@ pub enum EvalError {
     /// limit from the second derivatives vanishes too).
     #[error("degenerate: {0}")]
     Degenerate(String),
+    /// A pole query at parameters off a spline's knot range that the query's reach does not
+    /// cover: moving them onto the range shifts the surface by as much as the reach, or more
+    /// (the reason's own name in tests and logs: `OffRangeBeyondReach`), or the patch there is
+    /// rational, whose extension past the range is not bounded
+    /// ([`collapse::collapse_near`]).
+    #[error("off the surface's range: {0}")]
+    OffRange(String),
 }
 
 #[cfg(test)]

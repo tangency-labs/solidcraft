@@ -69,12 +69,11 @@ use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT};
 // Upstream status `SM_ERR`.
 use crate::error::SM_ERR;
 
-fn sm_err(operation: &'static str) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code: SM_ERR,
-        entity: None,
-    }
+/// Whether the Jacobian system's solve failed with `SM_ERR` (the system is not solvable),
+/// which ends the iteration: by its status, so also a typed failure that replaced the
+/// `Upstream` (#13790).
+fn is_bad_jacobian(error: &SolidError) -> bool {
+    error.upstream_status() == Some(SM_ERR)
 }
 
 /// How [`LocalSolveNd::solve_it`] treats next guesses that leave the parameter
@@ -161,7 +160,7 @@ pub trait EvalNFunctions {
         _intervals: Option<&ExtentNd>,
         _periodicities: Option<&[bool]>,
     ) -> Result<()> {
-        Err(sm_err(
+        Err(SolidError::geom_stage_failed(
             "geom::local_solve_nd::EvalNFunctions::set_intervals",
         ))
     }
@@ -226,7 +225,13 @@ pub fn compute_jacobian<E: EvalNFunctions + ?Sized>(
         delta = hi_t - lo_t; // use the actual difference, whatever happened
 
         if delta.abs() < EFF_ZERO {
-            return Err(sm_err(OP));
+            return Err(SolidError::geom(
+                OP,
+                crate::error::geom::GeomFailure::ZeroDifferenceStep {
+                    parameter: jj,
+                    at: base_param,
+                },
+            ));
         }
 
         // jj-th Jacobian column by first order central differences
@@ -499,7 +504,7 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
             // parameter steps from the Jacobian system J * deltas = -F
             match jacobian.solve_linear_system(&equation_values) {
                 Ok(s) => step_unclamped = s.x,
-                Err(SolidError::Upstream { code: SM_ERR, .. }) => {
+                Err(e) if is_bad_jacobian(&e) => {
                     // exit case - the Jacobian system is not solvable
                     self.termination_reason = TerminationReason::BadJacobian;
                     break;
@@ -957,7 +962,7 @@ mod tests {
     struct Failing;
     impl EvalNFunctions for Failing {
         fn evaluate(&mut self, _: &[f64], _: &mut [f64], _: Option<&mut Matrix>) -> Result<bool> {
-            Err(sm_err("test"))
+            Err(SolidError::geom_stage_failed("test"))
         }
     }
 
@@ -1023,10 +1028,13 @@ mod tests {
         }
         let mut e = WantsIntervals;
         let mut s = LocalSolveNd::new(&mut e, None, None);
-        assert!(matches!(
-            s.solve_it(&[1.0], EFF_ZERO),
-            Err(SolidError::Upstream { code: SM_ERR, .. })
-        ));
+        let e = s.solve_it(&[1.0], EFF_ZERO).unwrap_err();
+        assert_eq!(
+            e.geom_failure(),
+            Some(&crate::error::geom::GeomFailure::StageFailed)
+        );
+        assert!(e.is_defect());
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
     }
 
     #[test]
@@ -1052,8 +1060,34 @@ mod tests {
         let mut j = Matrix::new(2, 2);
         let ivls = [Extent1d::from_value(0.5), Extent1d::from_min_max(-2.0, 2.0)];
         let r = compute_jacobian(&mut e, &mut x, &f, &mut j, Some(&ivls));
-        assert!(matches!(r, Err(SolidError::Upstream { code: SM_ERR, .. })));
+        let e = r.unwrap_err();
+        assert_eq!(
+            e.geom_failure(),
+            Some(&crate::error::geom::GeomFailure::ZeroDifferenceStep {
+                parameter: 0,
+                at: 0.5
+            })
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
         // as upstream, the parameter stays perturbed
         assert_eq!(x, [0.5, -1.0]);
+    }
+
+    /// #13790: a typed `SM_ERR` that replaced the linear solve's `Upstream` ends the
+    /// iteration as a bad Jacobian, as the `Upstream` does.
+    #[test]
+    fn bad_jacobian_reads_the_status_of_a_typed_failure() {
+        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
+        let op = "geom::matrix::Matrix::solve_linear_system";
+        assert!(is_bad_jacobian(&SolidError::sm_err(op)));
+        for typed in replaced_upstream(op, SM_ERR, None) {
+            assert!(is_bad_jacobian(&typed), "{typed:?}");
+        }
+        for other in replaced_upstream(op, 1007, None)
+            .into_iter()
+            .chain(native_failures(op, SM_ERR))
+        {
+            assert!(!is_bad_jacobian(&other), "{other:?}");
+        }
     }
 }

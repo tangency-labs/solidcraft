@@ -496,6 +496,7 @@ fn rust_srf_srf(i: &Inputs) -> Result<Rec, HarnessError> {
         SrfSrfOptions {
             skip_two_pnts_intersection: *skip,
             ref_point: ref_point.map(v3),
+            closed_by_start_direction: false,
         },
     );
     o.push(match st(&r) {

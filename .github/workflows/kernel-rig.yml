@@ -84,7 +84,8 @@ jobs:
     # Draft pull requests run no CI, as in ci.yml.
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
+    # The checkout fetches history without file contents (below), so this takes well under a minute.
+    timeout-minutes: 10
     outputs:
       # The shard matrix (JSON list of areas and the ladder; [] when nothing is selected).
       shards: ${{ steps.plan.outputs.shards }}
@@ -93,8 +94,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # A pull request's diff needs its base's history.
+          # A pull request's diff needs its base's history: the commits and trees, not every file
+          # version. A full clone of every blob took over the 5-minute timeout on a 2-vCPU runner and
+          # cancelled the merge queue's rig selection (Select the rig areas) again and again.
           fetch-depth: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && '0' || '1' }}
+          filter: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'blob:none' || '' }}
       - name: Selection self-test
         run: python3 -I scripts/ci/test_kernel_rig_plan.py
       - id: plan
@@ -129,7 +133,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # Only pushes to main and develop commit the cache; pull requests, merge groups and forks
       # mount a clone and never write back.
       - name: Mount the compiler cache

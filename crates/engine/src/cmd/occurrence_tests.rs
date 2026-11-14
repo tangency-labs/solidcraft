@@ -1874,6 +1874,62 @@ fn occurrence_bodies_cache_retires_one_answer_when_full() {
     assert_eq!(s.occurrence_bodies(&root, true).unwrap().len(), 131);
 }
 
+/// Listing a subtree makes the design's name index once, not once for each placement in it: an
+/// assembly's active placement is listed at every model scene build, and making the index for
+/// each of its placements cost the subtree times the design (about 70 ms a build on a 561-body
+/// assembly, each appearance edit a frame of over 100 ms).
+#[test]
+fn listing_a_subtree_makes_the_name_index_once() {
+    let mut s = Session::default();
+    let (_assembly, assembly) = created(&mut s, "Assembly");
+    let (part, _) = created(&mut s, "Part");
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Part"}));
+    for i in 0..130 {
+        run(&mut s, "occurrence.copy", json!({"component": part, "translate": [i as f64 * 10.0, 0.0, 0.0]}));
+    }
+    crate::occurrences::NAME_INDEXES.with(|n| n.set(0));
+    let listed = s.occurrence_bodies(&[assembly], true).unwrap();
+    assert_eq!(listed.len(), 131);
+    assert_eq!(crate::occurrences::NAME_INDEXES.with(std::cell::Cell::get), 1, "one name index for the 131 placements");
+    let mut unique = listed.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), 131, "each placement's body has its own world name");
+}
+
+/// Finding the bodies a hidden placement hides looks at each placed body once, not at every
+/// body of the design for every placement: with anything hidden, each design change and each
+/// joint drag frame paid the placements times the bodies.
+#[test]
+fn bodies_hidden_by_a_placement_look_at_each_placed_body_once() {
+    let mut s = Session::default();
+    let (assembly_component, assembly) = created(&mut s, "Assembly");
+    let mut copies = Vec::new();
+    for p in 0..8 {
+        run(&mut s, "component.activate", json!({"component": assembly_component}));
+        let (part, _) = created(&mut s, &format!("Part{p}"));
+        run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": format!("Part{p}")}));
+        for i in 1..8 {
+            let o = run(&mut s, "occurrence.copy", json!({"component": part, "translate": [i as f64 * 10.0, p as f64 * 10.0, 0.0]}));
+            copies.push(o["occurrence"].as_u64().unwrap());
+        }
+    }
+    let hidden = vec![assembly, copies[0]];
+    let shown = vec![assembly, copies[1]];
+    run(&mut s, "browser.visibility", json!({"paths": [hidden], "visible": false}));
+    let hidden_body = s.occurrence_bodies(&hidden, false).unwrap();
+    let shown_body = s.occurrence_bodies(&shown, false).unwrap();
+    assert_eq!((hidden_body.len(), shown_body.len()), (1, 1));
+    // A design change: the hidden bodies are found again.
+    s.revision += 1;
+    crate::occurrences::HIDDEN_BY_PARENTS_CHECKS.with(|n| n.set(0));
+    assert!(!s.body_visible(&hidden_body[0]), "the hidden placement's body is hidden");
+    assert!(s.body_visible(&shown_body[0]), "another placement of the same part stays shown");
+    // 8 parts placed 8 times each, one body apiece; asking every body at every placement was about 8 times this.
+    let checks = crate::occurrences::HIDDEN_BY_PARENTS_CHECKS.with(std::cell::Cell::get);
+    assert_eq!(checks, 64, "each placed body is looked at once");
+}
+
 /// A connector's boss extruded To Object up to the shell of another component joins the
 /// connector only: the shell it runs to stays its own body in its own component, and the PCB
 /// sketched on the shell afterwards is still made (a Join extrude to an object joined the body
@@ -2326,4 +2382,232 @@ fn look_at_keeps_the_world_planes_for_their_names() {
     run(&mut s, "view.normal_to", json!({}));
     let camera = s.camera.unwrap();
     assert!(camera.target.dist(Vec3::new(0., 0., 5.)) < 1e-9, "the datum follows its placement: {:?}", camera.target);
+}
+
+/// Where an occurrence's bodies' centre of mass is, in the world.
+fn centre(s: &mut Session, occurrence: u64) -> [f64; 3] {
+    let r = run(s, "occurrence.properties", json!({"occurrence": occurrence}));
+    let c = &r["total"]["center_of_mass"];
+    [c[0].as_f64().unwrap(), c[1].as_f64().unwrap(), c[2].as_f64().unwrap()]
+}
+
+fn at(c: [f64; 3], expected: [f64; 3]) {
+    assert!(c.iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-6), "{c:?} != {expected:?}");
+}
+
+/// #8192: an occurrence moved by a translation typed as expressions (a STEP part placed at a
+/// station that is a parameter) sits where they work out to, keeps them, and moves with the
+/// parameter: after a change, past another move of it, through undo, a rename, and saving and
+/// opening the design.
+#[test]
+fn an_occurrence_moved_by_expressions_follows_its_parameters() {
+    let (dir, path) = temp_design("expressed-move", "solidcraft");
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dy", "expression": "10 mm"}));
+    let (_, occ) = created(&mut s, "Block");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 1, "height": 1}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    // The box's centre is (1, 0.5, 0.5) in its component.
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": ["0 mm", "dy", 0]}));
+    at(centre(&mut s, occ), [1.0, 10.5, 0.5]);
+    let o = s.doc.occurrences.iter().find(|o| o.id == occ).unwrap();
+    assert_eq!(o.expressed_moves.len(), 1);
+    assert_eq!(o.expressed_moves[0].translate, [None, Some("dy".to_string()), None], "text that names no parameter is a number");
+
+    run(&mut s, "parameters.change", json!({"name": "dy", "expression": "25 mm"}));
+    at(centre(&mut s, occ), [1.0, 25.5, 0.5]);
+    // Another move of it stays: the parameter moves it on from there.
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [5, 0, 0]}));
+    run(&mut s, "parameters.change", json!({"name": "dy", "expression": "3 mm"}));
+    at(centre(&mut s, occ), [6.0, 3.5, 0.5]);
+    run(&mut s, "edit.undo", json!({}));
+    at(centre(&mut s, occ), [6.0, 25.5, 0.5]);
+    // A renamed parameter carries into the move; one it uses can't be deleted.
+    run(&mut s, "parameters.rename", json!({"name": "dy", "new_name": "station"}));
+    let e = s.execute("parameters.delete", &json!({"name": "station"})).unwrap_err().to_string();
+    assert!(e.contains("occurrence Block:1 (translate y)"), "{e}");
+    run(&mut s, "parameters.change", json!({"name": "station", "expression": "12 mm"}));
+    at(centre(&mut s, occ), [6.0, 12.5, 0.5]);
+
+    // Saved and opened, it still follows.
+    run(&mut s, "file.save", json!({"path": path}));
+    run(&mut s, "file.new", json!({}));
+    run(&mut s, "doc.open", json!({"path": path}));
+    at(centre(&mut s, occ), [6.0, 12.5, 0.5]);
+    run(&mut s, "parameters.change", json!({"name": "station", "expression": "40 mm"}));
+    at(centre(&mut s, occ), [6.0, 40.5, 0.5]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A move given in world axes follows its parameter along those axes, under a turned parent.
+#[test]
+fn an_expressed_world_move_under_a_turned_parent_follows_along_world_axes() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dx", "expression": "10 mm"}));
+    let (_, parent) = created(&mut s, "Parent");
+    run(&mut s, "occurrence.move", json!({"occurrence": parent, "axis": [0, 0, 1], "angle": "90 deg"}));
+    let (_, child) = created(&mut s, "Child");
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let path = json!([parent, child]);
+    run(&mut s, "occurrence.move", json!({"occurrence": child, "path": path, "space": "world", "translate": ["dx", 0, 0]}));
+    let props = |s: &mut Session| {
+        let r = run(s, "occurrence.properties", json!({"occurrence": child, "path": path}));
+        [r["total"]["center_of_mass"][0].as_f64().unwrap(), r["total"]["center_of_mass"][1].as_f64().unwrap()]
+    };
+    let before = props(&mut s);
+    assert!((before[0] - 9.5).abs() < 1e-6 && (before[1] - 0.5).abs() < 1e-6, "{before:?}");
+    run(&mut s, "parameters.change", json!({"name": "dx", "expression": "30 mm"}));
+    let after = props(&mut s);
+    assert!((after[0] - 29.5).abs() < 1e-6 && (after[1] - 0.5).abs() < 1e-6, "{after:?}");
+}
+
+/// Plain numbers move as they always did and keep nothing; a move by expressions refuses to stay
+/// pending, and an expression that is not a length is refused with the design unchanged.
+#[test]
+fn numbers_keep_no_expressions_and_bad_expressions_are_refused() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dy", "expression": "10 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "turn", "expression": "30 deg"}));
+    let (_, occ) = created(&mut s, "Block");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 1, "height": 1}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, 10, 0]}));
+    let mut other = Session::default();
+    run(&mut other, "parameters.add", json!({"name": "dy", "expression": "10 mm"}));
+    let (_, o2) = created(&mut other, "Block");
+    let r2 = run(&mut other, "occurrence.move", json!({"occurrence": o2, "translate": ["0 mm", "dy", "0"]}));
+    assert_eq!(r["transform"], r2["transform"], "numbers and expressions that work out the same move the same");
+    assert!(s.doc.occurrences.iter().all(|o| o.expressed_moves.is_empty()));
+    run(&mut s, "parameters.change", json!({"name": "dy", "expression": "20 mm"}));
+    at(centre(&mut s, occ), [1.0, 10.5, 0.5]);
+
+    let doc = s.doc.clone();
+    for (translate, capture, expected) in [
+        (json!([0, "dy", 0]), false, "captured"),
+        (json!([0, "turn", 0]), true, "translate:"),
+        (json!([0, "nope", 0]), true, "translate:"),
+        (json!([0, true, 0]), true, "three finite numbers"),
+        (json!([0, true, "dy"]), true, "numbers or length expressions"),
+    ] {
+        let e = s.execute("occurrence.move", &json!({"occurrence": occ, "translate": translate, "capture": capture})).unwrap_err().to_string();
+        assert!(e.contains(expected), "{e}");
+        assert_eq!(s.doc, doc);
+    }
+}
+
+/// parameters.users names an occurrence moved by an expression, and an absolute pose (`to`) is
+/// not given expressions.
+#[test]
+fn an_expressed_move_is_a_parameter_user_and_absolute_poses_take_numbers_only() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dy", "expression": "10 mm"}));
+    let (_, occ) = created(&mut s, "Block");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 1, "height": 1}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, "dy + 1 mm", 0]}));
+    let r = run(&mut s, "parameters.users", json!({"name": "dy"}));
+    let text = r.to_string();
+    assert!(text.contains("\"occurrence\"") && text.contains("translate y"), "{text}");
+    let doc = s.doc.clone();
+    let e =
+        s.execute("occurrence.move", &json!({"occurrence": occ, "to": {"position": [0, 0, 0]}, "translate": [0, "dy", 0]})).unwrap_err().to_string();
+    assert!(e.contains("not both"), "{e}");
+    assert_eq!(s.doc, doc);
+}
+
+/// A grounded occurrence doesn't follow a parameter, but its moves keep up with it: ungrounded
+/// later, it stays and then follows by the next change only.
+#[test]
+fn a_grounded_occurrence_with_an_expressed_move_stays_and_follows_after_ungrounding() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dy", "expression": "10 mm"}));
+    let (_, occ) = created(&mut s, "Block");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 1, "height": 1}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": ["0 mm", "dy", 0]}));
+    at(centre(&mut s, occ), [1.0, 10.5, 0.5]);
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": true}));
+    run(&mut s, "parameters.change", json!({"name": "dy", "expression": "25 mm"}));
+    at(centre(&mut s, occ), [1.0, 10.5, 0.5]);
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": false}));
+    at(centre(&mut s, occ), [1.0, 10.5, 0.5]);
+    run(&mut s, "parameters.change", json!({"name": "dy", "expression": "30 mm"}));
+    at(centre(&mut s, occ), [1.0, 15.5, 0.5]);
+}
+
+/// A parameter change moves the pending placement and its exploded entry together, so the
+/// exploded view still shows as display only.
+#[test]
+fn an_expressed_move_follows_its_parameter_in_an_exploded_view() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dy", "expression": "10 mm"}));
+    let (_, occ) = created(&mut s, "Block");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 1, "height": 1}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": ["0 mm", "dy", 0]}));
+    run(&mut s, "component.create", json!({"name": "B", "parent": 0, "activate": false}));
+    let view = run(&mut s, "explode.create", json!({"moves": [{"occurrence": occ, "translate": [0, 0, 60]}]}))["view"].as_u64().unwrap();
+    run(&mut s, "explode.show", json!({"view": view}));
+    assert_eq!(s.pending_moves.get(&occ), s.exploded.get(&occ));
+    run(&mut s, "parameters.change", json!({"name": "dy", "expression": "25 mm"}));
+    assert!(s.uncaptured_moves().is_empty(), "the exploded placement is still display only: {:?}", s.uncaptured_moves());
+    assert_eq!(s.pending_moves.get(&occ), s.exploded.get(&occ));
+    let shown = s.pending_moves.get(&occ).unwrap()[3];
+    assert!((shown[1] - 25.0).abs() < 1e-9 && (shown[2] - 60.0).abs() < 1e-9, "{shown:?}");
+    run(&mut s, "explode.show", json!({}));
+    at(centre(&mut s, occ), [1.0, 25.5, 0.5]);
+}
+
+/// A world-axes move keeps following along world axes after it is reparented under a turned parent.
+#[test]
+fn an_expressed_world_move_follows_along_world_axes_after_reparenting() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dx", "expression": "10 mm"}));
+    let (parent_component, parent) = created(&mut s, "Parent");
+    run(&mut s, "occurrence.ground", json!({"occurrence": parent, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": parent, "axis": [0, 0, 1], "angle": "90 deg"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let (_, child) = created(&mut s, "Child");
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": child, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": child, "space": "world", "translate": ["dx", 0, 0]}));
+    run(&mut s, "occurrence.reparent", json!({"occurrence": child, "parent": parent_component}));
+    let path = json!([parent, child]);
+    let props = |s: &mut Session| {
+        let r = run(s, "occurrence.properties", json!({"occurrence": child, "path": path}));
+        [r["total"]["center_of_mass"][0].as_f64().unwrap(), r["total"]["center_of_mass"][1].as_f64().unwrap()]
+    };
+    let before = props(&mut s);
+    run(&mut s, "parameters.change", json!({"name": "dx", "expression": "30 mm"}));
+    let after = props(&mut s);
+    assert!((after[0] - before[0] - 20.0).abs() < 1e-6 && (after[1] - before[1]).abs() < 1e-6, "{before:?} -> {after:?}");
+}
+
+/// A joint that holds an occurrence still wins over its expressed move after a parameter changes.
+#[test]
+fn a_joint_wins_over_an_expressed_move_when_a_parameter_changes() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dy", "expression": "10 mm"}));
+    let mut ids = Vec::new();
+    for name in ["Base", "Block"] {
+        run(&mut s, "component.activate", json!({"component": 0}));
+        ids.push(created(&mut s, name).1);
+        run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2}));
+    }
+    let (base, block) = (ids[0], ids[1]);
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": block, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": block, "translate": ["0 mm", "dy", 0]}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": base, "point": [0,0,0]}, "b": {"occurrence": block, "point": [0,0,0]}, "name": "Held"}),
+    );
+    let held = centre(&mut s, block);
+    run(&mut s, "parameters.change", json!({"name": "dy", "expression": "25 mm"}));
+    at(centre(&mut s, block), held);
 }

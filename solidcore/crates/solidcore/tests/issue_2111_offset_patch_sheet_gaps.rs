@@ -187,7 +187,7 @@ fn offset_with(d: f64, flags: &[&str]) -> (Kernel, Brep) {
     (k, r)
 }
 
-/// WR-705 at d = 0.5: with `offset_updates_result_tolerances` (and WR-671, WR-679) the
+/// WR-705 at d = 0.5: with WR-671 and WR-679 the
 /// offset's update of its own result moves no geometry and grows nothing: the result
 /// checks clean, its gaps at rounding, its area the offset's without the update.
 #[test]
@@ -195,7 +195,6 @@ fn offset_updates_its_result_tolerances() {
     let flags = [
         "offset_edges_keep_source_tolerance",
         "validate_tolerances_fixes_reported_gaps",
-        "offset_updates_result_tolerances",
     ];
     let (mut k, mut r) = offset_with(0.5, &flags);
     let gap = largest_gap(&mut k, &mut r);

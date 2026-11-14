@@ -444,8 +444,8 @@ mod tests {
     }
 
     /// tangency-labs/solidcore#1072 (WR-464): the collapse threshold of the cylinder,
-    /// cone, sphere and torus. Past it the offset has no surface and the flag does not
-    /// turn that into a failure; short of it the offset is a surface.
+    /// cone, sphere and torus. Past it the offset has no surface (not a failure); short of
+    /// it the offset is a surface.
     #[test]
     fn collapse_thresholds_of_the_analytic_surfaces() {
         use crate::geom::axis2_placement::Axis2Placement;
@@ -468,27 +468,24 @@ mod tests {
             (Surface::from(sphere), -1.9, -2.1),
             (Surface::from(torus), -0.4, -0.6),
         ];
-        for fixes in [false, true] {
-            let mut kernel = Kernel::default();
-            kernel.fixes.offset_missing_surface_fails = fixes;
-            for (surface, short, past) in &cases {
-                let (original, _, faceuse) = source(surface.clone(), OrientType::Same);
-                for (d, collapses) in [(*short, false), (*past, true)] {
-                    assert_eq!(
-                        surface.offset_collapses(&kernel, d, 1e-7).unwrap(),
-                        collapses
-                    );
-                    let mut backend = backend(&original);
-                    let made = OffsetGeometryCreation::new(d, 1e-6)
-                        .faceuse_offset_with_backend(
-                            &kernel,
-                            &mut backend,
-                            Handle::SourceFaceuse(faceuse),
-                            true,
-                        )
-                        .unwrap();
-                    assert_eq!(made.0.is_none(), collapses, "{d}");
-                }
+        let kernel = Kernel::default();
+        for (surface, short, past) in &cases {
+            let (original, _, faceuse) = source(surface.clone(), OrientType::Same);
+            for (d, collapses) in [(*short, false), (*past, true)] {
+                assert_eq!(
+                    surface.offset_collapses(&kernel, d, 1e-7).unwrap(),
+                    collapses
+                );
+                let mut backend = backend(&original);
+                let made = OffsetGeometryCreation::new(d, 1e-6)
+                    .faceuse_offset_with_backend(
+                        &kernel,
+                        &mut backend,
+                        Handle::SourceFaceuse(faceuse),
+                        true,
+                    )
+                    .unwrap();
+                assert_eq!(made.0.is_none(), collapses, "{d}");
             }
         }
     }

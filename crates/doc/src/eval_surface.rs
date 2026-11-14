@@ -122,7 +122,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             };
             let made = Traced::step(trimmed, &[&mb.traced()]);
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::traced_new(mb.name, made, mb.feature);
+                *slot = mb.remade(made);
             }
             Ok(())
         }
@@ -357,7 +357,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             match rest {
                 Some(rest) => {
                     if let Some(slot) = st.bodies.get_mut(i) {
-                        *slot = ModelBody::traced_new(mb.name.clone(), source.then(rest), mb.feature);
+                        *slot = mb.remade(source.then(rest));
                     }
                 }
                 None => {
@@ -375,12 +375,40 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let turned = mb.traced().then(kernel::reverse_faces(&mb.body, &crate::plain(faces))?);
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::traced_new(mb.name, turned, mb.feature);
+                *slot = mb.remade(turned);
             }
             Ok(())
         }
-        FeatureKind::SurfaceSweep { sketch, profiles, curves, path_sketch, path, orientation, twist, scale, rails, rail_fit } => {
+        FeatureKind::SurfaceSweep {
+            sketch,
+            profiles,
+            curves,
+            path_sketch,
+            path,
+            path_body,
+            path_edges,
+            orientation,
+            twist,
+            scale,
+            rails,
+            rail_fit,
+        } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
+            // The path is a chain of a body's edges (#2216) or the curves of a sketch.
+            if let Some(body) = path_body {
+                let chains = sheet_chains(ss, profiles.as_ref(), curves)?;
+                // The path runs on from the end nearest the middle of the curves.
+                let pts: Vec<Vec2> = chains.iter().flatten().flat_map(|s| s.polyline(1e-2)).collect();
+                let start = ss.plane.to_world(pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64));
+                let segs = crate::eval::edge_path_segments(st, body, path_edges, start, Some(&ss.plane))?;
+                let path_start = segs.first().map(kernel::PathSeg::start).unwrap_or(start);
+                let rails = crate::eval::rail_polylines(doc, st, rails, f.component, path_start)?;
+                let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
+                let body = kernel::sweep_sheet_with(&ss.plane, &chains, &segs, &ctl)?;
+                let traced = crate::lineage::ChainRoles { sketch: ss, chains: &chains }.tool(body);
+                push_sheet(st, f, traced);
+                return Ok(());
+            }
             let ps =
                 st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
             // As Sweep: a 3D path sketch is followed in the feature's frame, the curves with it.
@@ -523,7 +551,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let made = mb.traced().then(kernel::untrim(&mb.body, fi, which, *outer, replace)?);
             if replace {
                 if let Some(slot) = st.bodies.get_mut(i) {
-                    *slot = ModelBody::traced_new(mb.name, made, mb.feature);
+                    *slot = mb.remade(made);
                 }
             } else {
                 let name = new_name(st, f, 0);
@@ -796,7 +824,7 @@ const BLEND_STATIONS: usize = 41;
 /// The sketch curves `ids` (free-form ones exactly where they can be) grouped into chains of segments that meet end to end, each oriented
 /// to run one way. Curves are joined greedily at their free ends: where three meet, one of them
 /// starts a chain of its own.
-fn curve_chains(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec<Seg2>>> {
+pub(super) fn curve_chains(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec<Seg2>>> {
     if ids.len() > MAX_CHAIN_CURVES {
         return Err(DocError::Invalid(format!("at most {MAX_CHAIN_CURVES} curves")));
     }

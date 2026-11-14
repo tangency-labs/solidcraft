@@ -101,7 +101,7 @@ pub mod ring;
 const OP: &str = "blend::fillet_removal";
 
 fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
+    SolidError::blend_failed(OP, "the fillet could not be removed")
 }
 
 fn null(what: &'static str) -> SolidError {
@@ -110,7 +110,7 @@ fn null(what: &'static str) -> SolidError {
 
 /// `NER(p)`: a `NULL` pointer is `SM_ERR_NULL_POINTER`.
 fn ner<T>(v: Option<T>) -> Result<T> {
-    v.ok_or_else(|| SolidError::null_pointer(OP))
+    v.ok_or_else(|| SolidError::blend_missing(OP, "an object the removal needs"))
 }
 
 /// A status upstream turns into `SER(SM_ERR)` whatever it was: any failure but an
@@ -732,7 +732,7 @@ impl FilletRemoval {
             }
             let reach = (p0.distance(new_vtx_pt) + 10.0 * tol) / speed;
             let far = if high_end { end + reach } else { end - reach };
-            let side_part = ner(bspline_part(&side_curve))?;
+            let side_part = ner(bspline_part_with_nurb(&side_curve)?)?;
             let longer = Curve::from(ner(side_part.create_extended_curve(
                 far,
                 ContinuityType::CInfinity,
@@ -807,7 +807,7 @@ impl FilletRemoval {
                 if side_edge_extent.is_contained_by(&uv_extent, EFF_ZERO) {
                     continue;
                 }
-                let extended = match bspline_part(curve) {
+                let extended = match bspline_part_with_nurb(curve)? {
                     Some(bs) => ignored(bs.create_extended_curve(
                         crv_param,
                         ContinuityType::CInfinity,
@@ -1194,7 +1194,10 @@ impl FilletRemoval {
         let r = (|| -> Result<Extent1d> {
             // pCurve will have to be a SmBSplineCurve, for JoinWith().
             if bspline_part(&curve).is_none() {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::blend_missing(
+                    OP,
+                    "the side edge curve's B-spline form",
+                ));
             }
             let mut curve_domain = curve.natural_interval();
             if high_end {
@@ -1422,7 +1425,10 @@ impl FilletRemoval {
                 for &eu in &uses {
                     get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
                     if eu1::uv_trim_curve(b, eu)?.0.is_none() {
-                        return Err(SolidError::null_pointer(OP));
+                        return Err(SolidError::blend_missing(
+                            OP,
+                            "the edge use's UV trim curve",
+                        ));
                     }
                 }
             }
@@ -1441,6 +1447,19 @@ fn max3(a: f64, b: f64, c: f64) -> f64 {
     } else {
         c
     }
+}
+
+/// [`bspline_part`] for a call on it: upstream calls `CreateExtendedCurve` on the curve
+/// object itself, whose `GetOrCreateGwNurbPointer` runs a line's own `MakeNurb`, so a
+/// line's part comes with its NURB ([`crate::curve::line::Line::base_with_nurb`]), where
+/// a two-point line has none yet.
+fn bspline_part_with_nurb(
+    c: &Curve,
+) -> Result<Option<std::borrow::Cow<'_, crate::nurbs::b_spline_curve::BSplineCurve>>> {
+    if let CurveKind::Line(l) = c.kind() {
+        return Ok(Some(l.base_with_nurb()?));
+    }
+    Ok(bspline_part(c).map(std::borrow::Cow::Borrowed))
 }
 
 /// The `SmBSplineCurve` part of a curve (`SM_CAST_PTR(SmBSplineCurve, ..)`).
@@ -1545,7 +1564,7 @@ fn expand_boundary_span(
         SurfaceKind::ProceduralBlend(pb) => pb.net_mut(),
         // (the fork's SmBallPatch is an SmBSplineSurface too: its net)
         SurfaceKind::BallPatch(pb) => pb.net_mut(),
-        _ => return Err(SolidError::null_pointer(OP)),
+        _ => return Err(SolidError::blend_missing(OP, "the surface's B-spline net")),
     };
     base.expand_boundary_span(param, dir)
 }
@@ -1883,4 +1902,55 @@ pub fn delete_fillet_face(
     // (not upstream: the port's cached topology fields, true again for the caller)
     b.refresh_cached_topology();
     r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A lazy line (`Line::from_points`, no NURB yet, as upstream's two-point `SmLine`)
+    /// as a side edge's curve: its part for `CreateExtendedCurve` comes with its NURB, and
+    /// the line `(0, 0, 0)`–`(1, 0, 0)` on `[0, 1]` continued to the parameter `2` ends at
+    /// `(2, 0, 0)`. The bare part has no NURB and makes no extension.
+    #[test]
+    fn a_lazy_line_side_curve_extends() {
+        let line = crate::curve::line::Line::from_points(
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            3,
+        );
+        assert!(line.base().gw_nurb().is_none());
+        let c = Curve::from(line);
+        let bare =
+            bspline_part(&c)
+                .unwrap()
+                .create_extended_curve(2.0, ContinuityType::CInfinity, true);
+        assert!(!matches!(bare, Ok(Some(_))), "{bare:?}");
+        let part = bspline_part_with_nurb(&c).unwrap().unwrap();
+        let longer = part
+            .create_extended_curve(2.0, ContinuityType::CInfinity, true)
+            .unwrap()
+            .unwrap();
+        let end = longer.ends().unwrap().end;
+        assert!(end.distance(Point3::new(2.0, 0.0, 0.0)) <= 1e-12, "{end:?}");
+    }
+
+    /// #13790: removing a face while editing is off is refused with a typed blend failure
+    /// that keeps the `SM_ERR` status of the bare `Upstream` it replaced, and the body is
+    /// left alone.
+    #[test]
+    fn removal_with_editing_off_is_a_typed_failure() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        b.set_editing_enabled(false);
+        let face = crate::topology::brep::p1::faces(&b, None).unwrap()[0];
+        let error = delete_fillet_face(&mut k, &mut b, face, None).unwrap_err();
+        assert_eq!(error, sm_err());
+        assert!(error.blend_failure().is_some());
+        assert_eq!(error.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(crate::topology::brep::p1::faces(&b, None).unwrap().len(), 6);
+    }
 }

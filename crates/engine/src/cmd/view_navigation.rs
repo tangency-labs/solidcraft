@@ -6,18 +6,23 @@ use solidcraft_viewport::{Camera, StandardView};
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::schema::view_navigation::{
-    AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, GraphicsPreset, GraphicsPresetParams, GraphicsPresetResult, HistoryDock,
-    HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams, LayoutResult, NavigateParams, NavigateResult, NavigatorParams,
-    NormalToParams, PresetQuality, RenderBrowser, RenderFocus, RenderLive, RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams,
-    TabStep, TabStepParams, ZoomTool,
+    AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, DisplayToggleParams, DisplayToggleResult, GraphicsPreset, GraphicsPresetParams,
+    GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams, LayoutResult, NavigateParams,
+    NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool, NavigatorParams, NormalToParams, PerspectiveParams, PerspectiveResult,
+    PresetQuality, RenderBrowser, RenderFocus, RenderLive, RenderPanelVisibilityParams, RenderPanelVisibilityResult, RenderSelect, RibbonTabsOnly,
+    RibbonTabsOnlyParams, StandardViewParams, TabStep, TabStepParams, ToolParams, ToolResult, VisualStyle, VisualStyleParams, VisualStyleResult,
+    ZoomTool,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
 
 const ZOOM_TOOL_CONTRACT: TypedContract<ZoomTool> = TypedContract::new();
+const DISPLAY_TOGGLE_CONTRACT: TypedContract<DisplayToggleParams> = TypedContract::new();
+const NAVIGATION_BAR_CONTRACT: TypedContract<NavigationBarParams> = TypedContract::new();
 const FOCUS_CONTRACT: TypedContract<RenderFocus> = TypedContract::new();
 const NAVIGATOR_CONTRACT: TypedContract<NavigatorParams> = TypedContract::new();
 const RENDER_LIVE_CONTRACT: TypedContract<RenderLive> = TypedContract::new();
+const RENDER_PANEL_VISIBILITY_CONTRACT: TypedContract<RenderPanelVisibilityParams> = TypedContract::new();
 const BROWSER_CONTRACT: TypedContract<RenderBrowserRequest> = TypedContract::new();
 const TAB_STEP_CONTRACT: TypedContract<TabStepParams> = TypedContract::new();
 const STANDARD_VIEW_CONTRACT: TypedContract<StandardViewParams> = TypedContract::new();
@@ -27,7 +32,11 @@ const LAYOUT_CONTRACT: TypedContract<LayoutParams> = TypedContract::new();
 const HISTORY_LAYOUT_CONTRACT: TypedContract<HistoryLayoutParams> = TypedContract::new();
 const GRAPHICS_PRESET_CONTRACT: TypedContract<GraphicsPresetParams> = TypedContract::new();
 const AMBIENT_OCCLUSION_CONTRACT: TypedContract<AmbientOcclusionParams> = TypedContract::new();
+const PERSPECTIVE_CONTRACT: TypedContract<PerspectiveParams> = TypedContract::new();
 const NAVIGATE_CONTRACT: TypedContract<NavigateParams> = TypedContract::new();
+const TOOL_CONTRACT: TypedContract<ToolParams> = TypedContract::new();
+const VISUAL_STYLE_CONTRACT: TypedContract<VisualStyleParams> = TypedContract::new();
+const ORIGIN_AXES_ACROSS_VIEW_CONTRACT: TypedContract<crate::schema::view_navigation::OriginAxesAcrossViewParams> = TypedContract::new();
 
 // Both existing request forms share the Browser command and its published schema.
 #[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -64,22 +73,34 @@ CommandSpec::new("view.fit", "Fit", fit)
     .icon("fit").key("F6").noundo().doc_only().params("no parameters → frame the active canvas or selection; display only"),
 CommandSpec::new("view.home", "Home View", home)
     .icon("home").noundo().doc_only().params("no parameters → home orientation framing the active canvas; display only"),
-CommandSpec::new("view.tool", "Navigation Tool", tool)
-    .icon("orbit").noundo().doc_only().params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it"),
+CommandSpec::new("view.tool", "Navigation Tool", crate::checked!("view.tool", tool))
+    .icon("orbit").noundo().doc_only()
+    .contract(&TOOL_CONTRACT).output(output_schema_for::<ToolResult>)
+    .params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it"),
 CommandSpec::new("view.tool.zoom", "Drag to Zoom", crate::checked!("view.tool.zoom", zoom_tool))
     .icon("zoom").noundo().doc_only()
     .contract(&ZOOM_TOOL_CONTRACT).output(output_schema_for::<ZoomTool>)
     .params("on?: bool (omitted: toggle) → on?; latch the Zoom tool for left-button drags. A shortcut assigned in the UI zooms while held"),
-CommandSpec::new("view.spin", "Continuous Orbit", spin)
-    .icon("spin").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; continuous orbit until the next click or key"),
-CommandSpec::new("view.visual_style", "Visual Style", visual_style)
-    .icon("style").noundo().doc_only().params("style: shaded_with_edges|shaded|wireframe|shaded_with_hidden_edges → style, index (0..3 in that order)"),
-CommandSpec::new("view.grid", "Grid", grid)
-    .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the viewport grid"),
-CommandSpec::new("view.ground_shadow", "Ground Shadow", ground_shadow)
-    .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the ground shadow"),
-CommandSpec::new("view.navigation_bar", "Navigation Bar", navigation_bar)
-    .icon("pan").noundo().doc_only().params("visible?: bool (omitted: toggle) → visible?; show the navigation bar (window setting)"),
+CommandSpec::new("view.spin", "Continuous Orbit", crate::checked!("view.spin", spin))
+    .icon("spin").noundo().doc_only()
+    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
+    .params("on?: bool (omitted: toggle) → on?; continuous orbit until the next click or key"),
+CommandSpec::new("view.visual_style", "Visual Style", crate::checked!("view.visual_style", visual_style))
+    .icon("style").noundo().doc_only()
+    .contract(&VISUAL_STYLE_CONTRACT).output(output_schema_for::<VisualStyleResult>)
+    .params("style: shaded_with_edges|shaded|wireframe|shaded_with_hidden_edges → style, index (0..3 in that order)"),
+CommandSpec::new("view.grid", "Grid", crate::checked!("view.grid", grid))
+    .icon("style").noundo().doc_only()
+    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
+    .params("on?: bool (omitted: toggle) → on?; show the viewport grid"),
+CommandSpec::new("view.ground_shadow", "Ground Shadow", crate::checked!("view.ground_shadow", ground_shadow))
+    .icon("style").noundo().doc_only()
+    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
+    .params("on?: bool (omitted: toggle) → on?; show the ground shadow"),
+CommandSpec::new("view.navigation_bar", "Navigation Bar", crate::checked!("view.navigation_bar", navigation_bar))
+    .icon("pan").noundo().doc_only()
+    .contract(&NAVIGATION_BAR_CONTRACT).output(output_schema_for::<NavigationBarResult>)
+    .params("visible?: bool (omitted: toggle) → visible?; show the navigation bar (window setting)"),
 CommandSpec::new("view.navigator", "Custom View Navigator", crate::checked!("view.navigator", navigator))
     .icon("nav_settings").noundo().doc_only()
     .contract(&NAVIGATOR_CONTRACT).output(output_schema_for::<NavigatorParams>)
@@ -100,8 +121,8 @@ CommandSpec::new("view.render_browser", "Render Browser", crate::checked!("view.
     .icon("list").noundo().doc_only()
     .contract(&BROWSER_CONTRACT).output(output_schema_for::<RenderBrowserRequest>)
     .params("open: bool; or by_look?: bool; search?: bool; query?: string (up to 1024 bytes) → validated transient Browser controls; never edits the design or opens a dialog"),
-CommandSpec::new("view.render_inspector", "Render Inspector", render_inspector)
-    .icon("inspect").noundo().doc_only()
+CommandSpec::new("view.render_inspector", "Render Inspector", crate::checked!("view.render_inspector", render_inspector))
+    .icon("inspect").noundo().doc_only().contract(&RENDER_PANEL_VISIBILITY_CONTRACT).output(output_schema_for::<RenderPanelVisibilityResult>)
     .params("visible: bool → {visible}; per-document Inspector visibility; never edits the design or opens a dialog"),
 CommandSpec::new("view.render_live", "Pause or Resume Live Render", crate::checked!("view.render_live", render_live))
     .icon("render_image").noundo().doc_only()
@@ -114,8 +135,8 @@ CommandSpec::new("view.render_select", "Render selection", crate::checked!("view
 CommandSpec::new("view.render_stage", "Render Stage", render_stage)
     .icon("render_scene").noundo().doc_only()
     .params("stage: look|light|frame|output → {stage}; per-document UI state, never edits or evaluates the design; headless validation only"),
-CommandSpec::new("view.shots_strip", "Shots Strip", shots_strip)
-    .icon("camera").noundo().doc_only()
+CommandSpec::new("view.shots_strip", "Shots Strip", crate::checked!("view.shots_strip", shots_strip))
+    .icon("camera").noundo().doc_only().contract(&RENDER_PANEL_VISIBILITY_CONTRACT).output(output_schema_for::<RenderPanelVisibilityResult>)
     .params("visible: bool → {visible}; Render Shots strip UI preference. Headless echo only, no document edits or undo"),
 CommandSpec::new("view.render_dock", "Move Render Dock", crate::checked!("view.render_dock", render_dock))
     .at("RENDER", "SCENE").icon("settings").noundo().doc_only()
@@ -130,8 +151,10 @@ CommandSpec::new("view.graphics_preset", "Graphics Preset", crate::checked!("vie
     .icon("settings").noundo().doc_only().contract(&GRAPHICS_PRESET_CONTRACT).output(output_schema_for::<GraphicsPresetResult>).params("preset: performance|quality → preset, enabled, display_quality, supersampling, supersampling_adaptive; Quality: AO, Fine, adaptive 2x SSAA; Performance: no AO, Normal, no SSAA"),
 CommandSpec::new("view.ambient_occlusion", "Ambient Occlusion", crate::checked!("view.ambient_occlusion", ambient_occlusion))
     .icon("settings").noundo().doc_only().contract(&AMBIENT_OCCLUSION_CONTRACT).output(output_schema_for::<AmbientOcclusionResult>).params("enabled: bool → enabled; apply soft contact shading in the GPU viewport"),
-CommandSpec::new("view.perspective", "Perspective view", perspective)
-    .icon("perspective").noundo().doc_only().params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
+CommandSpec::new("view.origin_axes_across_view", "Origin Axes Across the Whole View", crate::checked!("view.origin_axes_across_view", origin_axes_across_view))
+    .icon("origin").noundo().doc_only().contract(&ORIGIN_AXES_ACROSS_VIEW_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::OriginAxesAcrossViewResult>).params("enabled: bool → enabled; extend the origin axes across the view, or keep the short axes when false; display only, never opens a dialog"),
+CommandSpec::new("view.perspective", "Perspective view", crate::checked!("view.perspective", perspective))
+    .icon("perspective").noundo().doc_only().contract(&PERSPECTIVE_CONTRACT).output(output_schema_for::<PerspectiveResult>).params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
 CommandSpec::new("view.angle_readout", "View Angles", crate::checked!("view.angle_readout", angle_readout))
     .icon("camera").noundo().doc_only().contract(&ANGLE_READOUT_CONTRACT).output(crate::schema::output_schema_for::<crate::schema::view_navigation::AngleReadoutResult>).params("enabled: bool → enabled; show the view's pitch, yaw and roll (degrees, as view.apply's camera in radians) and Ortho or Persp under the orientation gizmo; display only, never opens a dialog"),
 CommandSpec::new("view.navigate", "Navigate View", crate::checked!("view.navigate", navigate))
@@ -313,26 +336,27 @@ fn home(_s: &mut Session, p: &Value) -> Result<Value> {
 fn tool(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.tool";
     view_params(p, cmd, &["tool"])?;
-    let tool = p
-        .get("tool")
-        .and_then(Value::as_str)
-        .filter(|v| matches!(*v, "orbit" | "pan" | "zoom" | "none"))
-        .ok_or_else(|| bad(cmd, "tool must be orbit, pan, zoom or none"))?;
-    Ok(json!({"tool": tool}))
+    let tool = match p.get("tool").and_then(Value::as_str) {
+        Some("orbit") => NavigationTool::Orbit,
+        Some("pan") => NavigationTool::Pan,
+        Some("zoom") => NavigationTool::Zoom,
+        Some("none") => NavigationTool::None,
+        _ => return Err(bad(cmd, "tool must be orbit, pan, zoom or none")),
+    };
+    typed_reply(cmd, ToolResult { tool, param_warnings: Vec::new() })
 }
 
 fn visual_style(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.visual_style";
     view_params(p, cmd, &["style"])?;
-    let style = p.get("style").and_then(Value::as_str);
-    let index = match style {
-        Some("shaded_with_edges") => 0,
-        Some("shaded") => 1,
-        Some("wireframe") => 2,
-        Some("shaded_with_hidden_edges") => 3,
+    let style = match p.get("style").and_then(Value::as_str) {
+        Some("shaded_with_edges") => VisualStyle::ShadedWithEdges,
+        Some("shaded") => VisualStyle::Shaded,
+        Some("wireframe") => VisualStyle::Wireframe,
+        Some("shaded_with_hidden_edges") => VisualStyle::ShadedWithHiddenEdges,
         _ => return Err(bad(cmd, "style must be shaded_with_edges, shaded, wireframe or shaded_with_hidden_edges")),
     };
-    Ok(json!({"style": style, "index": index}))
+    typed_reply(cmd, VisualStyleResult { style, index: style.index(), param_warnings: Vec::new() })
 }
 
 fn view_toggle(p: &Value, cmd: &str, key: &str) -> Result<Value> {
@@ -463,23 +487,13 @@ fn render_dock(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn render_inspector(_s: &mut Session, p: &Value) -> Result<Value> {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Request {
-        visible: bool,
-    }
-    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_inspector", e.to_string()))?;
-    Ok(json!({"visible":request.visible}))
+    let request: RenderPanelVisibilityParams = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_inspector", e.to_string()))?;
+    typed_reply("view.render_inspector", RenderPanelVisibilityResult { visible: request.visible, param_warnings: Vec::new() })
 }
 
 fn shots_strip(_s: &mut Session, p: &Value) -> Result<Value> {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Request {
-        visible: bool,
-    }
-    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("view.shots_strip", e.to_string()))?;
-    Ok(json!({"visible": request.visible}))
+    let request: RenderPanelVisibilityParams = serde_json::from_value(p.clone()).map_err(|e| bad("view.shots_strip", e.to_string()))?;
+    typed_reply("view.shots_strip", RenderPanelVisibilityResult { visible: request.visible, param_warnings: Vec::new() })
 }
 
 fn layout(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -1094,7 +1108,7 @@ fn ambient_occlusion(_s: &mut Session, p: &Value) -> Result<Value> {
 
 fn perspective(_s: &mut Session, p: &Value) -> Result<Value> {
     let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad("view.perspective", "enabled must be a boolean"))?;
-    Ok(json!({"enabled": enabled}))
+    typed_reply("view.perspective", PerspectiveResult { enabled, param_warnings: Vec::new() })
 }
 
 const ANGLE_READOUT_CONTRACT: crate::schema::TypedContract<crate::schema::view_navigation::AngleReadoutParams> = crate::schema::TypedContract::new();
@@ -1104,6 +1118,13 @@ fn angle_readout(_s: &mut Session, p: &Value) -> Result<Value> {
     let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad("view.angle_readout", "`enabled` must be a boolean"))?;
     let reply = crate::schema::view_navigation::AngleReadoutResult { enabled, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
+/// Origin-axis display is an application preference, not a design edit.
+fn origin_axes_across_view(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.origin_axes_across_view";
+    let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad(cmd, "`enabled` must be a boolean"))?;
+    typed_reply(cmd, crate::schema::view_navigation::OriginAxesAcrossViewResult { enabled, param_warnings: Vec::new() })
 }
 
 fn next_tab(_s: &mut Session, _p: &Value) -> Result<Value> {
@@ -1122,6 +1143,22 @@ fn tab_step(step: i8) -> Result<Value> {
 #[cfg(test)]
 mod ambient_occlusion_tests {
     use super::*;
+
+    #[test]
+    fn origin_axes_across_view_validates_without_editing_design_history_or_camera() {
+        for param_check in crate::schema::ParamCheck::ALL {
+            let mut s = Session { param_check, ..Session::default() };
+            let design = s.doc.to_json();
+            for enabled in [true, false] {
+                assert_eq!(s.execute("view.origin_axes_across_view", &json!({"enabled": enabled})).unwrap(), json!({"enabled": enabled}));
+            }
+            for params in [json!({}), json!({"enabled": 1}), json!({"enabled": "true"}), json!({"enabled": null})] {
+                assert!(s.execute("view.origin_axes_across_view", &params).is_err(), "{param_check:?}: {params}");
+            }
+            assert_eq!(s.doc.to_json(), design);
+            assert!(s.undo.is_empty() && s.camera.is_none());
+        }
+    }
 
     #[test]
     fn angle_readout_validates_display_setting_without_editing_design_or_history() {

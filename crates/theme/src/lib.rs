@@ -1086,6 +1086,9 @@ pub struct Tokens {
     // ---- bodies and live previews ----
     pub body: Color32,
     pub body_edge: Color32,
+    /// Isoparm lines drawn on a surface: lighter than its edges, so they read as the surface's
+    /// flow, not its boundary.
+    pub isoparm: Color32,
     /// Command manipulators (direction arrows, handles).
     pub manipulator: Color32,
     /// Allowed assembly motion, separate from the selected face's blue.
@@ -1452,6 +1455,7 @@ impl Tokens {
             construction_geom: view.construction_geom,
             body: view.body,
             body_edge: view.body_edge,
+            isoparm: view.isoparm,
             manipulator: view.manipulator,
             joint_manipulator: view.joint_manipulator,
             joint_axis: view.joint_axis,
@@ -1631,6 +1635,20 @@ pub fn panel_motion_ease(progress: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A surface's isoparms show on its faces less than its edges do, and stay visible against the
+    /// view's background (seen at the sheet's silhouette), on both bases.
+    #[test]
+    fn isoparms_are_lighter_than_edges_and_visible_on_the_background() {
+        for t in [Tokens::light(), Tokens::dark()] {
+            let (iso, edge) = (contrast_ratio(t.isoparm, t.body), contrast_ratio(t.body_edge, t.body));
+            assert!(iso >= 1.5 && iso < edge, "isoparm {iso:.2} against edge {edge:.2} on the body");
+            for background in [t.viewport_top, t.viewport_bottom] {
+                let ratio = contrast_ratio(t.isoparm, background);
+                assert!(ratio >= 1.5, "isoparm {ratio:.2} on the viewport background {background:?}");
+            }
+        }
+    }
 
     #[test]
     fn panel_motion_is_bounded_and_reduced_or_invalid_inputs_finish_immediately() {

@@ -83,7 +83,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_sweep")
         .contract(&SURFACE_SWEEP_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); path_sketch: sketch; path: [curve ids in order] (a path with corners, or 3D curves, gives ruled walls mitred at the corners); orientation?, twist?, scale?, rails?, rail_fit? (as solid.sweep); name?, body_name? (a surface body, no caps)"),
+        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); path_sketch: sketch; path: [curve ids in order] (a path with corners, or 3D curves, gives ruled walls mitred at the corners); path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?, twist?, scale?, rails?, rail_fit? (as solid.sweep); name?, body_name? (a surface body, no caps)"),
     CommandSpec::new("surface.loft", "Surface Loft", crate::checked!("surface.loft", surface_loft))
         .at("SURFACE", "CREATE")
         .icon("surface_loft")
@@ -424,13 +424,12 @@ fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "surface.sweep";
     let sketch = feature_sketch(s, p, cmd)?;
     let (profiles, curves) = sheet_inputs(p, cmd)?;
-    let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() || path.len() > 1000 {
+    let (path_sketch, path, path_body, path_edges) = super::features::sweep_path(s, p, cmd)?;
+    if path_body.is_none() && (path.is_empty() || path.len() > 1000) {
         return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
     }
     let (orientation, twist, scale) = super::features::sweep_options(s, p, cmd)?;
-    let (rails, rail_fit) = super::features::sweep_rails(s, p, cmd, path_sketch)?;
+    let (rails, rail_fit) = super::features::sweep_rails(s, p, cmd, path_body.is_none().then_some(path_sketch))?;
     add_feature(
         s,
         p,
@@ -440,6 +439,8 @@ fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
             curves,
             path_sketch: SketchId(path_sketch),
             path,
+            path_body,
+            path_edges,
             orientation,
             twist,
             scale,
@@ -1726,6 +1727,31 @@ mod tests {
         assert!((area - want).abs() < want * 1e-2, "{area} vs {want}");
         assert!(s.execute("surface.thicken", &json!({"bodies": ["Nope"], "thickness": 1})).is_err());
         assert!(s.execute("surface.trim", &json!({"body": "Sheet"})).is_err());
+    }
+
+    /// #9867: a cut or an intersect whose named target is a surface body is refused, and the
+    /// reason says what to do (Trim, or Thicken first). The surface body is left as it was.
+    #[test]
+    fn a_cut_on_a_surface_body_is_refused_and_says_why() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "C"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "C", "distance": 40, "body_name": "Tube"}));
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "R"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 10], "p1": [15, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = area(&s, "Tube");
+        for (op, article) in [("cut", "a cut"), ("intersect", "an intersect")] {
+            let params = json!({"sketch": "R", "distance": 30, "direction": "symmetric", "operation": op, "targets": ["Tube"]});
+            let err = s.execute("solid.extrude", &params).unwrap_err().to_string();
+            let says = format!("Tube is a surface body, and {article} needs a solid: cut it with Surface › Trim, or Thicken it first");
+            assert!(err.contains(&says), "{op}: {err}");
+        }
+        let st = s.world_state().unwrap();
+        assert!(st.body("Tube").unwrap().body.is_surface());
+        assert_eq!(st.body("Tube").unwrap().body.face_count(), 1);
+        assert!((area(&s, "Tube") - before).abs() < 1e-9, "{before}");
     }
 
     /// `surface.patch`: a box with its top cut away by a sideways cylinder, patched by its rim

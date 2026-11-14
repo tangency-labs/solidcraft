@@ -167,7 +167,11 @@ fn side_face_intersection_makes_the_face_trimmed_cache() {
     };
     // the C++ reference fails the round with SM_FAILURE (1001)
     assert!(
-        matches!(result, Err(SolidError::Upstream { code: 1001, .. })),
+        result
+            .as_ref()
+            .err()
+            .and_then(solidcore::error::upstream_status)
+            == Some(1001),
         "{result:?}"
     );
 }
