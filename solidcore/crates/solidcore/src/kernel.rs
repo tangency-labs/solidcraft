@@ -588,9 +588,6 @@ pub struct UpstreamFixes {
     pub surface_continuity_checks_last_v_knot: bool,
     /// `sm_GoodDropResult` (`SmSurface::DropPoint` given a guess) refuses a local solve's result when the result is farther from the point than its guess, as its comment says; upstream measures its two distances the wrong way round (`dDsqGuess` to the result, `dDsqResult` to the guess), so it refused a result nearer than its guess, sending the drop to the global solve, and took one farther. The same fork change also takes a local result as the foot only when the gap's components along the unit tangents are within the local solve's tight tolerance, `SM_EFF_ZERO (1 + max|P|)` (their sum under it; an interior result each under it), where upstream takes any foot 1e-4 off (an interior one 1e-3 off in each direction); a stalled solve goes to the global solve (WR-56, #1852; the fork's tangency-labs/smlib@eaa998a (was 0b4de8c) / eaa998a, fork PR #70).
     pub good_drop_result_distances_in_order: bool,
-    /// `SmTwistVolume::EvaluateSimple` uses positive `per * cos` for the y
-    /// component of `Duw` (WR-46). Propagated through volume evaluation options.
-    pub twist_simple_duw_sign: bool,
     /// `smvol_LiftThirdDerivative` (surface and volume forms) uses `Dxzz` instead of
     /// `Dxxz` for the `x z^2` outer-derivative term in `Duuv`, `Duvv`, `Duuw`, `Duww`,
     /// `Dvvw`, and `Dvww`, and builds the volume form's `Duww` and `Dvww` from
@@ -603,9 +600,6 @@ pub struct UpstreamFixes {
     pub drop_curve_v_domain_degeneracy: bool,
     /// `SmTorus::AssertValid` reports a spindle torus whose V interval runs through an apex (`V = ±(90 + asin(R/r))`) as test 5, "Self Intersection", where upstream clears its result with no report and tests the U interval against `90 + acos(R/r)`, failing every spindle torus with a whole turn of U (WR-539; the fork's tangency-labs/smlib@daba678).
     pub torus_check_spindle_apex: bool,
-    /// Volume line-domain checks using `SmExtent3d::ContainsLineSeg3d` require
-    /// both endpoints inside the natural parameter box instead of either (WR-3).
-    pub extent3d_contains_both_segment_endpoints: bool,
     /// `SmSurface::LocalSurfaceIntersect`'s out-of-bounds boundary retries guard both
     /// the minimum and maximum boundary tests of the second through fourth parameter
     /// branches (`v` of `this`, `u` of `other`, `v` of `other`) with `!bFoundSolution`,
