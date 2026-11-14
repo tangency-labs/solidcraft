@@ -1151,7 +1151,7 @@ impl RibbonPanels {
                 let panel: &'static str = panel;
                 let sketch_create = tab == "SKETCH" && panel == "CREATE";
                 let finish = (tab == "SKETCH" && panel == "FINISH SKETCH") || (tab == "MODEL" && panel == "FINISH EDITING");
-                let in_gallery = |c: &&'static solidcraft_engine::CommandSpec| app.toolbar_custom.in_gallery(tab, panel, c.id);
+                let in_gallery = |c: &&'static solidcraft_engine::CommandSpec| crate::toolbar_custom::in_gallery(app, tab, panel, c.id);
                 let button = |c: &'static solidcraft_engine::CommandSpec| {
                     // Only the family's default pin follows the part's choice. Explicitly pinned
                     // variants remain exact commands, including in customised toolbars.
@@ -1512,8 +1512,11 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 // Gallery cells are painted together after the large buttons, in reading order.
                 if tab == "SKETCH" && panel == "CONSTRAIN" {
                     shown.sort_by_key(|c| {
-                        if app.toolbar_custom.in_gallery(&tab, panel, c.id) {
-                            crate::workspace::CONSTRAINT_GALLERY.iter().position(|id| *id == c.id).map(|i| i + 1).unwrap_or(0)
+                        if crate::toolbar_custom::in_gallery(app, &tab, panel, c.id) {
+                            crate::workspace::CONSTRAINT_GALLERY
+                                .iter()
+                                .position(|id| *id == c.id)
+                                .map_or(crate::workspace::CONSTRAINT_GALLERY.len() + 1, |i| i + 1)
                         } else {
                             0
                         }
@@ -4772,7 +4775,7 @@ mod ribbon_gallery_tests {
         let mut loaded = crate::toolbar_custom::ToolbarCustom::default();
         loaded.load(&older);
         assert_eq!(loaded.panels, h.app.toolbar_custom.panels);
-        assert!(loaded.in_gallery("SKETCH", "CONSTRAIN", id));
+        assert!(loaded.in_gallery("SKETCH", "CONSTRAIN", id, true));
         crate::toolbar_custom::reset(&mut h.app, "MODEL");
         h.frames(2);
         assert!(rect_of(&cell_handle).is_none());
@@ -4813,6 +4816,42 @@ mod ribbon_gallery_tests {
         crate::toolbar_custom::pin(&mut h.app, "SKETCH", "sketch.constraint.equal").unwrap();
         h.frames(2);
         assert!(rect_of("ribbon:constraint:sketch.constraint.equal").is_some());
+    }
+
+    /// Constraints the user pins join the small-cell grid after the default six, in pin order,
+    /// and the grid grows a column; the preference off keeps them full-size buttons.
+    #[test]
+    fn pinned_constraints_are_small_grid_cells() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1800,"height":900}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(3);
+        let first = rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[0])).unwrap();
+        let last = rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[5])).unwrap();
+        for id in ["sketch.constraint.midpoint", "sketch.constraint.fix"] {
+            crate::toolbar_custom::pin(&mut h.app, "SKETCH", id).unwrap();
+        }
+        h.frames(3);
+        let midpoint = rect_of("ribbon:constraint:sketch.constraint.midpoint").unwrap();
+        let fix = rect_of("ribbon:constraint:sketch.constraint.fix").unwrap();
+        assert_eq!(midpoint.size(), first.size());
+        // Eight cells in two rows of four: the defaults keep their places, the pins fill column four.
+        assert_eq!(rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[0])), Some(first));
+        assert_eq!(
+            (midpoint.top(), midpoint.left() - 27.0),
+            (first.top(), rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[2])).unwrap().left())
+        );
+        assert_eq!((fix.top(), fix.left()), (last.top(), midpoint.left()));
+        h.step(&json!({"click":{"handle":"ribbon:constraint:sketch.constraint.midpoint"}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.constraint.midpoint"));
+        h.step(&json!({"key":"Escape"})).unwrap();
+        // Dimension is not a constraint cell, and the old full-size buttons are a preference away.
+        assert!(rect_of("ribbon:constraint:sketch.dimension").is_none());
+        h.app.preferences.pinned_constraints_in_grid = false;
+        h.frames(3);
+        assert!(rect_of("ribbon:constraint:sketch.constraint.midpoint").is_none());
+        assert!(rect_of("button:sketch.constraint.midpoint").unwrap().height() > first.height());
+        assert_eq!(rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[5])).map(|r| r.size()), Some(last.size()));
     }
 }
 

@@ -2,7 +2,7 @@
 use crate::{
     Result, Session,
     params::bad,
-    schema::appearance::{AppearancePaintResult, AppearancePickUpResult, LookReply},
+    schema::appearance::{AppearanceCopyResult, AppearancePaintResult, AppearancePickUpResult, LookReply},
 };
 use serde_json::{Value, json};
 use solidcraft_doc::appearance::Look;
@@ -56,9 +56,9 @@ pub(in crate::cmd) fn pick_up(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub(in crate::cmd) fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     let look = resolved(s, p)?;
-    let reply = json!({"look":super::look_json(&look)});
+    let copied = AppearanceCopyResult { look: LookReply::from(&look), param_warnings: Vec::new() };
     s.appearance_clipboard = Some(look);
-    Ok(reply)
+    reply("appearance.copy", copied)
 }
 
 pub(in crate::cmd) fn favorite(_s: &mut Session, p: &Value) -> Result<Value> {
