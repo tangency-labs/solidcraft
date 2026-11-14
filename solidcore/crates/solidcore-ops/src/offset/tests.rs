@@ -351,6 +351,36 @@ fn half_a_cylinders_side_split_along_its_rulings_moves_out_over_steps() {
     moved_to(&b, &half, 4.0, v, [7, 15, 10]);
 }
 
+/// The upper half of that cylinder's side (split at z = 50) moved in 4: the cylinder r 46
+/// inside the cylinder r 50, the annulus at z = 50 facing up.
+/// V = 2500 pi 100 - (50² - 46²) pi 50, with the outward move's 5 faces, 7 edges, 4 vertices.
+#[test]
+fn half_a_cylinders_side_moves_in_under_a_step() {
+    all_fixes();
+    let b = split_at_height(
+        &make_cylinder([0.0; 3], 50.0, 100.0).unwrap(),
+        [50.0, 0.0, 25.0],
+        50.0,
+    );
+    let v = PI * 2500.0 * 100.0 - PI * (2500.0 - 46.0 * 46.0) * 50.0;
+    moved_to(&b, &[[50.0, 0.0, 75.0]], -4.0, v, [5, 7, 4]);
+}
+
+/// A cylinder's side split along its rulings (a round stored as two halves, the half at
+/// x > 0 in two by the seam) moved out 4 whole: one cylinder r 54, V = 2916 pi 100, with
+/// the split's 5 faces, 9 edges (three arcs on each cap, three rulings), 6 vertices.
+#[test]
+fn a_cylinders_side_split_along_its_rulings_moves_out_as_one() {
+    all_fixes();
+    let b = split_by_plane(
+        &make_cylinder([0.0; 3], 50.0, 100.0).unwrap(),
+        [0.0, 50.0, 50.0],
+        ([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+    );
+    let all = [[-50.0, 0.0, 50.0], [30.0, 40.0, 50.0], [30.0, -40.0, 50.0]];
+    moved_to(&b, &all, 4.0, PI * 2916.0 * 100.0, [5, 9, 6]);
+}
+
 #[test]
 fn hostile_arguments_are_refused() {
     all_fixes();
