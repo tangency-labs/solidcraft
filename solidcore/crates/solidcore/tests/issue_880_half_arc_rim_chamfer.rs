@@ -948,9 +948,16 @@ fn clip_line(clip: &Clip, p0: Point3, p1: Point3) -> Option<(f64, f64, Bound, Bo
 /// as its rails) and wherever a bound of v changes the constraint holding it (found on a
 /// 400-cell grid in u and bisected; a constraint taking a bound and handing it back
 /// within one cell is not seen). The grid does not change with `n`, so a missed switch
-/// is not found by refining it; ARGUED only: a missed switch leaves a kink inside a span,
-/// where a Gauss rule converges slowly in `n`, so it would show as a gap between the
-/// caller's n = 16, 24 and 32 well above the rule's error elsewhere. v exact by
+/// is not found by refining it. ARGUED only, and only for a switch that holds across a
+/// cell's end: it leaves a kink inside a span, where a Gauss rule converges slowly in
+/// `n`, so it would show as a gap between the caller's n = 16, 24 and 32 well above the
+/// rule's error elsewhere. A region (or a bound's excursion) that enters and leaves
+/// within one cell is NOT covered by that argument: every rule can miss it alike and
+/// agree (e.g. at(u, v) = (v, 2000 (u - 0.50125), 0), g = 1, the unit cylinder about z,
+/// no caps: the region is u in (0.50075, 0.50175), inside the cell [0.5, 0.5025], and the
+/// 16-, 24- and 32-point rules all give 0, not PI / 4000). Nothing here isolates such
+/// events from the clipping equations; the volume test's bound on an omission is its
+/// independent check against the B-rep's trims (1e-4). v exact by
 /// a 4-point rule (`g` must be a polynomial of degree 7 or less in v); u by an `n`-point
 /// Gauss rule per span.
 fn ruled_flux(
@@ -1184,7 +1191,9 @@ fn trims_volume(k: &Kernel, b: &mut Brep, originals: &[FaceId], panels: usize) -
 /// - The chamfered part's volume is the closed form plus two fluxes: out of the chamfer's
 ///   definitions over their exact regions (each chord inside the cylinder and on the
 ///   part's side of the bevel cap, with Gauss rules split at the spine's knots; n = 16
-///   and 24 within 1e-7 and 2.5e-8 of n = 32, MEASURED), and out of the bevel cap
+///   and 24 within 1e-7 and 2.5e-8 of n = 32, MEASURED; that agreement cannot show a
+///   piece of the region that enters and leaves within one of `ruled_flux`'s grid
+///   cells, which only the trims check below bounds), and out of the bevel cap
 ///   (Green's theorem on its B-rep face's edges).
 ///
 /// Both B-reps bound that volume to within their faces' fit: the trims of either build
