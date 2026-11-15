@@ -1326,6 +1326,26 @@ mod tests {
         for case in cases {
             let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
             let name = case["name"].as_str().unwrap();
+            // The edit's radius change against the rebuild's limit
+            // SM_EFF_ZERO_SQRT (1 + r): a taper is at least twice it, every other
+            // fixture at most half of it.
+            let ModeIn::CylBounded { radius, .. } = &i.cone.mode else {
+                panic!("{name}: not a bounded cylinder");
+            };
+            let OpIn::Rebuild {
+                edit: EditIn::ScaleLastXy { f },
+            } = &i.op
+            else {
+                panic!("{name}: not a scale_last_xy rebuild");
+            };
+            let (radius, f) = (*radius, *f);
+            let gap = (radius * f - radius).abs();
+            let limit = solidcore::math::EFF_ZERO_SQRT * (1.0 + radius);
+            if name.contains("taper_") {
+                assert!(gap >= 1.99 * limit, "{name}: {gap} vs {limit}");
+            } else {
+                assert!(gap <= 0.51 * limit, "{name}: {gap} vs {limit}");
+            }
             let mut cone = rust_cone(&k, &i.cone).unwrap();
             let before = cone.clone();
             let mut record = Vec::new();

@@ -80,27 +80,37 @@ fn ring() -> (Kernel, Brep) {
     (k, b)
 }
 
-/// The semi-angles of the ring's `SmCylinder` walls.
-fn cylinder_semi_angles(b: &Brep) -> Vec<f64> {
-    let mut angles = Vec::new();
+/// The semi-angle and the bottom and top radii of each of the ring's `SmCylinder` walls.
+fn cylinder_walls(b: &Brep) -> Vec<(f64, f64, f64)> {
+    let mut walls = Vec::new();
     for f in p1::faces(b, None).unwrap() {
         let Some(s) = face::surface(b, f).unwrap() else {
             continue;
         };
         match s.kind() {
-            SurfaceKind::Cone(c) if c.is_cylinder_class() => angles.push(c.semi_angle_deg()),
+            SurfaceKind::Cone(c) if c.is_cylinder_class() => {
+                walls.push((c.semi_angle_deg(), c.bot_radius(), c.top_radius()));
+            }
             _ => {}
         }
     }
-    angles
+    walls
 }
 
 #[test]
 fn wr701_the_turned_hole_walls_stay_cylinders() {
     let (mut k, mut b) = ring();
-    let angles = cylinder_semi_angles(&b);
-    assert_eq!(angles.len(), 2 * ARCS, "every arc's wall is an SmCylinder");
-    assert!(angles.iter().all(|&a| a == 0.0), "{angles:?}");
+    let walls = cylinder_walls(&b);
+    assert_eq!(walls.len(), 2 * ARCS, "every arc's wall is an SmCylinder");
+    assert!(walls.iter().all(|&(a, _, _)| a == 0.0), "{walls:?}");
+    // WR-701: `SwapUV` keeps each wall as it was made, its arc's radius to the bit. A wall
+    // rebuilt from its swapped NURB would get the mean of the radii read back (WR-385:
+    // 9.0000000000871 for the hole), which the semi-angle check alone does not catch.
+    for &(_, bot, top) in &walls {
+        assert_eq!(bot, top, "{walls:?}");
+        assert!(bot == 9.0 || bot == 10.0, "{bot}");
+    }
+    assert_eq!(walls.iter().filter(|w| w.1 == 9.0).count(), ARCS);
     let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
     assert_eq!(check.failure_count(), 0, "{:?}", check.lines());
 }

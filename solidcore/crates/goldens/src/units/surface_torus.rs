@@ -1176,6 +1176,101 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    /// WR-211: the torus found on the NURB of each of these `issue1433` fixtures keeps
+    /// whole full-circle curves: every circle NURB it holds has the knots
+    /// `0, 0, 0, .25, .25, .5, .5, .75, .75, 1, 1, 1` exactly, corner weights `sqrt(2)/2`,
+    /// side weights 1, and its control points (weights divided out) at the circle's
+    /// centre `± r X`, `± r Y` and `± r X ± r Y` to rounding (The NURBS Book §7.5). The
+    /// pinned C++ rebuilt the generator over a near-full-turn domain that converts to one
+    /// NURBS parameter, leaving all twelve knots equal.
+    #[test]
+    fn issue1433_found_tori_keep_full_circle_curves() {
+        let fixtures: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/surface.torus/issue1433_is_nurb.json"
+        ))
+        .unwrap();
+        let names = [
+            "issue1433_torus_far_full_s0_i0",
+            "issue1433_torus_far_full_s0_i1",
+            "issue1433_torus_far_full_s1_i0",
+            "issue1433_torus_far_full_s1_i1",
+            "issue1433_torus_thin_tube",
+            "issue1433_torus_tolscale_1000",
+        ];
+        let k = Kernel::default();
+        let half = std::f64::consts::FRAC_1_SQRT_2;
+        let knots = [0.0, 0.0, 0.0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1.0, 1.0, 1.0];
+        for name in names {
+            let case = fixtures["cases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|c| c["name"] == name)
+                .unwrap();
+            let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+            let t = rust_torus(&k, &i.torus).unwrap().unwrap();
+            let OpIn::IsNurb {
+                scale,
+                net_scale,
+                perturb,
+            } = &i.op
+            else {
+                panic!("{name}: not is_nurb");
+            };
+            let found = is_nurb(&k, &t, *scale, *net_scale, perturb)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{name}: no torus found"));
+            let s = found.base();
+            let polar = s.polar_curve().map(|e| Curve::from(e.clone()));
+            let mut circles = 0;
+            for c in [polar.as_ref(), s.gen_curve()].into_iter().flatten() {
+                let (CurveKind::Ellipse(e), Some(nurb)) = (c.kind(), nurb_of(c)) else {
+                    continue;
+                };
+                circles += 1;
+                assert_eq!(nurb.knots(), &knots[..], "{name}");
+                assert_eq!(nurb.cpts().len(), 9, "{name}");
+                let pts: Vec<Vec3> = nurb
+                    .cpts()
+                    .iter()
+                    .map(|cp| Vec3::new(cp.x / cp.w, cp.y / cp.w, cp.z / cp.w))
+                    .collect();
+                // the circle the net spans: centre between points 0 and 4, its axes to
+                // points 0 and 2
+                let o = (pts[0] + pts[4]) * 0.5;
+                let (dx, dy) = (pts[0] - o, pts[2] - o);
+                let r = dx.length();
+                let scale = o.max_dimension() + 2.0 * r;
+                let bound = 16.0 * f64::EPSILON * scale;
+                assert!((dy.length() - r).abs() <= bound, "{name}: {dy:?} {r}");
+                assert!(dx.dot(dy).abs() <= bound * r, "{name}: axes not square");
+                let expected = [
+                    (o + dx, 1.0),
+                    (o + dx + dy, half),
+                    (o + dy, 1.0),
+                    (o - dx + dy, half),
+                    (o - dx, 1.0),
+                    (o - dx - dy, half),
+                    (o - dy, 1.0),
+                    (o + dx - dy, half),
+                    (o + dx, 1.0),
+                ];
+                for (j, (cp, (q, w))) in nurb.cpts().iter().zip(expected).enumerate() {
+                    assert_eq!(cp.w, w, "{name} weight {j}");
+                    let e3 = pts[j];
+                    assert!((e3 - q).length() <= bound, "{name} point {j}: {e3:?} {q:?}");
+                }
+                // the analytic circle is the same one, to its recovery's tolerance
+                let p = e.position();
+                assert_eq!(e.x_radius(), e.y_radius(), "{name}");
+                let near = 1e-9 * (1.0 + scale);
+                assert!((p.origin() - o).length() <= near, "{name}: {:?} {o:?}", p.origin());
+                assert!((e.x_radius() - r).abs() <= near, "{name}: {} {r}", e.x_radius());
+            }
+            assert!(circles >= 1, "{name}: no circle NURB");
+        }
+    }
+
     fn op_name(op: &OpIn) -> &'static str {
         match op {
             OpIn::Build {} => "build",
