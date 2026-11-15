@@ -1274,6 +1274,12 @@ pub struct EdgeLayer {
     pub hidden: Vec<u8>,
     /// The block lines these replace: by block, ranges of its lines and of its hidden lines.
     pub replaced: Vec<ReplacedLines>,
+    /// For each of `replaced`, its body's lines here: its range of `lines` and of `hidden`. A
+    /// whole highlighted body's edges are drawn again from them.
+    pub ranges: Vec<(std::ops::Range<u32>, std::ops::Range<u32>)>,
+    /// Draw `hidden` with the model (Shaded with hidden edges); otherwise only a highlighted
+    /// body's are drawn, dimmed.
+    pub show_hidden: bool,
 }
 
 impl EdgeLayer {
@@ -1310,6 +1316,9 @@ struct EdgeLayerGpu {
     layer: Arc<EdgeLayer>,
     lines: Option<Batch>,
     hidden: Option<Batch>,
+    /// Each replaced body's lines and hidden lines in the layer, by its block and range of
+    /// block lines ([`LitEdges`] names a body that way).
+    bodies: std::collections::HashMap<(u64, u32, u32), (std::ops::Range<u32>, std::ops::Range<u32>)>,
     skip_lines: std::collections::HashMap<u64, Vec<std::ops::Range<u32>>>,
     skip_hidden: std::collections::HashMap<u64, Vec<std::ops::Range<u32>>>,
 }
@@ -1326,7 +1335,9 @@ impl EdgeLayerGpu {
             list.retain(|r| !r.is_empty());
             list.sort_by_key(|r| r.start);
         }
+        let bodies = layer.replaced.iter().zip(&layer.ranges).map(|(r, own)| ((r.block, r.lines.start, r.lines.end), own.clone())).collect();
         EdgeLayerGpu {
+            bodies,
             lines: upload(device, "sc_edge_layer", &layer.lines, LINE_SIZE),
             hidden: upload(device, "sc_edge_layer_hidden", &layer.hidden, LINE_SIZE),
             layer,
@@ -1873,32 +1884,66 @@ fn scene_bind<'a>(scene: &'a Batches, fallback: &'a wgpu::BindGroup) -> &'a wgpu
 /// Draw each of `edges`' lines from the model block they are in, in the style `style` picks
 /// ([`lit_line_style`]): it rides in the first vertex (`vs_line_lit`). A block not on the GPU
 /// any more (the model changed since the highlight was built) draws nothing.
+/// Which of a lit body's styles [`lit_lines`] draws.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LitPart {
+    Halo,
+    Core,
+    Hidden,
+}
+
+/// A whole lit body's edges drawn again in one style: from its lines in an edge layer drawn this
+/// frame when it has them (its seen stretches in the halo and core, its hidden ones dimmed with
+/// `known`, no depth test: they are known hidden), else from its lines in the model's block.
+#[allow(clippy::too_many_arguments)]
 fn lit_lines(
     pass: &mut wgpu::RenderPass<'static>,
     p: &wgpu::RenderPipeline,
+    known: &wgpu::RenderPipeline,
     blocks: &std::collections::HashMap<u64, BlockGpu>,
+    layer: Option<&EdgeLayerGpu>,
     edges: &[LitEdges],
-    style: fn(&LitEdges) -> u32,
+    part: LitPart,
     tally: &Tally,
 ) {
     if edges.is_empty() {
         return;
     }
-    pass.set_pipeline(p);
-    for e in edges {
-        let Some(batch) = blocks.get(&e.block).and_then(|b| b.lines.as_ref()) else { continue };
-        let first = style(e).saturating_mul(6);
-        // The block's lines may span several buffers: each draws its share of the range.
+    let draw_range = |pass: &mut wgpu::RenderPass<'static>, batch: &Batch, range: &std::ops::Range<u32>, first: u32| {
+        // The lines may span several buffers: each draws its share of the range.
         let mut at = 0u32;
         for (buffer, count) in &batch.parts {
             let end = at.saturating_add(*count);
-            let (from, to) = (e.lines.start.max(at), e.lines.end.min(end));
+            let (from, to) = (range.start.max(at), range.end.min(end));
             if from < to {
                 pass.set_vertex_buffer(0, buffer.slice(..));
                 pass.draw(first..first + 6, from - at..to - at);
                 tally.segments(to - from);
             }
             at = end;
+        }
+    };
+    for e in edges {
+        let first = match part {
+            LitPart::Halo => e.halo,
+            LitPart::Core => e.core,
+            LitPart::Hidden => e.hidden,
+        }
+        .saturating_mul(6);
+        let own = layer.and_then(|g| Some((g, g.bodies.get(&(e.block, e.lines.start, e.lines.end))?)));
+        match own {
+            Some((g, (seen, hidden))) => {
+                let (pipeline, batch, range) = if part == LitPart::Hidden { (known, &g.hidden, hidden) } else { (p, &g.lines, seen) };
+                if let Some(batch) = batch {
+                    pass.set_pipeline(pipeline);
+                    draw_range(pass, batch, range, first);
+                }
+            }
+            None => {
+                let Some(batch) = blocks.get(&e.block).and_then(|b| b.lines.as_ref()) else { continue };
+                pass.set_pipeline(p);
+                draw_range(pass, batch, &e.lines, first);
+            }
         }
     }
 }
@@ -2701,6 +2746,8 @@ pub struct Renderer {
     line_in: wgpu::RenderPipeline,
     line_out: wgpu::RenderPipeline,
     line_hidden_out: wgpu::RenderPipeline,
+    /// A lit body's hidden stretches from an edge layer (no depth test).
+    line_lit_hidden_known: wgpu::RenderPipeline,
     /// The scene's own lines in another colour and width ([`LitEdges`], `vs_line_lit`), where
     /// they are seen and where the model hides them.
     line_lit: wgpu::RenderPipeline,
@@ -3666,6 +3713,8 @@ impl Renderer {
                 pipeline("sc_lines_in", "vs_line", "fs_line_in", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
                 pipeline("sc_lines_out", "vs_line", "fs_line_out", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
                 pipeline("sc_lines_hidden_out", "vs_line", "fs_line_out", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
+                // A lit body's hidden stretches from an edge layer: known hidden, no depth test.
+                pipeline("sc_lines_lit_hidden_known", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
             )
         };
         let lines_all = || {
@@ -3716,7 +3765,8 @@ impl Renderer {
                 tri_hl_planned,
             ) = see_through_tris.join();
             let ((glass_far_flat, glass_near_flat, trans_flat), tri_hl_instanced_flat) = see_through_flat.join();
-            let (line, line_hidden, line_lit, line_lit_hidden, line_hidden_known, line_in, line_out, line_hidden_out) = lines.join();
+            let (line, line_hidden, line_lit, line_lit_hidden, line_hidden_known, line_in, line_out, line_hidden_out, line_lit_hidden_known) =
+                lines.join();
             let (overlay, guide_line) = lines_all.join();
             let (ss_blit, copy_blit, ss_filter) = blits.join();
             let (depth_reset, section_stencil) = resets.join();
@@ -3799,6 +3849,7 @@ impl Renderer {
                 line_in,
                 line_out,
                 line_hidden_out,
+                line_lit_hidden_known,
                 line_lit,
                 line_lit_hidden,
                 overlay,
@@ -4717,7 +4768,9 @@ impl Renderer {
                 }
             }
             if hidden {
-                lines(pass, &res.line_hidden_known, &g.hidden);
+                if g.layer.show_hidden {
+                    lines(pass, &res.line_hidden_known, &g.hidden);
+                }
             } else {
                 lines(pass, &res.line_in, &g.lines);
             }
@@ -4725,7 +4778,7 @@ impl Renderer {
         model_lines(pass, &res.line_hidden, true);
         in_moving(pass, &|pass, mv| lines(pass, &res.line_hidden, &mv.hidden));
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
-        lit_lines(pass, &res.line_lit_hidden, &m.blocks, &h.lit_edges, |e| e.hidden, tally);
+        lit_lines(pass, &res.line_lit_hidden, &res.line_lit_hidden_known, &m.blocks, layer, &h.lit_edges, LitPart::Hidden, tally);
         lines(pass, &res.line_hidden, &h.hidden);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         model_lines(pass, &res.line, false);
@@ -4734,8 +4787,8 @@ impl Renderer {
         lines(pass, &res.line, &sk.lines);
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
         // Whole bodies' edges first, so an edge or a face's outline lit over them keeps its own.
-        lit_lines(pass, &res.line_lit, &m.blocks, &h.lit_edges, |e| e.halo, tally);
-        lit_lines(pass, &res.line_lit, &m.blocks, &h.lit_edges, |e| e.core, tally);
+        lit_lines(pass, &res.line_lit, &res.line_lit, &m.blocks, layer, &h.lit_edges, LitPart::Halo, tally);
+        lit_lines(pass, &res.line_lit, &res.line_lit, &m.blocks, layer, &h.lit_edges, LitPart::Core, tally);
         lines(pass, &res.line, &h.lines);
         lines(pass, &res.guide_line, &h.guide_lines);
         pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);
@@ -6585,6 +6638,7 @@ mod glass_tests {
         let mut layer = EdgeLayer { scene_key: frame.key, ..EdgeLayer::default() };
         layer.line([-6.0, 3.0, 0.0], [0.0, 3.0, 0.0], blue, 3.0);
         layer.replaced.push(ReplacedLines { block: 7, lines: ranges[0].clone(), hidden: 0..0 });
+        layer.ranges.push((0..1, 0..0));
         let layer = Arc::new(layer);
         frame.edge_layer = Some(layer.clone());
         let count = |img: &[u8], f: &dyn Fn(&[u8; 4]) -> bool| img.as_chunks::<4>().0.iter().filter(|p| f(p)).count();
@@ -6607,6 +6661,23 @@ mod glass_tests {
         assert!(count(&fading, &reddish) > 20 && count(&fading, &bluish) > 20, "both lines while it fades");
         assert_eq!(count(&fading, &is_red), 0, "the replaced lines are faded, not whole");
         frame.edge_layer_fade = 1.0;
+        // A whole highlighted red body's edges, lit in yellow: only along what the layer shows of
+        // them (the left half), not along its whole block line.
+        let mut hl = GpuScene::default();
+        let yellow = hl.color([255, 255, 0, 255]);
+        let style = |w: f32| lit_line_style(yellow, w, true).unwrap_or(0);
+        hl.lit_edges.push(LitEdges { block: 7, lines: ranges[0].clone(), halo: style(1.0), core: style(3.0), hidden: style(1.0) });
+        frame.hl_key = 9;
+        frame.hl_slot = Arc::new(Mutex::new(Some(hl)));
+        let is_yellow = |p: &[u8; 4]| p[0] > 200 && p[1] > 200 && p[2] < 60;
+        let right = |img: &[u8]| img.as_chunks::<4>().0.iter().enumerate().filter(|(i, p)| i % 64 > 34 && is_yellow(p)).count();
+        let lit = render_frame(&mut renderer, &device, &queue, &frame, true);
+        assert!(count(&lit, &is_yellow) > 20 && right(&lit) == 0, "the lit body follows the layer");
+        frame.edge_layer = None;
+        assert!(right(&render_frame(&mut renderer, &device, &queue, &frame, true)) > 20, "without the layer its whole lines are lit");
+        frame.edge_layer = Some(layer.clone());
+        frame.hl_key = 10;
+        frame.hl_slot = Arc::new(Mutex::new(Some(GpuScene::default())));
         // A layer made for another scene (the model changed since) is not drawn.
         frame.edge_layer = Some(Arc::new(EdgeLayer {
             scene_key: frame.key + 1,

@@ -440,25 +440,30 @@ fn run(input: Input, cache: &Mutex<Cache>, cancel: &AtomicBool, progress: &Progr
         if lens.perspective { (p - lens.eye).dot(toward).max(lens.near) / lens.scale } else { 1.0 / lens.scale }
     };
     let eye = if lens.perspective { occlusion::Eye::At(lens.eye) } else { occlusion::Eye::Along(toward) };
-    let items: Vec<(usize, &Draw, usize)> = drawn
+    // Each drawn edge on the screen with its body's place in `drawn`, body by body.
+    let items: Vec<(usize, &Draw, usize, usize)> = drawn
         .iter()
-        .flat_map(|(pi, d)| d.edges.iter().filter(move |&&e| on_screen(&proj, d.mesh.edges.get(e), &d.place)).map(move |&e| (*pi, *d, e)))
+        .enumerate()
+        .flat_map(|(k, (pi, d))| d.edges.iter().filter(move |&&e| on_screen(&proj, d.mesh.edges.get(e), &d.place)).map(move |&e| (*pi, *d, e, k)))
         .collect();
     stats.bodies = drawn.len();
     stats.edges = items.len();
     progress.edges.store(items.len(), Ordering::Relaxed);
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let parts: Mutex<Vec<(EdgeLayer, usize, usize, [usize; 2], (f64, String, usize, usize, usize))>> = Mutex::new(Vec::new());
+    // Each worker's edges' lines by the edge's place in `items`, so they join up body by body.
+    type Lines = Vec<(usize, Vec<u8>, Vec<u8>)>;
+    let parts: Mutex<Vec<(Lines, usize, usize, [usize; 2], (f64, String, usize, usize, usize))>> = Mutex::new(Vec::new());
     std::thread::scope(|s| {
         for _ in 0..threads {
             s.spawn(|| {
-                let mut layer = EdgeLayer::default();
+                let mut done: Lines = Vec::new();
                 let (mut rays, mut hidden_edges, mut tests) = (0, 0, [0usize; 2]);
                 let mut slowest = (0.0, String::new(), 0, 0, 0);
                 let f32s = |p: Vec3| [p.x as f32, p.y as f32, p.z as f32];
                 loop {
                     let i = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(&(pi, d, edge)) = items.get(i) else { break };
+                    let Some(&(pi, d, edge, _)) = items.get(i) else { break };
+                    let mut layer = EdgeLayer::default();
                     if i.is_multiple_of(32) && stop() {
                         break;
                     }
@@ -497,16 +502,16 @@ fn run(input: Input, cache: &Mutex<Cache>, cancel: &AtomicBool, progress: &Progr
                             layer.lifted_line(f32s(a), f32s(b), d.edge, EDGE_WIDTH, n);
                         }
                     }
-                    if input.hidden {
-                        for r in &pieces.hidden {
-                            for w in occluders.edge_points(pi, edge, *r, &tol).windows(2) {
-                                layer.hidden_line(f32s(w[0].1), f32s(w[1].1), d.hidden, HIDDEN_WIDTH);
-                            }
+                    // Always made: a selected body shows its hidden edges dimmed in any style.
+                    for r in &pieces.hidden {
+                        for w in occluders.edge_points(pi, edge, *r, &tol).windows(2) {
+                            layer.hidden_line(f32s(w[0].1), f32s(w[1].1), d.hidden, HIDDEN_WIDTH);
                         }
                     }
+                    done.push((i, layer.lines, layer.hidden));
                 }
                 if let Ok(mut p) = parts.lock() {
-                    p.push((layer, rays, hidden_edges, tests, slowest));
+                    p.push((done, rays, hidden_edges, tests, slowest));
                 }
             });
         }
@@ -514,19 +519,33 @@ fn run(input: Input, cache: &Mutex<Cache>, cancel: &AtomicBool, progress: &Progr
     if stop() {
         return (None, stats);
     }
-    let mut layer = EdgeLayer { scene_key: input.scene_key, ..EdgeLayer::default() };
+    let mut layer = EdgeLayer { scene_key: input.scene_key, show_hidden: input.hidden, ..EdgeLayer::default() };
+    let mut all: Lines = Vec::with_capacity(items.len());
     for (part, rays, hidden_edges, tests, slowest) in parts.into_inner().unwrap_or_default() {
         stats.tests += tests[0];
         stats.spline_tests += tests[1];
         if slowest.0 > stats.slowest_edge.0 {
             stats.slowest_edge = slowest;
         }
-        layer.lines.extend_from_slice(&part.lines);
-        layer.hidden.extend_from_slice(&part.hidden);
+        all.extend(part);
         stats.rays += rays;
         stats.hidden_edges += hidden_edges;
     }
+    // Body by body, each body's lines and hidden lines one run apiece.
+    all.sort_unstable_by_key(|(i, _, _)| *i);
+    let count = |bytes: &Vec<u8>| u32::try_from(bytes.len() / crate::gpu::LINE_SIZE).unwrap_or(u32::MAX);
+    let mut ranges = vec![(0..0, 0..0); drawn.len()];
+    let mut at = all.iter().peekable();
+    for (k, range) in ranges.iter_mut().enumerate() {
+        let (l0, h0) = (count(&layer.lines), count(&layer.hidden));
+        while let Some((_, lines, hidden)) = at.next_if(|(i, _, _)| items.get(*i).is_some_and(|it| it.3 == k)) {
+            layer.lines.extend_from_slice(lines);
+            layer.hidden.extend_from_slice(hidden);
+        }
+        *range = (l0..count(&layer.lines), h0..count(&layer.hidden));
+    }
     layer.replaced = drawn.iter().map(|(_, d)| d.replaced.clone()).collect();
+    layer.ranges = ranges;
     stats.job_ms = crate::now_ms() - t0;
     log::debug!("exact edges: {stats:?}");
     (Some(layer), stats)
