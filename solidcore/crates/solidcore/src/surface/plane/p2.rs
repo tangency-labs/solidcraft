@@ -109,7 +109,7 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BoundingBoxRequest};
 use crate::nurbs::knots::Side;
-use crate::surface::surf_of_extrusion::{CurveOrientType, SurfOfExtrusion};
+use crate::surface::surf_of_extrusion::{CurveOrientType, ExtrusionIntersection, SurfOfExtrusion};
 use crate::surface::surf_of_revolution::SurfOfRevolution;
 use crate::surface::surface::p1::{evaluate_1st_derivatives, SurfaceIntersectContext};
 use crate::surface::surface::p2::{
@@ -1720,6 +1720,7 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
                     uv_domain,
                     approx_tol_3d,
                 )?;
+                extrusion_section_uv_curves(k, nurbs, plane, &mut x)?;
                 core::mem::swap(&mut x.surface1_uv_curves, &mut x.surface2_uv_curves);
                 need_nurb_intersection = x.needs_more_intersections;
                 *out = SurfaceIntersection::from(x);
@@ -1783,6 +1784,101 @@ pub(crate) fn extrusion_parallel_to(
     Ok((planar && parallel).then_some(ext))
 }
 
+/// Not upstream (#6748): fills the UV curves of `x`, the section of the B-spline `nurbs`
+/// (its first surface, as [`SurfOfExtrusion::intersect_with_plane_on`] orders them) by
+/// `plane` that [`extrusion_parallel_to`] found. The section is the profile moved along the
+/// sweep onto the plane, in the profile's own parameter, so on `nurbs` it is the iso line
+/// at the sweep parameter where the plane cuts, and on the plane its control net in the
+/// plane's parameters (an affine map, so the same curve), both exact. Upstream's special
+/// cases give none; the general intersection this case replaces gave them, and its callers
+/// read them (the offset's mate proves a curve without them only on analytic surfaces,
+/// `SurfaceIntersection::clip_exact_curves`). A curve not of a B-spline kind keeps none.
+///
+/// Along the sweep the B-spline is `C(t) + e σc / ((1 - σ) + σc)`, `σ` the sweep
+/// parameter's fraction and `c` the constant ratio of the end row's weights to the start
+/// row's (1 when not rational): the sweep's middle gives `c`, and the plane's fraction `f`
+/// of the way along `e` is at `σ = f / (c - f (c - 1))`.
+///
+/// # Errors
+///
+/// Those of the evaluations, the iso line and the curves' trims and constructions.
+pub(crate) fn extrusion_section_uv_curves(
+    k: &Kernel,
+    nurbs: &BSplineSurface,
+    plane: &Plane,
+    x: &mut ExtrusionIntersection,
+) -> Result<()> {
+    use crate::curve::iso_curve::IsoCurve;
+    use crate::nurbs::b_spline_curve::p1::CanonicalData;
+    use crate::nurbs::b_spline_surface::SurfParamType;
+    let domain = nurbs.natural_uv_domain();
+    let (sweep, start, end) = if nurbs.degree(SurfParamType::U) == 1 {
+        (SurfParamType::U, domain.min().x, domain.max().x)
+    } else {
+        (SurfParamType::V, domain.min().y, domain.max().y)
+    };
+    // (the point of the profile's start at the fraction `s` of the sweep)
+    let along = |s: f64| match sweep {
+        SurfParamType::U => domain.evaluate(s, 0.0),
+        _ => domain.evaluate(0.0, s),
+    };
+    let p0 = nurbs.evaluate_point(along(0.0))?;
+    let e = nurbs.evaluate_point(along(1.0))? - p0;
+    let n = plane.position().z_axis();
+    let g = (nurbs.evaluate_point(along(0.5))? - p0).dot(n) / e.dot(n);
+    let c = g / (1.0 - g);
+    let f = (plane.position().origin() - p0).dot(n) / e.dot(n);
+    let sigma = f / (c - f * (c - 1.0));
+    let iso = IsoCurve::new(
+        nurbs.copy(),
+        sweep,
+        start + (end - start) * sigma,
+        true,
+        true,
+    )
+    .create_uv_iso_line()?;
+    for (i, curve) in x.curves_3d.iter().enumerate() {
+        let CurveKind::BSpline(b) = curve.kind() else {
+            continue;
+        };
+        let canonical = b.canonical()?;
+        let net: Vec<Point3> = canonical
+            .control_points
+            .iter()
+            .map(|&p| {
+                let q = plane.project_point_to_uv_domain(p);
+                Point3::new(q.x, q.y, 0.0)
+            })
+            .collect();
+        let on_plane = BSplineCurve::create_canonical(&CanonicalData {
+            dim: 2,
+            degree: canonical.degree,
+            control_points: &net,
+            form: canonical.form,
+            knot_multiplicities: &canonical.knot_multiplicities,
+            knots: &canonical.knots,
+            knot_type: canonical.knot_type,
+            weights: if b.is_rational()? {
+                Some(&canonical.weights)
+            } else {
+                None
+            },
+            trim: None,
+        })?;
+        let mut on_nurbs = iso.copy(k)?;
+        let mut ivl = curve.natural_interval();
+        on_nurbs.trim(k, &mut ivl, TrimMode::Notify)?;
+        if let (Some(a), Some(b)) = (
+            x.surface1_uv_curves.get_mut(i),
+            x.surface2_uv_curves.get_mut(i),
+        ) {
+            *a = Some(on_nurbs);
+            *b = Some(Curve::from(on_plane));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1790,8 +1886,9 @@ mod tests {
     /// #6748: a quarter of the ellipse `(x / 2)² + y² = 1` (a rational quadratic) swept 2
     /// along z, as a B-rep record holds an extruded profile (its B-spline, not its surface
     /// of extrusion), cut by the plane z = 1: the section is the profile on the plane, on the
-    /// ellipse to rounding, from either side. The general intersection traces it and fits a
-    /// polynomial, off the ellipse by its approximation tolerance.
+    /// ellipse to rounding, from either side, with its UV curves on both surfaces, each
+    /// lifting onto the section at the same parameter to rounding. The general intersection
+    /// traces it and fits a polynomial, off the ellipse by its approximation tolerance.
     #[test]
     fn a_plane_parallel_to_a_b_spline_extrusions_profile_cuts_the_profile_exactly() {
         use crate::nurbs::crv_basic::Curve as NurbCurve;
@@ -1832,19 +1929,28 @@ mod tests {
         let wall_first = wall
             .global_surface_intersect(k, &wall_domain, &plane, &domain, [true, true], None, None)
             .unwrap();
-        for x in [plane_first, wall_first] {
+        for (x, order) in [
+            (plane_first, [&plane, &wall]),
+            (wall_first, [&wall, &plane]),
+        ] {
             assert_eq!(x.curves_3d.len(), 1);
             let curve = x.curves_3d.first().unwrap();
+            let uv = [&x.surface1_uv_curves, &x.surface2_uv_curves]
+                .map(|c| c.first().unwrap().as_ref().expect("a UV curve"));
             let ivl = curve.natural_interval();
             for i in 0..=16 {
-                let p = curve
-                    .evaluate_point(k, ivl.evaluate(f64::from(i) / 16.0))
-                    .unwrap();
+                let t = ivl.evaluate(f64::from(i) / 16.0);
+                let p = curve.evaluate_point(k, t).unwrap();
                 assert!((p.z - 1.0).abs() <= 1e-12, "{p:?}");
                 assert!(
                     ((p.x / 2.0).powi(2) + p.y * p.y - 1.0).abs() <= 1e-12,
                     "{p:?}"
                 );
+                for (surface, uv) in order.iter().zip(uv) {
+                    let q = uv.evaluate_point(k, t).unwrap();
+                    let lift = surface.evaluate_point(k, Point2::new(q.x, q.y)).unwrap();
+                    assert!(lift.distance(p) <= 1e-12, "{lift:?} vs {p:?}");
+                }
             }
         }
     }

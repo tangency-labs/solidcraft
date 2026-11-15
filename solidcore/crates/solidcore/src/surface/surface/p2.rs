@@ -4334,7 +4334,7 @@ impl Surface {
                     if let Some(ext) =
                         crate::surface::plane::p2::extrusion_parallel_to(k, nurbs, plane)?
                     {
-                        let x = ext.intersect_with_plane_on(
+                        let mut x = ext.intersect_with_plane_on(
                             k,
                             self,
                             uv_domain,
@@ -4344,6 +4344,9 @@ impl Surface {
                             approx_tol_3d,
                         )?;
                         if !x.needs_more_intersections {
+                            crate::surface::plane::p2::extrusion_section_uv_curves(
+                                k, nurbs, plane, &mut x,
+                            )?;
                             *out = SurfaceIntersection::from(x);
                             return Ok(());
                         }
