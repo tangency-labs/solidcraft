@@ -274,7 +274,7 @@ fn plugin_slot_menus_and_ribbon(requested: &mut BTreeMap<String, bool>) {
             "runtime":{"module":"entry.wasm","commands":[],"entries":[{
                 "name":"inspect","effect":"read","slots":[
                     {"kind":"menu","name":"File"},{"kind":"menu","name":"Help"},
-                    {"kind":"ribbon","name":"Model"},{"kind":"ribbon","name":"Audit tools"}
+                    {"kind":"ribbon","name":"Inspect"},{"kind":"ribbon","name":"Audit tools"}
                 ]
             }]}
         })
@@ -284,11 +284,11 @@ fn plugin_slot_menus_and_ribbon(requested: &mut BTreeMap<String, bool>) {
     h.app.session.plugin_state.plugins_dir = Some(root);
     h.app.home.open = false;
     h.app.preferences.ribbon_tabs_only = false;
-    h.app.ui.tab = "MODEL".into();
+    h.app.ui.tab = "INSPECT".into();
     h.call("ui.resize", json!({"width":2400,"height":1400}));
     // Discovery runs on a worker. Use the shared bounded scenario wait for this fixture's
     // unique group, so an earlier scan of the user's data directory cannot satisfy the wait.
-    h.step(&json!({"until":{"shown_handles":["panel:MODEL:plugin:icon-audit-helper","tab:PLUGINS"]}})).unwrap();
+    h.step(&json!({"until":{"shown_handles":["panel:INSPECT:plugin:icon-audit-helper","tab:INSPECT"]}})).unwrap();
     let label = "Icon audit helper · inspect";
     for (handle, surface) in [("appbar:file", "plugin File slot"), ("appbar:help", "plugin Help slot")] {
         click(&mut h, handle);
@@ -296,7 +296,8 @@ fn plugin_slot_menus_and_ribbon(requested: &mut BTreeMap<String, bool>) {
         collect(&mut h, surface, requested);
         escape(&mut h);
     }
-    for tab in ["MODEL", "PLUGINS"] {
+    // Model's Plugins group already lists every command, so a slot is drawn only on the other tabs.
+    for tab in ["INSPECT"] {
         click(&mut h, &format!("tab:{tab}"));
         click(&mut h, &format!("panel:{tab}:plugin:icon-audit-helper"));
         assert!(h.widget(label).is_some(), "{tab}: the host group menu must show the plugin's name");
