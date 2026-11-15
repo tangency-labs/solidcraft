@@ -240,7 +240,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             // The keys as the platform names them (Cmd on macOS); Redo has two (#12902).
             let tip = |id: &str, keys: &[&str]| {
                 let label = app.tr(id);
-                let keys = keys.iter().map(|key| crate::keymap::display(key)).collect::<Vec<_>>().join(", ");
+                let keys = keys.iter().map(|key| crate::ui_kit::chord_label(key)).collect::<Vec<_>>().join(", ");
                 if shown { format!("{label} ({keys})") } else { solidcraft_ui_text::format("ui.needs_design", &[("command", label)]) }
             };
             let (save_tip, undo_tip, redo_tip) =
