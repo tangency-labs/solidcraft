@@ -3740,7 +3740,13 @@ mod tests {
                 90.0,
             )
             .unwrap_err();
-            assert_eq!(e.sm_status(), Some(1007), "top {top}: {e}");
+            // the goldens record this refusal as 1007 (`SolidError::InvalidInput`), as
+            // upstream's degenerate swept face; run backwards it was 1025, axis inside face
+            assert!(
+                matches!(e, crate::SolidError::InvalidInput { .. })
+                    && e.to_string().contains("degenerates to a curve or point"),
+                "top {top}: {e}"
+            );
         }
     }
 
