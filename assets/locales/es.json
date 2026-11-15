@@ -5798,6 +5798,7 @@
   "ui.fillet_corner_tangent_tip": "Tangente (G1): una esquina de bola rodante, un trozo de la esfera de la bola rodante tangente a cada redondeo.",
   "ui.fillet_error_corner": "No se pudo construir la esquina suave aquí. Prueba otro Retroceso, o esquinas Tangentes.",
   "ui.fillet_error_failed": "No se pudo construir este redondeo en estas aristas. Prueba otro radio, o redondea menos aristas a la vez.",
+  "ui.fillet_error_no_radius": "Ningún radio funciona en estas aristas, ni siquiera uno muy chico: esta forma todavía no se puede redondear. Prueba con menos aristas, o con otras.",
   "ui.fillet_error_setback_short": "El retroceso es demasiado corto para el parche de esta esquina: construye desde {least} en adelante. Prueba un Retroceso más largo.",
   "ui.fillet_error_too_large": "El radio es demasiado grande para las caras junto a estas aristas. Prueba un radio menor, o pon Límites de cara a Radio máximo.",
   "ui.fillet_fit": "Límites de cara",

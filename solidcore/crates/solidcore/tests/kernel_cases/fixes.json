@@ -25,8 +25,6 @@
   "proto_vertex_miss_is_false",
   "edge_check_orders_tangent_faces",
   "ellipse_step_interval_checks",
-  "oscillating_skips_failed_guesses",
-  "refine_cc_range_ends",
   "flat_corners_test_bits",
   "surface_continuity_checks_last_v_knot",
   "good_drop_result_distances_in_order",
