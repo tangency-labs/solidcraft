@@ -113,6 +113,25 @@ fn a_shell_that_opens_no_face_seals_its_void() {
     }
 }
 
+/// #17158: a box with a round pocket cut into its top through two of its sides, and the two
+/// edges where the pocket's wall meets those sides rounded, so each round is tangent to the
+/// pocket's wall. An outside shell moves the round and the wall out together: they stay
+/// tangent along a line and meet the pocket's floor there. The shell was refused (`how far its
+/// neighbours extend to meet it has no certified bound`); it builds one closed sound body.
+#[test]
+fn an_outside_shell_of_a_round_tangent_to_a_pocket_wall_builds() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+    run(&mut s, "sketch.circle.center", json!({"center": [35, 5], "radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 4, "direction": "negative", "operation": "cut"}));
+    // where the pocket's wall (radius 10 about (35, 5)) leaves the sides x = 40 and y = 0
+    run(&mut s, "solid.fillet", json!({"edges": [[40.0, 13.660254037844387, 8.0], [26.339745962155614, 0.0, 8.0]], "radius": 2}));
+    run(&mut s, "solid.shell", json!({"faces": [[10, 10, 0]], "thickness": 1.5, "direction": "outside"}));
+    sound(&s);
+}
+
 /// #17210: a disc with two circles swept down slanting lines onto it from either side, both
 /// ending on one circle on the disc's top (oblique cylinders, mirror images, tangent to each
 /// other where their crossing curve meets the disc). Shelled with the bottom open, the two
