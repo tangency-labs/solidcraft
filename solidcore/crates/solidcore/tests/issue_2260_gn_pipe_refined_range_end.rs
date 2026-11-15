@@ -65,6 +65,7 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "close_loop_relates_only_coincident_edges",
     "cone_create_canonical_preserves_inside_out_and_checks_height",
     "corner_patch_face_side_twist",
+    "cover_refuses_folded_continuation",
     "curve_contacts_at_curve_ends",
     "curve_loop_normal_from_area",
     "curve_loop_start_after_previous_end",

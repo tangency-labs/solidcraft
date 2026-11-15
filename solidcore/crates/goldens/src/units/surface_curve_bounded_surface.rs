@@ -1316,6 +1316,10 @@ mod tests {
 mod wr43_tests {
     use super::*;
 
+    /// `SmLine_TYPE`: the generator's mislabelled UV header (a line header over a
+    /// B-spline body).
+    const LINE_TYPE: i64 = 14010;
+
     /// Rows that moved when `ReadFromDB` started reading each UV boundary with its own
     /// type header and keeping the implicit-outer flag (WR-43).
     const MOVED: [&str; 36] = [
@@ -1326,55 +1330,112 @@ mod wr43_tests {
         "gen0331", "gen0390", "read_db_uv_header_type_ignored", "read_db_uv_without_3d_type_zero",
     ];
 
-    /// Replays every `read_db` case. A record whose UV headers say B-spline curve and
-    /// that reads gives back the record: the implicit-outer flag written, and each UV
-    /// boundary a B-spline curve with the record's degree, control points and knots. A
-    /// record whose UV headers say line is read as lines (or refused), never as the
-    /// B-spline body that follows the header.
+    /// Replays every `read_db` case and accounts for each outcome from the record alone.
+    ///
+    /// - A basis header that is not a surface type is refused (upstream reads no further).
+    /// - Otherwise a record whose UV headers say B-spline curve reads, whatever its 3D
+    ///   boundaries (upstream read it with the last 3D type, 0 without any, and failed),
+    ///   and gives back the implicit-outer flag written and each UV boundary as the
+    ///   B-spline written: degree, knots, and every control point's coordinates and weight.
+    /// - A record whose UV headers say line has its B-spline bodies read as line data: each
+    ///   boundary that reads is a line whose point starts with the body's first two values
+    ///   (the last control-point index and the degree). Such a record is refused only when
+    ///   a later UV boundary follows (two or more), whose header the misaligned read then
+    ///   misses: a header that is not read, or a type no reader knows.
     #[test]
-    fn read_records_come_back_as_written() {
+    fn read_records_are_read_as_their_headers_say() {
         let ctx = CaseContext {
             root: crate::case::repo_root(),
             seeds: 0,
         };
         let k = Kernel::default();
         let mut seen = Vec::new();
+        let (mut bspline_reads, mut without_3d_reads, mut line_reads, mut line_refusals) =
+            (0, 0, 0, 0);
         for c in Runner.cases(&ctx).unwrap() {
             let i: Inputs = c.parse().unwrap();
-            let OpIn::ReadDb { version, uv_header_type, .. } = &i.op else {
+            let OpIn::ReadDb {
+                version,
+                uv_header_type,
+                basis_type,
+                ..
+            } = &i.op
+            else {
                 continue;
             };
             let rec = record_of(&i.op).unwrap();
-            let text = cbs_record(&rec);
             let mut db = DatabaseReader::new();
-            db.open_for_read(text.into_bytes(), FileType::Ascii);
+            db.open_for_read(cbs_record(&rec).into_bytes(), FileType::Ascii);
             let read = Surface::read_from_db(&k, cbs::TYPE, &mut db, *version);
-            let Ok(s) = read else {
-                seen.push(c.name.clone());
+            seen.push(c.name.clone());
+            if *basis_type != B_SPLINE_SURFACE_TYPE {
+                let e = read.err().unwrap_or_else(|| panic!("{}: a non-surface basis read", c.name));
+                assert!(e.to_string().contains("surface type"), "{}: {e}", c.name);
                 continue;
-            };
-            let SurfaceKind::CurveBounded(b) = s.kind() else {
-                panic!("{}: not a curve bounded surface", c.name);
-            };
-            assert_eq!(b.implicit_outer(), rec.implicit, "{}", c.name);
-            assert_eq!(b.boundaries_uv().len(), rec.curves_uv.len(), "{}", c.name);
-            for (got, want) in b.boundaries_uv().iter().zip(&rec.curves_uv) {
-                if *uv_header_type == B_SPLINE_CURVE_TYPE {
+            }
+            if *uv_header_type == B_SPLINE_CURVE_TYPE {
+                let s = read.unwrap_or_else(|e| panic!("{}: a B-spline record refused: {e}", c.name));
+                let SurfaceKind::CurveBounded(b) = s.kind() else {
+                    panic!("{}: not a curve bounded surface", c.name);
+                };
+                assert_eq!(b.implicit_outer(), rec.implicit, "{}", c.name);
+                assert_eq!(b.boundaries_uv().len(), rec.curves_uv.len(), "{}", c.name);
+                for (got, want) in b.boundaries_uv().iter().zip(&rec.curves_uv) {
                     let CurveKind::BSpline(bc) = got.kind() else {
-                        panic!("{}: a B-spline header read as {:?}", c.name, got.type_code());
+                        panic!("{}: a B-spline header read as {}", c.name, got.type_code());
                     };
                     let cur = bc.gw_nurb().unwrap();
                     assert_eq!(cur.degree(), want.p, "{}", c.name);
                     assert_eq!(cur.knots(), &want.knots[..], "{}", c.name);
                     assert_eq!(cur.cpts().len(), want.cpts.len(), "{}", c.name);
-                } else {
-                    assert_eq!(got.type_code(), *uv_header_type, "{}", c.name);
+                    for (g, w) in cur.cpts().iter().zip(&want.cpts) {
+                        assert_eq!([g.x, g.y, g.w], [w[0], w[1], w[3]], "{}", c.name);
+                        if want.dim == 3 {
+                            assert_eq!(g.z, w[2], "{}", c.name);
+                        }
+                    }
+                }
+                bspline_reads += 1;
+                if rec.curves_3d.is_empty() && !rec.curves_uv.is_empty() {
+                    without_3d_reads += 1;
+                }
+                continue;
+            }
+            assert_eq!(*uv_header_type, LINE_TYPE, "{}: an unexpected UV header", c.name);
+            match read {
+                Ok(s) => {
+                    let SurfaceKind::CurveBounded(b) = s.kind() else {
+                        panic!("{}: not a curve bounded surface", c.name);
+                    };
+                    assert_eq!(b.implicit_outer(), rec.implicit, "{}", c.name);
+                    assert_eq!(b.boundaries_uv().len(), rec.curves_uv.len(), "{}", c.name);
+                    for (got, want) in b.boundaries_uv().iter().zip(&rec.curves_uv) {
+                        let CurveKind::Line(l) = got.kind() else {
+                            panic!("{}: a line header read as {}", c.name, got.type_code());
+                        };
+                        let p = l.canonical_unit().point;
+                        let first = want.cpts.len().checked_sub(1).unwrap() as f64;
+                        assert_eq!([p.x, p.y], [first, want.p as f64], "{}", c.name);
+                    }
+                    line_reads += 1;
+                }
+                Err(e) => {
+                    assert!(rec.curves_uv.len() >= 2, "{}: one line boundary refused: {e}", c.name);
+                    let m = e.to_string();
+                    assert!(
+                        m.contains("curve type not read")
+                            || m.contains("curve dimension not read")
+                            || m.contains("the curve type read is not known"),
+                        "{}: {m}",
+                        c.name
+                    );
+                    line_refusals += 1;
                 }
             }
-            seen.push(c.name.clone());
         }
         for m in MOVED {
             assert!(seen.iter().any(|n| n == m), "{m} is not a read_db case");
         }
+        assert!(bspline_reads > 0 && without_3d_reads > 0 && line_reads > 0 && line_refusals > 0);
     }
 }

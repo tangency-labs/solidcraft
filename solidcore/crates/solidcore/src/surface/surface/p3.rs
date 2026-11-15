@@ -49,8 +49,9 @@
 //!   B-rep runs `topology::face::p1::remove_uv_trim_curves` right after the call (nothing
 //!   runs in between, so the order is upstream's). There is no entry point that skips
 //!   the deletion: every caller receives the face.
-//! - **A folded continuation is not covered** (WR-407; upstream merges onto it).
-//!   SolidCraft change, tangency-labs/smlib 1b6f5fa (`SmSurface::CoverCoincidentSurface`, before its
+//! - **A folded continuation is not covered** (opt-in
+//!   `Kernel::fixes.cover_refuses_folded_continuation`, WR-407; off by default, which
+//!   merges as upstream does). SolidCraft change, tangency-labs/smlib 1b6f5fa (`SmSurface::CoverCoincidentSurface`, before its
 //!   `AdjustSTEPUVDomain`): when a B-spline-based surface would be extended past its
 //!   natural domain, its normal may neither vanish nor turn back between neighbouring
 //!   samples of a 21 x 21 grid over the domain the merge uses; otherwise the cover fails
@@ -1537,9 +1538,10 @@ impl Surface {
         // its edges (two swept arc walls sharing their top and bottom planes, joined: UV gaps
         // and the wrong volume). The continued surface must not fold over the domain the
         // merge will use: its normal must not vanish or turn back between neighbouring
-        // samples of a grid over that domain (WR-407); upstream merges onto the
-        // continuation.
-        if out_of_bounds_enabled(self).is_some()
+        // samples of a grid over that domain. Opt-in (`Kernel::fixes.cover_refuses_folded_continuation`,
+        // WR-407); upstream merges onto the continuation.
+        if k.fixes.cover_refuses_folded_continuation
+            && out_of_bounds_enabled(self).is_some()
             && !update_domain.is_contained_by(&orig_domain, 0.0)
         {
             let Some((_, reference)) = self.step_normal(k, orig_domain.evaluate(0.5, 0.5))? else {
@@ -2256,17 +2258,37 @@ mod tests {
         Ok((covered, this.step_uv_domain().u_interval().max()))
     }
 
-    /// WR-407, #434 (SolidCraft change, tangency-labs/smlib 1b6f5fa): the cover across
-    /// the fold fails and changes nothing.
+    /// With `fixes.cover_refuses_folded_continuation` (WR-407, #434; SolidCraft change,
+    /// tangency-labs/smlib 1b6f5fa) the cover across the fold fails and changes nothing.
     #[test]
     fn issue_434_cover_refuses_a_continuation_that_folds() -> Result<()> {
-        let k = Kernel::default();
+        let mut k = Kernel::default();
+        k.fixes.cover_refuses_folded_continuation = true;
         let (covered, u_max) = issue_434_cover_across_a_fold(&k)?;
         assert!(
             !covered.success,
             "the fold at u = 1.5 must not be covered: {covered:?}"
         );
         // Nothing was changed by the refused cover.
+        assert_eq!(u_max, 1.0);
+        Ok(())
+    }
+
+    /// Default (SMLib v1.0.1): the flat sheet is now planar to `SM_EFF_ZERO` (`IsPlanar`
+    /// tests the unpadded pseudo box, `SmSurface.cpp:22371` at `3fd5b95`), so
+    /// `GetMaxAnalyticDomain` expands it relatively by 100 instead of by half a span per
+    /// cubic direction. The search over that domain reaches the folded continuation and
+    /// the cover fails, changing nothing. At `c9c5979` the padded box was not planar; the
+    /// domain ended at the fold (u = 1.5) and the cover succeeded (WR-407).
+    #[test]
+    fn issue_434_default_refuses_the_fold_of_a_planar_sheet() -> Result<()> {
+        let k = Kernel::default();
+        assert!(!k.fixes.cover_refuses_folded_continuation);
+        let (covered, u_max) = issue_434_cover_across_a_fold(&k)?;
+        assert!(
+            !covered.success,
+            "the planar sheet's cover across the fold fails: {covered:?}"
+        );
         assert_eq!(u_max, 1.0);
         Ok(())
     }

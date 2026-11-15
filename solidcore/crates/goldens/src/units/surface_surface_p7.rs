@@ -1903,6 +1903,7 @@ mod flat_corner_bits_tests {
         };
         let k = Kernel::default();
         let mut checked = Vec::new();
+        let mut failed = Vec::new();
         for c in Runner.cases(&ctx).unwrap() {
             let i: Inputs = c.parse().unwrap();
             let OpIn::Flat { angle, want: true } = i.op else {
@@ -1927,8 +1928,14 @@ mod flat_corner_bits_tests {
             let pts = with.points.unwrap();
             for (bit, (uv, p)) in [1u32, 2, 4, 8].iter().zip(corners.iter().zip(pts)) {
                 if with.flags & bit != 0 {
-                    if let Ok(e) = s.evaluate_point(&k, *uv) {
-                        assert_eq!(p, e, "{} corner {bit}", c.name);
+                    match s.evaluate_point(&k, *uv) {
+                        Ok(e) => assert_eq!(p, e, "{} corner {bit}", c.name),
+                        // `GetFlatCorners` ignores a failed evaluation: the point stays
+                        // undefined
+                        Err(_) => {
+                            assert_eq!(p, Vec3::UNDEF, "{} corner {bit}", c.name);
+                            failed.push(c.name.clone());
+                        }
                     }
                 } else {
                     assert_eq!(p, Vec3::UNDEF, "{} corner {bit}", c.name);
@@ -1940,6 +1947,8 @@ mod flat_corner_bits_tests {
         }
         for m in MOVED {
             assert!(checked.iter().any(|n| n == m), "{m} not among the checked cases");
+            // every flagged corner of a moved row evaluates
+            assert!(!failed.iter().any(|n| n == m), "{m} has a corner that fails to evaluate");
         }
     }
 }
