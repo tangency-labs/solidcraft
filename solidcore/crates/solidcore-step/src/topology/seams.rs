@@ -1172,7 +1172,8 @@ impl Builder<'_, '_> {
     }
 
     /// The parameter inside edge `e`'s interval where its curve reaches the value `target` of
-    /// the surface's parameter `d` (0: u, an angle about the axis; 1: v), if it does.
+    /// the surface's parameter `d` (0: u, an angle about the axis; 1: v), if it does, further
+    /// than the tolerance from both of its ends.
     fn crossing(&self, e: u32, d: usize, target: f64, period: f64, eval: &SurfaceEval) -> R<Option<f64>> {
         let edge = self.edges.get(e as usize).ok_or("edge reference")?;
         let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
@@ -1205,8 +1206,11 @@ impl Builder<'_, '_> {
                     }
                 }
                 let t = 0.5 * (a + b);
-                let eps = 1e-9 * (hi - lo);
-                return Ok((t > lo + eps && t < hi - eps).then_some(t));
+                // Inside the edge by more than the tolerance along it, measured in length: a split
+                // nearer an end would leave an edge no longer than its tolerance (the end vertex
+                // is then the one on the line, within the tolerance).
+                let clear = |end: f64| c.point(t).zip(c.point(end)).is_some_and(|(p, q)| p.dist(q) > self.tol);
+                return Ok((t > lo && t < hi && clear(lo) && clear(hi)).then_some(t));
             }
             prev = Some((t, x));
         }
