@@ -2501,8 +2501,8 @@ pub fn local_extension_reach(
                         }
                         // two cylinders on one axis direction: the first's meeting with
                         // their radical plane, in closed form, a tangent meeting included
-                        _ => match quadric::Radical::of(q, r) {
-                            Some(radical) => {
+                        _ => {
+                            if let Some(radical) = quadric::Radical::of(q, r) {
                                 let trace = |p: Dv, t: Dv| {
                                     let (nu, h) = radical.over(p);
                                     section_trace(p, t, nu, h)
@@ -2511,13 +2511,12 @@ pub fn local_extension_reach(
                                     Ok(trace_quadric_piece(over, mid, dt, &trace, q, tolerance))
                                 };
                                 pieces(&piece, bounds, pair, surfaces.as_deref())?
-                            }
-                            None => {
+                            } else {
                                 let piece =
                                     |over, mid, dt| quadric_pair_piece(k, over, mid, dt, a, c);
                                 pieces(&piece, bounds, pair, surfaces.as_deref())?
                             }
-                        },
+                        }
                     }
                 }
                 (Exact::Quadric(_) | Exact::Net(_), Exact::Quadric(_) | Exact::Net(_)) => {
@@ -2659,10 +2658,10 @@ fn corner(
                             {
                                 None
                             }
-                            (&[plane], [a, c]) => match quadric::Radical::of(a, c) {
-                                // two cylinders on one axis direction: where the plane's line
-                                // with their radical plane meets the first
-                                Some(radical) => {
+                            (&[plane], [a, c]) => {
+                                if let Some(radical) = quadric::Radical::of(a, c) {
+                                    // two cylinders on one axis direction: where the plane's
+                                    // line with their radical plane meets the first
                                     let meeting =
                                         corner_with_cylinders(p, plane, &radical, a, at.tolerance);
                                     match meeting {
@@ -2670,15 +2669,14 @@ fn corner(
                                         CornerMeeting::Nowhere => None,
                                         CornerMeeting::Uncertified => return Err(refuse()),
                                     }
-                                }
-                                None => {
+                                } else {
                                     let section =
                                         quadric::Section::corner(p, plane.point, plane.raw);
                                     let meeting =
                                         quadric::meet(k, a, c, section, section, Ivl::from(0.0))?;
                                     Some(meeting.ok_or_else(refuse)?.distance.hi)
                                 }
-                            },
+                            }
                             _ => return Err(refuse()),
                         },
                     }
