@@ -64,7 +64,13 @@ pub(crate) fn stem(template: &str, names: &Names, legacy: &str) -> String {
     if safe.chars().all(|c| c == '_') {
         legacy.to_string()
     } else if is_windows_device(safe) {
-        format!("_{safe}")
+        // The `_` in front counts too: the name stays within the byte limit, cut between characters.
+        let mut cut = safe.len().min(MAX_BYTES - 1);
+        while !safe.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let kept = safe.get(..cut).unwrap_or_default().trim_end_matches(|c: char| c.is_whitespace() || c == '.');
+        format!("_{kept}")
     } else {
         safe.to_string()
     }
@@ -227,6 +233,10 @@ mod tests {
             assert_eq!(name("{design}", fine, None, "x"), fine, "only the exact device names");
         }
         assert_eq!(name("", "CON", None, "CON"), "CON", "an empty template keeps the old name as it was");
+        // The `_` in front does not take a long name over the byte limit: 240 bytes before it.
+        let long = name(&format!("CON.{}", "🔧".repeat(59)), "Bracket", None, "x");
+        assert_eq!(long, format!("_CON.{}", "🔧".repeat(58)), "{} bytes", long.len());
+        assert!(long.len() <= MAX_BYTES);
     }
 
     #[test]

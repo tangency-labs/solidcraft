@@ -1048,7 +1048,10 @@ mod tests {
         assert_eq!(name(&h), None, "nothing usable is left: the old name");
 
         // Every name the preference makes is one `file.send_to_slicer` takes as `name`.
-        for template in [" .{design}. ", "{design}/{body}:?", "CON", "a\tb", &"{design}".repeat(100), &"🔧".repeat(70), "..{body}"] {
+        let long_device = format!("CON.{}", "🔧".repeat(59));
+        for template in
+            [" .{design}. ", "{design}/{body}:?", "CON", "nul.v2", &long_device, "a\tb", &"{design}".repeat(100), &"🔧".repeat(70), "..{body}"]
+        {
             h.app.preferences.slicer_file_name = template.into();
             let made = name(&h).unwrap_or_else(|| panic!("{template:?} makes a name"));
             assert_eq!(solidcraft_engine::slicer_files::check_name(&made), Ok(()), "{template:?} gave {made:?}");
