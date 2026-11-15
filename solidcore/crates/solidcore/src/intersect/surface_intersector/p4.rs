@@ -56,7 +56,9 @@
 //!   point `TestPoint` snapped to a start, through or end point, the span to it must
 //!   certify on a sphere ([`SurfaceIntersector::span_images_certified`]); traced points
 //!   toward it are added first, at most [`MAX_APPROACH_POINTS`], past which the trace
-//!   refuses with `IntersectFailed` (`approach_certified`).
+//!   refuses with `IntersectFailed` (`approach_certified`, which polls for cancellation
+//!   once per try). A point `TestPoint` leaves where it was is not certified again: its
+//!   span passed the certified span test.
 //! - **Recursion.** `DoPointIntersection` retries once from a singular end point
 //!   through itself, guarded by the function-static `bInsideMe` (set for the nested
 //!   call by an `SmTemporaryChangeValue`); here the flag is a parameter of the
@@ -1110,13 +1112,22 @@ pub const MAX_APPROACH_POINTS: usize = 16;
 /// and the UV image of a long span to it left the domain and missed the 3D span by 0.66.
 /// Each added point is a trace step from the last one half way to `next` (shortened by the
 /// trace's factor 1.5 until its span passes [`SurfaceIntersector::test_span_accuracy`] and
-/// ends before `next`). A span that passes as it is adds nothing.
+/// ends before `next`), into one point allocated per added point and reused by its tries,
+/// as `TraceCurve` reuses its next point. A step that hits a domain boundary is refused, as
+/// a step toward a point inside the domains cannot leave them; a clipped step is retried
+/// shorter. The added points are not tested against the trace's targets (`TestPoint`):
+/// `TestPoint` snapped to `next` as the first target on the span from `tsp`, and each
+/// added point lies on the curve before `next` (ARGUED: the added points follow the same
+/// curve between `tsp` and `next`, where that test found no earlier target). A span that
+/// certifies as it is adds nothing; there is no shortcut for a short span, as a snapped
+/// seam point can be a parameter step of 1e-10 and a whole period in u away.
 ///
 /// # Errors
 ///
 /// `IntersectFailed` when the span does not certify after [`MAX_APPROACH_POINTS`] points,
-/// or no step toward `next` passes before the trace's step floor (`100 SM_EFF_ZERO`) or
-/// [`MAX_STEP_TRIES`]; those of the trace steps.
+/// a step hits a domain boundary, or no step toward `next` passes before the trace's step
+/// floor (`100 SM_EFF_ZERO`) or [`MAX_STEP_TRIES`]; [`SolidError::Cancelled`] (polled once
+/// per try); those of the trace steps.
 fn approach_certified<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     v: &mut V,
     k: &Kernel,
@@ -1125,18 +1136,25 @@ fn approach_certified<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     uv_tol: [f64; 2],
 ) -> Result<()> {
     let refuse = |why: &'static str| SolidError::intersect_failed(OP_APPROACH, why);
+    let certified = |v: &V, from: TsectId| -> Result<bool> {
+        let base = v.intersector();
+        let (a, b) = (base.point(from)?, base.point(next)?);
+        Ok(base.span_images_certified(a, b, b.curve_parameter - a.curve_parameter))
+    };
     let mut from = tsp;
     for _ in 0..MAX_APPROACH_POINTS {
-        let (a, b) = {
-            let base = v.intersector();
-            (base.point(from)?.clone(), base.point(next)?.clone())
-        };
-        let span = b.curve_parameter - a.curve_parameter;
-        // a span this short passes the span test as it is
-        if span <= EFF_ZERO * 100.0 || v.intersector().span_images_certified(&a, &b, span) {
+        k.check_cancelled(OP_APPROACH)?;
+        if certified(v, from)? {
             return Ok(());
         }
-        let mut step_size = span / 2.0;
+        let (start, end) = {
+            let base = v.intersector();
+            (
+                base.point(from)?.curve_parameter,
+                base.point(next)?.curve_parameter,
+            )
+        };
+        let mut step_size = (end - start) / 2.0;
         let mut st = Step {
             found_good_point: false,
             deviation: 0.0,
@@ -1144,37 +1162,37 @@ fn approach_certified<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             clipped: false,
             hit_boundary: false,
         };
+        let mut fresh = TsectPnt::zeroed();
+        fresh.point_type = IntersectionPointType::Unknown;
+        let mid = v.intersector_mut().alloc_point(fresh);
         let mut tries = 0usize;
-        let mid = loop {
+        loop {
+            k.check_cancelled(OP_APPROACH)?;
             tries += 1;
             if tries > MAX_STEP_TRIES || step_size < EFF_ZERO * 100.0 {
                 return Err(refuse("no trace step toward the snapped point passes"));
             }
-            let mut fresh = TsectPnt::zeroed();
-            fresh.point_type = IntersectionPointType::Unknown;
-            let mid = v.intersector_mut().alloc_point(fresh);
             let ok = trace_step(v, k, from, step_size, mid, &mut st)?;
+            if ok && st.hit_boundary {
+                return Err(refuse(
+                    "a trace step toward the snapped point hit a domain boundary",
+                ));
+            }
             let before = {
-                let p = v.intersector().point(mid)?;
-                a.curve_parameter < p.curve_parameter && p.curve_parameter < b.curve_parameter
+                let p = v.intersector().point(mid)?.curve_parameter;
+                start < p && p < end
             };
-            if ok && st.found_good_point && before {
-                break mid;
+            if ok && st.found_good_point && !st.clipped && before {
+                break;
             }
             step_size /= 1.5;
-        };
+        }
         v.intersector().check_in_domains(mid, uv_tol)?;
         v.intersector_mut().point_mut(mid)?.deviation = st.deviation;
         v.intersector_mut().add_point_to_curve(mid)?;
         from = mid;
     }
-    let (a, b) = {
-        let base = v.intersector();
-        (base.point(from)?.clone(), base.point(next)?.clone())
-    };
-    if v.intersector()
-        .span_images_certified(&a, &b, b.curve_parameter - a.curve_parameter)
-    {
+    if certified(v, from)? {
         return Ok(());
     }
     Err(refuse(
@@ -1508,9 +1526,13 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
         // snap to a through or end point passed, then add the point
         if !done {
+            let before_test = v.intersector().point(next)?.curve_parameter;
             trace_test(v, k, next, &mut done)?;
             v.intersector_mut().point_mut(next)?.deviation = st.deviation;
-            approach_certified(v, k, tsp, next, uv_tol)?;
+            // a point TestPoint left where it was ends a span the span test certified
+            if done || v.intersector().point(next)?.curve_parameter != before_test {
+                approach_certified(v, k, tsp, next, uv_tol)?;
+            }
             v.intersector_mut().add_point_to_curve(next)?;
         }
 

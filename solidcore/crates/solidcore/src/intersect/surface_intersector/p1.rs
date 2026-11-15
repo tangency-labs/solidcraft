@@ -1326,8 +1326,7 @@ impl<'s> SurfaceIntersector<'s> {
         // Not upstream (#16669): the samples above are clamped to the domains and see five
         // parameters; a span is accepted only once its UV images are certified within the
         // tolerance of the 3D span over the whole span, or a shorter step is taken.
-        if step_size > EFF_ZERO * 100.0 && !self.span_images_certified(&tsect, &next_tsp, step_size)
-        {
+        if !self.span_images_certified(&tsect, &next_tsp, step_size) {
             self.demote_singularity(next)?;
             return Ok(SpanAccuracy {
                 found_good_point: false,
@@ -1360,8 +1359,10 @@ impl<'s> SurfaceIntersector<'s> {
         b: &TsectPnt,
     ) -> Result<bool> {
         let step_size = b.curve_parameter - a.curve_parameter;
+        // a span this short passes the sampled tests; on a sphere it is still certified
+        // (#16669: a snapped seam point can be a whole period away in u)
         if step_size <= EFF_ZERO * 100.0 {
-            return Ok(true);
+            return Ok(self.span_images_certified(a, b, step_size));
         }
         if a.crv_deriv().angle_between(b.crv_deriv())? > self.this_ang_tol_rad {
             return Ok(false);
@@ -1435,7 +1436,7 @@ impl<'s> SurfaceIntersector<'s> {
                 ];
                 !matches!(
                     sphere_span::sphere_span_image(surface, uv, xyz, self.this_approx_tol_3d),
-                    sphere_span::SpanImage::NotCertified
+                    sphere_span::SpanImage::NotCertified(_)
                 )
             })
     }
