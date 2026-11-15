@@ -217,6 +217,30 @@ fn a_table_that_cant_be_read_says_why_and_the_sheet_still_draws() {
     assert_eq!((said["status"].as_str(), said["drawn"].as_bool()), (Some("failed"), Some(false)), "{said}");
 }
 
+/// A parts list a file made that lists another design's file says why it can't be read and draws
+/// nothing: it is never filled with the parts of the design the drawing is in (`Session::drawn`).
+#[test]
+fn a_list_of_a_linked_design_is_never_filled_from_this_one() {
+    let mut s = assembly();
+    let sheet = sheet_of(&s);
+    let table = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "parts_list"})));
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let linked = d.sources.iter().map(|source| source.id).max().unwrap() + 1;
+    d.sources.push(solidcraft_doc::drawing::Source { id: linked, path: Some("plate.solidcraft".into()) });
+    s.doc_mut().put_drawing(Arc::new(d));
+    put_table(&mut s, table, |table| {
+        if let Kind::PartsList(list) = &mut table.kind {
+            list.of.source = linked;
+        }
+    });
+    s.drawing("test").unwrap().validate().unwrap();
+    let (state, bounds) = on_sheet(&s, table);
+    assert_eq!((state.drawn, state.failed, bounds), (false, true, None), "{state:?}");
+    assert!(state.why.as_deref().is_some_and(|why| why.contains("linked design")), "{state:?}");
+    let reply = inspected(&mut s, table);
+    assert_eq!((reply["status"].as_str(), reply["listed"].as_u64()), (Some("failed"), Some(0)), "{reply}");
+}
+
 /// Inspect gives what a placed table shows: its outline (the scene's box round it), each row with its
 /// key and rectangle, a cell an override changed with the value it replaced, named by its column even
 /// past a column that isn't printed, a filter that leaves nothing, and a word wider than its column.

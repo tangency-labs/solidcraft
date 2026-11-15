@@ -204,12 +204,14 @@ fn corner_of(place: Place, heading: Heading, size: Vec2, space: Aabb2) -> Vec2 {
 }
 
 /// `record`'s rows: a revision table's from the drawing's revisions; a parts list's from the design
-/// open, each with how many balloons point at it, or why it can't be listed.
+/// it lists, each with how many balloons point at it, or why it can't be listed.
 fn rows_of(s: &Session, d: &Drawing, record: &SheetTable) -> std::result::Result<Vec<Row>, String> {
     let list = match &record.kind {
         Kind::Revision => return Ok(d.revisions.table_rows(d.revisions.per_sheet.then_some(record.sheet))),
         Kind::PartsList(list) => list,
     };
+    // The design it lists, asked as every reader of a source asks: a linked design is refused, never read as this one.
+    let s = s.drawn(d, list.of.source).map_err(|why| why.to_string())?;
     let state = s.model.state();
     let mut tree = Tree::new(&s.doc, &state);
     let request = bom::Request { mass: shows_mass(&record.table), ..list.request() };
