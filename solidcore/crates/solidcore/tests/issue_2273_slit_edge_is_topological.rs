@@ -192,7 +192,11 @@ fn issue_2273_slit_paired_across_the_faces_two_sides_is_not_removed() {
     let mut k = Kernel::default();
     let mut b = joined(&mut k);
     let slit = slits(&k, &mut b);
-    assert_eq!(slit.len(), 1, "the union without its clean-up leaves one slit in the wall");
+    assert_eq!(
+        slit.len(),
+        1,
+        "the union without its clean-up leaves one slit in the wall"
+    );
     let e = slit[0];
     // A slit: the primary edge use and its radial in one loop use, the third (the radial's
     // mate) in the other.
