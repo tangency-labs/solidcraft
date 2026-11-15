@@ -106,7 +106,6 @@ fn kernel() -> Kernel {
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.cover_wraps_across_closed_seam = true;
     k
 }
 

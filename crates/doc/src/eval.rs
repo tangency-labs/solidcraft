@@ -26,6 +26,14 @@ use crate::{AxisRef, DocError, Document, Feature, FeatureId, FeatureKind, HoleKi
 
 type JointFaces = (Body, kernel::Result<Arc<[kernel::FaceInfo]>>);
 
+/// A body's face measurements worked out so far ([`ModelBody::faces_at`]), the latest first:
+/// the chord tolerance (its bits), the body measured and what was found.
+type MeasuredFaces = Vec<(u64, Body, kernel::Result<Arc<[kernel::FaceInfo]>>)>;
+
+/// How many face measurements a body keeps ([`ModelBody::faces_at`]): callers ask at a
+/// tolerance worked out from the body, so one body is asked at very few.
+const FACES_KEPT: usize = 4;
+
 /// A body's isoparametric curves worked out so far ([`ModelBody::iso_lines`]), with the body they
 /// were worked out on: by face, count each way and display quality.
 type IsoLines = (Option<Body>, std::collections::HashMap<(usize, usize, usize), Arc<[kernel::IsoLine]>>);
@@ -47,6 +55,9 @@ pub struct ModelBody {
     /// Joint face measurements use their own tolerance, independent of display quality.
     /// Shared by snapshots of this geometry; the body identity guards direct replacement.
     joint_faces: Arc<OnceLock<JointFaces>>,
+    /// [`ModelBody::faces_at`] worked out so far. Shared by snapshots of this geometry; each
+    /// measurement's body guards direct replacement.
+    faces: Arc<std::sync::Mutex<MeasuredFaces>>,
     /// Lazy canonical reference triangles for a proper rigid occurrence placement.
     mesh_placement: Option<Arc<placed_mesh::PlacedMesh>>,
     /// For a mirrored copy: its faces as a world state shows them, a rigid move of the source's
@@ -150,6 +161,7 @@ impl ModelBody {
             feature,
             mesh: Arc::new(OnceLock::new()),
             joint_faces: Arc::new(OnceLock::new()),
+            faces: Default::default(),
             mesh_placement: None,
             mirrored_mesh: None,
             opposite_hand: Arc::new(OnceLock::new()),
@@ -204,6 +216,33 @@ impl ModelBody {
         };
         let (body, faces) = self.joint_faces.get_or_init(|| (self.body.clone(), measure()));
         if body.same(&self.body) { faces.clone().map_err(Into::into) } else { measure().map_err(Into::into) }
+    }
+
+    /// Face measurements ([`Body::faces`]) at chord tolerance `tol`, worked out once for this
+    /// geometry and tolerance. `Body::faces` meshes the whole body, and the viewport asks which
+    /// faces a feature changed at every rebuild of its highlight (every hover change): a picked
+    /// Move feature of a large assembly measured each moved body again each time, for seconds.
+    ///
+    /// A measurement depends on the body and the tolerance alone. Snapshots and scratch copies
+    /// of this geometry share it; a geometry edit makes a new body, which is measured anew. The
+    /// last [`FACES_KEPT`] are kept. A failure is kept too: a body never changes in place, so
+    /// the same body fails the same way each time.
+    pub fn faces_at(&self, tol: f64) -> kernel::Result<Arc<[kernel::FaceInfo]>> {
+        let key = tol.to_bits();
+        let same = |k: &u64, body: &Body| *k == key && body.same(&self.body);
+        let known = self.faces.lock().ok().and_then(|list| list.iter().find(|(k, body, _)| same(k, body)).map(|(_, _, found)| found.clone()));
+        if let Some(found) = known {
+            return found;
+        }
+        #[cfg(test)]
+        cost_tests::count(|c| c.faces_at += 1);
+        let found: kernel::Result<Arc<[kernel::FaceInfo]>> = self.body.faces(tol).map(Arc::from);
+        if let Ok(mut list) = self.faces.lock() {
+            list.retain(|(k, body, _)| !same(k, body));
+            list.insert(0, (key, self.body.clone(), found.clone()));
+            list.truncate(FACES_KEPT);
+        }
+        found
     }
 
     /// A box around the body without meshing it ([`Body::outline_bounds`]), worked out once.
@@ -7222,7 +7261,13 @@ fn feature_tools_with_constructor(
             // lies before its surface (the tool less the body, the piece at the start). An end
             // the offset carries back across the start, away from that face, never meets it: it
             // ends at its level, as for a plane, instead of running out through the whole body.
-            let curved = curved_face(&tst, to_face, Some(n)).filter(|_| toward_to);
+            // A wall that runs along the extrusion (a cylinder's side, when extruding along its
+            // axis) and lies clear of the profile is never reached: the point picked on it stands
+            // for the plane through it, as a point in space does (#11923). A wall that crosses the
+            // profile seen along the extrusion still trims the tool to the body.
+            let curved = curved_face(&tst, to_face, Some(n))
+                .filter(|_| toward_to)
+                .filter(|_| !to_face.is_some_and(|face| runs_along(&tst, face, n) && !meets_footprint(&tst, face, &ss.plane, &regions)));
             // The tool is cut back to that surface below, which removes the part a To offset adds
             // past it: the offset would change nothing, so say so instead of cutting nothing (#12617).
             if curved.is_some()
@@ -9380,6 +9425,44 @@ fn curved_face(st: &ModelState, face: Option<(usize, usize)>, n: Option<Vec3>) -
     (!planar).then_some(bi)
 }
 
+/// Whether a face runs along `n` everywhere, from its exact surface: a plane whose normal is
+/// square to `n`, or a cylinder whose axis is parallel to `n` (the side of a prism or a cylinder
+/// parallel to `n`), so a sweep along `n` never meets it.
+fn runs_along(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> bool {
+    let Some(b) = st.bodies.get(bi) else { return false };
+    let Some(n) = n.normalized() else { return false };
+    match kernel::face_surface(&b.body, fi) {
+        Some(kernel::FaceSurface::Plane { normal, .. }) => normal.vec().dot(n).abs() < 1e-6,
+        Some(kernel::FaceSurface::Cylinder { axis, .. }) => axis.vec().cross(n).len() < 1e-6,
+        _ => false,
+    }
+}
+
+/// Whether a face that runs along the normal of `plane` ([`runs_along`]), seen along that
+/// normal, meets one of the profile `regions`. Seen so, the face is the curve its boundary edges
+/// make: their exact curves, sampled finely, meet a region where a sample lies in it or a step
+/// between two samples crosses one of its loops (a profile narrower than the steps).
+fn meets_footprint(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane, regions: &[Region2]) -> bool {
+    let Some(b) = st.bodies.get(bi) else { return false };
+    let tol = (b.body.size() * 1e-4).max(1e-4);
+    let Ok(edges) = b.body.edges(tol) else { return true };
+    let own = kernel::face_edge_indices(&b.body, fi);
+    let curves: Vec<Vec<Vec2>> = own.iter().filter_map(|e| edges.get(*e)).map(|e| e.points.iter().map(|q| plane.to_local(*q)).collect()).collect();
+    if curves.iter().flatten().any(|q| regions.iter().any(|r| r.contains(*q))) {
+        return true;
+    }
+    let loops: Vec<_> = regions.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).map(|l| l.polyline(1e-3)).collect();
+    curves.iter().flat_map(|c| c.windows(2)).any(|w| loops.iter().any(|l| l.edges().any(|(a, b)| segments_meet(w[0], w[1], *a, *b))))
+}
+
+/// Whether segments `p`-`q` and `a`-`b` cross or touch.
+fn segments_meet(p: Vec2, q: Vec2, a: Vec2, b: Vec2) -> bool {
+    let side = |o: Vec2, u: Vec2, v: Vec2| (u.x - o.x) * (v.y - o.y) - (u.y - o.y) * (v.x - o.x);
+    let (d1, d2) = (side(a, b, p), side(a, b, q));
+    let (d3, d4) = (side(p, q, a), side(p, q, b));
+    d1 * d2 <= 0.0 && d3 * d4 <= 0.0 && !(d1 == 0.0 && d2 == 0.0 && d3 == 0.0 && d4 == 0.0)
+}
+
 /// The body at `p` when the face there is not planar.
 fn curved_target_any(st: &ModelState, p: Vec3) -> Option<usize> {
     curved_face(st, face_at(st, p, None), None)
@@ -11297,6 +11380,7 @@ impl PlacedBodies {
             fresh.mesh = placed.mesh.clone();
             fresh.measured = placed.measured.clone();
             fresh.joint_faces = placed.joint_faces.clone();
+            fresh.faces = placed.faces.clone();
             fresh.mesh_placement = placed.mesh_placement.clone();
             fresh.plan = placed.plan.clone();
             fresh.gpu_plan = placed.gpu_plan.clone();

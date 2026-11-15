@@ -61,7 +61,7 @@ use super::spline::{
     MAX_SPLINE_DEGREE,
 };
 use super::vec::VecExt;
-use super::EvalError;
+use super::{Curve2, EvalError};
 use crate::math::Vec3;
 use crate::nurbs::math::{gamma, UNIT};
 
@@ -1013,6 +1013,270 @@ fn onto_range(s: &EvalSurface, uv: [f64; 2]) -> Result<Option<([f64; 2], f64)>, 
         return Err(refused("a shift onto the knot range is not finite"));
     }
     Ok(Some((near, delta)))
+}
+
+/// A certified bound on `|∂S/∂x_d|` of a polynomial spline over the points whose other
+/// parameter lies in `across` (on its knot range), or past an end of that range `across`
+/// reaches by at most `beyond_across`, and whose `d` parameter is on its knot range or past
+/// either end by at most `beyond`: how far the surface moves per unit of `d` there, so a point
+/// moved along `d` by `o` within that strip (a pcurve's control point a little past the range
+/// put on it) moves the surface by at most `o` times the bound.
+///
+/// On the range `∂S/∂d` at a fixed other parameter is the B-spline whose coefficients are
+/// `p (Q_(i+1) − Q_i) / (t_(i+p+1) − t_(i+1))` over the iso-line's control points `Q_i`, within
+/// their largest length (a convex combination of them). Over a strip the `Q_i` are the net's
+/// columns that are not zero somewhere on it ([`indices`]); at one parameter (`across` a single
+/// value, nothing past it) they are that iso-line's own, by de Boor across (with their
+/// rounding). Past the range the end spans' polynomials continue, the Bernstein basis summing in
+/// absolute value to at most `(1 + 2 beyond / h)^(p − 1)` over the derivative's degree `p − 1`,
+/// `h` the shorter end span ([`onto_range`]), and across to `(1 + 2 beyond_across / h_f)^q` over
+/// the degree `q` across, on the columns of the end span the strip holds. The product is rounded
+/// up. A rational net (any weight other than the first, or not positive), a point of the net
+/// whose Euclidean coordinates are not finite (a tiny weight), `across` off the range, or knots
+/// with an empty span where one is needed is refused: the bound is not decided there.
+pub fn partial_bound(
+    s: &EvalSurface,
+    d: usize,
+    across: [f64; 2],
+    beyond: f64,
+    beyond_across: f64,
+) -> Result<f64, EvalError> {
+    let EvalSurface::Nurbs(n) = s else {
+        return Err(refused("a partial bound of a surface that is not a spline"));
+    };
+    if d > 1 {
+        return Err(past(d));
+    }
+    let distance = |x: f64| x >= 0.0 && x.is_finite();
+    if !(distance(beyond) && distance(beyond_across) && across.iter().all(|x| x.is_finite())) {
+        return Err(malformed(
+            "a strip or a distance past the range that is not finite",
+        ));
+    }
+    let f = 1 - d;
+    let (deg, knots, count, ctrl) = (n.degree(), n.knots(), n.count(), n.ctrl());
+    let bad = || malformed("knots or a net that do not fit");
+    let none: &[f64] = &[];
+    let kn = |x: usize| knots.get(x).map_or(none, Vec::as_slice);
+    let get = |a: &[usize; 2], x: usize| a.get(x).copied().unwrap_or(0);
+    let (p, m, k) = (get(&deg, d), get(&count, d), kn(d));
+    let (q, mf, kf) = (get(&deg, f), get(&count, f), kn(f));
+    let nu = get(&count, 0);
+    let w0 = ctrl.first().ok_or_else(bad)?[3];
+    if !(w0 > 0.0 && ctrl.iter().all(|c| c[3] == w0)) {
+        return Err(refused("a partial bound of a rational net"));
+    }
+    // Control point `i` along d, `j` across, Euclidean (the net's one weight).
+    let point = |i: usize, j: usize| -> Result<Vec3, EvalError> {
+        let (iu, iv) = if d == 0 { (i, j) } else { (j, i) };
+        let c = ctrl
+            .get(
+                iv.checked_mul(nu)
+                    .and_then(|x| x.checked_add(iu))
+                    .ok_or_else(bad)?,
+            )
+            .copied()
+            .ok_or_else(bad)?;
+        if !(c[3] == w0 && w0 > 0.0 && c.iter().all(|x| x.is_finite())) {
+            return Err(refused("a partial bound of a rational net"));
+        }
+        let x = Vec3::new(c[0], c[1], c[2]) * (1.0 / w0);
+        if !(x.x.is_finite() && x.y.is_finite() && x.z.is_finite()) {
+            return Err(refused(
+                "a partial bound of a net whose Euclidean points are not finite",
+            ));
+        }
+        Ok(x)
+    };
+    let (a, b) = (across[0].min(across[1]), across[0].max(across[1]));
+    let (Some(a), Some(b)) = (onto_knots(kf, q, mf, a), onto_knots(kf, q, mf, b)) else {
+        return Err(refused("a strip off the knot range across"));
+    };
+    // Each iso-line's control points along d with their rounding: one line at a single
+    // parameter across, else every column the strip meets.
+    let mut lines: Vec<Vec<(Vec3, f64)>> = Vec::new();
+    if a == b && beyond_across == 0.0 {
+        let mut line = Vec::new();
+        for i in 0..m {
+            let at = |j: usize| point(i, j).ok().map(|x| Hom::exact([x.x, x.y, x.z, 1.0]));
+            let h = de_boor(q, kf, mf, at, a).map_err(|o| off_message(o, [a, b]))?;
+            line.push(h.euclid()?);
+        }
+        lines.push(line);
+    } else {
+        let (first, end, _, _) = indices(q, kf, mf, Some((a, b))).ok_or_else(bad)?;
+        for j in first..=end {
+            lines.push(
+                (0..m)
+                    .map(|i| point(i, j).map(|x| (x, 0.0)))
+                    .collect::<Result<_, _>>()?,
+            );
+        }
+    }
+    let mut top = 0.0f64;
+    for line in &lines {
+        for i in 0..m.saturating_sub(1) {
+            let step = k.get(i + p + 1).ok_or_else(bad)? - k.get(i + 1).ok_or_else(bad)?;
+            if !(step > 0.0) {
+                return Err(bad());
+            }
+            let (Some(&(x, ex)), Some(&(y, ey))) = (line.get(i), line.get(i + 1)) else {
+                return Err(bad());
+            };
+            let len = (y - x).len() + ex + ey + gamma(8) * (x.len() + y.len());
+            top = top.max(p as f64 * len / step);
+        }
+    }
+    // The end spans' continuation past the range along a direction of degree `deg` over
+    // `count` points, by `o`, to the power `power`.
+    let grow = |kk: &[f64], deg: usize, count: usize, o: f64, power: usize| {
+        if !(o > 0.0 && power > 0) {
+            return Ok(1.0);
+        }
+        let (Some(&lo), Some(&lo1), Some(&hi), Some(&hi0)) = (
+            kk.get(deg),
+            kk.get(deg + 1),
+            kk.get(count),
+            kk.get(count.checked_sub(1).ok_or_else(bad)?),
+        ) else {
+            return Err(bad());
+        };
+        let h = (lo1 - lo).min(hi - hi0);
+        if !(h > 0.0) {
+            return Err(bad());
+        }
+        Ok((0..power).fold(1.0, |acc, _| acc * (1.0 + 2.0 * o / h)))
+    };
+    let along = grow(k, p, m, beyond, p.saturating_sub(1))?;
+    let side = grow(kf, q, mf, beyond_across, q)?;
+    let bound = top * along * side * (1.0 + gamma(24));
+    if !bound.is_finite() {
+        return Err(refused("a partial bound that is not finite"));
+    }
+    Ok(bound)
+}
+
+/// A pcurve put on a polynomial spline's knot range ([`pcurve_onto_knots`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct OntoKnots {
+    /// The pcurve, its control points on the knot range, its knots and weights unchanged.
+    pub pcurve: Curve2,
+    /// A certified bound on how far the surface's point under the pcurve moves, at any
+    /// parameter, from where the pcurve was to where it is now.
+    pub displacement: f64,
+}
+
+/// A pcurve whose control points run a little past a polynomial spline's knot range, put on
+/// it: each control point moved onto the range (along u by at most `o_u`, along v by at most
+/// `o_v`, its overrun past an end along each), with a certified bound on how far that moves the
+/// surface under the pcurve. `Ok(None)` when the control points already lie on the range.
+///
+/// A B-spline is a convex combination of its control points (a rational one with positive
+/// weights too, its weights kept), so the moved pcurve lies on the range and each of its points
+/// `(u, v)` moves to `(u', v')` with `|u − u'| ≤ o_u`, `|v − v'| ≤ o_v`. Taken along u first at
+/// `v` (on the strip of the moved points' v, or past an end of it by at most `o_v`), then along
+/// v at `u'` (on the moved points' u), the surface moves by at most
+/// `o_u B_u + o_v B_v`, the two [`partial_bound`]s of those strips; past along only one
+/// direction one term remains. That sum, rounded up, is the displacement.
+///
+/// Refused ([`EvalError::Unevaluable`]) where the displacement is above `tolerance`, where no
+/// bound is decided (a surface that is not a spline, a rational net, one closed on itself along
+/// a direction, a rational pcurve with a weight that is not positive), and
+/// ([`EvalError::Invalid`]) for control points or a tolerance that are not finite.
+pub fn pcurve_onto_knots(
+    s: &EvalSurface,
+    pc: &Curve2,
+    tolerance: f64,
+) -> Result<Option<OntoKnots>, EvalError> {
+    let no = |why: &str| EvalError::Unevaluable(format!("a pcurve onto the knot range: {why}"));
+    let invalid = |why: &str| EvalError::Invalid(format!("a pcurve onto the knot range: {why}"));
+    let EvalSurface::Nurbs(n) = s else {
+        return Err(no("a surface that is not a spline"));
+    };
+    if !(tolerance >= 0.0 && tolerance.is_finite()) {
+        return Err(invalid("a tolerance that is not finite"));
+    }
+    if n.closed().iter().any(|c| *c) {
+        return Err(no("a spline closed on itself, whose parameter wraps"));
+    }
+    let points: Vec<[f64; 2]> = match pc {
+        Curve2::Spline { points, .. } => points.clone(),
+        Curve2::RationalSpline { homogeneous, .. } => {
+            if !homogeneous.iter().all(|h| h[2] > 0.0 && h[2].is_finite()) {
+                return Err(no("a rational pcurve with a weight that is not positive"));
+            }
+            homogeneous
+                .iter()
+                .map(|h| [h[0] / h[2], h[1] / h[2]])
+                .collect()
+        }
+    };
+    if points.is_empty() || !points.iter().flatten().all(|x| x.is_finite()) {
+        return Err(invalid("control points that are not finite"));
+    }
+    let knot_range = |d: usize| -> Result<[f64; 2], EvalError> {
+        match s.interval(d) {
+            Some((a, b)) if a <= b && a.is_finite() && b.is_finite() => Ok([a, b]),
+            _ => Err(invalid("knots that do not fit")),
+        }
+    };
+    let (ru, rv) = (knot_range(0)?, knot_range(1)?);
+    let clamp = |x: f64, [a, b]: [f64; 2]| x.max(a).min(b);
+    // The overrun past `r`, rounded up (its subtraction).
+    let over = |x: f64, [a, b]: [f64; 2]| (a - x).max(x - b).max(0.0) * (1.0 + UNIT);
+    // Each direction's overrun, and the moved points' hull.
+    let (mut ou, mut ov) = (0.0f64, 0.0f64);
+    let mut hu = [f64::INFINITY, f64::NEG_INFINITY];
+    let mut hv = hu;
+    for &[u, v] in &points {
+        (ou, ov) = (ou.max(over(u, ru)), ov.max(over(v, rv)));
+        let (cu, cv) = (clamp(u, ru), clamp(v, rv));
+        hu = [hu[0].min(cu), hu[1].max(cu)];
+        hv = [hv[0].min(cv), hv[1].max(cv)];
+    }
+    if ou == 0.0 && ov == 0.0 {
+        return Ok(None);
+    }
+    let mut shift = 0.0f64;
+    if ou > 0.0 {
+        shift += ou * partial_bound(s, 0, hv, ou, ov)?;
+    }
+    if ov > 0.0 {
+        shift += ov * partial_bound(s, 1, hu, ov, 0.0)?;
+    }
+    let displacement = shift * (1.0 + gamma(4));
+    if !(displacement <= tolerance) {
+        return Err(no(&format!(
+            "the move shifts the surface by up to {displacement} mm, past the tolerance \
+             {tolerance} mm"
+        )));
+    }
+    let onto = |[u, v]: [f64; 2]| [clamp(u, ru), clamp(v, rv)];
+    let pcurve = match pc {
+        Curve2::Spline { knots, points } => Curve2::Spline {
+            knots: knots.clone(),
+            points: points.iter().map(|p| onto(*p)).collect(),
+        },
+        Curve2::RationalSpline { knots, homogeneous } => Curve2::RationalSpline {
+            knots: knots.clone(),
+            homogeneous: homogeneous
+                .iter()
+                .map(|h| {
+                    let (p, w) = ([h[0] / h[2], h[1] / h[2]], h[2]);
+                    let q = onto(p);
+                    if q == p {
+                        *h
+                    } else {
+                        [q[0] * w, q[1] * w, w]
+                    }
+                })
+                .collect(),
+        },
+    };
+    Ok(Some(OntoKnots {
+        pcurve,
+        displacement,
+    }))
 }
 
 #[cfg(test)]

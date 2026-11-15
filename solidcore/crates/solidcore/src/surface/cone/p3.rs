@@ -35,6 +35,8 @@
 //! within the zone tolerance of a bounded face's wall along a line (the larger of the
 //! cone's and the plane's face tolerances, 0 without a face) and that line lies in the
 //! face's sweep, else its crossings are tested; bare surfaces keep upstream's test.
+//! WR-787 (#15429): parallel cylinders that both bound faces and overlap past touching by
+//! less than [`contact_tol_3d`] touch along one line; bare surfaces keep two crossings.
 //! No input-driven recursion is introduced.
 
 use super::{Cone, ConeStepInversion};
@@ -47,11 +49,11 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{
-    circle_coplanar_circle_intersect, line_closest_point, line_plane_intersect,
+    circle_coplanar_circle_intersect_in_contact, line_closest_point, line_plane_intersect,
     parallelogram_cross_vectors, CircleCircle,
 };
 use crate::geom::geom_utility::p2::segment_segment_intersect;
-use crate::geom::tol::{approx_tol3d, are_same_to_tol, is_zero};
+use crate::geom::tol::{approx_tol3d, are_same_to_tol, contact_tol_3d, is_zero};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
@@ -746,13 +748,19 @@ impl Cone {
                 return Ok(false);
             }
             let start = bottom + param * axis;
-            let intersection = circle_coplanar_circle_intersect(
+            // walls a hair less than tangent touch along one line where both are faces'
+            // (WR-787, #15429); bare surfaces keep upstream's two crossings
+            let faces = surfaces
+                .iter()
+                .all(|s| s.is_some_and(|s| s.owner_zone_tol_3d().is_some()));
+            let intersection = circle_coplanar_circle_intersect_in_contact(
                 axis,
                 start,
                 self.bot_radius(),
                 other_bottom,
                 other.bot_radius(),
                 tol,
+                if faces { contact_tol_3d(k) } else { 0.0 },
             )?;
             let count = intersection.count();
             let points = match intersection {
