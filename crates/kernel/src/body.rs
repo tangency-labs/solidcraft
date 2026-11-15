@@ -1380,8 +1380,8 @@ impl Body {
             }
             let first = *pts.first()?;
             let center = plane.to_local(origin + axis * (first - origin).dot(axis));
+            // A quick reject on the samples: their angle must keep going one way.
             let angles: Vec<f64> = pts.iter().map(|p| (plane.to_local(*p) - center).angle()).collect();
-            let mut sweep = 0.0;
             let mut sign = 0.0;
             for w in angles.windows(2) {
                 let [a, b] = w else { continue };
@@ -1393,15 +1393,29 @@ impl Body {
                     return None;
                 }
                 sign = d.signum();
-                sweep += d;
             }
-            let start = *angles.first()?;
-            let angular_tol = tol / radius;
-            if sweep.abs() < angular_tol || sweep.abs() > std::f64::consts::TAU + angular_tol {
+            // The proof (solidcore): the edge turns one way round the axis all along its
+            // interval, the same way the samples went; else no arc, and the caller fits.
+            let turn = solidcore_ops::curve_knots::turn_about_axis(e.parameters(), e.interval, [origin.x, origin.y, origin.z], [n.x, n.y, n.z])
+                .ok()
+                .flatten()?;
+            if turn != sign {
                 return None;
             }
-            let closed = e.vertices[0] == e.vertices[1] || (sweep.abs() - std::f64::consts::TAU).abs() <= angular_tol;
-            let sweep = if closed { sweep.signum() * std::f64::consts::TAU } else { sweep };
+            // The arc runs from the start vertex to the end vertex that way round (a closed
+            // edge all the way round).
+            let at = |v: u32| self.record.vertices.get(v as usize).map(|x| (plane.to_local(Vec3::from(x.point)) - center).angle());
+            let [v0, v1] = e.vertices;
+            let start = at(v0)?;
+            let sweep = if v0 == v1 {
+                turn * std::f64::consts::TAU
+            } else {
+                let d = (at(v1)? - start).rem_euclid(std::f64::consts::TAU);
+                if d * radius <= tol {
+                    return None;
+                }
+                if turn > 0.0 { d } else { d - std::f64::consts::TAU }
+            };
             Some(vec![solidcore_record::Seg2::Arc { center, radius, start, sweep }])
         })
     }
