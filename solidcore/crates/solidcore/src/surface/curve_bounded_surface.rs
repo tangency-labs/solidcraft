@@ -819,7 +819,8 @@ mod tests {
         assert_eq!(s.boundaries_3d().len(), 1);
         assert_eq!(s.boundaries_uv().len(), 1);
         assert_eq!(s.boundaries_uv()[0].dim(), 2);
-        assert!(!s.implicit_outer());
+        // the stream's implicit-outer line says 1 (WR-43: upstream drops it)
+        assert!(s.implicit_outer());
         assert_eq!(s.basis().type_code(), BSplineSurface::TYPE);
 
         // through the surface dispatch
@@ -827,8 +828,10 @@ mod tests {
         assert_eq!(r.type_code(), TYPE);
     }
 
+    /// WR-43: a UV boundary is read with its own type header, so a record without 3D
+    /// boundaries reads (upstream reads it with type 0 and fails with `SM_ERR`).
     #[test]
-    fn read_uv_without_3d_uses_type_zero() {
+    fn read_uv_without_3d_uses_its_own_type() {
         let k = Kernel::default();
         let text = format!(
             "0\n1\n0\n\nObject Type {}\n{}{}",
@@ -836,8 +839,11 @@ mod tests {
             surface_text(),
             curve_text(2)
         );
-        let e = CurveBoundedSurface::read_from_db(&k, &mut reader(&text), 30).unwrap_err();
-        assert!(!e.is_unported());
+        let s = CurveBoundedSurface::read_from_db(&k, &mut reader(&text), 30).unwrap();
+        assert!(s.boundaries_3d().is_empty());
+        assert_eq!(s.boundaries_uv().len(), 1);
+        assert_eq!(s.boundaries_uv()[0].dim(), 2);
+        assert!(!s.implicit_outer());
     }
 
     #[test]
