@@ -4572,8 +4572,25 @@ impl EdgeColours {
 }
 
 fn edge_lines(sc: &mut GpuScene, e: &[Vec3], cols: EdgeColours, w: f32, normals: &[[[f32; 3]; 2]]) {
+    seen_edge_lines(sc, e, cols, w, normals);
+    sc.reserve_lines(0, e.len().saturating_sub(1));
+    for p in e.windows(2) {
+        sc.hidden_line(p[0].to_f32(), p[1].to_f32(), cols.hidden, (w * 0.7).max(1.0));
+    }
+}
+
+/// An edge of a whole lit body (a hovered body or Browser row): its halo and line where it is
+/// seen, and nothing where the model hides it. A single lit edge shows dimmed through the model
+/// so a pick on the far side still shows ([`edge_lines`]); every edge of a body drawn that way
+/// turned the body into an x-ray of itself.
+fn whole_body_edge_lines(sc: &mut GpuScene, e: &[Vec3], cols: EdgeColours, w: f32) {
+    seen_edge_lines(sc, e, cols, w, &[]);
+}
+
+/// An edge's halo and line, drawn where it is seen.
+fn seen_edge_lines(sc: &mut GpuScene, e: &[Vec3], cols: EdgeColours, w: f32, normals: &[[[f32; 3]; 2]]) {
     let segments = e.len().saturating_sub(1);
-    sc.reserve_lines(2 * segments, segments);
+    sc.reserve_lines(2 * segments, 0);
     for (col, width) in [(cols.halo, w + 3.0), (cols.core, w)] {
         // Segments without their faces' normals share one width word.
         let flat = crate::gpu::lifted_width(width, [[0.0; 3]; 2]);
@@ -4581,9 +4598,6 @@ fn edge_lines(sc: &mut GpuScene, e: &[Vec3], cols: EdgeColours, w: f32, normals:
             let word = normals.get(i).map_or(flat, |n| crate::gpu::lifted_width(width, *n));
             sc.lifted_line_word(p[0].to_f32(), p[1].to_f32(), col, word);
         }
-    }
-    for p in e.windows(2) {
-        sc.hidden_line(p[0].to_f32(), p[1].to_f32(), cols.hidden, (w * 0.7).max(1.0));
     }
 }
 
@@ -4971,8 +4985,8 @@ fn highlight_block_tris(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -
 }
 
 /// A whole lit body's edges drawn again from the model's own edge lines, in `colours` at
-/// `width` (the halo, the line over it, the dimmed line where the model hides it), as
-/// [`edge_lines`] draws a copy of them. Lighting a whole assembly that way built and uploaded
+/// `width` (the halo and the line over it, where the edge is seen), as [`whole_body_edge_lines`]
+/// draws a copy of them. A lit body shows none of its hidden edges through itself. Lighting a whole assembly that way built and uploaded
 /// every edge of every body again (tens of megabytes) at each change of the hovered row.
 /// `None` where the model draws none of the body's edges (a view without edges): the caller
 /// copies them.
@@ -4986,7 +5000,6 @@ fn highlight_edges(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, colour
         lines,
         halo: crate::gpu::lit_line_style(colours.halo, width + 3.0, true)?,
         core: crate::gpu::lit_line_style(colours.core, width, true)?,
-        hidden: crate::gpu::lit_line_style(colours.hidden, (width * 0.7).max(1.0), false)?,
     })
 }
 
@@ -5574,13 +5587,18 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             let shaded = app.ui.visual_style != 2;
             for (ei, e) in m.edges.iter().enumerate() {
                 if m.edge_pickable(ei) && shaded && !m.shaded_edge_visible(ei) {
-                    edge_lines(&mut feedback, e, hover_edge, 1.5, &[]);
+                    whole_body_edge_lines(&mut feedback, e, hover_edge, 1.5);
                 }
             }
             continue;
         }
         for (ei, e) in m.edges.iter().enumerate() {
-            if m.edge_pickable(ei) && (whole || m.edge_faces.get(ei).is_some_and(|fs| fs.iter().any(|f| faces.contains(&(*f as usize))))) {
+            if !m.edge_pickable(ei) {
+                continue;
+            }
+            if whole {
+                whole_body_edge_lines(&mut feedback, e, hover_edge, 1.5);
+            } else if m.edge_faces.get(ei).is_some_and(|fs| fs.iter().any(|f| faces.contains(&(*f as usize)))) {
                 edge_lines(&mut feedback, e, hover_edge, 1.5, &[]);
             }
         }
@@ -12606,7 +12624,7 @@ mod tests {
         let segments: usize = smooth.iter().map(|i| m.edges[*i].len() - 1).sum();
         let merged = lit.merged();
         assert_eq!(merged.lines.len(), 2 * segments * crate::gpu::LINE_SIZE, "a halo and a line for each smooth edge's segment, copied");
-        assert_eq!(merged.hidden.len(), segments * crate::gpu::LINE_SIZE);
+        assert!(merged.hidden.is_empty(), "a hovered body shows none of its edges through itself");
     }
 
     /// The hover's edges drawn again from the model's lines look as the copy they replace did:
@@ -12652,7 +12670,7 @@ mod tests {
         let mesh = drawn_mesh(&app, &app_body(&app, "Plate"));
         for (i, e) in mesh.edges.iter().enumerate().filter(|(i, _)| mesh.edge_pickable(*i)) {
             assert!(mesh.shaded_edge_visible(i), "a box draws every edge it can pick");
-            edge_lines(&mut copy, e, colours, 1.5, &[]);
+            whole_body_edge_lines(&mut copy, e, colours, 1.5);
         }
         let (Some(none), Some(lit), Some(copied)) = (render(model.clone(), plain), render(model.clone(), lit), render(model, copy)) else {
             eprintln!("skipping: no GPU adapter");
@@ -12663,6 +12681,37 @@ mod tests {
         assert!(edges > 0, "the copy lights the edges");
         let off = differ(&lit, &copied);
         assert!(off * 20 < edges, "{off} of the {edges} pixels the edges light differ from the copy");
+    }
+
+    /// A hovered body lights its faces and the edges seen on it, never the edges the model hides:
+    /// a dimmed copy of every hidden edge drawn through the body made it look like a wireframe.
+    /// That holds for the model's own lines drawn again (`LitEdges` has no hidden style), for the
+    /// copy made where the view draws no edges, in every visual style. A
+    /// single hovered edge still shows dimmed where the model hides it.
+    #[test]
+    fn hovered_body_shows_none_of_its_hidden_edges() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 30, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Plate"})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.set_origin_shown(false);
+        for style in [0, 1, 2, 3] {
+            app.ui.visual_style = style;
+            app.viewport.hover_bodies.clear();
+            build_scene(&app);
+            app.viewport.hover_bodies = vec!["Plate".into()];
+            let lit = build_highlight(&app);
+            let merged = lit.clone().merged();
+            assert!(!merged.lines.is_empty() || !lit.lit_edges.is_empty(), "style {style}: the plate's edges are lit");
+            assert!(merged.hidden.is_empty(), "style {style}: no hidden edges drawn through a hovered body");
+        }
+        // A single edge keeps its dimmed far-side copy (#50).
+        app.ui.visual_style = 0;
+        app.viewport.hover_bodies.clear();
+        let mut sc = GpuScene::default();
+        let t = Tokens::get();
+        let colours = EdgeColours::new(&mut sc, t.hover_edge, t.hover_edge_halo);
+        edge_lines(&mut sc, &[Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)], colours, 1.5, &[]);
+        assert!(!sc.hidden.is_empty(), "a single lit edge still shows where the model hides it");
     }
 
     fn app_body(app: &SolveApp, name: &str) -> solidcraft_engine::doc::ModelBody {

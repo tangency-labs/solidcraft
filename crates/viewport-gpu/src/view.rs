@@ -723,8 +723,9 @@ pub struct BlockTris {
 }
 
 /// A body's edge lines in a model scene block ([`BlockBytes::lines`], by line), drawn again in
-/// three styles ([`lit_line_style`]): a halo, the line over it, and where the model hides the
-/// edge, a dimmed line.
+/// two styles ([`lit_line_style`]): a halo and the line over it, where the edge is seen. Where
+/// the model hides the edge nothing is drawn: a lit body does not show its far side's edges
+/// through itself.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LitEdges {
     /// The block's key ([`SceneBlock::key`]).
@@ -732,7 +733,6 @@ pub struct LitEdges {
     pub lines: std::ops::Range<u32>,
     pub halo: u32,
     pub core: u32,
-    pub hidden: u32,
 }
 
 /// The largest palette index a lit line can name: its style rides in the draw's first vertex,
@@ -2559,9 +2559,8 @@ pub struct Renderer {
     /// Lines behind the model (depth test >).
     line_hidden: wgpu::RenderPipeline,
     /// The scene's own lines in another colour and width ([`LitEdges`], `vs_line_lit`), where
-    /// they are seen and where the model hides them.
+    /// they are seen.
     line_lit: wgpu::RenderPipeline,
-    line_lit_hidden: wgpu::RenderPipeline,
     overlay: wgpu::RenderPipeline,
     /// Reference planes, axes and the ground shadow: as `trans` and `line`, but not cut by a section.
     guide_trans: wgpu::RenderPipeline,
@@ -3513,7 +3512,6 @@ impl Renderer {
                 pipeline("sc_lines", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
                 pipeline("sc_lines_hidden", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
                 pipeline("sc_lines_lit", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
-                pipeline("sc_lines_lit_hidden", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
             )
         };
         let lines_all = || {
@@ -3564,7 +3562,7 @@ impl Renderer {
                 tri_hl_planned,
             ) = see_through_tris.join();
             let ((glass_far_flat, glass_near_flat, trans_flat), tri_hl_instanced_flat) = see_through_flat.join();
-            let (line, line_hidden, line_lit, line_lit_hidden) = lines.join();
+            let (line, line_hidden, line_lit) = lines.join();
             let (overlay, guide_line) = lines_all.join();
             let (ss_blit, copy_blit, ss_filter) = blits.join();
             let (depth_reset, section_stencil) = resets.join();
@@ -3644,7 +3642,6 @@ impl Renderer {
                 line,
                 line_hidden,
                 line_lit,
-                line_lit_hidden,
                 overlay,
                 guide_trans: guide_trans.join(),
                 guide_line,
@@ -4531,7 +4528,6 @@ impl Renderer {
         lines(pass, &res.line_hidden, &m.hidden);
         in_moving(pass, &|pass, mv| lines(pass, &res.line_hidden, &mv.hidden));
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
-        lit_lines(pass, &res.line_lit_hidden, &m.blocks, &h.lit_edges, |e| e.hidden, tally);
         lines(pass, &res.line_hidden, &h.hidden);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         lines(pass, &res.line, &m.lines);
