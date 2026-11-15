@@ -1887,7 +1887,9 @@ mod wr457_certificates {
     /// square corner lies on the convex edge, revolves a quarter turn about it, adding
     /// `(pi/2) A d` (Pappus), where `d = r (10 - 3 pi) / (12 - 3 pi)` is the section's
     /// centroid distance from its square corner along either leg. So the volume is
-    /// `2600 + A L + (pi/2) A d`.
+    /// `2600 + A L + (pi/2) A d`. The premises (square ends, a convex third edge, a
+    /// rolling-ball quarter turn) are ARGUED from the fixture geometry; the cases are
+    /// picked by name in [`CONCAVE_PAIRS`].
     fn two_concave_rounds(r: f64, length: f64) -> f64 {
         use core::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
         let a = r * r * (1.0 - FRAC_PI_4);
@@ -1916,9 +1918,10 @@ mod wr457_certificates {
     /// ARGUED from the fixture geometry, not checked here), so its volume is the union's,
     /// changed by its section `r^2 (1 - pi/4)` along the edge's length `L`. Two concave
     /// rounds meeting at a convex corner hold [`two_concave_rounds`]. The enclosure must
-    /// hold the closed form, up to its f64 rounding. The harness row for the case (the
-    /// golden) must record the same body: status 0, the body's vertex, edge and face
-    /// counts, and a mass-properties volume within `1e-4` of the enclosure (MEASURED: the
+    /// hold the closed form, up to its f64 rounding. The live harness row (which the
+    /// goldens gate compares with `expected/blend.fillet_executive_p3.jsonl`) must record
+    /// the same body: status 0, the body's vertex, edge and face counts, and a
+    /// mass-properties volume within `1e-4` of the enclosure (MEASURED: the
     /// mass integrator's accuracy is an estimate, not a bound).
     #[test]
     fn the_rounds_upstream_refused_build_valid_closed_solids() {
@@ -1974,8 +1977,9 @@ mod wr457_certificates {
                 Form::None => None,
             };
             if let Some(exact) = exact {
-                // A handful of f64 operations on values below 4e3, each rounding by at
-                // most half an ulp: 16 ulps of the result bounds their error.
+                // About ten f64 operations, plus about ten ulps of d from cancelling 3 pi
+                // and the rounding of the stored pi constants, all on terms of at most 9
+                // added to 2600: 16 eps |exact| bounds the error with ample margin.
                 let slack = 16.0 * f64::EPSILON * exact.abs();
                 assert!(
                     e.lo - slack <= exact && exact <= e.hi + slack,
@@ -2005,4 +2009,5 @@ mod wr457_certificates {
             );
         }
     }
+
 }

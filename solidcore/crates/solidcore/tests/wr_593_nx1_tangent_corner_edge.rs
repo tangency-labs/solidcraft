@@ -20,12 +20,14 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::mass::enclosure::enclose_volume;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves as curves;
 use solidcore::query::api_queries::get_edges;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p2::is_manifold_solid;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
@@ -125,4 +127,34 @@ fn exact_round_builds() {
     assert_eq!(v.to_bits(), pinned.to_bits(), "{v} vs {pinned}");
     let want = expected_volume();
     assert!((v - want).abs() < 1e-3 * want, "{v} vs {want}");
+}
+
+/// Formerly `residue_round_fails_by_default`. The residue round upstream refused with
+/// status 1001 (the case this file pins) builds by
+/// default since `fillet_nx1_tangent_side_edge` was removed: the body is valid at Level 2,
+/// one closed manifold solid, and its certified volume enclosure lies within the closed
+/// form's tolerance (the round's surface approximates the exact torus, as in
+/// [`residue_round_with_the_fix`]).
+#[test]
+fn residue_round_builds_by_default() {
+    let mut k = Kernel::default();
+    let mut body = peg(&mut k, RESIDUE);
+    let e = concave_arc(&body);
+    fillet_edges(&mut k, &mut body, &[e], RADIUS, 1, 1, 1.0).unwrap();
+    let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "Level 2: {lines:?}");
+    assert!(is_manifold_solid(&body).unwrap());
+    let want = expected_volume();
+    let width = 1e-7 * want;
+    let enc = enclose_volume(&k, &mut body, width).unwrap();
+    assert!(enc.width() <= width, "{enc:?}");
+    eprintln!("enclosure [{}, {}] closed form {want}", enc.lo, enc.hi);
+    assert!(
+        enc.lo - 1e-3 * want <= want && want <= enc.hi + 1e-3 * want,
+        "closed form {want} vs [{}, {}]",
+        enc.lo,
+        enc.hi
+    );
 }

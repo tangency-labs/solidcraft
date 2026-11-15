@@ -93,13 +93,19 @@ fn expected_volume(slot_floor: f64) -> f64 {
 fn seam_edge_round_with_the_fix() {
     let (v, _) = fillet(0.0).unwrap();
     let want = expected_volume(0.0);
-    assert!((v - want).abs() < 1e-3 * want, "{v}");
+    eprintln!("seam volume {v} vs {want}");
+    assert!((v - want).abs() < 1e-3, "{v} vs {want}");
 }
 
+/// Formerly `off_seam_round_builds_a_manifold_solid`; `fillet` still asserts the
+/// manifold solid. The tolerance, 1e-3 absolute (MEASURED), is far below the round's own
+/// 6 (4 - pi) = 5.15, so an unrounded or partly rounded body fails.
 #[test]
-fn off_seam_round_builds_a_manifold_solid() {
+fn off_seam_round_holds_its_closed_form() {
     let (v, _) = fillet(0.5).unwrap();
     let want = expected_volume(0.5);
+    // pins the arithmetic of expected_volume
     assert!((want - 9706.665662772806).abs() < 1e-9);
-    assert!((v - want).abs() < 1e-3 * want, "{v}");
+    eprintln!("off-seam volume {v} vs {want}");
+    assert!((v - want).abs() < 1e-3, "{v} vs {want}");
 }
