@@ -8930,7 +8930,7 @@ mod issue_892_tests {
     /// lines into one loop, so either setting builds 10 faces and the closed-form volume
     /// (60 - 1) * 2 = 118, the plate less the hole, and passes `check_brep` at `Level2`.
     #[test]
-    fn issue_892_only_join_touching_loops_changes_the_sweep() {
+    fn issue_892_touching_hole_is_the_plate_less_the_hole() {
         // the plane's loop structure, the sweep's face count and volume, and the
         // whole-body check's failure lines, for one setting of the flag
         fn measure(join: bool) -> (Vec<usize>, Vec<usize>, usize, f64, Vec<String>) {

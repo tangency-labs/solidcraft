@@ -1490,7 +1490,8 @@ fn eval_point(k: &Kernel, c: &Curve, t: f64) -> Result<Point3> {
 /// meet. `arrive` is the end the loop arrives by (`2i` the start of curve `i`, `2i + 1`
 /// its end), `close` the start of the loop's first curve, `found` the nearest end to
 /// `arrive`. The ends at that vertex (within `tol_3d` of `found`) that the loop can go
-/// on from are those of curves it has not used, and `close`. Of them it takes the one
+/// on from are those of curves it has not used, and `close`; a curve with both ends there
+/// (shorter than `tol_3d`) offers only its start, so it is run forwards. Of them it takes the one
 /// whose leaving tangent comes next round the vertex from the arriving curve's,
 /// counterclockwise about `turn_normal` (unit, one for all the vertices of a call, from
 /// `loops_turn_normal`; zero where the curves lie on one line; tangency-labs/smlib
@@ -1519,6 +1520,11 @@ fn next_round_the_vertex(
             continue;
         }
         if at(seen, ii / 2)? && ii != close {
+            continue;
+        }
+        // a curve collapsed to this vertex (both ends within `tol_3d` of it) leaves it
+        // only from its start: its end's tangent would run it backwards (#17033)
+        if ii % 2 == 1 && at(ends, ii - 1)?.distance(found_pt) <= tol_3d {
             continue;
         }
         candidates.push(ii);
@@ -3688,6 +3694,53 @@ mod tests {
                     &format!("unit-weight point {index} [{i}]"),
                 );
             }
+        }
+    }
+
+    /// #17033: the partial cone profile with a top line shorter than the tolerance. Its
+    /// side, top and axis ends all meet at the top vertex; going on round that vertex
+    /// must run the collapsed top line forwards (from its start), not backwards from its
+    /// end. Backwards, the profile face made the sweep report the axis inside the face
+    /// (1025) instead of the degenerate swept face (1007, UB-215).
+    #[test]
+    fn issue_17033_collapsed_curve_at_the_vertex_runs_forwards() {
+        let k = Kernel::default();
+        for top in [1e-9, 1e-7, 9.9e-7] {
+            // as `create_partial_cone` builds it: side, base, axis, top
+            let cs = vec![
+                line3([1.0, 0.0, 0.0], [top, 0.0, 1.0]),
+                line3([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+                line3([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+                line3([top, 0.0, 1.0], [0.0, 0.0, 1.0]),
+            ];
+            for tol in [1e-6, 1e-5] {
+                let r = order_curves_into_loops(&k, &cs, tol).unwrap();
+                assert!(r.status().is_ok(), "top {top}, tol {tol}");
+                assert_eq!(r.loop_counts, vec![4], "top {top}, tol {tol}");
+                assert_eq!(r.ordered, vec![0, 3, 2, 1], "top {top}, tol {tol}");
+                assert_eq!(
+                    r.orients,
+                    vec![
+                        OrientType::Same,
+                        OrientType::Same,
+                        OrientType::Opposite,
+                        OrientType::Same
+                    ],
+                    "top {top}, tol {tol}"
+                );
+            }
+            let mut kk = Kernel::default();
+            let e = crate::primitive::api_primitives::create_partial_cone(
+                &mut kk,
+                Point3::new(0.0, 0.0, 0.0),
+                1.0,
+                top,
+                1.0,
+                0.0,
+                90.0,
+            )
+            .unwrap_err();
+            assert_eq!(e.sm_status(), Some(1007), "top {top}: {e}");
         }
     }
 
