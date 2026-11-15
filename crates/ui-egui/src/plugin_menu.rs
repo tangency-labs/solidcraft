@@ -596,8 +596,10 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
     if !shown(app, &plugin) {
         return;
     }
-    // The entry's dialog is already open: it keeps its values, and stays where it is.
-    if app.plugin_menu.dialogs.iter().any(|d| d.plugin.id == plugin.id && d.entry == entry.name) {
+    // The entry's dialog is already open on this design: it keeps its values, and stays where it
+    // is. Another design's dialog for the same entry belongs to that design.
+    let session = app.session.uid;
+    if app.plugin_menu.dialogs.iter().any(|d| d.plugin.id == plugin.id && d.entry == entry.name && d.session == session) {
         return;
     }
     let fields = form(&entry.input_schema);
