@@ -35,6 +35,12 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData
 const OP_CURVE: &str = "prism::profile::curve_on_frame";
 const OP_AREA: &str = "prism::profile::Loop2::signed_area";
 
+/// The smallest `|sweep|` (radians) of an arc a profile takes: below it the arc has no length.
+const MIN_ARC_SWEEP: f64 = 1e-12;
+
+/// The slack (radians) past a whole turn an arc's `|sweep|` may carry, for rounding.
+const ARC_SWEEP_SLACK: f64 = 1e-9;
+
 /// Highest degree of a [`Seg2::Bezier`].
 pub const MAX_BEZIER_DEGREE: usize = 9;
 
@@ -698,8 +704,8 @@ pub fn check_regions<'a>(
                         && radius < 1e9
                         && start.is_finite()
                         && sweep.is_finite()
-                        && sweep.abs() > 1e-12
-                        && sweep.abs() <= TAU + 1e-9
+                        && sweep.abs() > MIN_ARC_SWEEP
+                        && sweep.abs() <= TAU + ARC_SWEEP_SLACK
                 }
                 Seg2::Cubic { p0, p1, p2, p3 } => {
                     [p0, p1, p2, p3].into_iter().all(finite) && apart(p0, p3)
@@ -818,8 +824,9 @@ pub fn frame_is_orthonormal(frame: &Frame) -> bool {
 ///
 /// # Errors
 ///
-/// `InvalidInput` for a frame whose axes are not orthonormal, or a malformed segment; those of
-/// the constructors.
+/// `InvalidInput` for a frame whose axes are not orthonormal, a malformed segment, or an arc
+/// whose `|sweep|` is not above `1e-12` and at most a whole turn (`TAU + 1e-9`), the bounds
+/// [`check_regions`] holds; those of the constructors.
 pub fn curve_on_frame(k: &Kernel, frame: &Frame, level: f64, seg: &Seg2) -> Result<Curve> {
     if !frame_is_orthonormal(frame) || !level.is_finite() {
         return Err(SolidError::invalid_input(
@@ -844,6 +851,17 @@ pub fn curve_on_frame(k: &Kernel, frame: &Frame, level: f64, seg: &Seg2) -> Resu
             if !(start.is_finite() && sweep.is_finite()) {
                 return Err(SolidError::invalid_input(OP_CURVE, "a malformed segment"));
             }
+            // The bounds `check_regions` holds an arc to: refused here too, never clamped, so a
+            // sweep past a whole turn is not quietly built as a full circle.
+            if sweep.abs() <= MIN_ARC_SWEEP {
+                return Err(SolidError::invalid_input(OP_CURVE, "an arc of no sweep"));
+            }
+            if sweep.abs() > TAU + ARC_SWEEP_SLACK {
+                return Err(SolidError::invalid_input(
+                    OP_CURVE,
+                    "an arc that sweeps more than a whole turn",
+                ));
+            }
             let (_, x, y, _) = axes(frame);
             let (y, s0) = if sweep >= 0.0 {
                 (y, start)
@@ -855,6 +873,7 @@ pub fn curve_on_frame(k: &Kernel, frame: &Frame, level: f64, seg: &Seg2) -> Resu
             // crosses the circle's seam nor runs past a whole turn, whatever the start.
             let (c, s) = (s0.cos(), s0.sin());
             let placement = Axis2Placement::new(at(center), x * c + y * s, y * c - x * s);
+            // `.min(360.0)` only absorbs the rounding slack the check above admits.
             let deg = Extent1d::from_min_max(0.0, sweep.abs().to_degrees().min(360.0));
             let e = Ellipse::create_canonical_circle(k, &placement, radius, Some(&deg), None)?;
             Ok(Curve::from(e))

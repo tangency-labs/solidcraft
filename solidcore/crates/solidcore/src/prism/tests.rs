@@ -406,6 +406,103 @@ fn a_piece_made_a_curve_reads_back_as_itself() {
     }
 }
 
+/// The arc `curve_on_frame` builds on the plain frame against its closed form: it starts at
+/// `center + radius (cos start, sin start)` and ends at the same with `start + sweep`, every point
+/// between lies on the circle, and its angle from the start, turned the way `sweep` runs, rises
+/// strictly from 0 to `|sweep|` (the curve's own parameter need not be linear in the angle).
+fn assert_arc_closed_form(k: &Kernel, center: Point2, radius: f64, start: f64, sweep: f64) {
+    let s = Seg2::Arc {
+        center,
+        radius,
+        start,
+        sweep,
+    };
+    let c = curve_on_frame(k, &xy(), 0.0, &s).unwrap();
+    let iv = c.natural_interval();
+    let on = |t: f64| {
+        [
+            center.x + radius * t.cos(),
+            center.y + radius * t.sin(),
+            0.0,
+        ]
+    };
+    let a = c.evaluate_point(k, iv.min()).unwrap();
+    let b = c.evaluate_point(k, iv.max()).unwrap();
+    for (q, want) in [(a, on(start)), (b, on(start + sweep))] {
+        let got = [q.x, q.y, q.z];
+        assert!(
+            got.into_iter()
+                .zip(want)
+                .all(|(g, w)| (g - w).abs() < 1e-12),
+            "{s:?}: {got:?} vs {want:?}"
+        );
+    }
+    let mut last = 0.0;
+    for i in 1..64 {
+        let f = f64::from(i) / 64.0;
+        let q = c
+            .evaluate_point(k, iv.min() + f * (iv.max() - iv.min()))
+            .unwrap();
+        let (dx, dy) = (q.x - center.x, q.y - center.y);
+        assert!(
+            (dx.hypot(dy) - radius).abs() < 1e-12 && q.z.abs() < 1e-12,
+            "{s:?} at f = {f}: {q:?} off the circle"
+        );
+        let turned = (sweep.signum() * (dy.atan2(dx) - start)).rem_euclid(TAU);
+        assert!(
+            turned > last && turned < sweep.abs(),
+            "{s:?} at f = {f}: angle {turned} after {last}"
+        );
+        last = turned;
+    }
+}
+
+/// A single arc that is a whole turn, starting away from the frame's `x`: its own circle, angle
+/// 0 at the start, so it closes at the start and runs through the closed form all the way round.
+#[test]
+fn a_full_circle_arc_at_a_nonzero_start_is_the_closed_form() {
+    let k = Kernel::default();
+    assert_arc_closed_form(&k, p(1.0, -2.0), 3.0, 1.0, TAU);
+    assert_arc_closed_form(&k, p(1.0, -2.0), 3.0, 1.0, -TAU);
+}
+
+/// A counter-clockwise arc whose start is past a whole turn is the same arc as at `start - 2π`:
+/// its trim never crosses a seam, whatever the start.
+#[test]
+fn a_ccw_arc_starting_past_a_whole_turn_is_the_closed_form() {
+    let k = Kernel::default();
+    assert_arc_closed_form(&k, p(0.5, 0.25), 2.0, TAU + 1.25, 1.5);
+    assert_arc_closed_form(&k, p(0.5, 0.25), 2.0, 3.0 * TAU - 0.5, 2.0);
+}
+
+/// An arc of no sweep, or one past a whole turn, is refused as `InvalidInput` (the bounds
+/// `check_regions` holds), never clamped to a full circle.
+#[test]
+fn an_arc_of_no_sweep_or_past_a_whole_turn_is_refused() {
+    let k = Kernel::default();
+    let arc = |sweep: f64| Seg2::Arc {
+        center: p(0.0, 0.0),
+        radius: 1.0,
+        start: 0.5,
+        sweep,
+    };
+    for sweep in [TAU + 1e-6, -(TAU + 1e-6), 7.0, -12.0, 0.0, 1e-13, -1e-13] {
+        let r = curve_on_frame(&k, &xy(), 0.0, &arc(sweep));
+        assert!(
+            matches!(
+                r,
+                Err(crate::error::SolidError::InvalidInput {
+                    operation: "prism::profile::curve_on_frame",
+                    ..
+                })
+            ),
+            "{sweep}: {r:?}"
+        );
+    }
+    // the slack the bound admits still builds
+    assert!(curve_on_frame(&k, &xy(), 0.0, &arc(TAU + 5e-10)).is_ok());
+}
+
 /// A polynomial quadratic (a font's quadratic curve: a conic of weight 1) reads back as that
 /// conic, as a profile writes it, not as a degree-2 Bézier.
 #[test]
