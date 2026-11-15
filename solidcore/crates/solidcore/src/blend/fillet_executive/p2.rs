@@ -649,8 +649,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // the fork's (WR-634): no overflow edges yet, no mitred edges (9ba2b12)
         self.overflow_edges.clear();
         self.mitred_edges.clear();
-        // the fork's (WR-665, e418750): no fan split points yet
-        self.fan_split_points.clear();
+        // Not the fork's (WR-665, e418750, clears them here): the fan split points are
+        // kept. An earlier preparation's split is still in the body, and this one finds
+        // those vertices split already and records nothing, so clearing them would leave
+        // `JoinBlendedVertexFans` nothing to join. They are cleared by the join and when
+        // the target changes (`set_fillet_parameters`).
     }
 
     /// `SetFilletParameters`: resets the five operation switches to their common
@@ -680,6 +683,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         self.initialized = false;
 
         if let Some(brep) = params.brep {
+            // another body: the points split on the earlier one are not this one's
+            if self.target != Some(brep) {
+                self.fan_split_points.clear();
+            }
             self.target = Some(brep);
         }
 

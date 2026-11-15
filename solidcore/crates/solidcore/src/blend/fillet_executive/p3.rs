@@ -739,7 +739,8 @@ pub struct FilletExecutive<O> {
     /// corner order.
     pub mitred_edges: Vec<O>,
     /// `m_vFanSplitPoints` (the fork's, WR-665, tangency-labs/smlib@e418750; cleared by
-    /// `SetFilletParameters`): where a blended edge's vertex the body touches itself at
+    /// `JoinBlendedVertexFans` and when `SetFilletParameters` changes the target, kept
+    /// across another preparation of the same target, which the fork clears): where a blended edge's vertex the body touches itself at
     /// was split into one vertex per fan (`SplitBlendedVertexFans`), for
     /// `JoinBlendedVertexFans`.
     pub fan_split_points: Vec<Point3>,

@@ -208,6 +208,26 @@ fn fork_e418750_failed_blend_joins_the_fans_again() {
     assert_eq!(vertex::edges(&b, origin[0], None).unwrap().len(), 6);
 }
 
+/// The same failed blend prepared twice on one session: the second preparation finds the
+/// origin split already and splits nothing, so the first one's split point must survive
+/// it for the join to put the origin back together (#17401 review).
+#[test]
+fn fork_e418750_second_preparation_keeps_the_split_points() {
+    let mut k = Kernel::default();
+    let mut b = up_down_squares(&mut k);
+    let ids = axis_edges(&b);
+    let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+    for _ in 0..2 {
+        s.prepare_constant_radius_edges(&mut k, &ids, 30.0, 0, 1, 1.0)
+            .unwrap();
+    }
+    assert!(s.do_fillet(&mut k).is_err());
+    drop(s);
+    let origin = vertices_at(&b, Point3::ZERO);
+    assert_eq!(origin.len(), 1, "{origin:?}");
+    assert_eq!(vertex::edges(&b, origin[0], None).unwrap().len(), 6);
+}
+
 /// WR-570's knife-edge part: a 62 1/6 x 21 plate whose corner is cut by a circle of
 /// radius 21 about (TIP, -21), extruded 10; the arc wall meets the back face y = 0
 /// tangentially along the vertical edge at x = TIP.
