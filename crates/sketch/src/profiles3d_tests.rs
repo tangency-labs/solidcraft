@@ -196,6 +196,23 @@ fn a_half_disc_closed_by_a_drawn_arc_is_a_profile() {
 }
 
 #[test]
+fn a_closed_wire_whose_quarter_points_line_up_is_a_profile() {
+    // One closed wire in the plane y = 0: a triangle with a zigzag bottom. Its start, quarter,
+    // half and three-quarter points all lie on z = 0, and its ends meet, so the line through its
+    // ends has no direction. A point off that line must still span the wire's plane.
+    let v = |x: f64, z: f64| Vec3 { x, y: 0.0, z };
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let pts = [v(0.0, 0.0), v(5.0, -3.0), v(10.0, 0.0), v(15.0, -3.0), v(20.0, 0.0), v(25.0, -3.0), v(30.0, 0.0), v(15.0, 20.0), v(0.0, 0.0)];
+    sk.wires.push(wire("w", &pts));
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert_eq!(ps.len(), 1, "{:?}", ps.iter().map(|p| (&p.outer_curves, p.area)).collect::<Vec<_>>());
+    // The 30 × 20 triangle (300 mm²) and three notches of 10 × 3 / 2 below it.
+    assert!((ps[0].area - 345.0).abs() < 1e-6, "area {}", ps[0].area);
+    assert!(dist_to_plane(&ps[0].plane, v(15.0, 20.0)) < 1e-6);
+}
+
+#[test]
 fn nothing_without_3d_wires() {
     let mut sk = Sketch::new();
     let a = sk.add_point(Vec2 { x: 0.0, y: 0.0 }, None).unwrap();

@@ -296,22 +296,36 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
 /// The nodes of one wire (`ends`, in order along it) that span planes: all of them for a short
 /// wire, otherwise its two ends, the points a quarter, half and three quarters along it, and the
 /// point farthest from the line through its ends (so a curved wire always gives one off that
-/// line). A plane holding the whole wire holds these. A plane they span that misses other points
-/// of the wire gets none of the segments there, as every segment must lie on the plane.
+/// line). A closed wire's ends meet, so its line runs from its start to the point farthest from
+/// the start instead, and that point is a key point too. A plane holding the whole wire holds
+/// these. A plane they span that misses other points of the wire gets none of the segments
+/// there, as every segment must lie on the plane.
 fn key_points(ends: &[usize], pts: &[Vec3]) -> Vec<usize> {
     if ends.len() <= KEY_SAMPLES {
         return ends.to_vec();
     }
     let last = ends.len() - 1;
     let mut out: Vec<usize> = (0..KEY_SAMPLES).filter_map(|q| ends.get(q * last / (KEY_SAMPLES - 1))).copied().collect();
-    if let (Some(&a), Some(&b)) = (ends.first(), ends.last())
-        && let (Some(&a), Some(&b)) = (pts.get(a), pts.get(b))
+    let farthest = |measure: &dyn Fn(Vec3) -> f64| {
+        let m = |i: usize| pts.get(i).map_or(0.0, |&p| measure(p));
+        ends.iter().copied().max_by(|&i, &j| m(i).total_cmp(&m(j)))
+    };
+    let Some(&a) = ends.first().and_then(|&i| pts.get(i)) else {
+        return out;
+    };
+    let Some(mut b) = ends.last().and_then(|&i| pts.get(i)).copied() else {
+        return out;
+    };
+    if a.dist(b) <= MERGE_TOL
+        && let Some(far) = farthest(&|p| p.dist(a))
+        && let Some(&p) = pts.get(far)
     {
-        let chord = b - a;
-        let off = |i: usize| pts.get(i).map_or(0.0, |&p| chord.cross(p - a).len());
-        if let Some(&far) = ends.iter().max_by(|&&i, &&j| off(i).total_cmp(&off(j))) {
-            out.push(far);
-        }
+        out.push(far);
+        b = p;
+    }
+    let chord = b - a;
+    if let Some(far) = farthest(&|p| chord.cross(p - a).len()) {
+        out.push(far);
     }
     out
 }
