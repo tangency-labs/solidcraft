@@ -1291,7 +1291,7 @@ pub fn edge_plane_crossings(
         &edge.interval,
         tol,
     )?;
-    let mut crossings = Vec::with_capacity(solutions.len());
+    let mut crossings = Vec::new();
     for (solution_type, start, finish) in solutions {
         let first = start.parameters.first().copied().unwrap_or(0.0);
         match solution_type {
