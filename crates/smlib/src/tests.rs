@@ -95,7 +95,7 @@ const NO_KERNEL: [&str; 14] = [
     "hold_a_kernel",
 ];
 
-const ANSWERING: [&str; 66] = [
+const ANSWERING: [&str; 68] = [
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -137,12 +137,14 @@ const ANSWERING: [&str; 66] = [
     "mass_properties",
     "bounds",
     "edge_face_distance",
+    "curve_face_gap_bound",
     "area",
     "is_manifold_solid",
     "tagged",
     "history",
     "check",
     "check_owned",
+    "check_stitched",
     "make_cylinder",
     "make_sphere",
     "make_cone",
@@ -256,10 +258,13 @@ fn every_entry_point_answers() {
     says("mass_properties", a.mass_properties(1e-6));
     says("bounds", a.bounds());
     says("edge_face_distance", a.edge_face_distance(0, 0));
+    let spline = solidcore_record::brep::Curve::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[0.0; 3], [1.0; 3]] };
+    says("curve_face_gap_bound", a.curve_face_gap_bound(&spline, [0.0, 1.0], 0, 1e-3));
     says("area", a.area(1e-6));
     says("is_manifold_solid", a.is_manifold_solid());
     says("history", says("tagged", a.tagged(0)).unwrap().history());
     says("check", a.check(CheckLevel::All));
+    says("check_stitched", a.check_stitched(CheckLevel::All));
     says("check_owned", a.try_clone().and_then(|c| c.check_owned(CheckLevel::All)));
     says("make_cylinder", Brep::make_cylinder([0.0; 3], 1.0, 1.0));
     says("make_sphere", Brep::make_sphere([0.0; 3], 1.0));
@@ -449,22 +454,25 @@ fn answered<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
 /// or still open, blocked here on a channel, while another makes and measures a body of its own.
 #[test]
 fn a_kernel_call_that_does_not_end_holds_up_no_other_call() {
-    let (release, held) = call_held_open("held_open");
+    let (release, held) = call_held_open("held_open_by_no_other_call");
     let volume = answered(|| {
         let a = Brep::make_box([0.0; 3], [10.0; 3]).unwrap();
         let b = Brep::make_box([5.0, 0.0, 0.0], [10.0; 3]).unwrap();
         a.boolean(&b, BooleanOp::Union).unwrap().unwrap().volume(1e-7).unwrap()
     });
     assert!((volume - 1500.0).abs() < 1e-6, "{volume}");
-    assert!(current_call().is_some_and(|c| c.contains("held_open")), "the call still runs");
+    assert!(current_call().is_some_and(|c| c.contains("held_open_by_no_other_call")), "the call still runs");
     // And one holds up no other held open beside it.
-    let (release_too, held_too) = call_held_open("held_open_too");
-    assert!(current_call().is_some_and(|c| c.contains("held_open") && c.contains("held_open_too")));
+    let (release_too, held_too) = call_held_open("held_open_too_by_no_other_call");
+    assert!(current_call().is_some_and(|c| c.contains("held_open_by_no_other_call") && c.contains("held_open_too_by_no_other_call")));
     for (release, held) in [(release, held), (release_too, held_too)] {
         release.send(()).unwrap();
         held.join().unwrap().unwrap();
     }
-    assert!(!current_call().is_some_and(|c| c.contains("held_open")), "neither is in flight any more");
+    assert!(
+        !current_call().is_some_and(|c| c.contains("held_open_by_no_other_call") || c.contains("held_open_too_by_no_other_call")),
+        "neither is in flight any more"
+    );
 }
 
 /// Bodies are made and used on whichever kernel is free, at the same time on several threads, and
@@ -472,7 +480,7 @@ fn a_kernel_call_that_does_not_end_holds_up_no_other_call() {
 /// kernel is used once it is free, and two bodies from different kernels go into one boolean.
 #[test]
 fn bodies_move_between_kernels_and_calls_run_side_by_side() {
-    let (release, held) = call_held_open("held_open");
+    let (release, held) = call_held_open("held_open_beside_moved_bodies");
     let on_second = answered(|| Brep::make_box([5.0, 0.0, 0.0], [10.0; 3]).unwrap());
     release.send(()).unwrap();
     held.join().unwrap().unwrap();
@@ -506,7 +514,7 @@ fn bodies_move_between_kernels_and_calls_run_side_by_side() {
 /// away and the other call and later ones go on.
 #[test]
 fn a_panic_beside_a_running_call_costs_only_its_own_kernel() {
-    let (release, held) = call_held_open("held_open");
+    let (release, held) = call_held_open("held_open_beside_a_panic");
     let r: Result<()> = core::run("panicking", |_| panic!("on purpose"));
     assert!(matches!(r, Err(Error::Internal(_))), "{r:?}");
     let v = answered(|| Brep::make_box([0.0; 3], [2.0; 3]).unwrap().volume(1e-7).unwrap());

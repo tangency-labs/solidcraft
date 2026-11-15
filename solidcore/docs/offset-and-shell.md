@@ -158,7 +158,7 @@ job (§5.1).
 | refusal | when | what it names | checked | file |
 |---|---|---|---|---|
 | `OffsetFailure::Collapses` | a NURB-based face's least radius on the displaced side is within the input's tolerance of \|d\| | the face, the distance and the radius | always, before the face's offset is built | `offset_executive/p2.rs`, `refuse_singular_offset`; `sheets.rs`, `proved_singular` |
-| `OffsetFailure::Folds`, `NotCertified` | the offset of a NURB-based face is not certified regular over its parameter box; `NotCertified` when no radius on the displaced side bounds the wall | the face, the distance and, for `Folds`, `largest`, the least radius on the displaced side | always but in the local operation, after the collapse test | `p2.rs`, `refuse_folding_offset`; `sheets.rs`, `certify_regular` |
+| `OffsetFailure::Folds`, `NotCertified` | the offset of a NURB-based face is not certified regular over its parameter box; `NotCertified` when neither regularity nor a fold is proved within the patch budget (a fold counts only once proved on the face's own partials, in interval arithmetic), or no radius on the displaced side bounds the wall | the face, the distance and, for `Folds`, `largest`, the least radius on the displaced side | always but in the local operation, after the collapse test | `p2.rs`, `refuse_folding_offset`; `sheets.rs`, `certify_regular` |
 | `DistanceUnresolved`, `ToleranceUnresolved` | \|d\| below the input's tolerance; an approximation tolerance in (0, 1e-12] | the distance and the tolerance | always | `p2.rs`, `check_resolvable` |
 | `OffsetFailure::WallsTouch`, `LoopsCross` | an offset face's loops touch or cross | the face | per their flags | `error/offset.rs` |
 | `OffsetFailure::EdgeVanishes` | a vertex moves to or past its edge's end and the edge cannot be squeezed out | the original edge, or the face when available | during loop-gap closure | `offset_executive/step_gaps.rs` |
@@ -189,7 +189,7 @@ named size an estimate in the sense of definitions-and-certificates.md §7, inva
 certifying it is open.
 
 **The analytic kinds** never reach these tests: a closed-form radius moved to zero or past it gives
-no surface (§3; `Surface::offset_collapses`), an `SM_ERR` with `offset_missing_surface_fails`, not
+no surface (§3; `Surface::offset_collapses`), an `SM_ERR`, not
 a refusal by name. `SheetClass` (`Regular`, `Inverted`, `Spine`, `sheets.rs`) names the three cases
 but nothing outside its tests calls it yet.
 
@@ -200,9 +200,11 @@ away, as upstream does (`offset_face_prefix`, `p2.rs`).
 **In ops**, `Folds` becomes `Error::WallFolds { largest }` (`solidcore-ops/src/offset.rs`,
 `offset_refused`), the touching walls and the vanishing edge their own errors, and every other
 named reason a named `OffsetRefusal` with the face it names: `Collapses` passes on the distance
-and the radius. `OffsetFailure` is `#[non_exhaustive]`, so ops matches it with a wildcard: a
-reason ops does not name yet takes the error of its class where that has one (walls that touch,
-a fold, a vanishing edge); it and the routines' phrase causes (`OffsetFailure::is_phrase`)
+and the radius, and `Unsound` becomes ops' own `Unsoundness`, the input's entity its check
+names given by its index in the call's record `Order` (`RecordEntity`; a call without an order
+names a face by its place among the body's faces, and no edge or vertex). `OffsetFailure` is
+`#[non_exhaustive]`, so ops matches it with a wildcard: a reason ops does not name yet takes the
+error of its class where that has one (walls that touch, a fold, a vanishing edge); it and the routines' phrase causes (`OffsetFailure::is_phrase`)
 otherwise arrive as the transitional `OffsetRefusal::Phrase`, with the kernel's class, whether it
 is a defect (`OffsetFailure::is_defect`) and the kernel's words. In the sheet offset and the
 symmetric thicken, a refusal `offset_brep` returns before its executive runs (such as

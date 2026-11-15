@@ -305,6 +305,7 @@ use crate::surface::surf_of_extrusion::SurfOfExtrusion;
 use crate::surface::surf_of_revolution::p3::intersect_revolved_into;
 use crate::surface::surf_of_revolution::{Revolved, SurfOfRevolution};
 use crate::surface::surface::p1::{StepSurface, SurfaceIntersectContext, SurfaceSolveContext};
+use crate::surface::surface::p3::SingularitiesMemo;
 use crate::surface::surface::p8::BoundaryMemo;
 use crate::surface::surface::p8::FaceSolveCache;
 use crate::surface::surface_cache::p1::SurfaceCache;
@@ -439,6 +440,9 @@ pub struct Surface {
     /// Not upstream: the memo of the natural boundary curves `CoincidenceCheck` makes
     /// (`BoundaryMemo`); a copy starts an empty one, an edit replaces it.
     boundary_memo: BoundaryMemo,
+    /// Not upstream: the memo of the singular sides `GetSingularities` finds
+    /// (`SingularitiesMemo`); a copy starts an empty one, an edit replaces it.
+    singularities_memo: SingularitiesMemo,
     /// Not upstream (#2485, #2488): a round of an exact class or a blend corner's face,
     /// this surface its net, keeps its definition here ([`Surface::procedural_blend`]). A
     /// copy, a piece, an extension and an edit of the parametrization carry it (the
@@ -630,6 +634,7 @@ impl Clone for Surface {
             notify_identity: IdentitySlot::new(),
             made_kind: MadeKindSlot::default(),
             boundary_memo: BoundaryMemo::new(),
+            singularities_memo: SingularitiesMemo::new(),
             definition: self.definition.clone(),
         };
         s.update_owned_bases();
@@ -930,9 +935,7 @@ impl Surface {
                 base: s.base().clone_for_evaluation(depth + 1)?,
                 major_radius: s.major_radius,
                 minor_radius: s.minor_radius,
-                // The copy constructor resets this flag; an evaluation copy must not.
                 inside_out: s.inside_out,
-                keeps_inside_out: s.keeps_inside_out,
             })),
             SurfaceKind::SurfOfRevolution(s) => {
                 SurfaceKind::SurfOfRevolution(Box::new(s.clone_for_evaluation(depth + 1)?))
@@ -960,6 +963,7 @@ impl Surface {
             notify_identity: IdentitySlot::new(),
             made_kind: self.made_kind.shared(),
             boundary_memo: BoundaryMemo::new(),
+            singularities_memo: SingularitiesMemo::new(),
             definition: None,
         })
     }
@@ -1056,6 +1060,7 @@ impl Surface {
             notify_identity: IdentitySlot::new(),
             made_kind: self.made_kind.shared(),
             boundary_memo: BoundaryMemo::new(),
+            singularities_memo: SingularitiesMemo::new(),
             definition: self.definition.clone(),
         }
     }
@@ -1221,6 +1226,7 @@ impl Surface {
             notify_identity: IdentitySlot::new(),
             made_kind: MadeKindSlot::default(),
             boundary_memo: BoundaryMemo::new(),
+            singularities_memo: SingularitiesMemo::new(),
             definition: None,
         }
     }
@@ -1582,6 +1588,11 @@ impl Surface {
         &self.boundary_memo
     }
 
+    /// The memo of the singular sides `GetSingularities` finds (see `SingularitiesMemo`).
+    pub(crate) const fn singularities_memo(&self) -> &SingularitiesMemo {
+        &self.singularities_memo
+    }
+
     /// The concrete kind: once a `const` query made a cone's, sphere's, torus's or
     /// surface of revolution's missing NURB ([`Surface::kind_with_nurb`]), the made kind
     /// kept on this surface (`MadeKindSlot`), as upstream keeps the made NURB on the
@@ -1613,6 +1624,7 @@ impl Surface {
         }
         // an edit makes another surface value: start an empty boundary memo
         self.boundary_memo = BoundaryMemo::new();
+        self.singularities_memo = SingularitiesMemo::new();
         &mut self.kind
     }
 
@@ -2737,6 +2749,26 @@ impl Surface {
         }
     }
 
+    /// [`Self::convert_uv_from_nurbs_to_step`] with whether the analytic conversion is
+    /// exact: `false` where a polar converter could only solve numerically, so its angle
+    /// is not a closed form's. The other kinds are their exact base maps.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::convert_uv_from_nurbs_to_step`].
+    pub(crate) fn convert_uv_from_nurbs_to_step_exact(
+        &self,
+        k: &Kernel,
+        nurbs_uv: Point2,
+    ) -> Result<(Point2, bool)> {
+        match self.kind_with_nurb(k)? {
+            SurfaceKind::Cone(s) => s.convert_uv_from_nurbs_to_step_exact(k, nurbs_uv),
+            SurfaceKind::Sphere(s) => s.convert_uv_from_nurbs_to_step_exact(k, nurbs_uv),
+            SurfaceKind::Torus(s) => s.convert_uv_from_nurbs_to_step_exact(k, nurbs_uv),
+            _ => Ok((self.convert_uv_from_nurbs_to_step(k, nurbs_uv)?, true)),
+        }
+    }
+
     /// [`Surface::step_inversion`] whose `GlobalPointSolve` runs under the caller's
     /// face context (`context`: the solve context and this surface's handle in it), so
     /// a face-owned surface's solutions are classified against the face's trims
@@ -3249,6 +3281,7 @@ impl Surface {
     ) -> Result<()> {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
+        self.singularities_memo = SingularitiesMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.adjust_step_uv_domain(new_step_uv_domain),
             SurfaceKind::ProceduralBlend(pb) => {
@@ -3308,6 +3341,7 @@ impl Surface {
     fn reverse_kind(&mut self, k: &Kernel, param: SurfParamType) -> Result<()> {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
+        self.singularities_memo = SingularitiesMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.reverse(param),
             SurfaceKind::ProceduralBlend(s) => s.reverse(param),
@@ -3391,6 +3425,7 @@ impl Surface {
     fn reparameterize_kind(&mut self, k: &Kernel, new_domain: &Extent2d) -> Result<()> {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
+        self.singularities_memo = SingularitiesMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.reparameterize(new_domain),
             SurfaceKind::ProceduralBlend(s) => s.reparameterize(new_domain),
@@ -3399,7 +3434,7 @@ impl Surface {
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)
             | SurfaceKind::SrfInVolume(_) => base_edit(),
-            SurfaceKind::Plane(s) => s.reparameterize_with_kernel(k, new_domain),
+            SurfaceKind::Plane(s) => s.reparameterize(new_domain),
             // the inherited SmSurfOfRevolution::Reparameterize with the cone's iso curves
             SurfaceKind::Cone(s) => s.reparameterize(k, new_domain),
             SurfaceKind::Sphere(s) => s.reparameterize(k, new_domain),
@@ -3456,6 +3491,7 @@ impl Surface {
     ) -> Result<()> {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
+        self.singularities_memo = SingularitiesMemo::new();
         let type_code = self.type_code();
         let Self {
             kind,
@@ -3508,8 +3544,7 @@ impl Surface {
             // net the converter refuses leaves the surface as it was, with nothing notified;
             // then the surface itself is swapped with its notifications and takes the copy.
             // The copy is exact, as `clone_kind_exact`'s: the B-spline objects as they are
-            // (`Clone` fixes their knots up) and a torus's inside-out mark (`Clone` drops it
-            // without `keeps_inside_out`).
+            // (`Clone` fixes their knots up).
             SurfaceKind::Cone(s) => {
                 let mut swapped = s.clone();
                 swapped.rev = s.rev().clone_exact();
@@ -3597,6 +3632,7 @@ impl Surface {
     ) -> Result<()> {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
+        self.singularities_memo = SingularitiesMemo::new();
         // (#2485, #2488) a definition moves with its net; one that cannot move so (a scale
         // that is not uniform) refuses before the net moves. A sweep's (#2572) that cannot
         // follow the motion is left behind: the net moves as it did without it.
@@ -3693,6 +3729,7 @@ impl Surface {
     ) -> Result<()> {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
+        self.singularities_memo = SingularitiesMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.trim_with_domain_with(trim_domain, options),
             SurfaceKind::ProceduralBlend(pb) => {
@@ -9103,23 +9140,31 @@ mod swap_definition_tests {
         .unwrap();
     }
 
-    /// WR-701: a swap keeps the surface as it was made, swapped: a torus marked inside out
-    /// whose copy constructor drops the mark (`keeps_inside_out` false) is still inside out
-    /// after the swap, as it was before the swap was made on a copy.
+    /// WR-701: a swap keeps the surface as it was made, swapped: a torus made inside out
+    /// (its generating circle inside out) is still inside out after the swap, which is made
+    /// on a copy and taken back, and its generator still agrees with it (`SmSurfOfRevolution`
+    /// Test #11).
     #[test]
     fn a_swap_keeps_an_inside_out_torus_inside_out() {
         let k = Kernel::default();
         let frame = Axis2Placement::default();
-        let mut torus =
-            Torus::create_canonical(&k, &frame, 4.0, 1.5, TorusOptions::default(), None).unwrap();
-        torus.inside_out = true;
-        torus.keeps_inside_out = false;
+        let opts = TorusOptions {
+            inside_out: true,
+            ..TorusOptions::default()
+        };
+        let torus = Torus::create_canonical(&k, &frame, 4.0, 1.5, opts, None).unwrap();
+        assert!(torus.inside_out, "made inside out");
         let mut s = Surface::from(torus);
         s.swap_uv(&k).unwrap();
         let SurfaceKind::Torus(t) = s.kind() else {
             panic!("a torus");
         };
         assert!(t.inside_out, "the swap dropped the torus's inside-out mark");
+        let generator = t.base().gen_curve().unwrap();
+        assert!(
+            generator.inside_out_bit(),
+            "the swap turned the generator over"
+        );
         assert!(t.base().swap_uv());
     }
 

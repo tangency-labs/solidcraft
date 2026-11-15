@@ -102,6 +102,13 @@ pub const CONSTRAINT_GALLERY: &[&str] = &[
     "sketch.constraint.perpendicular",
 ];
 
+/// Whether a Constrain-panel command is drawn as a small grid cell: the default gallery and any
+/// other constraint the user pins, since every constraint has a small `c_` icon in the same style.
+pub fn constraint_cell(id: &str) -> bool {
+    CONSTRAINT_GALLERY.contains(&id)
+        || (id.starts_with("sketch.constraint.") && solidcraft_engine::find_command(id).is_some_and(|c| c.icon.starts_with("c_")))
+}
+
 pub struct CommandGroup {
     pub label: &'static str,
     pub ids: &'static [&'static str],
@@ -254,6 +261,7 @@ pub const SECTIONS: &[Section] = &[
             "joint.as_built",
             "joint.origin",
             "joint.rigid_group",
+            "assembly.constraint.create",
             "joint.limits",
             "joint.gear",
             "joint.rack_pinion",
@@ -287,7 +295,7 @@ pub const SECTIONS: &[Section] = &[
         ids: &["file.insert_step", "file.insert_mesh", "pointcloud.insert", "component.insert_design", "file.save_mesh", "file.send_to_slicer"],
     },
     Section { tab: "INSERT", panel: "IMAGES", promoted: 3, ids: &["canvas.insert", "canvas.decal", "canvas.edit"] },
-    Section { tab: "INSERT", panel: "2D", promoted: 2, ids: &["sketch.insert_dxf", "sketch.insert_svg"] },
+    Section { tab: "INSERT", panel: "2D", promoted: 2, ids: &["sketch.insert_dxf", "sketch.insert_svg", "sketch.insert_airfoil"] },
     Section { tab: "INSERT", panel: "LIBRARY", promoted: 3, ids: &["parts.fastener", "parts.library", "parts.resize", "parts.insert"] },
     Section { tab: "INSERT", panel: "LINKS", promoted: 2, ids: &["component.update_links", "component.break_link"] },
     Section { tab: "INSPECT", panel: "MEASURE", promoted: 3, ids: &["inspect.measure", "inspect.center_of_mass", "component.properties"] },
@@ -407,6 +415,7 @@ pub const SECTIONS: &[Section] = &[
             "sketch.fit_curves_to_section",
             "sketch.insert_dxf",
             "sketch.insert_svg",
+            "sketch.insert_airfoil",
             "canvas.insert",
         ],
     },
@@ -1024,6 +1033,17 @@ mod tests {
         let plain = grouped_commands("SURFACE", "CREATE", &commands);
         assert!(plain.iter().all(|(h, _)| h.is_none()));
         assert_eq!(plain.iter().map(|(_, c)| c.id).collect::<Vec<_>>(), commands.iter().map(|c| c.id).collect::<Vec<_>>());
+    }
+
+    /// The Joints section's buttons stay as they were when Constrain joined it (#6061): Constrain
+    /// is in the section's menu, after the four promoted commands, so no one's default ribbon changes.
+    #[test]
+    fn constrain_joins_the_joints_menu_without_changing_its_buttons() {
+        let specs = solidcraft_engine::command_specs();
+        let (commands, count) = layout("ASSEMBLE", "JOINTS", &specs).unwrap();
+        let ids: Vec<&str> = commands.iter().map(|c| c.id).collect();
+        assert_eq!(ids.get(..count), Some(&["joint.create", "joint.as_built", "joint.origin", "joint.rigid_group"][..]), "{ids:?}");
+        assert!(ids.iter().skip(count).any(|id| *id == "assembly.constraint.create"), "{ids:?}");
     }
 
     #[test]

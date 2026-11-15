@@ -25,6 +25,7 @@ use crate::numbered::{NumberedLoop, NumberedRegion};
 use crate::{KernelError, Result};
 
 /// A profile segment as SMLib gets it, with the profile segments it stands for.
+#[derive(Clone)]
 pub(crate) struct Piece {
     pub seg: Seg2,
     pub numbers: Vec<usize>,
@@ -258,6 +259,46 @@ mod imp {
         }
         right.reverse();
         (left, right)
+    }
+
+    /// How sharply a closed run of pieces of one curve may turn back where it meets its own start
+    /// before it is broken (cosine of the turn, 169.9°). SMLib's check refuses a closed wall
+    /// whose control net turns back by more than 170° across its seam (#13243 is the same check
+    /// within a piece): a section drawn as one closed spline round a trailing edge sharper than
+    /// 10°. Just under 170°, so a run SMLib takes as it is stays one wall.
+    const SEAM_TURN: f64 = -0.984_503_179_974_436_7;
+
+    /// `pieces` with each closed run of pieces of one curve ([`Piece::joins_previous`]) that turns
+    /// back by more than [`SEAM_TURN`] where it meets its own start broken half-way round: the
+    /// same curve as two walls SMLib's check takes, each named by its first piece. A run that
+    /// turns back between two of its pieces is taken as it is.
+    fn broken_at_seams(plane: &Plane, pieces: &[Piece]) -> Result<Vec<Piece>> {
+        // The directions a free-form piece leaves its start and reaches its end in, along its
+        // control polygon as SMLib's control net has it.
+        let legs = |x: &Piece| -> Result<Option<(Vec3, Vec3)>> {
+            let Curve::Nurbs { points, .. } = curve(plane, &x.seg)? else { return Ok(None) };
+            let at = |q: &[f64; 4]| Vec3::new(q[0], q[1], q[2]);
+            let (Some(first), Some(last)) = (points.first().map(at), points.last().map(at)) else { return Ok(None) };
+            let tiny = 1e-12 * first.len().max(last.len()).max(1.0);
+            let leaves = points.iter().map(at).find(|q| q.dist(first) > tiny).and_then(|q| (q - first).normalized());
+            let reaches = points.iter().rev().map(at).find(|q| q.dist(last) > tiny).and_then(|q| (last - q).normalized());
+            Ok(leaves.zip(reaches))
+        };
+        let mut out = pieces.to_vec();
+        let mut i = 0;
+        while i < out.len() {
+            let j = i + 1 + out.iter().skip(i + 1).take_while(|x| x.joins_previous).count();
+            if j - i > 1
+                && let (Some(x), Some(y)) = (out.get(j - 1), out.get(i))
+                && x.seg.end().dist(y.seg.start()) <= 1e-9 * (1.0 + y.seg.start().len())
+                && matches!((legs(x)?, legs(y)?), (Some((_, end)), Some((start, _))) if end.dot(start) < SEAM_TURN)
+                && let Some(half) = out.get_mut(i + (j - i) / 2)
+            {
+                half.joins_previous = false;
+            }
+            i = j;
+        }
+        Ok(out)
     }
 
     /// Bézier curves of one degree, each starting where the one before ends, as the one B-spline
@@ -559,9 +600,11 @@ mod imp {
         if !inside.is_empty() {
             let (ops, order) = ops()?;
             let points = points(inside);
-            let ds = (0..n)
-                .map(|f| ops.face_distances(order, f, &points).map_err(|e| KernelError::Failed(format!("sweep history: face {f}: {e}"))))
-                .collect::<Result<Vec<_>>>()?;
+            // Only a face within `reach` of a point can claim it below or be its nearest, so the
+            // seam is asked about those alone and answers `None` for the rest: every face against
+            // every point grew with the square of the profile's segment count (#15134).
+            let ds =
+                ops.face_distances_within(order, &points, reach).map_err(|e| KernelError::Failed(format!("sweep history: face distances: {e}")))?;
             for (j, s) in inside.iter().enumerate() {
                 let d = |f: usize| ds.get(f).and_then(|d| d.get(j).copied().flatten()).unwrap_or(f64::INFINITY);
                 let nearest = (0..n).map(d).fold(f64::INFINITY, f64::min);
@@ -626,6 +669,8 @@ mod imp {
         let base = plane.offset(from);
         let n = plane.x.cross(plane.y).normalized().ok_or_else(|| KernelError::Invalid("profile plane".into()))?;
         let dir = n * sign.signum();
+        // Only extrusions take runs of pieces as one curve (`crate::build`).
+        let pieces = &broken_at_seams(&base, pieces)?;
         let c = curves(&base, pieces)?;
         let top = plane.offset(from + sign.signum() * distance);
         let edges = seeds(&base, pieces, |q| q);

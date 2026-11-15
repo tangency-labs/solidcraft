@@ -17,11 +17,12 @@ use solidcore::query::api_queries::{
     edge_face_gap_samples, face_normal_at_edge,
 };
 use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects};
+use solidcore::query::face::p1 as face_p1;
 use solidcore::topology::brep::outward_solid_failure;
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
 use solidcore::topology::{edge, face};
 use solidcore::topology::{Brep, BrepId, FaceId, FaceuseId, RegionId};
-use solidcore::{Point3, Vec3};
+use solidcore::{Kernel, Point3, Vec3};
 
 use crate::blend::middle;
 use crate::body::Body;
@@ -35,6 +36,17 @@ impl Answer for Distance {}
 impl Answer for solidcore::geom::extent3d::Extent3d {}
 impl Answer for [f64; 3] {}
 impl Answer for Vec<Option<f64>> {}
+impl Answer for Vec<Vec<Option<f64>>> {}
+impl Answer for Vec<Result<PointClass>> {}
+
+/// A planar face square to a direction ([`Body::face_square_level`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SquareFaceLevel {
+    /// The signed distance from the origin to the face's plane, along the direction.
+    pub level: f64,
+    /// The face's own tolerance: levels closer than this are the same level on the face.
+    pub tolerance: f64,
+}
 
 fn array(v: Vec3) -> [f64; 3] {
     [v.x, v.y, v.z]
@@ -95,6 +107,122 @@ pub enum PointClass {
     OnBoundary,
 }
 
+/// Where the kernel's classification put a point ([`locate_points`]), before any rule for a
+/// region it is unsure of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Located {
+    /// Within the body's zone tolerance of a face, an edge or a vertex.
+    OnBoundary,
+    /// In `region`: material (`Some(true)`), void (`Some(false)`), or a region the kernel is
+    /// unsure of (`None`, its `IsVoid` `UNSURE`).
+    InRegion {
+        /// The region the point lies in.
+        region: RegionId,
+        /// Whether the region is material, `None` when the kernel is unsure.
+        material: Option<bool>,
+    },
+}
+
+/// Why [`locate_points`] could not place a point.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LocateFailure {
+    /// A coordinate is not finite; the point was not classified.
+    NotFinite,
+    /// The kernel's classification refused the point.
+    Classify(solidcore::SolidError),
+    /// The region the point lies in could not be read.
+    Region(solidcore::SolidError),
+    /// The classification succeeded with a class other than a vertex, an edge, a face or a
+    /// region (`SM_ERR` upstream).
+    Unclassified,
+}
+
+/// Where each of `points` lies against `b`, in order: `SmBrep::Point3DClassify` at the body's
+/// own zone tolerance (`SmTol::GetZoneTol3d`), with boundary intersections, so a point within
+/// that tolerance of a vertex, an edge or a face is on the boundary and never decided by a ray.
+/// The tolerance and one `BrepClassifier` (its private copy of `b`, which a solve may give UV
+/// trim curves, and its search structures) are made once for all the points. The kernel's own
+/// answer, before any rule for a region it is unsure of: [`Body::classify_points`] refuses such
+/// a region, a caller holding a raw B-rep (SolidCraft's smlib) chooses its own rule.
+#[must_use]
+pub fn locate_points(
+    k: &Kernel,
+    b: &Brep,
+    points: &[[f64; 3]],
+) -> Vec<std::result::Result<Located, LocateFailure>> {
+    let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
+    let mut classifier = BrepClassifier::of_brep(b);
+    points
+        .iter()
+        .map(|&p| locate(k, &mut classifier, tol, p))
+        .collect()
+}
+
+/// One point of [`locate_points`] through `classifier` at zone tolerance `tol`.
+fn locate(
+    k: &Kernel,
+    classifier: &mut BrepClassifier<'_, '_>,
+    tol: f64,
+    p: [f64; 3],
+) -> std::result::Result<Located, LocateFailure> {
+    let p = point(p).map_err(|_| LocateFailure::NotFinite)?;
+    let pc = classifier
+        .point_3d_classify(k, p, tol, true)
+        .map_err(LocateFailure::Classify)?;
+    match (pc.point_class(), pc.object()) {
+        (PointClassType::Vertex | PointClassType::Edge | PointClassType::Face, _) => {
+            Ok(Located::OnBoundary)
+        }
+        (PointClassType::Region, Some(EntityRef::Region(region))) => {
+            match region_material(classifier.brep(), region) {
+                Ok(m) => Ok(Located::InRegion {
+                    region,
+                    material: Some(m),
+                }),
+                Err(solidcore::SolidError::UnsureRegion { .. }) => Ok(Located::InRegion {
+                    region,
+                    material: None,
+                }),
+                Err(e) => Err(LocateFailure::Region(e)),
+            }
+        }
+        _ => Err(LocateFailure::Unclassified),
+    }
+}
+
+/// The only answer of a [`locate_points`] call on one point.
+fn one(
+    mut v: Vec<std::result::Result<Located, LocateFailure>>,
+) -> std::result::Result<Located, LocateFailure> {
+    v.pop().unwrap_or(Err(LocateFailure::Unclassified))
+}
+
+/// [`Body::classify_point`]'s class of a point [`locate_points`] placed: a region the kernel
+/// is unsure of is refused by name, never read as outside or inside.
+fn point_class(l: std::result::Result<Located, LocateFailure>) -> Result<PointClass> {
+    match l {
+        Ok(Located::OnBoundary) => Ok(PointClass::OnBoundary),
+        Ok(Located::InRegion {
+            material: Some(true),
+            ..
+        }) => Ok(PointClass::Inside),
+        Ok(Located::InRegion {
+            material: Some(false),
+            ..
+        }) => Ok(PointClass::Outside),
+        Ok(Located::InRegion {
+            region,
+            material: None,
+        }) => Err(Error::UnsureRegion {
+            region: region.index(),
+        }),
+        Err(LocateFailure::NotFinite) => Err(Error::Argument),
+        Err(LocateFailure::Classify(e) | LocateFailure::Region(e)) => Err(status(e)),
+        // Point3DClassify reports only the four classes above on success: SM_ERR.
+        Err(LocateFailure::Unclassified) => Err(Error::Status(solidcore::error::SM_ERR)),
+    }
+}
+
 /// A distance with its proved rounding bound: the exact distance between the points it was
 /// measured between is within `bound` of `value`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -146,6 +274,19 @@ pub struct EdgePoint {
     pub distance: f64,
 }
 
+/// The point of an edge nearest a ray ([`Body::edge_closest_to_ray`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EdgeRayPoint {
+    /// The point on the edge.
+    pub point: [f64; 3],
+    /// The edge curve's parameter there.
+    pub parameter: f64,
+    /// The ray's point nearest it.
+    pub on_ray: [f64; 3],
+    /// The kernel solve's distance between the two (not certified: a solve's).
+    pub distance: f64,
+}
+
 /// A face's area and the centroid of that area ([`Body::face_centroid`]), from one
 /// integration. **Estimated, not proved** ([`MassPropertiesEstimate`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -185,8 +326,8 @@ impl Body {
     /// **Estimated, not proved** ([`MassPropertiesEstimate`]).
     ///
     /// # Errors
-    /// [`Error::Status`] `SM_ERR_INVALID_INPUT` for an accuracy the kernel refuses, no mass or no
-    /// area, or a result that is not finite; [`Error::Status`] `SM_ERR_NOT_CONVERGING` when the
+    /// [`Error::Refused`], in the kernel's words, for an accuracy it refuses, no mass or no area,
+    /// or a result that is not finite; [`Error::Status`] `SM_ERR_NOT_CONVERGING` when the
     /// integration does not converge (the kernel's `NotConverged`); [`Error::Degenerate`] for
     /// an integrand that is not finite; [`Error::Unsupported`] for a span the integrator took
     /// no step over; [`Error::UnsureRegion`] for a region the kernel is unsure is material.
@@ -226,8 +367,8 @@ impl Body {
     /// ([`MassPropertiesEstimate`]).
     ///
     /// # Errors
-    /// [`Error::Status`] `SM_ERR_INVALID_INPUT` for an accuracy the kernel refuses or an area
-    /// that is not finite; the kernel's error.
+    /// [`Error::Refused`] for an accuracy the kernel refuses, in its words; [`Error::Status`]
+    /// `SM_ERR_INVALID_INPUT` for an area that is not finite; the kernel's error.
     pub fn area(&self, relative_accuracy: f64) -> Result<f64> {
         let a = with_body("area", self, |k, b| {
             Ok(
@@ -299,29 +440,30 @@ impl Body {
     /// point in a region the kernel is unsure is material (never read as outside or inside,
     /// the rule of the mass properties too); the kernel's status.
     pub fn classify_point(&self, p: [f64; 3]) -> Result<PointClass> {
-        let p = point(p)?;
+        point(p)?;
         with_body("classify_point", self, |k, b| {
-            let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
-            let mut classifier = BrepClassifier::of_brep(b);
-            let pc = match classifier.point_3d_classify(k, p, tol, true) {
-                Ok(pc) => pc,
-                Err(e) => return Ok(Err(status(e))),
-            };
-            Ok(match (pc.point_class(), pc.object()) {
-                (PointClassType::Vertex | PointClassType::Edge | PointClassType::Face, _) => {
-                    Ok(PointClass::OnBoundary)
-                }
-                (PointClassType::Region, Some(EntityRef::Region(r))) => {
-                    Ok(if region_material(classifier.brep(), r)? {
-                        PointClass::Inside
-                    } else {
-                        PointClass::Outside
-                    })
-                }
-                // Point3DClassify reports only the four classes above on success: SM_ERR.
-                _ => Err(Error::Status(solidcore::error::SM_ERR)),
-            })
+            Ok(point_class(one(locate_points(k, b, &[p]))))
         })?
+    }
+
+    /// [`Body::classify_point`] for each of `points`, in order, through one classification of
+    /// the body ([`locate_points`]): its zone tolerance, its private copy and its search
+    /// structures are made once for all of them, not once a point (on a large body they cost
+    /// far more than a point's own solve). Each point's class, or its own error.
+    ///
+    /// # Errors
+    /// The kernel's error from the call itself; each point's own error is in its place, as
+    /// [`Body::classify_point`] gives it.
+    pub fn classify_points(&self, points: &[[f64; 3]]) -> Result<Vec<Result<PointClass>>> {
+        if points.iter().all(|&p| point(p).is_err()) {
+            return Ok(points.iter().map(|_| Err(Error::Argument)).collect());
+        }
+        with_body("classify_points", self, |k, b| {
+            Ok(locate_points(k, b, points)
+                .into_iter()
+                .map(point_class)
+                .collect())
+        })
     }
 
     /// Whether the body is one closed manifold solid (`SmApiBrepIsManifoldSolid`).
@@ -382,6 +524,34 @@ impl Body {
         }))
     }
 
+    /// The point of record edge `edge` nearest the ray from `origin` along `direction` (the
+    /// kernel's `query::edge::closest_point_to_ray`), with the ray's point nearest it: a pick
+    /// through the view lands on the edge drawn under the pointer in any view, where the edge
+    /// point nearest one point of the ray ([`Body::edge_closest_point`]) does so only when that
+    /// point is the nearest. `None` where the kernel's solve finds no point.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the edges or a coordinate that is not finite; the
+    /// kernel's refusal of a direction of no length; any other kernel error.
+    pub fn edge_closest_to_ray(
+        &self,
+        order: &Order,
+        edge: usize,
+        origin: [f64; 3],
+        direction: [f64; 3],
+    ) -> Result<Option<EdgeRayPoint>> {
+        let (e, o, d) = (order::edge(order, edge)?, point(origin)?, point(direction)?);
+        let c = with_body("edge_closest_to_ray", self, |k, b| {
+            solidcore::query::edge::closest_point_to_ray(k, b, e, o, d)
+        })?;
+        Ok(c.map(|c| EdgeRayPoint {
+            point: array(c.point),
+            parameter: c.parameter,
+            on_ray: array(c.on_ray),
+            distance: c.distance,
+        }))
+    }
+
     /// The distance from each of `points` to record face `face` as it is trimmed
     /// (`SmApiFaceClosestPoint`), or `None` for a point the kernel's solve answers with a status
     /// (no point found). The face's shape is made once for all the points.
@@ -421,6 +591,38 @@ impl Body {
                     Ok(c.map(|c| c.distance))
                 })
                 .collect()
+        })
+    }
+
+    /// The distance from each of `points` to every record face as it is trimmed, face by face in
+    /// record order: row `f` holds one entry per point, `None` where the kernel's solve answers
+    /// with a status, and `None` where no point of face `f` comes within `reach` of that point.
+    ///
+    /// The kernel skips a face no point comes within `reach` of, because a face lies inside its
+    /// own box: such a point is further than `reach` from the face. A caller that keeps only
+    /// distances within `reach` therefore reads what [`Body::face_distances`] gives face by face,
+    /// including each point's nearest face whenever that distance is within `reach`.
+    ///
+    /// The whole pass is one kernel call, where [`Body::face_distances`] is one call per face.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a coordinate that is not finite; the kernel's refusal of a `reach`
+    /// that is not finite and at least zero; any other kernel error.
+    pub fn face_distances_within(
+        &self,
+        order: &Order,
+        points: &[[f64; 3]],
+        reach: f64,
+    ) -> Result<Vec<Vec<Option<f64>>>> {
+        let faces = (0..order.faces.len())
+            .map(|f| order::face(order, f))
+            .collect::<Result<Vec<_>>>()?;
+        let points = points
+            .iter()
+            .map(|p| point(*p))
+            .collect::<Result<Vec<_>>>()?;
+        with_body("face_distances_within", self, |k, b| {
+            q::faces_closest_distances_within(k, b, BrepId::from_index(0), &faces, &points, reach)
         })
     }
 
@@ -473,9 +675,9 @@ impl Body {
     /// ([`MassPropertiesEstimate`]).
     ///
     /// # Errors
-    /// [`Error::Argument`] for an index past the faces; [`Error::Status`]
-    /// `SM_ERR_INVALID_INPUT` for an accuracy the kernel refuses or an area that is not finite;
-    /// the kernel's error.
+    /// [`Error::Argument`] for an index past the faces; [`Error::Refused`] for an accuracy the
+    /// kernel refuses, in its words; [`Error::Status`] `SM_ERR_INVALID_INPUT` for an area that
+    /// is not finite; the kernel's error.
     pub fn face_area(&self, order: &Order, face: usize, relative_accuracy: f64) -> Result<f64> {
         let f = order::face(order, face)?;
         let a = with_body("face_area", self, |k, b| {
@@ -487,15 +689,41 @@ impl Body {
         Ok(a)
     }
 
+    /// The point of record face `face`'s surface nearest `p`, when `p` lies on that face itself
+    /// within `tolerance` (on its trimmed area, an edge or a vertex of it), else `None`: the
+    /// kernel drops `p` onto the surface and classifies it against the face's own trim loops
+    /// (`query::face::p1::point_on_face`), so a point on another face of the same surface is
+    /// not on this one.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces, a coordinate that is not finite or a
+    /// tolerance that is not finite and positive; the kernel's error.
+    pub fn point_on_face(
+        &self,
+        order: &Order,
+        face: usize,
+        p: [f64; 3],
+        tolerance: f64,
+    ) -> Result<Option<[f64; 3]>> {
+        let f = order::face(order, face)?;
+        let p = point(p)?;
+        if !(tolerance.is_finite() && tolerance > 0.0) {
+            return Err(Error::Argument);
+        }
+        with_body("point_on_face", self, |k, b| {
+            face_p1::point_on_face(k, b, f, p, tolerance).map(|n| Ok(n.map(|n| [n.x, n.y, n.z])))
+        })?
+    }
+
     /// The area of record face `face` and the centroid of that area
     /// (`SmApiFaceComputeCentroid`, one integration of the area and its first moments) at
     /// `relative_accuracy`, as the kernel's contract takes it (ops passes it on as given).
     /// **Estimated, not proved** ([`MassPropertiesEstimate`]).
     ///
     /// # Errors
-    /// [`Error::Argument`] for an index past the faces; [`Error::Status`]
-    /// `SM_ERR_INVALID_INPUT` for an accuracy the kernel refuses, a face of no area, or a result
-    /// that is not finite; the kernel's error.
+    /// [`Error::Argument`] for an index past the faces; [`Error::Refused`] for an accuracy the
+    /// kernel refuses or a face of no area, in its words; [`Error::Status`]
+    /// `SM_ERR_INVALID_INPUT` for a result that is not finite; the kernel's error.
     pub fn face_centroid(
         &self,
         order: &Order,
@@ -553,6 +781,50 @@ impl Body {
             value: array(n.normal.value),
             bound: n.normal.bound,
         }))
+    }
+
+    /// Where record face `face` lies along `direction`, when it is a plane square to it: the
+    /// signed distance from `origin` to the face's plane measured along `direction` (a point of
+    /// the face, its centroid, dotted with the unit `direction`), and the face's own tolerance
+    /// (`SmFace::GetTolerance`), the distance within which the kernel takes a point for being on
+    /// the face. `None` for a face that is not planar ([`Body::face_plane_normal`]) or whose
+    /// normal is not parallel to `direction`: the normal's cross with the unit `direction` is
+    /// longer than the normal's proved bound plus the kernel's model tolerance
+    /// (`NL_MTOL`, `nurbs::math::MODEL_TOL`), the tilt below which the kernel takes two
+    /// directions for the same.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces, a `direction` or `origin` that is not
+    /// finite, or input the kernel's query refuses (a `direction` of no length); the errors of
+    /// [`Body::face_plane_normal`] and [`Body::face_centroid`].
+    pub fn face_square_level(
+        &self,
+        order: &Order,
+        face: usize,
+        direction: [f64; 3],
+        origin: [f64; 3],
+    ) -> Result<Option<SquareFaceLevel>> {
+        let f = order::face(order, face)?;
+        let direction = point(direction)?;
+        let origin = point(origin)?;
+        let Some(n) = self.face_plane_normal(order, face)? else {
+            return Ok(None);
+        };
+        let on_face = point(self.face_centroid(order, face, 1e-8)?.centroid)?;
+        let Some(level) =
+            q::face_square_level(point(n.value)?, n.bound, on_face, direction, origin).map_err(
+                |e| match e {
+                    solidcore::SolidError::InvalidInput { .. } => Error::Argument,
+                    e => status(e),
+                },
+            )?
+        else {
+            return Ok(None);
+        };
+        let tolerance = with_body("face_tolerance", self, |_k, b| {
+            Ok(Ok::<f64, Error>(face::tolerance(b, f)?))
+        })??;
+        Ok(Some(SquareFaceLevel { level, tolerance }))
     }
 
     /// The length of record edge `edge` (`SmApiEdgeComputeLength`) at `relative_accuracy`, as
@@ -801,6 +1073,65 @@ pub(crate) mod tests {
         );
     }
 
+    /// A batch reads an unsure region as the one-point call does: `classify_points` refuses that
+    /// point by name and classifies the others; `locate_points` hands the kernel's answer on as
+    /// it is, for a caller with a rule of its own.
+    #[test]
+    fn a_batch_refuses_an_unsure_region_point_by_point() {
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+        let inner = {
+            let mut k = b.lock();
+            let infinite = k.infinite_region();
+            let inner: Vec<_> = solidcore::topology::brep::p1::regions(&k, None)
+                .unwrap()
+                .into_iter()
+                .filter(|&r| Some(r) != infinite)
+                .collect();
+            assert_eq!(inner.len(), 1);
+            k.region_mut(inner[0]).unwrap().set_is_void(2);
+            inner[0]
+        };
+        let points = [
+            [0.5, 1.0, 1.5],
+            [5.0, 1.0, 1.5],
+            [1.0, 1.0, 1.5],
+            [f64::NAN, 0.0, 0.0],
+        ];
+        let unsure = Error::UnsureRegion {
+            region: inner.index(),
+        };
+        assert_eq!(
+            b.classify_points(&points).unwrap(),
+            vec![
+                Err(unsure.clone()),
+                Ok(PointClass::Outside),
+                Ok(PointClass::OnBoundary),
+                Err(Error::Argument)
+            ]
+        );
+        assert_eq!(b.classify_point(points[0]), Err(unsure));
+        let located = session::run("locate", |k| Ok(Some(locate_points(k, &b.lock(), &points))))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            located[0],
+            Ok(Located::InRegion {
+                region: inner,
+                material: None
+            })
+        );
+        assert!(matches!(
+            located[1],
+            Ok(Located::InRegion {
+                material: Some(false),
+                ..
+            })
+        ));
+        assert_eq!(located[2], Ok(Located::OnBoundary));
+        assert_eq!(located[3], Err(LocateFailure::NotFinite));
+    }
+
     /// Two 10 mm cubes and the cube [3, 7]^3 inside the first, its faces turned
     /// (`SwapUV`: each surface's normal reversed, the face's other use made upward) so that
     /// they point into the cavity, as an import or `OrientTrimmedSurfaces` may leave them.
@@ -1037,6 +1368,50 @@ pub(crate) mod tests {
             area += ball.face_area(&o, f, 1e-8).unwrap();
         }
         assert!(rel(area, 36.0 * PI), "{area}");
+    }
+
+    /// A box's faces square to +Z: the top and the bottom, at their closed-form levels measured
+    /// from an origin off the box; the four sides are not square to it, and nor is a direction
+    /// tilted past the model tolerance; a sphere has no planar face.
+    #[test]
+    fn a_box_face_square_to_a_direction_is_found_at_its_level() {
+        all_fixes();
+        let b = make_box([0.0, 0.0, 1.0], [2.0, 3.0, 4.0]).unwrap();
+        let o = kernel_order(&b);
+        let mut levels = Vec::new();
+        for f in 0..o.faces.len() {
+            if let Some(s) = b
+                .face_square_level(&o, f, [0.0, 0.0, 2.0], [5.0, 5.0, 0.5])
+                .unwrap()
+            {
+                assert!(s.tolerance > 0.0 && s.tolerance < 1e-3, "{s:?}");
+                levels.push(s.level);
+            }
+        }
+        levels.sort_by(f64::total_cmp);
+        assert_eq!(levels.len(), 2, "{levels:?}");
+        assert!(
+            (levels[0] - 0.5).abs() < 1e-9 && (levels[1] - 4.5).abs() < 1e-9,
+            "{levels:?}"
+        );
+        for f in 0..o.faces.len() {
+            assert_eq!(
+                b.face_square_level(&o, f, [0.0, 0.01, 1.0], [0.0; 3])
+                    .unwrap(),
+                None
+            );
+        }
+        let ball = crate::make_sphere([0.0, 0.0, 0.0], 3.0).unwrap();
+        let ob = kernel_order(&ball);
+        assert_eq!(
+            ball.face_square_level(&ob, 0, [0.0, 0.0, 1.0], [0.0; 3])
+                .unwrap(),
+            None
+        );
+        assert!(matches!(
+            b.face_square_level(&o, 0, [0.0; 3], [0.0; 3]),
+            Err(Error::Argument)
+        ));
     }
 
     /// The partition of two merged boxes: its plane normal refused (no side faces out), as

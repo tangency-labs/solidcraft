@@ -919,6 +919,54 @@ fn a_format_39_left_hand_thread_and_tapped_hole_open_left_handed() {
     }
 }
 
+/// A tapped hole saves its thread's tolerance class (#16336) as given, only with a thread that takes
+/// it; an edit that doesn't give one keeps it while the thread still takes it, and drops it when the
+/// thread changes to one that doesn't. A hole without a class saves no key, and a hand-edited class
+/// the thread doesn't take fails the hole with the reason. The class changes no geometry.
+#[test]
+fn a_tapped_holes_class_is_saved_and_kept_through_an_edit() {
+    let class_of = |s: &Session, id: u64| match &s.doc.feature(id).unwrap().kind {
+        solidcraft_doc::FeatureKind::Hole { thread_class, .. } => thread_class.clone(),
+        _ => panic!("expected a hole"),
+    };
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 60, "height": 12, "body_name": "Plate"}));
+    let plain = json!({"position": [20, 30, 12], "thread": "M8", "depth": 10});
+    let hole = run(&mut s, "solid.hole", plain.clone())["feature"].as_u64().unwrap();
+    assert!(!s.doc.to_json().contains("thread_class"), "no class, no key: older designs read the same");
+    let untouched = volume(&mut s, "Plate");
+    let classed = json!({"position": [20, 30, 12], "thread": "M8", "depth": 10, "thread_class": "6H"});
+    run(&mut s, "timeline.redefine", json!({"feature": hole, "command": "solid.hole", "params": classed}));
+    assert_eq!(class_of(&s, hole).as_deref(), Some("6H"));
+    assert!(s.doc.to_json().contains(r#""thread_class": "6H""#), "saved as given (the design file is pretty-printed)");
+    assert!((volume(&mut s, "Plate") - untouched).abs() < 1e-6, "the class changes no geometry");
+    // The Hole window sends no class: an edit without one keeps it while the thread takes it.
+    let deeper = json!({"position": [20, 30, 12], "thread": "M8", "depth": 11});
+    run(&mut s, "timeline.redefine", json!({"feature": hole, "command": "solid.hole", "params": deeper}));
+    assert_eq!(class_of(&s, hole).as_deref(), Some("6H"), "kept through an edit");
+    let unified = json!({"position": [20, 30, 12], "thread": "1/4-20 UNC", "depth": 11});
+    run(&mut s, "timeline.redefine", json!({"feature": hole, "command": "solid.hole", "params": unified}));
+    assert_eq!(class_of(&s, hole), None, "a 1/4-20 UNC hole doesn't take 6H: dropped with the size");
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.model.results.iter().all(|r| r.error.is_none()));
+    for (params, why) in [
+        (json!({"position": [40, 30, 12], "depth": 10, "diameter": 6, "thread_class": "6H"}), "`thread_class` needs `thread` (a tapped hole)"),
+        (json!({"position": [40, 30, 12], "depth": 10, "thread": "M8", "thread_class": "6g"}), "an ISO metric tapped hole's class is"),
+        (json!({"position": [40, 30, 12], "depth": 10, "thread": "1/4-20 UNC", "thread_class": "2A"}), "class is 1B, 2B or 3B"),
+        (json!({"position": [40, 30, 12], "depth": 10, "thread": "G 1/4", "thread_class": "2B"}), "has no tolerance class"),
+    ] {
+        let err = s.execute("solid.hole", &params).unwrap_err().to_string();
+        assert!(err.contains(why), "{params}: {err}");
+    }
+    // A hand-edited class the thread doesn't take fails the hole, saying why.
+    let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let saved = v["features"].as_array_mut().unwrap().iter_mut().find(|f| f["id"] == json!(hole)).unwrap();
+    saved["thread_class"] = json!("6H");
+    let edited = Session::new(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
+    let failed: Vec<&String> = edited.model.results.iter().filter_map(|r| r.error.as_ref()).collect();
+    assert!(failed.iter().any(|e| e.contains("a Unified tapped hole's class is 1B, 2B or 3B")), "{failed:?}");
+}
+
 /// A trapezoidal nut: the groove from the drilled minor diameter D1 = d - P out to the
 /// internal root D4 = d + 2 ac (ISO 2904), 2π∫ r w(r) dr per turn.
 #[test]
@@ -1537,6 +1585,71 @@ fn a_hole_with_wall_for_the_groove_is_left_as_drilled() {
     assert!(e.contains("does not fit a 20.00 mm hole") && e.contains("takes M20"), "{e}");
 }
 
+/// #14191: the fill goes all the way round the hole, so a hole whose wall is open along the
+/// thread is not filled in: one that breaks out of the side of the part, one a cross hole meets,
+/// one drilled into a slanted face. Each is refused with the drill to use, and the part is left as
+/// it was. A blind hole and a chamfered one are still filled, and so are a counterbored hole and a
+/// cross-drilled one where the thread stops short of the counterbore and the cross hole.
+#[test]
+fn a_hole_open_along_the_thread_is_not_filled_in() {
+    let block = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [-20, -20, 0], "length": 40, "width": 40, "height": 20, "body_name": "Blk"}));
+        s
+    };
+    let cut = |s: &mut Session, dia: f64, height: f64, base: [f64; 3], axis: &str| {
+        run(s, "solid.cylinder", json!({"diameter": dia, "height": height, "base": base, "axis": axis, "operation": "cut"}));
+    };
+    let m12 = |face: [f64; 3]| json!({"face": face, "designation": "M12", "modeled": true});
+
+    let mut side = block();
+    cut(&mut side, 12.0, 20.0, [0.0, 16.0, 0.0], "Z");
+    let mut cross = block_with_bore(12.0);
+    cut(&mut cross, 4.0, 20.0, [-20.0, 0.0, 10.0], "X");
+    let mut slanted = Session::default();
+    run(&mut slanted, "sketch.create", json!({"plane": "XZ", "name": "P"}));
+    // On XZ the sketch's second coordinate runs down: the top falls from z = 25 to z = 15.
+    run(&mut slanted, "sketch.line", json!({"points": [[-20, 0], [20, 0], [20, -15], [-20, -25]], "closed": true}));
+    run(&mut slanted, "sketch.finish", json!({}));
+    run(&mut slanted, "solid.extrude", json!({"sketch": "P", "distance": 40, "direction": "symmetric", "body_name": "Blk"}));
+    cut(&mut slanted, 12.0, 30.0, [0.0, 0.0, 0.0], "Z");
+    for (what, mut s, face) in [("side", side, [-6.0, 16.0, 10.0]), ("cross hole", cross, [0.0, 6.0, 15.0]), ("slanted", slanted, [0.0, 6.0, 8.0])] {
+        let before = volume(&mut s, "Blk");
+        let e = s.execute("solid.thread", &m12(face)).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("this 12 mm hole is too wide for a modelled M12 thread and can't be filled in"), "{what}: {e}");
+        assert!(e.contains("drill 10.3 mm for M12"), "{what}: {e}");
+        assert!((volume(&mut s, "Blk") - before).abs() < 1e-9, "{what}: the part changed");
+    }
+
+    let mut blind = block();
+    cut(&mut blind, 12.0, 10.0, [0.0, 0.0, 10.0], "Z");
+    let mut counterbored = block_with_bore(12.0);
+    cut(&mut counterbored, 20.0, 5.0, [0.0, 0.0, 15.0], "Z");
+    let mut chamfered = block_with_bore(12.0);
+    run(&mut chamfered, "solid.chamfer", json!({"edges": [[6, 0, 20]], "distance": 1}));
+    let mut cross_drilled = block_with_bore(12.0);
+    cut(&mut cross_drilled, 4.0, 20.0, [-20.0, 0.0, 4.0], "X");
+    // 10 mm of thread from the end at `from`.
+    let part_way = |face: [f64; 3], from: [f64; 3]| {
+        let mut p = m12(face);
+        p["from"] = json!(from);
+        p["length"] = json!(10);
+        p
+    };
+    for (what, mut s, p) in [
+        ("blind", blind, m12([6.0, 0.0, 15.0])),
+        ("chamfered", chamfered, m12([6.0, 0.0, 10.0])),
+        ("counterbored", counterbored, part_way([6.0, 0.0, 5.0], [6.0, 0.0, 0.0])),
+        ("cross-drilled", cross_drilled, part_way([6.0, 0.0, 15.0], [6.0, 0.0, 20.0])),
+    ] {
+        let before = volume(&mut s, "Blk");
+        let made = s.execute("solid.thread", &p).unwrap_or_else(|e| panic!("{what}: {e}"));
+        let warning = made["feature"].as_u64().and_then(|f| s.model.result(f)).and_then(|r| r.warning.clone()).unwrap_or_default();
+        assert!(warning.contains("narrowed the 12 mm hole"), "{what}: {warning}");
+        assert!(volume(&mut s, "Blk") > before + 1.0, "{what}: the hole was not filled in");
+    }
+}
+
 /// #11609: a design saved with an automatic thread keeps the size it had (a 12 mm hole stays
 /// M14), while the same thread made now takes M12.
 #[test]
@@ -1648,4 +1761,36 @@ fn a_tapped_hole_across_slots_is_threaded_along_every_piece_of_its_wall() {
         let (cut, drilled) = (volume_between(&s, "Part", (z0, z1), None), volume_between(&plain, "Part", (z0, z1), None));
         assert!(cut < drilled - 1.0, "z {z0}..{z1}: {cut} vs {drilled}");
     }
+}
+
+/// #16668: two components built alike each have a cylinder at the same place in their own
+/// coordinates. A thread made in the second one is on the second one's body: cut into it when
+/// modelled, and recorded on it when cosmetic. It went on the first component's body.
+#[test]
+fn a_thread_goes_on_a_body_of_its_own_component() {
+    let studs = |modeled: bool| {
+        let mut s = Session::default();
+        for name in ["Stud A", "Stud B"] {
+            run(&mut s, "component.activate", json!({"component": 0}));
+            run(&mut s, "component.create", json!({"name": name}));
+            run(&mut s, "solid.cylinder", json!({"diameter": 8, "height": 20}));
+        }
+        // Stud B is the active component.
+        run(&mut s, "solid.thread", json!({"face": [4, 0, 10], "designation": "M8x1.25", "modeled": modeled}));
+        s
+    };
+    let body_of = |s: &Session, name: &str| {
+        let comp = s.doc.components.iter().find(|c| c.name == name).map(|c| c.id).unwrap();
+        s.model.state().bodies.iter().find(|b| b.component == comp).map(|b| b.name.clone()).unwrap()
+    };
+    let plain = PI * 16.0 * 20.0;
+    let mut s = studs(true);
+    let (a, b) = (body_of(&s, "Stud A"), body_of(&s, "Stud B"));
+    assert_ne!(a, b);
+    let (va, vb) = (volume(&mut s, &a), volume(&mut s, &b));
+    assert!((va - plain).abs() < 0.5, "Stud A is left as it was: {va} against {plain}");
+    assert!(vb < plain - 20.0, "Stud B is threaded: {vb} against {plain}");
+    let s = studs(false);
+    let on: Vec<String> = s.model.state().threads.iter().map(|t| t.body.clone()).collect();
+    assert_eq!(on, [body_of(&s, "Stud B")]);
 }

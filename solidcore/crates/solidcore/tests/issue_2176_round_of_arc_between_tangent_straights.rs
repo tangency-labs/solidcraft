@@ -6,19 +6,18 @@
 //! continues it tangentially with its convexity, and the vertical seam where the corner's
 //! cylinder runs tangent into the flat side. The round's rail on the top face (a circle of
 //! radius 1.5) runs alongside the straight edge and never meets it. Pinned SMLib fails the
-//! corner (`SM_FILERR_VERTEX_PROBLEM`, 1001); with `fillet_nx1_end_rib_global_merge` (WR-303) the
-//! end rib is deleted for the global merge, which cannot end a round lying along the
-//! continued edge, and `DoFilleting` leaves an open body (non-manifold, nothing removed),
-//! which `fillet_edges` refuses with `fillet_refuse_non_manifold_result`.
+//! corner (`SM_FILERR_VERTEX_PROBLEM`, 1001); with WR-303's global merge alone the end rib
+//! is deleted for the global merge, which cannot end a round lying along the continued
+//! edge, and `DoFilleting` left an open body (non-manifold, nothing removed).
 //!
-//! With `fillet_round_ends_at_tangent_continuation` (WR-674) the round ends at its section
+//! With WR-674 the round ends at its section
 //! through each vertex: the removed region is the round's section (1 - pi/4) r^2 about the
 //! corner's axis over the quarter turn, closed by flat ends, so by Pappus it removes exactly
 //! (1 - pi/4) r^2 (pi/2) (2 - c), c the section's centroid off the corner's wall.
 //!
 //! The fork's End at a smooth vertex (smlib#124, 41a39ec; WR-697) ends the round there
-//! instead, on the plane square to its edge: the same body, with or without WR-674 (whose
-//! path the End replaces). Its neighbours end the same way
+//! instead, on the plane square to its edge: the same body (the End replaces WR-674's
+//! path). Its neighbours end the same way
 //! where they run on tangentially into an edge not picked. Their figures are the fork's at
 //! 18e96f1 (`SmApiFilletEdges` on the same plate, `SmApiBrepComputeVolume` at 1e-10).
 
@@ -49,9 +48,8 @@ const RADIUS: f64 = 0.5;
 /// A point on the R2 corner arc at x > 0.
 const CORNER: [f64; 3] = [3.414_213_56, 32.525_324_7, 2.0];
 
-/// Every opt-in fix on except `geometric_g2_continuity` (SolidCraft's set, as in the issue),
-/// with WR-674 as given.
-fn kernel(wr674: bool) -> Kernel {
+/// Every opt-in fix on except `geometric_g2_continuity` (SolidCraft's set, as in the issue).
+fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
@@ -59,7 +57,6 @@ fn kernel(wr674: bool) -> Kernel {
             *f.flag_mut(name).unwrap() = true;
         }
     }
-    f.fillet_round_ends_at_tangent_continuation = wr674;
     k.fixes = f;
     k
 }
@@ -138,7 +135,7 @@ fn pappus() -> f64 {
 
 #[test]
 fn the_corner_arc_rounds_alone_with_flat_ends() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = plate(&mut k);
     let before = volume(&k, &mut b);
     let e = pick(&k, &b, CORNER);
@@ -160,7 +157,7 @@ fn the_corner_arc_rounds_alone_with_flat_ends() {
 /// `DoFilleting` alone (as SolidCraft drives the executive) builds the same closed body.
 #[test]
 fn do_filleting_builds_the_closed_body() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = plate(&mut k);
     let before = volume(&k, &mut b);
     let e = pick(&k, &b, CORNER);
@@ -182,25 +179,6 @@ fn do_filleting_builds_the_closed_body() {
     assert!(is_manifold_solid(&b).unwrap());
     let removed = before - volume(&k, &mut b);
     assert!((removed - pappus()).abs() <= 1e-7, "removed {removed}");
-}
-
-/// Without WR-674 the blend corner's End at a smooth vertex (the fork's 41a39ec) builds the
-/// round with flat ends: the fork's 0.159135839575356 (Pappus to 1.5e-10).
-#[test]
-fn the_blend_corner_ends_the_round_at_the_smooth_vertices() {
-    let mut k = kernel(false);
-    let mut b = plate(&mut k);
-    let before = fine_volume(&k, &mut b);
-    let e = pick(&k, &b, CORNER);
-    fillet_edges(&mut k, &mut b, &[e], RADIUS, 1, 1, 1.0).unwrap();
-    b.refresh_cached_topology();
-    assert!(is_manifold_solid(&b).unwrap());
-    assert_eq!(b.face_list().len(), 11);
-    let removed = before - fine_volume(&k, &mut b);
-    assert!(
-        (removed - 0.159_135_839_575_356).abs() <= 1e-9,
-        "removed {removed}"
-    );
 }
 
 /// The straight edges next to the corner and the rim, each rounded alone. The tab's side
@@ -235,7 +213,7 @@ fn the_neighbours_keep_their_rounds() {
         ),
         ([0.0, -25.0, 2.0], 7.958_672_926_831_696, 1e-10),
     ] {
-        let mut k = kernel(true);
+        let mut k = kernel();
         let mut b = plate(&mut k);
         let before = fine_volume(&k, &mut b);
         let e = pick(&k, &b, at);

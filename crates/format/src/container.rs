@@ -52,10 +52,34 @@ pub fn is_container(bytes: &[u8]) -> bool {
     bytes.starts_with(b"PK\x03\x04")
 }
 
+/// The SHA-256 of the bytes.
+pub fn sha256(bytes: &[u8]) -> [u8; 32] {
+    Sha256::digest(bytes).into()
+}
+
+fn hex(digest: &[u8; 32]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(64);
+    for byte in digest {
+        // Writing to a `String` cannot fail.
+        let _ = write!(&mut out, "{byte:02x}");
+    }
+    out
+}
+
 /// The SHA-256 of the bytes, in lowercase hexadecimal: a blob's name, and how a cache is keyed to
 /// the file it was written for.
 pub fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex(&sha256(bytes))
+}
+
+/// One part a [`Writer`] wrote, with the SHA-256 of its uncompressed content. A caller that signs
+/// a container uses these to bind the parts without reading the file back.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PartDigest {
+    pub name: String,
+    pub len: u64,
+    pub digest: [u8; 32],
 }
 
 /// A container being written.
@@ -65,11 +89,24 @@ pub struct Writer {
     expanded: usize,
     resolved: usize,
     limits: Limits,
+    /// Which written parts to record for a signature, and the records so far.
+    tracked: Option<(fn(&str) -> bool, Vec<PartDigest>)>,
 }
 
 impl Writer {
     pub fn new(limits: Limits) -> Writer {
-        Writer { zip: zip::ZipWriter::new(Cursor::new(Vec::new())), names: BTreeSet::new(), expanded: 0, resolved: 0, limits }
+        Writer { zip: zip::ZipWriter::new(Cursor::new(Vec::new())), names: BTreeSet::new(), expanded: 0, resolved: 0, limits, tracked: None }
+    }
+
+    /// Record the parts written from now on whose name `include` accepts, with their SHA-256, for
+    /// [`Writer::take_parts`]. Used by a caller that signs the container.
+    pub fn track_parts(&mut self, include: fn(&str) -> bool) {
+        self.tracked = Some((include, Vec::new()));
+    }
+
+    /// The tracked parts written so far, oldest first, and stop tracking.
+    pub fn take_parts(&mut self) -> Option<Vec<PartDigest>> {
+        self.tracked.take().map(|(_, parts)| parts)
     }
 
     /// The container's bytes.
@@ -79,6 +116,12 @@ impl Writer {
 
     /// Add a part, compressed or stored. A name already written is written once.
     pub fn part(&mut self, name: &str, bytes: &[u8], compressed: bool) -> Result<(), FormatError> {
+        self.part_with_digest(name, bytes, compressed, None)
+    }
+
+    /// [`Writer::part`] with a digest the caller already worked out (a blob's name is its digest),
+    /// so a signed save does not hash the same bytes twice.
+    fn part_with_digest(&mut self, name: &str, bytes: &[u8], compressed: bool, digest: Option<[u8; 32]>) -> Result<(), FormatError> {
         if bytes.len() > (self.limits.part_limit)(name) {
             return Err(invalid("part too large"));
         }
@@ -88,6 +131,12 @@ impl Writer {
         self.expanded = self.expanded.checked_add(bytes.len()).ok_or_else(|| invalid("expanded size overflow"))?;
         if self.expanded > (self.limits.max_expanded)() || self.names.len() > self.limits.max_entries {
             return Err(invalid("package too large"));
+        }
+        if let Some((include, parts)) = &mut self.tracked
+            && include(name)
+        {
+            let digest = digest.unwrap_or_else(|| sha256(bytes));
+            parts.push(PartDigest { name: name.to_owned(), len: bytes.len() as u64, digest });
         }
         let method = if compressed { zip::CompressionMethod::Deflated } else { zip::CompressionMethod::Stored };
         let level = (self.limits.level)(name, bytes.len());
@@ -133,8 +182,9 @@ impl Writer {
             .checked_add(bytes.len())
             .filter(|&n| n <= (self.limits.max_expanded)())
             .ok_or_else(|| invalid("resolved payloads too large"))?;
-        let name = format!("blobs/{}.{extension}", digest(bytes));
-        self.part(&name, bytes, compressed)?;
+        let digest = sha256(bytes);
+        let name = format!("blobs/{}.{extension}", hex(&digest));
+        self.part_with_digest(&name, bytes, compressed, Some(digest))?;
         Ok(Value::String(name))
     }
 }

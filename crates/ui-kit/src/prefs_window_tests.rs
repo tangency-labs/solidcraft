@@ -19,6 +19,7 @@ struct Fake {
     failing_restores: usize,
     /// Applies that fail before one succeeds.
     failing_applies: usize,
+    failing_confirmations: usize,
 }
 
 impl Host for Fake {
@@ -41,6 +42,13 @@ impl Host for Fake {
             return Err("not now".into());
         }
         self.values = snapshot.clone();
+        Ok(())
+    }
+    fn confirm(&mut self) -> Result<(), String> {
+        if self.failing_confirmations > 0 {
+            self.failing_confirmations -= 1;
+            return Err("invalid field".into());
+        }
         Ok(())
     }
     fn apply(&mut self) -> Result<(), String> {
@@ -273,4 +281,63 @@ fn every_name_the_window_publishes_starts_with_the_hosts_prefix() {
     assert_eq!(fake.window.section, 0, "Enter opened the match");
     assert!(registry::handle_at("x:revealed").is_some(), "the opened row is published under the prefix");
     no_prefs_names("revealing");
+}
+
+#[test]
+fn invalid_draft_fields_keep_ok_and_apply_editable_until_corrected() {
+    for button in [Button::Ok, Button::Apply] {
+        let (ctx, mut fake) = opened();
+        fake.values.grid = true;
+        fake.failing_confirmations = 2;
+        let target = if button == Button::Ok { "test:ok" } else { "test:apply" };
+        for _ in 0..2 {
+            frame(&ctx, &mut fake, Vec::new());
+            assert_eq!(click(&ctx, &mut fake, target), Some(button));
+            assert!(fake.window.open);
+            assert_eq!(fake.window.snapshot(), Some(&Values::default()));
+            assert!(fake.window.restore_error().is_none());
+        }
+        press(&mut fake, PAGES, button).unwrap();
+        assert!(fake.values.grid);
+        assert_eq!(fake.window.open, button == Button::Apply);
+    }
+}
+
+/// #15908: the footer's Restore Defaults is drawn like Cancel, Apply and OK: the same rounded corners
+/// on a frame of its own, not the hairline square outline a frameless button shows.
+#[test]
+fn restore_defaults_is_drawn_like_the_footer_buttons() {
+    let (ctx, mut fake) = opened();
+    registry::clear_handles();
+    let output = crate::test_support::raw_frame(
+        &ctx,
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))),
+            focused: true,
+            ..Default::default()
+        },
+        |ui| {
+            show(ui.ctx(), &mut fake, PAGES, &options("test"), |_| {});
+        },
+    );
+    /// The corner radius of the rectangle drawn over `rect`: on its centre, about its size.
+    fn corners(shape: &egui::Shape, rect: egui::Rect) -> Option<egui::CornerRadius> {
+        match shape {
+            egui::Shape::Rect(r)
+                if (r.rect.center() - rect.center()).length() < 2.0
+                    && r.rect.width() <= rect.width() + 16.0
+                    && r.rect.height() <= rect.height() + 16.0
+                    && (r.fill != egui::Color32::TRANSPARENT || r.stroke.width > 0.0) =>
+            {
+                Some(r.corner_radius)
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().find_map(|s| corners(s, rect)),
+            _ => None,
+        }
+    }
+    let of = |name: &str| {
+        let rect = registry::rect_of(name).unwrap_or_else(|| panic!("{name} is published"));
+        output.shapes.iter().find_map(|clipped| corners(&clipped.shape, rect)).unwrap_or_else(|| panic!("{name} is drawn on a frame"))
+    };
+    assert_eq!(of("test:defaults"), of("test:cancel"), "Restore Defaults has Cancel's corners");
 }
