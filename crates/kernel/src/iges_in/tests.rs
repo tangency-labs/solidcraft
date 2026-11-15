@@ -602,6 +602,34 @@ fn a_curve_over_a_tiny_knot_span_still_bounds_its_faces() {
     }
 }
 
+/// A patch trimmed by a curve on a surface with only its model-space curve (no B curve), a
+/// composite whose first line is written end to start: the first piece is turned to run on into
+/// the second, so the loop closes and the face is kept.
+#[test]
+fn a_trim_without_a_parameter_curve_whose_first_piece_is_reversed_keeps_its_face() {
+    let corners = [[0.0, 0.0, 0.0], [20.0, 0.0, 0.0], [20.0, 20.0, 0.0], [0.0, 20.0, 0.0]];
+    let mut ents: Vec<(i64, i64, String)> = vec![bilinear_patch(corners[0], corners[1], corners[2], corners[3])];
+    let fmt = |p: [f64; 3]| format!("{:?},{:?},{:?}", p[0], p[1], p[2]);
+    let mut pieces = Vec::new();
+    for k in 0..4 {
+        let (p0, p1) = (corners[k], corners[(k + 1) % 4]);
+        let (p0, p1) = if k == 0 { (p1, p0) } else { (p0, p1) };
+        ents.push((110, 0, format!("{},{}", fmt(p0), fmt(p1))));
+        pieces.push((2 * ents.len() - 1).to_string());
+    }
+    ents.push((102, 0, format!("4,{}", pieces.join(","))));
+    let c = 2 * ents.len() - 1;
+    // Created by projection, preferring the model-space curve (PREF 2), with no B curve.
+    ents.push((142, 0, format!("0,1,0,{c},2")));
+    let cos = 2 * ents.len() - 1;
+    ents.push((144, 0, format!("1,1,0,{cos}")));
+    let imp = iges_import(&iges_file(&ents)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("closed loop") || w.contains("face #")), "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.area, 400.0) < 1e-6, "area {}", m.area);
+}
+
 #[test]
 fn the_global_sections_native_system_becomes_the_originating_system() {
     let imp = round_trip(&box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap());

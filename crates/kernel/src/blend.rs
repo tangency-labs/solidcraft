@@ -163,6 +163,22 @@ impl Faces {
     }
 }
 
+/// The unit direction record edge `e` leaves its end vertex `v` in, from its exact curve. None
+/// for a closed edge (both ends at one vertex) or one that does not end at `v`.
+pub(crate) fn leaving(rec: &Brep, e: usize, v: u32) -> Option<Vec3> {
+    let edge = rec.edges.get(e)?;
+    let [a, b] = edge.vertices;
+    if a == b {
+        None
+    } else if a == v {
+        curve_tangent(edge.parameters(), edge.interval[0])
+    } else if b == v {
+        curve_tangent(edge.parameters(), edge.interval[1]).map(|t| t * -1.0)
+    } else {
+        None
+    }
+}
+
 /// The unit tangent of a record curve at `t`, along increasing `t`.
 pub(crate) fn curve_tangent(c: &Curve, t: f64) -> Option<Vec3> {
     curve_derivative(c, t)?.normalized().filter(|d| d.is_finite())
@@ -211,7 +227,10 @@ pub(crate) fn curve_derivative(c: &Curve, t: f64) -> Option<Vec3> {
 
 /// Curvature-continuous (G2) fillets: each section is SMLib's G2 blend curve between the contact
 /// lines the round of `radius` has (zero curvature at the contacts on planar faces), not a
-/// circle. A configuration SMLib cannot blend so is refused, never given a circular round.
+/// circle. A configuration SMLib cannot blend so is refused, never given a circular round. The
+/// G2 round of a single concave edge whose contact line runs off the flat face it rolls on is
+/// built by carrying that face on ([`or_carried_on`]); a boolean of that build fails on the G2
+/// face at some radii, and the refusal stays there.
 pub fn fillet_g2(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "fillet_g2");
     body.require_brep("G2 fillet")?;
@@ -221,8 +240,22 @@ pub fn fillet_g2(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     if edges.is_empty() || edges.len() > 1000 || edges.iter().any(|p| ![p.x, p.y, p.z].into_iter().all(f64::is_finite)) {
         return Err(KernelError::Invalid("G2 fillet needs 1 to 1000 finite edge points".into()));
     }
-    let out = crate::blend_smlib::fillet_g2(body, edges, radius)?;
-    closed(body, out)
+    let plain = crate::blend_smlib::fillet_g2(body, edges, radius).and_then(|b| closed(body, b));
+    or_carried_on(plain, body, edges, radius, |carried| crate::blend_smlib::fillet_g2(carried, edges, radius))
+}
+
+/// `plain` (a blend of `edges` as SMLib builds it), and where SMLib refuses the blend of a
+/// single edge as too large or fails it as an operation, the concave blend whose contact line
+/// runs off the flat face it rolls on, built by carrying that face on
+/// ([`concave_overflow_round`]) as [`fillet_removing`] builds such a round; where that does not
+/// apply, SMLib's error, and where a step of it fails, that step's failure (SMLib's refusal
+/// would name a largest size that fits, which a larger one may still beat). `reach` and `blend`
+/// as for [`concave_overflow_round`].
+pub(crate) fn or_carried_on(plain: Result<Body>, body: &Body, edges: &[Vec3], reach: f64, blend: impl Fn(&Body) -> Result<Body>) -> Result<Body> {
+    match (plain, edges) {
+        (Err(e @ (KernelError::TooLarge(_) | KernelError::Failed(_))), [pick]) => concave_overflow_round(body, *pick, reach, blend)?.ok_or(e),
+        (plain, _) => plain,
+    }
 }
 
 /// A fillet's result, refused when a face's boundary crosses itself (#871): rounds that
@@ -281,7 +314,7 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
     match crate::blend_smlib::fillet_removing(body, edges, radius, turn) {
         Ok((b, gone)) => Ok((closed(body, b)?, gone)),
         Err(KernelError::TooLarge(why)) => match edges {
-            [pick] => match concave_overflow_round(body, *pick, radius, |carried| crate::blend_smlib::fillet(carried, &[*pick], radius, turn)) {
+            [pick] => match concave_overflow_round(body, *pick, radius, |carried| crate::blend_smlib::fillet(carried, &[*pick], radius, turn))? {
                 Some(b) => Ok((b, Vec::new())),
                 None => Err(KernelError::TooLarge(why)),
             },
@@ -305,101 +338,109 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
 /// that material touches the edge, so none of it stands further off. `reach`: how far the blend
 /// reaches from the edge (a round's radius, a chamfer's larger distance), which sizes the slab.
 ///
-/// Only where it gives the blend SMLib would build on an unbounded face: the edge is straight,
-/// one of its faces is planar and it is concave (material in front of that face on the other
-/// face's side, and in its plane on one side of the edge's line only, the other face's), and
-/// at each end of the edge a planar face square to it ends the blend, so the
-/// slab's square ends add no material the blend could run into. `None` where it does not apply
-/// or a step fails: the caller keeps SMLib's refusal. Decided on exact geometry. Its steps are
-/// checked as they are built whatever the evaluation checks, also under `Validation::Off`.
-fn concave_overflow_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -> Result<Body>) -> Option<Body> {
-    // Each step checked as it is built: one whose result the check refuses gives `None`, so the
-    // caller keeps the kernel's refusal rather than a body the feature's check refuses later.
+/// The kernel says where that gives the blend it would build on an unbounded face, and
+/// measures the slab ([`solidcore_ops::carried_faces_ordered`]: a straight concave edge, a flat
+/// face of it, and a flat face square to the edge at each end, so the slab's square ends add no
+/// material the blend could run into). This only sequences the operations, each recording its
+/// history. `Ok(None)` where it does not apply, or where the blend itself fails on the body
+/// with the face carried on too (carrying the face on does not make room for it): the caller
+/// keeps SMLib's refusal. Where the blend builds there but a later step fails for every face,
+/// [`KernelError::Failed`] naming that step and why (the first face's, as the kernel lists
+/// them), without a largest size that fits: SMLib's refusal names one for the face as it is, which a larger blend carried on may
+/// still beat. Its steps are checked as they are built whatever the evaluation checks, also
+/// under `Validation::Off`.
+fn concave_overflow_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -> Result<Body>) -> Result<Option<Body>> {
+    // Each step checked as it is built: one whose result the check refuses fails that step, so
+    // the caller never gets a body the feature's check refuses later.
     crate::validation::validating(crate::Validation::EachStep, || carried_on_round(body, pick, reach, blend)).0
 }
 
+/// A step of [`carried_on_round`] that failed, and why.
+type FailedStep = (&'static str, String);
+
 /// [`concave_overflow_round`]'s steps.
-fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -> Result<Body>) -> Option<Body> {
+fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -> Result<Body>) -> Result<Option<Body>> {
     use solidcore_record::{Loop2, Plane, Region2, Vec2};
-    if !(reach.is_finite() && reach > 0.0) {
-        return None;
-    }
-    let rec = Faces::of(body).ok()?;
-    let (picked, _) = crate::blend_smlib::picked_edges(body, &[pick]).ok()?;
-    let [e] = picked.as_slice() else { return None };
+    // Where it applies: one edge picked, a body the kernel holds, and a face to carry on.
+    let Ok((picked, _)) = crate::blend_smlib::picked_edges(body, &[pick]) else { return Ok(None) };
+    let [e] = picked.as_slice() else { return Ok(None) };
     let e = *e;
-    if !rec.straight(e) {
-        return None;
+    let Some((ops, order)) = body.ops_body() else { return Ok(None) };
+    let Ok(found) = solidcore_ops::carried_faces_ordered(ops, order, e, reach) else { return Ok(None) };
+    if found.is_empty() {
+        return Ok(None);
     }
-    let (a, b) = rec.ends(e)?;
-    let length = a.dist(b);
-    let d = (b - a).normalized()?;
+    let rec = Faces::of(body)?;
     let size = body.size();
-    if !(length > 0.0 && size.is_finite() && size > 0.0) {
-        return None;
-    }
-    let eps = (size * 1e-4).max(1e-4).min(reach * 0.1);
-    let middle = (a + b) * 0.5;
-    let [vs, ve] = rec.rec.edges.get(e)?.vertices;
-    // A planar face square to the edge, other than its own, at vertex v.
-    let squared_at = |v: u32| {
-        rec.rec.edges.iter().enumerate().filter(|(_, x)| x.vertices.contains(&v)).any(|(i, _)| {
-            rec.faces_of(i)
-                .into_iter()
-                .any(|f| !rec.faces_of(e).contains(&f) && rec.plane_normal(f as usize).is_some_and(|n| n.dot(d).abs() > 1.0 - 1e-9))
-        })
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    // The step `what` failed with `cause`; or gave nothing.
+    let failed = |what: &'static str| {
+        move |cause: KernelError| -> Option<FailedStep> {
+            let why = match cause {
+                KernelError::Failed(why) => why,
+                other => other.to_string(),
+            };
+            Some((what, without_fit_note(&why)))
+        }
     };
-    if !(squared_at(vs) && squared_at(ve)) {
-        return None;
-    }
-    for f in rec.faces_of(e) {
-        let f = f as usize;
-        let Some(n) = rec.plane_normal(f) else { continue };
-        if n.dot(d).abs() > 1e-9 {
-            continue;
-        }
-        let u = n.cross(d);
-        // concave: material in front of the plane beside the edge, on the other face's side
-        let inside = |p: Vec3| matches!(body.classify_point(p), Ok(crate::PointClass::Inside));
-        if !(inside(middle + n * eps + u * eps) || inside(middle + n * eps - u * eps)) {
-            continue;
-        }
-        // The side of the edge's line, in the plane, that the other face stands on: the
-        // material is there, and the flat face lies on the other.
-        let along_u = match (inside(middle + u * eps), inside(middle - u * eps)) {
-            (true, false) => true,
-            (false, true) => false,
-            _ => continue,
-        };
-        let far = 4.0 * (size + reach);
-        let plane = Plane { origin: a, x: d, y: u };
-        let rect = Loop2::polygon(&[Vec2::new(0.0, -far), Vec2::new(length, -far), Vec2::new(length, far), Vec2::new(0.0, far)]);
-        let slab = crate::build::extrude(&plane, &[Region2 { outer: rect, holes: vec![] }], -far, 0.0).ok()?.into_iter().next()?;
-        let carried = crate::boolean(body, &slab, crate::BoolOp::Union).ok()??;
-        let rounded = blend(&carried).ok()?;
-        let fill = crate::boolean(&rounded, &carried, crate::BoolOp::Cut).ok()??;
+    let nothing = |what: &'static str| -> Option<FailedStep> { Some((what, "it gave no body".to_owned())) };
+    let volume = |x: &Body| crate::measure(x).map(|m| m.volume);
+    // A face whose carried-on blend fails at a step gives way to the edge's other face. `None`:
+    // the blend itself fails with the face carried on, so carrying it on does not apply.
+    let carry = |c: &solidcore_ops::CarriedFace| -> std::result::Result<Body, Option<FailedStep>> {
+        let plane = Plane { origin: v(c.origin), x: v(c.along), y: v(c.across) };
+        let length = c.outline[1][0];
+        let rect = Loop2::polygon(&c.outline.map(|p| Vec2::new(p[0], p[1])));
+        let what = "building the slab that carries the face on";
+        let slab = crate::build::extrude(&plane, &[Region2 { outer: rect, holes: vec![] }], c.depth[0], c.depth[1]).map_err(failed(what))?;
+        let slab = slab.into_iter().next().ok_or_else(|| nothing(what))?;
+        let what = "joining the slab to the body";
+        let carried = crate::boolean(body, &slab, crate::BoolOp::Union).map_err(failed(what))?.ok_or_else(|| nothing(what))?;
+        let rounded = blend(&carried).map_err(|_| None)?;
+        let what = "cutting the carried-on body from the blended one";
+        let fill = crate::boolean(&rounded, &carried, crate::BoolOp::Cut).map_err(failed(what))?.ok_or_else(|| nothing(what))?;
         // the face itself, by its index, for its sheet
-        let sheet = crate::surfaces::taken(body, &rec.rec, &[(f, false)]).ok()?;
+        let sheet = crate::surfaces::taken(body, &rec.rec, &[(c.face, false)]).map_err(failed("taking the flat face's sheet"))?;
         // The fill touches the edge, so it stands no further off the face's plane or the edge's
         // line than its own box is across.
-        let bounds = fill.exact_bounds().ok()?;
+        let bounds = fill.exact_bounds().map_err(failed("measuring the added material's box"))?;
         let room = bounds.min.dist(bounds.max) + size * 1e-3 + 1.0;
-        let prism = crate::thicken(&sheet, 2.0 * room, true).ok()?;
+        let prism = crate::thicken(&sheet, 2.0 * room, true).map_err(failed("thickening the flat face's sheet"))?;
         // Past the edge's line the fill stands over the other face, not over the flat face's
         // outline, and is kept whole.
-        let (from, to) = if along_u { (0.0, room) } else { (-room, 0.0) };
+        let (from, to) = if c.other_side > 0.0 { (0.0, room) } else { (-room, 0.0) };
         let beyond = Loop2::polygon(&[Vec2::new(0.0, from), Vec2::new(length, from), Vec2::new(length, to), Vec2::new(0.0, to)]);
-        let beyond = crate::build::extrude(&plane, &[Region2 { outer: beyond, holes: vec![] }], -room, room).ok()?.into_iter().next()?;
-        let keep = crate::boolean(&prism, &beyond, crate::BoolOp::Union).ok()??;
-        let kept = crate::boolean(&fill, &keep, crate::BoolOp::Intersect).ok()??;
-        let joined = crate::boolean(body, &kept, crate::BoolOp::Union).ok()??;
-        let joined = closed(body, joined).ok()?;
-        let grew = |x: &Body| crate::measure(x).ok().map(|m| m.volume);
-        if grew(&joined)? > grew(body)? {
-            return Some(over_body_alone(joined, body, e));
+        let what = "building the box past the edge's line";
+        let beyond = crate::build::extrude(&plane, &[Region2 { outer: beyond, holes: vec![] }], -room, room).map_err(failed(what))?;
+        let beyond = beyond.into_iter().next().ok_or_else(|| nothing(what))?;
+        let what = "joining the face's prism and the box past the edge's line";
+        let keep = crate::boolean(&prism, &beyond, crate::BoolOp::Union).map_err(failed(what))?.ok_or_else(|| nothing(what))?;
+        let what = "keeping the added material within the face's outline";
+        let kept = crate::boolean(&fill, &keep, crate::BoolOp::Intersect).map_err(failed(what))?.ok_or_else(|| nothing(what))?;
+        let what = "joining the added material to the body";
+        let joined = crate::boolean(body, &kept, crate::BoolOp::Union).map_err(failed(what))?.ok_or_else(|| nothing(what))?;
+        let joined = closed(body, joined).map_err(failed("checking that the result is closed"))?;
+        let what = "measuring the result";
+        if volume(&joined).map_err(failed(what))? > volume(body).map_err(failed(what))? {
+            Ok(over_body_alone(joined, body, e))
+        } else {
+            Err(Some(("checking that the result adds material", "it adds none".to_owned())))
+        }
+    };
+    let mut first: Option<FailedStep> = None;
+    for c in &found {
+        match carry(c) {
+            Ok(b) => return Ok(Some(b)),
+            Err(None) => {}
+            Err(Some(f)) => {
+                first.get_or_insert(f);
+            }
         }
     }
-    None
+    let Some((what, why)) = first else { return Ok(None) };
+    Err(KernelError::Failed(format!(
+        "the blend runs off the flat face beside its edge, and building it with that face carried on failed {what}: {why}"
+    )))
 }
 
 /// What a refusal of a setback too short for its corner says before the least that builds (in
@@ -1001,7 +1042,7 @@ pub fn chamfer_carrying_face(body: &Body, edges: &[Vec3], distance: f64) -> Resu
         // Just past the largest that fits, SMLib fails the chamfer as an operation (its status
         // 1001) rather than sizing it as too large; the error kinds say no more than that.
         (Err(e @ (KernelError::TooLarge(_) | KernelError::Failed(_))), [pick]) => {
-            concave_overflow_round(body, *pick, distance, |carried| chamfer(carried, &[*pick], distance)).ok_or(e)
+            concave_overflow_round(body, *pick, distance, |carried| chamfer(carried, &[*pick], distance))?.ok_or(e)
         }
         (plain, _) => plain,
     }
@@ -1033,7 +1074,8 @@ pub fn chamfer_sides_carrying_face(body: &Body, edges: &[Vec3], d1: f64, side: C
                 ChamferSide::Distance(d2) => d1.max(d2),
                 ChamferSide::Angle(_) => d1,
             };
-            concave_overflow_round(body, *pick, reach, |carried| crate::blend_smlib::chamfer_sides_along(carried, &[*pick], d1, side, first)).ok_or(e)
+            concave_overflow_round(body, *pick, reach, |carried| crate::blend_smlib::chamfer_sides_along(carried, &[*pick], d1, side, first))?
+                .ok_or(e)
         }
         (plain, _) => plain,
     }
@@ -1103,6 +1145,17 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
         out.push(edge_middle(&rec, e).ok_or_else(|| KernelError::Failed("a point on a chain edge".into()))?);
     }
     Ok(out)
+}
+
+/// The point halfway along the edge each of `picks` takes, as a blend takes it ([`blend_edges`]),
+/// one per pick and in their order: where a moved copy of the body finds the same edge again. A
+/// pick itself need not: at the vertex two edges share (the halves of a rim a seam splits) it is
+/// as near to each, and on a copy rounding takes either (#16934). The middle is on the edge's own
+/// curve, at the middle of its parameter interval. Picks that find no edge are refused.
+pub fn blend_edge_middles(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
+    let rec = Faces::of(body)?;
+    let (edges, _) = crate::blend_smlib::picked_edges(body, picks)?;
+    edges.into_iter().map(|e| edge_middle(&rec, e).ok_or_else(|| KernelError::Failed("a point on a picked edge".into()))).collect()
 }
 
 /// [`tangent_chain`] as the record's edge indices (the display's edge indices,
@@ -1175,14 +1228,7 @@ fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Result<Vec<usize>>
         }
         Ok(s)
     };
-    // The unit direction edge `e` leaves its end `v` in.
-    let leaving = |e: usize, v: u32| -> Option<Vec3> {
-        let [a, b] = rec.rec.edges.get(e)?.vertices;
-        if a == b {
-            return None;
-        }
-        if a == v { rec.tangent(e, false) } else { rec.tangent(e, true).map(|t| t * -1.0) }
-    };
+    let leaving = |e: usize, v: u32| leaving(&rec.rec, e, v);
     let cos = solidcraft_geom::TANGENT_CHAIN.cos();
     let accept = normal_reach(rec);
     // Whether edge `e` is convex at its end `v` (its faces meet at less than 180° inside the
@@ -1708,7 +1754,7 @@ mod tests {
                     chamfer(carried, &[BOSS_EDGE], 8.0)
                 })
             });
-            assert!(out.is_some(), "{mode:?}");
+            assert!(matches!(out, Ok(Some(_))), "{mode:?}");
             assert_eq!(seen.get(), Some(crate::validation::Step::Check), "{mode:?}");
             assert!(!deferred, "{mode:?}: no step's check is left for the feature");
         }
@@ -1990,7 +2036,8 @@ mod tests {
             let out = concave_overflow_round(&body, BOSS_EDGE, 10.0, |carried| {
                 crate::blend_smlib::chamfer_sides_along(carried, &[BOSS_EDGE], 9.0, ChamferSide::Distance(10.0), first)
             })
-            .expect("carried on");
+            .expect("carried on")
+            .expect("it applies");
             let (p, q, area) = boss_chamfer_sides_section(plate, along_boss);
             let (added, full) = (crate::measure(&out).unwrap().volume - before, 24.0 * area - past_corner_arc(p, q));
             assert!((full - added).abs() < 1e-4, "along {first:?}: added {added} of {full}");
@@ -2249,6 +2296,54 @@ mod tests {
         assert_eq!(second_face_first(0.0, 1e-12), None);
         assert_eq!(second_face_first(1e-12, 0.0), None);
         assert_eq!(second_face_first(f64::NAN, 0.0), None);
+    }
+
+    /// The chord round and the G2 round of the boss's base edge are carried on as the constant
+    /// round is. Where SMLib builds them on the face as it is (chord 7, G2 5) the carried-on
+    /// build gives its volume. Past the face (chord 8 and 10, G2 7 and 8.5) SMLib refuses them and
+    /// they are built: one shell, inside the body's box, growing with the size. (The G2 round
+    /// is still refused at some radii, 8 among them: a boolean of the build fails on its
+    /// face, #15417.)
+    #[test]
+    fn concave_chord_and_g2_rounds_run_on_past_where_their_face_turns_into_a_round() {
+        let body = boss_on_rounded_plate();
+        let before = crate::measure(&body).unwrap();
+        let added = |b: &Body| crate::measure(b).unwrap().volume - before.volume;
+        // one shell, inside the body's box, adding more than `least`
+        let grown = |b: &Body, least: f64, what: &str| {
+            let m = crate::measure(b).unwrap();
+            assert!(m.shells == 1 && added(b) > least, "{what}: added {}", added(b));
+            assert!(m.bbox.min.dist(before.bbox.min) < 1e-9 && m.bbox.max.dist(before.bbox.max) < 1e-9, "{what}: {:?}", m.bbox);
+        };
+        let smlib = added(&crate::fillet_chord(&body, &[BOSS_EDGE], 7.0).unwrap());
+        let carried = concave_overflow_round(&body, BOSS_EDGE, 7.0, |c| crate::blend_smlib::fillet_chord(c, &[BOSS_EDGE], 7.0)).unwrap().unwrap();
+        assert!((added(&carried) - smlib).abs() < 1e-6, "chord: carried on {}, SMLib {smlib}", added(&carried));
+        let mut last = smlib;
+        for c in [8.0, 10.0] {
+            assert!(matches!(crate::blend_smlib::fillet_chord(&body, &[BOSS_EDGE], c), Err(KernelError::TooLarge(_))), "SMLib refuses chord {c}");
+            let round = crate::fillet_chord(&body, &[BOSS_EDGE], c).unwrap_or_else(|e| panic!("chord {c}: {e}"));
+            grown(&round, last, &format!("chord {c}"));
+            last = added(&round);
+        }
+        let smlib = added(&fillet_g2(&body, &[BOSS_EDGE], 5.0).unwrap());
+        let carried = concave_overflow_round(&body, BOSS_EDGE, 5.0, |c| crate::blend_smlib::fillet_g2(c, &[BOSS_EDGE], 5.0)).unwrap().unwrap();
+        assert!((added(&carried) - smlib).abs() < 1e-6, "G2: carried on {}, SMLib {smlib}", added(&carried));
+        // 7 and 8.5 build carried on, on Linux and Windows alike (9 builds on Windows only: a
+        // boolean of the build on the G2 face goes either way there)
+        let mut last = smlib;
+        for r in [7.0, 8.5] {
+            assert!(matches!(crate::blend_smlib::fillet_g2(&body, &[BOSS_EDGE], r), Err(KernelError::TooLarge(_))), "SMLib refuses G2 {r}");
+            let round = fillet_g2(&body, &[BOSS_EDGE], r).unwrap_or_else(|e| panic!("G2 {r}: {e}"));
+            grown(&round, last, &format!("G2 {r}"));
+            last = added(&round);
+        }
+        // At 8 a boolean of the carried-on build fails on the G2 face: the refusal names that
+        // step and its cause, not SMLib's largest radius that fits, which 8.5 beats.
+        let why = match fillet_g2(&body, &[BOSS_EDGE], 8.0) {
+            Err(KernelError::Failed(why)) => why,
+            other => panic!("G2 8: {:?}", other.map(|_| ())),
+        };
+        assert!(why.contains("with that face carried on failed ") && !why.contains("that fits"), "{why}");
     }
 
     /// A search where every candidate is refused as too large keeps the smallest size it tried

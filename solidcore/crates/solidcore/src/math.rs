@@ -398,6 +398,81 @@ impl Transform {
         }
     }
 
+    /// The unit, orthogonal frame axes nearest to `x` and `y`: `x` normalized, and `y` made
+    /// perpendicular to it and normalized (the kernel picks a perpendicular when `y` is parallel to
+    /// `x` or has no length). Restores a frame carried through a rigid motion to exactly unit and
+    /// orthogonal axes.
+    ///
+    /// # Errors
+    /// Non-finite coordinates or an `x` of no length.
+    pub fn orthonormal_frame(x: Vec3, y: Vec3) -> crate::error::Result<[Vec3; 2]> {
+        let [x, y, _] = x.make_unit_ortho_vectors(Some(y))?;
+        Ok([x, y])
+    }
+
+    /// Carry a plane's axes by a rigid motion, preserving its UV scales and orthogonality.
+    /// Source axes square to the same dot-product rounding as the plane constructor are
+    /// reconstructed as an orthogonal pair after the move. Genuinely skew axes keep their
+    /// parametrisation and are mapped directly. Call this only for a rigid motion.
+    ///
+    /// This prevents the rounding of successive rotations from accumulating into a skew
+    /// plane. It does not widen the plane constructor's rounding bound.
+    ///
+    /// # Errors
+    /// Non-finite coordinates, axes of no length, or a degenerate mapped pair.
+    pub fn rigid_plane_axes(&self, u: Vec3, v: Vec3) -> crate::error::Result<[Vec3; 2]> {
+        use crate::error::SolidError;
+        use crate::nurbs::math::gamma;
+        let (a, b) = (u.length(), v.length());
+        if !(finite3(u)
+            && finite3(v)
+            && a > 0.0
+            && b > 0.0
+            && (a * b).is_finite()
+            && self.m.iter().flatten().all(|x| x.is_finite()))
+        {
+            return Err(SolidError::invalid_input(
+                OP_MAPS,
+                "invalid plane axes or motion",
+            ));
+        }
+        let (mu, mv) = (self.transform_vector(u), self.transform_vector(v));
+        if !(finite3(mu) && finite3(mv)) {
+            return Err(SolidError::invalid_input(
+                OP_MAPS,
+                "non-finite mapped plane axes",
+            ));
+        }
+        if u.dot(v).abs() > gamma(3) * a * b {
+            return Ok([mu, mv]);
+        }
+        let [x, y, _] = mu.make_unit_ortho_vectors(Some(mv.unitize()?))?;
+        Ok([x * a, y * b])
+    }
+
+    /// Carry a plane given by three points through a rigid motion, returning its origin
+    /// and axes. Keeping axes instead of reconstructing endpoints avoids cancellation when
+    /// the plane's parametrisation is read back.
+    ///
+    /// # Errors
+    /// Those of [`Self::rigid_plane_axes`], or a non-finite origin.
+    pub fn rigid_plane_through(
+        &self,
+        origin: Point3,
+        u: Point3,
+        v: Point3,
+    ) -> crate::error::Result<(Point3, [Vec3; 2])> {
+        let axes = self.rigid_plane_axes(u - origin, v - origin)?;
+        let origin = self.transform_point(origin);
+        if !finite3(origin) {
+            return Err(crate::error::SolidError::invalid_input(
+                OP_MAPS,
+                "non-finite plane origin",
+            ));
+        }
+        Ok((origin, axes))
+    }
+
     /// Maps a vector, ignoring translation (`SmTransform::TransformVector`).
     #[must_use]
     pub fn transform_vector(&self, v: Vec3) -> Vec3 {
@@ -553,6 +628,32 @@ impl Transform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_rigid_turns_keep_plane_axes_square_and_keep_uv_scales() {
+        use crate::nurbs::math::gamma;
+        let tilt = Transform::rotation(Point3::ZERO, Vec3::X, 1.5e-6).unwrap();
+        let turn = Transform::rotation(Point3::ZERO, Vec3::Z, 1_f64.to_radians()).unwrap();
+        let [mut u, mut v] = tilt.rigid_plane_axes(Vec3::X * 2.0, Vec3::Y * 3.0).unwrap();
+        for _ in 0..360 {
+            [u, v] = turn.rigid_plane_axes(u, v).unwrap();
+            assert!(u.dot(v).abs() <= gamma(3) * u.length() * v.length());
+            assert!((u.length() - 2.0).abs() < 1e-12);
+            assert!((v.length() - 3.0).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn a_rigid_turn_preserves_a_skew_plane_parametrisation() {
+        let turn =
+            Transform::rotation(Point3::ZERO, Vec3::Z, core::f64::consts::FRAC_PI_2).unwrap();
+        let [u, v] = turn
+            .rigid_plane_axes(Vec3::new(2.0, 0.0, 0.0), Vec3::new(1.0, 3.0, 0.0))
+            .unwrap();
+        assert!((u - Vec3::new(0.0, 2.0, 0.0)).length() < 1e-14);
+        assert!((v - Vec3::new(-3.0, 1.0, 0.0)).length() < 1e-14);
+        assert!((u.dot(v) - 2.0).abs() < 1e-14);
+    }
 
     /// The largest difference between two matrices' entries.
     fn apart(a: &Transform, b: &Transform) -> f64 {

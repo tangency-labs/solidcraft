@@ -5,64 +5,108 @@ use solidcraft_engine::{Sel, sketch::SketchPatternKind};
 
 use crate::{
     SolveApp,
-    browser::{Row, draw_row},
+    browser::{Row, Spec, node_row},
+    ui_kit::browser::Rows,
 };
 
 pub(crate) fn has_patterns(app: &SolveApp, sketch: u64) -> bool {
     app.session.doc.sketch(sketch).is_ok_and(|sk| !sk.patterns.is_empty())
 }
 
-/// Shared by the parts browser and the vertical feature history. The stored document is the
-/// source, so rolled-back sketches retain their children without showing preview-only copies.
-/// `dim`: the sketch is hidden (or a placement above it), so its patterns fade with it.
-pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: usize, scope: &str, occurrence: Option<(u64, &[u64])>, dim: bool) {
+/// One pattern row of a sketch, as the Browser and the vertical feature history list it.
+struct Pattern {
+    id: String,
+    label: String,
+    icon: &'static str,
+    selected: bool,
+    /// What a click on it selects while its sketch is edited: the copies, not the sources.
+    copies: Vec<Sel>,
+}
+
+/// The sketch's patterns, from the stored document, so rolled-back sketches retain their
+/// children without showing preview-only copies.
+fn patterns(app: &SolveApp, sketch: u64) -> Vec<Pattern> {
     let patterns: Vec<_> = app.session.doc.sketch(sketch).map(|sk| sk.patterns.clone()).unwrap_or_default();
-    for pattern in patterns {
-        let (name, icon) = match pattern.kind {
-            SketchPatternKind::Rectangular { .. } => ("Rectangular Pattern", "sketch_rect_pattern"),
-            SketchPatternKind::Circular { .. } => ("Circular Pattern", "sketch_circ_pattern"),
-        };
-        let suffix = pattern.id.strip_prefix("pat").unwrap_or(&pattern.id);
-        let label = format!("{} {suffix}", solidcraft_ui_text::tr_label(name));
-        let active = app.session.active_sketch == Some(sketch);
-        // The sources are inputs to the pattern: selecting its row must only delete copies.
-        // Select point copies when the point itself is a source; curve endpoints go with curves.
-        let sources: std::collections::BTreeSet<_> = pattern.entities.iter().collect();
-        let copies: Vec<_> = pattern
-            .instances
-            .iter()
-            .flat_map(|instance| &instance.curves)
-            .map(|id| Sel::SketchCurve { id: id.clone(), sketch: None })
-            .chain(
-                pattern
-                    .instances
-                    .iter()
-                    .flat_map(|instance| &instance.points)
-                    .filter(|(source, _)| sources.contains(source))
-                    .map(|(_, id)| Sel::SketchPoint { id: id.clone() }),
-            )
-            .collect();
-        let selected = active && !copies.is_empty() && copies.iter().all(|copy| app.session.selection.contains(copy));
-        let response = draw_row(
+    let active = app.session.active_sketch == Some(sketch);
+    patterns
+        .into_iter()
+        .map(|pattern| {
+            let (name, icon) = match pattern.kind {
+                SketchPatternKind::Rectangular { .. } => ("Rectangular Pattern", "sketch_rect_pattern"),
+                SketchPatternKind::Circular { .. } => ("Circular Pattern", "sketch_circ_pattern"),
+            };
+            let suffix = pattern.id.strip_prefix("pat").unwrap_or(&pattern.id);
+            let label = format!("{} {suffix}", solidcraft_ui_text::tr_label(name));
+            // The sources are inputs to the pattern: selecting its row must only delete copies.
+            // Select point copies when the point itself is a source; curve endpoints go with curves.
+            let sources: std::collections::BTreeSet<_> = pattern.entities.iter().collect();
+            let copies: Vec<_> = pattern
+                .instances
+                .iter()
+                .flat_map(|instance| &instance.curves)
+                .map(|id| Sel::SketchCurve { id: id.clone(), sketch: None })
+                .chain(
+                    pattern
+                        .instances
+                        .iter()
+                        .flat_map(|instance| &instance.points)
+                        .filter(|(source, _)| sources.contains(source))
+                        .map(|(_, id)| Sel::SketchPoint { id: id.clone() }),
+                )
+                .collect();
+            let selected = active && !copies.is_empty() && copies.iter().all(|copy| app.session.selection.contains(copy));
+            Pattern { id: pattern.id.clone(), label, icon, selected, copies }
+        })
+        .collect()
+}
+
+/// A pattern row clicked or double-clicked: a double-click opens the sketch (its placement's
+/// component active) and the pattern's editor; a click selects the copies while the sketch is
+/// edited, else the sketch.
+fn act(app: &mut SolveApp, sketch: u64, occurrence: Option<(u64, &[u64])>, pattern: Pattern, double: bool, clicked: bool) {
+    if double {
+        if let Some((component, path)) = occurrence {
+            let _ = app.run("component.activate", json!({"component":component,"occurrence":path.last(),"path":path}));
+        }
+        app.edit_sketch(sketch);
+        if app.session.active_sketch == Some(sketch) {
+            crate::sketch_modify_ui::edit_pattern(app, &pattern.id);
+        }
+    } else if clicked {
+        let items = if app.session.active_sketch == Some(sketch) { pattern.copies } else { vec![Sel::Feature { id: sketch }] };
+        let _ = app.run("select.set", json!({"items":items}));
+    }
+}
+
+/// The patterns under their sketch in the Browser. `dim`: the sketch is hidden (or a placement
+/// above it), so its patterns fade with it.
+pub(crate) fn browser_rows(app: &mut SolveApp, rows: &mut Rows<'_>, sketch: u64, depth: usize, occurrence: Option<(u64, &[u64])>, dim: bool) {
+    for pattern in patterns(app, sketch) {
+        let key = format!("pattern:{sketch}:{}", pattern.id);
+        let response = node_row(
+            rows,
+            Spec { key: &key, ..Default::default() },
+            Row { depth, icon: pattern.icon, label: &pattern.label, name: true, selected: pattern.selected, dim, ..Default::default() },
+        );
+        if let Some(rect) = response.rect {
+            crate::scenario::publish_handle(&format!("browser:sketch-pattern:{sketch}:{}", pattern.id), rect.center());
+        }
+        act(app, sketch, occurrence, pattern, response.double, response.clicked);
+    }
+}
+
+/// The patterns under their sketch in the vertical feature history.
+pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: usize, scope: &str, occurrence: Option<(u64, &[u64])>, dim: bool) {
+    for pattern in patterns(app, sketch) {
+        let response = crate::ui_kit::tree_row(
             ui,
             ui.scope_id().with(("sketch_pattern", sketch, &pattern.id)),
-            &Row { depth, icon, label: &label, name: true, selected, dim, ..Default::default() },
+            &Row { depth, icon: pattern.icon, label: &pattern.label, name: true, selected: pattern.selected, dim, ..Default::default() },
         );
         if let Some(rect) = response.rect {
             crate::scenario::publish_handle(&format!("{scope}:sketch-pattern:{sketch}:{}", pattern.id), rect.center());
         }
-        if response.double {
-            if let Some((component, path)) = occurrence {
-                let _ = app.run("component.activate", json!({"component":component,"occurrence":path.last(),"path":path}));
-            }
-            app.edit_sketch(sketch);
-            if app.session.active_sketch == Some(sketch) {
-                crate::sketch_modify_ui::edit_pattern(app, &pattern.id);
-            }
-        } else if response.clicked {
-            let items = if active { copies } else { vec![Sel::Feature { id: sketch }] };
-            let _ = app.run("select.set", json!({"items":items}));
-        }
+        act(app, sketch, occurrence, pattern, response.double, response.clicked);
     }
 }
 

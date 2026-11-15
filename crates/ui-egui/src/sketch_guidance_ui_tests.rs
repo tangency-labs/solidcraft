@@ -675,3 +675,17 @@ fn sketch_point_snaps_to_a_model_holes_woken_centre() {
         assert_eq!(placed.dist(centre) < 1e-6, on, "snap points {on}: {placed:?}");
     }
 }
+
+/// In a sketch, Shift targets a midpoint, so it doesn't keep the woken snap points the way it
+/// does in a dialog's point input (#11809): with Shift held, the pointer going from the hole's
+/// rim onto the box's top edge wakes the edge's points.
+#[test]
+fn shift_in_a_sketch_doesnt_keep_the_snap_points() {
+    let mut h = holed_box_sketch();
+    h.app.start("sketch.point");
+    step(&mut h, json!({"move":{"world":[18,20,10]}}));
+    let rim = h.app.viewport.woken.item.clone();
+    assert!(rim.is_some(), "{:?}", h.app.viewport.woken);
+    step(&mut h, json!({"move":{"world":[40,0,10]},"shift":true}));
+    assert!(h.app.viewport.woken.item.is_some() && h.app.viewport.woken.item != rim, "{:?}", h.app.viewport.woken);
+}

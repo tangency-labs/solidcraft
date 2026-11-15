@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use super::{Curves3dResult, Line3dParams, Move3dParams, Move3dResult, Point3dParams, Point3dResult, Spline3dParams};
+use super::{Arc3dParams, Curves3dResult, Line3dParams, Move3dParams, Move3dResult, Point3dParams, Point3dResult, Spline3dParams};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -9,6 +9,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<Line3dParams>(), &["points", "sketch"]);
     assert_keys(input_schema_for::<Spline3dParams>(), &["points", "sketch"]);
+    assert_keys(input_schema_for::<Arc3dParams>(), &["end", "sketch", "start", "through"]);
     assert_keys(input_schema_for::<Point3dParams>(), &["point", "sketch"]);
     assert_keys(input_schema_for::<Move3dParams>(), &["by", "index", "sketch", "to", "wire"]);
 }
@@ -34,6 +35,15 @@ fn strict_keeps_todays_errors() {
         ("sketch.spline3d", json!({"points": [[0, 0, 0]]})),
         ("sketch.spline3d", json!({"points": 5})),
         ("sketch.spline3d", json!({"points": [[0, 0, 0], [1, 1]]})),
+        ("sketch.arc3d", json!({})),
+        ("sketch.arc3d", json!({"start": [0, 0, 0]})),
+        ("sketch.arc3d", json!({"start": [0, 0, 0], "through": [0, 0, 1]})),
+        ("sketch.arc3d", json!({"start": null, "through": [0, 0, 1], "end": [1, 0, 0]})),
+        ("sketch.arc3d", json!({"start": [0, 0], "through": [0, 0, 1], "end": [1, 0, 0]})),
+        ("sketch.arc3d", json!({"start": "a", "through": [0, 0, 1], "end": [1, 0, 0]})),
+        ("sketch.arc3d", json!({"start": [0, 0, 0], "through": [0, 0], "end": [1, 0, 0]})),
+        ("sketch.arc3d", json!({"start": [0, 0, 0], "through": [0, 0, 1], "end": [1, 0]})),
+        ("sketch.arc3d", json!({"start": [0, 0, 0], "through": [0, 0, 1], "end": [1, 0, 0], "sketch": true})),
         ("sketch.point3d", json!({})),
         ("sketch.point3d", json!({"point": null})),
         ("sketch.point3d", json!({"point": [1, 2]})),
@@ -83,6 +93,10 @@ fn the_types_read_each_key_as_the_handlers_do() {
         ("sketch.line3d", json!({"points": (0..500).map(|i| json!([i, 0, 0])).collect::<Vec<_>>()})),
         ("sketch.spline3d", json!({"points": [[0, 0, 0], [1, 1, 1], [2, 0, 3]]})),
         ("sketch.spline3d", json!({"points": [[0, 0, 0], [1, 1, 1]], "sketch": null})),
+        ("sketch.arc3d", json!({"start": [0, 0, 0], "through": [0, 5, 10], "end": [10, 0, 10]})),
+        ("sketch.arc3d", json!({"start": {"x": 0, "y": 0, "z": 0}, "through": [0, 5, 10], "end": [10, 0, 10], "sketch": null})),
+        ("sketch.arc3d", json!({"start": [0, 0, 0], "through": [0, 5, 10], "end": [10, 0, 10], "sketch": "Path"})),
+        ("sketch.arc3d", json!({"start": [0, 0, 0], "through": [0, 5, 10], "end": [10, 0, 10], "sketch": "no such sketch"})),
         ("sketch.point3d", json!({"point": [3, 4, 5]})),
         ("sketch.point3d", json!({"point": {"x": 3, "y": 4, "z": 5}, "sketch": "Path"})),
         ("sketch.move3d", json!({"wire": wire, "to": [1, 2, 3]})),
@@ -155,6 +169,18 @@ fn the_schemas_take_what_the_handlers_read() {
         ],
     );
     takes(
+        input_schema_for::<Arc3dParams>(),
+        &[
+            (json!({"start": [0, 0, 0], "through": [0, 5, 10], "end": [10, 0, 10]}), true),
+            (json!({"start": {"x": 0, "y": 0, "z": 0}, "through": [0, 5, 10], "end": [10, 0, 10], "sketch": "Path"}), true),
+            (json!({"start": [0, 0, 0], "through": [0, 5, 10], "end": [10, 0, 10], "sketch": 4}), true),
+            (json!({}), false),
+            (json!({"start": [0, 0, 0], "through": [0, 5, 10]}), false),
+            (json!({"start": [0, 0], "through": [0, 5, 10], "end": [10, 0, 10]}), false),
+            (json!({"start": [0, 0, 0], "through": [0, 5, 10], "end": [10, 0, 10], "sketch": true}), false),
+        ],
+    );
+    takes(
         input_schema_for::<Move3dParams>(),
         &[
             (json!({"wire": "w1", "to": [1, 2, 3]}), true),
@@ -188,6 +214,9 @@ fn replies_match_the_output_schema() {
     let spline = run("sketch.spline3d", json!({"points": [[0, 8, 0], [5, 9, 5], [10, 8, 10]]}));
     assert_eq!(spline["curves"].as_array().map(Vec::len), Some(1), "{spline}");
     matches(output_schema_for::<Curves3dResult>(), "sketch.spline3d", &spline);
+    let arc = run("sketch.arc3d", json!({"start": [0, 2, 0], "through": [5, 2, 6], "end": [10, 2, 0]}));
+    assert_eq!(arc["curves"].as_array().map(Vec::len), Some(1), "{arc}");
+    matches(output_schema_for::<Curves3dResult>(), "sketch.arc3d", &arc);
     let point = run("sketch.point3d", json!({"point": {"x": 3, "y": 4, "z": 5}}));
     assert!(point["point"].is_string(), "{point}");
     matches(output_schema_for::<Point3dResult>(), "sketch.point3d", &point);
@@ -210,6 +239,7 @@ fn a_misspelt_key_is_reported_in_warn() {
     let calls = [
         ("sketch.line3d", json!({"points": [[0, 5, 0], [0, 5, 10]], "skech": "Path"})),
         ("sketch.spline3d", json!({"points": [[0, 5, 0], [0, 5, 10]], "skech": "Path"})),
+        ("sketch.arc3d", json!({"start": [0, 5, 0], "through": [5, 5, 5], "end": [10, 5, 0], "skech": "Path"})),
         ("sketch.point3d", json!({"point": [1, 2, 3], "pont": [1, 2, 3]})),
         ("sketch.move3d", json!({"wire": ids[0], "to": [1, 2, 3], "inex": 1})),
     ];
@@ -233,6 +263,8 @@ fn the_check_names_what_is_wrong_with_a_key() {
     assert_eq!(issues("sketch.line3d", json!({"points": [[0, 0, 0]]})), ["`points` needs 2 to 500 points"]);
     assert_eq!(issues("sketch.line3d", json!({"points": [[0, 0, 0], [1]]})), ["a point must be [x, y, z]"]);
     assert_eq!(issues("sketch.spline3d", json!({"points": 1})), ["`points` must list [x,y,z] points"]);
+    assert_eq!(issues("sketch.arc3d", json!({"start": [1], "through": [0, 0, 1], "end": [1, 0, 0]})), ["`start` must be a point [x, y, z]"]);
+    assert_eq!(issues("sketch.arc3d", json!({"start": [0, 0, 0], "through": "up", "end": [1, 0, 0]})), ["`through` must be a point [x, y, z]"]);
     assert_eq!(issues("sketch.point3d", json!({"point": [1]})), ["`point` must be a point [x, y, z]"]);
     assert_eq!(issues("sketch.move3d", json!({"wire": 1})), ["`wire` must be a 3D curve or point id"]);
     assert_eq!(issues("sketch.move3d", json!({"wire": "w", "index": 500})), ["`index` must be a fit point index below 500"]);

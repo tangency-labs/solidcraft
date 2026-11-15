@@ -12,6 +12,8 @@ pub trait AppPanelServices {
         Ok(())
     }
     fn refresh_read_only(&mut self, session: &Session) -> PanelResult<()>;
+    #[cfg(not(target_arch = "wasm32"))]
+    fn set_presentation_viewport(&mut self, _native: Option<&HostId>) {}
     fn services(&mut self) -> ContentServices<'_>;
 }
 
@@ -20,6 +22,8 @@ pub struct AppPanelRuntime {
     runtime: PanelRuntime,
     services: Box<dyn AppPanelServices>,
     native: Box<dyn NativeHostAdapter>,
+    #[cfg(not(target_arch = "wasm32"))]
+    desktop: Option<super::native::DesktopNativeAdapter>,
     host: Option<WorkspacePanelHost>,
     last_tick_frame: Option<u64>,
     last_error: Option<PanelError>,
@@ -38,6 +42,8 @@ impl AppPanelRuntime {
             runtime,
             services,
             native: Box::<InAppNativeAdapter>::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            desktop: None,
             host: None,
             last_tick_frame: None,
             last_error: None,
@@ -117,6 +123,7 @@ impl AppPanelRuntime {
             catalogue: self.catalogue.state().export()?,
             rejected: state.rejected.clone(),
             legacy: state.legacy.clone(),
+            unread: state.unread.clone(),
         })
     }
     pub(super) fn preference_preset_names(&self) -> Vec<String> {
@@ -131,6 +138,73 @@ impl AppPanelRuntime {
     pub(super) fn preference_user_preset_names(&self) -> Vec<String> {
         self.catalogue.state().user_presets().map(|(name, _)| name.to_string()).collect()
     }
+    /// First paint restore that keeps what it can. Without native windows, Window
+    /// placements fall back to their portable ones; if the selected layout still
+    /// cannot be placed it is reset to its default. Other saved layouts are kept.
+    fn restore_preference_record_resilient(&mut self, session: &Session, record: super::preferences::PreferenceRecord) -> PanelResult<()> {
+        let first = match self.restore_preference_record(session, record.clone()) {
+            Ok(()) => return Ok(()),
+            Err(reason) => reason,
+        };
+        let mut reset = self.preferences.as_ref().map(|state| state.reset.clone()).unwrap_or_default();
+        let saved = record.value();
+        let mut current = record;
+        let mut changed = Vec::new();
+        let mut originals = Vec::new();
+        let mut keep_saved = false;
+        if !self.native.capabilities().native_windows
+            && let Ok((redocked, names, kept)) = super::preferences::redock_native_record(&current, self.runtime.layout().registry())
+            && !names.is_empty()
+        {
+            let (rejected, mut unread) = (current.rejected.clone(), current.unread.clone());
+            if super::preferences::merge_unread(&mut unread, kept.clone()).is_none() {
+                keep_saved = true;
+            }
+            current = redocked;
+            current.rejected = rejected;
+            current.unread = unread;
+            changed = names;
+            originals = kept;
+        }
+        if !changed.is_empty() {
+            if self.restore_preference_record(session, current.clone()).is_ok() {
+                reset.extend(changed);
+                if let Some(state) = &mut self.preferences {
+                    state.reset = reset;
+                    if keep_saved && state.preserve.is_none() {
+                        state.preserve = Some(saved);
+                    }
+                }
+                return Ok(());
+            }
+            reset.extend(changed);
+        }
+        // The selected layout still cannot be placed: its default stands in and its
+        // saved bytes are kept as an unread entry. The recovery copy is left as it was.
+        let selected = current.selected.clone();
+        if let Ok(state) = current.catalogue(self.runtime.layout().registry())
+            && let Some(stored) = state.remembered(&selected)
+        {
+            let raw = commands::RawRecord { bytes: stored.bytes().to_vec(), rejected: stored.rejected().map(<[u8]>::to_vec) };
+            originals.push(super::preferences::UnreadEntry::from_raw("remembered", &selected.0, &raw));
+        }
+        if super::preferences::merge_unread(&mut current.unread, originals).is_none() {
+            keep_saved = true;
+        }
+        let prior_rejected = current.rejected.clone();
+        if self.reset_pending_preferences(session, current).is_err() {
+            return Err(first);
+        }
+        reset.push(selected.0);
+        if let Some(state) = &mut self.preferences {
+            state.rejected = prior_rejected;
+            state.reset = reset;
+            if keep_saved && state.preserve.is_none() {
+                state.preserve = Some(saved);
+            }
+        }
+        Ok(())
+    }
     pub(super) fn restore_preference_record(&mut self, session: &Session, record: super::preferences::PreferenceRecord) -> PanelResult<()> {
         let next = record.catalogue(self.runtime.layout().registry())?;
         let stored = next.remembered(&record.selected).ok_or_else(|| error(Rule::MissingTarget, "saved selected workspace has no layout"))?;
@@ -143,6 +217,7 @@ impl AppPanelRuntime {
             state.failed_environment = None;
             state.rejected = record.rejected;
             state.legacy = record.legacy;
+            state.unread = record.unread;
         }
         Ok(())
     }
@@ -210,6 +285,7 @@ impl AppPanelRuntime {
             let original = record.value();
             state.rejected = record.rejected.or(Some(original));
             state.legacy = record.legacy;
+            state.unread = record.unread;
             state.pending = None;
             state.failed = false;
             state.failed_environment = None;
@@ -447,6 +523,146 @@ impl AppPanelRuntime {
         self.native = native;
         Ok(())
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn enable_desktop_windows(&mut self, ctx: &egui::Context) -> PanelResult<()> {
+        if self.production.is_some() && self.desktop.is_none() && !ctx.embed_viewports() {
+            let desktop = super::native::DesktopNativeAdapter::default();
+            self.set_native_adapter(Box::new(desktop.clone()))?;
+            self.desktop = Some(desktop);
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn show_desktop_windows(&mut self, app: &mut crate::SolveApp, ctx: &egui::Context, enabled: bool) -> PanelResult<()> {
+        use super::native_ui::WindowAction;
+
+        let (Some(desktop), Some(state)) = (self.desktop.clone(), self.production.clone()) else { return Ok(()) };
+        if !self.runtime.layout().layout().sections.iter().any(|section| section.location.zone() == Zone::Window) {
+            return Ok(());
+        }
+        self.reconcile(&app.session)?;
+        let windows: Vec<_> = self
+            .runtime
+            .layout()
+            .layout()
+            .sections
+            .iter()
+            .filter_map(|section| {
+                let SectionLocation::Window { host, .. } = &section.location else { return None };
+                Some((host.clone(), section.clone()))
+            })
+            .collect();
+        let mut failure = None;
+        for (host, section) in windows {
+            let paint = (|| -> PanelResult<()> {
+                let layout = self.runtime.layout();
+                let available = section.tabs.iter().map(|id| (id.clone(), layout.availability(id))).collect();
+                let active = (!app.home.open).then(|| presented_tab(&section, &available)).flatten();
+                let Some(active) = active else {
+                    desktop.suspend(&host);
+                    self.mount_native(&app.session, &host, &ResolvedLayout::default(), &mut EmptyPanelHost)?;
+                    return Ok(());
+                };
+                let (min, max) = tab_bounds(layout.layout(), layout.registry(), &section)?;
+                if !desktop.owns(&host, &section.id) {
+                    return Err(error(Rule::Lifecycle, "native window lost its layout registration"));
+                }
+                let title = self.runtime.instance_presentation(active)?.title;
+                let size = section.size;
+                let preferred =
+                    Size { width: size.width.max(360.0).clamp(min.width, max.width), height: size.height.max(440.0).clamp(min.height, max.height) };
+                let Some(builder) = desktop.builder(ctx, &host, active, title, preferred, (min, max)) else { return Ok(()) };
+                let Some(viewport) = desktop.viewport_id(&host) else { return Ok(()) };
+                let action = match desktop.ready(ctx, &host, &builder) {
+                    Ok(false) => return Ok(()),
+                    Err(reason) => {
+                        self.recover_unopened_window(&app.session, host, &section)?;
+                        app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
+                        return Err(reason);
+                    }
+                    Ok(true) => {
+                        self.services.set_presentation_viewport(Some(&host));
+                        let mut services = self.services.services();
+                        let mut content = super::production::ProductionFrame { app, state: state.clone() };
+                        let result = ctx.show_viewport_immediate(viewport, builder, |ui, class| {
+                            if class == egui::ViewportClass::EmbeddedWindow {
+                                return Err(error(Rule::Capability, "desktop viewport became unavailable"));
+                            }
+                            desktop.observe(ui.ctx(), &host, active);
+                            solidcraft_ui_registry::isolated(|| {
+                                super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)
+                            })
+                        });
+                        self.services.set_presentation_viewport(None);
+                        result?
+                    }
+                };
+                let Some(action) = action else { return Ok(()) };
+                let close = matches!(action, WindowAction::Redock);
+                let mutation = match action {
+                    WindowAction::Activate(instance) => Mutation::Activate { instance },
+                    WindowAction::Expand(section) => Mutation::Collapse { section, collapsed: false },
+                    WindowAction::Content(instance, action) => Mutation::HeaderAction { instance, action },
+                    WindowAction::Redock => Mutation::NativeClose { host },
+                };
+                if let Err(reason) = self.dispatch(&app.session, LayoutAction::Apply { expected_revision: None, mutations: vec![mutation] }) {
+                    if close {
+                        ctx.send_viewport_cmd_to(viewport, egui::ViewportCommand::CancelClose);
+                    }
+                    return Err(reason);
+                }
+                ctx.request_repaint();
+                Ok(())
+            })();
+            if let Err(reason) = paint {
+                failure.get_or_insert(reason);
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn recover_unopened_window(&mut self, session: &Session, host: HostId, section: &Section) -> PanelResult<()> {
+        let close = LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::NativeClose { host }] };
+        match self.dispatch(session, close.clone()) {
+            Ok(_) => return Ok(()),
+            // A failed OS window must not strand an open panel. Recovery may use
+            // the shared host's bounded overflow extent when the dock fills meanwhile.
+            Err(reason) if reason.rule == Rule::NoSpace => {
+                self.with_adapters(|runtime, native, services| runtime.dispatch(close, native, services))?;
+                return Ok(());
+            }
+            Err(_) => {}
+        }
+        // The former tab group may have filled or become incompatible during
+        // creation. Restore the whole cohort as one floating section.
+        let layout = self.runtime.layout().layout();
+        let id = next_section_id_with_reservations(layout, &self.preference_identity_reservations()?)?;
+        let mut mutations = Vec::new();
+        for (index, instance) in section.tabs.iter().enumerate() {
+            let destination = if index == 0 {
+                Destination::NewSection {
+                    section: id.clone(),
+                    index: layout.sections.len(),
+                    location: SectionLocation::Floating { origin: Point { x: 0.0, y: 0.0 } },
+                    size: section.size,
+                }
+            } else {
+                Destination::JoinTab { section: id.clone(), index }
+            };
+            mutations.push(Mutation::Move { instance: instance.clone(), destination });
+        }
+        mutations.push(Mutation::Activate { instance: section.active.clone() });
+        if section.collapsed {
+            mutations.push(Mutation::Collapse { section: id, collapsed: true });
+        }
+        self.with_adapters(|runtime, native, services| {
+            runtime.dispatch(LayoutAction::Apply { expected_revision: None, mutations }, native, services)
+        })?;
+        Ok(())
+    }
+
     pub fn native_capabilities(&self) -> HostCapabilities {
         self.native.capabilities()
     }
@@ -530,7 +746,7 @@ impl AppPanelRuntime {
         if result.is_ok()
             && let Some(record) = self.preferences.as_ref().filter(|state| !state.failed).and_then(|state| state.pending.clone())
         {
-            match self.restore_preference_record(session, record) {
+            match self.restore_preference_record_resilient(session, record) {
                 Ok(()) => {
                     self.refresh_metrics()?;
                     self.refresh_reservations()?;
@@ -1009,8 +1225,16 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             && let Some(host) = &mut integration.host
         {
             host.set_header_action_visible(InstanceId("history".into()), ControlId("play".into()), app.preferences.history_play_button);
+            host.set_live_drag(app.preferences.live_panel_drag_preview);
         }
-        let result = integration.sync_native_direction(direction).and_then(|()| integration.tick(&app.session));
+        let result = (|| {
+            #[cfg(not(target_arch = "wasm32"))]
+            if !app.embedded && !app.embed_editor {
+                integration.enable_desktop_windows(ctx)?;
+            }
+            integration.sync_native_direction(direction)?;
+            integration.tick(&app.session)
+        })();
         if result.is_err() || !integration.preferences.as_ref().is_some_and(|state| state.failed) {
             integration.last_error = result.err();
         }
@@ -1019,9 +1243,29 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
         .panel_runtime
         .as_ref()
         .and_then(|integration| integration.preferences.as_ref())
-        .is_some_and(|state| state.failed || state.rejected.is_some())
+        .is_some_and(|state| state.failed || state.rejected.is_some() || !state.reset.is_empty())
     {
         super::preferences::report_notice(app);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn show_desktop_windows(app: &mut crate::SolveApp, ctx: &egui::Context) {
+    let Some(mut integration) = app.panel_runtime.take() else { return };
+    let enabled = !crate::ui_kit::Container::modal_input_blocked(ctx);
+    if let Err(reason) = integration.show_desktop_windows(app, ctx, enabled) {
+        app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
+        integration.last_error = Some(reason);
+    }
+    app.panel_runtime = Some(integration);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl crate::SolveApp {
+    pub fn refresh_panel_monitors(&mut self, monitors: impl FnOnce() -> Vec<super::NativeMonitor>) {
+        if let Some(desktop) = self.panel_runtime.as_ref().and_then(|integration| integration.desktop.as_ref()) {
+            desktop.update_monitors(monitors);
+        }
     }
 }
 

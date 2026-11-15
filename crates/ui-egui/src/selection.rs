@@ -22,6 +22,16 @@ pub(crate) fn same_item(a: &Sel, b: &Sel) -> bool {
     }
 }
 
+/// Whether the selection holds the body `body`: selected on its own, or through a selected
+/// occurrence (the bodies its placement shows, as its Browser row lists them).
+pub(crate) fn holds_body(session: &solidcraft_engine::Session, body: &str) -> bool {
+    session.selection.iter().any(|s| match s {
+        Sel::Body { name } => name == body,
+        Sel::Occurrence { path } => session.occurrence_bodies_shared(path, true).is_ok_and(|b| b.iter().any(|n| n == body)),
+        _ => false,
+    })
+}
+
 /// Two distinct point intents for the alignment command, without creating sketch points.
 pub(crate) fn alignment_points(selection: &[Sel]) -> Option<[serde_json::Value; 2]> {
     let [a, b] = selection else { return None };
@@ -112,11 +122,15 @@ pub struct SelInput {
     /// nothing leaves under the form (#10428). Without one the tooltip names what it takes.
     pub tip: Option<&'static str>,
     pub items: Vec<Sel>,
+    /// Where the points picked into this input came from when a hovered flat face offered them
+    /// (#11476): a corner, an edge's middle or a hole's centre of that face, with the face, its
+    /// outward normal and the edge. A joint origin there lies on the face and follows it by name.
+    pub from_face: Vec<(Sel, solidcraft_engine::snap::SnapKind, solidcraft_engine::snap::SnapSource)>,
 }
 
 impl SelInput {
     pub fn new(label: &'static str, accept: Accept, multi: bool) -> SelInput {
-        SelInput { label, accept, multi, places: false, tip: None, items: Vec::new() }
+        SelInput { label, accept, multi, places: false, tip: None, items: Vec::new(), from_face: Vec::new() }
     }
 
     /// This input with face picks as places (see [`SelInput::places`]).
@@ -206,7 +220,7 @@ pub(crate) fn curve_pick(id: &str, sketch: u64, active: Option<u64>) -> Sel {
     Sel::SketchCurve { id: id.to_string(), sketch: (active != Some(sketch)).then_some(sketch) }
 }
 
-/// Projections preserve pick order and repetitions; callers own any deduplication or frames.
+/// Projections preserve pick order; profile identities occur once, other picks retain repetitions.
 pub(crate) trait SelectionExt {
     fn body_names(&self) -> Vec<String>;
     fn curve_ids(&self) -> Vec<String>;
@@ -230,7 +244,11 @@ impl SelectionExt for [Sel] {
         named.all(|k| k == Some(first)).then_some(first)
     }
     fn profiles(&self) -> Vec<(u64, usize)> {
-        self.iter().filter_map(|x| if let Sel::Profile { sketch, index } = x { Some((*sketch, *index)) } else { None }).collect()
+        let mut seen = std::collections::BTreeSet::new();
+        self.iter()
+            .filter_map(|x| if let Sel::Profile { sketch, index } = x { Some((*sketch, *index)) } else { None })
+            .filter(|profile| seen.insert(*profile))
+            .collect()
     }
     fn edge_points(&self) -> Vec<Vec3> {
         self.iter().filter_map(|x| if let Sel::Edge { point, .. } = x { Some(*point) } else { None }).collect()
