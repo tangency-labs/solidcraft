@@ -186,10 +186,11 @@ fn rounded_bodies() -> Vec<(&'static str, Body)> {
     let post = crate::cylinder(Vec3::ZERO, Vec3::Z, 5.0, 20.0).unwrap();
     let arm = crate::cylinder(Vec3::new(0.0, 0.0, 10.0), Vec3::X, 3.0, 15.0).unwrap();
     let tee = boolean(&post, &arm, BoolOp::Union).unwrap().unwrap();
-    let foot = Vec3::new((25.0f64 - 9.0).sqrt(), 0.0, 13.0);
+    // Where the arm's top line meets the post: x² + 3² = 5².
+    let foot = Vec3::new(4.0, 0.0, 13.0);
     out.push(("tee", crate::fillet(&tee, &[foot], 1.0).unwrap()));
     let tube = crate::cylinder(Vec3::ZERO, Vec3::Z, 5.0, 20.0).unwrap();
-    let slant = solidcore_record::Plane { origin: Vec3::new(0.0, 0.0, 10.0), x: Vec3::X, y: Vec3::new(0.0, 1.0, -0.5).normalized().unwrap() };
+    let slant = solidcore_record::Plane { origin: Vec3::new(0.0, 0.0, 10.0), x: Vec3::X, y: Vec3::new(0.0, 0.8, -0.6) };
     if let Ok(parts) = split_by_plane(&tube, &slant)
         && let Some(lower) = parts.into_iter().find(|p| p.mesh(&crate::MeshTolerance::chord(0.1)).is_ok_and(|m| m.bounds().min.z < 1.0))
         && let Ok(rounded) = crate::fillet(&lower, &[Vec3::new(5.0, 0.0, 10.0)], 1.5)
@@ -205,7 +206,8 @@ fn rounded_bodies() -> Vec<(&'static str, Body)> {
 /// kernel's own move makes. A pattern of 900 rounded cylinders sent each copy through the kernel.
 #[test]
 fn a_rounded_body_moves_exactly_as_the_kernel_moves_it() {
-    let (c, s) = (0.7f64.cos(), 0.7f64.sin());
+    // A turn whose cosine and sine are exact (3-4-5), and a long way off.
+    let (c, s) = (0.6, 0.8);
     let matrices = [
         [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [290., 290., 0., 1.]],
         [[c, s, 0., 0.], [-s, c, 0., 0.], [0., 0., 1., 0.], [10., -20., 30., 1.]],
@@ -227,7 +229,7 @@ fn a_rounded_body_moves_exactly_as_the_kernel_moves_it() {
             // The kernel's own move gives the same body.
             let kernels = transformed(&body, &m).unwrap();
             for (a, b) in placed.record().vertices.iter().zip(&kernels.record().vertices) {
-                assert!(Vec3::from(a.point).dist(Vec3::from(b.point)) < 1e-9, "{what}");
+                assert!(a.point.iter().zip(b.point).all(|(x, y)| (x - y).abs() < 1e-9), "{what}: {:?} vs {:?}", a.point, b.point);
             }
             // It is an operand like any other: cut through a round, as the source is cut.
             let corner = crate::box_solid(Vec3::new(-50.0, -50.0, 3.0), Vec3::new(50.0, 1.0, 50.0)).unwrap();
