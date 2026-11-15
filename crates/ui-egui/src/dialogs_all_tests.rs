@@ -965,10 +965,14 @@ fn face_pattern_attractors_come_from_the_advanced_option() {
     let near = picks(ATTRACTORS);
     assert!(near.iter().any(|p| matches!(p, Sel::Edge { .. })) && near.contains(&Sel::Body { name: "Body2".into() }), "{near:?}");
     assert!(matches!(picks(FAR_ATTRACTORS).as_slice(), [Sel::Edge { .. }]), "{:?}", picks(FAR_ATTRACTORS));
-    let (_, again) = apply_commands(&h.app, &edit).unwrap().remove(0);
-    let a = &again["attract"];
-    assert_eq!(a["bodies"], json!(["Body2"]));
+    // An edit redefines the feature: the pattern's parameters are nested in the redefinition.
+    let (redefine, again) = apply_commands(&h.app, &edit).unwrap().remove(0);
+    assert_eq!(redefine, "timeline.redefine");
+    assert_eq!(again["command"], json!("solid.pattern.face"));
+    let a = &again["params"]["attract"];
+    assert_eq!(a["bodies"], json!(["Body2"]), "{again}");
     assert!(a["geometry"][0]["edge"].is_array() && a["far_geometry"][0]["edge"].is_array(), "{again}");
+    h.app.run(&redefine, again).unwrap();
 }
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
