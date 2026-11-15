@@ -277,6 +277,7 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.offset_resolve_crossing_loops = true;
+    k.fixes.offset_stitch_at_body_tolerance = true;
     k.fixes.oscillating_skips_failed_guesses = true;
     k.fixes.planar_path_profile_placement_statuses = true;
     k.fixes.planar_path_sweep_statuses = true;

@@ -124,6 +124,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_cleanup_keeps_target_faces = true;
     f.fillet_nx1_tangent_side_edge = true;
     f.fillet_3x2_mixed_concave_side_edge = true;
+    f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
