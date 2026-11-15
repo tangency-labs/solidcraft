@@ -742,15 +742,16 @@ fn a_rim_round_partly_on_the_top_rolls_onto_the_foot_round_partway() {
 /// rolled onto the foot round; in the slot the foot round is cut away, and the rail rolled onto
 /// it crosses the slot's edges. The rail on the top crosses the slot's rims, cliffs: the cliff
 /// overflow (the only path since tangency-labs/solidcraft#13841, as it was with the corpus's
-/// fixes) takes it before the trim. Its overflow-first pass then fails internally (code 4, a
-/// rail without a curve in `RailsFitTheirFaces`), which reads as status 1001. The blend is
-/// not built. The 1001 pins that known defect (tangency-labs/solidcraft#16686), not the
-/// intended behaviour, which is a typed refusal. Before the cliff overflow was the only path, the kernel without the
-/// corpus's fixes reached the trim, which refuses it as a rail not proved on the foot round
-/// ([`RoomReason::RailLeavesFace`]); without that proof it failed later, in the trace's
-/// rollover, also with status 1001.
+/// fixes) judges it first. It is refused as its rail leaving its face
+/// ([`RoomReason::RailLeavesFace`], typed since solidcore-ops' untyped "refused without the
+/// cliff overflow fix" refusal was removed), as main refused it. (With this branch's earlier
+/// base the overflow-first pass failed internally instead, code 4, read as status 1001,
+/// tangency-labs/solidcraft#16686.) MEASURED: the refusal names the fit 3.247 at
+/// (-36, -74.841, 5), above the asked 2, which no closed form here supports; the size is not
+/// asserted. Without the rail's proof on the foot round the blend failed later, in the
+/// trace's rollover, with status 1001.
 #[test]
-fn a_rim_round_whose_top_reaches_the_contact_between_sections_is_not_built() {
+fn a_rim_round_whose_top_reaches_the_contact_between_sections_is_refused() {
     let r4 = 9.0;
     let d = 2.0;
     let (v, w) = (-65.0 - r4, top_end_on_side());
@@ -768,8 +769,10 @@ fn a_rim_round_whose_top_reaches_the_contact_between_sections_is_not_built() {
     let result = blend(&b, Blend::Round, &rim, &[d], &[], Corners::Filled);
     fixes();
     match result {
-        // a known defect, tangency-labs/solidcraft#16686: should be a typed refusal
-        Err(Error::Status(1001)) => {}
+        Err(Error::TooLarge {
+            why: Some(RoomReason::RailLeavesFace),
+            ..
+        }) => {}
         other => panic!("the slot between the sections: {other:?}"),
     }
 }
