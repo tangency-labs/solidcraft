@@ -2076,7 +2076,8 @@ fn a_rim_round_across_a_loft_s_creases_is_certified_or_refused() {
 /// the fillet ("Unable to Process Rollover").
 #[test]
 fn a_round_split_by_rollover_ends_its_last_piece_at_a_closed_edge_s_seam() {
-    use solidcore_ops::{boolean, BooleanOp};
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::BooleanOp;
     all_fixes();
     let phase = PI / 12.0;
     let sections = [
@@ -2106,11 +2107,43 @@ fn a_round_split_by_rollover_ends_its_last_piece_at_a_closed_edge_s_seam() {
         "the edge picked is not the boss's foot: {near:?}"
     );
     drop(k);
+    let r = 1.0;
     let before = volume(&b);
-    blend(&b, Blend::Round, &[index], &[1.0], &[], Corners::Filled)
+    let [faces, _, _] = b.counts().unwrap();
+    let made = blend(&b, Blend::Round, &[index], &[r], &[], Corners::Filled)
         .unwrap_or_else(|e| panic!("the boss's foot does not round: {e:?}"));
     let report = b.check(CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{report}");
-    // a round at a concave foot adds material
-    assert!(volume(&b) > before, "{} <= {before}", volume(&b));
+    // The round only adds faces: every face it meets is trimmed back, none taken away. Its
+    // edge and vertex counts depend on how many pieces the rollover makes along the hull's
+    // spline joints, which the construction does not fix.
+    assert!(!made.made.is_empty());
+    assert_eq!(b.counts().unwrap()[0], faces + made.made.len());
+    // The round fills the concave foot. Its section in a plane through the boss's axis is the
+    // region between the two walls and the ball's arc: r^2 (cot(a / 2) - (pi - a) / 2) for
+    // walls meeting at a (through the air). The boss is upright, and the hull's top under the
+    // foot slopes less than atan(0.16) (steepest across the sections, half-axes 24 and 14 at
+    // |y| = 6: dz/dy = (14 / 24^2) 6 / sqrt(1 - (6 / 24)^2) = 0.151; along x the half-axes
+    // change by 0.5 over 20), so a lies in [88, 100] degrees and the section's area in
+    // [0.141, 0.233] r^2. By Pappus the added volume is the integral of that area round the
+    // axis at its centroid's radius, between 6 and 6 + r: in [0.141 2 pi 6, 0.233 2 pi 7] r^3
+    // = [5.3, 10.3] r^3 for r = 1.
+    let added = volume(&b) - before;
+    assert!((5.3..=10.3).contains(&added), "{added}");
+    // Each face the round made lies within the ball's reach of the foot: no farther out from
+    // the boss's side than r cot(44 degrees) < 1.04 r, and above the hull's top under the
+    // foot (z = 20 + 14 cos(asin(6 / 24)) = 33.55 at |y| = 6 on the lower of the two
+    // sections beside it) less r, with 0.5 for the loft between them, up to the boss's top.
+    let (k, brep) = kernel_copy(&b);
+    for &f in &made.made {
+        let face = brep.face_list()[f];
+        let bx = face_bounding_box(&k, &brep, face, true).unwrap();
+        for p in [bx.min(), bx.max()] {
+            assert!(
+                p.x.abs() <= 6.0 + 1.04 * r && p.y.abs() <= 6.0 + 1.04 * r,
+                "{bx:?}"
+            );
+            assert!(p.z >= 33.55 - r - 0.5 && p.z <= 39.0, "{bx:?}");
+        }
+    }
 }

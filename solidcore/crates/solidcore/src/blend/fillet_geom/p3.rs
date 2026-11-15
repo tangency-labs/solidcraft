@@ -1127,10 +1127,10 @@ impl FilletBrep {
 
         let mut tsect_pnts: Vec<VertexuseId> = Vec::new();
         let mut proj_params: Vec<f64> = Vec::new();
-        // each rail-end point's vertex use and parameter on the solver edge, and whether it
-        // is the start or the end of a main rail (not of a rail split off it), in the order
-        // met
-        let mut projected: Vec<(VertexuseId, f64, Option<OrientType>)> = Vec::new();
+        // each rail-end point's vertex use, its parameter on the solver edge, its edge use's
+        // orientation (the rail's start or end) and whether its rail is a main rail (not one
+        // split off it), in the order met
+        let mut projected: Vec<(VertexuseId, f64, OrientType, bool)> = Vec::new();
         for jj in 0..2usize {
             if !b3d_test {
                 let eu_on_surf = solver
@@ -1271,21 +1271,18 @@ impl FilletBrep {
                         t = ivl.max();
                     }
 
-                    let main_end = if rail_index == 0 {
-                        Some(eu1::orientation(self.brep(), eu)?)
-                    } else {
-                        None
-                    };
-                    projected.push((vu, t, main_end));
+                    let orientation = eu1::orientation(self.brep(), eu)?;
+                    projected.push((vu, t, orientation, rail_index == 0));
                 } // end loop on both edgeuses of this rail
             } // end loop on all rails on this side
         } // end loop on both main rails
 
         // Not upstream (#17016): on a closed solver edge the geometry runs forward along the
         // edge from its start (its main rails' starts, the edge uses of the same orientation)
-        // to its end. When a main rail's end lies before that start, the geometry runs
-        // across the edge's seam, and each point before the start lies past the seam: one
-        // period on. Upstream sorts such points by their parameter as they are (moving only
+        // to its end, through the rails split off them in order. When a rail's end lies
+        // before that start (the main rails' own, or, once they are split, the last split-off
+        // rail's, which ends the geometry), the geometry runs across the edge's seam, and
+        // each point before the start lies past the seam: one period on. Upstream sorts such points by their parameter as they are (moving only
         // an end exactly on the seam, and only in the 3D test), so the last piece of a round
         // split by rollover, which ends at the seam, was traced from the seam the long way
         // round to its start and its rails trimmed to a negative interval. A 2D test drops
@@ -1294,15 +1291,15 @@ impl FilletBrep {
         if is_closed_solver_edge {
             let start = projected
                 .iter()
-                .filter(|(_, _, end)| *end == Some(OrientType::Same))
-                .map(|(_, t, _)| *t)
+                .filter(|(_, _, orientation, main)| *main && *orientation == OrientType::Same)
+                .map(|(_, t, _, _)| *t)
                 .reduce(f64::min);
             if let Some(start) = start {
-                let wraps = projected
-                    .iter()
-                    .any(|(_, t, end)| *end == Some(OrientType::Opposite) && *t < start);
+                let wraps = projected.iter().any(|(_, t, orientation, _)| {
+                    *orientation == OrientType::Opposite && *t < start
+                });
                 if wraps {
-                    for (_, t, _) in &mut projected {
+                    for (_, t, _, _) in &mut projected {
                         if *t < start {
                             *t += ivl.length();
                         }
@@ -1312,7 +1309,7 @@ impl FilletBrep {
         }
 
         // sorting SmTsectPnts
-        for (vu, t, _) in projected {
+        for (vu, t, _, _) in projected {
             let mut index_of_insert = proj_params.len();
             let mut do_insertion = true;
             for (kk, &p) in proj_params.iter().enumerate() {
