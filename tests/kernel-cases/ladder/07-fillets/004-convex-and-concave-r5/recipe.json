@@ -1,0 +1,70 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      40,
+      0
+     ],
+     [
+      40,
+      10
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      10,
+      40
+     ],
+     [
+      0,
+      40
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 20
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      10,
+      10,
+      10
+     ],
+     [
+      0,
+      0,
+      10
+     ]
+    ],
+    "radius": 5
+   }
+  }
+ ]
+}

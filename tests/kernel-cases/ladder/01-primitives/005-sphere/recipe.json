@@ -1,0 +1,10 @@
+{
+ "commands": [
+  {
+   "command": "solid.sphere",
+   "params": {
+    "radius": 10
+   }
+  }
+ ]
+}

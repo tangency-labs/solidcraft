@@ -1,0 +1,98 @@
+{
+ "commands": [
+  {
+   "command": "material.create",
+   "params": {
+    "name": "Rig Two",
+    "density_g_cm3": 2.0
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 20,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "operation": "new",
+    "body_name": "BlockA"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     30,
+     0,
+     0
+    ],
+    "operation": "new",
+    "body_name": "BlockB"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "A",
+    "parent": "root",
+    "activate": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "BlockA"
+    ],
+    "component": "A"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "B",
+    "parent": "root",
+    "activate": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "BlockB"
+    ],
+    "component": "B"
+   }
+  },
+  {
+   "command": "material.assign",
+   "params": {
+    "bodies": [
+     "BlockA",
+     "BlockB"
+    ],
+    "material": "Rig Two"
+   }
+  },
+  {
+   "command": "joint.rigid_group",
+   "params": {
+    "occurrences": [
+     "A:1",
+     "B:1"
+    ]
+   }
+  },
+  {
+   "command": "assembly.mass_properties",
+   "params": {}
+  }
+ ]
+}

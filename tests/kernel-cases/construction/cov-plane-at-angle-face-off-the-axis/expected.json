@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "a box's top turned 45 degrees about X, which lies off it",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): the top z = 20 turned +45 deg about the X axis through the origin: normal (0, -1/sqrt2, 1/sqrt2), and its point (0,0,20) goes to (0, -20/sqrt2, 20/sqrt2): the plane -y + z = 20 sqrt2, 20 from the axis",
+ "construction": {
+  "P": {
+   "plane": {
+    "through": [
+     0,
+     -14.14213562373095,
+     14.14213562373095
+    ],
+    "normal": [
+     0,
+     -1,
+     1
+    ]
+   }
+  }
+ }
+}

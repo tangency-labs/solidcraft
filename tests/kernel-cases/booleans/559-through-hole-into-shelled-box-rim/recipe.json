@@ -1,0 +1,41 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -35,
+     -25,
+     0
+    ],
+    "length": 70,
+    "width": 50,
+    "height": 30
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      0,
+      0,
+      30
+     ]
+    ],
+    "thickness": 2
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     0,
+     24,
+     30
+    ],
+    "diameter": 1
+   }
+  }
+ ]
+}

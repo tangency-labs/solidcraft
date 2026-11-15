@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#851"
+ ],
+ "what": "the knife edge where #851's concave R21 wall runs out tangent into the back face, chamfered 5: the plane through the contacts of the ball of radius 5",
+ "source": "analytic",
+ "method": "plate x 0..41.1667, y -21..0 and the corner x 41.1667..62.1667 less the cylinder r 21 about (62.1667, -21), 10 high (tessellation/1263): V0 = 10 (62.1667 x 21 - pi 21^2/4) = 9591.394099. The chamfer cuts along the chord between the contacts of the ball of radius d = 5 that fits there (as the R5 round's): on the back face at x = 62.1667 - sqrt(84 d), on the wall where the line from its axis to the ball's centre meets it. It takes the triangle plane contact, tip, wall contact less the wall's circular segment R^2/2 (b - sin b), b = acos((21-d)/(21+d)): 56.370971 mm^2, times 10. V = 9027.684392",
+ "body_count": 1,
+ "volume_mm3": 9027.684392451565,
+ "continuity": {
+  "order": "g0"
+ }
+}

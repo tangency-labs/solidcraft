@@ -128,6 +128,12 @@ impl PhotographicTask {
     pub fn step(&mut self, units: usize) -> Result<bool> {
         self.state.first_mut().ok_or_else(|| invalid("missing photographic state"))?.step(units)
     }
+    #[cfg(feature = "raytrace-cpu")]
+    pub(crate) fn next_step_pixels(&self, units: usize) -> Result<u64> {
+        let state = self.state.first().ok_or_else(|| invalid("missing photographic state"))?;
+        let remaining = state.width * state.height - if state.ready { state.pixel } else { state.scanned };
+        Ok(remaining.min(units.clamp(1, 16384)) as u64)
+    }
     pub fn progress(&self) -> (u64, u64) {
         self.state.first().map_or((0, 0), PhotographicState::progress)
     }
@@ -183,7 +189,7 @@ impl PhotographicState {
             source,
             linear,
             output,
-            lookup: std::array::from_fn(|i| crate::surface::srgb8_to_linear(i as u8)),
+            lookup: std::array::from_fn(|i| solidcraft_viewport::surface::srgb8_to_linear(i as u8)),
             tiles: [Highlight::default(); 144],
             highlights: [Highlight::default(); 4],
             source_count: 0,
@@ -369,8 +375,7 @@ impl PhotographicState {
             let grain = (random(index as u32 ^ self.options.seed) - 0.5) * self.options.grain * (luminance + 0.03).sqrt();
             for channel in 0..3 {
                 let linear = (rgb[channel] + flare[channel] + grain).max(0.0);
-                let encoded = if linear <= 0.0031308 { linear * 12.92 } else { 1.055 * linear.powf(1.0 / 2.4) - 0.055 };
-                self.output.push((encoded.clamp(0.0, 1.0) * 255.0).round() as u8);
+                self.output.push(solidcraft_color::srgb::encode8(linear));
             }
             self.output.push(255);
         }

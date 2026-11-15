@@ -1,13 +1,17 @@
 //! Borrowed prepared-scene contract shared by bounded transport consumers.
 use super::{Bvh, Hit, MAX_DISTANCE_MM, Ray, Result, TraceError};
-use crate::{ProductScene, surface::OpaqueSurface};
-use solidcraft_geom::Vec3;
+use crate::ProductScene;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
+use solidcraft_viewport::surface::OpaqueSurface;
 
 #[derive(Clone, Copy)]
 pub struct PreparedPrimitive {
     pub body_index: usize,
     /// Authoritative captured mesh face tag; never inferred from a plane.
     pub face: Option<u32>,
+    /// Explicit scalar face appearance suppresses inherited body maps.
+    pub has_face_override: bool,
     pub vertices: [Vec3; 3],
     pub normals: [Vec3; 3],
     pub surface: OpaqueSurface,

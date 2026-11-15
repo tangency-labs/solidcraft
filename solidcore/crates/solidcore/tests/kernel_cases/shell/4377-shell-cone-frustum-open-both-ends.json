@@ -1,0 +1,137 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "shell",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "open_faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 1
+            },
+            {
+              "at": [],
+              "index": 2
+            }
+          ],
+          "points": [
+            [
+              4.902393103603272,
+              5.509302074841121,
+              -2.3684757858670005e-15
+            ],
+            [
+              16.098896995231495,
+              0.5828658658286621,
+              38.10000000000001
+            ]
+          ],
+          "tolerance": 0.06820371255602668
+        },
+        "thickness": -0.125
+      }
+    }
+  ],
+  "case": "4377-shell-cone-frustum-open-both-ends",
+  "expected": {
+    "body_count": 1,
+    "faces": 4,
+    "method": "the wall is the side offset 0.125 normal to the cone, inward: half-angle a = atan(10/38.1), inner radii r - 0.125/cos(a) at both ends; both ends are open, so V = pi h/3 (R1^2+R1R2+R2^2) - pi h/3 (r1^2+r1r2+r2^2). Faces: outer and inner cones, the two end rings = 4",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4377"
+    ],
+    "volume_mm3": 462.0591,
+    "what": "a cone frustum (r 10 at the bottom, 20 at the top, 38.1 high) shelled 0.125 with both its ends removed, leaving a conical tube: truck refused it ('a corner whose faces don't meet the same way after the move')"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 6,
+      "faces": 4,
+      "vertices": 4
+    }
+  },
+  "records": "4377-shell-cone-frustum-open-both-ends.bodies.json.gz",
+  "result": [
+    {
+      "body": "Cone",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7417.2007482598965,
+      "body_count": 1,
+      "edges": 6,
+      "faces": 4,
+      "vertices": 4,
+      "volume_mm3": 462.05910479276054
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4377"
+  ],
+  "traced_ops": [
+    "revolve",
+    "copy",
+    "copy",
+    "tagged",
+    "shell"
+  ],
+  "ungraded": [],
+  "what": "a cone frustum (r 10 at the bottom, 20 at the top, 38.1 high) shelled 0.125 with both its ends removed, leaving a conical tube: truck refused it ('a corner whose faces don't meet the same way after the move')",
+  "why_not": []
+}

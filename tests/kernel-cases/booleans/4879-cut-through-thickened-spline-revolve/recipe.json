@@ -1,0 +1,138 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Profile"
+   }
+  },
+  {
+   "command": "sketch.spline.control_point",
+   "params": {
+    "points": [
+     [
+      -10,
+      8
+     ],
+     [
+      -4,
+      12
+     ],
+     [
+      2,
+      9
+     ],
+     [
+      8,
+      13
+     ],
+     [
+      14,
+      10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.revolve",
+   "params": {
+    "sketch": "Profile",
+    "curves": [
+     "s1"
+    ],
+    "axis": "X",
+    "angle": "100 deg"
+   }
+  },
+  {
+   "command": "surface.thicken",
+   "params": {
+    "bodies": [
+     "Body1"
+    ],
+    "thickness": "2 mm",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "solid.remove",
+   "params": {
+    "bodies": [
+     "Body1"
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Window",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -2,
+     6
+    ],
+    "p1": [
+     6,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Window",
+    "distance": 10,
+    "direction": "symmetric",
+    "through_all": true,
+    "operation": "cut"
+   }
+  }
+ ]
+}

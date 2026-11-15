@@ -1,0 +1,29 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "radius": 5,
+    "height": 30,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     5,
+     0,
+     15
+    ],
+    "modeled": true,
+    "form": "square"
+   }
+  }
+ ]
+}

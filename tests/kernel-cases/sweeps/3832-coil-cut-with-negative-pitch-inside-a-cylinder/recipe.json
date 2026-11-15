@@ -1,0 +1,35 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 45,
+    "height": 40,
+    "base": [
+     0,
+     0,
+     -20
+    ],
+    "axis": "Z",
+    "body_name": "Blank"
+   }
+  },
+  {
+   "command": "solid.coil",
+   "params": {
+    "diameter": 80,
+    "revolutions": 7,
+    "pitch": -2,
+    "section_size": 1,
+    "section": "circular",
+    "section_position": "center",
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "operation": "cut"
+   }
+  }
+ ]
+}

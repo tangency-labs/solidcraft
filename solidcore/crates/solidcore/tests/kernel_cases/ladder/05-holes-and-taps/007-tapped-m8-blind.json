@@ -1,0 +1,160 @@
+{
+  "area": "ladder/05-holes-and-taps",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "007-tapped-m8-blind",
+  "expected": {
+    "body_count": 1,
+    "faces": 8,
+    "method": "M8 coarse pitch 1.25: the tap maker's drill 6.8 (Yamawa YEU23 p.704); removed pi r^2 12 to the shoulder + the point cone pi r^2 (r/tan59)/3",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 47539.467413298,
+    "what": "an M8 tapped blind hole 12 deep with a 118 deg drill point"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 9062.405554142271,
+      "body_count": 1,
+      "edges": 17,
+      "faces": 8,
+      "vertices": 12,
+      "volume_mm3": 47539.4674133087
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 16,
+      "faces": 8,
+      "vertices": 11
+    }
+  },
+  "records": "007-tapped-m8-blind.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 9062.405554142271,
+      "body_count": 1,
+      "edges": 17,
+      "faces": 8,
+      "vertices": 12,
+      "volume_mm3": 47539.4674133087
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "an M8 tapped blind hole 12 deep with a 118 deg drill point",
+  "why_not": []
+}

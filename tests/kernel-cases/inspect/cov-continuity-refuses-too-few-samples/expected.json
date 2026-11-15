@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "continuity with 2 stations a seam",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin: a seam needs its two ends and one station between: 2 is refused",
+ "outcome": "refused",
+ "refusal": "`samples` must be 3\u2026257 stations along each edge"
+}

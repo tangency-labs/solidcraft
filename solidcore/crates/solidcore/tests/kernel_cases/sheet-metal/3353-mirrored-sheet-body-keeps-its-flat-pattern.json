@@ -1,0 +1,252 @@
+{
+  "area": "sheet-metal",
+  "bodies": {
+    "b42": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b42"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b43"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b43"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b44"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b44"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b45"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b45"
+      ],
+      "op": "transform",
+      "outputs": [
+        "b46"
+      ],
+      "params": {
+        "matrix": [
+          [
+            -1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    }
+  ],
+  "case": "3353-mirrored-sheet-body-keeps-its-flat-pattern",
+  "expected": {
+    "body_count": 2,
+    "method": "T = 2, R = 2, K = 0.4, setback 4. One body: base 100 x 52, flanges 20 and 15 high (straights 16 and 11), all 100 wide, 2 thick, two bends of (pi/2)(16 - 4)*100/2 = 942.478 each, a 10 mm hole through the base (pi*25*2). V1 = 2*100*(52 + 16 + 11) + 2*942.478 - 50*pi. The mirror copy is congruent: two bodies, total 2*V1. The flat pattern of the copy must exist",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3353",
+      "tangency-labs/solidcraft#3354"
+    ],
+    "volume_mm3": 35055.75191894878,
+    "what": "a sheet metal body mirrored into a new body must still be sheet metal (flat pattern, bend table): it was a plain solid"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 100,
+      "faces": 48,
+      "vertices": 56
+    }
+  },
+  "records": "3353-mirrored-sheet-body-keeps-its-flat-pattern.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b43"
+    },
+    {
+      "body": "Body1 (2)",
+      "made": "b46"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 36688.81384877018,
+      "body_count": 2,
+      "edges": 76,
+      "faces": 30,
+      "vertices": 52,
+      "volume_mm3": 35055.75191933128
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3353",
+    "tangency-labs/solidcraft#3354"
+  ],
+  "traced_ops": [
+    "extrude",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "copy",
+    "copy",
+    "tagged",
+    "transform",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d"
+  ],
+  "ungraded": [],
+  "what": "a sheet metal body mirrored into a new body must still be sheet metal (flat pattern, bend table): it was a plain solid",
+  "why_not": []
+}

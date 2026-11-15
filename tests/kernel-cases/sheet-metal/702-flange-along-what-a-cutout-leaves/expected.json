@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#702"
+ ],
+ "what": "a 200 x 100 plate whose bottom-left 100 x 60 is cut away, and a 90 degree 40 mm inside flange picked on what is left of the bottom edge (x 100..200)",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5. The flange runs only along the 100 mm the cut leaves of the edge. Plate 200*100 - 100*60 = 14000, less the 3 mm setback (R + T) strip along that stretch 100*3 = 300: 13700. Flange: bend flat BA = (pi/2)(R + K t) = pi, straight 40 - (R+T) = 37, both 100 wide: 100*(pi + 37). With K = 0.5 the neutral axis is the mid-surface, so the folded volume is the flat area times t: V = 2*(13700 + 100*(pi + 37))",
+ "body_count": 1,
+ "volume_mm3": 35428.31853071796
+}

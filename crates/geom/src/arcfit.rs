@@ -5,9 +5,10 @@
 //! keeps smooth curves this way with far fewer pieces than a chord polyline of the same
 //! tolerance: a biarc's error falls with the cube of its length, a chord's with the square.
 
+use crate::prelude::*;
 use std::f64::consts::{PI, TAU};
 
-use crate::{Loop2, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 
 /// Most pieces one segment is fitted with.
 pub const MAX_FIT_PIECES: usize = 2048;
@@ -15,163 +16,6 @@ pub const MAX_FIT_PIECES: usize = 2048;
 const MAX_DEPTH: u32 = 30;
 /// Samples inside each candidate span that must lie within the tolerance.
 const SAMPLES: usize = 12;
-
-impl Seg2 {
-    /// A straight line or a circular arc (what [`Seg2::fit_arcs`] produces).
-    pub fn is_line_or_arc(&self) -> bool {
-        matches!(self, Seg2::Line { .. } | Seg2::Arc { .. })
-    }
-
-    /// Lines and circular arcs that follow the segment within `tol` (mm), in order, the first
-    /// starting at the segment's start and the last ending at its end; consecutive pieces share
-    /// their end points and tangents. Lines and arcs come back unchanged. `None` when the
-    /// segment is not finite or would need more than [`MAX_FIT_PIECES`] pieces.
-    pub fn fit_arcs(&self, tol: f64) -> Option<Vec<Seg2>> {
-        if self.is_line_or_arc() {
-            return Some(vec![*self]);
-        }
-        if !(tol.is_finite() && tol > 0.0) {
-            return None;
-        }
-        let tol = tol.max(1e-9);
-        let mut out: Vec<Seg2> = Vec::new();
-        // Spans still to fit; the last pushed is fitted first, so pushing the right half before
-        // the left one keeps the output in parameter order.
-        let mut todo = vec![(0.0f64, 1.0f64, 0u32)];
-        let mut steps = 0usize;
-        while let Some((t0, t1, depth)) = todo.pop() {
-            steps += 1;
-            if steps > 4 * MAX_FIT_PIECES {
-                return None;
-            }
-            let (p0, p1) = (self.point_at(t0), self.point_at(t1));
-            if !(p0.is_finite() && p1.is_finite()) {
-                return None;
-            }
-            if p0.dist(p1) < 1e-12 && self.span_extent(t0, t1) < tol {
-                continue;
-            }
-            let fit = match (self.tangent_out(t0, t1), self.tangent_in(t0, t1)) {
-                (Some(d0), Some(d1)) => biarc(p0, d0, p1, d1).filter(|arcs| self.within(arcs, t0, t1, tol)),
-                _ => None,
-            };
-            match fit {
-                Some(arcs) => {
-                    out.extend(arcs);
-                    if out.len() > MAX_FIT_PIECES {
-                        return None;
-                    }
-                }
-                None if depth < MAX_DEPTH => {
-                    let tm = 0.5 * (t0 + t1);
-                    todo.push((tm, t1, depth + 1));
-                    todo.push((t0, tm, depth + 1));
-                }
-                None => {
-                    // Too fine to split further (a cusp): the chord is within the tolerance
-                    // here or nothing is.
-                    let chord = [Seg2::Line { a: p0, b: p1 }];
-                    if !self.within(&chord, t0, t1, tol) {
-                        return None;
-                    }
-                    out.push(chord[0]);
-                }
-            }
-        }
-        // The pieces join where their spans meet; pin the outer ends to the segment's own.
-        if let Some(first) = out.first_mut() {
-            *first = with_start(*first, self.start());
-        }
-        if let Some(last) = out.last_mut() {
-            *last = with_end(*last, self.end());
-        }
-        Some(out)
-    }
-
-    /// Unit direction of travel leaving `t` towards `t1`.
-    fn tangent_out(&self, t: f64, t1: f64) -> Option<Vec2> {
-        self.derivative(t).normalized().or_else(|| (self.point_at(t + (t1 - t) * 1e-4) - self.point_at(t)).normalized())
-    }
-
-    /// Unit direction of travel arriving at `t1` from `t0`.
-    fn tangent_in(&self, t0: f64, t1: f64) -> Option<Vec2> {
-        self.derivative(t1).normalized().or_else(|| (self.point_at(t1) - self.point_at(t1 - (t1 - t0) * 1e-4)).normalized())
-    }
-
-    /// Largest distance of the span's sample points from its start (a loop's size).
-    fn span_extent(&self, t0: f64, t1: f64) -> f64 {
-        let p0 = self.point_at(t0);
-        (1..=SAMPLES).map(|i| self.point_at(t0 + (t1 - t0) * i as f64 / (SAMPLES + 1) as f64).dist(p0)).fold(0.0, f64::max)
-    }
-
-    /// Do `pieces` follow the span `t0..t1` within `tol` both ways?
-    fn within(&self, pieces: &[Seg2], t0: f64, t1: f64, tol: f64) -> bool {
-        if pieces.iter().any(|p| matches!(p, Seg2::Arc { sweep, .. } if sweep.abs() > PI)) {
-            return false;
-        }
-        let samples: Vec<Vec2> = (0..=SAMPLES + 1).map(|i| self.point_at(t0 + (t1 - t0) * i as f64 / (SAMPLES + 1) as f64)).collect();
-        // The curve near the pieces...
-        if samples.iter().any(|p| pieces.iter().map(|s| dist_to(s, *p)).fold(f64::INFINITY, f64::min) > tol) {
-            return false;
-        }
-        // ...and the pieces near the curve (their quarter points against the curve's closest
-        // point on the span).
-        pieces.iter().all(|s| {
-            [0.25, 0.5, 0.75].iter().all(|f| {
-                let q = s.point_at(*f);
-                self.dist_on_span(q, t0, t1, &samples) <= tol
-            })
-        })
-    }
-
-    /// Distance from `q` to the span `t0..t1` (closest sample, then Newton steps).
-    fn dist_on_span(&self, q: Vec2, t0: f64, t1: f64, samples: &[Vec2]) -> f64 {
-        let n = samples.len().saturating_sub(1).max(1);
-        let (k, mut best) = samples.iter().enumerate().map(|(i, p)| (i, p.dist(q))).fold((0, f64::INFINITY), |a, b| if b.1 < a.1 { b } else { a });
-        let mut t = t0 + (t1 - t0) * k as f64 / n as f64;
-        for _ in 0..12 {
-            let (p, d) = (self.point_at(t), self.derivative(t));
-            let dd = d.dot(d);
-            if !(dd > 1e-300) {
-                break;
-            }
-            let nt = (t - (p - q).dot(d) / dd).clamp(t0, t1);
-            best = best.min(self.point_at(nt).dist(q));
-            if (nt - t).abs() < 1e-15 {
-                break;
-            }
-            t = nt;
-        }
-        best
-    }
-}
-
-impl Loop2 {
-    /// The loop with every free-form segment fitted by lines and arcs (see
-    /// [`Seg2::fit_arcs`]). `None` when a segment cannot be fitted.
-    pub fn fit_arcs(&self, tol: f64) -> Option<Loop2> {
-        let mut segs = Vec::with_capacity(self.segs.len());
-        for s in &self.segs {
-            segs.extend(s.fit_arcs(tol)?);
-            if segs.len() > MAX_FIT_PIECES * 8 {
-                return None;
-            }
-        }
-        Some(Loop2 { segs })
-    }
-
-    /// Only lines and arcs?
-    pub fn is_line_arc(&self) -> bool {
-        self.segs.iter().all(Seg2::is_line_or_arc)
-    }
-}
-
-impl Region2 {
-    /// Only lines and arcs?
-    pub fn is_line_arc(&self) -> bool {
-        self.outer.is_line_arc() && self.holes.iter().all(Loop2::is_line_arc)
-    }
-}
 
 /// Distance from `p` to a line or arc segment (other segments: to their closest point).
 fn dist_to(s: &Seg2, p: Vec2) -> f64 {
@@ -270,6 +114,185 @@ fn with_end(s: Seg2, p: Vec2) -> Seg2 {
     match s {
         Seg2::Line { a, .. } => Seg2::Line { a, b: p },
         other => other,
+    }
+}
+
+/// Arcs and lines fitted to a profile segment ([`Seg2`]).
+pub trait Seg2ArcFit {
+    /// A straight line or a circular arc (what [`Seg2::fit_arcs`] produces).
+    fn is_line_or_arc(&self) -> bool;
+    /// Lines and circular arcs that follow the segment within `tol` (mm), in order, the first
+    /// starting at the segment's start and the last ending at its end; consecutive pieces share
+    /// their end points and tangents. Lines and arcs come back unchanged. `None` when the
+    /// segment is not finite or would need more than [`MAX_FIT_PIECES`] pieces.
+    fn fit_arcs(&self, tol: f64) -> Option<Vec<Seg2>>;
+}
+
+impl Seg2ArcFit for Seg2 {
+    fn is_line_or_arc(&self) -> bool {
+        matches!(self, Seg2::Line { .. } | Seg2::Arc { .. })
+    }
+    fn fit_arcs(&self, tol: f64) -> Option<Vec<Seg2>> {
+        if self.is_line_or_arc() {
+            return Some(vec![*self]);
+        }
+        if !(tol.is_finite() && tol > 0.0) {
+            return None;
+        }
+        let tol = tol.max(1e-9);
+        let mut out: Vec<Seg2> = Vec::new();
+        // Spans still to fit; the last pushed is fitted first, so pushing the right half before
+        // the left one keeps the output in parameter order.
+        let mut todo = vec![(0.0f64, 1.0f64, 0u32)];
+        let mut steps = 0usize;
+        while let Some((t0, t1, depth)) = todo.pop() {
+            steps += 1;
+            if steps > 4 * MAX_FIT_PIECES {
+                return None;
+            }
+            let (p0, p1) = (self.point_at(t0), self.point_at(t1));
+            if !(p0.is_finite() && p1.is_finite()) {
+                return None;
+            }
+            if p0.dist(p1) < 1e-12 && self.span_extent(t0, t1) < tol {
+                continue;
+            }
+            let fit = match (self.tangent_out(t0, t1), self.tangent_in(t0, t1)) {
+                (Some(d0), Some(d1)) => biarc(p0, d0, p1, d1).filter(|arcs| self.within(arcs, t0, t1, tol)),
+                _ => None,
+            };
+            match fit {
+                Some(arcs) => {
+                    out.extend(arcs);
+                    if out.len() > MAX_FIT_PIECES {
+                        return None;
+                    }
+                }
+                None if depth < MAX_DEPTH => {
+                    let tm = 0.5 * (t0 + t1);
+                    todo.push((tm, t1, depth + 1));
+                    todo.push((t0, tm, depth + 1));
+                }
+                None => {
+                    // Too fine to split further (a cusp): the chord is within the tolerance
+                    // here or nothing is.
+                    let chord = [Seg2::Line { a: p0, b: p1 }];
+                    if !self.within(&chord, t0, t1, tol) {
+                        return None;
+                    }
+                    out.push(chord[0]);
+                }
+            }
+        }
+        // The pieces join where their spans meet; pin the outer ends to the segment's own.
+        if let Some(first) = out.first_mut() {
+            *first = with_start(*first, self.start());
+        }
+        if let Some(last) = out.last_mut() {
+            *last = with_end(*last, self.end());
+        }
+        Some(out)
+    }
+}
+
+/// What fitting a segment reads of a span of it.
+trait Span {
+    /// Unit direction of travel leaving `t` towards `t1`.
+    fn tangent_out(&self, t: f64, t1: f64) -> Option<Vec2>;
+    /// Unit direction of travel arriving at `t1` from `t0`.
+    fn tangent_in(&self, t0: f64, t1: f64) -> Option<Vec2>;
+    /// Largest distance of the span's sample points from its start (a loop's size).
+    fn span_extent(&self, t0: f64, t1: f64) -> f64;
+    /// Do `pieces` follow the span `t0..t1` within `tol` both ways?
+    fn within(&self, pieces: &[Seg2], t0: f64, t1: f64, tol: f64) -> bool;
+    /// Distance from `q` to the span `t0..t1` (closest sample, then Newton steps).
+    fn dist_on_span(&self, q: Vec2, t0: f64, t1: f64, samples: &[Vec2]) -> f64;
+}
+
+impl Span for Seg2 {
+    fn tangent_out(&self, t: f64, t1: f64) -> Option<Vec2> {
+        self.derivative(t).normalized().or_else(|| (self.point_at(t + (t1 - t) * 1e-4) - self.point_at(t)).normalized())
+    }
+    fn tangent_in(&self, t0: f64, t1: f64) -> Option<Vec2> {
+        self.derivative(t1).normalized().or_else(|| (self.point_at(t1) - self.point_at(t1 - (t1 - t0) * 1e-4)).normalized())
+    }
+    fn span_extent(&self, t0: f64, t1: f64) -> f64 {
+        let p0 = self.point_at(t0);
+        (1..=SAMPLES).map(|i| self.point_at(t0 + (t1 - t0) * i as f64 / (SAMPLES + 1) as f64).dist(p0)).fold(0.0, f64::max)
+    }
+    fn within(&self, pieces: &[Seg2], t0: f64, t1: f64, tol: f64) -> bool {
+        if pieces.iter().any(|p| matches!(p, Seg2::Arc { sweep, .. } if sweep.abs() > PI)) {
+            return false;
+        }
+        let samples: Vec<Vec2> = (0..=SAMPLES + 1).map(|i| self.point_at(t0 + (t1 - t0) * i as f64 / (SAMPLES + 1) as f64)).collect();
+        // The curve near the pieces...
+        if samples.iter().any(|p| pieces.iter().map(|s| dist_to(s, *p)).fold(f64::INFINITY, f64::min) > tol) {
+            return false;
+        }
+        // ...and the pieces near the curve (their quarter points against the curve's closest
+        // point on the span).
+        pieces.iter().all(|s| {
+            [0.25, 0.5, 0.75].iter().all(|f| {
+                let q = s.point_at(*f);
+                self.dist_on_span(q, t0, t1, &samples) <= tol
+            })
+        })
+    }
+    fn dist_on_span(&self, q: Vec2, t0: f64, t1: f64, samples: &[Vec2]) -> f64 {
+        let n = samples.len().saturating_sub(1).max(1);
+        let (k, mut best) = samples.iter().enumerate().map(|(i, p)| (i, p.dist(q))).fold((0, f64::INFINITY), |a, b| if b.1 < a.1 { b } else { a });
+        let mut t = t0 + (t1 - t0) * k as f64 / n as f64;
+        for _ in 0..12 {
+            let (p, d) = (self.point_at(t), self.derivative(t));
+            let dd = d.dot(d);
+            if !(dd > 1e-300) {
+                break;
+            }
+            let nt = (t - (p - q).dot(d) / dd).clamp(t0, t1);
+            best = best.min(self.point_at(nt).dist(q));
+            if (nt - t).abs() < 1e-15 {
+                break;
+            }
+            t = nt;
+        }
+        best
+    }
+}
+
+/// Arcs and lines fitted to a profile loop ([`Loop2`]).
+pub trait Loop2ArcFit {
+    /// The loop with every free-form segment fitted by lines and arcs (see
+    /// [`Seg2::fit_arcs`]). `None` when a segment cannot be fitted.
+    fn fit_arcs(&self, tol: f64) -> Option<Loop2>;
+    /// Only lines and arcs?
+    fn is_line_arc(&self) -> bool;
+}
+
+impl Loop2ArcFit for Loop2 {
+    fn fit_arcs(&self, tol: f64) -> Option<Loop2> {
+        let mut segs = Vec::with_capacity(self.segs.len());
+        for s in &self.segs {
+            segs.extend(s.fit_arcs(tol)?);
+            if segs.len() > MAX_FIT_PIECES * 8 {
+                return None;
+            }
+        }
+        Some(Loop2 { segs })
+    }
+    fn is_line_arc(&self) -> bool {
+        self.segs.iter().all(Seg2::is_line_or_arc)
+    }
+}
+
+/// Whether a profile region ([`Region2`]) is lines and arcs only.
+pub trait Region2ArcFit {
+    /// Only lines and arcs?
+    fn is_line_arc(&self) -> bool;
+}
+
+impl Region2ArcFit for Region2 {
+    fn is_line_arc(&self) -> bool {
+        self.outer.is_line_arc() && self.holes.iter().all(Loop2::is_line_arc)
     }
 }
 

@@ -1,0 +1,125 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "A sketch"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     10,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.patch",
+   "params": {
+    "sketch": "A sketch",
+    "body_name": "A"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "B sketch"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     20,
+     0
+    ],
+    "p1": [
+     30,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.patch",
+   "params": {
+    "sketch": "B sketch",
+    "body_name": "B"
+   }
+  },
+  {
+   "command": "surface.blend",
+   "params": {
+    "from": {
+     "body": "A",
+     "edges": [
+      [
+       10,
+       10,
+       0
+      ]
+     ]
+    },
+    "to": {
+     "body": "B",
+     "edges": [
+      [
+       20,
+       10,
+       0
+      ]
+     ]
+    },
+    "stitch": true,
+    "body_name": "Bridge"
+   }
+  }
+ ]
+}

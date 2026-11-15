@@ -1,0 +1,83 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Steel (mm)",
+    "thickness": "2.5 mm",
+    "active": true,
+    "bend_radius": "2.5 mm",
+    "k_factor": 0.44
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Base"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     100,
+     60
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Base"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Ellipse"
+   }
+  },
+  {
+   "command": "sketch.ellipse",
+   "params": {
+    "center": [
+     50,
+     30
+    ],
+    "major": [
+     60,
+     30
+    ],
+    "minor_radius": 6
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Ellipse",
+    "through_all": true,
+    "direction": "symmetric",
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

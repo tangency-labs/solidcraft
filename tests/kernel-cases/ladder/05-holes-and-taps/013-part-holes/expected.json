@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "the running part: an M6 tapped through hole, an M5 tapped blind hole in the boss, a d3.3 hole down through wall and base",
+ "source": "analytic",
+ "method": "removed pi 2.5^2 20 (M6, tap drill 5) + pi 2.1^2 8 (M5, tap drill 4.2, flat) + pi 1.65^2 35; faces +1 +2 +1",
+ "body_count": 1,
+ "volume_mm3": 53470.420668652,
+ "faces": 20
+}

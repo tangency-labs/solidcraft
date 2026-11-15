@@ -1,0 +1,25 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "diameter": 48,
+    "height": 25,
+    "body_name": "Bolt"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     24,
+     0,
+     12.5
+    ],
+    "designation": "M48x0.75",
+    "length": 25,
+    "modeled": true
+   }
+  }
+ ]
+}

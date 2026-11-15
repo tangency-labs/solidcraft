@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Features</title>
+  <path d="M32 6 L55 19 L55 45 L32 58 L9 45 L9 19Z" fill="none" stroke="currentColor" stroke-width="4.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M9 19L32 32M32 32L55 19M32 32L32 58" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M42 19C42 22.2 37.52 24.8 32 24.8C26.48 24.8 22 22.2 22 19C22 15.8 26.48 13.2 32 13.2C37.52 13.2 42 15.8 42 19Z" fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

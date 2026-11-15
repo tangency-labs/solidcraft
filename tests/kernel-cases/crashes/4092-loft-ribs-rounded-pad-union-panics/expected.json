@@ -1,0 +1,22 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#4092"
+  ],
+  "what": "join extrude of a rounded pad over a lofted body with ring and ribs: repeated truck intersection_curve panics, then 'boolean Union: no result'",
+  "source": "analytic",
+  "method": "the pad (X -8..8, Y 18..25, Z 36..59) overlaps the body, ribs and ring, so the join is one connected solid; the join must succeed with one valid closed solid and no panic. Body: neck pi 18^2 21; the two-section loft is ruled, the circle r 18 paired with the 30 x 20 ellipse by their common angle parameter (the ellipse an affine image of the circle), so each section is an ellipse (18 + 12 l) x (18 + 2 l): 17 pi int (18 + 12 l)(18 + 2 l) dl = 7786 pi (pairing by normals instead, the largest any pairing gives, adds 17 pi * 1.5 = 80, inside the tolerance); the ellipse chamber pi*30*20*22 (z 38..60) and the flange 70 x 50 r 6 (area 3500 - (4 - pi)*36 = 3469.097, z 60..64, holding the chamber): 101181.25. The handle disc (r 12 about (y 30, z 47), x -5..5), the two ribs (the rounded profile, x -8..-4 and 4..8) and the pad (x -8..8, z 36..59 rounded r 3, y 18..25) add, by integrating over x -8..8, z 35..59 the length in y of the union of every part's y-interval less the body's own (grids 400^2..1600^2 agree to 2.4): 5347.9. V = 106529.2. Box: the flange's x +-35, y -25 to the disc's 42, z 0..64",
+  "body_count": 1,
+  "volume_mm3": 106529.2,
+  "bbox": {
+    "min": [
+      -35.0,
+      -25.0,
+      0.0
+    ],
+    "max": [
+      35.0,
+      42.0,
+      64.0
+    ]
+  }
+}

@@ -1,0 +1,42 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#4161",
+  "why": "no geometry: Fold on a body that isn't sheet metal (dup of #2987)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4230",
+  "why": "UI only: ribbon tab styles"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4297",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4301",
+  "why": "no geometry: Flange on a body that isn't sheet metal (dup of #2987)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4440",
+  "why": "UI only: the flat pattern view doesn't draw perforations"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4514",
+  "why": "no geometry: Flange on a body that isn't sheet metal (dup of #2987)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4713",
+  "why": "no reproduction: Press Pull on a user's sheet-metal part runs a solid extrude (tool choice)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4720",
+  "why": "no geometry: two sheet-metal bodies combined lose their flat pattern, as warned (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4968",
+  "why": "no geometry: included bend angles in sheet-metal exports (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5269",
+  "why": "no kernel geometry: flat-pattern DXF export clamps a degree-9 Bezier (file export)"
+ }
+]

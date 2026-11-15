@@ -1,0 +1,7816 @@
+{
+ "cases": [
+  {
+   "name": "box1x1x2_eu0_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu0_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu0_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu0_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu0_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu0_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu0_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu0_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu0_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu0_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu0_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu17_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu17_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu17_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu17_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu17_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu17_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu17_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu17_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu17_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu17_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box1x1x2_eu17_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box1x1x2.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu0_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu0_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu0_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu0_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu0_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu0_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu0_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu0_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu0_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu0_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu0_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu17_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu17_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu17_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu17_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu17_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu17_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu17_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu17_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu17_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu17_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "brick_eu17_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu0_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu0_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu0_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu0_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu0_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu0_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu0_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu0_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu0_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu0_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu0_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu17_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu17_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu17_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu17_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu17_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu17_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu17_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu17_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu17_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu17_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "corner_box_eu17_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu0_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu0_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu0_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu0_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu0_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu0_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu0_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu0_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu0_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu0_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu0_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu17_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu17_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu17_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu17_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu17_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu17_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu17_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu17_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu17_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu17_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "l_shaped_box_eu17_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu0_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu0_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu0_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu0_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu0_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu0_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu0_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu0_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu0_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu0_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu0_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu17_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu17_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu17_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu17_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu17_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu17_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu17_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu17_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu17_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu17_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "6_sided_corner_eu17_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/6_sided_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu0_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu0_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu0_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu0_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu0_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu0_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu0_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu0_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu0_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu0_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu0_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu17_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu17_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu17_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu17_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu17_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu17_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu17_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu17_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu17_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu17_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_w_slot_eu17_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_w_slot.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu0_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu0_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu0_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu0_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu0_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu0_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu0_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu0_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu0_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu0_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu0_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu17_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu17_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu17_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu17_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu17_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu17_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu17_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu17_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu17_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu17_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_box_eu17_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu0_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu0_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu0_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu0_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu0_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu0_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu0_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu0_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu0_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu0_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu0_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu17_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu17_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu17_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu17_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu17_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu17_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu17_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu17_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu17_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu17_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "filleted_box_eu17_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu0_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu0_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu0_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu0_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu0_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu0_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu0_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu0_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu0_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu0_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu0_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu17_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu17_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu17_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu17_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu17_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu17_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu17_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu17_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu17_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu17_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "box_on_box_eu17_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu0_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu0_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu0_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu0_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu0_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu0_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu0_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu0_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu0_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu0_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu0_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu17_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu17_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu17_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu17_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu17_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu17_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu17_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu17_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu17_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu17_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "cyl_on_box_eu17_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu0_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu0_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu0_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu0_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu0_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu0_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu0_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu0_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu0_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu0_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu0_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu17_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu17_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu17_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu17_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu17_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu17_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu17_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu17_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu17_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu17_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_shell_eu17_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu0_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu0_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu0_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu0_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu0_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu0_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu0_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu0_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu0_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu0_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu0_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu17_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu17_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu17_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu17_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu17_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu17_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu17_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu17_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu17_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu17_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "rollover_corner_eu17_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/rollover_corner.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu0_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu0_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu0_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu0_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu0_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu0_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu0_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu0_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu0_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu0_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu0_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu17_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu17_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu17_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu17_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu17_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu17_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu17_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu17_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu17_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu17_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "test1_eu17_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test1.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu0_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu0_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu0_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu0_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu0_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu0_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu0_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu0_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu0_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu0_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu0_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 0,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu17_m0_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu17_m1_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu17_m2_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu17_m2_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu17_m3_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu17_m3_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu17_m4_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu17_m4_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu17_m4_mixed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2
+    ],
+    "solvers": [
+     {
+      "approx": 0.0001,
+      "tang": 0.05,
+      "fsg": 2
+     },
+     {
+      "approx": 1e-06,
+      "tang": 0.01,
+      "fsg": 1
+     },
+     {
+      "approx": 0.001,
+      "tang": 0.1,
+      "fsg": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu17_m5_circ",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "loft_brick_eu17_m5_lin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:68",
+   "inputs": {
+    "case": "create",
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/loft_brick.smb",
+     "rebuild": false
+    },
+    "eu": 17,
+    "more": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "solvers": [
+     {
+      "approx": 1e-05,
+      "tang": 0.0174532925199433,
+      "fsg": 1
+     }
+    ]
+   }
+  }
+ ]
+}

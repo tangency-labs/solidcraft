@@ -1,0 +1,11 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#1648",
+    "tangency-labs/solidcraft#1850"
+  ],
+  "what": "a sphere that touches a box's bottom edge at one point: the union leaves a sliver face pinched to zero height, whose loop touches itself within tolerance, and it must still mesh",
+  "source": "analytic",
+  "method": "Sphere centre (2.5,15,27.5), r=12.5; box x 0..5, y 0..7.5, z 17.5..22.5. The box edge point (2.5,7.5,17.5) is at distance sqrt(7.5^2+10^2)=12.5 from the centre, so the sphere only touches the edge. V(sphere)=4/3 pi r^3=8181.2309, V(box)=187.5. The box is not inside the sphere (corner (0,0,17.5) is at 21.3 from the centre), so V(common) = integral over x in 0..5, y in 0..7.5 of the z-length of {z in 17.5..22.5 : (x-2.5)^2+(y-15)^2+(z-27.5)^2 <= 156.25}; midpoint rule on a 1600x1600 grid (converged to 1e-7 relative: 55.62178). Union = 8181.2309 + 187.5 - 55.6218 = 8313.1091.",
+  "body_count": 1,
+  "volume_mm3": 8313.1091
+}

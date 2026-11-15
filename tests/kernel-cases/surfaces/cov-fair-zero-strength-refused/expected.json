@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "fair with strength 0: refused, a step of nothing",
+ "source": "invariants",
+ "method": "strength is the fraction of the fairing step, greater than 0 and at most 1",
+ "outcome": "refused",
+ "refusal": "`strength` must be greater than 0 and at most 1"
+}

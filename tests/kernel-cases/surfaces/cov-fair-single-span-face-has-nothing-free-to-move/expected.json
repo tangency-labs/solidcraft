@@ -1,0 +1,26 @@
+{
+ "sources": [],
+ "what": "fair on a single-span cubic extrusion holding its edges: every control row is a boundary row or the one next to it, so nothing moves",
+ "source": "analytic",
+ "method": "the face: the Bezier (0,0), (13,8), (27,-8), (40,0) on XZ extruded 20 along -y or +y, B-spline degree (3, 1), one span each way. keep_edges holds the two boundary rows each side and the rows next to them: across the cubic that is all 4 rows, so the surface is unchanged: area = curve length 41.3983 (Gauss-Legendre 64) x 20 = 827.966",
+ "valid": false,
+ "body_count": 1,
+ "faces": 1,
+ "boundary_edges": 4,
+ "area_mm2": 827.9663653036151,
+ "surface_types": [
+  "bspline"
+ ],
+ "splines": [
+  {
+   "degree": [
+    3,
+    1
+   ],
+   "spans": [
+    1,
+    1
+   ]
+  }
+ ]
+}

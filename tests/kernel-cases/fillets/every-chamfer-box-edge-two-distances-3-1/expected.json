@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "a box's top front edge chamfered by two distances: 3 along the top (the first face, the one facing up) and 1 down the front",
+ "source": "analytic",
+ "method": "box 40x30x20, the edge y=0, z=20: the triangle (0,20), (3,20), (0,19) in (y,z), area 1.5, along 40: V = 24000 - 60 = 23940. Its centroid (1, 59/3) fixes which leg went where: centre of mass (20, (360000 - 60)/23940, (240000 - 60 * 59/3)/23940), graded to 0.0005 mm (flipped, it moves 0.0017 mm in y and z). Faces 7.",
+ "body_count": 1,
+ "volume_mm3": 23940.0,
+ "faces": 7,
+ "center_of_mass": [
+  20.0,
+  15.035087719298245,
+  9.97577276524645
+ ],
+ "tolerance": {
+  "abs_mm": 0.0005
+ },
+ "continuity": {
+  "order": "g0"
+ }
+}

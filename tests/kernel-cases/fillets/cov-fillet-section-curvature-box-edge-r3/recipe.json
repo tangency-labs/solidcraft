@@ -1,0 +1,27 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "radius": 3,
+    "type": "curvature",
+    "edges": [
+     [
+      20,
+      30,
+      20
+     ]
+    ]
+   }
+  }
+ ]
+}

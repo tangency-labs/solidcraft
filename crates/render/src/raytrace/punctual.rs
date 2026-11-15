@@ -1,7 +1,8 @@
 //! Original relative point/spot response. Coordinates/reference distances are mm.
 //! No lumen, lux, watts, measured CCT, IES or glTF photometry is implied.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::{Ray, Result, TraceError, bounded, lighting::MAX_LIGHT_INTENSITY, prepared::SharedHit, unit};
 

@@ -328,3 +328,93 @@ fn commands_that_add_nothing_report_empty_lists() {
     let r = run(&mut s, "sketch.move_point", json!({"point": strs(&c["points"])[1], "to": [12, 6]}));
     assert_eq!(r["created"], json!({"points": [], "curves": [], "constraints": [], "dimensions": []}), "{r}");
 }
+
+/// Conic curves take the curve prefix `n`, not the constraints' `k` (#6173): however a conic
+/// is created — drawn, a Move/Copy copy, a pattern copy — its id still says it is a curve.
+#[test]
+fn conic_curves_take_the_n_prefix_not_the_constraints_k() {
+    let mut s = new_sketch();
+    let drawn = run(&mut s, "sketch.conic", json!({"start": [80, 490], "end": [100, 490], "apex": [90, 505], "rho": 0.5}));
+    let conic = strs(&drawn["curves"])[0].clone();
+    assert_eq!(conic, "n1", "a drawn conic starts its own counter");
+
+    // A constraint keeps its prefix, and it no longer shares a counter with conics.
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{conic}.start")}));
+    let sk = sketch(&s);
+    assert!(sk.constraints.iter().any(|k| k.id == "k1"), "constraint ids: {:?}", sk.constraints.iter().map(|k| &k.id).collect::<Vec<_>>());
+
+    let copy = run(&mut s, "sketch.move", json!({"entities": [conic], "translate": [40, 0], "copy": true}));
+    assert_eq!(strs(&copy["curves"]), vec!["n2".to_string()], "a Move/Copy copy continues the conic counter");
+
+    let pattern = run(&mut s, "sketch.pattern.rectangular", json!({"entities": [conic], "count": 2, "spacing": 40}));
+    let made: Vec<String> = strs(&pattern["curves"]);
+    assert!(!made.is_empty(), "{pattern}");
+    for id in made {
+        assert!(id.starts_with('n'), "a pattern copy keeps the conic prefix: {id}");
+    }
+}
+
+/// A curve id goes into the face names of the features that use the curve, so an id with a
+/// character the name grammar reads (`|`, `,`, `~`, `]`, `#`, `(` and `)`) would split every
+/// name it lands in: an id of `c|1` gave the edges of an extrusion the names
+/// `F2:side:c|1#1|F2:side:c|1#2~1`, three separators where an edge has two faces and one
+/// separator. An id that cannot be written into a name whole is refused instead (#5858).
+#[test]
+fn a_curve_id_that_cannot_be_written_into_a_name_is_refused() {
+    let mut s = new_sketch();
+    for id in ["c|1", "c,1", "c~1", "c]1", "c#1", "c(1", "c)1"] {
+        let p = json!({"center": [0, 0], "radius": 5, "id": id});
+        let e = match s.execute("sketch.circle.center", &p) {
+            Ok(v) => panic!("the id `{id}` was taken: {v:?}"),
+            Err(e) => e.to_string(),
+        };
+        assert!(e.contains(id), "the error names the id: {e}");
+    }
+    // The id that can be written into a name is still taken, and the faces it makes are
+    // named with it whole.
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5, "id": "c1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10}));
+    let edges = run(&mut s, "model.edges", json!({"body": "Body1"}));
+    let listed: Vec<String> = edges["edges"].as_array().unwrap().iter().filter_map(|e| e["name"].as_str().map(str::to_string)).collect();
+    assert!(!listed.is_empty(), "{edges}");
+    // Every edge names each face it bounds once, whole, separated by one `|` each: two faces
+    // where it separates two (the rims), one where both its sides are the same face (the side's
+    // seam, on a kernel that keeps the side whole). The id is never cut.
+    let world = s.world_state().unwrap();
+    let body = world.body("Body1").unwrap();
+    let faces = solidcraft_doc::naming::face_names(body);
+    let names = solidcraft_doc::naming::edge_names(body);
+    let mesh = body.mesh();
+    assert_eq!(names.len(), mesh.edge_faces.len());
+    let mut sorted = names.clone();
+    sorted.sort();
+    let mut shown = listed.clone();
+    shown.sort();
+    assert_eq!(sorted, shown, "model.edges lists the body's edge names");
+    assert!(faces.iter().any(|f| f == "F2:side:c1" || f.starts_with("F2:side:c1#")), "the side is named with the id whole: {faces:?}");
+    let mut rims = 0;
+    for ((name, between), points) in names.iter().zip(&mesh.edge_faces).zip(&mesh.edges) {
+        let whole = name.rsplit_once('~').filter(|(_, k)| k.parse::<u32>().is_ok()).map_or(name.as_str(), |(n, _)| n);
+        let parts: Vec<&str> = whole.split('|').collect();
+        let own: Vec<&str> = between.iter().map(|f| faces[*f as usize].as_str()).collect();
+        assert_eq!(parts.len(), own.len(), "an edge names each face it bounds, separated once each: {name}");
+        for part in &parts {
+            assert!(own.contains(part), "`{part}` of {name} is a whole face name among {own:?}");
+        }
+        match own.as_slice() {
+            [_, _] => rims += 1,
+            [side] => {
+                // A seam: along the side from the bottom to the top, at one place on the circle.
+                assert!(side.starts_with("F2:side:c1"), "only the side has a seam: {name}");
+                let (Some(a), Some(b)) = (points.first(), points.last()) else { panic!("an empty edge: {name}") };
+                assert!(
+                    (a.z - b.z).abs() > 9.999 && (a.x - b.x).hypot(a.y - b.y) < 1e-6 && (a.x.hypot(a.y) - 5.).abs() < 1e-6,
+                    "{name}: {a:?} {b:?}"
+                );
+            }
+            other => panic!("{name} bounds {other:?}"),
+        }
+    }
+    assert!(rims >= 2, "the top and bottom rims: {names:?}");
+}

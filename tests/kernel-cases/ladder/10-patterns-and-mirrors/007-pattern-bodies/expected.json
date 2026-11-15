@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a pin r3 h10 patterned 4 times at 10 mm as bodies",
+ "source": "analytic",
+ "method": "four separate pins",
+ "body_count": 4,
+ "volume_mm3": 1130.973355292,
+ "faces": 12
+}

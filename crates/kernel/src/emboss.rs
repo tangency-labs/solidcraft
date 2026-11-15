@@ -1,12 +1,18 @@
-//! Exact radial embossing of orthogonal profiles on complete cylindrical walls.
-use crate::body::{Body, Solid, from_p3, p3};
+//! Exact radial embossing of orthogonal profiles on complete cylindrical walls, outside or
+//! inside (a bore, where raised is towards the axis), built on the body's schema 4 record: the
+//! wall's face loses the profiles' footprints, and each profile adds its walls (planes, along
+//! the axis or square to it) and its raised or sunk cap (the wall's cylinder at the new radius).
+use crate::assemble::{AFace, AUse, Assembly};
+use crate::body::Body;
 use crate::history::Change;
 use crate::numbered::NumberedRegion;
-use crate::offset::{Surf, surf_of};
-use crate::record::Operand;
+use crate::offset::{Surf, face_edges, surf_of};
 use crate::{KernelError, Result, guard};
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
-use truck_modeling::{self as mt, Transformed, builder};
+use solidcore_record::brep::{Brep, Curve, Frame, Loop, Surface};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::brep::eval::CurveEval;
+use solidcraft_geom::brep::form;
+use solidcraft_geom::prelude::*;
 
 fn fail(s: &str) -> KernelError {
     KernelError::Invalid(format!("cylinder emboss: {s}"))
@@ -16,23 +22,49 @@ fn angle(p: Vec3, o: Vec3, axis: Vec3, radial: Vec3, tangent: Vec3) -> f64 {
     let w = w - axis * w.dot(axis);
     w.dot(tangent).atan2(w.dot(radial))
 }
-fn unwrap(a: f64, around: f64) -> f64 {
-    around + (a - around + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+fn arr(v: Vec3) -> [f64; 3] {
+    [v.x, v.y, v.z]
 }
 
-fn wall_angles(face: &mt::Face, o: Vec3, axis: Vec3, radial: Vec3, tangent: Vec3, tol: f64) -> Option<(f64, f64)> {
-    if face.boundaries().len() != 1 || face.edge_iter().count() != 4 {
+/// For a plane tangent to a cylinder about the axis `a` of radius `r` through `o`: the direction
+/// from the axis to the tangent line, and the direction the wrapped profile's x runs in (found by
+/// solidcore). An exterior wall needs the plane's normal pointing away from the axis.
+fn wall_frame(normal: Vec3, w: Vec3, a: Vec3, r: f64, convex: bool, tol: f64) -> Option<(Vec3, Vec3)> {
+    let f = solidcore_ops::cylinder_wall::wall_frame(arr(normal), arr(w), arr(a), r, convex, tol)?;
+    Some((Vec3::from(f.radial), Vec3::from(f.tangent)))
+}
+
+/// The angles a wall face spans about the axis, seen from `radial`: from one of its arcs about
+/// the axis (a face of one loop of four edge uses: two arcs and two lines, or a whole turn's two
+/// circles and its seam used twice).
+fn wall_angles(b: &Brep, face: usize, o: Vec3, axis: Vec3, radial: Vec3, tangent: Vec3) -> Option<(f64, f64)> {
+    let f = b.faces.get(face)?;
+    let [Loop::Edges { edges }] = f.loops.as_slice() else { return None };
+    if edges.len() != 4 {
         return None;
     }
-    for edge in face.edge_iter() {
-        if let Some(Some(mid)) = crate::offset::arc_mid(&edge, tol * 10.) {
-            let am = angle(mid, o, axis, radial, tangent);
-            let aa = unwrap(angle(from_p3(edge.front().point()), o, axis, radial, tangent), am);
-            let ab = unwrap(angle(from_p3(edge.back().point()), o, axis, radial, tangent), am);
-            return Some((aa.min(ab), aa.max(ab)));
+    for u in edges {
+        let e = b.edges.get(u.edge as usize)?;
+        let Curve::Circle { frame, .. } = &e.curve else { continue };
+        let z = Vec3::from(frame.x_axis).cross(Vec3::from(frame.y_axis));
+        if z.dot(axis).abs() < 1.0 - 1e-9 {
+            continue;
         }
+        // The circle's parameter is its angle: the wall spans the edge's angles on the circle
+        // (`interval` is on its NURBS form where it has one) about the angle of its middle (a
+        // whole turn, from the seam, for a wall in one piece).
+        let c = CurveEval::new(&e.curve).ok()?;
+        let [t0, t1] = solidcore_ops::label::edge_curve_interval(e)?;
+        let am = angle(c.point(0.5 * (t0 + t1))?, o, axis, radial, tangent);
+        let half = 0.5 * (t1 - t0);
+        return Some((am - half, am + half));
     }
     None
+}
+
+/// The body's record, for the queries below (a mesh body has none).
+fn record(body: &Body) -> Result<Brep> {
+    crate::native::brep_record(body)
 }
 
 /// Certify a tessellated pick and project it onto the cylinder used by emboss.
@@ -41,10 +73,12 @@ pub fn cylinder_emboss_anchor(body: &Body, face: usize, at: Vec3) -> Result<Vec3
         return Err(fail("invalid selected face point"));
     }
     guard("cylinder emboss anchor", || {
-        let f = body.solid.face_iter().nth(face).ok_or_else(|| fail("selected face"))?;
-        let tol = (body.size() * 1e-8).max(1e-8);
-        let Some(Surf::Cylinder { o, a, r, convex: true }) = surf_of(f, tol) else {
-            return Err(fail("selected face is not an exterior cylinder"));
+        let rec = record(body)?;
+        if face >= rec.faces.len() {
+            return Err(fail("selected face"));
+        }
+        let Some(Surf::Cylinder { o, a, r, .. }) = surf_of(&rec, face) else {
+            return Err(fail("selected face is not a cylindrical wall"));
         };
         let w = at - o;
         let radial = w - a * w.dot(a);
@@ -55,7 +89,7 @@ pub fn cylinder_emboss_anchor(body: &Body, face: usize, at: Vec3) -> Result<Vec3
     })
 }
 
-/// Wrap sketch arc length around an exterior cylinder, retaining exact radial depth.
+/// Wrap sketch arc length around a cylindrical wall (outside, or a bore), retaining exact radial depth.
 /// Profiles must contain orthogonal lines and lie inside one uninterrupted wall face.
 pub fn emboss_cylinder(body: &Body, plane: &Plane, regions: &[Region2], depth: f64) -> Result<Body> {
     emboss_impl(body, None, plane, regions, depth, false).and_then(EmbossOutcome::body)
@@ -92,38 +126,39 @@ pub fn infer_cylinder_emboss(body: &Body, plane: &Plane, regions: &[Region2], de
         return Ok(None);
     }
     guard("cylinder emboss inference", || {
+        let rec = record(body)?;
         let tol = (body.size() * 1e-8).max(1e-8);
         let mut tangent = false;
-        for (index, face) in body.solid.face_iter().enumerate() {
-            if index >= 50_000 {
+        for face in 0..rec.faces.len() {
+            if face >= 50_000 {
                 return Err(fail("target search exceeds face work limit"));
             }
-            if let Some(Surf::Cylinder { o, a, r, convex: true }) = surf_of(face, tol) {
-                let w = plane.origin - o;
-                let normal = plane.normal();
-                let signed = w.dot(normal);
-                if normal.dot(a).abs() < 1e-8 && (signed.abs() - r).abs() <= tol * 10.0 {
-                    let radial = if signed < 0.0 { -normal } else { normal };
+            if let Some(Surf::Cylinder { o, a, r, convex }) = surf_of(&rec, face) {
+                // The sketch plane touches this wall from either side: take the wall's frame
+                // as seen from the plane's side (the bore's form), then turn the tangent for
+                // an exterior wall so the wrap runs the same way round as the face.
+                if let Some((radial, bore_x)) = wall_frame(plane.normal(), plane.origin - o, a, r, false, tol) {
+                    let wrap_x = if convex { -bore_x } else { bore_x };
                     // Every supported uninterrupted wall uses one angle interval
                     // around this tangent normal, contained in (-pi,pi). A remote
                     // footprint entirely outside even that global interval cannot
                     // select this body, regardless of other unsupported faces.
-                    if !profile_interval_overlaps(plane, regions, o, a.cross(radial), -std::f64::consts::PI * r, std::f64::consts::PI * r)? {
+                    if !profile_interval_overlaps(plane, regions, o, wrap_x, -std::f64::consts::PI * r, std::f64::consts::PI * r)? {
                         continue;
                     }
-                    if let Some((lo, hi)) = wall_angles(face, o, a, radial, a.cross(radial), tol) {
+                    if let Some((lo, hi)) = wall_angles(&rec, face, o, a, radial, wrap_x) {
                         if lo >= -tol / r || hi <= tol / r {
                             continue;
                         }
-                        if !profile_interval_overlaps(plane, regions, o, a.cross(radial), lo * r, hi * r)? {
+                        if !profile_interval_overlaps(plane, regions, o, wrap_x, lo * r, hi * r)? {
                             continue;
                         }
                     }
-                    let relevant = match face_axial_bounds(face, o, a)? {
+                    let relevant = match face_axial_bounds(&rec, face, o, a)? {
                         Some((lo, hi)) => profile_interval_overlaps(plane, regions, o, a, lo, hi)?,
                         None => true,
                     };
-                    if relevant && signed < 0.0 {
+                    if relevant && convex && radial.dot(plane.normal()) < 0.0 {
                         return Err(fail("sketch normal must point outwards from the exterior wall"));
                     }
                     tangent |= relevant;
@@ -141,25 +176,21 @@ pub fn infer_cylinder_emboss(body: &Body, plane: &Plane, regions: &[Region2], de
     })
 }
 
-/// Whether a body contains an analytic exterior cylindrical wall. This bounded
+/// Whether a body contains an analytic cylindrical wall, outside or a bore. This bounded
 /// preflight avoids resolving cylinder placement context for ordinary planar targets.
 pub fn has_cylinder_emboss_wall(body: &Body) -> Result<bool> {
     if body.is_mesh() {
         return Ok(false);
     }
     guard("cylinder emboss target", || {
-        let tol = (body.size() * 1e-8).max(1e-8);
-        for (index, face) in body.solid.face_iter().enumerate() {
-            if index >= 50_000 {
-                return Err(fail("target search exceeds face work limit"));
-            }
-            if matches!(surf_of(face, tol), Some(Surf::Cylinder { convex: true, .. })) {
-                return Ok(true);
-            }
+        let rec = record(body)?;
+        if rec.faces.len() > 50_000 {
+            return Err(fail("target search exceeds face work limit"));
         }
-        Ok(false)
+        Ok((0..rec.faces.len()).any(|face| matches!(surf_of(&rec, face), Some(Surf::Cylinder { .. }))))
     })
 }
+
 fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Region2], depth: f64, qualify: bool) -> Result<EmbossOutcome> {
     body.require_brep("cylinder emboss")?;
     if !depth.is_finite() || depth.abs() < 1e-6 || depth.abs() > 1e6 || regions.is_empty() || regions.len() > 64 {
@@ -175,28 +206,21 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
         return Err(fail("invalid sketch frame"));
     }
     guard("cylinder emboss", || {
-        if body.solid.boundaries().len() != 1 || body.solid.face_iter().take(17).count() > 16 || body.solid.edge_iter().take(257).count() > 256 {
+        let rec = record(body)?;
+        if rec.shells.len() != 1 || rec.faces.len() > 16 || rec.edges.len() > 256 {
             return Err(fail("requires a complete cylinder or coaxial sleeve"));
         }
-        let faces: Vec<_> = body.solid.face_iter().cloned().collect();
         let tol = (body.size() * 1e-8).max(1e-8);
-        let surfaces: Vec<_> =
-            faces.iter().map(|f| surf_of(f, tol).ok_or_else(|| fail("requires only cylindrical walls and planar endcaps"))).collect::<Result<_>>()?;
+        let surfaces: Vec<Surf> = (0..rec.faces.len())
+            .map(|f| surf_of(&rec, f).ok_or_else(|| fail("requires only cylindrical walls and planar endcaps")))
+            .collect::<Result<_>>()?;
         let mut chosen = None;
         for (fi, s) in surfaces.iter().enumerate() {
-            let Surf::Cylinder { o, a, r, convex: true } = *s else { continue };
-            let w = plane.origin - o;
-            let radial = plane.normal();
-            if radial.dot(a).abs() > 1e-8 || (w.dot(radial) - r).abs() > tol * 10.0 {
+            let Surf::Cylinder { o, a, r, convex } = *s else { continue };
+            let Some((radial, tangent)) = wall_frame(plane.normal(), plane.origin - o, a, r, convex, tol) else {
                 continue;
-            }
-            let radial = radial.normalized().ok_or_else(|| fail("radial frame"))?;
-            let tangent = a.cross(radial);
-            let f = faces.get(fi).ok_or_else(|| fail("face"))?;
-            if f.boundaries().len() != 1 || f.edge_iter().count() != 4 {
-                continue;
-            }
-            let Some((alo, ahi)) = wall_angles(f, o, a, radial, tangent, tol) else {
+            };
+            let Some((alo, ahi)) = wall_angles(&rec, fi, o, a, radial, tangent) else {
                 continue;
             };
             if alo >= -tol / r || ahi <= tol / r {
@@ -205,26 +229,32 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             if chosen.is_some() {
                 return Err(fail("ambiguous cylindrical face"));
             }
-            chosen = Some((fi, o, a, r, radial, tangent, alo, ahi));
+            chosen = Some((fi, o, a, r, convex, radial, tangent, alo, ahi));
         }
-        let (fi, o, axis, r, radial, tangent, alo, ahi) =
-            chosen.ok_or_else(|| fail("sketch must be tangent to one complete exterior cylindrical wall, clear of its seam"))?;
+        let (fi, o, axis, r, outside, radial, tangent, alo, ahi) =
+            chosen.ok_or_else(|| fail("sketch must be tangent to one complete cylindrical wall, outside or inside, clear of its seam"))?;
         if qualify && !profile_interval_overlaps(plane, regions, o, tangent, alo * r, ahi * r)? {
             return Ok(EmbossOutcome::NoMatch);
         }
         let mut caps = Vec::new();
+        // Across the material: the largest bore radius for an exterior wall, the smallest outside
+        // radius for a bore.
         let mut inner: f64 = 0.0;
+        let mut outer = f64::INFINITY;
         for s in &surfaces {
             match *s {
                 Surf::Plane { n, d } if n.dot(axis).abs() > 1.0 - 1e-8 => caps.push((d - n.dot(o)) / n.dot(axis)),
                 Surf::Cylinder { o: co, a: ca, r: cr, convex }
                     if ca.dot(axis).abs() > 1.0 - 1e-8 && (co - o - axis * (co - o).dot(axis)).len() < tol * 10.0 =>
                 {
-                    if convex && (cr - r).abs() > tol * 10.0 {
-                        return Err(fail("interrupted or stepped cylinder"));
-                    }
-                    if !convex {
+                    if convex == outside {
+                        if (cr - r).abs() > tol * 10.0 {
+                            return Err(fail("interrupted or stepped cylinder"));
+                        }
+                    } else if outside {
                         inner = inner.max(cr);
+                    } else {
+                        outer = outer.min(cr);
                     }
                 }
                 _ => return Err(fail("requires a complete cylinder or coaxial sleeve")),
@@ -241,15 +271,28 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
         if qualify && !profile_interval_overlaps(plane, regions, o, axis, lo, hi)? {
             return Ok(EmbossOutcome::NoMatch);
         }
-        let rr = r + depth;
-        if rr <= inner + tol * 10.0 {
+        // Positive depth is out of the material: away from the axis on the outside, towards it in
+        // a bore.
+        let rr = if outside { r + depth } else { r - depth };
+        if outside && rr <= inner + tol * 10.0 {
             return Err(fail("depth reaches the axis or inner wall"));
         }
+        if !outside {
+            if rr <= tol * 10.0 {
+                return Err(fail("depth reaches the axis"));
+            }
+            if !outer.is_finite() || rr >= outer - tol * 10.0 {
+                return Err(fail("depth breaks through the outer wall"));
+            }
+        }
         if let Some(at) = anchor {
+            // The saved pick identifies the wall, not the face the sketch is tangent to: every
+            // exterior cylindrical face of the body is that wall (a stepped or interrupted
+            // cylinder was refused above), stored as several faces between its seams. So the
+            // pick lies on it wherever it is on the cylinder between the endcaps (#3782).
             let h = (at - o).dot(axis);
             let v = at - o - axis * h;
-            let theta = angle(at, o, axis, radial, tangent);
-            if (v.len() - r).abs() > tol * 10.0 || theta <= alo + tol / r || theta >= ahi - tol / r || h <= lo + tol || h >= hi - tol {
+            if (v.len() - r).abs() > tol * 10.0 || h <= lo + tol || h >= hi - tol {
                 return Err(fail("saved selection no longer identifies the sketch's cylindrical face"));
             }
         }
@@ -307,39 +350,21 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             let at = o + axis * p.y + (radial * (p.x / r).cos() + tangent * (p.x / r).sin()) * r;
             return Ok(EmbossOutcome::Anchor(fi, at));
         }
-        let at = |p: Vec2, radius: f64| o + axis * p.y + (radial * (p.x / r).cos() + tangent * (p.x / r).sin()) * radius;
-        let selected = faces.get(fi).ok_or_else(|| fail("face"))?;
-        let mut base_patches = vec![selected.absolute_boundaries().clone()];
+        let mut asm = Assembly::from_record(&rec)?;
+        let selected = asm.faces.get_mut(fi).and_then(Option::take).ok_or_else(|| fail("face"))?;
+        // The footprint's arcs lie on the wall face and are labelled on its frame, so their NURBS
+        // forms run on the face's own quarter grid and their pcurves there are exact.
+        let label = form::frame_of(&selected.surface);
+        let wall = Wrap { o, axis, radial, tangent, r, label, tol };
+        // The cap's normal, out of the material, is away from the axis outside and towards it in a
+        // bore, raised or sunk.
+        let cap_out = outside;
+        // The wall's pieces left around the footprints: the face itself, then one per profile
+        // hole (the original radius inside it).
+        let mut base_patches: Vec<Vec<Vec<AUse>>> = vec![selected.loops.clone()];
         let mut hole_patches = Vec::new();
         let mut footprints = Vec::new();
-        let mut added = Vec::new();
-        let k = rr / r;
-        let coord = |v: Vec3| [v.x, v.y, v.z];
-        let av = coord(axis);
-        let ov = coord(o);
-        let mut m = [[0.0; 4]; 4];
-        for (j, col) in m.iter_mut().take(3).enumerate() {
-            for (i, slot) in col.iter_mut().take(3).enumerate() {
-                *slot = if i == j { k } else { 0.0 } + (1.0 - k) * av.get(i).copied().unwrap_or(0.0) * av.get(j).copied().unwrap_or(0.0);
-            }
-        }
-        for (i, oi) in ov.iter().enumerate() {
-            let translation =
-                *oi - (0..3).map(|j| m.get(j).and_then(|row| row.get(i)).copied().unwrap_or(0.0) * ov.get(j).copied().unwrap_or(0.0)).sum::<f64>();
-            if let Some(slot) = m.get_mut(3).and_then(|row| row.get_mut(i)) {
-                *slot = translation;
-            }
-        }
-        if let Some(slot) = m.get_mut(3).and_then(|row| row.get_mut(3)) {
-            *slot = 1.0;
-        }
-        let [c0, c1, c2, c3] = m;
-        let [a, b, c, d] = c0;
-        let [e, f, g, h] = c1;
-        let [i, j, l, n] = c2;
-        let [p, q, s, t] = c3;
-        let mat = mt::Matrix4::new(a, b, c, d, e, f, g, h, i, j, l, n, p, q, s, t);
-        let raised = selected.oriented_surface().transformed(mat);
+        let mut added: Vec<AFace> = Vec::new();
         // History of the faces added (walls from their profile segments, the raised or sunk
         // region the profile's end cap), in the order added.
         let mut added_history = Vec::new();
@@ -347,20 +372,21 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             let mut cap = Vec::new();
             for (li, numbered_loop) in reg.loops().enumerate() {
                 let lp = &numbered_loop.lp;
-                let (base, top, walls) = wrapped_loop(lp, r, rr, &at)?;
+                let (base, top, walls) = wall.wrapped_loop(&mut asm, lp, rr, selected.shell)?;
                 // One wall per segment, in order.
                 added_history.extend((0..walls.len()).map(|j| crate::record::profile(numbered_loop.numbers(j))));
+                let hole = reversed(&base);
                 if li == 0 {
-                    footprints.push((lp, base.inverse()));
+                    footprints.push((lp, hole));
                 } else {
                     let index = base_patches.len();
-                    base_patches.push(vec![base.inverse()]);
+                    base_patches.push(vec![hole]);
                     hole_patches.push((lp, index));
                 }
                 cap.push(top);
                 added.extend(walls);
             }
-            added.push(mt::Face::try_new(cap, raised.clone()).map_err(|e| fail(&e.to_string()))?);
+            added.push(AFace { surface: wall.cylinder(rr), nurbs: None, natural_out: cap_out, loops: cap, shell: selected.shell, domain: None });
             added_history.push(crate::record::cap(true));
         }
         // An island inside a profile hole cuts that hole's original-radius patch,
@@ -375,25 +401,189 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
                 .unwrap_or(0);
             base_patches.get_mut(owner).ok_or_else(|| fail("profile ownership"))?.push(wire);
         }
-        let mut all: Vec<_> = faces.iter().enumerate().filter(|(i, _)| *i != fi).map(|(_, f)| f.clone()).collect();
         // History (one operand, the body; profile numbering over `regions`), face by face as
         // gathered: the other faces kept, the wall's pieces left around the footprints (split
         // when the profile's holes leave more than one), then the faces added.
         let pieces = if base_patches.len() > 1 { Change::Split } else { Change::Modified };
-        let mut history: Vec<_> = crate::record::kept_except(faces.len(), fi).collect();
+        let mut history: Vec<_> = crate::record::kept_except(rec.faces.len(), fi).collect();
         history.extend(std::iter::repeat_n(crate::record::from_face(0, fi, pieces), base_patches.len()));
         history.extend(added_history);
-        for patch in base_patches {
-            all.push(mt::Face::try_new(patch, selected.oriented_surface()).map_err(|e| fail(&e.to_string()))?);
+        for (k, loops) in base_patches.into_iter().enumerate() {
+            // The face's own parameter box only where it keeps its outer loop.
+            let domain = if k == 0 { selected.domain } else { None };
+            asm.face(AFace {
+                surface: selected.surface.clone(),
+                nurbs: selected.nurbs.clone(),
+                natural_out: selected.natural_out,
+                loops,
+                shell: selected.shell,
+                domain,
+            });
         }
-        all.extend(added);
-        let solid = Solid::try_new(vec![all.into()]).map_err(|e| fail(&e.to_string()))?;
-        let result = Body::new(solid)?;
+        for f in added {
+            asm.face(f);
+        }
+        let finished = asm.finish()?;
+        let result = crate::assemble::body_with_history(finished, &asm, body, history)?;
         if !result.validity().is_empty() {
             return Err(fail("rebuilt cylinder is not a closed manifold"));
         }
-        Ok(EmbossOutcome::Body(crate::record::attach(result, &[Operand::new(body)], Some(history), Default::default())?))
+        Ok(EmbossOutcome::Body(result))
     })
+}
+
+/// A loop's uses the other way round.
+fn reversed(l: &[AUse]) -> Vec<AUse> {
+    l.iter().rev().map(|u| AUse { edge: u.edge, forward: !u.forward, given: None }).collect()
+}
+
+/// The wall a profile wraps onto: its axis, the sketch's radial and tangent directions there,
+/// and its radius.
+struct Wrap {
+    o: Vec3,
+    axis: Vec3,
+    radial: Vec3,
+    tangent: Vec3,
+    r: f64,
+    /// The wall face's own frame, which the arcs at its radius are labelled on.
+    label: Option<Frame>,
+    tol: f64,
+}
+
+impl Wrap {
+    /// The point at wrapped profile coordinates `p` (arc length at the wall, height) at `radius`.
+    fn at(&self, p: Vec2, radius: f64) -> Vec3 {
+        let t = p.x / self.r;
+        self.o + self.axis * p.y + (self.radial * t.cos() + self.tangent * t.sin()) * radius
+    }
+
+    /// The wall's cylinder at `radius` (its angle measured from the sketch's radial).
+    fn cylinder(&self, radius: f64) -> Surface {
+        Surface::Cylinder { frame: Frame { origin: arr(self.o), x_axis: arr(self.radial), y_axis: arr(self.tangent) }, radius }
+    }
+
+    /// An edge from vertex `a` at `p` to vertex `b` at `q` (wrapped coordinates) at `radius`:
+    /// an arc about the axis where the segment runs round the wall, else a line along it. The
+    /// use that runs from `a` to `b`.
+    fn edge(&self, asm: &mut Assembly, a: u32, b: u32, p: Vec2, q: Vec2, radius: f64) -> Result<AUse> {
+        if (q.x - p.x).abs() <= 1e-10 {
+            return Ok(AUse { edge: asm.line(a, b)?, forward: true, given: None });
+        }
+        let frame = Frame { origin: arr(self.o + self.axis * p.y), x_axis: arr(self.radial), y_axis: arr(self.tangent) };
+        let (ta, tb) = (p.x / self.r, q.x / self.r);
+        let forward = ta < tb;
+        let (interval, ends) = if forward { ([ta, tb], (a, b)) } else { ([tb, ta], (b, a)) };
+        let circle = Curve::Circle { frame, radius };
+        let (circle, interval) = match &self.label {
+            Some(label) if (radius - self.r).abs() <= self.tol => form::on_frame(&circle, interval, label, self.tol).unwrap_or((circle, interval)),
+            _ => (circle, interval),
+        };
+        Ok(AUse { edge: asm.edge(circle, interval, ends.0, ends.1)?, forward, given: None })
+    }
+
+    /// A profile loop wrapped onto the wall: its footprint at the wall's radius and its cap's
+    /// loop at `rr`, both running as the loop does, and one planar wall per segment between
+    /// them (each loop seen from outside the body).
+    fn wrapped_loop(&self, asm: &mut Assembly, lp: &Loop2, rr: f64, shell: usize) -> Result<(Vec<AUse>, Vec<AUse>, Vec<AFace>)> {
+        let corners: Vec<Vec2> = lp.segs.iter().map(Seg2::start).collect();
+        let base: Vec<u32> = corners.iter().map(|p| asm.vertex(self.at(*p, self.r))).collect::<Result<_>>()?;
+        let top: Vec<u32> = corners.iter().map(|p| asm.vertex(self.at(*p, rr))).collect::<Result<_>>()?;
+        let radial: Vec<u32> = base.iter().zip(&top).map(|(a, b)| asm.line(*a, *b)).collect::<Result<_>>()?;
+        let n = corners.len();
+        let (mut be, mut te, mut walls) = (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n));
+        for i in 0..n {
+            let j = (i + 1) % n;
+            let (Some(&p), Some(&q), Some(&ba), Some(&bb), Some(&ta), Some(&tb), Some(&ra), Some(&rb)) =
+                (corners.get(i), corners.get(j), base.get(i), base.get(j), top.get(i), top.get(j), radial.get(i), radial.get(j))
+            else {
+                return Err(fail("loop topology"));
+            };
+            let eb = self.edge(asm, ba, bb, p, q, self.r)?;
+            let et = self.edge(asm, ta, tb, p, q, rr)?;
+            // The wall's plane, its natural normal along the loop's turning: out of the
+            // material whether the cap is raised or sunk.
+            let mid = (p + q) * 0.5;
+            let ring = [self.at(p, self.r), self.at(mid, self.r), self.at(q, self.r), self.at(q, rr), self.at(mid, rr), self.at(p, rr)];
+            let normal = newell(&ring).ok_or_else(|| fail("a wall of no area"))?;
+            let u = (ring[2] - ring[0]).normalized().ok_or_else(|| fail("a wall of no width"))?;
+            let u = (u - normal * u.dot(normal)).normalized().ok_or_else(|| fail("a wall of no width"))?;
+            let surface = Surface::Plane { origin: arr(ring[0]), u_axis: arr(u), v_axis: arr(normal.cross(u)) };
+            let lp = vec![
+                eb.clone(),
+                AUse { edge: rb, forward: true, given: None },
+                AUse { edge: et.edge, forward: !et.forward, given: None },
+                AUse { edge: ra, forward: false, given: None },
+            ];
+            walls.push(AFace { surface, nurbs: None, natural_out: true, loops: vec![lp], shell, domain: None });
+            be.push(eb);
+            te.push(et);
+        }
+        Ok((be, te, walls))
+    }
+}
+
+/// The unit normal of a planar ring of points, along its turning (right-hand rule).
+fn newell(ring: &[Vec3]) -> Option<Vec3> {
+    let n = ring.len();
+    let mut s = Vec3::ZERO;
+    for i in 0..n {
+        let (a, b) = (*ring.get(i)?, *ring.get((i + 1) % n)?);
+        s += a.cross(b);
+    }
+    s.normalized()
+}
+
+/// The span along `axis` from `o` of face `face`'s edges, from their exact bounds (a line's
+/// ends, a circle's extreme heights, a spline's control points); `None` for any other curve.
+fn face_axial_bounds(b: &Brep, face: usize, o: Vec3, axis: Vec3) -> Result<Option<(f64, f64)>> {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    let mut count = 0usize;
+    let mut add = |z0: f64, z1: f64| -> Result<()> {
+        count = count.saturating_add(1);
+        if count > 100_000 || !z0.is_finite() || !z1.is_finite() {
+            return Err(fail("target boundary work limit or nonfinite geometry"));
+        }
+        lo = lo.min(z0);
+        hi = hi.max(z1);
+        Ok(())
+    };
+    let height = |p: Vec3| (p - o).dot(axis);
+    for e in face_edges(b, face) {
+        let edge = b.edges.get(e as usize).ok_or_else(|| fail("edge"))?;
+        match &edge.curve {
+            Curve::Line { .. } => {
+                let c = CurveEval::new(edge.parameters()).map_err(|e| fail(&e.to_string()))?;
+                for t in edge.interval {
+                    let z = height(c.point(t).ok_or_else(|| fail("edge point"))?);
+                    add(z, z)?;
+                }
+            }
+            Curve::Circle { frame, radius } => {
+                let (x, y) = (Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+                let z = height(Vec3::from(frame.origin));
+                let reach = radius * x.dot(axis).hypot(y.dot(axis));
+                add(z - reach, z + reach)?;
+            }
+            Curve::Spline { points, .. } => {
+                for p in points {
+                    let z = height(Vec3::from(*p));
+                    add(z, z)?;
+                }
+            }
+            Curve::RationalSpline { homogeneous, .. } => {
+                for h in homogeneous {
+                    if !h[3].is_finite() || h[3] <= 0.0 {
+                        return Ok(None);
+                    }
+                    let z = height(Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]));
+                    add(z, z)?;
+                }
+            }
+            Curve::Ellipse { .. } | Curve::Polyline { .. } | Curve::SurfaceIntersection { .. } => return Ok(None),
+        }
+    }
+    Ok((lo.is_finite() && hi.is_finite()).then_some((lo, hi)))
 }
 
 fn profile_interval_overlaps(plane: &Plane, regions: &[Region2], o: Vec3, axis: Vec3, lo: f64, hi: f64) -> Result<bool> {
@@ -442,7 +632,7 @@ fn profile_interval_overlaps(plane: &Plane, regions: &[Region2], o: Vec3, axis: 
                         add(p)?;
                     }
                 }
-                Seg2::Bezier { n, p } if (1..=solidcraft_geom::MAX_BEZIER_DEGREE as u8).contains(&n) => {
+                Seg2::Bezier { n, p } if (1..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(&n) => {
                     for p in p.iter().take(usize::from(n) + 1) {
                         add(*p)?;
                     }
@@ -453,70 +643,6 @@ fn profile_interval_overlaps(plane: &Plane, regions: &[Region2], o: Vec3, axis: 
         overlaps |= min < hi && max > lo;
     }
     Ok(overlaps)
-}
-
-fn face_axial_bounds(face: &mt::Face, o: Vec3, axis: Vec3) -> Result<Option<(f64, f64)>> {
-    let mut lo = f64::INFINITY;
-    let mut hi = f64::NEG_INFINITY;
-    let mut count = 0usize;
-    let mut add = |point: Vec3| -> Result<()> {
-        count = count.saturating_add(1);
-        if count > 100_000 || !point.is_finite() {
-            return Err(fail("target boundary work limit or nonfinite geometry"));
-        }
-        let z = (point - o).dot(axis);
-        lo = lo.min(z);
-        hi = hi.max(z);
-        Ok(())
-    };
-    for edge in face.edge_iter() {
-        match edge.curve() {
-            mt::Curve::Line(_) => {
-                add(from_p3(edge.front().point()))?;
-                add(from_p3(edge.back().point()))?;
-            }
-            mt::Curve::BSplineCurve(curve) => {
-                for point in curve.control_points() {
-                    add(from_p3(*point))?;
-                }
-            }
-            mt::Curve::NurbsCurve(curve) => {
-                for point in curve.control_points() {
-                    if !point.w.is_finite() || point.w <= 0.0 {
-                        return Ok(None);
-                    }
-                    add(Vec3::new(point.x / point.w, point.y / point.w, point.z / point.w))?;
-                }
-            }
-            mt::Curve::IntersectionCurve(_) => return Ok(None),
-        }
-    }
-    Ok((lo.is_finite() && hi.is_finite()).then_some((lo, hi)))
-}
-
-fn wrapped_loop(lp: &Loop2, r: f64, rr: f64, at: &impl Fn(Vec2, f64) -> Vec3) -> Result<(mt::Wire, mt::Wire, Vec<mt::Face>)> {
-    let base: Vec<_> = lp.segs.iter().map(|s| builder::vertex(p3(at(s.start(), r)))).collect();
-    let top: Vec<_> = lp.segs.iter().map(|s| builder::vertex(p3(at(s.start(), rr)))).collect();
-    let radial: Vec<_> = base.iter().zip(&top).map(|(a, b)| builder::line(a, b)).collect();
-    let mut be = Vec::new();
-    let mut te = Vec::new();
-    let mut walls = Vec::new();
-    for (i, s) in lp.segs.iter().enumerate() {
-        let next = (i + 1) % lp.segs.len();
-        let (Some(a), Some(b), Some(c), Some(d), Some(ra), Some(rb)) =
-            (base.get(i), base.get(next), top.get(i), top.get(next), radial.get(i), radial.get(next))
-        else {
-            return Err(fail("loop topology"));
-        };
-        let circular = (s.end().x - s.start().x).abs() > 1e-10;
-        let eb = if circular { builder::circle_arc(a, b, p3(at(s.mid(), r))) } else { builder::line(a, b) };
-        let et = if circular { builder::circle_arc(c, d, p3(at(s.mid(), rr))) } else { builder::line(c, d) };
-        let w: mt::Wire = vec![eb.clone(), rb.clone(), et.inverse(), ra.inverse()].into();
-        walls.push(builder::try_attach_plane(&[w]).map_err(|e| fail(&e.to_string()))?);
-        be.push(eb);
-        te.push(et);
-    }
-    Ok((be.into(), te.into(), walls))
 }
 
 fn validate_profiles(regions: &[Region2], tol: f64) -> Result<()> {
@@ -615,9 +741,9 @@ mod tests {
             Region2 { outer: Loop2::polygon(&[Vec2::new(-5., 5.), Vec2::new(-1., 5.), Vec2::new(-1., 10.), Vec2::new(-5., 10.)]), holes: vec![] };
         let (_, other_anchor) = infer_cylinder_emboss(&near, &shifted, std::slice::from_ref(&shifted_profile), 1.).unwrap().unwrap();
         assert!(other_anchor.dist(anchor) < 1e-10);
-        let before = near.tessellate_with(1e-4, true).unwrap().measure().volume;
+        let before = near.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         let result = emboss_cylinder_at(&near, other_anchor, &shifted, &[shifted_profile], 1.).unwrap();
-        assert!((result.tessellate_with(1e-4, true).unwrap().measure().volume - before - 21.).abs() < 0.02);
+        assert!((result.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume - before - 21.).abs() < 0.02);
         assert!(infer_cylinder_emboss(&near, &plane(), &regions, -10.).is_err());
         let inward = Plane::new(Vec3::Y * 10., Vec3::X, Vec3::Z).unwrap();
         assert!(infer_cylinder_emboss(&near, &inward, &regions, 1.).unwrap_err().to_string().contains("outwards"));
@@ -629,16 +755,16 @@ mod tests {
         ring.holes.push(Loop2::polygon(&[Vec2::new(-1., 6.), Vec2::new(1., 6.), Vec2::new(1., 9.), Vec2::new(-1., 9.)]));
         let island =
             Region2 { outer: Loop2::polygon(&[Vec2::new(-0.5, 6.5), Vec2::new(0.5, 6.5), Vec2::new(0.5, 8.5), Vec2::new(-0.5, 8.5)]), holes: vec![] };
-        let before = body.tessellate_with(1e-4, true).unwrap().measure().volume;
+        let before = body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         for depth in [1., -1.] {
             for regions in [vec![ring.clone(), island.clone()], vec![island.clone(), ring.clone()]] {
                 let result = emboss_cylinder(&body, &plane(), &regions, depth).unwrap();
                 assert_eq!(result.shell_count(), 1);
                 assert!(result.validity().is_empty());
-                let after = result.tessellate_with(1e-4, true).unwrap().measure().volume;
+                let after = result.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
                 let expected = 16. * (depth + depth * depth / 20.);
                 assert!((after - before - expected).abs() < 0.02, "{} vs {expected}", after - before);
-                let mesh = result.tessellate_with(0.001, true).unwrap();
+                let mesh = result.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
                 for (s, raised) in [(0., true), (0.75, false), (1.5, true)] {
                     let radial = -Vec3::X * (s / 10.0_f64).sin() + Vec3::Y * (s / 10.0_f64).cos();
                     let radius = if depth > 0. { 10.5 } else { 9.5 };
@@ -655,11 +781,11 @@ mod tests {
             let result = emboss_cylinder(&body, &plane(), &[profile()], depth).unwrap();
             assert_eq!(result.shell_count(), 1);
             assert!(result.validity().is_empty());
-            let before = body.tessellate_with(1e-4, true).unwrap().measure().volume;
-            let after = result.tessellate_with(1e-4, true).unwrap().measure().volume;
+            let before = body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
+            let after = result.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
             let expected = if depth > 0. { 21. } else { -19. };
             assert!((after - before - expected).abs() < 0.02, "{} vs {expected}", after - before);
-            let mesh = result.tessellate_with(0.001, true).unwrap();
+            let mesh = result.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
             for s in [-1.5, 0., 1.5] {
                 let radial = -Vec3::X * (s / 10.0_f64).sin() + Vec3::Y * (s / 10.0_f64).cos();
                 assert_eq!(mesh.contains(radial * (if depth > 0. { 10.5 } else { 9.5 }) + Vec3::Z * 7.5), depth > 0.);
@@ -692,12 +818,12 @@ mod tests {
             for depth in [1., -1.] {
                 let result = emboss_cylinder_at(&body, origin + radial * 10.0 + axis * 7.5, &plane, std::slice::from_ref(&profile), depth).unwrap();
                 assert_eq!(result.shell_count(), 1);
-                let before = body.tessellate_with(1e-4, true).unwrap().measure().volume;
-                let after = result.tessellate_with(1e-4, true).unwrap().measure().volume;
+                let before = body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
+                let after = result.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
                 let want = profile.area().abs() * (depth + depth * depth / 20.0);
                 assert!((after - before - want).abs() < 0.02, "{} vs {want}", after - before);
                 let point = |s: f64, z: f64, r: f64| origin + axis * z + (radial * (s / 10.0).cos() + tangent * (s / 10.0).sin()) * r;
-                let mesh = result.tessellate_with(0.001, true).unwrap();
+                let mesh = result.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
                 for (s, z) in [(-1.5, 7.5), (1.5, 7.5), (0.5, 6.5)] {
                     let material = profile.contains(Vec2::new(s, z));
                     assert_eq!(mesh.contains(point(s, z, if depth > 0. { 10.5 } else { 9.5 })), if depth > 0. { material } else { !material });
@@ -707,7 +833,7 @@ mod tests {
                 assert_eq!(imported.bodies.len(), 1);
                 let round = imported.bodies.first().unwrap();
                 assert!(round.body.validity().is_empty());
-                let roundmesh = round.body.tessellate_with(0.001, true).unwrap();
+                let roundmesh = round.body.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
                 assert_eq!(roundmesh.contains(point(-1.5, 7.5, if depth > 0. { 10.5 } else { 9.5 })), depth > 0.);
                 let cut = crate::boolean(
                     &round.body,
@@ -716,7 +842,7 @@ mod tests {
                 )
                 .unwrap()
                 .unwrap();
-                assert!(!cut.tessellate(0.01).unwrap().contains(point(-1.5, 7.5, 9.0)));
+                assert!(!cut.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().contains(point(-1.5, 7.5, 9.0)));
             }
         }
     }
@@ -744,7 +870,55 @@ mod tests {
         ] {
             assert!(emboss_cylinder(&sleeve, &plane(), &profiles, d).is_err());
         }
-        assert!(emboss_cylinder_at(&sleeve, -Vec3::Y * 10. + Vec3::Z * 7.5, &plane(), &[profile()], 1.).is_err());
+        // A pick anywhere on the exterior wall identifies it (#3782); one on the bore does not.
+        assert!(emboss_cylinder_at(&sleeve, -Vec3::Y * 10. + Vec3::Z * 7.5, &plane(), &[profile()], 1.).is_ok());
+        assert!(emboss_cylinder_at(&sleeve, -Vec3::Y * 8. + Vec3::Z * 7.5, &plane(), &[profile()], 1.).is_err());
+        assert!(emboss_cylinder_at(&sleeve, -Vec3::Y * 10. + Vec3::Z * 20., &plane(), &[profile()], 1.).is_err());
         assert_eq!(crate::step_export(&[&sleeve], "unchanged").unwrap(), before);
+    }
+
+    /// A bore is wrapped like an outside wall, raised towards the axis and sunk away from it
+    /// (#16683): exact counts, the annular sector's volume, and the depths that refuse.
+    #[test]
+    fn a_bore_is_embossed_and_debossed_to_exact_geometry() {
+        let outer = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 20.).unwrap();
+        let hole = crate::cylinder(-Vec3::Z, Vec3::Z, 8., 22.).unwrap();
+        let tube = crate::boolean(&outer, &hole, crate::BoolOp::Cut).unwrap().unwrap();
+        // Tangent to the bore at +Y, with x running towards -X: an asymmetric rectangle.
+        let bore = Plane::new(Vec3::Y * 8., -Vec3::X, Vec3::Z).unwrap();
+        let rect =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(-1., 5.), Vec2::new(3., 5.), Vec2::new(3., 10.), Vec2::new(-1., 10.)]), holes: vec![] };
+        let volume = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
+        let before = volume(&tube);
+        let (faces, edges, vertices) = (tube.face_count(), tube.edge_count(), tube.vertex_count());
+        // Wrapped at the bore's radius 8: the width 4 is the angle 0.5, the height 5.
+        let sector = |rr: f64| 5. * 0.5 * (rr * rr - 64.).abs() / 2.;
+        let (inferred, at) = infer_cylinder_emboss(&tube, &bore, std::slice::from_ref(&rect), -1.).unwrap().unwrap();
+        assert!(cylinder_emboss_anchor(&tube, inferred, at).unwrap().dist(at) < 1e-10);
+        for (depth, rr) in [(-1., 9.), (1., 7.)] {
+            let result = emboss_cylinder_at(&tube, at, &bore, std::slice::from_ref(&rect), depth).unwrap();
+            assert_eq!(result.shell_count(), 1);
+            assert!(result.validity().is_empty());
+            // Four walls and the floor or top; their eight corners, twelve edges.
+            assert_eq!((result.face_count(), result.edge_count(), result.vertex_count()), (faces + 5, edges + 12, vertices + 8));
+            let change = volume(&result) - before;
+            let want = if depth < 0. { -sector(rr) } else { sector(rr) };
+            assert!((change - want).abs() < 0.02, "{change} vs {want}");
+            let mesh = result.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
+            let point = |x: f64, z: f64, r: f64| -Vec3::X * r * (x / 8.).sin() + Vec3::Y * r * (x / 8.).cos() + Vec3::Z * z;
+            for (x, inside) in [(2.5, true), (-0.5, true), (-2., false), (4., false)] {
+                // Half way up the slot or boss, between the bore and its new surface.
+                let probe = point(x, 7.5, 0.5 * (8. + rr));
+                assert_eq!(mesh.contains(probe), if depth < 0. { !inside } else { inside });
+            }
+        }
+        // Through the outer wall, or to the axis.
+        for depth in [-2., -3., 8., 9.] {
+            assert!(emboss_cylinder_at(&tube, at, &bore, std::slice::from_ref(&rect), depth).is_err(), "{depth}");
+        }
+        assert!(emboss_cylinder_at(&tube, at, &bore, std::slice::from_ref(&rect), -1.9).is_ok());
+        // The sketch's side of the tangent plane does not matter in a bore.
+        let flipped = Plane::new(Vec3::Y * 8., Vec3::X, Vec3::Z).unwrap();
+        assert!(infer_cylinder_emboss(&tube, &flipped, &[rect], 1.).unwrap().is_some());
     }
 }

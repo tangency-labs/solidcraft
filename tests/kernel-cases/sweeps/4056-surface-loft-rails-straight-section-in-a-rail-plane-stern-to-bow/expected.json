@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4056",
+  "tangency-labs/solidcraft#4080"
+ ],
+ "what": "a surface loft between a vertical line on XZ (bow) and a slanted line in the plane x = 100 (stern), stern to bow, guided by a keel rail lying in the bow sketch plane and a sheer rail at z = 20 (refused: \"a guide rail crosses section 2's plane\")",
+ "source": "analytic",
+ "method": "with straight sections and straight rails the surface is the bilinear patch S(t,s) = (100 t, 40 t s, 20 s), which contains both rails (s = 0: keel, s = 1: sheer) and both sections (t = 0, 1); S_t = (100, 40 s, 0), S_s = (0, 40 t, 20), cross = (800 s, -2000, 4000 t); A = double integral of its length = 2995.833 (Gauss-Legendre). One face, open (valid false); bbox 0..100, 0..40, 0..20. The loft is independent of the order of the sections.",
+ "valid": false,
+ "area_mm2": 2995.832811766292,
+ "faces": 1,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   100,
+   40,
+   20
+  ]
+ }
+}

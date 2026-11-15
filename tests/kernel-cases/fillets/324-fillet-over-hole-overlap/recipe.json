@@ -1,0 +1,60 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 40,
+    "width": 20,
+    "height": 10,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "H"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     20,
+     14.5
+    ],
+    "radius": 3
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "H",
+    "distance": "10 mm",
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      10,
+      20,
+      10
+     ]
+    ],
+    "radius": "4 mm"
+   }
+  }
+ ]
+}

@@ -1,0 +1,27 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1191"
+ ],
+ "what": "an R2 round on the outer and inner rim circles of a tube's top face (the report's ten picks on a ring-shaped top: the round failed after 0.10.1; rebuilt as a plain tube since the design is not in the report)",
+ "source": "analytic",
+ "method": "Tube R=18.5, r=11.5, h=33: V0 = pi (18.5^2 - 11.5^2) 33 = 21771.2371. Each rim round removes the square-minus-quarter-disc section (area A = (1-pi/4) 4 = 0.858407, first moment about the round's centre line rho^3/6 = 4/3) swept about the axis (Pappus). Outer rim (convex), section centre at radius 16.5: 2 pi (16.5 A + 4/3) = 97.3737; inner rim (convex, material outside r=11.5), centre at radius 13.5: 2 pi (13.5 A - 4/3) = 64.4333. V = 21771.2371 - 97.3737 - 64.4333 = 21609.4311 mm3. Faces: outer wall, two toroidal rounds, top ring, inner wall, bottom ring = 6.",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 21609.4311,
+ "faces": 6,
+ "bbox": {
+  "min": [
+   -18.5,
+   -18.5,
+   0
+  ],
+  "max": [
+   18.5,
+   18.5,
+   33
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

@@ -1,0 +1,12 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2826",
+    "tangency-labs/solidcraft#2827"
+  ],
+  "what": "a cut that ends exactly in a face of its target (the plate's top face) must open the hole, not leave a zero-thickness skin over it",
+  "source": "analytic",
+  "method": "plate 40x40x2.8 minus the barrel r6 x 1.6 from below minus the hole r3.04 x 1.2 from the barrel floor (z 1.6) to the top face (z 2.8): V = 4480 - pi*36*1.6 - pi*3.04^2*1.2. Faces: bottom (with the barrel opening), top (with the hole), 4 sides, barrel wall, barrel floor (annulus), hole wall = 9; a skin would add a 10th",
+  "body_count": 1,
+  "volume_mm3": 4264.204251952329,
+  "faces": 9
+}

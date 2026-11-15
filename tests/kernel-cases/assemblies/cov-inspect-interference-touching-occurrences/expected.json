@@ -1,0 +1,17 @@
+{
+ "sources": [],
+ "what": "inspect.interference of the arm standing on the base face to face",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); they meet on a face only: no overlap volume",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 8,
+   "json": {
+    "count": 0,
+    "interferences": []
+   }
+  }
+ ]
+}

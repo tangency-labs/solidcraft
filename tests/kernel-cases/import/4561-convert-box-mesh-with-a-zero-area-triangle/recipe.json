@@ -1,0 +1,22 @@
+{
+ "commands": [
+  {
+   "command": "file.insert_mesh",
+   "params": {
+    "path": "$CASE/box-degenerate.stl"
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "box-degenerate"
+   }
+  },
+  {
+   "command": "mesh.convert",
+   "params": {
+    "body": "box-degenerate"
+   }
+  }
+ ]
+}

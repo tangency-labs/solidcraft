@@ -2,7 +2,7 @@
 //! on `file.insert_step` and `doc.open`.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_kernel::{ExportBody, ExportProduct, StepHeader, box_solid, step_export_products};
 
 use super::run;
@@ -44,7 +44,7 @@ fn frame_file(tag: &str) -> String {
 
 /// The lowest and highest corner of everything the design shows.
 fn extent(s: &Session) -> ([f64; 3], [f64; 3]) {
-    let b = crate::view::bounds(s);
+    let b = crate::view::bounds(s).unwrap();
     ([b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z])
 }
 
@@ -62,6 +62,43 @@ fn kinds(s: &Session) -> Vec<&'static str> {
 
 fn total_volume(s: &mut Session) -> f64 {
     run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
+}
+
+/// A body the STEP file marks invisible starts hidden, and Show brings it back: the import
+/// keeps the body, as the file does, rather than dropping it.
+#[test]
+fn a_step_body_the_file_marks_invisible_comes_in_hidden() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-step-hidden-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let body = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let products = vec![ExportProduct {
+        name: "Part".into(),
+        bodies: vec![ExportBody { name: "Hidden".into(), body: &body, color: Some([0.9, 0.3, 0.3]) }],
+        children: Vec::new(),
+    }];
+    let text = step_export_products(&products, 0, &StepHeader::default()).unwrap();
+    let styled = text
+        .lines()
+        .find(|line| line.contains("=STYLED_ITEM("))
+        .and_then(|line| line.split('=').next())
+        .expect("the exported body has a styled item");
+    let text = text.replace("ENDSEC;", &format!("#9999=INVISIBILITY(({styled}));\nENDSEC;"));
+    let path = dir.join("hidden.step");
+    std::fs::write(&path, text).unwrap();
+
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
+    assert_eq!(r["created_bodies"], json!(["Hidden"]), "{r}");
+    assert!(!s.body_visible("Hidden"), "the file's invisible body starts hidden");
+    assert!(s.model.state().bodies.iter().any(|b| b.name == "Hidden"), "the body stays in the model");
+    // Hiding is saved with the design, so reopening keeps it hidden.
+    let design = dir.join("hidden.solidcraft");
+    run(&mut s, "file.save_as", json!({"path": design.to_string_lossy()}));
+    let mut again = Session::default();
+    run(&mut again, "doc.open", json!({"path": design.to_string_lossy()}));
+    assert!(!again.body_visible("Hidden"), "still hidden after reopening");
+    run(&mut s, "browser.visibility", json!({"items": ["Hidden"], "visible": true}));
+    assert!(s.body_visible("Hidden"), "Show brings it back");
 }
 
 #[test]

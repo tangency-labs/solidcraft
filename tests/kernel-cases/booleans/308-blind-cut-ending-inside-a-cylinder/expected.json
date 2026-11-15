@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#308"
+ ],
+ "what": "a hinge leaf (40x30x3) with a joined r4 knuckle cylinder along X and a O4 pin hole, then a 3.3 mm blind cut of x 12..28, y 29..40 ending inside the cylinder: the result grew a sphere and a freeform face",
+ "source": "analytic",
+ "method": "all walls are planes or cylinders along X, so V = 40*A - 16*B with A = area of the section (leaf y 0..30,z 0..3 union disc centre (y=33,z=4) r4, minus the pin disc r2) = 126.8438 mm2 (integrated over y, exact chords), B = the part of A with y>=29, z<=3.3 = 18.1650 mm2 (the gap, 16 long). V = 5073.752 - 290.640 = 4783.112. No sphere or freeform face can occur: only planes and cylinders",
+ "body_count": 1,
+ "volume_mm3": 4783.1123
+}

@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "the centre of mass of a body that is not there",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin; no body `Nope`: refused",
+ "outcome": "refused",
+ "refusal": "no such bodies"
+}

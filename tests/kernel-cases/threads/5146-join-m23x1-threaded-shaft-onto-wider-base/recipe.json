@@ -1,0 +1,48 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "diameter": 26,
+    "height": 10,
+    "body_name": "Base"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "diameter": 23,
+    "height": 20,
+    "base": [
+     0,
+     0,
+     10
+    ],
+    "operation": "new",
+    "body_name": "Shaft"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     11.5,
+     0,
+     20
+    ],
+    "designation": "M23x1",
+    "modeled": true
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Base",
+    "tools": [
+     "Shaft"
+    ],
+    "operation": "join"
+   }
+  }
+ ]
+}

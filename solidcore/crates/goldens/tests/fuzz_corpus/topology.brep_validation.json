@@ -1,0 +1,21 @@
+{
+ "unit": "topology.brep_validation",
+ "cases": [
+  {
+   "name": "fuzz00074_grid_faces_2_32",
+   "origin": "local sweep --fuzz 300 --seeds 24: topology.brep_validation/fuzz00074 (crash: rust: killed by signal 6 (memory allocation of 32 bytes failed); base grid_2_pointers, mutation /grid_faces = 4294967296)",
+   "issue": "runner: the Rust side built a sheet grid of 2^32 faces where the FFI refuses more than 512 faces for the C++ side, until the 4 GiB fuzz address-space limit aborted the process; fixed by applying the FFI's checks on the Rust side (topology_brep_validation::validate)",
+   "cpp": "harness: invalid argument: invalid B-rep validation arguments",
+   "rust": "harness: invalid argument: invalid B-rep validation arguments",
+   "inputs": {"coincidence": false, "grid_faces": 4294967296}
+  },
+  {
+   "name": "fuzz00277_grid_faces_i64_max_coincidence",
+   "origin": "local sweep --fuzz 300 --seeds 24: topology.brep_validation/fuzz00277 (crash: rust: killed by signal 6 (memory allocation of 32 bytes failed); base grid_32_pointers, mutations /coincidence = true, /grid_faces = 9223372036854775807)",
+   "issue": "runner: as fuzz00074, through the coincidence search",
+   "cpp": "harness: invalid argument: invalid B-rep validation arguments",
+   "rust": "harness: invalid argument: invalid B-rep validation arguments",
+   "inputs": {"coincidence": true, "grid_faces": 9223372036854775807}
+  }
+ ]
+}

@@ -1,8 +1,10 @@
 # Visible CPU surface emission (#1695)
 
 This transient option adds visible emission to the existing opaque CPU consumer.
-The recovered source checkpoint was not compiled or run; its port requires its own
-exact-revision tests, project gates and native PNG acceptance before publication.
+At the recovery handoff the source checkpoint was not compiled or run.
+Subsequent combined CPU renderer regressions have executed for linear radiance,
+sidedness, zero identity, reflected hits, target refusal and work/cancellation.
+Current combined engine/UI/native qualification and project gates remain pending.
 
 The transient `render.preflight` / `render.start` raytrace options accept:
 
@@ -28,10 +30,12 @@ preserve baseline output. Explicit null, unknown fields and unsupported combinat
 refuse. The raster default and GPU preview gain no emission capability. Runtime
 inputs do not modify design storage, geometry, engineering properties or caches.
 
-Emission does not add a sampled direct-light source for neighboring surfaces: no
-emissive-triangle sampling or GI estimator is introduced. Existing selected specular
-paths can reach an emitting surface. With other analytic/HDR lighting disabled and
-no reflected emitter path, nonemitting surfaces remain dark. The primary background
+Emission does not add a sampled direct-light source for neighboring surfaces.
+Without optional [opaque path lighting](render-cpu-path.md), only existing selected
+specular paths can reach an emitting surface; with other analytic/HDR lighting
+disabled and no reflected emitter path, nonemitting surfaces remain dark. Explicit
+path lighting can carry BSDF-sampled diffuse emission, without mesh-emitter
+next-event sampling. The primary background
 retains its original display color.
 
 At most 32 emitter slots and 256 bytes per exact body name are admitted, including
@@ -42,8 +46,8 @@ debit cumulative work and observe cancellation; no new scheduler or pool is used
 
 Tests written cover linear output/exposure, zero PNG equivalence, front/back normals,
 unlit neighbors, exact target refusal, duplicate/capacity/JSON bounds and metadata
-accounting. They have not run yet. Full CI, wasm, real command/export acceptance and
-review must follow on the real integrated revision before this is ready to merge.
+accounting. The renderer cases have executed; current combined engine contracts,
+full CI, wasm and real command/export/native acceptance remain separate gates.
 
 
 ## Integration with the current opaque consumer
@@ -64,5 +68,5 @@ is integrated; programmatic preflight/start accept the same bounded typed reques
 
 The current-consumer port adds written regressions for AA/reflection divisors,
 combined directional/point/area lighting and emission reached by a reflected ray.
-All newly ported tests and these three regressions require execution on the exact
-candidate. Their presence is not a PASS or native acceptance claim.
+The corresponding renderer integration regressions have executed on the combined
+candidate. This does not qualify a visible emission editor or native acceptance.

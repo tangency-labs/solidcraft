@@ -1,0 +1,17 @@
+{
+ "base": "../../05-holes-and-taps/013-part-holes",
+ "commands": [
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     23,
+     15,
+     25
+    ],
+    "modeled": true,
+    "designation": "M16"
+   }
+  }
+ ]
+}

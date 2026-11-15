@@ -1,0 +1,12 @@
+id = "intersect.curve_class_p8"
+upstream = ["source/SMLib/src/SmCurveClass.cpp"]
+rust_module = "intersect::curve_class::p8"
+depends_on = ["curve.crv_on_surf", "curve.curve_p2", "geom.extent2d", "geom.extent3d", "geom.object", "geom.solution_array", "geom.tol", "geom.vector2d", "geom.vector3d", "intersect.curve_class_p1", "intersect.curve_class_p3", "intersect.curve_class_p5", "intersect.point_class", "surface.surface_p2", "surface.volume_p1"]
+soft_depends_on = ["curve.curve_p4", "curve.curve_p8", "curve.line", "geom.extent1d", "nurbs.b_spline_surface_p1", "surface.plane_p1", "surface.surface_p5", "surface.surface_p6", "surface.surface_p7", "surface.surface_p8", "surface.volume_p2"]
+est_lines = 1900
+layer = 37
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "GREEN, PR #563 on main b65597902: 1127 native cases (327 fixtures + 800 generated), 1127 bit-identical passes, 0 failed, 0 deferred; all 913 main passes retained and 214 deferrals now pass. Verified by x86_64 CI 39928207576 and full ARM64 audit. CurveOnClassify calls intersect_natural_bounds; sm_InsertSolutions calls p5::insert_solutions through ClassObject::temporary boundary handles; volume boundary planes call surface.surface_p8 GlobalCurveIntersect. WR-155 slot-4/5 shared-buffer emulation and its 12 wr155_* fixtures are retained. Historical sensitivity detected all 785 pre-wiring perturbations. Coverage includes surface-operation state comparisons, defined UV-volume rejections and no-discontinuity volume early returns; finite extreme-input and alias-emulation details remain in findings.md. Green certifies this native corpus, not every 3D discontinuity/discontinuous-volume solve branch. Five functions: Intersect3DDiscontinuities, Intersect3DDiscontinuties, IntersectUVDiscontinuties, IntersectNaturalBounds; unit-SCC #22 (220 units); 317 upstream test entry points."

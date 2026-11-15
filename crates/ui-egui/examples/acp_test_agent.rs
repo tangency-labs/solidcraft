@@ -157,7 +157,7 @@ fn main() {
                 };
                 // "save": only the save (the design is there already).
                 if text.contains("save") {
-                    let path = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default().join("Documents/block.solidcraft");
+                    let path = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default().join("Documents/block.sc");
                     let title = format!("save {}", path.display());
                     say(session, "I'll save the design to your Documents folder.");
                     tool(session, "t4", &title, "edit", "in_progress", None);
@@ -177,7 +177,7 @@ fn main() {
                     send(&json!({"jsonrpc": "2.0", "id": 900, "method": "session/request_permission", "params": {
                         "sessionId": session,
                         // Named as the Claude Code adapter names an MCP tool.
-                        "toolCall": {"toolCallId": "t1", "title": "mcp__solidcraft__batch"},
+                        "toolCall": {"toolCallId": "t1", "title": "mcp__solidcraft-app__batch", "kind": "other"},
                         "options": [{"optionId": "allow", "name": "Allow", "kind": "allow_once"}, {"optionId": "reject", "name": "Reject", "kind": "reject_once"}],
                     }}));
                     // Wait for the answer (other lines are not expected meanwhile).

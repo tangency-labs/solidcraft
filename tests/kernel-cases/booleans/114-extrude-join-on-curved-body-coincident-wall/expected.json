@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#114"
+ ],
+ "what": "extruding a profile onto a cylinder with zero taper: the new wall is the old wall continued (coincident cylindrical faces), join failed",
+ "source": "analytic",
+ "method": "cylinder r10 h10 joined with an r10 circle extruded 5 from its top: one cylinder r10 h15; V = pi*100*15 = 1500 pi = 4712.389; faces: 2 caps and one side = 3",
+ "body_count": 1,
+ "volume_mm3": 4712.38898038469,
+ "faces": 3
+}

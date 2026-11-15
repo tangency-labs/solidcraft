@@ -1,7 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_doc::{Document, FeatureKind, ProfileSel};
-use solidcraft_geom::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{CurveKind, Sketch};
 
 use crate::{Session, Snapshot};
@@ -100,10 +101,10 @@ fn offset_guard_live_child_follows_radius_then_retirement_is_honest() {
         }
         Ok(_) => {
             assert!(s.model.results.iter().any(|r| r.error.is_some()), "retired parent must not keep a stale successful child");
-            assert!(s.world_state().body("Child").is_none());
+            assert!(s.world_state().unwrap().body("Child").is_none());
             let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
             assert!(reopened.model.results.iter().any(|r| r.error.is_some()));
-            assert!(reopened.world_state().body("Child").is_none());
+            assert!(reopened.world_state().unwrap().body("Child").is_none());
         }
     }
 }
@@ -164,7 +165,7 @@ fn offset_guard_complete_delete_keeps_dangling_profile_loadable_without_circle_r
         "solid.extrude",
         json!({"sketch":sketch,"profiles":{"offset_boundaries":[association]},"distance":2,"operation":"new","name":"OffsetBody","body_name":"Selected"}),
     );
-    run(&mut s, "sketch.edit", json!({"sketch":sketch}));
+    run(&mut s, "sketch.edit", json!({"sketch":sketch,"restore_marker":false}));
     run(&mut s, "sketch.delete", json!({"entities":outputs}));
     let saved = s.doc.to_json();
     let FeatureKind::Extrude { profiles: ProfileSel::OffsetBoundaries { associations }, .. } = &s.doc.find_feature("OffsetBody").unwrap().kind else {
@@ -174,7 +175,7 @@ fn offset_guard_complete_delete_keeps_dangling_profile_loadable_without_circle_r
     let check = |s: &Session| {
         assert!(solved(s, sketch).curve_index("Unrelated").is_some());
         assert!(s.model.results.iter().find(|r| r.id == s.doc.find_feature("OffsetBody").unwrap().id).unwrap().error.is_some());
-        assert!(s.world_state().body("Selected").is_none(), "dangling selection must never adopt the unrelated circle");
+        assert!(s.world_state().unwrap().body("Selected").is_none(), "dangling selection must never adopt the unrelated circle");
     };
     check(&s);
     let reopened = Session::new(Document::from_json(&saved).unwrap());

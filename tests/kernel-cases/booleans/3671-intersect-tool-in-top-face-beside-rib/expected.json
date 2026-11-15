@@ -1,0 +1,22 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3671"
+  ],
+  "what": "intersect with a tapered pocket tool whose top face lies in the block's top face, 0.5 mm short of a rib",
+  "source": "analytic",
+  "method": "the tool lies wholly inside the block (z 5..20, x 40..89.5, y 30..70), so the intersection is the tool: a frustum of a rectangle 49.5x40 at the top, sides leaning in 30 deg over 15 mm (inset d=15*tan30=8.660 per side); prismatoid V = h/3 (A1 + A2 + sqrt(A1 A2)). The PR quotes 19573.6090 for its own numbers; 30 deg exactly gives this value (within 1e-3 of it). Nothing may stay above z=20 (the rib is not part of the tool)",
+  "body_count": 1,
+  "volume_mm3": 19559.5484,
+  "bbox": {
+    "min": [
+      40,
+      30,
+      5
+    ],
+    "max": [
+      89.5,
+      70,
+      20
+    ]
+  }
+}

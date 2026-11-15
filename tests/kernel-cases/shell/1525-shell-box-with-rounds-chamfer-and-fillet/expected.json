@@ -1,0 +1,23 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1525"
+ ],
+ "what": "a 50x50x30 box with r10 vertical rounds, a 5 mm chamfer round the base and a 4 mm fillet where the chamfer meets the wall, shelled 2 mm open at the top",
+ "source": "analytic",
+ "method": "the body is convex (every edge convex), so the 2 mm shell's cavity is its exact inward offset, open at the top. Body = the square Q = [10,40]^2 swept by a profile at distance f(z) from Q: horizontal section area A(z) = 900 + 120 f + pi f^2. Body: f = 5 + z (chamfer) to z = 4 sqrt2 - 1.828 = 3.828, then the r4 fillet centred at (6, zc), zc = 1 + 4 sqrt2, f = 6 + sqrt(16 - (z - zc)^2) up to zc, then f = 10 (r10 rounds) to z = 30. Cavity (every face moved 2 in: floor z = 2, chamfer plane by 2 along its normal, fillet r2 about the same centre, rounds r8): f = z + 5 - 2 sqrt2 to zc - sqrt2, then 6 + sqrt(4 - (z - zc)^2) to zc, then 8, from z = 2 to 30. V = int_0^30 A_body - int_2^30 A_cavity = 70207.8635 - 56506.1293. Faces: the body's 26 (top, bottom, 4 walls, 4 rounds, 4 + 4 chamfer planes and cones, 4 + 4 fillet cylinders and tori) less the top, their 25 inner copies and the rim",
+ "body_count": 1,
+ "volume_mm3": 13701.734185296977,
+ "faces": 51,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   50,
+   50,
+   30
+  ]
+ }
+}

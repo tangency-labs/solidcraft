@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "XY turned 30 degrees about X",
+ "source": "analytic",
+ "method": "turning XY's normal Z by +30 deg about +X (right hand): (0, -sin 30, cos 30) = (0, -1/2, sqrt3/2); the plane keeps the X axis",
+ "construction": {
+  "P": {
+   "plane": {
+    "through": [
+     25,
+     0,
+     0
+    ],
+    "normal": [
+     0,
+     -0.5,
+     0.8660254037844386
+    ]
+   }
+  }
+ }
+}

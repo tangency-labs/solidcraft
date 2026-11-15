@@ -1,0 +1,41 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 8,
+    "height": 30
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 20,
+    "height": 15,
+    "corner": [
+     -50,
+     -10,
+     30
+    ],
+    "operation": "join",
+    "targets": [
+     "Body1"
+    ]
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      -30,
+      -10,
+      30
+     ]
+    ],
+    "distance": 3
+   }
+  }
+ ]
+}

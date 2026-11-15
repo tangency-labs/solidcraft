@@ -12,6 +12,16 @@ fn edge(s: &str) -> EdgeName {
     e
 }
 
+/// A name in the older form (a nested name after a colon), read as it was.
+fn old(s: &str) -> FaceName {
+    FaceName::parse(s).unwrap_or_else(|e| panic!("{s}: {e}"))
+}
+
+/// An edge in the older form, read as it was.
+fn old_edge(s: &str) -> EdgeName {
+    EdgeName::parse(s).unwrap_or_else(|e| panic!("{s}: {e}"))
+}
+
 fn made(feature: u64, role: Role) -> FaceName {
     FaceName { base: Base::Made { feature: FeatureId(feature), role }, suffixes: Vec::new() }
 }
@@ -56,7 +66,7 @@ fn pieces_copies_and_numbered_pieces() {
 /// piece's (corpus `naming-split-pieces`).
 #[test]
 fn a_blend_of_an_earlier_piece_keeps_the_qualifier_inside() {
-    let f = face("F5:blend:F2:side:l2|F2:top#[F2:side:l2,F4:side:l2]");
+    let f = face("F5:blend(F2:side:l2|F2:top#[F2:side:l2,F4:side:l2])");
     let Base::Blend { feature: FeatureId(5), rounds: Rounds::Edge(e) } = &f.base else { panic!("{f:?}") };
     assert!(f.suffixes.is_empty());
     assert_eq!(e.faces[1].stem(), made(2, Role::Top));
@@ -67,12 +77,12 @@ fn a_blend_of_an_earlier_piece_keeps_the_qualifier_inside() {
 /// is the fillet face's.
 #[test]
 fn a_blend_split_by_a_later_cut_takes_the_qualifier() {
-    let f = face("F4:blend:F3:+x|F3:+z#[F3:-y,F5:-y]");
+    let f = face("F4:blend(F3:+x|F3:+z)#[F3:-y,F5:-y]");
     let Base::Blend { feature: FeatureId(4), rounds: Rounds::Edge(e) } = &f.base else { panic!("{f:?}") };
     assert_eq!(e.faces[1], made(3, Role::BoxFace { axis: Axis::Z, high: true }));
     assert!(matches!(f.suffixes.as_slice(), [Suffix::Piece(_)]));
     // Copied by a later pattern, then split: both are the blend face's, in order.
-    let g = face("F4:blend:F3:+x|F3:+z@F6.1#[F7:a]");
+    let g = face("F4:blend(F3:+x|F3:+z)@F6.1#[F7:a]");
     assert!(matches!(g.suffixes.as_slice(), [Suffix::Copy { feature: FeatureId(6), .. }, Suffix::Piece(_)]));
     assert_eq!(g.feature(), Some(FeatureId(6)));
 }
@@ -81,9 +91,31 @@ fn a_blend_split_by_a_later_cut_takes_the_qualifier() {
 /// the inner face.
 #[test]
 fn a_later_cut_told_apart_by_older_faces_reads_as_the_inner_faces() {
-    let f = face("F4:blend:F3:+x|F3:+z#[F3:-y]");
+    let f = face("F4:blend(F3:+x|F3:+z#[F3:-y])");
     let Base::Blend { rounds: Rounds::Edge(e), .. } = &f.base else { panic!("{f:?}") };
     assert!(f.suffixes.is_empty() && e.faces[1].suffixes.len() == 1);
+}
+
+/// The same face, read two ways: the name inside the parentheses ends at its `)`, so a
+/// qualifier inside them is the nested name's and one after them the outer face's. The two
+/// faces of the corpus's two designs therefore no longer read alike (#5857).
+#[test]
+fn a_nested_name_in_parentheses_says_which_face_a_qualifier_qualifies() {
+    // The fillet rounds an edge of a piece the slot made before it: the qualifier is inside.
+    let inside = face("F3:blend(F1:+x|F1:+z#[F1:+x,F2:+x])");
+    let Base::Blend { rounds: Rounds::Edge(e), .. } = &inside.base else { panic!("{inside:?}") };
+    assert!(inside.suffixes.is_empty());
+    assert_eq!(e.faces[1].suffixes.len(), 1);
+    // A slot cut after the fillet splits the fillet face: the qualifier is after the `)`.
+    let outside = face("F2:blend(F1:+x|F1:+z)#[F1:+y,F3:+y]");
+    let Base::Blend { rounds: Rounds::Edge(e), .. } = &outside.base else { panic!("{outside:?}") };
+    assert!(e.faces[1].suffixes.is_empty());
+    assert_eq!(outside.suffixes.len(), 1);
+    // Two names of the same shape, two different faces.
+    assert_ne!(inside.to_string(), outside.to_string());
+    // And the older form reads each of them as it did.
+    assert_eq!(old("F3:blend:F1:+x|F1:+z#[F1:+x,F2:+x]"), inside);
+    assert_eq!(old("F2:blend:F1:+x|F1:+z#[F1:+y,F3:+y]"), outside);
 }
 
 #[test]
@@ -92,28 +124,28 @@ fn edges_split_into_their_two_faces() {
     assert_eq!(e.faces[0], made(2, Role::Side { profile: None, curve: "l1".into() }));
     assert_eq!(edge("F2:side:l1|F2:top~1").tie, Some(1));
     // The blend face first: the whole blend name, then the slot's wall.
-    let e = edge("F4:blend:F3:+x|F3:+z#[F3:-y,F5:-y]|F5:-y");
-    assert_eq!(e.faces[0].to_string(), "F4:blend:F3:+x|F3:+z#[F3:-y,F5:-y]");
+    let e = edge("F4:blend(F3:+x|F3:+z)#[F3:-y,F5:-y]|F5:-y");
+    assert_eq!(e.faces[0].to_string(), "F4:blend(F3:+x|F3:+z)#[F3:-y,F5:-y]");
     assert_eq!(e.faces[1], made(5, Role::BoxFace { axis: Axis::Y, high: false }));
     // The blend face second.
-    let e = edge("F2:side:l1|F5:blend:F2:side:l2|F2:top#[F2:side:l2,F4:side:l2]");
+    let e = edge("F2:side:l1|F5:blend(F2:side:l2|F2:top#[F2:side:l2,F4:side:l2])");
     assert!(matches!(e.faces[1].base, Base::Blend { feature: FeatureId(5), .. }));
     // A blend of a blend's edge.
-    let e = edge("F6:blend:F4:blend:a|b|c|d");
+    let e = edge("F6:blend(F4:blend(a|b)|c)|d");
     let Base::Blend { rounds: Rounds::Edge(inner), .. } = &e.faces[0].base else { panic!("{e:?}") };
     assert!(matches!(inner.faces[0].base, Base::Blend { feature: FeatureId(4), .. }));
     assert_eq!(e.faces[1].base, Base::Other("d".into()));
     // A `~k` ending the edge numbers it, not the blend's edge.
-    let e = edge("F2:x|F5:blend:a|b~1");
+    let e = edge("F2:x|F5:blend(a|b)~1");
     assert_eq!(e.tie, Some(1));
     assert!(matches!(&e.faces[1].base, Base::Blend { rounds: Rounds::Edge(b), .. } if b.tie.is_none()));
     // A blend named by its edge's index.
-    assert_eq!(edge("F5:blend:3|F2:top").faces[0].base, Base::Blend { feature: FeatureId(5), rounds: Rounds::Index(3) });
+    assert_eq!(edge("F5:blend(3)|F2:top").faces[0].base, Base::Blend { feature: FeatureId(5), rounds: Rounds::Index(3) });
 }
 
 #[test]
 fn inner_walls_nest_a_face() {
-    let f = face("F3:inner:F2:top#[F2:side:l2]");
+    let f = face("F3:inner(F2:top#[F2:side:l2])");
     let Base::Inner { feature: FeatureId(3), offsets } = &f.base else { panic!("{f:?}") };
     assert_eq!(offsets.stem(), made(2, Role::Top));
 }
@@ -121,33 +153,33 @@ fn inner_walls_nest_a_face() {
 #[test]
 fn what_made_a_face_and_its_kind() {
     assert_eq!(made_by("F2:side:l1@F7.2"), Some(2));
-    assert_eq!(made_by("F3:inner:F5:blend:a|b"), Some(3));
+    assert_eq!(made_by("F3:inner(F5:blend(a|b))"), Some(3));
     assert_eq!(made_by("Body1:face:3"), None);
     assert_eq!(split_feature("F12:boss:side:3"), Some((12, "boss:side:3")));
     // A blend named only inside another name is not one.
-    assert!(is_blend("F5:blend:F2:x|F2:y#[F6:z]"));
-    assert!(!is_blend("F2:top#[F5:blend:a|b]"));
-    assert!(!is_blend("F3:inner:F5:blend:a|b"));
+    assert!(is_blend("F5:blend(F2:x|F2:y#[F6:z])"));
+    assert!(!is_blend("F2:top#[F5:blend(a|b)]"));
+    assert!(!is_blend("F3:inner(F5:blend(a|b))"));
     // A copy only inside a blend's edge doesn't make the blend face a copy.
     assert!(is_copy("F2:side:l1@F7.2#[F8:x]"));
-    assert!(!is_copy("F5:blend:F2:x@F3.1|F2:y"));
+    assert!(!is_copy("F5:blend(F2:x@F3.1|F2:y)"));
     assert!(is_numbered_piece("F2:top#2") && is_numbered_piece("F2:top#[F4:x]#1"));
-    assert!(!is_numbered_piece("F5:blend:F2:top#2|F2:x") && !is_numbered_piece("F2:top#[F4:x]"));
-    assert!(is_wall("F4:side") && !is_wall("F4:side#1") && !is_wall("F5:blend:F2:x|F4:side"));
+    assert!(!is_numbered_piece("F5:blend(F2:top#2|F2:x)") && !is_numbered_piece("F2:top#[F4:x]"));
+    assert!(is_wall("F4:side") && !is_wall("F4:side#1") && !is_wall("F5:blend(F4:side:l2|F4:side)"));
 }
 
 /// A shell's inner wall split by a later cut: the qualifier, naming the cut, is the wall's.
 #[test]
 fn an_inner_wall_split_by_a_later_cut_takes_the_qualifier() {
-    let f = face("F3:inner:F2:top#[F2:side:l2,F6:x]");
+    let f = face("F3:inner(F2:top)#[F2:side:l2,F6:x]");
     assert!(matches!(f.suffixes.as_slice(), [Suffix::Piece(_)]));
-    assert_eq!(f.stem().to_string(), "F3:inner:F2:top");
+    assert_eq!(f.stem().to_string(), "F3:inner(F2:top)");
 }
 
 #[test]
 fn features_in_text_order() {
     let ids = |s: &str| face(s).features().into_iter().map(|f| f.0).collect::<Vec<_>>();
-    assert_eq!(ids("F3:inner:F2:blend:F1:+y|F1:-x"), vec![3, 2, 1, 1]);
+    assert_eq!(ids("F3:inner(F2:blend(F1:+y|F1:-x))"), vec![3, 2, 1, 1]);
     assert_eq!(ids("F82:-z@F84.2"), vec![82, 84]);
     assert_eq!(ids("F2:top#[F2:side:l2,F4:side:l2]"), vec![2, 2, 4]);
     assert_eq!(ids("F1:side:曲線F10"), vec![1]);
@@ -157,8 +189,8 @@ fn features_in_text_order() {
 #[test]
 fn feature_ids_map_everywhere_but_role_text() {
     let ids = std::collections::BTreeMap::from([(2, 12), (5, 15)]);
-    let mapped = map_features("F5:blend:F2:side:l2|F2:top#[F2:side:l2,F4:side:l2]@F2.1", &ids);
-    assert_eq!(mapped.as_deref(), Some("F15:blend:F12:side:l2|F12:top#[F12:side:l2,F4:side:l2]@F12.1"));
+    let mapped = map_features("F5:blend(F2:side:l2|F2:top#[F2:side:l2,F4:side:l2])@F2.1", &ids);
+    assert_eq!(mapped.as_deref(), Some("F15:blend(F12:side:l2|F12:top#[F12:side:l2,F4:side:l2])@F12.1"));
     // Where an id sits: a name's ids must map, a qualifier's may stay.
     let f = face("F2:top#[F9:x]");
     let strict = f.map(
@@ -180,12 +212,13 @@ fn errors_say_where() {
     assert_eq!(FaceName::parse("F2:top#[F3:x"), Err(NameError::Expected { at: 12, what: "`,` or `]` in a piece's faces" }));
     assert_eq!(FaceName::parse("a|b"), Err(NameError::Expected { at: 1, what: "the end of the name" }));
     assert_eq!(FaceName::parse(""), Err(NameError::Expected { at: 0, what: "a face" }));
+    assert_eq!(FaceName::parse("F2:blend("), Err(NameError::Expected { at: 9, what: "`)`" }));
 }
 
 #[test]
 fn hostile_names_never_panic() {
     let long = "x".repeat(MAX_NAME_LEN + 1);
-    let deep = format!("{}x", "F1:inner:".repeat(64));
+    let deep = format!("{}x{}", "F1:inner(".repeat(64), ")".repeat(64));
     let deep_pieces = format!("x{}{}", "#[x".repeat(64), "]".repeat(64));
     for s in [
         "",
@@ -202,6 +235,10 @@ fn hostile_names_never_panic() {
         "F1:blend:",
         "F1:blend:x",
         "F1:blend:x|",
+        "F1:blend(",
+        "F1:blend()",
+        "F1:inner(",
+        "F1:blend(a|b",
         "@F",
         "x@F1.",
         "x@F",
@@ -217,11 +254,14 @@ fn hostile_names_never_panic() {
         deep.as_str(),
         deep_pieces.as_str(),
     ] {
+        // Whatever reads back reads as the same name, in the current form.
         if let Ok(f) = FaceName::parse(s) {
-            assert_eq!(f.to_string(), s);
+            let back = FaceName::parse(&f.to_string()).unwrap_or_else(|e| panic!("{f}: {e}"));
+            assert_eq!(back, f, "reads back as the same name: {s}");
         }
         if let Ok(e) = EdgeName::parse(s) {
-            assert_eq!(e.to_string(), s);
+            let back = EdgeName::parse(&e.to_string()).unwrap_or_else(|err| panic!("{e}: {err}"));
+            assert_eq!(back, e, "reads back as the same edge: {s}");
         }
     }
     assert_eq!(FaceName::parse(&long), Err(NameError::TooLong));
@@ -230,9 +270,24 @@ fn hostile_names_never_panic() {
     // An open boundary's edge has one face; an edge three faces meet at, three.
     assert_eq!(edge("F2:top").faces.len(), 1);
     assert_eq!(edge("x|y|z").faces.len(), 3);
-    // A blend's edge has two faces at most; a third is the outer edge's.
-    let e = edge("F5:blend:a|b|c");
+    // A blend's edge is the edge it rounds; the rest of the name is the outer edge's.
+    let e = edge("F5:blend(a|b|c)");
+    assert!(matches!(&e.faces[0].base, Base::Blend { rounds: Rounds::Edge(inner), .. } if inner.faces.len() == 3) && e.faces.len() == 1);
+    // In the older form the two are not told apart, and the third face is the outer edge's.
+    let e = old_edge("F5:blend:a|b|c");
     assert!(matches!(&e.faces[0].base, Base::Blend { rounds: Rounds::Edge(inner), .. } if inner.faces.len() == 2) && e.faces.len() == 2);
     // A fillet on an open boundary's edge.
-    assert!(matches!(face("F1:blend:F10:start").base, Base::Blend { rounds: Rounds::Edge(ref e), .. } if e.faces.len() == 1));
+    assert!(matches!(face("F1:blend(F10:start)").base, Base::Blend { rounds: Rounds::Edge(ref e), .. } if e.faces.len() == 1));
+}
+
+#[test]
+fn a_text_that_cannot_be_written_into_a_name_whole_is_told() {
+    // A curve's id goes into the name of the faces the curve makes, so it has to come
+    // back out of the name as itself (#5858).
+    for good in ["c1", "l4", "s01.l4", "c-1", "c_1", "a.b", "x"] {
+        assert!(text_fits_name(good), "`{good}` fits a name");
+    }
+    for bad in ["c|1", "c,1", "c~1", "c]1", "c#1", "c(1", "c)1", "", "s1.l4"] {
+        assert!(!text_fits_name(bad), "`{bad}` does not fit a name");
+    }
 }

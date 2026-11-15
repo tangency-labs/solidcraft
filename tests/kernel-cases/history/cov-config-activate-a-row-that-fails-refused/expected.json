@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "config.activate of a row with a block 0 long",
+ "source": "invariants",
+ "method": "a 0 mm block cannot be built: the activation is refused and the design kept",
+ "outcome": "refused",
+ "refusal": "configuration `Zero` would fail to rebuild"
+}

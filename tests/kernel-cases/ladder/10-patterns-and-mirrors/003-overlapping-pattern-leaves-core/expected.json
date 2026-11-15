@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "six r5 cuts patterned round a circle r6 in a disk r20: they overlap and cut a core free",
+ "source": "analytic",
+ "method": "neighbouring cuts overlap (centres 6 apart < 10) but none reaches the axis (6 > 5): a core is cut free; the union's area 337.050332638 by a polar integral of the covered radial intervals",
+ "body_count": 2,
+ "volume_mm3": 9195.867287979
+}

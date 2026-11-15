@@ -1,0 +1,36 @@
+{
+ "sources": [],
+ "what": "an exploded view moving the arm 30 mm up, shown",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); the view moves Arm by (0,0,30). explode.show is shown only (the design keeps its placements), so occurrence.properties reports Arm where the design places it: centre (20,0,5)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 8,
+   "json": {
+    "moves": [
+     {
+      "translate": [
+       0.0,
+       0.0,
+       30.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,153 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "Side",
+    "plane": "YZ"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -39,
+      5
+     ],
+     [
+      -39,
+      0
+     ],
+     [
+      60,
+      0
+     ],
+     [
+      60,
+      10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.spline.control_point",
+   "params": {
+    "points": [
+     [
+      60,
+      10
+     ],
+     [
+      49.5,
+      10
+     ],
+     [
+      49.5,
+      5
+     ],
+     [
+      39,
+      5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      39,
+      5
+     ],
+     [
+      -39,
+      5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "body_name": "Plate",
+    "direction": "symmetric",
+    "distance": 56,
+    "name": "Pad",
+    "sketch": "Side"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "Wedge",
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "closed": true,
+    "points": [
+     [
+      -28,
+      39
+     ],
+     [
+      -23.5,
+      55
+     ],
+     [
+      -23.5,
+      66
+     ],
+     [
+      -29,
+      66
+     ],
+     [
+      -29,
+      39
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "direction": "symmetric",
+    "name": "TaperCut",
+    "operation": "cut",
+    "sketch": "Wedge",
+    "targets": [
+     "Plate"
+    ],
+    "through_all": true
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "body": "Plate",
+    "edges": [
+     [
+      -28,
+      39,
+      2.5
+     ]
+    ],
+    "name": "CornerFillet",
+    "radius": 5
+   }
+  }
+ ]
+}

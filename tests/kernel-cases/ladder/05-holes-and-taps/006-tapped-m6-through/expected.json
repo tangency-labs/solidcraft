@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "an M6 tapped hole through: the tap drill d5 (major - pitch), cosmetic thread",
+ "source": "analytic",
+ "method": "M6 coarse pitch 1: tap drill 6 - 1 = 5; removed pi 2.5^2 20; the cosmetic thread adds no geometry",
+ "body_count": 1,
+ "volume_mm3": 47607.300918301,
+ "faces": 7
+}

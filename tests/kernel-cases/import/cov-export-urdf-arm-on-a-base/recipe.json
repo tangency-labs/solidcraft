@@ -1,0 +1,135 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 1000,
+    "width": 500,
+    "height": 200,
+    "corner": [
+     -500,
+     -250,
+     -200
+    ],
+    "operation": "new",
+    "body_name": "BaseBox"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 400,
+    "width": 100,
+    "height": 100,
+    "corner": [
+     0,
+     -50,
+     0
+    ],
+    "operation": "new",
+    "body_name": "ArmBox"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Base",
+    "parent": "root",
+    "activate": false,
+    "grounded": true
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "BaseBox"
+    ],
+    "component": "Base"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Arm",
+    "parent": "root",
+    "activate": false,
+    "grounded": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "ArmBox"
+    ],
+    "component": "Arm"
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "revolute",
+    "name": "Hinge",
+    "flip": true,
+    "a": {
+     "occurrence": "Base",
+     "point": [
+      0,
+      0,
+      0
+     ],
+     "z": [
+      0,
+      0,
+      1
+     ]
+    },
+    "b": {
+     "occurrence": "Arm",
+     "point": [
+      0,
+      0,
+      0
+     ],
+     "z": [
+      0,
+      0,
+      1
+     ]
+    },
+    "quiet": true
+   }
+  },
+  {
+   "command": "file.export_urdf",
+   "params": {
+    "path": "$OUT/cov-export-urdf-arm.urdf"
+   }
+  },
+  {
+   "command": "file.new",
+   "params": {
+    "name": "Reimported"
+   }
+  },
+  {
+   "command": "file.insert_mesh",
+   "params": {
+    "path": "$OUT/cov-export-urdf-arm-Base.stl"
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "cov-export-urdf-arm-Base"
+   }
+  },
+  {
+   "command": "mesh.convert",
+   "params": {
+    "body": "cov-export-urdf-arm-Base"
+   }
+  }
+ ]
+}

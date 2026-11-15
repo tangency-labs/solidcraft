@@ -1,0 +1,60 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 40,
+    "width": 40,
+    "height": 20,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     20,
+     20,
+     20
+    ],
+    "diameter": 6,
+    "name": "Hole"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      23,
+      20,
+      20
+     ]
+    ],
+    "distance": 1
+   }
+  },
+  {
+   "command": "face.delete",
+   "params": {
+    "faces": [
+     [
+      23,
+      20,
+      10
+     ],
+     [
+      23.5,
+      20,
+      19.5
+     ]
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,89 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "center": [
+     0,
+     0,
+     0.75
+    ],
+    "length": 20,
+    "width": 20,
+    "height": 1.5,
+    "body_name": "Sheet"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 2,
+    "height": 3,
+    "base": [
+     0,
+     0,
+     -0.5
+    ],
+    "operation": "cut",
+    "targets": [
+     "Sheet"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 2,
+    "height": 1.5,
+    "base": [
+     0.004,
+     0,
+     0
+    ],
+    "body_name": "Rivet"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 4,
+    "height": 1,
+    "base": [
+     0.004,
+     0,
+     1.5
+    ],
+    "operation": "join",
+    "targets": [
+     "Rivet"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 4,
+    "height": 1,
+    "base": [
+     0.004,
+     0,
+     -1
+    ],
+    "operation": "join",
+    "targets": [
+     "Rivet"
+    ]
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Sheet",
+    "tools": [
+     "Rivet"
+    ],
+    "operation": "intersect"
+   }
+  }
+ ]
+}

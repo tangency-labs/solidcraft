@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5149"
+ ],
+ "what": "a 25x2x10 fin standing on a disc plate, circular-patterned 40 times about the plate's axis (joined): 'boolean Union: no result' past about 15 copies",
+ "source": "analytic",
+ "method": "fins r 20..45, 2 wide: at r = 20 the 40 copies are 2 pi 20/40 = 3.14 apart, wider than a fin, so none overlap. V = pi 50^2 5 + 40*25*2*10 = 39269.908 + 20000. Faces: the plate's bottom, side and top + 5 per fin = 203",
+ "body_count": 1,
+ "faces": 203,
+ "volume_mm3": 59269.9082
+}

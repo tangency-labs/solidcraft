@@ -1,0 +1,44 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 20,
+    "height": 5,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 5,
+    "name": "Label"
+   }
+  },
+  {
+   "command": "sketch.text",
+   "params": {
+    "text": "SOLID 391",
+    "at": [
+     3,
+     5
+    ],
+    "height": 8
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Label",
+    "distance": -1,
+    "operation": "cut"
+   }
+  }
+ ]
+}

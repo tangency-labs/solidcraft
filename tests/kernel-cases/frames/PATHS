@@ -1,0 +1,6 @@
+# Source files whose change must rerun the frames area (frame members, inserted profiles).
+crates/doc/src/eval_frame.rs
+crates/doc/src/frame.rs
+crates/engine/src/cmd/frame.rs
+crates/engine/src/cmd/sketch.rs
+tests/kernel-cases/frames/**

@@ -1,7 +1,8 @@
 use super::*;
+use crate::ProductMesh;
 use crate::job::{AnisotropicFaceOptions, CancelToken, ImageRequest, Integrator, TaskPoll};
-use crate::{Camera, ProductMesh, StandardView};
 use solidcraft_geom::Mesh;
+use solidcraft_viewport::{Camera, StandardView};
 use std::sync::Arc;
 
 fn body(name: &str, x: f64) -> ProductMesh {
@@ -146,6 +147,7 @@ fn direct_response_respects_geometry_visibility_and_quarter_turn() {
 fn decoded_cpu_png_rotates_only_the_two_explicit_planar_targets() {
     fn render(scene: ProductScene, camera: Camera, options: RaytraceOptions) -> ::image::RgbaImage {
         let request = ImageRequest {
+            studio_weights: None,
             environment: None,
             textures: None,
             integrator: Integrator::Raytrace,
@@ -168,7 +170,7 @@ fn decoded_cpu_png_rotates_only_the_two_explicit_planar_targets() {
     let original = scene.meshes.iter().map(|b| b.mesh.positions.clone()).collect::<Vec<_>>();
     let mut camera = Camera::default();
     camera.set_view(StandardView::Top);
-    camera.fit(&scene.bounds);
+    camera.fit(&crate::view_bounds(&scene.bounds));
     let first = render(scene.clone(), camera, options());
     let mut rotated = options();
     rotated.anisotropic_faces[0].as_mut().unwrap().orientation = AnisotropicOrientation::QuarterTurn;

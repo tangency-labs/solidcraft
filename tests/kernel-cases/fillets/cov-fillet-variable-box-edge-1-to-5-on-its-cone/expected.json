@@ -1,0 +1,28 @@
+{
+ "sources": [],
+ "what": "a variable round from r1 to r5 along a box's top back edge: the balls' envelope, a circular cone, not their great circles",
+ "source": "analytic",
+ "method": "box 20x30x20, the top back edge (y = 30, z = 20) with r = 1 + x/5 from x = 0 to 20. The balls' centres (x, 30 - r, 20 - r) run on a line, r proportional to their distance from the apex (-5, 30, 20): their envelope is the circular cone about that line with sin(phi) = 1/sqrt(27). Each ball touches it along the circle square to the line of centres, offset -r r'/|c'| from the centre, not along the great circle (whose middle is 0.0101 off the cone at x = 10). In each plane x = const the cone's section cuts off the corner, between the contact lines, the area found by rays from the corner (each meets the cone at the root of a quadratic); integrated over x it is 43.777573: V = 12000 - 43.777573 = 11956.2224. Faces 7; both seams G1, not G2.",
+ "body_count": 1,
+ "volume_mm3": 11956.2224267359,
+ "faces": 7,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   20,
+   30,
+   20
+  ]
+ },
+ "continuity": {
+  "order": "g1",
+  "exact": true
+ },
+ "tolerance": {
+  "rel": 1e-05
+ }
+}

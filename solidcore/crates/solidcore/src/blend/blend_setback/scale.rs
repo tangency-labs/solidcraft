@@ -1,0 +1,552 @@
+//! The least scale of a corner's setbacks at which its G1 fill is certified convex (the
+//! fork's `SmBlendSetback::CertifiedScale`, `sm_SbModelRounds`; tangency-labs/smlib
+//! 250cb3f, f1d81f4; smlib#104; 20b1c01, smlib#106(a)).
+//!
+//! Upstream: `source/SMLib/src/SmBlendSetback.cpp`, `source/SMLib/inc/SmBlendSetback.h`.
+//!
+//! | Rust | Upstream |
+//! |------|----------|
+//! | [`certified_scale`] | `SmBlendSetback::CertifiedScale` |
+//! | `model_rounds` (private) | `sm_SbModelRounds` |
+//!
+//! The corner's rounds are made from its geometry: edge i's round, of radius r between its
+//! faces f and g (normals n out of the material), has its ball's centre C at
+//! `V + t a + s r (n_f + n_g) / (1 + n_f . n_g)` at t along the edge from the vertex V
+//! (`s = -1` at a convex edge, the ball in the material; `+1` at a concave one), its section
+//! the arc from `C - s r n_f` to `C - s r n_g` about C, the rational quadratic through the
+//! edge's point with the weight cos of half the arc, `(1 + n_f . n_g) / 2` under the root. A
+//! round runs from its end section away from the vertex, linear along.
+//!
+//! Deviations: the fork's status, `rdScale`, `*plSolves` and `*ppReason` are one return
+//! value ([`CertifiedScale`]) or a [`Refusal`]; the solves of a refused search are not
+//! returned.
+
+use super::graph::faces_common_point;
+use super::{el, fill_hole_probe, smax, smin, Edge, Face, FillStats, Probe, Refusal, Round};
+use crate::error::Result;
+use crate::geom::vector3d::sqrt;
+use crate::kernel::Kernel;
+use crate::math::Point3;
+use crate::nurbs::b_spline_curve::KnotType;
+use crate::nurbs::b_spline_surface::{
+    BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData, SurfParamType,
+};
+use crate::surface::surface::Surface;
+
+/// What [`certified_scale`] finds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CertifiedScale {
+    /// `rdScale`: the locally least certifying scale on a grid of `1e-3`, 1 where
+    /// the setbacks themselves do; 0 where none up to 2 does.
+    pub scale: f64,
+    /// `*plSolves`: the quadratic programmes solved.
+    pub solves: usize,
+    /// `*plAttempts`: fills built by the search, at most 12.
+    pub attempts: usize,
+    /// Exact sector-row materialization attempts across every fill in the search.
+    pub qp_rows_built: usize,
+    /// Maximum constraint working-set size across the search's quadratic programmes.
+    pub qp_peak_rows_held: usize,
+    /// Dual active-set iterations across every fill in the search.
+    pub qp_steps: usize,
+    /// `*ppReason`: why none certifies, with a scale of 0.
+    pub reason: Option<&'static str>,
+}
+
+/// `sm_SbModelRounds`: the corner's constant circular rounds, one per edge, each ending at
+/// its setback (module docs).
+fn model_rounds(
+    faces: &[Face],
+    edges: &[Edge],
+    setbacks: &[f64],
+) -> core::result::Result<Vec<BSplineSurface>, Refusal> {
+    let n = edges.len();
+    if n < 3 || faces.len() != n || setbacks.len() != n {
+        return Err(Refusal::invalid(
+            "SmBlendSetback: a corner needs three or more edges, as many faces and setbacks",
+        ));
+    }
+    // the vertex: the faces' planes' common point (least squares)
+    let v = faces_common_point(faces).ok_or_else(|| {
+        Refusal::invalid("SmBlendSetback: the corner's faces meet in no one point")
+    })?;
+    let mut surfaces = Vec::with_capacity(n);
+    for (i, edge) in edges.iter().enumerate() {
+        let [f, g] = edge.faces;
+        let setback = el(setbacks, i)?;
+        if f >= n || g >= n || !(edge.radius > 0.0) || !(setback > 0.0) {
+            return Err(Refusal::invalid(
+                "SmBlendSetback: an edge needs a positive radius, a positive setback and two of the faces given",
+            ));
+        }
+        let nf = el(faces, f)?.normal;
+        let ng = el(faces, g)?.normal;
+        // convex where the other edge on face g runs into face f's material
+        let mut side = 0.0;
+        for (j, other) in edges.iter().enumerate() {
+            if j != i && (other.faces[0] == g || other.faces[1] == g) {
+                side = other.away.dot(nf);
+            }
+        }
+        if side == 0.0 {
+            return Err(Refusal::invalid(
+                "SmBlendSetback: an edge's face holds no other edge of the corner",
+            ));
+        }
+        let s = if side < 0.0 { -1.0 } else { 1.0 };
+        let r = edge.radius;
+        let c = nf.dot(ng);
+        if !(1.0 + c > 1.0e-9) {
+            return Err(Refusal::invalid(
+                "SmBlendSetback: an edge's faces fold onto each other",
+            ));
+        }
+        let sw = (nf + ng) * (s * r / (1.0 + c));
+        let w = sqrt(0.5 * (1.0 + c));
+        let len = 2.0 * r;
+        let mut pts: Vec<Point3> = Vec::with_capacity(6);
+        let mut wts: Vec<f64> = Vec::with_capacity(6);
+        for k in 0..2 {
+            let se = v + edge.away * (setback + f64::from(k) * len);
+            let sc = se + sw;
+            pts.push(sc - nf * (s * r));
+            pts.push(se);
+            pts.push(sc - ng * (s * r));
+            wts.push(1.0);
+            wts.push(w);
+            wts.push(1.0);
+        }
+        let um = [2, 2];
+        let vm = [3, 3];
+        let uk = [setback, setback + len];
+        let vk = [0.0, 1.0];
+        let surface = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 2,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &um,
+            v_multiplicities: &vm,
+            u_knots: &uk,
+            v_knots: &vk,
+            knot_type: KnotType::Unspecified,
+            weights: Some(&wts),
+            uv_domain: None,
+        })?;
+        surfaces.push(surface);
+    }
+    Ok(surfaces)
+}
+
+/// The corner whose model is filled (`CertifiedScale`'s arguments, for its `at` and
+/// `model`).
+struct Model<'a> {
+    kernel: &'a Kernel,
+    faces: &'a [Face],
+    edges: &'a [Edge],
+    setbacks: &'a [f64],
+    most: Option<&'a [f64]>,
+    size: f64,
+}
+
+impl Model<'_> {
+    /// `at`: the setbacks at scale k, each k times its own, held at its most.
+    fn at(&self, k: f64) -> Result<Vec<f64>> {
+        let mut out = self.setbacks.to_vec();
+        for (i, x) in out.iter_mut().enumerate() {
+            *x *= k;
+            if let Some(m) = self.most {
+                *x = smin(*x, el(m, i)?);
+            }
+        }
+        Ok(out)
+    }
+
+    /// `model`: the model's fill at scale k, its probe at degree 9 (`probe`), or the fill
+    /// itself (taken certified: `true`).
+    fn run(
+        &self,
+        k: f64,
+        probe: Option<&mut Probe>,
+        work: &mut FillStats,
+    ) -> core::result::Result<bool, Refusal> {
+        let ks = self.at(k)?;
+        let surfaces: Vec<Surface> = model_rounds(self.faces, self.edges, &ks)?
+            .into_iter()
+            .map(Surface::from)
+            .collect();
+        let mut rounds = Vec::with_capacity(surfaces.len());
+        for (surface, &end) in surfaces.iter().zip(&ks) {
+            rounds.push(Round {
+                surface,
+                along: SurfParamType::U,
+                end,
+                corner_above: false,
+            });
+        }
+        let tol = 1.0e-9 * (1.0 + k * self.size);
+        let mut as_fill = Probe {
+            fill: true,
+            ..Probe::default()
+        };
+        let is_probe = probe.is_some();
+        let mut stats = FillStats::default();
+        let result = fill_hole_probe(
+            self.kernel,
+            self.faces,
+            &rounds,
+            tol,
+            probe.unwrap_or(&mut as_fill),
+            &mut stats,
+        );
+        work.solves = work.solves.saturating_add(stats.solves);
+        work.qp_rows_built = work.qp_rows_built.saturating_add(stats.qp_rows_built);
+        work.qp_peak_rows_held = work.qp_peak_rows_held.max(stats.qp_peak_rows_held);
+        work.qp_steps = work.qp_steps.saturating_add(stats.qp_steps);
+        match result {
+            Err(_) if !is_probe && stats.uncertified => Ok(false),
+            Err(refusal) => Err(refusal),
+            Ok(_) => Ok(!is_probe),
+        }
+    }
+}
+
+/// `SmBlendSetback::CertifiedScale`: the smallest certifying scale on the grid whose neighbour below fails; monotonicity checked, not proved.
+///
+/// The grid is thousandths in `[1, 2]`. Each setback is multiplied by the scale before
+/// being held at its `most`. The search returns 1 if the original fill certifies, 0 with
+/// its reason if the fill at 2 does not, otherwise bisects integer grid indices. At most
+/// 12 fills are built. Certification is of the QP's least-energy solution at fixed
+/// subdivision depth; neither that verdict nor the room-limited feasible sets are proved
+/// monotone. The result is certified at its own scale and its immediate predecessor fails.
+///
+/// # Errors
+/// [`Refusal`] with `SM_ERR_INVALID_INPUT` and its reason where the corner is not one of
+/// planes and straight edges, or `most` is not one per edge; a failing fill's refusal.
+pub fn certified_scale(
+    kernel: &Kernel,
+    faces: &[Face],
+    edges: &[Edge],
+    setbacks: &[f64],
+    most: Option<&[f64]>,
+) -> core::result::Result<CertifiedScale, Refusal> {
+    let mut work = FillStats::default();
+    let mut size = 0.0;
+    for &x in setbacks {
+        size = smax(size, x.abs());
+    }
+    if most.is_some_and(|m| m.len() != setbacks.len()) {
+        return Err(Refusal::invalid(
+            "SmBlendSetback: one most setback per edge",
+        ));
+    }
+    let ctx = Model {
+        kernel,
+        faces,
+        edges,
+        setbacks,
+        most,
+        size,
+    };
+    let mut attempts = 0;
+    let mut certified = |i: i32| {
+        attempts += 1;
+        ctx.run(f64::from(i) / 1000.0, None, &mut work)
+    };
+    if certified(1000)? {
+        return Ok(CertifiedScale {
+            scale: 1.0,
+            solves: work.solves,
+            attempts,
+            qp_rows_built: work.qp_rows_built,
+            qp_peak_rows_held: work.qp_peak_rows_held,
+            qp_steps: work.qp_steps,
+            reason: None,
+        });
+    }
+    if !certified(2000)? {
+        return Ok(CertifiedScale {
+            scale: 0.0,
+            solves: work.solves,
+            attempts,
+            qp_rows_built: work.qp_rows_built,
+            qp_peak_rows_held: work.qp_peak_rows_held,
+            qp_steps: work.qp_steps,
+            reason: Some(
+                "SmBlendSetback: no G1 fill is certified convex at the corner's setbacks up to twice them",
+            ),
+        });
+    }
+    // The smallest certifying scale on the grid whose neighbour below fails;
+    // monotonicity checked, not proved. Both ends of the final bracket were tested.
+    let hi = bisect_thousandths(1000, 2000, &mut certified)?;
+    Ok(CertifiedScale {
+        scale: f64::from(hi) / 1000.0,
+        solves: work.solves,
+        attempts,
+        qp_rows_built: work.qp_rows_built,
+        qp_peak_rows_held: work.qp_peak_rows_held,
+        qp_steps: work.qp_steps,
+        reason: None,
+    })
+}
+
+/// The bisection of [`certified_scale`]'s search on the grid of thousandths, shared by the
+/// curved Setback's growth (`grow_curved`, solidcore#2343): from `lo`, an index known to
+/// fail, and `hi`, one known to certify, the integer bracket is halved (`certified` asked at
+/// each midpoint) until its ends are adjacent. Returns `hi`: the smallest certifying index on
+/// the grid whose neighbour below fails; monotonicity checked, not proved. From 1000 and
+/// 2000 it asks at most 10 times.
+pub(crate) fn bisect_thousandths<E>(
+    mut lo: i32,
+    mut hi: i32,
+    mut certified: impl FnMut(i32) -> core::result::Result<bool, E>,
+) -> core::result::Result<i32, E> {
+    while hi - lo > 1 {
+        let mid = (lo + hi) / 2;
+        if certified(mid)? {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Ok(hi)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blend::blend_setback::fill_hole_counted;
+    use crate::math::Vec3;
+
+    fn corner(radii: [f64; 3], frame: usize, concave: bool) -> (Vec<Face>, Vec<Edge>) {
+        let unit = |i: usize| {
+            let mut xyz = [0.0; 3];
+            xyz[(i + frame) % 3] = 1.0;
+            Vec3::new(xyz[0], xyz[1], xyz[2])
+        };
+        let faces = (0..3)
+            .map(|i| Face {
+                point: Point3::default(),
+                normal: unit(i) * if concave { 1.0 } else { -1.0 },
+                ..Face::default()
+            })
+            .collect();
+        let edges = (0..3)
+            .map(|i| Edge {
+                away: unit(i),
+                radius: radii[i],
+                faces: [(i + 1) % 3, (i + 2) % 3],
+            })
+            .collect();
+        (faces, edges)
+    }
+
+    #[test]
+    fn thousandth_scales_and_attempt_budget() {
+        let kernel = Kernel::default();
+        // The last column: the QPs the search solved with each attempt's degrees least first,
+        // the order before degree 9 first (the same counts on Linux and Windows x86-64). The
+        // search must now solve fewer.
+        for (radii, setbacks, most, want, least_first) in [
+            ([2.0, 3.0, 4.0], [4.5, 4.75, 6.0], None, 1.056, Some(35)),
+            ([1.0, 1.5, 2.0], [2.25, 2.375, 3.0], None, 1.056, Some(35)),
+            (
+                [2.0, 3.0, 4.0],
+                [4.5, 4.75, 4.5],
+                Some([20.0, 20.0, 4.5]),
+                1.046,
+                Some(39),
+            ),
+            // Eight of its twelve attempts certify below degree 9, each solving degree 9 first,
+            // one QP more: it solves fewer than least first's 34 only where degree 9 decides
+            // at least three of its four failing attempts, so no bound.
+            ([2.0, 3.0, 4.0], [4.25; 3], None, 1.110, None),
+            // One certifying attempt, one QP more than least first's 2 (its budget further on).
+            ([5.0; 3], [8.0; 3], None, 1.0, None),
+            // Every edge held at its original setback: no scale can certify.
+            (
+                [2.0, 3.0, 4.0],
+                [4.5, 4.75, 6.0],
+                Some([4.5, 4.75, 6.0]),
+                0.0,
+                Some(10),
+            ),
+        ] {
+            let (faces, edges) = corner(radii, 0, false);
+            let result = certified_scale(
+                &kernel,
+                &faces,
+                &edges,
+                &setbacks,
+                most.as_ref().map(<[_; 3]>::as_slice),
+            )
+            .unwrap();
+            println!(
+                "scale {} attempts {} solves {} rows {} held {} steps {}",
+                result.scale,
+                result.attempts,
+                result.solves,
+                result.qp_rows_built,
+                result.qp_peak_rows_held,
+                result.qp_steps
+            );
+            assert_eq!(result.scale, want);
+            assert!(result.attempts <= 12);
+            // Degree 9 first, as the corner's own fill: a failing attempt that degree 9 proves
+            // unmet solves that one programme, where least first solved five. Which failing
+            // attempts' degree 9 is not proven infeasible, and so still solve five, differs
+            // between targets and machines, so the count is held below least first's, not
+            // pinned. Every attempt solves degree 9 at least.
+            if let Some(least_first) = least_first {
+                assert!(result.solves < least_first, "QP count {}", result.solves);
+            }
+            assert!(result.solves >= result.attempts);
+            assert!(result.qp_rows_built > 0);
+            assert!(result.qp_peak_rows_held <= result.qp_rows_built);
+            assert!(result.qp_steps >= result.solves);
+            // Work budgets leave room for floating-point branch differences while
+            // rejecting the former full matrices (up to 693,051 retained rows) and, on
+            // aarch64, the degrees below 9 a failing attempt tried (the fork's 20b1c01 took
+            // 120,513 steps in one degree-7 programme of the first corner). The QP bounds
+            // above reject that order; a long programme below 9 in an attempt whose degree 9
+            // is not proven infeasible is caught by the step budget only.
+            assert!(result.qp_rows_built <= 12_000_000);
+            assert!(result.qp_peak_rows_held <= 16_000);
+            assert!(result.qp_steps <= 25_000);
+            if want == 1.0 {
+                // The r=5, setback=8 corner needs no scale search. Its dense
+                // programme built 430,962 rows and retained 254,037 at peak. Its one
+                // attempt solves degree 9 before the least degree that certifies: three
+                // programmes, 22 steps on x86-64.
+                assert!(result.solves <= 3);
+                assert!(result.qp_rows_built <= 10_000);
+                assert!(result.qp_peak_rows_held <= 2_000);
+                assert!(result.qp_steps <= 32);
+            }
+            assert_eq!(
+                result.attempts,
+                if want == 1.0 {
+                    1
+                } else if want == 0.0 {
+                    2
+                } else {
+                    12
+                }
+            );
+            assert_eq!(result.reason.is_some(), want == 0.0);
+        }
+    }
+
+    /// A search attempt fills its model as the corner's own fill does (`fill_hole_counted`):
+    /// degree 9 first, then up from the least degree. An attempt whose degree 9 proves the
+    /// sector conditions unmet stops there with that one programme, its verdict that of every
+    /// degree by degree raising (from the least degree up, each failing attempt of the first
+    /// corner solved five, and on aarch64 one of degree 7 took 120,513 steps).
+    #[test]
+    fn search_attempts_fill_as_the_corner_does() {
+        let kernel = Kernel::default();
+        let (faces, edges) = corner([2.0, 3.0, 4.0], 0, false);
+        let setbacks = [4.5, 4.75, 6.0];
+        let model = Model {
+            kernel: &kernel,
+            faces: &faces,
+            edges: &edges,
+            setbacks: &setbacks,
+            most: None,
+            size: setbacks.iter().copied().fold(0.0, f64::max),
+        };
+        // 1 fails (the search's first attempt), 1.056 is the least scale that certifies
+        for (k, certifies) in [(1.0, false), (1.056, true)] {
+            let mut search = FillStats::default();
+            assert_eq!(model.run(k, None, &mut search).unwrap(), certifies);
+            let ks = model.at(k).unwrap();
+            let surfaces: Vec<Surface> = model_rounds(&faces, &edges, &ks)
+                .unwrap()
+                .into_iter()
+                .map(Surface::from)
+                .collect();
+            let rounds: Vec<Round<'_>> = surfaces
+                .iter()
+                .zip(&ks)
+                .map(|(surface, &end)| Round {
+                    surface,
+                    along: SurfParamType::U,
+                    end,
+                    corner_above: false,
+                })
+                .collect();
+            let tol = 1.0e-9 * (1.0 + k * model.size);
+            let mut own = FillStats::default();
+            let fill = fill_hole_counted(&kernel, &faces, &rounds, 1, tol, &mut own);
+            println!(
+                "scale {k} search solves {} steps {} own solves {} steps {}",
+                search.solves, search.qp_steps, own.solves, own.qp_steps
+            );
+            assert_eq!(fill.is_ok(), certifies, "scale {k}");
+            assert_eq!(search.solves, own.solves, "scale {k}");
+            assert_eq!(search.qp_steps, own.qp_steps, "scale {k}");
+            if !certifies {
+                assert_eq!(search.solves, 1, "degree 9's proof ends the attempt");
+            }
+        }
+    }
+
+    /// Separate expensive run mode, as requested by the handoff. Seventeen descriptions
+    /// cover axis permutations, concavity, scale changes and room-limited growth.
+    /// The smallest certifying scale on the grid whose neighbour below fails;
+    /// monotonicity checked, not proved.
+    #[test]
+    #[ignore = "explicit setback monotonicity gate: many full QP fills"]
+    fn setback_monotone_grid() {
+        let kernel = Kernel::default();
+        let mut corners = 0;
+        for frame in 0..3 {
+            for (radii, setbacks, most, want, concave) in [
+                ([2.0, 3.0, 4.0], [4.5, 4.75, 6.0], None, 1056, false),
+                ([1.0, 1.5, 2.0], [2.25, 2.375, 3.0], None, 1056, true),
+                (
+                    [2.0, 3.0, 4.0],
+                    [4.5, 4.75, 4.5],
+                    Some([20.0, 20.0, 4.5]),
+                    1046,
+                    false,
+                ),
+                ([2.0, 3.0, 4.0], [4.25; 3], None, 1110, false),
+                ([5.0; 3], [8.0; 3], None, 1000, false),
+                ([3.0; 3], [4.5; 3], None, 1000, false),
+            ] {
+                // Two equal-radius permutations suffice, keeping seventeen corners.
+                if frame == 2 && radii == [3.0; 3] {
+                    continue;
+                }
+                let (faces, edges) = corner(radii, frame, concave);
+                let most = most.as_ref().map(<[_; 3]>::as_slice);
+                let result = certified_scale(&kernel, &faces, &edges, &setbacks, most).unwrap();
+                assert_eq!(result.scale, f64::from(want) / 1000.0);
+                let model = Model {
+                    kernel: &kernel,
+                    faces: &faces,
+                    edges: &edges,
+                    setbacks: &setbacks,
+                    most,
+                    size: setbacks.iter().copied().fold(0.0, f64::max),
+                };
+                let mut grid = vec![1000, want + 20, want + 100, 1500, 2000];
+                grid.extend((want - 3..=want + 3).filter(|i| *i >= 1000));
+                grid.sort_unstable();
+                grid.dedup();
+                for i in grid {
+                    let mut solves = FillStats::default();
+                    assert_eq!(
+                        model.run(f64::from(i) / 1000.0, None, &mut solves).unwrap(),
+                        i >= want,
+                        "corner {corners} grid {i}"
+                    );
+                }
+                corners += 1;
+            }
+        }
+        assert_eq!(corners, 17);
+    }
+}

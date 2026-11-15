@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#556",
+  "tangency-labs/solidcraft#646"
+ ],
+ "what": "an R0.5 round on a single straight bottom edge of a box whose end runs out against a cylindrical boss wall",
+ "source": "analytic",
+ "method": "box 40x40x20 joined with a cylinder R12 height 40 centred on its side at (40,20): V0 = 32000 + pi*144*40 - pi*144/2*20 = 45571.680. The edge x=40, z=0 runs from y=0 to the boss wall (y = 20 - sqrt(144-(x-40)^2), 8.000 at x=40). The R0.5 round removes the quarter-circle spandrel (x 39.5..40, z 0..0.5 under the arc) swept along y up to the wall: removed = integral over x of [0.5 - sqrt(0.25-(x-39.5)^2)] (20 - sqrt(144-(x-40)^2)) dx = 0.42925. V = V0 - removed.",
+ "body_count": 1,
+ "volume_mm3": 45571.25101226832,
+ "continuity": {
+  "order": "g1"
+ }
+}

@@ -1,0 +1,107 @@
+{
+ "base": "../../02-booleans/020-part-back-wall",
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      15,
+      15,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      20
+     ],
+     [
+      8,
+      20
+     ],
+     [
+      8,
+      30
+     ],
+     [
+      0,
+      30
+     ]
+    ],
+    "ids": [
+     "b",
+     "s",
+     "t",
+     "ax"
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "axis": "ax",
+    "operation": "join",
+    "targets": [
+     "Part"
+    ],
+    "name": "Boss"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.slot.center_to_center",
+   "params": {
+    "p0": [
+     35,
+     10
+    ],
+    "p1": [
+     50,
+     10
+    ],
+    "width": 8
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 20,
+    "operation": "cut",
+    "targets": [
+     "Part"
+    ],
+    "name": "Slot"
+   }
+  }
+ ]
+}

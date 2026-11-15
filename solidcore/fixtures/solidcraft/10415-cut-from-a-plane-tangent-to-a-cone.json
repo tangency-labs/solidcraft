@@ -1,0 +1,533 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/10415",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the triage's stand-in on the default cone (diameter 20, height 20; tangent plane at half height, a 4 mm circle) and its two controls, reproduced on 0.29.0 with solidcraft-cli",
+ "summary": "A cut from a plane tangent to a cone's side failed on SolidCraft's truck kernel once it reached the cone's far side (#10415). The report (0.29.0, browser build): a cone, a plane tangent to its side, a circle drawn about the plane's centre and extruded as a cut through the cone, which after a long wait fails with 'boolean Cut: the operation failed: no result'. The triage reproduced it with solidcraft-cli 0.29.0 and 0.30.1 on the default cone (diameter 20, height 20) with the tangent plane at half height and a 4 mm circle: cut 8 builds, cut 30 and through all fail; a 6 mm circle cut 60 and a 3 mm circle cut 15 from a plane tangent at height 5 build. Replayed with solidcraft-cli 0.29.0 (truck): solid.cone (radius 10, height 20, apex (0, 0, 20)), construct.plane.tangent at (5, 0, 10), a 4 mm circle about the plane's origin, solid.extrude cut -L: cuts 4.2, 8 and 12 build (each after a retry with the tool moved 6.122475e-5 mm), cuts 13, 14, 15, 20, 30 and through all fail with 'no result'; the 6 mm circle cut 30 is refused ('the cut could not be computed reliably: it would change the body away from the tool') and cut 60 builds; the 3 mm circle from height 5 cut 15 builds. So with the 4 mm circle the cut fails once the tool breaks out through the cone's far side, which it does from L = 12.2405. Not fixed on truck: kernel work is paused (tangency-labs/solidcraft#3992), and the `pr` link is the SMLib kernel move (tangency-labs/solidcraft#4012). Geometry: the cone is the triangle (z, r) = (0, 0), (20, 0), (0, 10) revolved about Z (the format has no cone step), with `revolve_analytic_profile_faces` (WR-448, which SolidCraft's SMLib backend turns on) so that its slanted side is a cone, as SolidCraft's is, and not a B-spline surface of revolution with its pole at the apex. The plane tangent at P0 = ((20 - z0)/2, 0, z0) has the inward normal n = (-2, 0, -1)/sqrt(5) (the cone's half-angle is atan(1/2)); the extruded circle is the cylinder of radius rho on the disc about P0 in that plane, along n, length L, so its base touches the cone along 2*rho of the generator through P0, as in the report. Volumes: pi*10^2*20/3 less the tool within the cone, the integral over the tool's base disc of the length inside the cone of each line along n (between the two roots of the cone's quadric and below the base plane: the cone is convex, so one interval); the inner integral by Gauss-Legendre on the pieces between its kinks, the outer by Gauss-Legendre with v = rho sin(phi). 200 and 400 nodes and scipy's adaptive quadrature agree to 3e-7 mm^3, and a randomised QMC of the removed part over the tool's frame (scrambled Sobol, 16 replicates of 2^21 points) lies within two of its standard errors (the largest 1.51); the truck results that build are within 0.09 mm^3 of these (meshed; its cone alone measures 2094.15 against 2094.40). Every case expects one lump, a manifold solid and its volume within 0.01 mm^3. Expected values are analytic; nothing comes from a commercial CAD product.",
+ "cases": [
+  {
+   "name": "blind_cut_8",
+   "note": "A circle of diameter 4 on the plane tangent to the cone's side at half height, cut 8 into the cone: the tool's base touches the cone along 4 mm of the generator through (5, 0, 10) and its end stays inside. On SolidCraft 0.29.0 (truck) this cut builds (1994.93 meshed) after a retry with the tool moved ('Boolean retry: tool displacement 6.122475e-5 mm').",
+   "fixes": [
+    "revolve_analytic_profile_faces"
+   ],
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "cone",
+     "plane": "zx",
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         20.0,
+         0.0
+        ],
+        [
+         0.0,
+         10.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "tool",
+     "origin": [
+      5.0,
+      0.0,
+      10.0
+     ],
+     "axis": [
+      -0.8944271909999159,
+      0.0,
+      -0.4472135954999579
+     ],
+     "radius": 2.0,
+     "height": 8.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cone",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1995.00843891,
+     "tol": 0.01,
+     "formula": "pi*10^2*20/3 less the tool within the cone: the integral over the tool's base disc of radius 2 about P0 = (5, 0, 10) (u along the generator towards the apex, (-1, 0, 2)/sqrt(5); v along y) of the length of the line P0 + u*(-1, 0, 2)/sqrt(5) + v*(0, 1, 0) + t*(-2, 0, -1)/sqrt(5), 0 <= t <= 8, inside the cone: between the two roots in t of x^2 + y^2 - ((20 - z)/2)^2 = 0 (the cone is convex, so one interval) and below the base plane's crossing t = sqrt(5)*10 + 2u; the inner integral over u by Gauss-Legendre (40 nodes) on the pieces between its kinks (found by root finding), the outer over v = 2*sin(phi) by Gauss-Legendre (200 nodes); 200 and 400 nodes and scipy's adaptive quadrature agree to 3e-7; tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "blind_cut_12",
+   "note": "The same circle cut 12: the tool's end is still inside, 0.24 short of the far side (it breaks out from 12.2405). On SolidCraft 0.29.0 (truck) this cut builds (1944.67 meshed), after the same retry.",
+   "fixes": [
+    "revolve_analytic_profile_faces"
+   ],
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "cone",
+     "plane": "zx",
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         20.0,
+         0.0
+        ],
+        [
+         0.0,
+         10.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "tool",
+     "origin": [
+      5.0,
+      0.0,
+      10.0
+     ],
+     "axis": [
+      -0.8944271909999159,
+      0.0,
+      -0.4472135954999579
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cone",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1944.742956452,
+     "tol": 0.01,
+     "formula": "pi*10^2*20/3 less the tool within the cone: the integral over the tool's base disc of radius 2 about P0 = (5, 0, 10) (u along the generator towards the apex, (-1, 0, 2)/sqrt(5); v along y) of the length of the line P0 + u*(-1, 0, 2)/sqrt(5) + v*(0, 1, 0) + t*(-2, 0, -1)/sqrt(5), 0 <= t <= 12, inside the cone: between the two roots in t of x^2 + y^2 - ((20 - z)/2)^2 = 0 (the cone is convex, so one interval) and below the base plane's crossing t = sqrt(5)*10 + 2u; the inner integral over u by Gauss-Legendre (40 nodes) on the pieces between its kinks (found by root finding), the outer over v = 2*sin(phi) by Gauss-Legendre (200 nodes); 200 and 400 nodes and scipy's adaptive quadrature agree to 3e-7; tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "cut_13_partly_through",
+   "note": "The same circle cut 13: the tool's end breaks out through part of the far side. On SolidCraft 0.29.0 (truck) the cut fails: 'boolean Cut: the operation failed: no result' (also at 14 and 15).",
+   "fixes": [
+    "revolve_analytic_profile_faces"
+   ],
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "cone",
+     "plane": "zx",
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         20.0,
+         0.0
+        ],
+        [
+         0.0,
+         10.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "tool",
+     "origin": [
+      5.0,
+      0.0,
+      10.0
+     ],
+     "axis": [
+      -0.8944271909999159,
+      0.0,
+      -0.4472135954999579
+     ],
+     "radius": 2.0,
+     "height": 13.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cone",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1932.571249601,
+     "tol": 0.01,
+     "formula": "pi*10^2*20/3 less the tool within the cone: the integral over the tool's base disc of radius 2 about P0 = (5, 0, 10) (u along the generator towards the apex, (-1, 0, 2)/sqrt(5); v along y) of the length of the line P0 + u*(-1, 0, 2)/sqrt(5) + v*(0, 1, 0) + t*(-2, 0, -1)/sqrt(5), 0 <= t <= 13, inside the cone: between the two roots in t of x^2 + y^2 - ((20 - z)/2)^2 = 0 (the cone is convex, so one interval) and below the base plane's crossing t = sqrt(5)*10 + 2u; the inner integral over u by Gauss-Legendre (40 nodes) on the pieces between its kinks (found by root finding), the outer over v = 2*sin(phi) by Gauss-Legendre (200 nodes); 200 and 400 nodes and scipy's adaptive quadrature agree to 3e-7; tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "cut_30_through",
+   "note": "The report's case on the default cone, as the triage built it: the same circle cut 30, through the far side (fully from 17.574), not reaching the base. On SolidCraft 0.29.0 (truck) the cut fails: 'boolean Cut: the operation failed: no result' (also at 20 and through all).",
+   "fixes": [
+    "revolve_analytic_profile_faces"
+   ],
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "cone",
+     "plane": "zx",
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         20.0,
+         0.0
+        ],
+        [
+         0.0,
+         10.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "tool",
+     "origin": [
+      5.0,
+      0.0,
+      10.0
+     ],
+     "axis": [
+      -0.8944271909999159,
+      0.0,
+      -0.4472135954999579
+     ],
+     "radius": 2.0,
+     "height": 30.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cone",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1909.355312428,
+     "tol": 0.01,
+     "formula": "pi*10^2*20/3 less the tool within the cone: the integral over the tool's base disc of radius 2 about P0 = (5, 0, 10) (u along the generator towards the apex, (-1, 0, 2)/sqrt(5); v along y) of the length of the line P0 + u*(-1, 0, 2)/sqrt(5) + v*(0, 1, 0) + t*(-2, 0, -1)/sqrt(5), 0 <= t <= 30, inside the cone: between the two roots in t of x^2 + y^2 - ((20 - z)/2)^2 = 0 (the cone is convex, so one interval) and below the base plane's crossing t = sqrt(5)*10 + 2u; the inner integral over u by Gauss-Legendre (40 nodes) on the pieces between its kinks (found by root finding), the outer over v = 2*sin(phi) by Gauss-Legendre (200 nodes); 200 and 400 nodes and scipy's adaptive quadrature agree to 3e-7; tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "circle_6_cut_30_through",
+   "note": "A circle of diameter 6 cut 30, through the far side and a little of the base. On SolidCraft 0.29.0 (truck) the cut is refused: 'the cut could not be computed reliably: it would change the body away from the tool'.",
+   "fixes": [
+    "revolve_analytic_profile_faces"
+   ],
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "cone",
+     "plane": "zx",
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         20.0,
+         0.0
+        ],
+        [
+         0.0,
+         10.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "tool",
+     "origin": [
+      5.0,
+      0.0,
+      10.0
+     ],
+     "axis": [
+      -0.8944271909999159,
+      0.0,
+      -0.4472135954999579
+     ],
+     "radius": 3.0,
+     "height": 30.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cone",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1686.818976618,
+     "tol": 0.01,
+     "formula": "pi*10^2*20/3 less the tool within the cone: the integral over the tool's base disc of radius 3 about P0 = (5, 0, 10) (u along the generator towards the apex, (-1, 0, 2)/sqrt(5); v along y) of the length of the line P0 + u*(-1, 0, 2)/sqrt(5) + v*(0, 1, 0) + t*(-2, 0, -1)/sqrt(5), 0 <= t <= 30, inside the cone: between the two roots in t of x^2 + y^2 - ((20 - z)/2)^2 = 0 (the cone is convex, so one interval) and below the base plane's crossing t = sqrt(5)*10 + 2u; the inner integral over u by Gauss-Legendre (40 nodes) on the pieces between its kinks (found by root finding), the outer over v = 3*sin(phi) by Gauss-Legendre (200 nodes); 200 and 400 nodes and scipy's adaptive quadrature agree to 3e-7; tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "circle_6_cut_60_through",
+   "note": "The triage's control: the diameter 6 circle cut 60, the same result as cut 30. On SolidCraft 0.29.0 (truck) this cut builds (1686.75 meshed), after a retry with the tool moved 1.213859e-4 mm.",
+   "fixes": [
+    "revolve_analytic_profile_faces"
+   ],
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "cone",
+     "plane": "zx",
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         20.0,
+         0.0
+        ],
+        [
+         0.0,
+         10.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "tool",
+     "origin": [
+      5.0,
+      0.0,
+      10.0
+     ],
+     "axis": [
+      -0.8944271909999159,
+      0.0,
+      -0.4472135954999579
+     ],
+     "radius": 3.0,
+     "height": 60.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cone",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1686.818976618,
+     "tol": 0.01,
+     "formula": "pi*10^2*20/3 less the tool within the cone: the integral over the tool's base disc of radius 3 about P0 = (5, 0, 10) (u along the generator towards the apex, (-1, 0, 2)/sqrt(5); v along y) of the length of the line P0 + u*(-1, 0, 2)/sqrt(5) + v*(0, 1, 0) + t*(-2, 0, -1)/sqrt(5), 0 <= t <= 60, inside the cone: between the two roots in t of x^2 + y^2 - ((20 - z)/2)^2 = 0 (the cone is convex, so one interval) and below the base plane's crossing t = sqrt(5)*10 + 2u; the inner integral over u by Gauss-Legendre (40 nodes) on the pieces between its kinks (found by root finding), the outer over v = 3*sin(phi) by Gauss-Legendre (200 nodes); 200 and 400 nodes and scipy's adaptive quadrature agree to 3e-7; tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "circle_3_low_cut_15_through_base",
+   "note": "The triage's other control: a circle of diameter 3 on the plane tangent at height 5, cut 15, out through the base (fully from 14.18). On SolidCraft 0.29.0 (truck) this cut builds (2015.59 meshed), after the 6.122475e-5 mm retry.",
+   "fixes": [
+    "revolve_analytic_profile_faces"
+   ],
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "cone",
+     "plane": "zx",
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         20.0,
+         0.0
+        ],
+        [
+         0.0,
+         10.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "tool",
+     "origin": [
+      7.5,
+      0.0,
+      5.0
+     ],
+     "axis": [
+      -0.8944271909999159,
+      0.0,
+      -0.4472135954999579
+     ],
+     "radius": 1.5,
+     "height": 15.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cone",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 2015.604062248,
+     "tol": 0.01,
+     "formula": "pi*10^2*20/3 less the tool within the cone: the integral over the tool's base disc of radius 1.5 about P0 = (7.5, 0, 5) (u along the generator towards the apex, (-1, 0, 2)/sqrt(5); v along y) of the length of the line P0 + u*(-1, 0, 2)/sqrt(5) + v*(0, 1, 0) + t*(-2, 0, -1)/sqrt(5), 0 <= t <= 15, inside the cone: between the two roots in t of x^2 + y^2 - ((20 - z)/2)^2 = 0 (the cone is convex, so one interval) and below the base plane's crossing t = sqrt(5)*5 + 2u; the inner integral over u by Gauss-Legendre (40 nodes) on the pieces between its kinks (found by root finding), the outer over v = 1.5*sin(phi) by Gauss-Legendre (200 nodes); 200 and 400 nodes and scipy's adaptive quadrature agree to 3e-7; tol 0.01 mm^3"
+    }
+   }
+  }
+ ]
+}

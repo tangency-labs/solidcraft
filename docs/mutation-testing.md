@@ -2,9 +2,10 @@
 
 SolidCraft will move from truck to solidcore (#1597). The tests that have to catch regressions
 across that switch are the ones that don't depend on the kernel: the reference tests
-([docs/oracle.md](oracle.md)), the robustness goldens ([docs/robustness.md](robustness.md)) and
-the engine's command tests. Most of the kernel's own unit tests call truck-specific code and go
-away with it.
+([docs/oracle.md](oracle.md)) and the engine's command tests. The reference for what the kernel
+builds is the kernel-cases ladder (`tests/kernel-cases/ladder/`,
+[docs/kernel-ladder.md](kernel-ladder.md)). Most of the kernel's own unit tests call
+truck-specific code and go away with it.
 
 Mutation testing checks those suites. [cargo-mutants](https://mutants.rs) makes small changes to
 the source, one at a time (`*` becomes `/`, a condition is negated, a function returns a default
@@ -18,7 +19,6 @@ nobody would notice, and solidcore could get the same thing wrong without anyone
 - `oracle_suite` (`apps/solidcraft-cli/tests/oracle_cases.rs`): every case in `tests/oracle` with
   expected values and no `known_failure` must pass, as `cargo xtask oracle` requires. It is
   `#[ignore]`d so CI doesn't replay the oracle twice.
-- The pull-request sample of the robustness goldens: every 8th seed, as `ci.yml` runs it.
 
 The kernel's unit tests are left out on purpose. A mutant that only they catch marks a behaviour
 the black-box suites would miss once the kernel is swapped.

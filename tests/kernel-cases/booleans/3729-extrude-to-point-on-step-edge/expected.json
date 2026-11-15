@@ -1,0 +1,22 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3729"
+  ],
+  "what": "extrude `to` a point lying exactly on the top edge of a step: must end at the plane z=20 through the point",
+  "source": "analytic",
+  "method": "block 20x20x10 = 4000, step 10x10x10 = 1000 (z 10..20), column r=1.5 from the block's top z=10 up to the plane z=20 through `to`: pi*1.5^2*10 = 70.686. V = 5070.686, top at z=20 (the kernel went to z=22.73)",
+  "body_count": 1,
+  "volume_mm3": 5070.6858,
+  "bbox": {
+    "min": [
+      -10,
+      -10,
+      0
+    ],
+    "max": [
+      10,
+      10,
+      20
+    ]
+  }
+}

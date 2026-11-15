@@ -1,0 +1,27 @@
+{
+ "sources": [],
+ "what": "a truncated cone (frustum) R10 r5 h20 on the X axis from x=5",
+ "source": "analytic",
+ "method": "frustum: V = pi h/3 (R^2+Rr+r^2) = pi*20*175/3; A = pi(R^2+r^2) + pi(R+r) sqrt(h^2+(R-r)^2); centroid h(R^2+2Rr+3r^2)/(4(R^2+Rr+r^2)) = 7.857 from the base; faces: base, top, side = 3",
+ "body_count": 1,
+ "faces": 3,
+ "volume_mm3": 3665.191429188092,
+ "area_mm2": 1364.1829574548633,
+ "center_of_mass": [
+  12.857142857142858,
+  0,
+  0
+ ],
+ "bbox": {
+  "min": [
+   5,
+   -10,
+   -10
+  ],
+  "max": [
+   25,
+   10,
+   10
+  ]
+ }
+}

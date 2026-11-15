@@ -1,0 +1,177 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 20,
+    "width": 20,
+    "height": 10,
+    "corner": [
+     -10,
+     -10,
+     -10
+    ],
+    "operation": "new",
+    "body_name": "BaseBox"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     0,
+     -5,
+     0
+    ],
+    "operation": "new",
+    "body_name": "ArmBox"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Base",
+    "parent": "root",
+    "activate": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "BaseBox"
+    ],
+    "component": "Base"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Arm",
+    "parent": "root",
+    "activate": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "ArmBox"
+    ],
+    "component": "Arm"
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "Base:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 50,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     -10,
+     30,
+     0
+    ],
+    "operation": "new",
+    "body_name": "StopBox"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Stop",
+    "parent": "root",
+    "activate": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "StopBox"
+    ],
+    "component": "Stop"
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "Stop:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "revolute",
+    "name": "Hinge",
+    "flip": true,
+    "a": {
+     "occurrence": "Base",
+     "point": [
+      0,
+      0,
+      0
+     ],
+     "z": [
+      0,
+      0,
+      1
+     ]
+    },
+    "b": {
+     "occurrence": "Arm",
+     "point": [
+      0,
+      0,
+      0
+     ],
+     "z": [
+      0,
+      0,
+      1
+     ]
+    },
+    "quiet": true
+   }
+  },
+  {
+   "command": "contact.create",
+   "params": {
+    "occurrences": [
+     "Arm",
+     "Stop"
+    ],
+    "name": "Stop set"
+   }
+  },
+  {
+   "command": "contact.enable_sets",
+   "params": {}
+  },
+  {
+   "command": "joint.drive",
+   "params": {
+    "joint": "Hinge",
+    "value": 90,
+    "quiet": true
+   }
+  },
+  {
+   "command": "occurrence.properties",
+   "params": {
+    "occurrence": "Arm:1"
+   }
+  }
+ ]
+}

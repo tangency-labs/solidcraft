@@ -1,0 +1,33 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "A",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "body_name": "B",
+    "operation": "new",
+    "corner": [
+     5,
+     5,
+     5
+    ]
+   }
+  },
+  {
+   "command": "inspect.interference",
+   "params": {}
+  }
+ ]
+}

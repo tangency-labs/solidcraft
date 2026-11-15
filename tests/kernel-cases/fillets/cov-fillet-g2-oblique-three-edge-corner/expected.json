@@ -1,0 +1,9 @@
+{
+ "what": "the three edges at a top corner of a block drafted 15 deg (an oblique convex corner) filleted 2 as a curvature-continuous (G2) fillet",
+ "source": "invariants",
+ "method": "a 30 x 20 rectangle extruded 10 with a 15 deg inward taper; the top front edge, the top left edge and the drafted edge between them at the corner near (0, 0, 10); the fillet type curvature (G2 sections and G2 corner patches): every seam of a round and of the corner patch with its neighbours G2, one valid body",
+ "body_count": 1,
+ "continuity": {
+  "order": "g2"
+ }
+}

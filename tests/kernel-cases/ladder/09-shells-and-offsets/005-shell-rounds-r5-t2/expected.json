@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "the box with r5 vertical rounds shelled 2 mm open at the top: the inner corners r3",
+ "source": "analytic",
+ "method": "the cavity is the 56x36 rounded rectangle with r 5-2 = 3 corners, 18 deep",
+ "body_count": 1,
+ "volume_mm3": 11421.858316913,
+ "faces": 19
+}

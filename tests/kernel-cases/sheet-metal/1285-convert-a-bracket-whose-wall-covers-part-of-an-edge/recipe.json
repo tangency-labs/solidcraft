@@ -1,0 +1,72 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Test",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "2 mm",
+    "k_factor": 0.44,
+    "gap": "0.5 mm"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 80,
+    "width": 50,
+    "height": 2,
+    "corner": [
+     0,
+     100,
+     0
+    ],
+    "body_name": "Bracket"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 2,
+    "height": 30,
+    "corner": [
+     20,
+     100,
+     0
+    ],
+    "operation": "join",
+    "targets": [
+     "Bracket"
+    ]
+   }
+  },
+  {
+   "command": "sheet.convert",
+   "params": {
+    "body": "Bracket",
+    "face": [
+     40,
+     125,
+     0
+    ],
+    "bends": [
+     [
+      40,
+      100,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sheet.unfold",
+   "params": {}
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

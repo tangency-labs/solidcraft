@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1092",
+  "tangency-labs/solidcraft#1314"
+ ],
+ "what": "a U channel modelled with its bend radii (R2 inside, R4 outside), a 6 mm hole in one wall and a label engraved 0.2 deep in its web, converted at the bends' outer arcs",
+ "source": "analytic",
+ "method": "rule T = 2, R = 2 equals the modelled bends, so the converted sheet is the solid itself. Section: two legs 26 x 2, web 32 x 2, two quarter annuli of radii 2 and 4 (pi(16-4)/4 = 3*pi each): 104 + 64 + 6*pi = 186.850 mm2, over 100 mm; minus the hole pi*3^2*2 and the label 20*10*0.2",
+ "body_count": 1,
+ "volume_mm3": 18588.40692438926
+}

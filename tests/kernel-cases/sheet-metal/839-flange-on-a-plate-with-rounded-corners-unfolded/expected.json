@@ -1,0 +1,21 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#839"
+ ],
+ "what": "a 200 x 100 plate with its corners rounded 8 and one 40 mm inside flange on its bottom edge, unfolded: the trim made the outline's arcs chords",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5, BD(90) = 2.8584: the flat reaches 40 - BD = 37.1416 below the plate's bottom edge; the plate itself spans x 0..200 up to y = 100 (its top corners are the rounded ones); z 0..2",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   0,
+   -37.1415926535898,
+   0
+  ],
+  "max": [
+   200,
+   100,
+   2
+  ]
+ }
+}

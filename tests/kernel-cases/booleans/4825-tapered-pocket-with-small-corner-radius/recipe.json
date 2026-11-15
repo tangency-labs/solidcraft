@@ -1,0 +1,87 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Outline",
+    "offset": 46,
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.rectangle.rounded",
+   "params": {
+    "p0": [
+     -159,
+     -106
+    ],
+    "p1": [
+     159,
+     106
+    ],
+    "radius": 8
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Outline",
+    "distance": 110,
+    "body_name": "Hull"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Ledge",
+    "offset": 156,
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.rectangle.rounded",
+   "params": {
+    "p0": [
+     -141,
+     -88
+    ],
+    "p1": [
+     141,
+     88
+    ],
+    "radius": 2
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Ledge",
+    "distance": 5,
+    "direction": "negative",
+    "taper": "30 deg",
+    "profiles": [
+     {
+      "point": [
+       0,
+       0
+      ]
+     }
+    ],
+    "operation": "cut",
+    "targets": [
+     "Hull"
+    ]
+   }
+  }
+ ]
+}

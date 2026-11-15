@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Feature group</title>
+  <path d="M28.5 11L50.5 11A4.5 4.5 0 0 1 55 15.5L55 28.5A4.5 4.5 0 0 1 50.5 33L28.5 33A4.5 4.5 0 0 1 24 28.5L24 15.5A4.5 4.5 0 0 1 28.5 11Z" fill="#8e9faf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M21 20L43 20A4.5 4.5 0 0 1 47.5 24.5L47.5 37.5A4.5 4.5 0 0 1 43 42L21 42A4.5 4.5 0 0 1 16.5 37.5L16.5 24.5A4.5 4.5 0 0 1 21 20Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M13.5 29L35.5 29A4.5 4.5 0 0 1 40 33.5L40 46.5A4.5 4.5 0 0 1 35.5 51L13.5 51A4.5 4.5 0 0 1 9 46.5L9 33.5A4.5 4.5 0 0 1 13.5 29Z" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M16 40L33 40" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2801"
+  ],
+  "what": "a join of a triangular prism and a thin slab with rounded corners (r 4.9) that share their bottom plane, the prism's edge in that plane lying in the slab's end face",
+  "source": "analytic",
+  "method": "prism: triangle (y,z) = (-63,0), (-3,0), (-63,60) extruded 1.2 along x (x 4.4..5.6): 1.2*0.5*60*60 = 2160. slab: rounded rectangle 10x64 (y -67..-3), r 4.9, 0.4 thick: 0.4*(640-(4-pi)*4.9^2). The prism's sloped face is z = -3-y, so at height z it reaches y = -3-z; overlap = Int over z in 0..0.4 of the area of {x in 4.4..5.6, -63 <= y <= -3-z} inside the slab (the corner arcs, centres (4.9,-7.9) and (5.1,-7.9), narrow it for y > -7.9), integrated numerically with Simpson = 28.704. Union = prism + slab - overlap",
+  "body_count": 1,
+  "volume_mm3": 2379.051921236255
+}

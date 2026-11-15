@@ -1,0 +1,115 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 60,
+    "height": 30,
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "body_name": "Basin"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      20.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Top"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     100,
+     60
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      11.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Pad"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     2,
+     2
+    ],
+    "p1": [
+     12,
+     12
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "Top"
+     },
+     {
+      "sketch": "Pad"
+     }
+    ],
+    "operation": "cut",
+    "targets": [
+     "Basin"
+    ]
+   }
+  }
+ ]
+}

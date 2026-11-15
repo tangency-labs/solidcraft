@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "an r3 round all round the top of the box with r5 vertical rounds: a tangent chain of lines and arcs",
+ "source": "analytic",
+ "method": "straight runs 2*50 + 2*30 = 160 remove (1-pi/4) r^2 each mm; at each corner the round is a torus quarter: Pappus, the section (1-pi/4) r^2 with its centroid r(10-3pi)/(12-3pi) in from the wall, at radius 5 - that, over a quarter turn",
+ "body_count": 1,
+ "volume_mm3": 47209.224452285,
+ "faces": 18
+}

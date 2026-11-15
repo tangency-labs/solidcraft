@@ -1,0 +1,12 @@
+id = "geom.hash_table"
+upstream = ["source/SMLib/inc/SmHashTable.h"]
+rust_module = "geom::hash_table"
+depends_on = ["geom.extent3d", "geom.tol", "geom.vector3d"]
+soft_depends_on = []
+est_lines = 593
+layer = 3
+tests = ["prog_test:my_test_closed_sphere_properties", "prog_test:my_test_squeeze_edge_tracks_removal", "prog_test:my_test_missing_poles_refreshes_all_faces", "SM_API_test:TestSmHealBrep", "SM_API_test:TestSmHeal", "prog_test:my_test_MakeFace", "pt_TestFiles/MakeFace/ApproximateSphere.smp"]
+status = "green"
+claimed_by = "swarm-geom.hash_table-a1"
+claimed_at = "2026-10-12T20:00:27Z"
+notes = "GREEN: difftest 619 cases (19 fixture incl. SmHealData::Cache_CoinVertices replays on Points.pts/FitCrvPoints.pts/PointSet + 600 generated), 0 deferred, bit-identical; a 10,019-case run was also clean; upstream IncMaxItemCount use-after-free and FindCoincidentPairs head-only/aliasing quirks in findings.md. 12 fns; largest: SmObjsInVoxels::Add, SmObjsInVoxels::FindCoincidentPairs, SmObjsInVoxels::IncMaxItemCount, SmObjsInVoxels::MapPointToVoxel; unit-SCC #22 (220 units); 59 upstream test entry points reach this unit"

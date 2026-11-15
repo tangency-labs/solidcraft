@@ -1,0 +1,62 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "S",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "2 mm",
+    "k_factor": 0.4
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Base"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     100,
+     60
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Base"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      100,
+      60,
+      1
+     ]
+    ],
+    "radius": 10
+   }
+  },
+  {
+   "command": "sheet.flat_pattern",
+   "params": {}
+  }
+ ]
+}

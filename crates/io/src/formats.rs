@@ -22,8 +22,12 @@ pub enum ImportTarget {
     Design,
     /// B-rep CAD read as an Import base feature (`doc.open` / `file.insert_step`).
     Brep,
+    /// A KiCad board read as a design of its own (`doc.open`).
+    Kicad,
     /// Mesh read as a MeshImport feature (`doc.open` / `file.insert_mesh`).
     Mesh,
+    /// A reference scan, separate from model bodies (`doc.open` / `pointcloud.insert`).
+    PointCloud,
     /// A 2D drawing read into the active sketch (`sketch.insert_dxf` / `sketch.insert_svg`).
     Sketch,
 }
@@ -135,6 +139,29 @@ const STEP_NAMES: OptionSpec = OptionSpec {
 
 const BREP_IMPORT: &[OptionSpec] = &[UP_Z, STEP_NAMES];
 
+/// What a FreeCAD file brings: its feature history rebuilt as features (sketches, Pad, Pocket,
+/// Revolution, Groove, Fillet, Chamfer, primitives), or only its solids (see `doc.open`).
+const HISTORY: OptionSpec = OptionSpec {
+    param: "history",
+    label: "FreeCAD history",
+    kind: OptionKind::Choice { choices: &[("features", "Rebuild its sketches and features"), ("solids", "Solids only")], default: 0 },
+};
+
+const FREECAD_IMPORT: &[OptionSpec] = &[UP_Z, STEP_NAMES, HISTORY];
+
+/// A KiCad PCB's import options (see `doc.open`). The board's own thickness and colour are used
+/// unless the command is given others, so neither is offered here.
+const KICAD_IMPORT: &[OptionSpec] = &[
+    OptionSpec { param: "components", label: "Include components", kind: OptionKind::Bool { default: true } },
+    OptionSpec {
+        param: "copper",
+        label: "Copper (traces, vias, zones, pads)",
+        kind: OptionKind::Choice { choices: &[("none", "None"), ("overlay", "Overlay on the board"), ("mesh", "Modelled")], default: 0 },
+    },
+    OptionSpec { param: "silkscreen", label: "Include silkscreen", kind: OptionKind::Bool { default: true } },
+    OptionSpec { param: "representation", label: "Board", kind: OptionKind::Choice { choices: &[("brep", "Solid"), ("mesh", "Mesh")], default: 0 } },
+];
+
 /// Binary is the `stl` format value, ASCII is `stla` (see `file.export`).
 const STL_ENCODING: OptionSpec =
     OptionSpec { param: "format", label: "Encoding", kind: OptionKind::Choice { choices: &[("stl", "Binary"), ("stla", "ASCII")], default: 0 } };
@@ -178,7 +205,7 @@ pub static FORMATS: &[FormatSpec] = &[
     FormatSpec {
         id: "design",
         label: "SolidCraft design",
-        extensions: &[crate::DESIGN_EXT, crate::LEGACY_DESIGN_EXT, "json"],
+        extensions: &[crate::DESIGN_EXTS[0], crate::DESIGN_EXTS[1], crate::DESIGN_EXTS[2], "json"],
         role: Role::Design,
         import: Some(ImportSpec { target: ImportTarget::Design, options: &[], native_only: false }),
         export: None,
@@ -204,7 +231,7 @@ pub static FORMATS: &[FormatSpec] = &[
         label: "FreeCAD",
         extensions: &["fcstd"],
         role: Role::Artifact,
-        import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: true }),
+        import: Some(ImportSpec { target: ImportTarget::Brep, options: FREECAD_IMPORT, native_only: true }),
         export: None,
     },
     FormatSpec {
@@ -213,6 +240,14 @@ pub static FORMATS: &[FormatSpec] = &[
         extensions: &["3dm"],
         role: Role::Artifact,
         import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: true }),
+        export: None,
+    },
+    FormatSpec {
+        id: "kicad",
+        label: "KiCad PCB",
+        extensions: &["kicad_pcb", "kicad_pro"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::Kicad, options: KICAD_IMPORT, native_only: false }),
         export: None,
     },
     FormatSpec {
@@ -253,6 +288,40 @@ pub static FORMATS: &[FormatSpec] = &[
         extensions: &["glb", "gltf"],
         role: Role::Artifact,
         import: Some(ImportSpec { target: ImportTarget::Mesh, options: &[UP_Y], native_only: false }),
+        export: None,
+    },
+    // Writing is GLB only (one file); the glTF row above reads both, and stays the row a
+    // `.glb` path finds first.
+    FormatSpec {
+        id: "glb",
+        label: "GLB (glTF binary)",
+        extensions: &["glb"],
+        role: Role::Artifact,
+        import: None,
+        export: Some(ExportSpec { command: "file.export", format: None, options: &[], scope: ExportScope::Bodies, lossless: false }),
+    },
+    FormatSpec {
+        id: "ply",
+        label: "PLY point cloud",
+        extensions: &["ply"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
+        export: None,
+    },
+    FormatSpec {
+        id: "xyz",
+        label: "XYZ point cloud",
+        extensions: &["xyz"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
+        export: None,
+    },
+    FormatSpec {
+        id: "pts",
+        label: "PTS point cloud",
+        extensions: &["pts"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
         export: None,
     },
     FormatSpec {
@@ -373,7 +442,9 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
             ImportTarget::Design => add("SolidCraft design (container or JSON)", f.extensions),
             ImportTarget::Brep if import.native_only => add("FreeCAD and Rhino", f.extensions),
             ImportTarget::Brep => add(f.label, f.extensions),
+            ImportTarget::Kicad => add(f.label, f.extensions),
             ImportTarget::Mesh => add("Mesh (3MF, STL, OBJ, glTF)", f.extensions),
+            ImportTarget::PointCloud => add("Point cloud (PLY, XYZ, PTS)", f.extensions),
             ImportTarget::Sketch => add("Sketch drawings (DXF, SVG)", f.extensions),
         }
     }
@@ -413,11 +484,24 @@ mod tests {
         for e in ["step", "stp", "igs", "iges", "fcstd", "3dm"] {
             assert!(with_target(ImportTarget::Brep).contains(&e), "registry misses B-rep .{e}");
         }
+        for e in with_target(ImportTarget::Kicad) {
+            assert!(crate::is_kicad_path(&format!("board.{e}")), "is_kicad_path misses .{e}");
+        }
         for e in with_target(ImportTarget::Mesh) {
             assert!(crate::is_mesh_path(&format!("part.{e}")), "is_mesh_path misses .{e}");
         }
         for e in ["3mf", "stl", "obj", "glb", "gltf"] {
             assert!(with_target(ImportTarget::Mesh).contains(&e), "registry misses mesh .{e}");
+        }
+        for e in ["ply", "xyz", "pts"] {
+            assert!(with_target(ImportTarget::PointCloud).contains(&e), "registry misses point cloud .{e}");
+            assert!(crate::is_point_cloud_path(&format!("scan.{e}")));
+            assert!(open_extensions(true).contains(&e));
+            assert!(open_extensions(false).contains(&e));
+            assert_eq!(
+                import_for_path(&format!("scan.{}", e.to_uppercase())).and_then(|f| f.import.as_ref()).map(|i| i.target),
+                Some(ImportTarget::PointCloud)
+            );
         }
         for e in with_target(ImportTarget::Design) {
             assert!(crate::is_design_path(&format!("part.{e}")), "is_design_path misses .{e}");
@@ -449,6 +533,10 @@ mod tests {
         assert_eq!(for_path("a.3mf").map(|f| f.id), Some("3mf"));
         assert_eq!(for_path("a.dxf").map(|f| f.id), Some("dxf-sketch"));
         assert_eq!(import_for_path("a.glb").map(|f| f.id), Some("gltf"));
+        assert_eq!(for_path("a.glb").map(|f| f.id), Some("gltf"));
+        let writes = |ext: &str| exportable().filter(|f| f.extensions.contains(&ext)).map(|f| f.id).collect::<Vec<_>>();
+        assert_eq!(writes("glb"), vec!["glb"]);
+        assert!(writes("gltf").is_empty(), "a .gltf file is never written");
         assert!(for_path("a.png").is_none());
         assert!(for_path("nodot").is_none());
     }
@@ -470,11 +558,12 @@ mod tests {
     fn import_filter_groups_hold_the_expected_extensions() {
         let native = import_filters(true);
         let find = |label: &str| native.iter().find(|(l, _)| *l == label).map(|(_, e)| e.clone()).unwrap_or_default();
-        assert_eq!(find("SolidCraft design (container or JSON)"), vec![crate::DESIGN_EXT, crate::LEGACY_DESIGN_EXT, "json"]);
+        assert_eq!(find("SolidCraft design (container or JSON)"), vec!["sc", "solidcraft", "solvecraft", "json"]);
         assert_eq!(find("STEP"), vec!["step", "stp"]);
         assert_eq!(find("IGES"), vec!["igs", "iges"]);
         assert_eq!(find("FreeCAD and Rhino"), vec!["fcstd", "3dm"]);
         assert_eq!(find("Mesh (3MF, STL, OBJ, glTF)"), vec!["stl", "3mf", "obj", "glb", "gltf"]);
+        assert_eq!(find("Point cloud (PLY, XYZ, PTS)"), vec!["ply", "xyz", "pts"]);
         assert_eq!(find("Sketch drawings (DXF, SVG)"), vec!["dxf", "svg"]);
         assert!(import_filters(false).iter().all(|(l, _)| *l != "FreeCAD and Rhino"));
     }

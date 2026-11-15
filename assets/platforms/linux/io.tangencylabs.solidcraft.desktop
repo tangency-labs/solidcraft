@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=SolidCraft
+GenericName=3D CAD
+Comment=Parametric 3D CAD: sketch, constrain, extrude, and change a parameter to rebuild
+Exec=solidcraft %f
+TryExec=solidcraft
+Icon=io.tangencylabs.solidcraft
+Terminal=false
+StartupNotify=true
+StartupWMClass=io.tangencylabs.solidcraft
+Categories=Graphics;3DGraphics;Engineering;
+Keywords=cad;3d;parametric;sketch;step;stl;modelling;modeling;
+MimeType=application/x-solidcraft;model/step;model/iges;model/stl;model/3mf;
+# Desktop ids of earlier releases; launchers keep pinned entries across the renames.
+X-Flatpak-RenamedFrom=ai.storyteller.solidcraft.desktop;ai.storyteller.solvecraft.desktop;

@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the tangent plane to a cylinder where a point projects on it",
+ "source": "analytic",
+ "method": "cylinder r 5, h 10 on (60,0,0) along +Z: (66,8,5) lies along (0.6,0.8,0) from the axis: it touches at (63,4,5) with normal (0.6,0.8,0)",
+ "construction": {
+  "T": {
+   "plane": {
+    "through": [
+     63,
+     4,
+     5
+    ],
+    "normal": [
+     3,
+     4,
+     0
+    ]
+   }
+  }
+ }
+}

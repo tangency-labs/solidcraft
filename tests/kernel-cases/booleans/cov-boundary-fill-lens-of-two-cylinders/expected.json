@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "Boundary Fill of the cell inside both of two overlapping cylinders (r10, axes 10 apart): the lens",
+ "source": "analytic",
+ "method": "two circles r with centres d = r apart overlap in 2r^2 acos(d/2r) - (d/2) sqrt(4r^2-d^2) = 200 pi/3 - 5 sqrt 300 = 122.837; h 10. Faces: bottom, top, two cylinder arcs = 4",
+ "body_count": 1,
+ "faces": 4,
+ "volume_mm3": 1228.3696986087568,
+ "bbox": {
+  "min": [
+   0,
+   -8.660254037844387,
+   0
+  ],
+  "max": [
+   10,
+   8.660254037844387,
+   10
+  ]
+ }
+}

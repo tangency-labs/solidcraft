@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3345"
+ ],
+ "what": "a 4 x 3 profile drawn at the middle of the bottom line of a closed 60 x 40 rounded-rectangle path (corner radius 8) and swept round the whole path (walls offset, fillets turned the wrong way)",
+ "source": "analytic",
+ "method": "the profile is centred on the path and square to it, so every part of the path keeps it centred: V = A L with A = 12 and L = 2 * 44 + 2 * 24 + 4 (pi/2) 8 = 186.27 (Pappus on the arcs), V = 2235.2. The tube stays within 2 mm of the path sideways and 1.5 mm up: bbox x +-32, y +-22, z +-1.5.",
+ "body_count": 1,
+ "volume_mm3": 2235.18578948924,
+ "bbox": {
+  "min": [
+   -32,
+   -22,
+   -1.5
+  ],
+  "max": [
+   32,
+   22,
+   1.5
+  ]
+ }
+}

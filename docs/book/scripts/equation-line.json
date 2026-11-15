@@ -1,0 +1,6 @@
+{"commands": [
+  {"command": "sketch.create", "params": {"plane": "XY", "name": "Line"}},
+  {"command": "sketch.equation_curve", "params": {"explicit": true, "y": "x / 2", "start": 0, "end": 40}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "view.apply", "params": {"view": "top"}}
+]}

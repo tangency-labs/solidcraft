@@ -17,7 +17,8 @@
 //! exactly; the network there refuses G1/G2 on two sides that meet at a corner for the same
 //! reason. Everything this module refuses is an error, never a quietly worse surface.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::bridge::{Continuity, Frame, bridge};

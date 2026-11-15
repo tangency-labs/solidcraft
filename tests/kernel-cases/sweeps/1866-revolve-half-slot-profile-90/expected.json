@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1866"
+ ],
+ "what": "half a slot (r 3, centres 14 apart; the segment before the axis edge comes back to the axis along an arc) revolved 90 deg about its centreline",
+ "source": "analytic",
+ "method": "the profile lies on one side of the axis, so a turn of theta gives theta / 2 pi of the capsule (cylinder r 3, length 14 plus two hemispheres, 508.94): V = 1/4 of it; faces: the cylinder part, two spherical parts and the two planar end faces = 5.",
+ "body_count": 1,
+ "volume_mm3": 127.23450247038662,
+ "faces": 5
+}

@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a 4x4 square post cut off the top of a sphere r10 through its pole",
+ "source": "analytic",
+ "method": "removed = int over the square |x|,|y|<=2 of (sqrt(100 - x^2 - y^2) - 5) = 77.846302682 (nested Gauss); faces: sphere, 4 sides, floor z=5",
+ "body_count": 1,
+ "volume_mm3": 4110.943902105,
+ "faces": 6
+}

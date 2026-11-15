@@ -1,8 +1,10 @@
 //! Dimension continuation (`solve_after_value_edit`): the triconnected linkage family (two
 //! triangles joined by three links, left to the iteration by the construction) under random
 //! dimension edits from its previous solved state, with every failure that remains proven
-//! infeasible; and the solve without continuation when nothing it could help with changed.
-use solidcraft_geom::Vec2;
+//! infeasible; an edit the continuation cannot reach, solved in steps; and the solve without
+//! continuation when nothing it could help with changed.
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 use crate::construct::switch;
 use crate::model::{ConstraintKind, Sketch};
@@ -339,5 +341,27 @@ fn hostile_old_values_never_panic() {
         let rep = solve_after_value_edit(&mut s, &bad);
         assert!(rep.max_residual.is_finite());
         assert!(s.points.iter().all(|p| p.pos.x.is_finite() && p.pos.y.is_finite()));
+    }
+}
+
+#[test]
+fn an_edit_continuation_cannot_reach_is_solved_in_steps() {
+    // Every distance of the linkage changed at once, by 0.6× to 2.3×. The one-jump solve fails
+    // and so does the continuation from the layout (its branch ends); the edit made in steps
+    // reaches the new values with both triangles turning as before.
+    let new = [54.0, 59.0, 72.0, 31.0, 78.0, 76.0, 33.0, 61.0, 82.0];
+    let mut rng = Lcg(1);
+    let (mut sk, old) = linkage(&mut rng, 1.0, 1.0, false);
+    set_distances(&mut sk, &new);
+    let before = turns(&sk);
+    let mut jump = sk.clone();
+    assert!(!switch::without_differential(|| solve(&mut jump)).ok());
+    let mut edit = sk.clone();
+    let report = switch::without_differential(|| solve_after_value_edit(&mut edit, &old));
+    assert!(report.keeps_orientation(), "{report:?}");
+    assert_eq!(turns(&edit), before);
+    for (&(a, b), d) in PAIRS.iter().zip(new) {
+        let measured = edit.points[a + 1].pos.dist(edit.points[b + 1].pos);
+        assert!((measured - d).abs() < 1e-6, "{a}-{b}: {measured} for {d}");
     }
 }

@@ -3,7 +3,7 @@
 //! shown without changing the design).
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 /// The motion retained by an associative trace. Joint bounds keep their expressions, in
 /// command units (degrees or millimetres); studies are referenced by their stable identity.

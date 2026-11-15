@@ -1,6 +1,5 @@
 //! Layout checks over every toolbar command, headless (see `solidcraft_ui_egui::scenario`):
-//! each command's dialog opens docked at the viewport's right within its width limits, and
-//! every window it opens fits on screen.
+//! each command's dialog opens at the right edge within its width limits, and every window fits on screen.
 
 use serde_json::{Value, json};
 use solidcraft_ui_egui::scenario::{Harness, check, rect_of};
@@ -20,8 +19,16 @@ fn harness() -> Harness {
     h
 }
 
+/// These tests and the scenarios name English words, whatever the PC's language (#10297).
 #[test]
-fn every_dialog_opens_docked_within_its_width_limits() {
+fn the_harness_takes_english_as_the_system_language() {
+    let h = Harness::new();
+    assert_eq!(h.app.preferences.language, solidcraft_ui_text::SYSTEM);
+    assert_eq!(solidcraft_ui_text::effective_language(&h.app.preferences.language), "en");
+}
+
+#[test]
+fn every_dialog_opens_at_the_right_within_its_width_limits() {
     let mut bad = Vec::new();
     let mut seen = 0;
     for spec in solidcraft_engine::command_specs() {
@@ -36,7 +43,7 @@ fn every_dialog_opens_docked_within_its_width_limits() {
             // Wide cards use the kit's bounded table/timeline width.
             let w = rect_of("dialog:outer").map_or(0.0, |r| r.width());
             let limits = if matches!(spec.id, "config.table" | "config.configure" | "motion.study") {
-                let width = solidcraft_ui_egui::theme::Tokens::get().form_card_width * 3.0;
+                let width = solidcraft_theme::Tokens::get().form_card_width * 3.0;
                 json!({"min":width - 4.0,"max":width + 2.0})
             } else if w > 400.0 {
                 json!({"min":480,"max":562})
@@ -97,12 +104,12 @@ fn docked_ribbon_geometry_and_search() {
             assert_eq!(search.top(), ribbon.top() + 4.0);
             assert_eq!(search.right(), ribbon.right() - 4.0);
             assert_eq!(search.center().y, ribbon.top() + 15.0);
-            let t = solidcraft_ui_egui::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             let (hint_width, key_width) = h.ctx.fonts_mut(|fonts| {
                 (
                     fonts
                         .layout_no_wrap(
-                            solidcraft_ui_egui::i18n::tr_label("Search commands").to_owned(),
+                            solidcraft_ui_text::tr_label("Search commands").to_owned(),
                             egui::FontId::proportional(t.font_button),
                             t.form_dim,
                         )
@@ -115,7 +122,7 @@ fn docked_ribbon_geometry_and_search() {
             assert_eq!(search.width(), (hint_width + key_width + t.space_16 + t.space_4 * 5.0 + t.space_2).ceil());
             assert!(ribbon.contains_rect(search));
             assert!(search.left() > workspace.right());
-            assert!(h.app.viewport.rect.unwrap().top() >= toolbar::APP_BAR_HEIGHT + toolbar::RIBBON_HEIGHT);
+            assert!(h.app.viewport.rect.unwrap().top() < ribbon.bottom(), "the ribbon overlays the viewport");
             h.step(&json!({"click":{"handle":"ribbon:search"}})).unwrap();
             assert!(h.app.ui.palette_open);
             h.frames(10);
@@ -126,7 +133,7 @@ fn docked_ribbon_geometry_and_search() {
             assert_eq!(Some(field), rect_of("shortcut:search"));
             assert_eq!(Some(field), rect_of("palette:search"));
             let popup = rect_of("ribbon:search_popup").unwrap();
-            assert_eq!(popup.top(), field.bottom() + solidcraft_ui_egui::theme::Tokens::get().space_6);
+            assert_eq!(popup.top(), field.bottom() + solidcraft_theme::Tokens::get().space_6);
             assert_eq!(popup.x_range(), field.x_range());
             assert!(popup.top() >= search.bottom());
             assert!(popup.left() <= search.left());

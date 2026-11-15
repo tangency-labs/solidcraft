@@ -1,0 +1,23 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3862",
+  "tangency-labs/solidcraft#3915"
+ ],
+ "what": "a clockwise 5-turn coil of 4 mm square wire placed outside a 40 mm diameter, pitch 8 (the section, position and direction parameters)",
+ "source": "analytic",
+ "method": "outside puts the wire centre at radius 20 + 2 = 22 (radial 20..24); the 4 x 4 section turned 5 times by the screw: V = 16 * 2 pi 22 * 5 = 11060.6. bbox r 24, z from -2 to 40 + 2.",
+ "body_count": 1,
+ "volume_mm3": 11058.40614063607,
+ "bbox": {
+  "min": [
+   -24,
+   -24,
+   -2
+  ],
+  "max": [
+   24,
+   24,
+   42
+  ]
+ }
+}

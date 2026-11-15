@@ -1,0 +1,603 @@
+{
+  "cases": [
+    {
+      "name": "engine_ner_none_op00",
+      "inputs": {
+        "family": 6,
+        "operation": 0,
+        "options": null,
+        "a": [],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_none_op01",
+      "inputs": {
+        "family": 6,
+        "operation": 1,
+        "options": 11,
+        "a": [],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_none_op02",
+      "inputs": {
+        "family": 6,
+        "operation": 2,
+        "options": 18,
+        "a": [],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_none_op03",
+      "inputs": {
+        "family": 6,
+        "operation": 3,
+        "options": null,
+        "a": [],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_none_op04",
+      "inputs": {
+        "family": 6,
+        "operation": 4,
+        "options": 0,
+        "a": [],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_none_op05",
+      "inputs": {
+        "family": 6,
+        "operation": 5,
+        "options": 7,
+        "a": [],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_none_op06",
+      "inputs": {
+        "family": 6,
+        "operation": 6,
+        "options": null,
+        "a": [],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_none_op07",
+      "inputs": {
+        "family": 6,
+        "operation": 7,
+        "options": 21,
+        "a": [],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_none_op08",
+      "inputs": {
+        "family": 6,
+        "operation": 8,
+        "options": 28,
+        "a": [],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_none_op09",
+      "inputs": {
+        "family": 6,
+        "operation": 9,
+        "options": null,
+        "a": [],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_none_op10",
+      "inputs": {
+        "family": 6,
+        "operation": 10,
+        "options": 10,
+        "a": [],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_primary_op00",
+      "inputs": {
+        "family": 6,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ],
+            "size": [
+              2.0,
+              3.0,
+              4.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_primary_op01",
+      "inputs": {
+        "family": 6,
+        "operation": 1,
+        "options": 14,
+        "a": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_primary_op02",
+      "inputs": {
+        "family": 6,
+        "operation": 2,
+        "options": 21,
+        "a": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ],
+            "size": [
+              2.0,
+              3.0,
+              4.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_primary_op03",
+      "inputs": {
+        "family": 6,
+        "operation": 3,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_primary_op04",
+      "inputs": {
+        "family": 6,
+        "operation": 4,
+        "options": 3,
+        "a": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ],
+            "size": [
+              2.0,
+              3.0,
+              4.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_primary_op05",
+      "inputs": {
+        "family": 6,
+        "operation": 5,
+        "options": 10,
+        "a": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_primary_op06",
+      "inputs": {
+        "family": 6,
+        "operation": 6,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ],
+            "size": [
+              2.0,
+              3.0,
+              4.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_primary_op07",
+      "inputs": {
+        "family": 6,
+        "operation": 7,
+        "options": 24,
+        "a": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_primary_op08",
+      "inputs": {
+        "family": 6,
+        "operation": 8,
+        "options": 31,
+        "a": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ],
+            "size": [
+              2.0,
+              3.0,
+              4.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_primary_op09",
+      "inputs": {
+        "family": 6,
+        "operation": 9,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_primary_op10",
+      "inputs": {
+        "family": 6,
+        "operation": 10,
+        "options": 13,
+        "a": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ],
+            "size": [
+              2.0,
+              3.0,
+              4.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_other_op00",
+      "inputs": {
+        "family": 6,
+        "operation": 0,
+        "options": null,
+        "a": [],
+        "b": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ],
+            "size": [
+              2.0,
+              3.0,
+              4.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_other_op01",
+      "inputs": {
+        "family": 6,
+        "operation": 1,
+        "options": 12,
+        "a": [],
+        "b": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_other_op02",
+      "inputs": {
+        "family": 6,
+        "operation": 2,
+        "options": 19,
+        "a": [],
+        "b": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ],
+            "size": [
+              2.0,
+              3.0,
+              4.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_other_op03",
+      "inputs": {
+        "family": 6,
+        "operation": 3,
+        "options": null,
+        "a": [],
+        "b": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_other_op04",
+      "inputs": {
+        "family": 6,
+        "operation": 4,
+        "options": 1,
+        "a": [],
+        "b": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ],
+            "size": [
+              2.0,
+              3.0,
+              4.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_other_op05",
+      "inputs": {
+        "family": 6,
+        "operation": 5,
+        "options": 8,
+        "a": [],
+        "b": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_other_op06",
+      "inputs": {
+        "family": 6,
+        "operation": 6,
+        "options": null,
+        "a": [],
+        "b": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ],
+            "size": [
+              2.0,
+              3.0,
+              4.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_other_op07",
+      "inputs": {
+        "family": 6,
+        "operation": 7,
+        "options": 22,
+        "a": [],
+        "b": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_other_op08",
+      "inputs": {
+        "family": 6,
+        "operation": 8,
+        "options": 29,
+        "a": [],
+        "b": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ],
+            "size": [
+              2.0,
+              3.0,
+              4.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_other_op09",
+      "inputs": {
+        "family": 6,
+        "operation": 9,
+        "options": null,
+        "a": [],
+        "b": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "engine_ner_other_op10",
+      "inputs": {
+        "family": 6,
+        "operation": 10,
+        "options": 11,
+        "a": [],
+        "b": [
+          {
+            "point": [
+              1.5,
+              -2.0,
+              0.25
+            ],
+            "size": [
+              2.0,
+              3.0,
+              4.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 20,
+    "height": 30,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     0,
+     0,
+     30
+    ],
+    "diameter": 8.5,
+    "type": "counterbore",
+    "cb_diameter": 18,
+    "cb_depth": 5
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      20,
+      0,
+      30
+     ]
+    ],
+    "radius": 3
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     0,
+     -4.25,
+     12.5
+    ],
+    "designation": "M10x1.5",
+    "length": 25,
+    "modeled": true
+   }
+  }
+ ]
+}

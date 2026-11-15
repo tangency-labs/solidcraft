@@ -1,0 +1,2685 @@
+{
+ "cases": [
+  {
+   "name": "info_unit_frame",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "info",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "types": [
+     22011,
+     22001,
+     22008,
+     22010,
+     22004,
+     22006,
+     1,
+     11001,
+     12060
+    ]
+   }
+  },
+  {
+   "name": "info_default",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "info",
+    "twist": {},
+    "types": [
+     22011,
+     22001,
+     22008,
+     22010,
+     22004,
+     22006,
+     1,
+     11001,
+     12060
+    ]
+   }
+  },
+  {
+   "name": "info_offset_frame",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "info",
+    "twist": {
+     "ctor": {
+      "o": [
+       1,
+       -2,
+       3
+      ],
+      "axis": [
+       0,
+       2,
+       0
+      ],
+      "mid": [
+       0,
+       0,
+       3
+      ],
+      "period": -2.5,
+      "min": 1e-05
+     }
+    },
+    "types": [
+     22011,
+     22001,
+     22008,
+     22010,
+     22004,
+     22006,
+     1,
+     11001,
+     12060
+    ]
+   }
+  },
+  {
+   "name": "ctor_zero_axis",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "info",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       0
+      ],
+      "mid": [
+       1,
+       1,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "types": [
+     22011
+    ]
+   }
+  },
+  {
+   "name": "ctor_zero_mid",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "info",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       1,
+       1
+      ],
+      "mid": [
+       0,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "types": [
+     22011
+    ]
+   }
+  },
+  {
+   "name": "ctor_both_zero",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "info",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       0
+      ],
+      "mid": [
+       0,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "types": [
+     22011
+    ]
+   }
+  },
+  {
+   "name": "ctor_parallel_mid",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "info",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       0,
+       0,
+       -3
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "types": [
+     22011
+    ]
+   }
+  },
+  {
+   "name": "ctor_skew_mid",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "info",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       1,
+       1,
+       0
+      ],
+      "mid": [
+       1,
+       0,
+       0.2
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "types": [
+     22011
+    ]
+   }
+  },
+  {
+   "name": "ctor_nearly_perp",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "info",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       1e-07
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "types": [
+     22011
+    ]
+   }
+  },
+  {
+   "name": "ctor_period_zero",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "info",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 0.0,
+      "min": 0.25
+     }
+    },
+    "types": [
+     22011
+    ]
+   }
+  },
+  {
+   "name": "ctor_period_tiny_neg_min",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "info",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 1e-09,
+      "min": -0.75
+     }
+    },
+    "types": [
+     22011
+    ]
+   }
+  },
+  {
+   "name": "ctor_min_below_zone",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "info",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 1e-06,
+      "min": 1e-08
+     }
+    },
+    "types": [
+     22011
+    ]
+   }
+  },
+  {
+   "name": "ctor_left_hand",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "info",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": -3.0,
+      "min": 1.0
+     }
+    },
+    "types": [
+     22011
+    ]
+   }
+  },
+  {
+   "name": "eval_simple_n0",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval_simple",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 2.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     1.0,
+     2.0,
+     0.5
+    ],
+    "n": 0
+   }
+  },
+  {
+   "name": "eval_n0",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval",
+    "twist": {
+     "ctor": {
+      "o": [
+       1,
+       0,
+       -1
+      ],
+      "axis": [
+       0,
+       1,
+       0
+      ],
+      "mid": [
+       0,
+       0,
+       1
+      ],
+      "period": 3.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     0.3,
+     -1.2,
+     0.7
+    ],
+    "n": 0,
+    "comp": true
+   }
+  },
+  {
+   "name": "eval_next_n0",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 5.0,
+      "min": 1e-05
+     },
+     "next": [
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       -1,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       2
+      ]
+     ]
+    },
+    "p": [
+     2.0,
+     0.5,
+     1.25
+    ],
+    "n": 0,
+    "comp": true
+   }
+  },
+  {
+   "name": "eval_next_nocomp_n0",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 5.0,
+      "min": 1e-05
+     },
+     "next": [
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       -1,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       2
+      ]
+     ]
+    },
+    "p": [
+     2.0,
+     0.5,
+     1.25
+    ],
+    "n": 0,
+    "comp": false
+   }
+  },
+  {
+   "name": "eval_simple_n1",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval_simple",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 2.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     1.0,
+     2.0,
+     0.5
+    ],
+    "n": 1
+   }
+  },
+  {
+   "name": "eval_n1",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval",
+    "twist": {
+     "ctor": {
+      "o": [
+       1,
+       0,
+       -1
+      ],
+      "axis": [
+       0,
+       1,
+       0
+      ],
+      "mid": [
+       0,
+       0,
+       1
+      ],
+      "period": 3.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     0.3,
+     -1.2,
+     0.7
+    ],
+    "n": 1,
+    "comp": true
+   }
+  },
+  {
+   "name": "eval_next_n1",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 5.0,
+      "min": 1e-05
+     },
+     "next": [
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       -1,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       2
+      ]
+     ]
+    },
+    "p": [
+     2.0,
+     0.5,
+     1.25
+    ],
+    "n": 1,
+    "comp": true
+   }
+  },
+  {
+   "name": "eval_next_nocomp_n1",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 5.0,
+      "min": 1e-05
+     },
+     "next": [
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       -1,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       2
+      ]
+     ]
+    },
+    "p": [
+     2.0,
+     0.5,
+     1.25
+    ],
+    "n": 1,
+    "comp": false
+   }
+  },
+  {
+   "name": "eval_simple_n2",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval_simple",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 2.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     1.0,
+     2.0,
+     0.5
+    ],
+    "n": 2
+   }
+  },
+  {
+   "name": "eval_n2",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval",
+    "twist": {
+     "ctor": {
+      "o": [
+       1,
+       0,
+       -1
+      ],
+      "axis": [
+       0,
+       1,
+       0
+      ],
+      "mid": [
+       0,
+       0,
+       1
+      ],
+      "period": 3.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     0.3,
+     -1.2,
+     0.7
+    ],
+    "n": 2,
+    "comp": true
+   }
+  },
+  {
+   "name": "eval_next_n2",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 5.0,
+      "min": 1e-05
+     },
+     "next": [
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       -1,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       2
+      ]
+     ]
+    },
+    "p": [
+     2.0,
+     0.5,
+     1.25
+    ],
+    "n": 2,
+    "comp": true
+   }
+  },
+  {
+   "name": "eval_next_nocomp_n2",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 5.0,
+      "min": 1e-05
+     },
+     "next": [
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       -1,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       2
+      ]
+     ]
+    },
+    "p": [
+     2.0,
+     0.5,
+     1.25
+    ],
+    "n": 2,
+    "comp": false
+   }
+  },
+  {
+   "name": "eval_simple_n3",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval_simple",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 2.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     1.0,
+     2.0,
+     0.5
+    ],
+    "n": 3
+   }
+  },
+  {
+   "name": "eval_n3",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval",
+    "twist": {
+     "ctor": {
+      "o": [
+       1,
+       0,
+       -1
+      ],
+      "axis": [
+       0,
+       1,
+       0
+      ],
+      "mid": [
+       0,
+       0,
+       1
+      ],
+      "period": 3.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     0.3,
+     -1.2,
+     0.7
+    ],
+    "n": 3,
+    "comp": true
+   }
+  },
+  {
+   "name": "eval_next_n3",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 5.0,
+      "min": 1e-05
+     },
+     "next": [
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       -1,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       2
+      ]
+     ]
+    },
+    "p": [
+     2.0,
+     0.5,
+     1.25
+    ],
+    "n": 3,
+    "comp": true
+   }
+  },
+  {
+   "name": "eval_next_nocomp_n3",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 5.0,
+      "min": 1e-05
+     },
+     "next": [
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       -1,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       2
+      ]
+     ]
+    },
+    "p": [
+     2.0,
+     0.5,
+     1.25
+    ],
+    "n": 3,
+    "comp": false
+   }
+  },
+  {
+   "name": "eval_simple_left_hand",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval_simple",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": -2.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     1.0,
+     0.0,
+     0.25
+    ],
+    "n": 3
+   }
+  },
+  {
+   "name": "eval_simple_n4_error",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval_simple",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     1,
+     1,
+     1
+    ],
+    "n": 4
+   }
+  },
+  {
+   "name": "eval_n5_error",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     1,
+     1,
+     1
+    ],
+    "n": 5,
+    "comp": true
+   }
+  },
+  {
+   "name": "eval_default_nan",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval",
+    "twist": {},
+    "p": [
+     1,
+     1,
+     1
+    ],
+    "n": 3,
+    "comp": true
+   }
+  },
+  {
+   "name": "eval_default_w0",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval_simple",
+    "twist": {},
+    "p": [
+     1,
+     1,
+     0
+    ],
+    "n": 2
+   }
+  },
+  {
+   "name": "eval_origin",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "eval",
+    "twist": {
+     "ctor": {
+      "o": [
+       3,
+       3,
+       3
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "n": 3,
+    "comp": true
+   }
+  },
+  {
+   "name": "bbox_full_turn",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "b_box",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "b": [
+     1,
+     1,
+     5
+    ],
+    "want_box": true,
+    "want_pseudo": true
+   }
+  },
+  {
+   "name": "bbox_quarter",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "b_box",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "a": [
+     1,
+     1,
+     0
+    ],
+    "b": [
+     2,
+     2,
+     1
+    ],
+    "want_box": true,
+    "want_pseudo": true
+   }
+  },
+  {
+   "name": "bbox_no_rotation",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "b_box",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "a": [
+     -1,
+     -2,
+     0
+    ],
+    "b": [
+     3,
+     1,
+     0
+    ],
+    "want_box": true,
+    "want_pseudo": false
+   }
+  },
+  {
+   "name": "bbox_negative_w",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "b_box",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "a": [
+     -1,
+     -1,
+     -3.5
+    ],
+    "b": [
+     2,
+     0.5,
+     -0.2
+    ],
+    "want_box": true,
+    "want_pseudo": false
+   }
+  },
+  {
+   "name": "bbox_left_hand",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "b_box",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": -6.0,
+      "min": 1e-05
+     }
+    },
+    "a": [
+     0.5,
+     -1,
+     0
+    ],
+    "b": [
+     2,
+     1,
+     2.5
+    ],
+    "want_box": true,
+    "want_pseudo": true
+   }
+  },
+  {
+   "name": "bbox_pseudo_only",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "b_box",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "a": [
+     1,
+     1,
+     0
+    ],
+    "b": [
+     2,
+     2,
+     1
+    ],
+    "want_box": false,
+    "want_pseudo": true
+   }
+  },
+  {
+   "name": "bbox_unbounded",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "b_box",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "a": [
+     -1234567.0,
+     -1234567.0,
+     -1234567.0
+    ],
+    "b": [
+     1234567.0,
+     1234567.0,
+     1234567.0
+    ],
+    "want_box": true,
+    "want_pseudo": true
+   }
+  },
+  {
+   "name": "bbox_unbounded_w",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "b_box",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "a": [
+     0,
+     0,
+     -1234567.0
+    ],
+    "b": [
+     1,
+     1,
+     1234567.0
+    ],
+    "want_box": true,
+    "want_pseudo": false
+   }
+  },
+  {
+   "name": "bbox_none",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "b_box",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "b": [
+     1,
+     1,
+     1
+    ],
+    "want_box": false,
+    "want_pseudo": false
+   }
+  },
+  {
+   "name": "bbox_default_twist",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "b_box",
+    "twist": {},
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "b": [
+     1,
+     1,
+     1
+    ],
+    "want_box": true,
+    "want_pseudo": true
+   }
+  },
+  {
+   "name": "bbox_exact_quarter_turn_axes",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "b_box",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "a": [
+     1,
+     0,
+     0
+    ],
+    "b": [
+     1,
+     0,
+     1
+    ],
+    "want_box": true,
+    "want_pseudo": false
+   }
+  },
+  {
+   "name": "bbox_inverted",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "b_box",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "a": [
+     2,
+     2,
+     1
+    ],
+    "b": [
+     1,
+     1,
+     0
+    ],
+    "want_box": true,
+    "want_pseudo": true
+   }
+  },
+  {
+   "name": "inv_guess",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "inv_guess",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 2.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     0.0,
+     1.0,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "inv_guess_default",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "inv_guess",
+    "twist": {},
+    "p": [
+     1.0,
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "global_free",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "global",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 2.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     0.0,
+     1.0,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "global_in_domain",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "global",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 2.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     0.0,
+     1.0,
+     0.5
+    ],
+    "dom": [
+     [
+      0,
+      -2,
+      0
+     ],
+     [
+      2,
+      2,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "global_out_domain",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "global",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 2.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     0.0,
+     1.0,
+     0.5
+    ],
+    "dom": [
+     [
+      2,
+      2,
+      2
+     ],
+     [
+      3,
+      3,
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "name": "global_on_boundary",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "global",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "dom": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      2,
+      1,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "local_free",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "local",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": -2.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     3.0,
+     1.0,
+     -0.5
+    ],
+    "g": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "local_in_domain",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "local",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 2.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     0.0,
+     1.0,
+     0.5
+    ],
+    "g": [
+     9,
+     9,
+     9
+    ],
+    "dom": [
+     [
+      0,
+      -2,
+      0
+     ],
+     [
+      2,
+      2,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "local_out_domain",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "local",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 2.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     0.0,
+     1.0,
+     0.5
+    ],
+    "g": [
+     1,
+     1,
+     1
+    ],
+    "dom": [
+     [
+      2,
+      2,
+      2
+     ],
+     [
+      3,
+      3,
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "name": "preds",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "preds",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "p": [
+     1000000.0,
+     -1000000.0,
+     3
+    ],
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "b": [
+     5,
+     5,
+     5
+    ]
+   }
+  },
+  {
+   "name": "preds_default",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "preds",
+    "twist": {},
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "b": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "copy_full_with_next",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "copy",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     },
+     "next": [
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       -1,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       2
+      ]
+     ]
+    },
+    "simple": false
+   }
+  },
+  {
+   "name": "copy_simple_with_next",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "copy",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     },
+     "next": [
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       -1,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       2
+      ]
+     ]
+    },
+    "simple": true
+   }
+  },
+  {
+   "name": "copy_default",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "copy",
+    "twist": {},
+    "simple": false
+   }
+  },
+  {
+   "name": "equal_self",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "equal",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "other": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "self_cmp": true
+   }
+  },
+  {
+   "name": "equal_same",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "equal",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 3.0,
+      "min": 0.5
+     }
+    },
+    "other": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 3.0,
+      "min": 0.5
+     }
+    },
+    "self_cmp": false
+   }
+  },
+  {
+   "name": "equal_other_period_same_min",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "equal",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 3.0,
+      "min": 0.5
+     }
+    },
+    "other": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 7.0,
+      "min": 0.5
+     }
+    },
+    "self_cmp": false
+   }
+  },
+  {
+   "name": "equal_other_min",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "equal",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 3.0,
+      "min": 0.5
+     }
+    },
+    "other": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 3.0,
+      "min": 0.6
+     }
+    },
+    "self_cmp": false
+   }
+  },
+  {
+   "name": "equal_other_frame",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "equal",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "other": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       1,
+       0,
+       0
+      ],
+      "mid": [
+       0,
+       1,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "self_cmp": false
+   }
+  },
+  {
+   "name": "equal_next_vs_none",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "equal",
+    "twist": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     },
+     "next": [
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       -1,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       2
+      ]
+     ]
+    },
+    "other": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "self_cmp": false
+   }
+  },
+  {
+   "name": "equal_defaults",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "equal",
+    "twist": {},
+    "other": {},
+    "self_cmp": false
+   }
+  },
+  {
+   "name": "equal_default_vs_ctor",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp (no upstream test builds an SmTwistVolume; unit edge case)",
+   "inputs": {
+    "op": "equal",
+    "twist": {},
+    "other": {
+     "ctor": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "mid": [
+       1,
+       0,
+       0
+      ],
+      "period": 4.0,
+      "min": 1e-05
+     }
+    },
+    "self_cmp": false
+   }
+  },
+  {
+   "name": "read_db_ascii",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp:2070 (ReadFromDB of the WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "data": "4 TwistVolume Twist NeutralDistance \n1e-05 TwistVolume SingularityTol: min legal distance from singularity at U = 0\n0 : 1 = with NextMap, 0 = without \n1 : 1 = with OrientMap, 0 = without \nObject Type 22008\n1.0 0.0 0.0 0.0\n0.0 1.0 0.0 0.0\n0.0 0.0 1.0 0.0\n1.0 2.0 3.0 1.0\n0 : 1 = with NextMap, 0 = without \n0 : 1 = with OrientMap, 0 = without \n"
+   }
+  },
+  {
+   "name": "read_db_ascii_no_orient",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp:2070 (ReadFromDB of the WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "data": "-2.5 TwistVolume Twist NeutralDistance \n0.001 TwistVolume SingularityTol\n0 : 1 = with NextMap, 0 = without \n0 : 1 = with OrientMap, 0 = without \n"
+   }
+  },
+  {
+   "name": "read_db_ascii_next",
+   "upstream_ref": "source/SMLib/src/SmTwistVolume.cpp:2070 (ReadFromDB of the WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "data": "6 TwistVolume Twist NeutralDistance \n1e-05 TwistVolume SingularityTol\n1 : 1 = with NextMap, 0 = without \nObject Type 22008\n2.0 0.0 0.0 0.0\n0.0 2.0 0.0 0.0\n0.0 0.0 2.0 0.0\n0.0 0.0 1.0 1.0\n0 : 1 = with NextMap, 0 = without \n0 : 1 = with OrientMap, 0 = without \n1 : 1 = with OrientMap, 0 = without \nObject Type 22008\n0.0 1.0 0.0 0.0\n-1.0 0.0 0.0 0.0\n0.0 0.0 1.0 0.0\n0.0 0.0 0.0 1.0\n0 : 1 = with NextMap, 0 = without \n0 : 1 = with OrientMap, 0 = without \n"
+   }
+  }
+ ]
+}

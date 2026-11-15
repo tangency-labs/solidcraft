@@ -1,0 +1,13 @@
+{
+ "sources": [],
+ "what": "the smallest radius of a box, which has no curved face",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin: every face is flat: no radius (null)",
+ "results": [
+  {
+   "step": 2,
+   "pointer": "/min_radius",
+   "json": null
+  }
+ ]
+}

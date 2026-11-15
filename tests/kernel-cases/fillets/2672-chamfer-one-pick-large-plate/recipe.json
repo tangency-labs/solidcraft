@@ -1,0 +1,62 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 145,
+    "width": 145,
+    "height": 10,
+    "center": [
+     0,
+     0,
+     5
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 10
+   }
+  },
+  {
+   "command": "sketch.slot.overall",
+   "params": {
+    "p0": [
+     -25,
+     0
+    ],
+    "p1": [
+     25,
+     0
+    ],
+    "width": 10
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10,
+    "operation": "join"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      0,
+      5,
+      20
+     ]
+    ],
+    "distance": 1
+   }
+  }
+ ]
+}

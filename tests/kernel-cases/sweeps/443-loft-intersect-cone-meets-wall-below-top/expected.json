@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#443"
+ ],
+ "what": "a cylinder (r 35, h 10) intersected with a conical loft (r 45 at z = -1 to r 33 at z = 11) that crosses its wall 1 mm below the top face (body came back unchanged)",
+ "source": "analytic",
+ "method": "the cone radius is 44 - z, so it meets the wall r = 35 at z = 9 and has r = 34 at the top: the result is the cylinder to z = 9 plus a frustum from r 35 to r 34 over 1 mm: V = pi 35^2 9 + pi/3 (35^2 + 35 34 + 34^2); faces: wall, cone, top, bottom.",
+ "body_count": 1,
+ "volume_mm3": 38375.601461150516,
+ "faces": 4
+}

@@ -1,0 +1,18 @@
+{
+ "base": "../../08-chamfers/008-part-chamfers",
+ "commands": [
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      30,
+      20,
+      0
+     ]
+    ],
+    "thickness": 1.5
+   }
+  }
+ ]
+}

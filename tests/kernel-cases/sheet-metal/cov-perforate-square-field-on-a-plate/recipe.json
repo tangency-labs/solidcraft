@@ -1,0 +1,58 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Steel 1",
+    "thickness": "1 mm",
+    "active": true,
+    "bend_radius": "1 mm",
+    "k_factor": 0.5
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Base"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     30,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Base"
+   }
+  },
+  {
+   "command": "sheet.perforate",
+   "params": {
+    "diameter": "2",
+    "pitch": "5",
+    "margin": "1",
+    "pattern": "square"
+   }
+  },
+  {
+   "command": "sheet.flat_pattern",
+   "params": {}
+  }
+ ]
+}

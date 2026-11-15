@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "component.extract of a component that is already linked",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5), Arm's box built inside Arm; after one extract Arm is linked; extracting it again is refused",
+ "outcome": "refused",
+ "refusal": "is linked to a design file already"
+}

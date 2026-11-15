@@ -18,8 +18,8 @@ impl Decoder {
     pub(super) fn new(bytes: &[u8], width: u32, height: u32, cancel: &CancelToken) -> Result<Self> {
         cancel.check()?;
         let limit = super::linear_exr::encoded_limit(width, height)?;
-        let expected = super::linear_exr::header(width, height)?;
-        if bytes.len() as u64 > limit || !bytes.starts_with(&expected) {
+        let expected = super::linear_exr::native_header(bytes, width, height)?;
+        if bytes.len() as u64 > limit {
             return Err(invalid("master is not the retained native FLOAT32 linear-sRGB/D65 profile"));
         }
         let first = expected.len() + height as usize * 8;
@@ -116,5 +116,20 @@ mod tests {
         cancel.cancel();
         assert!(decoder.step(&bytes, &cancel).is_err());
         assert_eq!(decoder.rows(), 0);
+    }
+    #[cfg(feature = "raytrace-cpu")]
+    #[test]
+    fn cpu_native_master_roundtrips_without_accepting_arbitrary_software_headers() {
+        let pixels = vec![[8.0, 0.25, 0.5, 0.75], [0.0, 0.0, 0.0, 0.0]];
+        let mut task = super::super::linear_exr::ExrTask::new_cpu(2, 1, pixels.clone(), CancelToken::default()).unwrap();
+        assert!(task.step(1).unwrap());
+        let (bytes, _) = task.finish().unwrap();
+        let mut decoder = Decoder::new(&bytes, 2, 1, &CancelToken::default()).unwrap();
+        assert!(decoder.step(&bytes, &CancelToken::default()).unwrap());
+        assert_eq!(decoder.finish().unwrap(), pixels);
+        let mut foreign = bytes;
+        let at = foreign.windows(b"SolidCraft native CPU raytrace".len()).position(|w| w == b"SolidCraft native CPU raytrace").unwrap();
+        foreign[at] ^= 1;
+        assert!(Decoder::new(&foreign, 2, 1, &CancelToken::default()).is_err());
     }
 }

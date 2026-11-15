@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Wireframe</title>
+  <path d="M32 6 L55 19 L55 45 L32 58 L9 45 L9 19Z" fill="none" stroke="currentColor" stroke-width="5.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 32L32 6M32 32L55 19M32 32L55 45M32 32L32 58M32 32L9 45M32 32L9 19" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

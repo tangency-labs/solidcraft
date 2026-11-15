@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4305"
+ ],
+ "what": "a 0.6 x 1 groove swept as a cut round the wall of a rounded-rectangle pocket (lines and r5 arcs, at mid height): the sweep didn't follow the path",
+ "source": "analytic",
+ "method": "box 60x40x20 less the pocket (50x30, r5 corners, 15 deep): 48000 - (1500 - (4-pi) 25) 15. The groove section 0.6 deep into the wall x 1 high starts at the path's start, square to it; its centroid runs 0.3 outside the path, so by Pappus it removes 0.6*1*(2*40 + 2*20 + 2 pi 5.3)",
+ "body_count": 1,
+ "volume_mm3": 25729.9222
+}

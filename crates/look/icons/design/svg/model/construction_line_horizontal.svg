@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Horizontal construction line</title>
+  <path d="M8 32L56 32" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="10 5"/>
+  <circle cx="32" cy="32" r="5.8" fill="#ffffff"/>
+  <circle cx="32" cy="32" r="3.4" fill="#236ead"/>
+</svg>

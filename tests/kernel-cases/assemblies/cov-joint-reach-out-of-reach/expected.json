@@ -1,0 +1,34 @@
+{
+ "sources": [],
+ "what": "joint.reach asked to take the arm's tip to (0,60,5), 60 from the hinge",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); the tip moves on a circle of radius 40: the nearest it gets is (0,40,5), 20 mm short",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "reached": false,
+    "error_mm": 20.0,
+    "point": [
+     0.0,
+     40.0,
+     5.0
+    ]
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      0.0,
+      20.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

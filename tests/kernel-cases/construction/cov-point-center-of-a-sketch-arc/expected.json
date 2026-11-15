@@ -1,0 +1,15 @@
+{
+ "sources": [],
+ "what": "the centre of a sketch arc",
+ "source": "analytic",
+ "method": "the arc r 10 about the sketch origin on XY",
+ "construction": {
+  "C": {
+   "point": [
+    0,
+    0,
+    0
+   ]
+  }
+ }
+}

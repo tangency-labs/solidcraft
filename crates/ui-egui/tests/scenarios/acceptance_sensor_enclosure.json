@@ -156,7 +156,7 @@
   "params": {
    "command": "file.save_as",
    "params": {
-    "path": "$DIR/enclosure.solidcraft"
+    "path": "$DIR/enclosure.sc"
    }
   }
  },
@@ -165,7 +165,7 @@
   "params": {
    "command": "doc.open",
    "params": {
-    "path": "$DIR/enclosure.solidcraft"
+    "path": "$DIR/enclosure.sc"
    }
   }
  },

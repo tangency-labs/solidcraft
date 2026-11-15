@@ -1,0 +1,19 @@
+{
+ "sources": [],
+ "what": "motion.trace of the arm's tip with a contact set between the arm and a block",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Stop: box 50x10x10 from (-10,30,0), grounded; the arm's corner (40,5) turned \u03b8 reaches y = 40 sin \u03b8 + 5 cos \u03b8, which is 30 at \u03b8 = asin(30/\u221a1625) - atan(5/40) = 40.9676; contact sets stop the motion: the trace from 0 to 90 stops short of the block, its last point within the circle's arc up to \u03b8 = 40.97 (y \u2264 40 sin 40.97 = 26.22)",
+ "body_count": 3,
+ "volume_mm3": 13000.0,
+ "results": [
+  {
+   "step": 15,
+   "json": {
+    "stopped_by_contact": {
+     "a": "Stop:1",
+     "b": "Arm:1"
+    }
+   }
+  }
+ ]
+}

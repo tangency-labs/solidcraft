@@ -1,0 +1,180 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b22": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b25"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b26"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  10.0,
+                  6.0,
+                  20.0
+                ],
+                [
+                  30.0,
+                  6.0,
+                  20.0
+                ]
+              ],
+              "index": 27
+            }
+          ],
+          "points": [
+            [
+              20.0,
+              6.0,
+              20.0
+            ]
+          ],
+          "tolerance": 2.693582403567252
+        },
+        "kind": "chamfer",
+        "sizes": [
+          0.5
+        ]
+      }
+    }
+  ],
+  "case": "3276-chamfer-edge-of-1mm-protrusion-on-joined-l",
+  "expected": {
+    "bbox": {
+      "max": [
+        40,
+        20,
+        30
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "center_of_mass": [
+      20.0,
+      7.4676,
+      10.08
+    ],
+    "continuity": {
+      "order": "g0"
+    },
+    "method": "Base 40x20x10 (8000). A wall 40x5x20 extruded up from the base's top face at y 0..5 (4000): an L section. A 20x10 pad extruded 1 mm out of the wall's front face (y 5..6, z 10..20, x 10..30) (200). A 0.5 mm chamfer on its top outer edge (y=6, z=20, length 20) removes a right triangle 0.5x0.5/2 x 20 = 2.5. V = 12200 - 2.5 = 12197.5 mm3. Centre of mass from the pieces: base (20,10,5), wall (20,2.5,20), pad (20,5.5,15), minus the removed wedge at (20, 17/3, 59.5/3).",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3276"
+    ],
+    "volume_mm3": 12197.5,
+    "what": "three extrudes joined into an L-shaped body with a 1 mm protrusion, then a chamfer on the protrusion's outer edge (the report: the corners are no longer 90 degrees and the chamfer fails)"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 33,
+      "faces": 13,
+      "vertices": 22
+    }
+  },
+  "records": "3276-chamfer-edge-of-1mm-protrusion-on-joined-l.bodies.json.gz",
+  "result": [
+    {
+      "body": "L",
+      "made": "b26"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4613.892135623731,
+      "body_count": 1,
+      "edges": 33,
+      "faces": 13,
+      "vertices": 22,
+      "volume_mm3": 12197.5
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3276"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "three extrudes joined into an L-shaped body with a 1 mm protrusion, then a chamfer on the protrusion's outer edge (the report: the corners are no longer 90 degrees and the chamfer fails)",
+  "why_not": []
+}

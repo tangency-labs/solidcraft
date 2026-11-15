@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3928",
+  "tangency-labs/solidcraft#3972"
+ ],
+ "what": "an IGES file of twelve trimmed planes forming two separate closed boxes (10x20x30, one 100 mm along x): they must come in as two solids, not one open body",
+ "source": "analytic",
+ "method": "two boxes 10 x 20 x 30: V = 2*6000; A = 2*2200; 12 faces",
+ "body_count": 2,
+ "volume_mm3": 12000.0,
+ "area_mm2": 4400.0,
+ "faces": 12
+}

@@ -1,0 +1,83 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Steel 2",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "1 mm",
+    "k_factor": 0.5
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Blank"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      160,
+      0
+     ],
+     [
+      160,
+      30
+     ],
+     [
+      20,
+      30
+     ],
+     [
+      20,
+      60
+     ],
+     [
+      0,
+      60
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Blank"
+   }
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "edges": [
+     [
+      90,
+      30,
+      2
+     ]
+    ],
+    "height": 15,
+    "angle": 90,
+    "position": "inside"
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

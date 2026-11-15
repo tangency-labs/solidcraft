@@ -1,6 +1,7 @@
 //! URDF export (#719, docs/urdf.md): files, names, limits, mass and forward kinematics against
 //! the joint solver.
 
+use solidcraft_geom::prelude::*;
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
@@ -111,7 +112,7 @@ fn stl_volume(bytes: &[u8]) -> Option<f64> {
         for (k, p) in t.iter().enumerate() {
             let n = mesh.positions.len() as u32;
             tri[k] = *index.entry(p.map(f32::to_bits)).or_insert_with(|| {
-                mesh.positions.push(solidcraft_geom::Vec3::new(p[0] as f64, p[1] as f64, p[2] as f64));
+                mesh.positions.push(solidcore_record::Vec3::new(p[0] as f64, p[1] as f64, p[2] as f64));
                 n
             });
         }
@@ -194,10 +195,16 @@ fn urdf_forward_kinematics_match_the_assembly() {
 #[test]
 fn urdf_limits_convert_units() {
     let mut s = two_cubes();
-    joint(&mut s, "slider", "Rail", json!([[10, 0]]));
+    joint(&mut s, "slider", "Rail", json!([[0, 10]]));
     let x = package(&s).xml;
     assert!(x.contains(r#"<joint name="Rail" type="prismatic">"#), "{x}");
     assert!(x.contains(r#"<limit lower="0" upper="0.01" effort="1000" velocity="10"/>"#), "{x}");
+
+    // Older documents can contain reversed limits even though joint commands now reject them.
+    let mut doc = (*s.doc).clone();
+    doc.assembly.joints[0].limits = vec![Some((10.0, 0.0))];
+    let p = solidcraft_io::urdf(&doc, &s.doc.painted(&s.model.state()), "t", &UrdfOptions::default()).unwrap();
+    assert!(p.xml.contains(r#"<limit lower="0" upper="0.01" effort="1000" velocity="10"/>"#), "{}", p.xml);
 
     let mut s = two_cubes();
     joint(&mut s, "revolute", "Turn", json!([[-30, 45]]));
@@ -375,7 +382,7 @@ fn urdf_inertial_is_mass_weighted() {
     }
     assert!(i.inertia[0][1].abs() < 1e-15);
     // The centre of mass is the cube's centre, in the link frame.
-    assert!(i.com.dist(solidcraft_doc::apply_point(&l.mesh_origin, solidcraft_geom::Vec3::new(105.0, 5.0, 5.0))) < 1e-9, "{:?}", i.com);
+    assert!(i.com.dist(solidcraft_doc::apply_point(&l.mesh_origin, solidcore_record::Vec3::new(105.0, 5.0, 5.0))) < 1e-9, "{:?}", i.com);
 }
 
 #[test]
@@ -570,6 +577,7 @@ fn urdf_warns_when_placements_are_cut_off() {
             name: format!("C{k}:1"),
             transform: solidcraft_doc::IDENTITY,
             grounded: false,
+            expressed_moves: Vec::new(),
         });
     }
     // A component placed twice with a part nested in it, next to the deep chain: its copy is
@@ -578,7 +586,15 @@ fn urdf_warns_when_placements_are_cut_off() {
     doc.components.push(solidcraft_doc::Component { id: 3002, name: "Foot".into(), parent: 3001, ..Default::default() });
     // Listed first, so the walk (a stack) goes down the chain before reaching them.
     for (id, component, parent, name) in [(4003, 3002, 3001, "Foot:1"), (4002, 3001, 0, "Leg:2"), (4001, 3001, 0, "Leg:1")] {
-        let o = solidcraft_doc::Occurrence { id, component, parent, name: name.into(), transform: solidcraft_doc::IDENTITY, grounded: false };
+        let o = solidcraft_doc::Occurrence {
+            id,
+            component,
+            parent,
+            name: name.into(),
+            transform: solidcraft_doc::IDENTITY,
+            grounded: false,
+            expressed_moves: Vec::new(),
+        };
         doc.occurrences.insert(0, o);
     }
     let p = solidcraft_io::urdf(&doc, &s.model.state(), "t", &UrdfOptions::default()).unwrap();

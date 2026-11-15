@@ -55,10 +55,11 @@
 //! down well and a branch the reference does not decide is unknown, so neither is merged
 //! (the solver starts those points where they are).
 
+use solidcraft_geom::prelude::*;
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 
 use crate::loci::{Locus, Reading, Rel, Span, View, crossing, mag, place, side};
 use crate::union_find::{find, union};

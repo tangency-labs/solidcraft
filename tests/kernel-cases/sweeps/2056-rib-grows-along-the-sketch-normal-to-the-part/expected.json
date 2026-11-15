@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2056",
+  "tangency-labs/solidcraft#2057"
+ ],
+ "what": "a rib drawn on a plane 20 mm in front of a block (parallel to XZ, a 40 mm line along X) with direction normal, growing toward the block",
+ "source": "analytic",
+ "method": "the wall runs along the sketch normal (+Y) from y = -20 to the block face y = 0 and into it, 40 long and 2 thick (across the curve, in the sketch plane): it adds 40 * 2 * 20 = 1600 to the block 60 x 40 x 10: V = 24000 + 1600 = 25600, one body.",
+ "body_count": 1,
+ "volume_mm3": 25600.0
+}

@@ -1,0 +1,22 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3383"
+  ],
+  "what": "a root body joined into a body inside a component whose occurrence is turned a quarter turn: the tool must stay where it is in the world",
+  "source": "analytic",
+  "method": "Plate 40x40x10 (x -20..20, y -20..20, z 0..10) turned 90 deg about X becomes x -20..20, y -10..0, z -20..20. Boss is world x -5..5, y -5..5, z -25..-15. Overlap = 10 x 5 x 5 = 250 (y -5..0, z -20..-15). Union = 16000 + 1000 - 250 = 16750, one body; bbox x -20..20, y -10..5, z -25..20",
+  "body_count": 1,
+  "volume_mm3": 16750.0,
+  "bbox": {
+    "min": [
+      -20,
+      -10,
+      -25
+    ],
+    "max": [
+      20,
+      5,
+      20
+    ]
+  }
+}

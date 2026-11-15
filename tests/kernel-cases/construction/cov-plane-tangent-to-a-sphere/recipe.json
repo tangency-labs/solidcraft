@@ -1,0 +1,35 @@
+{
+ "commands": [
+  {
+   "command": "solid.sphere",
+   "params": {
+    "center": [
+     0,
+     0,
+     60
+    ],
+    "radius": 5,
+    "body_name": "Ball",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "construct.plane.tangent",
+   "params": {
+    "face": {
+     "face": [
+      0,
+      0,
+      65
+     ]
+    },
+    "at": [
+     0,
+     3,
+     64
+    ],
+    "name": "T"
+   }
+  }
+ ]
+}

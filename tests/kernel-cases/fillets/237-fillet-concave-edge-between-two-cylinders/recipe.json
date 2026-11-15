@@ -1,0 +1,67 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "start": [
+     1.7728134670876865,
+     17.048669520256194
+    ],
+    "end": [
+     16.250324167975673,
+     5.452243981674495
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     10.715766135516247,
+     13.378055020402751
+    ],
+    "start": [
+     16.250324167975673,
+     5.452243981674495
+    ],
+    "end": [
+     1.7728134670876865,
+     17.048669520256194
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      16.250324167975673,
+      5.452243981674495,
+      5
+     ]
+    ],
+    "radius": 6
+   }
+  }
+ ]
+}

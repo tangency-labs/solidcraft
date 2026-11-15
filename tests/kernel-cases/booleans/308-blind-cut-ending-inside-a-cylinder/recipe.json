@@ -1,0 +1,145 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 3,
+    "body_name": "Hinge"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "Knuckle",
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      -1
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     -4,
+     33
+    ],
+    "radius": 4
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Knuckle",
+    "distance": 40,
+    "operation": "join",
+    "body_names": [
+     "Hinge"
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "Pin",
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      -1
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     -4,
+     33
+    ],
+    "radius": 2
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Pin",
+    "distance": 100,
+    "direction": "symmetric",
+    "operation": "cut",
+    "body_names": [
+     "Hinge"
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "Gap",
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     12,
+     29
+    ],
+    "p1": [
+     28,
+     40
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Gap",
+    "distance": 3.3,
+    "operation": "cut",
+    "body_names": [
+     "Hinge"
+    ]
+   }
+  }
+ ]
+}

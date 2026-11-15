@@ -1,0 +1,6 @@
+{
+  "unit": "geom.a_object",
+  "cases": [
+    {"name": "fuzz00958_runs", "origin": "fuzz-out/n2000/geom.a_object/fuzz00958.json (panic: rust: attempt to negate with overflow)", "cpp": "ok", "rust": "ok", "inputs": {"kind": "script", "objects": [0], "ops": [["copy_construct"]]}}
+  ]
+}

@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2464",
+  "tangency-labs/solidcraft#2465"
+ ],
+ "what": "an Extrude Join onto a plate with a hidden coincident copy: the hidden body must not be joined in",
+ "source": "analytic",
+ "method": "two 40x40x5 plates (8000 each), the copy hidden. The 2 mm wide ring rim (36x36 minus 32x32 = 272 mm2) extruded 3 joins the visible plate only: 8000 + 816 + 8000 = 16816. Two bodies remain",
+ "body_count": 2,
+ "volume_mm3": 16816.0
+}

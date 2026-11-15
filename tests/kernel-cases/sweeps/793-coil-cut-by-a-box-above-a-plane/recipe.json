@@ -1,0 +1,46 @@
+{
+ "commands": [
+  {
+   "command": "solid.coil",
+   "params": {
+    "diameter": 40,
+    "revolutions": 6,
+    "pitch": 4.0,
+    "section_size": 2.0,
+    "section": "circular",
+    "section_position": "center",
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "operation": "new",
+    "body_name": "Spring"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 60,
+    "height": 20,
+    "corner": [
+     -30,
+     -30,
+     12.5
+    ],
+    "body_name": "Above"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Spring",
+    "tools": [
+     "Above"
+    ],
+    "operation": "cut"
+   }
+  }
+ ]
+}

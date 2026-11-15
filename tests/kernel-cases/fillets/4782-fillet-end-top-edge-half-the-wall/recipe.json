@@ -1,0 +1,26 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 80,
+    "width": 10,
+    "height": 10,
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      80,
+      5,
+      10
+     ]
+    ],
+    "radius": 5
+   }
+  }
+ ]
+}

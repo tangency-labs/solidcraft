@@ -1,0 +1,36 @@
+{
+ "commands": [
+  {
+   "command": "solid.sphere",
+   "params": {
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": 5,
+    "body_name": "A",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "solid.sphere",
+   "params": {
+    "center": [
+     20,
+     0,
+     0
+    ],
+    "radius": 5,
+    "body_name": "B",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "inspect.clearance",
+   "params": {
+    "clearance": 15
+   }
+  }
+ ]
+}

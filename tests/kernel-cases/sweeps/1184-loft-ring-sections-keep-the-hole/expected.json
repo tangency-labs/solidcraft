@@ -1,0 +1,15 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1184",
+  "tangency-labs/solidcraft#1254",
+  "tangency-labs/solidcraft#2435",
+  "tangency-labs/solidcraft#2447"
+ ],
+ "what": "a loft between two ring sections (outer r 20, inner r 12) 20 mm apart (the hole was dropped and a solid disc built)",
+ "source": "analytic",
+ "method": "a tube of outer r 20, inner r 12, length 20: V = pi (20^2 - 12^2) 20, A = 2 pi 20 20 + 2 pi 12 20 + 2 pi (20^2 - 12^2); faces: outer wall, bore, two annular caps.",
+ "body_count": 1,
+ "volume_mm3": 16084.95438637974,
+ "area_mm2": 5629.734035232909,
+ "faces": 4
+}

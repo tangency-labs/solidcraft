@@ -1,0 +1,1145 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -40,
+     -40
+    ],
+    "p1": [
+     40,
+     40
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -35.2,
+     -35.2
+    ],
+    "p1": [
+     -28.8,
+     -28.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -35.2,
+     -27.2
+    ],
+    "p1": [
+     -28.8,
+     -20.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -35.2,
+     -19.2
+    ],
+    "p1": [
+     -28.8,
+     -12.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -35.2,
+     -11.2
+    ],
+    "p1": [
+     -28.8,
+     -4.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -35.2,
+     -3.2
+    ],
+    "p1": [
+     -28.8,
+     3.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -35.2,
+     4.8
+    ],
+    "p1": [
+     -28.8,
+     11.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -35.2,
+     12.8
+    ],
+    "p1": [
+     -28.8,
+     19.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -35.2,
+     20.8
+    ],
+    "p1": [
+     -28.8,
+     27.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -35.2,
+     28.8
+    ],
+    "p1": [
+     -28.8,
+     35.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -27.2,
+     -35.2
+    ],
+    "p1": [
+     -20.8,
+     -28.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -27.2,
+     -27.2
+    ],
+    "p1": [
+     -20.8,
+     -20.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -27.2,
+     -19.2
+    ],
+    "p1": [
+     -20.8,
+     -12.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -27.2,
+     -11.2
+    ],
+    "p1": [
+     -20.8,
+     -4.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -27.2,
+     -3.2
+    ],
+    "p1": [
+     -20.8,
+     3.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -27.2,
+     4.8
+    ],
+    "p1": [
+     -20.8,
+     11.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -27.2,
+     12.8
+    ],
+    "p1": [
+     -20.8,
+     19.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -27.2,
+     20.8
+    ],
+    "p1": [
+     -20.8,
+     27.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -27.2,
+     28.8
+    ],
+    "p1": [
+     -20.8,
+     35.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -19.2,
+     -35.2
+    ],
+    "p1": [
+     -12.8,
+     -28.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -19.2,
+     -27.2
+    ],
+    "p1": [
+     -12.8,
+     -20.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -19.2,
+     -19.2
+    ],
+    "p1": [
+     -12.8,
+     -12.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -19.2,
+     -11.2
+    ],
+    "p1": [
+     -12.8,
+     -4.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -19.2,
+     -3.2
+    ],
+    "p1": [
+     -12.8,
+     3.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -19.2,
+     4.8
+    ],
+    "p1": [
+     -12.8,
+     11.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -19.2,
+     12.8
+    ],
+    "p1": [
+     -12.8,
+     19.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -19.2,
+     20.8
+    ],
+    "p1": [
+     -12.8,
+     27.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -19.2,
+     28.8
+    ],
+    "p1": [
+     -12.8,
+     35.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -11.2,
+     -35.2
+    ],
+    "p1": [
+     -4.8,
+     -28.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -11.2,
+     -27.2
+    ],
+    "p1": [
+     -4.8,
+     -20.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -11.2,
+     -19.2
+    ],
+    "p1": [
+     -4.8,
+     -12.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -11.2,
+     -11.2
+    ],
+    "p1": [
+     -4.8,
+     -4.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -11.2,
+     -3.2
+    ],
+    "p1": [
+     -4.8,
+     3.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -11.2,
+     4.8
+    ],
+    "p1": [
+     -4.8,
+     11.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -11.2,
+     12.8
+    ],
+    "p1": [
+     -4.8,
+     19.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -11.2,
+     20.8
+    ],
+    "p1": [
+     -4.8,
+     27.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -11.2,
+     28.8
+    ],
+    "p1": [
+     -4.8,
+     35.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -3.2,
+     -35.2
+    ],
+    "p1": [
+     3.2,
+     -28.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -3.2,
+     -27.2
+    ],
+    "p1": [
+     3.2,
+     -20.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -3.2,
+     -19.2
+    ],
+    "p1": [
+     3.2,
+     -12.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -3.2,
+     -11.2
+    ],
+    "p1": [
+     3.2,
+     -4.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -3.2,
+     -3.2
+    ],
+    "p1": [
+     3.2,
+     3.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -3.2,
+     4.8
+    ],
+    "p1": [
+     3.2,
+     11.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -3.2,
+     12.8
+    ],
+    "p1": [
+     3.2,
+     19.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -3.2,
+     20.8
+    ],
+    "p1": [
+     3.2,
+     27.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -3.2,
+     28.8
+    ],
+    "p1": [
+     3.2,
+     35.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     4.8,
+     -35.2
+    ],
+    "p1": [
+     11.2,
+     -28.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     4.8,
+     -27.2
+    ],
+    "p1": [
+     11.2,
+     -20.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     4.8,
+     -19.2
+    ],
+    "p1": [
+     11.2,
+     -12.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     4.8,
+     -11.2
+    ],
+    "p1": [
+     11.2,
+     -4.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     4.8,
+     -3.2
+    ],
+    "p1": [
+     11.2,
+     3.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     4.8,
+     4.8
+    ],
+    "p1": [
+     11.2,
+     11.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     4.8,
+     12.8
+    ],
+    "p1": [
+     11.2,
+     19.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     4.8,
+     20.8
+    ],
+    "p1": [
+     11.2,
+     27.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     4.8,
+     28.8
+    ],
+    "p1": [
+     11.2,
+     35.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     12.8,
+     -35.2
+    ],
+    "p1": [
+     19.2,
+     -28.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     12.8,
+     -27.2
+    ],
+    "p1": [
+     19.2,
+     -20.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     12.8,
+     -19.2
+    ],
+    "p1": [
+     19.2,
+     -12.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     12.8,
+     -11.2
+    ],
+    "p1": [
+     19.2,
+     -4.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     12.8,
+     -3.2
+    ],
+    "p1": [
+     19.2,
+     3.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     12.8,
+     4.8
+    ],
+    "p1": [
+     19.2,
+     11.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     12.8,
+     12.8
+    ],
+    "p1": [
+     19.2,
+     19.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     12.8,
+     20.8
+    ],
+    "p1": [
+     19.2,
+     27.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     12.8,
+     28.8
+    ],
+    "p1": [
+     19.2,
+     35.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     20.8,
+     -35.2
+    ],
+    "p1": [
+     27.2,
+     -28.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     20.8,
+     -27.2
+    ],
+    "p1": [
+     27.2,
+     -20.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     20.8,
+     -19.2
+    ],
+    "p1": [
+     27.2,
+     -12.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     20.8,
+     -11.2
+    ],
+    "p1": [
+     27.2,
+     -4.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     20.8,
+     -3.2
+    ],
+    "p1": [
+     27.2,
+     3.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     20.8,
+     4.8
+    ],
+    "p1": [
+     27.2,
+     11.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     20.8,
+     12.8
+    ],
+    "p1": [
+     27.2,
+     19.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     20.8,
+     20.8
+    ],
+    "p1": [
+     27.2,
+     27.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     20.8,
+     28.8
+    ],
+    "p1": [
+     27.2,
+     35.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     28.8,
+     -35.2
+    ],
+    "p1": [
+     35.2,
+     -28.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     28.8,
+     -27.2
+    ],
+    "p1": [
+     35.2,
+     -20.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     28.8,
+     -19.2
+    ],
+    "p1": [
+     35.2,
+     -12.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     28.8,
+     -11.2
+    ],
+    "p1": [
+     35.2,
+     -4.8
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     28.8,
+     -3.2
+    ],
+    "p1": [
+     35.2,
+     3.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     28.8,
+     4.8
+    ],
+    "p1": [
+     35.2,
+     11.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     28.8,
+     12.8
+    ],
+    "p1": [
+     35.2,
+     19.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     28.8,
+     20.8
+    ],
+    "p1": [
+     35.2,
+     27.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     28.8,
+     28.8
+    ],
+    "p1": [
+     35.2,
+     35.2
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 1.2,
+    "profiles": [
+     {
+      "point": [
+       -39,
+       -39
+      ]
+     }
+    ],
+    "operation": "new",
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 1.2
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 20.8
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 19.6
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 20,
+    "profiles": [
+     {
+      "point": [
+       20.2,
+       0
+      ]
+     }
+    ],
+    "operation": "join",
+    "targets": [
+     "Plate"
+    ]
+   }
+  }
+ ]
+}

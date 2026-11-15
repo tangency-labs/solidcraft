@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "the top rim of a hole through a plate rounded r1",
+ "source": "analytic",
+ "method": "plate 40x40x10 with a through hole R5 at (20, 20): V0 = 16000 - 250 pi = 15214.6018. The rim (rho = 5, z = 10) is convex with the material outside it: the r1 round removes the spandrel (1-pi/4) = 0.214602 whose centroid lies outside rho = 5 (first moment 5/6-pi/4 = 0.047935), revolved once (a torus, Pappus): 2 pi (5 A + M) = 7.0431. V = 15207.5587. Faces 8.",
+ "body_count": 1,
+ "volume_mm3": 15207.558735513938,
+ "faces": 8,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

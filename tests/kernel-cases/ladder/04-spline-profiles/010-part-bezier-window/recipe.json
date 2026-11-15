@@ -1,0 +1,80 @@
+{
+ "base": "../../03-analytic-profiles/009-part-boss-and-slot",
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      40,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      20,
+      22
+     ],
+     [
+      40,
+      22
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.spline.control_point",
+   "params": {
+    "points": [
+     [
+      40,
+      22
+     ],
+     [
+      37,
+      34
+     ],
+     [
+      23,
+      34
+     ],
+     [
+      20,
+      22
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10,
+    "operation": "cut",
+    "targets": [
+     "Part"
+    ],
+    "name": "Window"
+   }
+  }
+ ]
+}

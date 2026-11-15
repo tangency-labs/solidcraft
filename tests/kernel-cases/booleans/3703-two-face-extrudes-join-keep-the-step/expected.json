@@ -1,0 +1,22 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3703"
+  ],
+  "what": "two joined face extrudes on one box (top face, then the right side face): the stepped shape must stay",
+  "source": "analytic",
+  "method": "box 25x20x35 = 17500; top face pulled up 10: +25*20*10 = 5000; the right face x=25 is then one planar face 20 wide and 45 tall (box side merged with the new block's side) and is pulled out 10: +20*45*10 = 9000. V = 31500, bbox x 0..35, z 0..45. (Assumes coplanar faces merge, as the README's face counts do.)",
+  "body_count": 1,
+  "volume_mm3": 31500.0,
+  "bbox": {
+    "min": [
+      0,
+      0,
+      0
+    ],
+    "max": [
+      35,
+      20,
+      45
+    ]
+  }
+}

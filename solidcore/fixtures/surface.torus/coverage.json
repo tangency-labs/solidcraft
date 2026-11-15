@@ -1,0 +1,168 @@
+{
+ "cases": [
+  {
+   "name": "horn_iso_inner_major_circle_degenerate",
+   "upstream_ref": "source/SMLib/src/SmTorus.cpp:829 (coverage: crates/solidcore/src/surface/torus.rs:1061)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 1.0,
+     "minor": 1.0
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": 0.5
+   }
+  },
+  {
+   "name": "horn_iso_inner_major_circle_degenerate_dom",
+   "upstream_ref": "source/SMLib/src/SmTorus.cpp:829 (coverage: crates/solidcore/src/surface/torus.rs:1061)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 1.0,
+     "minor": 1.0
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": 0.5,
+    "dom": [
+     0.1,
+     0.2,
+     0.6,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "horn_half_iso_start_on_axis",
+   "upstream_ref": "source/SMLib/src/SmTorus.cpp:829 (coverage: crates/solidcore/src/surface/torus.rs:1061)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 1.0,
+     "minor": 1.0,
+     "dom": [
+      0,
+      180,
+      360,
+      360
+     ]
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": 0.0
+   }
+  },
+  {
+   "name": "horn_half_minor_iso_from_axis_0.0",
+   "upstream_ref": "source/SMLib/src/SmTorus.cpp:867 (coverage: crates/solidcore/src/surface/torus.rs:1099)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 1.0,
+     "minor": 1.0,
+     "dom": [
+      0,
+      180,
+      360,
+      360
+     ]
+    },
+    "op": "iso",
+    "param": 0,
+    "iso": 0.0
+   }
+  },
+  {
+   "name": "horn_half_minor_iso_from_axis_0.5",
+   "upstream_ref": "source/SMLib/src/SmTorus.cpp:867 (coverage: crates/solidcore/src/surface/torus.rs:1099)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 1.0,
+     "minor": 1.0,
+     "dom": [
+      0,
+      180,
+      360,
+      360
+     ]
+    },
+    "op": "iso",
+    "param": 0,
+    "iso": 0.5
+   }
+  }
+ ]
+}

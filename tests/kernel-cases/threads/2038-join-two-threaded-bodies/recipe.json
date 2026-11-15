@@ -1,0 +1,78 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 16,
+    "height": 12,
+    "body_name": "A"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     0,
+     0,
+     0
+    ],
+    "direction": [
+     0,
+     0,
+     1
+    ],
+    "diameter": 12.163,
+    "depth": 10
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     6.0815,
+     0,
+     1
+    ],
+    "designation": "M13.5x1.337",
+    "length": 8,
+    "modeled": true
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 13.05,
+    "height": 14,
+    "base": [
+     0,
+     0,
+     12
+    ],
+    "operation": "new",
+    "body_name": "B"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     13.05,
+     0,
+     19
+    ],
+    "designation": "M26.1x1.814",
+    "modeled": true
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "A",
+    "tools": [
+     "B"
+    ],
+    "operation": "join"
+   }
+  }
+ ]
+}

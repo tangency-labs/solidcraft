@@ -14,7 +14,7 @@ fn sketch() -> Harness {
 
 /// A line's first point: the circle's centre, or a point of its own.
 fn starts_at_centre(h: &Harness) -> bool {
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let centre = sk.resolve_point("c1.center").unwrap();
     sk.curves.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Line { a, b } if a == centre || b == centre))
@@ -39,6 +39,37 @@ fn hovering_a_circles_edge_makes_its_centre_easy_to_take() {
         h.step(&json!({"key":"Escape"})).unwrap();
         assert_eq!(starts_at_centre(&h), wake, "wake={wake}");
     }
+}
+
+/// The pointer leaves the circle: past its radius from the centre, the centre sleeps again
+/// (#16346). Just outside the circle it stays awake, so the pointer can still cross it.
+#[test]
+fn the_centre_sleeps_when_the_pointer_leaves_the_circle() {
+    let mut h = sketch();
+    h.step(&json!({"move":{"world":[30,20,0]}})).unwrap();
+    h.frames(2);
+    assert!(h.app.viewport.woken_centre.is_some(), "the centre wakes");
+    // Just outside the circle, still within its radius from the centre: it stays awake.
+    h.step(&json!({"move":{"world":[31,20,0]}})).unwrap();
+    h.frames(2);
+    assert!(h.app.viewport.woken_centre.is_some(), "the centre stays awake near the circle");
+    // Past the radius from the centre: it sleeps.
+    h.step(&json!({"move":{"world":[33,20,0]}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.viewport.woken_centre, None, "the centre sleeps");
+}
+
+/// Clicking empty space deselects, and the centre goes back to sleep with the selection
+/// (#16346): the click is inside the circle, away from the centre.
+#[test]
+fn the_centre_sleeps_when_the_user_clicks_empty_space() {
+    let mut h = sketch();
+    h.step(&json!({"move":{"world":[30,20,0]}})).unwrap();
+    h.frames(2);
+    assert!(h.app.viewport.woken_centre.is_some(), "the centre wakes");
+    h.step(&json!({"click":{"world":[26,20,0]}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.viewport.woken_centre, None, "the centre sleeps");
 }
 
 /// Another curve hovered puts the centre back to sleep.

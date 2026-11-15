@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#1219"
+  ],
+  "what": "24 small grooves cut into a bore whose top edge has an unrelated 1 mm fillet: 73 s and 24 boolean retries instead of 0.2 s",
+  "source": "analytic",
+  "method": "block 140x140x25 minus bore r68.2 h25: V0 = 140*140*25 - pi*68.2^2*25 = 124692.46. Fillet R1 on the bore's top edge removes the corner region (square 1x1 minus quarter disc, centroid radii 68.7 and 69.2-4/(3pi)), Pappus: 2pi*(1*68.7 - pi/4*(69.2-4/(3pi))) = 92.26. Each groove is the 0.9x0.6 rectangle (x 67.8..68.7, y +-0.3) cut 4.5 deep (z 19..23.5); only the part outside the bore is material: 0.6*68.7 - 2*F(0.3), F(y)=(y*sqrt(r^2-y^2)+r^2*asin(y/r))/2, = 0.300132 mm2, times 4.5 times 24 = 32.41. The grooves end at z 23.5, below the fillet (z 24-25), so the removals are disjoint: V = 124692.46 - 92.26 - 32.41 = 124567.79",
+  "body_count": 1,
+  "volume_mm3": 124567.79
+}

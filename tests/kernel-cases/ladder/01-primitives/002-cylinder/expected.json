@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "a cylinder r10 h30",
+ "source": "analytic",
+ "method": "V = pi r^2 h; A = 2 pi r^2 + 2 pi r h; faces: two disks and one whole cylinder",
+ "body_count": 1,
+ "volume_mm3": 9424.777960769,
+ "area_mm2": 2513.274122872,
+ "faces": 3,
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   30
+  ]
+ }
+}

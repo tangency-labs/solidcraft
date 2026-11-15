@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3885",
+  "tangency-labs/solidcraft#3886"
+ ],
+ "what": "a box of six trimmed planes with one edge written as a B-spline curve (126) over a knot span of 1e-7: both faces it bounds must be kept",
+ "method": "box 10 x 20 x 30 of six trimmed bilinear patches: V = 6000; A = 2(200+300+600) = 2200; 6 faces",
+ "source": "analytic",
+ "body_count": 1,
+ "volume_mm3": 6000.0,
+ "area_mm2": 2200.0,
+ "faces": 6
+}

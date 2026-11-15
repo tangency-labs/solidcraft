@@ -1,0 +1,260 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Shop",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "2 mm",
+    "k_factor": 0.4
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "U"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      30
+     ],
+     [
+      0,
+      4
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     4,
+     4
+    ],
+    "start": [
+     0,
+     4
+    ],
+    "end": [
+     4,
+     0
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      4,
+      0
+     ],
+     [
+      36,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     36,
+     4
+    ],
+    "start": [
+     36,
+     0
+    ],
+    "end": [
+     40,
+     4
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      40,
+      4
+     ],
+     [
+      40,
+      30
+     ],
+     [
+      38,
+      30
+     ],
+     [
+      38,
+      4
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     36,
+     4
+    ],
+    "start": [
+     36,
+     2
+    ],
+    "end": [
+     38,
+     4
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      36,
+      2
+     ],
+     [
+      4,
+      2
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     4,
+     4
+    ],
+    "start": [
+     2,
+     4
+    ],
+    "end": [
+     4,
+     2
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      2,
+      4
+     ],
+     [
+      2,
+      30
+     ],
+     [
+      0,
+      30
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "U",
+    "distance": 100,
+    "body_name": "Channel"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     40,
+     18,
+     30
+    ],
+    "diameter": 6,
+    "depth": 3
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XZ",
+    "name": "Label"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     10,
+     -60
+    ],
+    "p1": [
+     30,
+     -70
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Label",
+    "distance": 0.2,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "sheet.convert",
+   "params": {
+    "body": "Channel",
+    "face": [
+     20,
+     0,
+     20
+    ],
+    "rule": "Shop",
+    "bends": [
+     [
+      1.172,
+      1.172,
+      50
+     ],
+     [
+      38.828,
+      1.172,
+      50
+     ]
+    ]
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

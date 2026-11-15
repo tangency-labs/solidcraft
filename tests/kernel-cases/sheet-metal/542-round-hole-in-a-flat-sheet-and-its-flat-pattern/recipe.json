@@ -1,0 +1,83 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Steel",
+    "thickness": "2.5 mm",
+    "active": true,
+    "bend_radius": "2.5 mm",
+    "k_factor": 0.44
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Base"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     100,
+     60
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Base"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Hole"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     50,
+     30
+    ],
+    "radius": 1.6
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Hole",
+    "through_all": true,
+    "direction": "symmetric",
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "sheet.flat_pattern",
+   "params": {}
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

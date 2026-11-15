@@ -1,0 +1,18 @@
+{
+ "commands": [
+  {
+   "command": "solid.coil",
+   "params": {
+    "diameter": 40,
+    "revolutions": 5,
+    "pitch": 8,
+    "section_size": 4,
+    "section": "square",
+    "section_position": "outside",
+    "clockwise": true,
+    "name": "Spring",
+    "operation": "new"
+   }
+  }
+ ]
+}

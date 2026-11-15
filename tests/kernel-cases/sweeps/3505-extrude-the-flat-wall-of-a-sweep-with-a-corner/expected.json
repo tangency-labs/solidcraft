@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3505"
+ ],
+ "what": "the inner side wall of the vertical leg of a mitred swept bar extruded outward by 3 mm (the wall is a B-spline net in a plane, \"the selected planar face no longer exists\")",
+ "source": "analytic",
+ "method": "bar: 8 x 5 section, path 30 up then 40 across (mitred): V = 40 * 70 = 2800. The inner wall of the vertical leg is the plane x = 4, 5 wide and 26 high (it ends where the mitre meets the horizontal leg underside at z = 26): extruding it 3 mm outward adds 5 * 26 * 3 = 390, a block touching the horizontal leg along z = 26: V = 3190.",
+ "body_count": 1,
+ "volume_mm3": 3190
+}

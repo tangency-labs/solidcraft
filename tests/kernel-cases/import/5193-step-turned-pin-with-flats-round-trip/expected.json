@@ -1,0 +1,25 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5193"
+ ],
+ "what": "a turned pin (revolves with two grooves, a stepped bore with a drill point from one end, a stud with chamfered root and tip on the other) with two milled flats, exported to STEP and read back: truck's STEP lost two faces of the flats' neighbours and grew 0.075% (synthetic: the report's own pin, re-dimensioned)",
+ "source": "analytic",
+ "method": "the re-imported body is graded. Every section square to Z is a disc of the revolve profile's radius (4, chamfered 0.6 at both ends), less the end bore (r 1.6 from a 118-ish point at x 13..13.9, r 1.9 at the mouth), less the grooves r 3.3..4 (z -2..-6, -18..-18.8), less for z -13..0 the two circular segments beyond |x| = 3.3; the stud z 0..6 is r 2 with 0.25 and 0.4 chamfers. V = Int A(z) dz (python quadrature) = 998.79936 + 74.08360. Graded to 1e-4 relative, below truck's 7.5e-4 change; bbox x, y -4..4, z -24..6",
+ "body_count": 1,
+ "volume_mm3": 1072.88296,
+ "bbox": {
+  "min": [
+   -4.0,
+   -4.0,
+   -24.0
+  ],
+  "max": [
+   4.0,
+   4.0,
+   6.0
+  ]
+ },
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

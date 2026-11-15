@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "the stock shelled 2 mm, open at the top",
+ "source": "analytic",
+ "method": "cavity 56x36x18; faces 5 outer + rim + 5 inner",
+ "body_count": 1,
+ "volume_mm3": 11712,
+ "faces": 11
+}

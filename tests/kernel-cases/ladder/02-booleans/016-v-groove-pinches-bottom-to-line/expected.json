@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a V groove whose apex touches the bottom face along a line, cut through: two pieces",
+ "source": "analytic",
+ "method": "apex (30, 0) on the bottom face, flanks through (18, 20) and (42, 20): removed triangle 24 wide x 20 high, times 40; the pieces meet only along the line x=30, z=0, so the regularized result is two solids",
+ "body_count": 2,
+ "volume_mm3": 38400.0
+}

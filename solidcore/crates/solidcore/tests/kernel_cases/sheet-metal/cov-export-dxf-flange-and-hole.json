@@ -1,0 +1,132 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-export-dxf-flange-and-hole",
+  "expected": {
+    "body_count": 1,
+    "files": [
+      {
+        "dxf": {
+          "BEND_DOWN": {
+            "LINE": 0,
+            "LWPOLYLINE": 0
+          },
+          "BEND_UP": {
+            "length_mm": 80.0
+          },
+          "CUT": {
+            "CIRCLE": 1,
+            "length_mm": 31.41592653589793
+          },
+          "OUTLINE": {
+            "ARC": 0,
+            "LINE": [
+              4,
+              8
+            ],
+            "length_mm": 273.42477796076935
+          }
+        },
+        "path": "flat.dxf"
+      }
+    ],
+    "method": "T = 2, R = 2, K = 0.5: flat = base 80 x (40 - 4) + bend zone BA = (pi/2)(R + K*T) = 4.712389 + leg 20 - 4 = 16: 80 x 56.712389. OUTLINE: its 4 sides (each may be split where the zone meets the panels: 4 to 8 lines), length 2*(80 + 56.712389); CUT: the hole, 1 circle, length 10*pi; BEND_UP: the flange's bend line (it bends up), 80 long; no BEND_DOWN, no arcs",
+    "results": [
+      {
+        "json": {
+          "bends": 1
+        },
+        "step": 8
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "what": "sheet.export_dxf of an 80 x 40 x 2 base with a 20 mm flange on its y = 0 edge and a 10 mm hole: outline, cut and bend line"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 34,
+      "faces": 16,
+      "vertices": 20
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 9526.584013179972,
+      "body_count": 1,
+      "edges": 26,
+      "faces": 11,
+      "vertices": 18,
+      "volume_mm3": 8916.902604336163
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d"
+  ],
+  "ungraded": [
+    "files: SolidCraft computes it",
+    "results: SolidCraft computes it"
+  ],
+  "what": "sheet.export_dxf of an 80 x 40 x 2 base with a 20 mm flange on its y = 0 edge and a 10 mm hole: outline, cut and bend line",
+  "why_not": [
+    "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

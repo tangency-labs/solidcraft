@@ -1,0 +1,12 @@
+id = "geom.grid"
+upstream = ["source/SMLib/inc/SmGrid.h", "source/SMLib/src/SmGrid.cpp"]
+rust_module = "geom::grid"
+depends_on = ["geom.extent3d", "geom.object", "geom.vector3d"]
+soft_depends_on = ["geom.tree"]
+est_lines = 876
+layer = 4
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-geom.grid-a1"
+claimed_at = "2026-10-12T20:21:29Z"
+notes = "CO-PORTED in intersect.ray_tracer (PR #48): PARTIAL: difftest 615 cases (15 fixture + 600 generated), 613 pass bit-identical, 2 deferred (surface.surface_cache_p3 1: SmSurfaceGridElement::Init needs the patch data of a bare tree node; surface.surface_p2 1: ExpandHierarchy via smsurf_GetSurfaceCache, a DISPATCH GAP (the element holds a handle, no store turns it into the Surface); retagged by surface.surface_cache_p1, then by surface.surface_p1 in PR #43); 30k-seed run clean; no UNPORTED(geom.grid) stubs existed. 23 fns; largest: SmGrid::Setup3DDDA, SmGrid::Step3DDDA, SmSurfaceHierarchyElement::ExpandHierarchy, SmGrid::AddElement; cycle back-edges (call into later units; stub or co-port): geom.extent2d(2), surface.surface_cache_p1(2), surface.surface_p2(2), geom.polar_box(1), geom.pseudo_box(1), surface.surface_cache_p3(1), surface.surface_p7(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit fix/geom-stale-stubs: Grid::expand_hierarchy_with ports SmSurfaceHierarchyElement::ExpandHierarchy over a caller-held surface cache tree with SmSurfaceGridElement::Init as a closure; GREEN (wire: grid surface elements): SmSurfaceGridElement::Init is SurfaceGridElement::init (+ from_leaf_data, moved from intersect::ray_tracer::surface_leaf); Grid::expand_hierarchy takes the surface's cache and Grid::add_surface_node is AddElement(SM_GE_SURFACE) from a tree node, so the two dispatch gaps are gone (ElementSource::Surface removed); RayTracer::add_surface_to_grid calls Grid::expand_hierarchy. The explicit-cache ops of the runner (define_surface .. observe_cached) run these on the real cache nodes of both sides, and the two fixtures that were deferred (raytracer_surface_hierarchy_expand, surface_leaf_element) are written with them; opaque add_hier surface labels stay dump-only. difftest 621 cases (21 fixture + 600 generated), 621 pass, 0 fail, 0 deferred, max_rel_err 0e0, all 621 compare values; 6000-seed run (6021 cases) clean."

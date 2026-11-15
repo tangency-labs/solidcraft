@@ -1,0 +1,47 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 10,
+    "height": 15,
+    "corner": [
+     0,
+     -5,
+     0
+    ],
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 30,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "operation": "join",
+    "targets": [
+     "Block"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      -10,
+      0,
+      30
+     ]
+    ],
+    "radius": 2
+   }
+  }
+ ]
+}

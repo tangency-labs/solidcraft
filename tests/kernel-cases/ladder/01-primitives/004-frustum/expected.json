@@ -1,0 +1,10 @@
+{
+ "sources": [],
+ "what": "a cone frustum r10 -> r5, h20 (revolved trapezoid)",
+ "source": "analytic",
+ "method": "V = pi h/3 (R^2 + R r + r^2); A = pi (R^2 + r^2) + pi (R + r) sqrt((R-r)^2 + h^2)",
+ "body_count": 1,
+ "volume_mm3": 3665.191429188,
+ "area_mm2": 1364.182957455,
+ "faces": 3
+}

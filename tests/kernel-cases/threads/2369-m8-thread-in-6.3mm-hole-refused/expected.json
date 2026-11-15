@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2369",
+  "tangency-labs/solidcraft#2688",
+  "tangency-labs/solidcraft#2853",
+  "tangency-labs/solidcraft#1018"
+ ],
+ "what": "a modelled thread on a hole that isn't the thread's size: refused with the size to use, never a silent change of the hole",
+ "source": "analytic",
+ "method": "Decision (#1018, #2853): a modelled thread never changes the size of the hole it is on; one that isn't the thread's size is refused, naming the size to use. A fill-to-tap-drill or turn-down option would be opt-in, off by default (see #3060), and get its own case. The refusal's numbers, from ISO 68-1 (H = P sqrt3/2, basic depth 5H/8): M8 (P 1.25): the tap drill is the tap maker's, 6.8 mm (Yamawa YEU23 p.704, as tapped holes take it since 05f1c6b9a and case 2115 grades; major minus pitch, 6.75 mm, is only for a size no table lists); basic minor diameter D1 = 8 - 2 x 5H/8 = 8 - 1.353 = 6.647 mm; a 6.3 mm hole is below the minor diameter, so the thread's teeth would fill part of the hole. Expected message: \"this 6.3 mm hole is too narrow for a modelled M8 thread (its teeth would fill the hole); drill 6.8 mm for M8\".",
+ "outcome": "refused",
+ "refusal": "this 6.3 mm hole is too narrow for a modelled M8 thread (its teeth would fill the hole); drill 6.8 mm for M8"
+}

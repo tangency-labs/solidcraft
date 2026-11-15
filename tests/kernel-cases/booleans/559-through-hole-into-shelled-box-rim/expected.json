@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#559"
+ ],
+ "what": "a 1 mm through-all hole straight down into the 2 mm rim of a shelled box: 'implausible volume' / no result",
+ "source": "analytic",
+ "method": "box 70x50x30 shelled 2 mm inward, top open: 105000 - 66*46*28 = 19992. The hole (r 0.5) at y=24 lies inside the wall y 23..25 and runs all 30 mm (wall, then floor): pi*0.25*30 = 23.562. V = 19992 - 23.562 = 19968.438",
+ "body_count": 1,
+ "volume_mm3": 19968.438055098075
+}

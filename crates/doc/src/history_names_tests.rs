@@ -23,7 +23,7 @@ fn piece_names_parse_into_stem_and_bounding_faces() {
 }
 
 fn named(names: &[&str]) -> Vec<Named> {
-    names.iter().map(|n| Named { name: n.to_string(), aliases: Vec::new(), verified: true, origins: None }).collect()
+    names.iter().map(|n| Named { name: n.to_string(), verified: true, ..Named::default() }).collect()
 }
 
 #[test]
@@ -111,6 +111,22 @@ fn a_piece_with_many_faces_around_it_keeps_a_name_that_can_be_used() {
     assert_ne!(names.faces[0], names.faces[1], "the pieces are still told apart");
 }
 
+/// A name saved in the older form (`F5:blend:F2:+x|F2:+z`) names the same face as today's
+/// `F5:blend(F2:+x|F2:+z)`, so a stored name still finds the face, its piece and its stem.
+#[test]
+fn a_name_in_the_older_form_still_finds_the_face_it_names() {
+    let names = qualify(named(&["F5:blend(F2:+x|F2:+z)#[F6:-y]", "F2:+x", "F2:+z"]), &[]);
+    // The face is a piece of the blend face the stored name names.
+    assert_eq!(matches(&names, 0, "F5:blend:F2:+x|F2:+z"), Some(Match::Piece), "the older form names the same face");
+    assert_eq!(matches(&names, 0, "F5:blend(F2:+x|F2:+z)"), Some(Match::Piece), "the current form as well");
+    // Another face of the design is not that face.
+    assert_eq!(matches(&names, 1, "F5:blend:F2:+x|F2:+z"), None);
+    // The inner face of an older design is found as well.
+    let names = qualify(named(&["F3:inner(F2:top)#[F4:-y]", "F2:top"]), &[]);
+    assert_eq!(matches(&names, 0, "F3:inner:F2:top"), Some(Match::Piece), "the older form names the same face");
+    assert_eq!(matches(&names, 1, "F3:inner:F2:top"), None);
+}
+
 #[test]
 fn a_merged_face_takes_the_shared_stem_or_the_first_name_and_answers_to_the_others() {
     let m = merged(named(&["top#[a]", "top#[b]"])).unwrap();
@@ -123,6 +139,28 @@ fn a_merged_face_takes_the_shared_stem_or_the_first_name_and_answers_to_the_othe
     assert_eq!(m.aliases, vec!["F9:top".to_string()]);
     let names = qualify(vec![m], &[]);
     assert_eq!(matches(&names, 0, "F9:top"), Some(Match::Alias));
+}
+
+/// A side drawn in two collinear pieces is one face its feature made from both: each piece's role
+/// names that very face, a piece of it once it is split. Joined with another feature's face, it
+/// keeps them, and the other face's names are aliases only.
+#[test]
+fn a_face_made_from_several_roles_is_named_by_each_and_keeps_them_when_merged() {
+    let side = Named { name: "F2:side:c1".into(), synonyms: vec!["F2:side:c2".into()], verified: true, ..Named::default() };
+    let names = qualify(vec![side.clone()], &[]);
+    assert_eq!(names.faces[0], "F2:side:c1");
+    assert_eq!(matches(&names, 0, "F2:side:c2"), Some(Match::Exact));
+    let other = Named { name: "F9:side:a".into(), synonyms: vec!["F9:side:b".into()], verified: true, ..Named::default() };
+    let m = merged(vec![side.clone(), other]).unwrap();
+    assert_eq!((m.name.as_str(), m.synonyms.as_slice()), ("F2:side:c1", ["F2:side:c2".to_string()].as_slice()));
+    assert_eq!(m.aliases, vec!["F9:side:a".to_string(), "F9:side:b".to_string()]);
+    let names = qualify(vec![m], &[]);
+    assert_eq!(matches(&names, 0, "F2:side:c2"), Some(Match::Exact));
+    assert_eq!(matches(&names, 0, "F9:side:b"), Some(Match::Alias));
+    // Split by a cut: each piece is a piece of what either role names.
+    let names = qualify(vec![side.clone(), side, Named { name: "F4:side:x".into(), ..Named::default() }], &[(0, 2)]);
+    assert_eq!(names.faces[0], "F2:side:c1#[F4:side:x]");
+    assert_eq!(matches(&names, 0, "F2:side:c2"), Some(Match::Piece));
 }
 
 /// #3330: a linked design's faces are named after the names that design gave them, so what the
@@ -148,4 +186,103 @@ fn a_linked_designs_face_names_keep_their_pieces_and_nothing_else() {
     for n in ["", "#", "#[", "]", "a#[", "#[]", "x#[[]]]", "#1", "a#[b]#", "é#[ü]"] {
         let _ = role(n);
     }
+}
+
+/// A face that was split when a name was stored and is whole again (#11731): the stored piece
+/// is all of it, when the face still touches the faces that told the piece apart.
+#[test]
+fn a_piece_name_finds_its_face_once_it_is_whole_again() {
+    let faces = named(&["top", "left", "right", "start"]);
+    let names = qualify(faces, &[(0, 1), (0, 3)]);
+    assert_eq!(names.faces[0], "top");
+    assert_eq!(matches(&names, 0, "top#[left]"), Some(Match::Piece));
+    assert_eq!(matches(&names, 0, "top#[left,start]"), Some(Match::Piece));
+    // It no longer touches a face the qualifier names: some other piece, gone since.
+    assert_eq!(matches(&names, 0, "top#[right]"), Some(Match::Stem));
+    assert_eq!(matches(&names, 0, "top#[left]@F9.1"), None, "a copy's piece");
+    // A numbered piece (nothing told it apart, or a tie) says nothing about which part it was.
+    assert_eq!(matches(&names, 0, "top#1"), Some(Match::Stem));
+    assert_eq!(matches(&names, 0, "top#[left]#2"), Some(Match::Stem));
+    assert_eq!(matches(&names, 0, "top#[]"), Some(Match::Stem));
+}
+
+/// A fillet or chamfer replaces the edge between two faces with a face of its own, named after
+/// that edge (`F3:blend:side|start`): the two no longer touch, and the blend is what tells a piece
+/// of one from a piece of another. A piece told apart by the face the blend separated from is
+/// still found, so the edge saved with it is too (#4325).
+#[test]
+fn a_piece_name_survives_the_blend_that_replaced_the_edge_it_was_told_apart_by() {
+    // The side now meets the start cap only through the blend along their old edge.
+    let faces = named(&["side", "start", "F3:blend:side|start"]);
+    let names = qualify(faces, &[(0, 2), (1, 2)]);
+    assert_eq!(names.faces[0], "side");
+    assert_eq!(matches(&names, 0, "side#[start]"), Some(Match::Piece));
+    // A face the blend does not round an edge with is not one the side is told apart by.
+    assert_eq!(matches(&names, 0, "side#[top]"), Some(Match::Stem));
+    assert_eq!(matches(&names, 0, "side#[F3:blend:side|top]"), Some(Match::Stem), "a blend of another edge");
+}
+
+/// A blend face's own name is the edge it replaced, so the faces that told a piece of one apart
+/// sit inside that name (`F3:blend:side#[start]|start`); the face whole again since is the blend
+/// of the sides without their qualifiers (#4325).
+#[test]
+fn a_piece_of_a_blend_face_finds_it_once_it_is_one_face_again() {
+    let faces = named(&["F3:blend:side|start", "side", "start"]);
+    let names = qualify(faces, &[(0, 1), (0, 2)]);
+    assert_eq!(names.faces[0], "F3:blend:side|start");
+    assert_eq!(matches(&names, 0, "F3:blend:side#[start]|start"), Some(Match::Piece));
+    assert_eq!(matches(&names, 0, "F3:blend:side#[side]|start"), Some(Match::Piece));
+    // A face the blend no longer touches, inside its name: not its piece.
+    assert_eq!(matches(&names, 0, "F3:blend:side#[top]|start"), None);
+    // A qualifier on the side that is whole anyway is not a piece at all.
+    assert_eq!(matches(&names, 0, "F3:blend:side|start"), Some(Match::Exact));
+    // A pattern copy's blend: the qualifier carries the copy's instance, as the faces around the
+    // copy do, and the name compares within that copy only.
+    let copied = qualify(named(&["F3:blend:side|start@F9.1", "side@F9.1", "start@F9.1"]), &[(0, 1), (0, 2)]);
+    assert_eq!(matches(&copied, 0, "F3:blend:side#[start@F9.1]|start@F9.1"), Some(Match::Piece));
+    assert_eq!(matches(&copied, 0, "F3:blend:side#[start@F9.1]|start@F9.2"), None, "another copy");
+}
+
+/// A piece of a blend face is found by the name the blend is written in today as well: the
+/// qualifier that tells the piece apart sits inside the blend's name, on one of the edge's sides,
+/// and the face whole again since is the blend of the sides without their qualifiers.
+#[test]
+fn a_piece_of_a_blend_face_is_found_by_the_name_the_blend_is_written_in_today() {
+    let faces = named(&["F3:blend(side|start)", "side", "start"]);
+    let names = qualify(faces, &[(0, 1), (0, 2)]);
+    assert_eq!(names.faces[0], "F3:blend(side|start)");
+    assert_eq!(matches(&names, 0, "F3:blend(side#[start]|start)"), Some(Match::Piece));
+    assert_eq!(matches(&names, 0, "F3:blend(side#[side]|start)"), Some(Match::Piece));
+    // A face the blend no longer touches, inside its name: not its piece.
+    assert_eq!(matches(&names, 0, "F3:blend(side#[top]|start)"), None);
+}
+
+/// Two pieces of one face that a blend tells apart from the same face both answer to the stored
+/// name: one through the face itself, one through the blend that replaced its edge. The lookup
+/// chooses neither (#4325).
+#[test]
+fn two_pieces_told_apart_by_one_blend_both_answer_to_a_stored_name() {
+    let doc = crate::Document {
+        features: serde_json::from_value(serde_json::json!([
+            {"id": 1, "name": "Box1", "type": "box", "corner": [0, 0, 0], "length": "40", "width": "30", "height": "10"},
+            {"id": 2, "name": "Round", "type": "fillet", "edges": [[20, 0, 10]], "radius": "2"},
+            // A slot through the front wall, top to bottom: the wall is two pieces, and each keeps
+            // the round along its own top edge.
+            {"id": 3, "name": "Slot", "type": "box", "corner": [15, -1, 0], "length": "10", "width": "12", "height": "12"},
+            {"id": 4, "name": "SlotCut", "type": "combine", "target": "Body1", "tools": ["Body2"], "operation": "cut"}
+        ]))
+        .unwrap(),
+        ..crate::Document::default()
+    };
+    let doc = crate::format::read(&doc.to_json()).unwrap();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = state.body("Body1").unwrap();
+    let names = crate::naming::names(body);
+    let stored = "F1:-y#[F1:+z]";
+    let answering: Vec<usize> =
+        (0..names.faces.len()).filter(|face| matches(&names, *face, stored).is_some_and(|level| level >= Match::Piece)).collect();
+    assert_eq!(answering.len(), 2, "{:?}", names.faces);
+    assert!(crate::name_lookup::locate_face_on_body(&state, Some("Body1"), stored, Vec3::new(5., 0., 4.)).is_none(), "two faces answer");
 }

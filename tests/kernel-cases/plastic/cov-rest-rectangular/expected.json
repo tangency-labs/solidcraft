@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "plastic.rest, a solid rectangle 16 along x by 10 across and 3 high, on a 60 x 40 x 3 plate with no rule (no draft)",
+ "source": "analytic",
+ "method": "no rule, no draft: a 16 x 10 x 3 block joined on the face, wholly inside it. V = 60*40*3 + 16*10*3 = 7680. Faces: the plate's 6 and the rest's 4 sides and top",
+ "body_count": 1,
+ "volume_mm3": 7680.0,
+ "faces": 11,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   6
+  ]
+ }
+}

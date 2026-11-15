@@ -1,0 +1,11 @@
+{
+ "description": "A corner where three rounds meet: a 40 x 40 x 30 box with its vertical edge rounded R8, then its two top edges and the arc between them over that round rounded R4 (one tangent chain). The top round rolls over the vertical one in one blend face at the corner, which meets its neighbours tangent but jumps in curvature. It is taken off (face.delete with heal false) and the hole patched from its four edges with Curvature (g2) and, beside it, with Curvature change (g3). Both meet the rounds and the top in tangent plane and curvature; the g3 patch also meets the curvature's rate of change in the middle of each seam (below 1e-4 /mm^2, against 0.27 to 0.63 for g2).",
+ "commands": [
+  {"command": "solid.box", "params": {"corner": [0, 0, 0], "length": 40, "width": 40, "height": 30, "body_name": "Plate"}},
+  {"command": "solid.fillet", "params": {"body": "Plate", "edges": [[40, 40, 15]], "radius": 8}},
+  {"command": "solid.fillet", "params": {"body": "Plate", "edges": [[40, 20, 30], [20, 40, 30]], "radius": 4}},
+  {"command": "face.delete", "params": {"body": "Plate", "faces": [[37.79, 36.155, 28.43]], "heal": false}},
+  {"command": "surface.patch", "params": {"body": "Plate", "edges": [[34.828, 34.828, 30.0], [37.657, 37.657, 26.0], [38.828, 32.0, 28.828], [32.0, 38.828, 28.828]], "continuity": "g2", "body_name": "Patch G2"}},
+  {"command": "surface.patch", "params": {"body": "Plate", "edges": [[34.828, 34.828, 30.0], [37.657, 37.657, 26.0], [38.828, 32.0, 28.828], [32.0, 38.828, 28.828]], "continuity": "g3", "body_name": "Patch G3"}}
+ ]
+}

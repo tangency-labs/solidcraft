@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3540"
+  ],
+  "what": "a groove cut whose r33 arcs lie exactly on the r33 cylinder of an earlier slot cut and overlap it in Z: minutes of CPU",
+  "source": "analytic",
+  "method": "tube r28..33, z -5..10: V = pi*(33^2-28^2)*15. Slots (3 sectors, 26 deg each, r29.5..33, z -3..8): each removes theta/2*(R^2-r^2)*h. Grooves (3 sectors, 69 deg, r30..33, z 4.7..8.3). Each groove overlaps its slot in 25 deg x r30..33 x z 4.7..8 (3.3), counted once. V = 14372.79 - 1637.88 - 1229.09 + 408.21 = 11914.03",
+  "body_count": 1,
+  "volume_mm3": 11914.03
+}

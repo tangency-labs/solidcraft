@@ -183,19 +183,28 @@ def spandrel_offset(R):
 
 
 def write(case, method, bodies, mp, area, bbox, faces=None, **extra):
-    d = {
-        "source": "analytic",
+    path = os.path.join(OUT, case, "expected.json")
+    d = {"source": "analytic"}
+    # known_failure is kept by hand (the oracle fails the job when a known failure passes), so
+    # regenerating the values keeps it
+    try:
+        with open(path) as f:
+            old = json.load(f)
+        if "known_failure" in old:
+            d["known_failure"] = old["known_failure"]
+    except (OSError, ValueError):
+        pass
+    d.update({
         "method": method,
         "body_count": bodies,
         "volume_mm3": mp.v,
         "area_mm2": area,
         "center_of_mass": mp.com(),
         "bbox": {"min": list(map(float, bbox[0])), "max": list(map(float, bbox[1]))},
-    }
+    })
     if faces is not None:
         d["faces"] = faces
     d.update(extra)
-    path = os.path.join(OUT, case, "expected.json")
     with open(path, "w") as f:
         json.dump(d, f, indent=2)
         f.write("\n")

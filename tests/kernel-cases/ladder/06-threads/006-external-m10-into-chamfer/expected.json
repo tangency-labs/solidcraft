@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a d10 x 30 cylinder with a 1 mm chamfer on top, then a modelled M10 thread over its cylinder face, running out through the chamfer",
+ "source": "analytic",
+ "method": "ISO 68-1 basic profile (60 deg, root flat P/4 at d - 5H/4 ... minor d1 = d - 1.0825 P, crest flat P/8): a helical groove of fixed section is a screw motion, so averaged over the turn every meridian half-plane holds the same section and V = 2 pi int int r m(r) dr dz over the stock's section, m the material fraction per pitch; the groove runs out past free ends. Tolerance 0.5%: solid.thread cuts faceted by design (chords within P/200 on the body, P/100 on the tool); the stock's section is r <= 5 below z=29 and r <= 5 - (z-29) in the chamfer; the groove runs one pitch past z=29, which covers the chamfer down to r=4.2 (above the root r=4.188 only for 0.01 mm)",
+ "body_count": 1,
+ "volume_mm3": 1948.692985041,
+ "tolerance": {
+  "rel": 0.005
+ }
+}

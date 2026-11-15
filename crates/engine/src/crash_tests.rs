@@ -18,11 +18,12 @@ fn child() {
     let (Some(dir), Some(mode)) = (solidcraft_geom::env::var_os("CRASH_CHILD_DIR"), solidcraft_geom::env::var("CRASH_CHILD")) else {
         return;
     };
-    let fresh = install(PathBuf::from(dir), build());
+    let dir = PathBuf::from(dir);
+    let fresh = install(dir.clone(), build());
     println!("FRESH {}", serde_json::to_string(&fresh).unwrap());
     // Dying while starting up, before any command: in a graphics driver, with or without what
     // a native crash handler caught.
-    if mode == "startup" || mode == "native" {
+    if mode == "startup" || mode == "native" || mode == "signal" {
         phase("window");
         phase("adapter request");
         set_environment("Renderer: Vulkan Test GPU (driver 1.2.3)");
@@ -36,16 +37,123 @@ fn child() {
             .unwrap();
             fs::write(dump, b"MDMP fake").unwrap();
         }
+        // What the macOS signal handler writes: no minidump, a walk up the stack instead (with
+        // a frame that isn't text, one far too long, and far too many).
+        if mode == "signal" {
+            let (info, _) = native_paths().unwrap();
+            let mut frames = vec![json!("libAGXMetalG13X.dylib+0x1A2B3C"), json!(42), json!("x".repeat(5000))];
+            frames.extend((0..100).map(|i| json!(format!("solidcraft+0x{i:X} frame{i}"))));
+            let v = json!({"signal": "SIGSEGV", "number": 11, "code": "SIGSEGV", "name": "segmentation fault",
+                "detail": "read of 0x0000000000000010 (SEGV_MAPERR)", "address": "0x0000000201A2B3C0",
+                "module": "/System/Library/Extensions/AGXMetalG13X.bundle/Contents/MacOS/libAGXMetalG13X.dylib",
+                "offset": "0x1A2B3C", "thread": 4242, "thread_name": "main", "pid": 77, "frames": frames});
+            fs::write(info, v.to_string()).unwrap();
+        }
+        std::process::abort();
+    }
+    // Up and running, then a second window's surface (the agent chat on its own), then dying.
+    if mode == "late_surface" {
+        startup_step("window surface");
+        startup_step("surface configure");
+        phase(RUNNING);
+        startup_step("window surface");
+        startup_step("surface configure");
         std::process::abort();
     }
     set_environment("Renderer: test");
     let mut s = Session { crash_journal: true, ..Default::default() };
     s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+    if mode == "read_only" {
+        let state = STATE.get().unwrap();
+        let before = read_live_journal(state);
+        assert_eq!(before.base, json!("new"));
+        assert_eq!(before.replay, vec![json!({"command":"solid.box","params":{"length":10,"width":20,"height":30}})]);
+        let evaluations = s.evaluations;
+        s.execute("document.inspect", &json!({})).unwrap();
+        assert_eq!(s.evaluations, evaluations, "reading the design does not evaluate it");
+        let after = read_live_journal(state);
+        assert_eq!(after.base, before.base, "a read must not rebase the recovery journal");
+        assert_eq!(after.replay, before.replay, "the command that made the box must remain replayable");
+        assert!(after.in_flight.is_none());
+        end_session();
+        println!("READ_ONLY_JOURNAL_OK");
+        return;
+    }
     // Commands that only read are not kept.
     for _ in 0..50 {
         s.execute("document.inspect", &json!({})).unwrap();
     }
     match mode.as_str() {
+        "prepared" => {
+            let original = s.scratch();
+            s.execute("timeline.roll_to", &json!({"position":0})).unwrap();
+            let source = s.scratch();
+            let state = STATE.get().unwrap();
+            let journal_before_error = read_live_journal(state).replay;
+            let invalid = vec![(
+                "timeline.redefine".into(),
+                json!({"feature":1,"command":"solid.box","params":{"length":"missing_extent","width":20,"height":30}}),
+            )];
+            assert!(s.scratch().compute_editor_commands(&invalid, &source, original.scratch()).is_err());
+            assert_eq!(read_live_journal(state).replay, journal_before_error, "failed worker work never enters recovery");
+            let evaluations = s.evaluations;
+            s.restore_editor(&source, original).unwrap();
+            assert_eq!(s.evaluations, evaluations, "Cancel restores without evaluating");
+            assert_eq!(s.doc.marker, None);
+            let original = s.scratch();
+            s.execute("timeline.roll_to", &json!({"position":0})).unwrap();
+            let source = s.scratch();
+            let commands =
+                vec![("timeline.redefine".into(), json!({"feature":1,"command":"solid.box","params":{"length":12,"width":20,"height":30}}))];
+            let before = read_live_journal(state).replay;
+            let discarded = s.scratch().compute_editor_commands(&commands, &source, original.scratch()).unwrap();
+            drop(discarded);
+            assert_eq!(read_live_journal(state).replay, before, "discarded work never enters recovery");
+            let prepared = s.scratch().compute_editor_commands(&commands, &source, original).unwrap();
+            s.accept_commands(prepared).unwrap();
+            let journal = read_live_journal(state);
+            assert_eq!(journal.base, json!("new"), "accepted steps form one continuous replay");
+            assert_eq!(journal.replay.len(), before.len() + 2, "restore marker and redefine are recorded once");
+            let mut replay = Session::default();
+            for command in &journal.replay {
+                replay.execute(command["command"].as_str().unwrap(), &command["params"]).unwrap();
+            }
+            assert_eq!(replay.doc.marker, None);
+            let volume = replay.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+            assert!((volume - 7200.0).abs() < 0.001);
+            let path = state.dir.join("prepared-source.solidcraft");
+            s.execute("file.save_as", &json!({"path":path})).unwrap();
+            // A host can adopt an opened tab before any command has rebased its journal.
+            state.journal.lock().unwrap().last_doc = 0;
+            let commands = vec![("solid.box".into(), json!({"length":1,"width":1,"height":1}))];
+            let prepared = s.scratch().compute_commands(&commands, None).unwrap();
+            s.accept_commands(prepared).unwrap();
+            assert_eq!(read_live_journal(state).base, json!({"file":path}));
+            println!("PREPARED_JOURNAL_OK");
+        }
+        // Live sketch drag frames store the edited design without copying it again: each
+        // frame is journaled, and the next frame does not take the design for an outside edit.
+        "sketch_drag" => {
+            s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+            s.execute("sketch.rectangle.two_point", &json!({"p0": [5, 5], "p1": [25, 20]})).unwrap();
+            for k in 1..=3 {
+                let (from, to) = ([6.0 - k as f64, 5.0], [5.0 - k as f64, 5.0]);
+                s.execute("sketch.drag", &json!({"entity": "l1.start", "from": from, "to": to, "live": true})).unwrap();
+            }
+            s.execute("sketch.drag_end", &json!({})).unwrap();
+            let journal = read_live_journal(STATE.get().unwrap());
+            assert_eq!(journal.base, json!("new"), "the drag frames continue the replay");
+            // The drag's end only evaluates the model: it changes nothing a replay needs.
+            let ids: Vec<&str> = journal.replay.iter().filter_map(|c| c["command"].as_str()).collect();
+            assert_eq!(ids, ["solid.box", "sketch.create", "sketch.rectangle.two_point", "sketch.drag", "sketch.drag", "sketch.drag"]);
+            let mut replay = Session::default();
+            for command in &journal.replay {
+                replay.execute(command["command"].as_str().unwrap(), &command["params"]).unwrap();
+            }
+            let id = s.active_sketch.unwrap();
+            assert_eq!(replay.doc.sketch(id).ok(), s.doc.sketch(id).ok(), "the replay drags the sketch to the same place");
+            println!("SKETCH_DRAG_JOURNAL_OK");
+        }
         "render" => {
             s.execute("render.settings.set", &json!({"name":"Studio","set":{"exposure_ev":2}})).unwrap();
             s.execute("render.settings.get", &json!({"name":"Studio"})).unwrap();
@@ -61,8 +169,51 @@ fn child() {
             }
             assert_eq!(s.doc.features.len(), 1, "the design is unchanged");
         }
+        // A panic inside a solidcore call: caught there, an internal error of the command.
         "kernel" => {
-            assert!(s.execute("diagnostics.crash_test", &json!({"mode": "kernel"})).is_err());
+            let r = s.execute("diagnostics.crash_test", &json!({"mode": "kernel"}));
+            assert!(matches!(&r, Err(crate::EngineError::Internal(id, _)) if id == "diagnostics.crash_test"), "{r:?}");
+        }
+        // A Rayon worker panics while this command is inside the kernel guard. The hook must not
+        // write an unrecovered report at once; the command fails with the kernel's internal error
+        // and the report is recovered, with this command and the design.
+        "worker" => {
+            let r = s.execute("diagnostics.crash_test", &json!({"mode": "worker"}));
+            assert!(
+                matches!(&r, Err(crate::EngineError::Internal(id, msg)) if id == "diagnostics.crash_test" && msg.contains("on a worker")),
+                "{r:?}"
+            );
+            assert_eq!(s.doc.features.len(), 1, "the design is unchanged");
+        }
+        // Same worker, but the panic is not caught by the kernel guard. It stays a command panic.
+        "worker_raw" => {
+            let r = s.execute("diagnostics.crash_test", &json!({"mode": "worker_raw"}));
+            assert!(
+                matches!(&r, Err(crate::EngineError::Internal(id, msg)) if id == "diagnostics.crash_test" && msg.contains("a worker panic in a command")),
+                "{r:?}"
+            );
+            assert_eq!(s.doc.features.len(), 1, "the design is unchanged");
+        }
+        // Between commands: a worker panic is reported at once, as a panic on any other thread is.
+        "worker_idle" => {
+            let r = solidcraft_kernel::crash_test_worker_panic("rayon worker outside a command");
+            assert!(matches!(&r, Err(solidcraft_kernel::KernelError::Internal(_))), "{r:?}");
+        }
+        // The kernel's own parallel path: an item panics inside `guard` on a pool worker while a
+        // command is open (`map_with_local_pools` runs it on its one-thread pool). Nothing is
+        // written until the command ends; then one recovered report with the command's design.
+        "guarded_worker" => {
+            let before = s.doc.clone();
+            let params = json!({"case": "guarded_worker"});
+            command_begin(&s, "test.guarded_worker", &params);
+            let scope = Scope::enter();
+            let r = solidcraft_kernel::map_with_local_pools(&[0], 1, |_| -> solidcraft_kernel::Result<()> {
+                std::panic::panic_any(String::from("a guarded panic on a pool worker"))
+            });
+            drop(scope);
+            assert!(matches!(r.as_slice(), [Err(solidcraft_kernel::KernelError::Internal(_))]), "{r:?}");
+            assert!(list(&STATE.get().unwrap().dir).is_empty(), "the worker's panic waits for the command to end");
+            command_done(true, false, &before, &s.doc, "test.guarded_worker", &params, Err("the item failed".into()));
         }
         // `thread_dies`: the panic ends the app, as one on the window's thread does.
         "thread" | "thread_dies" => {
@@ -88,6 +239,31 @@ fn child() {
             s.execute("solid.box", &json!({"length": 4, "width": 4, "height": 4})).unwrap();
             let _ = s.execute("diagnostics.crash_test", &json!({"mode": "abort"}));
         }
+        // A new design and commands on it before the app's next frame (a control-channel batch).
+        "new" => {
+            s.execute("file.new", &json!({})).unwrap();
+            s.execute("solid.sphere", &json!({"diameter": 8})).unwrap();
+            let _ = s.execute("diagnostics.crash_test", &json!({"mode": "abort"}));
+        }
+        // A clean exit whose journal cannot be removed: the directory is read-only.
+        "clean_read_only" => {
+            // Only Unix makes the folder read-only here; elsewhere the session just ends.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let sessions = dir.join("sessions");
+                fs::set_permissions(&sessions, fs::Permissions::from_mode(0o500)).unwrap();
+                end_session();
+                fs::set_permissions(&sessions, fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            #[cfg(not(unix))]
+            end_session();
+            println!("CLEAN_READ_ONLY_OK");
+        }
+        // A second install in the same process: the journal it opens is an orphan.
+        "install_twice" => {
+            install(dir.clone(), build());
+        }
         _ => {}
     }
     end_session();
@@ -104,6 +280,30 @@ fn run_child(dir: &Path, mode: &str) -> (String, bool) {
         .output()
         .unwrap();
     (String::from_utf8_lossy(&out.stdout).into_owned(), out.status.success())
+}
+
+#[test]
+fn accepted_prepared_commands_replay_and_discarded_work_is_not_journaled() {
+    let directory = fresh_dir("prepared");
+    let (output, ok) = run_child(&directory, "prepared");
+    assert!(ok && output.contains("PREPARED_JOURNAL_OK"), "{output}");
+    let _ = fs::remove_dir_all(directory);
+}
+
+#[test]
+fn a_read_only_command_keeps_the_replay_after_body_names_are_pinned() {
+    let directory = fresh_dir("read-only");
+    let (output, ok) = run_child(&directory, "read_only");
+    assert!(ok && output.contains("READ_ONLY_JOURNAL_OK"), "{output}");
+    let _ = fs::remove_dir_all(directory);
+}
+
+#[test]
+fn live_sketch_drag_frames_keep_the_replay() {
+    let directory = fresh_dir("sketch-drag");
+    let (output, ok) = run_child(&directory, "sketch_drag");
+    assert!(ok && output.contains("SKETCH_DRAG_JOURNAL_OK"), "{output}");
+    let _ = fs::remove_dir_all(directory);
 }
 
 fn only_report(dir: &Path) -> (Summary, Value) {
@@ -135,6 +335,7 @@ fn a_command_panic_is_reported_once_with_the_design_and_the_command() {
     assert!(!bt.iter().any(|f| f.as_str().unwrap().contains("crash::hook")), "the hook's own frames are dropped: {bt:?}");
     assert_eq!(v["recent_commands"][0]["command"], "solid.box");
     // The design from before the command, and the command: together they reproduce the crash.
+    assert!(v["design_path"].as_str().unwrap().ends_with("design.sc"), "{v}");
     let design = solidcraft_io::read_design(&fs::read(v["design_path"].as_str().unwrap()).unwrap()).unwrap();
     assert_eq!(design.features.len(), 1);
     let replay: Value = serde_json::from_slice(&fs::read(v["replay_path"].as_str().unwrap()).unwrap()).unwrap();
@@ -152,6 +353,82 @@ fn a_kernel_panic_is_reported_as_recovered() {
     assert_eq!(s.kind, "kernel_panic_recovered");
     assert!(s.replayable);
     assert!(v["message"].as_str().unwrap().contains("in the kernel"), "{v}");
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// A panic on a Rayon worker inside the kernel guard, during a command (child case `worker`):
+/// one `kernel_panic_recovered` report with the command, its design and its replay.
+#[test]
+fn a_worker_panic_during_a_command_is_recovered_with_the_command() {
+    let d = fresh_dir("worker");
+    let (_, ok) = run_child(&d, "worker");
+    assert!(ok, "the worker panic was caught");
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "kernel_panic_recovered");
+    assert_eq!(s.command.as_deref(), Some("diagnostics.crash_test"));
+    assert!(s.replayable);
+    assert_eq!(v["thread"], "solidcraft-kernel-0");
+    assert!(v["message"].as_str().unwrap().contains("on a worker"), "{v}");
+    assert_eq!(v["base"], "the design as it was when the command started");
+    let design = solidcraft_io::read_design(&fs::read(v["design_path"].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!(design.features.len(), 1);
+    let replay: Value = serde_json::from_slice(&fs::read(v["replay_path"].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!(replay["commands"], json!([{"command": "diagnostics.crash_test", "params": {"mode": "worker"}}]));
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// The same worker panic resumed outside the guard (child case `worker_raw`): one
+/// `command_panic` with the command and its design, not a recovered kernel panic.
+#[test]
+fn a_worker_panic_outside_the_kernel_guard_is_a_command_panic() {
+    let d = fresh_dir("worker-raw");
+    let (_, ok) = run_child(&d, "worker_raw");
+    assert!(ok, "the worker panic was caught by the command");
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "command_panic");
+    assert_eq!(s.command.as_deref(), Some("diagnostics.crash_test"));
+    assert!(s.replayable);
+    assert_eq!(v["thread"], "solidcraft-kernel-0");
+    assert!(v["message"].as_str().unwrap().contains("a worker panic in a command"), "{v}");
+    assert_eq!(v["base"], "the design as it was when the command started");
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// A worker panic while no command is open (child case `worker_idle`): written at once as a
+/// `panic`, with no command and the journal's base.
+#[test]
+fn a_worker_panic_outside_a_command_is_reported_at_once() {
+    let d = fresh_dir("worker-idle");
+    let (_, ok) = run_child(&d, "worker_idle");
+    assert!(ok, "the worker panic was caught");
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "panic");
+    assert_eq!(s.command, None, "no command was running");
+    assert_eq!(v["thread"], "solidcraft-kernel-0");
+    assert_eq!(v["message"], "rayon worker outside a command");
+    assert_eq!(v["base"], "new");
+    assert_eq!(v["recent_commands"][0]["command"], "solid.box");
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// A panic inside `guard` on a kernel pool worker (`map_with_local_pools`, child case
+/// `guarded_worker`): nothing is written until the command ends, then one recovered report.
+#[test]
+fn a_guarded_panic_on_a_pool_worker_is_reported_when_the_command_ends() {
+    let d = fresh_dir("guarded-worker");
+    let (_, ok) = run_child(&d, "guarded_worker");
+    assert!(ok, "the worker panic was caught");
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "kernel_panic_recovered");
+    assert_eq!(s.command.as_deref(), Some("test.guarded_worker"));
+    assert!(s.replayable);
+    assert_ne!(v["thread"], "crash::tests::child", "it ran on the pool's worker");
+    assert_eq!(v["message"], "a guarded panic on a pool worker");
+    assert_eq!(v["base"], "the design as it was when the command started");
+    let design = solidcraft_io::read_design(&fs::read(v["design_path"].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!(design.features.len(), 1);
+    let replay: Value = serde_json::from_slice(&fs::read(v["replay_path"].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!(replay["commands"], json!([{"command": "test.guarded_worker", "params": {"case": "guarded_worker"}}]));
     let _ = fs::remove_dir_all(&d);
 }
 
@@ -182,6 +459,37 @@ fn a_known_panic_that_ends_the_app_is_counted_not_reported_again_as_an_unclean_e
     // A repeat the app survives is counted once, though it then ends cleanly.
     assert!(run_child(&d, "thread").1);
     assert_eq!(only_report(&d).0.count, 3);
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// A clean exit whose journal cannot be removed (its directory is read-only) is not an unclean
+/// exit at the next start: the journal says the session ended cleanly.
+#[test]
+fn a_clean_exit_whose_journal_cannot_be_removed_is_not_reported_as_an_unclean_exit() {
+    let d = fresh_dir("clean-exit");
+    let (out, ok) = run_child(&d, "clean_read_only");
+    assert!(ok && out.contains("CLEAN_READ_ONLY_OK"), "{out}");
+    // The next start finds the journal the clean exit could not remove: it says nothing about it.
+    let (out, ok) = run_child(&d, "none");
+    assert!(ok);
+    assert!(out.contains("FRESH []"), "{out}");
+    let reports = list(&d);
+    assert!(reports.is_empty(), "{reports:?}");
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// A second install in the same process leaves no journal behind: the next start has nothing to
+/// report about it.
+#[test]
+fn a_journal_left_behind_by_a_second_install_is_not_reported_as_an_unclean_exit() {
+    let d = fresh_dir("install-twice");
+    let (out, ok) = run_child(&d, "install_twice");
+    assert!(ok, "{out}");
+    let (out, ok) = run_child(&d, "none");
+    assert!(ok);
+    assert!(out.contains("FRESH []"), "{out}");
+    let reports = list(&d);
+    assert!(reports.is_empty(), "{reports:?}");
     let _ = fs::remove_dir_all(&d);
 }
 
@@ -254,6 +562,30 @@ fn activating_a_component_is_journaled_so_the_replay_builds_in_the_same_componen
     let _ = fs::remove_dir_all(&d);
 }
 
+/// A new design is journaled at once, not from the app's next frame: commands sent right after
+/// `file.new` are in the replay, and the report names the command in flight, not `file.new`.
+#[test]
+fn commands_right_after_a_new_design_are_journaled() {
+    let d = fresh_dir("new");
+    assert!(!run_child(&d, "new").1);
+    assert!(run_child(&d, "none").1);
+    let (s, report) = only_report(&d);
+    assert!(s.message.contains("while running `diagnostics.crash_test`"), "{}", s.message);
+    let replay: Value = serde_json::from_slice(&fs::read(report["replay_path"].as_str().unwrap()).unwrap()).unwrap();
+    let commands = replay["commands"].as_array().unwrap();
+    let ids: Vec<&str> = commands.iter().map(|c| c["command"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["solid.box", "file.new", "solid.sphere", "diagnostics.crash_test"]);
+    let mut recovered = Session::default();
+    for command in commands {
+        let id = command["command"].as_str().unwrap();
+        if id != "diagnostics.crash_test" {
+            recovered.execute(id, &command["params"]).unwrap();
+        }
+    }
+    assert_eq!(recovered.doc.features.len(), 1, "the sphere, on the new design");
+    let _ = fs::remove_dir_all(&d);
+}
+
 #[test]
 fn a_crash_while_starting_up_names_the_step_and_the_renderer() {
     let d = fresh_dir("startup");
@@ -295,6 +627,44 @@ fn a_native_crash_is_reported_with_the_module_the_step_and_the_minidump() {
     let _ = run_child(&d, "none");
     let (s, _) = only_report(&d);
     assert_eq!(s.count, 2);
+    let _ = fs::remove_dir_all(&d);
+}
+
+#[test]
+fn a_crash_signal_is_reported_with_its_thread_and_its_walk_up_the_stack() {
+    let d = fresh_dir("signal");
+    let (_, ok) = run_child(&d, "signal");
+    assert!(!ok, "the child aborted");
+    let (_, ok) = run_child(&d, "none");
+    assert!(ok);
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "unclean_exit");
+    assert!(s.message.contains("segmentation fault (SIGSEGV) in libAGXMetalG13X.dylib+0x1A2B3C during startup (device creation"), "{}", s.message);
+    assert_eq!(v["native"]["signal"], "SIGSEGV");
+    let bt: Vec<&str> = v["backtrace"].as_array().unwrap().iter().map(|f| f.as_str().unwrap()).collect();
+    assert_eq!(bt[0], "SIGSEGV segmentation fault (read of 0x0000000000000010 (SEGV_MAPERR))");
+    assert_eq!(bt[2], "on thread 4242 (main)");
+    assert_eq!(bt[3], "libAGXMetalG13X.dylib+0x1A2B3C");
+    // Frames that aren't text are dropped, long ones cut, and only so many kept.
+    assert_eq!(bt[4], format!("{}… (5000 bytes)", "x".repeat(300)));
+    assert_eq!(bt[5], "solidcraft+0x0 frame0");
+    assert_eq!(bt.len(), 3 + MAX_FRAMES, "{bt:?}");
+    assert!(v.get("minidump_path").is_none(), "{v}");
+    let _ = fs::remove_dir_all(&d);
+}
+
+#[test]
+fn a_window_surface_after_startup_is_not_a_startup_crash() {
+    let d = fresh_dir("late_surface");
+    let (_, ok) = run_child(&d, "late_surface");
+    assert!(!ok, "the child aborted");
+    let (_, ok) = run_child(&d, "none");
+    assert!(ok);
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "unclean_exit");
+    assert!(!s.message.contains("during startup"), "{}", s.message);
+    assert!(s.message.contains("between commands"), "{}", s.message);
+    assert!(v.get("startup_phase").is_none(), "{v}");
     let _ = fs::remove_dir_all(&d);
 }
 
@@ -360,6 +730,17 @@ fn fake_report(dir: &Path, secs: u64, sig: u64, kind: &str) -> String {
     id
 }
 
+/// A report folder an earlier release wrote holds `design.solidcraft`: still found.
+#[test]
+fn a_report_from_an_earlier_release_still_finds_its_design() {
+    let d = fresh_dir("legacy-design");
+    let id = fake_report(&d, 1_700_000_000, 7, "command_panic");
+    fs::write(d.join(&id).join("design.solidcraft"), solidcraft_io::write_design(&solidcraft_doc::Document::default())).unwrap();
+    let v = read(&d, &id).unwrap();
+    assert!(v["design_path"].as_str().unwrap().ends_with("design.solidcraft"), "{v}");
+    let _ = fs::remove_dir_all(&d);
+}
+
 #[test]
 fn reports_stay_within_their_limits() {
     let d = fresh_dir("limits");
@@ -422,6 +803,22 @@ fn signatures_ignore_numbers_but_not_places() {
     assert_eq!(signature("a.rs:1", "face 12 of 40"), signature("a.rs:1", "face 7 of 3"));
     assert_ne!(signature("a.rs:1", "face 12"), signature("a.rs:2", "face 12"));
     assert_ne!(signature("a.rs:1", "edge"), signature("a.rs:1", "face"));
+}
+
+/// A graphics device reset met first by a queue write panics inside wgpu-core (#10240, #6528):
+/// that is the device loss, which the app restarts after, not a crash to report. The same words
+/// from anywhere else, and wgpu's other panics, still are.
+#[test]
+fn a_lost_graphics_device_met_inside_wgpu_is_not_a_crash() {
+    let lost = "called `Result::unwrap()` on an `Err` value: Lost";
+    let windows = r"C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-core-30.0.1\src\device\queue.rs:503";
+    let linux = "/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wgpu-core-30.0.1/src/device/queue.rs:503";
+    assert!(graphics_device_lost(lost, windows));
+    assert!(graphics_device_lost(lost, linux));
+    assert!(!graphics_device_lost(lost, "crates/gpu/src/view.rs:3189"), "not inside wgpu");
+    assert!(!graphics_device_lost("called `Result::unwrap()` on an `Err` value: OutOfMemory", linux));
+    assert!(!graphics_device_lost("Error in Queue::submit: Validation Error", linux));
+    assert!(!graphics_device_lost(lost, "/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wgpu-30.0.1/src/api/queue.rs:1"));
 }
 
 #[test]

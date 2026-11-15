@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3832"
+ ],
+ "what": "a 7-turn coil (centre diameter 80, wire 1 mm, pitch -2 so it winds downward) cut from a cylinder that holds it entirely (boolean Cut: no result)",
+ "source": "analytic",
+ "method": "cylinder r 45, z -20..20 holds the wire (r 40 +- 0.5, z 0 down to -14) wholly, leaving a helical tunnel sealed inside (a body with an internal void: the expected shell count is 2, which the rig cannot grade, so valid is false): V = pi 45^2 40 - pi 0.5^2 * 2 pi 40 * 7 = 253087.3.",
+ "valid": false,
+ "body_count": 1,
+ "volume_mm3": 253087.26032462073
+}

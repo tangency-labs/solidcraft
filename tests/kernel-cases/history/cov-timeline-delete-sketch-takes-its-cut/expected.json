@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "timeline.delete of a sketch deletes the cut made from it",
+ "method": "the notch goes with its sketch: 40x30x10 block with its front top edge rounded R2 along 40 mm: V = 12000 - (1-pi/4) 4 40; faces 6 + 1 = 7",
+ "body_count": 1,
+ "volume_mm3": 11965.663706143592,
+ "faces": 7,
+ "source": "analytic"
+}

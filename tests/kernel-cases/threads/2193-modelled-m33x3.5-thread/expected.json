@@ -1,0 +1,33 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2193",
+  "tangency-labs/solidcraft#2263",
+  "tangency-labs/solidcraft#4153"
+ ],
+ "what": "a modelled M33x3.5 thread, a size the thread menu lacked (designation typed by hand), on a 33 mm shaft (4 turns)",
+ "source": "analytic",
+ "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. External groove (the space between teeth): a trapezoid P/4 wide at the root radius d/2 - 5H/8, widening by 2 tan30 per unit of radius to 7P/8 at d/2. Internal groove: P/8 wide at the major radius d/2, widening to 3P/4 at the minor radius, cut only where there is material (r >= hole radius). Pappus: volume per turn = 2 pi A rc (A the trapezoid area, rc its centroid radius from the axis); a helical sweep of L/P turns removes exactly (L/P) x that, where each end of the thread is a free end or lies inside material. Shaft R=16.5 L=14, M33x3.5 (P=3.5) over its whole length, both ends free: V = pi R^2 L - (L/P) V_turn = 11974.1804 - 4 x 368.57682 = 10499.8731 mm3. COM on the axis at L/2 (7): the groove is symmetric over whole turns. Tolerance 1%: a modelled thread is a faceted helical solid (radial chord error up to 1% of the pitch on every wall, i.e. a volume deficit of about 4/3 x sag/R).",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 10499.8731,
+ "center_of_mass": [
+  0,
+  0,
+  7.0
+ ],
+ "bbox": {
+  "min": [
+   -16.5,
+   -16.5,
+   0
+  ],
+  "max": [
+   16.5,
+   16.5,
+   14
+  ]
+ },
+ "tolerance": {
+  "rel": 0.01
+ }
+}

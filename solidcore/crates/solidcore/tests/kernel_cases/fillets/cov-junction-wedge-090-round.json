@@ -1,0 +1,145 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  30.0
+                ]
+              ],
+              "index": 7
+            }
+          ],
+          "points": [
+            [
+              0.0,
+              0.0,
+              15.0
+            ]
+          ],
+          "tolerance": 2.180449471770337
+        },
+        "kind": "round",
+        "sizes": [
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-junction-wedge-090-round",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "prism over a triangle with a 90 degree apex, sides 20, 30 long: V0 = 200 sin(a) * 30. The apex edge rounded r 2 removes r^2 (cot(a/2) - (pi - a)/2) along 30. V = 5974.247779608",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 1e-6
+    },
+    "volume_mm3": 5974.247779607694,
+    "what": "prism over a 90 degree triangle, apex edge round 2"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8
+    }
+  },
+  "records": "cov-junction-wedge-090-round.bodies.json.gz",
+  "result": [
+    {
+      "body": "Wedge",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2421.059102336683,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 5974.247779576752
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "prism over a 90 degree triangle, apex edge round 2",
+  "why_not": []
+}

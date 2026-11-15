@@ -1,12 +1,12 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 use super::*;
+use solidcore_record::Vec3;
 use solidcraft_doc::joints::{Coupling, Joint, JointKind, MotionLink, NamedOrigin, Size, Snap, XRef};
 use solidcraft_doc::motion::{ContactSet, ExplodedView, MotionStudy, StudyKey};
 use solidcraft_doc::{IDENTITY, Occurrence};
-use solidcraft_geom::Vec3;
 
 fn at(occurrence: u64) -> JointOrigin {
-    JointOrigin { occurrence, snap: Snap::Point { point: Vec3::ZERO, z: None, x: None } }
+    JointOrigin::new(occurrence, Snap::Point { point: Vec3::ZERO, z: None, x: None })
 }
 
 fn joint(id: u64, a: u64, b: u64) -> Joint {
@@ -23,11 +23,13 @@ fn joint(id: u64, a: u64, b: u64) -> Joint {
         angle: 0.1,
         suppressed: false,
         exprs: Default::default(),
+        captured: None,
+        constraint: None,
     }
 }
 
 fn occurrence(id: u64) -> Occurrence {
-    Occurrence { id, component: id, parent: 0, name: format!("Occurrence{id}"), transform: IDENTITY, grounded: false }
+    Occurrence { id, component: id, parent: 0, name: format!("Occurrence{id}"), transform: IDENTITY, grounded: false, expressed_moves: Vec::new() }
 }
 
 fn documents() -> (Document, Document) {
@@ -36,18 +38,18 @@ fn documents() -> (Document, Document) {
     source.assembly.origins = vec![
         NamedOrigin {
             name: "Typed origin".into(),
-            origin: JointOrigin {
-                occurrence: 1,
-                snap: Snap::FaceCenter {
+            origin: JointOrigin::new(
+                1,
+                Snap::FaceCenter {
                     pick: Vec3::new(1.0, 2.0, 3.0),
                     face: Some("F1:start@F10.2".into()),
                     x: Some(XRef::Face { face: "F10:side".into(), pick: None }),
                 },
-            },
+            ),
         },
         NamedOrigin {
             name: "Foreign geometry".into(),
-            origin: JointOrigin { occurrence: 1, snap: Snap::CircleCenter { pick: Vec3::ZERO, face: Some("F99:end".into()), end: None, x: None } },
+            origin: JointOrigin::new(1, Snap::CircleCenter { pick: Vec3::ZERO, face: Some("F99:end".into()), end: None, x: None }),
         },
         NamedOrigin { name: "Outside".into(), origin: at(9) },
     ];
@@ -86,7 +88,7 @@ fn internal_relationships_receive_independent_ids_and_remapped_typed_references(
     assert_eq!((a.joints[4].a.occurrence, a.joints[4].b.occurrence), (101, 102));
     assert_eq!(a.joints[4].values, source.assembly.joints[0].values);
     assert_eq!(a.joints[4].limits, source.assembly.joints[0].limits);
-    assert_eq!(a.joints[4].name, "Joint1 (copy)");
+    assert_eq!(a.joints[4].name, "Joint1 (2)");
     assert_eq!(a.origins.len(), 4);
     // Its x reference's face is the copy's too.
     assert!(matches!(&a.origins[3].origin.snap, Snap::FaceCenter { face: Some(face), x: Some(XRef::Face { face: x, .. }), .. }
@@ -116,10 +118,7 @@ fn internal_relationships_receive_independent_ids_and_remapped_typed_references(
 fn copied_gears_take_their_picked_faces_along() {
     let (mut source, _) = documents();
     let circle = |face: &str| {
-        Size::Circle(JointOrigin {
-            occurrence: 1,
-            snap: Snap::CircleCenter { pick: Vec3::X, face: Some(face.into()), end: Some("F1:top".into()), x: None },
-        })
+        Size::Circle(JointOrigin::new(1, Snap::CircleCenter { pick: Vec3::X, face: Some(face.into()), end: Some("F1:top".into()), x: None }))
     };
     let gear = |ra| Coupling::Gear { ra, rb: Size::Length(5.0), internal: false, reverse: false };
     source.assembly.links = vec![
@@ -145,7 +144,7 @@ fn copied_gears_take_their_picked_faces_along() {
 fn naming_remaps_exact_tokens_unicode_and_legacy_body_identity() {
     let features = BTreeMap::from([(1, 21), (10, 30)]);
     let bodies = BTreeMap::from([("Wheel: inner".into(), "Wheel copy: inner".into())]);
-    assert_eq!(face_name("F1:blend:F10:start@F1.3", &features, &bodies).as_deref(), Some("F21:blend:F30:start@F21.3"));
+    assert_eq!(face_name("F1:blend:F10:start@F1.3", &features, &bodies).as_deref(), Some("F21:blend(F30:start@F21.3)"));
     assert_eq!(face_name("F1:side:曲線F10", &features, &bodies).as_deref(), Some("F21:side:曲線F10"));
     assert_eq!(face_name("F1:side:F100.7", &features, &bodies).as_deref(), Some("F21:side:F100.7"));
     assert_eq!(face_name("Wheel: inner:face:7", &features, &bodies).as_deref(), Some("Wheel copy: inner:face:7"));
@@ -191,7 +190,7 @@ fn second_copy_has_unique_names_and_keeps_global_contact_switches_unchanged() {
     clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &features, &BTreeMap::new()).unwrap();
     destination.occurrences.extend([201, 202].map(occurrence));
     clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 201), (2, 202)]), &features, &BTreeMap::new()).unwrap();
-    assert_eq!(destination.assembly.joints[6].name, "Joint1 (copy 2)");
+    assert_eq!(destination.assembly.joints[6].name, "Joint1 (3)");
     assert!(destination.assembly.contact_enabled && destination.assembly.contact_all);
     let names: BTreeSet<&str> = destination.assembly.origins.iter().map(|x| x.name.as_str()).collect();
     assert_eq!(names.len(), destination.assembly.origins.len());
@@ -228,16 +227,16 @@ fn paste_new_internal_motion_study_drives_only_the_copied_assembly_and_reopens()
     assert_eq!(s.doc.assembly.origins.len(), 2);
     assert_eq!(s.doc.assembly.contact_sets.len(), 2);
     assert_eq!(s.doc.assembly.exploded.len(), 2);
-    let copied_joint = s.doc.assembly.joints.iter().find(|j| j.name == "Rail (copy)").unwrap().id;
+    let copied_joint = s.doc.assembly.joints.iter().find(|j| j.name == "Rail (2)").unwrap().id;
     let copied_moving = s.doc.assembly.joints.iter().find(|j| j.id == copied_joint).unwrap().b.occurrence;
     assert_ne!(copied_moving, moving);
-    run(&mut s, "motion.play", json!({"study":"Travel (copy)","step":10}));
+    run(&mut s, "motion.play", json!({"study":"Travel (2)","step":10}));
     assert_eq!(s.doc.assembly.joints.iter().find(|j| j.id == source_joint).unwrap().values, vec![0.0]);
     assert_eq!(s.doc.assembly.joints.iter().find(|j| j.id == copied_joint).unwrap().values, vec![6.0]);
     assert_eq!(s.doc.occurrences.iter().find(|o| o.id == moving).unwrap().transform, original);
     let reopened = Document::from_json(&s.doc.to_json()).unwrap();
     assert_eq!(reopened.assembly, s.doc.assembly);
-    assert!(reopened.assembly.studies.iter().any(|m| m.name == "Travel (copy)" && m.keys[0].joint == copied_joint));
+    assert!(reopened.assembly.studies.iter().any(|m| m.name == "Travel (2)" && m.keys[0].joint == copied_joint));
 }
 
 /// An edge origin's edge, face and corner edge are the copy's too.
@@ -248,10 +247,16 @@ fn an_edge_origin_is_copied_onto_the_copys_edges() {
     let mut source = source;
     source.assembly.origins = vec![NamedOrigin {
         name: "Corner".into(),
-        origin: JointOrigin {
-            occurrence: 1,
-            snap: Snap::Edge { pick: Vec3::new(1.0, 2.0, 3.0), edge: edge("F1:top|F1:side"), face: edge("F1:top"), corner: edge("F1:top|F10:end") },
-        },
+        origin: JointOrigin::new(
+            1,
+            Snap::Edge {
+                pick: Vec3::new(1.0, 2.0, 3.0),
+                edge: edge("F1:top|F1:side"),
+                face: edge("F1:top"),
+                corner: edge("F1:top|F10:end"),
+                axis: None,
+            },
+        ),
     }];
     destination.assembly.origins.clear();
     clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new())

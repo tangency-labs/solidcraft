@@ -1,0 +1,85 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "P"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      8,
+      0
+     ],
+     [
+      30,
+      0
+     ],
+     [
+      30,
+      6
+     ],
+     [
+      18,
+      6
+     ],
+     [
+      18,
+      22
+     ],
+     [
+      8,
+      22
+     ]
+    ],
+    "infer": false,
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "axis": "Z",
+    "angle": "360 deg",
+    "operation": "new",
+    "body_name": "Hub"
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "face": [
+     12,
+     20.784609690826528,
+     6
+    ],
+    "distance": 5,
+    "operation": "join"
+   }
+  }
+ ]
+}

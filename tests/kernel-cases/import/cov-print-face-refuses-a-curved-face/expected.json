@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a cylinder's side picked as the face a slicer export lays it on",
+ "source": "analytic",
+ "method": "(10,0,10) is on the side of the cylinder r 10, h 20 about z: a curved face, which no body can lie flat on: refused",
+ "outcome": "refused",
+ "refusal": "only a flat face can be the print face"
+}

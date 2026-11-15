@@ -17,14 +17,14 @@ static NEXT: AtomicUsize = AtomicUsize::new(0);
 /// Whether pictures can be drawn here; installs the renderer the CLI installs, so the MCP
 /// `screenshot` in this process draws as `solidcraft-cli mcp` does.
 fn gpu() -> bool {
-    match solidcraft_gpu::capture::shared() {
+    match solidcraft_viewport_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(c) => {
             solidcraft_engine::capture::install(std::sync::Arc::new(move |scene, cam, w, h| {
                 c.rgba(scene, cam, w, h).map(|rgba| solidcraft_engine::capture::Picture { rgba, renderer: c.renderer() }).map_err(|e| e.to_string())
             }));
             true
         }
-        Err(e @ solidcraft_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+        Err(e @ solidcraft_viewport_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
             eprintln!("skipping: {e}");
             false
         }
@@ -171,9 +171,9 @@ fn a_saved_view_is_its_camera_and_a_standard_view_is_unchanged() {
     let top = dir.snapshot(&script, "top.png", &["--view", "top"]);
     let mut s = Session::default();
     s.run_script(&serde_json::from_slice(&std::fs::read(&script).unwrap()).unwrap()).unwrap();
-    let mut cam = solidcraft_engine::view::home_camera(&s);
-    cam.set_view(solidcraft_engine::render::StandardView::Top);
-    let scene = solidcraft_engine::view::scene(&s, &cam);
+    let mut cam = solidcraft_engine::view::home_camera(&s).unwrap();
+    cam.set_view(solidcraft_viewport::StandardView::Top);
+    let scene = solidcraft_engine::view::scene(&s, &cam).unwrap();
     assert_same(&top, &solidcraft_engine::capture::png(&scene, &cam, SIZE.0, SIZE.1).unwrap().bytes, "the home camera turned to the top");
     assert_same(&top, &dir.mcp(&script, "mcp-top.png", json!({"view": "top"})), "the MCP top view");
     assert_differs(&top, &saved, "top and the saved view");
@@ -288,7 +288,7 @@ fn a_snapshot_shows_the_part_where_the_camera_puts_it() {
         let vp = c.view_proj(f64::from(SIZE.0) / f64::from(SIZE.1), 1000.0);
         let (mut elo, mut ehi) = ([f64::MAX; 2], [f64::MIN; 2]);
         for k in 0..8 {
-            let p = solidcraft_engine::geom::Vec3::new(
+            let p = solidcore_record::Vec3::new(
                 corner[0] + size[0] * f64::from(k & 1),
                 corner[1] + size[1] * f64::from((k >> 1) & 1),
                 corner[2] + size[2] * f64::from((k >> 2) & 1),
@@ -335,10 +335,10 @@ fn a_forced_cpu_snapshot_is_the_cpu_rasterizers_and_says_so() {
     assert!(stderr.contains("CPU rasterizer"), "{stderr}");
     let mut s = Session::default();
     s.run_script(&serde_json::from_slice(&std::fs::read(&script).unwrap()).unwrap()).unwrap();
-    let mut cam = solidcraft_engine::view::home_camera(&s);
-    cam.set_view(solidcraft_engine::render::StandardView::Top);
-    let scene = solidcraft_engine::view::scene(&s, &cam);
-    let cpu = solidcraft_engine::render::render_png(&scene, &cam, SIZE.0 as usize, SIZE.1 as usize).unwrap();
+    let mut cam = solidcraft_engine::view::home_camera(&s).unwrap();
+    cam.set_view(solidcraft_viewport::StandardView::Top);
+    let scene = solidcraft_engine::view::scene(&s, &cam).unwrap();
+    let cpu = solidcraft_viewport::render_png(&scene, &cam, SIZE.0 as usize, SIZE.1 as usize).unwrap();
     assert_eq!(std::fs::read(dir.0.join("cpu.png")).unwrap(), cpu);
 }
 
@@ -399,6 +399,49 @@ fn a_view_or_a_camera_that_cannot_be_used_is_an_error_and_writes_nothing() {
         assert!(stderr.contains(expect), "{extra:?}: {stderr}");
         assert!(output.stdout.is_empty() && !dir.0.join("never.png").exists(), "{extra:?}");
     }
+}
+
+#[test]
+fn repeated_snapshot_options_are_refused_without_writing_a_picture() {
+    let dir = Scratch::new();
+    let script = dir.script("part.json", &[]);
+    let second = dir.0.join("second.png");
+    let second = second.to_str().unwrap();
+    let camera = camera().to_string();
+    let cases: [(&[&str], &str); 7] = [
+        (&["--out", second], "--out"),
+        (&["--view", "front", "--view", "top"], "--view"),
+        (&["--camera", &camera, "--camera", &camera], "--camera"),
+        (&["--width", "320"], "--width"),
+        (&["--height", "240"], "--height"),
+        (&["--section", "z=0", "--section", "z=5"], "--section"),
+        (&["--quality", "normal", "--quality", "fine"], "--quality"),
+    ];
+    for (extra, option) in cases {
+        let output = dir.run(&script, "never.png", extra);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{extra:?}: {stderr}");
+        assert!(stderr.contains(&format!("{option} may be given only once")), "{extra:?}: {stderr}");
+        assert!(output.stdout.is_empty(), "{extra:?}");
+        assert!(!dir.0.join("never.png").exists() && !Path::new(second).exists(), "{extra:?}");
+    }
+}
+
+#[test]
+fn repeated_snapshot_input_is_refused_before_loading_or_replacing_files() {
+    let dir = Scratch::new();
+    let out = dir.0.join("keep.png");
+    std::fs::write(&out, b"existing picture").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
+        .args(["snapshot", "--in", "missing-first.sc", "--in", "missing-second.sc", "--out"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("--in may be given only once"), "{stderr}");
+    assert!(output.stdout.is_empty());
+    assert_eq!(std::fs::read(&out).unwrap(), b"existing picture");
 }
 
 /// The usage text says what the new options do.

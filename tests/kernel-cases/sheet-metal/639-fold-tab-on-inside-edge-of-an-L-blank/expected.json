@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#639",
+  "tangency-labs/solidcraft#653",
+  "tangency-labs/solidcraft#963"
+ ],
+ "what": "a tab (x 45..60, y 60..90) on an inside edge of an L-shaped blank folded 90 degrees at x = 59 with the fixed point on the other leg; refused as folding tabs that join again",
+ "source": "analytic",
+ "method": "blank area by the shoelace formula 7450.0 mm2 at t = 0.8; the fold has width 30 (the tab's height along the line): a fold keeps the flat length of the blank, so a fold of angle th, inner radius R, thickness t and K-factor K over a width w takes a flat strip of BA = th(R+Kt) and puts a bend of volume th((R+t)^2-R^2)w/2 in its place: V = V_flat + th w t^2 (1/2 - K) (the bend's mid-surface lies at R+t/2, the neutral axis at R+Kt). V = 7450.0*0.8 + (pi/2)*30*0.64*0.06",
+ "body_count": 1,
+ "volume_mm3": 5961.809557368468
+}

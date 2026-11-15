@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1765",
+  "tangency-labs/solidcraft#1858"
+ ],
+ "what": "two 1.5 mm circular cuts overlapping an earlier 0.75 mm pocket (timeline roll-back, insert, redefine): the cut came out empty",
+ "source": "analytic",
+ "method": "plate 40x30x10 = 12000 minus the 2 mm round on its top-front edge (1-pi/4)*4*40 = 34.336, minus the 30x10x0.75 pocket (225), minus per circle (r5, centred y=15, so its upper half lies under the pocket): upper half 0.5*25pi*(1.5-0.75) + lower half 0.5*25pi*1.5 = 29.45 + 58.90 = 88.36 each (circles are 16 apart, so they do not meet). V = 12000 - 34.336 - 225 - 176.71 = 11563.95",
+ "body_count": 1,
+ "volume_mm3": 11563.949119379165
+}

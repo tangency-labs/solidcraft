@@ -1,0 +1,27 @@
+{
+ "sources": [],
+ "what": "a full cone (top radius 0: an apex) r6, height -12 from a base at z=10: the apex at z=-2",
+ "source": "analytic",
+ "method": "V = pi r^2 h/3 = pi*36*4; A = pi r^2 + pi r sqrt(h^2+r^2); centroid h/4 from the base toward the apex: z = 10-3; faces: base and side = 2",
+ "body_count": 1,
+ "faces": 2,
+ "volume_mm3": 452.3893421169302,
+ "area_mm2": 365.99066584669873,
+ "center_of_mass": [
+  0,
+  0,
+  7
+ ],
+ "bbox": {
+  "min": [
+   -6,
+   -6,
+   -2
+  ],
+  "max": [
+   6,
+   6,
+   10
+  ]
+ }
+}

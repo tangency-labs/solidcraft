@@ -1,0 +1,46 @@
+{
+ "base": "../../12-sheet-metal/001-base-flange",
+ "commands": [
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "edge",
+    "edges": [
+     [
+      50.0,
+      0,
+      2.0
+     ]
+    ],
+    "height": 30.0,
+    "angle": 90
+   }
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "edge",
+    "edges": [
+     [
+      50.0,
+      0,
+      30.0
+     ]
+    ],
+    "height": 10.0,
+    "angle": 90
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     50.0,
+     35,
+     2.0
+    ],
+    "diameter": 10
+   }
+  }
+ ]
+}

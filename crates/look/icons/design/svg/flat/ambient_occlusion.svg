@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Ambient occlusion</title>
+  <g opacity="0.22"><path d="M13 51L51 51A38 38 0 0 0 13 13Z" fill="currentColor" stroke="currentColor" stroke-width="0" stroke-linejoin="round" stroke-linecap="round"/></g>
+  <g opacity="0.38"><path d="M13 51L40 51A27 27 0 0 0 13 24Z" fill="currentColor" stroke="currentColor" stroke-width="0" stroke-linejoin="round" stroke-linecap="round"/></g>
+  <g opacity="0.62"><path d="M13 51L29 51A16 16 0 0 0 13 35Z" fill="currentColor" stroke="currentColor" stroke-width="0" stroke-linejoin="round" stroke-linecap="round"/></g>
+  <path d="M13 10L13 51L54 51" fill="none" stroke="currentColor" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -7,7 +7,9 @@
 //! constants; they still bound profiles and take constraints and dimensions like any curve.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Aabb2, Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::Aabb2;
+use solidcraft_geom::prelude::*;
 
 use crate::model::{Curve, CurveKind, Result, Sketch, SketchError, in_range, radius_in_range};
 
@@ -16,6 +18,8 @@ const MERGE_TOL: f64 = 1e-7;
 
 #[path = "link_loops.rs"]
 mod loops;
+#[path = "link_rebuild.rs"]
+mod rebuild;
 /// Most entities a single link may produce.
 pub const MAX_LINK_ENTITIES: usize = 20_000;
 
@@ -53,6 +57,8 @@ pub enum LinkSource {
     SketchPoint { sketch: u64, point: String },
     /// The model origin.
     Origin,
+    /// A named construction point (#12075).
+    ConstructionPoint { name: String },
     /// An origin axis (`X`, `Y`, `Z`).
     Axis { name: String },
     /// One of the sketch's own axes (`x` or `y`): the line through the sketch origin along it,
@@ -134,20 +140,21 @@ impl LinkSource {
     /// Short description for messages and the browser.
     pub fn describe(&self) -> String {
         match self {
-            LinkSource::Edge { body, .. } => format!("edge of {body}"),
-            LinkSource::Face { body, .. } => format!("face of {body}"),
+            LinkSource::Edge { body, .. } => of_body("edge", body),
+            LinkSource::Face { body, .. } => of_body("face", body),
             LinkSource::Body { body } => body.clone(),
-            LinkSource::Vertex { body, .. } => format!("vertex of {body}"),
+            LinkSource::Vertex { body, .. } => of_body("vertex", body),
             LinkSource::SketchCurve { curve, .. } => format!("sketch curve {curve}"),
             LinkSource::SketchPoint { point, .. } => format!("sketch point {point}"),
             LinkSource::Origin => "origin".into(),
+            LinkSource::ConstructionPoint { name } => format!("point {name}"),
             LinkSource::Axis { name } => format!("{name} axis"),
             LinkSource::SketchAxis { name } => format!("sketch {name} axis"),
             LinkSource::Plane { name } => format!("{name} plane"),
             LinkSource::OnSurface { curve, .. } => format!("{curve} on a face"),
             LinkSource::Intersection { a, b } => format!("intersection of {} and {}", a.describe(), b.describe()),
-            LinkSource::Spun { body, .. } => format!("spun profile of {body}"),
-            LinkSource::Iso { body, .. } => format!("isoparametric curve of {body}"),
+            LinkSource::Spun { body, .. } => of_body("spun profile", body),
+            LinkSource::Iso { body, .. } => of_body("isoparametric curve", body),
             LinkSource::Text { text, .. } => format!("text \"{}\"", text.chars().take(20).collect::<String>()),
         }
     }
@@ -170,12 +177,20 @@ impl LinkSource {
             LinkSource::SketchCurve { .. }
             | LinkSource::SketchPoint { .. }
             | LinkSource::Origin
+            | LinkSource::ConstructionPoint { .. }
             | LinkSource::Axis { .. }
             | LinkSource::SketchAxis { .. }
             | LinkSource::Plane { .. }
             | LinkSource::Text { .. } => Vec::new(),
         }
     }
+}
+
+/// The description of a source that names a body: "face of Body1", or the kind alone when the
+/// reference names no body (a picked face is found by its geometry, and the body it belongs
+/// to is not named in the reference).
+fn of_body(kind: &str, body: &str) -> String {
+    if body.is_empty() { kind.to_string() } else { format!("{kind} of {body}") }
 }
 
 /// Half length of the line a sketch axis link produces.
@@ -205,6 +220,10 @@ pub struct Link {
     /// geometry refresh. None: the edge is the one nearest the source's point.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edge_name: Option<String>,
+    /// Persistent model vertex identity of a `Vertex` source, resolved by the document before
+    /// geometry refresh. None: the vertex is the one nearest the source's point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertex_name: Option<String>,
     /// Automatically projected borders owned by a durable sketch face attachment.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_face: bool,
@@ -238,12 +257,14 @@ pub enum LinkGeom {
         major: Vec2,
         minor: f64,
     },
-    /// Spline through (`control == false`) or over (`control`) the points.
+    /// Spline through (`control == false`) or over (`control`) the points; a control spline
+    /// with its own knots and weights where it has them ([`crate::Nurbs`]).
     Spline {
         pts: Vec<Vec2>,
         control: bool,
         degree: u8,
         periodic: bool,
+        nurbs: Option<crate::Nurbs>,
     },
 }
 
@@ -257,11 +278,12 @@ impl LinkGeom {
             LinkGeom::Arc { c, a, b } => ok(c) && ok(a) && ok(b) && c.dist(*a) > 1e-9 && a.dist(*b) > MERGE_TOL,
             LinkGeom::Conic { a, apex, b, rho } => ok(a) && ok(apex) && ok(b) && a.dist(*b) > MERGE_TOL && *rho > 1e-6 && *rho < 1.0 - 1e-6,
             LinkGeom::Ellipse { c, major, minor } => ok(c) && ok(major) && c.dist(*major) > 1e-9 && radius_in_range(*minor),
-            LinkGeom::Spline { pts, control, degree, periodic } => {
+            LinkGeom::Spline { pts, control, degree, periodic, nurbs } => {
                 (!*periodic || (!*control && *degree == 3 && crate::periodic_beziers(pts).is_ok()))
+                    && nurbs.as_ref().is_none_or(|k| *control && !*periodic && k.check(pts.len(), *degree).is_ok())
                     && (2..=crate::curves::MAX_SPLINE_POINTS).contains(&pts.len())
                     && pts.iter().all(ok)
-                    && (1..=solidcraft_geom::MAX_BEZIER_DEGREE as u8).contains(degree)
+                    && (1..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(degree)
             }
         }
     }
@@ -275,7 +297,7 @@ struct Layout {
     curves: Vec<LCurve>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum LCurve {
     Line(usize, usize),
     Circle(usize, f64),
@@ -283,11 +305,11 @@ enum LCurve {
     Conic(usize, usize, usize, f64),
     Ellipse(usize, usize, f64),
     /// Start, end, first interior point and interior count (interior points are consecutive
-    /// and never shared), control flag, degree.
-    Spline(usize, usize, usize, usize, bool, u8, bool),
+    /// and never shared), control flag, degree, periodic, own knots and weights.
+    Spline(usize, usize, usize, usize, bool, u8, bool, Option<crate::Nurbs>),
 }
 
-fn layout(geom: &[LinkGeom]) -> Result<Layout> {
+fn layout(geom: &[LinkGeom], kind: LinkKind) -> Result<Layout> {
     if geom.len() > MAX_LINK_ENTITIES {
         return Err(SketchError::TooLarge);
     }
@@ -339,14 +361,14 @@ fn layout(geom: &[LinkGeom]) -> Result<Layout> {
                     l.curves.push(LCurve::Ellipse(c, m, minor));
                 }
             }
-            LinkGeom::Spline { pts, control, degree, periodic } => {
+            LinkGeom::Spline { pts, control, degree, periodic, nurbs } => {
                 let (Some(first), Some(last)) = (pts.first(), pts.last()) else { continue };
                 let s0 = pt(&mut l.pts, *first);
                 let first_in = l.pts.len();
                 let inner = pts.get(1..pts.len() - 1).unwrap_or_default();
                 l.pts.extend(inner.iter().copied());
                 let s1 = pt(&mut l.pts, *last);
-                l.curves.push(LCurve::Spline(s0, s1, first_in, inner.len(), control, degree, periodic));
+                l.curves.push(LCurve::Spline(s0, s1, first_in, inner.len(), control, degree, periodic, nurbs));
             }
         }
     }
@@ -364,8 +386,9 @@ fn layout(geom: &[LinkGeom]) -> Result<Layout> {
     let curves = l.curves.clone();
     l.lone.retain(|i| !used(*i, &curves));
     // A face seen edge-on: every edge falls on one line, and one line end to end stands for
-    // them all (its vertices can be projected one by one).
-    if l.lone.is_empty() && l.curves.len() > 1 && flat(&l.curves, &l.pts) {
+    // them all (its vertices can be projected one by one). A section is not a projection: pieces
+    // on one line with a gap between them (a ring cut through its hole) stay apart (#14282).
+    if kind != LinkKind::Intersect && l.lone.is_empty() && l.curves.len() > 1 && flat(&l.curves, &l.pts) {
         let (a, b) = extent(&l.pts);
         l = Layout { pts: vec![a, b], lone: Vec::new(), curves: vec![LCurve::Line(0, 1)] };
     }
@@ -377,6 +400,13 @@ fn extent(pts: &[Vec2]) -> (Vec2, Vec2) {
     let farthest = |from: Vec2| pts.iter().copied().max_by(|p, q| p.dist(from).total_cmp(&q.dist(from))).unwrap_or(from);
     let a = farthest(pts.first().copied().unwrap_or(Vec2::ZERO));
     (a, farthest(a))
+}
+
+/// Whether the link's geometry is a closed boundary, whose identity the loop analysis reads.
+/// A face taken with `Intersect` is the face's section with the sketch plane: an open chain of
+/// segments, which no closed boundary describes (#13471).
+fn closed_boundary(link: &Link) -> bool {
+    matches!(link.source, LinkSource::Face { .. }) && link.kind != LinkKind::Intersect
 }
 
 /// Straight pieces along one line: a face seen edge-on, whose silhouette encloses nothing.
@@ -402,6 +432,16 @@ fn same_shape(a: &LCurve, b: &LCurve) -> bool {
     )
 }
 
+/// Whether two splines' own knots and weights ([`crate::Nurbs`]) are the same within `close`.
+fn same_nurbs(a: Option<&crate::Nurbs>, b: Option<&crate::Nurbs>, close: impl Fn(f64, f64) -> bool) -> bool {
+    let all = |x: &[f64], y: &[f64]| x.len() == y.len() && x.iter().zip(y).all(|(p, q)| close(*p, *q));
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => all(&a.knots, &b.knots) && all(&a.weights, &b.weights),
+        _ => false,
+    }
+}
+
 /// Do two curve sets describe the same geometry, regardless of the order the curves come in or
 /// the direction a loop was walked? Lines match with either end first; circles by centre and
 /// radius; arcs by centre and their (start, end) pair; conics by all their points and rho.
@@ -422,7 +462,9 @@ fn same_geometry(a: &[(LCurve, Vec<Vec2>)], b: &[(LCurve, Vec<Vec2>)]) -> bool {
             (LCurve::Arc(..), LCurve::Arc(..)) => all(),
             (LCurve::Conic(.., ra), LCurve::Conic(.., rb)) => all() && close(*ra, *rb),
             (LCurve::Ellipse(.., ra), LCurve::Ellipse(.., rb)) => all() && close(*ra, *rb),
-            (LCurve::Spline(.., ca, da, pa), LCurve::Spline(.., cb, db, pb)) => ca == cb && da == db && pa == pb && all(),
+            (LCurve::Spline(.., ca, da, pa, ka), LCurve::Spline(.., cb, db, pb, kb)) => {
+                ca == cb && da == db && pa == pb && same_nurbs(ka.as_ref(), kb.as_ref(), close) && all()
+            }
             _ => false,
         }
     };
@@ -551,8 +593,9 @@ impl Sketch {
         self.links.iter().find(|l| l.id == id)
     }
 
-    /// The expressions of the sketch's texts and of its points placed by parameters, each with
-    /// what it sets (`Text height`, `Point X`…).
+    /// The expressions of the sketch's texts, of its points placed by parameters and of its
+    /// equation curves, each with what it sets (`Text height`, `Point X`, `Curve Y`…). An equation
+    /// curve's own variable (`t` or `x`) is among the names its formulas refer to.
     pub fn text_exprs(&self) -> Vec<(&'static str, &String)> {
         self.links
             .iter()
@@ -562,6 +605,7 @@ impl Sketch {
             })
             .flatten()
             .chain(self.points.iter().filter_map(|p| p.exprs.as_deref()).flat_map(crate::PointExprs::list))
+            .chain(self.equations.iter().flat_map(crate::EquationCurve::list))
             .collect()
     }
 
@@ -587,7 +631,9 @@ impl Sketch {
             .collect()
     }
 
-    /// Mutable view of [`Sketch::text_exprs`], for renaming the parameters they refer to.
+    /// Mutable view of [`Sketch::text_exprs`], for renaming the parameters they refer to. An
+    /// equation curve's formulas are not in it: [`Sketch::equation_exprs_mut`] gives them with the
+    /// variable a rename must leave alone.
     pub fn text_exprs_mut(&mut self) -> Vec<&mut String> {
         self.links
             .iter_mut()
@@ -659,40 +705,66 @@ impl Sketch {
     /// and ends; other curves, and points on their own (the origin, a vertex), never count as
     /// present.
     pub fn link_geometry_present(&self, geom: &[LinkGeom]) -> bool {
-        let Ok(lay) = layout(geom) else { return false };
-        if lay.curves.is_empty() || !lay.lone.is_empty() {
+        self.geometry_present(geom, LinkKind::Project, false)
+    }
+
+    /// [`Sketch::link_geometry_present`], where a point on its own counts too when a linked
+    /// point on its own already sits there: Intersect cuts a curve or an edge at points, and
+    /// cutting the same one again would stack a second point on the first. The end of a linked
+    /// curve (a corner of the face's border) does not count.
+    pub fn link_geometry_or_points_present(&self, geom: &[LinkGeom]) -> bool {
+        self.geometry_present(geom, LinkKind::Intersect, true)
+    }
+
+    /// `kind` lays `geom` out as a new link of that kind would be (see [`layout`]).
+    fn geometry_present(&self, geom: &[LinkGeom], kind: LinkKind, points: bool) -> bool {
+        let Ok(lay) = layout(geom, kind) else { return false };
+        if lay.curves.is_empty() && lay.lone.is_empty() {
+            return false;
+        }
+        // Without `points`, a point on its own never counts as present (see above).
+        if !points && (lay.curves.is_empty() || !lay.lone.is_empty()) {
             return false;
         }
         let at = |i: usize| self.points.get(i).map(|p| p.pos);
         let near = |i: usize, q: Option<Vec2>| lay.pts.get(i).zip(q).is_some_and(|(p, q)| p.dist(q) <= MERGE_TOL);
         let curve_present = |c: &LCurve| {
-            self.curves.iter().filter(|k| k.link.is_some()).any(|k| match (*c, &k.kind) {
-                (LCurve::Line(a, b), CurveKind::Line { a: p, b: q }) => (near(a, at(*p)) && near(b, at(*q))) || (near(a, at(*q)) && near(b, at(*p))),
-                (LCurve::Circle(c, r), CurveKind::Circle { c: p, r: s }) => near(c, at(*p)) && (r - s).abs() <= MERGE_TOL,
-                (LCurve::Arc(c, a, b), CurveKind::Arc { c: p, a: q, b: e }) => near(c, at(*p)) && near(a, at(*q)) && near(b, at(*e)),
+            self.curves.iter().filter(|k| k.link.is_some()).any(|k| match (c, &k.kind) {
+                (&LCurve::Line(a, b), CurveKind::Line { a: p, b: q }) => (near(a, at(*p)) && near(b, at(*q))) || (near(a, at(*q)) && near(b, at(*p))),
+                (&LCurve::Circle(c, r), CurveKind::Circle { c: p, r: s }) => near(c, at(*p)) && (r - s).abs() <= MERGE_TOL,
+                (&LCurve::Arc(c, a, b), CurveKind::Arc { c: p, a: q, b: e }) => near(c, at(*p)) && near(a, at(*q)) && near(b, at(*e)),
                 _ => false,
             })
         };
-        lay.curves.iter().all(curve_present)
+        if !lay.curves.iter().all(curve_present) {
+            return false;
+        }
+        // Only a linked point on its own counts: the end or centre of a linked curve (the border
+        // of the sketch's face, an edge projected before) is not a cut an earlier Intersect left.
+        let on_curves: std::collections::HashSet<usize> = self.curves.iter().filter(|k| k.link.is_some()).flat_map(|k| k.kind.point_ids()).collect();
+        let point_present =
+            |i: usize| self.points.iter().enumerate().any(|(pi, p)| p.link.is_some() && !on_curves.contains(&pi) && near(i, Some(p.pos)));
+        lay.lone.iter().all(|i| point_present(*i))
     }
 
     /// Add linked geometry. Returns the link id; the new curve and point ids are
     /// [`Sketch::link_curves`] / [`Sketch::link_points`] of it.
     pub fn add_link(&mut self, kind: LinkKind, source: LinkSource, geom: &[LinkGeom]) -> Result<String> {
-        let lay = layout(geom)?;
+        let lay = layout(geom, kind)?;
         if lay.curves.is_empty() && lay.lone.is_empty() {
             return Err(SketchError::Invalid("the reference projects to nothing on this sketch plane".into()));
         }
-        if self.points.len() + lay.pts.len() > crate::model::MAX_POINTS {
+        if self.points.len().saturating_add(lay.pts.len()) > crate::limits::max_points() {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("j")?;
-        self.links.push(Link { id: id.clone(), kind, source, face_name: None, edge_name: None, auto_face: false, lost: false });
+        self.links.push(Link { id: id.clone(), kind, source, face_name: None, edge_name: None, vertex_name: None, auto_face: false, lost: false });
         self.build_link(&id, &lay)?;
         Ok(id)
     }
 
-    fn build_link(&mut self, id: &str, lay: &Layout) -> Result<()> {
+    /// Make the entities of link `id` for `lay`. Returns the point each layout point became.
+    fn build_link(&mut self, id: &str, lay: &Layout) -> Result<Vec<Option<usize>>> {
         let mut idx: Vec<Option<usize>> = vec![None; lay.pts.len()];
         let mut point = |sk: &mut Sketch, li: usize| -> Result<usize> {
             if let Some(Some(i)) = idx.get(li) {
@@ -714,15 +786,15 @@ impl Sketch {
                 LCurve::Line(a, b) => (CurveKind::Line { a: point(self, a)?, b: point(self, b)? }, "l"),
                 LCurve::Circle(c, r) => (CurveKind::Circle { c: point(self, c)?, r }, "c"),
                 LCurve::Arc(c, a, b) => (CurveKind::Arc { c: point(self, c)?, a: point(self, a)?, b: point(self, b)? }, "a"),
-                LCurve::Conic(a, b, x, rho) => (CurveKind::Conic { a: point(self, a)?, b: point(self, b)?, apex: point(self, x)?, rho }, "k"),
+                LCurve::Conic(a, b, x, rho) => (CurveKind::Conic { a: point(self, a)?, b: point(self, b)?, apex: point(self, x)?, rho }, "n"),
                 LCurve::Ellipse(c, m, r) => (CurveKind::Ellipse { c: point(self, c)?, m: point(self, m)?, r }, "e"),
-                LCurve::Spline(a, b, f, n, control, degree, periodic) => {
+                LCurve::Spline(a, b, f, n, control, degree, periodic, ref nurbs) => {
                     let mut pts = vec![point(self, a)?];
                     for i in f..f + n {
                         pts.push(point(self, i)?);
                     }
                     pts.push(point(self, b)?);
-                    (CurveKind::Spline { pts, control, degree, periodic }, "s")
+                    (CurveKind::Spline { pts, control, degree, periodic, nurbs: nurbs.clone(), handles: Vec::new() }, "s")
                 }
             };
             let cid = self.fresh(prefix)?;
@@ -735,24 +807,29 @@ impl Sketch {
                 centerline: false,
                 fixed: false,
                 infinite: false,
+                spline_handle_of: None,
             });
         }
         for li in &lay.lone {
             point(self, *li)?;
         }
-        Ok(())
+        Ok(idx)
     }
 
     /// Replace a link's geometry with a newly resolved one. When the shape is the same (same
     /// curve kinds sharing the same points) the entities keep their ids and only move, so
-    /// constraints and dimensions on them survive; otherwise the link is rebuilt. Returns
-    /// `true` when it was rebuilt.
+    /// constraints and dimensions on them survive; otherwise the link is rebuilt, and the
+    /// sketch's own curves and constraints on it move to the new entities that match the old
+    /// ones (`rebuild_link`). Returns `true` when it was rebuilt.
     pub fn update_link(&mut self, id: &str, geom: &[LinkGeom]) -> Result<bool> {
-        if self.link(id).is_none() {
+        let Some(kind) = self.link(id).map(|l| l.kind) else {
             return Err(SketchError::Unknown(id.into()));
-        }
-        let lay = layout(geom)?;
-        if self.link(id).is_some_and(|l| matches!(l.source, LinkSource::Face { .. }))
+        };
+        let lay = layout(geom, kind)?;
+        // A projected face boundary is a closed loop: crossings and touching points make its
+        // identity ambiguous, and the link keeps the geometry it had. A face taken with
+        // `Intersect` is a section: an open chain, which no closed boundary describes.
+        if self.link(id).is_some_and(closed_boundary)
             && lay.lone.is_empty()
             && lay.curves.len() <= 512
             && lay.pts.len() <= 512
@@ -775,7 +852,7 @@ impl Sketch {
                 Some(CurveKind::Arc { c, a, b }) => Some(LCurve::Arc(local(*c)?, local(*a)?, local(*b)?)),
                 Some(CurveKind::Conic { a, b, apex, rho }) => Some(LCurve::Conic(local(*a)?, local(*b)?, local(*apex)?, *rho)),
                 Some(CurveKind::Ellipse { c, m, r }) => Some(LCurve::Ellipse(local(*c)?, local(*m)?, *r)),
-                Some(CurveKind::Spline { pts, control, degree, periodic }) => {
+                Some(CurveKind::Spline { pts, control, degree, periodic, nurbs, handles }) if handles.is_empty() => {
                     let (a, b) = (local(*pts.first()?)?, local(*pts.last()?)?);
                     let inner: Vec<usize> =
                         pts.get(1..pts.len().saturating_sub(1)).unwrap_or_default().iter().map(|q| local(*q)).collect::<Option<_>>()?;
@@ -784,7 +861,7 @@ impl Sketch {
                     if inner.iter().enumerate().any(|(k, x)| *x != f + k) {
                         return None;
                     }
-                    Some(LCurve::Spline(a, b, f, inner.len(), *control, *degree, *periodic))
+                    Some(LCurve::Spline(a, b, f, inner.len(), *control, *degree, *periodic, nurbs.clone()))
                 }
                 _ => None,
             })
@@ -840,7 +917,7 @@ impl Sketch {
                 LCurve::Arc(c, a, b) => LCurve::Arc(renum(c), renum(a), renum(b)),
                 LCurve::Conic(a, b, x, r) => LCurve::Conic(renum(a), renum(b), renum(x), r),
                 LCurve::Ellipse(c, m, r) => LCurve::Ellipse(renum(c), renum(m), r),
-                LCurve::Spline(a, b, f, n, ct, d, periodic) => LCurve::Spline(renum(a), renum(b), renum(f), n, ct, d, periodic),
+                LCurve::Spline(a, b, f, n, ct, d, periodic, ref k) => LCurve::Spline(renum(a), renum(b), renum(f), n, ct, d, periodic, k.clone()),
             })
             .collect();
         let same = match &cur {
@@ -855,8 +932,15 @@ impl Sketch {
                                 (LCurve::Arc(a0, a1, a2), LCurve::Arc(b0, b1, b2)) => a0 == b0 && a1 == b1 && a2 == b2,
                                 (LCurve::Conic(a0, a1, a2, _), LCurve::Conic(b0, b1, b2, _)) => a0 == b0 && a1 == b1 && a2 == b2,
                                 (LCurve::Ellipse(a0, a1, _), LCurve::Ellipse(b0, b1, _)) => a0 == b0 && a1 == b1,
-                                (LCurve::Spline(a0, a1, a2, a3, a4, a5, a6), LCurve::Spline(b0, b1, b2, b3, b4, b5, b6)) => {
-                                    a0 == b0 && a1 == b1 && (a2 == b2 || *a3 == 0) && a3 == b3 && a4 == b4 && a5 == b5 && a6 == b6
+                                (LCurve::Spline(a0, a1, a2, a3, a4, a5, a6, a7), LCurve::Spline(b0, b1, b2, b3, b4, b5, b6, b7)) => {
+                                    a0 == b0
+                                        && a1 == b1
+                                        && (a2 == b2 || *a3 == 0)
+                                        && a3 == b3
+                                        && a4 == b4
+                                        && a5 == b5
+                                        && a6 == b6
+                                        && a7.is_some() == b7.is_some()
                                 }
                                 _ => false,
                             }
@@ -873,12 +957,14 @@ impl Sketch {
             let pos = |pi: usize| self.points.get(pi).map(|p| p.pos);
             let old: Option<Vec<(LCurve, Vec<Vec2>)>> = cur
                 .iter()
-                .map(|c| curve_points(c).into_iter().map(|li| points.get(li).and_then(|pi| pos(*pi))).collect::<Option<Vec<_>>>().map(|ps| (*c, ps)))
+                .map(|c| {
+                    curve_points(c).into_iter().map(|li| points.get(li).and_then(|pi| pos(*pi))).collect::<Option<Vec<_>>>().map(|ps| (c.clone(), ps))
+                })
                 .collect();
             let fresh: Option<Vec<(LCurve, Vec<Vec2>)>> = lay
                 .curves
                 .iter()
-                .map(|c| curve_points(c).into_iter().map(|li| lay.pts.get(li).copied()).collect::<Option<Vec<_>>>().map(|ps| (*c, ps)))
+                .map(|c| curve_points(c).into_iter().map(|li| lay.pts.get(li).copied()).collect::<Option<Vec<_>>>().map(|ps| (c.clone(), ps)))
                 .collect();
             let lone_old: Vec<Vec2> = points.iter().filter_map(|pi| pos(*pi)).collect();
             if let (Some(old), Some(fresh)) = (old, fresh)
@@ -891,6 +977,7 @@ impl Sketch {
         }
         // A resized face can enumerate the same boundary in another order. Match the
         // shared-point graph in normalized sketch space before discarding its identity.
+        let mut same_order_agrees = false;
         if let Some(cur) = &cur
             && points.len() == lay.pts.len()
             && cur.len() == lay.curves.len()
@@ -902,7 +989,7 @@ impl Sketch {
                 let b: Aabb2 = ps.iter().copied().collect();
                 ps.iter().map(|p| b.relative(*p)).collect()
             };
-            let loop_roles_required = self.link(id).is_some_and(|l| matches!(l.source, LinkSource::Face { .. }))
+            let loop_roles_required = self.link(id).is_some_and(closed_boundary)
                 && cur.iter().chain(&lay.curves).all(|c| matches!(c, LCurve::Line(..) | LCurve::Arc(..) | LCurve::Circle(..)))
                 && lay.lone.is_empty()
                 && !flat(cur, &old)
@@ -1028,14 +1115,46 @@ impl Sketch {
                     {
                         *r = *value;
                     }
+                    if let (Some(Curve { kind: CurveKind::Spline { nurbs, .. }, .. }), Some(LCurve::Spline(.., value))) =
+                        (self.curves.get_mut(*ci), lay.curves.get(li))
+                    {
+                        nurbs.clone_from(value);
+                    }
                 }
                 return Ok(false);
             }
+            // A face resized by more than the match above allows (#9001: an angle's wall made
+            // thicker moves the inner corner by more than a tenth of the face) is still the same
+            // boundary when two witnesses agree: the new boundary was read in the same order
+            // with the same curves, and each point read in that order is, among the points on
+            // the same loop with lines leaving them the same ways, clearly the nearest to where
+            // it was. The two end corners of a thin arm have the same lines; the lines leave them
+            // in opposite senses, which tells them apart when the box the points are compared in
+            // shrinks with the face (#12086).
+            same_order_agrees = same
+                && loop_roles.as_ref().is_some_and(|roles| {
+                    (0..points.len()).all(|k| {
+                        let (Some(&fresh_i), Some(p)) = (order.get(k), a.get(k)) else { return false };
+                        let mut candidates: Vec<(usize, f64)> = b
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| {
+                                old_roles.get(k) == fresh_roles.get(*i)
+                                    && roles.old.get(k) == roles.fresh.get(*i)
+                                    && roles.old_lines.get(k).zip(roles.fresh_lines.get(*i)).is_some_and(|(x, y)| loops::same_lines(x, y))
+                                    && roles.old_leaving.get(k).zip(roles.fresh_leaving.get(*i)).is_some_and(|(x, y)| loops::same_leaving(x, y))
+                            })
+                            .map(|(i, q)| (i, p.dist(*q)))
+                            .collect();
+                        candidates.sort_by(|x, y| x.1.total_cmp(&y.1));
+                        matches!(candidates.first(), Some((i, d)) if *i == fresh_i && candidates.get(1).is_none_or(|(_, second)| *d < *second * 0.75))
+                    })
+                });
         }
         // Equal topology alone does not identify a face boundary: an outer rim and a
         // hole can have identical point graphs. Never move saved curve ids between them
         // when the geometric match is ambiguous; the document reports a lost link.
-        if same && self.link(id).is_some_and(|l| matches!(l.source, LinkSource::Face { .. })) {
+        if same && !same_order_agrees && self.link(id).is_some_and(closed_boundary) {
             self.set_link_lost(id, true);
             return Err(SketchError::Invalid("projected face boundary identity is ambiguous; last geometry retained".into()));
         }
@@ -1056,12 +1175,34 @@ impl Sketch {
                 if let (LCurve::Ellipse(.., r), Some(Curve { kind: CurveKind::Ellipse { r: slot, .. }, .. })) = (c, self.curves.get_mut(*ci)) {
                     *slot = *r;
                 }
+                if let (LCurve::Spline(.., k), Some(Curve { kind: CurveKind::Spline { nurbs, .. }, .. })) = (c, self.curves.get_mut(*ci)) {
+                    nurbs.clone_from(k);
+                }
             }
             return Ok(false);
         }
-        // Rebuild: drop the old entities (constraints on them go too) and make new ones.
-        self.drop_link_entities(id);
-        self.build_link(id, &lay)?;
+        // A face seen edge-on was once saved as two lines on the same two points, one each way;
+        // it is one line now. Keep the first line (an offset or a constraint may name it) and
+        // drop only the second, instead of rebuilding both under new ids.
+        if let Some([LCurve::Line(0, 1), LCurve::Line(1, 0)]) = cur.as_deref()
+            && let [LCurve::Line(0, 1)] = new.as_slice()
+            && let [_, second] = curves[..]
+            && let [p0, p1] = points[..]
+            && lay.lone.is_empty()
+            && let Some(a) = order.first().and_then(|li| lay.pts.get(*li)).copied()
+            && let Some(b) = order.get(1).and_then(|li| lay.pts.get(*li)).copied()
+        {
+            if let Some(p) = self.points.get_mut(p0) {
+                p.pos = a;
+            }
+            if let Some(p) = self.points.get_mut(p1) {
+                p.pos = b;
+            }
+            self.remove_curves(&[second]);
+            return Ok(true);
+        }
+        // Rebuild: new entities, and what the sketch held on the old ones moves to them.
+        self.rebuild_link(id, &lay, &points, &curves, cur.as_deref())?;
         Ok(true)
     }
 
@@ -1080,14 +1221,57 @@ impl Sketch {
         self.points.iter().zip(&was).any(|(p, w)| p.pos != *w).then_some(was)
     }
 
-    fn drop_link_entities(&mut self, id: &str) {
-        let curves = self.link_curves(id);
-        let keep = self.links.clone();
-        self.remove_curves(&curves);
-        let pts = self.link_points(id);
-        self.remove_points(&pts);
-        // Removal prunes empty links; this one stays.
-        self.links = keep;
+    /// `stored` as this sketch has its entities, when they differ only by texts built anew
+    /// since (other words, from an expression, are other outlines with new points and curves):
+    /// those texts' entities as this sketch has them, every other point where `stored` has it,
+    /// every other circle and ellipse with its stored radius, arcs with their stored turn and
+    /// constraints with their stored values. Paired so entity by entity, a solve after the links
+    /// moved can walk from the stored state as it does when no text changed. `None` when the
+    /// two are the same entities or differ in anything else.
+    pub fn stored_with_rebuilt_texts(&self, stored: &Sketch) -> Option<Sketch> {
+        let texts: Vec<&str> = self.links.iter().filter(|l| matches!(l.source, LinkSource::Text { .. })).map(|l| l.id.as_str()).collect();
+        let in_text = |link: &Option<String>| link.as_deref().is_some_and(|l| texts.contains(&l));
+        let same = self.points.len() == stored.points.len()
+            && self.curves.len() == stored.curves.len()
+            && self.points.iter().zip(&stored.points).all(|(p, q)| p.id == q.id)
+            && self.curves.iter().zip(&stored.curves).all(|(c, d)| c.id == d.id);
+        let ids = |sk: &Sketch| sk.links.iter().map(|l| l.id.clone()).collect::<Vec<_>>();
+        if same
+            || texts.is_empty()
+            || ids(self) != ids(stored)
+            || !self.points.iter().filter(|p| !in_text(&p.link)).map(|p| &p.id).eq(stored.points.iter().filter(|p| !in_text(&p.link)).map(|p| &p.id))
+            || !self.curves.iter().filter(|c| !in_text(&c.link)).map(|c| &c.id).eq(stored.curves.iter().filter(|c| !in_text(&c.link)).map(|c| &c.id))
+            || !self.constraints.iter().map(|c| &c.id).eq(stored.constraints.iter().map(|c| &c.id))
+        {
+            return None;
+        }
+        let mut out = self.clone();
+        let points: std::collections::BTreeMap<&str, Vec2> =
+            stored.points.iter().filter(|p| !in_text(&p.link)).map(|p| (p.id.as_str(), p.pos)).collect();
+        for p in out.points.iter_mut().filter(|p| !in_text(&p.link)) {
+            if let Some(pos) = points.get(p.id.as_str()) {
+                p.pos = *pos;
+            }
+        }
+        let curves: std::collections::BTreeMap<&str, &Curve> =
+            stored.curves.iter().filter(|c| !in_text(&c.link)).map(|c| (c.id.as_str(), c)).collect();
+        for c in out.curves.iter_mut().filter(|c| !in_text(&c.link)) {
+            let Some(d) = curves.get(c.id.as_str()) else { continue };
+            match (&mut c.kind, &d.kind) {
+                (CurveKind::Circle { r, .. }, CurveKind::Circle { r: s, .. }) | (CurveKind::Ellipse { r, .. }, CurveKind::Ellipse { r: s, .. }) => {
+                    *r = *s
+                }
+                (CurveKind::Conic { rho, .. }, CurveKind::Conic { rho: s, .. }) => *rho = *s,
+                _ => {}
+            }
+            c.reversed = d.reversed;
+        }
+        for (c, d) in out.constraints.iter_mut().zip(&stored.constraints) {
+            if let Some(v) = d.kind.value() {
+                c.kind.set_value(v);
+            }
+        }
+        Some(out)
     }
 
     /// Mark a link as lost (its reference was not found); its geometry stays as it was.

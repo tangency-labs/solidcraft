@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1865",
+  "tangency-labs/solidcraft#1910",
+  "tangency-labs/solidcraft#1983",
+  "tangency-labs/solidcraft#2034"
+ ],
+ "what": "a union of two solids that meet along cylindrical faces: a tube (r10..12, z 0..20) and a 90 deg ring sector (same radii, z 10..30) whose curved faces are the tube's own, overlapping it axially; refused ('planar faces only') or, by the faceted fallback, left 1710 faceted faces",
+ "source": "analytic",
+ "method": "tube pi(144-100)*20 = 880 pi; sector pi(144-100)/4*20 = 220 pi, of which z 10..20 (110 pi) lies in the tube. V = 880 pi + 110 pi = 990 pi = 3110.18. Faces by merged count: bottom annulus, 3/4 top annulus at z=20, sector top at z=30, two radial planes (x=0, y=0, z 20..30), one outer and one inner cylinder = 7; never a faceted body",
+ "body_count": 1,
+ "volume_mm3": 3110.1767270538953,
+ "faces": 7
+}

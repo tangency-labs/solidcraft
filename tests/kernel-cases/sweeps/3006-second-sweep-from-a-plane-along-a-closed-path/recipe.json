@@ -1,0 +1,134 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Path"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 30
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "construct.plane.along_path",
+   "params": {
+    "path": {
+     "sketch": "Path",
+     "curve": "c1"
+    },
+    "t": 0.5,
+    "name": "P50"
+   }
+  },
+  {
+   "command": "construct.plane.along_path",
+   "params": {
+    "path": {
+     "sketch": "Path",
+     "curve": "c1"
+    },
+    "t": 0.75,
+    "name": "P75"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "P50",
+    "name": "Round"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 3.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "P75",
+    "name": "Square"
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "corner": [
+     2.5,
+     2.5
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.sweep",
+   "params": {
+    "sketch": "Round",
+    "path_sketch": "Path",
+    "path": [
+     "c1"
+    ],
+    "operation": "new",
+    "body_name": "RoundBar"
+   }
+  },
+  {
+   "command": "solid.sweep",
+   "params": {
+    "sketch": "Square",
+    "path_sketch": "Path",
+    "path": [
+     "c1"
+    ],
+    "operation": "join",
+    "targets": [
+     "RoundBar"
+    ]
+   }
+  }
+ ]
+}

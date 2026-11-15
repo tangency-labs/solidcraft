@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#844"
+ ],
+ "what": "two swept walls (12 mm thick, 60 mm high) along concentric half circles of radius 50 and 58 turned 90 degrees apart, overlapping in thickness by 4 mm over a quarter turn and sharing the planes z = 0 and z = 60 (join gave an error, minutes, or an open body)",
+ "source": "analytic",
+ "method": "wall A is the ring r 44..56 over 0..180 degrees, wall B the ring r 52..64 over 90..270 degrees, both z 0..60: V_A = 60 (pi/2)(56^2 - 44^2) = 113097, V_B = 60 (pi/2)(64^2 - 52^2) = 131155; they overlap in r 52..56, angles 90..180: 60 (pi/4)(56^2 - 52^2) = 20357. V = V_A + V_B - overlap = 223932.7; one body (the walls touch over a quarter turn).",
+ "body_count": 1,
+ "volume_mm3": 223932.72434788046
+}

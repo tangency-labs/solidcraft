@@ -1,0 +1,376 @@
+# intersect.surface_drop_lib_p3: the exact cylinder trims move 44 golden rows (2026-11-10)
+
+- Unit: intersect.surface_drop_lib_p3 (WR-680; the flag `cylinder_plane_section_trims_exact`
+  retired, see `plan/upstream-issues/WR-680--addendum-2026-11-10-default-and-flag-retired.md`).
+- What moves: 44 rows of two bodies, values only (no case added, removed, broken or refused
+  differently). Rows that moved only within the goldens' `1e-9` keep their blessed text.
+- `piecewise-box-edges-*` (8 rows of `blend.fillet_executive_p3`): the 10 x 20 x 30 box
+  with edges rounded r0.5 and mitred. The unit integrates mass to `1e-4`, so its rows move
+  within that. Integrated to `1e-12`, the volume is the closed form
+  `6000 - r^2 (1 - pi/4) L + n r^3 (5/3 - pi/2)`
+  (`mitred_box_rounds_are_their_closed_form` in
+  `crates/solidcore/tests/issue_2109_cylinder_plane_section_trims.rs`); the traced trims,
+  4.3e-6 off their edges, left it 4.5e-6 to 8.1e-6 off.
+- `sphere_diff_3cylinders.smb` (`pt_TestFiles/Fillet`; 36 rows of
+  `blend.fillet_executive_p3`, `topology.face_p3`, `topology.edgeuse_p3` and
+  `corpus.parity`): read with its UV trims rebuilt, 17 of its cylinder trims become rational
+  quartics within 1.6e-13 of their edges, where the traced cubics were 1.3e-5 off (two of
+  them 9.6e-3). The `topology` rows digest these trims. In the fillet and parity rows the
+  volumes move by at most 2.6e-3 of 169497 and the areas by at most 2.2e-4 of 38237. The
+  body has no closed form.
+- How measured: `cargo run --profile goldens -p goldens -- --all --goldens` at the fix,
+  then `--bless` of the four units; the trims' distances from their edges by sampling the
+  trim lifted onto its surface against the edge's curve.
+
+## The rows, old to new
+
+### `blend.fillet_executive_p3` (18 rows)
+
+- `piecewise-box-edges-0-1`:
+  - `values.mass_properties[1]`: 5998.402474529421 to 5998.402543655564
+  - `values.mass_properties[2]`: 5998.402474529421 to 5998.402543655564
+  - `values.mass_properties[3]`: 4.999135272986161 to 4.99913530767552
+  - `values.mass_properties[4]`: 9.999135276538652 to 9.999135315245166
+  - `values.mass_properties[5]`: 14.996034953928016 to 14.996035044941893
+  - `values.mass_properties[6]`: 2598222.3723900267 to 2598222.424924777
+  - `values.mass_properties[7]`: 1998451.2841356825 to 1998451.3270221106
+  - `values.mass_properties[8]`: 999527.7971654396 to 999527.8172865901
+  - `values.mass_properties[9]`: 899367.5101854707 to 899367.5314050158
+  - `values.mass_properties[10]`: 449606.2438251754 to 449606.25647167955
+  - `values.mass_properties[11]`: 299842.8930973649 to 299842.8994597478
+- `piecewise-box-edges-0-1-2`:
+  - `values.mass_properties[1]`: 5997.329503235369 to 5997.329572360888
+  - `values.mass_properties[2]`: 5997.329503235369 to 5997.329572360888
+  - `values.mass_properties[3]`: 5.000009645091854 to 5.00000967977676
+  - `values.mass_properties[4]`: 9.999135121832559 to 9.999135160546013
+  - `values.mass_properties[5]`: 14.998697940955562 to 14.998698031954126
+  - `values.mass_properties[6]`: 2598079.2900545467 to 2598079.3425888564
+  - `values.mass_properties[7]`: 1998451.2417698312 to 1998451.284655832
+  - `values.mass_properties[8]`: 999384.7114566567 to 999384.7315776577
+  - `values.mass_properties[9]`: 899366.3151418399 to 899366.3363612375
+  - `values.mass_properties[10]`: 449606.23457063275 to 449606.2472169817
+  - `values.mass_properties[11]`: 299841.6927871981 to 299841.6991495148
+- `piecewise-box-edges-0-1-2-3`:
+  - `values.mass_properties[1]`: 5996.268482235584 to 5996.268608473818
+  - `values.mass_properties[2]`: 5996.268482235584 to 5996.268608473818
+  - `values.mass_properties[4]`: 9.999154675732406 to 9.999154702511552
+  - `values.mass_properties[5]`: 14.996063356677329 to 14.996063525027136
+  - `values.mass_properties[6]`: 2596993.1492674337 to 2596993.2392652063
+  - `values.mass_properties[7]`: 1997503.4193458795 to 1997503.4939705362
+  - `values.mass_properties[8]`: 999246.3482068322 to 999246.3740760277
+  - `values.mass_properties[9]`: 899052.7360357245 to 899052.7688364687
+  - `values.mass_properties[10]`: 449602.69860910985 to 449602.7130239249
+  - `values.mass_properties[11]`: 299840.5284213158 to 299840.535530175
+- `piecewise-box-edges-0-1-3`:
+  - `values.mass_properties[1]`: 5997.341453529632 to 5997.341579768433
+  - `values.mass_properties[2]`: 5997.341453529632 to 5997.341579768433
+  - `values.mass_properties[4]`: 9.999154826967516 to 9.999154853741858
+  - `values.mass_properties[5]`: 14.993400369874573 to 14.99340053825121
+  - `values.mass_properties[6]`: 2597136.231602912 to 2597136.321601103
+  - `values.mass_properties[7]`: 1997503.4617117303 to 1997503.5363367992
+  - `values.mass_properties[8]`: 999389.4339156136 to 999389.4597849513
+  - `values.mass_properties[9]`: 899053.9310793541 to 899053.9638802367
+  - `values.mass_properties[10]`: 449602.7078636525 to 449602.7222786213
+  - `values.mass_properties[11]`: 299841.7287314825 to 299841.7358404071
+- `piecewise-box-edges-0-1-4`:
+  - `values.mass_properties[1]`: 5997.329618318214 to 5997.329687443733
+  - `values.mass_properties[2]`: 5997.329618318214 to 5997.329687443733
+  - `values.mass_properties[3]`: 4.998260641565335 to 4.998260676270399
+  - `values.mass_properties[4]`: 9.999135121849157 to 9.99913516056261
+  - `values.mass_properties[5]`: 14.998697776742159 to 14.998697867740724
+  - `values.mass_properties[6]`: 2598079.3128011464 to 2598079.365335456
+  - `values.mass_properties[7]`: 1998346.3587016147 to 1998346.4015876157
+  - `values.mass_properties[8]`: 999279.8363305995 to 999279.8564516006
+  - `values.mass_properties[9]`: 899366.3225543492 to 899366.3437737467
+  - `values.mass_properties[10]`: 449605.0634077394 to 449605.07605408836
+  - `values.mass_properties[11]`: 299736.8050348302 to 299736.8113971468
+- `piecewise-box-edges-0-3-8`:
+  - `values.mass_properties[7]`: 1997349.6971433728 to 1997349.6997409267
+  - `values.mass_properties[10]`: 449444.1331736153 to 449444.1341003187
+- `piecewise-box-edges-0-4-5`:
+  - `values.mass_properties[0]`: 2184.7997759340906 to 2184.799778852964
+  - `values.mass_properties[1]`: 5996.268427350089 to 5996.268453352739
+  - `values.mass_properties[2]`: 5996.268427350089 to 5996.268453352739
+  - `values.mass_properties[3]`: 4.996958109030092 to 4.996958136677199
+  - `values.mass_properties[4]`: 9.997385172407903 to 9.997385184344427
+  - `values.mass_properties[5]`: 14.999999999770953 to 14.999999975255333
+  - `values.mass_properties[6]`: 2597655.9256746494 to 2597655.934237956
+  - `values.mass_properties[7]`: 1998204.3837119415 to 1998204.390217179
+  - `values.mass_properties[8]`: 998721.7828580401 to 998721.7915321472
+  - `values.mass_properties[9]`: 899205.075967518 to 899205.079325668
+  - `values.mass_properties[10]`: 449446.5321135234 to 449446.5355407508
+  - `values.mass_properties[11]`: 299475.99965963187 to 299476.00330866454
+- `piecewise-box-edges-0-4-8`:
+  - `values.mass_properties[1]`: 5996.268618208877 to 5996.268625366811
+  - `values.mass_properties[2]`: 5996.268618208877 to 5996.268625366811
+  - `values.mass_properties[3]`: 4.996958286790571 to 4.996958292641284
+  - `values.mass_properties[4]`: 10.00261482750887 to 10.002614815795091
+  - `values.mass_properties[7]`: 1998204.4331087447 to 1998204.4362258078
+  - `values.mass_properties[10]`: 449446.5546596551 to 449446.5558118165
+- `stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1`:
+  - `values.mass_properties[0]`: 38227.395059015704 to 38227.39497970966
+  - `values.mass_properties[1]`: 169498.7732384385 to 169498.7717735628
+  - `values.mass_properties[2]`: 169498.7732384385 to 169498.7717735628
+  - `values.mass_properties[3]`: -6.535659138986239e-08 to 4.623255766698147e-08
+  - `values.mass_properties[4]`: -3.563790501734367e-05 to -3.3746260310659826e-05
+  - `values.mass_properties[5]`: 9.28556864676971e-05 to 9.28568898489775e-05
+  - `values.mass_properties[6]`: 200903771.63067678 to 200903770.69357702
+  - `values.mass_properties[7]`: 200903771.3397121 to 200903770.61891612
+  - `values.mass_properties[8]`: 200904532.08968392 to 200904530.42059574
+  - `values.mass_properties[9]`: 244.59158844656497 to 243.04915579724195
+  - `values.mass_properties[10]`: 5.232338913649665 to 5.212332724264934
+  - `values.mass_properties[11]`: 0.241503304594386 to 0.2782477575709461
+  - `values.result_geometry.blocks[0][0]`: -58.23628471091258 to -58.23630198317341
+  - `values.result_geometry.blocks[0][1]`: 3250.9242591803145 to 3250.9242419080533
+  - `values.result_geometry.blocks[0][2]`: 29063.769625591456 to 29063.768644527045
+  - `values.result_geometry.blocks[1][0]`: 393.33231003009774 to 393.3322996667531
+  - `values.result_geometry.blocks[1][1]`: 2283.686082563766 to 2283.6860722004217
+  - `values.result_geometry.blocks[1][2]`: -7485.558712097773 to -7485.5603598700045
+  - `values.result_geometry.blocks[2][0]`: 54.3322308528417 to 54.33222394394517
+  - `values.result_geometry.blocks[2][1]`: 2638.6291261731308 to 2638.629119264234
+  - `values.result_geometry.blocks[2][2]`: -12862.653024015211 to -12862.653473093282
+- `stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5`:
+  - `values.mass_properties[0]`: 38192.715671829144 to 38192.71559252309
+  - `values.mass_properties[1]`: 169488.1582510577 to 169488.156786182
+  - `values.mass_properties[2]`: 169488.1582510577 to 169488.156786182
+  - `values.mass_properties[3]`: -6.494126079125619e-08 to 4.6654877060792845e-08
+  - `values.mass_properties[4]`: -0.0009206701740508934 to -0.0009187784185204046
+  - `values.mass_properties[5]`: 0.00274459932488353 to 0.002744600551259024
+  - `values.mass_properties[6]`: 200882123.38385296 to 200882122.4467532
+  - `values.mass_properties[7]`: 200882123.08720684 to 200882122.36641085
+  - `values.mass_properties[8]`: 200899301.73179385 to 200899300.06270567
+  - `values.mass_properties[9]`: 6595.485066629833 to 6593.9426339805395
+  - `values.mass_properties[10]`: 5.230879115565467 to 5.210872926180737
+  - `values.mass_properties[11]`: 0.24143739618381177 to 0.2781818491603719
+  - `values.result_geometry.blocks[0][0]`: -55.04275585407373 to -55.042773126334566
+  - `values.result_geometry.blocks[0][1]`: 3250.5421029715994 to 3250.5420856993383
+  - `values.result_geometry.blocks[0][2]`: 29403.507339166164 to 29403.506358101753
+  - `values.result_geometry.blocks[1][0]`: 393.33231003009774 to 393.3322996667531
+  - `values.result_geometry.blocks[1][1]`: 2283.686082563766 to 2283.6860722004217
+  - `values.result_geometry.blocks[1][2]`: -7485.558712097773 to -7485.5603598700045
+  - `values.result_geometry.blocks[2][0]`: 59.80457242487494 to 59.80456551597842
+  - `values.result_geometry.blocks[2][1]`: 2637.390611484507 to 2637.3906045756103
+  - `values.result_geometry.blocks[2][2]`: -11679.935762591926 to -11679.936211669989
+- `stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1`:
+  - `values.mass_properties[0]`: 38236.60646754423 to 38236.60639321238
+  - `values.mass_properties[1]`: 169497.36934847521 to 169497.36786896354
+  - `values.mass_properties[2]`: 169497.36934847521 to 169497.36786896354
+  - `values.mass_properties[3]`: -0.0002442434704982383 to -0.0002441298476250882
+  - `values.mass_properties[4]`: 0.0002497767560673066 to 0.00025166980068552417
+  - `values.mass_properties[5]`: 8.722033752664722e-05 to 8.722084201979407e-05
+  - `values.mass_properties[6]`: 200904177.28570384 to 200904176.34575313
+  - `values.mass_properties[7]`: 200904009.3586459 to 200904008.6290078
+  - `values.mass_properties[8]`: 200903635.36792448 to 200903633.68539098
+  - `values.mass_properties[9]`: -219.85349823628647 to -221.39393452112498
+  - `values.mass_properties[10]`: 211.7087893819534 to 211.68654766482535
+  - `values.mass_properties[11]`: 802.8540378054577 to 802.8847324176213
+- `stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1`:
+  - `values.mass_properties[0]`: 38227.39456904653 to 38227.39448974048
+  - `values.mass_properties[1]`: 169498.76972793616 to 169498.76826306045
+  - `values.mass_properties[2]`: 169498.76972793616 to 169498.76826306045
+  - `values.mass_properties[3]`: 2.6024526311482366e-06 to 2.714041805572479e-06
+  - `values.mass_properties[4]`: -4.058406227797934e-05 to -3.869241757486415e-05
+  - `values.mass_properties[5]`: -0.00012379011426735353 to -0.0001237889127583873
+  - `values.mass_properties[6]`: 200903767.51041195 to 200903766.5733122
+  - `values.mass_properties[7]`: 200903767.2197315 to 200903766.49893552
+  - `values.mass_properties[8]`: 200904523.4664989 to 200904521.79741073
+  - `values.mass_properties[9]`: -272.1274098810829 to -273.66984253039135
+  - `values.mass_properties[10]`: 5.223001848333946 to 5.202995658949216
+  - `values.mass_properties[11]`: 0.24234996175311443 to 0.27909441472967467
+  - `values.result_geometry.blocks[0][0]`: 178.65343403658443 to 178.6534167643236
+  - `values.result_geometry.blocks[0][1]`: 3199.193276601 to 3199.193259328739
+  - `values.result_geometry.blocks[0][2]`: -10792.272973688872 to -10792.27395475327
+  - `values.result_geometry.blocks[1][0]`: 836.4691645295133 to 836.4691576206195
+  - `values.result_geometry.blocks[1][1]`: 2411.465829505752 to 2411.4658225968583
+  - `values.result_geometry.blocks[1][2]`: 28928.316368092885 to 28928.31526957864
+  - `values.result_geometry.blocks[2][0]`: 557.8207081571363 to 557.8206977937889
+  - `values.result_geometry.blocks[2][1]`: 2556.207707436294 to 2556.2076970729468
+  - `values.result_geometry.blocks[2][2]`: 134325.61177020936 to 134325.61103441205
+- `stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5`:
+  - `values.mass_properties[0]`: 38192.71518710443 to 38192.71510779838
+  - `values.mass_properties[1]`: 169488.15866987692 to 169488.15720500122
+  - `values.mass_properties[2]`: 169488.15866987692 to 169488.15720500122
+  - `values.mass_properties[3]`: 2.6031860063084604e-06 to 2.7147821669452055e-06
+  - `values.mass_properties[4]`: -0.0009258732176402615 to -0.0009239814621594171
+  - `values.mass_properties[5]`: -0.0027748621531443066 to -0.002774860974473181
+  - `values.mass_properties[6]`: 200882121.18941358 to 200882120.25231382
+  - `values.mass_properties[7]`: 200882120.89301014 to 200882120.17221415
+  - `values.mass_properties[8]`: 200899286.57691622 to 200899284.90782803
+  - `values.mass_properties[9]`: -6624.323367454232 to -6625.8658001035255
+  - `values.mass_properties[10]`: 5.224558750878024 to 5.204552561493293
+  - `values.mass_properties[11]`: 0.24218614949575126 to 0.2789306024723115
+  - `values.result_geometry.blocks[0][0]`: 175.4642895640224 to 175.4642722917617
+  - `values.result_geometry.blocks[0][1]`: 3198.806822926908 to 3198.806805654647
+  - `values.result_geometry.blocks[0][2]`: -10836.351438469621 to -10836.352419534018
+  - `values.result_geometry.blocks[1][0]`: 835.6467220106982 to 835.6467151018045
+  - `values.result_geometry.blocks[1][1]`: 2410.6433869869375 to 2410.6433800780437
+  - `values.result_geometry.blocks[1][2]`: 28870.044915666193 to 28870.04381715195
+  - `values.result_geometry.blocks[2][0]`: 560.4920595330373 to 560.4920491696898
+  - `values.result_geometry.blocks[2][1]`: 2558.8790588121956 to 2558.8790484488477
+  - `values.result_geometry.blocks[2][2]`: 134983.0654784917 to 134983.06474269443
+- `stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1`:
+  - `values.mass_properties[0]`: 38236.60646754423 to 38236.60639321238
+  - `values.mass_properties[1]`: 169497.36934847521 to 169497.36786896354
+  - `values.mass_properties[2]`: 169497.36934847521 to 169497.36786896354
+  - `values.mass_properties[3]`: -0.0002442434704982383 to -0.0002441298476250882
+  - `values.mass_properties[4]`: 0.0002497767560673066 to 0.00025166980068552417
+  - `values.mass_properties[5]`: 8.722033752664722e-05 to 8.722084201979407e-05
+  - `values.mass_properties[6]`: 200904177.28570384 to 200904176.34575313
+  - `values.mass_properties[7]`: 200904009.3586459 to 200904008.6290078
+  - `values.mass_properties[8]`: 200903635.36792448 to 200903633.68539098
+  - `values.mass_properties[9]`: -219.85349823628647 to -221.39393452112498
+  - `values.mass_properties[10]`: 211.7087893819534 to 211.68654766482535
+  - `values.mass_properties[11]`: 802.8540378054577 to 802.8847324176213
+- `stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5`:
+  - `values.mass_properties[0]`: 38236.60646754423 to 38236.60639321238
+  - `values.mass_properties[1]`: 169497.36934847521 to 169497.36786896354
+  - `values.mass_properties[2]`: 169497.36934847521 to 169497.36786896354
+  - `values.mass_properties[3]`: -0.0002442434704982383 to -0.0002441298476250882
+  - `values.mass_properties[4]`: 0.0002497767560673066 to 0.00025166980068552417
+  - `values.mass_properties[5]`: 8.722033752664722e-05 to 8.722084201979407e-05
+  - `values.mass_properties[6]`: 200904177.28570384 to 200904176.34575313
+  - `values.mass_properties[7]`: 200904009.3586459 to 200904008.6290078
+  - `values.mass_properties[8]`: 200903635.36792448 to 200903633.68539098
+  - `values.mass_properties[9]`: -219.85349823628647 to -221.39393452112498
+  - `values.mass_properties[10]`: 211.7087893819534 to 211.68654766482535
+  - `values.mass_properties[11]`: 802.8540378054577 to 802.8847324176213
+- `sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1`:
+  - `values.mass_properties[0]`: 38236.60646754423 to 38236.60639321238
+  - `values.mass_properties[1]`: 169497.36934847521 to 169497.36786896354
+  - `values.mass_properties[2]`: 169497.36934847521 to 169497.36786896354
+  - `values.mass_properties[3]`: -0.0002442434704982383 to -0.0002441298476250882
+  - `values.mass_properties[4]`: 0.0002497767560673066 to 0.00025166980068552417
+  - `values.mass_properties[5]`: 8.722033752664722e-05 to 8.722084201979407e-05
+  - `values.mass_properties[6]`: 200904177.28570384 to 200904176.34575313
+  - `values.mass_properties[7]`: 200904009.3586459 to 200904008.6290078
+  - `values.mass_properties[8]`: 200903635.36792448 to 200903633.68539098
+  - `values.mass_properties[9]`: -219.85349823628647 to -221.39393452112498
+  - `values.mass_properties[10]`: 211.7087893819534 to 211.68654766482535
+  - `values.mass_properties[11]`: 802.8540378054577 to 802.8847324176213
+- `sweep4-sphere_diff_3cylinders-all-r0.1`:
+  - `values.mass_properties[0]`: 38236.60646754423 to 38236.60639321238
+  - `values.mass_properties[1]`: 169497.36934847521 to 169497.36786896354
+  - `values.mass_properties[2]`: 169497.36934847521 to 169497.36786896354
+  - `values.mass_properties[3]`: -0.0002442434704982383 to -0.0002441298476250882
+  - `values.mass_properties[4]`: 0.0002497767560673066 to 0.00025166980068552417
+  - `values.mass_properties[5]`: 8.722033752664722e-05 to 8.722084201979407e-05
+  - `values.mass_properties[6]`: 200904177.28570384 to 200904176.34575313
+  - `values.mass_properties[7]`: 200904009.3586459 to 200904008.6290078
+  - `values.mass_properties[8]`: 200903635.36792448 to 200903633.68539098
+  - `values.mass_properties[9]`: -219.85349823628647 to -221.39393452112498
+  - `values.mass_properties[10]`: 211.7087893819534 to 211.68654766482535
+  - `values.mass_properties[11]`: 802.8540378054577 to 802.8847324176213
+- `sweep5-sphere_diff_3cylinders-e29-r1.0`:
+  - `values.mass_properties[0]`: 38236.60646754423 to 38236.60639321238
+  - `values.mass_properties[1]`: 169497.36934847521 to 169497.36786896354
+  - `values.mass_properties[2]`: 169497.36934847521 to 169497.36786896354
+  - `values.mass_properties[3]`: -0.0002442434704982383 to -0.0002441298476250882
+  - `values.mass_properties[4]`: 0.0002497767560673066 to 0.00025166980068552417
+  - `values.mass_properties[5]`: 8.722033752664722e-05 to 8.722084201979407e-05
+  - `values.mass_properties[6]`: 200904177.28570384 to 200904176.34575313
+  - `values.mass_properties[7]`: 200904009.3586459 to 200904008.6290078
+  - `values.mass_properties[8]`: 200903635.36792448 to 200903633.68539098
+  - `values.mass_properties[9]`: -219.85349823628647 to -221.39393452112498
+  - `values.mass_properties[10]`: 211.7087893819534 to 211.68654766482535
+  - `values.mass_properties[11]`: 802.8540378054577 to 802.8847324176213
+
+### `corpus.parity` (1 rows)
+
+- `Fillet__sphere_diff_3cylinders.smb`:
+  - `values.area[0]`: 38236.6057087192 to 38236.605488862486
+  - `values.rt_area[0]`: 38236.605708719195 to 38236.60548886247
+  - `values.rt_volume[0]`: 169497.31811078507 to 169497.32069403236
+  - `values.volume[0]`: 169497.31811078504 to 169497.32069403233
+
+### `topology.face_p3` (15 rows)
+
+- `own_reader_sphere_diff_3cylinders_uv_trim_f0_rebuild`:
+  - `values.out.blocks`: [[139.10557885695604, 139.10557885695604, 23371.627901390... to [[139.0011642299982, 139.0011642299982, 23365.05330969427...
+  - `values.out.n`: 12197 to 8214
+- `own_reader_sphere_diff_3cylinders_uv_trim_f10`:
+  - `values.out.blocks`: [[139.00083890245563, 139.00083890245563, 24241.037765654... to [[139.00076514876932, 139.00076514876932, 24241.033413235...
+  - `values.out.n`: 9071 to 8384
+- `own_reader_sphere_diff_3cylinders_uv_trim_f10_rebuild`:
+  - `values.out.blocks`: [[140.12274387359562, 140.12274387359562, 23516.064934579... to [[140.0011931083634, 140.0011931083634, 23509.05462065226...
+  - `values.out.n`: 12671 to 9258
+- `own_reader_sphere_diff_3cylinders_uv_trim_f11_rebuild`:
+  - `values.out.blocks`: [[144.1057009654512, 144.1057009654512, 24322.63366081334... to [[144.00120937332017, 144.00120937332017, 24316.055466113...
+  - `values.out.n`: 12875 to 9312
+- `own_reader_sphere_diff_3cylinders_uv_trim_f1_rebuild`:
+  - `values.out.blocks`: [[139.1055788007556, 139.1055788007556, 23371.62790110986... to [[139.00116417379775, 139.00116417379775, 23365.053309413...
+  - `values.out.n`: 12197 to 8214
+- `own_reader_sphere_diff_3cylinders_uv_trim_f2_rebuild`:
+  - `values.out.blocks`: [[140.105667184024, 140.105667184024, 23515.631592332105]... to [[140.0011931083634, 140.0011931083634, 23509.05462065226...
+  - `values.out.n`: 12671 to 9258
+- `own_reader_sphere_diff_3cylinders_uv_trim_f3_rebuild`:
+  - `values.out.blocks`: [[144.1057009654512, 144.1057009654512, 24322.63366081334... to [[144.00120937332017, 144.00120937332017, 24316.055466113...
+  - `values.out.n`: 12875 to 9312
+- `own_reader_sphere_diff_3cylinders_uv_trim_f4_rebuild`:
+  - `values.out.blocks`: [[139.10557895226424, 139.10557895226424, 23371.627901867... to [[139.0011643253064, 139.0011643253064, 23365.05331017081...
+  - `values.out.n`: 12257 to 8274
+- `own_reader_sphere_diff_3cylinders_uv_trim_f5_rebuild`:
+  - `values.out.blocks`: [[141.10558024264185, 141.10558024264185, 23878.627909385... to [[141.00116432530643, 141.00116432530643, 23872.053310170...
+  - `values.out.n`: 12257 to 8274
+- `own_reader_sphere_diff_3cylinders_uv_trim_f6`:
+  - `values.out.blocks`: [[140.00076641651498, 140.00076641651498, 24388.034119569... to [[140.00072094027206, 140.00072094027206, 24388.032045375...
+  - `values.out.n`: 9662 to 8027
+- `own_reader_sphere_diff_3cylinders_uv_trim_f6_rebuild`:
+  - `values.out.blocks`: [[139.10571597255495, 139.10571597255495, 23371.634309920... to [[139.00116390749355, 139.00116390749355, 23365.053307802...
+  - `values.out.n`: 13292 to 8514
+- `own_reader_sphere_diff_3cylinders_uv_trim_f7`:
+  - `values.out.blocks`: [[140.0623998215131, 140.0623998215131, 24391.43445984626... to [[140.06236498915212, 140.06236498915212, 24391.432669293...
+  - `values.out.n`: 9509 to 8079
+- `own_reader_sphere_diff_3cylinders_uv_trim_f7_rebuild`:
+  - `values.out.blocks`: [[139.11529157001132, 139.11529157001132, 23371.669065738... to [[139.06280795637355, 139.06280795637355, 23368.453931719...
+  - `values.out.n`: 13139 to 8566
+- `own_reader_sphere_diff_3cylinders_uv_trim_f8_rebuild`:
+  - `values.out.blocks`: [[139.10557885695604, 139.10557885695604, 23371.627901390... to [[139.0011642299982, 139.0011642299982, 23365.05330969427...
+  - `values.out.n`: 12197 to 8214
+- `own_reader_sphere_diff_3cylinders_uv_trim_f9_rebuild`:
+  - `values.out.blocks`: [[139.1055788007556, 139.1055788007556, 23371.62790110986... to [[139.00116417379775, 139.00116417379775, 23365.053309413...
+  - `values.out.n`: 12197 to 8214
+
+### `topology.edgeuse_p3` (10 rows)
+
+- `own_reader_sphere_diff_3cylinders_create_eu21_rebuild`:
+  - `values.state.blocks`: [["-inf", "inf", "-inf"], [14049.679912312768, 14530.5913... to [["-inf", "inf", "-inf"], ["-inf", "inf", "-inf"], [-44.4...
+  - `values.state.n`: 341 to 551
+- `own_reader_sphere_diff_3cylinders_create_eu30`:
+  - `values.state.blocks[0][0]`: "-inf" to 6.7812498163778825
+  - `values.state.blocks[0][2]`: "-inf" to "NaN"
+  - `values.state.blocks[1][0]`: 53.13585495904329 to 46.354605142665406
+  - `values.state.blocks[1][1]`: "inf" to 50.354605142665406
+  - `values.state.blocks[1][2]`: "NaN" to 1250.8996385610471
+  - `values.state.n`: 503 to 304
+- `own_reader_sphere_diff_3cylinders_create_eu30_rebuild`:
+  - `values.state.blocks`: [["-inf", "inf", "-inf"], ["-inf", "inf", "-inf"]] to [[42242.3991041244, 42799.65158359198, 2998132.0276400466]]
+  - `values.state.n`: 398 to 210
+- `own_reader_sphere_diff_3cylinders_create_eu36`:
+  - `values.state.blocks[0][0]`: "-inf" to 52.260844402800764
+  - `values.state.blocks[0][2]`: "-inf" to "NaN"
+  - `values.state.blocks[1][0]`: 53.01085433804352 to 0.750009935242753
+  - `values.state.blocks[1][1]`: "inf" to 4.750009935242753
+  - `values.state.blocks[1][2]`: "NaN" to 11.750129245523434
+  - `values.state.n`: 473 to 269
+- `own_reader_sphere_diff_3cylinders_create_eu36_rebuild`:
+  - `values.state.blocks`: [["-inf", "inf", "-inf"], ["-inf", "inf", "-inf"]] to [[42404.0717875365, 42800.47180477368, 2446584.1067375746]]
+  - `values.state.n`: 443 to 170
+- `own_reader_sphere_diff_3cylinders_create_eu39`:
+  - `values.state.blocks[0][0]`: "-inf" to 54.135845807867504
+  - `values.state.blocks[0][2]`: "-inf" to "NaN"
+  - `values.state.blocks[1][0]`: 54.8858558304779 to 0.750010022610394
+  - `values.state.blocks[1][1]`: "inf" to 4.750010022610393
+  - `values.state.blocks[1][2]`: "NaN" to 4.750130248714335
+  - `values.state.n`: 473 to 269
+- `own_reader_sphere_diff_3cylinders_create_eu39_rebuild`:
+  - `values.state.blocks`: [["-inf", "inf", "-inf"], ["-inf", "inf", "-inf"]] to [[42693.93243213361, 42699.93243213361, 2364539.923423812]]
+  - `values.state.n`: 443 to 170
+- `own_reader_sphere_diff_3cylinders_create_eu42_rebuild`:
+  - `values.state.blocks`: [["-inf", "inf", "-inf"]] to [["-inf", "inf", "-inf"], [13959.932844740102, 14521.1853...
+  - `values.state.n`: 221 to 326
+- `own_reader_sphere_diff_3cylinders_create_eu45`:
+  - `values.state.blocks`: [["-inf", "inf", "-inf"], ["-inf", "inf", "-inf"], [12.53... to [[0.380126001095241, "inf", "NaN"], [76.95397054595469, "...
+  - `values.state.n`: 818 to 409
+- `own_reader_sphere_diff_3cylinders_create_eu45_rebuild`:
+  - `values.state.blocks`: [["-inf", "inf", "-inf"], ["-inf", "inf", "-inf"], ["-inf... to [[41890.2236008958, 42743.3884665193, 2860011.8445197754]]
+  - `values.state.n`: 758 to 210

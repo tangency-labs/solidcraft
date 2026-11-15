@@ -11,6 +11,6 @@ Some earlier releases were installed as SolveCraft.app. Move that one to the Tra
 once SolidCraft.app is in Applications, and replace any Dock shortcut with the
 old name (open SolidCraft.app, then choose Options > Keep in Dock).
 
-Designs saved as .solvecraft still open, and SolidCraft copies your settings
-and recovery files from the old SolveCraft folder on its first launch.
-New designs are saved as .solidcraft.
+Designs saved as .solidcraft or .solvecraft still open, and SolidCraft copies
+your settings and recovery files from the old SolveCraft folder on its first
+launch. New designs are saved as .sc.

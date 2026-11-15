@@ -1,0 +1,26 @@
+{
+ "sources": [],
+ "what": "a 20 x 20 sheet trimmed by a circle r 4 drawn on it, keeping the outside: a sheet with a hole",
+ "source": "analytic",
+ "method": "A = 400 - 16 pi = 349.73, one plane face, free edges the 4 sides and the circle",
+ "valid": false,
+ "body_count": 1,
+ "faces": 1,
+ "boundary_edges": 5,
+ "area_mm2": 349.7345175425633,
+ "surface_types": [
+  "plane"
+ ],
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   20,
+   20,
+   0
+  ]
+ }
+}

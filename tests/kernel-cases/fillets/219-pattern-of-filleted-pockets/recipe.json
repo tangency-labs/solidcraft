@@ -1,0 +1,176 @@
+{
+ "commands": [
+  {
+   "command": "parameters.add",
+   "params": {
+    "name": "n",
+    "expression": "6",
+    "unit": ""
+   }
+  },
+  {
+   "command": "parameters.add",
+   "params": {
+    "name": "h",
+    "expression": "(419.1 mm - 3.175 mm - (n - 1) * 3.175 mm) / n",
+    "unit": "mm"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     150,
+     422.275
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 19.05,
+    "name": "Plate"
+   }
+  },
+  {
+   "command": "construct.plane.offset",
+   "params": {
+    "base": "XY",
+    "offset": 19.05,
+    "name": "PocketPlane"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "PocketPlane"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     3.175,
+     3.175
+    ],
+    "p1": [
+     146.825,
+     69.85
+    ]
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "origin",
+     "p1"
+    ],
+    "type": "horizontal",
+    "value": "3.175"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "origin",
+     "p1"
+    ],
+    "type": "vertical",
+    "value": "3.175"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l1"
+    ],
+    "type": "length",
+    "value": "143.65"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l4"
+    ],
+    "type": "length",
+    "value": "h"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 12.7,
+    "direction": "negative",
+    "operation": "cut",
+    "name": "Pocket"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      3.175,
+      3.175,
+      12.700000000000001
+     ],
+     [
+      146.825,
+      3.175,
+      12.700000000000001
+     ],
+     [
+      146.825,
+      69.85,
+      12.700000000000001
+     ],
+     [
+      3.175,
+      69.85,
+      12.700000000000001
+     ]
+    ],
+    "radius": 3.2
+   }
+  },
+  {
+   "command": "solid.pattern.rectangular",
+   "params": {
+    "features": [
+     "Pocket",
+     "Fillet1"
+    ],
+    "dir1": [
+     0,
+     1,
+     0
+    ],
+    "count1": "n",
+    "spacing1": "h + 3.175 mm"
+   }
+  }
+ ]
+}

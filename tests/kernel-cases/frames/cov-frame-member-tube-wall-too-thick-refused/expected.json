@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a 40x40 tube with a 20 mm wall has no hole: refused",
+ "source": "analytic",
+ "method": "the wall must be under half the smaller side (20): a clean refusal naming it",
+ "outcome": "refused",
+ "refusal": "must be less than half the smaller side"
+}

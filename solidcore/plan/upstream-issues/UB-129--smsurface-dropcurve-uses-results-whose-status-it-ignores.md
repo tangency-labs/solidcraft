@@ -1,0 +1,10 @@
+#### UB-129. `SmSurface::DropCurve` uses results whose status it ignores
+- **Severity:** Crash / undefined behaviour
+- **Area:** Intersection
+- **Location:** `source/SMLib/src/SmSurfaceDropLib.cpp:4590`-`4591` (`SmBSplineCurve::CreateLineSegment` of the pole line, status ignored, then `pUVTrimCurve->EditParameterization` on the pointer that stays `NULL` on a failure), `:5489` (`p3dCurve->EvaluatePoint(sInterval.GetMax(), sCurveEnd)`, status ignored, then `sCurveEnd` read), `:4232` (`SmTol::GetScaledZero(cr3dCurve)`, `SmTol.cpp:1400`, reads the point of an ignored `EvaluatePoint`) and `:4233` (`cr3dCurve.IsDegenerate(.., &crInterval)`, `SmCurve.cpp:14395`-`14427`: it reads the derivatives of `Evaluate` calls whose statuses it ignores; its asserted precondition, `crInterval` inside the natural interval, is compiled out and only matters for a curve kind whose `Evaluate` fails outside that interval).
+- **What happens:** A failing callee leaves the output unset (a `NULL` curve pointer, an uninitialised point or derivative array) and the next statement uses it.
+- **Trigger:** `CreateLineSegment` fails only for coincident ends (a natural domain shorter than `SM_EFF_ZERO` in the pole direction, which the domain checks above nearly exclude); the `EvaluatePoint`s fail only for curve kinds whose point evaluation can fail (`SmBSplineCurve`, `SmLine` and `SmCircle` clamp or extend instead); the `:4233` `IsDegenerate` case needs a curve kind whose `Evaluate` fails outside its natural interval, and `crInterval` reaching outside it (none in the harness: `SmBSplineCurve::Evaluate`/`EvaluatePoint` clamp, `SmBSplineCurve.cpp:3056`, `:3307`, and `SmLine` and `SmCircle` evaluate anywhere, so those intervals are not undefined).
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** crash/UB (needs a bad argument or a failing evaluator).
+- **Rust port:** `Surface::drop_curve_base` propagates those errors. The FFI rejects nothing for the `IsDegenerate` case (it accepts intervals outside the curve's range, zero-length and inverted ones; probed).

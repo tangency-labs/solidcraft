@@ -1,0 +1,79 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "diameter": 50,
+    "height": 10,
+    "body_name": "Disc"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      25,
+      0,
+      0
+     ]
+    ],
+    "distance": 1
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 20,
+    "width": 12,
+    "height": 4,
+    "corner": [
+     0,
+     -34,
+     0
+    ],
+    "operation": "join",
+    "targets": [
+     "Disc"
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Pocket",
+    "offset": 4
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     5,
+     -31
+    ],
+    "p1": [
+     15,
+     -27
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Pocket",
+    "distance": 0.6,
+    "direction": "negative",
+    "operation": "cut",
+    "targets": [
+     "Disc"
+    ]
+   }
+  }
+ ]
+}

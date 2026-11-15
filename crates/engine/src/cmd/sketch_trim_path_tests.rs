@@ -2,7 +2,8 @@
 //! with `sketch.trim` would, in one undo step.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::Shape;
 
 use crate::Session;

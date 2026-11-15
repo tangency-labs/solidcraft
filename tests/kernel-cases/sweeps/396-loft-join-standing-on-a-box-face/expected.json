@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#396",
+  "tangency-labs/solidcraft#577"
+ ],
+ "what": "a conical loft standing on a box top face, joined to the box (one body reported, two touching shells in the result)",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 plus the frustum of height 15 from r 6 to r 4 whose base disc lies wholly inside the box top face: V = 24000 + 15/3 pi (36 + 24 + 16). One closed shell: faces = 6 box (top with a circular hole) + cone + top disc = 8.",
+ "body_count": 1,
+ "volume_mm3": 25193.805208364123,
+ "faces": 8
+}

@@ -1,0 +1,323 @@
+//! New points on an existing fit spline (#6533): a fit point inserted where the curve already
+//! runs, or a new first or last point the spline runs on to. One point taken out of a spline
+//! (#10783). Also a spline's direction reversed (#8224).
+//!
+//! The spline keeps its curve index and every point it had (the new point is appended to
+//! `Sketch::points`), so constraints on its points and on the curve stay as they were.
+//!
+//! A spline with tangent handles (#6502) gets a handle and its construction line at the new
+//! point, and reversing it mirrors its handles so the curve keeps its shape.
+//!
+//! Control point splines take no new points yet: their knots are uniform, so one more control
+//! point re-spreads every span and the whole curve moves, wherever the point goes.
+
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
+
+use crate::model::{ConstraintKind, CurveKind, Result, Sketch, SketchError};
+
+/// Closer than this (relative to the spline's size) to one of its points, a new point would
+/// double it.
+const SAME_POINT: f64 = 1e-6;
+
+impl Sketch {
+    /// Insert a fit point into spline `ci` where the curve passes nearest to `at`, and return its
+    /// index. The point lies on the curve, which still runs through it and through all its old
+    /// points; between them the curve shifts slightly, as interpolation through one more point
+    /// does.
+    pub fn insert_spline_point(&mut self, ci: usize, at: Vec2) -> Result<usize> {
+        let pts = self.editable_spline(ci)?;
+        if !at.is_finite() {
+            return Err(SketchError::Invalid("the position must be finite".into()));
+        }
+        let pos: Vec<Vec2> = pts.iter().map(|i| self.point(*i).ok_or_else(|| SketchError::Unknown(format!("point {i}")))).collect::<Result<_>>()?;
+        // A fit spline has one exact piece between each pair of neighbouring fit points.
+        let pieces = self.exact_segs(ci).filter(|p| !p.is_empty() && p.len() + 1 == pos.len());
+        let pieces = pieces.ok_or_else(|| SketchError::Invalid("the spline has no exact pieces to place a point on".into()))?;
+        let (piece, new, slope) = pieces
+            .iter()
+            .enumerate()
+            .map(|(i, seg)| {
+                let t = seg.closest_param(at);
+                let q = seg.point_at(t);
+                (i, q, seg.derivative(t), q.dist(at))
+            })
+            .min_by(|a, b| a.3.total_cmp(&b.3))
+            .map(|(i, q, d, _)| (i, q, d))
+            .ok_or_else(|| SketchError::Invalid("the spline has no exact pieces to place a point on".into()))?;
+        let size = spread(&pos);
+        if [pos.get(piece), pos.get(piece + 1)].into_iter().flatten().any(|p| p.dist(new) <= SAME_POINT * size) {
+            return Err(SketchError::Invalid("there is already a spline point there".into()));
+        }
+        // A handle at the new point follows the curve's slope there, per unit chord as the
+        // handles store it.
+        let chord = pos.get(piece).zip(pos.get(piece + 1)).map_or(1.0, |(a, b)| a.dist(*b).max(1e-9));
+        let unit = pos.get(piece).zip(pos.get(piece + 1)).map_or(1.0, |(a, b)| ((a.dist(new) + new.dist(*b)) / 2.0).max(1e-9));
+        let handle = new + slope * (unit / chord);
+        let p = self.add_point(new, None)?;
+        if let Some(CurveKind::Spline { pts, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
+            pts.insert(piece + 1, p);
+        }
+        self.add_spline_handle(ci, piece + 1, p, handle, false)?;
+        Ok(p)
+    }
+
+    /// Give spline `ci`, when it has tangent handles, a handle at `handle` for its new fit point
+    /// `p` (handle number `at`), with its construction line. `last` when `p` is the open spline's
+    /// last point, whose handle points back along the curve.
+    fn add_spline_handle(&mut self, ci: usize, at: usize, p: usize, handle: Vec2, last: bool) -> Result<()> {
+        let Some(curve) = self.curves.get(ci) else { return Ok(()) };
+        let CurveKind::Spline { handles, .. } = &curve.kind else { return Ok(()) };
+        if handles.is_empty() {
+            return Ok(());
+        }
+        let spline_id = curve.id.clone();
+        let h = self.add_point(handle, None)?;
+        if let Some(CurveKind::Spline { handles, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
+            handles.insert(at.min(handles.len()), h);
+        }
+        let id = self.fresh("h")?;
+        let (a, b) = if last { (h, p) } else { (p, h) };
+        let line = self.add_line_pts(a, b, Some(&id))?;
+        if let Some(curve) = self.curves.get_mut(line) {
+            curve.construction = true;
+            curve.spline_handle_of = Some(spline_id);
+        }
+        Ok(())
+    }
+
+    /// Add `to` to fit spline `ci` as its new first (`at_start`) or last point, and return its
+    /// index: the curve runs on from its old end through it. The old end becomes an inner point,
+    /// so it must not be joined to anything (another curve, or a constraint on that point or a
+    /// tangency of the spline).
+    pub fn extend_spline(&mut self, ci: usize, to: Vec2, at_start: bool) -> Result<usize> {
+        let pts = self.editable_spline(ci)?;
+        if matches!(self.curves.get(ci).map(|c| &c.kind), Some(CurveKind::Spline { periodic: true, .. })) {
+            return Err(SketchError::Invalid("a closed spline has no end to extend".into()));
+        }
+        if !to.is_finite() {
+            return Err(SketchError::Invalid("the position must be finite".into()));
+        }
+        let end = if at_start { pts.first() } else { pts.last() }.copied().ok_or_else(|| SketchError::Invalid("empty spline".into()))?;
+        let joined = self.curves.iter().enumerate().any(|(i, c)| i != ci && c.kind.uses(end))
+            || self.constraints.iter().any(|k| {
+                let (points, curves) = k.kind.indices();
+                points.contains(&end) || (curves.contains(&ci) && matches!(k.kind, ConstraintKind::Tangent { .. } | ConstraintKind::Smooth { .. }))
+            });
+        if joined {
+            return Err(SketchError::Invalid("that end of the spline is joined to other geometry; add the point inside the spline instead".into()));
+        }
+        let pos: Vec<Vec2> = pts.iter().filter_map(|i| self.point(*i)).collect();
+        if pos.iter().any(|p| p.dist(to) <= SAME_POINT * spread(&pos)) {
+            return Err(SketchError::Invalid("there is already a spline point there".into()));
+        }
+        // With tangent handles, the old end becomes an inner point: a last point's handle points
+        // back along the curve, an inner one's forward, so it turns about its point. The new end
+        // takes a handle along the chord to it.
+        let old_end = pos.get(if at_start { 0 } else { pos.len().saturating_sub(1) }).copied().unwrap_or(to);
+        if !at_start
+            && let Some(CurveKind::Spline { handles, .. }) = self.curves.get(ci).map(|c| &c.kind)
+            && let Some(h) = handles.last().copied()
+            && let Some(q) = self.points.get_mut(h)
+        {
+            q.pos = old_end * 2.0 - q.pos;
+        }
+        let along = (to - old_end).normalized().unwrap_or(Vec2::new(1.0, 0.0));
+        let handle = to - along * old_end.dist(to).max(1e-9);
+        let p = self.add_point(to, None)?;
+        let count = if let Some(CurveKind::Spline { pts, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
+            if at_start {
+                pts.insert(0, p);
+            } else {
+                pts.push(p);
+            }
+            pts.len()
+        } else {
+            0
+        };
+        self.add_spline_handle(ci, if at_start { 0 } else { count }, p, handle, !at_start)?;
+        Ok(p)
+    }
+
+    /// Take point `p` out of spline `ci` (#10783), and return whether the point itself went too.
+    /// The spline runs through (or over) its other points, and keeps its curve index, so
+    /// constraints on the curve and on its other points stay. The point goes with the constraints
+    /// on it, unless another curve uses it (it stays, for that curve) or it is the origin.
+    ///
+    /// The spline keeps at least 2 points (a closed one 3 besides its closing point, which stays).
+    /// An end of an open spline joined to other geometry stays, as for [`Sketch::extend_spline`]:
+    /// the spline would no longer end where it is joined.
+    pub fn remove_spline_point(&mut self, ci: usize, p: usize) -> Result<bool> {
+        let curve = self.curves.get(ci).ok_or_else(|| SketchError::Unknown(format!("curve {ci}")))?;
+        let CurveKind::Spline { pts, periodic, .. } = &curve.kind else {
+            return Err(SketchError::WrongKind(curve.id.clone(), "only a spline has points to remove".into()));
+        };
+        let (pts, periodic) = (pts.clone(), *periodic);
+        if curve.link.is_some() {
+            return Err(SketchError::Invalid("a projected spline follows its source; its points can't be removed".into()));
+        }
+        if self.freeform_offsets.iter().any(|o| o.output == curve.id) {
+            return Err(SketchError::Invalid("an offset spline follows its source; break the offset association first".into()));
+        }
+        if self.freeform_offsets.iter().any(|o| o.source == curve.id) {
+            return Err(SketchError::Invalid(
+                "not supported yet: removing a point from a spline that has an offset; break the offset association first".into(),
+            ));
+        }
+        if self.patterns.iter().any(|pattern| pattern.contains(&curve.id)) {
+            return Err(SketchError::Invalid("not supported yet: removing a point from a patterned spline".into()));
+        }
+        let at = match pts.iter().enumerate().filter(|(_, q)| **q == p).map(|(i, _)| i).collect::<Vec<_>>().as_slice() {
+            [] => return Err(SketchError::Invalid(format!("that point isn't one of {}'s points", curve.id))),
+            [at] => *at,
+            _ => return Err(SketchError::Invalid("that point closes the spline; remove another one".into())),
+        };
+        let last = pts.len().saturating_sub(1);
+        if periodic && (at == 0 || at == last) {
+            return Err(SketchError::Invalid("a closed spline's closing point stays; remove another one".into()));
+        }
+        if pts.len() < if periodic { 5 } else { 3 } {
+            return Err(SketchError::Invalid(format!("a spline keeps at least {} points", if periodic { 3 } else { 2 })));
+        }
+        // The spline's own tangent handle lines (#6502) are part of it, not other geometry.
+        let spline_id = curve.id.clone();
+        let own = |c: &crate::model::Curve| c.spline_handle_of.as_deref() == Some(spline_id.as_str());
+        if !periodic && (at == 0 || at == last) {
+            let joined = self.curves.iter().enumerate().any(|(i, c)| i != ci && !own(c) && c.kind.uses(p))
+                || self.constraints.iter().any(|k| {
+                    let (points, curves) = k.kind.indices();
+                    points.contains(&p) || (curves.contains(&ci) && matches!(k.kind, ConstraintKind::Tangent { .. } | ConstraintKind::Smooth { .. }))
+                });
+            if joined {
+                return Err(SketchError::Invalid(
+                    "that end of the spline is joined to other geometry or held by a constraint; remove those first".into(),
+                ));
+            }
+        }
+        let mut left = pts;
+        left.remove(at);
+        if periodic {
+            let pos: Vec<Vec2> =
+                left.iter().map(|i| self.point(*i).ok_or_else(|| SketchError::Unknown(format!("point {i}")))).collect::<Result<_>>()?;
+            crate::periodic::validate_periodic_points(&pos)?;
+        }
+        // The point's tangent handle (#6502) goes with it: the handle point, and the construction
+        // line from the point to it.
+        let mut handle = None;
+        if let Some(CurveKind::Spline { pts, handles, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
+            *pts = left;
+            if at < handles.len() {
+                handle = Some(handles.remove(at));
+            }
+        }
+        if let Some(h) = handle {
+            let lines: Vec<usize> =
+                self.curves.iter().enumerate().filter(|(_, c)| own(c) && c.kind.uses(h) && c.kind.uses(p)).map(|(i, _)| i).collect();
+            self.drop_curves(&lines);
+        }
+        // The handle point goes unless something else still uses it; removed with `p` in one go,
+        // so neither index shifts under the other.
+        let handle = handle.filter(|h| *h != 0 && !self.point_used_by_curve(*h));
+        // The origin (point 0) is never removed.
+        if p == 0 || self.point_used_by_curve(p) {
+            if let Some(h) = handle {
+                self.keep_ties_through(&[h]);
+                self.remove_points(&[h]);
+            }
+            return Ok(false);
+        }
+        let gone: Vec<usize> = std::iter::once(p).chain(handle).collect();
+        self.keep_ties_through(&gone);
+        self.remove_points(&gone);
+        Ok(true)
+    }
+
+    /// Reverse spline `ci`'s direction: its last point becomes its first and the curve runs the
+    /// other way along the same path. Its points are reversed in place, so every point, and every
+    /// constraint on them and on the curve, stays. The shape doesn't change: a fit spline's chord
+    /// lengths and natural ends, a control point spline's uniform clamped knots and a closed
+    /// spline's cyclic fit (whose closing point repeats its first) read the same both ways.
+    pub fn reverse_spline(&mut self, ci: usize) -> Result<()> {
+        let curve = self.curves.get(ci).ok_or_else(|| SketchError::Unknown(format!("curve {ci}")))?;
+        if !matches!(curve.kind, CurveKind::Spline { .. }) {
+            return Err(SketchError::WrongKind(curve.id.clone(), "only a spline can be reversed".into()));
+        }
+        if curve.link.is_some() {
+            return Err(SketchError::Invalid("a projected spline follows its source; it can't be reversed on its own".into()));
+        }
+        let id = curve.id.as_str();
+        // An offset's side is taken along its sources' directions.
+        let offset = self.freeform_offsets.iter().any(|o| o.source == id || o.output == id)
+            || self.offsets.iter().any(|o| o.sources.iter().any(|(source, _)| source == id) || o.owns_output(id));
+        if offset {
+            return Err(SketchError::Invalid("the spline is part of an offset; break the offset association first".into()));
+        }
+        let mut mirrored = Vec::new();
+        if let Some(CurveKind::Spline { pts, handles, periodic, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
+            pts.reverse();
+            if !handles.is_empty() {
+                if *periodic {
+                    // The closing point repeats the first, which keeps its place: the handles of
+                    // the others run the other way after it.
+                    handles[1..].reverse();
+                    mirrored.extend(pts.iter().zip(handles.iter()).map(|(p, h)| (*p, *h)));
+                } else {
+                    // An open spline's end handles already point the other way along the curve;
+                    // its inner ones turn about their points.
+                    handles.reverse();
+                    let n = handles.len();
+                    mirrored.extend(pts.iter().zip(handles.iter()).enumerate().filter(|(i, _)| *i != 0 && *i + 1 != n).map(|(_, (p, h))| (*p, *h)));
+                }
+            }
+        }
+        for (p, h) in mirrored {
+            if let Some(at) = self.point(p)
+                && let Some(q) = self.points.get_mut(h)
+            {
+                q.pos = at * 2.0 - q.pos;
+            }
+        }
+        Ok(())
+    }
+
+    /// The points of spline `ci`, when it may take another one.
+    fn editable_spline(&self, ci: usize) -> Result<Vec<usize>> {
+        let curve = self.curves.get(ci).ok_or_else(|| SketchError::Unknown(format!("curve {ci}")))?;
+        let CurveKind::Spline { pts, control, .. } = &curve.kind else {
+            return Err(SketchError::WrongKind(curve.id.clone(), "only a spline takes another point".into()));
+        };
+        if *control {
+            return Err(SketchError::Invalid(
+                "not supported yet: adding a point to a control point spline (it would reshape the whole curve)".into(),
+            ));
+        }
+        if curve.link.is_some() {
+            return Err(SketchError::Invalid("a projected spline follows its source; it takes no points of its own".into()));
+        }
+        if self.freeform_offsets.iter().any(|o| o.output == curve.id) {
+            return Err(SketchError::Invalid("an offset spline follows its source; break the offset association first".into()));
+        }
+        if self.freeform_offsets.iter().any(|o| o.source == curve.id) {
+            return Err(SketchError::Invalid(
+                "not supported yet: adding a point to a spline that has an offset; break the offset association first".into(),
+            ));
+        }
+        if self.patterns.iter().any(|p| p.contains(&curve.id)) {
+            return Err(SketchError::Invalid("not supported yet: adding a point to a patterned spline".into()));
+        }
+        if pts.len() >= crate::curves::MAX_SPLINE_POINTS {
+            return Err(SketchError::Invalid(format!("a spline has at most {} points", crate::curves::MAX_SPLINE_POINTS)));
+        }
+        Ok(pts.clone())
+    }
+}
+
+/// The size of a set of points (its bounding box diagonal, at least 1 mm).
+fn spread(pos: &[Vec2]) -> f64 {
+    let (mut lo, mut hi) = (Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+    for p in pos {
+        lo = Vec2::new(lo.x.min(p.x), lo.y.min(p.y));
+        hi = Vec2::new(hi.x.max(p.x), hi.y.max(p.y));
+    }
+    if lo.is_finite() && hi.is_finite() { lo.dist(hi).max(1.0) } else { 1.0 }
+}

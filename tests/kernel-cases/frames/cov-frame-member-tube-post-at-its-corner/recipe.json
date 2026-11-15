@@ -1,0 +1,66 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Post"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      0,
+      50
+     ]
+    ],
+    "ids": [
+     "l1"
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {
+    "sketch": "Post"
+   }
+  },
+  {
+   "command": "frame.member",
+   "params": {
+    "sketch": "Post",
+    "profile": {
+     "kind": "rect_tube",
+     "width": 40,
+     "height": 30,
+     "wall": 3,
+     "outer_radius": 0
+    },
+    "anchor": "bottom_left"
+   }
+  }
+ ]
+}

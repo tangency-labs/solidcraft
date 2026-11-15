@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1972"
+ ],
+ "what": "a sphere split into two hemispheres; shelling the flat face of one must hollow that half only, the other half stays solid",
+ "source": "analytic",
+ "method": "two hemispheres r10, flat faces coincident at z=0. The pick (3,2,0) lies on both flat faces, so the body is named. The named half becomes a hollow hemisphere with cavity r8 open at the flat face: V=2/3*pi*(10^3-8^3); the other half is untouched: 2/3*pi*10^3. Total of two bodies",
+ "body_count": 2,
+ "volume_mm3": 3116.4599123610747
+}

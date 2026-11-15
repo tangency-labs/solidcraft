@@ -1,0 +1,73 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "center": [
+     0,
+     0,
+     5
+    ],
+    "length": 40,
+    "width": 20,
+    "height": 10,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "center": [
+     100,
+     0,
+     5
+    ],
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "operation": "new",
+    "body_name": "Other"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 10,
+    "name": "Pts"
+   }
+  },
+  {
+   "command": "sketch.point",
+   "params": {
+    "point": [
+     -10,
+     0
+    ]
+   }
+  },
+  {
+   "command": "sketch.point",
+   "params": {
+    "point": [
+     10,
+     0
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "sketch": "Pts",
+    "type": "countersink",
+    "diameter": 5,
+    "cs_diameter": 10,
+    "cs_angle": "90 deg"
+   }
+  }
+ ]
+}

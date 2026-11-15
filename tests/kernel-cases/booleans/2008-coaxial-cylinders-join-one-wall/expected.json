@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2008",
+  "tangency-labs/solidcraft#1986"
+ ],
+ "what": "a join of coaxial cylinders of one radius whose walls overlap leaves one cylindrical wall in one face (it came out as a stack of faces, so a later chamfer on its top edge refused)",
+ "source": "analytic",
+ "method": "cylinder r25.6 over z 0..46: V = pi*655.36*46 = 30146.56 pi = 94711; faces 3 (two caps, one wall)",
+ "body_count": 1,
+ "volume_mm3": 94708.21142700392,
+ "faces": 3
+}

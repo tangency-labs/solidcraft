@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "two 60x40x20 boxes overlapping 30x20 in plan, tops and bottoms coplanar",
+ "source": "analytic",
+ "method": "V = 2*48000 - 30*20*20; the plan outline is an 8-sided polygon: 8 sides + top + bottom",
+ "body_count": 1,
+ "volume_mm3": 84000,
+ "faces": 10
+}

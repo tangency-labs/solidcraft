@@ -1,0 +1,40 @@
+{
+ "sources": [],
+ "what": "a G1 blend across the 10 mm gap between two coplanar sheets, stitched to both: flat, filling the gap exactly",
+ "source": "analytic",
+ "method": "both ends' tangent planes are z = 0 and the edges face each other along x: every cross-section's Hermite lies in z = 0 from x = 10 to x = 20, so the blend is the 10 x 20 strip; stitched: one body, area 200 + 200 + 200 = 600, 6 free edges round the 30 x 20 outline (the blend's own sides counted, [6, 8]); seams at x = 10 and 20 at least G1",
+ "valid": false,
+ "body_count": 1,
+ "area_mm2": 600.0,
+ "boundary_edges": [
+  6,
+  8
+ ],
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   30,
+   20,
+   0
+  ]
+ },
+ "continuity": {
+  "order": "g1",
+  "edges": [
+   [
+    10,
+    10,
+    0
+   ],
+   [
+    20,
+    10,
+    0
+   ]
+  ]
+ }
+}

@@ -107,12 +107,13 @@ The source includes analytic distance/barycentric/normal tests, tiny/huge and
 grazing cases, shared-edge ties, slab/parallel cases, BVH-versus-brute-force
 seeded closest/any-hit comparisons, hostile float admission, deterministic
 incremental stepping, depth/degenerate termination and work/memory/cancellation
-checks. These are planned executable checks, **not passing results until run**.
+checks. These renderer regressions have executed on the combined CPU-feature source.
 
 Required validation before publication: project quality gates, default and
 feature-enabled render tests/strict Clippy, and feature-enabled wasm checking.
-The current source-only preparation intentionally does not run Cargo while
-another owner holds the shared machine's build window.
+The original source-only preparation deferred Cargo while another owner held
+the build window. That historical handoff does not describe the later executed
+CPU renderer checks; current combined workflow/platform gates remain separate.
 
 RT2 is the separate useful image unit: explicitly selected opaque CPU visibility
 and cast shadows, using the existing camera/scene and host ownership/accounting.

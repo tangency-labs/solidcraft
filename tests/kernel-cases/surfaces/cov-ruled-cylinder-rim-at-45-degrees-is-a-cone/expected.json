@@ -1,0 +1,26 @@
+{
+ "sources": [],
+ "what": "a ruled strip off a cylinder's top rim at 45 degrees from the top face's normal, turned away from it: an exact cone frustum",
+ "source": "analytic",
+ "method": "rulings at 45 deg from +z, leaning out (away from the top face), keep their angle to the arc's axis: a cone. r 10 at z 10 to r 10 + 5/sqrt2 = 13.536 at z 10 + 5/sqrt2 = 13.536; lateral area pi (r1 + r2) slant = pi 23.536 5 = 369.69; one face, two free circles",
+ "valid": false,
+ "body_count": 1,
+ "faces": 1,
+ "boundary_edges": 2,
+ "area_mm2": 369.69530208595893,
+ "surface_types": [
+  "cone"
+ ],
+ "bbox": {
+  "min": [
+   -13.535533905932738,
+   -13.535533905932738,
+   10
+  ],
+  "max": [
+   13.535533905932738,
+   13.535533905932738,
+   13.535533905932738
+  ]
+ }
+}

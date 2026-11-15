@@ -1,0 +1,36 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#851",
+  "tangency-labs/solidcraft#854"
+ ],
+ "what": "on #851's knife-edge part (tessellation/1263): the arc's top edge R2, then the top front edge R2 as a fillet of its own",
+ "source": "invariants",
+ "method": "the rolling ball of R2 fits on every one of these edges and where they meet; the corner between rounds that end in each other has no closed form here: one closed valid solid whose display mesh closes. Each round meets the faces it rolls on G1: graded at its seams' middles (the top front round's at z = 8 on the front and y = -19 on the top; the arc's at rho 23 on the top and rho 21, z = 8 on the wall; the uprights' at their contacts, z = 5). Where a round ends on a face or on another round the seam is a crease by construction and is not graded.",
+ "body_count": 1,
+ "watertight": true,
+ "continuity": {
+  "order": "g1",
+  "edges": [
+   [
+    45.903210699376075,
+    -4.736544032709407,
+    10
+   ],
+   [
+    47.31742426174917,
+    -6.150757595082501,
+    8
+   ],
+   [
+    20,
+    -21,
+    8
+   ],
+   [
+    20,
+    -19,
+    10
+   ]
+  ]
+ }
+}

@@ -83,7 +83,9 @@ mod tests {
         let automatic = doc.component_identification_color(id);
         let mut legacy: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
         legacy["components"][0].as_object_mut().unwrap().remove("identification_color");
-        legacy["format_pending"].as_array_mut().unwrap().retain(|name| name != "component-identification-colors");
+        if let Some(pending) = legacy.get_mut("format_pending").and_then(|v| v.as_array_mut()) {
+            pending.retain(|name| name != "component-identification-colors");
+        }
         let restored = Document::from_json(&legacy.to_string()).unwrap();
         assert_eq!(restored.component_identification_color(id), automatic);
         assert_eq!(restored.components[0].identification_color, None);
@@ -128,7 +130,9 @@ mod tests {
         for component in json["components"].as_array_mut().unwrap() {
             component.as_object_mut().unwrap().remove("identification_color_index");
         }
-        json["format_pending"].as_array_mut().unwrap().retain(|name| name != "sequential-component-colors");
+        if let Some(pending) = json.get_mut("format_pending").and_then(|v| v.as_array_mut()) {
+            pending.retain(|name| name != "sequential-component-colors");
+        }
         let mut restored = Document::from_json(&json.to_string()).unwrap();
         assert_eq!(restored.components[0].identification_color_index, Some(0));
         assert_eq!(restored.components[1].identification_color_index, Some(1));

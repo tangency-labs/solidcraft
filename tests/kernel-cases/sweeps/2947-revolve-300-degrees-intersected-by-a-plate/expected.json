@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2947",
+  "tangency-labs/solidcraft#2948"
+ ],
+ "what": "a rectangle section revolved 300 degrees about Z, then intersected with a plate (slab |y| <= 5) crossing the ring at the start/end gap side and the far side (boolean gave up: \"loop not inside any face piece\")",
+ "source": "analytic",
+ "method": "the ring section r 20..30, z 0..10 turns from +x counter-clockwise through 300 degrees (the gap is -60..0 degrees). The slab |y| <= 5 meets +x (only y >= 0 is covered) and -x (fully covered). Area of annulus part with |y| <= 5, x > 0: F(R) = a sqrt(R^2 - a^2) + R^2 asin(a/R); V = 10 [ (F(30) - F(20)) / 2 + (F(30) - F(20)) ]. The two crossings are disjoint, so two bodies.",
+ "body_count": 2,
+ "volume_mm3": 1510.6287024479082
+}

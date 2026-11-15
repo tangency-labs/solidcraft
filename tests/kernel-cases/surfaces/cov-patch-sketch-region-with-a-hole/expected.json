@@ -1,0 +1,26 @@
+{
+ "sources": [],
+ "what": "a planar patch of the region between a 20 x 20 square and a circle r 4 inside it (picked by a point in the ring): a square with a hole",
+ "source": "analytic",
+ "method": "A = 400 - 16 pi = 349.73, one plane face, free edges 4 sides + the circle",
+ "valid": false,
+ "body_count": 1,
+ "faces": 1,
+ "boundary_edges": 5,
+ "area_mm2": 349.7345175425633,
+ "surface_types": [
+  "plane"
+ ],
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   20,
+   20,
+   0
+  ]
+ }
+}

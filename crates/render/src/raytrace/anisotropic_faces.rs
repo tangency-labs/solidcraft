@@ -2,14 +2,15 @@
 //! Captured ordinal/name and mesh face tag must match. Strict plane equality is
 //! conservative: rotated or imported roundoff may refuse instead of guessing.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::{
     ProductScene,
     anisotropic_surface::{AnisotropicSurface, VisualFrame},
     job::{self, AnisotropicOrientation, ErrorCode, JobError, RaytraceOptions},
-    surface::OpaqueSurface,
 };
+use solidcraft_viewport::surface::OpaqueSurface;
 
 use super::{TraceError, Triangle, lighting::Lighting};
 

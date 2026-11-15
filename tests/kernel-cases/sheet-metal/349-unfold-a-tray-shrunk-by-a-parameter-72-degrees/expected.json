@@ -1,0 +1,21 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#349"
+ ],
+ "what": "a 2000 x 2500 tray with four 38.6 mm flanges at 72 degrees whose sketch is driven by parameters W and H, shrunk to 400 x 300 and unfolded (the solver leaves 1e-13 mm residuals: the planar region arrangement failed)",
+ "source": "analytic",
+ "method": "a flange of angle th, outer leg length Hf (height, from the virtual sharp along the flange) bends with allowance BA = th(R+Kt) and bend deduction BD = 2(R+t)tan(th/2) - BA; unfolded it lies in the base's plane and reaches Hf - BD beyond the base's edge. T = 2, R = 1, K = 0.5. BD(72) = 1.8460; the flat of the 400 x 300 tray is the same as built directly: reaches 36.7540 past each base edge",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   -36.75401895483967,
+   -36.75401895483967,
+   0
+  ],
+  "max": [
+   436.7540189548397,
+   336.7540189548397,
+   2
+  ]
+ }
+}

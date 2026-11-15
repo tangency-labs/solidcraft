@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the plane through a box's bottom-front and top-back edges",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): both run along X, through (0,0,0) and (0,30,20): normal X x (0,30,20) = (0,-20,30): the plane 3z = 2y, normal (0,-2,3)",
+ "construction": {
+  "E": {
+   "plane": {
+    "through": [
+     5,
+     30,
+     20
+    ],
+    "normal": [
+     0,
+     -2,
+     3
+    ]
+   }
+  }
+ }
+}

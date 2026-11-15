@@ -1,0 +1,24 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 16.5,
+    "height": 14,
+    "body_name": "Shaft"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     16.5,
+     0,
+     7.0
+    ],
+    "designation": "M33x3.5",
+    "modeled": true
+   }
+  }
+ ]
+}

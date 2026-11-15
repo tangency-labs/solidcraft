@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1269"
+ ],
+ "what": "a circle of radius 5 on XY swept with orientation parallel along a path rising 20 mm while leaning 20 mm in x (the profile does not turn: a sheared cylinder)",
+ "source": "analytic",
+ "method": "with the profile keeping its attitude the body is an oblique circular cylinder: Cavalieri, V = base area * vertical height = pi 25 * 20 = 1570.8. Area = two discs 2 pi 25 + lateral = perimeter of the right section (ellipse a 5, b 5 cos45) * slant 20 sqrt2 = 921.119 total; bbox x -5..25, y +-5, z 0..20; faces: oblique cylinder and two discs.",
+ "body_count": 1,
+ "volume_mm3": 1570.7963267948967,
+ "area_mm2": 921.1191904850396,
+ "faces": 3,
+ "bbox": {
+  "min": [
+   -5,
+   -5,
+   0
+  ],
+  "max": [
+   25,
+   5,
+   20
+  ]
+ }
+}

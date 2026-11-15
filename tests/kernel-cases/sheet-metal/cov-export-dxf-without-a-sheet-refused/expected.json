@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "sheet.export_dxf in a design with a box and no sheet metal body",
+ "source": "invariants",
+ "method": "there is no flat pattern to write: a clean refusal that says how to start a sheet",
+ "outcome": "refused",
+ "refusal": "there is no sheet metal body"
+}

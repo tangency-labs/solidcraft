@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a cylinder r10 h20 with its side face offset 2 mm",
+ "source": "analytic",
+ "method": "a cylinder r12 h20",
+ "body_count": 1,
+ "volume_mm3": 9047.786842339,
+ "faces": 3
+}

@@ -1,0 +1,53 @@
+{
+ "sources": [],
+ "what": "a box against one 5 mm taller",
+ "source": "analytic",
+ "method": "box A 40 x 30 x 20 and B 40 x 30 x 25 on the same corner: B - A is the slab z 20..25, V 6000, only in B, at most 5 from A",
+ "results": [
+  {
+   "step": 3,
+   "pointer": "/a/volume_mm3",
+   "json": 24000.0
+  },
+  {
+   "step": 3,
+   "pointer": "/b/volume_mm3",
+   "json": 30000.0
+  },
+  {
+   "step": 3,
+   "pointer": "/difference/volume_mm3",
+   "json": 6000.0
+  },
+  {
+   "step": 3,
+   "pointer": "/identical",
+   "json": false
+  },
+  {
+   "step": 3,
+   "pointer": "/regions/0/side",
+   "json": "only_in_b"
+  },
+  {
+   "step": 3,
+   "pointer": "/regions/0/volume_mm3",
+   "json": 6000.0
+  },
+  {
+   "step": 3,
+   "pointer": "/only_in_b/volume_mm3",
+   "json": 6000.0
+  },
+  {
+   "step": 3,
+   "pointer": "/only_in_a/volume_mm3",
+   "json": 0.0
+  },
+  {
+   "step": 3,
+   "pointer": "/deviation/max_mm",
+   "json": 5.0
+  }
+ ]
+}

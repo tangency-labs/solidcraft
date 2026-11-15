@@ -1,0 +1,190 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 3000,
+    "width": 300,
+    "height": 2,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.8,
+    "height": 6,
+    "base": [
+     150,
+     150,
+     -2
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.8,
+    "height": 6,
+    "base": [
+     450,
+     150,
+     -2
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.8,
+    "height": 6,
+    "base": [
+     750,
+     150,
+     -2
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.8,
+    "height": 6,
+    "base": [
+     1050,
+     150,
+     -2
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.8,
+    "height": 6,
+    "base": [
+     1350,
+     150,
+     -2
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.8,
+    "height": 6,
+    "base": [
+     1650,
+     150,
+     -2
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.8,
+    "height": 6,
+    "base": [
+     1950,
+     150,
+     -2
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.8,
+    "height": 6,
+    "base": [
+     2250,
+     150,
+     -2
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.8,
+    "height": 6,
+    "base": [
+     2550,
+     150,
+     -2
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.8,
+    "height": 6,
+    "base": [
+     2850,
+     150,
+     -2
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 16,
+    "width": 16,
+    "height": 10,
+    "center": [
+     150,
+     150,
+     1
+    ],
+    "operation": "intersect",
+    "targets": [
+     "Plate"
+    ]
+   }
+  }
+ ]
+}

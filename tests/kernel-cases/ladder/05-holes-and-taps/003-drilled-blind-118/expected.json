@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a d10 drilled hole 10 deep to the shoulder with a 118 deg point",
+ "source": "analytic",
+ "method": "depth to the shoulder (tests/oracle/18); point cone h = r / tan59; removed pi r^2 10 + pi r^2 h/3; + wall and cone",
+ "body_count": 1,
+ "volume_mm3": 47135.949365496,
+ "faces": 8
+}

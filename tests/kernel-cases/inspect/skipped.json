@@ -1,0 +1,26 @@
+[
+ {
+  "source": "inspect.accessibility",
+  "why": "draws only: shades the faces a tool from one direction can reach; returns the analysis it set, no numbers"
+ },
+ {
+  "source": "inspect.curvature_map",
+  "why": "draws only: shades the faces by curvature; returns the analysis it set (its radius), no measurement"
+ },
+ {
+  "source": "inspect.draft",
+  "why": "draws only: shades the faces by draft against the pull direction; returns the pull and angle it was given, no face's draft angle"
+ },
+ {
+  "source": "inspect.environment_map",
+  "why": "draws only: a reflection shading; returns the analysis it set"
+ },
+ {
+  "source": "inspect.section",
+  "why": "draws only: shows the cut on a plane; returns the plane it was given (origin, normal, axis, at), no section area or outline"
+ },
+ {
+  "source": "inspect.zebra",
+  "why": "draws only: zebra stripes; returns the analysis it set (its stripe count)"
+ }
+]

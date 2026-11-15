@@ -1,0 +1,11 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2583"
+  ],
+  "what": "a tapered extrude of a 20x10 rectangle whose bottom side is drawn as two collinear pieces: the sloped side is one face",
+  "source": "analytic",
+  "method": "sections are (20+2d)x(10+2d) with d = z*tan5deg (positive taper grows outward); V = Int (200 + 60d + 4d^2) dz over z in 0..10 = 200*10 + 30*tan5*100 + 4*tan5^2*1000/3 = 2272.672. Four side faces, top and bottom = 6 (not 7)",
+  "body_count": 1,
+  "volume_mm3": 2272.671678905175,
+  "faces": 6
+}

@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3417",
+  "tangency-labs/solidcraft#3421",
+  "tangency-labs/solidcraft#3280"
+ ],
+ "what": "a 60 mm rhombus (120 and 60 degree corners) with a 90 degree flange on each of its four edges and a square corner relief 8 mm across at each corner: at this size the four reliefs stay apart and all are cut",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5, gap 0.5, square relief 8 across (r = 4). The 90 deg flanges stand back R + T = 3: the base is the rhombus inset 3, side 53.071797, height 45.961524, area 2439.260673. A square relief cuts r along both edges from the trimmed base's corner, square to them: a kite of area r^2 tan(alpha/2), 9.237604 at 60 and 27.712813 at 120 deg, reaching r/cos(alpha/2) = 4.618802 and 8 along the bisector. Here every corner keeps its relief: the two 120 deg corners are the trimmed short diagonal, 53.071797, apart, so their kites are far from meeting (they would meet with the corners under 16 mm apart), every edge is longer than 2r and every other edge further than 8 from a corner. The bends stop at the reliefs: 4 x (53.071797 - 8) long, BA = (pi/2)(R + T/2) = pi wide. Each panel (leg 20 - 3 = 17, its outer face on the rhombus' edge, its inner face 2 in) is closed with its end square to it, half the gap from the corner's bisector on its inner face: (g/2 + T cos(alpha/2)) / sin(alpha/2) from the rhombus' corner along the edge, 3.964102 at 60 and 1.443376 at 120 deg, so each panel is 54.592523 long. Flat area 6644.040285; K = 0.5, so V = T x flat = 13288.080571. Bbox: the walls stand 20 high on the rhombus' edges (y 0 and 51.961524), and the panel ends at the 60 deg corners keep them 3.964102 x cos 60 = 1.982051 from x = 0 and x = 90 (the bends, stopped 4 past the trimmed corners, reach no nearer)",
+ "body_count": 1,
+ "volume_mm3": 13288.08057084238,
+ "bbox": {
+  "min": [
+   1.9820508075688776,
+   0,
+   0
+  ],
+  "max": [
+   88.01794919243112,
+   51.96152422706631,
+   20
+  ]
+ }
+}

@@ -3,12 +3,16 @@
 //! OpenType (CFF) cubic Béziers are cubic control splines, both exact. A glyph's counters (the
 //! holes of A, B, 8…) are loops inside its outline; profile detection makes them holes.
 //!
-//! The default font is embedded (Liberation Sans, SIL OFL 1.1; see `assets/fonts/liberation-sans/OFL.txt` and
+//! The default font is embedded (Liberation Sans, SIL OFL 1.1; see `crates/sketch/assets/fonts/liberation-sans/OFL.txt` and
 //! ATTRIBUTION.md); [`crate::fonts`] finds others by file path or installed family name. [`TextMetrics`] measures
-//! text by the rule that draws it.
+//! text by the rule that draws it. A line with right-to-left characters (Arabic, Hebrew…) is ordered by the
+//! Unicode bidirectional algorithm and shaped with the font's own rules, so letters join and marks sit where the font
+//! puts them; every other line is set glyph by glyph, as it always was.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Ring, Vec2};
+use solidcore_record::Vec2;
+use solidcraft_geom::Ring;
+use solidcraft_geom::prelude::*;
 
 use crate::fonts::{FontData, font_data_styled};
 use crate::link::{LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES};
@@ -53,7 +57,7 @@ impl Outline {
             self.line(to);
             return;
         }
-        self.out.push(LinkGeom::Spline { pts: vec![a, c1, c2, b], control: true, degree: 3, periodic: false });
+        self.out.push(LinkGeom::Spline { pts: vec![a, c1, c2, b], control: true, degree: 3, periodic: false, nurbs: None });
         self.cur = to;
     }
 }
@@ -101,6 +105,40 @@ impl TextAlign {
     }
 }
 
+/// Where a text's block of lines sits up and down against its anchor (`at`, or its path).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextVerticalAlign {
+    /// The first line's baseline runs through the anchor.
+    #[default]
+    Baseline,
+    /// The tops of the first line's capitals are at the anchor.
+    Top,
+    /// The block is centred on it: halfway between the first line's capital tops and the last
+    /// line's baseline.
+    Middle,
+    /// The bottom of the last line's descenders (the tails of g, p and y) is at the anchor.
+    Bottom,
+}
+
+impl TextVerticalAlign {
+    fn is_baseline(&self) -> bool {
+        *self == TextVerticalAlign::Baseline
+    }
+
+    /// How far up (mm) every baseline moves for a block of `lines` lines at capital height
+    /// `height`, `pitch` apart, whose descenders reach `descent` below a baseline.
+    fn shift(self, lines: usize, height: f64, pitch: f64, descent: f64) -> f64 {
+        let below = lines.saturating_sub(1) as f64 * pitch;
+        match self {
+            TextVerticalAlign::Baseline => 0.0,
+            TextVerticalAlign::Top => -height,
+            TextVerticalAlign::Middle => (below - height) / 2.0,
+            TextVerticalAlign::Bottom => below + descent,
+        }
+    }
+}
+
 /// How a text is set: the style of its font, where its lines sit, the space between its letters
 /// and lines, and the sketch curve its baseline follows (instead of the straight line from `at`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -111,6 +149,8 @@ pub struct TextStyle {
     pub italic: bool,
     #[serde(default, skip_serializing_if = "TextAlign::is_left")]
     pub align: TextAlign,
+    #[serde(default, skip_serializing_if = "TextVerticalAlign::is_baseline")]
+    pub vertical_align: TextVerticalAlign,
     /// Extra space between letters (mm; negative brings them closer).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub letter_spacing: f64,
@@ -128,7 +168,16 @@ pub struct TextStyle {
 
 impl Default for TextStyle {
     fn default() -> Self {
-        TextStyle { bold: false, italic: false, align: TextAlign::Left, letter_spacing: 0.0, line_spacing: 1.0, path: None, reverse: false }
+        TextStyle {
+            bold: false,
+            italic: false,
+            align: TextAlign::Left,
+            vertical_align: TextVerticalAlign::Baseline,
+            letter_spacing: 0.0,
+            line_spacing: 1.0,
+            path: None,
+            reverse: false,
+        }
     }
 }
 
@@ -194,19 +243,39 @@ pub struct TextMetrics<'a> {
     fallback: Option<ttf_parser::GlyphId>,
     letter_spacing: f64,
     line_spacing: f64,
+    /// The font's bytes and face index, for shaping a right-to-left line.
+    bytes: &'a [u8],
+    index: u32,
+    /// What shaping needs from the font, read the first time a right-to-left line asks (None: the font cannot be shaped).
+    shaper: std::cell::OnceCell<Option<harfrust::ShaperData>>,
+}
+
+/// One glyph of a laid-out line: where its origin is along the line, its advance and how far it is raised (marks),
+/// in millimetres.
+struct Glyph {
+    id: ttf_parser::GlyphId,
+    x: f64,
+    advance: f64,
+    rise: f64,
 }
 
 impl<'a> TextMetrics<'a> {
     /// The face of `font` set in `style`: its letter and line spacing (its bold and italic chose the face).
     pub fn new(font: &'a FontData, style: &TextStyle) -> Result<TextMetrics<'a>> {
         check_spacing(style)?;
-        let face = ttf_parser::Face::parse(font.bytes(), font.index).map_err(|e| SketchError::Invalid(format!("font: {e}")))?;
+        let mut face = ttf_parser::Face::parse(font.bytes(), font.index).map_err(|e| SketchError::Invalid(format!("font: {e}")))?;
+        if let Some(weight) = font.weight {
+            face.set_variation(ttf_parser::Tag::from_bytes(b"wght"), weight);
+        }
         Ok(TextMetrics {
             cap: cap_height(&face),
             pitch: f64::from(face.ascender()) - f64::from(face.descender()) + f64::from(face.line_gap()),
             fallback: face.glyph_index('?'),
             letter_spacing: style.letter_spacing,
             line_spacing: style.line_spacing,
+            bytes: font.bytes(),
+            index: font.index,
+            shaper: std::cell::OnceCell::new(),
             face,
         })
     }
@@ -225,11 +294,17 @@ impl<'a> TextMetrics<'a> {
         Ok(own * self.line_spacing)
     }
 
+    /// How far (mm) the font's descenders reach below a baseline at a capital height of `height` mm (none when the
+    /// font gives no descender below it).
+    pub fn descent(&self, height: f64) -> Result<f64> {
+        Ok((-f64::from(self.face.descender())).max(0.0) * self.scale(height)?)
+    }
+
     /// The width (mm) of one line at a capital height of `height` mm, as it is drawn: from its first glyph's origin to
     /// the end of its last glyph's advance. A line break in it is a character like any other.
     pub fn line_width(&self, line: &str, height: f64) -> Result<f64> {
         let k = self.scale(height)?;
-        Ok(self.glyphs(line, k).last().map(|(_, x, advance)| x + advance).unwrap_or(0.0))
+        Ok(self.laid_out(line, k).1)
     }
 
     /// The characters of one line the font has no glyph for, in order and each time they come: those its character map
@@ -251,6 +326,68 @@ impl<'a> TextMetrics<'a> {
             pen += advance + self.letter_spacing;
             Some((gid, x, advance))
         })
+    }
+
+    /// The glyphs of one line in the order they stand along it, left to right, and the line's width. A line with
+    /// right-to-left characters is shaped (see [`Self::shaped`]); any other is laid out by [`Self::glyphs`].
+    fn laid_out(&self, line: &str, k: f64) -> (Vec<Glyph>, f64) {
+        if let Some(shaped) = self.shaped(line, k) {
+            return shaped;
+        }
+        let glyphs: Vec<Glyph> = self.glyphs(line, k).map(|(id, x, advance)| Glyph { id, x, advance, rise: 0.0 }).collect();
+        let width = glyphs.last().map(|g| g.x + g.advance).unwrap_or(0.0);
+        (glyphs, width)
+    }
+
+    /// A line with right-to-left characters, set the way the script needs it: the Unicode bidirectional algorithm puts
+    /// its runs in display order, each run is shaped by the font's own rules in its own direction (joined letters,
+    /// ligatures, marks attached to their letters), and the glyphs come out left to right. None for a line without
+    /// right-to-left characters, or when the font cannot be shaped. Kerning stays off, as in the other lines, and the
+    /// letter spacing goes after each glyph that has an advance, not after a mark. A character the font lacks is its
+    /// missing-glyph box here. Brackets are not mirrored.
+    fn shaped(&self, line: &str, k: f64) -> Option<(Vec<Glyph>, f64)> {
+        use harfrust::{Direction, Feature, ShapeOptions, Tag, UnicodeBuffer};
+        // Nothing below U+0590 is written right to left.
+        if line.chars().all(|c| u32::from(c) < 0x0590) {
+            return None;
+        }
+        let info = unicode_bidi::BidiInfo::new(line, None);
+        if !info.has_rtl() {
+            return None;
+        }
+        let font = harfrust::FontRef::from_index(self.bytes, self.index).ok()?;
+        let data = self.shaper.get_or_init(|| Some(harfrust::ShaperData::new(&font))).as_ref()?;
+        let shaper = data.shaper(&font).build();
+        let kerning_off = [Feature::new(Tag::new(b"kern"), 0, ..)];
+        let (mut out, mut pen, mut gap) = (Vec::new(), 0.0f64, 0.0f64);
+        // A line break in the line ends a paragraph of the algorithm; the paragraphs follow one another.
+        let runs = info.paragraphs.iter().flat_map(|paragraph| {
+            let (levels, runs) = info.visual_runs(paragraph, paragraph.range.clone());
+            runs.into_iter().map(move |run| (levels.get(run.start).is_some_and(|l| l.is_rtl()), run))
+        });
+        for (rtl, run) in runs {
+            let mut buffer = UnicodeBuffer::new();
+            buffer.push_str(line.get(run.clone())?);
+            buffer.set_direction(if rtl { Direction::RightToLeft } else { Direction::LeftToRight });
+            buffer.guess_segment_properties();
+            let shaped = shaper.shape(buffer, ShapeOptions::new().features(&kerning_off));
+            for (glyph, place) in shaped.glyph_infos().iter().zip(shaped.glyph_positions()) {
+                let advance = f64::from(place.x_advance) * k;
+                out.push(Glyph {
+                    id: ttf_parser::GlyphId(u16::try_from(glyph.glyph_id).ok()?),
+                    x: pen + f64::from(place.x_offset) * k,
+                    advance,
+                    rise: f64::from(place.y_offset) * k,
+                });
+                pen += advance;
+                gap = 0.0;
+                if advance != 0.0 {
+                    pen += self.letter_spacing;
+                    gap = self.letter_spacing;
+                }
+            }
+        }
+        Some((out, pen - gap))
     }
 }
 
@@ -294,15 +431,16 @@ pub fn text_geometry_styled(
     let along = path.map(|pts| Path::new(pts, style.reverse)).transpose()?;
     let anchor = along.as_ref().map(|p| p.anchor(style.align)).unwrap_or(0.0);
     let (sin, cos) = angle.sin_cos();
+    let lift = style.vertical_align.shift(text.split('\n').count(), height, pitch, metrics.descent(height)?);
     let mut out = Vec::new();
     for (row, line) in text.split('\n').enumerate() {
-        let base_y = -(row as f64) * pitch;
+        let base_y = lift - (row as f64) * pitch;
         let start = match style.align {
             TextAlign::Left => 0.0,
             TextAlign::Center => -metrics.line_width(line, height)? / 2.0,
             TextAlign::Right => -metrics.line_width(line, height)?,
         };
-        for (gid, x, advance) in metrics.glyphs(line, k) {
+        for Glyph { id: gid, x, advance, rise } in metrics.laid_out(line, k).0 {
             // The glyph's frame: its origin on the baseline and the way the baseline runs.
             let (origin, dir) = match &along {
                 None => {
@@ -317,7 +455,7 @@ pub fn text_geometry_styled(
             let up = Vec2::new(-dir.y, dir.x);
             let map = Box::new(move |gx: f32, gy: f32| {
                 let (gx, gy) = (f64::from(gx) * k, f64::from(gy) * k);
-                origin + dir * (gx + gy * shear) + up * gy
+                origin + dir * (gx + gy * shear) + up * (gy + rise)
             });
             let mut ob = Outline { out: Vec::new(), start: origin, cur: origin, map };
             let _ = metrics.face.outline_glyph(gid, &mut ob);
@@ -504,7 +642,7 @@ mod tests {
 
     #[test]
     fn a_font_file_gives_the_same_outlines_and_unknown_fonts_are_errors() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/liberation-sans/LiberationSans-Regular.ttf");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/liberation-sans/LiberationSans-Regular.ttf");
         let by_file = text_geometry_in(Some(&path.to_string_lossy()), "A7_L", Vec2::ZERO, 8.0, 0.0).unwrap();
         assert_eq!(by_file, text_geometry("A7_L", Vec2::ZERO, 8.0, 0.0).unwrap());
         let e = text_geometry_in(Some("No Such Family 12345"), "A", Vec2::ZERO, 8.0, 0.0).unwrap_err().to_string();

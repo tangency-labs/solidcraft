@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3963"
+ ],
+ "what": "a 20 mm square face bounded by one closed degree-1 B-spline edge whose only vertex sits at parameter 2e-7, just past the curve's start: the face must be kept, not dropped or crashed on",
+ "source": "analytic",
+ "method": "one planar face 20 x 20: A = 400; a sheet, so valid is false; 1 face",
+ "valid": false,
+ "body_count": 1,
+ "area_mm2": 400.0,
+ "faces": 1
+}

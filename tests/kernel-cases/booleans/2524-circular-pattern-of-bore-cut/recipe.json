@@ -1,0 +1,44 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "center": [
+     0,
+     10,
+     0
+    ],
+    "length": 40,
+    "width": 20,
+    "height": 40,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     10,
+     -1,
+     0
+    ],
+    "axis": "Y",
+    "radius": 3,
+    "height": 22,
+    "operation": "cut",
+    "name": "Bore"
+   }
+  },
+  {
+   "command": "solid.pattern.circular",
+   "params": {
+    "features": [
+     "Bore"
+    ],
+    "axis": "Y",
+    "count": 2,
+    "angle": "360 deg"
+   }
+  }
+ ]
+}

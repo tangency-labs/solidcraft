@@ -1,0 +1,61 @@
+{
+ "base": "../cov-config-configure-default-row",
+ "commands": [
+  {
+   "command": "config.row",
+   "params": {
+    "name": "Long",
+    "values": {
+     "W": "60 mm"
+    }
+   }
+  },
+  {
+   "command": "config.rule",
+   "params": {
+    "rules": [
+     {
+      "id": "big",
+      "name": "Big",
+      "condition": {
+       "type": "parameter",
+       "parameter": "W",
+       "operator": "gt",
+       "expression": "50 mm"
+      },
+      "effect": {
+       "type": "drive_suppression",
+       "feature": 2,
+       "value": true
+      }
+     },
+     {
+      "id": "small",
+      "name": "Small",
+      "condition": {
+       "type": "parameter",
+       "parameter": "W",
+       "operator": "le",
+       "expression": "50 mm"
+      },
+      "effect": {
+       "type": "drive_suppression",
+       "feature": 2,
+       "value": false
+      }
+     }
+    ]
+   }
+  },
+  {
+   "command": "config.activate",
+   "params": {
+    "row": "Long"
+   }
+  },
+  {
+   "command": "config.rules",
+   "params": {}
+  }
+ ]
+}

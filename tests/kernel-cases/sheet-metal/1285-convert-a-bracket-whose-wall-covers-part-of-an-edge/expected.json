@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1285",
+  "tangency-labs/solidcraft#1340"
+ ],
+ "what": "an 80 x 50 x 2 plate with a 40 wide, 30 high wall on part of its front edge, converted at the wall's outside bend edge: refused because the bend's setback used up an edge of a face",
+ "source": "analytic",
+ "method": "T = 2, R = 2, K = 0.44, BD(90) = 3.4761. One 90 degree bend 40 long; the plate is 50 deep and the wall 30 high to the outer sharp, so the flat is 50 + 30 - BD = 76.524 deep: unfolded it reaches 30 - BD = 26.5239 in front of the plate's edge y = 100 and spans x 0..80, z 0..2",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   0,
+   73.4761065788307,
+   0
+  ],
+  "max": [
+   80,
+   150,
+   2
+  ]
+ }
+}

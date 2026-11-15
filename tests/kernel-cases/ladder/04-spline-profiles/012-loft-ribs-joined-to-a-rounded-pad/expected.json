@@ -1,0 +1,25 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4092"
+ ],
+ "what": "the same without the top flange: the join fails with 'boolean Union: no result'",
+ "source": "analytic",
+ "method": "the pad (X -8..8, Y 18..25, Z 36..59) overlaps the body, ribs and ring, so the join is one connected solid. Pieces, each an interval in y at given (x, z): the neck r18 (z 0..21); the ruled loft from the circle r18 to the ellipse 30 x 20 (an affine image of the circle, so each section is the ellipse of semi-axes 18 + 12 s, 18 + 2 s, s = (z-21)/17); the chamber (ellipse 30 x 20, z 38..64); the ring (disc r12 about y 30, z 47, x -5..5); the two ribs (x -8..-4 and 4..8; their outline of three lines and three r1.5 corner arcs is convex); the pad (y 18..25, x -8..8, z 36..59, r3 corners). V = 2 int_0^30 int_0^64 |union of the intervals| dz dx (Gauss on panels split at x 4, 5, 8, 18 and the z bounds; it converges to 1e-6) = 100193.017956. Bbox: the chamber's ellipse (x +-30, y -20), the ring's top y 42, z 0..64",
+ "body_count": 1,
+ "volume_mm3": 100193.017956313,
+ "bbox": {
+  "min": [
+   -30,
+   -20,
+   0
+  ],
+  "max": [
+   30,
+   42,
+   64
+  ]
+ },
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

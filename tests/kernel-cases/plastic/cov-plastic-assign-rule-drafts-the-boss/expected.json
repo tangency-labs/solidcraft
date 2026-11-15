@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "plastic.assign_rule gives the plate a 3 degree rule; a boss on it with no draft of its own takes it",
+ "source": "analytic",
+ "method": "the boss takes the draft of its body's rule: a cone frustum r 5 to 5 - 12 tan 3 deg = 4.371106649, 12 high, less its straight hole r 2, 12 deep (inside the top's radius). V = 60*60*3 + (pi*12/3)(5^2 + 5 r1 + r1^2) - pi*2^2*12 = 11478.107830",
+ "body_count": 1,
+ "volume_mm3": 11478.107830371639,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   60,
+   15
+  ]
+ }
+}

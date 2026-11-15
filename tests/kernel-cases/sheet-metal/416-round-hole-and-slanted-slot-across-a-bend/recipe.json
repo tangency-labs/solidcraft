@@ -1,0 +1,126 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "AL2",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "1 mm",
+    "k_factor": 0.5
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Plate"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     160,
+     100
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Plate"
+   }
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "edge",
+    "edges": [
+     [
+      80,
+      100,
+      2
+     ]
+    ],
+    "height": 30,
+    "angle": 90
+   }
+  },
+  {
+   "command": "sheet.unfold",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Cuts"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     50,
+     98.570796
+    ],
+    "diameter": 20
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      116.669873,
+      85.678491
+     ],
+     [
+      125.330127,
+      90.678491
+     ],
+     [
+      113.330127,
+      111.463101
+     ],
+     [
+      104.669873,
+      106.463101
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Cuts",
+    "through_all": true,
+    "direction": "symmetric",
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "sheet.refold",
+   "params": {}
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

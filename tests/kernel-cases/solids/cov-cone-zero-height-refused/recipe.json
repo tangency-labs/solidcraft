@@ -1,0 +1,11 @@
+{
+ "commands": [
+  {
+   "command": "solid.cone",
+   "params": {
+    "radius": 5,
+    "height": 0
+   }
+  }
+ ]
+}

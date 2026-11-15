@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#262",
+  "tangency-labs/solidcraft#277"
+ ],
+ "what": "a 20 x 20 tab folded 90 degrees on a line 1 mm inside its root, where the bend zone stays clear of the blank's outline",
+ "source": "analytic",
+ "method": "blank area 100*50 + 20*20 = 5400 mm2 at t = 0.8; the fold has width 20: a fold keeps the flat length of the blank, so a fold of angle th, inner radius R, thickness t and K-factor K over a width w takes a flat strip of BA = th(R+Kt) and puts a bend of volume th((R+t)^2-R^2)w/2 in its place: V = V_flat + th w t^2 (1/2 - K) (the bend's mid-surface lies at R+t/2, the neutral axis at R+Kt). V = 5400*0.8 + (pi/2)*20*0.64*0.06",
+ "body_count": 1,
+ "volume_mm3": 4321.206371578978
+}

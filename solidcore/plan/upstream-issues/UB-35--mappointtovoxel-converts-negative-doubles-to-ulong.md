@@ -1,0 +1,11 @@
+#### UB-35. `MapPointToVoxel` converts negative doubles to `ULONG`
+- **Severity:** Crash / undefined behaviour
+- **Area:** Spatial structures and small geometry
+- **Location:** `SmHashTable.h:1957`-`1959`, `SmObjsInVoxels<TYPE>::MapPointToVoxel`.
+- **What happens:** `(ULONG)((x - min) / len)` is UB for negative values. On x86-64 g++ it wraps, so a point below the box lands in the top voxel after the clamp (the comment says the low end). NaN maps high; `+inf` maps to 0. aarch64 g++ saturates instead (negative and NaN map to 0, `+inf` to the top voxel), so the voxel depends on the platform. A box with a zero-length axis gives NaN or `+-inf` for every point, so `SmHealData::Cache_CoinVertices` on a flat or linear vertex set puts the vertices into different voxels on the two platforms.
+- **Trigger:** Add a point with `x < box.min.x`, or any point to a box with a zero-length axis.
+- **How found:** read during porting; generated difftest cases; on aarch64, difftest failures of `geom.hash_table` and `heal.heal_data_p2` on macOS arm64.
+- **Confirmed:** yes. The port emulates the x86-64 conversion and matches. The aarch64 result was confirmed on macOS arm64 with GCC 13.4 (2026-10-17).
+- **Severity:** crash/UB (wrong voxel in practice).
+- **Rust port:** Emulates the x86-64 result (`ulong_from_f64`).
+- **Platform dependence:** confirmed 2026-10-18 on arm64 (Ubuntu 24.04 GCC 13.3 and Apple clang). AArch64 `fcvtzu` saturates, so negatives and NaN map to voxel 0 and `+inf` maps high. A degenerate (single-point) vertex box makes the quotient `0/0 = NaN` on every axis: x86-64 files the point in voxel `(cnt-1, cnt-1, cnt-1)` plus 3 low-side neighbours, arm64 in voxel `(0,0,0)` with no neighbours. The arm64 reference build therefore disagrees with x86-64 in `geom.hash_table` and `heal.heal_data_p1`-`p3`, and a full `geom.hash_table` run on arm64 segfaults in `FindCoincidentPairs` (see `plan/findings.md`, General).

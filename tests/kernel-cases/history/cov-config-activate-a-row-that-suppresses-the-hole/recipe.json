@@ -1,0 +1,20 @@
+{
+ "base": "../cov-config-configure-default-row",
+ "commands": [
+  {
+   "command": "config.row",
+   "params": {
+    "name": "Plain",
+    "values": {
+     "suppress:Hole": true
+    }
+   }
+  },
+  {
+   "command": "config.activate",
+   "params": {
+    "row": "Plain"
+   }
+  }
+ ]
+}

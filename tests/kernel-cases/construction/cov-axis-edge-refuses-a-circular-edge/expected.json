@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "an axis on a circular edge, which is not straight",
+ "source": "analytic",
+ "method": "cylinder r 5, h 10 on (60,0,0) along +Z: its top edge is a circle, no line: refused",
+ "outcome": "refused",
+ "refusal": "the edge is not straight"
+}

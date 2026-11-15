@@ -1,0 +1,10 @@
+{
+ "sources": [],
+ "what": "a 15x20 rectangle on the axis revolved 180 deg: a half cylinder",
+ "source": "analytic",
+ "method": "V = pi r^2 h / 2; the two end rectangles are coplanar and meet on the axis: one 30x20 face; + half disks top and bottom + half cylinder",
+ "body_count": 1,
+ "volume_mm3": 7068.583470577,
+ "area_mm2": 2249.336143135,
+ "faces": 4
+}

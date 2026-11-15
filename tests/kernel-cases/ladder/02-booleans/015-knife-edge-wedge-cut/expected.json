@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a triangular prism cut whose slope meets the bottom face along one line (a knife edge), its other faces on the stock's",
+ "source": "analytic",
+ "method": "the tool removes the half above the plane through the edge x=0,z=0 and the edge x=60,z=20: a wedge 60x40x20/2 = 24000 with a knife edge at x=0, z=0",
+ "body_count": 1,
+ "volume_mm3": 24000.0,
+ "faces": 5,
+ "edges": 9,
+ "vertices": 6
+}

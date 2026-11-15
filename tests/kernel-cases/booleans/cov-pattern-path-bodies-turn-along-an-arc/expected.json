@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "a body patterned 3 times along a half circle r20 with orientation path: each copy turns with the tangent",
+ "source": "analytic",
+ "method": "instances at 0, 90 and 180 deg along the arc, each turned with the tangent: the 4x2x2 key (long side radial) stays radial, at (0,20) 2 wide in X and 4 long in Y (y 18..22). Unturned it would be 4 wide in X (x -2..2, y 19..21). Three keys: V = 3*16, bbox x -22..22, y -1..22, z 0..2",
+ "body_count": 3,
+ "volume_mm3": 48.0,
+ "bbox": {
+  "min": [
+   -22,
+   -1,
+   0
+  ],
+  "max": [
+   22,
+   22,
+   2
+  ]
+ }
+}

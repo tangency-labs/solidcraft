@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "the stock shelled 2 mm outward, open at the top",
+ "source": "analytic",
+ "method": "walls grown out of the closed faces: 64 x 44 x 22 less the original box",
+ "body_count": 1,
+ "volume_mm3": 13952,
+ "faces": 11
+}

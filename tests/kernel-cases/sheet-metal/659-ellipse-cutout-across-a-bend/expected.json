@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#659",
+  "tangency-labs/solidcraft#692"
+ ],
+ "what": "a 160 x 100 plate with a 90 degree flange, unfolded, a 24 x 12 ellipse cut across the bend zone and refolded: the cut's wall folds to a curve on the bend's cylinder",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5: flat area 160*(97 + pi + 27) as in the round-hole case; the ellipse (semi-axes 12 and 6, area 72*pi) lies inside the flat. With K = 0.5 a through cut of flat area A removes A*t of the folded part: V = 2*(160*(124 + pi) - 72*pi)",
+ "body_count": 1,
+ "volume_mm3": 40232.92030703181
+}

@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3103"
+ ],
+ "what": "a cone frustum (r20 at the base, r15 at the top, 30 tall) shelled 2 mm open at the top",
+ "source": "analytic",
+ "method": "outer V=pi*30/3*(20^2+20*15+15^2). Wall offset 2 normal to the cone: half-angle a=atan(5/30), inner radius r(z)=20-z*tan(a)-2/cos(a), floor at z=2. Cavity frustum height 28 from r(2) to r(30). V=outer-pi*28/3*(ra^2+ra*rb+rb^2)",
+ "body_count": 1,
+ "volume_mm3": 8292.991685180048
+}

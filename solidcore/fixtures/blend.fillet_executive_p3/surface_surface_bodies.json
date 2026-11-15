@@ -1,0 +1,1678 @@
+{
+  "cases": [
+    {
+      "name": "owned-first-free-second-x0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "owners": [
+            1,
+            0
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 0,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "free-first-owned-second-x0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "owners": [
+            0,
+            1
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 0,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "two-faces-one-body-x0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "owners": [
+            1,
+            2
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 0,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "two-faces-two-bodies-x0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "owners": [
+            1,
+            1
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 0,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "owned-first-free-second-x2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "owners": [
+            1,
+            0
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "free-first-owned-second-x2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "owners": [
+            0,
+            1
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "two-faces-one-body-x2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "owners": [
+            1,
+            2
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "two-faces-two-bodies-x2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "owners": [
+            1,
+            1
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "same-free-surface-twice-equal-radii",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "owners": [
+            0,
+            3
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "same-free-surface-twice-distinct-radii",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "owners": [
+            0,
+            3
+          ],
+          "radius1": 2,
+          "radius2": -1,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "same-owned-surface-twice",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "owners": [
+            1,
+            3
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-free-r2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            0,
+            0
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-one-body-r2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            1,
+            2
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-two-bodies-r2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            1,
+            1
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-owned-first-r2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            1,
+            0
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-free-tiny",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            0,
+            0
+          ],
+          "radius1": 0.001,
+          "radius2": 0.001,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-one-body-tiny",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            1,
+            2
+          ],
+          "radius1": 0.001,
+          "radius2": 0.001,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-free-tiny-linear",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            0,
+            0
+          ],
+          "radius1": 0.001,
+          "radius2": 0.001,
+          "tolerance": 0.01,
+          "xsect": 0,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-free-radius-below-tolerance",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            0,
+            0
+          ],
+          "radius1": 0.005,
+          "radius2": 0.005,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-free-small",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            0,
+            0
+          ],
+          "radius1": 0.05,
+          "radius2": 0.05,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-one-body-small",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            1,
+            2
+          ],
+          "radius1": 0.05,
+          "radius2": 0.05,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-two-bodies-small",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            1,
+            1
+          ],
+          "radius1": 0.05,
+          "radius2": 0.05,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-owned-first-small",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            1,
+            0
+          ],
+          "radius1": 0.05,
+          "radius2": 0.05,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-free-radius-twice-tolerance",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            0,
+            0
+          ],
+          "radius1": 0.02,
+          "radius2": 0.02,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-one-body-radius-twice-tolerance",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            1,
+            2
+          ],
+          "radius1": 0.02,
+          "radius2": 0.02,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-two-bodies-radius-twice-tolerance",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            1,
+            1
+          ],
+          "radius1": 0.02,
+          "radius2": 0.02,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "adjacent-owned-first-radius-twice-tolerance",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface_bodies": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              10,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              10
+            ]
+          ],
+          "owners": [
+            1,
+            0
+          ],
+          "radius1": 0.02,
+          "radius2": 0.02,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    }
+  ]
+}

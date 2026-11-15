@@ -1,0 +1,85 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 40,
+    "height": 5,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.move",
+   "params": {
+    "bodies": [
+     "Plate"
+    ],
+    "copy": true
+   }
+  },
+  {
+   "command": "browser.visibility",
+   "params": {
+    "items": [
+     "Plate (2)"
+    ],
+    "visible": false
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 5,
+    "name": "Rim"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     2,
+     2
+    ],
+    "p1": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     4,
+     4
+    ],
+    "p1": [
+     36,
+     36
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Rim",
+    "profiles": [
+     {
+      "point": [
+       3,
+       3
+      ]
+     }
+    ],
+    "distance": 3,
+    "operation": "join"
+   }
+  }
+ ]
+}

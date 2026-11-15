@@ -1,0 +1,207 @@
+//! Where a primitive goes, typed in its dialog (#5638). The Box is placed by its corner or its
+//! centre, the Cylinder and Cone by the centre of their base, the Sphere and Torus by their
+//! centre, as X, Y and Z fields that take expressions and units like the size fields. A point
+//! picked in the view (a vertex, a point on an edge or face, the origin, a point of a shown
+//! sketch) fills the fields of the Box, Sphere and Torus; one selected before the window opens
+//! places them there (#9403).
+//!
+//! The placement lives in the dialog's extra parameters under the command's own key (`corner`,
+//! `center` or `base`). It is written there only once a field or the choice changes, so a new
+//! dialog left alone sends no placement (the box stays at the origin, as before), and an edited
+//! feature's stored point goes back unchanged.
+
+use serde_json::{Map, Value, json};
+use solidcore_record::Vec3;
+use solidcraft_engine::Session;
+use solidcraft_engine::doc::expr::Kind as ValueKind;
+use solidcraft_engine::geom::prelude::*;
+
+use crate::selection::{EDGES, EXTERNAL_POINTS, FACES, ORIGIN, POINTS, SNAP_POINTS, SelInput, VERTICES};
+use crate::ui_kit::{self, choice_row, expr_row};
+use solidcraft_engine::Sel;
+use solidcraft_ui_text::tr;
+
+/// The placement keys a primitive's dialog offers, the choice's first option first.
+fn keys(cmd: &str) -> &'static [&'static str] {
+    match cmd {
+        "solid.box" => &["corner", "center"],
+        "solid.cylinder" | "solid.cone" => &["base"],
+        "solid.sphere" | "solid.torus" => &["center"],
+        _ => &[],
+    }
+}
+
+/// The Box's choice of the point its fields place.
+const BOX_PLACEMENTS: [&str; 2] = ["Corner", "Center"];
+
+/// The selection inputs of a primitive's dialog: the Box takes a point for its corner or centre,
+/// the Sphere and Torus for their centre. It takes the points of every shown sketch, each with
+/// its sketch (#9403), and hovering an edge or face wakes its snap points (a hole's centre, an
+/// edge's middle, a face's centre) to pick (#11230).
+pub(crate) fn inputs(cmd: &str) -> Vec<SelInput> {
+    match cmd {
+        "solid.box" | "solid.sphere" | "solid.torus" => {
+            vec![
+                SelInput::new("Point", VERTICES | EDGES | FACES | ORIGIN | POINTS | EXTERNAL_POINTS | SNAP_POINTS, false)
+                    .tip("dialog.primitive_point_tip"),
+            ]
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// The text a placement coordinate shows: typed text as it is, a stored number (millimetres) as
+/// the edit fields show stored lengths.
+fn shown(s: &Session, v: Option<&Value>) -> String {
+    match v {
+        Some(Value::String(t)) => t.clone(),
+        // "10", not the JSON number's "10.0".
+        Some(Value::Number(n)) => crate::dialogs::stored_length(s, &n.as_f64().map_or_else(|| n.to_string(), |v| v.to_string())),
+        _ => crate::dialogs::length_default(s, "0"),
+    }
+}
+
+/// The current placement: which key, and its three coordinates as the fields show them.
+fn current(s: &Session, cmd: &str, extra: &Map<String, Value>) -> Option<(usize, [String; 3])> {
+    let keys = keys(cmd);
+    let first = keys.first()?;
+    let index = keys.iter().position(|k| extra.contains_key(*k)).unwrap_or(0);
+    let point = extra.get(keys.get(index).copied().unwrap_or(first)).and_then(Value::as_array);
+    let coord = |i: usize| shown(s, point.and_then(|p| p.get(i)));
+    Some((index, [coord(0), coord(1), coord(2)]))
+}
+
+/// Store a placement under `key`, replacing the other choice.
+fn store(cmd: &str, extra: &mut Map<String, Value>, index: usize, coords: &[String; 3]) {
+    let keys = keys(cmd);
+    let Some(key) = keys.get(index) else { return };
+    for k in keys {
+        extra.remove(*k);
+    }
+    extra.insert((*key).into(), json!(coords));
+}
+
+/// The placement rows (shown while no pre-selected face or vertex places the primitive). True
+/// when Enter was pressed in a field.
+pub(crate) fn rows(ui: &mut egui::Ui, s: &Session, cmd: &str, extra: &mut Map<String, Value>) -> bool {
+    let Some((index, mut coords)) = current(s, cmd, extra) else { return false };
+    let mut choice = index;
+    if keys(cmd).len() > 1 {
+        choice_row(ui, "Placement", "pr_place", &mut choice, &BOX_PLACEMENTS);
+    } else {
+        let point = if keys(cmd) == ["center"] { tr("ui.center") } else { tr("Base Center") };
+        ui_kit::row(ui, "Placement", |ui| {
+            ui_kit::text(ui, point, ui_kit::Text::Cell);
+        });
+    }
+    let before = coords.clone();
+    let mut enter = false;
+    for (label, value) in ["X", "Y", "Z"].into_iter().zip(coords.iter_mut()) {
+        enter |= expr_row(ui, label, value);
+    }
+    if choice != index || coords != before {
+        store(cmd, extra, choice, &coords);
+    }
+    enter
+}
+
+/// A coordinate of a picked or dropped point (mm) as a field shows it and OK sends it: in the
+/// design's length unit, kept to the nanometre in every unit, so a vertex at 38.1 mm reads
+/// "1.5 in", not "1.5000000000000002 in", and one in a metre design does not move by a rounded
+/// millimetre.
+fn coord(s: &Session, v: f64) -> String {
+    let v = (v * 1e6).round() / 1e6;
+    // No "-0 mm".
+    let v = if v == 0.0 { 0.0 } else { v };
+    s.doc.design_length(v).1
+}
+
+/// Where a pick is in the world: a vertex, or a point on an edge or face, where it was picked; a
+/// sketch point where its sketch puts it (one without a sketch is the open sketch's).
+pub(crate) fn world_point(s: &Session, sel: &Sel) -> Option<Vec3> {
+    let (sketch, id) = match sel {
+        Sel::Vertex { point, .. } | Sel::Face { point, .. } | Sel::Edge { point, .. } => return Some(*point),
+        Sel::ExternalSketchPoint { sketch, id } => (*sketch, id),
+        Sel::SketchPoint { id } => (s.active_sketch?, id),
+        _ => return None,
+    };
+    let st = s.world_state().ok()?;
+    let ss = st.sketch(sketch)?;
+    let at = ss.sketch.resolve_point(id).and_then(|i| ss.sketch.point(i))?;
+    Some(ss.plane.to_world(at))
+}
+
+/// A point picked into the Box's input: it goes into the X, Y and Z of the current placement
+/// (the corner or the centre), replacing a pre-selected face or vertex.
+pub(crate) fn picked(s: &Session, cmd: &str, at: &mut Option<(Vec3, Option<Vec3>)>, extra: &mut Map<String, Value>, sel: Option<&Sel>) {
+    let Some(point) = sel.and_then(|sel| world_point(s, sel)) else { return };
+    if !point.is_finite() || inputs(cmd).is_empty() {
+        return;
+    }
+    let Some((index, _)) = current(s, cmd, extra) else { return };
+    store(cmd, extra, index, &[coord(s, point.x), coord(s, point.y), coord(s, point.z)]);
+    *at = None;
+}
+
+/// A Box dropped by its placement marker at `p` on a face with normal `n`: the current placement
+/// (the corner or the centre) written so the box stands on the face, centred on `p` across it
+/// (only centred on `p` on a face square to no axis), as a pre-selected face places it. `size` is
+/// the box's length, width and height (mm), `texts` the same as typed: a size that is an
+/// expression stays one in the place (as `dialogs::box_corner` keeps it), so the box keeps
+/// standing there when the size changes. Returns the point written, in the design's length unit
+/// as the fields show it.
+pub(crate) fn dropped(s: &Session, extra: &mut Map<String, Value>, p: Vec3, n: Vec3, size: Vec3, texts: [&str; 3]) -> Option<Value> {
+    if !p.is_finite() {
+        return None;
+    }
+    let index = keys("solid.box").iter().position(|k| extra.contains_key(*k)).unwrap_or(0);
+    // How much of the size lies behind `p` along each axis: for the corner none (or all) along
+    // the face's normal and half across it; the centre is half a size further on.
+    let behind = |axis: Vec3| {
+        let corner = match n.dot(axis) {
+            d if d > 1.0 - 1e-9 => 0.0,
+            d if d < -1.0 + 1e-9 => 1.0,
+            _ => 0.5,
+        };
+        if index == 0 { corner } else { corner - 0.5 }
+    };
+    // A drop is only as exact as the pointer: to the micrometre, so the fields read 45 mm, not
+    // 44.999991 mm.
+    let um = |v: f64| coord(s, (v * 1e3).round() / 1e3);
+    let at = |c: f64, size: f64, text: &str, axis: Vec3| {
+        let f = behind(axis);
+        // A size typed as `l = 20` is placed by its value: `l` exists only once the box does.
+        let text = solidcraft_engine::doc::expr::definition(text).map_or(text, |(_, rhs)| rhs).trim();
+        if f == 0.0 || text.is_empty() || solidcraft_engine::doc::expr::is_literal(text) {
+            return um(c - f * size);
+        }
+        // A bare number in it has the design's unit, as OK reads the size.
+        let text = crate::length_input::expression(&s.doc, text, ValueKind::Length);
+        match f {
+            1.0 => format!("{} - ({text})", um(c)),
+            0.5 => format!("{} - ({text}) / 2", um(c)),
+            _ => format!("{} + ({text}) / 2", um(c)),
+        }
+    };
+    let coords = [at(p.x, size.x, texts[0], Vec3::X), at(p.y, size.y, texts[1], Vec3::Y), at(p.z, size.z, texts[2], Vec3::Z)];
+    store("solid.box", extra, index, &coords);
+    Some(json!(coords))
+}
+
+/// The typed placement into the command's parameters, read as the size fields read it
+/// (`length_input::expression`): a bare number, a decimal comma or a unitless expression typed
+/// into a field is in the design's units, an empty field is 0, and a stored number is kept.
+pub(crate) fn params(s: &Session, cmd: &str, extra: &Map<String, Value>, p: &mut Map<String, Value>) {
+    for key in keys(cmd) {
+        let Some(Value::Array(point)) = extra.get(*key) else { continue };
+        let coords: Vec<Value> = point
+            .iter()
+            .map(|c| match c {
+                Value::String(t) if t.trim().is_empty() => json!(0),
+                Value::String(t) => json!(crate::length_input::expression(&s.doc, t, ValueKind::Length)),
+                other => other.clone(),
+            })
+            .collect();
+        p.insert((*key).into(), Value::Array(coords));
+    }
+}

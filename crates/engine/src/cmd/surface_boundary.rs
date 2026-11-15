@@ -6,29 +6,29 @@
 
 use serde_json::Value;
 use solidcraft_doc::{BodyName, FeatureKind, NetworkCurve, Operation, Position, SketchId};
-use solidcraft_kernel::Continuity;
+use solidcraft_geom::prelude::*;
+use solidcraft_kernel::{Construction, Continuity};
 
 use super::CommandSpec;
 use super::features::{add_feature, feature_sketch, sketch_id};
 use crate::params::{bad, str_, string_list, vec3};
+use crate::schema::features::FeatureResult;
+use crate::schema::surface_boundary::{BoundaryParams, MAX_NETWORK_CURVES, MAX_SAMPLES, MIN_SAMPLES};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 /// The stations a boundary carries by default (the patch's resolution along the loop).
 const DEFAULT_SAMPLES: usize = solidcraft_doc::BOUNDARY_SAMPLES;
-/// The fewest stations a patch can hold the widest continuity pair with: a G3 side needs four rows
-/// at each of two opposite sides, so eight.
-const MIN_SAMPLES: usize = 8;
-/// The most stations a boundary may carry (the kernel's own cap).
-const MAX_SAMPLES: usize = 512;
-/// The most curves one direction of a network may list (the kernel's own cap).
-const MAX_NETWORK_CURVES: usize = solidcraft_geom::network::MAX_NETWORK_CURVES;
+const CONTRACT: TypedContract<BoundaryParams> = TypedContract::new();
 /// The most sketch curves one network curve may chain, and points picking one chain of edges
 /// (the kernel's own caps).
 use solidcraft_kernel::{MAX_CHAIN_CURVES as MAX_CHAIN, MAX_EDGE_PICKS as MAX_PICKS};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("surface.boundary", "Boundary Surface", boundary)
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("surface.boundary", "Boundary Surface", crate::checked!("surface.boundary", boundary))
     .at("SURFACE", "CREATE")
     .icon("surface_boundary")
+    .contract(&CONTRACT)
+    .output(output_schema_for::<FeatureResult>)
     .params(
         "Either a loop of one sketch's curves — sketch?: id|name (default: the sketch being edited); curves: [2 to 4 sketch curve ids in loop order] (each one ends where the next begins and the last where the first does; two: the patch spans between them and leaves each boundary along the tangent across it; three or four: the flat patch of the loop, three collapsing the side opposite the first curve to the corner there); continuity?: g0|g1|g2|g3 | [one per curve] (default g1: how much of the surface across each boundary the patch repeats — a sketch curve's own plane, so g1 and up hold exactly and g0 lets the middle bow); crown?: number -0.9…3 (default 0: how full the middle is, without touching a boundary; two curves only); samples?: 8…512 stations per boundary (default 25) — or a curve network — u: [curve] (two or more one way: the surface lofts through them), v?: [curve] (crossing every u-curve once: two each way give a Coons patch, more a Gordon surface through every curve; a curve that misses another by more than 0.01 mm is refused, naming the pair), each curve \"id\" (a curve of `sketch`) | {sketch?: id|name, curves: [ids meeting end to end]} (planar or 3D sketch curves) | {body: name, edges: [[x,y,z]] (points on a chain of its edges), continuity?: g0|g1|g2 (default g0; g1 the surface leaves tangent to the face beside a surface's open edges, g2 with its curvature too; on curves of one direction only)} | {point: [x,y,z]} (a side collapsed to a point: a three-sided patch); operation?: new|join (default new; join sews the surface into the body of its first edge curve, a solid when it closes the gap). name?, body_name? (a surface body)",
     )];
@@ -48,7 +48,7 @@ fn loop_patch(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`v` and `operation` belong to a curve network: give its curves as `u` and `v`"));
     }
     let sketch = feature_sketch(s, p, cmd)?;
-    let curves = string_list(p, "curves");
+    let curves = string_list(cmd, p, "curves")?;
     if !(2..=4).contains(&curves.len()) {
         return Err(bad(cmd, "`curves` must list 2 to 4 sketch curves in loop order (or give a network as `u` and `v`)"));
     }
@@ -56,7 +56,7 @@ fn loop_patch(s: &mut Session, p: &Value) -> Result<Value> {
     // of each is the first of the next, and the last boundary's end is the first one's start.
     let state = s.model.state();
     let sk = state.sketch(sketch).ok_or_else(|| bad(cmd, "the sketch has not been solved"))?;
-    let mut ends: Vec<(solidcraft_geom::Vec2, solidcraft_geom::Vec2)> = Vec::with_capacity(curves.len());
+    let mut ends: Vec<(solidcore_record::Vec2, solidcore_record::Vec2)> = Vec::with_capacity(curves.len());
     for id in &curves {
         let ci = sk.sketch.curve_index(id).ok_or_else(|| bad(cmd, format!("no sketch curve `{id}`")))?;
         let pieces = sk.sketch.exact_pieces(ci);
@@ -88,15 +88,12 @@ fn loop_patch(s: &mut Session, p: &Value) -> Result<Value> {
     drop(state);
     let orders = match p.get("continuity") {
         None | Some(Value::Null) => vec![Continuity::G1; curves.len()],
-        Some(Value::String(w)) => {
-            let one = Continuity::parse(w).ok_or_else(|| bad(cmd, "`continuity` must be g0, g1, g2 or g3"))?;
-            vec![one; curves.len()]
-        }
+        Some(one @ Value::String(_)) => vec![crate::params::continuity(cmd, Some(one), "`continuity`", Construction::Bridge)?; curves.len()],
         Some(v) => {
             let list = v.as_array().filter(|a| a.len() == curves.len()).ok_or_else(|| bad(cmd, "`continuity` must be one word, or one per curve"))?;
             let mut out = Vec::with_capacity(list.len());
             for x in list {
-                out.push(x.as_str().and_then(Continuity::parse).ok_or_else(|| bad(cmd, "`continuity` entries must be g0, g1, g2 or g3"))?);
+                out.push(crate::params::continuity(cmd, Some(x), "a `continuity` entry", Construction::Bridge)?);
             }
             out
         }
@@ -199,16 +196,13 @@ fn network_curves(s: &Session, p: &Value, key: &str, default_sketch: &mut Option
                 curve.body = Some(BodyName::from(body.to_string()));
                 curve.edges = pts;
             } else {
-                curve.curves = string_list(o, "curves");
+                curve.curves = string_list(cmd, o, "curves")?;
                 if o.get("sketch").is_some_and(|v| !v.is_null()) {
                     curve.sketch = Some(SketchId(sketch_id(s, o.get("sketch"), cmd, &format!("{name}.sketch"))?));
                 }
             }
             if let Some(g) = o.get("continuity").filter(|v| !v.is_null()) {
-                let g = g.as_str().and_then(Continuity::parse).ok_or_else(|| bad(cmd, format!("{name}.continuity must be g0, g1 or g2")))?;
-                if g == Continuity::G3 {
-                    return Err(bad(cmd, format!("not supported yet: G3 on {name} (a curve network holds up to g2)")));
-                }
+                let g = crate::params::continuity(cmd, Some(g), &format!("{name}.continuity"), Construction::Network)?;
                 if g != Continuity::G0 && curve.body.is_none() {
                     return Err(bad(cmd, format!("{name}: g1 and g2 apply to a curve on a body's edges (a surface's open edges)")));
                 }

@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "a modelled Rc 1/2 internal taper pipe thread (ISO 7-1) in a d17.6 hole (the tap maker's) through a 13.2 mm plate, from its top face",
+ "source": "analytic",
+ "method": "ISO 7-1 / ASME B1.20.1 taper 1 in 16 on the diameter. The thread starts at its free end with the standard's diameter there and its diameters grow into the material (the external major d0 + y/16 at y mm in; the internal minor d1 - y/16). The crests are the cone's: the material outside the external major cone (inside the internal minor cone) along the thread is cut as the die (tap) cuts it. The groove is the sweep of the profile's section, rising P a turn and moving P/32 a turn off the axis, so a point (rho, zeta) of the section at turn t lies at r = rho + c t, z = z0 + zeta + P t, the volume element is 2 pi r dA dt, and the groove removes 2 pi int_0^T (int int r dA over the section within the material) dt, exact while turns don't overlap (Gauss on 400 panels a turn: the integrand is piecewise polynomial in t). the space between the teeth is a groove of straight flanks, its tooth (H - h) tan(half angle) wide at the crest and its groove as wide at the root (the truncations split equally); the standard's crest and root rounds are flats here. ISO 7-1 Rc 1/2: the gauge diameter d = 20.955 at the face (z = 13.2), so the minor there is d1 = d - 2h = 18.631, shrinking 1/16 per mm down; the plate is the useful thread 13.2 thick, so the minor cone stays outside the 17.6 hole (17.806 at the bottom). Both faces are free ends, the groove running a pitch past each. V = 40^2 13.2 - pi 8.8^2 13.2 - the ring inside the minor cone (pi int (r_m^2 - 8.8^2), 230.460888) - the groove (460.876764)",
+ "body_count": 1,
+ "volume_mm3": 17217.301204408,
+ "bbox": {
+  "min": [
+   -20,
+   -20,
+   0
+  ],
+  "max": [
+   20,
+   20,
+   13.2
+  ]
+ },
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

@@ -1,0 +1,26 @@
+{
+ "sources": [],
+ "what": "a 10 x 10 sheet's edge x = 10 extended naturally by 5: the plane continued to 15 x 10",
+ "source": "analytic",
+ "method": "a natural extension keeps a plane on itself: the face becomes x 0..15, y 0..10, area 150, one plane face, 4 free edges",
+ "valid": false,
+ "body_count": 1,
+ "faces": 1,
+ "boundary_edges": 4,
+ "area_mm2": 150.0,
+ "surface_types": [
+  "plane"
+ ],
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   15,
+   10,
+   0
+  ]
+ }
+}

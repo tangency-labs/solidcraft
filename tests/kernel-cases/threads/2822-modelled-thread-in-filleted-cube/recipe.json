@@ -1,0 +1,85 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     20,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10,
+    "body_name": "Cube"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      0,
+      0,
+      5
+     ],
+     [
+      20,
+      0,
+      5
+     ],
+     [
+      20,
+      20,
+      5
+     ],
+     [
+      0,
+      20,
+      5
+     ]
+    ],
+    "radius": 2
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     10,
+     10,
+     10
+    ],
+    "diameter": 2.5
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     11.25,
+     10,
+     5
+    ],
+    "designation": "M3",
+    "modeled": true
+   }
+  }
+ ]
+}

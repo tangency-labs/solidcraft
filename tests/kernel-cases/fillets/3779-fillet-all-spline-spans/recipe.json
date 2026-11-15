@@ -1,0 +1,145 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      -3
+     ],
+     [
+      20,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      20,
+      0
+     ],
+     [
+      23,
+      10
+     ],
+     [
+      20,
+      20
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      20,
+      20
+     ],
+     [
+      10,
+      23
+     ],
+     [
+      0,
+      20
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      0,
+      20
+     ],
+     [
+      -3,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10,
+    "body_name": "Pillow"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      4.8592,
+      -2.0044,
+      10
+     ],
+     [
+      15.1408,
+      -2.0044,
+      10
+     ],
+     [
+      22.0044,
+      4.8592,
+      10
+     ],
+     [
+      22.0044,
+      15.1408,
+      10
+     ],
+     [
+      15.1408,
+      22.0044,
+      10
+     ],
+     [
+      4.8592,
+      22.0044,
+      10
+     ],
+     [
+      -2.0044,
+      15.1408,
+      10
+     ],
+     [
+      -2.0044,
+      4.8592,
+      10
+     ]
+    ],
+    "radius": 0.1
+   }
+  }
+ ]
+}

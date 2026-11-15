@@ -1,0 +1,5 @@
+{"commands": [
+  {"command": "solid.box", "params": {"corner": [15, 0, 22.5], "length": 7.5, "width": 20, "height": 5, "body_name": "Box"}},
+  {"command": "solid.sphere", "params": {"center": [20, 10, 27.5], "radius": 3.75, "body_name": "Ball"}},
+  {"command": "solid.combine", "params": {"target": "Box", "tools": ["Ball"], "operation": "join"}}
+]}

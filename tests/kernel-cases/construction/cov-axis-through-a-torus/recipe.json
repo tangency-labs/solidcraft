@@ -1,0 +1,31 @@
+{
+ "commands": [
+  {
+   "command": "solid.torus",
+   "params": {
+    "center": [
+     0,
+     60,
+     0
+    ],
+    "major": 10,
+    "minor": 2,
+    "body_name": "Ring",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "construct.axis.through_cylinder",
+   "params": {
+    "face": {
+     "face": [
+      12,
+      60,
+      0
+     ]
+    },
+    "name": "A"
+   }
+  }
+ ]
+}

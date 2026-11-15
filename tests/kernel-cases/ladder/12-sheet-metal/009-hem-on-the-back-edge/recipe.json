@@ -1,0 +1,19 @@
+{
+ "base": "../../12-sheet-metal/002-edge-flange-90",
+ "commands": [
+  {
+   "command": "sheet.hem",
+   "params": {
+    "edges": [
+     [
+      50.0,
+      60.0,
+      2.0
+     ]
+    ],
+    "length": 8.0,
+    "gap": 1.0
+   }
+  }
+ ]
+}

@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "the active rule drafts 2 degrees (ABS (1.5mm)), the plate's assigned rule 4 degrees: a round rest on the plate takes the assigned 4",
+ "source": "analytic",
+ "method": "a body's assigned rule comes before the active one: the rest (round, 10 across, 5 high, solid) is drafted 4 deg: V = 60*40*3 + (pi*5/3)(5^2 + 5 r1 + r1^2), r1 = 5 - 5 tan 4 deg, = 7565.878955 (with the active 2 deg it would be 7579.145355)",
+ "body_count": 1,
+ "volume_mm3": 7565.878954822472
+}

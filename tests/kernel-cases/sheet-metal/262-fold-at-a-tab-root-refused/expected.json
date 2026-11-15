@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#262",
+  "tangency-labs/solidcraft#277"
+ ],
+ "what": "a fold exactly at a tab's root, where the bend zone (+-BA/2) would reach the blank's outline beside the tab, needs a bend relief",
+ "source": "invariants",
+ "method": "the fold line y = 50 is the tab's root: its bend zone reaches the corners (40,50) and (60,50) of the outline, so a clean bend is impossible without a relief that fold does not cut; the right behaviour is a refusal that names the cause, not a panic, a hang or a malformed body (BA/2 = (pi/2)(0.8+0.352)/2 = 0.905 mm)",
+ "outcome": "refused",
+ "refusal": "the bend zone (1.810 mm wide) reaches a corner of the sheet's outline"
+}

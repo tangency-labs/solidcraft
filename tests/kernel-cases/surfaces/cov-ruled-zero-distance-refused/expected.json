@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a ruled strip of width 0: refused, it would have no area",
+ "source": "invariants",
+ "method": "a strip needs a positive width",
+ "outcome": "refused",
+ "refusal": "the ruled surface distance must be positive and finite"
+}

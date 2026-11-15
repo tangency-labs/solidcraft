@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#316"
+ ],
+ "what": "a 40 x 30 x 10 box, its bottom outline rounded R1.5, shelled 2 mm open at the bottom: the round is smaller than the wall, so a 0.5 mm rim is left",
+ "source": "analytic",
+ "method": "outside: the box less its mitred bottom round, (1-pi/4) 1.5^2 (140 - 8c), c = 1.5 (10-3pi)/(3(4-pi)). The round's inward offset by 2 vanishes (1.5 < 2), so the cavity is the sharp box x 2..38, y 2..28, z 0..8 open at the bottom, 7488: V = 4445.694671",
+ "body_count": 1,
+ "volume_mm3": 4445.694671058465
+}

@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "a box's vertical edge rounded r2, then the top front edge meeting it at the corner rounded r2 (Tangent chain on)",
+ "source": "analytic",
+ "method": "box 40x30x20; the edge x=40, y=0 rounded r2, then the edge y=0, z=20: rounding the second edge after the first, its tangent chain (the default) runs on along the first round's end arc (on the end face, tangent to it) and the third edge at the corner; the rolling ball along that arc, between the end face and the first round of the same radius, is the corner's sphere, so the result is the three-edge rolling-ball corner: V = 23924.0826, as every-fillet-after-fillet-front-then-vertical-r2. Faces 10.",
+ "body_count": 1,
+ "volume_mm3": 23924.08257310633,
+ "faces": 10,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   20
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

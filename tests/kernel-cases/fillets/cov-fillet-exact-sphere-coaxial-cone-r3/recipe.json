@@ -1,0 +1,47 @@
+{
+ "commands": [
+  {
+   "command": "solid.sphere",
+   "params": {
+    "radius": 10,
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "operation": "new",
+    "body_name": "Ball"
+   }
+  },
+  {
+   "command": "solid.cone",
+   "params": {
+    "radius": 5,
+    "height": 20,
+    "top_radius": 3,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "operation": "join",
+    "targets": [
+     "Ball"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      0,
+      4.087346743853332,
+      9.12653256146668
+     ]
+    ],
+    "radius": 3
+   }
+  }
+ ]
+}

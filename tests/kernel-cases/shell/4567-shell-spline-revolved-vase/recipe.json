@@ -1,0 +1,99 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      14,
+      3
+     ],
+     [
+      22,
+      14
+     ],
+     [
+      22,
+      26
+     ],
+     [
+      14,
+      36
+     ],
+     [
+      6,
+      40
+     ],
+     [
+      6,
+      46
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      6,
+      46
+     ],
+     [
+      0,
+      46
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      46
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "axis": "y",
+    "angle": "360 deg"
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      0,
+      46,
+      3
+     ]
+    ],
+    "thickness": "2 mm"
+   }
+  }
+ ]
+}

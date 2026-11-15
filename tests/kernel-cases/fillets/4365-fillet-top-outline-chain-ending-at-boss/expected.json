@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4365",
+  "tangency-labs/solidcraft#4222"
+ ],
+ "what": "the top outline of a 60x40 r10 rounded block filleted r2 along its tangent chain, where a boss (r10, 10 high) standing over a corner of the outline interrupts it: refused ('a vertex of the edge chain where other faces meet')",
+ "source": "invariants",
+ "method": "the round runs round the outline from the boss's wall to its wall and ends against it; how the rolling ball closes on the boss's cylinder has no closed form, so only the outcome is graded: one valid closed body (the reporter's standard test, rebuilt from its screenshot)",
+ "body_count": 1,
+ "continuity": {
+  "order": "g1"
+ }
+}

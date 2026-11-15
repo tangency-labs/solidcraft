@@ -1,0 +1,12 @@
+id = "geom.extent1d"
+upstream = ["source/SMLib/inc/SmExtent1d.h", "source/SMLib/inc/SmExtentNd.h", "source/SMLib/src/SmExtent1d.cpp", "source/SMLib/src/SmExtentNd.cpp"]
+rust_module = "geom::extent1d"
+depends_on = []
+soft_depends_on = ["geom.tol"]
+est_lines = 974
+layer = 2
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-geom.extent1d-a1"
+claimed_at = "2026-10-12T19:48:21Z"
+notes = "GREEN: difftest 3091 cases (91 fixture from my_test_extent1d/header examples/edge cases + 3000 generated), all bit-identical, 0 deferred, max_rel_err 0; --perturb SENSITIVE. Wired back-edges: SmExtent3d::Get{U,V,W}Interval/Set{U,V}Interval (geom.extent3d intervals cases no longer deferred), SmTol::MapTo1d(SmTol3d&,SmVector3d&,const SmExtent1d&) and SmTol::GetScaledZero(const SmExtent1d&) (geom.tol, +5 fixtures and a map_to_1d op). Unowned dead fns (OnlySnapValue, Maximum/MinimumDistance, AreOverlapping, ContainsValueRelative, AnyBounds, AssertValid, Dump) not ported. 56 fns; largest: SmExtent1d::IntersectPeriodic, SmExtent1d::ContainsPeriodicValue, SmExtentNd::ClampVector, SmExtent1d::ApproximateUnbounded; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"

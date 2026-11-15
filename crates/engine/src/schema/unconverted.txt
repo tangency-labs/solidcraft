@@ -1,0 +1,20 @@
+# Commands that predate the rule that every command has input and output schemas
+# (coverage_tests.rs). This list only shrinks: when you give a command its contract and output
+# type, remove its line. Never add one: a new command comes with both schemas. Sorted, one id
+# per line.
+face.delete
+render.aging.describe
+render.backends
+render.effects.describe
+render.scene
+solid.draft
+solid.hole
+solid.loft
+solid.mirror
+solid.offset_face
+solid.pattern.path
+solid.pattern.rectangular
+solid.shell
+solid.thread
+surface.extrude
+surface.revolve

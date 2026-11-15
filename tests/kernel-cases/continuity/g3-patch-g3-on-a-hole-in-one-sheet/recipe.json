@@ -1,0 +1,138 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XZ"
+   }
+  },
+  {
+   "command": "sketch.spline.control_point",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      13,
+      8
+     ],
+     [
+      27,
+      -8
+     ],
+     [
+      40,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.extrude",
+   "params": {
+    "sketch": "Sketch1",
+    "curves": [
+     "s1"
+    ],
+    "distance": 40,
+    "body_name": "Sheet"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      12,
+      12
+     ],
+     [
+      28,
+      12
+     ],
+     [
+      28,
+      28
+     ],
+     [
+      12,
+      28
+     ],
+     [
+      12,
+      12
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.trim",
+   "params": {
+    "body": "Sheet",
+    "curves": {
+     "sketch": "Sketch2"
+    },
+    "keep": [
+     2,
+     2,
+     -1.044595
+    ]
+   }
+  },
+  {
+   "command": "surface.patch",
+   "params": {
+    "body": "Sheet",
+    "edges": [
+     [
+      20,
+      12,
+      0.0
+     ],
+     [
+      28,
+      20,
+      2.002857
+     ],
+     [
+      20,
+      28,
+      0.0
+     ],
+     [
+      12,
+      20,
+      -2.002857
+     ]
+    ],
+    "continuity": "g3",
+    "body_name": "Patch"
+   }
+  },
+  {
+   "command": "surface.stitch",
+   "params": {
+    "bodies": [
+     "Sheet",
+     "Patch"
+    ]
+   }
+  }
+ ]
+}

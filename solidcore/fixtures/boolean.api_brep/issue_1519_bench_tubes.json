@@ -1,0 +1,237 @@
+{
+ "cases": [
+  {
+   "name": "issue1519_bench_tubes_union_checked",
+   "note": "#1519 / WR-580: a bicycle frame's top tube (r 16, (-150, 0, 820) to (600, 0, 860)) united with its seat tube (r 16, (0, 0, 300) to (-150, 0, 820)) as SolidCraft's bench builds them (axes rounded to 1e-6, bases and heights to 1e-3, seams 0.6131 rad round from the frame's x), each SmApiCreateCylinder turned about Z for its seam, about Y onto its axis and moved to its base, as crates/solidcore/tests/wr580_tube_joint_no_coincident_edges.rs builds them. At the default fixes (upstream behaviour) this compares the port with the C++: upstream's SmEdgeDefinition::Imprint makes a second edge beside the seat's end circle (SmFace tests 33 and 34), unless the union first fails on #1517 (WR-579), which the default fixes also leave in place. Compares the union's status and SMLib's capi check (level 2) of the result.",
+   "inputs": {
+    "api": "checked",
+    "a": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 125.12804241947079
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "angle_deg": 86.94709765086374
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         -150.0,
+         0.0,
+         820.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 16.0,
+      "height": 751.066
+     }
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 35.12804241947077
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "angle_deg": -16.090829052954405
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         0.0,
+         0.0,
+         300.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 16.0,
+      "height": 541.202
+     }
+    },
+    "operation": 1,
+    "level": 2
+   }
+  },
+  {
+   "name": "issue1519_bench_tubes_union_measured",
+   "note": "#1519 / WR-580: a bicycle frame's top tube (r 16, (-150, 0, 820) to (600, 0, 860)) united with its seat tube (r 16, (0, 0, 300) to (-150, 0, 820)) as SolidCraft's bench builds them (axes rounded to 1e-6, bases and heights to 1e-3, seams 0.6131 rad round from the frame's x), each SmApiCreateCylinder turned about Z for its seam, about Y onto its axis and moved to its base, as crates/solidcore/tests/wr580_tube_joint_no_coincident_edges.rs builds them. At the default fixes (upstream behaviour) this compares the port with the C++: upstream's SmEdgeDefinition::Imprint makes a second edge beside the seat's end circle (SmFace tests 33 and 34), unless the union first fails on #1517 (WR-579), which the default fixes also leave in place. Compares the union's status, counts, volume and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 125.12804241947079
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "angle_deg": 86.94709765086374
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         -150.0,
+         0.0,
+         820.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 16.0,
+      "height": 751.066
+     }
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 35.12804241947077
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "angle_deg": -16.090829052954405
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         0.0,
+         0.0,
+         300.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 16.0,
+      "height": 541.202
+     }
+    },
+    "operation": 1
+   }
+  }
+ ]
+}

@@ -1,0 +1,54 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 10
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      20,
+      0,
+      0
+     ],
+     [
+      40,
+      15,
+      0
+     ],
+     [
+      20,
+      30,
+      0
+     ],
+     [
+      0,
+      15,
+      0
+     ]
+    ],
+    "radius": 1.5,
+    "tangent_chain": false
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      20,
+      15,
+      0
+     ]
+    ],
+    "thickness": 2
+   }
+  }
+ ]
+}

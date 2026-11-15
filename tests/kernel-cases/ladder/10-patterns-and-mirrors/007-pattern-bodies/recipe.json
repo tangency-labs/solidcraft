@@ -1,0 +1,32 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "radius": 3,
+    "height": 10,
+    "body_name": "Pin"
+   }
+  },
+  {
+   "command": "solid.pattern.rectangular",
+   "params": {
+    "bodies": [
+     "Pin"
+    ],
+    "dir1": [
+     1,
+     0,
+     0
+    ],
+    "count1": 4,
+    "spacing1": 10
+   }
+  }
+ ]
+}

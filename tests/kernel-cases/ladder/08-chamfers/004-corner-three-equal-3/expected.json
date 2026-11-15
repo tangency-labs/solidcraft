@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "3 mm chamfers on the three edges meeting at a corner",
+ "source": "analytic",
+ "method": "the union of the three prisms {b+c<=d}, {a+c<=d}, {a+b<=d} (a, b, c distances from the corner faces): sum d^2/2 L - 3 d^3/3 + the triple part d^3/4 (exact integral)",
+ "body_count": 1,
+ "volume_mm3": 47480.25,
+ "faces": 9
+}

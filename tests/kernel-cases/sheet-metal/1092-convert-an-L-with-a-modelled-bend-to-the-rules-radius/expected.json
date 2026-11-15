@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1092",
+  "tangency-labs/solidcraft#1314"
+ ],
+ "what": "an L section modelled with a bend of R2 inside and R4 outside, converted at that bend under a rule of R3: the bend becomes one bend of the rule's radius at the legs' virtual sharp",
+ "source": "analytic",
+ "method": "T = 2, R = 3, K = 0.5: BD(90) = 2*(R+T) - (pi/2)(R + K t) = 10 - 2*pi = 3.7168. The outer legs are 60 and 40 long (to the outer virtual sharp at the origin), so the flat length is 100 - BD = 96.2832, 50 wide, 2 thick; with K = 0.5 the folded volume is the flat area times t: V = 50*2*(100 - BD)",
+ "body_count": 1,
+ "volume_mm3": 9628.31853071796
+}

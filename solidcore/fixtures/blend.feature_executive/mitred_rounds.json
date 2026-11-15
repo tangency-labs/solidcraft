@@ -1,0 +1,15 @@
+{
+ "cases": [
+  {
+   "name": "mitred_rounds_box_top_r3",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp AddFeature(faces, SM_RB_EXTEND_SURFACE, SM_RB_FROM_OTHER_BREP) + DoDefeature: the four mitred r3 rounds round a 40x30x10 box's top, taken off together (the offset-faces put-back's group removal, #2020)",
+   "inputs": {
+    "file": "fixtures/blend.feature_executive/rounded_box_top_r3.smb",
+    "features": [
+     { "kind": "faces", "faces": [6, 7, 8, 9], "base_rb": 2, "feat_rb": 3 }
+    ],
+    "ops": [ { "op": "defeature" } ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "an arm hinged on a grounded base written by Export URDF, and the base's mesh read back",
+ "source": "analytic",
+ "method": "Base (grounded): box 1000x500x200; Arm: box 400x100x100 on a revolute joint. The tree: base_link, Base fixed to it, Arm on the revolute: 3 links, 2 joints. Meshes are written in metres, so the base's STL read back as millimetres is the box 1 x 0.5 x 0.2: V = 0.1, A = 2(0.5 + 0.2 + 0.1) = 1.6, 6 faces",
+ "body_count": 1,
+ "faces": 6,
+ "volume_mm3": 0.1,
+ "area_mm2": 1.6,
+ "results": [
+  {
+   "step": 8,
+   "json": {
+    "format": "Urdf",
+    "links": 3,
+    "joints": 2
+   }
+  }
+ ]
+}

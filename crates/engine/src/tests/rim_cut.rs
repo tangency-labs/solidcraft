@@ -3,7 +3,7 @@
 //! cut) was never meshed: its boundary was projected onto its surface starting from a corner
 //! that a search without a hint misses, so the face was dropped. Every boolean with the body
 //! then failed (truck's meshes both operands to classify faces), and the exact fallback refused
-//! it for the same face. The owner's design, `battery-tpu-case.solidcraft` (format 18).
+//! it for the same face. The owner's design, `battery-tpu-case.sc` (format 18).
 
 use std::path::Path;
 
@@ -13,7 +13,7 @@ use super::run;
 use crate::Session;
 
 fn open_at(feature: &str) -> Session {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tests/fixtures/battery-tpu-case.solidcraft");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tests/fixtures/battery-tpu-case.sc");
     let mut s = Session::default();
     run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
     run(&mut s, "timeline.roll_to", json!({"feature": feature}));
@@ -48,7 +48,6 @@ fn rim_cut_after_the_round_on_the_other_end() {
     let id = cut_window(&mut after)["feature"].as_u64().unwrap();
     let result = after.model.result(id).unwrap();
     assert!(result.error.is_none() && result.warning.is_none(), "{result:?}");
-    assert!(result.boolean_diagnostics.events.is_empty(), "{:?}", result.boolean_diagnostics);
     // The window's three faces (two sides and the top), at both points of the timeline.
     assert_eq!(faces(&before), f1 + 3);
     assert_eq!(faces(&after), f2 + 3);

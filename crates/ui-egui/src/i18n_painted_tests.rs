@@ -3,6 +3,7 @@
 //! paints the English text even though the language has a translation; this sweep catches it
 //! wherever it happens on the surfaces it opens.
 
+use crate::i18n::LocaleNames as _;
 use std::collections::{BTreeMap, BTreeSet};
 
 use solidcraft_engine::Session;
@@ -30,7 +31,9 @@ fn painted(h: &mut Harness) -> BTreeSet<String> {
             egui::Shape::Text(t) => {
                 let text = t.galley.job.text.trim();
                 out.insert(text.to_string());
-                for part in text.split(['›', '·', '•']).flat_map(|p| p.split("   ")) {
+                // Split composed labels, but only on the spaced middle dot: the bare one is
+                // Catalan's l·l inside a word ("Cancel·la"), not a separator.
+                for part in text.split(['›', '•']).flat_map(|p| p.split(" · ")).flat_map(|p| p.split("   ")) {
                     out.insert(part.trim().to_string());
                 }
             }
@@ -67,11 +70,20 @@ fn design_names(app: &SolveApp) -> BTreeSet<String> {
 /// in `language`. (When one entry with the text is still English there, English is right.)
 /// `names` are the design's own names, which are not UI text, except the default names the
 /// language translates (a new design's `Untitled`, `Sketch1`): those must show translated.
+/// A text the language gives another message is its own word, not English: Romanian's Aspect
+/// (Appearance) is also the English Aspect of the Render Frame stage.
 fn english_leaks(language: &str, texts: &BTreeSet<String>, english: &BTreeMap<String, Vec<String>>, names: &BTreeSet<String>) -> Vec<String> {
-    let locale = crate::i18n::Locale::for_language(language);
+    let locale = solidcraft_ui_text::Locale::for_language(language);
+    let own: BTreeSet<&str> = english
+        .iter()
+        .flat_map(|(text, ids)| ids.iter().map(move |id| (text.as_str(), locale.text(id))))
+        .filter(|(text, shown)| text != shown)
+        .map(|(_, shown)| shown)
+        .collect();
     texts
         .iter()
         .filter(|text| !names.contains(*text) || locale.given_name(text) != text.as_str())
+        .filter(|text| !own.contains(text.as_str()))
         .filter(|text| english.get(*text).is_some_and(|ids| ids.iter().all(|id| locale.text(id) != text.as_str())))
         .cloned()
         .collect()
@@ -104,7 +116,7 @@ fn sweep(h: &mut Harness, language: &str) -> BTreeMap<&'static str, BTreeSet<Str
         seen.insert(name, painted(h));
     }
     h.app.ui.palette_open = false;
-    let title = crate::i18n::Locale::for_language(language).text("ui.preferences").to_string();
+    let title = solidcraft_ui_text::Locale::for_language(language).text("ui.preferences").to_string();
     for page in crate::prefs::PAGES {
         h.call("ui.prefs", serde_json::json!({"open": page}));
         h.frames(2);
@@ -136,6 +148,7 @@ fn sweep(h: &mut Harness, language: &str) -> BTreeMap<&'static str, BTreeSet<Str
 
 #[test]
 fn no_english_is_painted_where_the_language_has_a_translation() {
+    crate::i18n::install();
     let english = english_ids();
     let mut h = sample();
     let names = design_names(&h.app);
@@ -153,11 +166,13 @@ fn no_english_is_painted_where_the_language_has_a_translation() {
 }
 
 /// The sweep can see a leak: English painted by a plain painter call is reported, the same text
-/// in the language is not, and English that the language leaves untranslated is not either.
+/// in the language is not, English that the language leaves untranslated is not either, and nor
+/// is a word the language gives another message.
 #[test]
 fn the_sweep_reports_english_only_where_a_translation_exists() {
+    crate::i18n::install();
     let english = english_ids();
-    let locale = crate::i18n::Locale::for_language("ja");
+    let locale = solidcraft_ui_text::Locale::for_language("ja");
     let translated = locale.text("cmd.sketch_rectangle_center").to_string();
     assert_ne!(translated, "Center Rectangle");
     let texts: BTreeSet<String> =
@@ -165,4 +180,10 @@ fn the_sweep_reports_english_only_where_a_translation_exists() {
     // "Fillet" here is a feature someone named so: a design name, not a label.
     let names: BTreeSet<String> = ["Fillet".to_string()].into();
     assert_eq!(english_leaks("ja", &texts, &english, &names), vec!["Center Rectangle".to_string()]);
+    // A word the language gives another message is its own, though English has a message with
+    // the same letters: Romanian's Aspect is Appearance, English's Aspect is the Frame stage's.
+    let ro = solidcraft_ui_text::Locale::for_language("ro");
+    assert_eq!(ro.text("cmd.appearance_assign"), "Aspect");
+    assert_ne!(ro.text("render.frame_aspect"), "Aspect");
+    assert!(english_leaks("ro", &["Aspect".to_string()].into(), &english, &BTreeSet::new()).is_empty());
 }

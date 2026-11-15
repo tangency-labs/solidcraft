@@ -1,0 +1,13 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3460"
+  ],
+  "what": "Combine cut (keep tools) of an enclosure by its lid whose insert is flush with the inner walls and carries four small half-moon tabs that cross them; the cut must not return the target unchanged",
+  "source": "analytic",
+  "method": "enclosure 40x30x20 minus cavity 36x26x18 = 7152; lid insert 36x26x8 flush with the cavity walls and top, plus four vertical cylinders r=2.5, 6 tall, centred 2 mm inside each wall so each pokes 0.5 mm into the wall: overlap per tab is a circular segment (chord 3, sagitta 0.5) of area 2.5^2*acos(0.8) - 2*1.5 = 1.0219, times 6. The cut moves 4*6*1.0219 = 24.5 mm3 from the enclosure into nothing and the lid is kept, so the two bodies together hold 7152 + 36*26*8 + 24.5 - 24.5 = 14640 (an unchanged target would total 14664.5). Graded with rel 5e-4 so a no-op cut is caught; body_count 2",
+  "body_count": 2,
+  "volume_mm3": 14640.0,
+  "tolerance": {
+    "rel": 0.0005
+  }
+}

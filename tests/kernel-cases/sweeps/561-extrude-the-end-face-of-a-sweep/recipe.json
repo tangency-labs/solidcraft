@@ -1,0 +1,134 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Path"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      0,
+      30
+     ]
+    ],
+    "infer": false,
+    "ids": [
+     "p1"
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      30
+     ],
+     [
+      40,
+      30
+     ]
+    ],
+    "infer": false,
+    "ids": [
+     "p2"
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Sec"
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "corner": [
+     4,
+     2.5
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.sweep",
+   "params": {
+    "sketch": "Sec",
+    "path_sketch": "Path",
+    "path": [
+     "p1",
+     "p2"
+    ],
+    "operation": "new",
+    "body_name": "Bar"
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "face": [
+     40,
+     0,
+     30
+    ],
+    "distance": 6,
+    "operation": "join"
+   }
+  }
+ ]
+}

@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "timeline.move_to_group of a cut into a folder its sketch is outside of",
+ "source": "invariants",
+ "method": "folder R would hold Round and Notch with the sketch between them: not one contiguous run",
+ "outcome": "refused",
+ "refusal": "timeline folder `R` must contain one contiguous run of features"
+}

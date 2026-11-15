@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1717",
+  "tangency-labs/solidcraft#2158"
+ ],
+ "what": "a second sphere cut overlapping an earlier sphere cut on a box edge: 'no result'",
+ "source": "analytic",
+ "method": "box 30x20x5 (V=3000). Each sphere r=10 centred on the back-bottom edge removes the quarter of the ball between z=-5..5: pi(r^2 h - h^3/3)/2 with h=5 -> 1375*pi/6 = 719.95. The two balls' common lens (centres 5 apart) over the slab, halved by the y<=20 half-space: 1/2 * integral_0^5 [2 rho^2 acos(d/2rho) - (d/2) sqrt(4 rho^2 - d^2)] dz with rho^2=100-z^2, d=5 -> 483.551. Removed = 2*719.95 - 483.551 = 956.345; V = 3000 - 956.345 = 2043.655",
+ "body_count": 1,
+ "volume_mm3": 2043.6548
+}

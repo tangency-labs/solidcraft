@@ -136,6 +136,19 @@ impl ModifierCombo {
         parts.join("+")
     }
 
+    /// The display label in the user's language, for the host platform: "Cmd or Option" reads
+    /// "Cmd oder Option" in German. Key names stay as the keyboard prints them.
+    pub fn shown_label(self) -> String {
+        let platform = Platform::host();
+        if self == Self::CTRL_ALT {
+            return solidcraft_ui_text::format("ui.modifiers_either", &[("first", ctrl_name_for(platform)), ("second", alt_name_for(platform))]);
+        }
+        if self == Self::NONE {
+            return solidcraft_ui_text::tr_label("None").to_string();
+        }
+        self.label_for(platform)
+    }
+
     /// Combos offered by the sketch snap-suppress picker (classic OR first).
     pub const SNAP_SUPPRESS_CHOICES: [Self; 4] = [Self::CTRL_ALT, Self::CTRL, Self::ALT, Self::SHIFT];
 }
@@ -214,6 +227,8 @@ pub enum ModAction {
     TextSingleLetter = 7,
     TextHandleConstrain = 8,
     IsoCurveAlternate = 9,
+    ExtendPair = 10,
+    KeepSnapPoints = 11,
 }
 
 impl ModAction {
@@ -228,6 +243,8 @@ impl ModAction {
         Self::TextSingleLetter,
         Self::TextHandleConstrain,
         Self::IsoCurveAlternate,
+        Self::ExtendPair,
+        Self::KeepSnapPoints,
     ];
 
     pub const fn id(self) -> &'static str {
@@ -242,6 +259,8 @@ impl ModAction {
             Self::TextSingleLetter => "text_single_letter",
             Self::TextHandleConstrain => "text_handle_constrain",
             Self::IsoCurveAlternate => "isocurve_alternate",
+            Self::ExtendPair => "extend_pair",
+            Self::KeepSnapPoints => "keep_snap_points",
         }
     }
 
@@ -303,6 +322,9 @@ pub enum Scope {
     Manipulator,
     /// Feature dialogs with a live preview (Primary can roll the preview back for reselect).
     FeaturePreview,
+    /// Point inputs that take snap points (Move, Align, Measure, joints): a held key keeps the
+    /// shown points while the pointer moves.
+    PointPick,
 }
 
 impl Scope {
@@ -312,6 +334,7 @@ impl Scope {
             Self::SketchDraw | Self::SketchDrag => SKETCH_SNAP_BINDINGS,
             Self::Manipulator => MANIPULATOR_BINDINGS,
             Self::FeaturePreview => FEATURE_PREVIEW_BINDINGS,
+            Self::PointPick => POINT_PICK_BINDINGS,
         }
     }
 }
@@ -358,6 +381,15 @@ const FEATURE_PREVIEW_BINDINGS: &[Binding] = &[Binding {
     // Hold Primary to roll the command preview back so obscured geometry can be (re)selected.
     action: ModAction::PreviewReselect,
     defaults: &[ModifierCombo::CTRL],
+    matching: Match::AtLeast,
+    trigger: Trigger::Live,
+    rebindable: true,
+}];
+
+const POINT_PICK_BINDINGS: &[Binding] = &[Binding {
+    // Hold Shift to keep the shown snap points while the pointer crosses other edges and faces.
+    action: ModAction::KeepSnapPoints,
+    defaults: &[ModifierCombo::SHIFT],
     matching: Match::AtLeast,
     trigger: Trigger::Live,
     rebindable: true,
@@ -412,6 +444,11 @@ pub fn preview_reselect(held: Held, manipulator_dragging: bool) -> bool {
         return false;
     }
     resolve(&[Scope::FeaturePreview], None, held, Trigger::Live).contains(ModAction::PreviewReselect)
+}
+
+/// Whether the held keys keep the shown snap points where they are (Shift by default).
+pub fn keep_snap_points(held: Held) -> bool {
+    resolve(&[Scope::PointPick], None, held, Trigger::Live).contains(ModAction::KeepSnapPoints)
 }
 
 /// Resolve which actions are active for `held` under the given scopes and optional tool.
@@ -610,6 +647,20 @@ mod tests {
         assert!(set.contains(ModAction::IsoCurveAlternate));
         let bare = resolve(&[], None, held, Trigger::Press);
         assert!(!bare.contains(ModAction::IsoCurveAlternate));
+    }
+
+    #[test]
+    fn extend_shift_is_the_pair_action_and_not_a_midpoint_snap() {
+        let held = Held { shift: true, ..Default::default() };
+        let press = resolve(&[], descriptor("sketch.extend"), held, Trigger::Press);
+        assert!(press.contains(ModAction::ExtendPair));
+        let plain = resolve(&[], descriptor("sketch.extend"), Held::default(), Trigger::Press);
+        assert!(!plain.contains(ModAction::ExtendPair));
+        // Sketch scopes give Shift the midpoint snap while drawing; Extend's own entry turns it off.
+        let live = resolve(&[Scope::SketchDraw, Scope::SketchDrag], descriptor("sketch.extend"), held, Trigger::Live);
+        assert!(!live.contains(ModAction::TargetMidpoint));
+        let drawing = resolve(&[Scope::SketchDraw, Scope::SketchDrag], descriptor("sketch.line"), held, Trigger::Live);
+        assert!(drawing.contains(ModAction::TargetMidpoint));
     }
 
     #[test]

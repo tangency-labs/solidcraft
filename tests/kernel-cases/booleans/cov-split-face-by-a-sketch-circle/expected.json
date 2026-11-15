@@ -1,0 +1,10 @@
+{
+ "sources": [],
+ "what": "a block's top face split by a sketch circle on it: a disc face and the face around it",
+ "source": "analytic",
+ "method": "the shape is unchanged (V 12000, A 3800); the top becomes two faces: 7",
+ "body_count": 1,
+ "faces": 7,
+ "volume_mm3": 12000.0,
+ "area_mm2": 3800.0
+}

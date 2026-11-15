@@ -1,0 +1,24 @@
+{
+ "commands": [
+  {
+   "command": "solid.sphere",
+   "params": {
+    "radius": 10,
+    "body_name": "Ball"
+   }
+  },
+  {
+   "command": "solid.scale",
+   "params": {
+    "bodies": [
+     "Ball"
+    ],
+    "factors": [
+     1,
+     2,
+     0.5
+    ]
+   }
+  }
+ ]
+}

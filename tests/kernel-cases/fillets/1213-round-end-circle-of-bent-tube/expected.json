@@ -1,0 +1,17 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1213",
+  "tangency-labs/solidcraft#1291"
+ ],
+ "what": "an R3 round on the end circle of a lofted tube whose axis bends 60 degrees",
+ "source": "analytic",
+ "method": "five circles R20 square to a centre arc of radius 100 turning 60 degrees, lofted. SolidCraft's loft is a cubic skin interpolating the five sections at chord-length parameters 0, 1/4, 1/2, 3/4, 1 (knots 0^4 1/2 1^4); every section's control points move rigidly with its plane, so the wall is S(u,v) = C(v) + 20 cos(u) z + 20 sin(u) Y(v), C and Y the cubic interpolants of the section origins and in-plane directions. |Y| is not 1 between the given circles, so those sections are ellipses and the body is not a torus (exact torus: pi*20^2*100*pi/3 = 131594.725). Its volume by the divergence theorem, Gauss quadrature on the wall and the end caps, converged: 131601.597487935. The R3 round on the start circle (the plane x=0) removes the region between the cap, the wall and the rolling ball's canal surface, the ball centre found for each u along the moving spine (touching the cap and the wall), by the divergence theorem, converged to 1e-12: 233.662461919. Pappus on the spandrel (1-pi/4) r^2 at its centroid radius overstates it (234.576949197, exact only for a straight tube; an exact torus gives 233.731514056). V = 131601.597487935 - 233.662461919 = 131367.935026. The value holds for the loft built this way only: a loft with other parameters or knots is another body.",
+ "body_count": 1,
+ "volume_mm3": 131367.935026,
+ "tolerance": {
+  "rel": 1e-06
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

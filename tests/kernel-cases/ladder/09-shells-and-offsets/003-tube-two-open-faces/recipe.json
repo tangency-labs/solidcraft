@@ -1,0 +1,23 @@
+{
+ "base": "../../01-primitives/001-box",
+ "commands": [
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      30,
+      20,
+      20
+     ],
+     [
+      30,
+      20,
+      0
+     ]
+    ],
+    "thickness": 2
+   }
+  }
+ ]
+}

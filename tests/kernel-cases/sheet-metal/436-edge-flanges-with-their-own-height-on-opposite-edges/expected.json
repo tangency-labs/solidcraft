@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#436",
+  "tangency-labs/solidcraft#447"
+ ],
+ "what": "one edge flange feature whose two edges carry their own heights (30 and 25 mm) over the feature's 20 mm default",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5, setback 3 at each 90 degree bend. Base 120 x 90 trimmed to 120 x 84; flange straights 30 - 3 = 27 and 25 - 3 = 22, each 120 wide; two bends of flat width BA = pi (K = 0.5). Flat area 120*(84 + 27 + 22 + 2*pi); the folded volume is the flat area times t: V = 2*120*(133 + 2*pi)",
+ "body_count": 1,
+ "volume_mm3": 33427.9644737231
+}

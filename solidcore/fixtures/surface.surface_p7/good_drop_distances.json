@@ -1,0 +1,49 @@
+{
+  "cases": [
+    {
+      "name": "good_drop_distance_result_nearer_than_guess",
+      "inputs": {
+        "surface": { "plane": { "o": [0, 0, 0], "n": [0, 0, 1] } },
+        "op": {
+          "op": "good_drop",
+          "dom": [0, 0, 1, 1],
+          "p": [-0.5, 0.50048828125, 0],
+          "guess": [0.4, 0.5],
+          "value": 1.0,
+          "sol": [0.5, 0.5]
+        }
+      },
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp: sm_GoodDropResult final distance comparison (WR-56, #1852); pinned default rejects the nearer result"
+    },
+    {
+      "name": "good_drop_distance_guess_nearer_than_result",
+      "inputs": {
+        "surface": { "plane": { "o": [0, 0, 0], "n": [0, 0, 1] } },
+        "op": {
+          "op": "good_drop",
+          "dom": [0, 0, 1, 1],
+          "p": [-0.5, 0.50048828125, 0],
+          "guess": [0.50048828125, 0.5],
+          "value": 1.0,
+          "sol": [0.5, 0.5]
+        }
+      },
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp: sm_GoodDropResult final distance comparison (WR-56, #1852); pinned default accepts the farther result"
+    },
+    {
+      "name": "good_drop_distance_equal_guess_and_result",
+      "inputs": {
+        "surface": { "plane": { "o": [0, 0, 0], "n": [0, 0, 1] } },
+        "op": {
+          "op": "good_drop",
+          "dom": [0, 0, 1, 1],
+          "p": [-0.5, 0.50048828125, 0],
+          "guess": [0.5009765625, 0.5],
+          "value": 1.0,
+          "sol": [0.5, 0.5]
+        }
+      },
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp: sm_GoodDropResult final distance comparison (WR-56, #1852); equal distances remain accepted"
+    }
+  ]
+}

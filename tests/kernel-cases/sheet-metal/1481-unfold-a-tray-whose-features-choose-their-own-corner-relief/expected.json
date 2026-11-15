@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1232",
+  "tangency-labs/solidcraft#1481"
+ ],
+ "what": "a 120 x 90 base with two edge flange features (bottom and left edges with a round relief, top and right edges with a square one) over a rule whose relief is a notch, unfolded",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5, BD(90) = 2*3 - pi = 2.8584; each wall's flat reaches 20 - BD = 17.1416 past the base's edge, whatever corner relief a feature chooses (the relief cuts only the corner): bbox x -17.1416..137.1416, y -17.1416..107.1416, z 0..2",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   -17.141592653589793,
+   -17.141592653589793,
+   0
+  ],
+  "max": [
+   137.14159265358978,
+   107.1415926535898,
+   2
+  ]
+ }
+}

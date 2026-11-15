@@ -1,0 +1,53 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 40,
+    "height": 8,
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "name": "Plate"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 10,
+    "height": 30,
+    "corner": [
+     0,
+     30,
+     8
+    ],
+    "operation": "join",
+    "name": "Wall"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     20,
+     23.0,
+     8
+    ],
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "diameter": 6.4,
+    "type": "countersink",
+    "cs_diameter": 13.7,
+    "cs_angle": 90,
+    "name": "CS"
+   }
+  }
+ ]
+}

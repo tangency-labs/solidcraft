@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a cylinder r10 along X 1e-3 mm above the top face, cut",
+ "source": "analytic",
+ "method": "gap 1e-3 mm: no contact, nothing is removed",
+ "body_count": 1,
+ "volume_mm3": 48000,
+ "faces": 6,
+ "edges": 12,
+ "vertices": 8
+}

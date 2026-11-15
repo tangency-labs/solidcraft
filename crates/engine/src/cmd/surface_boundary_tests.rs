@@ -114,8 +114,8 @@ fn a_network_of_3d_lines_is_a_hyperbolic_paraboloid() {
     // The face's own area comes from the coarse reference mesh (a chord of a fiftieth of a per
     // cent of the body); the measuring mesh is refined onto the surface.
     assert!((face - want).abs() < 1e-2 * want && (total - want).abs() < 1e-3 * want, "{face} / {total} vs {want}");
-    let st = s.world_state();
-    let mesh = st.body(&body).map(|b| b.body.tessellate(0.01)).and_then(Result::ok).unwrap_or_default();
+    let st = s.world_state().unwrap();
+    let mesh = st.body(&body).map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01))).and_then(Result::ok).unwrap_or_default();
     assert!(!mesh.positions.is_empty());
     for p in &mesh.positions {
         assert!((p.z - p.x * p.y / 10.0).abs() < 1e-6, "{p:?} is off the paraboloid");
@@ -194,13 +194,13 @@ fn hostile_networks_are_refused() {
     let mut s = Session::default();
     let (sheet, top) = cylinder_and_line(&mut s);
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 40, 0]}));
-    let boxed = s.world_state().bodies.last().map(|b| b.name.clone()).unwrap_or_default();
+    let boxed = s.world_state().unwrap().bodies.last().map(|b| b.name.clone()).unwrap_or_default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Flat"}));
     let a = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
     let b = line(&mut s, [0.0, 5.0], [10.0, 5.0]);
     let far = line(&mut s, [0.0, 20.0], [10.0, 20.0]);
     let ring = first(&run(&mut s, "sketch.circle.center", json!({"center": [50, 50], "radius": 3}))["created"]["curves"]);
-    let bodies = s.world_state().bodies.len();
+    let bodies = s.world_state().unwrap().bodies.len();
     let edge = |g: &str| json!({"body": sheet, "edges": [[5.0, 10.0, 0.0]], "continuity": g});
     let many: Vec<Value> = (0..33).map(|_| json!(a)).collect();
     let cases: Vec<(Value, &str)> = vec![
@@ -240,7 +240,7 @@ fn hostile_networks_are_refused() {
         assert!(!matches!(e, crate::EngineError::Internal(..)), "{params}: {e}");
         assert!(e.to_string().contains(want), "{params}: {e}");
     }
-    assert_eq!(s.world_state().bodies.len(), bodies, "a refused network left a body behind");
+    assert_eq!(s.world_state().unwrap().bodies.len(), bodies, "a refused network left a body behind");
 }
 
 /// An edit (`timeline.redefine`) may turn a loop of sketch curves into the network of the same
@@ -259,9 +259,62 @@ fn an_edit_turns_a_loop_into_a_network_and_back() {
     run(&mut s, "timeline.redefine", json!({"feature": "Patch", "command": "surface.boundary", "params": network}));
     let kind = |s: &Session| s.doc.find_feature("Patch").map(|f| f.kind.clone());
     assert!(matches!(kind(&s), Some(solidcraft_doc::FeatureKind::SurfaceNetwork { .. })), "{:?}", kind(&s));
-    let body = s.world_state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
+    let body = s.world_state().unwrap().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
     assert!((areas(&mut s, &body).0 - 100.0).abs() < 1e-6);
     run(&mut s, "timeline.redefine", json!({"feature": "Patch", "command": "surface.boundary", "params": {"sketch": "Square", "curves": sides}}));
     assert!(matches!(kind(&s), Some(solidcraft_doc::FeatureKind::SurfaceBoundary { .. })), "{:?}", kind(&s));
     assert!((areas(&mut s, &body).0 - 100.0).abs() < 1e-6);
+}
+
+/// #16508: a boundary surface and a loft built on one arc stitch into one sheet. The case is the
+/// issue's: a half circle (R 13.8 about z = 5.5) on the plane x = 6 is lofted to the same half
+/// circle on x = 60, and is also one of the four sides of a boundary network whose other sides
+/// are an arc on x = -9 and two lines in the XZ plane. The two surfaces are fitted to the arc each
+/// on its own, and their edges along it end up about 7e-5 apart, so before the fix the stitch was
+/// refused ("Bad Gap ... offset=6.81e-05") at any stitch tolerance.
+///
+/// Edge count: each surface is one four-sided face, 4 + 4 = 8 edges, and the stitch makes the
+/// arc they share one edge, so the sheet has 8 - 1 = 7 edges on 2 faces.
+#[test]
+fn a_boundary_surface_and_a_loft_surface_on_one_curve_stitch() {
+    let mut s = Session::default();
+    let mut arc = |name: &str, offset: f64, start: [f64; 2], end: [f64; 2], through: [f64; 2]| {
+        run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": offset, "name": name}));
+        run(&mut s, "sketch.arc.three_point", json!({"start": start, "end": end, "through": through}));
+        run(&mut s, "sketch.finish", json!({}));
+    };
+    let half = ([0.0, -8.3], [0.0, 19.3], [-13.8, 5.5]);
+    arc("Shared", 6.0, half.0, half.1, half.2);
+    arc("Far", 60.0, half.0, half.1, half.2);
+    // The issue's back arc: centre (1.5255, 0.9839), through both ends and its point farthest out.
+    let (centre, start, end): ([f64; 2], [f64; 2], [f64; 2]) =
+        ([1.5254923566139873, 0.9839315653407356], [0.0, -8.888970788629825], [0.0, 10.856833919298804]);
+    let r = (centre[0] - start[0]).hypot(centre[1] - start[1]);
+    arc("Back", -9.0, start, end, [centre[0] - r, centre[1]]);
+    // The two rails in the XZ plane (a sketch point (u, v) is the model point (u, 0, -v)).
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Rails"}));
+    let low = line(&mut s, [6.0, 8.3], [-9.0, -start[1]]);
+    let high = line(&mut s, [-9.0, -end[1]], [6.0, -19.3]);
+    run(&mut s, "sketch.finish", json!({}));
+    let curve = |sketch: &str, id: &str| json!({"sketch": sketch, "curves": [id]});
+    let loft = run(&mut s, "surface.loft", json!({"sections": [curve("Shared", "a1"), curve("Far", "a1")]}));
+    let boundary = run(
+        &mut s,
+        "surface.boundary",
+        json!({"u": [curve("Rails", &low), curve("Rails", &high)], "v": [curve("Shared", "a1"), curve("Back", "a1")]}),
+    );
+    let (a, b) = (first(&boundary["created_bodies"]), first(&loft["created_bodies"]));
+    assert!(!a.is_empty() && !b.is_empty() && a != b, "{boundary} / {loft}");
+    for body in [&a, &b] {
+        let edges = run(&mut s, "model.edges", json!({"body": body}));
+        assert_eq!(edges["edges"].as_array().map(Vec::len), Some(4), "each surface is four-sided: {edges}");
+    }
+    let stitched = run(&mut s, "surface.stitch", json!({"bodies": [a, b]}));
+    let bodies: Vec<&Value> = ["created_bodies", "changed_bodies"].iter().filter_map(|k| stitched[*k].as_array()).flatten().collect();
+    assert_eq!(bodies.len(), 1, "one sheet: {stitched}");
+    let body = bodies[0].as_str().unwrap_or_default();
+    let faces = run(&mut s, "model.faces", json!({"body": body}));
+    assert_eq!(faces["faces"].as_array().map(Vec::len), Some(2), "{faces}");
+    let edges = run(&mut s, "model.edges", json!({"body": body}));
+    assert_eq!(edges["edges"].as_array().map(Vec::len), Some(7), "{edges}");
 }

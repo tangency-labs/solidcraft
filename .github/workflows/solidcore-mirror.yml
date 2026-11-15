@@ -1,0 +1,142 @@
+# Mirror SolidCraft's vendored kernel to its own repository.
+#
+# `solidcore` is the SolidCore kernel, vendored with `git subtree`, so `main` keeps
+# SolidCore's history. This workflow pushes the commits under `solidcore` back to
+# tangency-labs/solidcore, so the same history can be read from either repository.
+#
+# It mirrors incrementally (scripts/ci/solidcore-mirror.sh): one mirror commit per new main
+# commit that changes solidcore/, a merged branch's commits included, each with exactly that
+# commit's solidcore/ tree, its author, dates and message, and a `solidcraft: <sha>` trailer. The
+# last one records the main commit it reached (`solidcraft-main:`), where the next run starts; the
+# first run starts from the vendoring merge. Never `git subtree split`: it replays main's whole
+# history (about 100 minutes) and overflows dash's recursion limit.
+#
+# The push is always a fast-forward. A force push would rewrite SolidCore's history, so the
+# workflow stops instead when the two have diverged, or when a mirror commit would not be the
+# kernel alone.
+#
+# SolidCore's `main` is protected. The deploy key must have write access to that repository and
+# must bypass its `protect-main` ruleset (see the pull request that added this file).
+name: Mirror to SolidCore
+
+on:
+  push:
+    branches: [main]
+    # Only a change to the vendored kernel can move SolidCore. Editing this file rehearses it.
+    paths:
+      - "solidcore/**"
+      - ".github/workflows/solidcore-mirror.yml"
+      - "scripts/ci/solidcore-mirror.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run at a time, never cancelled: two pushes to SolidCore must not race.
+concurrency:
+  group: solidcore-mirror
+  cancel-in-progress: false
+
+env:
+  # The directory in SolidCraft that is the whole of SolidCore.
+  PREFIX: solidcore
+  SOLIDCORE_URL: git@github.com:tangency-labs/solidcore.git
+  SOLIDCORE_BRANCH: main
+
+jobs:
+  mirror:
+    name: Mirror main's kernel commits
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # Incremental: seconds per run.
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Always the real main, and its whole history: the mirror walks main's ancestry since the
+      # last mirrored commit, which a shallow clone would not have.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The private half of a deploy key with write access to tangency-labs/solidcore. Fail here,
+      # with a readable message, instead of somewhere inside git.
+      - name: Set up the SolidCore deploy key
+        env:
+          SOLIDCORE_DEPLOY_KEY: ${{ secrets.SOLIDCORE_DEPLOY_KEY }}
+        run: |
+          if [ -z "$SOLIDCORE_DEPLOY_KEY" ]; then
+            echo "::error::The SOLIDCORE_DEPLOY_KEY secret is not set. Add the private half of a deploy key that has write access to tangency-labs/solidcore under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          install -d -m 700 "$RUNNER_TEMP/ssh"
+          (umask 077 && printf '%s\n' "$SOLIDCORE_DEPLOY_KEY" > "$RUNNER_TEMP/ssh/solidcore")
+          # The fetch and the push inherit this, so both use the same key.
+          printf '%s\n' "GIT_SSH_COMMAND=ssh -i $RUNNER_TEMP/ssh/solidcore -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new" >> "$GITHUB_ENV"
+
+      # Decide, before touching SolidCore, whether there is anything to mirror and whether it is a
+      # fast-forward. There are three states: in sync, SolidCore behind (push), diverged (fail).
+      - name: Check what needs mirroring
+        id: check
+        run: |
+          set -euo pipefail
+
+          # The remote tip, so the ancestry tests below compare against what SolidCore has.
+          if ! git fetch --no-tags "$SOLIDCORE_URL" "$SOLIDCORE_BRANCH"; then
+            echo "::error::Could not fetch $SOLIDCORE_URL $SOLIDCORE_BRANCH. Check that SOLIDCORE_DEPLOY_KEY is the private half of a solidcore deploy key with write access, and that the branch exists."
+            exit 1
+          fi
+          REMOTE=$(git rev-parse FETCH_HEAD)
+
+          # Mirror commits for main's solidcore/ commits since the last run, built incrementally on
+          # SolidCore's tip (never `git subtree split`, which replays main's whole history). The
+          # script fails on divergence or anything that is not a fast-forward of SolidCore's tip.
+          bash scripts/ci/solidcore-mirror.sh "$REMOTE" HEAD > "$RUNNER_TEMP/mirror.out"
+          cat "$RUNNER_TEMP/mirror.out"
+          STATE=$(sed -n 's/^state=//p' "$RUNNER_TEMP/mirror.out")
+          SPLIT=$(sed -n 's/^tip=//p' "$RUNNER_TEMP/mirror.out")
+          COUNT=$(sed -n 's/^count=//p' "$RUNNER_TEMP/mirror.out")
+          {
+            echo "state=$STATE"
+            echo "split=$SPLIT"
+            echo "remote=$REMOTE"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Mirror to SolidCore"
+            echo
+            echo "| | commit |"
+            echo "| --- | --- |"
+            echo "| SolidCraft \`$PREFIX\` mirror ($COUNT new) | \`$SPLIT\` |"
+            echo "| solidcore \`$SOLIDCORE_BRANCH\` | \`$REMOTE\` |"
+            echo
+            case "$STATE" in
+              in-sync) echo "**In sync.** Nothing to mirror." ;;
+              fast-forward) echo "**Fast-forward push needed.** SolidCore is behind." ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Push the checked commit itself. A plain push is also the safety net: git refuses a
+      # non-fast-forward.
+      - name: Push the mirror commit
+        if: steps.check.outputs.state == 'fast-forward'
+        env:
+          SPLIT: ${{ steps.check.outputs.split }}
+        run: |
+          set -euo pipefail
+
+          if ! git push "$SOLIDCORE_URL" "$SPLIT:refs/heads/$SOLIDCORE_BRANCH"; then
+            echo "::error::Push to solidcore failed. If git names a protected branch or GH006, SOLIDCORE_DEPLOY_KEY has no write access or does not bypass solidcore's protect-main ruleset. If git names a non-fast-forward, solidcore moved during this run; re-run."
+            exit 1
+          fi
+
+          # Confirm SolidCore now has exactly the commit this run checked.
+          PUSHED=$(git ls-remote "$SOLIDCORE_URL" "refs/heads/$SOLIDCORE_BRANCH" | cut -f1)
+          if [ "$PUSHED" != "$SPLIT" ]; then
+            echo "::error::solidcore $SOLIDCORE_BRANCH is $PUSHED after the push, expected $SPLIT."
+            exit 1
+          fi
+
+          { echo; echo "**Mirrored.** solidcore \`$SOLIDCORE_BRANCH\` is now \`$SPLIT\`."; } >> "$GITHUB_STEP_SUMMARY"

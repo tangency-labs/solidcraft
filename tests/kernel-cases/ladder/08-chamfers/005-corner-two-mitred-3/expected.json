@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "3 mm chamfers on two top edges meeting at a corner (mitred)",
+ "source": "analytic",
+ "method": "two prisms meeting in a mitre: d^2/2 (60 + 40) - d^3/3",
+ "body_count": 1,
+ "volume_mm3": 47559.0,
+ "faces": 8
+}

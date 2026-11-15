@@ -1,0 +1,75 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 40,
+    "height": 10,
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      -20.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "RibS"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      10,
+      5
+     ],
+     [
+      50,
+      5
+     ]
+    ],
+    "infer": false,
+    "ids": [
+     "r1"
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.rib",
+   "params": {
+    "sketch": "RibS",
+    "curves": [
+     "r1"
+    ],
+    "thickness": 2,
+    "direction": "normal"
+   }
+  }
+ ]
+}

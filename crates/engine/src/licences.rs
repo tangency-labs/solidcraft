@@ -20,7 +20,7 @@ mod tests {
     #[test]
     fn the_licences_are_built_in() {
         assert!(super::LICENSE_MIT.contains("MIT License") && super::LICENSE_APACHE.contains("Apache License"));
-        assert!(super::THIRD_PARTY.contains("truck") && super::THIRD_PARTY.contains("egui"));
+        assert!(super::THIRD_PARTY.contains("wgpu") && super::THIRD_PARTY.contains("egui"));
         assert!(super::all().contains("NOTICE"));
     }
 }

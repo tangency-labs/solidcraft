@@ -21,6 +21,7 @@
 //! Each design runs in a child process (this test binary, [`action_matrix_worker`]) so an action
 //! that hangs or aborts is recorded as such and the rest of the design still runs.
 
+use solidcraft_engine::geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -28,10 +29,10 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::kernel::{FaceSurface, face_surface};
 use solidcraft_engine::doc::{FaceAttachmentStatus, ModelBody, naming};
-use solidcraft_engine::geom::Vec3;
 
 /// One in this many actions runs on pull requests (by a stable hash of its key).
 const PR_SAMPLE: u64 = 40;
@@ -92,7 +93,7 @@ fn designs() -> Vec<(String, PathBuf)> {
     add("regressions", root.join("examples/regressions"), "json");
     add("demo", root.join("examples/demo"), "json");
     add("typical", root.join("tests/action_matrix/designs"), "json");
-    add("demo", root.join("tests/action_matrix/designs"), "solidcraft");
+    add("demo", root.join("tests/action_matrix/designs"), solidcraft_engine::io::DESIGN_EXT);
     let mut cases: Vec<PathBuf> =
         std::fs::read_dir(root.join("tests/oracle")).unwrap().flatten().map(|e| e.path()).filter(|p| p.join("recipe.json").is_file()).collect();
     cases.sort();
@@ -105,7 +106,7 @@ fn designs() -> Vec<(String, PathBuf)> {
 /// Build a design from its file.
 fn load(path: &Path) -> Result<Session, String> {
     let mut s = Session::default();
-    if path.extension().is_some_and(|x| x == "solidcraft") {
+    if solidcraft_engine::io::is_design_container_path(path) {
         s.execute("doc.open", &json!({"path": path.to_string_lossy()})).map_err(|e| e.to_string())?;
         return Ok(s);
     }
@@ -196,7 +197,7 @@ fn round3(x: f64) -> f64 {
 
 /// Every action on every entity of the design's final bodies, in a fixed order.
 fn actions(s: &Session) -> Vec<Action> {
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let placed = s.placed_document();
     let paths: BTreeMap<String, Vec<u64>> =
         placed.body_frames_with_source(&s.model.state()).into_iter().map(|(world, _, _, path, _)| (world, path)).collect();
@@ -395,8 +396,10 @@ fn actions(s: &Session) -> Vec<Action> {
             let r = round3((shortest * 0.1).max(0.01));
             let mut add = |action, act| out.push(Action { entity: entity.clone(), action, act });
             if !smooth(e, mid) {
-                add("edge.fillet", Act::Run("solid.fillet", json!({"edges": [pt(mid)], "radius": r})));
-                add("edge.chamfer", Act::Run("solid.chamfer", json!({"edges": [pt(mid)], "distance": r})));
+                // The midpoint is interior to this edge, but other bodies (including component
+                // copies in their local frames) can have coincident edges. Retain the picked body.
+                add("edge.fillet", Act::Run("solid.fillet", json!({"body": world, "edges": [pt(mid)], "radius": r})));
+                add("edge.chamfer", Act::Run("solid.chamfer", json!({"body": world, "edges": [pt(mid)], "distance": r})));
             }
             let dir = straight(pts);
             if dir.is_some() {
@@ -1279,6 +1282,41 @@ fn rectangle(plane: Value, p0: [f64; 2], p1: [f64; 2]) -> [Value; 3] {
 }
 
 #[test]
+fn edge_round_actions_keep_the_picked_body() {
+    for (corner, length) in [([10, 0, 20], 4), ([0, 0, 0], 20)] {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20, "body_name": "Plate"})).unwrap();
+        s.execute(
+            "solid.box",
+            &json!({"corner": corner, "length": length, "width": length, "height": length, "body_name": "Block", "operation": "new"}),
+        )
+        .unwrap();
+        let mut tried = 0;
+        for a in actions(&s) {
+            if !a.entity.starts_with("Plate/") || !matches!(a.action, "edge.chamfer" | "edge.fillet") {
+                continue;
+            }
+            let Act::Run(id, ref p) = a.act else { continue };
+            let q = &p["edges"][0];
+            let x = q[0].as_f64().unwrap();
+            if q[1] != 0.0 || q[2] != 20.0 || !(0.0..20.0).contains(&x) {
+                continue;
+            }
+            // Block either meets this midpoint or coincides with the whole edge.
+            assert_eq!(p["body"], "Plate", "{}: {p}", a.action);
+            assert_eq!(q, &json!([10.0, 0.0, 20.0]));
+            let mut unscoped = p.clone();
+            unscoped.as_object_mut().unwrap().remove("body");
+            let err = s.scratch().execute(id, &unscoped).unwrap_err().to_string();
+            assert!(err.contains("[10, 0, 20] lies on edges of 2 bodies, Plate and Block"), "{err}");
+            perform(&mut s.scratch(), &a.act, &errors(&s)).unwrap();
+            tried += 1;
+        }
+        assert_eq!(tried, 2);
+    }
+}
+
+#[test]
 fn a_fillet_or_chamfer_on_one_edge_ending_at_a_cylinder() {
     for (cmd, size) in [("solid.fillet", "radius"), ("solid.chamfer", "distance")] {
         reproduces(
@@ -1301,7 +1339,9 @@ fn a_fillet_or_chamfer_on_one_edge_ending_at_a_cylinder() {
 fn a_round_on_a_knuckle_cap_circle() {
     for (cmd, size, removed) in [("solid.fillet", "radius", (2.4, 2.8)), ("solid.chamfer", "distance", (5.6, 6.3))] {
         let mut s = load(&root().join("tests/oracle/63-hinge-knuckle/recipe.json")).unwrap();
-        let volume = |s: &Session| s.model.state().bodies.iter().map(|b| b.body.tessellate(0.001).unwrap().measure().volume).sum::<f64>();
+        let volume = |s: &Session| {
+            s.model.state().bodies.iter().map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().measure().volume).sum::<f64>()
+        };
         let before = volume(&s);
         s.execute(cmd, &json!({"edges": [[40.0, 29.837_722, 6.449_490]], size: 0.728})).unwrap_or_else(|e| panic!("{cmd}: {e}"));
         check(&s, 0, &BTreeMap::new()).unwrap_or_else(|(kind, e)| panic!("{cmd}: {kind}: {e}"));
@@ -1321,7 +1361,9 @@ fn a_round_on_a_knuckle_cap_circle() {
 #[test]
 fn a_hair_thin_hole_on_a_ledge_beside_a_loft_cut() {
     let mut s = load(&root().join("examples/regressions/loft_cut_beside_round_hole.json")).unwrap();
-    let volume = |s: &Session| s.model.state().bodies.iter().map(|b| b.body.tessellate_with(0.005, true).unwrap().measure().volume).sum::<f64>();
+    let volume = |s: &Session| {
+        s.model.state().bodies.iter().map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.005)).unwrap().measure().volume).sum::<f64>()
+    };
     let before = volume(&s);
     s.execute("solid.hole", &json!({"diameter": 0.133, "position": [357.22, -150.993_333, 730.0]})).unwrap();
     check(&s, 0, &BTreeMap::new()).unwrap_or_else(|(kind, e)| panic!("{kind}: {e}"));
@@ -1338,7 +1380,9 @@ fn a_hair_thin_hole_on_a_ledge_beside_a_loft_cut() {
 #[test]
 fn a_small_hole_through_the_wall_of_a_plastic_rest() {
     let mut s = load(&root().join("apps/solidcraft-cli/tests/corpus/modern-plastic.solidcraft")).unwrap();
-    let volume = |s: &Session| s.model.state().bodies.iter().map(|b| b.body.tessellate_with(0.002, true).unwrap().measure().volume).sum::<f64>();
+    let volume = |s: &Session| {
+        s.model.state().bodies.iter().map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.002)).unwrap().measure().volume).sum::<f64>()
+    };
     let before = volume(&s);
     s.execute("solid.hole", &json!({"diameter": 0.8, "position": [63.069_841_5, 28.333_333, 4.0]})).unwrap();
     check(&s, 0, &BTreeMap::new()).unwrap_or_else(|(kind, e)| panic!("{kind}: {e}"));
@@ -1353,7 +1397,9 @@ fn a_small_hole_through_the_wall_of_a_plastic_rest() {
 #[test]
 fn a_hole_square_to_a_45_degree_flange() {
     let mut s = load(&root().join("tests/oracle/70-sm-flange-45/recipe.json")).unwrap();
-    let volume = |s: &Session| s.model.state().bodies.iter().map(|b| b.body.tessellate_with(0.002, true).unwrap().measure().volume).sum::<f64>();
+    let volume = |s: &Session| {
+        s.model.state().bodies.iter().map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.002)).unwrap().measure().volume).sum::<f64>()
+    };
     let before = volume(&s);
     s.execute("solid.hole", &json!({"diameter": 3.448, "position": [66.666_667, -4.511_845, 4.511_845]})).unwrap();
     check(&s, 0, &BTreeMap::new()).unwrap_or_else(|(kind, e)| panic!("{kind}: {e}"));
@@ -1521,7 +1567,7 @@ fn sketches_on_loft_and_sweep_faces() {
 #[test]
 fn press_pull_on_the_pi_case_floor() {
     reproduces(
-        Some("tests/action_matrix/designs/pi-case.solidcraft"),
+        Some("tests/action_matrix/designs/pi-case.sc"),
         json!([{"command": "solid.press_pull", "params": {"face": [30, 20, 0], "distance": 1}}]),
     );
 }
@@ -1611,7 +1657,7 @@ impl TipConstruction {
             other => panic!("expected an axis, got {other:?}"),
         }
     }
-    fn plane(&self) -> solidcraft_engine::geom::Plane {
+    fn plane(&self) -> solidcore_record::Plane {
         match &self.0 {
             solidcraft_engine::doc::construct::ConstructGeom::Plane(p) => *p,
             other => panic!("expected a plane, got {other:?}"),
@@ -1691,7 +1737,7 @@ fn the_ribbed_lid_builds_the_same_body_every_time() {
         st.bodies
             .iter()
             .map(|b| {
-                let mesh = b.body.tessellate(0.1).unwrap();
+                let mesh = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.1)).unwrap();
                 let bits = mesh.positions.iter().fold(0u64, |acc, p| {
                     acc.rotate_left(7).wrapping_add(p.x.to_bits() ^ p.y.to_bits().rotate_left(21) ^ p.z.to_bits().rotate_left(42))
                 });
@@ -1703,4 +1749,32 @@ fn the_ribbed_lid_builds_the_same_body_every_time() {
     for _ in 0..5 {
         assert_eq!(fingerprint(), first);
     }
+}
+
+// #13295: a circle sketched on the plane at 45 degrees through a bar's step edge, 7.9e-6 off
+// that edge (as the reporter's sketch had it), cut through all across a hole. The cut wall's
+// seam edge ends on the bar's edge a few micrometres across the seam, inside its vertex's
+// tolerance, and the check refused the result ("Face Near missing Seam").
+#[test]
+fn a_circle_cut_from_a_slanted_plane_through_a_step_edge_beside_a_hole() {
+    let mut s = Session::default();
+    let (y0, z1, yc, z2) = (16.423877938511588, 13.06859205815335, 12.527075811882755, 19.566787029154483);
+    let p = [[0.0, 0.0], [y0, 0.0], [y0, z1], [yc, z1], [yc, z2], [0.0, z2]];
+    s.execute("sketch.create", &json!({"plane": "YZ"})).unwrap();
+    for i in 0..6 {
+        s.execute("sketch.line", &json!({"points": [p[i], p[(i + 1) % 6]]})).unwrap();
+    }
+    s.execute("sketch.finish", &json!({})).unwrap();
+    s.execute("solid.extrude", &json!({"distance": 100, "operation": "new"})).unwrap();
+    let start = s.doc.features.len();
+    let hole = json!({"base": [20.421614627576027, y0 + 5.0, 6.534296029076675], "axis": [0, -1, 0], "radius": 3.5355339059327378, "height": y0 + 10.0, "operation": "cut", "targets": ["Body1"]});
+    s.execute("solid.cylinder", &hole).unwrap();
+    let r = std::f64::consts::FRAC_1_SQRT_2;
+    let plane = json!({"origin": [0, yc - yc * r, z2 + yc * r], "x_dir": [1, 0, 0], "y_dir": [0, r, -r]});
+    s.execute("sketch.create", &json!({"plane": plane, "name": "Slant"})).unwrap();
+    s.execute("sketch.circle.center", &json!({"center": [20.4216146277246, 12.527083680740917], "radius": 4.716990566008734})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    s.execute("solid.extrude", &json!({"sketch": "Slant", "through_all": true, "direction": "negative", "operation": "cut", "targets": ["Body1"]}))
+        .unwrap();
+    check(&s, start, &BTreeMap::new()).unwrap_or_else(|(kind, e)| panic!("{kind}: {e}"));
 }

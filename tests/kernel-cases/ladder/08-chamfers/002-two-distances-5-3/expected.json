@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a 5 x 3 chamfer on the top front edge",
+ "source": "analytic",
+ "method": "removed d1 d2 / 2 L",
+ "body_count": 1,
+ "volume_mm3": 47550.0,
+ "faces": 7
+}

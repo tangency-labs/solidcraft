@@ -25,8 +25,9 @@ pub use crate::bspline::Dir;
 pub use mesh::{Extension, IndexRect, MAX_GRID_POINTS, MAX_INDEX_LINES, Segment, TMesh};
 pub use refine::Cut;
 
-use crate::Vec3;
 use crate::bspline::{HPoint, MAX_SPLINE_DEGREE, Side, SplineError, SplineResult, invalid, local_basis, weighted_points};
+use crate::prelude::*;
+use solidcore_record::Vec3;
 
 /// A blending function: its anchor's local knot vectors as line indices and as values, and
 /// its support.

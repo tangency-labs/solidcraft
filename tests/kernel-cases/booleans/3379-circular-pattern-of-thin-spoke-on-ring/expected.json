@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3379"
+  ],
+  "what": "a circular pattern (count 5) of a spoke thinner than the ring it joins (faces 0.5 mm inside the rim and hub faces)",
+  "source": "analytic",
+  "method": "ring pi*(66^2-63^2)*3 + hub pi*12^2*3 + 5 spokes. A spoke is the box 53x2x2.5 (x 11..64, z +-1.25, y 0.5..2.5; the issue starts it at x=12, tangent to the hub, which joins the hub by a line only, so it starts at 11 here to overlap it). It overlaps the ring by 5.021 and the hub by 4.891 (width * Int over z in -1.25..1.25 of 64 - sqrt(63^2-z^2) and of sqrt(12^2-z^2) - 11). V = ring + hub + 5*(265 - overlaps), one body",
+  "body_count": 1,
+  "volume_mm3": 6279.997172312351
+}

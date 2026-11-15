@@ -29,6 +29,11 @@ pub type CallbackResources = type_map::TypeMap;
 pub struct Callback(Box<dyn CallbackTrait>);
 
 impl Callback {
+    /// Inspect the concrete callback without preparing or painting GPU work.
+    pub fn downcast_ref<T: CallbackTrait>(&self) -> Option<&T> {
+        (self.0.as_ref() as &dyn std::any::Any).downcast_ref()
+    }
+
     /// Creates a new [`epaint::PaintCallback`] from a callback trait instance.
     pub fn new_paint_callback(
         rect: epaint::emath::Rect,
@@ -85,7 +90,7 @@ impl Callback {
 /// # Example
 ///
 /// See the [`custom3d_wgpu`](https://github.com/emilk/egui/blob/main/crates/egui_demo_app/src/apps/custom3d_wgpu.rs) demo source for a detailed usage example.
-pub trait CallbackTrait: Send + Sync {
+pub trait CallbackTrait: Send + Sync + std::any::Any {
     fn prepare(
         &self,
         _device: &wgpu::Device,
@@ -127,6 +132,29 @@ pub struct ScreenDescriptor {
 
     /// High-DPI scale factor (pixels per point).
     pub pixels_per_point: f32,
+}
+
+/// SolidCraft: optional ownership of a complete frame, outside the primitive loop.
+/// Returning false keeps the ordinary pass. No effect resources exist by default.
+pub trait FrameCompositor: Send + Sync {
+    /// SolidCraft: select the native viewport before any effect preparation/painting.
+    fn begin_viewport(&self, _viewport: u64) {}
+    /// SolidCraft: actual acquired target geometry, before callback preparation.
+    fn screen(&self, _screen: &ScreenDescriptor, _resources: &mut CallbackResources) {}
+    /// SolidCraft: release target-dependent state on zero size or a lost device.
+    fn suspend(&self) {}
+    fn render(
+        &self,
+        renderer: &Renderer,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        jobs: &[epaint::ClippedPrimitive],
+        screen: &ScreenDescriptor,
+        clear: [f32; 4],
+    ) -> bool;
+
+    /// Called only after the commands producing cached pixels have been submitted.
+    fn submitted(&self) {}
 }
 
 impl ScreenDescriptor {
@@ -245,6 +273,11 @@ pub struct Renderer {
     uniform_bind_group: wgpu::BindGroup,
     texture_bind_group_layout: wgpu::BindGroupLayout,
 
+    /// Uniform buffers each holding a single `u32` of texture flags
+    /// (see [`texture_flags`]), indexed by that flag value.
+    /// Read by the shader when `predictable_texture_filtering` is on.
+    texture_flag_buffers: [wgpu::Buffer; NUM_TEXTURE_FLAGS],
+
     /// Map of egui texture IDs to textures and their associated bindgroups (texture view +
     /// sampler). The texture may be None if the `TextureId` is just a handle to a user-provided
     /// sampler.
@@ -263,6 +296,8 @@ pub struct Renderer {
     ///
     /// See also [`CallbackTrait`].
     pub callback_resources: CallbackResources,
+    /// SolidCraft: installed lazily by an enabled effect; the ordinary loop is unchanged.
+    pub frame_compositor: Option<std::sync::Arc<dyn FrameCompositor>>,
 }
 
 impl Renderer {
@@ -352,9 +387,30 @@ impl Renderer {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            has_dynamic_offset: false,
+                            min_binding_size: NonZeroU64::new(
+                                (core::mem::size_of::<u32>() * 4) as _,
+                            ),
+                            ty: wgpu::BufferBindingType::Uniform,
+                        },
+                        count: None,
+                    },
                 ],
             })
         };
+
+        let texture_flag_buffers = core::array::from_fn::<_, NUM_TEXTURE_FLAGS, _>(|flag| {
+            let flag = flag as u32;
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("egui_texture_flags_{flag}")),
+                contents: bytemuck::bytes_of(&[flag, 0, 0, 0]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            })
+        });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("egui_pipeline_layout"),
@@ -464,11 +520,13 @@ impl Renderer {
             previous_uniform_buffer_content: UniformBuffer::zeroed(),
             uniform_bind_group,
             texture_bind_group_layout,
+            texture_flag_buffers,
             textures: HashMap::default(),
             next_user_texture_id: 0,
             samplers: HashMap::default(),
             options,
             callback_resources: CallbackResources::default(),
+            frame_compositor: None,
         }
     }
 
@@ -488,6 +546,19 @@ impl Renderer {
         paint_jobs: &[epaint::ClippedPrimitive],
         screen_descriptor: &ScreenDescriptor,
     ) {
+        self.render_with_mesh_offset(render_pass, paint_jobs, screen_descriptor, 0);
+    }
+
+    /// SolidCraft: continue an uploaded frame in another render pass. `mesh_offset`
+    /// counts every preceding mesh, including meshes with an empty clip rectangle.
+    /// Callbacks consume no mesh buffer slice. The caller preserves primitive order.
+    pub fn render_with_mesh_offset(
+        &self,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        paint_jobs: &[epaint::ClippedPrimitive],
+        screen_descriptor: &ScreenDescriptor,
+        mesh_offset: usize,
+    ) {
         profiling::function_scope!();
 
         if self.skip_frame {
@@ -501,8 +572,8 @@ impl Renderer {
         // run.
         let mut needs_reset = true;
 
-        let mut index_buffer_slices = self.index_buffer.slices.iter();
-        let mut vertex_buffer_slices = self.vertex_buffer.slices.iter();
+        let mut index_buffer_slices = self.index_buffer.slices.iter().skip(mesh_offset);
+        let mut vertex_buffer_slices = self.vertex_buffer.slices.iter().skip(mesh_offset);
 
         for epaint::ClippedPrimitive {
             clip_rect,
@@ -719,6 +790,9 @@ impl Renderer {
         };
 
         let bind_group = bind_group.unwrap_or_else(|| {
+            let nearest =
+                image_delta.options.magnification == epaint::textures::TextureFilter::Nearest;
+            let wrap_mode = wrap_mode_flag(image_delta.options.wrap_mode);
             let sampler = self
                 .samplers
                 .entry(image_delta.options)
@@ -736,6 +810,11 @@ impl Renderer {
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.texture_flag_buffers[texture_flags(nearest, wrap_mode)]
+                            .as_entire_binding(),
                     },
                 ],
             })
@@ -839,6 +918,8 @@ impl Renderer {
     ) -> epaint::TextureId {
         profiling::function_scope!();
 
+        let nearest = sampler_descriptor.mag_filter == wgpu::FilterMode::Nearest;
+        let wrap_mode = address_mode_wrap_flag(sampler_descriptor.address_mode_u);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             compare: None,
             ..sampler_descriptor
@@ -855,6 +936,11 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.texture_flag_buffers[texture_flags(nearest, wrap_mode)]
+                        .as_entire_binding(),
                 },
             ],
         });
@@ -895,6 +981,8 @@ impl Renderer {
             .get_mut(&id)
             .expect("Tried to update a texture that has not been allocated yet.");
 
+        let nearest = sampler_descriptor.mag_filter == wgpu::FilterMode::Nearest;
+        let wrap_mode = address_mode_wrap_flag(sampler_descriptor.address_mode_u);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             compare: None,
             ..sampler_descriptor
@@ -911,6 +999,11 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.texture_flag_buffers[texture_flags(nearest, wrap_mode)]
+                        .as_entire_binding(),
                 },
             ],
         });
@@ -933,6 +1026,9 @@ impl Renderer {
         profiling::function_scope!();
 
         self.skip_frame = false;
+        if let Some(effect) = &self.frame_compositor {
+            effect.screen(screen_descriptor, &mut self.callback_resources);
+        }
         let screen_size_in_points = screen_descriptor.screen_size_in_points();
 
         let uniform_buffer_content = UniformBuffer {
@@ -1095,6 +1191,49 @@ impl Renderer {
     }
 }
 
+/// Set in bit 0 of the texture flags if the sampler uses nearest filtering.
+///
+/// Must match `TEX_FLAG_NEAREST` in `egui.wgsl`.
+const TEX_FLAG_NEAREST: u32 = 1;
+
+/// Wrap modes, stored in bits 1+ of the texture flags.
+///
+/// Must match the `WRAP_MODE_*` constants in `egui.wgsl`.
+const WRAP_MODE_CLAMP_TO_EDGE: u32 = 0;
+const WRAP_MODE_REPEAT: u32 = 1;
+const WRAP_MODE_MIRRORED_REPEAT: u32 = 2;
+
+/// Number of distinct values [`texture_flags`] can return.
+const NUM_TEXTURE_FLAGS: usize = 6;
+
+fn wrap_mode_flag(wrap_mode: epaint::textures::TextureWrapMode) -> u32 {
+    match wrap_mode {
+        epaint::textures::TextureWrapMode::ClampToEdge => WRAP_MODE_CLAMP_TO_EDGE,
+        epaint::textures::TextureWrapMode::Repeat => WRAP_MODE_REPEAT,
+        epaint::textures::TextureWrapMode::MirroredRepeat => WRAP_MODE_MIRRORED_REPEAT,
+    }
+}
+
+fn address_mode_wrap_flag(address_mode: wgpu::AddressMode) -> u32 {
+    match address_mode {
+        wgpu::AddressMode::Repeat => WRAP_MODE_REPEAT,
+        wgpu::AddressMode::MirrorRepeat => WRAP_MODE_MIRRORED_REPEAT,
+        wgpu::AddressMode::ClampToEdge | wgpu::AddressMode::ClampToBorder => {
+            WRAP_MODE_CLAMP_TO_EDGE
+        }
+    }
+}
+
+/// Index into [`Renderer::texture_flag_buffers`]: the texture flags
+/// read by the shader when `predictable_texture_filtering` is on.
+///
+/// Bit 0: [`TEX_FLAG_NEAREST`].
+/// Bits 1+: one of the `WRAP_MODE_*` constants.
+fn texture_flags(nearest: bool, wrap_mode: u32) -> usize {
+    let nearest = if nearest { TEX_FLAG_NEAREST } else { 0 };
+    (nearest | (wrap_mode << 1)) as usize
+}
+
 fn create_sampler(
     options: epaint::textures::TextureOptions,
     device: &wgpu::Device,
@@ -1181,13 +1320,18 @@ impl ScissorRect {
     }
 }
 
-// Look at the feature flag for an explanation.
-#[cfg(not(all(
-    target_arch = "wasm32",
-    not(feature = "fragile-send-sync-non-atomic-wasm"),
-)))]
-#[test]
-fn renderer_impl_send_sync() {
-    fn assert_send_sync<T: Send + Sync>() {}
+// Compile-time check that `Renderer` is `Send + Sync`.
+// Deliberately not a `#[test]`: tests never run on wasm, but `cargo check` does.
+// On wasm this only holds with `fragile-send-sync-non-atomic-wasm` and without threads;
+// look at the feature flag for an explanation.
+#[cfg(any(
+    not(target_arch = "wasm32"),
+    all(
+        feature = "fragile-send-sync-non-atomic-wasm",
+        not(target_feature = "atomics")
+    ),
+))]
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<Renderer>();
-}
+};

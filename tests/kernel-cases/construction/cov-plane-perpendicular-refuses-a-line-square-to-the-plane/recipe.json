@@ -1,0 +1,14 @@
+{
+ "commands": [
+  {
+   "command": "construct.plane.perpendicular",
+   "params": {
+    "plane": "XY",
+    "line": {
+     "axis": "Z"
+    },
+    "name": "P"
+   }
+  }
+ ]
+}

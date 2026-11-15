@@ -1,0 +1,6 @@
+{
+  "unit": "nlib.math",
+  "cases": [
+    {"name": "fuzz00662_ffi_rejected_m_9223372036854775807_64", "origin": "fuzz-out/n2000/nlib.math/fuzz00662.json (timeout: rust: no result after 20 s)", "cpp": "harness: ffi rejected: m = 9223372036854775807 > 64", "rust": "error: rust: nurbs::math::RealMatrix: invalid input: index out of range (upstream would access outside its arrays)", "inputs": {"a": {"bw": 0, "m": 9223372036854775807, "mtp": "upper_right", "n": 0, "rows": [[-3.03]]}, "in_place": true, "op": "transpose"}}
+  ]
+}

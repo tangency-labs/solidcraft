@@ -1,0 +1,52 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      20,
+      0
+     ],
+     [
+      10,
+      17
+     ],
+     [
+      -10,
+      17
+     ],
+     [
+      -20,
+      0
+     ],
+     [
+      -10,
+      -17
+     ],
+     [
+      10,
+      -17
+     ]
+    ],
+    "periodic": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10
+   }
+  }
+ ]
+}

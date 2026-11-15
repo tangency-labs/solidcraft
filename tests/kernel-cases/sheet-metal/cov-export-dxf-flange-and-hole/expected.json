@@ -1,0 +1,41 @@
+{
+ "sources": [],
+ "what": "sheet.export_dxf of an 80 x 40 x 2 base with a 20 mm flange on its y = 0 edge and a 10 mm hole: outline, cut and bend line",
+ "source": "analytic",
+ "method": "T = 2, R = 2, K = 0.5: flat = base 80 x (40 - 4) + bend zone BA = (pi/2)(R + K*T) = 4.712389 + leg 20 - 4 = 16: 80 x 56.712389. OUTLINE: its 4 sides (each may be split where the zone meets the panels: 4 to 8 lines), length 2*(80 + 56.712389); CUT: the hole, 1 circle, length 10*pi; BEND_UP: the flange's bend line (it bends up), 80 long; no BEND_DOWN, no arcs",
+ "body_count": 1,
+ "results": [
+  {
+   "step": 8,
+   "json": {
+    "bends": 1
+   }
+  }
+ ],
+ "files": [
+  {
+   "path": "flat.dxf",
+   "dxf": {
+    "OUTLINE": {
+     "LINE": [
+      4,
+      8
+     ],
+     "ARC": 0,
+     "length_mm": 273.42477796076935
+    },
+    "CUT": {
+     "CIRCLE": 1,
+     "length_mm": 31.41592653589793
+    },
+    "BEND_UP": {
+     "length_mm": 80.0
+    },
+    "BEND_DOWN": {
+     "LINE": 0,
+     "LWPOLYLINE": 0
+    }
+   }
+  }
+ ]
+}

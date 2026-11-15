@@ -1,0 +1,19 @@
+{
+ "sources": [],
+ "what": "timeline.group of a sketch and its cut into a folder changes no geometry",
+ "method": "a folder is only the timeline's: round R2 on the whole 40 mm front top edge, then the 10x10x5 notch through it: V = 12000 - 500 - (1-pi/4) 4 (40-10) (the notch already holds the round's 10 mm in it); faces: 6 block + 4 notch (bottom, two sides, back) + the round in two pieces = 12",
+ "body_count": 1,
+ "volume_mm3": 11474.247779607695,
+ "faces": 12,
+ "results": [
+  {
+   "step": 7,
+   "json": {
+    "group": 5,
+    "name": "Notch folder",
+    "parent": null
+   }
+  }
+ ],
+ "source": "analytic"
+}

@@ -1,0 +1,1448 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/11267",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the report's repro.json (a = 5.5, 6.0, 6.1, 6.5 and its two controls), reproduced on 0.29.0 with solidcraft-cli",
+ "summary": "A cut failed for some sizes on SolidCraft's truck kernel after a join in which a slot's round end is tangent to a slab's faces (#11267). The report's tool (its repro.json, 0.26.0): on the XZ plane a circle of diameter 5.2 about (0, a) and a rectangle x 0..9, z a - 2.25..a + 2.25, extruded 10 towards +y (a new body); the same with the rectangle x -9..0, extruded 10 towards -y and joined; on the YZ plane a slot from (0, a) to (0, 16), 4.5 wide, extruded 10 both ways and joined; then the tool cut from a cylinder of diameter 16 and height 12.4. The slot is as wide as the slabs are tall, so its round bottom, a cylinder of radius 2.25 about the X axis at height a, touches the slabs' bottom faces z = a - 2.25 along the line y = 0 (by design: a cable enters through the slot). Replayed with solidcraft-cli 0.29.0 (truck): the slot's join is not exact and is retried with the tool moved ('Boolean retry: tool displacement 5.491811e-5 mm, rotation 2.000000e-6 rad'), and the cut then fails ('boolean Cut: the operation failed: no result') at a = 5.5, 6.1, 6.2 and 6.5, while 5.7, 5.9, 6.0, 6.3, 6.6 and 7.0 build, as in the report's table (a comment there has the same on 0.30.1); the report's two controls at a = 6.1, the slot 4.52 wide and the slabs without the circles, join without the retry and cut. Not fixed on truck: kernel work is paused (tangency-labs/solidcraft#3992), and the `pr` link is the SMLib kernel move (tangency-labs/solidcraft#4012). Each sketch's circle and rectangle extrude as one outline (on 0.29.0 the first slab is one body of 6 faces), and the cases build them so: the circle's arc outside the rectangle (radius 2.6, ends at x = +-sqrt(2.6^2 - 2.25^2), z = a +- 2.25) and the rectangle's three other sides, extruded on the XZ plane from y = 10 to 0 and from 0 to -10; the slot is two lines and two half circles on the YZ plane extruded from x = -10 to 10; the cylinder is a circle extruded 12.4. Volumes are exact integrals over z of the slices' areas: every slice of the tool is a union of axis-aligned rectangles (the circles |x| <= sqrt(2.6^2 - (z - a)^2), |y| <= 10; the slabs; the slot |x| <= 10, |y| <= sqrt(2.25^2 - (z - a)^2) below z = a and 2.25 above), its area by inclusion-exclusion and, for the cut, clipped to the cylinder's disc in closed form; integrated by Gauss-Legendre on each piece between the breakpoints with z = z0 + (z1 - z0)(1 - cos t)/2, as in 11005-tee-of-tubes-branch-bore-cut.json. 200 and 400 nodes and scipy's adaptive quadrature agree to 1e-10 mm^3, and a randomised QMC over the CSG (scrambled Sobol, 16 replicates of 2^21 points) lies within two of its standard errors (the largest 1.47); the truck results that build are within 0.08 mm^3 of these (meshed). Every case expects one lump, a manifold solid and its volume within 0.01 mm^3. Expected values are analytic; nothing comes from a commercial CAD product.",
+ "cases": [
+  {
+   "name": "tool_joined_a_6_1",
+   "note": "The report's tool at a = 6.1, joined but not cut: two slabs with the circle (one outline each), joined, then the slot joined, its round bottom tangent to the slabs' bottom faces z = 3.85 along y = 0. On SolidCraft 0.29.0 (truck) the slot's join is not exact and is retried with the tool moved ('Boolean retry: tool displacement 5.491811e-5 mm, rotation 2.000000e-6 rad'); its volume is right (2037.30 meshed).",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "slab_pos",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.1
+       ],
+       "radius": 2.6,
+       "start_deg": 59.92665235502623,
+       "end_deg": 300.07334764497375
+      },
+      {
+       "kind": "line",
+       "from": [
+        1.3028814220795386,
+        3.8499999999999996
+       ],
+       "to": [
+        9.0,
+        3.8499999999999996
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        9.0,
+        3.8499999999999996
+       ],
+       "to": [
+        9.0,
+        8.35
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        9.0,
+        8.35
+       ],
+       "to": [
+        1.3028814220795386,
+        8.35
+       ]
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      10.0,
+      0.0
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "extrude",
+     "id": "slab_neg",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.1
+       ],
+       "radius": 2.6,
+       "start_deg": -120.07334764497378,
+       "end_deg": 120.07334764497378
+      },
+      {
+       "kind": "line",
+       "from": [
+        -1.3028814220795386,
+        8.35
+       ],
+       "to": [
+        -9.0,
+        8.35
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -9.0,
+        8.35
+       ],
+       "to": [
+        -9.0,
+        3.8499999999999996
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -9.0,
+        3.8499999999999996
+       ],
+       "to": [
+        -1.3028814220795386,
+        3.8499999999999996
+       ]
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "union",
+     "id": "slabs",
+     "a": "slab_pos",
+     "b": "slab_neg"
+    },
+    {
+     "op": "extrude",
+     "id": "slot",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        2.25,
+        6.1
+       ],
+       "to": [
+        2.25,
+        16.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        16.0
+       ],
+       "radius": 2.25,
+       "start_deg": 0.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        -2.25,
+        16.0
+       ],
+       "to": [
+        -2.25,
+        6.1
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.1
+       ],
+       "radius": 2.25,
+       "start_deg": 180.0,
+       "end_deg": 360.0
+      }
+     ],
+     "plane": "yz",
+     "origin": [
+      -10.0,
+      0.0,
+      0.0
+     ],
+     "distance": 20.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "slabs",
+     "b": "slot"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 2037.325764272,
+     "tol": 0.01,
+     "formula": "the tool: every slice z = const is a union of axis-aligned rectangles (the circle |x| <= sqrt(2.6^2 - (z - 6.1)^2), |y| <= 10; the slabs 0 <= x <= 9, 0 <= y <= 10 and -9 <= x <= 0, -10 <= y <= 0 for |z - 6.1| <= 2.25; the slot |x| <= 10, |y| <= sqrt(2.25^2 - (z - 6.1)^2) below z = 6.1, 2.25 up to 16 (and its round above)), its area by inclusion-exclusion, integrated over z by Gauss-Legendre on each piece between the breakpoints with z = z0 + (z1 - z0)(1 - cos t)/2 (200 and 400 nodes and scipy's adaptive quadrature agree to 1e-9); tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "cut_a_5_5",
+   "note": "The tool at a = 5.5 cut from the cylinder of radius 8 and height 12.4. On SolidCraft 0.29.0 (truck) the cut fails: 'boolean Cut: the operation failed: no result'.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "cylinder",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        0.0,
+        0.0
+       ],
+       "radius": 8.0
+      }
+     ],
+     "distance": 12.4
+    },
+    {
+     "op": "extrude",
+     "id": "slab_pos",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        5.5
+       ],
+       "radius": 2.6,
+       "start_deg": 59.92665235502623,
+       "end_deg": 300.07334764497375
+      },
+      {
+       "kind": "line",
+       "from": [
+        1.3028814220795386,
+        3.25
+       ],
+       "to": [
+        9.0,
+        3.25
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        9.0,
+        3.25
+       ],
+       "to": [
+        9.0,
+        7.75
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        9.0,
+        7.75
+       ],
+       "to": [
+        1.3028814220795386,
+        7.75
+       ]
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      10.0,
+      0.0
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "extrude",
+     "id": "slab_neg",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        5.5
+       ],
+       "radius": 2.6,
+       "start_deg": -120.07334764497378,
+       "end_deg": 120.07334764497378
+      },
+      {
+       "kind": "line",
+       "from": [
+        -1.3028814220795386,
+        7.75
+       ],
+       "to": [
+        -9.0,
+        7.75
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -9.0,
+        7.75
+       ],
+       "to": [
+        -9.0,
+        3.25
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -9.0,
+        3.25
+       ],
+       "to": [
+        -1.3028814220795386,
+        3.25
+       ]
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "union",
+     "id": "slabs",
+     "a": "slab_pos",
+     "b": "slab_neg"
+    },
+    {
+     "op": "extrude",
+     "id": "slot",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        2.25,
+        5.5
+       ],
+       "to": [
+        2.25,
+        16.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        16.0
+       ],
+       "radius": 2.25,
+       "start_deg": 0.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        -2.25,
+        16.0
+       ],
+       "to": [
+        -2.25,
+        5.5
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        5.5
+       ],
+       "radius": 2.25,
+       "start_deg": 180.0,
+       "end_deg": 360.0
+      }
+     ],
+     "plane": "yz",
+     "origin": [
+      -10.0,
+      0.0,
+      0.0
+     ],
+     "distance": 20.0
+    },
+    {
+     "op": "union",
+     "id": "tool",
+     "a": "slabs",
+     "b": "slot"
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cylinder",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1433.853147674,
+     "tol": 0.01,
+     "formula": "pi*8^2*12.4 less the tool within the cylinder: every slice z = const is a union of axis-aligned rectangles (the circle |x| <= sqrt(2.6^2 - (z - 5.5)^2), |y| <= 10; the slabs 0 <= x <= 9, 0 <= y <= 10 and -9 <= x <= 0, -10 <= y <= 0 for |z - 5.5| <= 2.25; the slot |x| <= 10, |y| <= sqrt(2.25^2 - (z - 5.5)^2) below z = 5.5, 2.25 up to 16 (and its round above)), its area by inclusion-exclusion, clipped to the disc x^2 + y^2 <= 64 in closed form (the quadrant areas x*y or y*sqrt(64 - y^2) + int sqrt(64 - u^2) du), integrated over z by Gauss-Legendre on each piece between the breakpoints with z = z0 + (z1 - z0)(1 - cos t)/2 (200 and 400 nodes and scipy's adaptive quadrature agree to 1e-9); tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "cut_a_6_0",
+   "note": "The tool at a = 6.0 cut from the cylinder. On SolidCraft 0.29.0 (truck) this cut builds (1469.36 meshed), after the retried join.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "cylinder",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        0.0,
+        0.0
+       ],
+       "radius": 8.0
+      }
+     ],
+     "distance": 12.4
+    },
+    {
+     "op": "extrude",
+     "id": "slab_pos",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.0
+       ],
+       "radius": 2.6,
+       "start_deg": 59.92665235502623,
+       "end_deg": 300.07334764497375
+      },
+      {
+       "kind": "line",
+       "from": [
+        1.3028814220795386,
+        3.75
+       ],
+       "to": [
+        9.0,
+        3.75
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        9.0,
+        3.75
+       ],
+       "to": [
+        9.0,
+        8.25
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        9.0,
+        8.25
+       ],
+       "to": [
+        1.3028814220795386,
+        8.25
+       ]
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      10.0,
+      0.0
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "extrude",
+     "id": "slab_neg",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.0
+       ],
+       "radius": 2.6,
+       "start_deg": -120.07334764497378,
+       "end_deg": 120.07334764497378
+      },
+      {
+       "kind": "line",
+       "from": [
+        -1.3028814220795386,
+        8.25
+       ],
+       "to": [
+        -9.0,
+        8.25
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -9.0,
+        8.25
+       ],
+       "to": [
+        -9.0,
+        3.75
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -9.0,
+        3.75
+       ],
+       "to": [
+        -1.3028814220795386,
+        3.75
+       ]
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "union",
+     "id": "slabs",
+     "a": "slab_pos",
+     "b": "slab_neg"
+    },
+    {
+     "op": "extrude",
+     "id": "slot",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        2.25,
+        6.0
+       ],
+       "to": [
+        2.25,
+        16.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        16.0
+       ],
+       "radius": 2.25,
+       "start_deg": 0.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        -2.25,
+        16.0
+       ],
+       "to": [
+        -2.25,
+        6.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.0
+       ],
+       "radius": 2.25,
+       "start_deg": 180.0,
+       "end_deg": 360.0
+      }
+     ],
+     "plane": "yz",
+     "origin": [
+      -10.0,
+      0.0,
+      0.0
+     ],
+     "distance": 20.0
+    },
+    {
+     "op": "union",
+     "id": "tool",
+     "a": "slabs",
+     "b": "slot"
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cylinder",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1469.372741449,
+     "tol": 0.01,
+     "formula": "pi*8^2*12.4 less the tool within the cylinder: every slice z = const is a union of axis-aligned rectangles (the circle |x| <= sqrt(2.6^2 - (z - 6)^2), |y| <= 10; the slabs 0 <= x <= 9, 0 <= y <= 10 and -9 <= x <= 0, -10 <= y <= 0 for |z - 6| <= 2.25; the slot |x| <= 10, |y| <= sqrt(2.25^2 - (z - 6)^2) below z = 6, 2.25 up to 16 (and its round above)), its area by inclusion-exclusion, clipped to the disc x^2 + y^2 <= 64 in closed form (the quadrant areas x*y or y*sqrt(64 - y^2) + int sqrt(64 - u^2) du), integrated over z by Gauss-Legendre on each piece between the breakpoints with z = z0 + (z1 - z0)(1 - cos t)/2 (200 and 400 nodes and scipy's adaptive quadrature agree to 1e-9); tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "cut_a_6_1",
+   "note": "The report's case: the tool at a = 6.1 cut from the cylinder. On SolidCraft 0.29.0 (truck) the cut fails: 'boolean Cut: the operation failed: no result'.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "cylinder",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        0.0,
+        0.0
+       ],
+       "radius": 8.0
+      }
+     ],
+     "distance": 12.4
+    },
+    {
+     "op": "extrude",
+     "id": "slab_pos",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.1
+       ],
+       "radius": 2.6,
+       "start_deg": 59.92665235502623,
+       "end_deg": 300.07334764497375
+      },
+      {
+       "kind": "line",
+       "from": [
+        1.3028814220795386,
+        3.8499999999999996
+       ],
+       "to": [
+        9.0,
+        3.8499999999999996
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        9.0,
+        3.8499999999999996
+       ],
+       "to": [
+        9.0,
+        8.35
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        9.0,
+        8.35
+       ],
+       "to": [
+        1.3028814220795386,
+        8.35
+       ]
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      10.0,
+      0.0
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "extrude",
+     "id": "slab_neg",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.1
+       ],
+       "radius": 2.6,
+       "start_deg": -120.07334764497378,
+       "end_deg": 120.07334764497378
+      },
+      {
+       "kind": "line",
+       "from": [
+        -1.3028814220795386,
+        8.35
+       ],
+       "to": [
+        -9.0,
+        8.35
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -9.0,
+        8.35
+       ],
+       "to": [
+        -9.0,
+        3.8499999999999996
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -9.0,
+        3.8499999999999996
+       ],
+       "to": [
+        -1.3028814220795386,
+        3.8499999999999996
+       ]
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "union",
+     "id": "slabs",
+     "a": "slab_pos",
+     "b": "slab_neg"
+    },
+    {
+     "op": "extrude",
+     "id": "slot",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        2.25,
+        6.1
+       ],
+       "to": [
+        2.25,
+        16.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        16.0
+       ],
+       "radius": 2.25,
+       "start_deg": 0.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        -2.25,
+        16.0
+       ],
+       "to": [
+        -2.25,
+        6.1
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.1
+       ],
+       "radius": 2.25,
+       "start_deg": 180.0,
+       "end_deg": 360.0
+      }
+     ],
+     "plane": "yz",
+     "origin": [
+      -10.0,
+      0.0,
+      0.0
+     ],
+     "distance": 20.0
+    },
+    {
+     "op": "union",
+     "id": "tool",
+     "a": "slabs",
+     "b": "slot"
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cylinder",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1476.476660204,
+     "tol": 0.01,
+     "formula": "pi*8^2*12.4 less the tool within the cylinder: every slice z = const is a union of axis-aligned rectangles (the circle |x| <= sqrt(2.6^2 - (z - 6.1)^2), |y| <= 10; the slabs 0 <= x <= 9, 0 <= y <= 10 and -9 <= x <= 0, -10 <= y <= 0 for |z - 6.1| <= 2.25; the slot |x| <= 10, |y| <= sqrt(2.25^2 - (z - 6.1)^2) below z = 6.1, 2.25 up to 16 (and its round above)), its area by inclusion-exclusion, clipped to the disc x^2 + y^2 <= 64 in closed form (the quadrant areas x*y or y*sqrt(64 - y^2) + int sqrt(64 - u^2) du), integrated over z by Gauss-Legendre on each piece between the breakpoints with z = z0 + (z1 - z0)(1 - cos t)/2 (200 and 400 nodes and scipy's adaptive quadrature agree to 1e-9); tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "cut_a_6_5",
+   "note": "The tool at a = 6.5 cut from the cylinder. On SolidCraft 0.29.0 (truck) the cut fails: 'boolean Cut: the operation failed: no result'.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "cylinder",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        0.0,
+        0.0
+       ],
+       "radius": 8.0
+      }
+     ],
+     "distance": 12.4
+    },
+    {
+     "op": "extrude",
+     "id": "slab_pos",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.5
+       ],
+       "radius": 2.6,
+       "start_deg": 59.92665235502623,
+       "end_deg": 300.07334764497375
+      },
+      {
+       "kind": "line",
+       "from": [
+        1.3028814220795386,
+        4.25
+       ],
+       "to": [
+        9.0,
+        4.25
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        9.0,
+        4.25
+       ],
+       "to": [
+        9.0,
+        8.75
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        9.0,
+        8.75
+       ],
+       "to": [
+        1.3028814220795386,
+        8.75
+       ]
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      10.0,
+      0.0
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "extrude",
+     "id": "slab_neg",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.5
+       ],
+       "radius": 2.6,
+       "start_deg": -120.07334764497378,
+       "end_deg": 120.07334764497378
+      },
+      {
+       "kind": "line",
+       "from": [
+        -1.3028814220795386,
+        8.75
+       ],
+       "to": [
+        -9.0,
+        8.75
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -9.0,
+        8.75
+       ],
+       "to": [
+        -9.0,
+        4.25
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -9.0,
+        4.25
+       ],
+       "to": [
+        -1.3028814220795386,
+        4.25
+       ]
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "union",
+     "id": "slabs",
+     "a": "slab_pos",
+     "b": "slab_neg"
+    },
+    {
+     "op": "extrude",
+     "id": "slot",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        2.25,
+        6.5
+       ],
+       "to": [
+        2.25,
+        16.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        16.0
+       ],
+       "radius": 2.25,
+       "start_deg": 0.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        -2.25,
+        16.0
+       ],
+       "to": [
+        -2.25,
+        6.5
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.5
+       ],
+       "radius": 2.25,
+       "start_deg": 180.0,
+       "end_deg": 360.0
+      }
+     ],
+     "plane": "yz",
+     "origin": [
+      -10.0,
+      0.0,
+      0.0
+     ],
+     "distance": 20.0
+    },
+    {
+     "op": "union",
+     "id": "tool",
+     "a": "slabs",
+     "b": "slot"
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cylinder",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1504.892335225,
+     "tol": 0.01,
+     "formula": "pi*8^2*12.4 less the tool within the cylinder: every slice z = const is a union of axis-aligned rectangles (the circle |x| <= sqrt(2.6^2 - (z - 6.5)^2), |y| <= 10; the slabs 0 <= x <= 9, 0 <= y <= 10 and -9 <= x <= 0, -10 <= y <= 0 for |z - 6.5| <= 2.25; the slot |x| <= 10, |y| <= sqrt(2.25^2 - (z - 6.5)^2) below z = 6.5, 2.25 up to 16 (and its round above)), its area by inclusion-exclusion, clipped to the disc x^2 + y^2 <= 64 in closed form (the quadrant areas x*y or y*sqrt(64 - y^2) + int sqrt(64 - u^2) du), integrated over z by Gauss-Legendre on each piece between the breakpoints with z = z0 + (z1 - z0)(1 - cos t)/2 (200 and 400 nodes and scipy's adaptive quadrature agree to 1e-9); tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "cut_a_6_1_slot_4_52",
+   "note": "The report's first control: the slot 4.52 wide, so its bottom (radius 2.26) crosses the slabs' bottom faces instead of touching them. On SolidCraft 0.29.0 (truck) the joins are exact and the cut builds (1474.54 meshed).",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "cylinder",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        0.0,
+        0.0
+       ],
+       "radius": 8.0
+      }
+     ],
+     "distance": 12.4
+    },
+    {
+     "op": "extrude",
+     "id": "slab_pos",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.1
+       ],
+       "radius": 2.6,
+       "start_deg": 59.92665235502623,
+       "end_deg": 300.07334764497375
+      },
+      {
+       "kind": "line",
+       "from": [
+        1.3028814220795386,
+        3.8499999999999996
+       ],
+       "to": [
+        9.0,
+        3.8499999999999996
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        9.0,
+        3.8499999999999996
+       ],
+       "to": [
+        9.0,
+        8.35
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        9.0,
+        8.35
+       ],
+       "to": [
+        1.3028814220795386,
+        8.35
+       ]
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      10.0,
+      0.0
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "extrude",
+     "id": "slab_neg",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.1
+       ],
+       "radius": 2.6,
+       "start_deg": -120.07334764497378,
+       "end_deg": 120.07334764497378
+      },
+      {
+       "kind": "line",
+       "from": [
+        -1.3028814220795386,
+        8.35
+       ],
+       "to": [
+        -9.0,
+        8.35
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -9.0,
+        8.35
+       ],
+       "to": [
+        -9.0,
+        3.8499999999999996
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -9.0,
+        3.8499999999999996
+       ],
+       "to": [
+        -1.3028814220795386,
+        3.8499999999999996
+       ]
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "union",
+     "id": "slabs",
+     "a": "slab_pos",
+     "b": "slab_neg"
+    },
+    {
+     "op": "extrude",
+     "id": "slot",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        2.26,
+        6.1
+       ],
+       "to": [
+        2.26,
+        16.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        16.0
+       ],
+       "radius": 2.26,
+       "start_deg": 0.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        -2.26,
+        16.0
+       ],
+       "to": [
+        -2.26,
+        6.1
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.1
+       ],
+       "radius": 2.26,
+       "start_deg": 180.0,
+       "end_deg": 360.0
+      }
+     ],
+     "plane": "yz",
+     "origin": [
+      -10.0,
+      0.0,
+      0.0
+     ],
+     "distance": 20.0
+    },
+    {
+     "op": "union",
+     "id": "tool",
+     "a": "slabs",
+     "b": "slot"
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cylinder",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1474.567703412,
+     "tol": 0.01,
+     "formula": "pi*8^2*12.4 less the tool within the cylinder: every slice z = const is a union of axis-aligned rectangles (the circle |x| <= sqrt(2.6^2 - (z - 6.1)^2), |y| <= 10; the slabs 0 <= x <= 9, 0 <= y <= 10 and -9 <= x <= 0, -10 <= y <= 0 for |z - 6.1| <= 2.25; the slot |x| <= 10, |y| <= sqrt(2.26^2 - (z - 6.1)^2) below z = 6.1, 2.26 up to 16 (and its round above)), its area by inclusion-exclusion, clipped to the disc x^2 + y^2 <= 64 in closed form (the quadrant areas x*y or y*sqrt(64 - y^2) + int sqrt(64 - u^2) du), integrated over z by Gauss-Legendre on each piece between the breakpoints with z = z0 + (z1 - z0)(1 - cos t)/2 (200 and 400 nodes and scipy's adaptive quadrature agree to 1e-9); tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "cut_a_6_1_no_circles",
+   "note": "The report's second control: the slabs without the circles (rectangles and slot only), the slot still tangent to the slabs' bottom faces. On SolidCraft 0.29.0 (truck) the cut builds (1610.10 meshed).",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "cylinder",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        0.0,
+        0.0
+       ],
+       "radius": 8.0
+      }
+     ],
+     "distance": 12.4
+    },
+    {
+     "op": "extrude",
+     "id": "slab_pos",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         3.8499999999999996
+        ],
+        [
+         9.0,
+         3.8499999999999996
+        ],
+        [
+         9.0,
+         8.35
+        ],
+        [
+         0.0,
+         8.35
+        ]
+       ]
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      10.0,
+      0.0
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "extrude",
+     "id": "slab_neg",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -9.0,
+         3.8499999999999996
+        ],
+        [
+         0.0,
+         3.8499999999999996
+        ],
+        [
+         0.0,
+         8.35
+        ],
+        [
+         -9.0,
+         8.35
+        ]
+       ]
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "union",
+     "id": "slabs",
+     "a": "slab_pos",
+     "b": "slab_neg"
+    },
+    {
+     "op": "extrude",
+     "id": "slot",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        2.25,
+        6.1
+       ],
+       "to": [
+        2.25,
+        16.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        16.0
+       ],
+       "radius": 2.25,
+       "start_deg": 0.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        -2.25,
+        16.0
+       ],
+       "to": [
+        -2.25,
+        6.1
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        6.1
+       ],
+       "radius": 2.25,
+       "start_deg": 180.0,
+       "end_deg": 360.0
+      }
+     ],
+     "plane": "yz",
+     "origin": [
+      -10.0,
+      0.0,
+      0.0
+     ],
+     "distance": 20.0
+    },
+    {
+     "op": "union",
+     "id": "tool",
+     "a": "slabs",
+     "b": "slot"
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cylinder",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1610.168947891,
+     "tol": 0.01,
+     "formula": "pi*8^2*12.4 less the tool within the cylinder: every slice z = const is a union of axis-aligned rectangles (the slabs 0 <= x <= 9, 0 <= y <= 10 and -9 <= x <= 0, -10 <= y <= 0 for |z - 6.1| <= 2.25; the slot |x| <= 10, |y| <= sqrt(2.25^2 - (z - 6.1)^2) below z = 6.1, 2.25 up to 16 (and its round above)), its area by inclusion-exclusion, clipped to the disc x^2 + y^2 <= 64 in closed form (the quadrant areas x*y or y*sqrt(64 - y^2) + int sqrt(64 - u^2) du), integrated over z by Gauss-Legendre on each piece between the breakpoints with z = z0 + (z1 - z0)(1 - cos t)/2 (200 and 400 nodes and scipy's adaptive quadrature agree to 1e-9); tol 0.01 mm^3"
+    }
+   }
+  }
+ ]
+}

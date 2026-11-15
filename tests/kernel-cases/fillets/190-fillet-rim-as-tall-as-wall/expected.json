@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#190",
+  "tangency-labs/solidcraft#318"
+ ],
+ "what": "an R2 round of the top edge of a disc 2 mm high (the round is as tall as the wall, so it meets the bottom face)",
+ "source": "analytic",
+ "method": "disc R13 x 2: V0 = pi 169 * 2. R2 on the top circle: (1-pi/4) r^2 (2 pi R - 2 pi x r) with x r = r (5/6-pi/4)/(1-pi/4) = 0.4465 the spandrel centroid offset (Pappus) = 67.706 removed; the round is a quarter torus from the top face down to the bottom face, so the wall is used up. V = 994.152.",
+ "body_count": 1,
+ "volume_mm3": 994.1518798118414,
+ "continuity": {
+  "order": "g1"
+ }
+}

@@ -99,10 +99,6 @@
   ],
   "timeline": [
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 1,
       "ms": 0.204585,
@@ -113,10 +109,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 2,
       "ms": 2.318662,
@@ -127,10 +119,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 3,
       "ms": 0.109196,
@@ -141,10 +129,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 4,
       "ms": 0.338859,
@@ -155,10 +139,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 5,
       "ms": 0.312259,
@@ -169,10 +149,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 6,
       "ms": 0.23144699999999999,

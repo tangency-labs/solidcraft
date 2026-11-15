@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "an r2 round on the top edge of a cylinder r10 h20",
+ "source": "analytic",
+ "method": "a torus round: Pappus on the removed section (1-pi/4) r^2 at radius 10 - r(10-3pi)/(12-3pi)",
+ "body_count": 1,
+ "volume_mm3": 6231.659467358,
+ "faces": 4
+}

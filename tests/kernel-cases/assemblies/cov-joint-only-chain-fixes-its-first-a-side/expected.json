@@ -1,0 +1,40 @@
+{
+ "sources": [],
+ "what": "a revolute between two free parts, the design's only joint",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Gear: box 10x10x10 from (60,-5,0), centre (65,0,5), on revolute G2 about z through (50,0,0), here G2 joins Arm (not Base) to Gear and no joint reaches Base: with nothing grounded involved, the first joint's A side (Arm) is fixed, so Gear turns 90 about (50,0,0): (50,15,5)",
+ "body_count": 3,
+ "volume_mm3": 9000.0,
+ "results": [
+  {
+   "step": 12,
+   "json": {
+    "moved": true
+   }
+  },
+  {
+   "step": 13,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      50.0,
+      15.0,
+      5.0
+     ]
+    }
+   }
+  },
+  {
+   "step": 14,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

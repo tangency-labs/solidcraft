@@ -1,5 +1,7 @@
 //! Read-only bridge between optical concepts and sourced physical references.
 //! No appearance identifies a grade, assigns density, or supplies missing constants.
+use crate::schema::TypedContract;
+use crate::schema::render_library::{PhysicalPlan, PhysicalPrepareParams, PlannedCommand, PlannedMaterial};
 use crate::{Result, Session, params::bad};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -161,6 +163,7 @@ pub(super) fn associations(id: &str) -> Result<Value> {
         ids.into_iter().map(|id| Ok(summary(by(profiles, "id", id, command)?, by(cards, "profile_id", id, command)?))).collect::<Result<Vec<_>>>()?;
     Ok(json!({"specifications":selected,"candidate_profiles":references,"auto_assign":false,"unknown_is_zero":false}))
 }
+pub(super) const PREPARE_CONTRACT: TypedContract<PhysicalPrepareParams> = TypedContract::new();
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Prepare {
@@ -191,11 +194,30 @@ pub(super) fn prepare(_s: &mut Session, params: &Value) -> Result<Value> {
     }
     let density =
         density.ok_or_else(|| bad(command, "profile lacks one supported point density; ranges and unknowns cannot be replaced by a midpoint"))?;
-    Ok(json!({"status":"plan_only_not_executed","profile_id":input.id,"receipts":description["receipts"],
-        "native_validation":description["native_validation"],"not_projected":description["native_projection"]["not_projected"],
-        "extended_profile":description["resource"],"document_changed":false,"assigned_bodies":[],
-        "command":{"command":"material.create","params":{"name":input.name,"density_g_cm3":density/1000.0,"physical_card":card}},
-        "requirements":["Review grade, formulation, source and conditions before execution.","This partial card is not a complete constitutive model or a certification.","Create does not assign a body; never use a constituent as an effective laminate, foam or populated assembly.","Retain this profile and omission receipt; the native card cannot encode all extended properties."]}))
+    let plan = PhysicalPlan {
+        status: "plan_only_not_executed".into(),
+        profile_id: input.id,
+        receipts: description["receipts"].clone(),
+        native_validation: description["native_validation"].clone(),
+        not_projected: description["native_projection"]["not_projected"].clone(),
+        extended_profile: description["resource"].clone(),
+        document_changed: false,
+        assigned_bodies: Vec::new(),
+        command: PlannedCommand {
+            command: "material.create".into(),
+            params: PlannedMaterial { name: input.name, density_g_cm3: density / 1000.0, physical_card: card },
+        },
+        requirements: [
+            "Review grade, formulation, source and conditions before execution.",
+            "This partial card is not a complete constitutive model or a certification.",
+            "Create does not assign a body; never use a constituent as an effective laminate, foam or populated assembly.",
+            "Retain this profile and omission receipt; the native card cannot encode all extended properties.",
+        ]
+        .map(String::from)
+        .into(),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(plan).map_err(|e| bad(command, e.to_string()))
 }
 #[cfg(test)]
 mod tests {

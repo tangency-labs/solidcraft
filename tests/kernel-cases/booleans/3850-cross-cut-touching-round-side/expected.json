@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3850",
+  "tangency-labs/solidcraft#3741"
+ ],
+ "what": "a O50 x 50 cylinder with a 25 mm square through-hole, then a cross cut by a O40 circle split into two halves by a line (both halves picked, merged into one round tool whose end face x=25 touches the cylinder's side along y=0): the result must be one shell, not a good shell plus a zero-area one",
+ "source": "analytic",
+ "method": "slice by y: width(y) = 2 sqrt(625-y^2) minus 25 where |y|<=12.5 (the square hole); the tool is the cylinder y^2+(z-25)^2<=400 along x, removing 2 sqrt(400-y^2) of the 50 mm height for |y|<20. V = Int_-25^25 width(y) (50 - 2 sqrt(400-y^2) [|y|<20]) dy = 32897.51 (python midpoint quadrature, 400000 pts per piece, split at the breakpoints). The PR reports 32893.6 (mesh integration, within 1.2e-4). One body, one shell",
+ "body_count": 1,
+ "shells": 1,
+ "volume_mm3": 32897.506
+}

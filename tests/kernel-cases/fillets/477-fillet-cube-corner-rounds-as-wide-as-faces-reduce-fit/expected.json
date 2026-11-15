@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#477"
+ ],
+ "what": "the three edges at a 20 mm cube's corner rounded R20 with fit reduce: reduced to the largest that fits, just under 20",
+ "source": "analytic",
+ "method": "at radius r the three rounds run (1-pi/4) r^2 along 20 - r past the corner cube [0,r]^3, which loses r^3 less its ball's octant: removed = 3 (1-pi/4) r^2 (20-r) + r^3 (1-pi/6). The search stops within 0.01 of 20; at r = 19.99, V = 4191.931514, and the volume changes 0.3 mm^3 per 0.001 mm of radius there, so the case's tolerance (4.2 mm^3) holds r within 0.013 of it.",
+ "body_count": 1,
+ "volume_mm3": 4191.9315140872695,
+ "continuity": {
+  "order": "g1"
+ }
+}

@@ -1,0 +1,12 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#1263"
+  ],
+  "what": "a plate with a concave quarter-round wall that meets the back face tangentially at a knife-edge tip (a box and a box less a cylinder, united): its display tessellation used to fail with 'boundary does not lie on the surface' before anything was filleted",
+  "source": "analytic",
+  "method": "Plate x 0..41.1667, y -21..0, z 0..10 (area 864.5 in plan). Corner box x 41.1667..62.1667, y -21..0 less the cylinder r=21 centred at (62.1667,-21): the cylinder takes the quarter disc pi 21^2/4 = 346.361 out of the 441 plan area, leaving 94.639 (it meets the back face y=0 at the tip (62.1667,0), tangentially). Plan area 959.139, V = 10 * 959.139 = 9591.394. Surface: top and bottom 2*959.139, left wall 21*10, front wall 41.1667*10 (the arc starts at the corner box's front-left corner, so the corner adds no front wall), back wall 62.1667*10, arc wall (pi*21/2)*10: A = 3491.479. Six faces.",
+  "body_count": 1,
+  "volume_mm3": 9591.394,
+  "area_mm2": 3491.479,
+  "faces": 6
+}

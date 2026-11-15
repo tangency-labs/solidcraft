@@ -2,7 +2,10 @@
 //! the viewport or the browser goes in one undoable step through `selection.delete`. When it
 //! takes other features with it or makes some fail, a confirmation lists them first.
 
+use std::sync::Arc;
+
 use serde_json::{Value, json};
+use solidcraft_engine::doc::KeptResults;
 
 use crate::SolveApp;
 use crate::ui_kit;
@@ -15,6 +18,8 @@ const MAX_LISTED: usize = 20;
 pub struct Pending {
     pub params: Value,
     pub report: Value,
+    /// What the dry run computed ahead, for the delete to find (#9917).
+    pub kept: Option<Arc<KeptResults>>,
 }
 
 /// What Delete acts on now: the selection (bodies not locked), plus the components picked in
@@ -71,6 +76,11 @@ pub fn delete_selection(app: &mut SolveApp) {
     request(app, params);
 }
 
+/// Whether Delete has nothing to act on: nothing selected, and no joint open in Edit Joint.
+pub fn nothing_to_delete(app: &SolveApp) -> bool {
+    is_empty(&selection_params(app)) && edited_joint(app).is_none()
+}
+
 /// The joint the open Edit Joint dialog edits.
 fn edited_joint(app: &SolveApp) -> Option<u64> {
     match app.dialog.as_ref().map(|d| &d.kind) {
@@ -87,7 +97,7 @@ fn joint_delete_blocked(app: &SolveApp) -> Option<&'static str> {
         Some("Finish the active tool before deleting a joint")
     } else if app.computing_since().is_some() {
         Some("Wait for the design to finish computing before deleting a joint")
-    } else if app.file_load.busy() {
+    } else if app.file_load_holds() {
         Some("Wait for the file to finish loading before deleting a joint")
     } else {
         None
@@ -105,7 +115,7 @@ pub fn request(app: &mut SolveApp, params: Value) {
             && ["items", "occurrences", "components", "canvases"]
                 .iter()
                 .all(|k| params.get(*k).and_then(Value::as_array).is_none_or(|a| a.is_empty()));
-        if only_edited && app.applying.is_none() && app.tool.is_none() && app.computing_since().is_none() && !app.file_load.busy() {
+        if only_edited && app.applying.is_none() && app.tool.is_none() && app.computing_since().is_none() && !app.file_load_holds() {
             crate::dialogs::cancel(app);
         }
         if let Some(why) = joint_delete_blocked(app) {
@@ -122,7 +132,7 @@ pub fn request(app: &mut SolveApp, params: Value) {
 }
 
 /// [`request`] once its dry run's report is in.
-pub(crate) fn checked(app: &mut SolveApp, params: Value, report: Result<Value, String>) {
+pub(crate) fn checked(app: &mut SolveApp, params: Value, report: Result<Value, String>, kept: Option<Arc<KeptResults>>) {
     let report = match report {
         Ok(r) => r,
         Err(e) => {
@@ -136,14 +146,16 @@ pub(crate) fn checked(app: &mut SolveApp, params: Value, report: Result<Value, S
     let fails = report["would_fail"].as_array().is_some_and(|a| !a.is_empty());
     let shared = shared_occurrences(app, &params);
     if extra || fails || shared {
-        app.menu.confirm = Some(Pending { params, report });
+        app.menu.confirm = Some(Pending { params, report, kept });
     } else {
-        run(app, &params);
+        run(app, &params, kept);
     }
 }
 
-fn run(app: &mut SolveApp, params: &Value) {
-    match app.run("selection.delete", params.clone()) {
+/// Delete for real. With the history rolled back it builds the history after the marker to see
+/// what the delete breaks: the dry run built it ahead, off the window thread, and `kept` it.
+fn run(app: &mut SolveApp, params: &Value, kept: Option<Arc<KeptResults>>) {
+    match app.run_with_kept(kept, |app| app.run("selection.delete", params.clone())) {
         Ok(r) => {
             app.tree.picked_components.clear();
             app.tree.picked_canvases.clear();
@@ -160,7 +172,7 @@ fn run(app: &mut SolveApp, params: &Value) {
 pub fn confirm(app: &mut SolveApp, accept: bool) -> bool {
     let Some(p) = app.menu.confirm.take() else { return false };
     if accept {
-        run(app, &p.params);
+        run(app, &p.params, p.kept);
     }
     true
 }
@@ -173,14 +185,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let (deleted, fails) = (list("deleted"), list("would_fail"));
     let shared = shared_occurrences(app, &p.params);
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_delete_confirm"), "delete", crate::i18n::tr_label("Delete"))
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_delete_confirm"), "delete", solidcraft_ui_text::tr_label("Delete"))
         .tone(ui_kit::Tone::Danger)
         .actions("Delete", "Cancel", None)
         .show(ctx, true, |ui| {
             if shared {
                 ui_kit::text(
                     ui,
-                    crate::i18n::tr_label("This child is shared. Deleting it removes it from every copy of its parent."),
+                    solidcraft_ui_text::tr_label("This child is shared. Deleting it removes it from every copy of its parent."),
                     ui_kit::Text::Report("shared", false),
                 );
             }
@@ -190,7 +202,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 if names.is_empty() {
                     continue;
                 }
-                ui_kit::text(ui, crate::i18n::tr_label(heading), ui_kit::Text::Report(key, error));
+                ui_kit::text(ui, solidcraft_ui_text::tr_label(heading), ui_kit::Text::Report(key, error));
                 for name in names.iter().take(MAX_LISTED) {
                     ui_kit::text(ui, &format!("  • {name}"), ui_kit::Text::Report(&format!("{key}:{name}"), error));
                 }
@@ -198,7 +210,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     let more = (names.len() - MAX_LISTED).to_string();
                     ui_kit::text(
                         ui,
-                        &crate::i18n::format("delete.and_more", &[("count", &more)]),
+                        &solidcraft_ui_text::format("delete.and_more", &[("count", &more)]),
                         ui_kit::Text::Report(&format!("{key}:more"), error),
                     );
                 }

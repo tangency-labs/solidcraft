@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "a modelled 1/2-14 NPT taper pipe thread (ASME B1.20.1, 60 deg, 1 in 16) on its 0.840 in pipe, its effective thread L2 from the end",
+ "source": "analytic",
+ "method": "ISO 7-1 / ASME B1.20.1 taper 1 in 16 on the diameter. The thread starts at its free end with the standard's diameter there and its diameters grow into the material (the external major d0 + y/16 at y mm in; the internal minor d1 - y/16). The crests are the cone's: the material outside the external major cone (inside the internal minor cone) along the thread is cut as the die (tap) cuts it. The groove is the sweep of the profile's section, rising P a turn and moving P/32 a turn off the axis, so a point (rho, zeta) of the section at turn t lies at r = rho + c t, z = z0 + zeta + P t, the volume element is 2 pi r dA dt, and the groove removes 2 pi int_0^T (int int r dA over the section within the material) dt, exact while turns don't overlap (Gauss on 400 panels a turn: the integrand is piecewise polynomial in t). ASME B1.20.1 (H28 Table VII.2) 1/2-14 NPT: pipe OD D = 0.840 in, E0 = 0.75843 in the pitch diameter at the small end, h = 0.8 P truncated equally at crest and root (0.033 P each, a 0.038 P flat), so the major at the end is E0 + h = 20.7156 mm, growing 1/16; L2 = 0.5337 in = 13.556. The major cone passes the pipe's OD (10.668) 9.93 mm in, so from there to L2 the crests are the pipe's surface, as the standard's imperfect threads are. It starts at the free top end z = 25 and runs the standard length L = 13.5560 down to z = 11.4440, where it stops square inside the face (the groove's section centred there, the cut below it bounded by the pipe's surface only). V = pi R^2 25 - the ring outside the cone (pi int (R^2 - r_cone^2) where the cone is inside the pipe) - the groove (609.702166). Bbox: the pipe's",
+ "body_count": 1,
+ "volume_mm3": 8226.404941856,
+ "bbox": {
+  "min": [
+   -10.668,
+   -10.668,
+   0
+  ],
+  "max": [
+   10.668,
+   10.668,
+   25
+  ]
+ },
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

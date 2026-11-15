@@ -1,0 +1,35 @@
+{
+  "area": "plastic",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-plastic-manage-rules-from-an-unknown-rule-refused",
+  "expected": {
+    "method": "a new rule copies the values of `from`; with no such rule there is nothing to copy, a clean refusal naming it",
+    "outcome": "refused",
+    "refusal": "no plastic rule `No Such Rule` to start from",
+    "source": "invariants",
+    "sources": [],
+    "what": "plastic.manage_rules asked to start a new rule from a rule that does not exist"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 1 (plastic.manage_rules): invalid parameters for `plastic.manage_rules`: no plastic rule `No Such Rule` to start from",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 1 (plastic.manage_rules): invalid parameters for `plastic.manage_rules`: no plastic rule `No Such Rule` to start from",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "plastic.manage_rules asked to start a new rule from a rule that does not exist",
+  "why_not": [
+    "no kernel operation ran before the failure: step 1 (plastic.manage_rules): invalid parameters for `plastic.manage_rules`: no plastic rule `No Such Rule` to start from"
+  ]
+}

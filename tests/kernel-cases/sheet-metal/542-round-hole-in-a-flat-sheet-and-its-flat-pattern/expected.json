@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#542",
+  "tangency-labs/solidcraft#552"
+ ],
+ "what": "a 3.2 mm round hole cut through a 100 x 60 x 2.5 sheet, which the flat pattern must report as a circle",
+ "source": "analytic",
+ "method": "V = 100*60*2.5 - pi*1.6^2*2.5 = 15000 - 6.4*pi",
+ "body_count": 1,
+ "volume_mm3": 14979.893807017026
+}

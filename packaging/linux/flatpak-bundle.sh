@@ -12,7 +12,7 @@
 # installed per-user from Flathub. Unless --no-test, the bundle is installed per-user, the CLI
 # is checked, and the desktop creates/measures a box on headless X11 and Wayland. The desktop
 # check also needs python3, dbus-x11, xvfb, xauth and weston; no screenshots are produced.
-# Manifest: packaging/linux/flatpak/ai.storyteller.solidcraft.bundle.yml.
+# Manifest: packaging/linux/flatpak/io.tangencylabs.solidcraft.bundle.yml.
 # Adapted from PhotoCraft's (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
 set -euo pipefail
 # shellcheck source=../env.sh

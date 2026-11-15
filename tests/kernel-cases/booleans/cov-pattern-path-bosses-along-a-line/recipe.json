@@ -1,0 +1,73 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 20,
+    "height": 5,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     10,
+     10,
+     5
+    ],
+    "radius": 3,
+    "height": 5,
+    "operation": "join",
+    "name": "Boss"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Path"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      10,
+      10
+     ],
+     [
+      90,
+      10
+     ]
+    ],
+    "ids": [
+     "p1"
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {
+    "sketch": "Path"
+   }
+  },
+  {
+   "command": "solid.pattern.path",
+   "params": {
+    "features": [
+     "Boss"
+    ],
+    "path_sketch": "Path",
+    "path": [
+     "p1"
+    ],
+    "count": 5,
+    "spacing": 20
+   }
+  }
+ ]
+}

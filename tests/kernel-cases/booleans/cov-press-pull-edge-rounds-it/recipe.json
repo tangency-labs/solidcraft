@@ -1,0 +1,26 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 10,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.press_pull",
+   "params": {
+    "edges": [
+     [
+      20,
+      0,
+      10
+     ]
+    ],
+    "distance": 2
+   }
+  }
+ ]
+}

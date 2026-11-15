@@ -1,0 +1,37 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 10,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.replace_face",
+   "params": {
+    "faces": [
+     [
+      20,
+      15,
+      10
+     ]
+    ],
+    "target": {
+     "origin": [
+      0,
+      0,
+      15
+     ],
+     "normal": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  }
+ ]
+}

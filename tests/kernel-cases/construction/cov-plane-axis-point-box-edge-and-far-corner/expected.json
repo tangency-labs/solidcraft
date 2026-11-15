@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the plane through a box edge and the corner farthest from it",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin: the edge y 0, z 0 is the X axis and the far corner is (40,30,20); the plane holds the origin and its normal is X x (0,30,20) = (0,-20,30), i.e. (0,-2,3)/sqrt(13): the plane 3z = 2y, which also holds the opposite edge's other end (0,30,20)",
+ "construction": {
+  "P": {
+   "plane": {
+    "through": [
+     0,
+     30,
+     20
+    ],
+    "normal": [
+     0.0,
+     -0.5547,
+     0.83205
+    ]
+   }
+  }
+ }
+}

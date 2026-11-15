@@ -1,0 +1,11 @@
+#### WR-575. `SmBSplineCurve::Trim` removes a conic's short end span and stretches the curve off its circle
+- **Severity:** Wrong result (geometry off by up to about 1e-6; tolerance gaps exceeded downstream)
+- **Area:** NURBS (B-spline curve trimming)
+- **Location:** `source/SMLib/src/SmBSplineCurveNLib.cpp`, `SmBSplineCurve::Trim`: after `sm_CrvTrim`, a new end span shorter than the 3D zone tolerance (mapped to 1D) is removed with `N_CrvRemoveDegenSegs` (`:4624` at 1.0.1).
+- **What happens:** `N_CrvRemoveDegenSegs` takes the short span out and stretches the remaining spans over its length. For a rational curve (a circle's or ellipse's NURB) the result is no longer the conic: a trimmed half circle of radius 16 lies about 1.4e-6 off its circle. In the reported body the circle edge's gaps then exceed the tolerance (7.8e-6 against 7.5e-6, `SmBrep` tests #0 and #2).
+- **Trigger:** trimming a rational 3D curve so that a new end span comes out shorter than the 3D zone tolerance, e.g. a trim 1e-7 from the middle knot of a radius 16 half circle (two rational quarters), or the union of two equal tubes of radius 16 meeting end to end, the first stopping 1e-5 short of the second's start (tangency-labs/solidcore#1529).
+- **How found:** traced by a contributor from SolidCraft (#1529). The fork stopped the removal for UV curves only (WR-441, #1114).
+- **Confirmed:** the pinned C++ build does the same as the Rust port: the `nurbs.b_spline_curve_n_lib` difftest fixtures `issue1114_dim3_*` (a radius 0.14 half circle, green on main) compare both sides on this removal, and `issue1529_r16_*` add the issue's radius 16 half circle.
+- **Rust port:** behaves as upstream by default. With `Kernel::fixes.bspline_trim_keeps_rational_end_spans`, a trimmed rational curve (`N_IsCrvRat`: its control points carry weights) keeps its short end spans and stays on its conic; non-rational curves are still cleaned as upstream (`nurbs/b_spline_curve_n_lib.rs`, `trim_with_zone_tol`). The issue notes that keeping the span changed the volume at a nearby gap (1e-6) of the same tubes by 0.11 mm^3 in a trial, so the fix stays opt-in.
+
+  Tests: `wr_575_trim_keeps_a_rational_short_end_span_on_the_circle` and `wr_575_non_rational_short_end_span_is_still_removed` in `crates/solidcore/src/nurbs/b_spline_curve_n_lib.rs`.

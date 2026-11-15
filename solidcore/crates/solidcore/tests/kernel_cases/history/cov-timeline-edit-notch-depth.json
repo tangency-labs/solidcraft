@@ -1,0 +1,156 @@
+{
+  "area": "history",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b18"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b18",
+        "b19"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "cov-timeline-edit-notch-depth",
+  "expected": {
+    "body_count": 1,
+    "faces": 10,
+    "method": "the 10x10 notch 8 deep: V = 12000 - 800; faces 6 + 4 = 10",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 11200.0,
+    "what": "timeline.edit of a cut's depth from 5 to 8"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16
+    }
+  },
+  "records": "cov-timeline-edit-notch-depth.bodies.json.gz",
+  "result": [
+    {
+      "body": "Block",
+      "made": "b20"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3960.0,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16,
+      "volume_mm3": 11200.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "timeline.edit of a cut's depth from 5 to 8",
+  "why_not": []
+}

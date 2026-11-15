@@ -51,7 +51,7 @@ fn test_boat_step_orbits_pans_zooms_rolls_and_holds_the_boat_in_its_box() {
     let aspect = 1.4;
     let run = |m: Motion, seconds: f64| {
         let mut cam = start;
-        step(&mut cam, m, seconds, 150.0, radius, aspect, false, false);
+        step(&mut cam, m, seconds, 150.0, radius, aspect, false);
         cam
     };
     // Nothing moves nothing.
@@ -70,17 +70,17 @@ fn test_boat_step_orbits_pans_zooms_rolls_and_holds_the_boat_in_its_box() {
     // Held down for a long time, the limits hold: nearest, farthest, and the pan room.
     let mut cam = start;
     for _ in 0..400 {
-        step(&mut cam, motion([1.0, 1.0, 1.0], [0.0; 3]), 0.05, 150.0, radius, aspect, false, false);
+        step(&mut cam, motion([1.0, 1.0, 1.0], [0.0; 3]), 0.05, 150.0, radius, aspect, false);
     }
     assert!(cam.distance >= radius * NEAREST / 1.0 - 1e-6 && cam.target.len() <= cam.distance * (FOV / 2.0).tan() + 1e-6);
     let mut cam = start;
     for _ in 0..400 {
-        step(&mut cam, motion([-1.0, -1.0, -1.0], [0.0; 3]), 0.05, 150.0, radius, aspect, false, false);
+        step(&mut cam, motion([-1.0, -1.0, -1.0], [0.0; 3]), 0.05, 150.0, radius, aspect, false);
     }
     assert!(cam.distance <= radius * FARTHEST + 1e-6);
     // Hostile numbers leave a valid camera.
     let mut cam = start;
-    step(&mut cam, motion([f64::NAN, f64::INFINITY, 1e300], [f64::NAN; 3]), 0.05, 150.0, radius, aspect, false, false);
+    step(&mut cam, motion([f64::NAN, f64::INFINITY, 1e300], [f64::NAN; 3]), 0.05, 150.0, radius, aspect, false);
     assert!(cam.is_valid());
 }
 
@@ -94,7 +94,7 @@ fn test_boat_draws_inside_its_box_at_every_size_and_pose() {
         // Through the extremes of what the 3D mouse can do.
         for (translation, rotation) in [([0.0; 3], [0.0; 3]), ([1.0, -1.0, 1.0], [1.0, 0.0, 1.0]), ([-1.0, 1.0, -1.0], [0.0, 1.0, -1.0])] {
             for _ in 0..200 {
-                step(&mut cam, motion(translation, rotation), 0.05, f64::from(h), m.radius, aspect, false, false);
+                step(&mut cam, motion(translation, rotation), 0.05, f64::from(h), m.radius, aspect, false);
             }
             let frame = project(m, &cam, rect.shrink(1.0));
             assert!(!frame.indices.is_empty(), "{w}x{h}: something is drawn");
@@ -141,7 +141,7 @@ fn test_boat_far_faces_come_first_and_a_page_opened_again_starts_afresh() {
     let moved = Some(DeviceMotion { motion: motion([0.0; 3], [1.0, 0.0, 0.0]), seconds: 0.05 });
     let draw = |time: f64, motion: Option<DeviceMotion>, state: &mut Option<Boat>| {
         let mut output = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
-            show(ui, state, motion, false, false, vec2(200.0, 150.0));
+            show(ui, state, motion, false, vec2(200.0, 150.0));
         });
         output.textures_delta.clear();
     };

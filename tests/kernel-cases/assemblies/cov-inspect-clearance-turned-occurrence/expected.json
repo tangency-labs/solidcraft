@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "inspect.clearance between the arm turned 90 degrees and a grounded block",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); a block 10x10x10 from (20,0,0); hinge at 90 puts Arm at x -5..5, y 0..40: the gap to the block's face x = 20 is 15",
+ "body_count": 3,
+ "volume_mm3": 9000.0,
+ "results": [
+  {
+   "step": 14,
+   "json": {
+    "overlaps": [],
+    "near": [
+     {
+      "distance_mm": 15.0
+     }
+    ]
+   }
+  }
+ ]
+}

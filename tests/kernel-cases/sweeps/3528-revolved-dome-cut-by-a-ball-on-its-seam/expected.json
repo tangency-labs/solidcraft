@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3528"
+ ],
+ "what": "a ball of radius 4 centred on the dome of a revolved mushroom cap (azimuth 15 degrees, across an internal seam of the revolved faces), cut from it: removed nearly the whole ball",
+ "source": "analytic",
+ "method": "the cap is the revolution of the profile (0,0) (7,0) (7,20) (26,39), arc about (0,32.1) r 26.9 to (0,59), back: V = pi [49*20 + (26^3 - 7^3)/3 + 26.9^2 * 20 - (26.9^3 - 6.9^3)/3] = 46551.0. The ball centre is on the dome sphere (r 26.9), so the cut removes the lens of two spheres, radii 4 and 26.9 at distance 26.9: V = pi (R + r - d)^2 (d^2 + 2 d r - 3 r^2 + 2 d R + 6 r R - 3 R^2) / (12 d) = 126.5. The tool is consumed (keep_tools false): one body.",
+ "body_count": 1,
+ "volume_mm3": 46424.50587797245
+}

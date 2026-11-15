@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "a vertical rectangular tube 40x30x3 (sharp corners) on a 50 mm line, anchored at the profile's bottom left corner",
+ "source": "analytic",
+ "method": "a vertical member's x is world X, y = d x X = world Y; the bottom left corner on the line: x 0..40, y 0..30, z 0..50; section 40*30 - 34*24 = 384, V = 19200; faces 4 outside + 4 inside + 2 ends",
+ "body_count": 1,
+ "faces": 10,
+ "volume_mm3": 19200.0,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   50
+  ]
+ }
+}

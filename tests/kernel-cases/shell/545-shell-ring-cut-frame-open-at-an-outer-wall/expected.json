@@ -1,0 +1,26 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#545"
+ ],
+ "what": "the frame of examples/regressions/ring_cut_below_recess_thin_floor (a recess from the top, a ring cut from the bottom, a 0.5 mm floor between) shelled 0.5 mm open at the ring cut's outer wall (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): regressions/ring_cut_below_recess_thin_floor, Frame/F6:side:l2 face.shell)",
+ "source": "analytic",
+ "method": "every wall of the frame is at least 0.5 thick except the 0.5 mm floor, which a 0.5 shell hollows to nothing: the floor stays solid, and the core under the recess (x, y 16..84, z 0..18) is hollowed to a sealed void, x, y 16.5..83.5, z 0.5..17.5, the floor and the core's walls between it and the open cavity. The cavity is that void, the ring between the squares 0.5..99.5 and 2..98 for z 0.5..18, the ring between 0.5..99.5 and 5.5..94.5 for z 18..29.5, and x 97.5..98, y 2..98, z 0.5..18 behind the open wall: 67^2 17 + (99^2 - 96^2) 17.5 + (99^2 - 89^2) 11.5 + 0.5 96 17.5 = 109010.5. V = 130054.5 - 109010.5 = 21044, the body's outer shell and the void's",
+ "body_count": 1,
+ "shells": 2,
+ "volume_mm3": 21044.0,
+ "tolerance": {
+  "rel": 1e-06
+ },
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   100,
+   100,
+   30
+  ]
+ }
+}

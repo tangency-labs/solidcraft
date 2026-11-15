@@ -1,8 +1,10 @@
 //! The window surface is clamped to the device's largest texture (#869): a window moved between
 //! monitors of different scale asked for 11512 x 6808 against a maximum of 8192 and the
-//! surface configure was a validation panic. The clamp lives in the vendored egui-wgpu.
+//! surface configure was a validation panic. The clamp lives in the vendored egui-wgpu, and so
+//! does the present mode of a window other than the main one (the agent chat popped out).
 
-use egui_wgpu::clamp_surface_extent;
+use egui_wgpu::wgpu::PresentMode;
+use egui_wgpu::{clamp_surface_extent, viewport_present_mode};
 
 #[test]
 fn a_window_that_fits_is_unchanged() {
@@ -37,5 +39,26 @@ fn extreme_sizes_never_give_zero_or_exceed_the_limit() {
         assert!(cw >= 1 && ch >= 1, "{w}x{h} max {m} gave {cw}x{ch}");
         assert!(cw <= m.max(1) && ch <= m.max(1), "{w}x{h} max {m} gave {cw}x{ch}");
         assert!(s > 0.0 && s <= 1.0);
+    }
+}
+
+#[test]
+fn a_popped_out_window_presents_without_waiting_for_the_display() {
+    // Mesa's Vulkan on Wayland: the chat's window took the main window down to a crawl while
+    // both waited for vsync in one frame.
+    let wayland = [PresentMode::Fifo, PresentMode::Mailbox, PresentMode::Immediate];
+    assert_eq!(viewport_present_mode(false, PresentMode::AutoVsync, &wayland), PresentMode::Mailbox);
+    assert_eq!(viewport_present_mode(false, PresentMode::Fifo, &[PresentMode::Fifo, PresentMode::Immediate]), PresentMode::Immediate);
+    // The main window keeps its vsync: it paces both.
+    assert_eq!(viewport_present_mode(true, PresentMode::AutoVsync, &wayland), PresentMode::AutoVsync);
+}
+
+#[test]
+fn a_surface_that_only_waits_and_a_chosen_mode_without_vsync_are_kept() {
+    assert_eq!(viewport_present_mode(false, PresentMode::AutoVsync, &[PresentMode::Fifo]), PresentMode::AutoVsync);
+    assert_eq!(viewport_present_mode(false, PresentMode::Fifo, &[]), PresentMode::Fifo);
+    for configured in [PresentMode::AutoNoVsync, PresentMode::Immediate, PresentMode::Mailbox] {
+        assert_eq!(viewport_present_mode(false, configured, &[PresentMode::Fifo, PresentMode::Mailbox]), configured);
+        assert_eq!(viewport_present_mode(true, configured, &[PresentMode::Fifo]), configured);
     }
 }

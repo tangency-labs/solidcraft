@@ -1,0 +1,19 @@
+[
+  {"note":"24 synthetic instances retain minima in a bounded scroll extent at small sizes and 200% scale. Scroll tracks own only their narrow input regions."},
+  {"call":"ui.resize","params":{"width":1280,"height":800}},
+  {"panel_fixture":{"enabled":true,"preset":"overflow"}},
+  {"call":"ui.resize","params":{"width":800,"height":600}},
+  {"widget":"Scroll panel columns"},
+  {"widget":"Scroll panel stacks"},
+  {"call":"ui.resize","params":{"width":480,"height":320}},
+  {"widget":"Scroll panel stacks"},
+  {"call":"ui.prefs","params":{"ui_scale":2}},
+  {"panel_fixture":{}},
+  {"call":"ui.resize","params":{"width":1280,"height":800}},
+  {"widget":"Scroll panel columns"},
+  {"call":"ui.prefs","params":{"ui_scale":1}},
+  {"call":"ui.resize","params":{"width":1600,"height":1000}},
+  {"panel_fixture":{}},
+  {"expect":{"errors":0,"features":0,"dialog":null,"tool":null}},
+  {"panel_fixture":{"enabled":false}}
+]

@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4782"
+ ],
+ "what": "both vertical edges of a 15 mm wide box end rounded r10, past the full round (7.5): refused naming the largest radius that fits, 7.5",
+ "source": "invariants",
+ "method": "box 80x15x20, the two vertical edges at x=80 rounded r10 with the exact fit (the default): the two rounds meet at r = 15/2 = 7.5, where they use up the 15 mm end face (a full round, as 199-fillet-uses-up-end-face); past it no round fits, so the right answer is a clean refusal that names 7.5 mm, the largest radius that fits (fillet_max, three significant digits: 7.50)",
+ "outcome": "refused",
+ "refusal": "the largest radius that fits is 7.5 mm"
+}

@@ -1,0 +1,113 @@
+{
+ "coverage": "FillGapEdgeuses past its empty check: offset edge uses on one side of an edge that the other side's do not cover (gaps), from upstream .smb sources (TestFiles/pt_TestFiles) at offset distances large enough that the offset faces are trimmed back. Each gap reaches the candidate-vertex search; the candidates are 0 or 1, so FillGapEdgeuses returns before CreateCornerBlend.",
+ "cases": [
+  {
+   "name": "fill_gap_extrudeHoles1_face0_round_d13",
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp (FillGapEdgeuses): rounded corners, one gap edge use, one candidate edge (early return)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Boolean/extrudeHoles1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0059574935488984,
+    "config": {
+     "member_distance": 13.0,
+     "member_approx_tol": 0.0059574935488984,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "fill_gap_extrudeHoles1_face0_round_d14_3",
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp (FillGapEdgeuses): rounded corners, two FillGapEdgeuses calls with one candidate edge each",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Boolean/extrudeHoles1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0059574935488984,
+    "config": {
+     "member_distance": 14.3,
+     "member_approx_tol": 0.0059574935488984,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "fill_gap_extrudeHoles1_face0_extend_d13",
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp (FillGapEdgeuses): extended corners, gap edge uses with no candidate face (zero candidates)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Boolean/extrudeHoles1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0059574935488984,
+    "config": {
+     "member_distance": 13.0,
+     "member_approx_tol": 0.0059574935488984,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "fill_gap_open_shell_face0_extend_outset",
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp (FillGapEdgeuses): extended corners on an open shell, zero candidates",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/open_shell.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.001946671479763,
+    "config": {
+     "member_distance": 9.11171,
+     "member_approx_tol": 0.001946671479763,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  }
+ ]
+}

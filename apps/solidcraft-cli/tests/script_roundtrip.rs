@@ -123,3 +123,42 @@ fn a_design_naming_a_sketch_and_its_extrude_alike_replays_from_its_script() {
     assert_eq!(names, ["Block", "Block"], "{first:#}");
     assert_eq!(second["commands"], first["commands"], "the replayed design's script has the same steps");
 }
+
+/// #10230: script export must disclose the print-face state that replay leaves out.
+#[test]
+fn script_export_warns_about_omitted_print_faces_on_stderr() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-print-face-script-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let saved = dir.join("block.sc");
+    let exported = dir.join("block.json");
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5, "body_name": "Block"})).unwrap();
+    s.execute("body.print_face", &json!({"body": "Block", "point": [10, 5, 0]})).unwrap();
+    s.execute("file.save", &json!({"path": saved})).unwrap();
+    let native = std::fs::read(&saved).unwrap();
+
+    for to_file in [false, true] {
+        let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"));
+        cmd.arg("script").arg(&saved);
+        if to_file {
+            cmd.arg("--out").arg(&exported);
+        }
+        let out = cmd.output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{stderr}");
+        assert!(stderr.contains("note: the script leaves out print-face assignments (body.print_face)"), "{stderr}");
+        let script = if to_file {
+            assert!(out.stdout.is_empty(), "--out must keep stdout empty");
+            std::fs::read(&exported).unwrap()
+        } else {
+            out.stdout
+        };
+        let script: Value = serde_json::from_slice(&script).unwrap();
+        let mut replayed = Session::default();
+        replayed.run_script(&script).unwrap();
+        assert!(replayed.doc.print_faces.is_empty());
+        assert_eq!(replayed.doc.features, s.doc.features);
+        assert_eq!(std::fs::read(&saved).unwrap(), native, "export must not change the source design");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}

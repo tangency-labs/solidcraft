@@ -1,0 +1,13 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#819",
+    "tangency-labs/solidcraft#921"
+  ],
+  "what": "a disc with a pocket that splits the outer cylinder wall's seam edges at the pocket floor: the wall used to be meshed with fans cutting through the disc, so the measured volume and the STL read too small",
+  "source": "analytic",
+  "method": "disc r=50 h=10 with a coaxial pocket r=48 depth 8 (floor at z=2). V = pi*50^2*10 - pi*48^2*8 = 78539.816 - 57905.836 = 20633.980. Area = bottom pi*50^2 + outer wall 2 pi 50 *10 + top ring pi(50^2-48^2) + pocket wall 2 pi 48 *8 + floor pi 48^2. Five faces. The shelled-top disc (shell 2 mm, top face removed) is the same solid.",
+  "body_count": 1,
+  "volume_mm3": 20633.981,
+  "area_mm2": 21262.299,
+  "faces": 5
+}

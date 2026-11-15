@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#405",
+  "tangency-labs/solidcraft#406"
+ ],
+ "what": "a 120 x 90 tray with four 38.6 mm flanges at 72 degrees, closed at the corners with the rule's gap, unfolded",
+ "source": "analytic",
+ "method": "a flange of angle th, outer leg length Hf (height, from the virtual sharp along the flange) bends with allowance BA = th(R+Kt) and bend deduction BD = 2(R+t)tan(th/2) - BA; unfolded it lies in the base's plane and reaches Hf - BD beyond the base's edge. T = 2, R = 1, K = 0.5. BD(72) = 6*tan(36 deg) - 1.2566*2 = 1.8460; the flat reaches 38.6 - BD = 36.7540 past each base edge (the flat size 120 + 2*36.754 = 193.508, as the closed form W + 2(Hf - BD))",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   -36.75401895483967,
+   -36.75401895483967,
+   0
+  ],
+  "max": [
+   156.75401895483967,
+   126.75401895483967,
+   2
+  ]
+ }
+}

@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "001's modelled M10 thread with ISO 4753's chamfered end at the end it starts from only (`tip: start`, from the top)",
+ "source": "analytic",
+ "method": "ISO 68-1 basic profile (60 deg, root flat P/4 at d - 5H/4 ... minor d1 = d - 1.0825 P, crest flat P/8): a helical groove of fixed section is a screw motion, so averaged over the turn every meridian half-plane holds the same section and V = 2 pi int int r m(r) dr dz over the stock's section, m the material fraction per pitch; the groove runs out past free ends. Tolerance 0.01%: SMLib's exact screw sweep; as 017 at the top end only: the 45 deg cone down to d3 = d - 2 (17/24) H = 8.160 (ISO 724) at z = 30, cut after the groove, lowers the stock's radius to r_f + (30 - z); the bottom end stays as cut, the groove running out past it",
+ "body_count": 1,
+ "volume_mm3": 1949.80017257,
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

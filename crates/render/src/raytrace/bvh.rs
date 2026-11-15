@@ -341,6 +341,7 @@ impl Bvh {
 /// The fixed stack is included in image admission; no per-ray heap allocation.
 pub(crate) struct TraceCursor {
     ray: Ray,
+    source_plane: Option<(std::ops::Range<usize>, [solidcore_record::Vec3; 3])>,
     any: bool,
     stack: [usize; STACK_SLOTS],
     length: usize,
@@ -350,9 +351,27 @@ pub(crate) struct TraceCursor {
 }
 impl TraceCursor {
     pub(crate) fn new(ray: Ray, any: bool) -> Self {
-        Self { ray, any, stack: [0; STACK_SLOTS], length: 1, leaf: None, best: None, done: false }
+        Self { ray, source_plane: None, any, stack: [0; STACK_SLOTS], length: 1, leaf: None, best: None, done: false }
+    }
+    /// Only the opt-in general-glass route uses an exact on-surface origin.
+    /// Exclude its producing plane, not an epsilon slab or a parallel face.
+    pub(crate) fn from_plane(ray: Ray, range: std::ops::Range<usize>, plane: [solidcore_record::Vec3; 3]) -> Self {
+        let mut cursor = Self::new(ray, false);
+        cursor.source_plane = Some((range, plane));
+        cursor
     }
     pub(crate) fn step(&mut self, bvh: &Bvh, work: &mut WorkBudget, cancel: &CancelToken) -> Result<Option<Option<Hit>>> {
+        self.step_ordered(bvh, work, cancel, |new, old| new.primitive_index < old.primitive_index)
+    }
+    /// Opt-in transport can choose a material ordering at an exact distance tie;
+    /// ordinary visibility retains its original input-ordinal ordering.
+    pub(crate) fn step_ordered(
+        &mut self,
+        bvh: &Bvh,
+        work: &mut WorkBudget,
+        cancel: &CancelToken,
+        prefer: impl Fn(Hit, Hit) -> bool,
+    ) -> Result<Option<Option<Hit>>> {
         work.tick(cancel)?;
         if self.done {
             return Err(TraceError::Internal("completed traversal cursor"));
@@ -366,6 +385,13 @@ impl TraceCursor {
                 self.leaf = Some((ordinal + 1, end));
                 let index = *bvh.order.get(ordinal).ok_or(TraceError::Internal("cursor ordinal"))?;
                 let triangle = bvh.triangles.get(index).ok_or(TraceError::Internal("cursor primitive"))?;
+                if self
+                    .source_plane
+                    .as_ref()
+                    .is_some_and(|(range, plane)| range.contains(&index) && super::glass_mesh::same_plane(*plane, triangle.vertices()))
+                {
+                    return Ok(None);
+                }
                 if let Some(geometry) = triangle.intersect(&self.ray) {
                     let hit = Hit { primitive_index: index, geometry };
                     if self.any {
@@ -373,7 +399,7 @@ impl TraceCursor {
                         return Ok(Some(Some(hit)));
                     }
                     if self.best.is_none_or(|old| {
-                        geometry.distance < old.geometry.distance || (geometry.distance == old.geometry.distance && index < old.primitive_index)
+                        geometry.distance < old.geometry.distance || (geometry.distance == old.geometry.distance && prefer(hit, old))
                     }) {
                         self.best = Some(hit);
                     }
@@ -401,5 +427,69 @@ impl TraceCursor {
             }
         }
         Ok(None)
+    }
+}
+
+/// Cooperative candidate enumeration for exact origin predicates. Query boxes
+/// are conservative (an axis ray or finite segment's box); no floating ray-depth
+/// ordering, nearest-hit truncation or probability is used for the certificate.
+pub(super) struct PrimitiveScan {
+    min: solidcore_record::Vec3,
+    max: solidcore_record::Vec3,
+    stack: [usize; STACK_SLOTS],
+    length: usize,
+    leaf: Option<(usize, usize)>,
+    done: bool,
+}
+pub(super) enum ScanPoll {
+    Pending,
+    Primitive(usize),
+    Done,
+}
+impl PrimitiveScan {
+    pub(super) fn new(min: solidcore_record::Vec3, max: solidcore_record::Vec3) -> Result<Self> {
+        if !min.is_finite() || !max.is_finite() || min.x > max.x || min.y > max.y || min.z > max.z {
+            return Err(TraceError::InvalidInput("CPU origin scan bounds"));
+        }
+        Ok(Self { min, max, stack: [0; STACK_SLOTS], length: 1, leaf: None, done: false })
+    }
+    pub(super) fn step(&mut self, bvh: &Bvh, work: &mut WorkBudget, cancel: &CancelToken) -> Result<ScanPoll> {
+        work.tick(cancel)?;
+        if self.done {
+            return Err(TraceError::Internal("completed CPU origin scan"));
+        }
+        if bvh.nodes.is_empty() {
+            self.done = true;
+            return Ok(ScanPoll::Done);
+        }
+        if let Some((at, end)) = self.leaf {
+            if at < end {
+                self.leaf = Some((at + 1, end));
+                let index = *bvh.order.get(at).ok_or(TraceError::Internal("CPU origin scan ordinal"))?;
+                return Ok(ScanPoll::Primitive(index));
+            }
+            self.leaf = None;
+        }
+        if self.length == 0 {
+            self.done = true;
+            return Ok(ScanPoll::Done);
+        }
+        self.length -= 1;
+        let index = *self.stack.get(self.length).ok_or(TraceError::Internal("CPU origin scan stack"))?;
+        let node = bvh.nodes.get(index).ok_or(TraceError::Internal("CPU origin scan node"))?;
+        let lo = node.bounds.min();
+        let hi = node.bounds.max();
+        if !(hi.x < self.min.x || lo.x > self.max.x || hi.y < self.min.y || lo.y > self.max.y || hi.z < self.min.z || lo.z > self.max.z) {
+            match node.kind {
+                Kind::Leaf { start, end } => self.leaf = Some((start, end)),
+                Kind::Branch { left, right } => {
+                    for child in [right, left] {
+                        *self.stack.get_mut(self.length).ok_or(TraceError::Internal("CPU origin scan bounded stack"))? = child;
+                        self.length += 1;
+                    }
+                }
+            }
+        }
+        Ok(ScanPoll::Pending)
     }
 }

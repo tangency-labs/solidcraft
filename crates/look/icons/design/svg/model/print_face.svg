@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Print Face</title>
+  <path d="M9.72 26.17L4.5 20.95L4.5 40.85L9.72 46.07Z" fill="#b8c3cf"/>
+  <path d="M9.72 26.17L4.5 20.95L4.5 40.85L9.72 46.07Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18.77 23.15L9.72 26.17L9.72 46.07L18.77 43.05Z" fill="#328bd3"/>
+  <path d="M18.77 23.15L9.72 26.17L9.72 46.07L18.77 43.05Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M13.55 17.93L18.77 23.15L9.72 26.17L4.5 20.95Z" fill="#e2e8ef"/>
+  <path d="M13.55 17.93L18.77 23.15L9.72 26.17L4.5 20.95Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M50.45 37.54L38.27 25.35L38.27 33.88L50.45 46.07Z" fill="#b8c3cf"/>
+  <path d="M50.45 37.54L38.27 25.35L38.27 33.88L50.45 46.07Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M59.5 34.53L50.45 37.54L50.45 46.07L59.5 43.05Z" fill="#8e9faf"/>
+  <path d="M59.5 34.53L50.45 37.54L50.45 46.07L59.5 43.05Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M47.31 22.34L59.5 34.53L50.45 37.54L38.27 25.35Z" fill="#e2e8ef"/>
+  <path d="M47.31 22.34L59.5 34.53L50.45 37.54L38.27 25.35Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M50.45 46.07L38.27 33.88" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M59.5 43.05L50.45 46.07" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24.17 34.2L28.31 34.2" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M35.31 34.2L27.31 38.7L27.31 29.7Z" fill="#236ead"/>
+</svg>
