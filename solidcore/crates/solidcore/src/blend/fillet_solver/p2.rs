@@ -1192,10 +1192,8 @@ impl FilletSolver {
     /// # Errors
     ///
     /// With the opt-in `Kernel::fixes.fillet_chamfer_cone_on_arc` (not upstream, WR-421) a
-    /// linear generator is revolved too, into a cone; with
-    /// `Kernel::fixes.fillet_chamfer_cone_stored_as_cone` as well (WR-572) that revolution
-    /// is stored as the cone `CopyAndAddAnalytics` finds in its NURBS form, the rails made on
-    /// it.
+    /// linear generator is revolved too, into a cone, and that revolution is stored as the
+    /// cone `CopyAndAddAnalytics` finds in its NURBS form, the rails made on it (WR-572).
     /// Not upstream: a section centred on the arc's axis has its rail points turned into
     /// the half-planes through the edge's ends and takes the edge's start for the nearest
     /// point (WR-422); a start rail point within the solver's tolerance of the arc's axis
@@ -1589,12 +1587,12 @@ impl FilletSolver {
             trans.translate(origin);
             torus.transform(k, &trans, None)?;
         }
-        // `fixes.fillet_chamfer_cone_stored_as_cone` (WR-572, the fork's b5743ec): a linear
-        // section revolved is a cone, and is stored as one (SmCone), as a straight edge's
-        // round is stored as its cylinder: the revolution's NURBS form (its
+        // Not upstream (WR-572, the fork's b5743ec): a linear section revolved is a cone,
+        // and is stored as one (SmCone), as a straight edge's round is stored as its
+        // cylinder: the revolution's NURBS form (its
         // `SmBSplineSurface::Copy`) through `CopyAndAddAnalytics`, kept when that gives a
         // cone; anything else stays the revolution
-        let torus = if linear_section && k.fixes.fillet_chamfer_cone_stored_as_cone {
+        let torus = if linear_section {
             let cone = torus.base().copy().copy_and_add_analytics(k)?;
             if matches!(cone.kind(), crate::surface::surface::SurfaceKind::Cone(_)) {
                 cone
