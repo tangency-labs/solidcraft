@@ -3,10 +3,14 @@
 use crate::drawing_dimension_status::{DimensionItem, DrawingAttention};
 use crate::ui_kit;
 
+fn tr(id: &str) -> String { solidcraft_ui_text::format(id, &[]) }
+fn fmt(id: &str, values: &[(&str, &str)]) -> String { solidcraft_ui_text::format(id, values) }
+use crate::ui_kit;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AttentionRow {
     pub id: String,
-    pub state: &'static str,
+    pub state: String,
     pub reason: String,
     pub location: String,
 }
@@ -24,19 +28,19 @@ pub fn rows(snapshot: &DrawingAttention) -> Vec<AttentionRow> {
     }).collect()
 }
 
-fn state(d: &DimensionItem) -> &'static str {
+fn state(d: &DimensionItem) -> String {
     match d.status.as_str() {
-        "lost" => "Lost",
-        "ambiguous" => "Ambiguous",
-        "ok" | "overridden" if d.out_of_date => "Out of date",
-        "ok" | "overridden" => "Inspection needed",
-        _ => "Needs attention",
+        "lost" => tr("ui.drawing_attention.lost"),
+        "ambiguous" => tr("ui.drawing_attention.ambiguous"),
+        "ok" | "overridden" if d.out_of_date => tr("ui.drawing_attention.stale"),
+        "ok" | "overridden" => tr("ui.drawing_attention.inspect"),
+        _ => tr("ui.drawing_attention.other"),
     }
 }
 
 fn reason(d: &DimensionItem) -> String {
     if let Some(error) = &d.inspect_error {
-        return format!("Inspection failed: {error}");
+        return fmt("ui.drawing_attention.inspection_failed", &[("error", error)]);
     }
     if let Some(why) = &d.why {
         if !why.trim().is_empty() {
@@ -44,9 +48,9 @@ fn reason(d: &DimensionItem) -> String {
         }
     }
     if d.out_of_date {
-        return "The drawing changed since this dimension was updated.".to_owned();
+        return tr("ui.drawing_attention.changed");
     }
-    "The dimension reference needs inspection.".to_owned()
+    tr("ui.drawing_attention.reference")
 }
 
 /// Draw a status card only; callers decide its position and refresh cadence.
@@ -96,10 +100,10 @@ mod tests {
         ]}));
         let list = rows(&snapshot);
         assert_eq!(list.len(), 2);
-        assert_eq!(list[0].state, "Lost");
+        assert_eq!(list[0].state, tr("ui.drawing_attention.lost"));
         assert_eq!(list[0].reason, "Edge deleted");
         assert_eq!(list[0].location, "Location unknown");
-        assert_eq!(list[1].state, "Out of date");
+        assert_eq!(list[1].state, tr("ui.drawing_attention.stale"));
     }
 
     #[test]
@@ -107,7 +111,7 @@ mod tests {
         let mut snapshot = from_status(&json!({"dimensions":[{"dimension":"d","status":"ambiguous"}]}));
         snapshot.dimensions[0].inspect_error = Some("not available".to_owned());
         let list = rows(&snapshot);
-        assert_eq!(list[0].reason, "Inspection failed: not available");
-        assert_eq!(list[0].state, "Ambiguous");
+        assert_eq!(list[0].reason, fmt("ui.drawing_attention.inspection_failed", &[("error", "not available")]));
+        assert_eq!(list[0].state, tr("ui.drawing_attention.ambiguous"));
     }
 }
