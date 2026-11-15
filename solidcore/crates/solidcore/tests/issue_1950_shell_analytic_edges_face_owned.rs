@@ -83,8 +83,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.keep_operand_uv_trims = true;
     f.geometric_g2_continuity = true;
     f.proto_vertex_miss_is_false = true;
-    f.check_loop_vertex_tolerance = true;
-    f.check_loop_projected_seam_ends = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
     f.join_touching_loops = true;

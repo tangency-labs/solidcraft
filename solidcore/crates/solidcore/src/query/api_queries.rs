@@ -20,6 +20,7 @@
 //! | [`edge_plane_crossings`] | not upstream: where an edge, over its own interval, meets a plane |
 //! | [`edge_crossing_on_face`] | not upstream: where a curve meets an edge, solved on one of the edge's faces |
 //! | [`point_distance`], [`vertex_distance`], [`edge_face_gap_samples`], [`edgeuse_face_frame`] | not upstream: certified distances (the last on `SmCrvSrfGapFunction`'s samples) |
+//! | [`box_max_distance_to_point`] | not upstream: [`Extent3d::max_distance_to_point`] of a box given by two corners |
 //! | `count_contained_samples`, `edge_piece_points`, `point_in_solid`, `target_curve_crossings` (private) | `sm_CountContainedSamples`, `sm_PointInSolid`, its `BrepCurveSolve` |
 //! | `solution_point` (private) | `SmSolution::GetPoint` |
 //!
@@ -1499,6 +1500,20 @@ pub fn point_distance(a: Point3, b: Point3) -> Result<Distance> {
         value,
         bound: cmax(bound, 0.0),
     })
+}
+
+/// The largest distance from `point` to a point of the box with opposite corners `a`
+/// and `b`: to its farthest corner ([`Extent3d::max_distance_to_point`]; not upstream).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a non-finite coordinate.
+pub fn box_max_distance_to_point(a: Point3, b: Point3, point: Point3) -> Result<f64> {
+    let finite = |p: Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if !finite(a) || !finite(b) || !finite(point) {
+        return Err(SolidError::invalid_input(OP, "non-finite point"));
+    }
+    Ok(Extent3d::from_points(a, b).max_distance_to_point(point))
 }
 
 /// The distance from vertex `id`'s point to `point`, as [`point_distance`] (not
