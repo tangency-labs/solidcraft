@@ -767,6 +767,14 @@ impl Body {
         }
     }
 
+    /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
+    pub fn nearest_face(&self, p: Vec3) -> Option<(f64, usize)> {
+        let (ops, order) = self.ops_body()?;
+        let reach = self.size().max(1.0) * 100.0;
+        let dists = ops.face_distances_within(order, &[[p.x, p.y, p.z]], reach).ok()?;
+        dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0))
+    }
+
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
     pub fn with_cylinder_certificate(mut self, producer: u64) -> Result<Self> {
         if producer == 0 {
