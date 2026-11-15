@@ -221,7 +221,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.check_loop_projected_seam_ends = true;
     k.fixes.check_loop_vertex_tolerance = true;
     k.fixes.classify_edge_interval = true;
-    k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.cylinder_rebuild_mean_radius = true;

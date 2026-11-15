@@ -13,7 +13,7 @@
 //! | [`Surface::evaluate_geometric`], [`evaluate_geometric_of`] | `SmSurface::EvaluateGeometric`          |
 //! | [`Surface::evaluate_normal_section`], [`evaluate_normal_section_of`], [`SurfaceNormalSection`] | `SmSurface::EvaluateNormalSection` |
 //! | [`Surface::get_singularities`], [`Surface::get_singularities_of_face`], [`Singularities`] | `SmSurface::GetSingularities`                    |
-//! | [`Surface::cover_coincident_surface_deferring_trims`], [`CoverCoincident`] | `SmSurface::CoverCoincidentSurface`     |
+//! | [`Surface::cover_coincident_surface_deferring_trims`], [`CoverCoincident`], [`ContinuationFold`] | `SmSurface::CoverCoincidentSurface` |
 //! | [`Surface::calculate_tight_bounding_box`]        | `SmSurface::CalculateTightBoundingBox`           |
 //! | [`check_shape_match`]                             | `smsurf_CheckShapeMatch`                         |
 //! | [`FindPsNormalEnfo`] (`EvalNFunctions`)           | `SmFindPSNormalENFO::Evaluate` (struct: `surface.surface_p1`) |
@@ -49,14 +49,20 @@
 //!   B-rep runs `topology::face::p1::remove_uv_trim_curves` right after the call (nothing
 //!   runs in between, so the order is upstream's). There is no entry point that skips
 //!   the deletion: every caller receives the face.
-//! - **A folded continuation is not covered** (opt-in
-//!   `Kernel::fixes.cover_refuses_folded_continuation`, WR-407; off by default, which
-//!   merges as upstream does). SolidCraft change, tangency-labs/smlib 1b6f5fa (`SmSurface::CoverCoincidentSurface`, before its
-//!   `AdjustSTEPUVDomain`): when a B-spline-based surface would be extended past its
-//!   natural domain, its normal may neither vanish nor turn back between neighbouring
-//!   samples of a 21 x 21 grid over the domain the merge uses; otherwise the cover fails
-//!   (the faces keep the edge between them) instead of merging onto a continuation that
-//!   is not one sheet. tangency-labs/solidcore#434.
+//! - **A folded continuation is not covered** (WR-407; upstream merges onto it).
+//!   SolidCraft change, tangency-labs/smlib 1b6f5fa (`SmSurface::CoverCoincidentSurface`,
+//!   before its `AdjustSTEPUVDomain`): when a B-spline-based surface would be extended
+//!   past its natural domain, its normal may not turn back between neighbouring samples
+//!   of a 21 x 21 grid over the domain the merge uses; otherwise the cover fails (the
+//!   faces keep the edge between them) instead of merging onto a continuation that is not
+//!   one sheet, and [`CoverCoincident::fold`] names the reversed pair
+//!   ([`ContinuationFold`]). tangency-labs/solidcore#434. The fork also refused a sample
+//!   whose normal is shorter than `SM_EFF_ZERO_SQRT` times the normal at the centre of
+//!   the natural domain; that cut-off is no derived bound, and it refused covers at the
+//!   degenerate corners of the surface's own domain (a collapsed edge, whose normal is
+//!   exactly zero). Here a sample whose normal is exactly zero has no direction and
+//!   witnesses nothing: each comparison bridges it to the last sample with a direction
+//!   along its grid row and column, so a reversal across it is still a fold.
 //! - **A face across a wrapped seam is covered** (WR-599; the fork's
 //!   tangency-labs/smlib@16bf1cb; upstream refuses every crossing). A boundary step across this surface's seam in a
 //!   direction it is closed in over its natural domain is no failure, and the domain
@@ -113,7 +119,7 @@ const NUM_SAMPLES: usize = 6;
 /// `lNumBdrySamples` of `CoverCoincidentSurface`: the samples along each boundary.
 const NUM_BDRY_SAMPLES: usize = 15;
 /// `lNumFoldSamples` of the fork's `CoverCoincidentSurface`: the `21 x 21` grid over the
-/// extended domain whose normals must neither vanish nor turn back.
+/// extended domain whose normals must not turn back.
 const NUM_FOLD_SAMPLES: usize = 21;
 /// `lNumFoldSamples - 1.0`: the grid's step in fractions of the domain.
 const NUM_FOLD_SAMPLES_DENOM: f64 = (NUM_FOLD_SAMPLES - 1) as f64;
@@ -317,6 +323,34 @@ pub struct CoverCoincident {
     /// (`topology::face::p1::remove_uv_trim_curves`) right after the call. `None` on
     /// failure and for a surface no face owns.
     pub remove_uv_trim_curves_of: Option<ObjectRef>,
+    /// Why the cover failed when the continuation it would merge onto is not one sheet
+    /// (WR-407); `None` on success and on every other failure.
+    pub fold: Option<ContinuationFold>,
+}
+
+/// The witness that the continuation of a B-spline-based surface past its natural
+/// domain folds over the domain a cover would merge onto (WR-407), found on the
+/// `21 x 21` grid over that domain. `uv` is the later sample in grid order (u major, then
+/// v) and `neighbour` the sample it was compared with: the one before it along its grid
+/// row or column, past any sample whose normal is exactly zero.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ContinuationFold {
+    /// The unit normals at `uv` and `neighbour` turn back: their dot product `dot` is not
+    /// positive.
+    TurnsBack {
+        /// The later sample.
+        uv: Point2,
+        /// The sample compared with it.
+        neighbour: Point2,
+        /// The dot product of the two unit normals.
+        dot: f64,
+    },
+    /// The first derivatives could not be evaluated at `uv`, or the normal there is not
+    /// finite.
+    NotEvaluated {
+        /// The sample.
+        uv: Point2,
+    },
 }
 
 /// A two-surface local solution ([`Surface::local_surface_solve`] and
@@ -1116,6 +1150,7 @@ impl Surface {
             max_dist: BIG_DOUBLE,
             covered_step_domain: None,
             remove_uv_trim_curves_of: None,
+            fold: None,
         };
 
         // We're going to have to expand ourselves right away.
@@ -1252,6 +1287,7 @@ impl Surface {
                 max_dist,
                 covered_step_domain: Some(new_domain),
                 remove_uv_trim_curves_of: self.face_owner(),
+                fold: None,
             });
         }
 
@@ -1537,47 +1573,16 @@ impl Surface {
         // face's UV domain spans the fold, and the face rebuilt on it gets UV trims far from
         // its edges (two swept arc walls sharing their top and bottom planes, joined: UV gaps
         // and the wrong volume). The continued surface must not fold over the domain the
-        // merge will use: its normal must not vanish or turn back between neighbouring
-        // samples of a grid over that domain. Opt-in (`Kernel::fixes.cover_refuses_folded_continuation`,
-        // WR-407); upstream merges onto the continuation.
-        if k.fixes.cover_refuses_folded_continuation
-            && out_of_bounds_enabled(self).is_some()
+        // merge will use: its normal must not turn back between neighbouring samples of a
+        // grid over that domain (WR-407); upstream merges onto the continuation.
+        if out_of_bounds_enabled(self).is_some()
             && !update_domain.is_contained_by(&orig_domain, 0.0)
         {
-            let Some((_, reference)) = self.step_normal(k, orig_domain.evaluate(0.5, 0.5))? else {
-                return Ok(failure);
-            };
-            let mut previous: Vec<Vec3> = Vec::new();
-            for ii in 0..NUM_FOLD_SAMPLES {
-                let mut row: Vec<Vec3> = Vec::with_capacity(NUM_FOLD_SAMPLES);
-                for jj in 0..NUM_FOLD_SAMPLES {
-                    let uv = update_domain.evaluate(
-                        ii as f64 / NUM_FOLD_SAMPLES_DENOM,
-                        jj as f64 / NUM_FOLD_SAMPLES_DENOM,
-                    );
-                    let Some((normal, length)) = self.step_normal(k, uv)? else {
-                        return Ok(failure);
-                    };
-                    // A normal of no length is a fold or a pole (`!(length > limit)`, so an
-                    // incomparable length refuses too).
-                    if length.partial_cmp(&(EFF_ZERO_SQRT * reference))
-                        != Some(core::cmp::Ordering::Greater)
-                    {
-                        return Ok(failure);
-                    }
-                    let unit = normal / length;
-                    if row
-                        .last()
-                        .is_some_and(|previous_in_row| unit.dot(*previous_in_row) <= 0.0)
-                        || previous
-                            .get(jj)
-                            .is_some_and(|above| unit.dot(*above) <= 0.0)
-                    {
-                        return Ok(failure);
-                    }
-                    row.push(unit);
-                }
-                previous = row;
+            if let Some(fold) = self.continuation_fold(k, &update_domain)? {
+                return Ok(CoverCoincident {
+                    fold: Some(fold),
+                    ..failure
+                });
             }
         }
 
@@ -1591,7 +1596,54 @@ impl Surface {
             max_dist,
             covered_step_domain: Some(new_domain),
             remove_uv_trim_curves_of: self.face_owner(),
+            fold: None,
         })
+    }
+
+    /// The first fold of this surface (with out-of-bounds evaluation on) over `domain`
+    /// in its STEP parameters, on the `21 x 21` grid `CoverCoincidentSurface`'s fold rule
+    /// samples (WR-407): two neighbouring samples whose unit normals turn back
+    /// (`!(dot > 0)`, so a NaN dot refuses), or a sample that cannot be evaluated or whose
+    /// normal is not finite. A sample whose normal is exactly zero (a degenerate point,
+    /// such as a collapsed edge of the natural domain) has no direction and witnesses
+    /// nothing; the next sample along its row and its column is compared with the last
+    /// one before it that has a direction, so a reversal across it is still found.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluation.
+    fn continuation_fold(&self, k: &Kernel, domain: &Extent2d) -> Result<Option<ContinuationFold>> {
+        // The last sample with a direction in each grid column (fixed v), and its uv.
+        let mut column: [Option<(Point2, Vec3)>; NUM_FOLD_SAMPLES] = [None; NUM_FOLD_SAMPLES];
+        for ii in 0..NUM_FOLD_SAMPLES {
+            // The last sample with a direction in this grid row (fixed u).
+            let mut row: Option<(Point2, Vec3)> = None;
+            for (jj, above) in column.iter_mut().enumerate() {
+                let uv = domain.evaluate(
+                    ii as f64 / NUM_FOLD_SAMPLES_DENOM,
+                    jj as f64 / NUM_FOLD_SAMPLES_DENOM,
+                );
+                let Some((normal, length)) = self.step_normal(k, uv)? else {
+                    return Ok(Some(ContinuationFold::NotEvaluated { uv }));
+                };
+                if !length.is_finite() {
+                    return Ok(Some(ContinuationFold::NotEvaluated { uv }));
+                }
+                if length == 0.0 {
+                    continue;
+                }
+                let unit = normal / length;
+                for (neighbour, other) in [row, *above].into_iter().flatten() {
+                    let dot = unit.dot(other);
+                    if dot.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+                        return Ok(Some(ContinuationFold::TurnsBack { uv, neighbour, dot }));
+                    }
+                }
+                row = Some((uv, unit));
+                *above = Some((uv, unit));
+            }
+        }
+        Ok(None)
     }
 
     /// The normal (`Du × Dv`) and its length at `uv` in the STEP parameterisation
@@ -2255,38 +2307,95 @@ mod tests {
         Ok((covered, this.step_uv_domain().u_interval().max()))
     }
 
-    /// With `fixes.cover_refuses_folded_continuation` (WR-407, #434; SolidCraft change,
-    /// tangency-labs/smlib 1b6f5fa) the cover across the fold fails and changes nothing.
-    #[test]
-    fn issue_434_cover_refuses_a_continuation_that_folds() -> Result<()> {
-        let mut k = Kernel::default();
-        k.fixes.cover_refuses_folded_continuation = true;
-        let (covered, u_max) = issue_434_cover_across_a_fold(&k)?;
-        assert!(
-            !covered.success,
-            "the fold at u = 1.5 must not be covered: {covered:?}"
-        );
-        // Nothing was changed by the refused cover.
-        assert_eq!(u_max, 1.0);
-        Ok(())
-    }
-
-    /// Default (SMLib v1.0.1): the flat sheet is now planar to `SM_EFF_ZERO` (`IsPlanar`
-    /// tests the unpadded pseudo box, `SmSurface.cpp:22371` at `3fd5b95`), so
-    /// `GetMaxAnalyticDomain` expands it relatively by 100 instead of by half a span per
-    /// cubic direction. The search over that domain reaches the folded continuation and
-    /// the cover fails, changing nothing. At `c9c5979` the padded box was not planar; the
-    /// domain ended at the fold (u = 1.5) and the cover succeeded (WR-407).
+    /// The flat sheet is planar to `SM_EFF_ZERO` (`IsPlanar` tests the unpadded pseudo
+    /// box, `SmSurface.cpp:22371` at `3fd5b95`), so `GetMaxAnalyticDomain` expands it
+    /// relatively by 100 instead of by half a span per cubic direction. The search over
+    /// that domain reaches the folded continuation and the cover fails, changing nothing.
+    /// At `c9c5979` the padded box was not planar; the domain ended at the fold
+    /// (u = 1.5) and only the fold rule (WR-407, #434) refused the cover.
     #[test]
     fn issue_434_default_refuses_the_fold_of_a_planar_sheet() -> Result<()> {
         let k = Kernel::default();
-        assert!(!k.fixes.cover_refuses_folded_continuation);
         let (covered, u_max) = issue_434_cover_across_a_fold(&k)?;
         assert!(
             !covered.success,
             "the planar sheet's cover across the fold fails: {covered:?}"
         );
         assert_eq!(u_max, 1.0);
+        Ok(())
+    }
+
+    /// A B-spline surface quadratic in u and linear in v over `[0, 1]^2` from the three
+    /// u rows `rows` (each the v = 0 and v = 1 control point), with out-of-bounds
+    /// evaluation on, as `CoverCoincidentSurface` evaluates it.
+    fn wr_407_quadratic_sheet(rows: [[Vec3; 2]; 3]) -> Result<Surface> {
+        use crate::nurbs::b_spline_surface::p1::BSplineSurface as Bss;
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let net = rows
+            .iter()
+            .map(|r| r.iter().map(|p| CPoint::from_point(*p)).collect())
+            .collect();
+        let nl = NlSurface::new(
+            net,
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )?;
+        let mut s = Surface::from(Bss::from_nurb(nl, false));
+        set_out_of_bounds_enabled(&mut s, true);
+        Ok(s)
+    }
+
+    /// WR-407, tangency-labs/solidcraft#17215: a collapsed edge of the surface's own
+    /// domain is no fold. `P(u, v) = (u, u^2 v, 0)` collapses its edge u = 0 to the
+    /// origin, so the normal `Du x Dv = (0, 0, u^2)` is exactly zero on the grid row
+    /// u = 0 of `[-1, 1] x [0, 1]` (sample 10 of 20), and it points along +z on every
+    /// other row, on the continuation u < 0 too. The fork's cut-off (`SM_EFF_ZERO_SQRT`
+    /// times the normal at the centre of the natural domain) refused this cover.
+    #[test]
+    fn wr_407_collapsed_edge_of_the_domain_is_no_fold() -> Result<()> {
+        let k = Kernel::default();
+        let s = wr_407_quadratic_sheet([
+            [Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0)],
+            [Vec3::new(0.5, 0.0, 0.0), Vec3::new(0.5, 0.0, 0.0)],
+            [Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0)],
+        ])?;
+        let domain = Extent2d::from_bounds(-1.0, 0.0, 1.0, 1.0);
+        // The row u = 0 is sampled, and its normal is exactly zero there.
+        let edge = domain.evaluate(0.5, 0.25);
+        assert_eq!(edge.x, 0.0);
+        assert_eq!(s.step_normal(&k, edge)?.map(|(_, length)| length), Some(0.0));
+        assert_eq!(s.continuation_fold(&k, &domain)?, None);
+        Ok(())
+    }
+
+    /// The real defect next to the case above is still caught: `x(u) = 2u - u^2` turns
+    /// back at the natural boundary u = 1, where `Du` (and the normal) is exactly zero.
+    /// The zero row is passed over and u = 1.1 is compared with u = 0.9, whose normals
+    /// are -z and +z.
+    #[test]
+    fn wr_407_fold_through_a_zero_normal_is_still_a_fold() -> Result<()> {
+        let k = Kernel::default();
+        let s = wr_407_quadratic_sheet([
+            [Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)],
+            [Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0)],
+            [Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0)],
+        ])?;
+        let domain = Extent2d::from_bounds(0.0, 0.0, 2.0, 1.0);
+        let fold_row = domain.evaluate(0.5, 0.0);
+        assert_eq!(fold_row.x, 1.0);
+        assert_eq!(s.step_normal(&k, fold_row)?.map(|(_, length)| length), Some(0.0));
+        let Some(ContinuationFold::TurnsBack { uv, neighbour, dot }) =
+            s.continuation_fold(&k, &domain)?
+        else {
+            panic!("the fold at u = 1 must be found");
+        };
+        assert_eq!(uv, domain.evaluate(11.0 / 20.0, 0.0));
+        assert_eq!(neighbour, domain.evaluate(9.0 / 20.0, 0.0));
+        assert!(uv.x > 1.0 && neighbour.x < 1.0, "{uv:?} {neighbour:?}");
+        assert!(dot < -0.999_999, "{dot}");
         Ok(())
     }
 
