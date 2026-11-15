@@ -1932,7 +1932,7 @@ impl SplitCorners for NoCorners {
 }
 
 /// Where `t` goes in the ascending `params`, or `None` when it lies within `tol` of one of
-/// them (ReCalcFilletGeom's sort of the rail-end points by their parameter on the edge).
+/// them (`ReCalcFilletGeom`'s sort of the rail-end points by their parameter on the edge).
 fn sorted_insert_index(params: &[f64], t: f64, tol: f64) -> Option<usize> {
     for (kk, &p) in params.iter().enumerate() {
         if (t - p).abs() < tol {
