@@ -1679,7 +1679,10 @@ fn a_traced_cut_whose_round_is_tangent_to_a_thin_ribs_side_removes_its_tool() {
         let z = solidcore::query::api_queries::vertex_get_point(&brep, v)
             .unwrap()
             .z;
-        assert!([0.0, 2.5, 5.0].iter().any(|h| (z - h).abs() < 1e-6), "a vertex at z = {z}");
+        assert!(
+            [0.0, 2.5, 5.0].iter().any(|h| (z - h).abs() < 1e-6),
+            "a vertex at z = {z}"
+        );
     }
 }
 
