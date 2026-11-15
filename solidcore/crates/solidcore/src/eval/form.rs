@@ -535,14 +535,37 @@ fn surface_on(
         if !valid_interval(along) {
             return None;
         }
-        let (ring_grid, fa) = face_quarters(angles, 0.0)?;
-        let (a_knots, arcs_r) = arcs(ring_grid.0, ring_grid.1);
         let (p_knots, h) = profile_nurbs(profile, Some(along))?;
         let fp = match profile.as_ref() {
             Curve::Circle { .. } | Curve::Ellipse { .. } => curve(profile, along)?.1,
             _ => along,
         };
         let (o, x, y, k) = revolution_frame(&h, *origin, *axis)?;
+        // The angle `tolerance` makes on the widest circle the face's profile reaches about the
+        // axis, as a cylinder's ([`reaches`]): no wider than its control points' (the profile
+        // lies in their hull). A matrix that is not the identity may scale the placed surface,
+        // so its angle ends are taken as they are.
+        let identity = *matrix
+            == [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ];
+        let widest = h
+            .iter()
+            .map(|hp| {
+                let d = Vec3::new(hp[0] / hp[3], hp[1] / hp[3], hp[2] / hp[3]) - o;
+                (d - k * d.dot(k)).len()
+            })
+            .fold(0.0, f64::max);
+        let reach = if identity && tolerance > 0.0 && widest > 0.0 && widest.is_finite() {
+            tolerance / widest
+        } else {
+            0.0
+        };
+        let (ring_grid, fa) = face_quarters(angles, reach)?;
+        let (a_knots, arcs_r) = arcs(ring_grid.0, ring_grid.1);
         let net: Vec<Vec<[f64; 4]>> = arcs_r
             .iter()
             .map(|([c, s], wu)| {
