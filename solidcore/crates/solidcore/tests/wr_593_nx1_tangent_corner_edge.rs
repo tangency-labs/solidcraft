@@ -130,11 +130,14 @@ fn exact_round_builds() {
 }
 
 /// Formerly `residue_round_fails_by_default`. The residue round upstream refused with
-/// status 1001 (the case this file pins) builds by
-/// default since `fillet_nx1_tangent_side_edge` was removed: the body is valid at Level 2,
-/// one closed manifold solid, and its certified volume enclosure lies within the closed
-/// form's tolerance (the round's surface approximates the exact torus, as in
-/// [`residue_round_with_the_fix`]).
+/// status 1001 (the case this file pins) builds by default since
+/// `fillet_nx1_tangent_side_edge` was removed: the body is valid at Level 2 and one closed
+/// manifold solid. Its certified volume enclosure lies above the peg's volume (a concave
+/// round only adds material) and below [`expected_volume`], the full half-turn sweep of
+/// the round's section (at the arc's ends the section would overhang the bar's flat
+/// sides, so the built round is trimmed there and adds less; ARGUED). The residue of 1e-10
+/// must not change the body: the exact round's pinned volume (`exact_round_builds`) lies
+/// within 1e-6 of the enclosure (MEASURED: that volume is the integrator's estimate).
 #[test]
 fn residue_round_builds_by_default() {
     let mut k = Kernel::default();
@@ -146,14 +149,17 @@ fn residue_round_builds_by_default() {
         .lines();
     assert!(lines.is_empty(), "Level 2: {lines:?}");
     assert!(is_manifold_solid(&body).unwrap());
-    let want = expected_volume();
-    let width = 1e-7 * want;
+    let pi = core::f64::consts::PI;
+    let peg = H * (2.0 * R * L + pi * R * R) + H * pi * R * R;
+    let sweep = expected_volume();
+    let width = 1e-7 * sweep;
     let enc = enclose_volume(&k, &mut body, width).unwrap();
     assert!(enc.width() <= width, "{enc:?}");
-    eprintln!("enclosure [{}, {}] closed form {want}", enc.lo, enc.hi);
+    assert!(peg < enc.lo && enc.hi < sweep, "{peg} < {enc:?} < {sweep}");
+    let exact = 3_581.983_727_673_527_5_f64;
     assert!(
-        enc.lo - 1e-3 * want <= want && want <= enc.hi + 1e-3 * want,
-        "closed form {want} vs [{}, {}]",
+        enc.lo - 1e-6 <= exact && exact <= enc.hi + 1e-6,
+        "exact round {exact} vs [{}, {}]",
         enc.lo,
         enc.hi
     );
