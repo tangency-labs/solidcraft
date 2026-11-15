@@ -138,6 +138,12 @@ fn exact_round_builds() {
 /// sides, so the built round is trimmed there and adds less; ARGUED). The residue of 1e-10
 /// must not change the body: the exact round's pinned volume (`exact_round_builds`) lies
 /// within 1e-6 of the enclosure (MEASURED: that volume is the integrator's estimate).
+/// The body is that sweep trimmed by the bar's side planes y = +-R: at radius `rho` the
+/// planes cut `2 acos(R / rho)` off the half turn, so the round adds
+/// `int (pi - 2 acos(R / rho)) rho h(rho) d rho` over the section, whose height above the
+/// top is `h(rho) = r - sqrt(r^2 - (rho - R - r)^2)`. The enclosure must hold the peg plus
+/// that integral, evaluated by a fine midpoint rule (MEASURED: the rule's error is not
+/// bounded here; it agrees with the enclosure to 4e-6).
 #[test]
 fn residue_round_builds_by_default() {
     let mut k = Kernel::default();
@@ -156,6 +162,23 @@ fn residue_round_builds_by_default() {
     let enc = enclose_volume(&k, &mut body, width).unwrap();
     assert!(enc.width() <= width, "{enc:?}");
     assert!(peg < enc.lo && enc.hi < sweep, "{peg} < {enc:?} < {sweep}");
+    let n = 200_000;
+    let step = RADIUS / f64::from(n);
+    let trimmed: f64 = (0..n)
+        .map(|i| {
+            let rho = R + (f64::from(i) + 0.5) * step;
+            let t = rho - R - RADIUS;
+            let h = RADIUS - (RADIUS * RADIUS - t * t).max(0.0).sqrt();
+            (pi - 2.0 * (R / rho).min(1.0).acos()) * rho * h * step
+        })
+        .sum();
+    assert!(
+        enc.lo - 1e-5 <= peg + trimmed && peg + trimmed <= enc.hi + 1e-5,
+        "trimmed sweep {} vs [{}, {}]",
+        peg + trimmed,
+        enc.lo,
+        enc.hi
+    );
     let exact = 3_581.983_727_673_527_5_f64;
     assert!(
         enc.lo - 1e-6 <= exact && exact <= enc.hi + 1e-6,
