@@ -155,11 +155,14 @@ fn run_on_drop(drop: Result<DroppedPoint>, tol: f64) -> Result<DroppedPoint> {
 
 /// A curved side edge that does not reach the new corner (exact only, WR-606):
 /// [`R::SideEdgeNotStraight`] when the drop onto it converged (`decided`), so that it stops
-/// short is proved; a stage failure when the drop stopped or failed (#15034 rule 5).
+/// short is proved; a stage failure when the drop stopped or failed (#15034 rule 5), keeping
+/// the failed drop's error (`drop_err`) as its cause.
 #[track_caller]
-fn curved_side_edge(decided: bool) -> SolidError {
+fn curved_side_edge(decided: bool, drop_err: Option<SolidError>) -> SolidError {
     if decided {
         refused(R::SideEdgeNotStraight)
+    } else if let Some(e) = drop_err {
+        stage_failed_after(e)
     } else {
         stage_failed()
     }
@@ -732,6 +735,8 @@ impl FilletRemoval {
         let mut crv_param = 0.0;
         let mut success = false;
         let mut stat_ok = false;
+        // the side-edge drop's error, kept as the cause of an exact-only stage failure
+        let mut drop_err = None;
 
         let new_vtx_pt = *self
             .new_vtx_pts
@@ -761,7 +766,7 @@ impl FilletRemoval {
                     crv_dist = d.distance;
                 }
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => {}
+                Err(e) => drop_err = Some(e),
             }
         }
 
@@ -778,7 +783,7 @@ impl FilletRemoval {
                 let decided = stat_ok && success;
                 // (an undecided drop proves no inexactness)
                 self.not_exact = decided;
-                return Err(curved_side_edge(decided));
+                return Err(curved_side_edge(decided, drop_err));
             }
             let curve_ivl = side_curve.natural_interval();
             let end = if high_end {
@@ -2085,12 +2090,25 @@ mod tests {
         assert_eq!(failed.cause(), Some(&call));
         // a curved side edge is refused only when the drop onto it converged
         assert_eq!(
-            curved_side_edge(true).blend_failure(),
+            curved_side_edge(true, None).blend_failure(),
             Some(&BlendFailure::RemovalRefused(R::SideEdgeNotStraight))
         );
-        assert_eq!(
-            curved_side_edge(false).blend_failure(),
-            Some(&BlendFailure::StageFailed)
-        );
+        let stopped = curved_side_edge(false, None);
+        assert_eq!(stopped.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert_eq!(stopped.cause(), None);
+    }
+
+    /// A drop onto a curved side edge that failed with an error (exact only) is a stage
+    /// failure that keeps the drop's error as its cause, so the chain reaches the call that
+    /// failed; a drop that only stopped has no cause to keep.
+    #[test]
+    fn a_failed_drop_onto_a_curved_side_edge_is_kept_as_the_cause() {
+        let call = SolidError::invalid_input("curve::drop_point", "no such curve");
+        let failed = curved_side_edge(false, Some(call.clone()));
+        assert_eq!(failed.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert!(failed.is_defect() && !failed.is_refusal());
+        assert_eq!(failed.cause(), Some(&call));
+        assert_eq!(failed.root_cause(), &call);
+        assert_eq!(curved_side_edge(false, None).cause(), None);
     }
 }
