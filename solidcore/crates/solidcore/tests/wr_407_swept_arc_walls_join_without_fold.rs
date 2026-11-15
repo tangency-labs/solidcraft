@@ -9,8 +9,8 @@
 //! continuation; upstream's `CoverCoincidentSurface` merged wall B's top onto that folded
 //! continuation and the join lost 5573 mm3. WR-407's frame on the path plane's normal is
 //! the default now, and without `cover_refuses_folded_continuation` the join is still
-//! wrong: with the drop pieces of the walls' trims joined (WR-543) it is 7744 mm3 too
-//! large. With `cover_refuses_folded_continuation` the cover across the
+//! wrong: the merged cover is a face of wall A's top B-spline whose trims run about 1.7 in
+//! v past the spline's knot domain. With `cover_refuses_folded_continuation` the cover across the
 //! fold is refused and the join has the closed-form volume
 //! `V_A + V_B - overlap = 60 (pi/2)(56^2 - 44^2) + 60 (pi/2)(64^2 - 52^2) - 60 (pi/4)(56^2 - 52^2)`.
 //! The walls' radial faces are the sweep's approximation of the arcs, so the volume is
@@ -159,38 +159,127 @@ fn farthest_trim_past_domain(k: &Kernel, b: &Brep) -> f64 {
     worst
 }
 
+/// Every face's UV trims lie in its surface's natural (knot) domain widened by `margin`,
+/// checked on the trims' control points (PROVEN for B-spline trims: each control point is
+/// read in homogeneous form `(x w, y w, z w, w)`, its weight must be positive, and its
+/// point `(x w / w, y w / w)` inside the widened domain; with positive weights a B-spline
+/// lies in the convex hull of its control points, and the widened domain is convex). A
+/// trim with no B-spline form, a weight that is not positive or a NaN fails. `margin`
+/// covers the one division's rounding. `Err` names the first trim that fails.
+fn trims_inside_domain(k: &Kernel, b: &Brep, margin: f64) -> Result<(), String> {
+    use solidcore::blend::fillet_section::certificate::NurbsCurve;
+    use solidcore::topology::brep::p1::faces;
+    use solidcore::topology::edgeuse::p1::{faceuse_loopuses, loopuse_edgeuses, uv_trim_curve};
+    for f in faces(b, None).unwrap() {
+        let face = b.face(f).unwrap();
+        let dom = face
+            .surface
+            .as_ref()
+            .unwrap()
+            .natural_uv_domain_with_nurb(k)
+            .unwrap();
+        let (u0, u1) = (dom.u_min() - margin, dom.u_max() + margin);
+        let (v0, v1) = (dom.v_min() - margin, dom.v_max() + margin);
+        let up = face.faceuse.unwrap();
+        for lu in faceuse_loopuses(b, up, false, None).unwrap() {
+            for eu in loopuse_edgeuses(b, lu).unwrap() {
+                let t = uv_trim_curve(b, eu)
+                    .unwrap()
+                    .0
+                    .unwrap_or_else(|| panic!("edge use {eu:?} of face {f:?} has no UV trim"));
+                let Some(bs) = t.b_spline_base() else {
+                    return Err(format!("face {f:?}: a trim with no B-spline form"));
+                };
+                let cn = NurbsCurve::of(bs).unwrap();
+                for p in cn.pw.chunks(4) {
+                    let &[xw, yw, _, w] = p else {
+                        return Err(format!("face {f:?}: a control point not homogeneous"));
+                    };
+                    // written so a NaN fails
+                    if !(w > 0.0) {
+                        return Err(format!("face {f:?}: a control point's weight {w}"));
+                    }
+                    let (x, y) = (xw / w, yw / w);
+                    if !(x >= u0 && x <= u1 && y >= v0 && y <= v1) {
+                        return Err(format!(
+                            "face {f:?}: control point ({x}, {y}) outside [{u0}, {u1}] x \
+                             [{v0}, {v1}]"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The body's tolerance volume: `sum A_f tol_f` over faces (area times tolerance) `+ sum pi
+/// tol_e^2 L_e` over edges (the tubes) `+ sum 4/3 pi tol_v^3` over vertices (the balls), from
+/// the body's own stored tolerances. The region a body bounds is defined only up to it: a
+/// face within its tolerance of the solid's boundary moves the volume by at most its area
+/// times that tolerance (to first order), and near an edge or vertex the closure lies in the
+/// edge's tube or the vertex's ball (ARGUED: the strips' widths are measured against the
+/// tolerances in `support/volume_leak.rs`, not certified).
+fn tolerance_volume(k: &Kernel, b: &mut Brep) -> f64 {
+    use solidcore::mass::integrator::properties::{edge_length, face_area};
+    use solidcore::topology::brep::p1::{edges, faces, vertices};
+    use solidcore::topology::{edge, face, vertex};
+    let mut slack = 0.0;
+    for f in faces(b, None).unwrap() {
+        let tol = face::p2::tolerance(b, f).unwrap();
+        slack += face_area(k, b, f, 1e-8).unwrap() * tol;
+    }
+    for e in edges(b, None).unwrap() {
+        let tol = edge::tolerance(b, e).unwrap();
+        slack += PI * tol * tol * edge_length(k, b, e, 1e-9).unwrap();
+    }
+    for v in vertices(b, None).unwrap() {
+        let tol = vertex::tolerance(b, v).unwrap();
+        slack += 4.0 / 3.0 * PI * tol * tol * tol;
+    }
+    slack
+}
+
 /// Without the fold rule the cover merges onto wall A's folded continuation: wall B's top
 /// becomes a face of wall A's top B-spline whose trims run about 1.7 in v past the spline's
 /// knot domain (1.69 here), where every consumer that clamps to the domain (upstream's
-/// `EvaluateSimple`) sees another surface than the face's edges lie on. With the fix no
-/// trim leaves its domain by more than a rounding.
+/// `EvaluateSimple`) sees another surface than the face's edges lie on, and one of its
+/// edges carries a tolerance of 2.3. With the fix every trim lies inside its domain (to
+/// 1e-9, on its control points).
 ///
 /// This used to be measured by the volume (7744 mm3 too large; 5573 mm3 short with
 /// upstream's sweep frame, 14596 mm3 with a drop piece stretched onto each trim's edge).
 /// Those figures were the clamped integration of that face. `brep_volume` now integrates
-/// it on the B-spline continued past its domain (#16735), where it lies on its edges, and
-/// the join's volume is the closed form's to the 1 mm3 the radial faces' approximation
-/// allows (MEASURED 1.6e-5 off), as with the fix (5.1e-7).
+/// it on the B-spline continued past its domain (#16735), where it lies on its edges, so
+/// the two joins bound the same solid up to their tolerances: their volumes agree within
+/// the two bodies' tolerance volumes ([`tolerance_volume`]).
 #[test]
 fn wr_407_default_join_loses_the_folded_cover() {
     // (the volume makes the faces' missing UV trims first)
     let (k, mut b) = joined(false);
     let v = volume(&k, &mut b);
+    let slack = tolerance_volume(&k, &mut b);
+    // a sampled point past the domain is a proven lower bound on how far the trim leaves it
     let past = farthest_trim_past_domain(&k, &b);
     assert!(
         past > 1.5,
         "the cover's trims leave the domain by only {past}"
     );
-    assert!(
-        (v - closed_form()).abs() < 1.0,
-        "{v} against {}",
+    let (kf, mut bf) = joined(true);
+    let vf = volume(&kf, &mut bf);
+    let slack_f = tolerance_volume(&kf, &mut bf);
+    eprintln!(
+        "wr_407: without the fix {v} (tolerance volume {slack:.3e}), with it {vf} \
+         ({slack_f:.3e}), closed form {}",
         closed_form()
     );
-    let (kf, mut bf) = joined(true);
-    let _ = volume(&kf, &mut bf);
-    let past = farthest_trim_past_domain(&kf, &bf);
+    if let Err(e) = trims_inside_domain(&kf, &bf, 1e-9) {
+        panic!("with the fix a trim leaves its domain: {e}");
+    }
     assert!(
-        past < 1e-9,
-        "with the fix a trim leaves its domain by {past}"
+        (v - vf).abs() <= slack + slack_f,
+        "{v} without the fix against {vf} with it: {:.3e} past the tolerance volumes \
+         {slack:.3e} + {slack_f:.3e}",
+        (v - vf).abs()
     );
 }

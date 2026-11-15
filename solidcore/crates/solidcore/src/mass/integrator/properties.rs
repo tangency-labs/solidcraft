@@ -477,7 +477,8 @@ impl<'a> Unclamped<'a> {
             return Ok(none);
         };
         // a plane is a bilinear, non-rational patch: its continuation is itself
-        if !matches!(surface.kind(), SurfaceKind::Plane(_)) && !continuation_certified(base, hull)?
+        if !matches!(surface.kind(), SurfaceKind::Plane(_))
+            && !continuation_certified(k, base, hull)?
         {
             return Ok(none);
         }
@@ -511,8 +512,13 @@ const CERTIFY_CUTS: u32 = 16;
 /// or its weights proved positive over the box as the enclosure proves them
 /// (`mass::enclosure::partials_over`), the box cut in halves where that is too coarse,
 /// along the side longer against the domain's, at most [`CERTIFY_CUTS`] times along any
-/// path.
+/// path. Cancellation is polled once per box.
+///
+/// # Errors
+///
+/// Those of the enclosure, and [`SolidError::Cancelled`] when `k` is cancelled.
 fn continuation_certified(
+    k: &Kernel,
     base: &crate::nurbs::b_spline_surface::BSplineSurface,
     hull: (f64, f64, f64, f64),
 ) -> Result<bool> {
@@ -541,6 +547,7 @@ fn continuation_certified(
     );
     let mut stack = vec![(u0, u1, v0, v1, 0u32)];
     while let Some((a, b, c, d, cuts)) = stack.pop() {
+        k.check_cancelled(OP)?;
         if proved(a, b, c, d)? {
             continue;
         }
@@ -1459,7 +1466,7 @@ fn gap_closure(
     use crate::topology::edgeuse::{p1 as eu1, p3 as eu3};
     let fu = crate::topology::face::p2::upward_faceuse(b, f)?
         .ok_or_else(|| SolidError::mass_missing(OP, "the face's faceuse"))?;
-    let mut loops = Vec::new();
+    let mut pools = Vec::new();
     for lu in eu1::faceuse_loopuses(b, fu, false, None)? {
         if crate::topology::loopuse::is_vertex_loopuse(b, lu)? {
             continue;
@@ -1487,16 +1494,19 @@ fn gap_closure(
                 .ok_or_else(|| SolidError::mass_missing(OP, "the edge use's edge"))?;
             let ivl = b.edge(e)?.interval;
             let edge = edge::curve(b, e)?.map(|c| (c.clone(), ivl.min(), ivl.max()));
-            sides.push(ClosureSide {
-                trim,
-                edge,
-                vertex,
-                same,
-                trim_ends: [vertex; 2],
-                edge_ends: [vertex; 2],
-            });
+            sides.push((
+                eu,
+                ClosureSide {
+                    trim,
+                    edge,
+                    vertex,
+                    same,
+                    trim_ends: [vertex; 2],
+                    edge_ends: [vertex; 2],
+                },
+            ));
         }
-        loops.push(sides);
+        pools.push(sides);
     }
     // The face is integrated over its oriented trim boundary ([`boundary`]), which fills a
     // UV gap between consecutive trims (a surface singularity, or a trim ending short of the
@@ -1505,22 +1515,30 @@ fn gap_closure(
     // curve does, so every piece of the boundary the face integral runs along is closed.
     let integrated = closed_boundary(k, b, f)?;
     let mut at_curve = 0usize;
-    for (sides, &count) in loops.iter_mut().zip(&integrated.loops) {
+    let mut counts = integrated.loops.iter();
+    let mut loops: Vec<Vec<ClosureSide>> = Vec::new();
+    for mut pool in pools {
+        let Some(&count) = counts.next() else {
+            // a loop the boundary does not integrate keeps its edge uses' order
+            loops.push(pool.into_iter().map(|(_, side)| side).collect());
+            continue;
+        };
         let curves = at_curve..at_curve + count;
         at_curve += count;
-        let mut used = core::mem::take(sides).into_iter().peekable();
         let mut closed = Vec::new();
         let mut gaps = Vec::new();
         for j in curves {
             match integrated.edgeuses.get(j) {
-                Some(Some(_)) => {
-                    // the gap lines before this side end at its vertex
-                    let Some(side) = used.next() else {
+                Some(Some(eu)) => {
+                    // the side of this boundary curve's own edge use, whatever its place
+                    // in the loop; the gap lines before it end at its vertex
+                    let Some(at) = pool.iter().position(|(id, _)| id == eu) else {
                         return Err(SolidError::mass_failed(
                             OP,
-                            "the face's boundary has more trims than its loop",
+                            "the face's boundary has a trim of no edge use of its loop",
                         ));
                     };
+                    let (_, side) = pool.swap_remove(at);
                     for trim in core::mem::take(&mut gaps) {
                         closed.push(gap_side(trim, side.vertex));
                     }
@@ -1546,13 +1564,13 @@ fn gap_closure(
                 closed.push(gap_side(trim, first));
             }
         }
-        if used.peek().is_some() {
+        if !pool.is_empty() {
             return Err(SolidError::mass_failed(
                 OP,
                 "the face's loop has more edge uses than its boundary",
             ));
         }
-        *sides = closed;
+        loops.push(closed);
     }
     let surface = b
         .face(f)?
