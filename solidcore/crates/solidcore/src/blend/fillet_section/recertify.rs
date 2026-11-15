@@ -536,6 +536,34 @@ pub fn recertify_with_thumbweight(
     recertify_in_frame(k, &local, pb.bound(), frame_rounding(pb.net())?)
 }
 
+/// The bound of a blend whose net was edited after it was built (#17015: a fillet's join
+/// at a corner sets an end row of it to its neighbour's), proved as [`recertify`] proves
+/// a net, against `ceiling` in place of its old bound: the largest over its spans of the
+/// certificate, the net's distance from its rows and the floor, plus two floors more, as
+/// `Build` stores its bound (rows computed again are within two floors of these). A later
+/// [`recertify`] against it takes each span's certificate no further than this one did,
+/// so it proves it again.
+///
+/// # Errors
+///
+/// Those of [`recertify`]: `InvalidInput` where the edited net is not proved within
+/// `ceiling` of its definition, or is not a net of its definition's stations.
+pub(crate) fn rebound(k: &Kernel, pb: &ProceduralBlend, ceiling: f64) -> Result<f64> {
+    let centre = frame_centre(pb.net())?;
+    let local = pb.translated(k, centre * -1.0)?;
+    let (achieved, _) = recertify_in_frame(k, &local, ceiling, frame_rounding(pb.net())?)?;
+    let floor = precision_floor(k, local.supports(), local.definition().order, local.net())?;
+    let bound = achieved + 2.0 * floor;
+    if bound.is_finite() {
+        Ok(bound)
+    } else {
+        Err(SolidError::invalid_input(
+            OP,
+            "the edited net's bound is not finite",
+        ))
+    }
+}
+
 /// [`recertify_with_thumbweight`] of a blend already in its own frame, against `bound`,
 /// its net's distance from its rows taken as at least `shift` more.
 #[allow(clippy::too_many_lines)]
