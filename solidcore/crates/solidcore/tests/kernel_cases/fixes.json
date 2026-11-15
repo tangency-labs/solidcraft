@@ -63,7 +63,6 @@
   "revolution_round_offset_collapses",
   "uv_trim_corner_end_points_only",
   "bspline_trim_preserves_uv_spans",
-  "bspline_trim_keeps_rational_end_spans",
   "proto_edge_self_loop_on_vertex_degenerate",
   "slice_coincident_faces_sheet_side",
   "boolean_outer_shell_first",

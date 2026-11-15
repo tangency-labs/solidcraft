@@ -197,7 +197,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.validation_does_not_make_uv_trims = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
     f.point_on_start_point_squared_tolerance = true;
-    f.bspline_trim_keeps_rational_end_spans = true;
     f.fillet_exact_round_classes = true;
     f.check_seam_crossing_unclosed = true;
     f.ascii_doubles_round_trip = true;
