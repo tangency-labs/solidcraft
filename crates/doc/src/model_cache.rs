@@ -593,6 +593,9 @@ impl SavedModel {
                 blend_edges: serde_json::from_value(field("blend_edges")?).map_err(invalid)?,
                 fitted: serde_json::from_value(field("fitted")?).map_err(invalid)?,
                 tapered: serde_json::from_value(field("tapered")?).map_err(invalid)?,
+                // Not kept either: every state would list those of all the features before it.
+                // A pattern's copies then find their sources' faces by name.
+                named_faces: BTreeMap::new(),
                 // A join's notice is for the evaluation that made it, not kept with the cache.
                 kept_separate: BTreeMap::new(),
                 // Not kept either: a saved model's states carry no lineage, so the check of a
