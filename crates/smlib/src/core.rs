@@ -157,7 +157,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_removal_takes_ring_fillets = true;
     // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
     f.fillet_trim_inside_by_best_dot = true;
-    f.fillet_half_degree_crease = true;
     f.curve_loop_normal_from_area = true;
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
     f.fillet_cliff_overflow = true;
@@ -187,7 +186,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_union_refuses_solid_leak = true;
     f.curve_loop_start_after_previous_end = true;
     f.loop_use_reports_open_gaps = true;
-    f.face_points_span_domain = true;
     f.drop_curve_v_domain_degeneracy = true;
     f.mirror_curve_keeps_euclidean_control_points = true;
     f.dupin_bottom_hyperbola_axis = true;
@@ -197,8 +195,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.point_on_start_point_squared_tolerance = true;
     f.bspline_trim_keeps_rational_end_spans = true;
     f.fillet_exact_round_classes = true;
-    f.check_seam_crossing_unclosed = true;
-    f.ascii_doubles_round_trip = true;
     f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.volume_lift_third_derivative_terms = true;

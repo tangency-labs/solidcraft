@@ -562,8 +562,6 @@ pub struct UpstreamFixes {
     /// corner's degeneracy test takes anti-parallel side normals for an ordinary corner.
     /// Upstream refuses the edge as tangent (WR-570; the fork's tangency-labs/smlib@b7ec55b).
     pub fillet_knife_edge_rounds: bool,
-    /// `SmEdge::GetBlendEdgeuse` takes two faces for tangent (an edge with nothing to round) only within half a degree of each other, not 2 degrees: a crease of 0.5 to 2 degrees (a draft meeting a flat, a roof crease) is an edge the model means and is rounded like any other. Upstream refuses it (`SM_ERR_INVALID_INPUT` from the fillet) (WR-621, #1808; the fork's tangency-labs/smlib@2e8758b).
-    pub fillet_half_degree_crease: bool,
     /// `DoExtendedOffset` finds the excess offset faces after the merge only, not also on the untrimmed faces before it (WR-341, #977).
     pub offset_excess_faces_after_merge: bool,
     /// The extended offset (`SmOffsetExecutive::DoExtendedOffset`, which shells and offsets with extended convex edges) caps each vertex of the original with one edge (a cone's apex, the tip of a drilled hole) with the sphere `BuildOffsetOfVertex` builds for it, a face of the whole sphere zone the merge joins to the cone's offset; upstream builds no vertex offsets there, so the cone's offset ends open on the circle the apex's normals sweep out and the shell fails (WR-531; the fork's tangency-labs/smlib@d5dadaa).
@@ -983,27 +981,6 @@ pub struct UpstreamFixes {
     /// minimum from the range's middle); only curves whose separation vanishes coincide
     /// over a range (the fork's 04b42b4).
     pub simple_coincidence_crossing_is_point: bool,
-    /// `SmFace::GetPointsInFace` samples a rectangularly trimmed face from its UV domain's
-    /// minimum: each column starts at the domain's minimum u plus the column increment and
-    /// each row at the domain's minimum v plus the row increment, and the column increment
-    /// is the domain's u length over the number of columns plus one. Upstream samples
-    /// `(k * dUInc, j * dVInc + dither)` as fractions of the domain's lengths from zero, so
-    /// a face whose domain does not start at the origin gets points outside it, and its
-    /// `dUInc` kept the divisor of the `min(2 * count, 30) + 1` search count after the
-    /// rectangular branch reset the column count to `min(count, 30)`, so the columns did
-    /// not span the domain (WR-86, #1909). This corrects the origin and the column spacing,
-    /// not uniform coverage of the domain for every count: counts above 30 still plan only
-    /// `min(count, 30)` columns and stop at the requested count, so when those rows do not
-    /// divide the requested count the last sampled column is truncated and later columns
-    /// are not sampled (31 points fill 16 of 30 columns), and with more than one point the
-    /// V dither still comes from `kernel.rng`. Off by default (pinned behaviour).
-    pub face_points_span_domain: bool,
-    /// `sm_CheckSeamCrossing` returns `false` (no seam crossed) for a surface closed
-    /// in neither direction (`!closed_u && !closed_v`). Upstream returns `SM_SUCCESS`
-    /// (1000), which reads as `true` from a function documented to return whether a
-    /// shift happened (WR-87; `plan/upstream-issues/WR-87--sm-checkseamcrossing-returns-sm-success-as-its-smboolean.md`
-    /// and its 2026-10-31 addendum). Off by default for pinned C++ parity.
-    pub check_seam_crossing_unclosed: bool,
     /// `SmBSplineSurface::IsParallelToVector` (and `SmPlane`'s inherited branch) returns
     /// `false` when `vector` cannot be unitised, and tests subsequent control points of
     /// each row or column against the chord direction `(line_end - line_pnt).unitize()`
@@ -1014,16 +991,6 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-39--addendum-2026-10-31-parallel-to-vector.md`). Off by
     /// default for pinned C++ parity.
     pub surface_parallel_to_vector_checks: bool,
-    /// The ASCII database writer (`SmDatabaseIO`, `SmBrep::WriteToFile(.., SM_ASCII,
-    /// ..)`) writes each double in the shortest form that reads back as the same
-    /// double, in exponent notation (`3.0000000000000004e-1`), where upstream's stream
-    /// is `fixed` with precision 16 (`%.16f`): that keeps 16 digits after the point,
-    /// fewer than 17 significant digits below 1, so `0.3` plus 1 ULP reads back as
-    /// `0.3` and a sphere's read-back volume drifts by 1.3e-5 relative (WR-655, the
-    /// loss seen in #1485). Both kinds of file read back with every reader (`>>`
-    /// accepts the exponent); binary files are lossless either way. Off by default
-    /// (pinned behaviour: the same bytes as the C++ writer).
-    pub ascii_doubles_round_trip: bool,
     /// Constant and variable-radius rounds between NURBS faces are built as their definition, a [`crate::surface::procedural_blend::ProceduralBlend`] (the fork's `SmProceduralBlend`): the two faces the ball rolls on, its radius or radius law, the section's order and thumbweight rule and the leader, which evaluate exactly; its net, the certified B-spline approximation within the certificate's bound (the radius law in the certificate), is what the surface cache and tessellation use (`SmBlendNetScope`), the cache's node boxes grown by the net's bound. With it the file reader reads a definition (`SmProceduralBlend_TYPE`, `SURF_BASE_TYPE + 41`); without it that type is refused as the pinned reader refuses it (WR-698, #2273; the fork's tangency-labs/smlib@014f66f to 729f893, smlib#79 step 7, merged at 5e8c9c1).
     ///
     /// Not the fork's (#2486): a chamfer (the linear section) of a constant-radius solver's two offsets between NURBS faces, or of a constant-distance solver's chord between planes, is built as its definition too, the section generator's order 0: the straight chord between the feet of the point at the two offsets off the faces, certified as any section; between planes it is the exact plane through the feet, a `Plane` at a bound of 0 carrying its definition ([`crate::surface::procedural_blend::exact::ExactClass::Chord`], reached through [`crate::surface::surface::Surface::procedural_blend`]); either way keeping the chamfer's sizes (two distances, a distance and an angle, or a chord, with the wedge angle they were converted at; [`crate::surface::procedural_blend::chamfer`], [`crate::blend::fillet_executive::session::FilletSession::prepare_chamfers`]). The record and the database carry the sizes.
