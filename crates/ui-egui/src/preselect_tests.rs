@@ -255,6 +255,213 @@ fn offset_plane_on_a_face_reopens_with_the_face() {
     assert!(matches!(plane, Some(solidcraft_engine::doc::construct::ConstructGeom::Plane(pl)) if (pl.origin.y + 10.0).abs() < 1e-9), "{plane:?}");
 }
 
+/// #15151: the preview used the design's YZ plane, but OK offset the active component's YZ.
+#[test]
+fn offset_plane_in_a_rotated_component_keeps_the_picked_world_plane() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence":"Part:1","axis":[0,1,0],"angle":"90 deg"})).unwrap();
+    h.call("ui.camera", json!({"distance":1200}));
+    h.call("ui.set", json!({"showOrigin":true}));
+    h.step(&json!({"click":{"plane":"YZ"}})).unwrap();
+    h.app.start("construct.plane.offset");
+    h.settle();
+    h.step(&json!({"drag":[{"handle":"arrow"},{"world":[-380,0,0]}],"ctrl":true})).unwrap();
+    let (origin, normal) = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert!(origin.dist(Vec3::ZERO) < 1e-8);
+    assert!(normal.unwrap().dist(Vec3::X) < 1e-8);
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    let planes = solidcraft_engine::view::construction_planes(&h.app.session);
+    let (_, _, plane) = planes.iter().find(|(_, name, _)| name == "Plane1").unwrap();
+    assert!(plane.normal().dist(Vec3::X) < 1e-8, "{plane:?}");
+    assert!(plane.origin.dist(Vec3::new(-380., 0., 0.)) < 1e-3, "{plane:?}");
+
+    let id = h.app.session.doc.find_feature("Plane1").unwrap().id;
+    h.app.edit_feature(id);
+    h.frames(3);
+    assert!(crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).is_some());
+    h.step(&json!({"click":{"handle":"dialog:clear:Plane"}})).unwrap();
+    assert!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, Sel::Plane { name: "XY".into() });
+    h.app.dialog = Some(d);
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while h.app.applying.is_some() && std::time::Instant::now() < deadline {
+        h.frames(1);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    h.settle();
+    assert!(h.app.dialog.is_none() && h.app.applying.is_none(), "{:?}", h.app.dialog);
+    let planes = solidcraft_engine::view::construction_planes(&h.app.session);
+    let (_, _, plane) = planes.iter().find(|(_, name, _)| name == "Plane1").unwrap();
+    assert!(plane.normal().dist(Vec3::Z) < 1e-8, "a replacement pick must discard the saved base: {plane:?}");
+}
+
+#[test]
+fn offset_plane_world_bases_reopen_after_the_component_moves_again() {
+    for name in ["XY", "XZ", "YZ"] {
+        let mut app = app_with(json!([
+            {"command":"component.create","params":{"name":"Part","grounded":false}},
+            {"command":"occurrence.move","params":{"occurrence":"Part:1","translate":[20,30,40],"axis":[0,1,0],"angle":"90 deg"}}
+        ]));
+        app.session.selection = vec![Sel::Plane { name: name.into() }];
+        let mut d = crate::dialogs::Dialog::for_command(&app, "construct.plane.offset").unwrap();
+        d.kind = Kind::OffsetPlane { offset: "-12 mm".into() };
+        let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
+        app.session.execute(&command, &params).unwrap();
+        let world_plane =
+            |app: &crate::SolveApp| solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == "Plane1").unwrap().2;
+        let picked = solidcore_record::Plane::named(name).unwrap();
+        let made = world_plane(&app);
+        assert!(made.origin.dist(picked.normal() * -12.) < 1e-8, "{name}: {made:?}");
+        assert!(made.normal().dist(picked.normal()) < 1e-8, "{name}: {made:?}");
+        app.session.execute("occurrence.move", &json!({"occurrence":"Part:1","translate":[3,4,5],"axis":[1,0,0],"angle":"25 deg"})).unwrap();
+        let before = world_plane(&app);
+        let id = app.session.doc.find_feature("Plane1").unwrap().id;
+        let mut d = crate::dialogs::for_feature(&app, id, None).unwrap();
+        let (origin, normal) = crate::canvas::anchor(&app, &d).unwrap();
+        assert!(normal.unwrap().dist(before.normal()) < 1e-8);
+        assert!(origin.dist(before.origin + before.normal() * 12.) < 1e-8);
+        d.kind = Kind::OffsetPlane { offset: "9 mm".into() };
+        let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
+        app.session.execute(&command, &params).unwrap();
+        let after = world_plane(&app);
+        assert!(after.normal().dist(before.normal()) < 1e-8, "{name}: {after:?}");
+        assert!(after.origin.dist(before.origin + before.normal() * 21.) < 1e-8, "{name}: {after:?}");
+    }
+}
+
+#[test]
+fn offset_plane_local_origin_edits_keep_the_component_frame() {
+    let mut app = app_with(json!([
+        {"command":"component.create","params":{"name":"Part","grounded":false}},
+        {"command":"occurrence.move","params":{"occurrence":"Part:1","translate":[20,30,40],"axis":[0,1,0],"angle":"90 deg"}},
+        {"command":"construct.plane.offset","params":{"base":"YZ","offset":"10 mm"}}
+    ]));
+    let feature = app.session.doc.find_feature("Plane1").unwrap().clone();
+    let key = solidcraft_engine::origins::key(&app.session.doc.first_path(feature.component), "YZ");
+    let base = app.session.origin_plane(&key).unwrap();
+    let mut d = crate::dialogs::for_feature(&app, feature.id, None).unwrap();
+    assert_eq!(d.inputs[0].items, vec![Sel::Plane { name: key.clone() }]);
+    let (origin, normal) = crate::canvas::anchor(&app, &d).unwrap();
+    assert!(origin.dist(base.origin) < 1e-8);
+    assert!(normal.unwrap().dist(base.normal()) < 1e-8);
+    let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
+    app.session.execute(&command, &params).unwrap();
+    assert_eq!(app.session.doc.feature(feature.id).unwrap().kind, feature.kind);
+    d.active = 0;
+    d.pick(&app.session, Sel::Plane { name: "YZ".into() });
+    let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
+    app.session.execute(&command, &params).unwrap();
+    let (_, _, plane) = solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == "Plane1").unwrap();
+    assert!(plane.origin.dist(Vec3::X * 10.) < 1e-8);
+    assert!(plane.normal().dist(Vec3::X) < 1e-8);
+
+    // A fresh pick of the active component's own datum remains local, without a self-reference.
+    app.session.selection = vec![Sel::Plane { name: key }];
+    let d = crate::dialogs::Dialog::for_command(&app, "construct.plane.offset").unwrap();
+    let (_, params) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(params["base"], "YZ");
+    assert!(crate::canvas::anchor(&app, &d).unwrap().1.unwrap().dist(base.normal()) < 1e-8);
+}
+
+#[test]
+fn offset_plane_foreign_datum_edits_keep_the_reference() {
+    let mut app = app_with(json!([
+        {"command":"component.create","params":{"name":"Source","grounded":false}},
+        {"command":"occurrence.move","params":{"occurrence":"Source:1","translate":[20,30,40],"axis":[0,1,0],"angle":"90 deg"}}
+    ]));
+    let key = solidcraft_engine::origins::key(&app.session.doc.first_path(app.session.active_component), "YZ");
+    app.session.execute("component.activate", &json!({"component":0})).unwrap();
+    app.session.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap();
+    app.session.selection = vec![Sel::Plane { name: key.clone() }];
+    let mut d = crate::dialogs::Dialog::for_command(&app, "construct.plane.offset").unwrap();
+    d.kind = Kind::OffsetPlane { offset: "10 mm".into() };
+    let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(params["base"], key);
+    app.session.execute(&command, &params).unwrap();
+    let feature = app.session.doc.find_feature("Plane1").unwrap().clone();
+    let d = crate::dialogs::for_feature(&app, feature.id, None).unwrap();
+    assert_eq!(d.inputs[0].items, vec![Sel::Plane { name: key.clone() }]);
+    let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
+    app.session.execute(&command, &params).unwrap();
+    assert_eq!(app.session.doc.feature(feature.id).unwrap().kind, feature.kind);
+    app.session.execute("occurrence.move", &json!({"occurrence":"Source:1","translate":[3,4,5]})).unwrap();
+    let base = app.session.origin_plane(&key).unwrap();
+    let (_, _, plane) = solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == "Plane1").unwrap();
+    assert!(plane.origin.dist(base.origin + base.normal() * 10.) < 1e-8);
+    assert!(plane.normal().dist(base.normal()) < 1e-8);
+}
+
+#[test]
+fn offset_plane_local_origin_aliases_reopen_with_their_arrows() {
+    for (alias, item) in [("Top", "XY"), ("Front", "XZ"), ("Right", "YZ")] {
+        let mut app = app_with(json!([
+            {"command":"component.create","params":{"name":"Part","grounded":false}},
+            {"command":"occurrence.move","params":{"occurrence":"Part:1","translate":[20,30,40],"axis":[0,1,0],"angle":"90 deg"}},
+            {"command":"construct.plane.offset","params":{"base":alias,"offset":"10 mm"}}
+        ]));
+        let feature = app.session.doc.find_feature("Plane1").unwrap().clone();
+        let key = solidcraft_engine::origins::key(&app.session.doc.first_path(feature.component), item);
+        let d = crate::dialogs::for_feature(&app, feature.id, None).unwrap();
+        assert_eq!(d.inputs[0].items, vec![Sel::Plane { name: key.clone() }]);
+        let expected = app.session.origin_plane(&key).unwrap();
+        let (origin, normal) = crate::canvas::anchor(&app, &d).unwrap();
+        assert!(origin.dist(expected.origin) < 1e-8);
+        assert!(normal.unwrap().dist(expected.normal()) < 1e-8);
+        let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
+        app.session.execute(&command, &params).unwrap();
+        assert_eq!(app.session.doc.feature(feature.id).unwrap().kind, feature.kind);
+    }
+}
+
+#[test]
+fn offset_plane_through_a_fixed_point_reopens_in_world_coordinates() {
+    let mut app = app_with(json!([
+        {"command":"component.create","params":{"name":"Part","grounded":false}},
+        {"command":"occurrence.move","params":{"occurrence":"Part:1","translate":[20,30,40],"axis":[0,1,0],"angle":"90 deg"}},
+        {"command":"construct.plane.offset","params":{"base":{"origin":[0,0,0],"x_dir":[0,1,0],"y_dir":[0,0,1]},"through":{"point":[17,20,30]}}}
+    ]));
+    let feature = app.session.doc.find_feature("Plane1").unwrap().clone();
+    let mut d = crate::dialogs::for_feature(&app, feature.id, None).unwrap();
+    assert!(matches!(&d.inputs[1].items[..], [Sel::Vertex { point, .. }] if point.dist(Vec3::new(17.,20.,30.)) < 1e-8));
+    let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(params["params"]["through"]["type"], "point");
+    app.session.execute(&command, &params).unwrap();
+    let (_, _, plane) = solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == "Plane1").unwrap();
+    assert!(plane.normal().dist(Vec3::X) < 1e-8);
+    assert!(plane.origin.dist(Vec3::X * 17.) < 1e-8);
+    d.active = 1;
+    d.pick(&app.session, Sel::Vertex { body: String::new(), point: Vec3::new(18., 20., 30.) });
+    assert!(!d.extra.contains_key("through"), "a new point must discard the saved reference");
+}
+
+#[test]
+fn offset_plane_on_a_moved_face_keeps_its_through_point_when_edited() {
+    let mut app = app_with(json!([
+        {"command":"component.create","params":{"name":"Part","grounded":false}},
+        {"command":"occurrence.move","params":{"occurrence":"Part:1","translate":[20,0,0]}},
+        {"command":"solid.box","params":{"corner":[20,0,0],"length":10,"width":10,"height":10}},
+        {"command":"construct.plane.offset","params":{"base":{"face":[30,5,5]},"through":{"point":[25,5,5]}}}
+    ]));
+    let world_plane =
+        |app: &crate::SolveApp| solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == "Plane1").unwrap().2;
+    let before = world_plane(&app);
+    assert!((before.origin.x - 25.).abs() < 1e-8, "{before:?}");
+    let id = app.session.doc.find_feature("Plane1").unwrap().id;
+    let d = crate::dialogs::for_feature(&app, id, None).unwrap();
+    assert!(matches!(&d.inputs[0].items[..], [Sel::Face { .. }]));
+    let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
+    app.session.execute(&command, &params).unwrap();
+    let after = world_plane(&app);
+    assert!(after.origin.dist(before.origin) < 1e-8, "{after:?}");
+    assert!(after.normal().dist(before.normal()) < 1e-8);
+}
+
 #[test]
 fn feature_pattern_controls_preview_without_committing_and_cancel_cleanly() {
     for command in ["solid.pattern.rectangular", "solid.pattern.circular"] {

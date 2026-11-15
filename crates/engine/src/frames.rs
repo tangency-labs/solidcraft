@@ -435,13 +435,18 @@ pub fn mapped() -> bool {
 
 /// Author generated geometry directly in the active component's local frame.
 /// Restores the enclosing command's mapping state, including on an error.
-pub(crate) fn local_geometry() -> LocalGeometry {
-    LocalGeometry(MAPPED.with(|m| m.replace(true)))
+pub(crate) fn local_geometry() -> GeometryMapping {
+    GeometryMapping(MAPPED.with(|m| m.replace(true)))
 }
 
-pub(crate) struct LocalGeometry(bool);
+/// Let a nested constructor map world geometry itself, as it does when run directly.
+pub(crate) fn world_geometry() -> GeometryMapping {
+    GeometryMapping(MAPPED.with(|m| m.replace(false)))
+}
 
-impl Drop for LocalGeometry {
+pub(crate) struct GeometryMapping(bool);
+
+impl Drop for GeometryMapping {
     fn drop(&mut self) {
         MAPPED.with(|m| m.set(self.0));
     }
