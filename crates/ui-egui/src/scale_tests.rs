@@ -301,6 +301,7 @@ pub(crate) fn view_frame(
         hatch: Default::default(),
         moving: None,
         edge_layer: None,
+        edge_layer_fade: 1.0,
     }
 }
 

@@ -1257,6 +1257,8 @@ pub struct Frame {
     /// Some bodies' edges as the view sees them, drawn in place of their lines in the model
     /// scene's blocks while it is the scene they were made for; `None`: the blocks' lines.
     pub edge_layer: Option<Arc<EdgeLayer>>,
+    /// How far `edge_layer` has faded in over the lines it replaces, 0 to 1 (1: it alone).
+    pub edge_layer_fade: f32,
 }
 
 /// Model edges whose visible and hidden stretches were worked out for one view (from the exact
@@ -1331,6 +1333,27 @@ impl EdgeLayerGpu {
             skip_lines,
             skip_hidden,
         }
+    }
+}
+
+/// Draw only `b`'s lines (instances) in `ranges` (sorted, by line).
+fn lines_only(pass: &mut wgpu::RenderPass<'static>, b: &Batch, ranges: &[std::ops::Range<u32>], tally: &Tally) {
+    let mut at = 0u32;
+    for (buffer, count) in &b.parts {
+        let end = at.saturating_add(*count);
+        let mut bound = false;
+        for r in ranges.iter().filter(|r| r.end > at && r.start < end) {
+            let (from, to) = (r.start.max(at), r.end.min(end));
+            if from < to {
+                if !bound {
+                    pass.set_vertex_buffer(0, buffer.slice(..));
+                    bound = true;
+                }
+                pass.draw(0..6, from - at..to - at);
+                tally.segments(to - from);
+            }
+        }
+        at = end;
     }
 }
 
@@ -2671,8 +2694,13 @@ pub struct Renderer {
     line: wgpu::RenderPipeline,
     /// Lines behind the model (depth test >).
     line_hidden: wgpu::RenderPipeline,
-    /// [`EdgeLayer::hidden`]'s lines: drawn without a depth test.
+    /// [`EdgeLayer::hidden`]'s lines: drawn without a depth test, fading in.
     line_hidden_known: wgpu::RenderPipeline,
+    /// [`EdgeLayer::lines`] fading in, and the model lines it replaces fading out (visible and
+    /// hidden) while it does.
+    line_in: wgpu::RenderPipeline,
+    line_out: wgpu::RenderPipeline,
+    line_hidden_out: wgpu::RenderPipeline,
     /// The scene's own lines in another colour and width ([`LitEdges`], `vs_line_lit`), where
     /// they are seen and where the model hides them.
     line_lit: wgpu::RenderPipeline,
@@ -3632,8 +3660,12 @@ impl Renderer {
                 pipeline("sc_lines_lit", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
                 pipeline("sc_lines_lit_hidden", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
                 // An edge layer's hidden stretches: known hidden from the exact faces, so drawn
-                // whatever the depth buffer holds there.
-                pipeline("sc_lines_hidden_known", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
+                // whatever the depth buffer holds there; fading in.
+                pipeline("sc_lines_hidden_known", "vs_line", "fs_line_in", line_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
+                // An edge layer's visible stretches fading in, and the lines it replaces fading out.
+                pipeline("sc_lines_in", "vs_line", "fs_line_in", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+                pipeline("sc_lines_out", "vs_line", "fs_line_out", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+                pipeline("sc_lines_hidden_out", "vs_line", "fs_line_out", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
             )
         };
         let lines_all = || {
@@ -3684,7 +3716,7 @@ impl Renderer {
                 tri_hl_planned,
             ) = see_through_tris.join();
             let ((glass_far_flat, glass_near_flat, trans_flat), tri_hl_instanced_flat) = see_through_flat.join();
-            let (line, line_hidden, line_lit, line_lit_hidden, line_hidden_known) = lines.join();
+            let (line, line_hidden, line_lit, line_lit_hidden, line_hidden_known, line_in, line_out, line_hidden_out) = lines.join();
             let (overlay, guide_line) = lines_all.join();
             let (ss_blit, copy_blit, ss_filter) = blits.join();
             let (depth_reset, section_stencil) = resets.join();
@@ -3764,6 +3796,9 @@ impl Renderer {
                 line,
                 line_hidden,
                 line_hidden_known,
+                line_in,
+                line_out,
+                line_hidden_out,
                 line_lit,
                 line_lit_hidden,
                 overlay,
@@ -4107,6 +4142,7 @@ pub fn frame_key(cb: &Frame) -> u64 {
     cb.ssaa.to_bits().hash(&mut h);
     // The edges worked out for the view, while they are drawn.
     cb.edge_layer.as_ref().filter(|l| l.scene_key == cb.key).map(|l| Arc::as_ptr(l) as usize).hash(&mut h);
+    cb.edge_layer_fade.to_bits().hash(&mut h);
     // A drag's layer: the scene it holds and where it is drawn.
     match &cb.moving {
         Some(m) => {
@@ -4666,16 +4702,24 @@ impl Renderer {
                 return;
             };
             pass.set_pipeline(p);
+            let skip = if hidden { &g.skip_hidden } else { &g.skip_lines };
             for key in &m.block_order {
                 let Some(batch) = m.blocks.get(key).and_then(|b| if hidden { b.hidden.as_ref() } else { b.lines.as_ref() }) else { continue };
-                let skip = if hidden { &g.skip_hidden } else { &g.skip_lines };
                 lines_except(pass, batch, skip.get(key).map_or(&[][..], Vec::as_slice), tally);
             }
             lines(pass, p, if hidden { &m.own_hidden } else { &m.own_lines });
+            // While the layer fades in, the lines it replaces fade out under it.
+            if cb.edge_layer_fade < 1.0 {
+                pass.set_pipeline(if hidden { &res.line_hidden_out } else { &res.line_out });
+                for key in &m.block_order {
+                    let Some(batch) = m.blocks.get(key).and_then(|b| if hidden { b.hidden.as_ref() } else { b.lines.as_ref() }) else { continue };
+                    lines_only(pass, batch, skip.get(key).map_or(&[][..], Vec::as_slice), tally);
+                }
+            }
             if hidden {
                 lines(pass, &res.line_hidden_known, &g.hidden);
             } else {
-                lines(pass, p, &g.lines);
+                lines(pass, &res.line_in, &g.lines);
             }
         };
         model_lines(pass, &res.line_hidden, true);
@@ -5152,7 +5196,7 @@ fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: boo
     v.extend(cb.eye);
     v.extend([cb.ao_radius, cb.ao_samples.clamp(1, AO_SAMPLES) as f32, 0.0, 0.0]);
     v.extend(cb.analysis_colors);
-    v.extend([if reversed { 1.0 } else { 0.0 }, FACE_STEPS as f32, FACE_SLOPE, 0.0]);
+    v.extend([if reversed { 1.0 } else { 0.0 }, FACE_STEPS as f32, FACE_SLOPE, cb.edge_layer_fade.clamp(0.0, 1.0)]);
     v.extend(model.iter().flatten());
     v.extend([cb.hover_tint[0], cb.hover_tint[1], cb.hover_tint[2], 0.0]);
     v.extend([cb.selection_tint[0], cb.selection_tint[1], cb.selection_tint[2], 0.0]);
@@ -5527,6 +5571,7 @@ mod tests {
             hatch: Default::default(),
             moving: None,
             edge_layer: None,
+            edge_layer_fade: 1.0,
             outline: false,
             eye: [0.0; 4],
             ao_radius: 0.0,
@@ -6122,6 +6167,7 @@ mod glass_tests {
             hatch: Default::default(),
             moving: None,
             edge_layer: None,
+            edge_layer_fade: 1.0,
         };
         let texture = |format, usage, sample_count| {
             device.create_texture(&wgpu::TextureDescriptor {
@@ -6317,6 +6363,7 @@ mod glass_tests {
             hatch: Default::default(),
             moving: None,
             edge_layer: None,
+            edge_layer_fade: 1.0,
             outline: false,
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,

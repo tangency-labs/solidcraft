@@ -2462,7 +2462,7 @@ fn surface_groups_match_comparing_every_pair_and_preparing_can_be_cancelled() {
 fn the_chord_grid_finds_what_a_scan_of_every_chord_finds() {
     // The plate's top face: 16 circles and a square, thousands of chords.
     let def = prepare(&holed_plate(4, 10., 3., 2.), &Options::default()).unwrap();
-    let trim = &def.faces[1].trim;
+    let trim = def.faces[1].trim();
     assert!(trim.chords.len() > 1000);
     let (lo, hi) = (trim.lo, trim.hi);
     let mut checked = [0usize; 2];
@@ -3114,5 +3114,23 @@ fn a_plane_face_hides_a_straight_edge_whole_at_once_but_not_across_its_hole() {
         assert_eq!(across.visible.len(), 1, "{eye:?}: {across:?}");
         let [a, b] = across.visible[0];
         assert!((a - 0.125).abs() < 0.01 && (b - 0.875).abs() < 0.01, "{eye:?}: {across:?}");
+    }
+}
+
+#[test]
+fn a_body_prepared_lazily_hides_edges_exactly_as_one_prepared_whole() {
+    // The holed plate over a bar, and the rod: plane, cylinder and holed faces, their trims built
+    // up front or on the first ray that reaches them.
+    let lazy = Options { lazy: true, ..Options::default() };
+    let bodies = [holed_plate(1, 10., 3., 1.), cuboid([1., 4., -3.], [9., 5., -2.]), cylinder(2., 10.)];
+    let eager: Vec<Prepared> = bodies.iter().map(|b| prepare(b, &Options::default()).unwrap()).collect();
+    let later: Vec<Prepared> = bodies.iter().map(|b| prepare(b, &lazy).unwrap()).collect();
+    let scene = [identity(0, [0.; 3]), identity(1, [0.; 3]), identity(2, [20., 0., 0.])];
+    for eye in [occlusion::Eye::Along(Vec3::new(0., 0.3, -1.)), occlusion::Eye::At(Vec3::new(5., -60., 80.))] {
+        for (placement, edge) in [(1, 3), (2, 0), (2, 1)] {
+            let a = seen_pieces(&eager, &scene, placement, edge, eye, 0.05);
+            let b = seen_pieces(&later, &scene, placement, edge, eye, 0.05);
+            assert_eq!((a.visible, a.hidden), (b.visible, b.hidden), "{eye:?}, placement {placement} edge {edge}");
+        }
     }
 }

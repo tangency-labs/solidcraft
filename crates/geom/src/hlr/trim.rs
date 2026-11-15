@@ -189,6 +189,43 @@ fn lift(x: f64, near: f64, p: Option<f64>) -> f64 {
     }
 }
 
+/// The box of a face's boundary sampled as [`build`] samples it, without mapping it into the
+/// surface's chart (which is what building a trim costs).
+pub(crate) fn boundary_box(face: &Face, edges: &[C3], per_break: usize) -> (Vec3, Vec3) {
+    let (mut lo, mut hi) = (Vec3::new(f64::MAX, f64::MAX, f64::MAX), Vec3::new(f64::MIN, f64::MIN, f64::MIN));
+    for u in uses(face) {
+        let Some(c) = edges.get(u.edge as usize) else { continue };
+        let b = c.breaks();
+        for w in b.windows(2) {
+            let (Some(t0), Some(t1)) = (w.first(), w.get(1)) else { continue };
+            for i in 0..=per_break {
+                let p = c.at(t0 + (t1 - t0) * i as f64 / per_break as f64);
+                lo = lo.min(p);
+                hi = hi.max(p);
+            }
+        }
+    }
+    (lo, hi)
+}
+
+impl Trim {
+    /// A trim that classifies nothing, for `why`.
+    pub(crate) fn refused(why: &'static str) -> Trim {
+        Trim {
+            segs: Vec::new(),
+            period: [None, None],
+            inside: None,
+            chords: Vec::new(),
+            chord_error: 0.,
+            lo: Vec3::new(f64::MAX, f64::MAX, f64::MAX),
+            hi: Vec3::new(f64::MIN, f64::MIN, f64::MIN),
+            unsupported: Some(why),
+            index: None,
+            grid: None,
+        }
+    }
+}
+
 pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -> Trim {
     let period = surface.periods();
     let mut segs = Vec::new();

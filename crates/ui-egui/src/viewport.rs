@@ -5952,7 +5952,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::gpu::paint_background_picture(app, &painter, rect);
 
     // ---- model ----
-    let mut edge_layer = None;
+    let (mut edge_layer, mut edge_layer_fade) = (None, 1.0);
     crate::frame_watch::step(app, "viewport before the model");
     // A drag drawn as a layer keeps the refinements it began with.
     if !layered {
@@ -5980,7 +5980,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         // The model's edges as the exact faces hide them, once the view has stood still.
         if !layered {
-            edge_layer = crate::exact_edges::update(app, ui.ctx(), &proj);
+            (edge_layer, edge_layer_fade) = crate::exact_edges::update(app, ui.ctx(), &proj);
         }
         refresh_sketch_scene(app, &proj);
         if app.viewport.wireframe.busy() {
@@ -6051,6 +6051,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             sky: sky_uniform(app.preferences.dark_parts_shading, app.preferences.viewport_material_finish, proj.cam.up),
             moving,
             edge_layer,
+            edge_layer_fade,
         });
         crate::blur::viewport(&painter, rect, cb, rect, [t.viewport_top, t.viewport_bottom]);
         // The graphics card had no memory for the view's frame (#7296): say once why it looks
@@ -10369,6 +10370,7 @@ mod tests {
                     hatch: Default::default(),
                     moving: None,
                     edge_layer: None,
+                    edge_layer_fade: 1.0,
                 };
                 let t0 = std::time::Instant::now();
                 let mut encoder = device.create_command_encoder(&Default::default());

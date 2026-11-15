@@ -115,13 +115,37 @@ struct FaceData {
     analytic: Analytic,
     /// Faces of this body on the same quadric or torus (patches of one surface), itself included.
     group: Vec<usize>,
-    trim: Trim,
+    /// Its trim, built when first asked for ([`FaceData::trim`]) when the body was prepared
+    /// lazily ([`Options::lazy`]), else built with it.
+    trim: std::sync::OnceLock<Trim>,
+    /// Its number in the body's record and what its trim is built from.
+    index: usize,
+    source: std::sync::Arc<TrimSource>,
     lo: Vec3,
     hi: Vec3,
     /// Neither a plane nor a recognised quadric or torus.
     freeform: bool,
     /// The other faces it shares an edge with, sorted.
     neighbours: Vec<usize>,
+}
+
+/// What a lazily prepared body's trims are built from: its record (moved to its centre), its
+/// edges' curves and the boundary samples per curve piece.
+struct TrimSource {
+    /// Kept only when trims are built later.
+    record: Option<Brep>,
+    curves: Vec<C3>,
+    samples: usize,
+}
+
+impl FaceData {
+    /// The face's trim, built now if it has not been.
+    fn trim(&self) -> &Trim {
+        self.trim.get_or_init(|| match self.source.record.as_ref().and_then(|r| r.faces.get(self.index)) {
+            Some(f) => trim::build(f, &self.source.curves, &self.surface, self.source.samples),
+            None => Trim::refused("face reference"),
+        })
+    }
 }
 
 /// A body prepared once and shared by all of its placements.
@@ -240,6 +264,11 @@ pub fn prepare_cancellable(b: &Brep, opts: &Options, cancel: &dyn Fn() -> bool) 
         curves.push((c, acc));
     }
     let local_curves: Vec<C3> = curves.iter().map(|(c, _)| c.clone()).collect();
+    let source = std::sync::Arc::new(TrimSource {
+        record: opts.lazy.then(|| b.clone()),
+        curves: if opts.lazy { local_curves.clone() } else { Vec::new() },
+        samples: opts.trim_samples,
+    });
     let mut users: Vec<Vec<usize>> = vec![Vec::new(); b.edges.len()];
     // Faces and edges by their numbers in the record. Validation puts every face in a shell; its
     // loops are stored the same whichever side a shell uses, and hidden lines look at both, so the
@@ -289,12 +318,19 @@ pub fn prepare_cancellable(b: &Brep, opts: &Options, cancel: &dyn Fn() -> bool) 
             }
         }
         *report.surfaces.entry(analytic_name(&analytic).to_string()).or_insert(0) += 1;
-        let trim = trim::build(f, &local_curves, &surface, opts.trim_samples);
-        if let Some(why) = trim.unsupported {
-            report.unsupported_trims.push((fi, why.to_string()));
-        }
-        report.max_trim_chord = report.max_trim_chord.max(trim.chord_error);
-        let (mut lo, mut hi) = (trim.lo, trim.hi);
+        let built = std::sync::OnceLock::new();
+        let (mut lo, mut hi) = if opts.lazy {
+            trim::boundary_box(f, &local_curves, opts.trim_samples)
+        } else {
+            let trim = trim::build(f, &local_curves, &surface, opts.trim_samples);
+            if let Some(why) = trim.unsupported {
+                report.unsupported_trims.push((fi, why.to_string()));
+            }
+            report.max_trim_chord = report.max_trim_chord.max(trim.chord_error);
+            let bounds = (trim.lo, trim.hi);
+            let _ = built.set(trim);
+            bounds
+        };
         // Curved faces can bulge past their boundary: bound them by the whole surface's
         // guaranteed box (spline hull, turned profile), clipped to nothing tighter.
         if !matches!(surface, S3::Plane { .. })
@@ -318,7 +354,18 @@ pub fn prepare_cancellable(b: &Brep, opts: &Options, cancel: &dyn Fn() -> bool) 
         if freeform {
             report.freeform_faces.push(fi);
         }
-        faces.push(FaceData { surface, analytic, group: Vec::new(), trim, lo, hi, freeform, neighbours: Vec::new() });
+        faces.push(FaceData {
+            surface,
+            analytic,
+            group: Vec::new(),
+            trim: built,
+            index: fi,
+            source: source.clone(),
+            lo,
+            hi,
+            freeform,
+            neighbours: Vec::new(),
+        });
     }
     for (ei, (c, acc)) in curves.into_iter().enumerate() {
         let list = users.get(ei).cloned().unwrap_or_default();
@@ -327,6 +374,8 @@ pub fn prepare_cancellable(b: &Brep, opts: &Options, cancel: &dyn Fn() -> bool) 
         distinct.dedup();
         let kind = if list.len() >= 2 && distinct.len() == 1 {
             EdgeKind::Seam
+        } else if opts.lazy {
+            EdgeKind::Sharp
         } else if let [f1, f2] = distinct.as_slice() {
             let [t0, t1] = c.domain();
             let normals_parallel = [0.25, 0.5, 0.75].iter().all(|k| {
@@ -456,11 +505,15 @@ pub struct Options {
     pub trim_samples: usize,
     pub max_tracks: usize,
     pub max_rays: usize,
+    /// Build each face's trim when it is first needed, and leave edges unclassified (sharp but for
+    /// seams): what an interactive view's visibility needs ([`occlusion`]), which reaches few of
+    /// a large body's faces. A drawing builds everything up front.
+    pub lazy: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { tangent_edges: true, freeform: false, trim_samples: 256, max_tracks: 200_000, max_rays: 20_000_000 }
+        Options { tangent_edges: true, freeform: false, trim_samples: 256, max_tracks: 200_000, max_rays: 20_000_000, lazy: false }
     }
 }
 
@@ -704,7 +757,7 @@ pub fn hidden_lines(defs: &[Prepared], scene: &[Placement], view: &View, opts: &
             });
         }
         let dl = p.local_dir(view.d);
-        let supported = |f: &FaceData| !(f.freeform && !opts.freeform) && f.trim.unsupported.is_none();
+        let supported = |f: &FaceData| !(f.freeform && !opts.freeform) && f.trim().unsupported.is_none();
         // Faces on one surface (a sphere in two halves, say) share their silhouettes, keyed by
         // the set's first face: one curve along their seams, not one per face.
         let mut sets: std::collections::BTreeMap<usize, Vec<usize>> = std::collections::BTreeMap::new();
@@ -713,7 +766,7 @@ pub fn hidden_lines(defs: &[Prepared], scene: &[Placement], view: &View, opts: &
                 unsupported.push(Unsupported { placement: pi, face: fi, reason: "freeform face" });
                 continue;
             }
-            if let Some(reason) = f.trim.unsupported {
+            if let Some(reason) = f.trim().unsupported {
                 unsupported.push(Unsupported { placement: pi, face: fi, reason });
                 continue;
             }
@@ -730,7 +783,7 @@ pub fn hidden_lines(defs: &[Prepared], scene: &[Placement], view: &View, opts: &
         }
         for (fi, members) in sets {
             let Some(f) = def.faces.get(fi) else { continue };
-            let parts: Vec<(&S3, &Trim)> = members.iter().filter_map(|j| def.faces.get(*j)).map(|m| (&m.surface, &m.trim)).collect();
+            let parts: Vec<(&S3, &Trim)> = members.iter().filter_map(|j| def.faces.get(*j)).map(|m| (&m.surface, m.trim())).collect();
             let size = members.iter().filter_map(|j| def.faces.get(*j)).map(|m| (m.hi - m.lo).len()).fold(0., f64::max);
             let mut sils = Vec::new();
             silhouette::silhouettes(&parts, f.analytic, dl, &mut sils);
@@ -1803,15 +1856,15 @@ fn classify_point(ctx: &Ctx, placement: usize, own: &[usize], own_eps: f64, worl
             f.surface.ray_as(&f.analytic, p0, dl, range, &mut hits);
             for h in &hits {
                 let p = f.surface.point(h.uv);
-                let tol = 2. * f.trim.chord_error + 1e-7 * (f.hi - f.lo).len();
+                let tol = 2. * f.trim().chord_error + 1e-7 * (f.hi - f.lo).len();
                 // A hit on the boundary is uncertain on either side of it, so the parity test is
                 // left out there: its cost grows with the boundary around the hit, all of a
                 // circle when bodies in line along the view meet each other on their circles.
-                if f.trim.near(p, tol) {
+                if f.trim().near(p, tol) {
                     uncertain = true;
                     continue;
                 }
-                match f.trim.contains(h.uv) {
+                match f.trim().contains(h.uv) {
                     None => uncertain = true,
                     Some(inside) => {
                         // An unsupported freeform face never hides anything for certain.

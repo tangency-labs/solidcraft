@@ -703,6 +703,7 @@ fn offscreen(
         hatch: Default::default(),
         moving: None,
         edge_layer: None,
+        edge_layer_fade: 1.0,
     });
     let texture = |format, usage| {
         device.create_texture(&wgpu::TextureDescriptor {

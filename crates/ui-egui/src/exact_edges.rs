@@ -42,6 +42,9 @@ const PREPARE_BUDGET_MS: f64 = 2000.0;
 /// The largest coordinate of a body's box worked out here (mm): a hundredth of what hidden lines
 /// take, so placed bodies stay inside it.
 const EXTENT_MM: f64 = 1e10;
+/// How long the edges as the view sees them take to fade in over the model's own lines (ms), so
+/// they do not snap in.
+const FADE_MS: f64 = 150.0;
 /// Widths of the model's edge lines ([`crate::viewport`]'s `BodyDraw::build`).
 const EDGE_WIDTH: f32 = 1.3;
 const HIDDEN_WIDTH: f32 = 1.0;
@@ -98,8 +101,9 @@ type Cache = HashMap<usize, (solidcraft_engine::kernel::Body, Arc<Option<hlr::Pr
 #[derive(Default)]
 pub(crate) struct ExactEdges {
     rest: crate::viewport::CameraRest,
-    /// The view (model scene and camera) the layer was made for, and the layer.
-    layer: Option<(u64, Arc<EdgeLayer>)>,
+    /// The view (model scene and camera) the layer was made for, the layer, and when it was first
+    /// drawn (ms).
+    layer: Option<(u64, Arc<EdgeLayer>, f64)>,
     job: Option<Job>,
     /// The last view a job was started for, so a view whose job came back empty is not tried again.
     tried: u64,
@@ -153,9 +157,22 @@ struct Draw {
     edges: Vec<usize>,
 }
 
-/// The edge layer to draw this frame, if one is ready for the view; starts its job once the view
-/// has stood still.
-pub(crate) fn update(app: &mut SolveApp, ctx: &egui::Context, proj: &crate::viewport::Proj) -> Option<Arc<EdgeLayer>> {
+/// The edge layer to draw this frame, if one is ready for the view, and how far it has faded in
+/// (0 to 1); starts its job once the view has stood still.
+pub(crate) fn update(app: &mut SolveApp, ctx: &egui::Context, proj: &crate::viewport::Proj) -> (Option<Arc<EdgeLayer>>, f32) {
+    let now = crate::now_ms();
+    let layer = layer_for_view(app, ctx, proj);
+    let e = &mut app.viewport.exact_edges;
+    let Some((_, layer, since)) = layer.and(e.layer.as_ref()) else { return (None, 1.0) };
+    let fade = ((now - *since) / FADE_MS).clamp(0.0, 1.0);
+    if fade < 1.0 {
+        ctx.request_repaint();
+    }
+    (Some(layer.clone()), fade as f32)
+}
+
+/// [`update`]'s layer, ready for the view or not.
+fn layer_for_view(app: &mut SolveApp, ctx: &egui::Context, proj: &crate::viewport::Proj) -> Option<()> {
     if !enabled(&app.preferences) || app.viewport.gpu.is_none() || !matches!(app.ui.visual_style, 0 | 3) || crate::render_workspace::active(app) {
         let e = &mut app.viewport.exact_edges;
         e.layer = None;
@@ -174,9 +191,9 @@ pub(crate) fn update(app: &mut SolveApp, ctx: &egui::Context, proj: &crate::view
     };
     let now = crate::now_ms();
     let e = &mut app.viewport.exact_edges;
-    if let Some((v, layer)) = &e.layer {
+    if let Some((v, _, _)) = &e.layer {
         if *v == view {
-            return Some(layer.clone());
+            return Some(());
         }
         e.layer = None;
     }
@@ -197,9 +214,8 @@ pub(crate) fn update(app: &mut SolveApp, ctx: &egui::Context, proj: &crate::view
             stats.finished = e.stats.finished + 1;
             e.stats = stats;
             e.job = None;
-            let layer = Arc::new(layer?);
-            e.layer = Some((view, layer.clone()));
-            return Some(layer);
+            e.layer = Some((view, Arc::new(layer?), now));
+            return Some(());
         }
     }
     if wait > 0.0 {
@@ -333,7 +349,7 @@ fn run(input: Input, cache: &Mutex<Cache>, cancel: &AtomicBool, progress: &Progr
                         break;
                     }
                     let t = crate::now_ms();
-                    let options = hlr::Options { trim_samples: TRIM_SAMPLES, ..hlr::Options::default() };
+                    let options = hlr::Options { trim_samples: TRIM_SAMPLES, lazy: true, ..hlr::Options::default() };
                     let late = || stop() || crate::now_ms() - t > PREPARE_BUDGET_MS;
                     let p = hlr::prepare_cancellable(body.record(), &options, &late).ok();
                     if let Ok(mut m) = made.lock() {

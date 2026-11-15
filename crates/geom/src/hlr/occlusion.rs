@@ -493,8 +493,8 @@ impl<'a> Occluders<'a> {
             // of a body meet the point is behind both, and at a body's outline it is hidden or
             // seen by less than that accuracy.
             let s = f.surface.point(h.uv);
-            let near = f.trim.near(s, 2. * f.trim.chord_error + 1e-7 * (f.hi - f.lo).len());
-            f.trim.unsupported.is_none() && (near || f.trim.contains(h.uv) == Some(true))
+            let near = f.trim().near(s, 2. * f.trim().chord_error + 1e-7 * (f.hi - f.lo).len());
+            f.trim().unsupported.is_none() && (near || f.trim().contains(h.uv) == Some(true))
         })
     }
 }
@@ -508,10 +508,10 @@ impl Occluders<'_> {
         let Some(q) = self.scene.get(qi as usize) else { return false };
         let Some(f) = self.defs.get(q.body).and_then(|d| d.faces.get(fi as usize)) else { return false };
         let super::surface::S3::Plane { o, n, .. } = f.surface else { return false };
-        if f.trim.unsupported.is_some() {
+        if f.trim().unsupported.is_some() {
             return false;
         }
-        let tol = 2. * f.trim.chord_error + 1e-7 * (f.hi - f.lo).len();
+        let tol = 2. * f.trim().chord_error + 1e-7 * (f.hi - f.lo).len();
         let shadow = |p: Vec3| -> Option<Vec3> {
             let dir = match eye {
                 Eye::Along(d) => -d,
@@ -533,10 +533,10 @@ impl Occluders<'_> {
             (lam > self.touch && depth > self.touch).then_some(p + dl * lam)
         };
         let (Some(sa), Some(sb)) = (shadow(a), shadow(b)) else { return false };
-        if f.trim.near(sa, tol) || f.surface.inverse(sa, None).and_then(|uv| f.trim.contains(uv)) != Some(true) {
+        if f.trim().near(sa, tol) || f.surface.inverse(sa, None).and_then(|uv| f.trim().contains(uv)) != Some(true) {
             return false;
         }
-        f.trim.segment_clear(sa, sb, tol) == Some(true)
+        f.trim().segment_clear(sa, sb, tol) == Some(true)
     }
 }
 

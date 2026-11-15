@@ -465,6 +465,7 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         hatch: scene.part_hatch.map_or_else(Default::default, |c| c.map(|Rgb(r, g, b)| [r, g, b].map(|x| f32::from(x) / 255.0))),
         moving: None,
         edge_layer: None,
+        edge_layer_fade: 1.0,
     }
 }
 

@@ -130,6 +130,7 @@ impl Renderer {
             hatch: Default::default(),
             moving: None,
             edge_layer: None,
+            edge_layer_fade: 1.0,
         };
         let size = wgpu::Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 };
         let color = device.create_texture(&wgpu::TextureDescriptor {
