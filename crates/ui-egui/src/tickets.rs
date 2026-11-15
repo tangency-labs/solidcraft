@@ -15,6 +15,7 @@ use crate::agent_chat::backend::HttpRequest;
 
 pub mod agent;
 pub mod api;
+pub mod mine;
 pub mod payload;
 pub mod queue;
 
@@ -122,6 +123,8 @@ pub struct Tickets {
     /// The queue folder; None: no queue (reports made offline wait in memory for this run).
     pub queue_dir: Option<PathBuf>,
     memory_queue: Vec<payload::Outgoing>,
+    /// Help › My tickets.
+    pub mine: mine::Mine,
     retry_at: f64,
     /// A draft's page to open in the browser (on the next frame, which has the context).
     open_url: Option<String>,
@@ -384,6 +387,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     tick_send(app);
     tick_watch(app, now);
     agent::tick(app, ctx);
+    mine::tick(app, now);
     if let Some(url) = app.tickets.open_url.take() {
         ctx.open_url(egui::OpenUrl::new_tab(url));
     }
@@ -391,7 +395,11 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     if app.tickets.watch.is_some() {
         ctx.request_repaint_after(std::time::Duration::from_millis(1000));
     }
-    if app.tickets.sending.is_some() || app.tickets.apps_call.is_some() || matches!(app.tickets.sign_in, SignIn::Asking(_) | SignIn::Waiting { .. }) {
+    if app.tickets.sending.is_some()
+        || mine::busy(app)
+        || app.tickets.apps_call.is_some()
+        || matches!(app.tickets.sign_in, SignIn::Asking(_) | SignIn::Waiting { .. })
+    {
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
 }
@@ -435,6 +443,9 @@ fn tick_sign_in(app: &mut SolveApp, ctx: &egui::Context, now: f64) {
                             }
                             // Reports kept while signed out go next.
                             retry_now(app);
+                            if app.tickets.mine.open {
+                                mine::refresh(app);
+                            }
                             return;
                         }
                         api::Poll::Pending => {

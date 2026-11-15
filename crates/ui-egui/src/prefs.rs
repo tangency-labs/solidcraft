@@ -1625,6 +1625,10 @@ preference_settings! {
     /// Personal Sheet Metal Rules, offered by the rule manager of every design in this profile
     /// (#9346). No page reset discards this user-authored library.
     personal_sheet_rules: crate::personal_sheet_rules::Library = crate::personal_sheet_rules::Library::default();
+    /// Help › My tickets: when each of the user's tickets last changed as they last saw it (its
+    /// number and the server's `updatedAt`), for the dot on what is new. No secret: the sign-in
+    /// stays in the keyring.
+    tickets_seen: std::collections::BTreeMap<u64, String> = std::collections::BTreeMap::new();
     /// The file name File › Export and Save As Mesh offer: `{design}` and `{body}` stand for the
     /// design's and the exported body's names (`export_name`). Empty: each export offers the name
     /// it did before (the design's, or the first body's for a mesh).

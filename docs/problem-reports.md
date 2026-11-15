@@ -67,8 +67,20 @@ solidcraft-cli run replay.json --in design.sc
 ## Network use
 
 SolidCraft talks to the ticket server only when the user sends a report or opens My tickets, to
-send a report already waiting in the queue with a remembered token, or, while a draft it opened is
-waiting to be filed, to check whether it was. There is no telemetry.
+send a report already waiting in the queue with a remembered token, while a draft it opened waits
+to be filed (to see whether it was), or, with a remembered token, to check the user's own tickets
+at most every 15 minutes (below). There is no telemetry.
+
+## My tickets
+
+Help › My Tickets… lists the user's own tickets with their status and the latest reply, each with
+an Open button for its page on the server. A ticket with something new (a server notice not yet
+read, or a change since the list was last closed) has a dot, and so does the Help menu's item.
+The list is fetched when the window opens or Refresh is pressed. While signed in (a remembered
+token, or the window's Sign in), SolidCraft also
+checks a minute after it starts and then at most every 15 minutes, for the dot; signed out, it
+never checks. What was last seen (ticket numbers and their change times) is kept in the
+preferences as `tickets_seen`; the token stays in the keyring.
 
 ## The old behaviour
 
