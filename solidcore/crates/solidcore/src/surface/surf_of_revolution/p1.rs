@@ -552,7 +552,7 @@ impl SurfOfRevolution {
     ///
     /// # Errors
     ///
-    /// As [`Self::create_canonical`].
+    /// As [`Self::create_canonical`], and `on_axis_tol` not finite or negative.
     pub fn create_canonical_off_axis(
         k: &Kernel,
         swept_curve: Curve,
@@ -561,6 +561,15 @@ impl SurfOfRevolution {
         swap_uv: bool,
         on_axis_tol: f64,
     ) -> Result<Self> {
+        // a tolerance is a finite distance, never negative (a NaN would fall through to
+        // the default and an infinite one would put every point on the axis)
+        if !on_axis_tol.is_finite() || on_axis_tol < 0.0 {
+            return Err(SolidError::surface_failed(
+                OP_CANONICAL,
+                "the on-axis tolerance is not a finite, non-negative distance",
+            ));
+        }
+
         // unitize the rotation axis (status ignored upstream)
         let z_vec = axis_direction.unitize_or_z();
 
@@ -580,7 +589,7 @@ impl SurfOfRevolution {
         // on the axis by the point's distance from the axis, `|Z x x_vec|`, under the
         // bound the Y axis below is checked against (upstream: within 1 degree of its
         // direction, which takes a point far along the axis for one on it)
-        // (or within `on_axis_tol` of it, #17204; a NaN tolerance is no tolerance)
+        // (or within `on_axis_tol` of it, #17204)
         let on_axis_sq = if on_axis_tol > crate::math::EFF_ZERO {
             on_axis_tol * on_axis_tol
         } else {

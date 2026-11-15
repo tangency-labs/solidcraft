@@ -901,6 +901,28 @@ mod tests {
         );
     }
 
+    /// The on-axis tolerance of a surface of revolution is a finite, non-negative
+    /// distance: NaN, infinity and a negative one are refused, not read as the default
+    /// or as putting every point on the axis (#17204).
+    #[test]
+    fn issue_17204_on_axis_tolerance_must_be_finite() {
+        use crate::surface::surf_of_revolution::p1::SurfOfRevolution;
+
+        for tol in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0] {
+            let k = Kernel::default();
+            let line = segment([5.0, 0.0, 0.0], [5.0, 0.0, 5.0]);
+            let r = SurfOfRevolution::create_canonical_off_axis(
+                &k,
+                line,
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                false,
+                tol,
+            );
+            assert!(r.is_err(), "tolerance {tol} accepted");
+        }
+    }
+
     /// A square with a square hole (20 x 20 at r 10 to 30, the hole 8 x 8 centred in it)
     /// turned a whole turn about z is a ring with a ring-shaped void: with the opt-ins
     /// (WR-529, the fork's tangency-labs/smlib@38b4212) the void is not counted as
