@@ -34,7 +34,7 @@ use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::{edge_closest_point, get_edges};
 use solidcore::query::edge::edge_faces;
-use solidcore::query::edge_turn::{convex_at, turn_at};
+use solidcore::query::edge_turn::{convex_at, joint_turn, turn_at};
 use solidcore::query::tangent_edge::{tangent_all_along, Tangency};
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::sweep::api_brep::create_linear_sweep;
@@ -532,4 +532,25 @@ fn a_pcurve_1e_15_off_a_knot_line_is_on_its_own_side() {
         format!("{err:?}").contains("leaving its face's net"),
         "{err:?}"
     );
+}
+
+#[test]
+fn joint_turn_is_the_angle_between_the_directions() {
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-12;
+    assert!(close(joint_turn([1.0, 0.0], [2.0, 0.0]).unwrap(), 0.0));
+    assert!(close(
+        joint_turn([1.0, 0.0], [0.0, 3.0]).unwrap(),
+        FRAC_PI_2
+    ));
+    assert!(close(
+        joint_turn([0.0, 1.0], [1.0, 0.0]).unwrap(),
+        FRAC_PI_2
+    ));
+    assert!(close(joint_turn([1.0, 0.0], [-1.0, 0.0]).unwrap(), PI));
+}
+
+#[test]
+fn a_zero_or_non_finite_joint_direction_is_refused() {
+    assert!(joint_turn([0.0, 0.0], [1.0, 0.0]).is_err());
+    assert!(joint_turn([f64::NAN, 0.0], [1.0, 0.0]).is_err());
 }
