@@ -1,4 +1,4 @@
-name: SolidCraft T172 app-run repair regression
+name: SolidCraft T173 borrow-safe app-run regression
 on:
   push:
     branches: [integration/issue-15776-upstream-20261115]
