@@ -1142,10 +1142,12 @@ pub struct AttractParams {
     /// Far attractor bodies, by name.
     #[serde(default)]
     pub far_bodies: Option<NameList>,
-    /// The distance that counts as near. Default: the nearest copy's.
+    /// The distance that counts as near. Default: the nearest copy's. With far attractors, a hold
+    /// zone: copies within this of the near attractors take the near values in full (default 0).
     #[serde(default)]
     pub near: Option<LengthExpr>,
-    /// The distance that counts as far. Default: the farthest copy's.
+    /// The distance that counts as far. Default: the farthest copy's. With far attractors, a hold
+    /// zone: copies within this of the far attractors take the far values in full (default 0).
     #[serde(default)]
     pub far: Option<LengthExpr>,
     /// A copy's scale at the near distance. Default: 1.

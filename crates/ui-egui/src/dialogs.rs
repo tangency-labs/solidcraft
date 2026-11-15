@@ -8783,13 +8783,28 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     if form.attract {
                         crate::dialogs_face_pattern::set_attractor_inputs(&mut d, true);
                     }
-                    d.kind = Kind::FacePattern(Box::new(form));
-                    // The face where it was picked, when a face is still there.
-                    if let solidcraft_engine::doc::construct::GeoRef::Face { at, .. } = face
-                        && let (Some(pick), Some(inp)) = (face_sel(s, *at), d.inputs.get_mut(1))
-                    {
+                    // The face, and each attractor set, as picks where they are now. A set with a
+                    // reference that can't be shown stays empty, and its saved references go back
+                    // unchanged.
+                    if let (Some(pick), Some(inp)) = (model_axis_sel(s, face), d.inputs.get_mut(1)) {
                         inp.items = vec![pick];
                     }
+                    if let PatternKind::Face { attract: Some(a), .. } = pattern {
+                        let set = |geometry: &[solidcraft_engine::doc::construct::GeoRef], bodies: &[solidcraft_engine::doc::BodyName]| {
+                            let mut picks: Vec<Sel> = geometry.iter().map(|g| point_sel(s, g).or_else(|| saved_pick(s, g))).collect::<Option<_>>()?;
+                            picks.extend(bodies.iter().map(|b| Sel::Body { name: b.0.clone() }));
+                            Some(picks)
+                        };
+                        for (label, geometry, bodies) in [
+                            (crate::dialogs_face_pattern::ATTRACTORS, &a.geometry, &a.bodies),
+                            (crate::dialogs_face_pattern::FAR_ATTRACTORS, &a.far_geometry, &a.far_bodies),
+                        ] {
+                            if let (Some(picks), Some(inp)) = (set(geometry, bodies), d.inputs.iter_mut().find(|i| i.label == label)) {
+                                inp.items = picks;
+                            }
+                        }
+                    }
+                    d.kind = Kind::FacePattern(Box::new(form));
                     d.active = 0;
                     d
                 }

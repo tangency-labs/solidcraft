@@ -23,7 +23,10 @@
     "ui.face_pattern.nearest_copy": "nearest copy",
     "ui.face_pattern.farthest_copy": "farthest copy",
     "ui.face_pattern.group_copies": "Group copies",
-    "ui.face_pattern.far_attractors": "Far attractors"
+    "ui.face_pattern.far_attractors": "Far attractors",
+    "ui.face_pattern.between_note": "Copies change from the attractors to the far attractors",
+    "ui.face_pattern.hold_near": "hold near values within",
+    "ui.face_pattern.hold_far": "hold far values within"
   },
   "de": {
     "cmd.solid.pattern.face": "Muster auf Fläche",
@@ -49,7 +52,10 @@
     "ui.face_pattern.nearest_copy": "nächste Kopie",
     "ui.face_pattern.farthest_copy": "entfernteste Kopie",
     "ui.face_pattern.group_copies": "Kopien gruppieren",
-    "ui.face_pattern.far_attractors": "Ferne Attraktoren"
+    "ui.face_pattern.far_attractors": "Ferne Attraktoren",
+    "ui.face_pattern.between_note": "Die Kopien ändern sich von den Attraktoren zu den fernen Attraktoren",
+    "ui.face_pattern.hold_near": "Nahwerte halten innerhalb",
+    "ui.face_pattern.hold_far": "Fernwerte halten innerhalb"
   },
   "ar": {
     "cmd.solid.pattern.face": "نمط على وجه",
@@ -75,7 +81,10 @@
     "ui.face_pattern.nearest_copy": "أقرب نسخة",
     "ui.face_pattern.farthest_copy": "أبعد نسخة",
     "ui.face_pattern.group_copies": "جمّع النسخ",
-    "ui.face_pattern.far_attractors": "نقاط الجذب البعيدة"
+    "ui.face_pattern.far_attractors": "نقاط الجذب البعيدة",
+    "ui.face_pattern.between_note": "تتغير النسخ من عناصر الجذب إلى عناصر الجذب البعيدة",
+    "ui.face_pattern.hold_near": "ثبّت القيم القريبة ضمن",
+    "ui.face_pattern.hold_far": "ثبّت القيم البعيدة ضمن"
   },
   "he": {
     "cmd.solid.pattern.face": "תבנית על פאה",
@@ -101,7 +110,10 @@
     "ui.face_pattern.nearest_copy": "העותק הקרוב ביותר",
     "ui.face_pattern.farthest_copy": "העותק הרחוק ביותר",
     "ui.face_pattern.group_copies": "קבץ עותקים",
-    "ui.face_pattern.far_attractors": "נקודות משיכה רחוקות"
+    "ui.face_pattern.far_attractors": "נקודות משיכה רחוקות",
+    "ui.face_pattern.between_note": "העותקים משתנים מגורמי המשיכה אל גורמי המשיכה הרחוקים",
+    "ui.face_pattern.hold_near": "שמור ערכים קרובים בטווח",
+    "ui.face_pattern.hold_far": "שמור ערכים רחוקים בטווח"
   },
   "ja": {
     "cmd.solid.pattern.face": "面上のパターン",
@@ -127,7 +139,10 @@
     "ui.face_pattern.nearest_copy": "最も近いコピー",
     "ui.face_pattern.farthest_copy": "最も遠いコピー",
     "ui.face_pattern.group_copies": "コピーをグループ化",
-    "ui.face_pattern.far_attractors": "遠いアトラクター"
+    "ui.face_pattern.far_attractors": "遠いアトラクター",
+    "ui.face_pattern.between_note": "コピーはアトラクターから遠いアトラクターへと変化します",
+    "ui.face_pattern.hold_near": "近い値を保つ範囲",
+    "ui.face_pattern.hold_far": "遠い値を保つ範囲"
   },
   "vi": {
     "cmd.solid.pattern.face": "Mẫu trên mặt",
@@ -153,7 +168,10 @@
     "ui.face_pattern.nearest_copy": "bản gần nhất",
     "ui.face_pattern.farthest_copy": "bản xa nhất",
     "ui.face_pattern.group_copies": "Nhóm các bản sao",
-    "ui.face_pattern.far_attractors": "Điểm hút xa"
+    "ui.face_pattern.far_attractors": "Điểm hút xa",
+    "ui.face_pattern.between_note": "Các bản thay đổi từ điểm hút tới điểm hút xa",
+    "ui.face_pattern.hold_near": "giữ giá trị gần trong",
+    "ui.face_pattern.hold_far": "giữ giá trị xa trong"
   },
   "zh": {
     "cmd.solid.pattern.face": "面上阵列",
@@ -179,7 +197,10 @@
     "ui.face_pattern.nearest_copy": "最近的副本",
     "ui.face_pattern.farthest_copy": "最远的副本",
     "ui.face_pattern.group_copies": "将副本编组",
-    "ui.face_pattern.far_attractors": "远端吸引对象"
+    "ui.face_pattern.far_attractors": "远端吸引对象",
+    "ui.face_pattern.between_note": "副本从吸引对象向远端吸引对象变化",
+    "ui.face_pattern.hold_near": "在此距离内保持近值",
+    "ui.face_pattern.hold_far": "在此距离内保持远值"
   },
   "ko": {
     "cmd.solid.pattern.face": "면 위 패턴",
@@ -205,6 +226,9 @@
     "ui.face_pattern.nearest_copy": "가장 가까운 복사본",
     "ui.face_pattern.farthest_copy": "가장 먼 복사본",
     "ui.face_pattern.group_copies": "복사본 그룹화",
-    "ui.face_pattern.far_attractors": "먼 어트랙터"
+    "ui.face_pattern.far_attractors": "먼 어트랙터",
+    "ui.face_pattern.between_note": "복사본은 어트랙터에서 먼 어트랙터 쪽으로 달라집니다",
+    "ui.face_pattern.hold_near": "가까운 값 유지 범위",
+    "ui.face_pattern.hold_far": "먼 값 유지 범위"
   }
 }

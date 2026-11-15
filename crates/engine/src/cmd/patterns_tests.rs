@@ -2374,3 +2374,32 @@ fn face_pattern_groups_its_copies_unless_told_not_to() {
     run(&mut s, "solid.pattern.face", json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 4, "count2": 3, "group": false}));
     assert!(groups(&s).is_empty(), "group: false makes no group");
 }
+
+/// Between two sets the near and far distances are hold zones: within 10 mm of the front edge a
+/// copy takes the near values in full, within 10 mm of the back edge the far ones, and between
+/// them it ramps, (y − 10) / (60 − 10 − 10) of the way.
+#[test]
+fn face_pattern_hold_zones_between_two_edges() {
+    let mut s = Session::default();
+    plate_and_pin(&mut s);
+    let r = run(
+        &mut s,
+        "solid.pattern.face",
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 4, "count2": 6,
+               "attract": {"geometry": [{"edge": [50, 0, 10]}], "far_geometry": [{"edge": [50, 60, 10]}],
+                           "near": 10, "far": 10, "scale_near": 2, "scale_far": 0.5}}),
+    );
+    let pins = pin_heights(&s, &r);
+    assert_eq!(pins.len(), 24);
+    let (mut held_near, mut held_far, mut ramped) = (0, 0, 0);
+    for (c, h) in &pins {
+        let t = ((c.y - 10.0) / 40.0).clamp(0.0, 1.0);
+        assert!((h - ramp_height(t)).abs() < 1e-6, "at {c:?}: {h} mm, expected {}", ramp_height(t));
+        match t {
+            t if t <= 0.0 => held_near += 1,
+            t if t >= 1.0 => held_far += 1,
+            _ => ramped += 1,
+        }
+    }
+    assert!(held_near > 0 && held_far > 0 && ramped > 0, "copies in each zone: {held_near} {ramped} {held_far}");
+}
