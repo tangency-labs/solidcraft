@@ -179,11 +179,15 @@ fn separate(r: &solidcraft_smlib::Brep, how: Checked) -> std::result::Result<Opt
     split.then(|| r.to_native().map_err(|e| format!("export: {e}"))).transpose()
 }
 
-/// What a step says of a result SMLib's check refuses, naming the operands whose own check
-/// (`checks`, in order) fails too: the fault is then theirs.
+/// What a step says of a result SMLib's check refuses, naming the operands (the input of a
+/// blend) whose own check (`checks`, in order) fails too: the fault is then theirs.
 pub(crate) fn refuses(checks: impl ExactSizeIterator<Item = solidcraft_smlib::Result<solidcraft_smlib::CheckReport>>) -> String {
     let n = checks.len();
-    let name = |i: usize| if n == 2 { ["the first operand", "the second operand"][i.min(1)].to_string() } else { format!("operand {i}") };
+    let name = |i: usize| match n {
+        1 => "the input".to_string(),
+        2 => ["the first operand", "the second operand"][i.min(1)].to_string(),
+        _ => format!("operand {i}"),
+    };
     let failing: Vec<String> = checks.enumerate().filter(|(_, c)| c.as_ref().is_ok_and(|c| !c.is_valid())).map(|(i, _)| name(i)).collect();
     let whose = if failing.is_empty() { String::new() } else { format!(" ({} already fails it)", failing.join(" and ")) };
     format!("SMLib's check refuses the result{whose}")
@@ -344,6 +348,14 @@ mod tests {
         let (joined, _) = validating(Validation::EachFeature, || crate::boolean(&tool, &bad, crate::BoolOp::Union));
         let e = check_kept(&joined.unwrap().unwrap()).unwrap_err().to_string();
         assert!(e.contains("(the second operand already fails it)"), "{e}");
+        // A round on an edge away from the moved corner: the blend names its input the same way.
+        let edge = [Vec3::new(10.0, 5.0, 10.0)];
+        let (step, _) = validating(Validation::EachStep, || crate::fillet(&bad, &edge, 1.0));
+        let e = step.unwrap_err().to_string();
+        assert!(e.contains("SMLib's check refuses the result (the input already fails it)"), "{e}");
+        let (round, deferred) = validating(Validation::EachFeature, || crate::fillet(&bad, &edge, 1.0));
+        let e = check_kept(&round.unwrap()).unwrap_err().to_string();
+        assert!(deferred && e.contains("SMLib fillet: SMLib's check refuses the result (the input already fails it)"), "{e}");
         let (off, deferred) = validating(Validation::Off, || crate::boolean(&bad, &tool, crate::BoolOp::Union));
         assert!(off.is_ok_and(|b| b.is_some()) && !deferred);
     }
