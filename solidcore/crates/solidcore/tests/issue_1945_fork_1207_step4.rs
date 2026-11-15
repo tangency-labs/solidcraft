@@ -77,13 +77,10 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
-    k.fixes.slice_coincident_faces_sheet_side = true;
-    k.fixes.boolean_outer_shell_first = true;
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
-    k.fixes.boolean_cleanup_removes_slits = true;
     k.fixes.classify_edge_interval = true;
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;

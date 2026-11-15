@@ -156,9 +156,7 @@ fn top_edges(k: &Kernel, b: &Brep) -> Vec<EdgeId> {
 fn round() -> (f64, Result<(bool, f64), i32>) {
     let mut k = Kernel::default();
     k.fixes.analytic_copy_keeps_parameterization = true;
-    k.fixes.boolean_cleanup_removes_slits = true;
     k.fixes.boolean_new_face_closure_both_sides = true;
-    k.fixes.boolean_outer_shell_first = true;
     k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.box_face_failures_propagate = true;
@@ -234,7 +232,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.shell_empty_cavity_fails = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
-    k.fixes.slice_coincident_faces_sheet_side = true;
     k.fixes.ssi_low_angle_start_on_probation = true;
     k.fixes.ssi_pole_point_keeps_its_tangent = true;
     k.fixes.ssi_singular_start_inside_direction = true;
