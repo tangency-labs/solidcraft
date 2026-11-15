@@ -6,6 +6,9 @@
 //! tolerances grown; it changes the kinds or
 //! parameters of the other geometry, and a reflection the orientation: those are a kernel
 //! operation, not this.
+use solidcore_record::brep::blend::{
+    BlendDefinition, BlendDefinitionRecord, NurbsCurveRecord, NurbsSurfaceRecord, ProceduralBlendRecord, SupportRecord,
+};
 use solidcore_record::brep::{Brep, Curve, Frame, Surface};
 
 /// A rotation (rows of an orthonormal matrix with determinant +1) and a translation:
@@ -128,9 +131,131 @@ impl Rigid {
                 matrix: compose(&self.matrix(), matrix),
                 forward: *forward,
             },
-            // Moving a definition is the kernel's: its supports, leader and seeds move with it.
-            Surface::Blend { .. } => return None,
+            // The definition moves as the kernel moves it: its supports, leader and centre. A
+            // procedural blend's bound takes in the motion's rounding, from its net ([`moved`]).
+            Surface::Blend { definition } => Surface::Blend { definition: Box::new(self.blend(definition)?) },
         })
+    }
+
+    /// Whether the rotation is orthonormal to rounding: a blend's net and its definition then
+    /// move together within the rounding its bound takes in. A looser rotation moves them apart
+    /// (by up to [`ORTHONORMAL`] of their size), which only the kernel's rebuild can certify.
+    fn exact(&self) -> bool {
+        const ROUNDING: f64 = 16.0 * f64::EPSILON;
+        let column = |j: usize| [self.rotation[0][j], self.rotation[1][j], self.rotation[2][j]];
+        (0..3).all(|i| (0..3).all(|j| (dot(column(i), column(j)) - if i == j { 1.0 } else { 0.0 }).abs() <= ROUNDING))
+    }
+
+    /// A blend's definition moved: the supports, the leader and (an exact round's) the centre
+    /// the class is read at. Seeds are on the supports' parameters, the radius law on the
+    /// leader's, and offsets and sides along the normals, which move with the supports. `None`
+    /// for a motion only near rigid or a definition of a form this does not know to move.
+    fn blend(&self, d: &BlendDefinition) -> Option<BlendDefinition> {
+        if !self.exact() {
+            return None;
+        }
+        Some(match d {
+            BlendDefinition::Procedural(r) => BlendDefinition::Procedural(Box::new(self.procedural(r)?)),
+            BlendDefinition::ExactRound(r) => {
+                let mut r = r.clone();
+                r.supports = [self.support(&r.supports[0])?, self.support(&r.supports[1])?];
+                r.leader = match &r.leader {
+                    Some(leader) => Some(self.nurbs_curve(leader)?),
+                    None => None,
+                };
+                r.inputs.centre = self.point(r.inputs.centre);
+                BlendDefinition::ExactRound(r)
+            }
+        })
+    }
+
+    /// A procedural definition moved, its bound as it was ([`widened`] takes in the rounding).
+    fn procedural(&self, d: &BlendDefinitionRecord) -> Option<BlendDefinitionRecord> {
+        let mut d = d.clone();
+        d.supports = [self.support(&d.supports[0])?, self.support(&d.supports[1])?];
+        d.leader = self.nurbs_curve(&d.leader)?;
+        Some(d)
+    }
+
+    fn support(&self, s: &SupportRecord) -> Option<SupportRecord> {
+        Some(match s {
+            SupportRecord::Nurbs { kind, form } => SupportRecord::Nurbs { kind: *kind, form: self.nurbs_surface(form)? },
+            SupportRecord::Blend(b) => {
+                let net = self.nurbs_surface(&b.net)?;
+                let mut definition = self.procedural(&b.definition)?;
+                definition.bound = widened(definition.bound, net_points(&net)?);
+                SupportRecord::Blend(Box::new(ProceduralBlendRecord { definition, net }))
+            }
+        })
+    }
+
+    /// A control point as stored, `(w x, w y, w z)` with weight `w`, or `(x, y, z)`.
+    fn stored(&self, p: [f64; 3], w: Option<f64>) -> [f64; 3] {
+        match w {
+            Some(w) => {
+                let h = self.homogeneous([p[0], p[1], p[2], w]);
+                [h[0], h[1], h[2]]
+            }
+            None => self.point(p),
+        }
+    }
+
+    fn nurbs_surface(&self, f: &NurbsSurfaceRecord) -> Option<NurbsSurfaceRecord> {
+        let weights = weights_of(f.weights.as_deref(), f.points.len())?;
+        Some(NurbsSurfaceRecord { points: f.points.iter().enumerate().map(|(i, p)| self.stored(*p, weights(i))).collect(), ..f.clone() })
+    }
+
+    /// A curve in space (the leader); `None` for a planar one, which is in some other frame.
+    fn nurbs_curve(&self, c: &NurbsCurveRecord) -> Option<NurbsCurveRecord> {
+        if c.dim != 3 || !c.points_3d {
+            return None;
+        }
+        let weights = weights_of(c.weights.as_deref(), c.points.len())?;
+        Some(NurbsCurveRecord { points: c.points.iter().enumerate().map(|(i, p)| self.stored(*p, weights(i))).collect(), ..c.clone() })
+    }
+}
+
+/// The weight of each of `count` control points, when there are weights; `None` when their
+/// number is not the points'.
+fn weights_of(weights: Option<&[f64]>, count: usize) -> Option<impl Fn(usize) -> Option<f64> + '_> {
+    if weights.is_some_and(|w| w.len() != count) {
+        return None;
+    }
+    Some(move |i: usize| weights.and_then(|w| w.get(i).copied()))
+}
+
+/// The points and weights of a net's control points (stored weighted when rational).
+fn net_points(net: &NurbsSurfaceRecord) -> Option<Vec<([f64; 3], f64)>> {
+    let weights = weights_of(net.weights.as_deref(), net.points.len())?;
+    net.points
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let w = weights(i).unwrap_or(1.0);
+            (w > 0.0 && w.is_finite()).then(|| (p.map(|x| x / w), w))
+        })
+        .collect()
+}
+
+/// A procedural blend's bound after a rigid motion of its net, as the kernel widens it (its
+/// `transform_rounding`): each homogeneous coordinate is three products, their sum and the
+/// weighted translation (six operations) on coordinates of at most the moved net's size, divided
+/// by the least weight.
+fn widened(bound: f64, net: Vec<([f64; 3], f64)>) -> f64 {
+    let size = net.iter().fold(0.0_f64, |a, (p, _)| a.max(dot(*p, *p).sqrt()));
+    let (lo, hi) = net.iter().fold((f64::INFINITY, 0.0_f64), |(lo, hi), (_, w)| (lo.min(*w), hi.max(*w)));
+    let nu = 6.0 * (f64::EPSILON / 2.0);
+    bound + nu / (1.0 - nu) * (hi / lo) * size
+}
+
+/// The net of a face's NURBS form (its `nurbs`), as a definition's net is stored.
+fn face_net(s: &Surface) -> Option<Vec<([f64; 3], f64)>> {
+    match s {
+        Surface::Spline { points, .. } => Some(points.iter().flatten().map(|p| (*p, 1.0)).collect()),
+        Surface::RationalSpline { homogeneous, .. } => {
+            homogeneous.iter().flatten().map(|h| (h[3] > 0.0 && h[3].is_finite()).then(|| ([h[0] / h[3], h[1] / h[3], h[2] / h[3]], h[3]))).collect()
+        }
+        _ => None,
     }
 }
 
@@ -146,8 +271,9 @@ fn compose(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> [[f64; 4]; 4] {
 }
 
 /// This record moved by `motion` (module docs): topology, parameters and pcurves unchanged.
-/// `None` for a record with a blend by its definition: moving its supports, leader and seeds is
-/// the kernel's, which moves the definition with its net (its transform).
+/// A blend by its definition moves as the kernel moves it ([`Rigid::blend`]); `None` when the
+/// rotation is only near orthonormal, for an edge whose curve is on a blend, and for a definition
+/// of a form not known to move.
 pub fn moved(brep: &Brep, motion: &Rigid) -> Option<Brep> {
     let mut out = brep.clone();
     for f in &mut out.faces {
@@ -156,8 +282,20 @@ pub fn moved(brep: &Brep, motion: &Rigid) -> Option<Brep> {
             Some(n) => Some(motion.surface(n)?),
             None => None,
         };
+        // A procedural blend's net is the face's NURBS form: its bound takes in the rounding of
+        // moving it, as the kernel's move does.
+        if let Surface::Blend { definition } = &mut f.surface
+            && let BlendDefinition::Procedural(d) = definition.as_mut()
+        {
+            d.bound = widened(d.bound, face_net(f.nurbs.as_ref()?)?);
+        }
     }
     for e in &mut out.edges {
+        // An edge on a blend by its definition is the kernel's: its curve's copy of the blend
+        // keeps no net of its own to take in the rounding by.
+        if matches!(&e.curve, Curve::SurfaceIntersection { surfaces, .. } if surfaces.iter().any(|s| matches!(**s, Surface::Blend { .. }))) {
+            return None;
+        }
         e.curve = motion.curve(&e.curve)?;
         e.nurbs = match &e.nurbs {
             Some(n) => Some(motion.curve(n)?),

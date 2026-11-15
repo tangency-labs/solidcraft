@@ -16,7 +16,7 @@ use crate::{Result, Session};
 
 const CELL_GRID_CONTRACT: TypedContract<CellGridParams> = TypedContract::new();
 
-const HELP_HEAD: &str = "size: expr (a cell's inscribed diameter); web: expr (the wall between cells); depth: expr (or through_all: true); shape?: hexagon|square|triangle|circle|polygon (default hexagon); sides?: expr (polygon cells, 3 to 64; default 8); dot_grid?: hexagonal|square (where circle and polygon cells sit; default hexagonal); angle?: expr (the grid's rotation about the anchor; angle 45 deg with square cells gives a diamond layout); anchor?: [x,y,z] (a cell's centre, projected onto the sketch plane; default the sketch origin: grids with the same anchor, angle, size and web line up); clip?: whole|snap|free (cells the field's edge crosses: only whole cells; cells cut along the grid's own lines; cells trimmed to the edge as drawn; default snap); direction?: positive|negative|symmetric (default positive); sketch?: id|name (default: active or last sketch; its closed profiles hold the field: a loop inside another is a keep-out); profiles?: as solid.extrude; targets?: [body]; mode?: cut (the only mode so far); name?. Cuts at most ";
+const HELP_HEAD: &str = "size: expr (a cell's inscribed diameter); web: expr (the wall between cells); depth: expr (or through_all: true); shape?: hexagon|square|triangle|circle|polygon (default hexagon); sides?: expr (polygon cells, 3 to 64; default 8); dot_grid?: hexagonal|square (where circle and polygon cells sit; default hexagonal); angle?: expr (the grid's rotation about the anchor; angle 45 deg with square cells gives a diamond layout); anchor?: [x,y,z] (a cell's centre, projected onto the sketch plane; default the sketch origin: grids with the same anchor, angle, size and web line up); clip?: whole|snap|free (cells the field's edge crosses: only whole cells; cells cut along the grid's own lines; cells trimmed to the edge as drawn; default snap); margin?: expr (with clip whole, the least clearance from a cell to every edge of the field and its keep-outs, measured exactly; default 0, a cell may touch an edge); direction?: positive|negative|symmetric (default positive); sketch?: id|name (default: active or last sketch; its closed profiles hold the field: a loop inside another is a keep-out); profiles?: as solid.extrude; targets?: [body]; mode?: cut (the only mode so far); name?. Cuts at most ";
 const HELP_TAIL: &str = " cells in one operation; not for sheet metal (use sheet.perforate). The faces cut have no stable names yet";
 const HELP_LEN: usize = HELP_HEAD.len() + decimal_len(MAX_CUT_CELLS) + HELP_TAIL.len();
 const HELP_BYTES: [u8; HELP_LEN] = help_bytes();
@@ -112,6 +112,23 @@ fn cell_grid(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, a, Kind::Angle, cmd, "angle")?;
     }
     let anchor = point_param(s, p, "anchor", cmd)?;
+    let margin = match expr(p, "margin") {
+        Some(e) => {
+            check_expr(s, &e, Kind::Length, cmd, "margin")?;
+            // A bare number means the design's unit.
+            let typed: solidcraft_doc::Expr = s.doc.with_design_unit(&e, Kind::Length).into();
+            let v = s.doc.eval(&typed, Kind::Length).map_err(|err| bad(cmd, format!("margin: {err}")))?;
+            if !(v.is_finite() && v >= 0.0) {
+                return Err(bad(cmd, format!("`margin` must be 0 or more, not {v} mm")));
+            }
+            if v > 0.0 && clip != solidcore_record::cell_grid::Clip::Whole {
+                return Err(bad(cmd, "`margin` needs `clip: whole`: snapped and trimmed cells meet the edge by design"));
+            }
+            Some(e)
+        }
+        None if p.get("margin").is_some_and(|v| !v.is_null()) => return Err(bad(cmd, "`margin` must be a number or an expression")),
+        None => None,
+    };
     let through_all = bool_(p, "through_all").unwrap_or(false);
     let depth = if through_all {
         None
@@ -147,6 +164,7 @@ fn cell_grid(s: &mut Session, p: &Value) -> Result<Value> {
             angle,
             anchor,
             clip,
+            margin,
             depth,
             through_all,
             direction,

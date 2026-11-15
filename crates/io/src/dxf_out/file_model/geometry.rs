@@ -1244,12 +1244,13 @@ mod tests {
             assert_eq!(values(layers[0], 62), ["3"]);
             assert_eq!(values(layers[0], 6), ["HIDDEN"]);
             let expected_weight = match weight_code {
-                None => vec![],
+                None => vec!["-3"],
                 Some(0) => vec!["0"],
                 Some(50) => vec!["50"],
                 _ => panic!("unexpected fixture weight"),
             };
             assert_eq!(values(layers[0], 370), expected_weight);
+            assert_eq!(copied.layer(copied.default_layer()).unwrap().weight().map(super::super::StandardWeight::code), weight_code);
             let bulges = records(&pairs, "LWPOLYLINE");
             assert_eq!(bulges.len(), 1);
             for (code, expected) in [

@@ -107,8 +107,8 @@ pub struct Layer {
     name: String,
     color: i16,
     linetype: DxfLinetype,
-    /// None preserves legacy omission of group370; its semantic default is
-    /// unresolved here, never silently replaced with a numeric weight.
+    /// None keeps the unresolved default in the owned model. R2000 writes the
+    /// layer sentinel -3, never a silently chosen physical lineweight.
     weight: Option<StandardWeight>,
 }
 
@@ -632,8 +632,9 @@ mod tests {
             ("UNUSED", "3", "DASHED", None),
         ]) {
             x2_wire_fields(record, &[(2, &[name]), (62, &[color]), (6, &[kind])]);
-            assert_eq!(x2_wire_values(record, 370), weight.into_iter().collect::<Vec<_>>());
+            assert_eq!(x2_wire_values(record, 370), [weight.unwrap_or("-3")]);
         }
+        assert_eq!(source.layers().iter().map(|layer| layer.weight().map(StandardWeight::code)).collect::<Vec<_>>(), [None, Some(50), Some(0), None]);
         let entities = x2_wire_entities(&written);
         assert_eq!(entities.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(), ["LINE", "CIRCLE", "ARC", "LINE"]);
         for ((_, record), (layer, weight)) in entities.iter().zip([("CUT", None), ("0", Some("-2")), ("HIDDEN", Some("-1")), ("CUT", Some("-3"))]) {
@@ -733,7 +734,8 @@ mod tests {
                 .enumerate()
         {
             x2_wire_fields(&layers[style_index + 1].1, &[(2, &[name]), (62, &[color]), (6, &[kind])]);
-            assert_eq!(x2_wire_values(&layers[style_index + 1].1, 370), weight.into_iter().collect::<Vec<_>>());
+            assert_eq!(x2_wire_values(&layers[style_index + 1].1, 370), [weight.unwrap_or("-3")]);
+            assert_eq!(source.layers()[style_index + 1].weight().map(StandardWeight::code), styles[style_index].3);
             for (index, expected_weight) in wire_weights.iter().enumerate() {
                 let (entity, record) = &entities[style_index * 28 + index];
                 assert_eq!(*entity, "LINE");

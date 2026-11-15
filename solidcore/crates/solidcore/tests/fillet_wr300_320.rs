@@ -21,7 +21,7 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::edge;
 use solidcore::topology::EdgeId;
-use solidcore::{Brep, Kernel};
+use solidcore::{Brep, CancelToken, Kernel};
 
 fn kernel(set: impl FnOnce(&mut UpstreamFixes)) -> Kernel {
     let mut k = Kernel::default();
@@ -188,17 +188,21 @@ fn blends_larger_than_their_faces_are_refused() {
 /// A cylinder of radius 10 and height 20, its top rim blended by `size`.
 fn cylinder_rim(k: &mut Kernel, size: f64, xsect: u32) -> Outcome {
     let mut b = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0).unwrap();
-    let rim = *b
-        .edge_list()
+    let rim = top_rim(k, &b);
+    fillet(k, &mut b, &[rim], size, xsect)
+}
+
+/// The top rim (z = 20, radius 10) of [`cylinder_rim`]'s cylinder.
+fn top_rim(k: &Kernel, b: &Brep) -> EdgeId {
+    *b.edge_list()
         .iter()
         .find(|&&e| {
-            let c = edge::curve(&b, e).unwrap().unwrap();
-            let ivl = edge::interval(&b, e).unwrap();
+            let c = edge::curve(b, e).unwrap().unwrap();
+            let ivl = edge::interval(b, e).unwrap();
             let p = c.evaluate_point(k, ivl.min()).unwrap();
             (p.z - 20.0).abs() < 1e-6 && (p.x.hypot(p.y) - 10.0).abs() < 1e-6
         })
-        .unwrap();
-    fillet(k, &mut b, &[rim], size, xsect)
+        .unwrap()
 }
 
 /// Blends as wide as the face they roll on: the chamfer's cone would end in a point at the
@@ -241,6 +245,62 @@ fn chamfer_as_wide_as_its_face_is_refused() {
             );
         }
     }
+}
+
+/// The cancel-token polls [`rim_chamfer_near_the_radius_is_certified_in_bounded_work`]'s
+/// build may take (#16652): about three times the 17 879 it takes. Before the
+/// certificate's enclosures kept the cancellation of the face's point against its offset
+/// normal, the build took 1 414 866 (passing 60 000 within its first 4 s).
+const RIM_CHAMFER_POLLS: u64 = 50_000;
+
+/// The volume's tolerance in [`rim_chamfer_near_the_radius_is_certified_in_bounded_work`]:
+/// the chamfer's surface is within its tolerance (4e-5, its certificate's target a tenth
+/// of that) of the cone, whose area is `pi (R + (R - c)) c sqrt(2)` = 444.3, so the volume
+/// is within 444.3 x 4e-5 = 0.0178 of the closed form, plus the integrator's own 1e-6.
+const VOLUME_TOL: f64 = 0.02;
+
+/// #16652: a cylinder's top rim chamfered by 9.99, just below its radius of 10, built as
+/// its definition. The chamfer's centre line is a circle of radius 0.01 about the axis,
+/// where the cylinder offset by 9.99 moves a thousandth as fast as the cylinder: its
+/// certificate's enclosures took the face's point and its offset normal apart and lost
+/// that cancellation at every order, and cut the chord into pieces for ten minutes. A
+/// deterministic work budget (the kernel's cancel-token polls, which the certificate
+/// takes per level, piece and bound) stands in for the time: past it the build is
+/// cancelled. The chamfer is the closed form's: the cylinder less the ring the chamfer's
+/// triangle (legs c) sweeps about the axis, `pi c^2 (R - c / 3)` (Pappus), to the
+/// certified surface's distance times its area.
+#[test]
+fn rim_chamfer_near_the_radius_is_certified_in_bounded_work() {
+    let (r, h, c) = (10.0_f64, 20.0_f64, 9.99_f64);
+    let mut k = kernel(|f| f.fillet_round_as_definition = true);
+    let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), r, h).unwrap();
+    let rim = top_rim(&k, &b);
+    let token = CancelToken::after_polls(RIM_CHAMFER_POLLS);
+    k.set_cancel_token(token.clone());
+    let result = {
+        let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &[rim], c, 0, 1, 1.0)
+            .unwrap();
+        session
+            .do_fillet(&mut k)
+            .map_err(|_| session.error_info().code)
+    };
+    let polls = token.polls().unwrap();
+    k.clear_cancel_token();
+    assert!(
+        result.is_ok() && polls < RIM_CHAMFER_POLLS,
+        "{result:?} after {polls} polls"
+    );
+    let Outcome::Built { volume, manifold } = outcome(&mut k, &mut b, result) else {
+        panic!("refused after it was built");
+    };
+    let pi = std::f64::consts::PI;
+    let closed = pi * r * r * h - pi * c * c * (r - c / 3.0);
+    assert!(
+        manifold && near(volume, closed, VOLUME_TOL),
+        "{volume} against {closed}"
+    );
 }
 
 // ---- #960: the refusals named, not only commented ----

@@ -542,26 +542,23 @@ pub const MSAA: [u32; 4] = [1, 2, 4, 8];
 /// Supersampling factors (#1288): off, 1.5× and 2× the viewport's pixels each way.
 pub const SUPERSAMPLING: [f32; 3] = [1.0, 1.5, 2.0];
 
-/// Original view navigators, independent of the mouse navigation preset.
+/// View navigators, independent of the mouse navigation preset.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NavigatorStyle {
     /// Also what a navigator this version doesn't know reads as (`lenient`).
     #[default]
     Axes,
-    Cube,
-    /// A body of the user's choice, drawn the cube's size ([`crate::view_gizmo`]); the cube
-    /// until one is chosen.
+    /// A body of the user's choice ([`crate::view_gizmo`]); the signed axes until one is chosen.
     Custom,
 }
 
 impl NavigatorStyle {
-    pub const ALL: [Self; 3] = [Self::Axes, Self::Cube, Self::Custom];
+    pub const ALL: [Self; 2] = [Self::Axes, Self::Custom];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Axes => "Signed axes",
-            Self::Cube => "Cube",
             Self::Custom => "Custom",
         }
     }
@@ -571,7 +568,7 @@ impl NavigatorStyle {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NavigatorTexture {
-    /// The navigation cube's colours. Also what a value this version doesn't know reads as
+    /// The navigator's colours. Also what a value this version doesn't know reads as
     /// (`lenient`).
     #[default]
     Themed,
@@ -1094,13 +1091,13 @@ preference_settings! {
     show_donate_button: bool = true, PAGE_GENERAL => check_id("prefs.show_donate_button");
     /// The Discord button at the status bar's right end; the × on it turns it off.
     show_discord_button: bool = true, PAGE_GENERAL => check_id("prefs.show_discord_button");
-    /// View orientation widget: original signed axes (default) or compact cube.
+    /// View orientation widget: original signed axes (default) or a custom body.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
-    /// The custom view gizmo's colours: the cube's (themed) or the body's own (modeled).
+    /// The custom view gizmo's colours: the theme's (themed) or the body's own (modeled).
     navigator_texture: NavigatorTexture = NavigatorTexture::default(), PAGE_NAVIGATION;
-    /// The custom view gizmo has the cube's orbit and roll arrows around it.
+    /// The custom view gizmo has the orbit and roll arrows around it.
     navigator_arrows: bool = true, PAGE_NAVIGATION;
-    /// The custom view gizmo has the cube's Home button beside it.
+    /// The custom view gizmo has the Home button beside it.
     navigator_home: bool = true, PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
     radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
@@ -1385,9 +1382,25 @@ preference_settings! {
     /// click shows its panels over the view until a command starts or the pointer leaves them.
     /// Off by default: the whole ribbon shows. `view.ribbon_tabs_only` switches it.
     ribbon_tabs_only: bool = false, PAGE_LAYOUT;
+    /// Constraints pinned to the sketch ribbon's Constrain panel are drawn as small cells in its
+    /// constraint grid, like the default six. Off: they are full-size buttons, as before.
+    pinned_constraints_in_grid: bool = true, PAGE_LAYOUT;
     /// A double-click on a design tab renames the design in the tab; off, it maximizes the window
     /// as the rest of the title bar does, as before.
     tab_double_click_renames: bool = true, PAGE_LAYOUT;
+    /// A design's views (Model, Sketch, Sheet, Render, Animation) are tabs inside its tab; off, the
+    /// design keeps one tab and a view switcher lists them.
+    design_views_as_tabs: bool = true, PAGE_LAYOUT;
+    /// A drawing sheet opens as a view (a sub-tab) of its design.
+    design_sub_tab_sheets: bool = true, PAGE_LAYOUT;
+    /// Editing a sketch opens it as a view of its design; Finish Sketch returns to the previous view.
+    design_sub_tab_sketches: bool = true, PAGE_LAYOUT;
+    /// Render and Animate open as views of their design.
+    design_sub_tab_render: bool = true, PAGE_LAYOUT;
+    /// Opening a sheet, sketch or workspace that a view already shows activates that view.
+    design_reuse_views: bool = true, PAGE_LAYOUT;
+    /// A design opens with the views it had when it was last closed.
+    design_reopen_views: bool = false, PAGE_LAYOUT;
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
     dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_LAYOUT;
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
@@ -1575,15 +1588,15 @@ preference_settings! {
     network_hosts: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// What a middle-button double-click in the view does: `home`, `fit` or `off`.
     middle_double_click: String = "home".into(), PAGE_NAVIGATION;
-    /// A view chosen on the navigator (a cube face, corner or arrow, an axis tip) also frames the
+    /// A view chosen on the navigator (a face, corner or arrow, an axis tip) also frames the
     /// whole model, as Home does (#10091). Off by default: the view turns in place, keeping its
     /// target and zoom.
     navigator_fit: bool = false, PAGE_NAVIGATION;
-    /// The view cube's directional arrows orbit the camera the way the arrow points, as in
+    /// The navigator's directional arrows orbit the camera the way the arrow points, as in
     /// Fusion and Inventor (`invert_navigator_arrows`, #10254). Off by default: an arrow rotates
-    /// the cube toward the side it sits on, so the arrow on the left swings the camera left.
+    /// the view toward the side it sits on, so the arrow on the left swings the camera left.
     invert_navigator_arrows: bool = false, PAGE_NAVIGATION;
-    /// The view cube's two curved arrows roll the view the other way: the clockwise arrow rolls
+    /// The navigator's two curved arrows roll the view the other way: the clockwise arrow rolls
     /// counterclockwise and the counterclockwise arrow rolls clockwise (`invert_curved_roll_arrows`,
     /// #10483). Off by default: each arrow rolls the view the way it curls.
     invert_curved_roll_arrows: bool = false, PAGE_NAVIGATION;
@@ -1834,6 +1847,8 @@ preference_settings! {
     move_drag_highlights: bool = false, PAGE_TOOLS => check_id("prefs.move_drag_highlights");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
     disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
+    /// Approved install permissions survive page resets and Cancel, like installed files.
+    plugin_grants: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants> = std::collections::BTreeMap::new();
     /// User ceilings, not automatic increases to a package's approved execution budget.
     plugin_max_fuel: u64 = solidcraft_engine::plugin::HostLimits::default().max_fuel, PAGE_PLUGINS;
     plugin_max_memory_mib: usize = solidcraft_engine::plugin::HostLimits::default().max_memory_mib, PAGE_PLUGINS;
@@ -1893,6 +1908,11 @@ pub struct PrefsWindow {
     /// Search text on the Plugins page.
     pub(crate) plugin_query: String,
     pub(crate) plugin_limit_inputs: Option<crate::plugins::LimitInputs>,
+    pub(crate) plugin_job: Option<crate::plugins::PackageJob>,
+    /// Counts changes to the stored plugin grants made through preferences, so a package job can tell
+    /// that a decision was written while it ran, even one that leaves the value as it was.
+    pub(crate) grants_revision: u64,
+    pub(crate) plugin_remove: Option<(String, String)>,
     panel_restore_details: bool,
     panel_restore_retry: bool,
     panel_popup_reset: bool,
@@ -2088,7 +2108,9 @@ impl Snapshot {
         // Update bookkeeping isn't a setting: a check that finished while the dialog was open stays.
         let update = std::mem::take(&mut app.preferences.update);
         let stand_up_answers = std::mem::take(&mut app.preferences.stand_up_answers);
+        let plugin_grants = std::mem::take(&mut app.preferences.plugin_grants);
         app.preferences = self.prefs;
+        app.preferences.plugin_grants = plugin_grants;
         crate::plugins::sync_policy(app);
         self.panel_visibility.restore(app);
         sync_surface_analysis(app);
@@ -2154,6 +2176,7 @@ impl Snapshot {
             let mut held = prefs.clone();
             held.update.clone_from(&app.preferences.update);
             held.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
+            held.plugin_grants.clone_from(&app.preferences.plugin_grants);
             held == app.preferences
         };
         same_prefs
@@ -2189,6 +2212,7 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
     // Same bookkeeping rule as `restore`: a check that finished while the dialog was open stays.
     prefs.update.clone_from(&app.preferences.update);
     prefs.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
+    prefs.plugin_grants.clone_from(&app.preferences.plugin_grants);
     let mut shortcut_box = app.sbox.prefs();
     if let Some(o) = shortcut_box.as_object_mut() {
         o.insert("pinned".into(), serde_json::json!(s.favourites));
@@ -3072,6 +3096,7 @@ impl prefs_window::Host for SolveApp {
     }
     fn closed(&mut self) {
         self.prefs_window.plugin_limit_inputs = None;
+        self.prefs_window.plugin_remove = None;
         self.prefs_window.panel_restore_details = false;
         self.prefs_window.panel_popup_reset = true;
         self.keymap.read_only = false;
@@ -4281,6 +4306,11 @@ fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     if !accepted::max_sketch_points(&p) {
         p.max_sketch_points = Prefs::default().max_sketch_points;
     }
+    p.plugin_grants.retain(|id, grants| crate::plugins::valid_id(id) && crate::plugins::valid_grants(grants));
+    p.plugin_grants = p.plugin_grants.into_iter().take(crate::plugins::MAX_DISABLED).collect();
+    for grants in p.plugin_grants.values_mut() {
+        grants.folders.sort_by(|a, b| a.name.cmp(&b.name));
+    }
     p.disabled_plugins.retain(|id| crate::plugins::valid_id(id));
     if p.disabled_plugins.len() > crate::plugins::MAX_DISABLED {
         p.disabled_plugins = p.disabled_plugins.into_iter().take(crate::plugins::MAX_DISABLED).collect();
@@ -4472,6 +4502,19 @@ fn prepare_preferences(
     if new.ui_font != app.preferences.ui_font && !new.ui_font.trim().is_empty() && crate::fonts::ui_font(&new.ui_font).is_none() {
         return Err(format!("`ui_font`: `{}` is not an installed font family or a readable font file", new.ui_font.trim()));
     }
+    if new.plugin_grants.len() > crate::plugins::MAX_DISABLED
+        || new.plugin_grants.iter().any(|(id, grants)| !crate::plugins::valid_id(id) || !crate::plugins::valid_grants(grants))
+    {
+        return Err("`plugin_grants` must contain at most 256 valid plugin ids and bounded approved groups and folders".into());
+    }
+    // A scoped caller may not hand a plugin a folder outside its own scope: a later run without that
+    // scope would receive the stored authority.
+    for (id, grants) in &new.plugin_grants {
+        let before = app.preferences.plugin_grants.get(id);
+        for grant in grants.folders.iter().filter(|g| !before.is_some_and(|b| b.folders.contains(g))) {
+            solidcraft_engine::io::vfs::check(&grant.folder.to_string_lossy()).map_err(|e| format!("`plugin_grants` folder for `{id}`: {e}"))?;
+        }
+    }
     if new.disabled_plugins.len() > crate::plugins::MAX_DISABLED || new.disabled_plugins.iter().any(|id| !crate::plugins::valid_id(id)) {
         return Err(format!("`disabled_plugins` must be at most {} ids of lowercase letters, digits and hyphens", crate::plugins::MAX_DISABLED));
     }
@@ -4529,6 +4572,10 @@ fn prepare_preferences(
     if MiddleDoubleClick::parse(&new.middle_double_click).is_none() {
         return Err("`middle_double_click` must be home, fit or off".into());
     }
+    let mut new = new;
+    for grants in new.plugin_grants.values_mut() {
+        grants.folders.sort_by(|a, b| a.name.cmp(&b.name));
+    }
     Ok(new)
 }
 
@@ -4557,6 +4604,9 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     }
     if new.select_other_hidden != app.preferences.select_other_hidden {
         crate::select_other::close(app);
+    }
+    if p.get("plugin_grants").is_some() {
+        app.prefs_window.grants_revision += 1;
     }
     app.preferences = new;
     crate::plugins::sync_policy(app);
@@ -5211,7 +5261,7 @@ mod tests {
             for (key, label, labels) in [
                 ("size", "Size", &["Compact", "Regular"][..]),
                 ("buttons", "Buttons", &["Icons", "Icons + labels"][..]),
-                ("idle", "When idle", &["Always", "Fade", "Hover"][..]),
+                ("idle", "When idle", &["Always visible", "Fade", "Hide until hovered"][..]),
             ] {
                 let body = crate::scenario::rect_of("prefs:page_body").unwrap();
                 let row = crate::scenario::rect_of(&format!("prefs:navbar:{key}")).unwrap();
@@ -5323,6 +5373,8 @@ mod tests {
                 let stage = crate::scenario::rect_of("prefs:navbar:stage").unwrap();
                 let count = crate::scenario::rect_of("prefs:navbar:count").unwrap();
                 assert!(status.bottom() <= stage.top(), "Show and Reset belong above the shared stage");
+                let idle = crate::scenario::rect_of("prefs:navbar:idle").unwrap();
+                assert!(status.bottom() <= idle.top() && idle.bottom() <= stage.top(), "When idle belongs with Show, before the preview");
                 let bar = crate::scenario::rect_of("prefs:navbar:bar").unwrap();
                 assert!(stage.contains_rect(count), "the real slot count sits in the stage");
                 assert!(!count.intersects(bar), "the count never covers the bar");
@@ -6800,7 +6852,14 @@ mod tests {
             ("sketch_tab_always", json!(true), PAGE_LAYOUT),
             ("keep_work_on_tab_switch", json!(true), PAGE_LAYOUT),
             ("ribbon_reveal", json!(true), PAGE_LAYOUT),
+            ("pinned_constraints_in_grid", json!(false), PAGE_LAYOUT),
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
+            ("design_views_as_tabs", json!(false), PAGE_LAYOUT),
+            ("design_sub_tab_sheets", json!(false), PAGE_LAYOUT),
+            ("design_sub_tab_sketches", json!(false), PAGE_LAYOUT),
+            ("design_sub_tab_render", json!(false), PAGE_LAYOUT),
+            ("design_reuse_views", json!(false), PAGE_LAYOUT),
+            ("design_reopen_views", json!(true), PAGE_LAYOUT),
             ("dialog_buttons", json!("top"), PAGE_LAYOUT),
             ("toast_place", json!("centre"), PAGE_LAYOUT),
             ("operations_panel", json!(false), PAGE_LAYOUT),
@@ -7280,6 +7339,58 @@ mod tests {
         assert_eq!(h.app.preferences.browser_bodies_folders, BodiesFolders::Never, "Cancel puts it back");
         defaults(&mut h.app, PAGE_LAYOUT);
         assert_eq!(h.app.preferences.browser_bodies_folders, BodiesFolders::Several, "Interface's Restore Defaults");
+    }
+
+    /// Design tabs: views shown as tabs, sub-tabs for sheets, sketches and Render, and reusing a
+    /// view are on by default and reopening a design's views is off, also in preferences saved
+    /// before them. Each is saved and read back, `ui.prefs` refuses a value that is not a boolean,
+    /// the Layout page's Restore Defaults resets them, and one struct hands them to the tab strip.
+    #[test]
+    fn design_tab_preferences_default_roundtrip_reset_and_read_through_one_struct() {
+        use super::*;
+        use crate::design_tab_prefs::DesignTabPrefs;
+        let keys = [
+            "design_views_as_tabs",
+            "design_sub_tab_sheets",
+            "design_sub_tab_sketches",
+            "design_sub_tab_render",
+            "design_reuse_views",
+            "design_reopen_views",
+        ];
+        let mut h = crate::scenario::Harness::new();
+        let on = DesignTabPrefs::from(&h.app.preferences);
+        assert_eq!(
+            [on.views_as_tabs, on.sub_tab_sheets, on.sub_tab_sketches, on.sub_tab_render, on.reuse_views, on.reopen_views],
+            [true, true, true, true, true, false]
+        );
+        let old = lenient(&json!({"theme": "light"}));
+        assert_eq!(DesignTabPrefs::from(&old), on, "saved before they existed");
+        for key in keys {
+            let value = !serde_json::to_value(&h.app.preferences).unwrap()[key].as_bool().unwrap();
+            assert_eq!(control(&mut h.app, &json!({ key: value })).unwrap()[key], value, "{key}");
+            let mut restored = SolveApp::new(Default::default(), Default::default());
+            restored.load_prefs(&h.app.prefs());
+            assert_eq!(serde_json::to_value(&restored.preferences).unwrap()[key], json!(value), "{key} is saved");
+            for bad in [json!("yes"), json!(1), json!([true])] {
+                let before = h.app.preferences.clone();
+                assert!(set(&mut h.app, &json!({ key: bad })).is_err(), "{key}: {bad}");
+                assert_eq!(h.app.preferences, before, "{key}: a refused value changes nothing");
+            }
+        }
+        let flipped = DesignTabPrefs::from(&h.app.preferences);
+        assert_eq!(
+            [
+                flipped.views_as_tabs,
+                flipped.sub_tab_sheets,
+                flipped.sub_tab_sketches,
+                flipped.sub_tab_render,
+                flipped.reuse_views,
+                flipped.reopen_views
+            ],
+            [false, false, false, false, false, true]
+        );
+        defaults(&mut h.app, PAGE_LAYOUT);
+        assert_eq!(DesignTabPrefs::from(&h.app.preferences), on, "Layout's Restore Defaults");
     }
 
     /// Theme: System on a Linux desktop (#7944): the freedesktop preference wins, GNOME's
@@ -10395,22 +10506,38 @@ mod tests {
     }
 
     #[test]
+    fn an_unknown_navigator_style_loads_as_axes_and_is_refused_by_commands() {
+        // The second value is what an older version saved for the style that is gone.
+        for old in ["zigzag", "cube"] {
+            let saved = json!({"navigator_style": old, "length_decimals": 4});
+            let p = super::lenient(&saved);
+            assert_eq!(p.navigator_style, NavigatorStyle::Axes, "{old} reads as the axes navigator");
+            assert_eq!(p.length_decimals, 4, "the rest of the saved preferences are kept");
+            assert!(serde_json::from_value::<NavigatorStyle>(json!(old)).is_err());
+        }
+        let mut h = crate::scenario::Harness::new();
+        let before = h.app.preferences.clone();
+        assert!(control(&mut h.app, &json!({"navigator_style":"zigzag"})).is_err());
+        assert_eq!(h.app.preferences, before);
+        assert!(h.app.run("view.navigator", json!({"style":"zigzag"})).is_err());
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+    }
+
+    #[test]
     fn navigator_picker_preserves_axes_and_follows_preferences_transactions() {
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
         assert_eq!(old.navigator_style, NavigatorStyle::Axes);
         let mut h = crate::scenario::Harness::new();
         assert!(crate::scenario::handle_at("axis_view:z").is_some());
-        assert!(crate::scenario::handle_at("navigation_cube:front").is_none());
         let camera = h.app.cam;
         let design = h.app.session.doc.to_json();
         let nav = h.app.preferences.nav.clone();
         h.call("ui.prefs", json!({"open":"Navigation"}));
         super::reveal_preference(&mut h, "prefs:navigator");
-        let cube = crate::scenario::rect_of("prefs:navigator:Cube").unwrap().center();
+        let custom = crate::scenario::rect_of("prefs:navigator:Custom").unwrap().center();
         assert!(crate::scenario::rect_of("prefs:navigator:Signed axes").is_some());
-        h.call("ui.click", json!({"x":cube.x,"y":cube.y}));
-        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Cube);
-        assert!(crate::scenario::handle_at("navigation_cube:front").is_some());
+        h.call("ui.click", json!({"x":custom.x,"y":custom.y}));
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
         assert_eq!(h.app.preferences.nav, nav);
         assert_eq!(h.app.cam, camera);
         assert_eq!(h.app.session.doc.to_json(), design);
@@ -10422,13 +10549,12 @@ mod tests {
         assert_eq!(h.app.preferences, before, "invalid settings must fail atomically");
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
-        assert!(crate::scenario::handle_at("navigation_cube:front").is_none());
-        h.call("ui.prefs", json!({"open":"Navigation","navigator_style":"cube"}));
+        h.call("ui.prefs", json!({"open":"Navigation","navigator_style":"custom"}));
         h.call("ui.prefs", json!({"button":"apply"}));
         h.call("ui.prefs", json!({"button":"defaults"}));
         assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
         h.call("ui.prefs", json!({"button":"cancel"}));
-        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Cube);
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
         h.call("ui.prefs", json!({"navigator_style":"axes", "look_at_anim":false}));
         h.call("ui.view", json!({"view":"front"}));
         let axis = crate::scenario::handle_at("axis_view:-y").unwrap();
@@ -13380,7 +13506,6 @@ mod settings_search_tests {
                 ("Origin", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Origin"),
                 ("View navigator", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
                 ("Axes", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
-                ("Cube", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Cube"),
                 ("Turntable", crate::prefs::PAGE_NAVIGATION, "prefs:turntable"),
                 ("Wheel zoom speed", crate::prefs::PAGE_NAVIGATION, "prefs:wheel_zoom_speed"),
                 ("Zoom with two-finger scroll while holding", crate::prefs::PAGE_NAVIGATION, "prefs:trackpad_zoom_modifier"),
@@ -13392,8 +13517,7 @@ mod settings_search_tests {
                 h.app.prefs_window.shell.filter = query.into();
                 h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
-                let matching: Vec<_> =
-                    hits.iter().enumerate().filter(|(_, hit)| hit.page == page && (query != "Cube" || hit.label == "Cube")).collect();
+                let matching: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == page).collect();
                 assert_eq!(matching.len(), 1, "{theme}: {query} has one indexed setting");
                 set_cursor(&h.ctx, matching[0].0);
                 h.frames(2);
@@ -13720,6 +13844,32 @@ mod settings_search_tests {
                     "navigation never selects an option"
                 );
             }
+        }
+    }
+
+    /// A search draws every page twice in one frame (an invisible probe, then the pages that
+    /// match). No widget may take the same id in both draws: egui then paints its duplicate-id
+    /// warning over the window, and the two copies share hover, focus and click state (#15902).
+    #[test]
+    fn searching_the_preferences_gives_no_widget_the_same_id_twice() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.ctx.options_mut(|options| options.warn_on_id_clash = true);
+        h.call("ui.prefs", serde_json::json!({"language":"en"}));
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+        h.frames(2);
+        for query in ["sta", "f", "view", "e", "a"] {
+            h.app.prefs_window.shell.filter = query.into();
+            h.frames(4);
+            let warnings: Vec<String> = h
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) if text.galley.text().contains("use of widget ID") => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
+            assert!(warnings.is_empty(), "search `{query}`: {warnings:?}");
         }
     }
 }
