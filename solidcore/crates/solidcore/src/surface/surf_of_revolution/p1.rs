@@ -590,7 +590,7 @@ impl SurfOfRevolution {
         // bound the Y axis below is checked against (upstream: within 1 degree of its
         // direction, which takes a point far along the axis for one on it)
         // (or within `on_axis_tol` of it, #17204)
-        let on_axis_sq = if on_axis_tol > crate::math::EFF_ZERO {
+        let on_axis_sq = if on_axis_tol > EFF_ZERO {
             on_axis_tol * on_axis_tol
         } else {
             crate::math::EFF_ZERO_SQ
