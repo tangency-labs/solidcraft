@@ -8,6 +8,7 @@
 //! rectangle with a hole, and the disc.
 
 use solidcraft_geom::prelude::*;
+use std::collections::HashSet;
 use std::f64::consts::TAU;
 use std::sync::{Arc, OnceLock};
 
@@ -883,8 +884,42 @@ fn find_profiles_bounded(sk: &Sketch, max_edges: usize) -> Vec<Profile> {
     search(sk, max_edges, true, true).profiles
 }
 
+type BezierDefinition = (u8, Vec<(u64, u64)>);
+
+/// Exact single-span control-spline data, independent of direction and point IDs. Other spline
+/// modes can depend on knots, weights or handles; multi-span conversion can round differently
+/// on reversal. Keep those unchanged, and never infer duplicates from sampled chords.
+fn bezier_definition(sk: &Sketch, kind: &CurveKind) -> Option<BezierDefinition> {
+    let CurveKind::Spline { pts, control: true, degree, periodic: false, nurbs: None, handles } = kind else { return None };
+    if !handles.is_empty() || !(1..=MAX_BEZIER_DEGREE).contains(&usize::from(*degree)) || pts.len() != usize::from(*degree) + 1 {
+        return None;
+    }
+    let bits = |v: f64| if v == 0.0 { 0 } else { v.to_bits() };
+    let mut points: Vec<(u64, u64)> = pts
+        .iter()
+        .map(|i| {
+            let p = sk.point(*i)?;
+            p.is_finite().then(|| (bits(p.x), bits(p.y)))
+        })
+        .collect::<Option<_>>()?;
+    if points.iter().rev().cmp(points.iter()).is_lt() {
+        points.reverse();
+    }
+    Some((*degree, points))
+}
+
 fn search(sk: &Sketch, max_edges: usize, split: bool, cached: bool) -> ProfileSearch {
-    let curves: Vec<usize> = sk.curves.iter().enumerate().filter(|(_, c)| !c.construction && !c.centerline && !c.infinite).map(|(i, _)| i).collect();
+    // Repeated SVG outlines contribute one graph boundary. Keep the first curve's identity,
+    // and retain all source curves in the sketch so editing a duplicate can separate it again.
+    let mut definitions = HashSet::new();
+    let curves: Vec<usize> = sk
+        .curves
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| !c.construction && !c.centerline && !c.infinite)
+        .filter(|(_, c)| bezier_definition(sk, &c.kind).is_none_or(|key| definitions.insert(key)))
+        .map(|(i, _)| i)
+        .collect();
     let groups = if split { islands(sk, &curves) } else { vec![curves] };
     let found: Vec<Arc<Island>> = groups
         .iter()
@@ -2502,6 +2537,84 @@ mod tests {
         }
         let curves: Vec<usize> = (0..sk.curves.len()).collect();
         islands(sk, &curves).len()
+    }
+
+    fn cubic_lens(sk: &mut Sketch, reversed: bool) {
+        // SVG's default pixel scale. The two cubic integrals give area 1353/20 before scaling.
+        let scale = 25.4 / 96.0;
+        for mut controls in [[(0.0, 0.0), (0.0, 5.0), (12.0, 4.0), (11.0, -1.0)], [(11.0, -1.0), (10.0, -6.0), (-1.0, -5.0), (0.0, 0.0)]] {
+            if reversed {
+                controls.reverse();
+            }
+            // Equal coordinates deliberately use separate point IDs, as imported curves can.
+            let pts = controls.into_iter().map(|(x, y)| sk.add_point(Vec2::new(x * scale, -y * scale), None).unwrap()).collect();
+            sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+        }
+    }
+
+    /// #15408: repeated SVG outlines must not erase the region when their direction reverses.
+    #[test]
+    fn duplicate_cubic_outlines_keep_the_profile_and_source_curves() {
+        for reversed in [true, false] {
+            let mut sk = Sketch::new();
+            cubic_lens(&mut sk, false);
+            let original = find_profiles(&sk);
+            assert_eq!(original.len(), 1);
+            let expected = 1353.0 / 20.0 * (25.4_f64 / 96.0).powi(2);
+            assert!((original[0].area - expected).abs() < 1e-12);
+            let first_copy = sk.points.len();
+            cubic_lens(&mut sk, reversed);
+            for point in &mut sk.points[first_copy..] {
+                if point.pos.x == 0.0 {
+                    point.pos.x = -point.pos.x;
+                }
+                if point.pos.y == 0.0 {
+                    point.pos.y = -point.pos.y;
+                }
+            }
+            let source = serde_json::to_string(&sk).unwrap();
+            islands_match_whole(&sk);
+            assert_same(&find_profiles(&sk), &original);
+            assert_eq!(sk.curves.len(), 4);
+            assert_eq!(serde_json::to_string(&sk).unwrap(), source, "finding profiles preserves every imported curve and point");
+        }
+    }
+
+    #[test]
+    fn moving_a_duplicate_cubic_outline_updates_cached_profiles() {
+        let mut sk = Sketch::new();
+        cubic_lens(&mut sk, false);
+        let first_copy = sk.points.len();
+        cubic_lens(&mut sk, true);
+        assert_eq!(find_profiles(&sk).len(), 1);
+        for point in &mut sk.points[first_copy..] {
+            point.pos.x += 10.0;
+        }
+        islands_match_whole(&sk);
+        let profiles = find_profiles(&sk);
+        assert_eq!(profiles.len(), 2, "moving the duplicate restores its independent region");
+        for curve in &sk.curves {
+            assert!(profiles.iter().any(|profile| profile.outer_curves.contains(&curve.id)));
+        }
+    }
+
+    #[test]
+    fn cubic_boundaries_with_the_same_ends_keep_their_distinct_regions() {
+        let mut sk = Sketch::new();
+        for controls in [
+            [(0.0, 0.0), (0.0, 3.0), (3.0, 3.0), (3.0, 0.0)],
+            [(3.0, 0.0), (3.0, -3.0), (0.0, -3.0), (0.0, 0.0)],
+            [(0.0, 0.0), (0.0, 2.0), (3.0, 2.0), (3.0, 0.0)],
+        ] {
+            let pts = controls.into_iter().map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
+            sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+        }
+        islands_match_whole(&sk);
+        let profiles = find_profiles(&sk);
+        assert_eq!(profiles.len(), 2);
+        for curve in &sk.curves {
+            assert!(profiles.iter().any(|profile| profile.outer_curves.contains(&curve.id)));
+        }
     }
 
     /// #6896: letters with counters (holes), a frame round them that touches none (its holes

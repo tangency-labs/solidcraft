@@ -1,0 +1,48 @@
+{
+  "source": "independent circular-generator endpoint plus height times sweep vector",
+  "support1": [
+    0.1515496571916875,
+    0.13355002222430418,
+    0.7283587064043187
+  ],
+  "support2": [
+    0.11061516966501522,
+    -0.31196478390114496,
+    0.8252226756415861
+  ],
+  "midpoint": [
+    0.13108241342835136,
+    -0.08920738083842039,
+    0.7767906910229524
+  ],
+  "reported_point": [
+    0.13108241094191694,
+    -0.08920738291450833,
+    0.7767906510271132
+  ],
+  "support_gap": 0.45775725366450076,
+  "distance_to_support1": 0.22887862061182393,
+  "distance_to_support2": 0.22887863305268372,
+  "midpoint_rounding_difference": 4.012679466715975e-08,
+  "reported_deviation": 0.45775726612524936,
+  "effective_default_approximation_tolerance": 2469134.0,
+  "kernel_approximation_tolerance_not_used_as_this_default": 5e-06,
+  "raw_output_values_are_finite": true,
+  "interpretation": "coarse approximate Touching point within the effective caller tolerance; not exact surface contact or a completeness certificate",
+  "projection_view": {
+    "elevation": 23,
+    "azimuth": -52,
+    "xlim": [
+      -0.2,
+      0.65
+    ],
+    "ylim": [
+      -0.45,
+      0.3
+    ],
+    "zlim": [
+      0.3,
+      1.1
+    ]
+  }
+}

@@ -49,6 +49,12 @@ fn fixtures(root: &std::path::Path) -> Vec<String> {
     out
 }
 
+/// Fixtures whose export is written but does not read back: a face that winds round its axis more
+/// than a turn is written on its multi-turn spline form, and the reader makes no pcurves on a
+/// spline form that overlaps itself (its edge's pcurve comes out on another sheet, 6 mm off).
+/// The export's bytes are still pinned below. Tracked in #17080. Shrinks only.
+const NO_READ_BACK: &[&str] = &["tests/step-regressions/thread_crest_band.step"];
+
 /// (fixture, digest of its export) as written before the move, plus new fixtures; the torus-ring spline
 /// is now an exact torus (#16297).
 #[rustfmt::skip]
@@ -67,7 +73,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/kernel-cases/import/3730-void-oriented-shell-false/input.step", "e461e3732a479928"),
     ("tests/kernel-cases/import/3880-cylinder-seam-edge/input.step", "183935caa3bdda17"),
     ("tests/kernel-cases/import/3880-nurbs-hemisphere-dome/input.step", "c072f4d08cfefb04"),
-    ("tests/kernel-cases/import/3963-closed-spline-edge-vertex-past-start/input.step", "c0e524535a1b5a62"),
+    ("tests/kernel-cases/import/3963-closed-spline-edge-vertex-past-start/input.step", "3bc30242fa9c3a3f"),
     ("tests/kernel-cases/import/4005-cylinder-written-as-near-zero-cone/input.step", "6f13fdd4ff99c151"),
     ("tests/kernel-cases/import/4006-plane-written-as-cone-of-nearly-right-angle/input.step", "05c07f99a56d82c1"),
     ("tests/step-conformance/cone_point.step", "f8011a27d4b1fa9f"),
@@ -90,6 +96,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-regressions/cylinder_rim_off_its_wall.step", "e07c2fdbef7cc0c6"),
     ("tests/step-regressions/cylinder_spline_rims.step", "609aa9a609b95308"),
     ("tests/step-regressions/rod_doubled_edge.step", "8432fa140e74c146"),
+    ("tests/step-regressions/thread_crest_band.step", "30923bc03bcfd757"),
     ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "d2c476d6163c1863"),
     ("(assembly)", "45b6ef6cf64529e2"),
 ];
@@ -136,7 +143,13 @@ fn step_export_keeps_its_bytes_and_reads_back() {
         let file_name = name.rsplit('/').next().unwrap_or(&name).to_string();
         let out = step_export_bodies(&bodies, &StepHeader { file_name, ..Default::default() }).unwrap_or_else(|e| panic!("{name}: {e}"));
         table.push((name.clone(), digest(&out)));
-        if let Err(e) = round_trip(&name, &measures(&imp.bodies), &out) {
+        let read_back = round_trip(&name, &measures(&imp.bodies), &out);
+        if NO_READ_BACK.contains(&name.as_str()) {
+            // Still the known gap: when it is fixed this fails, and the fixture leaves the list.
+            if read_back.is_ok() {
+                failures.push(format!("{name}: reads back now; take it off NO_READ_BACK"));
+            }
+        } else if let Err(e) = read_back {
             failures.push(e);
         }
     }

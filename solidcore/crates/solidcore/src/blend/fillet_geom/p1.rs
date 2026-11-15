@@ -3764,7 +3764,6 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
     } else {
         (geom2, at_start_of_geom2, geom1, at_start_of_geom1)
     };
-    let copy_end_points_only;
     let from_row: Vec<CPoint>;
     {
         let from_surface = fb
@@ -3780,7 +3779,6 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
         let row_index = if from_at_start { 0 } else { gw.n() };
         from_row = gw.row(row_index)?.to_vec();
     }
-    let from_count = from_row.len().saturating_sub(1);
     {
         let to_surface = fb
             .geom_mut(to_geom)?
@@ -3788,37 +3786,34 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
             .ok_or_else(|| {
                 SolidError::blend_missing(OP_EXAMINE, "the target geometry's fillet surface")
             })?;
-        let Some(bs) = b_spline_net_mut(to_surface) else {
-            return Ok(());
-        };
-        let gw = bs.get_or_create_gw_nurb()?;
-        let to_count = gw.m();
-        copy_end_points_only = from_count != to_count;
-        let row_index = if to_at_start { 0 } else { gw.n() };
-
-        let from_at = |kk: usize| -> Result<CPoint> {
-            from_row
-                .get(kk)
-                .copied()
-                .ok_or_else(|| SolidError::invalid_input(OP_EXAMINE, "control net row too short"))
-        };
-        let [orient0, orient1] = orient;
-        if orient0 == orient1 {
-            if copy_end_points_only {
-                *gw.cpt_mut(row_index, 0)? = from_at(0)?;
-                *gw.cpt_mut(row_index, to_count)? = from_at(from_count)?;
-            } else {
-                for kk in 0..=to_count {
-                    *gw.cpt_mut(row_index, kk)? = from_at(kk)?;
-                }
-            }
-        } else if copy_end_points_only {
-            *gw.cpt_mut(row_index, 0)? = from_at(from_count)?;
-            *gw.cpt_mut(row_index, to_count)? = from_at(0)?;
+        // Not upstream (#17015): a blend by its definition takes the row on a copy, whose
+        // net's distance from the definition is proved again before it replaces the blend.
+        // The row moves the net's end by about the gap the join closes, so the old bound
+        // no longer holds; the copy keeps the larger of the old bound and the proved one, and
+        // a net not proved within the fillet's tolerance (`dist_tol`, the gap this join
+        // allows) is refused, never kept with a bound it does not meet.
+        if let SurfaceKind::ProceduralBlend(pb) = to_surface.kind_mut() {
+            let mut edited = (**pb).clone();
+            write_end_row(&mut edited.net, &from_row, to_at_start, orient)?;
+            let bound = pb.bound();
+            // (a net not proved within the tolerance is the join's refusal; any other
+            // failure of the proof, a cancel among them, is passed on as it is)
+            let Some(proved) =
+                crate::blend::fillet_section::recertify::rebound(k, &edited, dist_tol.max(bound))?
+            else {
+                return Err(SolidError::Unsupported {
+                    operation: OP_EXAMINE,
+                    reason: "two rounds that meet at a corner apart by more than the tolerance: \
+                             joining them moves a round off its definition",
+                });
+            };
+            edited.def.bound = bound.max(proved);
+            **pb = edited;
         } else {
-            for kk in 0..=to_count {
-                *gw.cpt_mut(row_index, kk)? = from_at(to_count - kk)?;
-            }
+            let Some(bs) = b_spline_net_mut(to_surface) else {
+                return Ok(());
+            };
+            write_end_row(bs, &from_row, to_at_start, orient)?;
         }
     }
 
@@ -3867,6 +3862,49 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
         drop_rail_onto_offset_surface(k, fb, adjust_solver, kk, rail, dist_tol)?;
     }
 
+    Ok(())
+}
+
+/// `sm_ExamineNFixFilletGeoms`'s copy of the good fillet's end row (`from_row`) into the
+/// end of `bs` the join is at (its first row `to_at_start`, else its last): the whole row
+/// where the two are as wide, else only its two end points, reversed where the two
+/// geometries run opposite ways (`orient`).
+fn write_end_row(
+    bs: &mut BSplineSurface,
+    from_row: &[CPoint],
+    to_at_start: bool,
+    orient: [OrientType; 2],
+) -> Result<()> {
+    let from_count = from_row.len().saturating_sub(1);
+    let gw = bs.get_or_create_gw_nurb()?;
+    let to_count = gw.m();
+    let copy_end_points_only = from_count != to_count;
+    let row_index = if to_at_start { 0 } else { gw.n() };
+
+    let from_at = |kk: usize| -> Result<CPoint> {
+        from_row
+            .get(kk)
+            .copied()
+            .ok_or_else(|| SolidError::invalid_input(OP_EXAMINE, "control net row too short"))
+    };
+    let [orient0, orient1] = orient;
+    if orient0 == orient1 {
+        if copy_end_points_only {
+            *gw.cpt_mut(row_index, 0)? = from_at(0)?;
+            *gw.cpt_mut(row_index, to_count)? = from_at(from_count)?;
+        } else {
+            for kk in 0..=to_count {
+                *gw.cpt_mut(row_index, kk)? = from_at(kk)?;
+            }
+        }
+    } else if copy_end_points_only {
+        *gw.cpt_mut(row_index, 0)? = from_at(from_count)?;
+        *gw.cpt_mut(row_index, to_count)? = from_at(0)?;
+    } else {
+        for kk in 0..=to_count {
+            *gw.cpt_mut(row_index, kk)? = from_at(to_count - kk)?;
+        }
+    }
     Ok(())
 }
 
