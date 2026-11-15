@@ -779,6 +779,7 @@ pub fn analytic_curve_intersect<O: Copy>(
                 ellipse,
                 other_interval,
                 tol,
+                contact_tol,
                 this_obj,
                 other_obj,
             )?;
@@ -800,6 +801,7 @@ pub fn analytic_curve_intersect<O: Copy>(
                 line,
                 other_interval,
                 tol,
+                contact_tol,
                 this_obj,
                 other_obj,
             )?;

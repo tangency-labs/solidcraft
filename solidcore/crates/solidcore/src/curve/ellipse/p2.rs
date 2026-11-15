@@ -77,6 +77,8 @@
 //! - **Circles a hair less than tangent.** [`Ellipse::intersect_with_ellipse`] takes a
 //!   contact tolerance apart from `tol` (WR-787, #15429): coplanar circles overlapping past
 //!   touching by less than it touch at one point; zero keeps upstream's two crossings.
+//!   [`Ellipse::intersect_with_line`] takes the same contact tolerance for a line in the
+//!   circle's plane (#14599).
 //! - **Two crossings stay two.** `IntersectWithLine` and `IntersectWithEllipse` find
 //!   their candidate points with `smgu_LineCoPlanarCircleIntersect` at ten times the
 //!   intersection tolerance, which upstream also uses to merge the line's two
@@ -1736,6 +1738,7 @@ impl Ellipse {
                 self.x_radius(),
                 tol * 10.0,
                 tol,
+                0.0,
             )?;
 
             // no intersections
@@ -1852,7 +1855,9 @@ impl Ellipse {
     /// the circle (a line perpendicular to the plane needs the general intersector,
     /// one that misses gives none). Each candidate point is dropped onto both curves
     /// and, when the line is not exactly in the plane, refined with the local curve
-    /// solver. Solutions name `this_obj` and `line_obj`; `start.parameters` holds
+    /// solver. A line overlapping the circle past touching by less than `contact_tol`
+    /// touches it at one point (WR-787, #14599; zero keeps upstream's two crossings).
+    /// Solutions name `this_obj` and `line_obj`; `start.parameters` holds
     /// `[ellipse param, line param]`.
     ///
     /// # Errors
@@ -1867,6 +1872,7 @@ impl Ellipse {
         line: &Line,
         other_interval: &Extent1d,
         tol: f64,
+        contact_tol: f64,
         this_obj: Option<O>,
         line_obj: Option<O>,
     ) -> Result<EllipseIntersection<O>> {
@@ -1931,6 +1937,7 @@ impl Ellipse {
                 self.x_radius(),
                 tol * 10.0,
                 tol,
+                contact_tol,
             )?;
             if line_params.is_empty() {
                 out.needs_more_intersections = false;
