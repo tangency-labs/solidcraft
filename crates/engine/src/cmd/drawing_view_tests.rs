@@ -1129,17 +1129,31 @@ fn a_mirrored_body_is_drawn_exact() {
     );
 }
 
-/// A cylinder split along its length draws its split line from the mesh, as the viewport does:
-/// `hlr` never draws a split between two faces of one surface, so the body falls back.
+/// A cylinder split round its middle keeps its exact lines and draws only the split from the mesh,
+/// as the viewport does: `hlr` draws no edge between two faces of one surface yet (#2455). From the
+/// front at 1:1 its outline (two 30 mm sides and two 20 mm rims seen edge on) is analytic, and the
+/// split is one sampled line 20 mm across, within the mesh's chords. Asked to certify, the view says
+/// which edges came from the mesh.
 #[test]
-fn a_split_round_face_is_drawn_from_the_mesh() {
+fn a_split_round_face_draws_only_its_split_from_the_mesh() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"diameter": 20, "height": 30, "body_name": "Cylinder"}));
     run(&mut s, "solid.split_face", json!({"body": "Cylinder", "faces": [[-10, 0, 15]], "plane": {"origin": [0, 0, 15], "normal": [0, 0, 1]}}));
     let v = snap(&mut s, json!({"view": "front", "scale": "1:1"}));
-    assert_eq!(v["status"]["provenance"], "mesh_projection", "{v}");
+    assert_eq!(v["status"]["provenance"], "hidden_lines_and_mesh_projection", "{v}");
+    // `hlr`'s pieces are analytic or bounded; only the mesh's are sampled.
+    let sampled = |l: &&Value| l["pieces"].as_array().unwrap().iter().any(|p| p["accuracy"]["kind"] == "sampled");
+    let (split, exact): (Vec<&Value>, Vec<&Value>) = v["lines"].as_array().unwrap().iter().partition(sampled);
+    let [split] = split.as_slice() else { panic!("one line from the mesh: {v}") };
+    assert_eq!(split["source"]["kind"], "edge", "{split}");
+    let across = drawn_length(&json!({"lines": [split]}), "visible");
+    assert!((across - 20.0).abs() < 0.05, "{across}: {split}");
+    // The rest stays `hlr`'s: both side silhouettes and both rims.
+    let kinds: Vec<&str> = exact.iter().filter_map(|l| l["source"]["kind"].as_str()).collect();
+    assert_eq!(kinds.iter().filter(|k| **k == "silhouette").count(), 2, "{v}");
+    assert_eq!(kinds.iter().filter(|k| **k == "edge").count(), 2, "{v}");
     let e = refused(&mut s, json!({"view": "front", "scale": "1:1", "max_error_mm": 0.01}));
-    assert!(e.contains("1 for split faces"), "{e}");
+    assert!(e.contains("edges drawn from the mesh: 1 for split faces"), "{e}");
 }
 
 /// A 20 x 20 x 40 tower behind the block, 40 to 60 mm across: in the front view at 1:1 its sides
