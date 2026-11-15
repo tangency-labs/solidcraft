@@ -148,6 +148,17 @@ The shared dialog draws the entry's input schema and supplies the package's cont
 Installing, enabling or discovering a plugin never runs an entry. Installation grants do not replace
 execution consent or the manifest-and-component identity checked by `plugin.run`.
 
+A string with a fixed set of values becomes a dropdown. With `enum` the dropdown shows the values
+themselves; to show words instead, list the options as `oneOf`, each `{"const": value, "title": shown}`
+(with an optional `description`). The dropdown shows the titles and the plugin receives the value:
+
+```json
+"up_axis": {"type": "string", "title": "Up axis", "default": "as_is", "oneOf": [
+  {"const": "as_is", "title": "As in the file"},
+  {"const": "stand_up", "title": "Stand up (Y-up to Z-up)"}
+]}
+```
+
 ## Versions
 
 The WIT package is `craft:plugin@0.1.0`. Today's surface is one capability, `commands@0.1`:

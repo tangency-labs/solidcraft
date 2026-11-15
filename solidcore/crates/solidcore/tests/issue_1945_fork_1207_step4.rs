@@ -109,7 +109,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_extension_from_base = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_nx1_tangent_side_edge = true;
-    k.fixes.fillet_rails_meet_at_one_end_point = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.offset_stitch_at_body_tolerance = true;

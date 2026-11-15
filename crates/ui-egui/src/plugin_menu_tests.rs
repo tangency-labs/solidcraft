@@ -32,11 +32,42 @@ fn each_schema_type_becomes_its_field_with_limits_labels_and_defaults() {
     assert_eq!((&fields[3].0.kind, &fields[3].1), (&Kind::Boolean, &Input::Boolean(false)));
     assert_eq!(fields[4].0.label, "name", "no title: the key");
     assert_eq!(fields[4].0.kind, Kind::Text { min_length: None, max_length: Some(8) });
-    assert_eq!(fields[5].0.kind, Kind::Choice(vec!["14.5".into(), "20".into(), "25".into()]));
+    let angles: Vec<String> = vec!["14.5".into(), "20".into(), "25".into()];
+    assert_eq!(fields[5].0.kind, Kind::Choice { values: angles.clone(), titles: angles }, "enum: each value shown as it is");
     assert_eq!(fields[5].1, Input::Choice(Some(1)), "the default");
     let no_default = form(&json!({"type":"object","properties":{"p":{"type":"string","enum":["a","b"]}}})).unwrap();
     assert_eq!(no_default[0].1, Input::Choice(None), "no default: nothing chosen yet");
     assert_eq!(form(&json!({"type":"object"})), Some(Vec::new()), "no properties: nothing to fill");
+}
+
+#[test]
+fn choice_options_show_their_titles_and_send_their_values() {
+    let schema = json!({"type":"object","properties":{"up":{"type":"string","title":"Up axis","default":"as_is","oneOf":[
+        {"const":"as_is","title":"As in the file"},{"const":"stand_up","title":"Stand up (Y-up to Z-up)","description":"Turns the design"},{"const":"raw"}
+    ]}}});
+    let mut fields = form(&schema).expect("drawn");
+    assert_eq!(
+        fields[0].0.kind,
+        Kind::Choice {
+            values: vec!["as_is".into(), "stand_up".into(), "raw".into()],
+            titles: vec!["As in the file".into(), "Stand up (Y-up to Z-up)".into(), "raw".into()]
+        },
+        "an option without a title shows its value"
+    );
+    assert_eq!(fields[0].1, Input::Choice(Some(0)), "the default, by value");
+    fields[0].1 = Input::Choice(Some(1));
+    assert_eq!(params(&fields), Ok(json!({"up":"stand_up"})), "the value goes to the plugin, not the title");
+    for options in [
+        json!([]),
+        json!([{"const":1,"title":"One"}]),
+        json!([{"const":"a"},{"const":"a","title":"Again"}]),
+        json!([{"const":"a","pattern":"x"}]),
+        json!([{"title":"No value"}]),
+        json!(["a"]),
+    ] {
+        assert_eq!(form(&json!({"type":"object","properties":{"p":{"type":"string","oneOf":options}}})), None, "{options}");
+    }
+    assert_eq!(form(&json!({"type":"object","properties":{"p":{"type":"string","enum":["a"],"oneOf":[{"const":"a"}]}}})), None, "not both");
 }
 
 #[test]
