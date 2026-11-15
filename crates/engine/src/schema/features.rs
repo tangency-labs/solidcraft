@@ -1080,6 +1080,96 @@ pub enum PatternResult {
     },
 }
 
+/// Copy bodies onto a face of the model: one copy at the centre of each cell of a grid laid
+/// across the face, standing on it. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PatternFaceParams {
+    /// The bodies to copy, by name. Each copy's +Z stands along the face's normal and its X runs
+    /// with the grid, its `anchor` on the face.
+    pub bodies: NameList,
+    /// The face to copy onto: a point on it ({"face": [x, y, z]}, kept by the face's persistent
+    /// name, so the copies follow the face as the model changes) or a reference as saved.
+    pub face: GeoRefParam,
+    /// Cells across the face (round a cylinder, its first direction).
+    pub count1: NumberExpr,
+    /// Cells along the face (its second direction).
+    pub count2: NumberExpr,
+    /// Every other column moves half a cell along.
+    #[serde(default)]
+    pub staggered: Option<bool>,
+    /// The grid's turn on the face. Default: 0.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// No copy nearer than this to the face's edges. Default: 0.
+    #[serde(default)]
+    pub margin: Option<LengthExpr>,
+    /// The copies stand on the other side of the face.
+    #[serde(default)]
+    pub flip: Option<bool>,
+    /// The point of the copied bodies that goes onto the face. Default: the origin.
+    #[serde(default)]
+    pub anchor: Option<PointExpr3>,
+    /// Advanced: change each copy with its distance to attractor points.
+    #[serde(default)]
+    pub attract: Option<AttractParams>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// How a face pattern's copies change with their distance to the nearest attractor point: each
+/// value goes from its `_near` setting at the `near` distance (or nearer) to its `_far` setting
+/// at the `far` distance (or farther).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AttractParams {
+    /// The attractor points: fixed points ({"point": [x, y, z]}), vertices, sketch points or
+    /// construction points, followed as they move.
+    pub points: Vec<GeoRefParam>,
+    /// The distance that counts as near. Default: the nearest copy's.
+    #[serde(default)]
+    pub near: Option<LengthExpr>,
+    /// The distance that counts as far. Default: the farthest copy's.
+    #[serde(default)]
+    pub far: Option<LengthExpr>,
+    /// A copy's scale at the near distance. Default: 1.
+    #[serde(default)]
+    pub scale_near: Option<NumberExpr>,
+    /// A copy's scale at the far distance. Default: 1.
+    #[serde(default)]
+    pub scale_far: Option<NumberExpr>,
+    /// How far a copy moves out along the face's normal at the near distance (negative: into
+    /// the face). Default: 0.
+    #[serde(default)]
+    pub offset_near: Option<LengthExpr>,
+    /// The same at the far distance. Default: 0.
+    #[serde(default)]
+    pub offset_far: Option<LengthExpr>,
+    /// How far a copy turns about the face's normal at the near distance. Default: 0.
+    #[serde(default)]
+    pub turn_near: Option<AngleExpr>,
+    /// The same at the far distance. Default: 0.
+    #[serde(default)]
+    pub turn_far: Option<AngleExpr>,
+    /// No copy farther than this from every attractor point.
+    #[serde(default)]
+    pub cutoff: Option<LengthExpr>,
+    /// How the values change between the distances: linear (default) or smooth (easing in and
+    /// out at both ends).
+    #[serde(default)]
+    pub falloff: Option<FalloffParam>,
+}
+
+/// How an attractor's effect changes between its near and far distances.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FalloffParam {
+    /// In step with the distance.
+    Linear,
+    /// Easing in and out at both ends.
+    Smooth,
+}
+
 /// A rigid matrix, in row-major order, with translation in its last column.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(untagged)]

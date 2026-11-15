@@ -3090,6 +3090,98 @@ pub enum PatternKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         orient: bool,
     },
+    /// Copies standing on a face of the model: one at the centre of each cell of a grid laid
+    /// across the face's surface parameters (`count1` by `count2`), each copy turned so its
+    /// up (+Z) follows the face's normal there and its X the grid's first direction, with its
+    /// `anchor` on the face. The face is found again on each evaluation, so the copies follow it.
+    /// Bodies only.
+    Face {
+        face: GeoRef,
+        #[walk(unitless = "Quantity")]
+        count1: Expr,
+        #[walk(unitless = "Quantity 2")]
+        count2: Expr,
+        /// Every other column moves half a cell along.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        staggered: bool,
+        /// The grid's turn on the face.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Grid angle")]
+        angle: Option<Expr>,
+        /// No copy nearer than this to the face's edges.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Margin")]
+        margin: Option<Expr>,
+        /// The copies stand on the other side of the face.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        /// The point of the copied bodies that goes onto the face (default: the origin).
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
+        #[walk(placement)]
+        anchor: Option<PointExpr>,
+        /// Advanced: each copy's size, height and turn follow its distance to attractor points.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attract: Option<Box<Attract>>,
+    },
+}
+
+/// How a pattern's copies change with their distance to attractor points: from the `near`
+/// value at the `near` distance (or nearer) to the `far` value at the `far` distance (or
+/// farther). Without `near` and `far` distances, the nearest and the farthest copies set them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct Attract {
+    /// The points the distances are measured to (fixed points, vertices, sketch points,
+    /// construction points), found again on each evaluation.
+    pub points: Vec<GeoRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Near distance")]
+    pub near: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Far distance")]
+    pub far: Option<Expr>,
+    /// Scale of a copy at the near distance, and at the far one (default 1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(unitless = "Scale near")]
+    pub scale_near: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(unitless = "Scale far")]
+    pub scale_far: Option<Expr>,
+    /// How far a copy moves out along the face's normal (negative: into it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Offset near")]
+    pub offset_near: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Offset far")]
+    pub offset_far: Option<Expr>,
+    /// How far a copy turns about the face's normal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(angle = "Turn near")]
+    pub turn_near: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(angle = "Turn far")]
+    pub turn_far: Option<Expr>,
+    /// No copy farther than this from every attractor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Cutoff")]
+    pub cutoff: Option<Expr>,
+    /// How the values change between the near and far distances.
+    #[serde(default, skip_serializing_if = "is_default_falloff")]
+    pub falloff: Falloff,
+}
+
+/// How an attractor's effect changes between its near and far distances.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Falloff {
+    /// In step with the distance.
+    #[default]
+    Linear,
+    /// Easing in and out at both ends (smoothstep).
+    Smooth,
+}
+
+fn is_default_falloff(f: &Falloff) -> bool {
+    *f == Falloff::Linear
 }
 
 fn default_pattern_alignment(alignment: &solidcraft_sketch::PatternAlignment) -> bool {
@@ -3215,6 +3307,7 @@ impl FeatureKind {
             FeatureKind::Combine { .. } => "CombineFeature",
             FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPatternFeature",
             FeatureKind::Pattern { pattern: PatternKind::Path { .. }, .. } => "PathPatternFeature",
+            FeatureKind::Pattern { pattern: PatternKind::Face { .. }, .. } => "FacePatternFeature",
             FeatureKind::Pattern { .. } => "CircularPatternFeature",
             FeatureKind::Mirror { .. } => "MirrorFeature",
             FeatureKind::ConstructionPlane { .. } => "ConstructionPlane",
@@ -3479,6 +3572,7 @@ impl FeatureKind {
             FeatureKind::Combine { .. } => "Combine",
             FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPattern",
             FeatureKind::Pattern { pattern: PatternKind::Path { .. }, .. } => "PathPattern",
+            FeatureKind::Pattern { pattern: PatternKind::Face { .. }, .. } => "FacePattern",
             FeatureKind::Pattern { .. } => "CircularPattern",
             FeatureKind::Mirror { .. } => "Mirror",
             FeatureKind::ConstructionPlane { .. } => "Plane",

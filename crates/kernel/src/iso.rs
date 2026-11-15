@@ -372,3 +372,128 @@ fn spline_iso(u_knots: &[f64], v_knots: &[f64], net: &[Vec<[f64; 4]>], along_u: 
     };
     Ok((brep::Curve::RationalSpline { knots, homogeneous }, [a, b]))
 }
+
+/// Most grid cells [`face_stations`] lays across a face, each way.
+pub const MAX_STATION_COUNT: usize = 1000;
+
+/// A point on a face where a pattern on it puts a copy, with the face's frame there.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FaceStation {
+    pub point: Vec3,
+    /// The face's unit normal, pointing out of the body's material (the surface's own normal
+    /// for a surface body, which has no inside).
+    pub normal: Vec3,
+    /// A unit direction along the face, square to `normal`: the way the surface's first
+    /// parameter runs there.
+    pub along: Vec3,
+    /// How far the point is from the face's boundary (its edges, not counting a seam).
+    pub margin: f64,
+}
+
+/// The points a grid of `count_u` by `count_v` cells puts on face `face` of `body`, one at each
+/// cell's centre. The grid covers the face's extent in its surface parameters (u, v), so on a
+/// cylinder `count_u` runs round it and `count_v` along it. `angle` (radians) turns the grid
+/// about the extent's centre, measured in the extent's own unit square; `staggered` moves every
+/// other column half a cell along. Points the face's trims leave out (holes, the parts of its
+/// extent it does not cover) are dropped, as are points nearer than `margin` to its boundary.
+pub fn face_stations(body: &Body, face: usize, count_u: usize, count_v: usize, angle: f64, staggered: bool, margin: f64) -> Result<Vec<FaceStation>> {
+    if !(1..=MAX_STATION_COUNT).contains(&count_u) || !(1..=MAX_STATION_COUNT).contains(&count_v) {
+        return Err(KernelError::Invalid(format!("pattern on a face: 1…{MAX_STATION_COUNT} cells each way")));
+    }
+    if !(angle.is_finite() && margin.is_finite() && margin >= 0.0) {
+        return Err(KernelError::Invalid("pattern on a face: the angle and the margin must be numbers, the margin not negative".into()));
+    }
+    if body.is_mesh() {
+        return Err(KernelError::Invalid("pattern on a face: a mesh body has no faces; use Convert Mesh first".into()));
+    }
+    let trims = FaceTrims::new(body, face)?;
+    let [[u0, u1], [v0, v1]] = trims.extent();
+    if !(u1 > u0 && v1 > v0) {
+        return Err(KernelError::Invalid("pattern on a face: the face has no extent".into()));
+    }
+    let boundary = boundary_polylines(body, face, &trims)?;
+    // Cell centres in the extent's unit square, turned about its centre. The turned lattice
+    // runs a whole extent past each side, so it still fills the square at any angle.
+    let (s, c) = angle.sin_cos();
+    let (nu, nv) = (count_u as f64, count_v as f64);
+    let reach = |n: usize| -(n as i64)..2 * n as i64;
+    let mut out = Vec::new();
+    for i in reach(count_u) {
+        let shift = if staggered && i.rem_euclid(2) == 1 { 0.5 } else { 0.0 };
+        for j in reach(count_v) {
+            let a = (i as f64 + 0.5) / nu - 0.5;
+            let b = (j as f64 + 0.5 + shift) / nv - 0.5;
+            let (x, y) = (0.5 + c * a - s * b, 0.5 + s * a + c * b);
+            if !((0.0..1.0).contains(&x) && (0.0..1.0).contains(&y)) {
+                continue;
+            }
+            let q = [u0 + x * (u1 - u0), v0 + y * (v1 - v0)];
+            if !trims.inside(q) {
+                continue;
+            }
+            let Some((point, su, sv)) = trims.eval.derivs(q[0], q[1]) else { continue };
+            // A pole (a sphere's tip) has no normal: no copy stands there.
+            let Some(normal) = su.cross(sv).normalized() else { continue };
+            let Some(along) = (su - normal * su.dot(normal)).normalized() else { continue };
+            let to_edge = boundary.iter().map(|l| polyline_distance(l, point)).fold(f64::INFINITY, f64::min);
+            if to_edge < margin {
+                continue;
+            }
+            out.push(FaceStation { point, normal, along, margin: to_edge });
+        }
+    }
+    orient_outward(body, &mut out)?;
+    Ok(out)
+}
+
+/// The face's edges as polylines in space, without its seams (an edge the face's loops run along
+/// twice, one on each side of the surface's period).
+fn boundary_polylines(body: &Body, face: usize, trims: &FaceTrims) -> Result<Vec<Vec<Vec3>>> {
+    let f = body.record().faces.get(face).ok_or_else(|| KernelError::Invalid(format!("the body has no face {face}")))?;
+    let mut uses: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
+    for l in &f.loops {
+        if let brep::Loop::Edges { edges } = l {
+            for e in edges {
+                *uses.entry(e.edge).or_insert(0) += 1;
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for l in &f.loops {
+        let brep::Loop::Edges { edges } = l else { continue };
+        for e in edges.iter().filter(|e| uses.get(&e.edge) == Some(&1)) {
+            let pts: Vec<Vec3> = pcurve_samples(&e.pcurve).iter().filter_map(|(_, q)| trims.eval.point(*q)).collect();
+            if pts.len() >= 2 {
+                out.push(pts);
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn polyline_distance(pts: &[Vec3], p: Vec3) -> f64 {
+    pts.windows(2)
+        .map(|w| {
+            let (a, b) = (w[0], w[1]);
+            let d = b - a;
+            let l2 = d.dot(d);
+            let t = if l2 > 0.0 { ((p - a).dot(d) / l2).clamp(0.0, 1.0) } else { 0.0 };
+            (a + d * t).dist(p)
+        })
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// Turn the stations' normals out of the body's material. A face's surface normal points either
+/// way, as the face's shell uses it; the body's inside tells which. A surface body has no inside,
+/// and keeps its surface's normal.
+fn orient_outward(body: &Body, stations: &mut [FaceStation]) -> Result<()> {
+    let Some(probe) = stations.first().copied() else { return Ok(()) };
+    let step = (body.size() * 1e-4).max(1e-6);
+    let classes = body.classify_points(&[probe.point + probe.normal * step, probe.point - probe.normal * step])?;
+    if matches!(classes.as_slice(), [crate::PointClass::Inside, crate::PointClass::Outside]) {
+        for s in stations.iter_mut() {
+            s.normal = -s.normal;
+        }
+    }
+    Ok(())
+}

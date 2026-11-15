@@ -283,6 +283,7 @@ pub const DOCUMENTED: &[&str] = &[
     "solid.move",
     "solid.offset_face",
     "solid.pattern.circular",
+    "solid.pattern.face",
     "solid.pattern.path",
     "solid.pattern.rectangular",
     "solid.pipe",
