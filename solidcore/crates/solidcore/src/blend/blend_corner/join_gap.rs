@@ -74,8 +74,9 @@
 //! - and the kinds that evaluate points from their analytic form are certified on it too: a
 //!   plane's normal within `sin delta` of square to `n`, a cone only of the cylinder class
 //!   (semi-angle 0) with its axis within `delta` of `n`, an extrusion's vector within
-//!   `delta` of `n`. An upright wall
-//! (`delta = 0`) is the cylinder over the edge along `n`, and a blend between it and the
+//!   `delta` of `n`.
+//!
+//! An upright wall (`delta = 0`) is the cylinder over the edge along `n`, and a blend between it and the
 //! plane is the same in every plane square to the edge: its section's foot on the plane
 //! stands its offset `oB` off the wall from the edge, and on the wall its offset `oA` off
 //! the plane down the ruling. So the rail is the edge's offset in the plane by the

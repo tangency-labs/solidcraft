@@ -852,7 +852,7 @@ fn the_over_side_join_holds_only_for_a_ring_of_the_two_walls() {
     assert_eq!(deg(&[eu1_, eu2_, eu_bottom]), behind);
 }
 
-/// #13911 (CodeRabbit on #17022): a variable-radius round's offset is its law at one
+/// #13911 (the review of #17022): a variable-radius round's offset is its law at one
 /// parameter, not a constant reach, so the over-side bound (`blend_corner::join_gap`) does
 /// not take it. The kinked plate's convex corner 0.35 degrees off straight is the Join for
 /// constant rounds r 1; rounded by a variable-radius law whose radii can change
@@ -896,7 +896,7 @@ fn a_variable_radius_round_takes_only_the_first_order_join_bound() {
     let mut s = FilletSession::new(&mut k, &mut target).unwrap();
     s.prepare_variable_radius_edges(&mut k, &edges, 1.0, law, 1, 1)
         .unwrap();
-    s.create_corners(&mut k, None).unwrap();
+    s.create_corners(&k, None).unwrap();
     let mut event = None;
     for id in s.fillet_corners().unwrap() {
         let c = s.corner(id).unwrap();
