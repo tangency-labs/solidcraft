@@ -202,8 +202,9 @@ impl Surface {
 
     /// A schema 4 record surface over the parameter box `domain` (`[[u0, u1], [v0, v1]]`, the
     /// record's own parameters: radians for angles), with the record's parameterisation and
-    /// normal. A spline is taken over its whole knot domain. A cone only as a whole turn (narrowing
-    /// along its axis as well: on the mirrored frame); a revolution not at all ([`Error::Unsupported`]).
+    /// normal, except a cone that narrows along its axis: that one is built on the mirrored frame,
+    /// where u and v both run reversed (the normal is unchanged). A spline is taken over its whole
+    /// knot domain. A cone only as a whole turn; a revolution not at all ([`Error::Unsupported`]).
     pub fn from_record(surface: &solidcore_record::brep::Surface, domain: [[f64; 2]; 2]) -> Result<Surface> {
         use solidcore_record::brep::Surface as S;
         let [u, v] = domain;
