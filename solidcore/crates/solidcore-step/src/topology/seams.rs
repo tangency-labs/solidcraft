@@ -971,6 +971,7 @@ impl Builder<'_, '_> {
         let k = k.ok_or_else(|| format!("face #{step}: a loop around the axis on its pole"))?;
         let k = match ax.kind {
             Kind::Iso { start, .. } => self.seam_start(fi, li, start, ax, eval)?,
+            Kind::Ruled | Kind::Sphere(_) => self.once_start(fi, li, ax, eval)?,
             _ => k,
         };
         let ring = self.rotated(fi, li, k)?;
@@ -1001,6 +1002,50 @@ impl Builder<'_, '_> {
             remove_loop(face, i, li);
         }
         Ok(())
+    }
+
+    /// The use of loop `li` of face `fi` (a cap round a cone's or a sphere's pole) where its seam
+    /// to the pole starts: at an angle about the axis the loop passes only once
+    /// ([`Builder::blocked_angles`]: every piece's angle runs one way there and no other piece
+    /// reaches it), so the loop followed from the seam covers exactly one turn. A loop that turns
+    /// back partway round (an edge across a drill point cut by another) covers the angles it
+    /// turns back over three times; a seam among them left it more than a turn wide, which reads
+    /// as a face winding round its axis. The first vertex at such an angle, else the loop split
+    /// in the middle of the widest range of them. Where the pieces leave no angle known to be
+    /// passed once (a piece whose hull reaches round the axis), the first vertex off the pole, as
+    /// every cap had it before.
+    fn once_start(&mut self, fi: usize, li: usize, ax: &Axis, eval: &SurfaceEval) -> R<usize> {
+        let Some(LoopB::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else { return Err("loop reference".into()) };
+        let es = es.clone();
+        let blocked = self.blocked_angles(fi, li, li, ax)?.ok_or("a cap's loop winds round its axis")?;
+        let frame = Perpendicular::new(ax);
+        let off_pole = |s: &Self, v: u32| -> R<bool> {
+            let x = s.vertices.get(v as usize).ok_or("vertex reference")?;
+            Ok(!ax.poles.iter().flatten().any(|p| Vec3::from(x.point).dist(*p) <= s.tol.max(x.tolerance)))
+        };
+        let mut first = None;
+        for (k, u) in es.iter().enumerate() {
+            let v = self.start(*u)?;
+            if !off_pole(self, v)? {
+                continue;
+            }
+            if first.is_none() {
+                first = Some((k, v));
+            }
+            if blocked.clear(frame.angle(self.vpoint(v)?)) {
+                return Ok(k);
+            }
+        }
+        let (k, first) = first.ok_or("a loop around the axis on its pole")?;
+        let Some(middle) = blocked.widest_clear() else { return Ok(k) };
+        // The surface's angle parameter at that angle about the axis: offset from the frame's by
+        // that of a vertex of the loop (both right-handed about the axis).
+        let u_of = eval.project(self.vpoint(first)?, None, f64::INFINITY).ok_or("a vertex off its surface")?;
+        let target = middle + (u_of[0] - frame.angle(self.vpoint(first)?));
+        let (e, t, _) =
+            self.meets(&es, 0, target, ax.period, eval)?.ok_or_else(|| unsupported("a loop round a pole that misses its seam's angle"))?;
+        let v = self.split_edge(e, t)?;
+        self.use_at(fi, li, v)
     }
 
     /// Join loops `la` (running +u) and `lb` (running −u) of face `fi` by a seam.
@@ -1401,7 +1446,12 @@ impl Builder<'_, '_> {
         for (li, l) in face.loops.iter().enumerate() {
             let es = match l {
                 LoopB::Vertex(v) => {
-                    arcs.push(frame.point_arc(self.vpoint(*v)?, self.tol));
+                    // A vertex loop at a pole (a cone's tip) is every angle at once: a seam to the
+                    // pole ends there and crosses nothing.
+                    let x = self.vertices.get(*v as usize).ok_or("vertex reference")?;
+                    if !ax.poles.iter().flatten().any(|p| Vec3::from(x.point).dist(*p) <= self.tol.max(x.tolerance)) {
+                        arcs.push(frame.point_arc(self.vpoint(*v)?, self.tol));
+                    }
                     continue;
                 }
                 LoopB::Edges(es) => es,
