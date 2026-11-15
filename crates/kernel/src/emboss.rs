@@ -163,6 +163,7 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
         let overlap = (d * 0.2).clamp(0.1, 2.0);
         let (lo, hi) = if depth > 0.0 { (-overlap, d) } else { (-d, overlap) };
         let mut prisms = Vec::new();
+        let mut through = false;
         let slab = if let Some(Surf::Cylinder { o, a, r, convex }) = surf_of(&rec, face) {
             // The prisms below reach at most the radius either side of the wall (further, they
             // would meet the ring's far side), so a deeper slab would be cut short.
@@ -209,16 +210,30 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
             let pad = ((d + overlap) * 2.5 + 2.0).min(r);
             let angles: Vec<_> = wall.iter().map(|f| wall_angles(&rec, *f, o, a, radial0, tangent0)).collect();
             let tau = std::f64::consts::TAU;
+            // A sketch point's angle about the axis and height along it, as the wall lays it out.
+            let (tx, ty) = (plane.x.dot(tangent0), plane.y.dot(tangent0));
+            let laid = |p: Vec2| ((u0 + p.x * tx + p.y * ty) / r, z0 + p.x * kx + p.y * ky);
+            let eps = 1e-9 * (1.0 + body.size());
+            // On a face of the wall: within its angles and heights, where its edges give them.
+            let on_wall = |(theta, height): (f64, f64)| {
+                angles.iter().zip(&heights).any(|(turn, along)| {
+                    turn.is_none_or(|(alo, ahi)| [theta - tau, theta, theta + tau].iter().any(|t| (alo - eps..=ahi + eps).contains(t)))
+                        && along.is_none_or(|(zl, zh)| (zl - eps..=zh + eps).contains(&height))
+                })
+            };
             for reg in regions {
                 let c = reg.centroid();
-                let theta = (u0 + c.x * plane.x.dot(tangent0) + c.y * plane.y.dot(tangent0)) / r;
-                let height = z0 + c.x * kx + c.y * ky;
-                // On a face of the wall: within its angles and heights, where its edges give them.
-                let on_wall = angles.iter().zip(&heights).any(|(turn, along)| {
-                    turn.is_none_or(|(alo, ahi)| [theta - tau, theta, theta + tau].iter().any(|t| (alo..=ahi).contains(t)))
-                        && along.is_none_or(|(zl, zh)| (zl..=zh).contains(&height))
-                });
-                if !on_wall {
+                let (theta, height) = laid(c);
+                // The whole region must lie on the wall, not just its centre: the corners of its
+                // box (the map is linear, so they bound it). shortcut: the outline's polyline
+                // within 1e-4, so a curve may bulge past the box by that much.
+                let (lo2, hi2) = reg
+                    .outer
+                    .polyline(1e-4)
+                    .iter()
+                    .fold((c, c), |(l, h), p| (Vec2::new(l.x.min(p.x), l.y.min(p.y)), Vec2::new(h.x.max(p.x), h.y.max(p.y))));
+                let corners = [lo2, Vec2::new(hi2.x, lo2.y), hi2, Vec2::new(lo2.x, hi2.y)];
+                if !on_wall((theta, height)) || !corners.into_iter().all(|p| on_wall(laid(p))) {
                     return Err(refuse(NOT_FITTING));
                 }
                 let radial = radial0 * theta.cos() + tangent0 * theta.sin();
@@ -235,6 +250,7 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
             let slab = crate::thicken(&sheet, hi - lo, false)?;
             let (h0, h1) = span(slab.exact_bounds()?, plane.origin, plane.normal());
             prisms = crate::extrude(plane, regions, h0 - d - 1.0, h1 + d + 1.0)?;
+            through = true;
             slab
         };
         // Every region must reach the face: one that misses it would leave its letter out.
@@ -242,6 +258,14 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
         let mut missed = Vec::new();
         for (i, prism) in prisms.iter().enumerate() {
             match crate::boolean(prism, &slab, crate::BoolOp::Intersect)? {
+                // A prism runs right through the slab: what is left of it is one part above and
+                // one below, unless the slab cuts it short (over the face's edge or a hole),
+                // where the two join round the side.
+                Some(_)
+                    if through && crate::boolean(prism, &slab, crate::BoolOp::Cut)?.map_or(0, |rest| rest.lumps().map_or(0, |l| l.len())) != 2 =>
+                {
+                    missed.push((i + 1).to_string())
+                }
                 Some(piece) => pieces.push(piece),
                 None => missed.push((i + 1).to_string()),
             }
@@ -1100,6 +1124,14 @@ mod tests {
             assert_eq!(result.shell_count(), 1);
             assert!((volume(&result) - v - 200. * depth.signum()).abs() < 1e-4, "{depth}: {}", volume(&result) - v);
         }
+        // A profile hanging over the face's edge (sketch x 15..25 is x 35..45 on a 40 wide
+        // face) is refused, not cut short at the edge.
+        let over =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(15., -5.), Vec2::new(25., -5.), Vec2::new(25., 5.), Vec2::new(15., 5.)]), holes: vec![] };
+        for depth in [2., -2.] {
+            let e = emboss_project_face(&block, top, at, &sketch, &[square(5.), over.clone()], depth).unwrap_err();
+            assert!(e.to_string().contains("profile 2 of 2 lies off it"), "{e}");
+        }
     }
 
     #[test]
@@ -1125,6 +1157,12 @@ mod tests {
             }
         }
         assert!(emboss_project_face(&cyl, 99, Vec3::new(20., 0., 20.), &side, &[square(3.)], 1.).is_err());
+        // The trough's wall is half a turn, 23.6 either side of its bottom: a square laid from
+        // 20 to 26 round it hangs off its edge.
+        let past =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(20., -3.), Vec2::new(26., -3.), Vec2::new(26., 3.), Vec2::new(20., 3.)]), holes: vec![] };
+        let e = emboss_project_face(&trough, inner, at, &sketch, &[past], -1.).unwrap_err();
+        assert!(e.to_string().contains("not fitting the selected target face"), "{e}");
     }
 
     #[test]
@@ -1148,6 +1186,11 @@ mod tests {
         // wider section as a closed cavity.
         let e = emboss_project_face(&shaft, wall, at, &sketch, &[square_at(5.), square_at(15.)], -1.).unwrap_err();
         assert!(e.to_string().contains("not fitting the selected target face"), "{e}");
+        // So is one whose centre is on the wall (z 9) but whose top (z 11) is past the step.
+        let e = emboss_project_face(&shaft, wall, at, &sketch, &[square_at(9.)], -1.).unwrap_err();
+        assert!(e.to_string().contains("not fitting the selected target face"), "{e}");
+        // Flush with the step (z 6..10) still fits.
+        assert!(emboss_project_face(&shaft, wall, at, &sketch, &[square_at(8.)], -1.).is_ok());
         // A depth the prisms cannot reach is refused, not cut short.
         let cyl = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 40.).unwrap();
         let side = face_where(&cyl, |s| matches!(s, Surf::Cylinder { convex: true, .. }));
