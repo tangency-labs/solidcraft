@@ -418,6 +418,9 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
                 app.preferences.disabled_plugins.remove(id);
                 app.session.disabled_plugins.remove(id);
             }
+            // A removed or replaced plugin's background is read again from its folder, or not at all.
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::plugin_shaders::forget(app, id);
             persist_grants(app)?;
         }
         if let PackageAction::Describe { path } = &job.action {

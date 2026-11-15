@@ -207,6 +207,8 @@ pub struct Compiled {
 /// pixel that spent it all still gets its colour encoded for the screen.
 const HOST_FUNCTIONS: [&str; 1] = ["sc_encode"];
 
+const NEEDS_BACKGROUND: &str = "needs fn background(px: ScPixel) -> vec4<f32>";
+
 fn refuse(shader: &Shader, reason: impl Into<String>) -> HostError {
     invalid(format!("shaders.{}", shader.id), format!("{}: {}", shader.source, reason.into()))
 }
@@ -223,10 +225,6 @@ pub fn compile(shader: &Shader, source: &str) -> Result<Compiled> {
         .enumerate()
         .map(|(i, t)| format!("@group(0) @binding({}) var {}: texture_2d<f32>;\n", FIRST_TEXTURE_BINDING as usize + i, t.name))
         .collect();
-    // Checked on the text: without it the host's own call to `background` is what fails to parse.
-    if !source.split("fn").skip(1).any(|rest| rest.trim_start().strip_prefix("background").is_some_and(|r| r.trim_start().starts_with('('))) {
-        return Err(refuse(shader, "needs fn background(px: ScPixel) -> vec4<f32>"));
-    }
     let lines = source.lines().count();
     let full = format!("{source}\n{}", PRELUDE.replace("{textures}", &textures));
     let at = |location: Option<naga::SourceLocation>| match location {
@@ -234,7 +232,18 @@ pub fn compile(shader: &Shader, source: &str) -> Result<Compiled> {
         Some(_) => "where it meets the host's declarations (a name starting sc or ScHost?): ".to_string(),
         None => String::new(),
     };
-    let mut module = naga::front::wgsl::parse_str(&full).map_err(|e| refuse(shader, format!("{}{}", at(e.location(&full)), e.message())))?;
+    let mut module = naga::front::wgsl::parse_str(&full).map_err(|e| {
+        // With no `background` of the plugin's own, the host's call to it is what fails to parse.
+        let in_host = e.location(&full).is_some_and(|l| l.line_number as usize > lines);
+        if in_host && e.message().contains("background") {
+            refuse(shader, NEEDS_BACKGROUND)
+        } else {
+            refuse(shader, format!("{}{}", at(e.location(&full)), e.message()))
+        }
+    })?;
+    if !module.functions.iter().any(|(_, f)| f.name.as_deref() == Some("background")) {
+        return Err(refuse(shader, NEEDS_BACKGROUND));
+    }
     let host: BTreeSet<&str> = ["sc", "sc_clamp", "sc_repeat"].into_iter().chain(shader.textures.iter().map(|t| t.name.as_str())).collect();
     if module.entry_points.iter().any(|e| !matches!(e.name.as_str(), "sc_vertex" | "sc_fragment")) {
         return Err(refuse(shader, "declares an entry point (@vertex, @fragment or @compute); the host supplies them"));

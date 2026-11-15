@@ -1762,11 +1762,13 @@ fn main() -> eframe::Result {
             // time, so one bad file cannot brick every launch (#5064).
             app.reopen_guard_dir = recovery_dir.clone();
             // A plugin's background effect may be what the driver gave up on: after a lost device
-            // it starts turned off, and the note says so.
-            if after_loss && !app.preferences.background_shader.is_empty() {
-                notes.push(format!(
-                    "The background effect {} was turned off in case it caused the reset; turn it on again in Preferences > Appearance.",
-                    app.preferences.background_shader
+            // it starts turned off, and the note says so. The first frame writes the change, so
+            // another stop before the next save cannot bring the effect back.
+            let cleared_background = after_loss && !app.preferences.background_shader.is_empty();
+            if cleared_background {
+                notes.push(solidcraft_ui_text::Locale::for_language(&app.preferences.language).format(
+                    "prefs.background_shader_after_loss",
+                    &[("name", &app.preferences.background_shader)],
                 ));
                 app.preferences.background_shader.clear();
             }
@@ -1882,8 +1884,13 @@ fn main() -> eframe::Result {
                     solidcraft_engine::crash::phase("first frame");
                 });
             Ok(Box::new(App {
-                // Before `app` moves: the settings as read, already on disk.
-                prefs_writer: PrefsWriter::read(app.prefs()),
+                // Before `app` moves: the settings as read, already on disk, unless the start
+                // changed them (a background effect cleared after a lost device): written at once.
+                prefs_writer: if cleared_background {
+                    PrefsWriter { pending_until: Some(std::time::Instant::now()), ..PrefsWriter::default() }
+                } else {
+                    PrefsWriter::read(app.prefs())
+                },
                 solve: app,
                 setup,
                 gpu_job: None,

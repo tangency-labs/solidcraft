@@ -8,6 +8,7 @@ fn background(px: ScPixel) -> vec4<f32> {
     // A band of the theme's accent just above the horizon, moving round it once a minute.
     let heading = atan2(px.ray.y, px.ray.x);
     let drift = 0.5 + 0.5 * cos(heading - sc.time * 6.2831853 / 60.0);
-    let band = exp(-pow((height - 0.05) / 0.08, 2.0)) * mix(0.15, 0.4, drift);
+    let offset = (height - 0.05) / 0.08;
+    let band = exp(-offset * offset) * mix(0.15, 0.4, drift);
     return vec4<f32>(mix(sky, sc.accent.rgb, band), 1.0);
 }

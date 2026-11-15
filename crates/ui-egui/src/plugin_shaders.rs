@@ -104,8 +104,7 @@ fn installed(app: &SolveApp) -> Vec<(Choice, String)> {
     let mut seen = std::collections::BTreeSet::new();
     let mut out = Vec::new();
     for path in paths {
-        let Ok(package) = solidcraft_engine::plugin::read_package(&path) else { continue };
-        let manifest = package.manifest;
+        let Ok(manifest) = manifest(&path) else { continue };
         if app.preferences.disabled_plugins.contains(&manifest.id) || !seen.insert(manifest.id.clone()) {
             continue;
         }
@@ -118,11 +117,25 @@ fn installed(app: &SolveApp) -> Vec<(Choice, String)> {
     out
 }
 
+/// A plugin folder's manifest alone: a background needs no component, and the list of choices is
+/// read on the window thread.
+fn manifest(folder: &str) -> Result<solidcraft_engine::plugin::Manifest, String> {
+    let dir = std::path::Path::new(folder);
+    let name = dir.file_name().and_then(|n| n.to_str()).ok_or("a plugin folder needs a name")?;
+    let path = dir.join("plugin.json");
+    let size = std::fs::metadata(&path).map_err(|e| format!("plugin.json: {e}"))?.len();
+    if size > solidcraft_engine::plugin::MAX_MANIFEST_BYTES as u64 {
+        return Err("plugin.json: too large".into());
+    }
+    let bytes = std::fs::read(&path).map_err(|e| format!("plugin.json: {e}"))?;
+    solidcraft_engine::plugin::parse_manifest(&bytes, name).map_err(|e| e.to_string())
+}
+
 /// Reads and checks the chosen background off the window thread.
 fn load(folder: String, key: String, limit: u32) -> Result<Loaded, String> {
-    let package = solidcraft_engine::plugin::read_package(&folder).map_err(|e| e.to_string())?;
+    let manifest = manifest(&folder)?;
     let shader_id = key.split_once('/').map(|(_, s)| s).unwrap_or_default();
-    let shader = package.manifest.shaders.iter().find(|s| s.id == shader_id).ok_or_else(|| format!("{key} is not in the plugin any more"))?;
+    let shader = manifest.shaders.iter().find(|s| s.id == shader_id).ok_or_else(|| format!("{key} is not in the plugin any more"))?;
     let dir = std::path::Path::new(&folder);
     let read = |file: &str, max: usize| -> Result<Vec<u8>, String> {
         let path = dir.join(file);
@@ -169,6 +182,9 @@ fn mips(bytes: &[u8], limit: u32) -> Result<Vec<([u32; 2], Vec<u8>)>, String> {
 }
 
 pub(crate) fn paint(app: &mut SolveApp, painter: &egui::Painter, rect: egui::Rect, tokens: &solidcraft_theme::Tokens) {
+    if !allowed(app) {
+        return;
+    }
     let key = app.preferences.background_shader.clone();
     let state = &mut app.plugin_shaders;
     if state.failed.as_ref().is_some_and(|failed| *failed != key) {
@@ -186,11 +202,7 @@ pub(crate) fn paint(app: &mut SolveApp, painter: &egui::Painter, rect: egui::Rec
         let Some(rs) = state.render.clone() else { return };
         if state.loading.as_ref().is_none_or(|(k, _)| *k != key) {
             let Some((_, folder)) = installed(app).into_iter().find(|(c, _)| c.key == key) else {
-                // Not installed, or turned off: say so once, and don't look again every frame.
-                app.plugin_shaders.failed = Some(key.clone());
-                let message = format!("{} {key}: {}", solidcraft_ui_text::tr(UNREADABLE), solidcraft_ui_text::tr("prefs.background_shader_missing"));
-                log::warn!("{message}");
-                app.set_status(message, true);
+                missing(app, &key);
                 return;
             };
             let pending: Pending = Arc::default();
@@ -243,6 +255,42 @@ pub(crate) fn paint(app: &mut SolveApp, painter: &egui::Painter, rect: egui::Rec
     let uniforms = host_uniforms(size, time, ppp, &app.cam, tokens);
     let Some(id) = draw(&rs, active, size, &uniforms) else { return };
     painter.image(id, rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+}
+
+/// A plugin turned off after its background was drawn, or while it loads, drops it, saying so once.
+fn allowed(app: &mut SolveApp) -> bool {
+    let key = app.preferences.background_shader.clone();
+    if key.is_empty() || app.plugin_shaders.failed.as_deref() == Some(key.as_str()) {
+        return true;
+    }
+    let plugin = key.split_once('/').map_or(key.as_str(), |(id, _)| id);
+    if crate::plugins::enabled(app, plugin) {
+        return true;
+    }
+    forget(app, plugin);
+    missing(app, &key);
+    false
+}
+
+/// Drops `plugin`'s background, drawn or loading, so it is read again from its folder when next chosen.
+pub(crate) fn forget(app: &mut SolveApp, plugin: &str) {
+    let state = &mut app.plugin_shaders;
+    let owns = |key: &str| key.split_once('/').is_some_and(|(id, _)| id == plugin);
+    if state.active.as_ref().is_some_and(|a| owns(&a.key)) {
+        retire(state);
+    }
+    if state.loading.as_ref().is_some_and(|(key, _)| owns(key)) {
+        state.loading = None;
+    }
+    state.choices = None;
+}
+
+/// The chosen background's plugin is missing or off: say so once, not every frame.
+fn missing(app: &mut SolveApp, key: &str) {
+    app.plugin_shaders.failed = Some(key.to_owned());
+    let message = format!("{} {key}: {}", solidcraft_ui_text::tr(UNREADABLE), solidcraft_ui_text::tr("prefs.background_shader_missing"));
+    log::warn!("{message}");
+    app.set_status(message, true);
 }
 
 fn retire(state: &mut State) {
@@ -498,5 +546,28 @@ mod tests {
         moved.distance *= 3.0;
         moved.target.x += 50.0;
         assert_eq!(at(&cam), at(&moved));
+    }
+
+    #[test]
+    fn a_background_stops_when_its_plugin_is_turned_off() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.background_shader = "dusk/dusk".into();
+        h.app.plugin_shaders.loading = Some(("dusk/dusk".into(), super::Pending::default()));
+        assert!(super::allowed(&mut h.app), "an enabled plugin's background may draw");
+        assert!(h.app.plugin_shaders.loading.is_some());
+        h.app.preferences.disabled_plugins.insert("dusk".into());
+        assert!(!super::allowed(&mut h.app), "a turned-off plugin's background must not draw");
+        assert!(h.app.plugin_shaders.loading.is_none(), "its pending load is dropped");
+        assert_eq!(h.app.plugin_shaders.failed.as_deref(), Some("dusk/dusk"));
+    }
+
+    #[test]
+    fn removing_a_plugin_forgets_its_background() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_shaders.loading = Some(("dusk/dusk".into(), super::Pending::default()));
+        super::forget(&mut h.app, "other");
+        assert!(h.app.plugin_shaders.loading.is_some(), "another plugin's removal leaves it");
+        super::forget(&mut h.app, "dusk");
+        assert!(h.app.plugin_shaders.loading.is_none());
     }
 }

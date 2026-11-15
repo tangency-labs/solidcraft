@@ -218,3 +218,15 @@ fn plugin_functions_named_like_the_host_are_refused() {
     let error = reason(compile(&background(&[]), &source).unwrap_err());
     assert!(error.contains("`sc_f0`") && error.contains("sc_"), "{error}");
 }
+
+/// WGSL allows comments between tokens: `background` is found by the parser, not by the text.
+#[test]
+fn background_is_found_with_comments_between_its_tokens() {
+    let source = "fn /* sky */ background(px: ScPixel) -> vec4<f32> { return sc.top; }
+";
+    assert!(compile(&background(&[]), source).is_ok());
+    let commented_out = "// fn background(px: ScPixel) -> vec4<f32> { return sc.top; }
+fn sky() {}
+";
+    assert!(reason(compile(&background(&[]), commented_out).unwrap_err()).contains("fn background"));
+}
