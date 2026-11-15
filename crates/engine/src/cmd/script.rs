@@ -67,6 +67,9 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     }
     resolve_legacy_names(&mut raw, &s.doc);
     let feature = recorded_feature(cmd, &raw)?;
+    if s.doc.is_skeleton(feature.component) && !feature.kind.is_reference() {
+        return Err(bad(cmd, "not supported yet: solid features in a skeleton component (it holds sketches and construction geometry only)"));
+    }
     let params = step_params(cmd, p.get("params"))?;
     let id = s.doc_mut().insert_feature(feature, params)?;
     s.refresh();

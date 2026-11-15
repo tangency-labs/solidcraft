@@ -564,7 +564,8 @@ fn set_kind(s: &mut Session, p: &Value) -> Result<Value> {
     if id == 0 {
         return Err(bad(cmd, "the design itself cannot change kind"));
     }
-    if kind == solidcraft_doc::ComponentKind::Skeleton && s.doc.features.iter().any(|f| f.component == id && !f.kind.is_reference()) {
+    let has_solids = s.doc.features.iter().any(|f| f.component == id && !f.kind.is_reference()) || s.doc.body_components.values().any(|&c| c == id);
+    if kind == solidcraft_doc::ComponentKind::Skeleton && has_solids {
         return Err(bad(cmd, "not supported yet: a component with solid features cannot become a skeleton"));
     }
     if let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == id) {
