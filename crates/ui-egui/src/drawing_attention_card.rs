@@ -2,6 +2,7 @@
 //! The host supplies a current DrawingAttention snapshot; no CAD command runs here.
 use crate::drawing_dimension_status::{DimensionItem, DrawingAttention};
 use crate::ui_kit;
+use std::collections::BTreeMap;
 
 fn tr(id: &str) -> String { solidcraft_ui_text::format(id, &[]) }
 fn fmt(id: &str, values: &[(&str, &str)]) -> String { solidcraft_ui_text::format(id, values) }
@@ -16,14 +17,18 @@ pub struct AttentionRow {
 }
 
 pub fn rows(snapshot: &DrawingAttention) -> Vec<AttentionRow> {
+    rows_with_names(snapshot, &BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new())
+}
+
+pub fn rows_with_names(snapshot: &DrawingAttention, dimensions: &BTreeMap<String, String>, views: &BTreeMap<String, String>, sheets: &BTreeMap<String, String>) -> Vec<AttentionRow> {
     snapshot.dimensions.iter().filter(|d| d.needs_attention()).map(|d| AttentionRow {
-        id: d.id.clone(),
+        id: dimensions.get(&d.id).cloned().unwrap_or_else(|| d.id.clone()),
         state: state(d),
         reason: reason(d),
         location: match (&d.sheet, &d.view) {
-            (Some(sheet), Some(view)) => format!("Sheet {sheet} · View {view}"),
-            (None, Some(view)) => format!("View {view} · sheet unknown"),
-            _ => "Location unknown".to_owned(),
+            (Some(sheet), Some(view)) => fmt("ui.drawing_attention.sheet_view", &[("sheet", sheets.get(sheet).map(String::as_str).unwrap_or(sheet)), ("view", views.get(view).map(String::as_str).unwrap_or(view))]),
+            (None, Some(view)) => fmt("ui.drawing_attention.view_only", &[("view", views.get(view).map(String::as_str).unwrap_or(view))]),
+            _ => tr("ui.drawing_attention.unknown"),
         },
     }).collect()
 }
@@ -55,8 +60,8 @@ fn reason(d: &DimensionItem) -> String {
 
 /// Draw a status card only; callers decide its position and refresh cadence.
 /// State is conveyed by both text and a shape, never by colour alone.
-pub fn show(ui: &mut egui::Ui, snapshot: &DrawingAttention) {
-    let items = rows(snapshot);
+pub fn show(ui: &mut egui::Ui, snapshot: &DrawingAttention, dimensions: &BTreeMap<String, String>, views: &BTreeMap<String, String>, sheets: &BTreeMap<String, String>) {
+    let items = rows_with_names(snapshot, dimensions, views, sheets);
     ui.group(|ui| {
         ui_kit::section_heading(ui, solidcraft_ui_text::tr("ui.drawing_attention.title"));
         if items.is_empty() {
@@ -102,7 +107,7 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].state, tr("ui.drawing_attention.lost"));
         assert_eq!(list[0].reason, "Edge deleted");
-        assert_eq!(list[0].location, "Location unknown");
+        assert_eq!(list[0].location, tr("ui.drawing_attention.unknown"));
         assert_eq!(list[1].state, tr("ui.drawing_attention.stale"));
     }
 
