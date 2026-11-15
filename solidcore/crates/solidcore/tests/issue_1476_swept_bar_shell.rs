@@ -165,6 +165,8 @@ fn issue_1476_swept_bar_shells() {
 #[ignore = "slow in debug builds (two 38 000-sample curve offsets)"]
 fn issue_1476_swept_bar_shells_with_solidcraft_fixes() {
     let mut fixes = solidcraft_fixes_without_cavity_regions();
+    // The preset has it on; this test is SolidCraft's configuration without it (the last
+    // test in this file turns it on).
     fixes.shell_edges_on_analytics_exact = false;
     assert_eq!(check(&fixes, Some(1299.482314966473)), 16);
 }
