@@ -1018,13 +1018,14 @@ impl OffsetExecutive {
     ///
     /// A side is a segment no other face borders (a segment of a step wall or one two faces
     /// share is no side); the segments are chained end to end, each end meeting exactly
-    /// one other within the segments' tolerance. A chain that does not close is closed by
-    /// the straight stretch from its last end to its first only where an offset edge runs
-    /// along all of it (its ends and three points between within the tolerance, as
-    /// `close_loop_gap` checks its segment on its face). A polygon of three or more corners
-    /// on one plane within the tolerance, twice its area more than the tolerance times its
-    /// perimeter, is filled; any other chain is left as it is (the result is then judged as
-    /// before). The face is kept out of the face extensions: it closes the gap exactly.
+    /// one other within the larger of the two segments' tolerances. A chain that does not
+    /// close is closed by the straight stretch from its last end to its first only where an
+    /// offset edge runs along all of it (its ends and three points between within the
+    /// chain's tolerance, the largest of its segments', as `close_loop_gap` checks its
+    /// segment on its face). A polygon of three or more corners on one plane within the
+    /// chain's tolerance, twice its area more than that tolerance times its perimeter, is
+    /// filled; any other chain is left as it is (the result is then judged as before). The
+    /// face is kept out of the face extensions: it closes the gap exactly.
     ///
     /// # Errors
     ///
@@ -1038,8 +1039,7 @@ impl OffsetExecutive {
         if segments.len() < 2 {
             return Ok(());
         }
-        let tol = segments.iter().fold(0.0, |t, c| max2(t, c.tol));
-        let mut polygons: Vec<(Vec<Point3>, Option<VertexId>)> = Vec::new();
+        let mut polygons: Vec<(Vec<Point3>, f64, Option<VertexId>)> = Vec::new();
         {
             let b = self.offset_brep().ok_or_else(|| null("no offset B-rep"))?;
             let mut open: Vec<GapSegment> = Vec::new();
@@ -1059,25 +1059,33 @@ impl OffsetExecutive {
                 let mut before: Vec<GapSegment> = Vec::new();
                 let (mut start, mut end) = (s.to, s.from);
                 let mut closed = false;
-                while let Some(j) = only(&open, &used, |c| c.to.distance(end) <= tol) {
+                // two segments meet within the larger of their own tolerances
+                let (mut first_tol, mut last_tol) = (s.tol, s.tol);
+                while let Some(j) = only(&open, &used, |c| {
+                    c.to.distance(end) <= max2(last_tol, c.tol)
+                }) {
                     let Some(c) = open.get(j) else { break };
                     used.insert(j);
                     after.push(*c);
                     end = c.from;
-                    if end.distance(start) <= tol {
+                    last_tol = c.tol;
+                    if end.distance(start) <= max2(first_tol, last_tol) {
                         closed = true;
                         break;
                     }
                 }
                 while !closed {
-                    let Some(j) = only(&open, &used, |c| c.from.distance(start) <= tol) else {
+                    let Some(j) = only(&open, &used, |c| {
+                        c.from.distance(start) <= max2(first_tol, c.tol)
+                    }) else {
                         break;
                     };
                     let Some(c) = open.get(j) else { break };
                     used.insert(j);
                     before.push(*c);
                     start = c.to;
-                    closed = start.distance(end) <= tol;
+                    first_tol = c.tol;
+                    closed = start.distance(end) <= max2(first_tol, last_tol);
                 }
                 let chain: Vec<GapSegment> = before
                     .into_iter()
@@ -1085,6 +1093,8 @@ impl OffsetExecutive {
                     .chain(std::iter::once(*s))
                     .chain(after)
                     .collect();
+                // the polygon's own tolerance: the largest of its segments'
+                let tol = chain.iter().fold(0.0, |t, c| max2(t, c.tol));
                 let mut corners: Vec<Point3> = chain.iter().map(|c| c.to).collect();
                 if !closed {
                     if chain.len() < 2 || !along_an_edge(kernel, b, end, start, tol)? {
@@ -1096,11 +1106,11 @@ impl OffsetExecutive {
                     .vertex
                     .filter(|_| chain.iter().all(|c| c.vertex == s.vertex));
                 if corners.len() >= 3 {
-                    polygons.push((corners, vertex));
+                    polygons.push((corners, tol, vertex));
                 }
             }
         }
-        for (corners, vertex) in polygons {
+        for (corners, tol, vertex) in polygons {
             self.cap_gap_polygon(kernel, &corners, tol, vertex, notifications)?;
         }
         Ok(())
