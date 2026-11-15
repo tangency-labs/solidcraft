@@ -73,8 +73,8 @@ impl CellGrid {
 
 fn inputs() -> Vec<SelInput> {
     vec![
-        SelInput::new("ui.cell_grid.profiles", PROFILES, true),
-        SelInput::new("ui.cell_grid.bodies", BODIES, true),
+        SelInput::new("ui.profiles", PROFILES, true),
+        SelInput::new("ui.bodies", BODIES, true),
         SelInput::new("ui.cell_grid.anchor", ANCHOR_PICKS, false),
     ]
 }
@@ -89,7 +89,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, _: &[SelInput])
         app.tr("ui.cell_grid.shape"),
         "cell_grid_shape",
         &mut c.shape,
-        &[app.tr("ui.cell_grid.hexagon"), app.tr("ui.cell_grid.square"), app.tr("ui.cell_grid.triangle"), app.tr("ui.circle"), app.tr("ui.polygon")],
+        &[app.tr("ui.cell_grid.hexagon"), app.tr("ui.perforate_square"), app.tr("ui.cell_grid.triangle"), app.tr("ui.circle"), app.tr("ui.polygon")],
     );
     let mut enter = false;
     if SHAPES.get(c.shape) == Some(&"polygon") {
@@ -101,7 +101,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, _: &[SelInput])
             app.tr("ui.cell_grid.dot_grid"),
             "cell_grid_dot_grid",
             &mut c.dot_grid,
-            &[app.tr("ui.cell_grid.hexagonal"), app.tr("ui.cell_grid.square")],
+            &[app.tr("ui.cell_grid.hexagonal"), app.tr("ui.perforate_square")],
         );
     }
     enter |= expr_row(ui, app.tr("ui.cell_grid.size"), &mut c.size);
