@@ -3841,11 +3841,11 @@ mod tests {
     }
 
     /// Without the preference (the default), a switch cancels the dialog and the tool, as before
-    /// #9360; the design keeps its toolbar tab (`remember_toolbar_tab`, on by default).
+    /// #9360; with `remember_toolbar_tab` on (off by default) the design keeps its toolbar tab.
     #[test]
     fn a_tab_switch_cancels_the_dialog_and_tool_by_default() {
         let defaults = crate::prefs::Prefs::default();
-        assert!(!defaults.keep_work_on_tab_switch && defaults.remember_toolbar_tab);
+        assert!(!defaults.keep_work_on_tab_switch && !defaults.remember_toolbar_tab);
         let (mut a, _) = measuring_and_drawing(false, true);
         switch(&mut a, 0);
         assert!(a.dialog.is_none() && a.tool.is_none());
