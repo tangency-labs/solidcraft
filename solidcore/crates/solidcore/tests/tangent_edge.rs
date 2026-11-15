@@ -540,16 +540,13 @@ fn joint_turn_is_the_angle_between_the_directions() {
     assert!(close(joint_turn([1.0, 0.0], [2.0, 0.0]).unwrap(), 0.0));
     assert!(close(
         joint_turn([1.0, 0.0], [0.0, 3.0]).unwrap(),
-        std::f64::consts::FRAC_PI_2
+        FRAC_PI_2
     ));
     assert!(close(
         joint_turn([0.0, 1.0], [1.0, 0.0]).unwrap(),
-        std::f64::consts::FRAC_PI_2
+        FRAC_PI_2
     ));
-    assert!(close(
-        joint_turn([1.0, 0.0], [-1.0, 0.0]).unwrap(),
-        std::f64::consts::PI
-    ));
+    assert!(close(joint_turn([1.0, 0.0], [-1.0, 0.0]).unwrap(), PI));
 }
 
 #[test]
