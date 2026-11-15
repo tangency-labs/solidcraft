@@ -316,6 +316,15 @@ What the port does today:
   second tool whole, as a void.
   Parallel cones (drill points) are met by the marching intersection and are not decided this
   way, nor are coplanar faces bounded by such circles.
+- **A line a hair inside a circle.** A line δ inside a circle crosses it at two points
+  `2√(2rδ)` apart and stays within δ of it between them, as two circles do.
+  `line_coplanar_circle_intersect_distinct` (`geom/geom_utility/p1.rs`) takes an overlap below
+  its contact tolerance as one touching point at the chord's midpoint, unless the whole circle
+  lies within that tolerance of the line. The site that passes `contact_tol_3d` for an edge
+  and a face's intersection curve that are both circles passes it when one is a line
+  (`curve/ellipse/p2.rs` through `intersect/curve_class/p9.rs`): a flat side a hair inside a
+  round tangent to it then touches the round's end circle at one point. The other line/circle
+  callers keep upstream's zero.
 
 **The refusal that names a tangent contact.** The kernel's boolean has none today. The `ssi` crate
 refuses a contact it cannot prove with `Error::Tangent`, code `BOOLEAN_TANGENT`, carrying where it
