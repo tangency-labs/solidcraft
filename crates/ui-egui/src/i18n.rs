@@ -141,6 +141,16 @@ impl LocaleNames for Locale {
         if let Some((feature, reference)) = solidcraft_engine::doc::reselect_parts(text) {
             return self.format("diagnostic.reselect_reference", &[("feature", &self.given_name(feature)), ("reference", reference)]);
         }
+        if let Some(lost) = solidcraft_engine::doc::lost_projection_parts(text) {
+            let feature = self.given_name(lost.feature);
+            let (count, more) = (lost.count.to_string(), lost.more.to_string());
+            let args = [("feature", feature.as_str()), ("count", &count), ("projections", lost.listed), ("projection", lost.listed), ("more", &more)];
+            return match (lost.count, lost.more) {
+                (1, _) => self.format("diagnostic.lost_projection", &args),
+                (_, 0) => self.format("diagnostic.lost_projections", &args),
+                _ => self.format("diagnostic.lost_projections_more", &args),
+            };
+        }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
             && let Some((component, detail)) = detail.split_once("'; the tool may overlap '")
@@ -216,6 +226,21 @@ pub fn tr_engine_error(error: &str) -> String {
     {
         return format("component.error.ambiguous_name", &[("name", name), ("ids", ids)]);
     }
+    for (prefix, suffix, id) in [
+        ("ambiguous contact set `", "; use a numeric contact set ID", "contact.error.ambiguous_name"),
+        ("ambiguous exploded view `", "; use a numeric exploded view ID", "explode.error.ambiguous_name"),
+        ("ambiguous joint `", "; use a numeric joint ID", "joint.error.ambiguous_name"),
+        ("ambiguous motion study `", "; use a numeric motion study ID", "motion.error.ambiguous_name"),
+    ] {
+        if let Some((name, ids)) =
+            text.strip_prefix(prefix).and_then(|rest| rest.strip_suffix(suffix)).and_then(|rest| rest.rsplit_once("`; matching IDs: "))
+        {
+            return format(id, &[("name", name), ("ids", ids)]);
+        }
+    }
+    if text == "joint limit minimum must not exceed maximum" {
+        return tr("joint.error.limit_order").to_string();
+    }
     if text == "nothing to break at there" {
         return tr("sketch.error.nothing_to_break").to_string();
     }
@@ -286,6 +311,26 @@ mod tests {
         assert_eq!(super::tr_engine_error(&message), expected);
         assert_eq!(super::tr_engine_error(&format!("invalid parameters for `component.delete`: {message}")), expected);
         assert_eq!(super::tr_engine_error("another error"), "another error");
+    }
+
+    #[test]
+    fn assembly_ambiguity_is_translated_without_truncating_names() {
+        install();
+        let _scope = scope("de");
+        let name = "A`; matching IDs: 99; use a numeric joint ID {ids}";
+        for (kind, command, plural, id_name) in [
+            ("contact set", "contact.edit", "Kontaktsätze", "Kontaktsatz-ID"),
+            ("exploded view", "explode.delete", "Explosionsdarstellungen", "ID der Explosionsdarstellung"),
+            ("joint", "joint.delete", "Gelenke", "Gelenk-ID"),
+            ("motion study", "motion.delete", "Bewegungsuntersuchungen", "ID der Bewegungsuntersuchung"),
+        ] {
+            let message = format!("ambiguous {kind} `{name}`; matching IDs: 1, 3; use a numeric {kind} ID");
+            let expected = format!("Mehrere {plural} heißen `{name}`. Verwende eine numerische {id_name}: 1, 3.");
+            assert_eq!(super::tr_engine_error(&message), expected, "{kind}");
+            assert_eq!(super::tr_engine_error(&format!("invalid parameters for `{command}`: {message}")), expected, "{kind}");
+            let unknown = format!("ambiguous {kind} `{name}`; matching IDs: 1, 3; another reason");
+            assert_eq!(super::tr_engine_error(&unknown), unknown);
+        }
     }
 
     /// #16164: the refusal to move a point the sketch holds fixed, or projects from a body, says
@@ -491,6 +536,44 @@ mod tests {
             assert_ne!(translated, message, "{language}");
             // Right-to-left text comes back in display order, so only what it holds is checked.
             assert!(translated.contains("Fillet {2}") && translated.contains("`F4:side:c1#1|F4:top`"), "{language}: {translated}");
+        }
+    }
+
+    #[test]
+    fn lost_projections_diagnostic_translates_with_the_sketch_and_projections_as_given() {
+        install();
+        let lost = |link: &str, body: &str, curve: &str| solidcraft_engine::doc::LostProjection {
+            link: link.into(),
+            what: format!("projected face of {body}"),
+            curves: vec![curve.into()],
+            points: Vec::new(),
+            name: "F2:side:l1".into(),
+        };
+        let lost_error = |n: usize| {
+            let links = [("j1", "Tray", "l1"), ("j2", "Cover", "l2"), ("j3", "Tray", "l3"), ("j4", "Tray", "l4")];
+            let links = links.into_iter().take(n).map(|(link, body, curve)| lost(link, body, curve)).collect();
+            solidcraft_engine::doc::DocError::LostProjections { feature: String::new(), links }
+        };
+        // One, three named, four with the last counted; under a plain name, one holding ": ", and in
+        // the error of a feature built from the sketch.
+        let wrapped = |n: usize| format!("sketch `A: b` failed: {}", lost_error(n).in_feature("A: b"));
+        let cases = [
+            (lost_error(1).in_feature("Outline {1}").to_string(), "Outline {1}", "projected face of Tray (curve l1)"),
+            (lost_error(3).in_feature("Outline {1}").to_string(), "Outline {1}", "projected face of Cover (curve l2)"),
+            (lost_error(4).in_feature("Outline {1}").to_string(), "Outline {1}", "projected face of Cover (curve l2)"),
+            (lost_error(4).in_feature("A: b").to_string(), "A: b", "projected face of Tray (curve l3)"),
+            (wrapped(1), "sketch `A: b` failed: A: b", "projected face of Tray (curve l1)"),
+            (wrapped(4), "sketch `A: b` failed: A: b", "projected face of Tray (curve l3)"),
+        ];
+        for (message, feature, shown) in cases {
+            assert!(!message.contains("F2:side:l1"), "{message}");
+            assert_eq!(Locale::for_language("en").diagnostic(&message), message);
+            for language in ["ar", "de", "he", "ja", "ko", "vi", "zh"] {
+                let translated = Locale::for_language(language).diagnostic(&message);
+                assert_ne!(translated, message, "{language}");
+                assert!(translated.contains(feature) && translated.contains(shown), "{language}: {translated}");
+                assert!(!translated.contains(" more"), "the count of the rest is translated too: {language}: {translated}");
+            }
         }
     }
 

@@ -1295,6 +1295,7 @@ impl Dialog {
                     && !i.rejects(sel)
             };
             if let Some(inp) = d.inputs.iter_mut().find(|i| takes(i)) {
+                retain_profile_list_sketch(&d.kind, inp, sel);
                 if matches!(d.kind, Kind::Fillet { .. }) {
                     for x in crate::viewport::grouped_selection(s, sel) {
                         if !d.picked_edges.iter().any(|y| selection::same_item(y, &x)) {
@@ -1737,6 +1738,15 @@ impl Dialog {
         if let Some(sel) = self.circle_centre_pick(s, inp, h, snap) {
             return Some(sel);
         }
+        // A mesh body has no vertices or edges to pick, and its own surface is its triangles: a
+        // point input of a construction takes the exact point the pointer's ray meets on one (#16400).
+        if matches!(self.kind, Kind::Construct { .. })
+            && inp.accept & selection::VERTICES != 0
+            && let Hit::Face { body, point, .. } = h
+            && is_mesh_body(s, body)
+        {
+            return Some(Sel::Vertex { body: body.clone(), point: *point });
+        }
         // The snap looked the face under the cursor up already, planar or not.
         let sel = inp.accepts(h, s.active_sketch, |body, face| {
             snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some())
@@ -1921,11 +1931,8 @@ impl Dialog {
         let picked = if chain { fillet_edges(s, &sel, true) } else { single.clone() };
         // Extrude and revolve take profiles of one sketch; both lofts take sections
         // from several sketches and must keep their pick order.
-        if let Sel::Profile { sketch, .. } = &sel
-            && !matches!(self.kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. }))
-            && let Some(inp) = self.inputs.get_mut(self.active)
-        {
-            inp.items.retain(|x| !matches!(x, Sel::Profile { sketch: s2, .. } if s2 != sketch));
+        if let Some(inp) = self.inputs.get_mut(self.active) {
+            retain_profile_sketch(&self.kind, inp, &sel);
         }
         let is_fillet = matches!(self.kind, Kind::Fillet { .. }) && self.active == 0;
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
@@ -2017,6 +2024,7 @@ impl Dialog {
             if !fits(inp.accept, &x) {
                 continue;
             }
+            retain_profile_list_sketch(&self.kind, inp, &x);
             accepted = true;
             if !inp.multi {
                 inp.items.clear();
@@ -2255,6 +2263,26 @@ pub(crate) fn fillet_least_setback(ctx: &egui::Context, s: &Session, items: &[Se
         .reduce(f64::max);
     ctx.data_mut(|d| d.insert_temp(id, (key, least)));
     least
+}
+
+/// Profiles are indices within one sketch. Only lofts consume sections from several sketches.
+/// Keep batch and preselection inputs consistent with successive clicks: the latest sketch wins.
+fn retain_profile_list_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
+    if matches!(
+        kind,
+        Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. } | Kind::Sweep { .. } | Kind::Surface(_) | Kind::Frame(_) | Kind::Sheet(_)
+    ) {
+        retain_profile_sketch(kind, input, sel);
+    }
+}
+
+/// Keep the profile picks of the sketch just picked; lofts retain their separate sections.
+fn retain_profile_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
+    if let Sel::Profile { sketch, .. } = sel
+        && !matches!(kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. }))
+    {
+        input.items.retain(|x| !matches!(x, Sel::Profile { sketch: other, .. } if other != sketch));
+    }
 }
 
 /// The profiles of a sketch that aren't the island inside another profile's hole: a circle in a
@@ -3112,6 +3140,12 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
     if (m == 1) != opts.multiple {
         opts.multiple = m == 1;
         d.inputs = if opts.multiple { vec![SelInput::new("Points", selection::POINTS, true)] } else { single_hole_inputs() };
+        if !opts.multiple
+            && d.editing.is_some()
+            && let Some(face) = d.inputs.first_mut()
+        {
+            face.multi = false;
+        }
         d.active = 0;
         d.extra.remove("direction");
     }
@@ -3679,13 +3713,18 @@ pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<
         return Some(FilletRefusal::Plain(solidcraft_ui_text::format("ui.fillet_error_setback_short", &[("least", &format!("{least} mm"))])));
     }
     let too_large = error.contains("larger than the faces beside its edges allow");
+    // The kernel tried smaller radii down to its least and none built: no radius is the cause, so
+    // a smaller one, or Largest radius, is no advice (the full refusal stays under Copy details).
+    let none_fits = too_large && error.contains("no smaller radius builds either");
     let corner = error.contains("setback") || error.contains("G2 corner") || error.contains("corner patch");
     let kernel = error.contains("SMLib")
         || error.contains("the operation failed")
         || error.contains("not supported yet")
         || error.contains("kernel internal error")
         || error.contains("the rounds would leave openings");
-    if too_large {
+    if none_fits {
+        Some(FilletRefusal::Plain(tr("ui.fillet_error_no_radius").to_string()))
+    } else if too_large {
         Some(FilletRefusal::Plain(tr("ui.fillet_error_too_large").to_string()))
     } else if corner && kernel {
         Some(FilletRefusal::Plain(tr("ui.fillet_error_corner").to_string()))
@@ -5610,7 +5649,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     let need = |i: usize, what: &str| -> Result<(), String> { if sels(d, i).is_empty() { Err(format!("select {what} first")) } else { Ok(()) } };
     let profiles = || -> (Value, Value) {
         let ps: Vec<(u64, usize)> = sels(d, 0).profiles();
-        (ps.first().map(|x| json!(x.0)).unwrap_or(Value::Null), json!(ps.iter().map(|x| x.1).collect::<Vec<_>>()))
+        let sketch = ps.first().map(|x| x.0);
+        (sketch.map(|id| json!(id)).unwrap_or(Value::Null), json!(ps.iter().filter(|x| Some(x.0) == sketch).map(|x| x.1).collect::<Vec<_>>()))
     };
     let face_points = |i: usize| -> Vec<Value> { sels(d, i).face_points().into_iter().map(pt).collect() };
     // An empty Thickness is no value to shell with: OK waits for one instead of the command
@@ -5934,7 +5974,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     Sel::Profile { sketch, index } => {
                         let last = sections.last_mut().filter(|sec| sec.get("sketch").and_then(Value::as_u64) == Some(*sketch));
                         match last.and_then(|sec| sec.get_mut("profiles")).and_then(Value::as_array_mut) {
-                            Some(profiles) => profiles.push(json!(index)),
+                            Some(profiles) => {
+                                let index = json!(index);
+                                if !profiles.contains(&index) {
+                                    profiles.push(index);
+                                }
+                            }
                             None => sections.push(json!({"sketch": sketch, "profiles": [index]})),
                         }
                         profile_sketches.push(*sketch);
@@ -6909,7 +6954,7 @@ const AXIS_PICK: &str =
 /// Which profiles of a sketch a profile selection means.
 pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &ProfileSel) -> Vec<usize> {
     let ps = &ss.profiles;
-    match sel {
+    let mut indices: Vec<usize> = match sel {
         ProfileSel::All => (0..ps.len()).collect(),
         ProfileSel::Indices { indices } => indices.iter().copied().filter(|i| *i < ps.len()).collect(),
         ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
@@ -6922,7 +6967,12 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
             })
             .collect(),
         ProfileSel::Points { points } => points.iter().filter_map(|q| solidcraft_engine::doc::sketch::profile_at_point(ps, *q)).collect(),
-    }
+    };
+    // Saved places or curve references can converge on one region after a sketch changes.
+    // Refill bypasses SelInput::toggle, so keep each resolved region only once here.
+    let mut seen = std::collections::BTreeSet::new();
+    indices.retain(|index| seen.insert(*index));
+    indices
 }
 
 thread_local! {
@@ -7121,12 +7171,18 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
     })
 }
 
+/// Is `body` an imported mesh body (no B-rep, so no vertices of its own)?
+fn is_mesh_body(s: &Session, body: &str) -> bool {
+    crate::open_meshing::session_world(s).body(body).is_some_and(|b| b.body.is_mesh())
+}
+
 /// A dialog pick as a construction reference (`construct.*`'s `{face|edge|vertex: [x,y,z]}`,
 /// `{plane}`, `{axis}` or `{sketch, point|curve}`).
 fn construct_ref(app: &SolveApp, sel: &Sel) -> Result<Value, String> {
     Ok(match sel {
         Sel::Face { point, .. } => json!({"face": pt(*point)}),
         Sel::Edge { point, .. } => json!({"edge": pt(*point)}),
+        Sel::Vertex { body, point } if is_mesh_body(&app.session, body) => json!({"point": pt(*point)}),
         Sel::Vertex { point, .. } => match crate::snap_wake::snapped(app, *point) {
             Some((item, snap)) => snap_ref(app, item, snap)?,
             None => json!({"vertex": pt(*point)}),
@@ -7587,6 +7643,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             ease_out,
             to,
             references,
+            // Not in the Hole window yet: an edit keeps it (`timeline.redefine`).
+            thread_class: _,
             old_surface_start: _,
         } => {
             let mut d = start("solid.hole")?;

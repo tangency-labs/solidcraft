@@ -7,12 +7,13 @@
 //! face, when only a face of the same stem is left, when the name is on several bodies, or when
 //! the name was saved before format 14 ([`LEGACY_MARK`]), the name finds nothing and the feature
 //! that uses it fails, asking for the reference to be picked again
-//! ([`crate::DocError::Reselect`]). An edge name has two more ways: when no edge's faces answer
-//! to it, and one of its faces is gone from a feature still on the body, the reference's point
-//! decides (see [`renamed_edge`]); so it does when a face of it is named after neighbours it no
-//! longer has, or answers to several faces, and the point lies on one edge between them (see
-//! [`resuffixed_edge`]). A face whose name was worked out from geometry, found where
-//! the reference's point no longer lies, is reported: only geometry decided.
+//! ([`crate::DocError::Reselect`]), or, for a sketch's projection, the sketch fails naming the
+//! projections it lost ([`crate::DocError::LostProjections`]). An edge name has two more ways:
+//! when no edge's faces answer to it, and one of its faces is gone from a feature still on the
+//! body, the reference's point decides (see [`renamed_edge`]); so it does when a face of it is
+//! named after neighbours it no longer has, or answers to several faces, and the point lies on
+//! one edge between them (see [`resuffixed_edge`]). A face whose name was worked out from
+//! geometry, found where the reference's point no longer lies, is reported: only geometry decided.
 //! Saved numbered Project links also have a compatibility check for a whole face that
 //! contains the saved pick and comes directly from its original construction feature.
 //! This check is local to manual sketch projection. A thread alone also finds a round side
@@ -32,7 +33,7 @@ use crate::{FeatureKind, ModelBody, ModelState, Operation};
 /// geometry, and some of them name a face that exact history names differently (a tube's outer
 /// wall was named after the nearest sketch curve to its centre, its inner circle): such a name
 /// finds no face, and the feature using it asks for the face to be picked again, which stores
-/// its exact name.
+/// its exact name (a sketch names the projection it lost; repairing it stores the exact name).
 pub const LEGACY_MARK: char = '?';
 
 /// A name saved before format 14, without its mark (`None`: an exact name).
@@ -114,7 +115,8 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
     }
 }
 
-/// Find a saved Sketch Project edge in its body. Older designs can name the edge between
+/// Find a saved edge in its body when it may be named with numbered pieces: a Sketch Project edge, or
+/// the edge of a fillet or chamfer (#16535). Older designs can name the edge between
 /// numbered pieces of faces that now evaluate whole (`F4:side:l6#2|F4:side:l7#2`, now
 /// `F4:side:l6|F4:side:l7`). Recover it only when the faces it separates are whole, the saved
 /// point lies on it, and its name is exact. Other edge references still require the stored
@@ -861,9 +863,43 @@ fn locate_face_with(st: &ModelState, name: &str, p: Vec3, round: bool) -> Option
     naming::warm_names(st.bodies.iter().filter(|b| !b.body.is_mesh()));
     match locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p) {
         Ok(hit) => Some(hit),
-        Err(Miss::Gone) => recover_numbered_face_in(st, name, p, round),
+        Err(Miss::Gone) => recover_numbered_face_in(st, name, p, round).or_else(|| replaced_side_line(st, name, p)),
         Err(Miss::Several) => None,
     }
+}
+
+/// The `F2` and the number of a side face named after a sketch line (`F2:side:l1`): `None` for any
+/// other name (a numbered piece, a face between neighbours, an arc's side).
+fn side_line_name(name: &str) -> Option<(&str, &str)> {
+    let (stem, id) = name.split_once(":side:l")?;
+    (!stem.is_empty() && !stem.contains(':') && !id.is_empty() && id.bytes().all(|c| c.is_ascii_digit())).then_some((stem, id))
+}
+
+/// A side face whose sketch line was replaced (#16661): the line was deleted and another drawn
+/// where it was, so the new line's side face has a new name (`F2:side:l5`) and the stored one
+/// (`F2:side:l1`) names nothing. The stored point still lies on the face of the line now there:
+/// that face, when it is the one side face of the same feature the point lies on. A line drawn
+/// anywhere else leaves the point on no side face, and the name finds nothing, as before.
+fn replaced_side_line(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
+    let (stem, _) = side_line_name(name)?;
+    if !p.is_finite() {
+        return None;
+    }
+    let mut found: Option<FaceHit> = None;
+    for (bi, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh() && b.body.face_count() <= MAX_PROJECTION_RECOVERY_FACES) {
+        let names = naming::names(b);
+        for (face, own) in names.faces.iter().enumerate() {
+            if side_line_name(own).is_none_or(|(s, _)| s != stem) {
+                continue;
+            }
+            let Some((_, point)) = on_face(b, face, p) else { continue };
+            if found.is_some() {
+                return None;
+            }
+            found = Some(FaceHit { body: bi, face, point, verified: names.verified(face), on_point: true });
+        }
+    }
+    found
 }
 
 /// A numbered piece of a round face (`F2:side:c1#2`, from the kernel before SMLib) on whichever

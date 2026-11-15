@@ -27,6 +27,73 @@ fn near(a: Vec3, b: Vec3) -> bool {
 }
 
 #[test]
+fn joint_creation_rejects_reversed_limits_without_changing_the_design() {
+    for command in ["joint.create", "joint.as_built"] {
+        for (kind, limits) in [("revolute", json!([[45, -45]])), ("slider", json!([["2 cm", "10 mm"]])), ("cylindrical", json!([null, [5, -5]]))] {
+            let mut s = Session::default();
+            run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+            let mut params = if command == "joint.create" {
+                json!({"a": {"occurrence": 0, "point": [0, 0, 0]}, "b": {"occurrence": "Part", "point": [0, 0, 0]}, "flip": true})
+            } else {
+                json!({"a": 0, "b": "Part"})
+            };
+            params["type"] = json!(kind);
+            params["limits"] = limits;
+            let (before, undo) = (s.doc.to_json(), s.undo.len());
+            let err = s.execute(command, &params).expect_err("reversed limits must be refused");
+            assert!(
+                matches!(err, crate::EngineError::BadParams { ref cmd, ref msg } if cmd == command && msg.contains("minimum")),
+                "{command}: {err}"
+            );
+            assert_eq!(s.doc.to_json(), before, "{command} changed the design after rejecting limits");
+            assert_eq!(s.undo.len(), undo, "{command} added an undo step after rejecting limits");
+        }
+    }
+}
+
+#[test]
+fn joint_limits_rejects_reversed_bounds_without_changing_the_design() {
+    for (kind, min, max) in [("revolute", json!(50), json!(-50)), ("slider", json!("2 cm"), json!("10 mm"))] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+        run(&mut s, "joint.as_built", json!({"type": kind, "a": 0, "b": "Part", "name": "Joint", "limits": [[-90, 90]]}));
+        let (before, undo) = (s.doc.to_json(), s.undo.len());
+        let err = s.execute("joint.limits", &json!({"joint": "Joint", "min": min, "max": max})).expect_err("reversed limits must be refused");
+        assert!(matches!(err, crate::EngineError::BadParams { ref msg, .. } if msg.contains("minimum")), "{kind}: {err}");
+        assert_eq!(s.doc.to_json(), before, "joint.limits changed the design after rejecting bounds");
+        assert_eq!(s.undo.len(), undo, "joint.limits added an undo step after rejecting bounds");
+    }
+}
+
+#[test]
+fn joint_limits_accept_ordered_and_equal_bounds_after_unit_conversion() {
+    for (kind, lo, hi, expected) in [
+        ("slider", "10 mm", "2 cm", (10.0, 20.0)),
+        ("slider", "1 cm", "10 mm", (10.0, 10.0)),
+        ("revolute", "45 deg", "90 deg", (FRAC_PI_2 / 2.0, FRAC_PI_2)),
+    ] {
+        for command in ["joint.create", "joint.as_built"] {
+            let mut s = Session::default();
+            run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+            let mut params = if command == "joint.create" {
+                json!({"a": {"occurrence": 0, "point": [0, 0, 0]}, "b": {"occurrence": "Part", "point": [0, 0, 0]}, "flip": true})
+            } else {
+                json!({"a": 0, "b": "Part"})
+            };
+            params["type"] = json!(kind);
+            params["name"] = json!("Joint");
+            params["limits"] = json!([[lo, hi]]);
+            run(&mut s, command, params);
+            assert_eq!(s.doc.assembly.joints[0].limits, vec![Some(expected)]);
+            run(&mut s, "joint.limits", json!({"joint": "Joint"}));
+            assert_eq!(s.doc.assembly.joints[0].limits, vec![None]);
+            run(&mut s, "joint.limits", json!({"joint": "Joint", "min": lo, "max": hi}));
+            assert_eq!(s.doc.assembly.joints[0].limits, vec![Some(expected)]);
+        }
+    }
+}
+
+#[test]
 fn deleted_joint_ids_are_not_reused_after_reopening() {
     for command in ["joint.create", "joint.as_built"] {
         let mut s = Session::default();
@@ -44,6 +111,54 @@ fn deleted_joint_ids_are_not_reused_after_reopening() {
         assert!(second > first, "{command}: deleted joint {first} was reused as {second}");
         assert!(s.execute("joint.drive", &json!({"joint": first, "value": 45})).is_err());
     }
+}
+
+#[test]
+fn ambiguous_joint_names_are_refused_without_changing_the_session() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    let params = json!({"type": "revolute", "a": 0, "b": "Part", "name": "Shared"});
+    let first = run(&mut s, "joint.as_built", params.clone())["joint"].as_u64().unwrap();
+    let second = run(&mut s, "joint.as_built", params)["joint"].as_u64().unwrap();
+    let mut s = Session::opened(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), None);
+    run(&mut s, "component.create", json!({"name": "Temporary", "activate": false}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(!s.redo.is_empty());
+    for (command, params) in [
+        ("joint.delete", json!({"joint": "Shared"})),
+        ("joint.edit", json!({"joint": "Shared", "name": "Changed"})),
+        ("joint.drive", json!({"joint": "Shared", "value": 45})),
+        ("selection.delete", json!({"joints": ["Shared"]})),
+    ] {
+        let (doc, undo, redo) = (s.doc.clone(), s.undo.len(), s.redo.len());
+        let error = s.execute(command, &params).expect_err("an ambiguous name must not choose a joint");
+        assert!(matches!(&error, crate::EngineError::BadParams { .. }), "{command}: {error}");
+        assert!(
+            error.to_string().contains(&format!("ambiguous joint `Shared`; matching IDs: {first}, {second}; use a numeric joint ID")),
+            "{command}: {error}"
+        );
+        assert_eq!(s.doc, doc, "{command} changed the document");
+        assert_eq!((s.undo.len(), s.redo.len()), (undo, redo), "{command} changed undo/redo");
+    }
+    run(&mut s, "joint.delete", json!({"joint": second}));
+    run(&mut s, "joint.edit", json!({"joint": "Shared", "name": "Unique"}));
+    assert_eq!(s.doc.assembly.joints.iter().find(|j| j.id == first).unwrap().name, "Unique");
+}
+
+#[test]
+fn joint_text_references_refuse_name_and_id_collisions() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    let first = run(&mut s, "joint.as_built", json!({"type": "revolute", "a": 0, "b": "Part", "name": "4"}))["joint"].as_u64().unwrap();
+    let second = run(&mut s, "joint.as_built", json!({"type": "revolute", "a": 0, "b": "Part", "name": "Target"}))["joint"].as_u64().unwrap();
+    assert_eq!(second, 4);
+    let doc = s.doc.clone();
+    let error = s.execute("joint.delete", &json!({"joint": "4"})).unwrap_err();
+    assert!(error.to_string().contains(&format!("matching IDs: {first}, {second}")), "{error}");
+    assert_eq!(s.doc, doc);
+    run(&mut s, "joint.delete", json!({"joint": second}));
+    run(&mut s, "joint.delete", json!({"joint": "4"}));
+    assert!(s.doc.assembly.joints.is_empty());
 }
 
 /// A hinge leaf (oracle 63's knuckle geometry): a 40 x 30 x 3 plate and an r4 knuckle along X
@@ -527,6 +642,114 @@ fn a_feature_reading_a_jointed_parts_placement_follows_the_solve() {
     fresh.no_cache = true;
     fresh.evaluate(&s.doc);
     assert_eq!(boxes(&s.model.state()), boxes(&fresh.state()));
+}
+
+/// A drawer post built To Object up to the frame's roof (#16732): a Roof component, and a Drawer
+/// whose Post runs from z 0 to the roof's underside at z 30, on a slider along z.
+fn post_to_the_roof() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Frame", "grounded": true}));
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 30], "length": 40, "width": 40, "height": 10, "body_name": "Roof"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Drawer", "grounded": false}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "P"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [15, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [10, 10, 30], "body_name": "Post"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let end = |occurrence: &str| json!({"occurrence": occurrence, "point": [10, 10, 0], "z": [0, 0, 1]});
+    run(&mut s, "joint.create", json!({"type": "slider", "a": end("Frame"), "b": end("Drawer"), "flip": true, "name": "Rail"}));
+    s
+}
+
+/// The post's volume and z range, as the world shows it.
+fn post_extent(s: &mut Session) -> (f64, f64, f64) {
+    let volume = s
+        .model
+        .state()
+        .bodies
+        .iter()
+        .find(|b| b.name == "Post")
+        .and_then(|b| solidcraft_kernel::measure(&b.body).ok())
+        .map_or(f64::NAN, |m| m.volume);
+    let m = run(s, "inspect.measure", json!({"bodies": ["Post"]}));
+    let z = |end: &str| m["bodies"][0]["bbox"][end][2].as_f64().unwrap_or(f64::NAN);
+    (volume, z("min"), z("max"))
+}
+
+/// #16732: sliding a part whose body was built up to another component's face moves the body as
+/// it is; it does not stay anchored to the face and stretch.
+#[test]
+fn a_to_object_extrude_to_another_component_moves_rigidly_with_its_slider() {
+    let mut s = post_to_the_roof();
+    let (volume, low, high) = post_extent(&mut s);
+    assert!((volume - 3000.0).abs() < 1e-6 && low.abs() < 1e-6 && (high - 30.0).abs() < 1e-6, "{volume} {low} {high}");
+    for value in [5.0, 10.0, 20.0] {
+        run(&mut s, "joint.drive", json!({"joint": "Rail", "value": value}));
+        let (volume, low, high) = post_extent(&mut s);
+        assert!((volume - 3000.0).abs() < 1e-6, "volume at {value}: {volume}");
+        assert!((low - value).abs() < 1e-6 && (high - 30.0 - value).abs() < 1e-6, "z range at {value}: {low}..{high}");
+    }
+}
+
+/// The design as the last release saved it, before the pending changes: its format number one
+/// back and no list of the changes it has, so each pending step runs as it opens.
+fn as_last_release_saved(file: &mut Value) {
+    let number = file["format"].as_str().and_then(|f| f.rsplit('/').next()).and_then(|n| n.parse::<u32>().ok()).unwrap_or(1);
+    file["format"] = json!(format!("solidcraft/{}", number.saturating_sub(1)));
+    if let Some(o) = file.as_object_mut() {
+        o.remove("format_pending");
+    }
+}
+
+/// A design saved before the pick kept the placements it was made against opens with the post
+/// where it was and moving rigidly: the file's own placements are taken as the pick's.
+#[test]
+fn an_older_design_with_a_to_object_extrude_opens_pinned_to_its_saved_placements() {
+    let mut s = post_to_the_roof();
+    let mut file: Value = serde_json::from_str(&s.doc.to_json()).unwrap_or_default();
+    as_last_release_saved(&mut file);
+    let mut stripped = 0;
+    for feature in file["features"].as_array_mut().into_iter().flatten() {
+        if feature["extent"].as_object_mut().is_some_and(|e| e.remove("picked_placements").is_some()) {
+            stripped += 1;
+        }
+    }
+    assert_eq!(stripped, 1, "the design records the pin");
+    let reopened = solidcraft_doc::Document::from_json(&file.to_string()).unwrap_or_else(|e| panic!("{e}"));
+    let pinned = reopened
+        .features
+        .iter()
+        .any(|f| matches!(&f.kind, solidcraft_doc::FeatureKind::Extrude { extent, .. } if !extent.picked_placements.is_empty()));
+    assert!(pinned, "the older design is pinned as it opens");
+    *s.doc_mut() = reopened;
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 10}));
+    let (volume, low, high) = post_extent(&mut s);
+    assert!((volume - 3000.0).abs() < 1e-6 && (low - 10.0).abs() < 1e-6 && (high - 40.0).abs() < 1e-6, "{volume} {low} {high}");
+}
+
+/// An older design whose components were never placed (no occurrences in the file) opens with
+/// each at the identity, and the extrude pinned to that.
+#[test]
+fn an_older_design_with_unplaced_components_opens_with_its_to_object_extrude_pinned() {
+    let s = post_to_the_roof();
+    let mut file: Value = serde_json::from_str(&s.doc.to_json()).unwrap_or_default();
+    as_last_release_saved(&mut file);
+    if let Some(o) = file.as_object_mut() {
+        o.remove("occurrences");
+    }
+    file["assembly"]["joints"] = json!([]);
+    for feature in file["features"].as_array_mut().into_iter().flatten() {
+        if let Some(e) = feature["extent"].as_object_mut() {
+            e.remove("picked_placements");
+        }
+    }
+    let reopened = solidcraft_doc::Document::from_json(&file.to_string()).unwrap_or_else(|e| panic!("{e}"));
+    let pinned = reopened
+        .features
+        .iter()
+        .any(|f| matches!(&f.kind, solidcraft_doc::FeatureKind::Extrude { extent, .. } if !extent.picked_placements.is_empty()));
+    assert!(pinned, "the extrude is pinned as the design opens");
 }
 
 /// #1239: two parts as bodies of one component (a multi-body STEP import). The refusal names the

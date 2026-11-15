@@ -26,6 +26,22 @@ fn ok<T, E: std::fmt::Debug>(r: std::result::Result<T, E>) -> T {
     }
 }
 
+/// Several scopes catch errors: running out of memory is reported in preference to the validation
+/// errors a refused buffer causes (#4791), and `buffer_init` pads like `create_buffer_init`.
+#[test]
+fn out_of_memory_is_reported_before_secondary_validation_errors() {
+    let validation = || wgpu::Error::Validation { source: "invalid buffer".into(), description: "invalid buffer".into() };
+    let oom = || wgpu::Error::OutOfMemory { source: "refused".into() };
+    let picked = preferred_error([validation(), oom()]).map(|e| describe_error(&e));
+    assert_eq!(picked.as_deref(), Some("GPU out of memory"));
+    let picked = preferred_error([validation()]).map(|e| describe_error(&e));
+    assert!(picked.is_some_and(|m| m.contains("invalid buffer")));
+    assert!(preferred_error([]).is_none());
+    let Ok((_, device, _)) = open_headless(test_env::policy()) else { return };
+    let buffer = buffer_init(&device, "test", &[1, 2, 3], wgpu::BufferUsages::VERTEX);
+    assert_eq!(buffer.map(|b| b.size()).map_err(|e| e.to_string()), Ok(wgpu::COPY_BUFFER_ALIGNMENT));
+}
+
 #[test]
 fn the_hlsl_for_fxc_has_no_arrays_fxc_must_unroll_loops_for() {
     use naga::back::hlsl;

@@ -133,6 +133,44 @@ pub enum DocError {
     /// empty until the evaluation of the feature fills it in ([`DocError::in_feature`]).
     #[error("{}", reselect_message(feature, reference))]
     Reselect { feature: String, reference: String },
+    /// A sketch's projections whose face or edge, kept by its persistent name, finds nothing any
+    /// more: the sketch fails, naming them as the user sees them. `feature` as for `Reselect`.
+    #[error("{}", lost_projections_message(feature, links))]
+    LostProjections { feature: String, links: Vec<LostProjection> },
+}
+
+/// A projection of a sketch whose named face or edge is gone ([`DocError::LostProjections`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LostProjection {
+    pub link: String,
+    /// What it projects: `projected face of Tray`.
+    pub what: String,
+    /// The ids of the sketch curves it gives.
+    pub curves: Vec<String>,
+    /// The ids of its points, named when it gives no curve.
+    pub points: Vec<String>,
+    /// The persistent name that finds nothing, never shown.
+    pub name: String,
+}
+
+impl LostProjection {
+    /// `projected face of Tray (curve l1)`.
+    pub fn label(&self) -> String {
+        const SHOWN: usize = 4;
+        let (ids, one, several) = if self.curves.is_empty() { (&self.points, "point", "points") } else { (&self.curves, "curve", "curves") };
+        let listed = ids.iter().take(SHOWN).map(String::as_str).collect::<Vec<_>>().join(", ");
+        match ids.len() {
+            0 => self.what.clone(),
+            1 => format!("{} ({one} {listed})", self.what),
+            n if n > SHOWN => format!("{} ({several} {listed}, …)", self.what),
+            _ => format!("{} ({several} {listed})", self.what),
+        }
+    }
+
+    /// `projected face of Tray (curve l1) is lost; delete the projection or project it again`.
+    pub fn warning(&self) -> String {
+        format!("{}{LOST_ONE}", self.label())
+    }
 }
 
 impl DocError {
@@ -142,10 +180,12 @@ impl DocError {
         DocError::Reselect { feature: String::new(), reference: reference.into() }
     }
 
-    /// This error, raised while feature `feature` was evaluated: a [`DocError::Reselect`] names it.
+    /// This error, raised while feature `feature` was evaluated: a [`DocError::Reselect`] or
+    /// [`DocError::LostProjections`] names it.
     pub fn in_feature(self, feature: &str) -> Self {
         match self {
             DocError::Reselect { feature: f, reference } if f.is_empty() => DocError::Reselect { feature: feature.into(), reference },
+            DocError::LostProjections { feature: f, links } if f.is_empty() => DocError::LostProjections { feature: feature.into(), links },
             other => other,
         }
     }
@@ -163,6 +203,59 @@ pub fn reselect_parts(text: &str) -> Option<(&str, &str)> {
     let (feature, rest) = text.split_once(": the reference `")?;
     let reference = rest.strip_suffix("` no longer exists as it was picked; reselect it")?;
     Some((feature, reference))
+}
+
+const LOST_ONE: &str = " is lost; delete the projection or project it again";
+const LOST_SEVERAL: &str = " projected references are lost: ";
+const LOST_MORE: &str = " and ";
+const LOST_SEVERAL_END: &str = "; delete each projection or project it again";
+/// The projections a lost-projections message lists by name; the rest are counted.
+const LOST_LISTED: usize = 3;
+
+/// What a sketch whose projections are lost says ([`DocError::LostProjections`]).
+fn lost_projections_message(feature: &str, links: &[LostProjection]) -> String {
+    let feature = if feature.is_empty() { "this sketch" } else { feature };
+    match links {
+        [one] => format!("{feature}: {}", one.warning()),
+        _ => {
+            let listed = links.iter().take(LOST_LISTED).map(LostProjection::label).collect::<Vec<_>>().join(", ");
+            let more = match links.len().saturating_sub(LOST_LISTED) {
+                0 => String::new(),
+                n => format!("{LOST_MORE}{n} more"),
+            };
+            format!("{feature}: {}{LOST_SEVERAL}{listed}{more}{LOST_SEVERAL_END}", links.len())
+        }
+    }
+}
+
+/// A [`DocError::LostProjections`] message read back ([`lost_projection_parts`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LostProjectionsText<'a> {
+    /// What comes before the projections: the sketch's name, after whatever a downstream feature
+    /// put in front of it (`sketch `Outline` failed: Outline`).
+    pub feature: &'a str,
+    pub count: usize,
+    /// The projections it names.
+    pub listed: &'a str,
+    /// How many more it only counts.
+    pub more: usize,
+}
+
+/// A [`DocError::LostProjections`] message read back from its text, found by its own wording, so
+/// a sketch name holding ": " or the words of a projection's kind, and a feature failing because
+/// of that sketch, still read back (a body name holding them as well does not). `None` for any
+/// other message.
+pub fn lost_projection_parts(text: &str) -> Option<LostProjectionsText<'_>> {
+    if let Some(rest) = text.strip_suffix(LOST_SEVERAL_END) {
+        let (head, listed) = rest.split_once(LOST_SEVERAL)?;
+        let (feature, count) = head.rsplit_once(": ")?;
+        let counted = listed.rsplit_once(LOST_MORE).and_then(|(named, n)| Some((named, n.strip_suffix(" more")?.parse().ok()?)));
+        let (listed, more) = counted.unwrap_or((listed, 0));
+        return Some(LostProjectionsText { feature, count: count.parse().ok()?, listed, more });
+    }
+    let rest = text.strip_suffix(LOST_ONE)?;
+    let at = [": projected ", ": intersected ", ": included "].iter().filter_map(|kind| rest.rfind(kind)).max()?;
+    Some(LostProjectionsText { feature: rest.get(..at)?, count: 1, listed: rest.get(at + 2..)?, more: 0 })
 }
 
 pub type Result<T> = std::result::Result<T, DocError>;

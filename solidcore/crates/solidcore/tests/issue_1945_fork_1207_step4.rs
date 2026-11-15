@@ -39,7 +39,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_vertex_error_diagnostics = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.fillet_chamfer_cone_stored_as_cone = true;
     k.fixes.corner_patch_face_side_twist = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_trim_inside_by_best_dot = true;
@@ -86,7 +85,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.boolean_outer_shell_first = true;
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.cover_wraps_across_closed_seam = true;
-    k.fixes.boolean2d_plane_covers_far_faces = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
@@ -111,9 +109,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_extension_from_base = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_nx1_tangent_side_edge = true;
-    k.fixes.fillet_nx1_opposite_continuation_side_edge = true;
-    k.fixes.fillet_rails_meet_at_one_end_point = true;
-    k.fixes.fillet_3x2_mixed_concave_side_edge = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.offset_stitch_at_body_tolerance = true;
@@ -126,7 +121,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.ssi_singular_start_inside_direction = true;
     k.fixes.ssi_pole_point_keeps_its_tangent = true;
     k.fixes.ssi_tangent_curve_tracer = true;
-    k.fixes.boolean_skips_faces_apart = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;
     k.fixes.boolean_new_face_closure_both_sides = true;
     k.fixes.box_face_failures_propagate = true;

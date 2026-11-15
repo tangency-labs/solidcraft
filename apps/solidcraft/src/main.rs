@@ -317,6 +317,8 @@ impl eframe::App for App {
         solidcraft_ui_egui::window_chrome::release_press_taken_by_os(ctx, raw);
         // A native dialog or lost focus may have kept a release (#16460).
         solidcraft_ui_egui::window_chrome::release_stale_input(ctx, raw);
+        // Wayland shows the last program's cursor until the window sets its own again (#16581).
+        solidcraft_ui_egui::window_chrome::reapply_cursor_on_return(ctx, raw);
         #[cfg(target_os = "macos")]
         if let Some(menu) = &mut self.native_menu {
             menu.raw_input_hook(&mut self.solve, ctx, raw);
@@ -1131,6 +1133,7 @@ fn main() -> eframe::Result {
             "--max-file-size" => max_file_size = Some(args.next()),
             s if s.starts_with("--max-file-size=") => max_file_size = Some(s.strip_prefix("--max-file-size=").map(str::to_string)),
             "--safe-mode" => safe_mode = true,
+            "--view" => solidcraft_ui_egui::new_window::set_start_view(&args.next().unwrap_or_default()),
             "--version" | "-V" => {
                 println!("solidcraft {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
@@ -1150,7 +1153,7 @@ fn main() -> eframe::Result {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--max-file-size SIZE] [design.sc | part.step]"
+                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
                 );
                 return Ok(());
             }

@@ -1,0 +1,50 @@
+{
+  "ar": {
+    "contact.error.ambiguous_name": "توجد عدة مجموعات تلامس بالاسم `{name}`. استخدم معرّف مجموعة تلامس رقميًا: {ids}.",
+    "explode.error.ambiguous_name": "توجد عدة عروض مفككة بالاسم `{name}`. استخدم معرّف عرض مفكك رقميًا: {ids}.",
+    "joint.error.ambiguous_name": "توجد عدة مفاصل بالاسم `{name}`. استخدم معرّف مفصل رقميًا: {ids}.",
+    "motion.error.ambiguous_name": "توجد عدة دراسات حركة بالاسم `{name}`. استخدم معرّف دراسة حركة رقميًا: {ids}."
+  },
+  "de": {
+    "contact.error.ambiguous_name": "Mehrere Kontaktsätze heißen `{name}`. Verwende eine numerische Kontaktsatz-ID: {ids}.",
+    "explode.error.ambiguous_name": "Mehrere Explosionsdarstellungen heißen `{name}`. Verwende eine numerische ID der Explosionsdarstellung: {ids}.",
+    "joint.error.ambiguous_name": "Mehrere Gelenke heißen `{name}`. Verwende eine numerische Gelenk-ID: {ids}.",
+    "motion.error.ambiguous_name": "Mehrere Bewegungsuntersuchungen heißen `{name}`. Verwende eine numerische ID der Bewegungsuntersuchung: {ids}."
+  },
+  "en": {
+    "contact.error.ambiguous_name": "Several contact sets are named `{name}`. Use a numeric contact set ID: {ids}.",
+    "explode.error.ambiguous_name": "Several exploded views are named `{name}`. Use a numeric exploded view ID: {ids}.",
+    "joint.error.ambiguous_name": "Several joints are named `{name}`. Use a numeric joint ID: {ids}.",
+    "motion.error.ambiguous_name": "Several motion studies are named `{name}`. Use a numeric motion study ID: {ids}."
+  },
+  "he": {
+    "contact.error.ambiguous_name": "לכמה קבוצות מגע יש השם `{name}`. יש להשתמש במזהה קבוצת מגע מספרי: {ids}.",
+    "explode.error.ambiguous_name": "לכמה תצוגות מפוצצות יש השם `{name}`. יש להשתמש במזהה תצוגה מפוצצת מספרי: {ids}.",
+    "joint.error.ambiguous_name": "לכמה מפרקים יש השם `{name}`. יש להשתמש במזהה מפרק מספרי: {ids}.",
+    "motion.error.ambiguous_name": "לכמה חקרי תנועה יש השם `{name}`. יש להשתמש במזהה חקר תנועה מספרי: {ids}."
+  },
+  "ja": {
+    "contact.error.ambiguous_name": "複数の接触セットに `{name}` という名前が付いています。数値の接触セット ID を使用してください: {ids}。",
+    "explode.error.ambiguous_name": "複数の分解図に `{name}` という名前が付いています。数値の分解図 ID を使用してください: {ids}。",
+    "joint.error.ambiguous_name": "複数のジョイントに `{name}` という名前が付いています。数値のジョイント ID を使用してください: {ids}。",
+    "motion.error.ambiguous_name": "複数のモーション スタディに `{name}` という名前が付いています。数値のモーション スタディ ID を使用してください: {ids}。"
+  },
+  "ko": {
+    "contact.error.ambiguous_name": "이름이 `{name}`인 접촉 집합이 여러 개입니다. 숫자 접촉 집합 ID를 사용하세요: {ids}.",
+    "explode.error.ambiguous_name": "이름이 `{name}`인 분해 보기가 여러 개입니다. 숫자 분해 보기 ID를 사용하세요: {ids}.",
+    "joint.error.ambiguous_name": "이름이 `{name}`인 관절이 여러 개입니다. 숫자 관절 ID를 사용하세요: {ids}.",
+    "motion.error.ambiguous_name": "이름이 `{name}`인 운동 연구가 여러 개입니다. 숫자 운동 연구 ID를 사용하세요: {ids}."
+  },
+  "vi": {
+    "contact.error.ambiguous_name": "Nhiều tập hợp tiếp xúc có tên `{name}`. Hãy dùng ID tập hợp tiếp xúc dạng số: {ids}.",
+    "explode.error.ambiguous_name": "Nhiều chế độ xem phân rã có tên `{name}`. Hãy dùng ID chế độ xem phân rã dạng số: {ids}.",
+    "joint.error.ambiguous_name": "Nhiều khớp nối cơ khí có tên `{name}`. Hãy dùng ID khớp nối cơ khí dạng số: {ids}.",
+    "motion.error.ambiguous_name": "Nhiều nghiên cứu chuyển động có tên `{name}`. Hãy dùng ID nghiên cứu chuyển động dạng số: {ids}."
+  },
+  "zh": {
+    "contact.error.ambiguous_name": "多个接触集名为 `{name}`。请使用数字接触集 ID：{ids}。",
+    "explode.error.ambiguous_name": "多个爆炸图名为 `{name}`。请使用数字爆炸图 ID：{ids}。",
+    "joint.error.ambiguous_name": "多个接头名为 `{name}`。请使用数字接头 ID：{ids}。",
+    "motion.error.ambiguous_name": "多个运动研究名为 `{name}`。请使用数字运动研究 ID：{ids}。"
+  }
+}

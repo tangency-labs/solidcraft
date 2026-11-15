@@ -510,3 +510,128 @@ fn a_shell_saved_under_a_numbered_side_piece_of_a_cylinder_still_asks_to_reselec
     let result = reopened.model.result(reopened.doc.features[shell].id).unwrap();
     assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{:?}", result.error);
 }
+
+/// A 40 x 20 x 10 block, shelled open at the side face of its line `l1` (picked at (20, 0, 5)).
+/// Returns the shell's feature id.
+fn block_shelled_at_its_first_side(s: &mut Session) -> u64 {
+    run(s, "sketch.create", json!({"plane": "XY", "name": "S1"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.extrude", json!({"distance": 10, "name": "E1"}));
+    let id = run(s, "solid.shell", json!({"faces": [[20, 0, 5]], "thickness": 2}))["feature"].as_u64().unwrap_or(0);
+    assert_eq!(shell_error(s, id), None);
+    id
+}
+
+fn shell_error(s: &Session, id: u64) -> Option<String> {
+    s.model.result(id).and_then(|r| r.error.clone())
+}
+
+/// Delete `l1` and draw `line` in the sketch under the extrude.
+fn replace_first_side(s: &mut Session, line: [[f64; 2]; 2]) {
+    run(s, "sketch.edit", json!({"sketch": "S1"}));
+    run(s, "sketch.delete", json!({"entities": ["l1"]}));
+    run(s, "sketch.line", json!({"points": line}));
+    run(s, "sketch.finish", json!({}));
+}
+
+/// #16661: a side deleted and drawn again where it was is a new line with a new id, and the
+/// shell's saved face still finds the face on it.
+#[test]
+fn a_side_line_deleted_and_drawn_again_keeps_the_shells_face() {
+    let mut s = Session::default();
+    let shell = block_shelled_at_its_first_side(&mut s);
+    replace_first_side(&mut s, [[0.0, 0.0], [40.0, 0.0]]);
+    assert_eq!(shell_error(&s, shell), None);
+}
+
+/// A different line in its place is another face: the shell asks for it to be picked again, and a
+/// point pick through `timeline.edit` repairs the reference.
+#[test]
+fn a_different_line_in_its_place_asks_to_reselect_and_a_point_pick_repairs_it() {
+    let mut s = Session::default();
+    let shell = block_shelled_at_its_first_side(&mut s);
+    replace_first_side(&mut s, [[0.0, 0.0], [40.0, 6.0]]);
+    let error = shell_error(&s, shell).unwrap_or_default();
+    assert!(error.contains("reselect"), "{error}");
+    // An edit that sends no point leaves the stored name alone: it still fails.
+    let stored = s.doc.feature(shell).map(|f| f.face_names.clone()).unwrap_or_default();
+    s.execute("timeline.edit", &json!({"feature": shell, "set": {"thickness": 1}})).ok();
+    assert_eq!(s.doc.feature(shell).map(|f| f.face_names.clone()), Some(stored));
+    // Picking the face now on the other line stores its name ...
+    run(&mut s, "timeline.edit", json!({"feature": shell, "set": {"faces": [[20, 3, 5]]}}));
+    assert_eq!(shell_error(&s, shell), None);
+    // ... and the stored name is the new face's, so a reopened design finds it too.
+    let reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
+    assert_eq!(shell_error(&reopened, shell), None);
+}
+
+/// #16661: an edit that sends only `extent.distance` of an extrude that ends at a face sends no
+/// face point, so its stored face names stay; sending the `extent.to` point stores them fresh.
+#[test]
+fn an_extrude_to_a_face_keeps_its_names_when_only_the_distance_is_edited() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-10, -10, 20], "length": 20, "width": 20, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-5, -5], "p1": [5, 5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let id = run(&mut s, "solid.extrude", json!({"to": [0, 0, 20]}))["feature"].as_u64().unwrap_or(0);
+    let names = |s: &Session| s.doc.feature(id).map(|f| f.face_names.clone()).unwrap_or_default();
+    let real = names(&s);
+    assert!(!real.is_empty() && real.iter().all(|n| !n.is_empty()), "{real:?}");
+
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"extent.distance": 7}}));
+    assert_eq!(names(&s), real);
+    assert_eq!(shell_error(&s, id), None);
+
+    // Another real face name of the plate in its place: sending the same point stores the face's own.
+    let other = faces(&mut s, "Plate").iter().filter_map(|f| f["name"].as_str().map(str::to_string)).find(|n| !real.contains(n)).unwrap_or_default();
+    assert!(!other.is_empty());
+    if let Some(f) = s.doc_mut().feature_mut(id) {
+        f.face_names = vec![other.clone()];
+    }
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"extent.to": [0, 0, 20]}}));
+    assert_eq!(names(&s), real);
+    assert_eq!(shell_error(&s, id), None);
+}
+
+/// A design saved by 0.30.1 numbered the pieces of each peg's round side (`F3:side#1`, `F4:side#2`),
+/// which the kernel now builds whole. A chamfer on the pegs' top edges saved under those names is
+/// found again on the edge each pick lies on (#16535): the same edges the chamfer had when picked,
+/// and a pick on the other peg is not that name's edge, so it asks again.
+#[test]
+fn a_chamfer_saved_under_numbered_side_pieces_of_a_peg_is_found_at_its_pick() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"base": [10, 10, 10], "radius": 2, "height": 6, "operation": "join", "name": "PegW"}));
+    run(&mut s, "solid.cylinder", json!({"base": [30, 10, 10], "radius": 2, "height": 6, "operation": "join", "name": "PegE"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[12, 10, 16], [32, 10, 16]], "distance": 0.5, "name": "LeadIn"}));
+    let lead_in = s.doc.features.iter().position(|f| f.name == "LeadIn").unwrap();
+    let id = |name: &str| s.doc.features.iter().find(|f| f.name == name).map(|f| f.id).unwrap();
+    let (west, east) = (id("PegW"), id("PegE"));
+    assert_eq!(s.doc.features[lead_in].edge_names, vec![format!("F{west}:side|F{west}:top"), format!("F{east}:side|F{east}:top")]);
+    let (chamfered, chamfered_faces) = (volume(&mut s, "Plate"), faces(&mut s, "Plate"));
+
+    let mut saved = (*s.doc).clone();
+    saved.features[lead_in].edge_names = vec![format!("F{west}:side#1|F{west}:top"), format!("F{east}:side#2|F{east}:top")];
+    let mut reopened = Session::opened_at(saved.clone(), None, None);
+    let result = reopened.model.result(reopened.doc.features[lead_in].id).unwrap();
+    assert!(!result.skipped && result.error.is_none(), "{:?}", result.error);
+    assert!((volume(&mut reopened, "Plate") - chamfered).abs() < 1e-6);
+    let names = |all: Vec<Value>| {
+        let mut n: Vec<String> = all.iter().filter_map(|f| f["name"].as_str().map(str::to_owned)).collect();
+        n.sort();
+        n
+    };
+    // The same faces by name: the chamfer's two cone faces and everything around them.
+    assert_eq!(names(faces(&mut reopened, "Plate")), names(chamfered_faces));
+
+    // The first name with its pick on the other peg's top edge is not that peg's edge: it asks again.
+    let mut off = saved;
+    if let solidcraft_doc::FeatureKind::Chamfer { edges, .. } = &mut off.features[lead_in].kind {
+        edges[0].0 = Vec3::new(32.0, 10.0, 16.0);
+    }
+    let reopened = Session::opened_at(off, None, None);
+    let result = reopened.model.result(reopened.doc.features[lead_in].id).unwrap();
+    assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{:?}", result.error);
+}
