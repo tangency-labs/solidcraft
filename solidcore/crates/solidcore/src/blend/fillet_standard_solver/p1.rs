@@ -54,6 +54,11 @@
 //! | [`JacobianSurfaces`]                                     | the `rpSurface1`, `rpSurface2` arguments of `LoadJacobian` |
 //!
 //! Deviations:
+//! - **Rails that meet end at one point.** (WR-594, the fork's tangency-labs/smlib
+//!   `5fdefb9`; no longer opt-in) `CircularCrossSectionFsg::create_surface_from_curves`
+//!   moves both rails' end control points to their midpoint at an end where they lie
+//!   within the approximation tolerance of each other, so the point section there lies
+//!   on both rails.
 //! - **Exact circles of one arc count.** (WR-711, not upstream or in the fork)
 //!   `CircularCrossSectionFsg::create_surface_from_curves` with exact arcs takes a second pass when its circles' arc counts differ, building
 //!   each circle of fewer arcs again with the most (`ArcCounts`), as the approximated
@@ -2985,33 +2990,35 @@ impl CircularCrossSectionFsg {
         )?;
 
         // Where the rails meet at an end of the fillet (a degenerate corner whose cross
-        // section is a point), both rails end at that one point: each rail is lifted
-        // from its own surface, and their ends differ by the model's accuracy, so the
-        // skinned surface came out close to singular there instead of exactly
-        // (tangency-labs/smlib@5fdefb9, WR-594).
-        if k.fixes.fillet_rails_meet_at_one_end_point {
-            for end in 0..2 {
-                let ivl = rail1.natural_interval();
-                let t = if end == 0 { ivl.min() } else { ivl.max() };
-                let end1 = rail1.evaluate_point(t)?;
-                let end2 = rail2.evaluate_point(t)?;
-                if end1.distance(end2) >= approx_tol_3d {
-                    continue;
-                }
-                let meet = (end1 + end2) / 2.0;
-                for rail in [&mut *rail1, &mut *rail2] {
-                    let idx = if end == 0 {
-                        0
-                    } else {
-                        rail.number_control_points()?
-                            .checked_sub(1)
-                            .ok_or_else(|| {
-                                SolidError::blend_failed(OP, "the rail has no control points")
-                            })?
-                    };
-                    let (_, w) = rail.control_point(ControlPointForm::EuclideanRational, idx)?;
-                    rail.set_control_point(ControlPointForm::EuclideanRational, idx, meet, w)?;
-                }
+        // section is a point, or a trace that ends where the blend closes up), both rails
+        // end at that one point (not upstream: tangency-labs/smlib@5fdefb9, WR-594). Each
+        // rail is lifted from its own surface, so their ends differ by up to the
+        // approximation tolerance. The cross sections below make a point section wherever
+        // the rails are closer than that tolerance, at the first rail's point, and the
+        // skinning then refuses the second rail for missing it (by more than `MODEL_TOL`)
+        // or keeps a near pole. Ends closer than the tolerance are one point to that
+        // tolerance: their midpoint lies within half of it of both.
+        for end in 0..2 {
+            let ivl = rail1.natural_interval();
+            let t = if end == 0 { ivl.min() } else { ivl.max() };
+            let end1 = rail1.evaluate_point(t)?;
+            let end2 = rail2.evaluate_point(t)?;
+            if end1.distance(end2) >= approx_tol_3d {
+                continue;
+            }
+            let meet = (end1 + end2) / 2.0;
+            for rail in [&mut *rail1, &mut *rail2] {
+                let idx = if end == 0 {
+                    0
+                } else {
+                    rail.number_control_points()?
+                        .checked_sub(1)
+                        .ok_or_else(|| {
+                            SolidError::blend_failed(OP, "the rail has no control points")
+                        })?
+                };
+                let (_, w) = rail.control_point(ControlPointForm::EuclideanRational, idx)?;
+                rail.set_control_point(ControlPointForm::EuclideanRational, idx, meet, w)?;
             }
         }
 

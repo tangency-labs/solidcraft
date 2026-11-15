@@ -10,13 +10,11 @@
 //! Its arc wall continued as itself past the tip carries the mirror of the true ball. The
 //! back face's bottom edge, run on behind the knife's vertex, is met there (the fork's gdb:
 //! t = -0.104 against the true +0.104), and the end rib then finds no intersection (1001).
-//! With `fillet_run_on_past_far_end_only`, the line runs on past the far end only, and each
-//! round has the closed-form volume (WR-570's), to 1e-9 relative.
+//! The line runs on past the far end only, and each round has the closed-form volume (WR-570's), to 1e-9 relative.
 //!
 //! The port's solve finds the true ball from its first guess even over the interval that
 //! reaches behind the vertex (the same [-1.85, 2.85] as the fork's at r 0.5), so this part
-//! rounds with the flag off too. The test that fails without the change is the
-//! interval's own, `wr643_side_edge_runs_on_past_its_far_end_only` in
+//! rounded without the change too. The test that checks the change is the interval's own, `wr643_side_edge_runs_on_past_its_far_end_only` in
 //! `blend/fillet_solver/p2.rs`; this one checks that the cut-off run-on still builds every
 //! round of the knife edge.
 #![allow(
@@ -111,7 +109,7 @@ fn removed(r: f64) -> f64 {
 /// The knife edge of the part (mirrored when `s` is -1) rounded `r` with the knife edge,
 /// the run-on and the analytic continuation on: its face count, volume and manifoldness,
 /// or the fillet error code.
-fn round(far_end_only: bool, s: f64, r: f64) -> Result<(usize, f64, bool), i32> {
+fn round(s: f64, r: f64) -> Result<(usize, f64, bool), i32> {
     let mut k = Kernel::default();
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_trace_reaches_rails = true;
@@ -120,7 +118,6 @@ fn round(far_end_only: bool, s: f64, r: f64) -> Result<(usize, f64, bool), i32> 
     k.fixes.fillet_cliff_overflow = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.offset_extension_as_itself = true;
-    k.fixes.fillet_run_on_past_far_end_only = far_end_only;
     let mut b = part(&mut k, s);
     let e = knife_edge(&k, &b, s);
     {
@@ -143,8 +140,8 @@ fn round(far_end_only: bool, s: f64, r: f64) -> Result<(usize, f64, bool), i32> 
 /// test asserts them.
 fn assert_knife_edge_round(r: f64, s: f64) {
     let before = (TIP - R) * R * H + R * R * (1.0 - PI / 4.0) * H;
-    let (faces, v, manifold) = round(true, s, r)
-        .unwrap_or_else(|code| panic!("r {r}, side {s}: the round failed: {code}"));
+    let (faces, v, manifold) =
+        round(s, r).unwrap_or_else(|code| panic!("r {r}, side {s}: the round failed: {code}"));
     let want = before - removed(r);
     assert_eq!(faces, 7, "r {r}, side {s}: faces");
     assert!(manifold, "r {r}, side {s}: not a manifold solid");
