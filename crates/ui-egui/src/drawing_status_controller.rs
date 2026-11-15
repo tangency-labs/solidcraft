@@ -13,7 +13,7 @@ pub struct RefreshRequest {
 #[derive(Default)]
 pub struct DrawingStatusController {
     generation: u64,
-    status: Option<Value>,
+    attention: Option<DrawingAttention>,
     inspections: BTreeMap<String, Result<Value, String>>,
     requested: BTreeSet<String>,
 }
@@ -23,7 +23,7 @@ impl DrawingStatusController {
     /// Late responses from previous generations must be ignored.
     pub fn invalidate(&mut self) -> u64 {
         self.generation = self.generation.wrapping_add(1);
-        self.status = None;
+        self.attention = None;
         self.inspections.clear();
         self.requested.clear();
         self.generation
@@ -38,7 +38,7 @@ impl DrawingStatusController {
         if generation != self.generation {
             return false;
         }
-        self.status = Some(status);
+        self.attention = Some(from_status(&status));
         self.inspections.clear();
         self.requested.clear();
         true
@@ -48,10 +48,9 @@ impl DrawingStatusController {
     /// Call once after accepting a status snapshot; repeated calls do not refetch.
     pub fn pending_inspections(&mut self) -> RefreshRequest {
         let inspect_ids = self
-            .status
+            .attention
             .as_ref()
-            .map(from_status)
-            .map(|a| a.dimensions.into_iter().filter(|d| d.needs_attention()).map(|d| d.id).filter(|id| self.requested.insert(id.clone())).collect())
+            .map(|a| a.dimensions.iter().filter(|d| d.needs_attention()).map(|d| d.id.clone()).filter(|id| self.requested.insert(id.clone())).collect())
             .unwrap_or_default();
         RefreshRequest { generation: self.generation, inspect_ids }
     }
@@ -62,12 +61,15 @@ impl DrawingStatusController {
             return false;
         }
         self.inspections.insert(dimension.to_owned(), result);
+        if let Some(attention) = &mut self.attention {
+            *attention = attention.clone().with_inspections(&self.inspections);
+        }
         true
     }
 
     /// No snapshot is shown after invalidation until the fresh status arrives.
-    pub fn snapshot(&self) -> Option<DrawingAttention> {
-        self.status.as_ref().map(|s| from_status(s).with_inspections(&self.inspections))
+    pub fn snapshot(&self) -> Option<&DrawingAttention> {
+        self.attention.as_ref()
     }
 }
 
