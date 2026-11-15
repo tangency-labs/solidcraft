@@ -1139,13 +1139,53 @@ impl FilletCorner {
                                 // the blends join only where their sections at the joint
                                 // vertex stand strictly within the B-rep's intersection
                                 // tolerance, which the check holds every vertex to (#16627;
-                                // `blend_corner::join_within_xsect_tolerance_deg`)
+                                // `blend_corner::join_within_xsect_tolerance_deg`), a first-order
+                                // gap only where the shared section lies behind the second
+                                // blend's end; over it the gap is of second order (#13911;
+                                // `blend_corner::join_gap`)
                                 let mut size = 0.0_f64;
+                                let mut blends = Vec::with_capacity(2);
                                 for &eu in solver_eus {
-                                    size = size.max(round_size(solver_of(eu)?)?);
+                                    let solver = solver_of(eu)?;
+                                    size = size.max(round_size(solver)?);
+                                    let mut faces = [(None, 0.0); 2];
+                                    for (rail, slot) in faces.iter_mut().enumerate() {
+                                        let face = match solver.edgeuse(rail)? {
+                                            Some(rail_eu) => eu1::face(b, rail_eu)?,
+                                            None => None,
+                                        };
+                                        let offset = solver.surface(rail)?.map_or(f64::NAN, |s| {
+                                            s.surface.offset_distance().abs()
+                                        });
+                                        *slot = (face, offset);
+                                    }
+                                    blends.push(crate::blend::blend_corner::join_gap::JoinBlend {
+                                        eu,
+                                        faces,
+                                    });
                                 }
                                 let xsect_tol =
                                     crate::topology::vertex::corner::xsect_tol_3d_of_brep(k, b);
+                                let behind_deg =
+                                    crate::blend::blend_corner::join_within_xsect_tolerance_deg(
+                                        size,
+                                        xsect_tol,
+                                        tan_tol_deg,
+                                    );
+                                let join_deg = match blends.as_slice() {
+                                    [first, second] => {
+                                        crate::blend::blend_corner::join_gap::join_tolerance_deg(
+                                            k,
+                                            b,
+                                            vertex,
+                                            [first, second],
+                                            xsect_tol,
+                                            tan_tol_deg,
+                                            behind_deg,
+                                        )?
+                                    }
+                                    _ => behind_deg,
+                                };
                                 let blend = crate::blend::blend_corner::classify(
                                     k,
                                     b,
@@ -1153,11 +1193,7 @@ impl FilletCorner {
                                     solver_eus,
                                     &all_eus,
                                     tan_tol_deg,
-                                    crate::blend::blend_corner::join_within_xsect_tolerance_deg(
-                                        size,
-                                        xsect_tol,
-                                        tan_tol_deg,
-                                    ),
+                                    join_deg,
                                 )?;
                                 let mut c = make(FilletCornerKind::NByTwo);
                                 c.blend = Some(blend);
