@@ -1704,6 +1704,50 @@ fn a_hole_rim_on_a_round_wall_projects_along_the_hole_as_its_circle() {
     assert_eq!(bar.body.validity(), Vec::<String>::new());
 }
 
+/// #12920, the open rim: the hole of radius 1.7 drilled along X at z = 19 breaks through the
+/// bar's top (z = 20), so its rim on the bar's round wall is open: no edge of it closes on itself.
+/// Projected along the hole's axis, an edge of that rim is one arc of the hole's circle, centre
+/// (0, 19), from the edge's first vertex to its last, the way it runs, through as much of the
+/// circle as the edge covers.
+#[test]
+fn an_open_hole_rim_on_a_round_wall_projects_along_the_hole_as_an_arc_of_its_circle() {
+    use solidcore_record::{Seg2, Vec2, Vec3};
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 11, "height": 20, "body_name": "Bar"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 1.7, "height": 30, "base": [-15, 0, 19], "axis": "X", "operation": "cut", "targets": ["Bar"]}));
+    let state = s.model.state();
+    let body = &state.body("Bar").unwrap().body;
+    let at = Vec3::new(-11., 0., 19. - 1.7);
+    let edges = body.edges(1e-3).unwrap();
+    let rim = edges
+        .iter()
+        .min_by(|a, b| {
+            let d = |e: &solidcraft_kernel::EdgeInfo| e.points.iter().map(|p| p.dist(at)).fold(f64::INFINITY, f64::min);
+            d(a).total_cmp(&d(b))
+        })
+        .unwrap();
+    let record = body.record();
+    let vertex = |v: u32| Vec3::from(record.vertices[v as usize].point);
+    let [v0, v1] = record.edges[rim.index].vertices;
+    assert!(v0 != v1, "the rim edge closes on itself");
+    let plane = solidcore_record::Plane { origin: Vec3::new(-20., 0., 0.), x: Vec3::Y, y: Vec3::Z };
+    let pieces = body.planar_edges(&plane, &[rim.index]).remove(0);
+    let Some([solidcraft_kernel::PlanarPiece::Seg(Seg2::Arc { center, radius, start, sweep })]) = pieces.as_deref() else {
+        panic!("the open rim projects as {pieces:?}")
+    };
+    let (center, radius, start, sweep) = (*center, *radius, *start, *sweep);
+    assert!(center.dist(Vec2::new(0., 19.)) < 1e-9 && (radius - 1.7).abs() < 1e-9, "centre {center:?}, radius {radius}");
+    let on_arc = |angle: f64| center + Vec2::new(angle.cos(), angle.sin()) * radius;
+    // The arc's ends are the edge's vertices, in the order the edge runs.
+    for (angle, v) in [(start, v0), (start + sweep, v1)] {
+        let want = plane.to_local(vertex(v));
+        assert!(on_arc(angle).dist(want) < 1e-9, "the arc ends at {:?}, the edge at {want:?}", on_arc(angle));
+    }
+    // And it goes the edge's way round: as long as the edge (its polyline a chord's sag shorter).
+    assert!((sweep.abs() * radius - rim.length).abs() < 1e-2 * rim.length, "sweep {sweep}, edge length {}", rim.length);
+    assert!(sweep.abs() < std::f64::consts::TAU - 1e-6, "sweep {sweep}");
+}
+
 /// A hook: a J of lines and two arcs about (-15, 0), of radii 7.5 and 15, extruded 20 with its
 /// top edges chamfered. Seen along the extrusion its outline is the J again. The walls are seen
 /// edge-on, but the triangles of a round wall join its two rims at slightly different angles
