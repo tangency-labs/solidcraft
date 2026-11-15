@@ -2231,7 +2231,7 @@ mod msaa_tests {
         let (current, old) = (d.join("solidcraft"), d.join("ai.storyteller.solidcraft"));
         std::fs::create_dir_all(&old).unwrap();
         std::fs::write(old.join("graphics.json"), r#"{"msaa":8}"#).unwrap();
-        super::adopt_settings(&current, &[old.clone()]).unwrap();
+        super::adopt_settings(&current, std::slice::from_ref(&old)).unwrap();
         assert_eq!(std::fs::read_to_string(current.join("graphics.json")).unwrap(), r#"{"msaa":8}"#);
         assert!(old.join("graphics.json").is_file());
         // Later launches leave the current settings alone.
