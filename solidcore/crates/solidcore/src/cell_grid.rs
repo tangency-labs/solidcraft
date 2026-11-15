@@ -590,7 +590,7 @@ fn lattice_loops(
             return Err(wrong("has no segments"));
         }
         let mut prims: Vec<Prim> = Vec::new();
-        let mut curved = false;
+        let mut loop_flattened = false;
         for seg in &lp.segs {
             check_seg(seg, MAX_COORD).map_err(wrong)?;
             edges.push(
@@ -606,11 +606,10 @@ fn lattice_loops(
                     start,
                     sweep,
                 } => {
-                    curved = true;
                     prims.push(Prim::arc(center, radius, start, sweep));
                 }
                 _ => {
-                    curved = true;
+                    loop_flattened = true;
                     flattened = true;
                     let pts = flatten(seg, FLATTEN_TOL)
                         .ok_or_else(|| wrong("has a curve too complex to follow"))?;
@@ -632,7 +631,7 @@ fn lattice_loops(
         }
         let moved: Vec<Prim> = prims.iter().map(|p| p.moved(turn, shift)).collect();
         loops.push(
-            Loop::new(moved, Some(curved))
+            Loop::new(moved, Some(loop_flattened))
                 .ok_or_else(|| wrong("has a coordinate that is not finite"))?,
         );
     }
