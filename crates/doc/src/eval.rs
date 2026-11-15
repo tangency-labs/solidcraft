@@ -7319,7 +7319,14 @@ fn feature_tools_with_constructor(
                     // A To offset: the end is the face's offset surface, not the face (#12617).
                     Some(p) if to_offset.abs() > 1e-9 => {
                         let travel = if hi > 0.0 { n } else { n * -1.0 };
-                        trim_to_offset_face(tools, tb, fi, p.0, travel, to_offset, |q: Vec3| ((q - ss.plane.origin).dot(n) - start).abs())?
+                        let trimmed =
+                            trim_to_offset_face(tools, tb, fi, p.0, travel, to_offset, |q: Vec3| ((q - ss.plane.origin).dot(n) - start).abs())?;
+                        // A tool the offset surface misses comes back whole, its end cap still at
+                        // the far height the extent was run out to: refused, as `trim_to_face` does.
+                        if trimmed.iter().any(|t| kernel::has_cap_at(&t.body, &ss.plane, far, far - start)) {
+                            return Err(DocError::Invalid("the profile reaches past the offset surface of the To face".into()));
+                        }
+                        trimmed
                     }
                     _ => trim_to_face(tools, tb, fi, &ss.plane, start, far)?,
                 };
