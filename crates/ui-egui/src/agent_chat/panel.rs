@@ -209,6 +209,8 @@ pub struct PanelView {
     pub dialog_open: bool,
     /// Changes allowed in one turn (0: no limit).
     pub turn_limit: u32,
+    /// Each reply's thinking starts folded (`agent_thinking_folded`, #17072).
+    pub thinking_folded: bool,
     /// Why the chosen model may not work, if it may not.
     pub model_warning: Option<String>,
     /// The chat buttons' tooltip: name and shortcut.
@@ -244,6 +246,7 @@ impl PanelView {
             selected: selected_count(app),
             dialog_open: app.dialog.is_some(),
             turn_limit: app.preferences.agent_chat_turn_limit,
+            thinking_folded: app.preferences.agent_thinking_folded,
             model_warning: settings::model_warning(app),
             toggle_keys: crate::keymap::keys(app, "ui.assistant"),
             capturing_keys: crate::keymap::capturing(app),
@@ -2064,7 +2067,29 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
             }
             Item::Agent { thought, text } => {
                 if *thought {
-                    super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).italics().color(t.text_dim)).wrap(), false);
+                    // The model's thinking folds open and shut per reply; it starts as the
+                    // preference says (#17072). Its header and arrow both toggle it.
+                    let id = Id::unique(("agent_chat_thought", n));
+                    let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(!view.thinking_folded);
+                    let header = ui.push_id(id, |ui| {
+                        ui.horizontal(|ui| {
+                            let (rect, _) = ui.allocate_exact_size(vec2(t.control_height, t.control_height), Sense::hover());
+                            let label = tr(if open { "ui.agent_chat_thinking_hide" } else { "ui.agent_chat_thinking_show" });
+                            let arrow = ui_kit::disclosure_button_at(ui, rect, open, label).backing_on_hover_text(label);
+                            solidcraft_ui_registry::publish_handle(&format!("agent_chat:thought:{n}"), arrow.rect.center());
+                            let title = RichText::new(tr("ui.agent_chat_thinking")).italics().color(t.text_dim).size(t.font_small);
+                            let title = ui.add(egui::Label::new(title).sense(Sense::click()));
+                            arrow.clicked() || title.clicked()
+                        })
+                        .inner
+                    });
+                    if header.inner {
+                        open = !open;
+                        ui.data_mut(|d| d.insert_temp(id, open));
+                    }
+                    if open {
+                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).italics().color(t.text_dim)).wrap(), false);
+                    }
                 } else {
                     let before = ui.cursor();
                     ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, text, all_selected));
@@ -3049,6 +3074,7 @@ mod tests {
             selected: 0,
             dialog_open: false,
             turn_limit: 0,
+            thinking_folded: true,
             model_warning: None,
             toggle_keys: Vec::new(),
             capturing_keys: false,

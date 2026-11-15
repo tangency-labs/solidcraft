@@ -55,9 +55,9 @@
 //! tolerance, upstream's threshold for raising none), so no tolerance is raised; upstream
 //! lets a curved face cover within five times it and raises only the kept face's, leaving
 //! the other face's vertices off the merged face.
-//! Opt-in `Kernel::fixes.cover_wraps_across_closed_seam` (WR-599, the fork's
-//! tangency-labs/smlib@16bf1cb): after each face merge `boolean_post_process` runs
-//! `HasSeamProblem` on the merged face and `SplitAtSeam` when a seam is crossed or missing.
+//! Not upstream (WR-599, the fork's tangency-labs/smlib@16bf1cb): after each face merge
+//! `boolean_post_process` runs `HasSeamProblem` on the merged face and `SplitAtSeam` when a
+//! seam is crossed or missing.
 //! Not upstream (WR-586, #483): the temporary origin shift's failed boxes and translations
 //! propagate, a failed second translation restores the first operand, and inverse
 //! transforms attempt all surviving operands before returning their first error. A
@@ -700,19 +700,17 @@ pub(crate) fn boolean_post_process_with_notifications(
         // unconditionally, even if IsTopological left it untouched.
         let domain = topological.merged_face_domain.unwrap_or_default();
         crate::topology::face::p2::set_uv_domain(brep, keep, &domain)?;
-        if k.fixes.cover_wraps_across_closed_seam {
-            // WR-599 (the fork's tangency-labs/smlib@16bf1cb): a face that wraps its
-            // surface's period may have taken in a face straddling the seam
-            // (`CoverCoincidentSurface`): the merged face is the periodic face whose seam
-            // runs on through that part. Add the missing piece of the seam, splitting the
-            // edges that cross it, as a face on a periodic surface has it.
-            crate::topology::face::p1::complete_merged_face_seam(
-                k,
-                brep,
-                notifications.as_deref_mut(),
-                keep,
-            )?;
-        }
+        // WR-599 (the fork's tangency-labs/smlib@16bf1cb): a face that wraps its surface's
+        // period may have taken in a face straddling the seam (`CoverCoincidentSurface`):
+        // the merged face is the periodic face whose seam runs on through that part. Add
+        // the missing piece of the seam, splitting the edges that cross it, as a face on a
+        // periodic surface has it.
+        crate::topology::face::p1::complete_merged_face_seam(
+            k,
+            brep,
+            notifications.as_deref_mut(),
+            keep,
+        )?;
         if slits {
             // WR-304: an operand edge between two faces that are now one bounds the
             // merged face on both sides (a slit); check it by the same test.
