@@ -297,7 +297,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.slice_coincident_faces_sheet_side = true;
     k.fixes.ssi_low_angle_start_on_probation = true;
     k.fixes.ssi_pole_point_keeps_its_tangent = true;
-    k.fixes.ssi_singular_start_inside_direction = true;
     k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;

@@ -118,7 +118,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
-    k.fixes.ssi_singular_start_inside_direction = true;
     k.fixes.ssi_pole_point_keeps_its_tangent = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;
