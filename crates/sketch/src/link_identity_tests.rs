@@ -583,3 +583,42 @@ fn leaving_directions_match_one_to_one() {
     assert!(!super::loops::same_leaving(&[right, up], &[right, up, left]));
     assert!(super::loops::same_leaving(&[], &[]));
 }
+
+/// #14249: a face with two round holes, saved with each hole split where an older build split
+/// it. Read again, the holes come back split at other points and the outline is read in
+/// another order: the projection is rebuilt. Its outline lines are where they were, so they
+/// keep their ids, though no constraint holds them: an extrude picks its profile by them.
+#[test]
+fn a_rebuilt_face_keeps_the_ids_of_lines_that_did_not_move() {
+    let hole = |c: Vec2, r: f64, at: f64| {
+        let a = c + Vec2::new(at.cos(), at.sin()) * r;
+        let b = c - Vec2::new(at.cos(), at.sin()) * r;
+        [LinkGeom::Arc { c, a, b }, LinkGeom::Arc { c, a: b, b: a }]
+    };
+    let p = [Vec2::new(-96.0, 180.0), Vec2::new(-96.0, -6.0), Vec2::new(96.0, -6.0), Vec2::new(96.0, 180.0)];
+    let (big, small) = ((Vec2::new(0.0, 90.0), 57.0), (Vec2::new(-48.44, 41.56), 2.0));
+    let saved: Vec<LinkGeom> = [LinkGeom::Line(p[0], p[1]), LinkGeom::Line(p[1], p[2]), LinkGeom::Line(p[3], p[0]), LinkGeom::Line(p[2], p[3])]
+        .into_iter()
+        .chain(hole(big.0, big.1, std::f64::consts::PI))
+        .chain(hole(small.0, small.1, 0.75 * std::f64::consts::PI))
+        .collect();
+    let fresh: Vec<LinkGeom> = [LinkGeom::Line(p[1], p[0]), LinkGeom::Line(p[1], p[2]), LinkGeom::Line(p[0], p[3]), LinkGeom::Line(p[2], p[3])]
+        .into_iter()
+        .chain(hole(big.0, big.1, 0.0))
+        .chain(hole(small.0, small.1, 0.0))
+        .collect();
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &saved).unwrap();
+    let ids = |sk: &Sketch, line: bool| -> std::collections::BTreeSet<String> {
+        sk.link_curves(&link).iter().map(|c| &sk.curves[*c]).filter(|c| matches!(c.kind, CurveKind::Line { .. }) == line).map(|c| c.id.clone()).collect()
+    };
+    let (lines, arcs) = (ids(&sk, true), ids(&sk, false));
+    assert!(sk.update_link(&link, &fresh).unwrap(), "the holes are split at other points: the projection is rebuilt");
+    assert!(!sk.link(&link).unwrap().lost);
+    assert_eq!(ids(&sk, true), lines, "the outline lines keep their ids");
+    assert_eq!(ids(&sk, false), arcs, "each hole's two arcs keep their ids");
+    let picked: Vec<String> = lines.into_iter().collect();
+    let profiles = crate::find_profiles(&sk);
+    let outline = crate::profile_by_curves(&profiles, &picked).expect("the extrude's saved pick finds its profile");
+    assert_eq!(profiles[outline].hole_curves.len(), 2, "with both holes in it");
+}
