@@ -767,6 +767,18 @@ impl Body {
         }
     }
 
+    /// Exact distance from `p` to each face of `self`, or empty for a mesh body.
+    pub fn face_distances(&self, p: Vec3) -> Vec<f64> {
+        let Some((ops, order)) = self.ops_body() else {
+            return Vec::new();
+        };
+        let reach = self.size().max(1.0) * 100.0;
+        let Ok(dists) = ops.face_distances_within(order, &[[p.x, p.y, p.z]], reach) else {
+            return Vec::new();
+        };
+        dists.into_iter().map(|row| row.first().copied().flatten().unwrap_or(f64::INFINITY)).collect()
+    }
+
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
     pub fn with_cylinder_certificate(mut self, producer: u64) -> Result<Self> {
         if producer == 0 {

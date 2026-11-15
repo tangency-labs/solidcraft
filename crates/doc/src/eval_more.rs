@@ -247,13 +247,7 @@ pub(super) fn rib_tools(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Fea
 fn planar_normal_at(b: &Body, p: Vec3) -> Option<Vec3> {
     let tol = (b.size() * 2e-3).max(1e-3);
     let faces = b.faces(tol).ok()?;
-    let mesh = b.mesh(&solidcraft_kernel::MeshTolerance::chord(tol)).ok()?;
-    let mut near = vec![f64::INFINITY; faces.len()];
-    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        if let (Some([u, v, w]), Some(d)) = (mesh.tri(t), near.get_mut(*f as usize)) {
-            *d = d.min(crate::appearance::closest_on_triangle(p, u, v, w).dist(p));
-        }
-    }
+    let near = b.face_distances(p);
     faces
         .iter()
         .filter_map(|f| f.plane_normal.map(|n| (n, ((p - f.centroid).dot(n)).abs(), near.get(f.index).copied().unwrap_or(f64::INFINITY))))
