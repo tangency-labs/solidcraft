@@ -678,3 +678,35 @@ fn a_plane_point_lift_refuses_an_index() {
     assert!(e.contains("`index` goes with `wire`"), "{e}");
     assert_eq!(s.doc.to_json(), before, "a refused lift changes nothing");
 }
+
+/// Lifting a rectangle's corner: the two lines through it become drawn lines whose far ends sit
+/// on the two plane corners they came from. The two plane lines left keep the constraints on
+/// them; the two constraints on the lifted lines are gone. Moving a remaining plane corner
+/// afterwards moves the plane point but not the drawn line's end: they are not joined.
+#[test]
+fn a_rectangle_corner_lift_says_what_stays() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]}));
+    let corner = s.doc.sketch(sketch).unwrap().points.iter().find(|p| p.pos.x == 20.0 && p.pos.y == 10.0).unwrap().id.clone();
+    let r = run(&mut s, "sketch.move3d", json!({"point": corner, "by":[0,0,5]}));
+    assert_eq!(r["moved"], 2, "{r}");
+    let sk = s.doc.sketch(sketch).unwrap();
+    // (a) the far ends are the remaining plane corners (20,0) and (0,10), and the lifted corner is (20,10,5).
+    let fit = |id: &str| sk.wires[sk.wire_index(id).unwrap()].fit.clone();
+    let (a, b) = (fit(r["curves"][0].as_str().unwrap()), fit(r["curves"][1].as_str().unwrap()));
+    near(a[0], Vec3::new(20.0, 0.0, 0.0));
+    near(a[1], Vec3::new(20.0, 10.0, 5.0));
+    near(b[0], Vec3::new(20.0, 10.0, 5.0));
+    near(b[1], Vec3::new(0.0, 10.0, 0.0));
+    // (b) the lifted lines' constraints are gone (Horizontal on the top, Vertical on the right),
+    // the rest stay with their renumbered lines; no dimension was there to lose.
+    let kinds: Vec<String> = sk.constraints.iter().map(|c| format!("{:?}", c.kind)).collect();
+    assert_eq!(kinds, ["Horizontal { l: 0 }", "Vertical { l: 1 }", "Coincident { p: 0, q: 1 }"], "{kinds:?}");
+    assert!(sk.constraints.iter().all(|c| c.param.is_none()));
+    // (c) moving the remaining plane corner (20,0) to (25,0) moves the plane point, not the drawn end.
+    let corner_20 = sk.points.iter().find(|p| p.pos.x == 20.0 && p.pos.y == 0.0).unwrap().id.clone();
+    run(&mut s, "sketch.move_point", json!({"point": corner_20, "to": [25, 0]}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.points.iter().any(|p| p.pos.x == 25.0 && p.pos.y == 0.0));
+    near(sk.wires[sk.wire_index(r["curves"][0].as_str().unwrap()).unwrap()].fit[0], Vec3::new(20.0, 0.0, 0.0));
+}
