@@ -130,22 +130,24 @@ fn report_progress(app: &mut SolveApp) {
         return;
     }
     match app.tickets.outcome.clone() {
-        Some(Outcome::Opened) => status(
-            &id,
-            "opened",
-            "The report is open in the person's browser: they review it there and click File ticket.",
-            json!({ "url": app.tickets.opened_url.clone() }),
-        ),
-        Some(Outcome::Filed(n)) => {
-            status(&id, "filed", &format!("Ticket #{n} filed."), json!({ "ticket": n, "url": api::ticket_url(n) }));
+        Some(Outcome::Opened(url)) => {
+            status(&id, "opened", "The report is open in the person's browser: they sign in there and click File ticket.", json!({ "url": url }));
             app.tickets.agent = None;
         }
-        Some(Outcome::Queued) => status(&id, "queued", "SolidCraft is offline: the report waits in the app until it is sent.", json!({})),
+        Some(Outcome::Queued(why)) => {
+            status(
+                &id,
+                "queued",
+                &format!("Could not reach the ticket server ({why}); the report is kept in SolidCraft until the person sends it again."),
+                json!({}),
+            );
+            app.tickets.agent = None;
+        }
         Some(Outcome::Failed(e)) => {
             status(&id, "failed", &e, json!({}));
             app.tickets.agent = None;
         }
-        Some(Outcome::Cancelled(_)) => {
+        Some(Outcome::Cancelled) => {
             status(&id, "failed", "The person cancelled the report.", json!({}));
             app.tickets.agent = None;
         }

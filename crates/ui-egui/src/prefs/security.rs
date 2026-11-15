@@ -78,22 +78,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         ui_kit::settings_section(ui, "reports", app.tr("prefs.reports"), |ui| {
             setting::report_on_github(app, ui);
-            ui_kit::settings_form(ui, labels, |ui| {
-                if crate::tickets::signed_in(app) {
-                    ui_kit::settings_inline_note(ui, app.tr("prefs.reports.signed_in"));
-                    let out = ui_kit::button(ui, app.tr("prefs.reports.sign_out"), ui_kit::Button::Normal);
-                    crate::scenario::publish_target("prefs:tickets_sign_out", out.rect);
-                    if out.clicked() {
-                        crate::tickets::sign_out(app);
-                    }
-                } else {
-                    ui_kit::settings_inline_note(ui, app.tr("prefs.reports.signed_out"));
-                }
-            });
-            let waiting = crate::tickets::queued(app);
-            if waiting > 0 {
-                ui_kit::settings_inline_note(ui, &solidcraft_ui_text::format("prefs.reports.queued", &[("count", &waiting.to_string())]));
-            }
         });
         ui_kit::settings_section(ui, "encryption", app.tr("prefs.security.encryption"), |ui| {
             ui_kit::settings_inline_note(ui, app.tr("prefs.security.encryption_note"));

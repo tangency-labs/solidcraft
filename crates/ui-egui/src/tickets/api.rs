@@ -10,8 +10,6 @@ use crate::agent_chat::backend::HttpRequest as Request;
 pub const SERVER: &str = "https://tickets.solidcraft.io";
 /// The client id the server knows the app by.
 const CLIENT_ID: &str = "solidcraft";
-/// What a token from the app's sign-in may do: file tickets, and read and upload to the user's own.
-const SCOPE: &str = "tickets:report";
 /// The app's slug on the server, preselected in the report.
 pub const DEFAULT_APP: &str = "solidcraft";
 
@@ -94,7 +92,7 @@ fn request(method: &'static str, path: &str, token: Option<&str>, body: Option<V
 pub enum Failure {
     /// No answer: offline, the server unreachable, a timeout. A report waits in the queue.
     Offline(String),
-    /// The token is no longer good: sign in again.
+    /// The token the request went with is no longer good (a draft's, once the draft expired).
     SignedOut,
     /// The server answered with an error; its message.
     Refused(String),
@@ -104,7 +102,7 @@ impl Failure {
     pub fn text(&self) -> String {
         match self {
             Self::Offline(e) => format!("Could not reach {}: {e}", server()),
-            Self::SignedOut => "Your sign-in has expired. Sign in again.".into(),
+            Self::SignedOut => "The report's draft expired on the server. Send it again.".into(),
             Self::Refused(e) => e.clone(),
         }
     }
@@ -132,16 +130,7 @@ fn text(v: &Value, key: &str) -> Option<String> {
     v.get(key).and_then(Value::as_str).map(|s| s.chars().take(2000).collect())
 }
 
-// ---- sign-in (device authorization, RFC 8628) ---------------------------------------------
-
-pub fn device_code() -> Request {
-    let mut body = json!({ "client_id": CLIENT_ID, "client_name": "SolidCraft", "scope": SCOPE });
-    if let Some(host) = hostname() {
-        // The server names the token "SolidCraft on <computer>", so it can be told apart.
-        body["hostname"] = json!(host);
-    }
-    request("POST", "/api/device/code", None, Some(body))
-}
+// ---- report drafts (no account needed) --------------------------------------------------------
 
 /// This computer's name, for the sign-in's name on the server; None where it isn't known.
 pub fn hostname() -> Option<String> {
@@ -157,108 +146,6 @@ pub fn hostname() -> Option<String> {
         (!name.is_empty()).then_some(name)
     }
 }
-
-/// The code to show and the page to open.
-#[derive(Clone, Debug, PartialEq)]
-pub struct DeviceCode {
-    pub device_code: String,
-    pub user_code: String,
-    /// The page to open: with the code filled in where the server offers that.
-    pub verification: String,
-    pub interval_s: f64,
-    pub expires_in_s: f64,
-}
-
-pub fn parse_device_code(v: &Value) -> Result<DeviceCode, Failure> {
-    let missing = || Failure::Refused("The server's sign-in answer was incomplete.".into());
-    let verification = text(v, "verification_uri_complete").or_else(|| text(v, "verification_uri")).ok_or_else(missing)?;
-    // Only a page on the ticket server opens in the browser.
-    if !on_server(&verification, "/device") {
-        return Err(missing());
-    }
-    Ok(DeviceCode {
-        device_code: text(v, "device_code").ok_or_else(missing)?,
-        user_code: text(v, "user_code").ok_or_else(missing)?.chars().take(32).collect(),
-        verification,
-        interval_s: v.get("interval").and_then(Value::as_f64).unwrap_or(5.0).clamp(1.0, 60.0),
-        expires_in_s: v.get("expires_in").and_then(Value::as_f64).unwrap_or(600.0).clamp(30.0, 3600.0),
-    })
-}
-
-pub fn device_token(device_code: &str) -> Request {
-    request("POST", "/api/device/token", None, Some(json!({ "device_code": device_code, "client_id": CLIENT_ID })))
-}
-
-/// What a poll of the sign-in says.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Poll {
-    Token(String),
-    Pending,
-    SlowDown,
-    Expired,
-    Denied,
-    Failed(Failure),
-}
-
-pub fn parse_poll(reply: Result<(u16, Vec<u8>), String>) -> Poll {
-    let (status, body) = match reply {
-        Ok(r) => r,
-        Err(e) => return Poll::Failed(Failure::Offline(e)),
-    };
-    let v: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
-    if (200..300).contains(&status) {
-        return match text(&v, "access_token") {
-            Some(token) if !token.is_empty() && token.len() < 1000 => Poll::Token(token),
-            _ => Poll::Failed(Failure::Refused("The server's sign-in answer was incomplete.".into())),
-        };
-    }
-    match v.get("error").and_then(Value::as_str) {
-        Some("authorization_pending") => Poll::Pending,
-        Some("slow_down") => Poll::SlowDown,
-        Some("expired_token") => Poll::Expired,
-        Some("access_denied") => Poll::Denied,
-        _ => Poll::Failed(answer(Ok((status, body))).err().unwrap_or(Failure::Refused(format!("The server answered {status}.")))),
-    }
-}
-
-// ---- apps and tickets -------------------------------------------------------------------------
-
-pub fn apps(token: &str) -> Request {
-    request("GET", "/api/apps", Some(token), None)
-}
-
-/// An app tickets are filed under: its slug and name.
-#[derive(Clone, Debug, PartialEq)]
-pub struct App {
-    pub slug: String,
-    pub name: String,
-}
-
-pub fn parse_apps(v: &Value) -> Vec<App> {
-    v.get("apps")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|a| Some(App { slug: text(a, "slug")?.chars().take(60).collect(), name: text(a, "name")?.chars().take(60).collect() }))
-        .take(50)
-        .collect()
-}
-
-pub fn create_ticket(token: &str, ticket: &Value) -> Request {
-    request("POST", "/api/tickets", Some(token), Some(ticket.clone()))
-}
-
-/// The new ticket's number.
-pub fn parse_ticket(v: &Value) -> Result<u64, Failure> {
-    v.get("id").and_then(Value::as_u64).ok_or_else(|| Failure::Refused("The server did not say which ticket it filed.".into()))
-}
-
-/// The ticket's page on the server.
-pub fn ticket_url(number: u64) -> String {
-    format!("{}/t/{number}", server())
-}
-
-// ---- report drafts (no account needed) --------------------------------------------------------
 
 /// A report draft for `ticket` (the same fields as a ticket): the server keeps it for 24 hours
 /// and its page, opened in the browser, files it once the person signs in and confirms.
@@ -293,36 +180,12 @@ pub fn parse_draft(v: &Value) -> Result<Draft, Failure> {
         .ok_or_else(bad)?;
     let upload_token = text(v, "upload_token").filter(|t| !t.is_empty() && t.len() < 1000).ok_or_else(bad)?;
     // Only the ticket server's own page opens in the browser.
-    let url = text(v, "url").filter(|u| on_server(u, "/draft/")).ok_or_else(bad)?;
+    // Only a page of the ticket server itself opens in the browser: its host compared exactly.
+    // The path is the server's to choose (it moved from /draft/ to /d/).
+    let url = text(v, "url")
+        .filter(|u| on_server(u, "/"))
+        .ok_or_else(|| Failure::Refused("The server's draft address is not on the ticket server.".into()))?;
     Ok(Draft { id, upload_token, url })
-}
-
-/// Whether the draft was filed yet (with the draft's upload token).
-pub fn draft_status(id: &str, upload_token: &str) -> Request {
-    request("GET", &format!("/api/drafts/{id}/status"), Some(upload_token), None)
-}
-
-/// What a draft's status says.
-#[derive(Clone, Debug, PartialEq)]
-pub enum DraftStatus {
-    Open,
-    Expired,
-    /// Filed as ticket `number`; with a token when the person ticked Remember this computer.
-    Claimed {
-        number: u64,
-        token: Option<String>,
-    },
-}
-
-pub fn parse_draft_status(v: &Value) -> DraftStatus {
-    match v.get("status").and_then(Value::as_str) {
-        Some("claimed") => DraftStatus::Claimed {
-            number: v.get("ticket_id").and_then(Value::as_u64).unwrap_or(0),
-            token: text(v, "access_token").filter(|t| !t.is_empty() && t.len() < 1000),
-        },
-        Some("expired") => DraftStatus::Expired,
-        _ => DraftStatus::Open,
-    }
 }
 
 // ---- resumable uploads ------------------------------------------------------------------------
@@ -336,19 +199,16 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Open an upload for a file: its name, size, hash, type and kind. `ticket`: the ticket it goes
-/// to with a person's token; None with a draft's upload token (the token names the draft).
-pub fn create_upload(token: &str, ticket: Option<u64>, name: &str, bytes: &[u8], content_type: &str, kind: &str) -> Request {
-    let mut body = json!({
+/// Open an upload for a file of a draft (its upload token names the draft): its name, size,
+/// hash, type and kind.
+pub fn create_upload(token: &str, name: &str, bytes: &[u8], content_type: &str, kind: &str) -> Request {
+    let body = json!({
         "filename": name,
         "size": bytes.len(),
         "sha256": sha256_hex(bytes),
         "content_type": content_type,
         "kind": kind,
     });
-    if let Some(ticket) = ticket {
-        body["ticket_id"] = json!(ticket);
-    }
     request("POST", "/api/uploads", Some(token), Some(body))
 }
 
@@ -393,10 +253,4 @@ pub fn upload_status(token: &str, upload: &str) -> Request {
 
 pub fn finish_upload(token: &str, upload: &str) -> Request {
     request("POST", &format!("/api/uploads/{upload}/complete"), Some(token), Some(json!({})))
-}
-
-// ---- the user's own tickets -------------------------------------------------------------------
-
-pub fn mine(token: &str) -> Request {
-    request("GET", "/api/tickets?reporter=me&status=all&sort=updated&limit=50", Some(token), None)
 }

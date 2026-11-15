@@ -2479,12 +2479,6 @@ mod tests {
         payload::Form { app: "solidcraft".into(), title: "Fillet fails".into(), description: "It refused".into(), ..Default::default() }
     }
 
-    fn run_ticks(app: &mut SolveApp, ctx: &egui::Context, n: usize) {
-        for _ in 0..n {
-            tickets::tick(app, ctx);
-        }
-    }
-
     fn temp_dir(tag: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("sc-report-{tag}-{}-{}", std::process::id(), crate::now_ms() as u64))
     }
@@ -2547,172 +2541,6 @@ mod tests {
         assert!(out.files.iter().all(|f| f.kind != "design"));
     }
 
-    #[test]
-    fn ticket_report_submit_makes_a_draft_uploads_its_files_and_opens_it_in_the_browser() {
-        let (mut app, _, requests, keyring) = ticket_app(true, None);
-        let ctx = crate::fonts::test_context();
-        let report = payload::build(&form(), payload::Ticks { design: true, ..Default::default() }, &evidence_with_design(), "t");
-        tickets::send(&mut app, report);
-        let mut opened = Vec::new();
-        for _ in 0..60 {
-            let out = ctx.run_ui(Default::default(), |ui| tickets::tick(&mut app, ui.ctx()));
-            opened.extend(out.platform_output.commands.into_iter().filter_map(|c| match c {
-                egui::OutputCommand::OpenUrl(u) => Some(u.url),
-                _ => None,
-            }));
-            if app.tickets.sending.is_none() {
-                break;
-            }
-        }
-        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Opened));
-        assert_eq!(opened, [format!("{}/draft/d1#sec", tickets::api::server())], "the draft's page opens in the browser");
-        let requests = requests.lock().unwrap().clone();
-        let draft = requests.iter().find(|r| r.url.ends_with("/api/drafts")).unwrap();
-        assert!(!draft.headers.iter().any(|(k, _)| k == "Authorization"), "no account needed");
-        assert!(!requests.iter().any(|r| r.url.contains("/api/device/") || r.url.ends_with("/api/tickets")), "no sign-in, no direct filing");
-        let uploads: Vec<_> = requests.iter().filter(|r| r.url.contains("/api/uploads")).collect();
-        assert!(uploads.iter().all(|r| r.headers.iter().any(|(k, v)| k == "Authorization" && v == "Bearer tdu_draft_token")));
-        let opened_uploads = uploads.iter().filter(|r| r.method == "POST" && r.url.ends_with("/api/uploads"));
-        assert!(opened_uploads.clone().all(|r| !String::from_utf8_lossy(r.body.as_deref().unwrap()).contains("ticket_id")));
-        let bytes: Vec<u8> = uploads.iter().filter(|r| r.method == "PUT").flat_map(|r| r.body.clone().unwrap_or_default()).collect();
-        assert!(bytes.windows(19).any(|w| w == b"SECRET-DESIGN-BYTES"), "the ticked design goes with the draft");
-
-        // Filed in the browser with Remember this computer: the app says so and keeps the token,
-        // in the keyring only.
-        let until = crate::now_ms() + 12_000.0;
-        while app.tickets.outcome == Some(tickets::Outcome::Opened) && crate::now_ms() < until {
-            run_ticks(&mut app, &ctx, 1);
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Filed(77)));
-        assert_eq!(keyring.0.lock().unwrap().get(tickets::SECRET_ID).map(String::as_str), Some("tkt_remembered_456"));
-        assert!(!serde_json::to_string(&app.preferences).unwrap().contains("tkt_remembered_456"));
-    }
-
-    #[test]
-    fn ticket_report_made_offline_waits_in_the_queue_and_sends_when_online() {
-        let dir = temp_dir("queue");
-        let (mut app, online, requests, _) = ticket_app(false, Some("tkt_good"));
-        app.tickets.queue_dir = Some(dir.clone());
-        let ctx = crate::fonts::test_context();
-        let report = payload::build(&form(), payload::Ticks { design: true, ..Default::default() }, &evidence_with_design(), "t");
-        tickets::send(&mut app, report);
-        run_ticks(&mut app, &ctx, 4);
-        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Queued));
-        let waiting = tickets::queue::list(&dir);
-        assert_eq!(waiting.len(), 1, "one report waits");
-        let kept = std::fs::read_to_string(waiting[0].join("report.json")).unwrap();
-        assert!(!kept.contains("tkt_good"), "the queue holds no token");
-        let sent = requests.lock().unwrap().len();
-        run_ticks(&mut app, &ctx, 4);
-        assert_eq!(requests.lock().unwrap().len(), sent, "no background requests while nothing is due");
-
-        // Back online with a remembered token: it is filed directly, no browser.
-        online.store(true, std::sync::atomic::Ordering::SeqCst);
-        tickets::retry_now(&mut app);
-        run_ticks(&mut app, &ctx, 40);
-        assert!(tickets::queue::list(&dir).is_empty(), "sent and removed from the queue");
-        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Filed(42)));
-        {
-            let requests = requests.lock().unwrap();
-            let ticket = requests.iter().find(|r| r.url.ends_with("/api/tickets") && r.method == "POST").unwrap();
-            assert!(ticket.headers.iter().any(|(k, v)| k == "Authorization" && v == "Bearer tkt_good"));
-            let uploaded: Vec<u8> = requests.iter().filter(|r| r.method == "PUT").flat_map(|r| r.body.clone().unwrap_or_default()).collect();
-            assert!(uploaded.windows(19).any(|w| w == b"SECRET-DESIGN-BYTES"), "the ticked design was uploaded");
-        }
-        let _ = std::fs::remove_dir_all(&dir);
-
-        // Without a token a waiting report goes only when the person asks (it opens a browser).
-        let (mut app, online, requests, _) = ticket_app(false, None);
-        app.tickets.queue_dir = Some(dir.clone());
-        tickets::send(&mut app, payload::build(&form(), payload::Ticks::default(), &evidence_with_design(), "t"));
-        run_ticks(&mut app, &ctx, 4);
-        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Queued));
-        online.store(true, std::sync::atomic::Ordering::SeqCst);
-        let before = requests.lock().unwrap().len();
-        tickets::retry_now(&mut app);
-        run_ticks(&mut app, &ctx, 10);
-        assert_eq!(requests.lock().unwrap().len(), before, "nothing goes by itself without a token");
-        tickets::send_waiting(&mut app);
-        run_ticks(&mut app, &ctx, 40);
-        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Opened));
-        assert!(tickets::queue::list(&dir).is_empty());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn ticket_report_device_sign_in_keeps_the_token_in_the_keyring_only() {
-        let dir = temp_dir("token");
-        let (mut app, online, requests, keyring) = ticket_app(true, None);
-        app.tickets.queue_dir = Some(dir.clone());
-        let ctx = crate::fonts::test_context();
-        tickets::begin_sign_in(&mut app);
-        run_ticks(&mut app, &ctx, 2);
-        assert!(matches!(&app.tickets.sign_in, tickets::SignIn::Waiting { code, .. } if code.user_code == "WDJB-MJHT"));
-        let until = crate::now_ms() + 5000.0;
-        while !tickets::signed_in(&mut app) && crate::now_ms() < until {
-            run_ticks(&mut app, &ctx, 1);
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        assert_eq!(keyring.0.lock().unwrap().get(tickets::SECRET_ID).map(String::as_str), Some("tkt_secret_token_123"));
-        online.store(false, std::sync::atomic::Ordering::SeqCst);
-        tickets::send(&mut app, payload::build(&form(), payload::Ticks::default(), &evidence_with_design(), "t"));
-        run_ticks(&mut app, &ctx, 4);
-        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Queued));
-        let mut written = Vec::new();
-        for folder in tickets::queue::list(&dir) {
-            for e in std::fs::read_dir(folder).unwrap() {
-                written.extend(std::fs::read(e.unwrap().path()).unwrap());
-            }
-        }
-        written.extend(serde_json::to_vec(&app.preferences).unwrap());
-        assert!(!written.windows(20).any(|w| w == b"tkt_secret_token_123"), "the token is written nowhere but the keyring");
-        assert!(requests.lock().unwrap().iter().filter(|r| r.url.contains("/device/")).all(|r| !r.headers.iter().any(|(k, _)| k == "Authorization")));
-        tickets::sign_out(&mut app);
-        assert!(keyring.0.lock().unwrap().get(tickets::SECRET_ID).is_none() && !tickets::signed_in(&mut app));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn ticket_report_opens_from_the_bug_button_and_a_failure_prefills_it() {
-        let (mut app, _, _, _) = ticket_app(true, Some("tkt_good"));
-        app.home.open = false;
-        assert!(ticket::enabled(&app));
-        let ctx = crate::fonts::test_context();
-        help::run(&mut app, &ctx, "report");
-        cancel_capture(&mut app);
-        let _ = ctx.run_ui(Default::default(), |ui| show(&mut app, ui.ctx()));
-        let draft = app.issue_report.draft.as_ref().unwrap();
-        let t = draft.ticket.as_ref().unwrap();
-        assert!(t.ticks == payload::Ticks::default() && t.form.app == "solidcraft" && !t.from_failure);
-        assert!(t.form.title.is_empty(), "the bug button starts empty");
-        app.issue_report.draft = None;
-
-        // From a failed operation: the title, the description template and the failed command.
-        let mut app = failing_sample();
-        app.services.tickets_http = ticket_app(true, None).0.services.tickets_http.take();
-        let dialog = app.dialog.clone();
-        let error = dialog.as_ref().and_then(|d| d.error.clone()).or_else(|| app.preview.error.clone()).unwrap_or_else(|| "operation failed".into());
-        let draft = draft_for(&app, dialog.as_ref(), Some(&error));
-        let t = ticket::new_ticket(&mut app, &draft, None);
-        assert!(t.from_failure && t.form.kind == payload::Kind::Bug);
-        assert!(t.form.title.contains(error.lines().next().unwrap()), "{}", t.form.title);
-        assert!(t.form.description.contains("**Error:**") && t.form.description.contains(solidcraft_ui_text::tr("report.trying_to_do")));
-        assert_eq!(t.evidence.failing.as_ref().map(|f| f.error.clone()), Some(limited(&error, 8000)));
-
-        // The preference brings back the GitHub draft for every report.
-        app.preferences.report_on_github = true;
-        assert!(!ticket::enabled(&app));
-        app.preferences.report_on_github = false;
-        // The public GitHub draft stays one click away.
-        let mut draft = draft;
-        draft.github = true;
-        app.issue_report.draft = Some(draft);
-        cancel_capture(&mut app);
-        let _ = ctx.run_ui(Default::default(), |ui| show(&mut app, ui.ctx()));
-        assert!(app.issue_report.draft.as_ref().unwrap().ticket.is_none(), "the GitHub draft, as before");
-    }
-
     /// Frames until `done` says stop, collecting the addresses opened in the browser.
     fn frames_until(app: &mut SolveApp, ctx: &egui::Context, mut done: impl FnMut(&SolveApp) -> bool) -> Vec<String> {
         let mut opened = Vec::new();
@@ -2733,10 +2561,181 @@ mod tests {
         app.run("diagnostics.report_issue_status", json!({"report": id})).unwrap()
     }
 
+    fn draft_page() -> String {
+        format!("{}/draft/d1#sec", tickets::api::server())
+    }
+
+    fn no_token_anywhere(requests: &Requests) {
+        for r in requests.lock().unwrap().iter() {
+            assert!(!r.url.contains("/api/device/") && !r.url.ends_with("/api/tickets"), "no sign-in, no direct filing: {}", r.url);
+            assert!(
+                r.headers.iter().filter(|(k, _)| k == "Authorization").all(|(_, v)| v == "Bearer tdu_draft_token"),
+                "only the draft's upload token"
+            );
+        }
+    }
+
+    #[test]
+    fn ticket_report_send_makes_a_draft_uploads_its_files_and_opens_it_in_the_browser() {
+        // A keyring entry from a test build is removed, and none is ever written.
+        let (mut app, _, requests, keyring) = ticket_app(true, Some("tkt_from_a_test_build"));
+        let ctx = crate::fonts::test_context();
+        let report = payload::build(&form(), payload::Ticks { design: true, ..Default::default() }, &evidence_with_design(), "t");
+        tickets::send(&mut app, report);
+        let opened = frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
+        assert!(keyring.0.lock().unwrap().is_empty(), "the app keeps no account details");
+        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Opened(draft_page())));
+        assert_eq!(opened, [draft_page()], "the draft's page opens in the browser");
+        no_token_anywhere(&requests);
+        let requests = requests.lock().unwrap().clone();
+        let draft = requests.iter().find(|r| r.url.ends_with("/api/drafts")).unwrap();
+        assert!(!draft.headers.iter().any(|(k, _)| k == "Authorization"), "no account needed");
+        let opens = requests.iter().filter(|r| r.method == "POST" && r.url.ends_with("/api/uploads"));
+        assert!(opens.clone().count() >= 2 && opens.clone().all(|r| !String::from_utf8_lossy(r.body.as_deref().unwrap()).contains("ticket_id")));
+        let bytes: Vec<u8> = requests.iter().filter(|r| r.method == "PUT").flat_map(|r| r.body.clone().unwrap_or_default()).collect();
+        assert!(bytes.windows(19).any(|w| w == b"SECRET-DESIGN-BYTES"), "the ticked design goes with the draft");
+        assert!(app.session.log.iter().any(|l| l.contains("Problem report: opened in the browser")), "each step is in the log");
+    }
+
+    #[test]
+    fn ticket_report_made_offline_is_kept_and_sent_on_retry() {
+        let dir = temp_dir("queue");
+        let (mut app, online, requests, _) = ticket_app(false, None);
+        app.tickets.queue_dir = Some(dir.clone());
+        let ctx = crate::fonts::test_context();
+        let report = payload::build(&form(), payload::Ticks { design: true, ..Default::default() }, &evidence_with_design(), "t");
+        tickets::send(&mut app, report);
+        frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
+        assert!(
+            matches!(&app.tickets.outcome, Some(tickets::Outcome::Queued(why)) if why.contains("network unreachable")),
+            "{:?}",
+            app.tickets.outcome
+        );
+        assert_eq!(tickets::queue::list(&dir).len(), 1, "one report kept");
+        let sent = requests.lock().unwrap().len();
+        frames_until(&mut app, &ctx, |_| false);
+        assert_eq!(requests.lock().unwrap().len(), sent, "nothing goes by itself");
+
+        online.store(true, std::sync::atomic::Ordering::SeqCst);
+        tickets::retry(&mut app, 0);
+        frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
+        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Opened(draft_page())));
+        assert!(tickets::queue::list(&dir).is_empty(), "sent and removed from the queue");
+        let uploaded: Vec<u8> =
+            requests.lock().unwrap().iter().filter(|r| r.method == "PUT").flat_map(|r| r.body.clone().unwrap_or_default()).collect();
+        assert!(uploaded.windows(19).any(|w| w == b"SECRET-DESIGN-BYTES"));
+        no_token_anywhere(&requests);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn report_harness() -> (crate::scenario::Harness, Requests) {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let (mut server, _, requests, _) = ticket_app(true, None);
+        h.app.services.tickets_http = server.services.tickets_http.take();
+        h.app.services.ticket_secrets = server.services.ticket_secrets.take();
+        help::run(&mut h.app, &h.ctx, "report");
+        cancel_capture(&mut h.app);
+        h.frames(4);
+        (h, requests)
+    }
+
+    #[test]
+    fn ticket_report_send_without_a_title_still_sends_and_ends_on_thanks() {
+        // The bug button opens the report with no title. Send must not refuse it out of sight
+        // (the reason Send seemed to do nothing): the title comes from the description.
+        let (mut h, requests) = report_harness();
+        {
+            let t = h.app.issue_report.draft.as_mut().unwrap().ticket.as_mut().unwrap();
+            assert!(t.form.title.is_empty());
+            t.form.description = "The sketch dimension box covers the value\nmore".into();
+        }
+        h.frames(2);
+        let ok = crate::scenario::handle_at("dialog:ok").expect("Send is drawn");
+        let at = [f64::from(ok.x), f64::from(ok.y)];
+        click_commands_at(&mut h, at);
+        click_commands_at(&mut h, at);
+        for _ in 0..200 {
+            if h.app.tickets.sending.is_none() {
+                break;
+            }
+            h.frame();
+        }
+        h.frames(2);
+        let requests = requests.lock().unwrap().clone();
+        let drafts: Vec<_> = requests.iter().filter(|r| r.url.ends_with("/api/drafts")).collect();
+        assert_eq!(drafts.len(), 1, "one draft for a double click");
+        let body: serde_json::Value = serde_json::from_slice(drafts[0].body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["title"], "The sketch dimension box covers the value");
+        // The dialog is now the Thanks box, with the link.
+        assert!(h.widget(solidcraft_ui_text::tr("report.thanks")).is_some(), "Thanks is shown");
+        assert!(h.widget(solidcraft_ui_text::tr("report.copy_link")).is_some() && h.widget(solidcraft_ui_text::tr("report.open_again")).is_some());
+        assert!(crate::scenario::handle_at("dialog:ok").is_none(), "no Send any more");
+        assert_eq!(ticket::title_or_default("", ""), solidcraft_ui_text::tr("report.default_title"));
+    }
+
+    #[test]
+    fn ticket_report_failure_shows_the_reason_with_retry() {
+        let (mut h, requests) = report_harness();
+        h.app.issue_report.draft.as_mut().unwrap().ticket.as_mut().unwrap().form.title = "REFUSE-ME".into();
+        h.frames(2);
+        let ok = crate::scenario::handle_at("dialog:ok").expect("Send is drawn");
+        click_commands_at(&mut h, [f64::from(ok.x), f64::from(ok.y)]);
+        h.frames(10);
+        assert!(matches!(h.app.tickets.outcome, Some(tickets::Outcome::Failed(_))));
+        assert!(h.widget(solidcraft_ui_text::tr("report.error_title")).is_some(), "the error is shown");
+        assert!(h.widget(solidcraft_ui_text::tr("report.retry")).is_some() && h.widget(solidcraft_ui_text::tr("report.copy_details")).is_some());
+        assert_eq!(requests.lock().unwrap().iter().filter(|r| r.url.ends_with("/api/drafts")).count(), 1);
+    }
+
+    #[test]
+    fn ticket_report_opens_from_the_bug_button_and_a_failure_prefills_it() {
+        // Without a way to reach the server, the bug button opens the GitHub draft: visible.
+        let mut app = app();
+        app.home.open = false;
+        assert!(!ticket::enabled(&app));
+        let ctx = crate::fonts::test_context();
+        help::run(&mut app, &ctx, "report");
+        cancel_capture(&mut app);
+        let _ = ctx.run_ui(Default::default(), |ui| show(&mut app, ui.ctx()));
+        assert!(app.issue_report.draft.as_ref().unwrap().ticket.is_none(), "the GitHub draft, shown");
+
+        let (mut app, _, _, _) = ticket_app(true, None);
+        app.home.open = false;
+        assert!(ticket::enabled(&app));
+        help::run(&mut app, &ctx, "report");
+        cancel_capture(&mut app);
+        let _ = ctx.run_ui(Default::default(), |ui| show(&mut app, ui.ctx()));
+        let t = app.issue_report.draft.as_ref().unwrap().ticket.as_ref().unwrap();
+        assert!(t.ticks == payload::Ticks::default() && t.form.app == "solidcraft" && !t.from_failure && t.form.title.is_empty());
+        app.issue_report.draft = None;
+
+        // From a failed operation: the title, the description template and the failed command.
+        let mut app = failing_sample();
+        app.services.tickets_http = ticket_app(true, None).0.services.tickets_http.take();
+        let dialog = app.dialog.clone();
+        let error = dialog.as_ref().and_then(|d| d.error.clone()).or_else(|| app.preview.error.clone()).unwrap_or_else(|| "operation failed".into());
+        let draft = draft_for(&app, dialog.as_ref(), Some(&error));
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        assert!(t.from_failure && t.form.kind == payload::Kind::Bug);
+        assert!(t.form.title.contains(error.lines().next().unwrap()), "{}", t.form.title);
+        assert!(t.form.description.contains("**Error:**") && t.form.description.contains(solidcraft_ui_text::tr("report.trying_to_do")));
+
+        // The preference brings back the GitHub draft for every report; the link for one.
+        app.preferences.report_on_github = true;
+        assert!(!ticket::enabled(&app));
+        app.preferences.report_on_github = false;
+        let mut draft = draft;
+        draft.github = true;
+        app.issue_report.draft = Some(draft);
+        cancel_capture(&mut app);
+        let _ = ctx.run_ui(Default::default(), |ui| show(&mut app, ui.ctx()));
+        assert!(app.issue_report.draft.as_ref().unwrap().ticket.is_none(), "the GitHub draft, as before");
+    }
+
     #[test]
     fn report_issue_from_an_agent_opens_a_draft_and_never_sends_the_design_on_its_word() {
         let ctx = crate::fonts::test_context();
-        // No design asked for: the app gathers the report, sends it as a draft and opens it.
         let (mut app, _, requests, _) = ticket_app(true, None);
         app.home.open = false;
         frames_until(&mut app, &ctx, |_| true);
@@ -2757,6 +2756,7 @@ mod tests {
             assert!(!body["consent"]["kinds"].as_array().unwrap().contains(&json!("design")));
             assert!(!requests.iter().any(|r| r.body.as_ref().is_some_and(|b| String::from_utf8_lossy(b).contains("\"kind\":\"design\""))));
         }
+        no_token_anywhere(&requests);
 
         // The design asked for: nothing is sent; the dialog opens for the person, the box unticked.
         let (mut app, _, requests, _) = ticket_app(true, None);
@@ -2785,8 +2785,8 @@ mod tests {
         assert_eq!(agent_status(&mut app, &id)["status"], "opened");
         assert!(requests.lock().unwrap().iter().any(|r| r.body.as_ref().is_some_and(|b| String::from_utf8_lossy(b).contains("\"kind\":\"design\""))));
 
-        // Offline: the agent's report waits, and goes when the person sends what waits.
-        let (mut app, online, _, _) = ticket_app(false, None);
+        // Offline: the agent hears so; the report is kept for the person to send.
+        let (mut app, _, _, _) = ticket_app(false, None);
         let dir = temp_dir("agent");
         app.tickets.queue_dir = Some(dir.clone());
         frames_until(&mut app, &ctx, |_| true);
@@ -2794,11 +2794,7 @@ mod tests {
         frames_until(&mut app, &ctx, |a| a.tickets.outcome.is_some());
         frames_until(&mut app, &ctx, |_| true);
         assert_eq!(agent_status(&mut app, &id)["status"], "queued");
-        online.store(true, std::sync::atomic::Ordering::SeqCst);
-        tickets::send_waiting(&mut app);
-        frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
-        frames_until(&mut app, &ctx, |_| true);
-        assert_eq!(agent_status(&mut app, &id)["status"], "opened");
+        assert_eq!(tickets::queue::list(&dir).len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2823,11 +2819,15 @@ mod tests {
             assert!(matches!(answer(Ok((status, b"{}".to_vec()))), Err(tickets::api::Failure::Offline(_))), "{status}");
         }
         assert!(matches!(answer(Ok((400, b"{}".to_vec()))), Err(tickets::api::Failure::Refused(_))));
-        assert!(matches!(answer(Ok((401, b"{}".to_vec()))), Err(tickets::api::Failure::SignedOut)));
 
         // Hosts are compared exactly, not by prefix.
         let server = tickets::api::server();
         assert!(on_server(&format!("{server}/draft/abc#s"), "/draft/"));
+        // The server's own page, whatever its path (it moved to /d/).
+        let moved = json!({"draft_id": "d2", "upload_token": "tdu_x", "url": format!("{server}/d/d2#s")});
+        assert_eq!(tickets::api::parse_draft(&moved).map(|d| d.url), Ok(format!("{server}/d/d2#s")));
+        let elsewhere = json!({"draft_id": "d2", "upload_token": "tdu_x", "url": "https://tickets.solidcraft.io.evil.example/d/d2#s"});
+        assert!(tickets::api::parse_draft(&elsewhere).is_err());
         for fake in [
             "https://tickets.solidcraft.io.evil.example/draft/x",
             "https://tickets.solidcraft.io@evil.example/draft/x",
@@ -2846,22 +2846,22 @@ mod tests {
         let first = tickets::new_owner(&mut app);
         tickets::send_for(&mut app, payload::build(&form(), payload::Ticks::default(), &evidence_with_design(), "t"), first);
         frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
-        assert_eq!((app.tickets.owner, app.tickets.outcome.clone()), (first, Some(tickets::Outcome::Opened)));
+        assert_eq!((app.tickets.owner, app.tickets.outcome.clone()), (first, Some(tickets::Outcome::Opened(draft_page()))));
         let draft = draft_for(&app, None, None);
         let next = ticket::new_ticket(&mut app, &draft, None);
         assert_ne!(next.id, first, "a new report starts with nothing sent");
 
-        // The server refusing a waiting report removes it and its files.
+        // The server refusing a kept report removes it and its files.
         let dir = temp_dir("refused");
-        let (mut app, online, _, _) = ticket_app(false, Some("tkt_good"));
+        let (mut app, online, _, _) = ticket_app(false, None);
         app.tickets.queue_dir = Some(dir.clone());
         let refused = payload::Form { title: "REFUSE-ME".into(), ..form() };
         tickets::send(&mut app, payload::build(&refused, payload::Ticks::default(), &evidence_with_design(), "t"));
-        run_ticks(&mut app, &ctx, 4);
+        frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
         assert_eq!(tickets::queue::list(&dir).len(), 1);
         online.store(true, std::sync::atomic::Ordering::SeqCst);
-        tickets::retry_now(&mut app);
-        run_ticks(&mut app, &ctx, 10);
+        tickets::retry(&mut app, 0);
+        frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
         assert!(matches!(app.tickets.outcome, Some(tickets::Outcome::Failed(_))));
         assert!(std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0) == 0, "no report or file left behind");
         let _ = std::fs::remove_dir_all(&dir);

@@ -27,17 +27,21 @@ The ticket carries a `consent` record listing exactly which boxes were ticked.
 
 ## Sending
 
-**Send report** creates a report draft on the server (no account needed), uploads the ticked
-attachments with the draft's upload token (resumable, with a progress bar and Cancel) and opens
-the draft's page in the browser. The person signs in there if needed, reviews the report and
-clicks File ticket; SolidCraft has nothing more to do. If they tick "Remember this computer"
-there, the app keeps the token it is given in the system keyring (service "SolidCraft tickets";
-the browser's local storage on the web) and later reports are filed directly, with "Ticket #N
-filed" and an Open button. Preferences › Security › Problem reports shows which and signs out.
+**Send** creates a report draft on the server (no account needed), uploads the ticked
+attachments with the draft's upload token (resumable, SHA-256 checked) and opens the draft's page
+in the browser. The person signs in there (with GitHub or Google; the account is made on first
+use), reviews the report and clicks File ticket. The dialog shows each stage in place of the form:
+Sending… with a progress bar and Cancel, then Thanks with the draft's link (Open it again, Copy
+link), or the exact reason it failed with Retry and Copy details. Each step is written to the
+log. Send is never refused for an empty title: the description's first line, or "Problem report",
+stands in.
 
-A report that cannot reach the server is kept in `<data folder>/report-queue` and the dialog
-offers Send now. With a remembered token it is sent by itself when SolidCraft starts or every
-five minutes. The queue never holds a token.
+SolidCraft keeps no account details: no sign-in and no token. A keyring entry "SolidCraft
+tickets" left by a test build is deleted once at startup.
+
+A report that cannot reach the server (offline, a timeout, a busy or failing server) is kept in
+`<data folder>/report-queue` (at most 20 reports and 1 GB) and sent when the person presses
+Retry. A report the server refuses leaves no files behind.
 
 ## From an agent
 
@@ -66,9 +70,8 @@ solidcraft-cli run replay.json --in design.sc
 
 ## Network use
 
-SolidCraft talks to the ticket server only when the user sends a report or opens My tickets, to
-send a report already waiting in the queue with a remembered token, or, while a draft it opened is
-waiting to be filed, to check whether it was. There is no telemetry.
+SolidCraft talks to the ticket server only when the person sends a report (or Retry), or an
+agent asks for one. There is no telemetry and nothing in the background.
 
 ## The old behaviour
 
@@ -79,11 +82,10 @@ Preferences › Security › "Report a bug opens a public GitHub draft instead"
 
 ## Server API
 
-Every path the app uses is in `crates/ui-egui/src/tickets/api.rs`: report drafts
-(`POST /api/drafts`, `GET /api/drafts/:id/status` with the upload token), device sign-in
-(`/api/device/code`, `/api/device/token`, a `tickets:report` token), `/api/apps`,
-`POST /api/tickets` (with `system`, `repro` and `consent`), and resumable uploads (`POST
-/api/uploads` with the file's size and SHA-256, `PUT /api/uploads/:id/parts/:n` in the parts the
-server asks for, `GET /api/uploads/:id` to resume, `POST /api/uploads/:id/complete`).
-`SOLIDCRAFT_TICKETS_URL` points a desktop build at a test server (`https://`, or
-`http://localhost`).
+Every path the app uses is in `crates/ui-egui/src/tickets/api.rs`: report drafts (`POST
+/api/drafts`, with `system`, `repro` and `consent`, no account) and resumable uploads with the
+draft's upload token (`POST /api/uploads` with the file's size and SHA-256, `PUT
+/api/uploads/:id/parts/:n` in the parts the server asks for, `GET /api/uploads/:id` to resume,
+`POST /api/uploads/:id/complete`). The draft and its page must be on the ticket server itself
+(host compared exactly). `SOLIDCRAFT_TICKETS_URL` points a desktop build at a test server
+(`https://`, or `http://` to 127.0.0.1 or localhost).
