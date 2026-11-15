@@ -1170,7 +1170,11 @@ fn exact_bspline_of_edge(
     // is joined only when the bound is within the joined edge's tolerance (a NaN bound
     // refuses). The edge's tolerance is never widened to admit it.
     if let Some(definition) = surface.procedural_definition() {
-        if !(definition.bound() <= tolerance) {
+        let within = definition
+            .bound()
+            .partial_cmp(&tolerance)
+            .is_some_and(std::cmp::Ordering::is_le);
+        if !within {
             return Ok(None);
         }
     }
