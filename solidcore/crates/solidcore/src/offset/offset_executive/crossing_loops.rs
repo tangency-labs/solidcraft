@@ -639,6 +639,11 @@ impl OffsetExecutive {
         if loops.is_empty() {
             return Ok(());
         }
+        // (not upstream) only a face with an edge whose offset is inverted turns inside
+        // out (`TrimmedEdge`); every other face of one loop is left as it is
+        if one_loop && !self.inverted_faces.contains(&f) {
+            return Ok(());
+        }
 
         // Every edge use, in loop order, with its UV trim curve.
         let mut loop_of: Vec<usize> = Vec::new();

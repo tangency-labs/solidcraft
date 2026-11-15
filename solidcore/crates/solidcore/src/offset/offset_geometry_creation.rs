@@ -524,6 +524,12 @@ pub trait OffsetExecutive<O> {
         let _ = original;
         false
     }
+    /// Not upstream (solidcraft#16983): notes offset face `offset_face`, which has an
+    /// edge whose offset is inverted (see `TrimmedEdge`); nothing unless the adapter
+    /// keeps it.
+    fn note_inverted_face(&mut self, offset_face: O) {
+        let _ = offset_face;
+    }
     /// Not upstream (WR-346): whether any inset face's offset collapsed (a convex round
     /// thinner than the wall); `false` unless `Kernel::fixes.offset_collapsed_rounds_mated`.
     fn has_collapsed_faces(&self) -> bool {
@@ -2909,6 +2915,8 @@ impl OffsetGeometryCreation {
 
         // (not upstream) the trim point of the base edge use's start vertex, then its end's
         let mut ends = [0.0_f64; 2];
+        // (not upstream) whether each trim point is a cut by a neighbour's offset surface
+        let mut cuts = [false; 2];
         // for two iterations - find a one 3DCurve trim point
         for i in 0..2 {
             let mut solutions: SolutionArray<O> = SolutionArray::with_capacity(16);
@@ -3376,7 +3384,8 @@ impl OffsetGeometryCreation {
             };
             let same_tol = 10.0 * self.this_approx_tol_3d;
             let first_again = |pnt: Point3| first.is_some_and(|f| distance(pnt, f) <= same_tol);
-            for sol in solutions.as_slice() {
+            let mut found_at = None;
+            for (ix, sol) in solutions.as_slice().iter().enumerate() {
                 let t = sol.start.param(0)?;
                 let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
 
@@ -3386,6 +3395,7 @@ impl OffsetGeometryCreation {
                     found_param = t;
                     found_dist = dist_moved;
                     found = true;
+                    found_at = Some(ix);
                 }
 
                 // If solution is a range, e.g. coincident curves, check m_vEnd
@@ -3399,9 +3409,12 @@ impl OffsetGeometryCreation {
                         found_param = t;
                         found_dist = dist_moved;
                         found = true;
+                        found_at = Some(ix);
                     }
                 }
             }
+            let mut cut = found_at
+                .is_some_and(|ix| face_solutions.iter().any(|&(lo, hi)| lo <= ix && ix < hi));
 
             // Four-face vertex splitting (WR-666, the fork's
             // tangency-labs/smlib@2e1bb8c): where more than three faces meet at the vertex,
@@ -3426,6 +3439,7 @@ impl OffsetGeometryCreation {
                     tan_tol_deg,
                 )? {
                     found_param = param;
+                    cut = true;
                 }
             }
 
@@ -3439,11 +3453,27 @@ impl OffsetGeometryCreation {
             if let Some(end) = ends.get_mut(i) {
                 *end = found_param;
             }
+            if let Some(c) = cuts.get_mut(i) {
+                *c = cut;
+            }
         } // end iter twice
 
         // (not upstream) whether the trim points come in the base edge use's order: an
-        // open edge only (a closed curve's two arcs are chosen below)
-        let inverted = !brep.edge_is_closed(base_edge)?
+        // open edge only (a closed curve's two arcs are chosen below), whose two ends are
+        // both cuts by its neighbours' offsets (they crossed over it); an end dropped from
+        // its vertex or taken from a mated neighbour's vertex says nothing of a crossing.
+        // Only in an inward shell with faces opened (a rib thinner than two walls), at an
+        // edge between two faces, where the faces that turn inside out with it are
+        // resolved before the merge (`offset_resolve_crossing_loops`, which drops their
+        // inverted regions); elsewhere (a solid offset, a sheet's thickening, a lamina
+        // edge, the fix off) an edge whose vertex moves past its other end is refused as
+        // vanishing, as before.
+        let inverted = k.fixes.offset_resolve_crossing_loops
+            && executive.inset()
+            && !executive.shell_faces().is_empty()
+            && other_base_edgeuse.is_some()
+            && cuts == [true, true]
+            && !brep.edge_is_closed(base_edge)?
             && Self::trim_points_inverted(k, brep, base_edgeuse, curve_3d, &trim_ivl, ends)?;
 
         // (WR-463, #403): on a closed curve the two trim points bound two arcs and the
@@ -4309,6 +4339,13 @@ impl OffsetGeometryCreation {
         );
         // (the rbDelete* flags only free the candidates upstream)
         r?;
+        if inverted {
+            for off in [offset_edgeuse, other_offset_edgeuse].into_iter().flatten() {
+                if let Some(face) = brep.edgeuse_face(off)? {
+                    executive.note_inverted_face(face);
+                }
+            }
+        }
 
         // when appropriate - change the pOtherOffsetEdgeuse geometry
         if let Some(other_off) = other_offset_edgeuse {
@@ -4768,6 +4805,13 @@ impl OffsetGeometryCreation {
             Some(other_edgeuse),
             inverted,
         )?;
+        if inverted {
+            for off in [offset_edgeuse, other_offset_edgeuse] {
+                if let Some(face) = brep.edgeuse_face(off)? {
+                    executive.note_inverted_face(face);
+                }
+            }
+        }
 
         // all done
         Ok(())
