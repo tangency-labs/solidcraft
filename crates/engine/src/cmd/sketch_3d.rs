@@ -271,13 +271,21 @@ fn lift_point(s: &mut Session, p: &Value, cmd: &str, point: &str) -> Result<Valu
             (None, Some(d)) => from + solidcraft_doc::apply_vector(&inverse, d),
             (None, None) => return Err(bad(cmd, "give `to` or `by`")),
         };
-        let through: Vec<usize> = sk.curves.iter().enumerate().filter(|(_, c)| c.kind.uses(pi)).map(|(i, _)| i).collect();
+        // The points joined to `pi` by coincident constraints are one place: the curves through any
+        // of them lift together.
+        let roots = super::sketch::coincident_points(sk);
+        let group: Vec<usize> = (0..sk.points.len()).filter(|i| roots.get(*i) == roots.get(pi)).collect();
+        let through: Vec<usize> = sk.curves.iter().enumerate().filter(|(_, c)| group.iter().any(|g| c.kind.uses(*g))).map(|(i, _)| i).collect();
         let mut fits = Vec::new();
         let mut k = 0;
         for (n, &ci) in through.iter().enumerate() {
             let ids = liftable(&sk.curves[ci], cmd)?;
             if n == 0 {
-                k = ids.iter().position(|i| *i == pi).ok_or_else(|| bad(cmd, format!("`{point}` is not a point of `{}`", sk.curves[ci].id)))?;
+                k = ids
+                    .iter()
+                    .position(|i| *i == pi)
+                    .or_else(|| ids.iter().position(|i| group.contains(i)))
+                    .ok_or_else(|| bad(cmd, format!("`{point}` is not a point of `{}`", sk.curves[ci].id)))?;
             }
             let fit = ids
                 .iter()
@@ -285,12 +293,16 @@ fn lift_point(s: &mut Session, p: &Value, cmd: &str, point: &str) -> Result<Valu
                 .collect::<Result<Vec<Vec3>>>()?;
             fits.push(fit);
         }
+        let mut gone = Vec::new();
         if through.is_empty() {
             fits.push(vec![from]);
-            sk.remove_points(&[pi]);
+            gone.push(pi);
         } else {
             sk.remove_curves(&through);
         }
+        // Joined points no curve uses any more go with the lift, and with them their constraints.
+        gone.extend(group.iter().copied().filter(|g| *g != pi && !sk.curves.iter().any(|c| c.kind.uses(*g))));
+        sk.remove_points(&gone);
         let mut made = Vec::new();
         for fit in &fits {
             made.push(sk.add_drawn_wire_in(fit, WireSpace::Component)?);
