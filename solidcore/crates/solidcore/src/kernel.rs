@@ -165,6 +165,7 @@ pub struct WorkCounters {
     proto_edge_intersections: Cell<u64>,
     shell_traversal_faces: Cell<u64>,
     proto_vertex_point_solves: Cell<u64>,
+    merge_record_visits: Cell<u64>,
     face_extreme_control_points: Cell<u64>,
     feet_tm_coefficients: Cell<u64>,
     mass_iso_evaluations: Cell<u64>,
@@ -226,6 +227,18 @@ impl WorkCounters {
     #[must_use]
     pub fn proto_vertex_point_solves(&self) -> u64 {
         self.proto_vertex_point_solves.get()
+    }
+
+    /// The work done on the notification records of the B-reps merged into one list operand
+    /// (`BooleanLists`' `MergeBrep` of each B-rep after the first,
+    /// `boolean::merge::p3::combine_brep`): one for each arena slot, key or record a pass
+    /// touches in the reserved-key check, the seeding of default records and the reset of a
+    /// kept store, for the operand and for the B-rep merged into it
+    /// (`NotifyRecords::note_visits` says what a pass is and what is outside the count). Not
+    /// the fork's.
+    #[must_use]
+    pub fn merge_record_visits(&self) -> u64 {
+        self.merge_record_visits.get()
     }
 
     /// Control points of the B-spline nets the trimmed-face tight box's directed solves
@@ -324,6 +337,7 @@ impl WorkCounters {
         self.proto_edge_intersections.set(0);
         self.shell_traversal_faces.set(0);
         self.proto_vertex_point_solves.set(0);
+        self.merge_record_visits.set(0);
         self.face_extreme_control_points.set(0);
         self.feet_tm_coefficients.set(0);
         self.mass_iso_evaluations.set(0);
@@ -369,6 +383,12 @@ impl WorkCounters {
     pub(crate) fn add_proto_vertex_point_solve(&self) {
         self.proto_vertex_point_solves
             .set(self.proto_vertex_point_solves.get().saturating_add(1));
+    }
+
+    /// Counts `visits` slots and keys visited for a list operand merge's records.
+    pub(crate) fn add_merge_record_visits(&self, visits: u64) {
+        self.merge_record_visits
+            .set(self.merge_record_visits.get().saturating_add(visits));
     }
 
     /// Counts the control points of the net one trimmed-face extreme solve ran on.
@@ -503,9 +523,6 @@ upstream_fixes! {
 #[allow(clippy::struct_excessive_bools)]
 #[non_exhaustive]
 pub struct UpstreamFixes {
-    /// `SmPlane::IsNurbSurfacePlane` places a recognised surface's origin after
-    /// orthogonalising its axes (WR-652, upstream issue #1056).
-    pub plane_recognition_origin_after_axes: bool,
     /// `SmCurveLoops::GetLoopStartEnd` starts a later loop after the previous loop
     /// ends, keeping adjacency within that loop (WR-96). Off by default for C++ parity.
     pub curve_loop_start_after_previous_end: bool,
@@ -631,11 +648,6 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-99--addendum-2026-11-01-guard-max-boundary-retry.md`).
     /// Off by default for pinned C++ parity.
     pub local_surface_intersect_guards_max_boundary_retry: bool,
-    /// `SmPlane::Reparameterize` moves the placement origin to `sOriginMax` when the UV domain
-    /// is reparameterized, maintaining consistency between analytic plane and NURB evaluations
-    /// across shifted domains; upstream computes `sOriginMax` but only references it under
-    /// `SM_DEBUG_CODE` (WR-41). Off by default for pinned C++ parity.
-    pub plane_reparameterize_moves_origin: bool,
     /// `SmCurveBoundedSurface::ReadFromDB` dispatches each UV boundary curve on its own
     /// stream header type (`lUVType`) instead of reusing the last 3D boundary's type
     /// (`l3DType`, `0` when there are no 3D boundaries), and passes the read
@@ -889,14 +901,10 @@ pub struct UpstreamFixes {
     pub offset_extension_as_itself: bool,
     /// `DoFilleting`'s `BooleanPostProcess` removes none of the target's own edges, nor an edge between two of its faces (the fork's `m_sPostProcessKeptEdges`/`Faces`), so the patches of a sphere imported in six faces are not merged into a face no patch's parameterization can carry (WR-459, #423; the fork's tangency-labs/smlib@b7d7b96 (was 9ddf4a8)).
     pub fillet_cleanup_keeps_target_faces: bool,
-    /// `SmFilletNx1Corner::MakeCornerTopology` skips a side edge whose faces meet tangentially at the corner's vertex (a flat top running smoothly onto a round) round the vertex to the edge past it, so the end face is the one beyond the tangent seam (the slot wall), not the round the fillet never meets, and `SmFilletEdge::CalcEdgeOnExtendedEdge` intersects the side face with the end face's extension when the side face is not one of the edge's own faces (WR-457, #418; the fork's tangency-labs/smlib@ba7f68e (was d5ebcb3)).
+    /// `SmFilletNx1Corner::MakeCornerTopology` skips a side edge whose faces meet tangentially at the corner's vertex (a flat top running smoothly onto a round) round the vertex to the edge past it, so the end face is the one beyond the tangent seam (the slot wall), not the round the fillet never meets, and `SmFilletEdge::CalcEdgeOnExtendedEdge` intersects the side face with the end face's extension when the side face is not one of the edge's own faces (WR-457, #418; the fork's tangency-labs/smlib@ba7f68e (was d5ebcb3)). The skip also passes, once, the filleted edge's G1 continuation across the vertex of the opposite convexity (past any tangent edges): the overhang's rim continuing the base circle of a cylinder standing over a block's edge. The edge past it, of the filleted edge's convexity, is the side edge extended and the face beyond it the end face, so the round ends there instead of failing with status 1001 (WR-499, #1474; the fork's tangency-labs/smlib@420e47d; no longer a flag of its own).
     pub fillet_nx1_tangent_side_edge: bool,
-    /// `SmFilletNx1Corner::MakeCornerTopology`'s tangent side-edge skip (`fillet_nx1_tangent_side_edge`, which must be on too) also passes, once, the filleted edge's G1 continuation across the vertex of the opposite convexity (past any tangent edges): the overhang's rim continuing the base circle of a cylinder standing over a block's edge. The edge past it, of the filleted edge's convexity, is the side edge extended and the face beyond it the end face, so the round ends there instead of failing with status 1001 (WR-499, #1474; the fork's tangency-labs/smlib@420e47d).
-    pub fillet_nx1_opposite_continuation_side_edge: bool,
     /// `SmCircularCrossSectionFSG::CreateSurfaceFromCurves` moves both rails' end control points to their midpoint at an end where the rails' ends lie within the approximation tolerance of each other (a degenerate corner whose cross section is a point), before the surface is skinned: each rail is lifted from its own surface, so at a vertex their ends differ by the model's accuracy (6.5e-12 mm on a sketch with solver residues), and the skinned surface kept a near pole there instead of an exact one, which `SmSurface` check test 5 refuses as close to singular (WR-594; the fork's tangency-labs/smlib@5fdefb9).
     pub fillet_rails_meet_at_one_end_point: bool,
-    /// `SmFillet3x2MixedConvexityCorner::MakeCornerTopology` gives the roles of the corner's two filleted edges by the unfilleted edge's convexity: where it is concave (a boss standing over a bar's side face, its line on that face running down from the vertex) the convex fillet's rail crosses it and the concave fillet's rail crosses its continuation past the vertex, instead of the other way round as in an L-shaped box, so the corner no longer fails with status 1001 "Corner Geometry Computation Failure" (WR-524, #1475; the fork's tangency-labs/smlib@1255993).
-    pub fillet_3x2_mixed_concave_side_edge: bool,
     /// `SmFilletNx2Corner::MakeCornerTopology` mitres two blends meeting at a vertex of three edges where the common face's corner between them is concave (mixed convexity: a pocket's rim at its sharp corner, a boss's root at its sharp corner, the side edge not filleted), as at a corner of uniform convexity: the rails meet in the common face (`SM_FV_RAIL_X_RAIL`) and on the side edge, the blends' surfaces meet along their intersection, and the corner is a bevel (where the rails meet the side edge at two places, `AdjustTopology` joins them along the side face). Upstream sweeps a 3-sided face round the side edge between ribs straight across from where the rails meet it. Edges meeting at 5 degrees or less still blend (WR-642; the fork's tangency-labs/smlib@4f06e72, the owner's ruling of 2026-10-30).
     pub fillet_mitre_concave_face_corners: bool,
     /// `SmFilletNx2Corner::AdjustTopology`, at a bevel (mitre) of two blends meeting at a vertex of three edges where the common face's corner between them is concave and whose rails meet the side edge at two places (walls leaning differently, a sloped basin's rim), builds the topology `AdjustConcaveCornerTopology` builds at a swept corner of mixed convexity instead of splitting the side vertex as for a convex bevel: each rail ends where it meets the side edge, the larger round's cut and the smaller rail's extension run on the side face's extended surface to where the mitre's curve meets them, and `CreateCornerPatch` fills only that gap with a patch on the side face's extended surface (`FilletCorner::bevel_gap_patch`). Upstream cut the larger round by the side face's own surface, which ends at the side edge (`CalcFilletIntSideFace` fails), or the smaller rail ran past its face (`TestRollOver` fails). Mitres at such corners come from `fillet_mitre_concave_face_corners` or a corner set to bevel (WR-644; the fork's tangency-labs/smlib@2223108).
@@ -1634,9 +1642,10 @@ mod tests {
                 w.ball_certified_roots(),
                 w.shell_traversal_faces(),
                 w.proto_vertex_point_solves(),
+                w.merge_record_visits(),
             )
         };
-        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0));
         w.add_face_pair();
         w.add_face_pair();
         w.add_loop_classified();
@@ -1648,11 +1657,12 @@ mod tests {
         w.add_ball_certified_root();
         w.add_shell_traversal_face();
         w.add_proto_vertex_point_solve();
-        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1, 1, 1));
+        w.add_merge_record_visits(3);
+        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1, 1, 1, 3));
         // each kernel counts its own work
         assert_eq!(Kernel::default().work_counters.face_pairs(), 0);
         w.reset();
-        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0));
     }
 
     #[test]

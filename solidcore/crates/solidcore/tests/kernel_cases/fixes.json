@@ -1,5 +1,4 @@
 [
-  "plane_recognition_origin_after_axes",
   "curve_loop_start_after_previous_end",
   "fillet_trim_status",
   "curve_loop_normal_from_area",
@@ -39,7 +38,6 @@
   "drop_curve_v_domain_degeneracy",
   "torus_check_spindle_apex",
   "local_surface_intersect_guards_max_boundary_retry",
-  "plane_reparameterize_moves_origin",
   "curve_bounded_surface_read_uv_type_and_implicit_outer",
   "planar_path_profile_placement_statuses",
   "revolve_analytic_profile_faces",
@@ -106,9 +104,7 @@
   "offset_extension_as_itself",
   "fillet_cleanup_keeps_target_faces",
   "fillet_nx1_tangent_side_edge",
-  "fillet_nx1_opposite_continuation_side_edge",
   "fillet_rails_meet_at_one_end_point",
-  "fillet_3x2_mixed_concave_side_edge",
   "fillet_mitre_concave_face_corners",
   "fillet_mitre_gap_patch",
   "fillet_corner_per_vertex_fan",

@@ -8,6 +8,12 @@
 //! `sm_GnJacobian`, `sm_Solve4`, `sm_GnStation`, `sm_LeaderSeries`, `sm_GnSolveStation` in
 //! `source/SMLib/src/SmFilletSection.cpp` (tangency-labs/smlib@11ea2d9); see [`super`] for
 //! the table.
+//!
+//! Deviations: an enclosure (an interval or a Taylor model) takes each face's offset point
+//! `S + r N` as one Taylor expansion in the foot's parameters ([`offset_taylor`],
+//! tangency-labs/solidcraft#16652), where the fork sums the expansions of `S` and `r N`: the
+//! same algebra, but only the first keeps their cancellation near the face's focal
+//! distance. The floating-point jets keep the fork's sum.
 
 use std::borrow::Cow;
 
@@ -586,6 +592,228 @@ pub struct GnSystem<'a, T: GnScalar> {
     pub law: Option<&'a Ser<T>>,
 }
 
+/// The Taylor coefficients `W[a][b]` (`a + b <= deg`) of a face's offset point
+/// `W(u, v) = S(u, v) + d0 N(u, v)` about the point its partials `pf` were taken at (or
+/// over the box they enclose): `W(u0 + du, v0 + dv) = sum W[a][b] du^a dv^b`, `N` the unit
+/// normal `S_u x S_v / |S_u x S_v|`. Not the fork's (#16652): the offset taken as one
+/// expansion, so an enclosure keeps the cancellation between `S` and `d0 N`, where the
+/// sum of their two expansions loses it (each enclosed apart, a coefficient's width is
+/// `|S_ab| + |d0 N_ab|` where the true value is their difference: near the face's focal
+/// distance, a cylinder of radius R offset by `d0 = -r` near R, every order's width came
+/// out `(R + r) / (R - r)` times too wide).
+///
+/// The algebra, all in `T` (each operation rounded outward for an enclosure):
+/// `t[a][b] = P[a][b] / (a! b!)` (the face's own Taylor coefficients, `1 / (a! b!)`
+/// rounded in T as [`gn_evaluate`] takes it), `S_u`'s and `S_v`'s coefficients
+/// `(a + 1) t[a + 1][b]` and `(b + 1) t[a][b + 1]`, their cross product `n` and `h = n . n`
+/// by Cauchy products, and `g = h^(-1/2)` by the recurrence of its homogeneous parts from
+/// `h Dg = -g Dh / 2` (`D = du d/du + dv d/dv`, the degree operator):
+/// `g_m = -(1 / (m h_0)) sum_{j < m} ((m + j) / 2) h_(m-j) g_j`, `g_0 = 1 / sqrt(h_0)`;
+/// then `N = n g` and `W = t + d0 N`. Each coefficient depends only on lower ones, so
+/// `W[a][b]` is the same whatever `deg` it is computed to. The partials are read to total
+/// order `deg + 1`.
+///
+/// # Errors
+///
+/// `SM_ERR` where the normal vanishes (`h_0` not positive), as [`Ser::inv_sqrt`].
+pub fn offset_taylor<T: GnScalar>(pf: &Partials<T>, d0: T, deg: usize) -> Result<Vec<V3<T>>> {
+    let zero = T::of(0.0);
+    let vz = V3 {
+        x: zero,
+        y: zero,
+        z: zero,
+    };
+    let k1 = deg + 1;
+    let w = k1 + 1;
+    let idx = |a: usize, b: usize| a * w + b;
+    let get = |v: &[V3<T>], a: usize, b: usize| v.get(idx(a, b)).copied().unwrap_or(vz);
+    let gets = |v: &[T], a: usize, b: usize| v.get(idx(a, b)).copied().unwrap_or(zero);
+    // the face's Taylor coefficients to total degree deg + 1
+    let mut t = vec![vz; w * w];
+    let mut fa = 1.0_f64;
+    for a in 0..=k1 {
+        if a > 0 {
+            fa *= a as f64;
+        }
+        let mut fb = 1.0_f64;
+        for b in 0..=(k1 - a) {
+            if b > 0 {
+                fb *= b as f64;
+            }
+            let sf = T::of(1.0) / T::of(fa * fb);
+            let p = pf.at(a, b);
+            if let Some(x) = t.get_mut(idx(a, b)) {
+                *x = V3 {
+                    x: p.x * sf,
+                    y: p.y * sf,
+                    z: p.z * sf,
+                };
+            }
+        }
+    }
+    // S_u's and S_v's, to total degree deg
+    let mut su = vec![vz; w * w];
+    let mut sv = vec![vz; w * w];
+    for a in 0..=deg {
+        for b in 0..=(deg - a) {
+            let (cu, cv) = (T::of((a + 1) as f64), T::of((b + 1) as f64));
+            let (tu, tv) = (get(&t, a + 1, b), get(&t, a, b + 1));
+            if let (Some(x), Some(y)) = (su.get_mut(idx(a, b)), sv.get_mut(idx(a, b))) {
+                *x = V3 {
+                    x: tu.x * cu,
+                    y: tu.y * cu,
+                    z: tu.z * cu,
+                };
+                *y = V3 {
+                    x: tv.x * cv,
+                    y: tv.y * cv,
+                    z: tv.z * cv,
+                };
+            }
+        }
+    }
+    // n = S_u x S_v and h = n . n
+    let mut n = vec![vz; w * w];
+    let mut h = vec![zero; w * w];
+    for a in 0..=deg {
+        for b in 0..=(deg - a) {
+            let mut c = vz;
+            for i in 0..=a {
+                for j in 0..=b {
+                    let (p, q) = (get(&su, i, j), get(&sv, a - i, b - j));
+                    c.x = c.x + (p.y * q.z - p.z * q.y);
+                    c.y = c.y + (p.z * q.x - p.x * q.z);
+                    c.z = c.z + (p.x * q.y - p.y * q.x);
+                }
+            }
+            if let Some(x) = n.get_mut(idx(a, b)) {
+                *x = c;
+            }
+        }
+    }
+    for a in 0..=deg {
+        for b in 0..=(deg - a) {
+            let mut c = zero;
+            for i in 0..=a {
+                for j in 0..=b {
+                    let (p, q) = (get(&n, i, j), get(&n, a - i, b - j));
+                    c = c + (p.x * q.x + p.y * q.y + p.z * q.z);
+                }
+            }
+            if let Some(x) = h.get_mut(idx(a, b)) {
+                *x = c;
+            }
+        }
+    }
+    // g = h^(-1/2), degree by degree
+    let h0 = gets(&h, 0, 0);
+    // 1 / sqrt(h0), refused where the normal vanishes, as the series' own inverse root
+    let g0 = Ser::constant(h0).inv_sqrt(Trunc::new(0, 0)?)?.at(0, 0);
+    let mut g = vec![zero; w * w];
+    if let Some(x) = g.get_mut(idx(0, 0)) {
+        *x = g0;
+    }
+    for m in 1..=deg {
+        let scale = T::of(-1.0) / (T::of(m as f64) * h0);
+        for a in 0..=m {
+            let b = m - a;
+            let mut c = zero;
+            // g_j's coefficients (p, q), p + q = j < m, times h's at (a - p, b - q)
+            for p in 0..=a {
+                for q in 0..=b {
+                    let j = p + q;
+                    if j >= m {
+                        continue;
+                    }
+                    let f = T::of(0.5 * (m + j) as f64);
+                    c = c + f * gets(&h, a - p, b - q) * gets(&g, p, q);
+                }
+            }
+            if let Some(x) = g.get_mut(idx(a, b)) {
+                *x = scale * c;
+            }
+        }
+    }
+    // W = t + d0 n g
+    let mut out = vec![vz; (deg + 1) * (deg + 1)];
+    for a in 0..=deg {
+        for b in 0..=(deg - a) {
+            let mut c = vz;
+            for i in 0..=a {
+                for j in 0..=b {
+                    let (p, q) = (get(&n, i, j), gets(&g, a - i, b - j));
+                    c.x = c.x + p.x * q;
+                    c.y = c.y + p.y * q;
+                    c.z = c.z + p.z * q;
+                }
+            }
+            let ta = get(&t, a, b);
+            if let Some(x) = out.get_mut(a * (deg + 1) + b) {
+                *x = V3 {
+                    x: ta.x + d0 * c.x,
+                    y: ta.y + d0 * c.y,
+                    z: ta.z + d0 * c.z,
+                };
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The offset's constant term `d0` (its series' at `sigma^0 eps^0`): `r_i s_i`, or the
+/// law's radius there times the side.
+fn offset_d0<T: GnScalar>(sys: &GnSystem<'_, T>, rf: f64, sidef: f64) -> T {
+    match sys.law {
+        Some(law) => law.at(0, 0) * T::of(sidef),
+        None => T::of(rf * sidef),
+    }
+}
+
+/// Whether the offset's series has terms past its constant: a law's radius varies with
+/// sigma, and with the offsets not held the offset is `tau r_i s_i`, `tau = 1 + eps`.
+fn offset_varies<T: GnScalar>(sys: &GnSystem<'_, T>, tr: Trunc) -> bool {
+    sys.law.is_some() || (!sys.hold && tr.e() >= 1)
+}
+
+/// The offset point `V = W + (d - d0) N` from the joint expansion's series `wv` (`W`
+/// composed with the feet, [`offset_taylor`]), `N = nrm inv_len`, `d` the offset's series:
+/// `S + d N` with `S + d0 N` taken as one. `varies`: [`offset_varies`] (otherwise
+/// `d - d0` is 0 and `V = W`).
+fn offset_rest<T: GnScalar>(
+    wv: VSer<T>,
+    nrm: &VSer<T>,
+    inv_len: &Ser<T>,
+    d: &Ser<T>,
+    varies: bool,
+    tr: Trunc,
+) -> VSer<T> {
+    if !varies {
+        return wv;
+    }
+    wv.add(&nrm.times(&inv_len.mul(&offset_part(d), tr), tr), tr)
+}
+
+/// `d - d0`: the offset's series less its constant term (taken in [`offset_taylor`]).
+fn offset_part<T: GnScalar>(d: &Ser<T>) -> Ser<T> {
+    let mut dd = d.clone();
+    dd.set(0, 0, T::of(0.0));
+    dd
+}
+
+/// `W[a][b]` of [`offset_taylor`]'s coefficients computed to degree `deg` (0 past it).
+fn offset_at<T: GnScalar>(w: &[V3<T>], deg: usize, a: usize, b: usize) -> V3<T> {
+    let zero = T::of(0.0);
+    let vz = V3 {
+        x: zero,
+        y: zero,
+        z: zero,
+    };
+    if a + b > deg {
+        return vz;
+    }
+    w.get(a * (deg + 1) + b).copied().unwrap_or(vz)
+}
+
 /// G's four series and the two feet's (`sm_GnEvaluate`'s `rG`, `rF`).
 pub type GnValues<T> = ([Ser<T>; 4], [VSer<T>; 2]);
 
@@ -659,6 +887,14 @@ pub fn gn_evaluate_vn<T: GnScalar>(
         // du^a and dv^b are 0 below degree a and b (du, dv have no constant term): the
         // powers and monomials past the degree computed are 0 there and left out
         let top = lm.min(tr.degree());
+        // the offset point's own expansion (enclosures, #16652): its constant offset d0
+        let d0 = offset_d0(sys, rf, sidef);
+        let wt = if T::JOINT_OFFSET {
+            Some(offset_taylor(pf, d0, top)?)
+        } else {
+            None
+        };
+        let mut wv = VSer::constant(zero);
         let mut pu = vec![Ser::constant(T::of(1.0))];
         let mut pv = vec![Ser::constant(T::of(1.0))];
         for a in 1..=top {
@@ -696,6 +932,12 @@ pub fn gn_evaluate_vn<T: GnScalar>(
                         o.add_scaled_from(&mono, cj * sf, a + b, tr);
                     }
                 }
+                if let Some(wt) = &wt {
+                    let c = offset_at(wt, top, a, b);
+                    for (o, &cj) in wv.a.iter_mut().zip(&[c.x, c.y, c.z]) {
+                        o.add_scaled_from(&mono, cj, a + b, tr);
+                    }
+                }
             }
         }
         let nrm = su.cross(&sv, tr);
@@ -713,7 +955,11 @@ pub fn gn_evaluate_vn<T: GnScalar>(
                 d.set(i, 1, d.at(i, 0));
             }
         }
-        let vf = s.add(&nrm.times(&inv_len.mul(&d, tr), tr), tr);
+        let vf = if wt.is_some() {
+            offset_rest(wv, &nrm, &inv_len, &d, offset_varies(sys, tr), tr)
+        } else {
+            s.add(&nrm.times(&inv_len.mul(&d, tr), tr), tr)
+        };
         if let (Some(vo), Some(fo), Some(no)) =
             (v_out.get_mut(f), f_out.get_mut(f), n_out.get_mut(f))
         {
@@ -747,6 +993,10 @@ struct GnFaceSeries<T: GnScalar> {
     w: Ser<T>,
     v: VSer<T>,
     n: VSer<T>,
+    /// The offset point's joint expansion composed with the feet ([`offset_taylor`]).
+    wv: VSer<T>,
+    /// Its coefficients, to the orders' total degree (none before the first evaluation).
+    wt: Option<Vec<V3<T>>>,
 }
 
 impl<T: GnScalar> GnFaceSeries<T> {
@@ -767,7 +1017,9 @@ impl<T: GnScalar> GnFaceSeries<T> {
             inv: InvSqrtSeries::default(),
             w: z,
             v: vz.clone(),
-            n: vz,
+            n: vz.clone(),
+            wv: vz,
+            wt: None,
         }
     }
 }
@@ -922,6 +1174,12 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
             merge_v(&mut fs.s, &vzero, btr);
             merge_v(&mut fs.su, &vzero, btr);
             merge_v(&mut fs.sv, &vzero, btr);
+            // the offset point's joint expansion (#16652), its coefficients once per orders
+            // (each the same whatever degree it is computed to, so [`gn_evaluate_vn`]'s)
+            if T::JOINT_OFFSET && fs.wt.is_none() {
+                fs.wt = Some(offset_taylor(pf, offset_d0(sys, rf, sidef), lm)?);
+            }
+            merge_v(&mut fs.wv, &vzero, btr);
             let mut fa = 1.0_f64;
             for (a, pua) in fs.pu.iter().enumerate().take(top + 1) {
                 if a > 0 {
@@ -942,6 +1200,12 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
                             o.add_scaled_from(&mono, cj * sf, a + b, btr);
                         }
                     }
+                    if let Some(wt) = &fs.wt {
+                        let c = offset_at(wt, lm, a, b);
+                        for (o, &cj) in fs.wv.a.iter_mut().zip(&[c.x, c.y, c.z]) {
+                            o.add_scaled_from(&mono, cj, a + b, btr);
+                        }
+                    }
                 }
             }
             merge_v(&mut fs.nrm, &fs.su.cross(&fs.sv, btr), btr);
@@ -958,8 +1222,21 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
                     d.set(i, 1, d.at(i, 0));
                 }
             }
-            fs.w.merge_computed(&inv_len.mul(&d, btr), btr);
-            merge_v(&mut fs.v, &fs.s.add(&fs.nrm.times(&fs.w, btr), btr), btr);
+            // (kept, as every series a later product reads: a product's coefficient reads
+            // its operands' lower ones, which an incremental call does not compute again)
+            let joint = fs.wt.is_some();
+            let dw = if joint { offset_part(&d) } else { d };
+            fs.w.merge_computed(&inv_len.mul(&dw, btr), btr);
+            if joint {
+                let vf = if offset_varies(sys, tr) {
+                    fs.wv.add(&fs.nrm.times(&fs.w, btr), btr)
+                } else {
+                    fs.wv.clone()
+                };
+                merge_v(&mut fs.v, &vf, btr);
+            } else {
+                merge_v(&mut fs.v, &fs.s.add(&fs.nrm.times(&fs.w, btr), btr), btr);
+            }
             merge_v(&mut fs.n, &fs.nrm.times(&inv_len, btr), btr);
         }
         let [f0, f1] = &self.faces;
@@ -2156,5 +2433,199 @@ mod tests {
             SolidError::blend_failed(OP, "the order is past the most the series hold")
         );
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+    }
+
+    /// A cylinder of radius 10 about z (height 20) as its NURBS, a point of it inside a
+    /// span, and its spans there.
+    fn cylinder_at() -> (Nurbs, f64, f64, usize, usize) {
+        let k = Kernel::default();
+        let mut cyl = crate::surface::cone::Cone::new_cylinder_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            10.0,
+            0.0,
+            360.0,
+            20.0,
+            false,
+            false,
+            false,
+        );
+        cyl.make_nurb(&k).unwrap();
+        let s = Surface::from(cyl);
+        let n = Nurbs::of(&as_b_spline(&k, &s).unwrap().unwrap()).unwrap();
+        let (u0, u1) = (knot(&n.u, n.p as isize), knot(&n.u, n.nu as isize));
+        let (v0, v1) = (knot(&n.v, n.q as isize), knot(&n.v, n.nv as isize));
+        let (u, v) = (u0 + 0.137 * (u1 - u0), 0.5 * (v0 + v1));
+        let (ku, kv) = (span(&n.u, n.p, n.nu, u), span(&n.v, n.q, n.nv, v));
+        (n, u, v, ku, kv)
+    }
+
+    /// The offset `S + d0 N` and its unit normal at `(u, v)` of `n`, in doubles.
+    fn offset_point(n: &Nurbs, u: f64, v: f64, d0: f64) -> [f64; 3] {
+        let ku = span(&n.u, n.p, n.nu, u);
+        let kv = span(&n.v, n.q, n.nv, v);
+        let p = nurbs_partials::<f64>(n, ku, kv, u, v, 1);
+        let (s, su, sv) = (p.at(0, 0), p.at(1, 0), p.at(0, 1));
+        let c = [
+            su.y * sv.z - su.z * sv.y,
+            su.z * sv.x - su.x * sv.z,
+            su.x * sv.y - su.y * sv.x,
+        ];
+        let l = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt();
+        [
+            s.x + d0 * c[0] / l,
+            s.y + d0 * c[1] / l,
+            s.z + d0 * c[2] / l,
+        ]
+    }
+
+    /// The offset point's joint expansion ([`offset_taylor`], #16652) is the offset's
+    /// Taylor polynomial: on a cylinder of radius 10 offset by -9.99 and by +9.99 (a
+    /// cylinder of radius 0.01 or 19.99 about the same axis, the cylinder scaled about it:
+    /// every coefficient to degree 6 is the face's own scaled by 0.001 or 1.999 in x and y,
+    /// the closed form), the polynomial of degree 6 at
+    /// a step of a thousandth of the parameters' range (its remainder, of degree 7, below
+    /// 1e-15 there) agrees with `S + d0 N` taken at the
+    /// stepped point to 1e-11, lies at the closed-form radius, and the interval expansion
+    /// at the same point (thin partials) holds the double one's coefficients to 1e-12.
+    #[test]
+    fn the_joint_offset_expansion_is_the_offset_point() {
+        let (n, u, v, ku, kv) = cylinder_at();
+        let deg = 6;
+        let pf = nurbs_partials::<f64>(&n, ku, kv, u, v, deg + 1);
+        let pi = nurbs_partials::<Ivl>(&n, ku, kv, Ivl::from(u), Ivl::from(v), deg + 1);
+        let span_u = knot(&n.u, n.nu as isize) - knot(&n.u, n.p as isize);
+        let span_v = knot(&n.v, n.nv as isize) - knot(&n.v, n.q as isize);
+        for d0 in [-9.99, 9.99] {
+            let w = offset_taylor(&pf, d0, deg).unwrap();
+            let wi = offset_taylor(&pi, Ivl::from(d0), deg).unwrap();
+            // closed form, every order: the offset cylinder is the cylinder scaled about
+            // its axis (z) by k = 0.001 or 1.999, an affine map, so each Taylor
+            // coefficient is the face's own, scaled by k in x and y
+            let w00 = offset_at(&w, deg, 0, 0);
+            let p00 = pf.at(0, 0);
+            let kk = w00.x.hypot(w00.y) / p00.x.hypot(p00.y);
+            assert!(
+                (kk - 0.001).abs() < 1e-12 || (kk - 1.999).abs() < 1e-12,
+                "d0 {d0}: k {kk}"
+            );
+            let mut fa = 1.0_f64;
+            for a in 0..=deg {
+                if a > 0 {
+                    fa *= a as f64;
+                }
+                let mut fb = 1.0_f64;
+                for b in 0..=(deg - a) {
+                    if b > 0 {
+                        fb *= b as f64;
+                    }
+                    let (c, p) = (offset_at(&w, deg, a, b), pf.at(a, b));
+                    let want = [kk * p.x / (fa * fb), kk * p.y / (fa * fb), p.z / (fa * fb)];
+                    let scale = 1.0 + p.x.abs().max(p.y.abs()).max(p.z.abs()) / (fa * fb);
+                    for (x, y) in [c.x, c.y, c.z].iter().zip(want) {
+                        assert!(
+                            (x - y).abs() < 1e-10 * scale,
+                            "d0 {d0} W[{a}][{b}]: {x} against {y}"
+                        );
+                    }
+                }
+            }
+            for a in 0..=deg {
+                for b in 0..=(deg - a) {
+                    let (c, ci) = (offset_at(&w, deg, a, b), offset_at(&wi, deg, a, b));
+                    for (x, xi) in [(c.x, ci.x), (c.y, ci.y), (c.z, ci.z)] {
+                        let slack = 1e-12 * (1.0 + x.abs());
+                        assert!(
+                            xi.lo - slack <= x && x <= xi.hi + slack,
+                            "d0 {d0} W[{a}][{b}] {x} not in {xi:?}"
+                        );
+                    }
+                }
+            }
+            for (fu, fv) in [(0.001, 0.0), (0.0, 0.001), (-0.0007, 0.0004)] {
+                let (du, dv) = (fu * span_u, fv * span_v);
+                let mut p = [0.0_f64; 3];
+                for a in 0..=deg {
+                    for b in 0..=(deg - a) {
+                        let c = offset_at(&w, deg, a, b);
+                        let m = du.powi(a as i32) * dv.powi(b as i32);
+                        p[0] += c.x * m;
+                        p[1] += c.y * m;
+                        p[2] += c.z * m;
+                    }
+                }
+                let q = offset_point(&n, u + du, v + dv, d0);
+                for (pc, qc) in p.iter().zip(&q) {
+                    assert!((pc - qc).abs() < 1e-11, "d0 {d0}: {p:?} against {q:?}");
+                }
+                let radius = p[0].hypot(p[1]);
+                let near = |r: f64| (radius - r).abs() < 1e-11;
+                assert!(near(0.01) || near(19.99), "d0 {d0}: radius {radius}");
+            }
+        }
+    }
+
+    /// The root cause of #16652: near a face's focal distance the offset point moves far
+    /// slower than the face's point (a cylinder of radius 10 offset by 9.99 toward its axis:
+    /// a thousandth as fast), and the offset's enclosure must keep that. A foot whose
+    /// first s-coefficient is an interval of half width w gives the offset's first
+    /// coefficient a width of `2 w |W_u|` (closed form: `W_u` the offset's own u-partial,
+    /// its speed); the joint expansion holds it within twice that. As the sum of the
+    /// face's and the normal's expansions (the fork's), it came out `(R + r) / (R - r)`,
+    /// about 2000 times, wider, and every order of the certificate's series again.
+    #[test]
+    fn the_offset_enclosure_keeps_the_focal_cancellation() {
+        let (n, u, v, ku, kv) = cylinder_at();
+        let pi = nurbs_partials::<Ivl>(&n, ku, kv, Ivl::from(u), Ivl::from(v), MAX_K);
+        // the second face: the plane z = 0 by its parameters
+        let mut p2 = Partials::<Ivl>::default();
+        let iv = |x: f64, y: f64, z: f64| V3 {
+            x: Ivl::from(x),
+            y: Ivl::from(y),
+            z: Ivl::from(z),
+        };
+        p2.set(1, 0, iv(1.0, 0.0, 0.0));
+        p2.set(0, 1, iv(0.0, 1.0, 0.0));
+        let pf = nurbs_partials::<f64>(&n, ku, kv, u, v, 2);
+        // the side toward the axis
+        let (s, su, sv) = (pf.at(0, 0), pf.at(1, 0), pf.at(0, 1));
+        let outward = (su.y * sv.z - su.z * sv.y) * s.x + (su.z * sv.x - su.x * sv.z) * s.y;
+        let side = if outward > 0.0 { -1.0 } else { 1.0 };
+        let r = 9.99;
+        let w_u = offset_at(&offset_taylor(&pf, r * side, 1).unwrap(), 1, 1, 0);
+        let zero = Ser::constant(Ivl::from(0.0));
+        let sys = GnSystem {
+            p: [&pi, &p2],
+            leader: VSer {
+                a: [zero.clone(), zero.clone(), zero.clone()],
+            },
+            tangent: VSer {
+                a: [zero.clone(), zero.clone(), zero],
+            },
+            r: [r, 1.0],
+            side: [side, 1.0],
+            hold: true,
+            law: None,
+        };
+        let half = 1e-6;
+        let mut xu = Ser::constant(Ivl::from(u));
+        xu.set(1, 0, Ivl::new(1.0 - half, 1.0 + half));
+        let x = [
+            xu,
+            Ser::constant(Ivl::from(v)),
+            Ser::constant(Ivl::from(0.0)),
+            Ser::constant(Ivl::from(0.0)),
+        ];
+        let (_, _, vv, _) = gn_evaluate_vn(&sys, &x, Trunc::new(1, 0).unwrap()).unwrap();
+        for (c, wc) in vv.a.iter().zip([w_u.x, w_u.y, w_u.z]) {
+            let got = c.at(1, 0);
+            let width = got.hi - got.lo;
+            let closed = 2.0 * half * wc.abs();
+            assert!(
+                width <= 2.0 * closed + 1e-12,
+                "width {width:e} against the closed form's {closed:e}"
+            );
+        }
     }
 }

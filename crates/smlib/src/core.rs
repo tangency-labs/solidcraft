@@ -96,7 +96,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_analytic_mate_edges = true;
     f.local_operation_refuses_loose_tangent_edges = true;
     f.torus_major_radius_from_origin = true;
-    f.fillet_nx1_opposite_continuation_side_edge = true;
     f.torus_iso_circle_axis_from_midpoint = true;
     f.internal_pole_row_through_knot = true;
     f.extrusion_origin_scaled_zero = true;
@@ -122,7 +121,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_extension_from_base = true;
     f.fillet_cleanup_keeps_target_faces = true;
     f.fillet_nx1_tangent_side_edge = true;
-    f.fillet_3x2_mixed_concave_side_edge = true;
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.shell_empty_cavity_fails = true;
@@ -176,7 +174,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.planar_path_sweep_statuses = true;
     f.planar_path_profile_placement_statuses = true;
     f.fillet_trim_status = true;
-    f.plane_recognition_origin_after_axes = true;
     f.brep_edit_statuses_pass_on = true;
     f.fillet_run_on_bspline_trims = true;
     f.query_statuses_pass_on = true;
@@ -206,7 +203,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.volume_lift_third_derivative_terms = true;
-    f.plane_reparameterize_moves_origin = true;
     f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
     f.volume_representational_end_continuities = true;
     f.offset_open_edge_second_trim_point = true;

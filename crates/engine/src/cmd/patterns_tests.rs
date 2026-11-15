@@ -1589,3 +1589,45 @@ fn copies_of_a_curvature_or_spline_fillet_keep_its_type() {
         }
     }
 }
+
+/// #16934: a circular pattern of a groove and the fillet that rounds its edges. The fillet's pick
+/// on the groove's top rim sits at the vertex where the groove's seam splits the rim in two, as
+/// near to one half as to the other: copies made from the pick rounded one half or the other as
+/// rounding fell, so every other copy kept half its rim sharp. Every copy is the original turned.
+#[test]
+fn circular_pattern_of_a_groove_and_its_fillet_rounds_every_copy_alike() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "side", "expression": "10 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Plan"}));
+    run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command": "sketch.polygon.inscribed", "params": {"center": [0, 0], "radius": 16.18, "sides": 10, "angle": 0},
+               "dimensions": {"radius": "side / (2 * sin(18 deg))"}}),
+    );
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"points": ["origin", "p1"], "mode": "horizontal"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Plan", "distance": 10, "name": "Prism", "body_name": "Node"}));
+    run(&mut s, "solid.extrude", json!({"face": [0, 0, 10], "distance": 6, "taper": "-45 deg", "operation": "join", "name": "Top"}));
+    let plain = run(&mut s, "inspect.measure", json!({}))["bodies"][0].clone();
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "GrooveSketch"}));
+    let corners = json!([[0, 28.92395], [-31.36774, -2.44379], [-33.48906, -0.32247], [-2.12132, 31.04527]]);
+    run(&mut s, "sketch.line", json!({"closed": true, "points": corners}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "GrooveSketch", "axis": "l1", "operation": "cut", "targets": ["Node"], "name": "Groove"}));
+    let edges = json!([[1.6583, -12.388, 13], [-1.6583, -12.388, 13], [0, -8.682, 16], [0, -15.388, 9.294]]);
+    run(&mut s, "solid.fillet", json!({"edges": edges, "radius": 1, "name": "GrooveRounds"}));
+    let one = run(&mut s, "inspect.measure", json!({}))["bodies"][0].clone();
+    let r = run(&mut s, "solid.pattern.circular", json!({"features": ["Groove", "GrooveRounds"], "axis": "Z", "count": 10, "name": "Grooves"}));
+    assert!(r["error"].is_null(), "{r}");
+    let all = run(&mut s, "inspect.measure", json!({}))["bodies"][0].clone();
+    // Each copy adds the faces the groove and its rounds added, and takes the material they took.
+    let count = |m: &Value, kind: &str| m["face_types"][kind].as_u64().unwrap_or(0);
+    for kind in ["cylinder", "other", "plane"] {
+        let want = count(&plain, kind) + 10 * (count(&one, kind) - count(&plain, kind));
+        assert_eq!(count(&all, kind), want, "{kind} faces: {all}");
+    }
+    let v = |m: &Value| m["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+    let want = v(&plain) - 10.0 * (v(&plain) - v(&one));
+    assert!(rel(v(&all), want) < 1e-6, "ten rounded grooves: {} mm³, expected {want} mm³", v(&all));
+}

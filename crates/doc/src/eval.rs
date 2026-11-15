@@ -10210,7 +10210,9 @@ fn eval_feature(
                 reduced |= used.is_some();
                 fitted.extend(used.unwrap_or_else(|| vec![r; edges.len()]));
                 tapered_all.extend(tapered);
-                found.extend(edges);
+                // A pattern repeats each edge at a moved copy of a point on it: the edge's middle,
+                // never the pick, which at a vertex two edges share finds either on a copy (#16934).
+                found.extend(kernel::blend_edge_middles(&mb.body, &edges)?);
                 blended.push((*ti, nb));
             }
             if !notes.is_empty() {
