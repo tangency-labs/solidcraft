@@ -710,3 +710,36 @@ fn a_rectangle_corner_lift_says_what_stays() {
     assert!(sk.points.iter().any(|p| p.pos.x == 25.0 && p.pos.y == 0.0));
     near(sk.wires[sk.wire_index(r["curves"][0].as_str().unwrap()).unwrap()].fit[0], Vec3::new(20.0, 0.0, 0.0));
 }
+
+/// A line joined to the lifted end by a Coincident constraint lifts with it: the joined line
+/// becomes a drawn curve too, and the constraint goes.
+#[test]
+fn move3d_point_lift_takes_lines_joined_by_coincident() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[10,5]]}));
+    let (end_pt, start_pt) = {
+        let sk = s.doc.sketch(sketch).unwrap();
+        let end = match &sk.curves[0].kind {
+            solidcraft_sketch::CurveKind::Line { b, .. } => sk.points[*b].id.clone(),
+            _ => panic!("first curve is not a line"),
+        };
+        let start = match &sk.curves[1].kind {
+            solidcraft_sketch::CurveKind::Line { a, .. } => sk.points[*a].id.clone(),
+            _ => panic!("second curve is not a line"),
+        };
+        (end, start)
+    };
+    run(&mut s, "sketch.constraint.coincident", json!({"a": end_pt, "b": start_pt}));
+    let first = s.doc.sketch(sketch).unwrap().curves[0].id.clone();
+    let r = run(&mut s, "sketch.move3d", json!({"point": format!("{first}.end"), "by":[0,0,4]}));
+    let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    assert_eq!(made.len(), 2, "{r}");
+    let sk = s.doc.sketch(sketch).unwrap();
+    let fits: Vec<Vec<Vec3>> = made.iter().map(|w| sk.wires[sk.wire_index(w).unwrap()].fit.clone()).collect();
+    let has = |f: &[Vec3], p: Vec3| f.iter().any(|q| q.dist(p) < 1e-7);
+    assert!(fits.iter().all(|f| has(f, Vec3::new(10.0, 0.0, 4.0))), "{fits:?}");
+    assert!(fits.iter().any(|f| has(f, Vec3::new(0.0, 0.0, 0.0))), "{fits:?}");
+    assert!(fits.iter().any(|f| has(f, Vec3::new(10.0, 5.0, 0.0))), "{fits:?}");
+    assert!(!sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_sketch::ConstraintKind::Coincident { .. })), "the coincident constraint goes");
+}
