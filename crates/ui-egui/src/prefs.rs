@@ -3583,6 +3583,10 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         o.insert("stand_up_offer".into(), json!(app.stand_up));
         o.insert("stand_up_note".into(), json!(app.stand_up.is_some() && app.stand_up_note));
         o.insert("dark".into(), json!(app.ui.dark));
+        let locked = app.policy.locked();
+        if !locked.is_empty() {
+            o.insert("policy".into(), json!({ "locked": locked, "check_updates": crate::policy::check_updates(app) }));
+        }
         o.insert("viewport_dark".into(), json!(app.viewport_dark()));
         o.insert("theme_ids".into(), json!(theme_choices(app).into_iter().map(|(id, _)| id).collect::<Vec<_>>()));
         let follow = &app.prefs_window.follow;
@@ -4392,6 +4396,10 @@ fn prepare_preferences(
         for (k, v) in src {
             if !o.contains_key(k) {
                 return Err(format!("unknown preference `{k}`"));
+            }
+            // Writing back the stored value is not a change (a client may send every setting it read).
+            if app.policy.locks(k) && o.get(k) != Some(v) {
+                return Err(format!("`{k}` is set by your organization's policy and cannot be changed here"));
             }
             if k == "custom_themes" {
                 let values = v

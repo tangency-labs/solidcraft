@@ -236,6 +236,7 @@ pub(crate) mod plugin_menu;
 mod plugin_slots;
 pub(crate) mod plugins;
 pub mod point_clouds;
+pub mod policy;
 pub mod prefs;
 pub mod prefs_notice;
 pub use solidcraft_ui_kit::prefs_window;
@@ -694,6 +695,9 @@ pub struct SolveApp {
     pub crashes: crash_ui::CrashUi,
     /// The update check and its window (`update`).
     pub updater: update::Updater,
+    /// What this computer's administrator set (`policy`). The host loads it at start; the default
+    /// is an unmanaged computer.
+    pub policy: policy::Policy,
     /// Safari's steps for installing the web app, while their window is open (`install`).
     pub install_steps: Option<install::Steps>,
     /// Toolbar buttons the user pinned, removed or reordered.
@@ -1020,6 +1024,7 @@ impl SolveApp {
             issue_report: issue_report::ReportState::default(),
             crashes: crash_ui::CrashUi::default(),
             updater: update::Updater::default(),
+            policy: policy::Policy::default(),
             install_steps: None,
             toolbar_custom: toolbar_custom::ToolbarCustom::default(),
             settings_profiles: settings_profiles::Profiles::default(),
