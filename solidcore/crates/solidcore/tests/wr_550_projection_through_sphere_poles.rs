@@ -146,26 +146,35 @@ fn roll_and_turned_ball(turn: f64, delta: f64) -> (Kernel, Extent2d, SurfaceInte
 
 /// A trace that reaches a sphere's pole takes the pole's singular parameter along the curve's
 /// tangent there (the solved parameter `s*` whose meridian holds the tangent `T`) and the
-/// sphere's derivatives on it. With the ball's seam turned 0.015 rad (poles 1e-6 inside the
-/// cylinder), `T` lies on the meridian at `s* = -0.00264`, just past the seam from the trace's
-/// side (`u = 0.165`), so the pole point keeps the seam's parameter `u = 0`. The derivatives
-/// were taken there too, 0.017 rad off `T`'s meridian: the UV tangent of the curve from the
-/// seam crossing into the pole then had a u-rate 9.0e4 times its v-rate there (turned 0.032:
-/// 1.9e5; turned 0.058 with the poles 5e-6 inside: 7.0e4).
+/// sphere's derivatives on it. With the ball's seam turned a few hundredths of a radian, `T`
+/// can lie on a meridian `s*` just past the seam from the trace's side, so the pole point
+/// keeps the seam's parameter `u = 0`. The derivatives were taken there too, off `T`'s
+/// meridian: the UV tangent of the curve from the seam crossing into the pole then had a
+/// u-rate 1.9e4 to 7.8e4 times its v-rate there (the five turns of the band below that reach
+/// the clamp, poles 3e-6 and 5e-6 inside the cylinder).
+///
+/// Which turns reach the clamp depends on where the trace's last step before the pole lands,
+/// so the test scans turns 0.010 to 0.060 rad at both depths and asks that at least
+/// `MIN_CLAMPED` of them reach it, rather than naming them.
 ///
 /// Taken across the seam on `s*`'s own meridian, the UV tangent at the pole has no u-rate: the
 /// sphere's `S_u` is normal to the meridian plane of `s*`, which holds `T`, so
 /// `T = a S_u + b S_v` has `a = 0`. The computed `a` carries the direction solve's error
 /// (`SM_EFF_ZERO`, about 1e-12 rad) times `|S_v| / |S_u|` at the stepped-back point, about 1e6
-/// for a point 1e-6 from the pole, so about 1e-6 · |b| (measured at most 6.4e-7 here); the
-/// bound 1e-3 · |b| is that with a margin of 1e3. Every pole end of every curve is checked.
-/// The ball turned -0.01 and 0 rad, where the pole's parameter is not clamped, are the
-/// controls.
+/// for a point micrometres from the pole, so about 1e-6 · |b| (measured at most 1.6e-7 at the
+/// clamped turns); the bound 1e-3 · |b| is that with a margin of 1e3. Every pole end of every
+/// curve is checked. The ball turned -0.01 and 0 rad (poles 1e-6 inside), where the pole's
+/// parameter is not clamped, are the controls.
 #[test]
 fn a_trace_into_a_pole_past_the_seam_takes_the_derivatives_on_the_curves_meridian() {
-    let clamped = [(0.015, -1e-6), (0.032, -1e-6), (0.058, -5e-6)];
+    // the property is checked on every turn of the band; at least `MIN_CLAMPED` must clamp
+    const MIN_CLAMPED: usize = 3;
+    let band = [-3e-6, -5e-6]
+        .into_iter()
+        .flat_map(|delta| (10..=60).map(move |i| (f64::from(i) * 0.001, delta)));
     let controls = [(-0.01, -1e-6), (0.0, -1e-6)];
-    for (turn, delta) in clamped.into_iter().chain(controls) {
+    let mut clamped = Vec::new();
+    for (turn, delta) in band.chain(controls) {
         let (k, domain, out) = roll_and_turned_ball(turn, delta);
         assert!(
             !out.surface2_uv_curves.is_empty(),
@@ -191,16 +200,21 @@ fn a_trace_into_a_pole_past_the_seam_takes_the_derivatives_on_the_curves_meridia
                 );
             }
         }
-        // the clamped cases: a curve from the seam crossing ends at the top pole on the seam
-        if clamped.contains(&(turn, delta)) {
-            let at_pole = out.surface2_uv_curves.iter().flatten().any(|uv| {
-                let p = uv.evaluate_point(&k, uv.natural_interval().max()).unwrap();
-                p.y == domain.max().y && p.x == domain.min().x
-            });
+        // a clamped case: a curve from the seam crossing ends at the top pole on the seam
+        let at_pole = out.surface2_uv_curves.iter().flatten().any(|uv| {
+            let p = uv.evaluate_point(&k, uv.natural_interval().max()).unwrap();
+            p.y == domain.max().y && p.x == domain.min().x
+        });
+        if at_pole {
             assert!(
-                at_pole,
-                "turned {turn}, {delta}: no curve ends at the pole on the seam"
+                !controls.contains(&(turn, delta)),
+                "control turned {turn}, {delta}: the pole's parameter is clamped"
             );
+            clamped.push((turn, delta));
         }
     }
+    assert!(
+        clamped.len() >= MIN_CLAMPED,
+        "only {clamped:?} of the band end at the pole on the seam"
+    );
 }
