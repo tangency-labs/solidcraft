@@ -37,7 +37,7 @@ use crate::schema::save::{SaveAsParams, SaveParams, SaveResult, SignedSave};
 use crate::schema::save_mesh::{SaveMeshResult, SlicerDelivery};
 use crate::schema::slicers::{SlicerInfo, SlicersParams, SlicersResult};
 use crate::schema::{TypedContract, output_schema_for};
-use crate::{EngineError, Result, Session};
+use crate::{EngineError, Result, Session, store_link_names};
 
 const INSERT_MESH_CONTRACT: TypedContract<InsertMeshParams> = TypedContract::new();
 const INSERT_STEP_CONTRACT: TypedContract<InsertStepParams> = TypedContract::new();
@@ -1829,7 +1829,11 @@ impl Session {
         let unpinned = session.doc.reserved_body_names.is_empty() && session.doc.features.iter().all(|f| f.body_names.is_empty());
         let before = session.doc.clone();
         session.pin_body_names();
-        if unpinned || !std::sync::Arc::ptr_eq(&before, &session.doc) {
+        // Links whose design dropped a guessed name as it opened keep the name of what they were
+        // found on, before a change can move it (#17229).
+        session.pin_dropped_link_names();
+        let dropped = session.has_dropped_link_names();
+        if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) {
             session.pin_rolled_back_body_names();
         }
         session.saved = session.doc.clone();
@@ -1854,6 +1858,11 @@ impl Session {
         whole.doc_mut().marker = None;
         whole.model.evaluate_shared(&whole.doc);
         whole.pin_body_names();
+        // The links of a sketch rolled back or skipped here, whose guessed names their design
+        // dropped as it opened (#17229): the whole timeline finds what each is on, and the name
+        // is the one it had at the geometry the design opened with, before an edit moves it.
+        whole.pin_dropped_link_names();
+        let link_pins = self.dropped_link_pins(&whole);
         let pins: Vec<(u64, Vec<String>)> = whole
             .doc
             .features
@@ -1862,12 +1871,12 @@ impl Session {
             .map(|f| (f.id, f.body_names.clone()))
             .collect();
         let reserve: Vec<String> = whole.doc.reserved_body_names.difference(&self.doc.reserved_body_names).cloned().collect();
-        if pins.is_empty() && reserve.is_empty() {
+        if pins.is_empty() && reserve.is_empty() && link_pins.is_empty() {
             return;
         }
         // As `pin_body_names` stores names: the bodies keep the names they have, so no result
         // changes and none is evaluated again.
-        let renamed: Vec<u64> = pins.iter().map(|(id, _)| *id).collect();
+        let renamed: Vec<u64> = pins.iter().map(|(id, _)| *id).chain(link_pins.iter().map(|(id, ..)| *id)).collect();
         let keep = self.model.pinned_prefix(&self.doc, &renamed);
         let doc = self.doc_mut();
         for (id, names) in pins {
@@ -1875,6 +1884,7 @@ impl Session {
                 f.body_names = names;
             }
         }
+        store_link_names(doc, link_pins);
         doc.reserved_body_names.extend(reserve);
         self.model.refingerprint_shared(&self.doc, keep);
     }

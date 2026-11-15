@@ -68,7 +68,7 @@ crates/solidcore-step/src/topology/swept.rs	revolution	int-div	1	proven	ts.len()
 crates/solidcore-step/src/topology/swept.rs	whole	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore-step/src/topology/swept.rs	widest_gap	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore-step/src/topology/wound.rs	along	f64::clamp	1	proven	clamp(0.0, FRAC_PI_2)	constant bounds 0 <= FRAC_PI_2
-crates/solidcore-step/src/topology/wound.rs	pcurve	Ord::clamp	1	proven	clamp(16, MAX_PIECES / 4)	constant bounds 16 <= MAX_PIECES / 4 (1000)
+crates/solidcore-step/src/topology/wound.rs	hermite_pieces	Ord::clamp	1	proven	clamp(16, MAX_PIECES / 4)	constant bounds 16 <= MAX_PIECES / 4 (1000), asserted at compile time beside MAX_PIECES
 crates/solidcore-step/src/write/topology.rs	BrepWriter::edge_geometry	with_capacity	1	proven	Vec::with_capacity(edge.uses.len())	the length of a collection already in memory
 crates/solidcore-step/src/write/topology.rs	BrepWriter::face	with_capacity	1	proven	Vec::with_capacity(face.loops.len())	the length of a collection already in memory
 crates/solidcore-step/src/write/topology.rs	BrepWriter::face	with_capacity	2	proven	Vec::with_capacity(edges.len())	the length of a collection already in memory
@@ -340,9 +340,15 @@ crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib	Vec::i
 crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib	Vec::insert	3	open	insert(at, uv)	
 crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib	Vec::insert	4	open	insert(at, exact)	
 crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib	int-rem	1	proven	order % 2	constant non-zero divisor
-crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::flush_curve	Vec::insert	1	open	insert(j + 1, split_knot)	
-crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::flush_curve	Vec::insert	2	open	insert(j + 1, mid_pnt)	
-crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::flush_curve	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::equalise_spans	Vec::insert	1	proven	insert(j + 1, split_knot)	j + 1 < knots.len() by the loop condition
+crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::equalise_spans	Vec::insert	2	proven	insert(j + 1, mid_pnt)	pnts.get(j + 1) succeeded just above, so j + 1 < pnts.len()
+crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::build_flush_geometry	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/blend/fillet_intersector/skin_bound.rs	BallFamily::nearest	f64::clamp	1	proven	clamp(lo, hi)	range is [lo, hi] with lo < hi: BallFamily::through returns None unless above(hi, lo), which a NaN fails
+crates/solidcore/src/blend/fillet_intersector/skin_bound.rs	BallFamily::piece_bound	f64::clamp	1	proven	clamp(lo, hi)	range is [lo, hi] with lo < hi: BallFamily::through returns None unless above(hi, lo), which a NaN fails
+crates/solidcore/src/blend/fillet_intersector/skin_bound.rs	BallFamily::radius_vanishes_on	f64::clamp	1	proven	clamp(lo, hi)	range is [lo, hi] with lo < hi: BallFamily::through returns None unless above(hi, lo), which a NaN fails
+crates/solidcore/src/blend/fillet_intersector/skin_bound.rs	BallFamily::radius_vanishes_on	f64::clamp	2	proven	clamp(lo, hi)	range is [lo, hi] with lo < hi: BallFamily::through returns None unless above(hi, lo), which a NaN fails
+crates/solidcore/src/blend/fillet_intersector/skin_bound.rs	BallFamily::through	with_capacity	1	proven	Vec::with_capacity(nodes.len())	n = nodes.len(), an existing slice (at most five balls); f64 is no larger than a Ball
+crates/solidcore/src/blend/fillet_intersector/skin_bound.rs	linear_through	Ord::clamp	1	proven	clamp(1, n.saturating_sub(1).max(1))	min 1 <= max, which is at least 1
 crates/solidcore/src/blend/fillet_outline.rs	decide	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/blend/fillet_outline.rs	decide	with_capacity	2	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/blend/fillet_outline.rs	decide	with_capacity	3	proven	Vec::with_capacity(2)	constant capacity
@@ -813,7 +819,6 @@ crates/solidcore/src/offset/construction/sheets.rs	local	f64::clamp	2	proven	cla
 crates/solidcore/src/offset/construction/sheets.rs	span_of	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/offset/offset_executive/p1.rs	sort_edgeuses	swap	1	open	swap(i - 1, i)	
 crates/solidcore/src/offset/offset_executive/p2.rs	api_shell_brep_full	with_capacity	1	open	Vec::with_capacity(faces.len())	
-crates/solidcore/src/offset/offset_executive/step_gaps.rs	OffsetExecutive::close_loop_gaps_in	int-rem	1	open	(kk + 1) % num	
 crates/solidcore/src/offset/offset_executive/step_gaps.rs	OffsetExecutive::split_corner_vertices	int-rem	1	open	(kk + 1) % num	
 crates/solidcore/src/offset/offset_faces.rs	OffsetFacesExecutive::join_across_closed_walls	Vec::remove	1	proven	remove(at)	at comes from position() over the same Vec just above
 crates/solidcore/src/offset/offset_geometry_creation.rs	OffsetGeometryCreation::create_step_wall	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity

@@ -1,5 +1,5 @@
-//! The fork's tangency-labs/smlib@b518bbe, under WR-599's
-//! `Kernel::fixes.cover_wraps_across_closed_seam`: `sm_CoverOtherCoincidentFace` asks the
+//! The fork's tangency-labs/smlib@b518bbe, with WR-599's cover across a closed seam:
+//! `sm_CoverOtherCoincidentFace` asks the
 //! cover on the faces' stored domains to stay within one period of the covering surface
 //! (`bAcrossWrappedSeams` FALSE); only its trim-derived attempt may cross a seam the surface
 //! wraps. Stored domains are conservative and may be the faces' whole surfaces: across the
@@ -70,9 +70,8 @@ fn coaxial_face_uv_box(k: &Kernel, s: &Surface, r: f64, z0: f64, z1: f64) -> Ext
 
 /// The merged face's STEP domain (degrees by length) after each of the test's two passes,
 /// and whether its trims lie inside its domain, for the broad (or face-sized) inputs.
-fn merged_domains(fix: bool, broad: bool, reverse: bool) -> Vec<(Extent2d, bool)> {
+fn merged_domains(broad: bool, reverse: bool) -> Vec<(Extent2d, bool)> {
     let mut k = Kernel::default();
-    k.fixes.cover_wraps_across_closed_seam = fix;
     let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
     for ii in 0..3 {
         let face = if reverse { 2 - ii } else { ii };
@@ -132,13 +131,13 @@ fn merged_domains(fix: bool, broad: bool, reverse: bool) -> Vec<(Extent2d, bool)
     out
 }
 
-/// With the fix the broad inputs merge to the faces' 180 degrees by 3 (within the
+/// The broad inputs merge to the faces' 180 degrees by 3 (within the
 /// `prog_test`'s 200 by 4), in either order and on both passes, as the face-sized ones do.
 #[test]
 fn fork_b518bbe_broad_stored_domains_merge_to_the_trims() {
     for reverse in [false, true] {
         for broad in [false, true] {
-            for (pass, (step, inside)) in merged_domains(true, broad, reverse).iter().enumerate() {
+            for (pass, (step, inside)) in merged_domains(broad, reverse).iter().enumerate() {
                 let size = step.size();
                 assert!(
                     size.x <= 200.0 && size.y <= 4.0,
@@ -150,16 +149,5 @@ fn fork_b518bbe_broad_stored_domains_merge_to_the_trims() {
                 );
             }
         }
-    }
-}
-
-/// Without the option no cover crosses a seam (upstream), and the broad inputs merge to
-/// the trims as well.
-#[test]
-fn broad_stored_domains_merge_to_the_trims_without_the_option() {
-    for (pass, (step, inside)) in merged_domains(false, true, false).iter().enumerate() {
-        let size = step.size();
-        assert!(size.x <= 200.0 && size.y <= 4.0, "pass {pass}: {size:?}");
-        assert!(inside, "pass {pass}: trims inside");
     }
 }

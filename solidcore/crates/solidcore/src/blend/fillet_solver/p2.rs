@@ -1192,10 +1192,8 @@ impl FilletSolver {
     /// # Errors
     ///
     /// With the opt-in `Kernel::fixes.fillet_chamfer_cone_on_arc` (not upstream, WR-421) a
-    /// linear generator is revolved too, into a cone; with
-    /// `Kernel::fixes.fillet_chamfer_cone_stored_as_cone` as well (WR-572) that revolution
-    /// is stored as the cone `CopyAndAddAnalytics` finds in its NURBS form, the rails made on
-    /// it.
+    /// linear generator is revolved too, into a cone, and that revolution is stored as the
+    /// cone `CopyAndAddAnalytics` finds in its NURBS form, the rails made on it (WR-572).
     /// Not upstream: a section centred on the arc's axis has its rail points turned into
     /// the half-planes through the edge's ends and takes the edge's start for the nearest
     /// point (WR-422); a start rail point within the solver's tolerance of the arc's axis
@@ -1445,7 +1443,14 @@ impl FilletSolver {
             k.fixes.fillet_statuses_pass_on,
         )? {
             Ok(a) => a,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(e)
+                if matches!(
+                    e,
+                    SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                ) || e.is_not_certified() =>
+            {
+                return Err(e)
+            }
             Err(_) => 0.0,
         };
         if span_ang < ANG_TOL_RAD {
@@ -1589,12 +1594,12 @@ impl FilletSolver {
             trans.translate(origin);
             torus.transform(k, &trans, None)?;
         }
-        // `fixes.fillet_chamfer_cone_stored_as_cone` (WR-572, the fork's b5743ec): a linear
-        // section revolved is a cone, and is stored as one (SmCone), as a straight edge's
-        // round is stored as its cylinder: the revolution's NURBS form (its
+        // Not upstream (WR-572, the fork's b5743ec): a linear section revolved is a cone,
+        // and is stored as one (SmCone), as a straight edge's round is stored as its
+        // cylinder: the revolution's NURBS form (its
         // `SmBSplineSurface::Copy`) through `CopyAndAddAnalytics`, kept when that gives a
         // cone; anything else stays the revolution
-        let torus = if linear_section && k.fixes.fillet_chamfer_cone_stored_as_cone {
+        let torus = if linear_section {
             let cone = torus.base().copy().copy_and_add_analytics(k)?;
             if matches!(cone.kind(), crate::surface::surface::SurfaceKind::Cone(_)) {
                 cone
@@ -2009,7 +2014,6 @@ impl FilletSolver {
         // allocate NewtonRaphson evaluator - contains equation definitions being solved
         let mut eval = SphereEval(FilletSphereSolveEnfo::new(plane_normal, plane_d, ops), k);
         let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
-        ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
 
         // set solve parameters
         ls.set_desired_accuracy(EFF_ZERO_SQ);
@@ -2187,7 +2191,6 @@ impl FilletSolver {
             k,
         );
         let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
-        ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
         ls.set_desired_accuracy(EFF_ZERO_SQ);
         ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
         ls.set_maximum_iterations(30);
@@ -2405,7 +2408,6 @@ impl FilletSolver {
             // when the resulting rails are classified and trimmed.
             let bounds = (!affine).then_some(&intervals);
             let mut ls = LocalSolveNd::new(&mut eval, bounds, Some(&periodicities));
-            ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
             ls.set_desired_accuracy(EFF_ZERO_SQ);
             ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
             ls.set_maximum_iterations(30);

@@ -74,6 +74,9 @@
 //!   `SM_NO_POST_EDIT`, whose `SmEllipse::Notify` override rebuilds the polar
 //!   converter (status ignored); the port calls [`Ellipse::set_up_polar_conversion`]
 //!   at those points. The other notifications only drop caches and are omitted.
+//! - **Circles a hair less than tangent.** [`Ellipse::intersect_with_ellipse`] takes a
+//!   contact tolerance apart from `tol` (WR-787, #15429): coplanar circles overlapping past
+//!   touching by less than it touch at one point; zero keeps upstream's two crossings.
 //! - **Two crossings stay two.** `IntersectWithLine` and `IntersectWithEllipse` find
 //!   their candidate points with `smgu_LineCoPlanarCircleIntersect` at ten times the
 //!   intersection tolerance, which upstream also uses to merge the line's two
@@ -120,7 +123,7 @@ use crate::geom::assert_array::labels::POLAR_CONVERSION_TYPE;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::{
-    circle_coplanar_circle_intersect, line_coplanar_circle_intersect_distinct,
+    circle_coplanar_circle_intersect_in_contact, line_coplanar_circle_intersect_distinct,
     line_plane_intersect, point_project_to_plane, transform_point_to_start_plane,
     vector_project_to_plane, CircleCircle,
 };
@@ -1599,6 +1602,8 @@ impl Ellipse {
     /// only). Non-circles, and circles in planes less than 10 degrees apart but not
     /// parallel, need the general intersector; the same curve has no intersections.
     /// Parallel planes farther apart than `tol` and circles that miss give none.
+    /// Coplanar circles that overlap past touching by less than `contact_tol` touch at
+    /// one point (WR-787, #15429; zero keeps upstream's two crossings).
     /// Otherwise each candidate point is dropped onto both curves and refined with the
     /// local curve solver. Solutions name `this_obj` and `other_obj`.
     ///
@@ -1614,6 +1619,7 @@ impl Ellipse {
         other: &Self,
         other_interval: &Extent1d,
         tol: f64,
+        contact_tol: f64,
         this_obj: Option<O>,
         other_obj: Option<O>,
     ) -> Result<EllipseIntersection<O>> {
@@ -1666,13 +1672,14 @@ impl Ellipse {
             }
 
             // intersect two coplanar circles
-            match circle_coplanar_circle_intersect(
+            match circle_coplanar_circle_intersect_in_contact(
                 this_normal,
                 this_center,
                 self.x_radius(),
                 other_center,
                 other.x_radius(),
                 tol,
+                contact_tol,
             )? {
                 // no intersections - all done
                 CircleCircle::None => {
@@ -2689,7 +2696,7 @@ mod tests {
         let ivl = a.base().natural_interval();
         // same object
         let r = a
-            .intersect_with_ellipse::<i64>(&k, &ivl, &a, &ivl, 1e-6, None, None)
+            .intersect_with_ellipse::<i64>(&k, &ivl, &a, &ivl, 1e-6, 0.0, None, None)
             .expect("same");
         assert!(!r.needs_more_intersections);
         // parallel planes far apart
@@ -2705,7 +2712,7 @@ mod tests {
         )
         .expect("b");
         let r = a
-            .intersect_with_ellipse::<i64>(&k, &ivl, &b, &ivl, 1e-6, None, None)
+            .intersect_with_ellipse::<i64>(&k, &ivl, &b, &ivl, 1e-6, 0.0, None, None)
             .expect("far");
         assert!(!r.needs_more_intersections);
         assert!(r.solutions.is_empty());
@@ -2722,7 +2729,7 @@ mod tests {
         )
         .expect("c");
         let r = a
-            .intersect_with_ellipse::<i64>(&k, &ivl, &c, &ivl, 1e-6, None, None)
+            .intersect_with_ellipse::<i64>(&k, &ivl, &c, &ivl, 1e-6, 0.0, None, None)
             .expect("crossing");
         assert_eq!(r.solutions.len(), 2);
     }

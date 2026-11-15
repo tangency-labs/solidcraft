@@ -119,10 +119,51 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
 /// the edge of a fillet or chamfer (#16535). Older designs can name the edge between
 /// numbered pieces of faces that now evaluate whole (`F4:side:l6#2|F4:side:l7#2`, now
 /// `F4:side:l6|F4:side:l7`). Recover it only when the faces it separates are whole, the saved
-/// point lies on it, and its name is exact. Other edge references still require the stored
-/// name as picked.
+/// point lies on it, and its name is exact. A name that ends with the number of the edge a blend
+/// replaced is found at its point too (see [`recover_blend_numbered_edge`]). Other edge references
+/// still require the stored name as picked.
 pub(crate) fn locate_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
-    locate_edge(b, name, near).or_else(|miss| recover_numbered_projected_edge(b, name, near).ok_or(miss))
+    locate_edge(b, name, near)
+        .or_else(|miss| recover_numbered_projected_edge(b, name, near).or_else(|| recover_blend_numbered_edge(b, name, near)).ok_or(miss))
+}
+
+/// Find a saved edge between a face and a fillet's or chamfer's face whose name, in the older
+/// form, ends with the number of the edge the blend replaced: 0.30.1 saved the top edge of a round
+/// that replaced the second of two edges between the same faces as
+/// `F2:top|F3:blend:F2:side:c1|F2:side:l1~2` (#14479). The older form reads a trailing `~k` as the
+/// whole edge's number, so the name finds no edge as read. Read with `~k` on the blend's edge
+/// (`F2:top|F3:blend(F2:side:c1|F2:side:l1~2)`), it can still answer to several faces alike: a
+/// blend of several edges between the same two faces names each of its faces after all of them,
+/// told apart by a number only. So the saved point decides: the one edge between the other face
+/// and a face answering to the blend's name that the point lies on.
+fn recover_blend_numbered_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
+    use crate::persistent_name::{Base, EdgeName, Rounds};
+    if b.body.is_mesh() || !near.is_finite() || !crate::persistent_name::in_old_form(name) {
+        return None;
+    }
+    let read = EdgeName::parse(name).ok()?;
+    let [face, blend] = read.faces.as_slice() else { return None };
+    let (Some(tie), Base::Blend { feature, rounds: Rounds::Edge(edge) }) = (read.tie, &blend.base) else { return None };
+    if !blend.suffixes.is_empty() || edge.tie.is_some() {
+        return None;
+    }
+    let rounds = Rounds::Edge(Box::new(EdgeName { faces: edge.faces.clone(), tie: Some(tie) }));
+    let blend = crate::persistent_name::FaceName { base: Base::Blend { feature: *feature, rounds }, suffixes: Vec::new() };
+    let (face, blend) = (face.to_string(), blend.to_string());
+    let faces = naming::names(b);
+    // The face exactly (see [`exactly`]); the blend face by its name, a piece of it, or a name
+    // merged into it.
+    let level = |f: u32, x: &str| crate::history_names::matches(&faces, f as usize, x);
+    let between = |p: u32, q: u32| level(p, &face).is_some_and(exactly) && level(q, &blend).is_some_and(|l| l >= Match::Piece);
+    let reach = pick_reach(b);
+    // Of the B-rep's edges between those faces, the one whose exact curve the point lies on.
+    let mut on = b.body.record().edges.iter().enumerate().filter(|(i, e)| {
+        let [p, q] = e.uses.as_slice() else { return false };
+        (between(p.face, q.face) || between(q.face, p.face))
+            && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach)
+    });
+    let edge = on.next().filter(|_| on.next().is_none())?.0;
+    Some(EdgeHit { edge, point: near, verified: false, on_point: true })
 }
 
 fn recover_numbered_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {

@@ -1,4 +1,4 @@
-//! #1024: with `fillet_refuse_rails_leaving_faces` (WR-302), a rail that runs off its
+//! #1024: with the refusal of rails leaving their faces (WR-302), a rail that runs off its
 //! face past the end of the filleted edge and passes exactly through a vertex of the
 //! face's boundary there gets two adjacent off-face intervals. `RailsFitTheirFaces`
 //! judged the first of them on its own, as if the rail left the face between the edge's
@@ -90,9 +90,8 @@ enum Outcome {
 }
 
 /// The front top edge of the spur prism rounded 2.
-fn round_front_edge(refuse_rails_leaving_faces: bool, tip: f64) -> Outcome {
+fn round_front_edge(tip: f64) -> Outcome {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = refuse_rails_leaving_faces;
     let mut b = spur_prism(&mut k, tip);
     let before = volume(&k, &mut b);
     let e = front_top_edge(&k, &b);
@@ -116,26 +115,24 @@ fn round_front_edge(refuse_rails_leaving_faces: bool, tip: f64) -> Outcome {
 }
 
 /// The round of 2 removes (1 - pi/4) 2^2 40 whether or not the extended rail runs
-/// through the spur's tip; with `fillet_refuse_rails_leaving_faces` it is not refused
-/// (before the fix: `NoRoom`), and without it SMLib builds the same body.
+/// through the spur's tip; it is not refused (before the fix: `NoRoom`), and SMLib, which
+/// has no such refusal, builds the same body.
 #[test]
 fn rail_through_a_boundary_vertex_past_the_edge_end_is_not_refused() {
     let analytic = (1.0 - std::f64::consts::FRAC_PI_4) * 4.0 * 40.0;
-    for on in [false, true] {
-        // tip 2: the extended rail (y = 2) passes exactly through the spur's tip;
-        // tip 2.5: it passes clear of the spur.
-        for tip in [2.0, 2.5] {
-            let Outcome::Built { removed, manifold } = round_front_edge(on, tip) else {
-                panic!("flag {on} tip {tip}: refused");
-            };
-            assert!(
-                manifold && (removed - analytic).abs() <= 1e-6,
-                "flag {on} tip {tip}: removed {removed}, expected {analytic}"
-            );
-        }
+    // tip 2: the extended rail (y = 2) passes exactly through the spur's tip;
+    // tip 2.5: it passes clear of the spur.
+    for tip in [2.0, 2.5] {
+        let Outcome::Built { removed, manifold } = round_front_edge(tip) else {
+            panic!("tip {tip}: refused");
+        };
+        assert!(
+            manifold && (removed - analytic).abs() <= 1e-6,
+            "tip {tip}: removed {removed}, expected {analytic}"
+        );
     }
     assert_ne!(
-        round_front_edge(true, 2.0),
+        round_front_edge(2.0),
         Outcome::Refused {
             code: FilletErrorType::NoRoom as i32
         }
