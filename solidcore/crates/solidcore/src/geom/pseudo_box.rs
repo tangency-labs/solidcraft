@@ -86,6 +86,9 @@
 //!   above 2 are undefined behaviour upstream; here they return `None` or an error.
 //! - `SM_ASSERT*` checks and `SM_DEBUG_CODE` blocks are compiled out upstream (release
 //!   build) and omitted.
+//! - `IsPlanar`'s normal is square to the flattest interval; upstream's is
+//!   `basis[0] × basis[1]` whichever interval is flat, which lies in the plane of a box
+//!   flat along its first or second basis vector (WR-790).
 
 use crate::error::{Result, SolidError, SM_ERR};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
@@ -216,7 +219,9 @@ pub struct Planar {
     pub is_planar: bool,
     /// The box centre (`pOptPlanePoint`).
     pub point: Point3,
-    /// `basis[0] × basis[1]` (`pOptPlaneNormal`; not unitised, as upstream).
+    /// Square to the flattest interval: the cross product of the other two basis vectors
+    /// in cyclic order, `basis[0] × basis[1]` when the last is the flattest
+    /// (`pOptPlaneNormal`; not unitised, as upstream).
     pub normal: Vec3,
     /// Smallest half interval length (`pOptActualDeviation`).
     pub deviation: f64,
@@ -694,7 +699,7 @@ impl PseudoBox {
 
     /// Whether some half interval length is below `tol` (`IsPlanar`; planes, lines and
     /// points are all planar; `tol == EFF_ZERO`, the upstream default, means "scaled
-    /// zero of the box").
+    /// zero of the box"), with the normal across the flattest interval.
     #[must_use]
     pub fn is_planar(&self, tol: f64) -> Planar {
         let [i0, i1, i2] = &self.intervals;
@@ -704,10 +709,20 @@ impl PseudoBox {
             .iter()
             .filter(|&&d| d / 2.0 < scaled_zero)
             .count();
+        // the other two basis vectors' cross product, in cyclic order (WR-790: upstream's
+        // is basis[0] x basis[1] whichever interval is flat); the last on a tie
+        let [b0, b1, b2] = self.basis;
+        let normal = if d0 < d1.min(d2) {
+            b1.cross(b2)
+        } else if d1 < d2 {
+            b2.cross(b0)
+        } else {
+            b0.cross(b1)
+        };
         Planar {
             is_planar: degen_dim_cnt >= 1,
             point: self.evaluate(0.5, 0.5, 0.5),
-            normal: self.basis[0].cross(self.basis[1]),
+            normal,
             deviation: min3(d0, d1, d2) / 2.0,
         }
     }
