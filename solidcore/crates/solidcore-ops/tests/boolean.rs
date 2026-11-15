@@ -1932,6 +1932,38 @@ fn a_traced_cut_by_a_wedge_grazing_the_grooves_1_mm_rounds_removes_the_wedge() {
     );
 }
 
+/// #17118's cut repeated with all ten wedges, one at a time in the order SolidCraft cut them
+/// (`wedge0` to `wedge9`), each cut on what the earlier ones left. The wedges are rotated copies,
+/// but the faces are visited in a different order at each: where the sliver of a groove's round
+/// in the wedge's thin edge first meets the wedge's plane before that plane is classified, the
+/// two faces were not paired (they lie on surfaces of different kinds), the sliver was left to a
+/// ray and kept: the fifth cut here, and the sixth wedge alone on the target, left bodies that
+/// were not closed. The result is
+/// the intersect above: the target less the ten wedges, plus what the target's rounds had already
+/// taken out of them, under 1e-3.
+#[test]
+fn a_traced_cut_by_each_of_ten_wedges_in_turn_is_the_target_less_the_wedges() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    let mut r = body("target");
+    let mut want = r.volume(1e-11).unwrap();
+    for i in 0..10 {
+        let wedge = body(&format!("wedge{i}"));
+        want -= wedge.volume(1e-11).unwrap();
+        r = boolean(r, wedge, BooleanOp::Subtract).unwrap().unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "after wedge {i}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "after wedge {i}");
+    }
+    // the target's 92 faces and the ten cylinders, as the intersect gives
+    assert_eq!(r.counts().unwrap(), [102, 320, 220]);
+    let v = r.volume(1e-11).unwrap();
+    assert!(
+        v >= want && v <= want + 1e-3,
+        "volume {v}, target less the wedges {want}"
+    );
+}
+
 /// A 10 mm cube with the vertical edge at x = 0, y = 0 rounded to radius 2.
 fn filleted_cube() -> Body {
     let block = make_box([0.0; 3], [10.0, 10.0, 10.0]).unwrap();

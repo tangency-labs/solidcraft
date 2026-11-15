@@ -19,8 +19,9 @@
 //! closure that deleted no topology and left the vertex with two common edges, instead of
 //! starting a new pass, so the ten passes are not a limit of ten gaps.
 //! Not upstream (#17118): in a union, difference or intersection, a face found coincident at a
-//! common edge with an already classified face of the other body, on a surface of another
-//! analytic kind, takes the class the coincidence gives, instead of being left to a ray.
+//! common edge with a face of the other body on a surface of another analytic kind takes the
+//! class the coincidence gives when the pair is not made (the partner already classified, or
+//! `FixFoundFaceCoincidence` pairing nothing), instead of being left to a ray.
 //! Global cache queue limits are absent (the port has no global caches).
 //! The temporary origin shift goes through `merge_p1`, before any topology
 //! mutation. Its inverse token spans the entire operation,
@@ -468,6 +469,41 @@ fn surfaces_of_other_kinds(primary: &Brep, pf: FaceId, other: &Brep, of: FaceId)
     Ok(surface(primary, pf)?.is_other_analytic_kind(surface(other, of)?))
 }
 
+/// Classifies the source face of a coincident pair, `of` when `reverse` and `pf` otherwise,
+/// by the coincidence's `keep`, and marks it, without pairing the two faces.
+fn classify_by_coincidence(
+    kernels: &BooleanKernels<'_>,
+    state: &mut ManifoldState,
+    faces: &mut Faces,
+    marks: (MarkType, MarkType),
+    reverse: bool,
+    (pf, of): (FaceId, FaceId),
+    keep: Option<bool>,
+) {
+    let Some(keep) = keep else {
+        return;
+    };
+    if reverse {
+        state
+            .other_marks
+            .mark(kernels.other(), Entity::Face(of), marks.1);
+        if keep {
+            faces.other_keep.push(of);
+        } else {
+            faces.other_delete.push(of);
+        }
+    } else {
+        state
+            .primary_marks
+            .mark(kernels.primary, Entity::Face(pf), marks.0);
+        if keep {
+            faces.keep.push(pf);
+        } else {
+            faces.delete.push(pf);
+        }
+    }
+}
+
 fn region_pair(b: &Brep, fu: FaceuseId) -> Result<(RegionId, RegionId)> {
     Ok((
         required(eu::faceuse_region(b, fu)?)?,
@@ -740,6 +776,22 @@ fn classify_edge_faces(
             } else {
                 None
             };
+            // Not upstream (#17118): a face on a surface of another kind than the face it
+            // coincides with lies on it only over a tangent patch within the tolerance,
+            // whose boundary the imprint need not draw in that face. Such a pair is often
+            // not one `FixFoundFaceCoincidence` accepts (it pairs nothing), or the partner
+            // was classified at another edge first. Either way the source face takes the
+            // class the coincidence gives. Left to the ray instead, it was classified from a
+            // point within the tolerance of the other boundary, where the answer can go
+            // either way: a sliver of a groove's round lying in a wedge thinner than the
+            // tolerance was kept by a cut, and the result was not closed.
+            let tangent_patch = matches!(
+                operation,
+                BooleanOperation::Union
+                    | BooleanOperation::Difference
+                    | BooleanOperation::Intersection
+            ) && surfaces_of_other_kinds(primary, pf, other, of)?;
+            let keep = coincident_keep(operation, same_side, non_solid, None);
             if if reverse {
                 state
                     .primary_marks
@@ -749,42 +801,8 @@ fn classify_edge_faces(
                     .other_marks
                     .is_marked(kernels.other(), Entity::Face(of), marks.1)
             } {
-                // Not upstream (#17118): a face on a surface of another kind than the face it
-                // coincides with lies on it only over a tangent patch within the tolerance,
-                // whose boundary the imprint need not draw in that face, so its partner may
-                // have been classified at another edge. It takes the class the coincidence gives.
-                // Left to the ray instead, it was classified from a point within the
-                // tolerance of the other boundary, where the answer can go either way: a
-                // sliver of a groove's round lying in a wedge thinner than the tolerance was
-                // kept by a cut, and the result was not closed.
-                if matches!(
-                    operation,
-                    BooleanOperation::Union
-                        | BooleanOperation::Difference
-                        | BooleanOperation::Intersection
-                ) && surfaces_of_other_kinds(primary, pf, other, of)?
-                {
-                    if let Some(keep) = coincident_keep(operation, same_side, non_solid, None) {
-                        if reverse {
-                            state
-                                .other_marks
-                                .mark(kernels.other(), Entity::Face(of), marks.1);
-                            if keep {
-                                faces.other_keep.push(of);
-                            } else {
-                                faces.other_delete.push(of);
-                            }
-                        } else {
-                            state
-                                .primary_marks
-                                .mark(kernels.primary, Entity::Face(pf), marks.0);
-                            if keep {
-                                faces.keep.push(pf);
-                            } else {
-                                faces.delete.push(pf);
-                            }
-                        }
-                    }
+                if tangent_patch {
+                    classify_by_coincidence(kernels, state, faces, marks, reverse, (pf, of), keep);
                 }
                 continue;
             }
@@ -792,6 +810,14 @@ fn classify_edge_faces(
                 intersector.fix_face_coincidence(kernels, primary, other, attributes, pf, of)?;
             if modified {
                 return Ok(false);
+            }
+            let source_paired = if reverse {
+                other_compatible.contains(&of)
+            } else {
+                compatible.contains(&pf)
+            };
+            if tangent_patch && !source_paired {
+                classify_by_coincidence(kernels, state, faces, marks, reverse, (pf, of), keep);
             }
             pairs(&compatible, &other_compatible)?;
             if operation == BooleanOperation::ExtractSeparate {

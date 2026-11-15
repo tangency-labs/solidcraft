@@ -308,12 +308,12 @@ second image into the first (`CombineCoincidentVertices`) when each relation wou
 and the two images share no edge, so the mate maps stay one-to-one; upstream dropped the second
 relation and left its vertex without a mate. A face of the other operand lying in that stretch can
 then be coincident, within the tolerance, with a face of the thin operand that was already
-classified at another edge. When the two surfaces are of different analytic kinds, they coincide
-only over such a tangent patch, whose boundary the imprint need not draw in the classified face,
-and the face takes the class the coincidence gives (`classify_edge_faces`, `merge/p4.rs`, for union,
-difference and intersection) rather than being left to a ray cast from a point within the
-tolerance of the other boundary, whose answer there can go either way. Two faces of one kind found
-coincident with an already classified face are left as before.
+classified at another edge, or that the coincidence repair (`FixFoundFaceCoincidence`) will not
+pair with it. When the two surfaces are of different analytic kinds, they coincide only over such
+a tangent patch, whose boundary the imprint need not draw in the other face, and the face takes
+the class the coincidence gives (`classify_edge_faces`, `merge/p4.rs`, for union, difference and
+intersection) rather than being left to a ray cast from a point within the tolerance of the other
+boundary, whose answer there can go either way. Two faces of one kind are left as before.
 
 This is the problem Segal's tolerant modeller and Jackson's local tolerances address [9, 10]: two
 entities within tolerance are one, and a decision across that band has to be made once and kept by
