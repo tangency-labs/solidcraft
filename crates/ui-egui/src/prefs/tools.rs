@@ -73,6 +73,15 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
+        ui_kit::settings_section(ui, "pattern_editing", app.tr("prefs.pattern_editing"), |ui| {
+            ui.horizontal_wrapped(|ui| {
+                let response = setting::linear_pattern_editor(app, ui).backing_on_hover_text(app.tr("prefs.linear_pattern_editor_note"));
+                crate::scenario::publish_target("prefs:linear_pattern_editor", response.rect);
+                if !crate::ui_kit::settings_search::suppress_chrome(ui) {
+                    ui_kit::help_icon(ui, app.tr("prefs.linear_pattern_editor_note"));
+                }
+            });
+        });
         ui_kit::settings_section(ui, "command_dialog_values", app.tr("prefs.command_dialog_values"), |ui| {
             setting::remember_dialog_values(app, ui);
             setting::fillet_legacy_radius(app, ui);

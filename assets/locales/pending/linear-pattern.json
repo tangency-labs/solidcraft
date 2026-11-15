@@ -1,0 +1,30 @@
+{
+  "en": {
+    "prefs.linear_pattern_editor": "Open single-direction patterns as Linear",
+    "prefs.linear_pattern_editor_note": "When editing a saved pattern with one row and no second direction, use the Linear editor. Off keeps the Rectangular editor. New pattern dialogs still start as Rectangular.",
+    "prefs.pattern_editing": "Pattern editing",
+    "ui.pattern_linear": "Linear",
+    "ui.pattern_mode": "Pattern",
+    "ui.pattern_rectangular": "Rectangular"
+  },
+  "de": {
+    "ui.pattern_linear": "Linear",
+    "ui.pattern_mode": "Muster",
+    "ui.pattern_rectangular": "Rechteckig"
+  },
+  "ja": {
+    "ui.pattern_linear": "直線",
+    "ui.pattern_mode": "パターン",
+    "ui.pattern_rectangular": "長方形"
+  },
+  "ko": {
+    "ui.pattern_linear": "선형",
+    "ui.pattern_mode": "패턴",
+    "ui.pattern_rectangular": "직사각형"
+  },
+  "zh": {
+    "ui.pattern_linear": "线性",
+    "ui.pattern_mode": "阵列",
+    "ui.pattern_rectangular": "矩形"
+  }
+}

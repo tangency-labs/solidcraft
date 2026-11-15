@@ -676,6 +676,105 @@ fn rectangular_pattern_window_opens_instead_of_a_click_tool() {
 }
 
 #[test]
+fn linear_sketch_pattern_ignores_invalid_second_direction_values() {
+    let (mut h, id) = open("sketch.pattern.rectangular");
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
+    if let Kind::SketchModify(Mod::PatternRect { count, spacing, count2, spacing2, linear, .. }) = &mut h.app.dialog.as_mut().unwrap().kind {
+        *count = "4".into();
+        *spacing = "12 mm".into();
+        *count2 = "this is ignored".into();
+        *spacing2 = "also ignored".into();
+        *linear = true;
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["count"], "4");
+    assert_eq!(commands[0].1["count2"], "1");
+    assert_ne!(commands[0].1["spacing2"], "also ignored");
+    assert!(commands[0].1["direction2"].is_null());
+    h.app.run(&commands[0].0, commands[0].1.clone()).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    assert_eq!(h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch.curves.len(), 4);
+}
+
+#[test]
+fn single_row_expression_stays_rectangular_when_reopened() {
+    let (mut h, id) = open("sketch.pattern.rectangular");
+    h.app.run("parameters.add", json!({"name":"rows","expression":"1","unit":""})).unwrap();
+    h.app.dialog = None;
+    let out =
+        h.app.run("sketch.pattern.rectangular", json!({"entities":[id],"count":"3","spacing":"10 mm","count2":"rows","spacing2":"8 mm"})).unwrap();
+    assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, out["pattern"].as_str().unwrap()));
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::SketchModify(Mod::PatternRect { linear: false, .. })));
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["count2"], "rows");
+    assert_eq!(commands[0].1["spacing2"], "8 mm");
+}
+
+#[test]
+fn old_single_row_sketch_keeps_second_direction_and_spacing() {
+    let (mut h, id) = open("sketch.pattern.rectangular");
+    h.app.dialog = None;
+    let out = h.app.run("sketch.pattern.rectangular", json!({"entities":[id],"count":"3","spacing":"10 mm","dir2":[0,1],"count2":"1","spacing2":"37 mm","alignment2":"center","reversed2":true})).unwrap();
+    assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, out["pattern"].as_str().unwrap()));
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::SketchModify(Mod::PatternRect { linear: false, .. })));
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["spacing2"], "37 mm");
+    assert_eq!(commands[0].1["alignment2"], "center");
+    assert_eq!(commands[0].1["reversed2"], true);
+    assert_eq!(commands[0].1["dir2"], json!([0.0, 1.0]));
+}
+
+#[test]
+fn linear_sketch_pattern_edit_roundtrip_uses_the_saved_shape_and_legacy_preference() {
+    let (mut h, id) = open("sketch.pattern.rectangular");
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::SketchModify(Mod::PatternRect { linear: false, .. })));
+    h.app.dialog = None;
+    let out =
+        h.app.run("sketch.pattern.rectangular", json!({"entities":[id],"count":"3","spacing":"10 mm","count2":"1","spacing2":"37 mm"})).unwrap();
+    let pattern = out["pattern"].as_str().unwrap();
+    assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, pattern));
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::SketchModify(Mod::PatternRect { linear: true, .. })));
+    if let Kind::SketchModify(Mod::PatternRect { linear, .. }) = &mut h.app.dialog.as_mut().unwrap().kind {
+        *linear = false;
+    }
+    for (command, params) in apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    h.app.dialog = None;
+    assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, pattern));
+    assert!(
+        matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::SketchModify(Mod::PatternRect { linear: true, spacing2, .. }) if spacing2 == "37 mm")
+    );
+    h.app.dialog = None;
+    h.app.preferences.linear_pattern_editor = false;
+    assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, pattern));
+    assert!(
+        matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::SketchModify(Mod::PatternRect { linear: false, spacing2, .. }) if spacing2 == "37 mm")
+    );
+}
+
+#[test]
+fn linear_pattern_mode_hides_second_controls_and_restores_them() {
+    let (mut h, id) = open("sketch.pattern.rectangular");
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
+    rect(&mut h, "3", "10 mm", "4", "7 mm");
+    h.settle();
+    h.step(&json!({"click":{"handle":"dialog:Pattern"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Pattern:Linear"}})).unwrap();
+    h.frames(3);
+    assert!(crate::scenario::handle_at("dialog:Quantity 2").is_none());
+    assert!(crate::scenario::handle_at("dialog:Spacing 2").is_none());
+    assert!(crate::scenario::handle_at("arrow2").is_none());
+    h.step(&json!({"click":{"handle":"dialog:Pattern"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Pattern:Rectangular"}})).unwrap();
+    h.frames(3);
+    assert!(crate::scenario::handle_at("dialog:Spacing 2").is_some());
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["count2"], "4");
+    assert_eq!(commands[0].1["spacing2"], "7 mm");
+}
+
+#[test]
 fn rectangular_sections_flip_and_center_independently_and_restore_even_counts_when_editing() {
     use solidcraft_engine::sketch::PatternAlignment;
     let (mut h, id) = open("sketch.pattern.rectangular");

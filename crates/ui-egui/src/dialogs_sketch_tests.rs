@@ -648,6 +648,24 @@ fn rectangular_pattern_quantity_arrows_keep_both_directions_within_the_copy_limi
 }
 
 #[test]
+fn linear_quantity_arrows_ignore_the_hidden_second_count() {
+    let mut h = fixture();
+    h.app.dialog = Some(picked(&h, "sketch.pattern.rectangular"));
+    if let Kind::SketchModify(Mod::PatternRect { count, count2, .. }) = &mut h.app.dialog.as_mut().unwrap().kind {
+        *count = "2".into();
+        *count2 = "250".into();
+    }
+    h.settle();
+    h.step(&json!({"click":{"handle":"dialog:Pattern"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Pattern:Linear"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"dialog:Quantity up"}})).unwrap();
+    assert!(
+        matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::SketchModify(Mod::PatternRect { count, count2, linear:true, .. }) if count == "3" && count2 == "250")
+    );
+}
+
+#[test]
 fn sketch_pattern_dialog_preserves_expression_text_when_applying_and_editing() {
     let mut h = fixture();
     h.app.run("parameters.add", json!({"name":"pitch","expression":"30","unit":"mm"})).unwrap();
