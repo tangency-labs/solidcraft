@@ -60,7 +60,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.refine_cc_range_ends = true;
     k.fixes.flat_corners_test_bits = true;
     k.fixes.good_drop_result_distances_in_order = true;
-    k.fixes.torus_check_spindle_apex = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.nurb_cylinder_inside_out_frame = true;
     k.fixes.revolve_analytic_profile_faces = true;
@@ -99,8 +98,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.torus_major_radius_from_origin = true;
     k.fixes.torus_iso_circle_axis_from_midpoint = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
-    k.fixes.internal_pole_row_through_knot = true;
-    k.fixes.extrusion_origin_scaled_zero = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
     k.fixes.imprint_reuses_coincident_face_edge = true;
@@ -123,7 +120,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.ssi_pole_point_keeps_its_tangent = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;
-    k.fixes.boolean_new_face_closure_both_sides = true;
     k.fixes.box_face_failures_propagate = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;
 }

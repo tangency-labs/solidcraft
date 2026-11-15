@@ -100,8 +100,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.local_operation_refuses_loose_tangent_edges = true;
     f.torus_major_radius_from_origin = true;
     f.torus_iso_circle_axis_from_midpoint = true;
-    f.internal_pole_row_through_knot = true;
-    f.extrusion_origin_scaled_zero = true;
     f.transform_scales_each_tolerance = true;
     f.transform_model_size_from_body_box = true;
     f.offset_collapsed_rounds_mated = true;
@@ -139,7 +137,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_splits_definition_across_split = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
-    f.torus_check_spindle_apex = true;
     f.local_operation_step_walls = true;
     f.edge_check_orders_tangent_faces = true;
     f.thicken_planar_side_walls = true;
@@ -149,7 +146,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.proto_edge_splits_at_captured_vertices = true;
     f.local_operation_closes_walls_to_nothing = true;
     f.imprint_reuses_coincident_face_edge = true;
-    f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.loops_go_on_round_the_vertex = true;
     f.revolve_splits_curves_on_axis = true;

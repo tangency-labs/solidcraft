@@ -157,7 +157,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     let mut k = Kernel::default();
     k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.boolean_cleanup_removes_slits = true;
-    k.fixes.boolean_new_face_closure_both_sides = true;
     k.fixes.boolean_outer_shell_first = true;
     k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
@@ -175,7 +174,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.delete_vertex_joins_seam_iso_curve = true;
     k.fixes.edge_check_orders_tangent_faces = true;
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
-    k.fixes.extrusion_origin_scaled_zero = true;
     k.fixes.face_tight_box_searches_trim = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
@@ -203,7 +201,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.good_drop_result_distances_in_order = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
     k.fixes.imprint_reuses_coincident_face_edge = true;
-    k.fixes.internal_pole_row_through_knot = true;
     k.fixes.join_touching_loops = true;
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
@@ -249,7 +246,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.taper_tangent_corner_planes = true;
     k.fixes.thicken_planar_side_walls = true;
-    k.fixes.torus_check_spindle_apex = true;
     k.fixes.torus_iso_circle_axis_from_midpoint = true;
     k.fixes.torus_major_radius_from_origin = true;
     k.fixes.torus_signed_gen_curve_interval = true;
