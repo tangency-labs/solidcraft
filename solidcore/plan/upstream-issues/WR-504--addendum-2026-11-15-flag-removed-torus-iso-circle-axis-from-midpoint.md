@@ -5,8 +5,8 @@ Updates: WR-504
 `Torus::create_iso_parametric_curve` (`surface/torus.rs`, `iso_curve`) gives a minor iso circle whose start lies on
 the axis the direction of its midpoint, and returns a failed midpoint evaluation. The flag is gone, so the opt-in in
 the original record no longer exists. Removed: the field, SolidCraft's preset line, its entries in the kernel rig's
-`fixes.json` and in `issue_2260_gn_pipe_refined_range_end.rs`, and the flag-off branch, which reused the zero start
-vector and gave the circle a NaN axis.
+`fixes.json` and in `issue_2260_gn_pipe_refined_range_end.rs`, its flag lines in the `issue_1945`, `issue_2020` and
+`wr650` test kernels, and the flag-off branch, which reused the zero start vector and gave the circle a NaN axis.
 
 - **Defaults:** SolidCraft's preset had the flag on, so the app's results don't change. `Kernel::default()` changes:
   a horn torus's minor iso circles have a unit axis and an analytic domain.
