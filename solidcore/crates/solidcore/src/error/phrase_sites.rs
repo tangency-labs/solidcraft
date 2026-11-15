@@ -665,7 +665,7 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/fillet_section/definition.rs", 6),
     ("solidcore/src/blend/fillet_section/definition_box.rs", 12),
     ("solidcore/src/blend/fillet_section/feet_tm.rs", 6),
-    ("solidcore/src/blend/fillet_section/section.rs", 27),
+    ("solidcore/src/blend/fillet_section/section.rs", 26),
     ("solidcore/src/blend/fillet_section/series.rs", 4),
     ("solidcore/src/blend/fillet_section/station.rs", 15),
     ("solidcore/src/blend/fillet_solver/curve_blend_sih.rs", 14),

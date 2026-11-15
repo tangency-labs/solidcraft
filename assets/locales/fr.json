@@ -4185,6 +4185,7 @@
   "sketch.move_released": "Déplacé : {count} contraintes qui le liaient au reste ont été relâchées ({names}).",
   "sketch.move_released_one": "Déplacé : {count} contrainte qui le liait au reste a été relâchée ({names}).",
   "sketch.open_ends": "{count} ouvertes",
+  "sketch.project.nothing_under_cursor": "Projeter : rien sous le curseur",
   "sketch.status_conflict": "contraintes en conflit",
   "sketch.status_fully_constrained": "entièrement contrainte",
   "sketch.untied_ends": "{count} sans coïncidence",
