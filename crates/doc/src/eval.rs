@@ -10211,35 +10211,48 @@ fn face_pattern(
         Some([x, y, z]) => Vec3::new(val(vals, x, Kind::Length)?, val(vals, y, Kind::Length)?, val(vals, z, Kind::Length)?),
         None => Vec3::ZERO,
     };
-    // Each station's distance to the nearest attractor point.
+    // Each station's distance to the nearest near attractor, and to the nearest far one when
+    // there are far attractors.
     let effects = match g.attract.as_deref() {
         None => None,
         Some(a) => {
             let ctx = crate::construct::Ctx { doc, vals, st: &cst, depth: 0, component };
-            let points = a.points.iter().map(|p| crate::construct::point(&ctx, p)).collect::<Result<Vec<Vec3>>>()?;
-            if points.is_empty() {
-                return Err(DocError::Invalid("attractors: give at least one point".into()));
+            let near = attractor_set(&ctx, &a.geometry, &a.bodies)?;
+            if near.is_empty() {
+                return Err(DocError::Invalid("attractors: give at least one point, edge, face or body".into()));
             }
-            Some((a, points))
+            let far = attractor_set(&ctx, &a.far_geometry, &a.far_bodies)?;
+            let near_d = stations.iter().map(|s| set_distance(&near, s.point)).collect::<Result<Vec<f64>>>()?;
+            let far_d = if far.is_empty() { None } else { Some(stations.iter().map(|s| set_distance(&far, s.point)).collect::<Result<Vec<f64>>>()?) };
+            Some((a, near_d, far_d))
         }
     };
     let distances: Vec<f64> = match &effects {
-        Some((_, points)) => stations.iter().map(|s| points.iter().map(|p| p.dist(s.point)).fold(f64::INFINITY, f64::min)).collect(),
+        Some((_, near_d, _)) => near_d.clone(),
         None => vec![0.0; stations.len()],
     };
     let (lo, hi) = distances.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), d| (a.min(*d), b.max(*d)));
     let mut out = Vec::new();
-    for (s, d) in stations.iter().zip(&distances) {
+    for (k, (s, d)) in stations.iter().zip(&distances).enumerate() {
         let (mut scale, mut offset, mut spin) = (1.0, 0.0, 0.0);
-        if let Some((a, _)) = &effects {
+        if let Some((a, _, far_d)) = &effects {
             if let Some(c) = &a.cutoff
                 && *d > val(vals, c, Kind::Length)?
             {
                 continue;
             }
-            let near = length(&a.near, lo)?;
-            let far = length(&a.far, hi)?;
-            let t = if (far - near).abs() < 1e-12 { 0.0 } else { ((d - near) / (far - near)).clamp(0.0, 1.0) };
+            let t = match far_d.as_ref().and_then(|f| f.get(k)) {
+                // Between two sets: 0 on the near attractors, 1 on the far ones.
+                Some(df) => {
+                    let sum = d + df;
+                    if sum > 1e-12 { (d / sum).clamp(0.0, 1.0) } else { 0.0 }
+                }
+                None => {
+                    let near = length(&a.near, lo)?;
+                    let far = length(&a.far, hi)?;
+                    if (far - near).abs() < 1e-12 { 0.0 } else { ((d - near) / (far - near)).clamp(0.0, 1.0) }
+                }
+            };
             let t = match a.falloff {
                 crate::Falloff::Linear => t,
                 crate::Falloff::Smooth => t * t * (3.0 - 2.0 * t),
@@ -10269,6 +10282,56 @@ fn face_pattern(
         out.push([[sx.x, sx.y, sx.z, 0.0], [sy.x, sy.y, sy.z, 0.0], [sz.x, sz.y, sz.z, 0.0], [t.x, t.y, t.z, 1.0]]);
     }
     Ok(out)
+}
+
+/// One attractor as found on this evaluation: a point, an edge (its body and index), or a face or
+/// a whole body ready for exact distance queries.
+enum Attractor<'a> {
+    Point(Vec3),
+    Edge(&'a kernel::Body, usize),
+    Shape(kernel::PointDistance<'a>),
+}
+
+/// The attractors of one set, each found again in the model as it is now.
+fn attractor_set<'a>(
+    ctx: &crate::construct::Ctx<'a>,
+    geometry: &[crate::construct::GeoRef],
+    bodies: &[crate::BodyName],
+) -> Result<Vec<Attractor<'a>>> {
+    use crate::construct::GeoRef;
+    let mut out = Vec::new();
+    for g in geometry {
+        out.push(match g {
+            GeoRef::Edge { at, name } => {
+                let (b, i, _) = crate::construct::edge_pick(ctx.st, *at, name)?;
+                Attractor::Edge(&b.body, i)
+            }
+            GeoRef::Face { at, name } => {
+                let (b, fi, _) = crate::construct::face_of(ctx.st, *at, name)?;
+                Attractor::Shape(kernel::PointDistance::to_face(&b.body, fi)?)
+            }
+            other => Attractor::Point(crate::construct::point(ctx, other)?),
+        });
+    }
+    for n in bodies {
+        let b = ctx.st.body(n).ok_or_else(|| DocError::Unknown(format!("attractor body `{n}`")))?;
+        out.push(Attractor::Shape(kernel::PointDistance::to_body(&b.body)?));
+    }
+    Ok(out)
+}
+
+/// The exact distance from `p` to the nearest attractor of a set.
+fn set_distance(set: &[Attractor], p: Vec3) -> Result<f64> {
+    let mut best = f64::INFINITY;
+    for a in set {
+        let d = match a {
+            Attractor::Point(q) => q.dist(p),
+            Attractor::Edge(b, i) => kernel::edge_distance(b, *i, p)?.unwrap_or(f64::INFINITY),
+            Attractor::Shape(s) => s.distance(p)?,
+        };
+        best = best.min(d);
+    }
+    if best.is_finite() { Ok(best) } else { Err(DocError::Invalid("attractors: no distance to them could be measured".into())) }
 }
 
 fn seg_len(s: &kernel::PathSeg) -> f64 {

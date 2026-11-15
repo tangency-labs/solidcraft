@@ -144,7 +144,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("pattern_rect")
         .contract(&PATTERN_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("bodies: [names]; face: {face: [x,y,z]} (any face; followed as the model changes); count1, count2 (grid cells across and along the face: round and along a cylinder); staggered?: bool (every other column half a cell along); angle?: expr (turns the grid); margin?: expr (no copy nearer the face's edges); flip?: bool (the other side of the face); anchor?: [x,y,z] (the point of the bodies that lands on the face, default the origin; their +Z stands along the face's normal, their X along the grid); attract?: {points: [refs], near?, far?, scale_near?, scale_far?, offset_near?, offset_far?, turn_near?, turn_far?, cutoff?, falloff?: linear|smooth} (advanced: each copy changes with its distance to the nearest point, from the near values at the near distance to the far values at the far one; default distances: the nearest and farthest copies')"),
+        .params("bodies: [names]; face: {face: [x,y,z]} (any face; followed as the model changes); count1, count2 (grid cells across and along the face: round and along a cylinder); staggered?: bool (every other column half a cell along); angle?: expr (turns the grid); margin?: expr (no copy nearer the face's edges); flip?: bool (the other side of the face); anchor?: [x,y,z] (the point of the bodies that lands on the face, default the origin; their +Z stands along the face's normal, their X along the grid); group?: bool (default true: the copies go into a group in the browser's Bodies folder, named after the feature); attract?: {geometry?: [refs: points, vertices, edges, faces], bodies?: [names], far_geometry?, far_bodies?, near?, far?, scale_near?, scale_far?, offset_near?, offset_far?, turn_near?, turn_far?, cutoff?, falloff?: linear|smooth} (advanced: each copy changes with its exact distance to the nearest attractor, from the near values at the near distance to the far values at the far one, default distances the nearest and farthest copies'; with far attractors, by its place between the two sets instead: near values on the near set, far values on the far set)"),
     CommandSpec::new("solid.pattern.path", "Pattern on Path", crate::checked!("solid.pattern.path", pattern_path))
         .at("SOLID", "CREATE")
         .icon("pattern_path")
@@ -3109,17 +3109,59 @@ fn pattern_face(s: &mut Session, p: &Value) -> Result<Value> {
         anchor,
         attract,
     };
-    finish_pattern(s, p, Vec::new(), pattern, bodies)
+    let reply = finish_pattern(s, p, Vec::new(), pattern, bodies)?;
+    // The copies go into a group of the browser's Bodies folder, named after the feature, unless
+    // `group` is false. Done in this command, so it is the same undo step. A redefinition, whose
+    // copies are in a group already, makes no second one.
+    if bool_(p, "group").unwrap_or(true) {
+        let copies: Vec<String> =
+            reply.get("created_bodies").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+        let group_of =
+            |name: &String| s.doc.browser_groups.iter().find(|g| g.items.contains(&solidcraft_doc::BrowserEntry::item(name))).map(|g| g.id);
+        let loose: Vec<String> = copies.iter().filter(|c| group_of(c).is_none()).cloned().collect();
+        match copies.iter().find_map(group_of) {
+            // Edited: copies it makes now join the group the others are in.
+            Some(id) if !loose.is_empty() => {
+                if let Some(g) = s.doc_mut().browser_groups.iter_mut().find(|g| g.id == id) {
+                    g.items.extend(loose.iter().map(|c| solidcraft_doc::BrowserEntry::item(c)));
+                }
+            }
+            Some(_) => {}
+            None if !copies.is_empty() => {
+                let name = reply.get("name").and_then(Value::as_str).unwrap_or("Pattern on Face").to_string();
+                super::browser::group(s, &json!({"folder": "bodies", "component": s.active_component, "name": name, "items": copies}))?;
+            }
+            None => {}
+        }
+    }
+    Ok(reply)
 }
 
 /// A face pattern's attractors (`attract`): the points and the values at the near and far
 /// distances, each checked as the kind it is.
 fn attract_param(s: &Session, a: &Value, cmd: &str) -> Result<solidcraft_doc::Attract> {
-    let list = a.get("points").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`attract.points` must list attractor points"))?;
-    if list.is_empty() || list.len() > 64 {
-        return Err(bad(cmd, "`attract.points` must list 1…64 points"));
+    // One set of attractors: geometry (points, vertices, edges, faces) and bodies by name.
+    let set = |geo_key: &str, body_key: &str| -> Result<(Vec<solidcraft_doc::construct::GeoRef>, Vec<BodyName>)> {
+        let list = match a.get(geo_key) {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(l)) if l.len() <= 64 => l.clone(),
+            Some(_) => return Err(bad(cmd, format!("`attract.{geo_key}` must list at most 64 points, edges or faces"))),
+        };
+        let geometry = list.iter().map(|v| super::construct::geo(s, Some(v), cmd, &format!("attract.{geo_key}"))).collect::<Result<Vec<_>>>()?;
+        let names = string_list(cmd, a, body_key)?;
+        if names.len() > 64 {
+            return Err(bad(cmd, format!("`attract.{body_key}` must list at most 64 bodies")));
+        }
+        if let Some(n) = names.iter().find(|n| s.model.state().body(n).is_none()) {
+            return Err(bad(cmd, format!("`attract.{body_key}`: no body `{n}`")));
+        }
+        Ok((geometry, names.into_iter().map(BodyName).collect()))
+    };
+    let (geometry, bodies) = set("geometry", "bodies")?;
+    if geometry.is_empty() && bodies.is_empty() {
+        return Err(bad(cmd, "`attract` needs `geometry` (points, edges or faces) or `bodies`"));
     }
-    let points = list.iter().map(|v| super::construct::geo(s, Some(v), cmd, "attract.points")).collect::<Result<Vec<_>>>()?;
+    let (far_geometry, far_bodies) = set("far_geometry", "far_bodies")?;
     let field = |key: &str, kind: Kind| -> Result<Option<solidcraft_doc::Expr>> {
         let e = expr(a, key);
         if let Some(e) = &e {
@@ -3141,7 +3183,10 @@ fn attract_param(s: &Session, a: &Value, cmd: &str) -> Result<solidcraft_doc::At
         Some(other) => return Err(bad(cmd, format!("unknown falloff `{other}` (linear or smooth)"))),
     };
     Ok(solidcraft_doc::Attract {
-        points,
+        geometry,
+        bodies,
+        far_geometry,
+        far_bodies,
         near: field("near", Kind::Length)?,
         far: field("far", Kind::Length)?,
         scale_near: field("scale_near", Kind::Unitless)?,

@@ -3125,14 +3125,26 @@ pub enum PatternKind {
     },
 }
 
-/// How a pattern's copies change with their distance to attractor points: from the `near`
-/// value at the `near` distance (or nearer) to the `far` value at the `far` distance (or
-/// farther). Without `near` and `far` distances, the nearest and the farthest copies set them.
+/// How a pattern's copies change with their distance to attractors: points, edges, faces or
+/// whole bodies. Each value goes from its `near` setting at the near distance (or nearer) to its
+/// `far` setting at the far distance (or farther); without those distances, the nearest and the
+/// farthest copies set them. With far attractors too, a copy's place between the two sets sets
+/// its value instead: the near setting on the near attractors, the far one on the far
+/// attractors, blended by the share of its distance to the near set in the sum of both.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 pub struct Attract {
-    /// The points the distances are measured to (fixed points, vertices, sketch points,
-    /// construction points), found again on each evaluation.
-    pub points: Vec<GeoRef>,
+    /// Geometry the distances are measured to: fixed points, vertices, sketch points,
+    /// construction points, edges and faces, found again on each evaluation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub geometry: Vec<GeoRef>,
+    /// Whole bodies the distances are measured to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bodies: Vec<BodyName>,
+    /// The far attractors, when the values blend between two sets.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub far_geometry: Vec<GeoRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub far_bodies: Vec<BodyName>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(length = "Near distance")]
     pub near: Option<Expr>,

@@ -12,11 +12,28 @@ use crate::dialogs::{Dialog, Kind, form_row, set_object_accepting};
 use crate::selection::{self, BODIES, FACES, SelInput, SelectionExt as _, point_value as pt};
 use crate::ui_kit::{self, choice_row, expr_row, hint_row};
 
-/// The pick input the attractor points go into, present while attractors are on.
+/// The pick inputs the attractors go into, present while attractors are on: the near set, and
+/// the optional far set the values blend towards.
 pub(crate) const ATTRACTORS: &str = "Attractors";
+pub(crate) const FAR_ATTRACTORS: &str = "Far attractors";
 
-/// What an attractor point may be: a vertex, a sketch point or a construction point.
-pub(crate) const ATTRACTOR_PICKS: selection::Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
+/// What an attractor may be: a vertex, a sketch or construction point, an edge, a face or a body.
+pub(crate) const ATTRACTOR_PICKS: selection::Accept =
+    selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS | selection::EDGES | FACES | BODIES;
+
+/// Add or remove the attractor picks.
+pub(crate) fn set_attractor_inputs(d: &mut Dialog, on: bool) {
+    for label in [ATTRACTORS, FAR_ATTRACTORS] {
+        set_object_accepting(&mut d.inputs, &mut d.active, label, ATTRACTOR_PICKS, on);
+        if let Some(i) = d.inputs.iter_mut().find(|i| i.label == label) {
+            i.multi = true;
+        }
+    }
+    // Picks go to the near set first.
+    if on && let Some(i) = d.inputs.iter().position(|i| i.label == ATTRACTORS) {
+        d.active = i;
+    }
+}
 
 /// The dialog's values; the picks live in the dialog's inputs.
 #[derive(Clone, Debug, PartialEq)]
@@ -28,6 +45,8 @@ pub struct Form {
     pub angle: String,
     pub margin: String,
     pub flip: bool,
+    /// The copies go into a browser group (on by default).
+    pub group: bool,
     /// The Advanced section's switch.
     pub attract: bool,
     pub near: String,
@@ -44,7 +63,10 @@ pub struct Form {
     /// When editing: the saved face and attractor references, sent while nothing is picked
     /// in their place.
     pub saved_face: Option<Value>,
-    pub saved_points: Vec<Value>,
+    pub saved_geometry: Vec<Value>,
+    pub saved_bodies: Vec<String>,
+    pub saved_far_geometry: Vec<Value>,
+    pub saved_far_bodies: Vec<String>,
 }
 
 impl Default for Form {
@@ -56,6 +78,7 @@ impl Default for Form {
             angle: String::new(),
             margin: String::new(),
             flip: false,
+            group: true,
             attract: false,
             near: String::new(),
             far: String::new(),
@@ -68,7 +91,10 @@ impl Default for Form {
             cutoff: String::new(),
             falloff: 0,
             saved_face: None,
-            saved_points: Vec::new(),
+            saved_geometry: Vec::new(),
+            saved_bodies: Vec::new(),
+            saved_far_geometry: Vec::new(),
+            saved_far_bodies: Vec::new(),
         }
     }
 }
@@ -95,13 +121,16 @@ pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     form_row(ui, "", |ui| {
         ui_kit::checkbox(ui, "Flip side", &mut f.flip);
     });
+    form_row(ui, "", |ui| {
+        ui_kit::checkbox(ui, "Group copies", &mut f.group);
+    });
     let mut attract = f.attract;
     ui_kit::section(ui, "face_pattern_advanced", "Advanced", f.attract, |ui| {
         form_row(ui, "", |ui| {
             ui_kit::checkbox(ui, "Attractors", &mut attract);
         });
         if attract {
-            ui_kit::status_line(ui, "Each copy changes with its distance to the nearest attractor point", ui_kit::StatusTone::Dim);
+            ui_kit::status_line(ui, "Each copy changes with its distance to the nearest attractor", ui_kit::StatusTone::Dim);
             enter |= hint_row(ui, "Near distance", &mut f.near, "nearest copy");
             enter |= hint_row(ui, "Far distance", &mut f.far, "farthest copy");
             enter |= expr_row(ui, "Scale near", &mut f.scale_near);
@@ -116,10 +145,7 @@ pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     });
     if attract != f.attract {
         f.attract = attract;
-        set_object_accepting(&mut d.inputs, &mut d.active, ATTRACTORS, ATTRACTOR_PICKS, attract);
-        if let Some(i) = d.inputs.iter_mut().find(|i| i.label == ATTRACTORS) {
-            i.multi = true;
-        }
+        set_attractor_inputs(d, attract);
     }
     enter
 }
@@ -150,15 +176,40 @@ pub(crate) fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
     if f.flip {
         p["flip"] = json!(true);
     }
+    if !f.group {
+        p["group"] = json!(false);
+    }
     if f.attract {
-        let mut points: Vec<Value> = picks(ATTRACTORS).iter().map(|sel| crate::dialogs::construct_ref(app, sel)).collect::<Result<_, _>>()?;
-        if points.is_empty() {
-            points.clone_from(&f.saved_points);
+        // One set: the picks split into geometry references and whole bodies; while nothing is
+        // picked, the set as saved.
+        let set = |label: &str, saved_geometry: &[Value], saved_bodies: &[String]| -> Result<(Vec<Value>, Vec<String>), String> {
+            let items = picks(label);
+            if items.is_empty() {
+                return Ok((saved_geometry.to_vec(), saved_bodies.to_vec()));
+            }
+            let mut geometry = Vec::new();
+            let mut bodies = Vec::new();
+            for sel in items {
+                match sel {
+                    Sel::Body { name } => bodies.push(name.clone()),
+                    other => geometry.push(crate::dialogs::construct_ref(app, other)?),
+                }
+            }
+            Ok((geometry, bodies))
+        };
+        let (geometry, bodies) = set(ATTRACTORS, &f.saved_geometry, &f.saved_bodies)?;
+        if geometry.is_empty() && bodies.is_empty() {
+            return Err("select the attractors, or switch Attractors off".into());
         }
-        if points.is_empty() {
-            return Err("select the attractor points, or switch Attractors off".into());
+        let (far_geometry, far_bodies) = set(FAR_ATTRACTORS, &f.saved_far_geometry, &f.saved_far_bodies)?;
+        let mut a = json!({});
+        for (key, list) in
+            [("geometry", json!(geometry)), ("bodies", json!(bodies)), ("far_geometry", json!(far_geometry)), ("far_bodies", json!(far_bodies))]
+        {
+            if list.as_array().is_some_and(|l| !l.is_empty()) {
+                a[key] = list;
+            }
         }
-        let mut a = json!({"points": points});
         for (key, v) in [
             ("near", &f.near),
             ("far", &f.far),
@@ -197,9 +248,27 @@ pub(crate) fn form_of(pattern: &PatternKind) -> Option<Form> {
         ..Form::default()
     };
     if let Some(a) = attract.as_deref() {
-        let Attract { points, near, far, scale_near, scale_far, offset_near, offset_far, turn_near, turn_far, cutoff, falloff } = a;
+        let Attract {
+            geometry,
+            bodies,
+            far_geometry,
+            far_bodies,
+            near,
+            far,
+            scale_near,
+            scale_far,
+            offset_near,
+            offset_far,
+            turn_near,
+            turn_far,
+            cutoff,
+            falloff,
+        } = a;
         f.attract = true;
-        f.saved_points = points.iter().filter_map(|g| serde_json::to_value(g).ok()).collect();
+        f.saved_geometry = geometry.iter().filter_map(|g| serde_json::to_value(g).ok()).collect();
+        f.saved_bodies = bodies.iter().map(|b| b.0.clone()).collect();
+        f.saved_far_geometry = far_geometry.iter().filter_map(|g| serde_json::to_value(g).ok()).collect();
+        f.saved_far_bodies = far_bodies.iter().map(|b| b.0.clone()).collect();
         f.near = s(near);
         f.far = s(far);
         f.scale_near = scale_near.as_deref().unwrap_or("1").to_string();

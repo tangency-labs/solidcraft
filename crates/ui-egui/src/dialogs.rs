@@ -8781,16 +8781,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     let mut d = start("solid.pattern.face")?;
                     let form = crate::dialogs_face_pattern::form_of(pattern).unwrap_or_default();
                     if form.attract {
-                        set_object_accepting(
-                            &mut d.inputs,
-                            &mut d.active,
-                            crate::dialogs_face_pattern::ATTRACTORS,
-                            crate::dialogs_face_pattern::ATTRACTOR_PICKS,
-                            true,
-                        );
-                        if let Some(i) = d.inputs.iter_mut().find(|i| i.label == crate::dialogs_face_pattern::ATTRACTORS) {
-                            i.multi = true;
-                        }
+                        crate::dialogs_face_pattern::set_attractor_inputs(&mut d, true);
                     }
                     d.kind = Kind::FacePattern(Box::new(form));
                     // The face where it was picked, when a face is still there.

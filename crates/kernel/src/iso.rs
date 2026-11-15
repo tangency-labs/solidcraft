@@ -497,3 +497,149 @@ fn orient_outward(body: &Body, stations: &mut [FaceStation]) -> Result<()> {
     }
     Ok(())
 }
+
+/// Exact distances from points to a face, or to every face of a body, measured on the faces'
+/// own surfaces and trims and on their edges' curves, never on a mesh. Made once for any number
+/// of points.
+pub struct PointDistance<'a> {
+    body: &'a Body,
+    faces: Vec<FaceProbe<'a>>,
+}
+
+/// One face of a [`PointDistance`]: its surface and trims, a grid of starting points, and its
+/// edges (not its seams).
+struct FaceProbe<'a> {
+    trims: FaceTrims<'a>,
+    samples: Vec<([f64; 2], Vec3)>,
+    edges: Vec<usize>,
+}
+
+/// Samples each way across a face where the nearest point's search starts.
+const PROBE_SAMPLES: usize = 12;
+
+impl<'a> PointDistance<'a> {
+    /// Distances to face `face` of `body`.
+    pub fn to_face(body: &'a Body, face: usize) -> Result<PointDistance<'a>> {
+        body.require_brep("a distance to a face")?;
+        Ok(PointDistance { body, faces: vec![FaceProbe::new(body, face)?] })
+    }
+
+    /// Distances to the whole of `body`: its nearest face.
+    pub fn to_body(body: &'a Body) -> Result<PointDistance<'a>> {
+        body.require_brep("a distance to a body")?;
+        let faces = (0..body.record().faces.len()).map(|f| FaceProbe::new(body, f)).collect::<Result<Vec<_>>>()?;
+        if faces.is_empty() {
+            return Err(KernelError::Invalid("the body has no faces".into()));
+        }
+        Ok(PointDistance { body, faces })
+    }
+
+    /// The distance from `at` to the nearest point of the face or body.
+    pub fn distance(&self, at: Vec3) -> Result<f64> {
+        if !at.is_finite() {
+            return Err(KernelError::Invalid("the point must be finite".into()));
+        }
+        let mut best = f64::INFINITY;
+        for f in &self.faces {
+            best = best.min(f.distance(self.body, at)?);
+        }
+        if best.is_finite() { Ok(best) } else { Err(KernelError::Failed("no distance to the face could be found".into())) }
+    }
+}
+
+impl<'a> FaceProbe<'a> {
+    fn new(body: &'a Body, face: usize) -> Result<FaceProbe<'a>> {
+        let trims = FaceTrims::new(body, face)?;
+        let [[u0, u1], [v0, v1]] = trims.extent();
+        let mut samples = Vec::new();
+        for i in 0..=PROBE_SAMPLES {
+            for j in 0..=PROBE_SAMPLES {
+                let q = [u0 + (u1 - u0) * i as f64 / PROBE_SAMPLES as f64, v0 + (v1 - v0) * j as f64 / PROBE_SAMPLES as f64];
+                if let Some(p) = trims.eval.point(q) {
+                    samples.push((q, p));
+                }
+            }
+        }
+        let f = body.record().faces.get(face).ok_or_else(|| KernelError::Invalid(format!("the body has no face {face}")))?;
+        let mut uses: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
+        for l in &f.loops {
+            if let brep::Loop::Edges { edges } = l {
+                for e in edges {
+                    *uses.entry(e.edge).or_insert(0) += 1;
+                }
+            }
+        }
+        let edges = uses.into_iter().filter(|(_, n)| *n == 1).map(|(e, _)| e as usize).collect();
+        Ok(FaceProbe { trims, samples, edges })
+    }
+
+    /// The distance from `at` to this face: to the surface's nearest point when that point is on
+    /// the face, else to the nearest of the face's edges.
+    fn distance(&self, body: &Body, at: Vec3) -> Result<f64> {
+        let mut best = f64::INFINITY;
+        if let Some((uv, d)) = self.nearest_on_surface(at)
+            && self.trims.inside(uv)
+        {
+            best = d;
+        }
+        for e in &self.edges {
+            if let Some(d) = crate::curvature_comb::edge_distance(body, *e, at)? {
+                best = best.min(d);
+            }
+        }
+        if !best.is_finite() {
+            // A closed face with no edges (a whole sphere): its nearest sample inside it.
+            best = self.samples.iter().filter(|(q, _)| self.trims.inside(*q)).map(|(_, p)| p.dist(at)).fold(f64::INFINITY, f64::min);
+        }
+        Ok(best)
+    }
+
+    /// The surface's nearest point to `at`, from the nearest sample: Gauss-Newton on the foot
+    /// point conditions (S_u · r = S_v · r = 0), kept in the face's box, whole periods wrapped.
+    fn nearest_on_surface(&self, at: Vec3) -> Option<([f64; 2], f64)> {
+        let mut q = self.samples.iter().min_by(|a, b| a.1.dist(at).total_cmp(&b.1.dist(at)))?.0;
+        let [[u0, u1], [v0, v1]] = self.trims.domain;
+        let period = self.trims.eval.domain().period;
+        let keep = |x: f64, lo: f64, hi: f64, p: Option<f64>| match p.filter(|p| *p > 0.0) {
+            Some(p) => {
+                let w = lo + (x - lo).rem_euclid(p);
+                if w > hi + 1e-12 { w - p } else { w }
+            }
+            None => x.clamp(lo, hi),
+        };
+        let dist = |q: [f64; 2]| self.trims.eval.point(q).map_or(f64::INFINITY, |p| p.dist(at));
+        let mut d = dist(q);
+        for _ in 0..60 {
+            let Some((s, su, sv)) = self.trims.eval.derivs(q[0], q[1]) else { break };
+            let r = at - s;
+            // Damped (Levenberg-Marquardt) so a pole, where one partial vanishes, still moves.
+            let damp = 1e-9 * (su.dot(su) + sv.dot(sv)).max(1e-300);
+            let (a, b, c) = (su.dot(su) + damp, su.dot(sv), sv.dot(sv) + damp);
+            let det = a * c - b * b;
+            let (g1, g2) = (su.dot(r), sv.dot(r));
+            let (du, dv) = ((c * g1 - b * g2) / det, (a * g2 - b * g1) / det);
+            if !(det > 0.0 && du.is_finite() && dv.is_finite()) {
+                break;
+            }
+            // Take the step only as far as it brings the point nearer.
+            let mut step = 1.0;
+            let mut moved = false;
+            for _ in 0..30 {
+                let next = [keep(q[0] + du * step, u0, u1, period[0]), keep(q[1] + dv * step, v0, v1, period[1])];
+                let dn = dist(next);
+                if dn < d {
+                    q = next;
+                    d = dn;
+                    moved = true;
+                    break;
+                }
+                step *= 0.5;
+            }
+            if !moved || (du.abs() + dv.abs()) * step < 1e-13 * (1.0 + q[0].abs() + q[1].abs()) {
+                break;
+            }
+        }
+        let p = self.trims.eval.point(q)?;
+        Some((q, p.dist(at)))
+    }
+}
