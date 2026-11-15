@@ -1257,6 +1257,7 @@ impl Dialog {
         recall(app, &mut d);
         // Patterns of features picked in the timeline: the objects are features.
         if is_pattern(&d.kind)
+            && !matches!(d.kind, Kind::FacePattern(_))
             && s.selection.iter().any(|x| matches!(x, Sel::Feature { .. }))
             && let Some(inp) = d.inputs.first_mut()
         {
@@ -3336,7 +3337,8 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
                 ),
                 _ => (crate::dialogs_face_pattern::kind(), crate::dialogs_face_pattern::inputs()),
             };
-            let accept = d.inputs.first().map(|i| i.accept).unwrap_or(BODIES);
+            // A face pattern copies bodies only.
+            let accept = if matches!(kind, Kind::FacePattern(_)) { BODIES } else { d.inputs.first().map(|i| i.accept).unwrap_or(BODIES) };
             if let Some(i) = inputs.first_mut() {
                 i.items = objects;
                 i.accept = accept;
@@ -3347,7 +3349,10 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
             d.extra.clear();
             d.advance();
         }
-        object_type_row(d, ui, session);
+        // A face pattern copies bodies only: no Object Type.
+        if !matches!(d.kind, Kind::FacePattern(_)) {
+            object_type_row(d, ui, session);
+        }
         return;
     }
     if crate::hole_folder::active(d) {
