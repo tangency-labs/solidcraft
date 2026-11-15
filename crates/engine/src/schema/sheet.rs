@@ -386,7 +386,8 @@ pub struct FlangeParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "IdOrName")]
     pub sketch: Option<IdOrName>,
-    /// Base: which of the sketch's profiles become the sheet. Default: all of them.
+    /// Base: which of the sketch's profiles become the sheet. When omitted, nested loops
+    /// alternate material and holes, as for Extrude. Explicit "all" includes every profile.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ProfilesParam")]
     pub profiles: Option<ProfilesParam>,
