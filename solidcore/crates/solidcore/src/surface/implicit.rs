@@ -2145,18 +2145,24 @@ impl AnalyticSupport {
     /// the axis. Of the rows of the form's Bezier patches, the one whose first sweep span has
     /// the largest control triangle gives the numbers ([`control_circle`]; a row on the axis has
     /// none): the axis is the triangle's normal, in the recogniser's sense; the centre is the
-    /// triangle's, moved onto the chord's perpendicular bisector; the x axis points to the
-    /// row's first point and the sweep ends at the angle of its last, in the last sweep span.
-    /// A short arc's control points fix the centre's distance along the bisector only to their
-    /// rounding over the arc's angle squared, but the bisector itself to that over the angle;
-    /// a centre off along the bisector moves the swept points by the square of the sweep, one
-    /// off across it turns them by the sweep. The recogniser's generator, generator range and
-    /// swap are kept, and its origin's height on the axis: they are conventions, not numbers.
-    /// `None` where no row has a triangle.
+    /// triangle's, moved onto the chord's perpendicular bisector. A short arc's control points
+    /// fix the centre's distance along the bisector only to their rounding over the arc's angle
+    /// squared, but the bisector itself to that over the angle; a centre off along the bisector
+    /// moves the swept points by the square of the sweep, one off across it turns them by the
+    /// sweep. The x axis points to the start of the sweep circle on which the surface's polar
+    /// converter measures the NURB's angles (`RebuildPolarConverter`: the sweep iso at the
+    /// generator's start, or at 0.45 of its range where that one lies on the axis), and the
+    /// sweep ends at the angle of that circle's end. Another row's start is turned from it by
+    /// the net's rounding, and every converted angle with it: 5e-14 radians between the
+    /// generator's ends on a 286 degree sweep in #17004's body. The recogniser's generator,
+    /// generator range and swap are kept, and its origin's height on the axis: they are
+    /// conventions, not numbers. `None` where no row has a triangle or both sweep isos lie on
+    /// the axis.
     ///
     /// # Errors
     ///
-    /// Those of the form's control net and Bezier decomposition, the generator's copy,
+    /// Those of the form's control net and Bezier decomposition, its sweep iso and that one's
+    /// evaluation, the generator's copy,
     /// [`SurfOfRevolution::new`](crate::surface::surf_of_revolution::SurfOfRevolution::new)
     /// and its reparameterisation.
     fn revolution_from_rows(
@@ -2164,6 +2170,8 @@ impl AnalyticSupport {
         recognised: &crate::surface::surf_of_revolution::SurfOfRevolution,
         form: &BSplineSurface,
     ) -> Result<Option<Surface>> {
+        use crate::math::EFF_ZERO;
+        use crate::nurbs::b_spline_surface::{IsoCurveOptions, SurfParamType};
         use crate::surface::surf_of_revolution::SurfOfRevolution;
         let Some(nurb) = form.gw_nurb() else {
             return Ok(None);
@@ -2187,22 +2195,12 @@ impl AnalyticSupport {
             .collect();
         // the sweep runs along u unless the recogniser swapped it
         let sweep_along_u = !recognised.swap_uv;
-        // the patch `sweep` spans along the sweep (first or last) and `g` along the generator
-        let patch = |last: bool, g: usize| -> Option<&Vec<Vec<Vec3>>> {
+        // the patch of the first span along the sweep and span `g` along the generator
+        let patch = |g: usize| -> Option<&Vec<Vec<Vec3>>> {
             if sweep_along_u {
-                let column = if last {
-                    patches.last()?
-                } else {
-                    patches.first()?
-                };
-                column.get(g)
+                patches.first()?.get(g)
             } else {
-                let row = patches.get(g)?;
-                if last {
-                    row.last()
-                } else {
-                    row.first()
-                }
+                patches.get(g)?.first()
             }
         };
         // a patch's control point `j` along the sweep of its generator row `r`
@@ -2218,9 +2216,9 @@ impl AnalyticSupport {
         } else {
             patches.len()
         };
-        let mut best: Option<(f64, Vec3, Vec3, Vec3, Vec3, Vec3)> = None;
+        let mut best: Option<(f64, Vec3, Vec3, Vec3, Vec3)> = None;
         for g in 0..generator_spans {
-            let (Some(first), Some(last)) = (patch(false, g), patch(true, g)) else {
+            let Some(first) = patch(g) else {
                 return Ok(None);
             };
             let rows = if sweep_along_u {
@@ -2234,33 +2232,52 @@ impl AnalyticSupport {
                 else {
                     return Ok(None);
                 };
-                let ends = if sweep_along_u {
-                    last.len()
-                } else {
-                    last.get(r).map_or(0, Vec::len)
-                };
-                let Some(stop) = ends.checked_sub(1).and_then(|e| at(last, r, e)) else {
-                    return Ok(None);
-                };
                 let Some((centre, _, normal, area)) = control_circle(p0, p1, p2) else {
                     continue;
                 };
                 if best.as_ref().is_none_or(|b| area > b.0) {
-                    best = Some((area, centre, normal, p0, p2, stop));
+                    best = Some((area, centre, normal, p0, p2));
                 }
             }
         }
-        let Some((_, centre, normal, start, p2, stop)) = best else {
+        let Some((_, centre, normal, p0, p2)) = best else {
             return Ok(None);
         };
+        // the sweep circle the polar converter measures the NURB's angles on
+        // (`RebuildPolarConverter`): the sweep iso at the generator's start, or at 0.45 of
+        // its range where that one lies on the axis
+        let uv = form.natural_uv_domain();
+        let sweep_iso = |fraction: f64| -> Result<BSplineCurve> {
+            let at = uv.evaluate(fraction, fraction);
+            let (param, value) = if sweep_along_u {
+                (SurfParamType::V, at.y)
+            } else {
+                (SurfParamType::U, at.x)
+            };
+            Ok(form
+                .create_iso_parametric_curve(k, param, value, IsoCurveOptions::default())?
+                .curve)
+        };
+        let mut circle = sweep_iso(0.0)?;
+        if circle.is_degenerate(k, EFF_ZERO, None)? {
+            circle = sweep_iso(0.45)?;
+            if circle.is_degenerate(k, EFF_ZERO, None)? {
+                return Ok(None);
+            }
+        }
+        let ends = circle.natural_interval();
+        let (start, stop) = (
+            circle.evaluate_point(ends.min())?,
+            circle.evaluate_point(ends.max())?,
+        );
         let position = recognised.position;
         let axis = if normal.dot(position.z_axis()) < 0.0 {
             -normal
         } else {
             normal
         };
-        let mid = (start + p2) * 0.5;
-        let Ok(bisector) = axis.cross(p2 - start).unitize() else {
+        let mid = (p0 + p2) * 0.5;
+        let Ok(bisector) = axis.cross(p2 - p0).unitize() else {
             return Ok(None);
         };
         let centre = mid + bisector * (centre - mid).dot(bisector);
