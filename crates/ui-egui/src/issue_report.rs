@@ -11,6 +11,7 @@ use egui::{ColorImage, TextureHandle};
 use crate::{SolveApp, dialogs, help};
 
 mod form;
+pub mod ticket;
 
 /// The most an answer keeps, in characters (as `TextEdit::char_limit` counts them, not bytes).
 const MAX_ANSWER: usize = 2000;
@@ -144,6 +145,12 @@ pub struct Draft {
     focus_requested: bool,
     missing_description: bool,
     opened_github: bool,
+    /// The in-app report's own state (`ticket`), made when it first shows.
+    ticket: Option<Box<ticket::TicketDraft>>,
+    /// The screenshot's 3D view part, for the in-app report.
+    view: Option<Arc<ColorImage>>,
+    /// The crash report a crash draft was made from: its id and JSON.
+    crash: Option<(String, String)>,
 }
 
 impl Draft {
@@ -165,6 +172,9 @@ impl Draft {
             focus_requested: false,
             missing_description: false,
             opened_github: false,
+            ticket: None,
+            view: None,
+            crash: None,
         }
     }
 
@@ -590,6 +600,8 @@ pub fn begin_crash(app: &mut SolveApp, ctx: &egui::Context, report: &serde_json:
     }
     cancel_capture(app);
     let mut draft = crash_draft(report);
+    let id = report.get("id").and_then(serde_json::Value::as_str).unwrap_or("report");
+    draft.crash = serde_json::to_string_pretty(report).ok().map(|json| (limited(id, 80), limited(&json, 1 << 20)));
     // A screenshot can still be added of the view as it is now.
     draft.source_signature = source_signature(app, None);
     app.issue_report.draft = Some(draft);
@@ -859,6 +871,9 @@ pub(crate) fn receive(app: &mut SolveApp, token: u64, image: Arc<ColorImage>) {
         return;
     };
     let stale = app.issue_report.pending.as_ref().is_some_and(|p| p.signature != signature(app, app.dialog.as_ref()));
+    let in_app = ticket::enabled(app);
+    let ctx_width = app.issue_report.pending.as_ref().map_or(1.0, |p| p.window.width());
+    let view_rect = app.viewport.rect.map(|r| r.translate(-app.issue_report.pending.as_ref().map_or(egui::Vec2::ZERO, |p| p.window.min.to_vec2())));
     app.issue_report.pending = None;
     if let Some(draft) = app.issue_report.draft.as_mut() {
         if stale {
@@ -867,6 +882,10 @@ pub(crate) fn receive(app: &mut SolveApp, token: u64, image: Arc<ColorImage>) {
         }
         match fitted(image, MAX_IMAGE_PIXELS, max_side) {
             Some(image) => {
+                draft.view = in_app.then(|| {
+                    let scale = image.size[0] as f32 / ctx_width.max(1.0);
+                    ticket::crop(&image, view_rect, scale)
+                });
                 draft.image = Some(image);
                 draft.texture = None;
                 draft.note = draft.rebuilt.take().unwrap_or("Screenshot captured locally. Review it before attaching it on GitHub.").into();
@@ -926,7 +945,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ctx.memory_mut(|m| m.request_focus(id));
     }
     let Some(mut draft) = app.issue_report.draft.take() else { return };
-    let (retake, close) = form::show(app, &mut draft, ctx);
+    let (retake, close) = if ticket::enabled(app) { ticket::show(app, &mut draft, ctx) } else { form::show(app, &mut draft, ctx) };
     if !close {
         app.issue_report.draft = Some(draft);
         if retake {
@@ -2326,5 +2345,255 @@ mod tests {
         receive(&mut app, token, Arc::new(ColorImage::new([0, 0], vec![])));
         assert!(app.issue_report.draft.as_ref().unwrap().image.is_none());
         assert!(app.issue_report.draft.as_ref().unwrap().note.contains("dimensions"));
+    }
+
+    // ---- the in-app report (tickets.solidcraft.io) ---------------------------------------------
+
+    use crate::tickets::{self, payload};
+    use std::sync::Mutex;
+
+    /// A keyring in memory that remembers every secret it was given.
+    #[derive(Default)]
+    struct FakeKeyring(Mutex<std::collections::HashMap<String, String>>);
+
+    impl crate::agent_chat::backend::Secrets for FakeKeyring {
+        fn get(&self, id: &str) -> Result<Option<String>, String> {
+            Ok(self.0.lock().unwrap().get(id).cloned())
+        }
+        fn set(&self, id: &str, secret: &str) -> Result<(), String> {
+            self.0.lock().unwrap().insert(id.into(), secret.into());
+            Ok(())
+        }
+        fn delete(&self, id: &str) -> Result<(), String> {
+            self.0.lock().unwrap().remove(id);
+            Ok(())
+        }
+    }
+
+    type Requests = Arc<Mutex<Vec<crate::agent_chat::backend::HttpRequest>>>;
+
+    /// A ticket server that answers at once: `online` false makes every request fail as if
+    /// offline. Records the requests it gets.
+    fn fake_server(online: Arc<std::sync::atomic::AtomicBool>, requests: Requests) -> tickets::Http {
+        Arc::new(move |r: crate::agent_chat::backend::HttpRequest, done: std::sync::mpsc::Sender<tickets::Reply>| {
+            requests.lock().unwrap().push(r.clone());
+            if !online.load(std::sync::atomic::Ordering::SeqCst) {
+                let _ = done.send(Err("network unreachable".into()));
+                return;
+            }
+            let path = r.url.trim_start_matches(&tickets::api::server()).to_string();
+            let reply = match (r.method, path.as_str()) {
+                ("POST", "/api/device/code") => {
+                    json!({"device_code":"dev-1","user_code":"WDJB-MJHT","verification_uri":format!("{}/device", tickets::api::server()),"interval":1,"expires_in":600})
+                }
+                ("POST", "/api/device/token") => json!({"access_token":"tkt_secret_token_123","token_type":"Bearer"}),
+                ("GET", "/api/apps") => json!({"apps":[{"slug":"solidcraft","name":"SolidCraft"},{"slug":"pcbcraft","name":"PCBCraft"}]}),
+                ("POST", "/api/tickets") => json!({"id": 42}),
+                ("POST", p) if p.ends_with("/uploads") => {
+                    json!({"id": format!("up{}", requests.lock().unwrap().len()), "offset": 0, "chunkSize": 65536})
+                }
+                ("PATCH", _) => {
+                    let offset: usize = r.headers.iter().find(|(k, _)| k == "Upload-Offset").unwrap().1.parse().unwrap();
+                    json!({"offset": offset + r.body.as_ref().map_or(0, Vec::len)})
+                }
+                ("POST", p) if p.ends_with("/complete") => json!({"attachment":{"id":"a"}}),
+                _ => json!({}),
+            };
+            let _ = done.send(Ok((if path == "/api/tickets" { 201 } else { 200 }, reply.to_string().into_bytes())));
+        })
+    }
+
+    fn ticket_app(online: bool, token: Option<&str>) -> (SolveApp, Arc<std::sync::atomic::AtomicBool>, Requests, Arc<FakeKeyring>) {
+        let online = Arc::new(std::sync::atomic::AtomicBool::new(online));
+        let requests: Requests = Arc::default();
+        let keyring = Arc::new(FakeKeyring::default());
+        if let Some(token) = token {
+            crate::agent_chat::backend::Secrets::set(&*keyring, tickets::SECRET_ID, token).unwrap();
+        }
+        let services = crate::Services {
+            tickets_http: Some(fake_server(online.clone(), requests.clone())),
+            ticket_secrets: Some(keyring.clone()),
+            ..Default::default()
+        };
+        (SolveApp::new(Session::default(), services), online, requests, keyring)
+    }
+
+    fn evidence_with_design() -> payload::Evidence {
+        payload::Evidence {
+            system: "SolidCraft 1.0\nOS: linux x86_64\n".into(),
+            app_version: "1.0".into(),
+            os: "linux x86_64".into(),
+            steps: vec![payload::Step { command: "solid.box".into(), params: "{}".into(), ok: true, result: "{}".into() }],
+            failing: Some((Some("Fillet".into()), "radius too large".into())),
+            log: vec!["[error] radius too large".into()],
+            screenshot: Some(vec![1, 2, 3]),
+            design: Some(("SecretBracket.sc".into(), b"SECRET-DESIGN-BYTES".to_vec())),
+            crash: None,
+        }
+    }
+
+    fn form() -> payload::Form {
+        payload::Form { app: "solidcraft".into(), title: "Fillet fails".into(), description: "It refused".into(), ..Default::default() }
+    }
+
+    #[test]
+    fn ticket_report_payload_carries_only_the_ticked_boxes() {
+        let evidence = evidence_with_design();
+        let ticks = payload::Ticks { system: false, repro: false, log: true, screenshot: false, design: false, crash: false };
+        let out = payload::build(&form(), ticks, &evidence, "solidcraft test");
+        let t = &out.ticket;
+        assert!(t.get("system").is_none() && t.get("appVersion").is_none() && t.get("os").is_none(), "system info unticked: {t}");
+        assert!(t.get("repro").is_none(), "what you were doing unticked: {t}");
+        assert_eq!(out.files.iter().map(|f| f.kind.as_str()).collect::<Vec<_>>(), ["log"]);
+        assert_eq!(
+            t["consent"],
+            json!({"system":false,"repro":false,"log":true,"screenshot":false,"design":false,"crash":false,"client":"solidcraft test"})
+        );
+        assert_eq!((t["app"].as_str(), t["type"].as_str(), t["title"].as_str()), (Some("solidcraft"), Some("bug"), Some("Fillet fails")));
+
+        let all = payload::Ticks { system: true, repro: true, log: true, screenshot: true, design: true, crash: true };
+        let out = payload::build(&form(), all, &evidence, "solidcraft test");
+        assert_eq!(out.ticket["system"], json!(evidence.system), "the exact text the dialog shows");
+        assert_eq!(out.ticket["repro"]["failing"]["error"], "radius too large");
+        assert_eq!(out.files.iter().map(|f| f.kind.as_str()).collect::<Vec<_>>(), ["log", "screenshot", "design"]);
+        assert_eq!(out.ticket["consent"]["crash"], false, "a box with nothing behind it is not consented to");
+    }
+
+    #[test]
+    fn ticket_report_never_includes_the_design_unless_its_box_is_ticked() {
+        assert!(!payload::Ticks::default().design, "the design box is off by default");
+        let evidence = evidence_with_design();
+        let out = payload::build(&form(), payload::Ticks::default(), &evidence, "solidcraft test");
+        let ticket = out.ticket.to_string();
+        assert!(!ticket.contains("SecretBracket") && out.ticket["consent"]["design"] == false);
+        for f in &out.files {
+            assert!(f.kind != "design" && !f.name.contains("SecretBracket"));
+            assert!(!f.bytes.windows(6).any(|w| w == b"SECRET"), "{} carries the design", f.name);
+        }
+        let ticked = payload::Ticks { design: true, ..Default::default() };
+        let out = payload::build(&form(), ticked, &evidence, "solidcraft test");
+        let design = out.files.iter().find(|f| f.kind == "design").unwrap();
+        assert_eq!((design.name.as_str(), design.bytes.as_slice()), ("SecretBracket.sc", &b"SECRET-DESIGN-BYTES"[..]));
+
+        // The dialog's own evidence: System info says nothing about the open design.
+        let mut app = app();
+        app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"PrivateWidget"})).unwrap();
+        Arc::make_mut(&mut app.session.doc).name = "PrivateWidget".into();
+        let evidence = ticket::evidence(&app, None, None, None);
+        assert!(!evidence.system.contains("PrivateWidget"), "{}", evidence.system);
+        assert!(evidence.design.as_ref().is_some_and(|(name, bytes)| name == "PrivateWidget.sc" && !bytes.is_empty()));
+        let out = payload::build(&form(), payload::Ticks { repro: false, ..Default::default() }, &evidence, "t");
+        assert!(!out.ticket.to_string().contains("PrivateWidget"));
+        assert!(out.files.iter().all(|f| f.kind != "design"));
+        // What you were doing lists the command that made it, with its settings.
+        assert!(evidence.steps.iter().any(|s| s.command == "solid.box" && s.ok && s.params.contains("PrivateWidget")));
+    }
+
+    fn run_ticks(app: &mut SolveApp, ctx: &egui::Context, n: usize) {
+        for _ in 0..n {
+            tickets::tick(app, ctx);
+        }
+    }
+
+    #[test]
+    fn ticket_report_made_offline_waits_in_the_queue_and_sends_when_online() {
+        let dir = std::env::temp_dir().join(format!("sc-report-queue-{}-{}", std::process::id(), crate::now_ms() as u64));
+        let (mut app, online, requests, _) = ticket_app(false, Some("tkt_good"));
+        app.tickets.queue_dir = Some(dir.clone());
+        let ctx = crate::fonts::test_context();
+        let report = payload::build(&form(), payload::Ticks { design: true, ..Default::default() }, &evidence_with_design(), "t");
+        tickets::send(&mut app, report);
+        run_ticks(&mut app, &ctx, 4);
+        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Queued));
+        let waiting = tickets::queue::list(&dir);
+        assert_eq!(waiting.len(), 1, "one report waits");
+        let kept = std::fs::read_to_string(waiting[0].join("report.json")).unwrap();
+        assert!(!kept.contains("tkt_good"), "the queue holds no token");
+        // Nothing else goes until a retry is due, and only for the queued report.
+        let sent = requests.lock().unwrap().len();
+        run_ticks(&mut app, &ctx, 4);
+        assert_eq!(requests.lock().unwrap().len(), sent, "no background requests while nothing is due");
+
+        online.store(true, std::sync::atomic::Ordering::SeqCst);
+        tickets::retry_now(&mut app);
+        run_ticks(&mut app, &ctx, 40);
+        assert!(tickets::queue::list(&dir).is_empty(), "sent and removed from the queue");
+        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Filed(42)));
+        let requests = requests.lock().unwrap();
+        let ticket = requests.iter().find(|r| r.url.ends_with("/api/tickets") && r.method == "POST").unwrap();
+        assert!(ticket.headers.iter().any(|(k, v)| k == "Authorization" && v == "Bearer tkt_good"));
+        let uploaded: Vec<u8> = requests.iter().filter(|r| r.method == "PATCH").flat_map(|r| r.body.clone().unwrap_or_default()).collect();
+        assert!(uploaded.windows(19).any(|w| w == b"SECRET-DESIGN-BYTES"), "the ticked design was uploaded");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Offline before ever signing in: the report waits too, and no sign-in is left pending.
+        let (mut app, _, _, _) = ticket_app(false, None);
+        app.tickets.queue_dir = Some(dir.clone());
+        tickets::send(&mut app, payload::build(&form(), payload::Ticks::default(), &evidence_with_design(), "t"));
+        run_ticks(&mut app, &ctx, 4);
+        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Queued));
+        assert!(matches!(app.tickets.sign_in, tickets::SignIn::Idle));
+        assert_eq!(tickets::queue::list(&dir).len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ticket_report_sign_in_keeps_the_token_in_the_keyring_only() {
+        let dir = std::env::temp_dir().join(format!("sc-report-token-{}-{}", std::process::id(), crate::now_ms() as u64));
+        let (mut app, online, requests, keyring) = ticket_app(true, None);
+        app.tickets.queue_dir = Some(dir.clone());
+        let ctx = crate::fonts::test_context();
+        let report = payload::build(&form(), payload::Ticks::default(), &evidence_with_design(), "t");
+        tickets::send(&mut app, report);
+        // No token: the code is asked for and shown, and the verification page opened.
+        run_ticks(&mut app, &ctx, 2);
+        assert!(matches!(&app.tickets.sign_in, tickets::SignIn::Waiting { code, .. } if code.user_code == "WDJB-MJHT"));
+        // Polling (the fake's interval is a second).
+        let until = crate::now_ms() + 5000.0;
+        while app.tickets.outcome.is_none() && crate::now_ms() < until {
+            run_ticks(&mut app, &ctx, 1);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Filed(42)), "the report goes once signed in");
+        assert_eq!(keyring.0.lock().unwrap().get(tickets::SECRET_ID).map(String::as_str), Some("tkt_secret_token_123"));
+        // Queue a report offline: neither the queue nor the preferences hold the token.
+        online.store(false, std::sync::atomic::Ordering::SeqCst);
+        tickets::send(&mut app, payload::build(&form(), payload::Ticks::default(), &evidence_with_design(), "t"));
+        run_ticks(&mut app, &ctx, 4);
+        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Queued));
+        let mut written = Vec::new();
+        for folder in tickets::queue::list(&dir) {
+            for e in std::fs::read_dir(folder).unwrap() {
+                written.extend(std::fs::read(e.unwrap().path()).unwrap());
+            }
+        }
+        written.extend(serde_json::to_vec(&app.preferences).unwrap());
+        assert!(!written.windows(20).any(|w| w == b"tkt_secret_token_123"), "the token is written nowhere but the keyring");
+        assert!(requests.lock().unwrap().iter().filter(|r| r.url.contains("/device/")).all(|r| !r.headers.iter().any(|(k, _)| k == "Authorization")));
+        // Sign out removes it from the keyring.
+        tickets::sign_out(&mut app);
+        assert!(keyring.0.lock().unwrap().get(tickets::SECRET_ID).is_none() && !tickets::signed_in(&mut app));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ticket_report_opens_from_the_bug_button_and_the_old_draft_stays_behind_a_preference() {
+        let (mut app, _, _, _) = ticket_app(true, Some("tkt_good"));
+        app.home.open = false;
+        assert!(ticket::enabled(&app), "the in-app report is the default");
+        let ctx = crate::fonts::test_context();
+        help::run(&mut app, &ctx, "report");
+        cancel_capture(&mut app);
+        let _ = ctx.run_ui(Default::default(), |ui| show(&mut app, ui.ctx()));
+        let draft = app.issue_report.draft.as_ref().unwrap();
+        assert!(draft.ticket.as_ref().is_some_and(|t| t.ticks == payload::Ticks::default() && t.form.app == "solidcraft"));
+        app.issue_report.draft = None;
+
+        app.preferences.report_on_github = true;
+        assert!(!ticket::enabled(&app));
+        help::run(&mut app, &ctx, "report");
+        cancel_capture(&mut app);
+        let _ = ctx.run_ui(Default::default(), |ui| show(&mut app, ui.ctx()));
+        assert!(app.issue_report.draft.as_ref().unwrap().ticket.is_none(), "the GitHub draft, as before");
     }
 }
