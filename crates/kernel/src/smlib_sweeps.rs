@@ -1207,7 +1207,7 @@ mod imp {
                 let motion = if translate {
                     seg_at(s, 0.5).map(|(at, _)| affine_moved(&IDENTITY, at - origin))
                 } else {
-                    carried_along(route, middle - (q - origin).dot(t0))
+                    carried_along(route, middle - solidcore_ops::affine::distance_along(origin.into(), t0.into(), q.into()))
                 };
                 out.extend(motion.map(|m| Seed { at: apply(&m, q), piece }));
             }

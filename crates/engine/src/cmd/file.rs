@@ -1832,7 +1832,8 @@ impl Session {
         // Links whose design dropped a guessed name as it opened keep the name of what they were
         // found on, before a change can move it (#17229).
         session.pin_dropped_link_names();
-        if unpinned || !std::sync::Arc::ptr_eq(&before, &session.doc) {
+        let dropped = session.doc.features.iter().any(|f| session.doc.sketch(f.id).is_ok_and(|sk| sk.links.iter().any(|l| l.name_dropped)));
+        if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) {
             session.pin_rolled_back_body_names();
         }
         session.saved = session.doc.clone();
@@ -1857,6 +1858,24 @@ impl Session {
         whole.doc_mut().marker = None;
         whole.model.evaluate_shared(&whole.doc);
         whole.pin_body_names();
+        // The links of a sketch rolled back or skipped here, whose guessed names their design
+        // dropped as it opened (#17229): the whole timeline finds what each is on, and the name
+        // is the one it had at the geometry the design opened with, before an edit moves it.
+        whole.pin_dropped_link_names();
+        let link_pins: Vec<(u64, String, Option<String>, Option<String>)> = whole
+            .doc
+            .features
+            .iter()
+            .filter_map(|f| {
+                let (mine, theirs) = (self.doc.sketch(f.id).ok()?, whole.doc.sketch(f.id).ok()?);
+                Some(mine.links.iter().filter(|l| l.name_dropped).filter_map(move |l| {
+                    let found = theirs.links.iter().find(|x| x.id == l.id && !x.name_dropped)?;
+                    (found.vertex_name.is_some() || found.edge_name.is_some())
+                        .then(|| (f.id, l.id.clone(), found.vertex_name.clone(), found.edge_name.clone()))
+                }))
+            })
+            .flatten()
+            .collect();
         let pins: Vec<(u64, Vec<String>)> = whole
             .doc
             .features
@@ -1865,17 +1884,25 @@ impl Session {
             .map(|f| (f.id, f.body_names.clone()))
             .collect();
         let reserve: Vec<String> = whole.doc.reserved_body_names.difference(&self.doc.reserved_body_names).cloned().collect();
-        if pins.is_empty() && reserve.is_empty() {
+        if pins.is_empty() && reserve.is_empty() && link_pins.is_empty() {
             return;
         }
         // As `pin_body_names` stores names: the bodies keep the names they have, so no result
         // changes and none is evaluated again.
-        let renamed: Vec<u64> = pins.iter().map(|(id, _)| *id).collect();
+        let renamed: Vec<u64> = pins.iter().map(|(id, _)| *id).chain(link_pins.iter().map(|(id, ..)| *id)).collect();
         let keep = self.model.pinned_prefix(&self.doc, &renamed);
         let doc = self.doc_mut();
         for (id, names) in pins {
             if let Some(f) = doc.feature_mut(id) {
                 f.body_names = names;
+            }
+        }
+        for (id, link, vertex, edge) in link_pins {
+            let Ok(sk) = doc.sketch_mut(id) else { continue };
+            if let Some(l) = sk.links.iter_mut().find(|l| l.id == link) {
+                l.vertex_name = l.vertex_name.take().or(vertex);
+                l.edge_name = l.edge_name.take().or(edge);
+                l.name_dropped = false;
             }
         }
         doc.reserved_body_names.extend(reserve);
