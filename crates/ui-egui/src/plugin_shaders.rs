@@ -1,15 +1,7 @@
 //! View backgrounds from plugins (capability `shaders@0.1`, `docs/plugin-shaders.md`).
 //!
-//! Preferences › Appearance › Background effect picks one, kept as `plugin-id/shader-id` in the
-//! `background_shader` preference (`""`: none, the default). The plugin's WGSL is read and checked
-//! off the window thread by `solidcraft_engine::plugin::shader::compile`, which also caps every loop; its
-//! pictures are decoded there with their mipmaps. On the window thread the module becomes a
-//! pipeline under an error scope and draws into a texture of the view's size, which the view shows
-//! between the theme's background and the model, as it does the background picture.
-//!
-//! Whatever fails (a missing or turned-off plugin, a shader this graphics card refuses, a picture
-//! that won't decode) leaves the theme's background, with one line in the status bar. Nothing is
-//! drawn halfway, and no plugin code runs on the CPU.
+//! The WGSL is checked off the window thread and built under an error scope on it; whatever fails
+//! leaves the theme's background, with one line in the status bar.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -19,15 +11,6 @@ use crate::SolveApp;
 
 /// The status line's key and the picker's labels.
 const UNREADABLE: &str = "prefs.background_shader_failed";
-
-/// A background a plugin offers.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Choice {
-    /// `plugin-id/shader-id`, as the preference keeps it.
-    pub(crate) key: String,
-    /// The shader's name and its plugin's.
-    pub(crate) label: String,
-}
 
 struct Loaded {
     wgsl: String,
@@ -66,7 +49,6 @@ pub(crate) struct State {
     failed: Option<String>,
     /// `failed` is only because its plugin is turned off: turning it on again clears it.
     off: bool,
-    choices: Option<(f64, Vec<Choice>)>,
 }
 
 impl State {
@@ -76,51 +58,20 @@ impl State {
     }
 }
 
-/// The installed, turned-on plugins' backgrounds, read again at most every 2 s while asked for.
-pub(crate) fn choices(app: &mut SolveApp, now: f64) -> Vec<Choice> {
-    if let Some((at, list)) = &app.plugin_shaders.choices
-        && now - at < 2.0
-    {
-        return list.clone();
+/// The folder of the turned-on plugin that offers background `key`, if one is installed.
+fn folder_of(app: &SolveApp, key: &str) -> Option<String> {
+    let (plugin, shader) = key.split_once('/')?;
+    if !crate::plugins::enabled(app, plugin) {
+        return None;
     }
-    let list = installed(app).into_iter().map(|(choice, _)| choice).collect::<Vec<_>>();
-    app.plugin_shaders.choices = Some((now, list.clone()));
-    list
+    let mut paths: Vec<String> = app.session.plugin_state.packages.get(plugin).cloned().into_iter().collect();
+    if let Some(dir) = app.session.plugin_state.plugins_dir() {
+        paths.push(dir.join(plugin).to_string_lossy().into_owned());
+    }
+    paths.into_iter().find(|path| manifest(path).is_ok_and(|m| m.id == plugin && m.shaders.iter().any(|s| s.id == shader)))
 }
 
-/// Each background with the plugin folder it comes from.
-fn installed(app: &SolveApp) -> Vec<(Choice, String)> {
-    let mut paths: Vec<String> = app.session.plugin_state.packages.values().cloned().collect();
-    if let Some(dir) = app.session.plugin_state.plugins_dir()
-        && let Ok(folders) = std::fs::read_dir(dir)
-    {
-        let mut found: Vec<String> = folders
-            .flatten()
-            .filter(|f| f.file_type().is_ok_and(|t| t.is_dir()) && !f.file_name().to_string_lossy().starts_with('.'))
-            .take(1024)
-            .map(|f| f.path().to_string_lossy().into_owned())
-            .collect();
-        found.sort();
-        paths.extend(found);
-    }
-    let mut seen = std::collections::BTreeSet::new();
-    let mut out = Vec::new();
-    for path in paths {
-        let Ok(manifest) = manifest(&path) else { continue };
-        if app.preferences.disabled_plugins.contains(&manifest.id) || !seen.insert(manifest.id.clone()) {
-            continue;
-        }
-        for shader in &manifest.shaders {
-            let key = format!("{}/{}", manifest.id, shader.id);
-            out.push((Choice { key, label: format!("{} ({})", shader.name, manifest.name) }, path.clone()));
-        }
-    }
-    out.sort_by(|a, b| a.0.label.cmp(&b.0.label));
-    out
-}
-
-/// A plugin folder's manifest alone: a background needs no component, and the list of choices is
-/// read on the window thread.
+/// A plugin folder's manifest alone: a background needs no component.
 fn manifest(folder: &str) -> Result<solidcraft_engine::plugin::Manifest, String> {
     let dir = std::path::Path::new(folder);
     let name = dir.file_name().and_then(|n| n.to_str()).ok_or("a plugin folder needs a name")?;
@@ -203,7 +154,7 @@ pub(crate) fn paint(app: &mut SolveApp, painter: &egui::Painter, rect: egui::Rec
     if state.active.is_none() {
         let Some(rs) = state.render.clone() else { return };
         if state.loading.as_ref().is_none_or(|(k, _)| *k != key) {
-            let Some((_, folder)) = installed(app).into_iter().find(|(c, _)| c.key == key) else {
+            let Some(folder) = folder_of(app, &key) else {
                 missing(app, &key);
                 return;
             };
@@ -274,7 +225,6 @@ fn allowed(app: &mut SolveApp) -> bool {
         }
         // Its plugin is on again: try the background again.
         state.failed = None;
-        state.choices = None;
     }
     state.off = false;
     if enabled {
@@ -296,7 +246,6 @@ pub(crate) fn forget(app: &mut SolveApp, plugin: &str) {
     if state.loading.as_ref().is_some_and(|(key, _)| owns(key)) {
         state.loading = None;
     }
-    state.choices = None;
 }
 
 /// The chosen background's plugin is missing or off: say so once, not every frame.

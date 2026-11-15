@@ -14,8 +14,8 @@ gives the design and the reasons for it.
 
 1. Install the plugin's `.zip` from Preferences › Plugins › Install plugin…, or with
    `plugin.install {"path": "dusk.zip"}`.
-2. Pick it under Preferences › Appearance › Background effect. The row appears once an installed,
-   turned-on plugin offers a background.
+2. Turn it on under its plugin's card in Preferences › Plugins: each background the plugin offers
+   has a switch there. One background is on at a time, so turning one on turns any other off.
 
 The choice is the `background_shader` preference, `"<plugin-id>/<shader-id>"`, so a script or agent
 sets it with `ui.prefs {"background_shader": "dusk/dusk"}`. `""` (the default) is none. Turning

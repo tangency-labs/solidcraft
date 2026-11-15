@@ -102,9 +102,6 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         app.preferences.background_image.clear();
                     }
                 });
-                // A background effect from an installed plugin (shaders@0.1).
-                #[cfg(not(target_arch = "wasm32"))]
-                background_shader_row(app, ui);
                 // The logo in the theme's own logo colours or in its accent.
                 let label = app.tr("prefs.logo");
                 ui_kit::row(ui, label, |ui| {
@@ -758,34 +755,4 @@ fn document_browser_preview(p: &egui::Painter, rect: egui::Rect, panel_fraction:
         "box",
         t.text_dim,
     );
-}
-
-/// Background effect: None, or one of the installed plugins' backgrounds. The row shows only
-/// while a plugin offers one or one is chosen.
-#[cfg(not(target_arch = "wasm32"))]
-fn background_shader_row(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let now = ui.ctx().input(|i| i.time);
-    let choices = crate::plugin_shaders::choices(app, now);
-    let current = app.preferences.background_shader.clone();
-    if choices.is_empty() && current.is_empty() {
-        return;
-    }
-    let none = app.tr("prefs.background_shader_none").to_string();
-    let mut labels: Vec<String> = std::iter::once(none).chain(choices.iter().map(|c| c.label.clone())).collect();
-    let mut selected = choices.iter().position(|c| c.key == current).map_or(0, |i| i + 1);
-    if selected == 0 && !current.is_empty() {
-        // Chosen, but its plugin is gone or turned off: shown by its key, drawing nothing.
-        labels.push(current.clone());
-        selected = labels.len() - 1;
-    }
-    let label = app.tr("prefs.background_shader");
-    ui_kit::row(ui, label, |ui| {
-        let options: Vec<&str> = labels.iter().map(String::as_str).collect();
-        if ui_kit::dropdown_picked(ui, "pref_background_shader", &mut selected, &options) {
-            app.preferences.background_shader = match selected {
-                0 => String::new(),
-                i => choices.get(i - 1).map_or(current.clone(), |c| c.key.clone()),
-            };
-        }
-    });
 }
