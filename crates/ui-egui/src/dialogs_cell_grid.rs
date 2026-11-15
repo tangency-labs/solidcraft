@@ -89,7 +89,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, _: &[SelInput]) -> bool {
     choice_row(
         ui,
-        app.tr("ui.cell_grid.shape"),
+        app.tr("Shape"),
         "cell_grid_shape",
         &mut c.shape,
         &[app.tr("ui.cell_grid.hexagon"), app.tr("ui.perforate_square"), app.tr("ui.cell_grid.triangle"), app.tr("ui.circle"), app.tr("ui.polygon")],
@@ -129,7 +129,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, _: &[SelInput])
     );
     // The command takes a margin with whole cells only: snapped and trimmed cells meet the edge.
     if CLIPS.get(c.clip) == Some(&"whole") {
-        enter |= expr_row(ui, app.tr("ui.cell_grid.margin"), &mut c.margin);
+        enter |= expr_row(ui, app.tr("Margin"), &mut c.margin);
     }
     enter |= expr_row(ui, app.tr("ui.angle"), &mut c.angle);
     enter
