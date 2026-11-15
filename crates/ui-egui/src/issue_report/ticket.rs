@@ -26,6 +26,9 @@ pub struct TicketDraft {
     pub from_failure: bool,
     /// The agent report this dialog is for (its id), when an agent opened it.
     pub agent: Option<String>,
+    /// This report, among the reports sent in this run: what is being sent, and how it went, is
+    /// this dialog's only when it is this report's (`tickets::Tickets::owner`).
+    pub id: u64,
     /// The title was found empty on Send.
     missing_title: bool,
 }
@@ -239,7 +242,8 @@ pub fn new_ticket(app: &mut SolveApp, draft: &Draft, ctx: Option<&egui::Context>
         _ => (draft.title.clone(), draft.description.clone()),
     };
     let mut form = payload::Form { app: api::DEFAULT_APP.into(), title, description, kind: payload::Kind::Bug };
-    let mut ticks = payload::Ticks { crash: draft.crash.is_some(), ..Default::default() };
+    // The crash report, like the design, is the person's to tick: never ticked to start with.
+    let mut ticks = payload::Ticks::default();
     if let Some(ask) = &draft.agent {
         // What the agent asked for, but the design and crash report stay the person's to tick.
         ticks = payload::Ticks { design: false, crash: false, ..ask.ticks };
@@ -253,7 +257,16 @@ pub fn new_ticket(app: &mut SolveApp, draft: &Draft, ctx: Option<&egui::Context>
         }
     }
     tickets::load_apps(app);
-    TicketDraft { form, ticks, evidence, from_failure: failing.is_some(), agent: draft.agent.as_ref().map(|a| a.id.clone()), missing_title: false }
+    let id = tickets::new_owner(app);
+    TicketDraft {
+        form,
+        ticks,
+        evidence,
+        from_failure: failing.is_some(),
+        agent: draft.agent.as_ref().map(|a| a.id.clone()),
+        id,
+        missing_title: false,
+    }
 }
 
 fn heading(ui: &mut Ui, id: &str) {
@@ -334,7 +347,7 @@ fn attachments(app: &SolveApp, draft: &mut Draft, ticket: &mut TicketDraft, ui: 
 }
 
 /// Progress and how the last report went.
-fn status(app: &mut SolveApp, ui: &mut Ui) {
+fn status(app: &mut SolveApp, ui: &mut Ui, id: u64) {
     if let Some(s) = &app.tickets.sending {
         let (done, total) = (s.sent, s.total.max(1));
         note(ui, "report.sending", &format("report.sending", &[("done", &payload::size_text(done)), ("total", &payload::size_text(total))]));
@@ -345,7 +358,9 @@ fn status(app: &mut SolveApp, ui: &mut Ui) {
             tickets::cancel(app);
         }
     }
-    match app.tickets.outcome.clone() {
+    // How another report went (one closed while it was sent) is not this one's.
+    let outcome = if app.tickets.owner == id { app.tickets.outcome.clone() } else { None };
+    match outcome {
         Some(Outcome::Opened) => note(ui, "report.opened", tr("report.opened")),
         Some(Outcome::Filed(n)) => {
             ui.horizontal_wrapped(|ui| {
@@ -372,7 +387,7 @@ fn status(app: &mut SolveApp, ui: &mut Ui) {
             let r = ui_kit::button(ui, tr("report.send_waiting"), ui_kit::Button::Normal);
             crate::scenario::publish_target("report:send_waiting", r.rect);
             if r.clicked() {
-                tickets::send_waiting(app);
+                tickets::send_waiting_for(app, id);
             }
         });
     }
@@ -382,12 +397,7 @@ fn status(app: &mut SolveApp, ui: &mut Ui) {
 pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -> (bool, bool) {
     let mut ticket = match draft.ticket.take() {
         Some(t) => t,
-        None => {
-            if app.tickets.sending.is_none() {
-                app.tickets.outcome = None;
-            }
-            Box::new(new_ticket(app, draft, Some(ctx)))
-        }
+        None => Box::new(new_ticket(app, draft, Some(ctx))),
     };
     let mut retake = false;
     let mut github = false;
@@ -395,7 +405,8 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     let screen = ctx.content_rect();
     let cards = ((screen.width() - 2.0 * t.space_16) / t.form_card_width).clamp(0.5, 2.0);
     // Sent (or being sent): Send again would send it twice.
-    let busy = app.tickets.sending.is_some() || matches!(app.tickets.outcome, Some(Outcome::Filed(_) | Outcome::Queued | Outcome::Opened));
+    let mine = app.tickets.owner == ticket.id;
+    let busy = app.tickets.sending.is_some() || (mine && matches!(app.tickets.outcome, Some(Outcome::Filed(_) | Outcome::Queued | Outcome::Opened)));
     let (closed, action) = ui_kit::Window::new(Id::unique("sc_issue_report"), "bug_report", tr("report.title"))
         .cards(cards)
         .placed(egui::Align2::CENTER_TOP, egui::pos2(screen.center().x, screen.top() + t.space_16))
@@ -485,7 +496,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                         ui_kit::divider(ui, "report-attach");
                         retake = attachments(app, draft, &mut ticket, ui);
                         ui_kit::divider(ui, "report-status");
-                        status(app, ui);
+                        status(app, ui, ticket.id);
                         note(ui, "report.browser_note", tr("report.browser_note"));
                         let r = ui.link(tr("report.github_instead"));
                         crate::scenario::publish_target("report:github", r.rect);
@@ -497,8 +508,13 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
         ticket.missing_title = ticket.form.title.trim().is_empty();
         if !ticket.missing_title {
             let report = outgoing(draft, &ticket);
-            tickets::send(app, report);
+            tickets::send_for(app, report, ticket.id);
         }
+    }
+    if retake {
+        // Retake brings the whole report up to date, not only its picture; what was typed and
+        // ticked stays.
+        ticket.evidence = evidence(app, Some(ctx), failing_of(draft), draft.crash.clone());
     }
     if github {
         // The public GitHub draft, as before tickets: same answers.

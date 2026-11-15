@@ -93,6 +93,9 @@ pub struct Sending {
     via_draft: bool,
     /// The draft, once the server opened it.
     draft: Option<api::Draft>,
+    /// Times an upload was resumed or started again (parts missing, a hash mismatch): a few, then
+    /// the report fails rather than going round for ever.
+    redo: u8,
 }
 
 /// How the last report went.
@@ -123,6 +126,12 @@ pub struct Tickets {
     pub queue_dir: Option<PathBuf>,
     memory_queue: Vec<payload::Outgoing>,
     retry_at: f64,
+    /// The report `sending` and `outcome` belong to (`ticket::TicketDraft::id`; 0: an agent's
+    /// or a queued one), and the last such id given out.
+    pub owner: u64,
+    next_owner: u64,
+    /// Tries in a row that found the server unreachable: the wait before the next doubles.
+    retry_failures: u32,
     /// A draft's page to open in the browser (on the next frame, which has the context).
     open_url: Option<String>,
     /// The agent report being sent or waiting in the dialog (`agent`), and the agents' reports
@@ -186,7 +195,8 @@ pub fn begin_sign_in(app: &mut SolveApp) {
     app.tickets.sign_in = SignIn::Asking(Call::start(&http, api::device_code()));
 }
 
-/// The apps tickets can be filed under, asked for when the report opens (signed in only).
+/// The apps tickets can be filed under, asked for when the report opens; only with a remembered
+/// token (the list needs one), else the dialog offers SolidCraft.
 pub fn load_apps(app: &mut SolveApp) {
     if app.tickets.apps_call.is_some() || !app.tickets.apps.is_empty() {
         return;
@@ -198,6 +208,18 @@ pub fn load_apps(app: &mut SolveApp) {
 /// Send `report`: as a draft whose page opens in the browser, where the person signs in if
 /// needed and files it; or filed directly when this computer has a remembered token.
 pub fn send(app: &mut SolveApp, report: payload::Outgoing) {
+    send_for(app, report, 0);
+}
+
+/// A new report's id, for [`send_for`].
+pub fn new_owner(app: &mut SolveApp) -> u64 {
+    app.tickets.next_owner += 1;
+    app.tickets.next_owner
+}
+
+/// [`send`] the report with id `owner` (its dialog's): how it goes is that dialog's.
+pub fn send_for(app: &mut SolveApp, report: payload::Outgoing, owner: u64) {
+    app.tickets.owner = owner;
     app.tickets.outcome = None;
     let via_draft = token(app).is_none();
     start(app, report, None, via_draft);
@@ -205,9 +227,15 @@ pub fn send(app: &mut SolveApp, report: payload::Outgoing) {
 
 /// Send the oldest report waiting in the queue now (the dialog's Send waiting reports).
 pub fn send_waiting(app: &mut SolveApp) {
+    send_waiting_for(app, 0);
+}
+
+/// [`send_waiting`] from the dialog with report id `owner`.
+pub fn send_waiting_for(app: &mut SolveApp, owner: u64) {
     if app.tickets.sending.is_some() {
         return;
     }
+    app.tickets.owner = owner;
     let via_draft = token(app).is_none();
     app.tickets.outcome = None;
     if !app.tickets.memory_queue.is_empty() {
@@ -253,6 +281,7 @@ fn start(app: &mut SolveApp, mut report: payload::Outgoing, folder: Option<PathB
         total,
         via_draft,
         draft: None,
+        redo: 0,
     };
     if step.is_none() {
         // Filed and uploaded already: only the queue entry is left.
@@ -308,7 +337,10 @@ fn keep_for_later(app: &mut SolveApp, report: payload::Outgoing, folder: Option<
         (None, None) => app.tickets.memory_queue.push(report),
     }
     app.tickets.outcome = Some(Outcome::Queued);
-    app.tickets.retry_at = crate::now_ms() + RETRY_MS;
+    // Five minutes, then ten, twenty… up to an hour between tries.
+    let backoff = RETRY_MS * f64::from(1u32 << app.tickets.retry_failures.min(4));
+    app.tickets.retry_failures = app.tickets.retry_failures.saturating_add(1);
+    app.tickets.retry_at = crate::now_ms() + backoff.min(60.0 * 60_000.0);
 }
 
 /// How long a draft opened in the browser is watched for being filed, in ms.
@@ -317,6 +349,7 @@ const WATCH_MS: f64 = 30.0 * 60_000.0;
 const WATCH_EVERY_MS: f64 = 5_000.0;
 
 fn finish(app: &mut SolveApp, s: Sending) {
+    app.tickets.retry_failures = 0;
     if let Some(folder) = &s.folder {
         queue::remove(folder);
         // The next waiting report goes now, not in five minutes.
@@ -502,6 +535,25 @@ fn tick_send(app: &mut SolveApp) {
         app.tickets.sending = Some(s);
         return;
     };
+    // Completing an upload the server is missing parts of resumes it; one whose hash didn't
+    // match starts again. A few times at most.
+    if let (Step::Finish(i), Ok((status @ (409 | 422), _))) = (s.step, &reply) {
+        s.redo = s.redo.saturating_add(1);
+        if s.redo > 3 {
+            app.tickets.outcome = Some(Outcome::Failed("The server did not take an attachment after several tries.".into()));
+            return;
+        }
+        s.step = if *status == 409 {
+            Step::Resume(i)
+        } else {
+            if let Some(f) = s.report.files.get_mut(i) {
+                f.upload = None;
+            }
+            Step::Open(i)
+        };
+        app.tickets.sending = Some(s);
+        return;
+    }
     let value = match api::answer(reply) {
         Ok(v) => v,
         Err(api::Failure::Offline(_)) => return enqueue(app, s),
@@ -517,9 +569,9 @@ fn tick_send(app: &mut SolveApp) {
         }
         Err(api::Failure::Refused(e)) => {
             app.tickets.outcome = Some(Outcome::Failed(e));
-            // The server will not take it as it is: it stops waiting (its files stay on disk).
+            // The server will not take it as it is: it stops waiting, and its files go.
             if let Some(folder) = &s.folder {
-                queue::refused(folder);
+                queue::remove(folder);
             }
             return;
         }

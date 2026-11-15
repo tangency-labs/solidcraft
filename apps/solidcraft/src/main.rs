@@ -882,8 +882,8 @@ impl Keychain {
 /// back. The answer comes on `done`.
 fn tickets_http(r: solidcraft_ui_egui::agent_chat::backend::HttpRequest, done: std::sync::mpsc::Sender<solidcraft_ui_egui::tickets::Reply>) {
     let spawned = std::thread::Builder::new().name("tickets-http".into()).spawn(move || {
-        let local = r.url.starts_with("http://127.0.0.1") || r.url.starts_with("http://localhost");
-        let reply = if r.url.starts_with("https://") || local { tickets_call(&r) } else { Err("only HTTPS is allowed".into()) };
+        // HTTPS, or plain HTTP to this computer (a test server): the host compared exactly.
+        let reply = if solidcraft_ui_egui::tickets::api::allowed_url(&r.url) { tickets_call(&r) } else { Err("only HTTPS is allowed".into()) };
         let _ = done.send(reply);
     });
     // Without a worker the sender is dropped with the closure: the report sees no answer and

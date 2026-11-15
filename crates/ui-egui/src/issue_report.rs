@@ -2425,7 +2425,15 @@ mod tests {
                 ("POST", p) if p.ends_with("/complete") => json!({"attachment":{"id":"a"}}),
                 _ => json!({}),
             };
-            let _ = done.send(Ok((if path == "/api/tickets" { 201 } else { 200 }, reply.to_string().into_bytes())));
+            let refuse = r.body.as_ref().is_some_and(|b| String::from_utf8_lossy(b).contains("REFUSE-ME"));
+            let status = if refuse {
+                400
+            } else if path == "/api/tickets" {
+                201
+            } else {
+                200
+            };
+            let _ = done.send(Ok((status, reply.to_string().into_bytes())));
         })
     }
 
@@ -2791,6 +2799,71 @@ mod tests {
         frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
         frames_until(&mut app, &ctx, |_| true);
         assert_eq!(agent_status(&mut app, &id)["status"], "opened");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ticket_report_review_fixes_hold() {
+        use tickets::api::{allowed_url, answer, on_server};
+        // A crash report is offered, never ticked to start with.
+        let (mut app, _, _, _) = ticket_app(true, None);
+        let ctx = crate::fonts::test_context();
+        begin_crash(
+            &mut app,
+            &ctx,
+            &json!({"id": "c1", "kind": "command_panic", "message": "boom", "command": {"command": "solid.fillet", "params": {"radius": 2}}}),
+        );
+        let draft = app.issue_report.draft.take().unwrap();
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        assert!(t.evidence.crash.is_some() && !t.ticks.crash && !t.ticks.design);
+        assert_eq!(t.evidence.failing.as_ref().and_then(|f| f.origin.as_deref()), Some("app"), "from the crash's kind");
+
+        // Only a refusal of the report itself is final; a busy or broken server is tried again.
+        for status in [408, 429, 500, 502, 503] {
+            assert!(matches!(answer(Ok((status, b"{}".to_vec()))), Err(tickets::api::Failure::Offline(_))), "{status}");
+        }
+        assert!(matches!(answer(Ok((400, b"{}".to_vec()))), Err(tickets::api::Failure::Refused(_))));
+        assert!(matches!(answer(Ok((401, b"{}".to_vec()))), Err(tickets::api::Failure::SignedOut)));
+
+        // Hosts are compared exactly, not by prefix.
+        let server = tickets::api::server();
+        assert!(on_server(&format!("{server}/draft/abc#s"), "/draft/"));
+        for fake in [
+            "https://tickets.solidcraft.io.evil.example/draft/x",
+            "https://tickets.solidcraft.io@evil.example/draft/x",
+            "https://evil.example/https://tickets.solidcraft.io/draft/x",
+            "http://tickets.solidcraft.io/draft/x",
+        ] {
+            assert!(!on_server(fake, "/draft/"), "{fake}");
+        }
+        assert!(allowed_url("http://127.0.0.1:8787/api/x") && allowed_url("http://localhost/api") && allowed_url("https://x.example/"));
+        for fake in ["http://127.0.0.1.evil.example/", "http://localhost.evil.example/", "http://localhost@evil.example/", "ftp://localhost/"] {
+            assert!(!allowed_url(fake), "{fake}");
+        }
+
+        // How a report closed while it was sent went is not the next report's.
+        let (mut app, _, _, _) = ticket_app(true, None);
+        let first = tickets::new_owner(&mut app);
+        tickets::send_for(&mut app, payload::build(&form(), payload::Ticks::default(), &evidence_with_design(), "t"), first);
+        frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
+        assert_eq!((app.tickets.owner, app.tickets.outcome.clone()), (first, Some(tickets::Outcome::Opened)));
+        let draft = draft_for(&app, None, None);
+        let next = ticket::new_ticket(&mut app, &draft, None);
+        assert_ne!(next.id, first, "a new report starts with nothing sent");
+
+        // The server refusing a waiting report removes it and its files.
+        let dir = temp_dir("refused");
+        let (mut app, online, _, _) = ticket_app(false, Some("tkt_good"));
+        app.tickets.queue_dir = Some(dir.clone());
+        let refused = payload::Form { title: "REFUSE-ME".into(), ..form() };
+        tickets::send(&mut app, payload::build(&refused, payload::Ticks::default(), &evidence_with_design(), "t"));
+        run_ticks(&mut app, &ctx, 4);
+        assert_eq!(tickets::queue::list(&dir).len(), 1);
+        online.store(true, std::sync::atomic::Ordering::SeqCst);
+        tickets::retry_now(&mut app);
+        run_ticks(&mut app, &ctx, 10);
+        assert!(matches!(app.tickets.outcome, Some(tickets::Outcome::Failed(_))));
+        assert!(std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0) == 0, "no report or file left behind");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

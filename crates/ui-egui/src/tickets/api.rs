@@ -19,11 +19,63 @@ pub const DEFAULT_APP: &str = "solidcraft";
 pub fn server() -> String {
     #[cfg(not(target_arch = "wasm32"))]
     if let Ok(url) = std::env::var("SOLIDCRAFT_TICKETS_URL")
-        && (url.starts_with("https://") || url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost"))
+        && allowed_url(&url)
+        && origin(&url).is_some_and(|o| o.path.is_empty() || o.path == "/")
     {
         return url.trim_end_matches('/').to_string();
     }
     SERVER.to_string()
+}
+
+/// A URL's parts the app checks: scheme, host (lower case), port and the path from its `/`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Origin {
+    pub scheme: String,
+    pub host: String,
+    pub port: Option<u16>,
+    pub path: String,
+}
+
+/// `url` taken apart; None for anything that isn't a plain `http(s)://host[:port][/path]` (a user
+/// name, an empty host, a bad port).
+pub fn origin(url: &str) -> Option<Origin> {
+    let (scheme, rest) = url.split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    if scheme != "https" && scheme != "http" {
+        return None;
+    }
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, path) = rest.split_at(end);
+    if authority.contains('@') || authority.is_empty() {
+        return None;
+    }
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((h, p)) if !h.contains(']') || h.ends_with(']') => (h, Some(p.parse::<u16>().ok()?)),
+        _ => (authority, None),
+    };
+    if host.is_empty() || !host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '[' | ']' | ':')) {
+        return None;
+    }
+    Some(Origin { scheme, host: host.to_ascii_lowercase(), port, path: path.to_string() })
+}
+
+/// This computer, for a test server over plain HTTP.
+fn local(host: &str) -> bool {
+    host == "127.0.0.1" || host == "localhost"
+}
+
+/// Whether the app may send a request to `url`: HTTPS, or plain HTTP to this computer only.
+pub fn allowed_url(url: &str) -> bool {
+    origin(url).is_some_and(|o| o.scheme == "https" || local(&o.host))
+}
+
+/// Whether `url` is a page of the ticket server itself under `path` (a page the app opens in the
+/// browser): the same scheme, host and port exactly, not a look-alike.
+pub fn on_server(url: &str, path: &str) -> bool {
+    match (origin(url), origin(&server())) {
+        (Some(u), Some(s)) => u.scheme == s.scheme && u.host == s.host && u.port == s.port && u.path.starts_with(path),
+        _ => false,
+    }
 }
 
 fn request(method: &'static str, path: &str, token: Option<&str>, body: Option<Value>) -> Request {
@@ -65,8 +117,9 @@ pub fn answer(reply: Result<(u16, Vec<u8>), String>) -> Result<Value, Failure> {
     match status {
         200..=299 => Ok(value),
         401 => Err(Failure::SignedOut),
-        // A gateway that cannot reach the app is as good as offline.
-        502..=504 => Err(Failure::Offline(format!("the server answered {status}"))),
+        // Transient: a timeout, too many requests, the server or a gateway in trouble. Only a
+        // refusal of the report itself (validation, permissions) is final.
+        408 | 425 | 429 | 500..=599 => Err(Failure::Offline(format!("the server answered {status}"))),
         _ => {
             let message =
                 value.get("message").or_else(|| value.get("error")).and_then(Value::as_str).unwrap_or("").chars().take(300).collect::<String>();
@@ -120,7 +173,7 @@ pub fn parse_device_code(v: &Value) -> Result<DeviceCode, Failure> {
     let missing = || Failure::Refused("The server's sign-in answer was incomplete.".into());
     let verification = text(v, "verification_uri_complete").or_else(|| text(v, "verification_uri")).ok_or_else(missing)?;
     // Only a page on the ticket server opens in the browser.
-    if !verification.starts_with(&server()) {
+    if !on_server(&verification, "/device") {
         return Err(missing());
     }
     Ok(DeviceCode {
@@ -240,7 +293,7 @@ pub fn parse_draft(v: &Value) -> Result<Draft, Failure> {
         .ok_or_else(bad)?;
     let upload_token = text(v, "upload_token").filter(|t| !t.is_empty() && t.len() < 1000).ok_or_else(bad)?;
     // Only the ticket server's own page opens in the browser.
-    let url = text(v, "url").filter(|u| u.starts_with(&format!("{}/draft/", server()))).ok_or_else(bad)?;
+    let url = text(v, "url").filter(|u| on_server(u, "/draft/")).ok_or_else(bad)?;
     Ok(Draft { id, upload_token, url })
 }
 
