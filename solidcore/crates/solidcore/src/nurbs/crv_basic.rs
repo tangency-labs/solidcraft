@@ -120,6 +120,10 @@ use crate::nurbs::srf_basic::{Surface, WEIGHT_MAX, WEIGHT_MIN, WEIGHT_TOL};
 /// angle before giving up.
 pub const CONIC_MAX_TURNS: usize = 1 << 20;
 
+/// The angle tolerance (degrees) of [`conic_data`] (`N_CrvGetConicData`'s `angle_tol_deg`): a
+/// sweep below it, or within it of a whole turn, is built as the full turn.
+pub const CONIC_ANGLE_TOL_DEG: f64 = 1.0e-6;
+
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
 }
@@ -1156,7 +1160,7 @@ pub struct ConicData {
 /// than [`CONIC_MAX_TURNS`] turns (upstream loops forever when adding 360 no longer
 /// changes it).
 pub fn conic_data(ctp: ConicType, as_deg: f64, ae_deg: f64) -> Result<ConicData> {
-    let angle_tol_deg = 1.0e-6; // Don't make this too small.
+    let angle_tol_deg = CONIC_ANGLE_TOL_DEG; // Don't make this too small.
     if !as_deg.is_finite() || !ae_deg.is_finite() {
         return Err(invalid("nurbs::crv_basic::conic_data", "non-finite angle"));
     }

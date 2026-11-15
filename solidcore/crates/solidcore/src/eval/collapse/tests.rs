@@ -713,3 +713,70 @@ fn the_step_faces_whose_pcurves_end_past_their_patch_are_answered() {
         assert_eq!(collapse_near(&tork, uv, 1e-3).unwrap(), Collapse::Neither);
     }
 }
+
+/// The plane `S(u, v) = (u, v, 0)` on [0, 1]² as a bilinear spline.
+fn unit_square() -> EvalSurface {
+    let at = |u: f64, v: f64| ([u, v, 0.0], 1.0);
+    spline(
+        [1, 1],
+        &[
+            vec![at(0.0, 0.0), at(0.0, 1.0)],
+            vec![at(1.0, 0.0), at(1.0, 1.0)],
+        ],
+    )
+}
+
+/// A pcurve past both knot ranges at a corner is put on both at once, with one bound on the
+/// surface's move over both coordinates: from (−1e-6, −1e-6) the plane moves by at most
+/// 1e-6 along each.
+#[test]
+fn a_pcurve_past_both_knot_ranges_is_put_on_both() {
+    let s = unit_square();
+    let pc = Curve2::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[-1e-6, -1e-6], [0.5, 0.5]],
+    };
+    let onto = pcurve_onto_knots(&s, &pc, 1e-3).unwrap().unwrap();
+    assert_eq!(
+        onto.pcurve,
+        Curve2::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![[0.0, 0.0], [0.5, 0.5]],
+        }
+    );
+    assert!(
+        (2e-6..2.0001e-6).contains(&onto.displacement),
+        "{}",
+        onto.displacement
+    );
+    // A tolerance under the move refuses it; a pcurve on the range is not moved.
+    assert!(matches!(
+        pcurve_onto_knots(&s, &pc, 1e-6),
+        Err(EvalError::Unevaluable(_))
+    ));
+    assert_eq!(pcurve_onto_knots(&s, &onto.pcurve, 1e-3), Ok(None));
+}
+
+/// A net with one weight so small that its Euclidean points overflow (1 / 1e-310 is infinite)
+/// has no partial bound: refused, not a bound of zero.
+#[test]
+fn a_partial_bound_of_a_net_whose_points_overflow_is_refused() {
+    let at = |u: f64, v: f64| ([u + 1.0, v + 1.0, 1.0], 1e-310);
+    let s = spline(
+        [1, 1],
+        &[
+            vec![at(0.0, 0.0), at(0.0, 1.0)],
+            vec![at(1.0, 0.0), at(1.0, 1.0)],
+        ],
+    );
+    for across in [[0.0, 1.0], [0.0, 0.0]] {
+        assert!(
+            partial_bound(&s, 0, across, 0.0, 0.0).is_err(),
+            "{across:?}"
+        );
+    }
+    assert!(matches!(
+        partial_bound(&s, 0, [0.0, 1.0], 0.0, 0.0),
+        Err(EvalError::Unevaluable(m)) if m.contains("not finite")
+    ));
+}

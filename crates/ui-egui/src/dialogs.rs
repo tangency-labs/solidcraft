@@ -3313,10 +3313,22 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::pref
     input_rows_range(d, ui, s, names, 0..d.inputs.len());
 }
 
-/// Saved vectors/axes are real inputs even when they have no origin-axis selection chip.
+/// Saved planes/vectors/axes are real inputs even when they have no selection chip.
 fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
+    if matches!(d.kind, Kind::OffsetPlane { .. }) {
+        return match index {
+            0 => Some("base"),
+            1 => Some("through"),
+            _ => None,
+        };
+    }
     if let Kind::Construct {
-        command: "construct.plane.axis_point" | "construct.plane.two_edges" | "construct.plane.three_points" | "construct.plane.perpendicular",
+        command:
+            "construct.plane.axis_point"
+            | "construct.plane.two_edges"
+            | "construct.plane.three_points"
+            | "construct.plane.perpendicular"
+            | "construct.point.along_path",
         keys,
         ..
     } = &d.kind
@@ -3389,6 +3401,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 let text = if filled {
                     RichText::new(if stored_reference.is_some() && matches!(d.kind, Kind::Section { .. }) {
                         solidcraft_ui_text::tr("ui.viewport_status_section_plane").into()
+                    } else if stored_reference.is_some() && matches!(d.kind, Kind::OffsetPlane { .. }) {
+                        solidcraft_ui_text::tr("sketch_panel.plane_fixed").into()
                     } else if custom_axis || stored_reference.is_some() {
                         solidcraft_ui_text::tr("dialog.custom_axis").into()
                     } else if !inp.multi {
@@ -6041,15 +6055,23 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             ("solid.sweep", p)
         }
         Kind::OffsetPlane { .. } => {
-            need(0, "a plane")?;
-            let base = plane_arg(app, sels(d, 0).first())?;
+            let base = match d.extra.get("base") {
+                Some(saved) => saved.clone(),
+                None => {
+                    need(0, "a plane")?;
+                    match sels(d, 0).first() {
+                        Some(Sel::Plane { name }) => shown_origin_plane(app, name).unwrap_or_else(|| json!(name)),
+                        pick => plane_arg(app, pick)?,
+                    }
+                }
+            };
             match offset_through_point(d) {
                 // A null `offset` keeps the descriptor's distance out: the plane goes through the point.
                 Some(point) => {
-                    // A snap point saved before, picked again where it was: kept as saved.
-                    let through = match (point, d.extra.get("through")) {
-                        (Sel::Vertex { point, .. }, Some(saved)) if saved.get("at").and_then(vec3_of) == Some(*point) => saved.clone(),
-                        _ => construct_ref(app, point)?,
+                    // Keep the saved reference until the point is cleared or replaced.
+                    let through = match d.extra.get("through") {
+                        Some(saved) => saved.clone(),
+                        None => construct_ref(app, point)?,
                     };
                     ("construct.plane.offset", json!({"base": base, "through": through, "offset": null}))
                 }
@@ -7162,6 +7184,16 @@ fn named_refill_in(s: &Session, body: Option<&str>, name: &str, point: Vec3, edg
     Some(if edge { Sel::Edge { body, index, point } } else { Sel::Face { body, index, point } })
 }
 
+/// A feature's face picks, searched only on the body the feature names (where the command finds
+/// them again), or on every body when it names none or none is called that. Searched on every
+/// body, a point stored in a component's frame also lies on a body whose own frame puts the same
+/// face there, such as a second placement or a root body at the component's origin, and the
+/// nearest of them could be that other body (#15903).
+fn body_face_sels(s: &Session, body: Option<&str>, faces: &[solidcraft_engine::doc::FacePick]) -> Vec<Sel> {
+    let only = body.filter(|name| crate::open_meshing::session_world(s).body(name).is_some());
+    faces.iter().filter_map(|p| face_sel_on(s, only, p.0)).collect()
+}
+
 fn emboss_face_sel(s: &Session, component: u64, face: &solidcraft_engine::doc::EmbossFace, persistent: &str) -> Option<Sel> {
     let source = s.model.state();
     let body = source.body(&face.body)?;
@@ -7401,6 +7433,50 @@ pub(crate) fn plane_sel(s: &Session, pl: &PlaneRef) -> Option<Sel> {
         PlaneRef::Face { at, .. } => face_sel(s, *at),
         PlaneRef::Flipped { base, .. } => plane_sel(s, base),
         _ => None,
+    }
+}
+
+/// Refill Offset Plane in the feature's authoring frame. A fixed plane is not a nearby face;
+/// keep its explicit world geometry until a replacement pick clears the saved input.
+fn refill_offset_base(s: &Session, d: &mut Dialog, component: u64, base: &PlaneRef) {
+    let pick = match base {
+        PlaneRef::Custom { plane } => {
+            let frame = feature_frame(s, component);
+            d.extra.insert(
+                "base".into(),
+                json!({
+                    "origin": pt(solidcraft_engine::doc::apply_point(&frame, plane.origin)),
+                    "x_dir": pt(solidcraft_engine::doc::apply_vector(&frame, plane.x)),
+                    "y_dir": pt(solidcraft_engine::doc::apply_vector(&frame, plane.y))
+                }),
+            );
+            None
+        }
+        PlaneRef::Origin { name } => {
+            // Saved names are local. Showing the owning occurrence's datum avoids presenting
+            // that local plane as the design's origin when the component has moved.
+            let path = if component == s.active_component {
+                s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(component))
+            } else {
+                s.doc.first_path(component)
+            };
+            d.extra.insert("base".into(), json!(name));
+            let item = match name.to_ascii_uppercase().as_str() {
+                "TOP" => "XY",
+                "FRONT" => "XZ",
+                "RIGHT" => "YZ",
+                _ => name,
+            };
+            Some(Sel::Plane { name: if path.is_empty() { name.clone() } else { solidcraft_engine::origins::key(&path, item) } })
+        }
+        PlaneRef::Datum { datum } => {
+            d.extra.insert("base".into(), json!(datum.key()));
+            Some(Sel::Plane { name: datum.key() })
+        }
+        _ => plane_sel(s, base),
+    };
+    if let Some(input) = d.inputs.first_mut() {
+        input.items = pick.into_iter().collect();
     }
 }
 
@@ -8190,20 +8266,29 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { base, .. } } => {
             let mut d = start("construct.plane.offset")?;
             d.kind = Kind::simple_restore(&f.kind)?;
-            if let Some(inp) = d.inputs.first_mut() {
-                inp.items = plane_sel(s, base).into_iter().collect();
-            }
+            refill_offset_base(s, &mut d, f.component, base);
             d
         }
         FeatureKind::ConstructionPlane { plane: PlaneRef::ThroughPoint { base, point } } => {
             let mut d = start("construct.plane.offset")?;
-            if let Some(inp) = d.inputs.first_mut() {
-                inp.items = plane_sel(s, base).into_iter().collect();
-            }
+            refill_offset_base(s, &mut d, f.component, base);
+            let frame = feature_frame(s, f.component);
             if let Some(inp) = d.inputs.get_mut(1) {
-                inp.items = point_sel(s, point).into_iter().collect();
+                // Face lookup during refill takes stored coordinates; the displayed point is world-space.
+                inp.items = point_sel(s, point)
+                    .into_iter()
+                    .map(|mut pick| {
+                        if let Sel::Vertex { point, .. } = &mut pick {
+                            *point = solidcraft_engine::doc::apply_point(&frame, *point);
+                        }
+                        pick
+                    })
+                    .collect();
             }
-            if matches!(point.as_ref(), solidcraft_engine::doc::construct::GeoRef::Snap { .. }) {
+            let mut world = f.kind.clone();
+            world.transform_geometry(&frame);
+            let FeatureKind::ConstructionPlane { plane: PlaneRef::ThroughPoint { point, .. } } = &world else { return None };
+            if d.inputs.get(1).is_some_and(|input| !input.items.is_empty()) {
                 d.extra.insert("through".into(), serde_json::to_value(point).ok()?);
             }
             d
@@ -8222,6 +8307,27 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 _ => return None,
             };
             d.kind = Kind::PathPlane { t: t.to_string(), sketch };
+            if let Some(input) = d.inputs.first_mut() {
+                input.items = vec![item];
+            }
+            d
+        }
+        // Point along a path reopens with its path and position, like Plane along a path (#17154).
+        FeatureKind::ConstructionPoint { def: solidcraft_engine::doc::construct::PointDef::AlongPath { path, t } } => {
+            let mut d = start("construct.point.along_path")?;
+            let item = match path {
+                solidcraft_engine::doc::construct::GeoRef::SketchCurve { sketch, curve } => {
+                    crate::selection::curve_pick(curve, *sketch, s.active_sketch)
+                }
+                solidcraft_engine::doc::construct::GeoRef::Edge { at, name } => {
+                    // Preserve the saved named reference until a replacement is picked.
+                    d.extra.insert("path".into(), json!({"type":"edge","at":pt3(*at),"name":name}));
+                    Sel::Edge { body: String::new(), index: 0, point: *at }
+                }
+                _ => return None,
+            };
+            let Kind::Construct { t: position, .. } = &mut d.kind else { return None };
+            *position = Some(t.to_string());
             if let Some(input) = d.inputs.first_mut() {
                 input.items = vec![item];
             }
@@ -8334,7 +8440,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let mut d = start("solid.offset_face")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
-                inp.items = faces.iter().filter_map(|p| face_sel(s, p.0)).collect();
+                inp.items = body_face_sels(s, body.as_deref(), faces);
             }
             if let Some(b) = body {
                 d.extra.insert("body".into(), json!(b));
@@ -8400,7 +8506,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         FeatureKind::ReplaceFace { faces, target, body } => {
             let mut d = start("solid.replace_face")?;
             if let Some(inp) = d.inputs.first_mut() {
-                inp.items = faces.iter().filter_map(|p| face_sel(s, p.0)).collect();
+                inp.items = body_face_sels(s, body.as_deref(), faces);
             }
             if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = plane_sel(s, target).into_iter().collect();
