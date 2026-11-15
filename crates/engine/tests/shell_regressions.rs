@@ -112,3 +112,57 @@ fn a_shell_that_opens_no_face_seals_its_void() {
         assert!((got - want).abs() < 1e-6 * want, "{direction}: volume {got}, want {want}");
     }
 }
+
+/// #17210: a disc with two circles swept down slanting lines onto it from either side, both
+/// ending on one circle on the disc's top (oblique cylinders, mirror images, tangent to each
+/// other where their crossing curve meets the disc). Shelled with the bottom open, the two
+/// walls' offsets meet on that circle's offset and on a curve through it, which crosses the
+/// offset top below the circle: the edge between the walls runs past the tangent point to
+/// its vertex there. The shell left a gap (`a gap in its offset's loops cannot be bridged`).
+/// The join itself is the kernel's `intersection_pieces_through_a_tangent_point_are_one_curve`.
+#[test]
+fn a_shell_of_two_sweeps_from_one_circle_meets_past_their_tangent_point() {
+    let mut s = Session::default();
+    let feature = |s: &mut Session, f: serde_json::Value| run(s, "timeline.add", json!({ "feature": f }));
+    feature(
+        &mut s,
+        json!({"id": 1, "name": "Sketch1", "type": "sketch", "plane": {"type": "origin", "name": "XY"}, "sketch": {
+        "points": [{"id": "origin", "pos": [0.0, 0.0], "fixed": true}, {"id": "c1.center", "pos": [0.0, 0.0], "fixed": false}],
+        "curves": [{"id": "c1", "type": "circle", "c": 1, "r": 30.0, "construction": false}], "constraints": [], "counters": {"c": 1}}}),
+    );
+    feature(
+        &mut s,
+        json!({"id": 2, "name": "Extrude1", "type": "extrude", "sketch": 1, "body_names": ["Body1"], "operation": "new_body",
+        "profiles": {"type": "curves", "loops": [["c1"]]}, "extent": {"distance": "8", "convention": "total_distance", "direction": "positive"}}),
+    );
+    feature(
+        &mut s,
+        json!({"id": 3, "name": "Sketch2", "type": "sketch", "plane": {"type": "flipped", "base": {"type": "origin", "name": "XZ"}}, "sketch": {
+        "points": [{"id": "origin", "pos": [0.0, 0.0], "fixed": true}, {"id": "l1.start", "pos": [0.0, 8.0], "fixed": false},
+            {"id": "l1.end", "pos": [40.0, 40.0], "fixed": false}, {"id": "l2.end", "pos": [-40.0, 40.0], "fixed": false}],
+        "curves": [{"id": "l1", "type": "line", "a": 1, "b": 2, "construction": false}, {"id": "l2", "type": "line", "a": 1, "b": 3, "construction": false}],
+        "constraints": [], "counters": {"l": 2}}}),
+    );
+    feature(
+        &mut s,
+        json!({"id": 4, "name": "Plane1", "type": "construction_plane", "plane": {"type": "through_point", "base": {"type": "origin", "name": "XY"},
+        "point": {"type": "sketch_point", "sketch": 3, "point": "l1.end"}}}),
+    );
+    feature(
+        &mut s,
+        json!({"id": 5, "name": "Sketch3", "type": "sketch", "plane": {"type": "construction", "feature": 4}, "sketch": {
+        "points": [{"id": "origin", "pos": [0.0, 0.0], "fixed": true}, {"id": "c1.center", "pos": [40.0, 0.0], "fixed": false}, {"id": "c2.center", "pos": [-40.0, 0.0], "fixed": false}],
+        "curves": [{"id": "c1", "type": "circle", "c": 1, "r": 20.0, "construction": false}, {"id": "c2", "type": "circle", "c": 2, "r": 20.0, "construction": false}],
+        "constraints": [], "counters": {"c": 2}}}),
+    );
+    feature(
+        &mut s,
+        json!({"id": 6, "name": "Sweep1", "type": "sweep", "sketch": 5, "profiles": {"type": "curves", "loops": [["c2"]]}, "path_sketch": 3, "path": ["l2"], "operation": "join"}),
+    );
+    feature(
+        &mut s,
+        json!({"id": 7, "name": "Sweep2", "type": "sweep", "sketch": 5, "profiles": {"type": "curves", "loops": [["c1"]]}, "path_sketch": 3, "path": ["l1"], "operation": "join"}),
+    );
+    run(&mut s, "solid.shell", json!({"body": "Body1", "faces": [[10.0, -10.0, 0.0]], "thickness": "1.5 mm", "tangent_chain": true}));
+    sound(&s);
+}

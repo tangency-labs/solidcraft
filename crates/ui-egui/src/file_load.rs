@@ -1533,6 +1533,7 @@ fn behind(app: &mut SolveApp, mut running: Running) {
             crate::operations::ended(app, &key, Outcome::Done);
             if request.kind == Kind::Open {
                 app.home.add_recent(&request.path);
+                crate::documents::design_opened(app, &request.path);
             }
             // A recovered design takes its entry with it into the background tab: saved there
             // first, so the old entry can go without the design being lost to a crash.
@@ -1724,6 +1725,9 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     if let Some(note) = &request.note {
                         app.set_status(note.clone(), false);
                     }
+                }
+                if request.kind == Kind::Open {
+                    crate::documents::design_opened(app, &request.path);
                 }
                 request.answer(Ok(made.result));
             }

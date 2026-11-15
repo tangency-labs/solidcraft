@@ -3174,3 +3174,47 @@ fn a_slot_arc_split_by_a_balls_seam_selects_and_rounds_like_its_mirror() {
     assert!((plus - 89.8218).abs() < 1e-2, "rounding the split arc removes {plus}");
     assert!((plus - minus).abs() < 1e-3, "the split arc's round removes {plus}, its mirror's {minus}");
 }
+
+/// A cut To a point on the curved wall of the body it cuts (#11923): the wall runs along the
+/// extrusion, so the cut can never reach it, and the point stands for the plane through it, as a
+/// point in space does. A 12 mm square on the top of a cylinder (r 20, 25 tall) cut To a point on
+/// the wall half way down takes a 12 x 12 x 12.5 slot.
+#[test]
+fn a_cut_to_a_point_on_a_wall_along_the_cut_stops_at_that_height() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[0.0,0.0],"radius":20.0}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":25.0}));
+    let before = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane":"XY","offset":25.0}));
+    run(&mut s, "sketch.rectangle.center", json!({"center":[0.0,0.0],"corner":[6.0,6.0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"direction":"negative","distance":"12.5 mm","operation":"cut","profiles":[0],"to":[14.14,14.14,12.5]}));
+    let removed = before - volume(&mut s);
+    assert!((removed - 12.0 * 12.0 * 12.5).abs() < 1e-3 * 1800.0, "removed {removed} vs 1800");
+}
+
+/// #11923 keeps main's trim where the wall crosses the profile, even a profile too narrow to hold
+/// a vertex of the wall's mesh: a 0.05 mm slot from x 18 to 22 at y 3 crosses a post (r 20, axis
+/// Z) under a plate at z 10. Extruded To a point on the post's wall at z 2, the tool is trimmed
+/// to the body, the piece outside the post from z 0 to the plate, not ended at z 2.
+#[test]
+fn a_narrow_profile_across_a_wall_along_the_extrusion_keeps_the_trim_to_the_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base":[0,0,0],"axis":[0,0,1],"radius":20,"height":40,"body_name":"Post"}));
+    run(&mut s, "solid.box", json!({"corner":[-30,-30,10],"length":60,"width":60,"height":2,"body_name":"Plate"}));
+    run(&mut s, "solid.combine", json!({"target":"Post","tools":["Plate"],"operation":"join"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Slot"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[18.0,2.975],"p1":[22.0,3.025]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Slot","to":[20,0,2],"body_name":"W"}));
+    let outside = (22.0 - (20.0f64 * 20.0 - 9.0).sqrt()) * 0.05;
+    let v = body_volume(&s, "W");
+    assert!(
+        (v - outside * 10.0).abs() < 0.02 * outside * 10.0,
+        "volume {v}: trimmed to the body is {}, ended at z 2 is {}",
+        outside * 10.0,
+        0.2 * 2.0
+    );
+}

@@ -15,9 +15,11 @@
 //! | Cause                                  | Class ([`ErrorKind`])                         |
 //! |----------------------------------------|-----------------------------------------------|
 //! | [`BlendFailure::NoRoom`]               | the reason's ([`no_room_class`]), 101 to 124, 128 or 129 |
+//! | [`BlendFailure::RemovalRefused`]       | the reason's ([`removal_class`]), 130 or 131  |
 //! | [`BlendFailure::StationDidNotConverge`]| [`ErrorKind::StationDidNotConverge`] (125)    |
 //! | [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`] | [`ErrorKind::TrimLeaks`] (126) |
 //! | [`BlendFailure::StageFailed`]          | [`ErrorKind::StageFailed`] (127)              |
+//! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -27,7 +29,7 @@
 //!
 //! | Rust                                   | Status difftest compares          |
 //! |----------------------------------------|-----------------------------------|
-//! | [`BlendFailure::NoRoom`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`] | `SM_ERR` |
+//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
 //! | [`BlendFailure::Missing`]              | `SM_ERR_NULL_POINTER`             |
 //! | [`BlendFailure::InvalidValue`]         | `SM_ERR_INVALID_INPUT`            |
@@ -37,6 +39,7 @@
 //! | [`BlendFailure::OutsideDomain`]        | `SM_ERR_OUTSIDE_OF_DOMAIN`        |
 //! | [`BlendFailure::NotWithinTolerance`]   | `SM_ERR_NOT_WITHIN_TOLERANCE`     |
 //! | [`BlendFailure::PassedOn`]             | the status of the stage passed on |
+//! | [`BlendFailure::NotCertified`]         | `SM_ERR`                          |
 //!
 //! **The phrase causes** ([`BlendFailure::Failed`] to [`BlendFailure::PassedOn`]) are the
 //! shape the blend sites were converted to before the record, some of them refusals not yet
@@ -72,6 +75,9 @@ pub enum BlendFailure {
     /// and 129; [`no_room_class`]). A refusal: the failure's fit, where the
     /// check computed one, is the size that builds.
     NoRoom(NoRoomReason),
+    /// A fillet removal refuses the face it is asked to remove, for the reason named
+    /// (classes 130 and 131; [`removal_class`]). A refusal that no size decides.
+    RemovalRefused(RemovalRefusal),
     /// The solve of the ball's position at a station of the blend did not converge: a defect,
     /// never "no root" (a solve that stops proves nothing about the root).
     StationDidNotConverge {
@@ -138,6 +144,24 @@ pub enum BlendFailure {
         /// The status the routine answers with (a comparison detail).
         status: i32,
     },
+    /// A blend surface not certified within its tolerance in the work its certificate is
+    /// allowed: the G^n section's certificate would halve spans past its budget
+    /// ([`crate::blend::fillet_section::section::GN_HALVING_BUDGET`]), or has more stations
+    /// than the fork's stop (4096), with spans still over its target (a tenth of the
+    /// tolerance). The round is refused (not built), but not as a fact of its geometry: the
+    /// budget, not the geometry, decides it, so its class is [`ErrorKind::NotWithinTolerance`],
+    /// not one of the refusal classes ([`ErrorKind::is_refusal`] is false), and no size is
+    /// named (the budget says nothing about which size would certify). Like a cancellation, no fallback turns it into
+    /// another result ([`crate::SolidError::is_unported_or_cancelled`]). Status `SM_ERR`: it
+    /// stands for the fork's own stop, the status `SM_ERR` with "the blend could not be
+    /// certified within its tolerance", which the port returned as
+    /// [`BlendFailure::Failed`] before it was typed.
+    NotCertified {
+        /// The spans halved when it was refused.
+        halvings: usize,
+        /// The certificate's stations when it was refused.
+        stations: usize,
+    },
 }
 
 /// The class of a blend larger than its faces allow, for `reason`: one of the blend's
@@ -186,16 +210,110 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
     }
 }
 
+/// Why a fillet removal (`crate::blend::fillet_removal`, its ring removal included) refuses
+/// the face it is asked to remove. Each is a fact of the face and its neighbours, not a
+/// defect; the class is [`removal_class`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RemovalRefusal {
+    /// A face the removal extends would grow past its surface's domain, which only a plane
+    /// continues exactly.
+    FaceGrowsPastDomain,
+    /// A corner of more than three edges keeps its end edge, which would need a fitted
+    /// intersection to run on to the new corner.
+    CornerNeedsFittedIntersection,
+    /// The side edge that would run on to the new corner is not a straight B-spline curve,
+    /// so it cannot run on exactly.
+    SideEdgeNotStraight,
+    /// The new corner is off the line of the side edge that would run on to it.
+    CornerOffSideLine,
+    /// The tangent surfaces of a ring fillet do not meet in a closed curve near its rails
+    /// within their domains: the sharp edge would lie on a continuation of one of them.
+    TangentSurfacesDoNotMeet,
+    /// A seam's UV trim, run on, does not reach the new vertex on its face's surface.
+    SeamTrimMissesNewVertex,
+    /// The fillet face does not have four edges.
+    NotFourEdges,
+    /// Two adjacent edges of the fillet face are both tangent.
+    AdjacentEdgesTangent,
+    /// The edge opposite the fillet face's tangent edge is not tangent.
+    OppositeEdgeNotTangent,
+    /// Neither of the fillet face's first two edges is tangent.
+    NoTangentEdge,
+    /// A tangent or end edge of the fillet face does not have two vertices.
+    EdgeWithoutTwoVertices,
+    /// An edge of the fillet face does not border exactly two faces.
+    EdgeNotBetweenTwoFaces,
+    /// A tangent face's surface is not a B-spline surface.
+    TangentFaceNotBSpline,
+    /// An end face's surface is not a B-spline surface.
+    EndFaceNotBSpline,
+    /// The face is not a ring fillet.
+    NotARing,
+    /// The ring fillet has more than two rails.
+    MoreThanTwoRails,
+    /// The ring fillet does not have two rails between two other faces.
+    RailsNotBetweenTwoFaces,
+    /// The ring fillet's seam does not join the two rails' vertices.
+    SeamDoesNotJoinRails,
+    /// A rail's vertex has an edge other than one open seam of its tangent face.
+    RailVertexHasOtherEdges,
+    /// A tangent face's seam crosses the sharp edge at more than one place.
+    SeamCrossesSharpEdgeTwice,
+    /// The two tangent faces' seams cross the sharp edge at different places.
+    SeamsCrossApart,
+    /// A seam has more than two edge uses with their own UV trim curves.
+    SeamHasMoreThanTwoTrims,
+    /// A seam has no edge use with its own UV trim curve.
+    SeamHasNoOwnTrim,
+}
+
+/// The class of a fillet removal's refusal, for `reason`: [`ErrorKind::RemovalNotExact`] (130)
+/// where the removal would continue a face or an edge past its geometry, and
+/// [`ErrorKind::NotARemovableFillet`] (131) where the face and its neighbours are not a fillet
+/// the removal recognises. Both are refusals no size decides.
+#[must_use]
+pub const fn removal_class(reason: RemovalRefusal) -> ErrorKind {
+    use RemovalRefusal as R;
+    match reason {
+        R::FaceGrowsPastDomain
+        | R::CornerNeedsFittedIntersection
+        | R::SideEdgeNotStraight
+        | R::CornerOffSideLine
+        | R::TangentSurfacesDoNotMeet
+        | R::SeamTrimMissesNewVertex => ErrorKind::RemovalNotExact,
+        R::NotFourEdges
+        | R::AdjacentEdgesTangent
+        | R::OppositeEdgeNotTangent
+        | R::NoTangentEdge
+        | R::EdgeWithoutTwoVertices
+        | R::EdgeNotBetweenTwoFaces
+        | R::TangentFaceNotBSpline
+        | R::EndFaceNotBSpline
+        | R::NotARing
+        | R::MoreThanTwoRails
+        | R::RailsNotBetweenTwoFaces
+        | R::SeamDoesNotJoinRails
+        | R::RailVertexHasOtherEdges
+        | R::SeamCrossesSharpEdgeTwice
+        | R::SeamsCrossApart
+        | R::SeamHasMoreThanTwoTrims
+        | R::SeamHasNoOwnTrim => ErrorKind::NotARemovableFillet,
+    }
+}
+
 impl BlendFailure {
     /// The status the C++ reports for the failure unless its site says otherwise (a
     /// comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
             Self::NoRoom(_)
+            | Self::RemovalRefused(_)
             | Self::StationDidNotConverge { .. }
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::NotCertified { .. }
             | Self::Failed(_) => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
@@ -209,18 +327,23 @@ impl BlendFailure {
     }
 
     /// The failure's class, its stable [`ErrorKind`], derived from the cause: the reason's
-    /// class for [`BlendFailure::NoRoom`] ([`no_room_class`]),
+    /// class for [`BlendFailure::NoRoom`] ([`no_room_class`]) and
+    /// [`BlendFailure::RemovalRefused`] ([`removal_class`]),
     /// [`ErrorKind::StationDidNotConverge`], [`ErrorKind::TrimLeaks`] for an open or leaking
-    /// trim loop, and [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`]. A phrase
+    /// trim loop, [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`], and
+    /// [`ErrorKind::NotWithinTolerance`] for a surface not certified within its tolerance in
+    /// its work budget ([`BlendFailure::NotCertified`]). A phrase
     /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
     /// [`ErrorKind::InvalidInput`], ...), as before the record ([`BlendFailure::is_phrase`]).
     #[must_use]
     pub const fn class(&self) -> ErrorKind {
         match self {
             Self::NoRoom(reason) => no_room_class(*reason),
+            Self::RemovalRefused(reason) => removal_class(*reason),
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
             Self::StageFailed => ErrorKind::StageFailed,
+            Self::NotCertified { .. } => ErrorKind::NotWithinTolerance,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -242,10 +365,12 @@ impl BlendFailure {
     pub const fn is_phrase(&self) -> bool {
         match self {
             Self::NoRoom(_)
+            | Self::RemovalRefused(_)
             | Self::StationDidNotConverge { .. }
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
-            | Self::StageFailed => false,
+            | Self::StageFailed
+            | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -262,11 +387,14 @@ impl BlendFailure {
     /// [`crate::SolidError::Upstream`] before solidcore described it): the decisions that
     /// read an upstream status ([`crate::error::upstream_status`]) treat it as that status,
     /// and the goldens read it. Every cause does: the status stays reachable for the goldens
-    /// while the cause, not the status, decides the type.
+    /// while the cause, not the status, decides the type. [`BlendFailure::NotCertified`]
+    /// stands for the fork's `SM_ERR` at its certificate's stop (and, past the work budget
+    /// solidcore adds, for the same stop reached sooner).
     #[must_use]
     pub const fn replaces_upstream_status(&self) -> bool {
         match self {
             Self::NoRoom(_)
+            | Self::RemovalRefused(_)
             | Self::StationDidNotConverge { .. }
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
@@ -279,7 +407,8 @@ impl BlendFailure {
             | Self::NotConverged(_)
             | Self::OutsideDomain(_)
             | Self::NotWithinTolerance(_)
-            | Self::PassedOn { .. } => true,
+            | Self::PassedOn { .. }
+            | Self::NotCertified { .. } => true,
         }
     }
 }
@@ -289,6 +418,7 @@ impl core::fmt::Display for BlendFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::NoRoom(reason) => write!(f, "{}: {reason:?}", self.class()),
+            Self::RemovalRefused(reason) => write!(f, "{}: {reason:?}", self.class()),
             Self::StationDidNotConverge {
                 s,
                 residual,
@@ -314,6 +444,11 @@ impl core::fmt::Display for BlendFailure {
             | Self::PassedOn { what, .. } => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
+            Self::NotCertified { halvings, stations } => write!(
+                f,
+                "the blend could not be certified within its tolerance in the work allowed \
+                 ({halvings} spans halved, {stations} stations)"
+            ),
         }
     }
 }
@@ -681,6 +816,54 @@ mod tests {
     }
 
     #[test]
+    fn a_fillet_removal_refusal_is_a_refusal_no_size_decides() {
+        use RemovalRefusal as R;
+        let cases = [
+            (R::FaceGrowsPastDomain, ErrorKind::RemovalNotExact),
+            (R::CornerNeedsFittedIntersection, ErrorKind::RemovalNotExact),
+            (R::SideEdgeNotStraight, ErrorKind::RemovalNotExact),
+            (R::CornerOffSideLine, ErrorKind::RemovalNotExact),
+            (R::TangentSurfacesDoNotMeet, ErrorKind::RemovalNotExact),
+            (R::SeamTrimMissesNewVertex, ErrorKind::RemovalNotExact),
+            (R::NotFourEdges, ErrorKind::NotARemovableFillet),
+            (R::AdjacentEdgesTangent, ErrorKind::NotARemovableFillet),
+            (R::OppositeEdgeNotTangent, ErrorKind::NotARemovableFillet),
+            (R::NoTangentEdge, ErrorKind::NotARemovableFillet),
+            (R::EdgeWithoutTwoVertices, ErrorKind::NotARemovableFillet),
+            (R::EdgeNotBetweenTwoFaces, ErrorKind::NotARemovableFillet),
+            (R::TangentFaceNotBSpline, ErrorKind::NotARemovableFillet),
+            (R::EndFaceNotBSpline, ErrorKind::NotARemovableFillet),
+            (R::NotARing, ErrorKind::NotARemovableFillet),
+            (R::MoreThanTwoRails, ErrorKind::NotARemovableFillet),
+            (R::RailsNotBetweenTwoFaces, ErrorKind::NotARemovableFillet),
+            (R::SeamDoesNotJoinRails, ErrorKind::NotARemovableFillet),
+            (R::RailVertexHasOtherEdges, ErrorKind::NotARemovableFillet),
+            (R::SeamCrossesSharpEdgeTwice, ErrorKind::NotARemovableFillet),
+            (R::SeamsCrossApart, ErrorKind::NotARemovableFillet),
+            (R::SeamHasMoreThanTwoTrims, ErrorKind::NotARemovableFillet),
+            (R::SeamHasNoOwnTrim, ErrorKind::NotARemovableFillet),
+        ];
+        for (reason, class) in cases {
+            let cause = BlendFailure::RemovalRefused(reason);
+            assert_eq!(cause.class(), class, "{reason:?}");
+            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            let e = SolidError::blend("blend::fillet_removal", cause);
+            assert_eq!(e.kind(), class, "{reason:?}");
+            // the status the C++ reports stays, for the goldens
+            assert_eq!(e.upstream_status(), Some(SM_ERR), "{reason:?}");
+            assert!(e.is_refusal() && !e.is_defect() && !e.sized(), "{reason:?}");
+        }
+        assert_eq!(
+            SolidError::blend(
+                "blend::fillet_removal",
+                BlendFailure::RemovalRefused(R::FaceGrowsPastDomain)
+            )
+            .to_string(),
+            "blend::fillet_removal: removal_not_exact: FaceGrowsPastDomain"
+        );
+    }
+
+    #[test]
     fn only_a_stage_failure_built_on_purpose_is_a_defect() {
         // a refusal not yet on the record, as `record_no_room` returns it: a phrase cause
         let refusal = SolidError::blend_failed(
@@ -906,7 +1089,9 @@ mod tests {
             | BlendFailure::StationDidNotConverge { .. }
             | BlendFailure::TrimLoopOpen
             | BlendFailure::TrimLoopDoesNotSeparate
-            | BlendFailure::StageFailed => None,
+            | BlendFailure::RemovalRefused(_)
+            | BlendFailure::StageFailed
+            | BlendFailure::NotCertified { .. } => None,
             BlendFailure::Failed(_) => Some("BlendFailure::Failed("),
             BlendFailure::Missing(_) => Some("BlendFailure::Missing("),
             BlendFailure::InvalidValue(_) => Some("BlendFailure::InvalidValue("),
@@ -926,7 +1111,7 @@ mod tests {
     /// sites lowers the pin to the new count, and a new site builds a typed cause.
     #[test]
     fn the_phrase_cause_sites_only_go_down() {
-        const PHRASE_CAUSE_SITES: usize = 1405;
+        const PHRASE_CAUSE_SITES: usize = 1402;
         use crate::blend::fillet_executive::NoRoomReason as R;
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),
@@ -939,7 +1124,12 @@ mod tests {
             },
             BlendFailure::TrimLoopOpen,
             BlendFailure::TrimLoopDoesNotSeparate,
+            BlendFailure::RemovalRefused(RemovalRefusal::FaceGrowsPastDomain),
             BlendFailure::StageFailed,
+            BlendFailure::NotCertified {
+                halvings: 0,
+                stations: 0,
+            },
             BlendFailure::Failed("x"),
             BlendFailure::Missing("x"),
             BlendFailure::InvalidValue("x"),

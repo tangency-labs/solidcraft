@@ -1081,6 +1081,9 @@ mod tests {
             app.home.open = false;
             app.preferences.ambient_occlusion = false;
             app.cpu_meshing = true;
+            // Refinement uses wall time and can change the scene between fixed-time frames.
+            // These fixtures check blur caching against stable display geometry.
+            app.viewport.suspend_refinement = true;
             app.cam.distance = 110.0;
             app.cam.target = solidcore_record::Vec3::new(20.0, 15.0, 12.5);
             let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
