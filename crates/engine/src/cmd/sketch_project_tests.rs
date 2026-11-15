@@ -2396,7 +2396,7 @@ fn a_sketch_failing_for_lost_projections_is_shown_where_it_is_and_never_used() {
 fn assert_rim(s: &mut Session, radius: f64, center: [f64; 2]) {
     let si = inspect(s);
     let arcs: Vec<Value> = linked_curves(&si).into_iter().filter(|c| c["type"] == "arc" || c["type"] == "circle").collect();
-    assert!(!arcs.is_empty(), "the opening is a full circle, got {si}");
+    assert_eq!(arcs.len(), 1, "the opening is one full circle, got {si}");
     for c in &arcs {
         let r = c["radius"].as_f64().unwrap_or(f64::NAN);
         assert!((r - radius).abs() < 1e-4, "{c}");
