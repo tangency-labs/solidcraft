@@ -92,6 +92,23 @@ fn a_click_on_the_bottom_edge_makes_an_edge_flange() {
     assert_eq!(c[0].1["type"], "edge", "{:?}", c[0].1);
 }
 
+/// The Flange window has no thickness, bend radius or K-factor of its own: a line under its Rule
+/// box says they are changed in Sheet Metal Rules (#17421).
+#[test]
+fn flange_window_says_where_the_rule_values_are_changed() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let sk = h.app.session.doc.features[0].id;
+    h.app.session.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
+    h.app.start("sheet.flange");
+    h.frames(3);
+    assert!(crate::scenario::rect_of("dialog:caption:Rule").is_some_and(|r| r.width() > 0.0), "the line under the Rule box is shown");
+    let text = solidcraft_ui_text::tr("ui.sheet_flange_rule_values");
+    assert!(text.contains(solidcraft_ui_text::tr("cmd.sheet_manage_rules")), "{text}");
+}
+
 /// Hem takes edges and an optional gap; rules make and pick a rule with its expressions.
 #[test]
 fn hem_and_rules() {

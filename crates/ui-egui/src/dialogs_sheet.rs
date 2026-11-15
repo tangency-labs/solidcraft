@@ -254,6 +254,13 @@ fn rule_combo(app: &SolveApp, ui: &mut egui::Ui, id: &str, rule: &mut usize) {
     choice_row(ui, "Rule", id, rule, &refs);
 }
 
+/// The Flange window's rule box with a line under it that says where the rule's values are
+/// changed: the window itself has no thickness or K-factor (#17421).
+fn flange_rule_combo(app: &SolveApp, ui: &mut egui::Ui, rule: &mut usize) {
+    rule_combo(app, ui, "sm_rule", rule);
+    crate::ui_kit::caption(ui, "Rule", solidcraft_ui_text::tr("ui.sheet_flange_rule_values"));
+}
+
 /// The flange type the picks make: edges an edge flange, sketch lines a contour, else base.
 fn flange_type(inputs: &[SelInput]) -> usize {
     let items = inputs.first().map(|i| i.items.as_slice()).unwrap_or(&[]);
@@ -404,9 +411,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 2 => {
                     enter |= expr_row(ui, "Distance", distance);
 
-                    rule_combo(app, ui, "sm_rule", rule);
+                    flange_rule_combo(app, ui, rule);
                 }
-                _ => rule_combo(app, ui, "sm_rule", rule),
+                _ => flange_rule_combo(app, ui, rule),
             }
             if *ty == 2 {
                 crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip), ("Other side", reverse)]);
