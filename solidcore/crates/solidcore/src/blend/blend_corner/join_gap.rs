@@ -17,9 +17,8 @@
 //! A Join ends both blends on one section, the first blend's, in the plane `S` through the
 //! corner's vertex `v` square to its edge (`FilletBrep::calc_join_section`). On the face the
 //! two blends share, that section's foot is `F = v + R1 b1`: `b1` the first edge's binormal
-//! into the face, `R1` the first blend's reach along the face (`(oB - oA cos phi) / sin phi`
-//! for offsets `oA` off the shared face and `oB` off its other face, the faces' normals
-//! `phi` apart; a round's `r tan(phi / 2)`, a chamfer's setback). Let `t2` be the second
+//! into the face, `R1` the first blend's reach along the face (on the upright walls this
+//! module takes, the blend's offset off the wall). Let `t2` be the second
 //! edge's direction leaving `v`, and `beta` the angle the two edges make in the face
 //! (`cos beta = -t1 . t2` for `t1` the first edge's direction leaving `v`).
 //!
@@ -32,7 +31,7 @@
 //!   The gap is `|R1 - lambda|`, bounded by [`overlap_gap`]: with equal reaches and straight
 //!   edges `R (sec beta - 1)`, second order (at the 3.4e-3 degrees of #13911, `1.8e-9 R`).
 //!
-//! **The bound** (PROVEN under the model below). Work in the shared face, a plane, with
+//! **The bound** (PROVEN under the model, which the code verifies). Work in the shared face, a plane, with
 //! `v` the origin, `x` along `t2` and `y` along `b2` (the second edge's binormal into the
 //! face). The face is a plane and `b_i` is `t_i` turned a quarter turn in it toward the face,
 //! so `b1` and `b2` make the angle `beta` the edges make, and on the over side
@@ -48,25 +47,48 @@
 //! most `asin(kr x) / kr`, which for `kr x <= 1/2` is at most `1.05 x`. Take
 //! `X = 2 R tan beta` (`R` the larger reach) with `tan beta <= 1/2` and `kr X <= 1/2`: the
 //! sagitta is then at most `X <= R`, so over `0 <= x <= X` the rail lies in the band
-//! `|y - R2| <= sagitta(kr, X)`, below the line at `x = 0` (`y = R2 > 0`) and above it at
-//! `x = X` (where the line stands at `X / tan beta = 2R`). It therefore crosses the line at
-//! some `x <= X`, where `lambda cos beta = R2 + d`, `|d| <= sagitta(kr, X)`: `|lambda - R2 /
-//! cos beta| <= sec beta sagitta(kr, X)`, and `|R1 - lambda| <= |R1 - R2 / cos beta| + sec
-//! beta sagitta(kr, X)`. The order of the two blends is not known here, so both are taken:
+//! `|y - R2| <= w`, `w = sagitta(kr, X) + e` (`e` the rail's shift off the edge's offset,
+//! below; refused unless `w <= R`). At `x = 0` the rail (`y = R2 > 0`) is above the line
+//! (`y = 0`), and at `x = X` it is below it (the line stands at `X / tan beta = 2R >= R2 +
+//! w`). It therefore crosses the line at some `x <= X`, where `lambda cos beta = R2 + d`,
+//! `|d| <= w`: `|lambda - R2 /
+//! cos beta| <= sec beta w`, and `|R1 - lambda| <= |R1 - R2 / cos beta| + sec beta w` (the
+//! shifts `e` are carried as the reaches' bounds). The order of the two blends is not known here, so both are taken:
 //! [`overlap_gap`] is the larger of the two `|R_i - R_j / cos beta|` plus `sec beta` times the
 //! larger sagitta. The rail runs at most `1.05 X` along its arc and its edge at most `1.05 X
 //! / (1 - R K)` (the rail's speed is `1 - R k` times the edge's), so the curvature bound is
 //! needed only over that much of the edge next to `v`: [`EdgeBend`] carries a bound and the
 //! certified length of the edge it holds over, and a bound over less is refused.
 //!
-//! **The model** (ARGUED, not derived here). The rails are taken as the edges' offsets by a
-//! constant reach in the shared plane: exact where the blend's other face meets the plane
-//! at a constant angle along the edge (a wall extruded square or drafted from the plane,
-//! #13911's walls); where that angle changes, the reach changes along the edge, which this
-//! bound does not count. The shared face must be a plane (anything else falls back to
-//! #16627's bound), so its bending is never a term. That the check's vertex gap is this
-//! distance is ARGUED as the over/behind split above, and MEASURED on #13911's body (a
-//! Join forced at every near-straight corner builds valid at every size).
+//! **The model** (verified). The shared face is a plane of unit normal `n`, and each blend's
+//! other face is a wall ruled along `n` ([`ruling_tilt`]): its B-spline net (a plane's, a
+//! cylinder's, an extrusion's or a B-spline's own) is of degree 1 across with two control
+//! points, each rung's points of one weight and every rung proved to point the same way
+//! along `n`, tilted from it by at most `delta` (`sin delta` certified, at most
+//! [`MAX_TILT`]). For a fixed parameter along, such a net is `A + t B` with `B` a positive
+//! combination of the rungs, so every ruling lies within `delta` of `n`. An upright wall
+//! (`delta = 0`) is the cylinder over the edge along `n`, and a blend between it and the
+//! plane is the same in every plane square to the edge: its section's foot on the plane
+//! stands its offset `oB` off the wall from the edge, and on the wall its offset `oA` off
+//! the plane down the ruling. So the rail is the edge's offset in the plane by the
+//! constant `R = oB`. A tilted wall stands within `h tan(delta)` of the upright one at
+//! depth `h`; the distance to a surface is 1-Lipschitz in the surface (Hausdorff), and the
+//! distance to the upright wall grows at unit rate along `b`, so each section's foot moves
+//! by at most that much: taken over `h <= 2 (oA + oB)` (ARGUED: the contacts lie within
+//! `oA + oB` of the plane), the shift `e = 2 (oA + oB) tan(delta)`. On #13911 `delta` is
+//! about `2.4e-18`.
+//!
+//! **The second joint vertex** (PROVEN under the model). The Join's section ends on the
+//! first wall too. With both walls upright through `v`, the line `v + t n` lies in both:
+//! the first section's plane contains `n` (it is square to `t1`, which lies in the plane),
+//! so its foot on the first wall is `v - oA1 n`, on that line. The second blend's rail on
+//! its wall is the second edge moved `oA2` down `n` and passes through `v - oA2 n`, on the
+//! same line. So the vertex there lies on the second wall and within `|oA1 - oA2|` of the
+//! second blend; tilted walls add at most each wall's shift twice. Drafted walls are
+//! refused (no bound is derived for their common edge), and fall back to #16627's bound.
+//!
+//! That the check's vertex gap is the larger of these two distances is ARGUED as the
+//! over/behind split above. MEASURED on `kinked_plate` (wr697): `sec(kink) - 1` to `1e-4`.
 //!
 //! **Curvature bounds** ([`EdgeBend`], PROVEN): a line 0; an ellipse of radii `a >= b`
 //! `a / b^2`, its largest; a polynomial B-spline, over the knot span at `v`, `max |C''| /
@@ -78,10 +100,9 @@
 //! bound is derived for it).
 //!
 //! **Rounding** (PROVEN for this module's arithmetic, [`crate::geom::certified`]): every
-//! unit vector carries `unit_error`, the cosines and sines of `phi` and `beta` their
-//! [`crate::geom::certified::dot`] and `cross_length` bounds, the reach `(e_num + R e_sin)
-//! / (sin phi - e_sin)` (the quotient amplifies the sine's error by `1 / sin phi`, so a
-//! near-tangent pair of faces widens it rather than being floored), the reaches' quotients by
+//! unit vector carries `unit_error` (a rung's its difference's `gamma_1`), the cosine and
+//! sine of `beta` and of each rung's tilt their [`crate::geom::certified::dot`] and
+//! `cross_length` bounds (the reach is the solver's offset, given), the reaches' quotients by
 //! `cos beta` their error through `1 / (cos beta - e_cos)`, and the bend term is evaluated
 //! from upper bounds of every input, each product, quotient and root rounded up by its
 //! `gamma`. The gap is compared with the budget by [`crate::geom::certified::Bounded::at_most`],
@@ -94,12 +115,15 @@
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignored, Result};
-use crate::geom::certified::{above, cross_length, dot, gamma, unit_error, Bounded};
+use crate::geom::certified::{
+    above, cross_length, dot, gamma, unit, unit_error, unit_error_of, Bounded,
+};
 use crate::geom::extent1d::Extent1d;
 use crate::kernel::Kernel;
 use crate::math::{Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BSplineCurve;
-use crate::nurbs::math::{NOW, NOZ};
+use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::nurbs::math::{CPoint, NOW, NOZ};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
@@ -133,8 +157,12 @@ struct AtVertex {
     out: Vec3,
     /// The edge's unit binormal into the shared face there.
     binormal: Vec3,
-    /// The blend's reach along the shared face, certified.
+    /// The blend's reach along the shared face, its offset off the wall, with how far the
+    /// rail may stand off the edge's offset by it (the wall's tilt).
     reach: Bounded,
+    /// The blend's offset off the shared face: its section's foot on the wall that far
+    /// down the wall's ruling through the vertex.
+    down: f64,
     /// The edge's curvature bound next to the vertex.
     bend: EdgeBend,
 }
@@ -184,10 +212,12 @@ pub fn sagitta(curvature: f64, x: f64) -> Option<f64> {
 /// The bound on the gap where the shared section lies over the second blend (module docs):
 /// the larger `|R_i - R_j / cos beta|` plus `sec beta` times the larger [`sagitta`] of the
 /// rails over `X = 2 R tan beta`, each rail's curvature from its edge's [`EdgeBend`] by
-/// [`rail_curvature`], certified for the inputs' bounds and its own rounding. `None` where
-/// `cos beta` is not proved positive, `tan beta > 1/2`, a reach is negative, a rail's
-/// curvature or sagitta is refused, or an edge's bound holds over less than the `1.05 X /
-/// (1 - R K)` of edge the rail runs over.
+/// [`rail_curvature`], certified for its own rounding. Each reach's bound is how far the
+/// rail may stand off the edge's offset by it (a wall's shift, module docs), carried into
+/// the gap. `None` where `cos beta` is not proved positive, `tan beta > 1/2`, a reach is
+/// negative, a rail's curvature or sagitta is refused, the band (sagitta and shift) exceeds
+/// the larger reach, or an edge's bound holds over less than the `1.05 X / (1 - R K)` of
+/// edge the rail runs over.
 #[must_use]
 pub fn overlap_gap(
     reaches: [Bounded; 2],
@@ -242,6 +272,11 @@ pub fn overlap_gap(
         if !(shrink > 0.0 && bend.arc >= up(1.05 * x / shrink, 3)) {
             return None;
         }
+    }
+    // the band the rail lies in, sagitta and shift, within the larger reach (module docs)
+    let band = up(sag + r1.bound.max(r2.bound), 1);
+    if band.is_nan() || band > reach_up {
+        return None;
     }
     let bend = up(up(1.0 / cos_lo, 1) * sag, 1);
     let value = apart + bend;
@@ -403,15 +438,97 @@ fn edge_bend(
     }))
 }
 
-/// The blend's [`AtVertex`] on `shared`, or `None` where it cannot be read (no edge use of
-/// the blend's edge on that face, a degenerate tangent or binormal, faces not proved apart,
-/// a reach not proved non-negative, an edge without a curvature bound).
+/// The largest tilt a wall's rulings may make with `normal`, the sine of the angle rounded
+/// up, where `surface` is ruled along it: a B-spline net (a plane's, a cone's or cylinder's,
+/// an extrusion's or a B-spline's own) of degree 1 with two control points across, each
+/// rung's two points of one weight, every rung proved to point the same way along `normal`
+/// (module docs). `None` otherwise, or past [`MAX_TILT`].
+fn ruling_tilt(surface: &Surface, normal: Vec3) -> Result<Option<f64>> {
+    let net = match surface.kind() {
+        SurfaceKind::Plane(p) => p.base(),
+        SurfaceKind::Cone(c) => c.rev.base(),
+        SurfaceKind::SurfOfExtrusion(e) => e.base(),
+        SurfaceKind::BSpline(s) => s,
+        _ => return Ok(None),
+    };
+    let (nu, nv, points) = net.control_points()?;
+    // a net linear both ways (a plane's) is tried both ways: the rungs across v, then
+    // across u
+    if nv == 2 && net.degree(SurfParamType::V) == 1 {
+        let rungs = points.chunks(2).filter_map(|c| match c {
+            [a, b] => Some((*a, *b)),
+            _ => None,
+        });
+        if let Some(tilt) = rungs_tilt(rungs, points.len() / 2, normal) {
+            return Ok(Some(tilt));
+        }
+    }
+    if nu == 2 && net.degree(SurfParamType::U) == 1 && points.len() == 2 * nv {
+        let (first, second) = points.split_at(nv);
+        let rungs = first.iter().zip(second).map(|(a, b)| (*a, *b));
+        return Ok(rungs_tilt(rungs, nv, normal));
+    }
+    Ok(None)
+}
+
+/// The tilt (a sine, rounded up) of `count` rungs from `normal` where every rung's two
+/// points share a weight and every rung is proved to point the same way along it, at most
+/// [`MAX_TILT`]; `None` otherwise.
+fn rungs_tilt(
+    rungs: impl Iterator<Item = (CPoint, CPoint)>,
+    count: usize,
+    normal: Vec3,
+) -> Option<f64> {
+    let ue = unit_error();
+    let mut tilt = 0.0_f64;
+    let mut side = 0.0_f64;
+    let mut seen = 0usize;
+    for (a, b) in rungs {
+        seen += 1;
+        let weighted = (a.w == NOW && b.w == NOW) || (a.w == b.w && above(a.w, 0.0));
+        if !weighted || a.z == NOZ || b.z == NOZ {
+            return None;
+        }
+        // homogeneous points of one weight: the rung's direction; each difference of two
+        // doubles rounds once, within gamma_1 of itself
+        let d = Vec3::new(b.x - a.x, b.y - a.y, b.z - a.z);
+        let length = d.length();
+        let du = unit(d)?;
+        let ed = unit_error_of(gamma(1) * up(length, 5), length);
+        let along = dot(du, normal, ed, ue);
+        let this = if along.value - along.bound > 0.0 {
+            1.0
+        } else if along.value + along.bound < 0.0 {
+            -1.0
+        } else {
+            return None;
+        };
+        if side != 0.0 && this != side {
+            return None;
+        }
+        side = this;
+        let sine = cross_length(du, normal, ed, ue);
+        tilt = tilt.max(sine.value + sine.bound);
+    }
+    let tilt = up(tilt, 1);
+    (seen > 0 && seen == count && tilt <= MAX_TILT).then_some(tilt)
+}
+
+/// The largest ruling tilt (a sine) [`ruling_tilt`] takes: walls drafted further are
+/// refused, as the second joint vertex is bounded only for upright walls (module docs).
+pub const MAX_TILT: f64 = 1e-9;
+
+/// The blend's [`AtVertex`] on `shared`, the plane of unit normal `normal`, or `None` where
+/// it cannot be read or the model does not hold (no edge use of the blend's edge on that
+/// face, a degenerate tangent or binormal, an other face not a wall ruled along `normal`,
+/// an edge without a curvature bound: module docs).
 fn at_vertex(
     k: &Kernel,
     b: &mut Brep,
     vertex: VertexId,
     blend: &JoinBlend,
     shared: FaceId,
+    normal: Vec3,
 ) -> Result<Option<AtVertex>> {
     let Some(e) = eu1::edge(b, blend.eu)? else {
         return Ok(None);
@@ -447,21 +564,9 @@ fn at_vertex(
     };
     let opts = BinormalOptions::default();
     let s = evaluate_binormal(k, b, on_shared, param, false, &opts)?;
-    let o = evaluate_binormal(k, b, on_other, param, false, &opts)?;
-    let (Ok(binormal), Ok(n_shared), Ok(n_other)) = (
-        s.binormal.unitize(),
-        s.face_normal.unitize(),
-        o.face_normal.unitize(),
-    ) else {
+    let Ok(binormal) = s.binormal.unitize() else {
         return Ok(None);
     };
-    let ue = unit_error();
-    let cos_phi = dot(n_shared, n_other, ue, ue);
-    let sin_phi = cross_length(n_shared, n_other, ue, ue);
-    let sin_lo = sin_phi.value - sin_phi.bound;
-    if !above(sin_lo, 0.0) {
-        return Ok(None);
-    }
     let other_face = eu1::face(b, on_other)?;
     let offset_on = |face: Option<FaceId>| {
         blend
@@ -470,18 +575,23 @@ fn at_vertex(
             .find(|(f, _)| f.is_some() && *f == face)
             .map(|&(_, o)| o)
     };
-    let (Some(o_shared), Some(o_other)) = (offset_on(Some(shared)), offset_on(other_face)) else {
+    let (Some(o_shared), Some(o_other), Some(wall)) =
+        (offset_on(Some(shared)), offset_on(other_face), other_face)
+    else {
         return Ok(None);
     };
-    // (oB - oA cos phi) / sin phi: the offsets are given, the cosine within its bound, the
-    // product and difference round twice; the quotient's error is the numerator's and the
-    // sine's through 1 / (sin phi - e_sin), and its own rounding
-    let num = o_other - o_shared * cos_phi.value;
-    let e_num = up(o_shared.abs() * cos_phi.bound, 1)
-        + gamma(2) * (o_other.abs() + (o_shared * cos_phi.value).abs());
-    let reach = num / sin_phi.value;
-    let e_reach = up((e_num + reach.abs() * sin_phi.bound) / sin_lo, 3) + gamma(1) * reach.abs();
-    if !(reach.is_finite() && e_reach.is_finite() && reach - e_reach >= 0.0) {
+    // the other face a wall ruled along the shared plane's normal (module docs)
+    let Some(surface) = face2::surface(b, wall)? else {
+        return Ok(None);
+    };
+    let Some(tilt) = ruling_tilt(surface, normal)? else {
+        return Ok(None);
+    };
+    // the wall stands within `h tan(delta)` of the upright one over the edge at depth `h`,
+    // taken over `h <= 2 (o_shared + o_other)` (module docs)
+    let (o_shared, o_other) = (o_shared.abs(), o_other.abs());
+    let shift = up(2.0 * (o_shared + o_other) * tilt / (1.0 - tilt), 4);
+    if !(o_other.is_finite() && o_shared.is_finite() && shift.is_finite()) {
         return Ok(None);
     }
     let Some(bend) = edge_bend(k, &curve, &ivl, param, at_start, tangent)? else {
@@ -491,18 +601,21 @@ fn at_vertex(
         out,
         binormal,
         reach: Bounded {
-            value: reach,
-            bound: e_reach,
+            value: o_other,
+            bound: shift,
         },
+        down: o_shared,
         bend,
     }))
 }
 
 /// The angle (degrees) within which the faces across the corner's side edges may meet for
 /// its two blends to Join: the solvers' tangency tolerance `tangency_tol_deg` where the
-/// shared face is a plane, the shared section is proved to lie over the second blend
-/// either way round, and [`overlap_gap`] there is proved below the intersection tolerance
-/// `xsect_tol` (less #16627's margin for the check's own rounding), else `behind_deg`,
+/// shared face is a plane, both other faces are walls ruled along its normal, the shared
+/// section is proved to lie over the second blend either way round, and both joint
+/// vertices' gaps ([`overlap_gap`] on the plane, the walls' offsets apart on their common
+/// ruling) are proved below the intersection tolerance `xsect_tol` (less #16627's margin
+/// for the check's own rounding), else `behind_deg`,
 /// #16627's bound ([`super::join_within_xsect_tolerance_deg`]). `behind_deg` too where the
 /// two blends share no single face or any quantity cannot be read or bounded (module docs).
 ///
@@ -534,16 +647,15 @@ pub fn join_tolerance_deg(
         return Ok(behind_deg);
     };
     // a plane: its bending is never a term (module docs)
-    let planar = matches!(
-        face2::surface(b, *shared)?.map(Surface::kind),
-        Some(SurfaceKind::Plane(_))
-    );
-    if !planar {
+    let Some(SurfaceKind::Plane(plane)) = face2::surface(b, *shared)?.map(Surface::kind) else {
         return Ok(behind_deg);
-    }
+    };
+    let Some(normal) = unit(plane.is_planar().1) else {
+        return Ok(behind_deg);
+    };
     let (Some(one), Some(two)) = (
-        at_vertex(k, b, vertex, first, *shared)?,
-        at_vertex(k, b, vertex, second, *shared)?,
+        at_vertex(k, b, vertex, first, *shared, normal)?,
+        at_vertex(k, b, vertex, second, *shared, normal)?,
     ) else {
         return Ok(behind_deg);
     };
@@ -571,7 +683,16 @@ pub fn join_tolerance_deg(
     let eps = f64::EPSILON;
     let reach = (one.reach.value + one.reach.bound).max(two.reach.value + two.reach.bound);
     let budget = xsect_tol * (1.0 - 16.0 * eps) - 8.0 * eps * reach;
-    if gap.at_most(budget).is_yes() {
+    // the second joint vertex, on the walls' common ruling through the vertex: the two
+    // sections' feet there stand `|o1 - o2|` apart, and each wall within its shift of the
+    // upright one (module docs)
+    let apart = (one.down - two.down).abs();
+    let walls = apart + 2.0 * (one.reach.bound + two.reach.bound);
+    let wall_gap = Bounded {
+        value: walls,
+        bound: gamma(4) * walls,
+    };
+    if gap.at_most(budget).is_yes() && wall_gap.at_most(budget).is_yes() {
         Ok(tangency_tol_deg)
     } else {
         Ok(behind_deg)

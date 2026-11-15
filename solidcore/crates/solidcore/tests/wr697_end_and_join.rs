@@ -902,13 +902,11 @@ fn drafted_plate(
 /// shared one where the two offsets cross (`blend_corner::join_within_xsect_tolerance_deg`).
 /// That holds on the 60 degree wedge at z = 0 and the 120 degree one at z = -2 alike: the
 /// radius, not the round's reach along the faces (`r cot(w / 2)`, sqrt 3 and 1 / sqrt 3). So
-/// the concave corner (the shared section behind the second round's end) is the Join at 0.97 of
-/// the kink where `2 r tan(a / 2)` reaches the intersection tolerance 2e-5, and the Turn at
-/// 1.03, on both wedges, and each passes the check. A bound on the reach fails both ways: at
-/// 120 degrees it joins at 1.03 (joined at 1.925e-3 degrees, the check finds the vertex
-/// 2.91e-5 off, `r a` to eight digits), and at 60 degrees it turns at 0.97. The convex corner
-/// (the section over the second round, second order: #13911, `blend_corner::join_gap`) is the
-/// Join at both and passes the check, its vertex gap at most `max(R, r) (sec(kink) - 1)`.
+/// the corner is the Join at 0.97 of the kink where `2 r tan(a / 2)` reaches the intersection
+/// tolerance 2e-5, and the Turn at 1.03, on both wedges and with the kink either way, and each
+/// passes the check. A bound on the reach fails both ways: at 120 degrees it joins at 1.03
+/// (joined at 1.925e-3 degrees, the check finds the vertex 2.91e-5 off, `r a` to eight
+/// digits), and at 60 degrees it turns at 0.97.
 #[test]
 fn a_near_straight_corner_s_join_holds_on_acute_and_obtuse_wedges() {
     let d = 30.0_f64.to_radians();
@@ -917,17 +915,11 @@ fn a_near_straight_corner_s_join_holds_on_acute_and_obtuse_wedges() {
     let a_max = 2.0 * (a_max / 2.0).atan();
     let k_max = ((a_max.cos() - s * s) / (c * c)).acos().to_degrees();
     for z in [0.0, -2.0] {
-        for (f, concave) in [
+        for (f, want) in [
             (0.97, BlendCornerEvent::Join),
             (1.03, BlendCornerEvent::Turn),
         ] {
             for convex in [false, true] {
-                // convex, the shared section lies over the second round: second order (#13911)
-                let want = if convex {
-                    BlendCornerEvent::Join
-                } else {
-                    concave
-                };
                 let kink = f * k_max;
                 let mut k = all_fixes();
                 let (mut b, at_edges, kv) = drafted_plate(&mut k, kink, convex, z);
@@ -945,22 +937,6 @@ fn a_near_straight_corner_s_join_holds_on_acute_and_obtuse_wedges() {
                 );
                 round(&mut k, &mut b, &at_edges, 1.0);
                 clean(&mut k, &mut b);
-                if convex {
-                    // second order: the cap's foot R (sec beta - 1) off (reach R = sqrt 3 on
-                    // the 60 degree wedge, 1 / sqrt 3 on the 120), the walls' end r (sec
-                    // beta - 1) at most (MEASURED cos 30 r (sec beta - 1) on both wedges)
-                    let gap = joint_gap(&k, &mut b, kv);
-                    let reach = if z == 0.0 {
-                        3.0_f64.sqrt()
-                    } else {
-                        1.0 / 3.0_f64.sqrt()
-                    };
-                    let second = reach.max(1.0) * (1.0 / kink.to_radians().cos() - 1.0);
-                    assert!(
-                        gap <= second * (1.0 + 1e-3),
-                        "edges at z {z}, {kink} degrees: gap {gap:e}, second order {second:e}"
-                    );
-                }
             }
         }
     }
