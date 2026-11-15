@@ -297,13 +297,12 @@ fn plugin_slot_menus_and_ribbon(requested: &mut BTreeMap<String, bool>) {
         escape(&mut h);
     }
     // Model's Plugins group already lists every command, so a slot is drawn only on the other tabs.
-    for tab in ["INSPECT"] {
-        click(&mut h, &format!("tab:{tab}"));
-        click(&mut h, &format!("panel:{tab}:plugin:icon-audit-helper"));
-        assert!(h.widget(label).is_some(), "{tab}: the host group menu must show the plugin's name");
-        collect(&mut h, &format!("plugin {tab} ribbon slot"), requested);
-        escape(&mut h);
-    }
+    let tab = "INSPECT";
+    click(&mut h, &format!("tab:{tab}"));
+    click(&mut h, &format!("panel:{tab}:plugin:icon-audit-helper"));
+    assert!(h.widget(label).is_some(), "{tab}: the host group menu must show the plugin's name");
+    collect(&mut h, &format!("plugin {tab} ribbon slot"), requested);
+    escape(&mut h);
     assert_eq!(requested.get("prefs_plugins"), Some(&false), "the host plugin badge must resolve to real artwork");
 }
 
