@@ -30,6 +30,13 @@ const MAX_TRIANGLES: usize = 2_000_000;
 /// to be drawn as one layer.
 const SAME_MOTION: f64 = 1e-9;
 
+/// How far from the origin (millimetres, along any axis) bodies may stand to be drawn as a
+/// layer. A layer's triangles go to the GPU as `f32` where the bodies stand and are moved there,
+/// so they keep the rounding of that place wherever they land: within this reach it is under
+/// 1/250 mm, at a kilometre 1/16 mm. Bodies built where they land are moved first and rounded
+/// there, so bodies standing far out that move nearer are drawn finer that way.
+const LAYER_REACH: f64 = 65_536.0;
+
 /// Tells one [`Cached`] from every other, in this run.
 static CACHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
@@ -48,9 +55,13 @@ struct Cached {
     frames: Vec<Mat>,
     /// This cache and no other ([`CACHES`]): what a layer's scenes are built from.
     serial: u64,
-    /// The points the meshes are drawn with where they stand, and the box around them: a
-    /// layer's extent is theirs moved. Made when a layer first asks.
-    rest: Option<(Aabb3, Vec<Vec3>)>,
+    /// The box around the points the meshes are drawn with where they stand: a layer's extent
+    /// is theirs moved. It follows the meshes alone, and is made when a layer first asks.
+    rest: Option<Aabb3>,
+    /// Those points, for the box of a motion that turns them (it is not the box at rest turned).
+    /// They follow the meshes alone, and are kept only once such a motion asks: a move along
+    /// the axes never needs them.
+    points: Option<Vec<Vec3>>,
 }
 
 /// Whether `commands` are a Move's preview (the one command this module draws).
@@ -84,39 +95,63 @@ fn layer_key(serial: u64, colors: Colors, copy: bool) -> u64 {
     h.finish()
 }
 
-/// The points `draw` draws `mesh` with: each vertex of a triangle that has a normal, once.
-fn drawn_points(mesh: &Mesh, out: &mut Vec<Vec3>) {
+/// Whether the GPU can take `motion`: each entry is finite as the `f32` it is handed over as.
+fn drawable(motion: &Mat) -> bool {
+    motion.iter().flatten().all(|v| (*v as f32).is_finite())
+}
+
+/// The points `draw` draws `mesh` with, to `each`: every vertex of a triangle that has a
+/// normal, once.
+fn drawn_points(mesh: &Mesh, mut each: impl FnMut(Vec3)) {
     let mut seen = vec![false; mesh.positions.len()];
     for k in mesh.triangles.iter().flatten() {
         let i = *k as usize;
         if let (Some(p), Some(_), Some(seen)) = (mesh.positions.get(i), mesh.normals.get(i), seen.get_mut(i))
             && !std::mem::replace(seen, true)
         {
-            out.push(*p);
+            each(*p);
         }
     }
 }
 
 impl Cached {
+    /// The box around the bodies where they stand, made once for these meshes.
+    fn rest(&mut self) -> Aabb3 {
+        let meshes = &self.meshes;
+        *self.rest.get_or_insert_with(|| {
+            let mut bounds = Aabb3::EMPTY;
+            meshes.iter().for_each(|mesh| drawn_points(mesh, |p| bounds.add(p)));
+            bounds
+        })
+    }
+
+    /// Whether the bodies stand within [`LAYER_REACH`] of the origin (bodies with nothing to
+    /// draw do).
+    fn within_reach(&mut self) -> bool {
+        let at_rest = self.rest();
+        at_rest.is_empty() || [at_rest.min, at_rest.max].iter().all(|p| [p.x, p.y, p.z].iter().all(|v| v.abs() <= LAYER_REACH))
+    }
+
     /// The box around the bodies moved by `motion`: the box of every drawn point moved, as
     /// building them moved finds it. A motion that turns nothing only shifts the box they have
-    /// where they stand, which is the same box.
+    /// where they stand, which is the same box; one that turns them moves each point.
     fn moved_bounds(&mut self, motion: &Mat) -> Aabb3 {
-        let meshes = &self.meshes;
-        let (at_rest, points) = self.rest.get_or_insert_with(|| {
-            let mut points = Vec::new();
-            meshes.iter().for_each(|mesh| drawn_points(mesh, &mut points));
-            let mut bounds = Aabb3::EMPTY;
-            points.iter().for_each(|p| bounds.add(*p));
-            (bounds, points)
-        });
         let turns = (0..3).any(|c| (0..4).any(|r| motion[c][r] != IDENTITY[c][r])) || motion[3][3] != 1.0;
         let mut bounds = Aabb3::EMPTY;
         if turns {
+            let meshes = &self.meshes;
+            let points = self.points.get_or_insert_with(|| {
+                let mut points = Vec::new();
+                meshes.iter().for_each(|mesh| drawn_points(mesh, |p| points.push(p)));
+                points
+            });
             points.iter().for_each(|p| bounds.add(apply_point(motion, *p)));
-        } else if !at_rest.is_empty() {
-            bounds.add(apply_point(motion, at_rest.min));
-            bounds.add(apply_point(motion, at_rest.max));
+        } else {
+            let at_rest = self.rest();
+            if !at_rest.is_empty() {
+                bounds.add(apply_point(motion, at_rest.min));
+                bounds.add(apply_point(motion, at_rest.max));
+            }
         }
         bounds
     }
@@ -236,6 +271,7 @@ impl MovePreview {
                 frames,
                 serial: CACHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 rest: None,
+                points: None,
             });
         }
         let cache = self.cached.as_mut()?;
@@ -270,10 +306,13 @@ impl MovePreview {
             bounds,
             layer,
         };
-        // One motion for every body, in a view that draws a layer: nothing is built at this
-        // change unless the bodies, the colours or the ghost changed since the scenes were made.
+        // One motion for every body that the GPU can take, in a view that draws a layer, of
+        // bodies a layer draws as finely as building them does: nothing is built at this change
+        // unless the bodies, the colours or the ghost changed since the scenes were made.
         if layered(app)
             && let Some(motion) = common(&motions)
+            && drawable(&motion)
+            && cache.within_reach()
         {
             let key = layer_key(cache.serial, colors, copy);
             let scenes = (app.preview.layer_shown() != Some(key)).then(|| cache.rest_scenes(colors, copy));
@@ -420,8 +459,30 @@ mod tests {
         assert!(still.ghost.is_empty());
     }
 
-    /// A move that turns nothing only shifts the bodies' box; the extent is the moved bodies'
-    /// either way, and an empty selection of triangles has none.
+    /// Bodies with nothing to draw have no extent, where they stand, moved or turned, and are
+    /// within a layer's reach.
+    #[test]
+    fn nothing_drawn_has_no_extent() {
+        let app = app();
+        let mut none = Cached {
+            document: app.session.doc.clone(),
+            revision: app.session.revision,
+            names: Vec::new(),
+            meshes: Vec::new(),
+            frames: Vec::new(),
+            serial: 0,
+            rest: None,
+            points: None,
+        };
+        assert!(none.within_reach());
+        assert!(none.moved_bounds(&IDENTITY).is_empty());
+        assert!(none.moved_bounds(&rigid(Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).is_empty(), "moved");
+        assert!(none.moved_bounds(&rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, 1.0)).is_empty(), "turned");
+        assert!(none.points.as_ref().is_some_and(Vec::is_empty), "the points are kept once a turn asked");
+    }
+
+    /// A move that turns nothing only shifts the bodies' box, and keeps no list of their points;
+    /// the extent is the moved bodies' either way.
     #[test]
     fn a_layers_extent_is_the_moved_bodies() {
         let gpu = on_gpu(plate_and_pin());
@@ -507,14 +568,12 @@ mod tests {
         let names: Vec<String> = [part, copy].iter().map(|o| s.occurrence_bodies(&[*o], true).unwrap()[0].clone()).collect();
         let app = on_gpu(SolveApp::new(s, Services::default()));
         let turned = [("solid.move".to_string(), json!({"bodies": names, "axis": [0, 1, 0], "angle": "25 deg"}))];
-        if let Some(Ok(placed)) = MovePreview::default().compute(&app, &turned, c) {
-            assert!(placed.layer.is_none() && !placed.scene.tris.is_empty(), "bodies that move differently are built where they land");
-        }
+        let placed = MovePreview::default().compute(&app, &turned, c).expect("taken here").expect("built");
+        assert!(placed.layer.is_none() && !placed.scene.tris.is_empty(), "bodies that move differently are built where they land");
         // The same bodies moved alike are a layer.
         let alike = [("solid.move".to_string(), json!({"bodies": names, "translate": [5, 0, 0]}))];
-        if let Some(Ok(placed)) = MovePreview::default().compute(&app, &alike, c) {
-            assert!(placed.layer.is_some(), "one motion for both");
-        }
+        let placed = MovePreview::default().compute(&app, &alike, c).expect("taken here").expect("built");
+        assert!(placed.layer.is_some(), "one motion for both");
         // A component moved and not captured: its drag has, or can take, the renderer's layer.
         let mut dragged = on_gpu(SolveApp::new(app.session.scratch(), Services::default()));
         let base = dragged.session.doc.occurrences.iter().find(|o| o.id == copy).map(|o| o.transform).unwrap();
@@ -522,8 +581,40 @@ mod tests {
         assert!(!dragged.session.pending_moves.is_empty() && !layered(&dragged), "a pending component move keeps the layer");
     }
 
-    /// Hostile commands never make a layer: what the preview cannot take is refused before one
-    /// is thought of, on a GPU as without one.
+    /// Bodies that stand beyond [`LAYER_REACH`] along any axis are built where they land, as
+    /// before: a layer would draw them with the `f32` rounding of where they stand, which is
+    /// coarser than that of the place a move towards the origin takes them to. Built there, they
+    /// keep their size. Just inside the reach they are a layer.
+    #[test]
+    fn bodies_far_from_the_origin_are_built_where_they_land() {
+        let pin_at = |base: [f64; 3]| {
+            let mut s = Session::default();
+            s.execute("solid.cylinder", &json!({"radius": 6, "height": 25, "base": base, "operation": "new", "body_name": "Pin"})).unwrap();
+            on_gpu(SolveApp::new(s, Services::default()))
+        };
+        let c = colors(&pin_at([0.0; 3]));
+        let home = |base: [f64; 3]| [("solid.move".to_string(), json!({"bodies": ["Pin"], "translate": [-base[0], -base[1], -base[2]]}))];
+        let built = |base: [f64; 3]| MovePreview::default().compute(&pin_at(base), &home(base), c).expect("taken here").expect("built");
+        for base in [[LAYER_REACH, 0.0, 0.0], [-LAYER_REACH, 0.0, 0.0], [0.0, LAYER_REACH, 0.0], [0.0, 0.0, LAYER_REACH], [0.0, -1.0e6, 2.0e5]] {
+            let far = built(base);
+            assert!(far.layer.is_none() && !far.scene.tris.is_empty() && !far.scene.ghost.is_empty(), "{base:?}: built where it lands");
+            // Moved home in double precision, then rounded there: the pin is drawn within its own
+            // 12 x 12 x 25 mm at the origin, to a thousandth.
+            let mut drawn = Aabb3::EMPTY;
+            positions(&far.scene.tris).iter().for_each(|p| drawn.add(*p));
+            let (low, high) = (drawn.min, drawn.max);
+            assert!(low.x >= -6.001 && low.y >= -6.001 && high.x <= 6.001 && high.y <= 6.001, "{base:?}: drawn from {low:?} to {high:?}");
+            assert!(low.z.abs() < 1e-3 && (high.z - 25.0).abs() < 1e-3, "{base:?}: drawn from {low:?} to {high:?}");
+        }
+        for base in [[LAYER_REACH - 7.0, 0.0, 0.0], [7.0 - LAYER_REACH, 0.0, 0.0], [0.0, 0.0, LAYER_REACH - 26.0]] {
+            assert!(built(base).layer.is_some(), "{base:?}: within reach");
+        }
+    }
+
+    /// What the preview cannot take is refused on a GPU as without one, before a layer is thought
+    /// of: a body that is not there, a value that does not evaluate, no bodies, a turn about no
+    /// axis, a component not copied, a matrix. A move too far for the GPU's numbers is built
+    /// where it lands as before, never handed over as a motion that is not finite.
     #[test]
     fn what_it_cannot_take_makes_no_layer_on_a_gpu() {
         let gpu = on_gpu(app());
@@ -532,18 +623,25 @@ mod tests {
         for p in [
             json!({"bodies": ["Nope"], "translate": [1, 0, 0]}),
             json!({"bodies": ["Plate"], "translate": ["width + ?", 0, 0]}),
-            json!({"bodies": ["Plate"], "translate": [1e308, 1e308, f64::MAX]}),
             json!({"bodies": [], "translate": [1, 0, 0]}),
             json!({"bodies": ["Plate"], "axis": [0, 0, 0], "angle": "90 deg"}),
             json!({"bodies": ["Plate"], "occurrences": [[1]], "translate": [1, 0, 0]}),
             json!({"bodies": ["Plate"], "matrix": [0, -1, 0, 30, 1, 0, 0, 0, 0, 0, 1, 0]}),
         ] {
-            let taken = pv.compute(&gpu, &[("solid.move".to_string(), p.clone())], c);
-            assert!(
-                !matches!(&taken, Some(Ok(b)) if b.layer.as_ref().is_some_and(|l| !l.motion.iter().flatten().all(|v| v.is_finite()))),
-                "{p}: a motion that is not finite"
-            );
+            assert!(pv.compute(&gpu, &[("solid.move".to_string(), p.clone())], c).is_none(), "{p}: left to the scratch design");
         }
+        for p in [
+            json!({"bodies": ["Plate"], "translate": [1e308, 1e308, f64::MAX]}),
+            json!({"bodies": ["Plate"], "translate": [0, -1e39, 0]}),
+            json!({"bodies": ["Plate"], "origin": [1e200, 0, 0], "axis": [0, 0, 1], "angle": "90 deg"}),
+        ] {
+            let far = pv.compute(&gpu, &[("solid.move".to_string(), p.clone())], c).expect("taken here").expect("built");
+            assert!(far.layer.is_none() && !far.scene.tris.is_empty(), "{p}: built where it lands");
+        }
+        // The largest move the GPU's numbers hold is still a layer.
+        let most = json!({"bodies": ["Plate"], "translate": [1e38, 0, 0]});
+        let layer = pv.compute(&gpu, &[("solid.move".to_string(), most)], c).expect("taken here").expect("built").layer.expect("a layer");
+        assert!(layer.motion.iter().flatten().all(|v| (*v as f32).is_finite()));
         assert!(pv.compute(&gpu, &[("solid.move".to_string(), json!({"bodies": ["Nope"], "translate": [1, 0, 0]}))], c).is_none());
         assert!(is_move(&[("solid.move".to_string(), json!({}))]));
         assert!(is_move(&[("timeline.redefine".to_string(), json!({"command": "solid.move"}))]));

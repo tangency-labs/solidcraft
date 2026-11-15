@@ -6002,7 +6002,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Drawn on the GPU; without one (the headless harness, tests) the model is not drawn.
     if app.viewport.gpu.is_some() {
         // The one moving layer: a component's drag, else what a preview only moves (a Move).
-        let moving = if layered { drag_layer::scenes(app) } else { app.preview.moving_layer() };
+        let moving = if layered {
+            // The drag has the renderer's one layer: a scene it held for a preview goes.
+            app.preview.layer_not_drawn();
+            drag_layer::scenes(app)
+        } else {
+            app.preview.moving_layer()
+        };
         if !layered && key != app.viewport.key {
             let sc = build_scene(app);
             if let Ok(mut slot) = app.viewport.slot.lock() {

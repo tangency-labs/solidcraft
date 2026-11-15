@@ -624,6 +624,42 @@ fn a_triad_drag_on_a_gpu_moves_its_layer_and_uploads_nothing() {
     assert!(h.app.preview.moving_layer().is_some(), "a layer again");
 }
 
+/// A frame that draws no layer makes the renderer let the moved bodies' scene go: Primary held
+/// to pick through the preview hides it. The preview is then computed again and hands its scenes
+/// over under a new key. Left with the old key and no scene, the renderer drew nothing, and the
+/// body stayed away until something else rebuilt the scenes. A scene the renderer has not taken
+/// yet is kept instead.
+#[test]
+fn a_move_layer_hidden_for_a_pick_is_handed_over_again() {
+    let mut h = translated_box();
+    h.app.viewport.gpu =
+        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.frames(3);
+    let layer = h.app.preview.moving_layer().expect("the moved body is a layer");
+    let still = h.app.preview.key;
+    // What a frame with Primary held asks of the preview, before the renderer took the scene.
+    let hidden_frame = |h: &mut crate::scenario::Harness| {
+        h.app.preview.rolled_back = true;
+        assert!(h.app.preview.moving_layer().is_none(), "hidden for the pick");
+        h.app.preview.rolled_back = false;
+    };
+    hidden_frame(&mut h);
+    h.frames(2);
+    let kept = h.app.preview.moving_layer().expect("still a layer");
+    assert_eq!((kept.key, h.app.preview.key), (layer.key, still), "nothing was taken, so nothing is built again");
+    // The renderer draws a frame of it, then one without it.
+    assert!(h.app.preview.renderer_takes_layer_for_tests());
+    h.frames(2);
+    assert_eq!(h.app.preview.moving_layer().expect("drawn at every frame").key, layer.key, "handed over once while it is drawn");
+    hidden_frame(&mut h);
+    h.frames(2);
+    let again = h.app.preview.moving_layer().expect("a layer again");
+    assert_ne!(again.key, layer.key, "under a new key, which the renderer takes a scene for");
+    assert!((again.transform[3][0] - 10.0).abs() < 1e-4, "{:?}", again.transform);
+    assert_eq!(h.app.preview.replaced, ["Body1"]);
+    assert!(h.app.preview.renderer_takes_layer_for_tests(), "the moved body's scene waits for the renderer");
+}
+
 /// A Move dialog on the 20 × 30 × 10 box, translated 10 mm along X.
 fn translated_box() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();

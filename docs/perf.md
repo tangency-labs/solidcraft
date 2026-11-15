@@ -1107,8 +1107,13 @@ and the viewport uploaded the whole scene. Now the bodies are built once where t
 the renderer draws them moved by one rigid motion, as it draws a component dragged with its
 triad (`MovingLayer`); the ghost is built once too and stays in the preview's own scene. A step
 of the drag builds and uploads nothing. Where the view draws no layer (no GPU, a section, an
-analysis or isocurves shown, a component moved and not captured) or the bodies move
-differently from each other, they are built where they land as before.
+analysis or isocurves shown, a component moved and not captured), the bodies move differently
+from each other, or they stand more than 65.536 m from the origin along an axis (a layer keeps
+the `f32` rounding of where its bodies stand), they are built where they land as before. A
+frame that draws no layer (Ctrl held to pick through the preview, also when it is pressed
+before or let go after a free drag) makes the renderer let the scene go, so the scenes are
+built once more afterwards. A motion that turns the bodies still moves each of their drawn
+points once a step, to find the preview's extent; the ring's times below include it.
 
 Measured on a Move of 103 bodies (imported STEP parts, about 1.7 million triangles in the
 design), Ryzen 5 7600X, NVIDIA GeForce RTX 5070, Windows, release build: the triad dragged
