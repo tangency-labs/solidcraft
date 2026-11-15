@@ -9247,21 +9247,36 @@ fn runs_along(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> bool {
     seen
 }
 
-/// Whether a face, seen along the normal of `plane`, meets one of the profile `regions`: a
-/// vertex of its mesh lies in one of them.
+/// Whether a face, seen along the normal of `plane`, meets one of the profile `regions`: a vertex
+/// of its mesh lies in one of them, or an edge of its mesh crosses one of their loops. A wall
+/// along the extrusion is seen edge-on, as a curve, so a profile narrower than the spacing of its
+/// vertices can cross it between two of them: the edges catch that.
 fn meets_footprint(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane, regions: &[Region2]) -> bool {
     let Some(b) = st.bodies.get(bi) else { return false };
     let m = b.mesh();
-    m.triangles
+    let tris: Vec<[Vec2; 3]> = m
+        .triangles
         .iter()
         .zip(&m.tri_face)
         .filter(|(_, f)| **f as usize == fi)
-        .flat_map(|(tri, _)| tri.iter())
-        .filter_map(|v| m.positions.get(*v as usize))
-        .any(|q| {
-            let uv = plane.to_local(*q);
-            regions.iter().any(|r| r.contains(uv))
+        .filter_map(|(tri, _)| {
+            let at = |k: usize| m.positions.get(tri[k] as usize).map(|q| plane.to_local(*q));
+            Some([at(0)?, at(1)?, at(2)?])
         })
+        .collect();
+    if tris.iter().flatten().any(|q| regions.iter().any(|r| r.contains(*q))) {
+        return true;
+    }
+    let loops: Vec<_> = regions.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).map(|l| l.polyline(1e-3)).collect();
+    tris.iter().any(|t| (0..3).any(|k| loops.iter().any(|l| l.edges().any(|(a, b)| segments_meet(t[k], t[(k + 1) % 3], *a, *b)))))
+}
+
+/// Whether segments `p`-`q` and `a`-`b` cross or touch.
+fn segments_meet(p: Vec2, q: Vec2, a: Vec2, b: Vec2) -> bool {
+    let side = |o: Vec2, u: Vec2, v: Vec2| (u.x - o.x) * (v.y - o.y) - (u.y - o.y) * (v.x - o.x);
+    let (d1, d2) = (side(a, b, p), side(a, b, q));
+    let (d3, d4) = (side(p, q, a), side(p, q, b));
+    d1 * d2 <= 0.0 && d3 * d4 <= 0.0 && !(d1 == 0.0 && d2 == 0.0 && d3 == 0.0 && d4 == 0.0)
 }
 
 /// The body at `p` when the face there is not planar.
