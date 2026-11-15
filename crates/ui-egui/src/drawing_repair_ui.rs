@@ -109,7 +109,7 @@ pub fn show(ui: &mut egui::Ui, session: &mut Session, state: &mut RepairUiState,
                     let Some(candidate) = state.candidates.get(state.candidate_index).cloned() else {
                         state.message = Some("Selected repair candidate is no longer available.".to_owned());
                         state.awaiting_confirmation = false;
-                        return;
+                        return false;
                     };
                     match drawing_dimension_repair::prepare(&id, status, &state.slot, candidate)
                         .and_then(|request| drawing_dimension_repair::confirm(session, &request, true).map(|_| ())) {
