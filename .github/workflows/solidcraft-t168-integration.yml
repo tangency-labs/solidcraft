@@ -1,4 +1,4 @@
-name: SolidCraft T180 automatic rustfmt and quality gate
+name: SolidCraft T181 upstream-first formatting and review gate
 on:
   push:
     branches: [integration/issue-15776-upstream-20261115]
@@ -15,18 +15,6 @@ jobs:
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
-      - name: Format and commit integration Rust sources
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo fmt --all
-          git config user.name "SolidCraft CI"
-          git config user.email "ci@users.noreply.github.com"
-          git add -- crates/ui-egui/src/drawing_attention_card.rs crates/ui-egui/src/drawing_dimension_repair.rs crates/ui-egui/src/drawing_dimension_status.rs crates/ui-egui/src/drawing_repair_ui.rs crates/ui-egui/src/drawing_status_controller.rs crates/ui-egui/src/drawing_status_engine.rs crates/ui-egui/src/drawing_workspace.rs crates/ui-egui/src/lib.rs
-          if ! git diff --cached --quiet; then
-            git commit -m "style: apply rustfmt to drawing integration"
-            git push origin HEAD:integration/issue-15776-upstream-20261115
-          fi
       - name: Fresh upstream merge and integrity checks
         shell: bash
         run: |
@@ -51,6 +39,18 @@ jobs:
           grep -q 'status_controller' crates/ui-egui/src/drawing_workspace.rs
           grep -q 'mod panels;' crates/ui-egui/src/drawing_workspace.rs
           echo "MERGED_WORKSPACE_READY=true"
+      - name: Format and commit integration Rust sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git config user.name "SolidCraft CI"
+          git config user.email "ci@users.noreply.github.com"
+          git add -- crates/ui-egui/src/drawing_attention_card.rs crates/ui-egui/src/drawing_dimension_repair.rs crates/ui-egui/src/drawing_dimension_status.rs crates/ui-egui/src/drawing_repair_ui.rs crates/ui-egui/src/drawing_status_controller.rs crates/ui-egui/src/drawing_status_engine.rs crates/ui-egui/src/drawing_workspace.rs crates/ui-egui/src/lib.rs
+          if ! git diff --cached --quiet; then
+            git commit -m "style: apply rustfmt to drawing integration"
+            echo "Formatted integration files in CI; upstream merge is temporary and must not be pushed automatically."
+          fi
       - name: Check Rust formatting and sorted module lists
         shell: bash
         run: |
