@@ -374,10 +374,11 @@ impl OffsetExecutive {
                 let loopuses = b.faceuse(fu)?.loopuses.clone();
                 'loops: for lu in loopuses {
                     let eus = eu::loopuse_edgeuses(b, lu)?;
-                    let num = eus.len();
                     for (kk, &this) in eus.iter().enumerate() {
+                        // the next use round the loop (the first after the last)
                         let next = *eus
-                            .get((kk + 1) % num)
+                            .get(kk + 1)
+                            .or_else(|| eus.first())
                             .ok_or_else(|| null("loop without edge uses"))?;
                         if this == next {
                             continue;

@@ -813,7 +813,6 @@ crates/solidcore/src/offset/construction/sheets.rs	local	f64::clamp	2	proven	cla
 crates/solidcore/src/offset/construction/sheets.rs	span_of	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/offset/offset_executive/p1.rs	sort_edgeuses	swap	1	open	swap(i - 1, i)	
 crates/solidcore/src/offset/offset_executive/p2.rs	api_shell_brep_full	with_capacity	1	open	Vec::with_capacity(faces.len())	
-crates/solidcore/src/offset/offset_executive/step_gaps.rs	OffsetExecutive::close_loop_gaps_in	int-rem	1	open	(kk + 1) % num	
 crates/solidcore/src/offset/offset_executive/step_gaps.rs	OffsetExecutive::split_corner_vertices	int-rem	1	open	(kk + 1) % num	
 crates/solidcore/src/offset/offset_faces.rs	OffsetFacesExecutive::join_across_closed_walls	Vec::remove	1	proven	remove(at)	at comes from position() over the same Vec just above
 crates/solidcore/src/offset/offset_geometry_creation.rs	OffsetGeometryCreation::create_step_wall	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
