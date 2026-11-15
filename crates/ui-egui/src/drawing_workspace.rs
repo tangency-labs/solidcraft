@@ -780,6 +780,10 @@ mod tests {
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
         h.app.ui.tab = "SURFACE".into();
+        h.app.ui.show_timeline = true;
+        h.app.preferences.history_in_browser = false;
+        h.frames(4);
+        assert!(crate::scenario::rect_of("history:card").is_some());
         let doc = h.app.session.doc.clone();
         let revision = h.app.session.revision;
         let undo = h.app.session.undo.len();
@@ -788,12 +792,16 @@ mod tests {
         assert!(start(&mut h.app, "drawing.view.base.planned"));
         h.frames(2);
         assert!(h.widget("Apply (not implemented)").is_some());
+        assert!(crate::scenario::rect_of("history:card").is_none());
+        assert!(h.app.ui.show_timeline);
         assert_eq!(h.app.session.undo.len(), undo);
         assert_eq!(h.app.session.revision, revision);
         assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
         assert_eq!(h.app.cam, cam);
         enter(&mut h.app, false).unwrap();
         assert_eq!(h.app.ui.tab, "SURFACE");
+        h.frames(4);
+        assert!(crate::scenario::rect_of("history:card").is_some());
     }
 
     #[test]

@@ -166,7 +166,7 @@ impl Product {
         let render = crate::render_workspace::active(app);
         match self {
             Self::Browser => !render && !crate::render_ui::focused(app),
-            Self::History => !render && !app.preferences.history_in_browser,
+            Self::History => !render && !crate::drawing_workspace::active(app) && !app.preferences.history_in_browser,
             Self::Assistant => crate::agent_chat::shown(app) && !app.preferences.agent_chat_popped,
             Self::RenderBrowser | Self::RenderLibrary | Self::RenderInspector | Self::RenderShots => render && !crate::render_ui::focused(app),
             Self::SketchOptions => !render && crate::sketch_palette::editing(app),
