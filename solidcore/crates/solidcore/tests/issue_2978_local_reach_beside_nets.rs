@@ -43,7 +43,7 @@ use solidcore::topology::database_io::FileType;
 use solidcore::topology::face::p2 as face_ops;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::FaceId;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, CancelToken, EntityRef, Kernel};
 
 /// The upstream test file `Solids/<name>`, or `None` without the upstream checkout.
 fn solid(k: &mut Kernel, name: &str) -> Option<Brep> {
@@ -717,26 +717,73 @@ fn three_revolution_faces_given_planes_build_a_sound_solid() {
     );
 }
 
-/// `gen0012`: one revolution face given two planes and another a tilted one, refused with
-/// the input unchanged (past the reach, an edge vanishes: `SM_ERR_OFFSET_EDGE_VANISHES`).
+/// `gen0012`'s moves: one revolution face given two planes and another a tilted one.
+const GEN0012: [(usize, f64, [f64; 3]); 3] = [
+    (2, -0.536_542_413_140_470_6, [0.0; 3]),
+    (2, -1.250_163_666_404_037_9, [0.0; 3]),
+    (
+        1,
+        0.0,
+        [
+            0.019_211_488_598_403_77,
+            0.247_784_794_496_732_8,
+            0.166_922_271_536_784_85,
+        ],
+    ),
+];
+
+/// `gen0012`: refused with the input unchanged (past the reach, an edge vanishes:
+/// `SM_ERR_OFFSET_EDGE_VANISHES`).
 #[test]
 fn a_revolution_face_given_two_planes_is_refused_unchanged() {
-    revolution_built_sound_or_refused_unchanged(
-        &[
-            (2, -0.536_542_413_140_470_6, [0.0; 3]),
-            (2, -1.250_163_666_404_037_9, [0.0; 3]),
-            (
-                1,
-                0.0,
-                [
-                    0.019_211_488_598_403_77,
-                    0.247_784_794_496_732_8,
-                    0.166_922_271_536_784_85,
-                ],
-            ),
-        ],
-        false,
-    );
+    revolution_built_sound_or_refused_unchanged(&GEN0012, false);
+}
+
+/// The polls at the end of `gen0012`'s local operation that
+/// [`a_revolution_refusal_cancelled_late_comes_back_cancelled`] cancels at.
+const LAST_POLLS: u64 = 64;
+
+/// `gen0012`'s local operation cancelled at each of its last [`LAST_POLLS`] polls
+/// (`CancelToken::after_polls`) comes back cancelled every time: a gap pass cancelled after
+/// an edge closed to a point is never turned into the refusal of that edge
+/// (`SM_ERR_OFFSET_EDGE_VANISHES`). The loop gaps are closed at the end of the operation,
+/// just before its refusal: of its 5914 polls, the one at 5912 is inside a gap pass after
+/// a squeeze. Swept over every poll (about 14 minutes), every one comes back cancelled.
+#[test]
+fn a_revolution_refusal_cancelled_late_comes_back_cancelled() {
+    let run = |token: CancelToken| -> Option<solidcore::Result<()>> {
+        let mut k = Kernel::default();
+        let mut b = solid(&mut k, "revolution.smb")?;
+        let (faces, planes): (Vec<FaceId>, Vec<(Point3, Vec3)>) = GEN0012
+            .iter()
+            .map(|&(i, offset, tilt)| plane_for(&k, &b, i, offset, tilt))
+            .unzip();
+        let surfaces = planes
+            .iter()
+            .map(|&(o, n)| Surface::from(Plane::from_normal(o, n)))
+            .collect();
+        k.set_cancel_token(token);
+        let mut notifications = Notifications::new(&mut b);
+        Some(local_operation(
+            &mut k,
+            &mut b,
+            &faces,
+            surfaces,
+            &mut notifications.context(),
+        ))
+    };
+    let counter = CancelToken::after_polls(u64::MAX);
+    let Some(uncancelled) = run(counter.clone()) else {
+        return;
+    };
+    let e = uncancelled.unwrap_err();
+    assert!(e.is_offset_edge_vanishes(), "{e:?}");
+    let polls = counter.polls().unwrap();
+    assert!(polls > 0, "the operation polls for cancellation");
+    for n in polls.saturating_sub(LAST_POLLS - 1).max(1)..=polls {
+        let e = run(CancelToken::after_polls(n)).unwrap().unwrap_err();
+        assert!(e.is_cancelled(), "cancelled at poll {n} of {polls}: {e:?}");
+    }
 }
 
 /// `gen0050`: two neighbouring revolution faces given planes, moved out, built.

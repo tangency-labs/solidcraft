@@ -327,9 +327,14 @@ impl OffsetExecutive {
             &mut closed_edges,
         );
         if let Err(failure) = closing {
+            // A cancelled pass is a cancellation, never a refusal.
+            if failure.is_cancelled() {
+                return Err(failure);
+            }
             // (WR-566) a later gap failed after edges had closed to points: an edge closed
-            // where no face closed to nothing is refused by name, as it would have been
-            // once every gap was closed, ahead of the later gap's failure
+            // where no face (yet) closed to nothing is refused by name, ahead of the later
+            // gap's failure. Mid-pass this can name a face (1043) that the remaining passes
+            // would only have refused as their own failure (1001); either way it is refused.
             if !closed_edges.is_empty() {
                 self.closed_faces(kernel, original, b, &closed_edges)?;
             }
