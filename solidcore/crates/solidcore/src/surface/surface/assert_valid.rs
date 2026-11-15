@@ -91,7 +91,8 @@
 //! - **Curve-bounded labels.** Upstream declares a six-entry table but omits this
 //!   class from `SM_GetAssertLabelList`: failed test 0 uses the one-entry default
 //!   table, and a failed test 1..5 with a report list reads past it. The port keeps
-//!   that lookup; the out-of-range report is `InvalidInput`. With no report list,
+//!   that lookup for test 0 and labels tests 1..5 from the class's own table
+//!   (`labels::CURVE_BOUNDED_SURFACE`, UB-273). With no report list,
 //!   failed boundary checks return false normally, as upstream. At levels 0..2,
 //!   the inherited base continuity test reads an unwritten output: this class uses
 //!   the generic failing `GetKnots`. The existing continuity guard returns
@@ -475,9 +476,9 @@ fn curve_bounded_surface_assert_valid(
     );
     walk.depth = depth;
     let basis_ok = basis_result?;
-    rtn &= r.report(CURVE_BOUNDED_SURFACE_TYPE, 0, 0, basis_ok, UNDEF, UNDEF)?;
+    rtn &= curve_bounded_report(r, 0, basis_ok)?;
     // Every owned value is evaluated through the same kernel context.
-    rtn &= r.report(CURVE_BOUNDED_SURFACE_TYPE, 3, 0, true, UNDEF, UNDEF)?;
+    rtn &= curve_bounded_report(r, 3, true)?;
 
     for (curves, test, context_test) in [
         (bounded.boundaries_3d(), 1, 4),
@@ -495,18 +496,35 @@ fn curve_bounded_surface_assert_valid(
                 key,
                 polar_key,
             )?;
-            rtn &= r.report(CURVE_BOUNDED_SURFACE_TYPE, test, 0, ok, UNDEF, UNDEF)?;
-            rtn &= r.report(
-                CURVE_BOUNDED_SURFACE_TYPE,
-                context_test,
-                0,
-                true,
-                UNDEF,
-                UNDEF,
-            )?;
+            rtn &= curve_bounded_report(r, test, ok)?;
+            rtn &= curve_bounded_report(r, context_test, true)?;
         }
     }
     Ok(rtn)
+}
+
+/// `SM_ASSERT_BOOLEAN_REPORT(test, SM_LEVEL_0, passed)` of `SmCurveBoundedSurface`.
+/// Upstream's label lookup gives the class [`DEFAULT`](crate::geom::assert_array::labels::DEFAULT),
+/// one entry long: test 0 is labelled from it, as upstream; a later test, which upstream
+/// reads past its end, takes its label from the class's own
+/// `sAssertCurveBoundedSurface_list` (not upstream).
+fn curve_bounded_report(r: &mut Reporter<'_>, test: u64, passed: bool) -> Result<bool> {
+    let upstream = assert_label_list(CURVE_BOUNDED_SURFACE_TYPE, 0);
+    if usize::try_from(test).is_ok_and(|t| t < upstream.len()) {
+        return r.report(CURVE_BOUNDED_SURFACE_TYPE, test, 0, passed, UNDEF, UNDEF);
+    }
+    let class_string = r.class_string;
+    r.report_from(
+        crate::geom::assert_array::labels::CURVE_BOUNDED_SURFACE,
+        CURVE_BOUNDED_SURFACE_TYPE,
+        CURVE_BOUNDED_SURFACE_TYPE,
+        class_string,
+        test,
+        0,
+        passed,
+        UNDEF,
+        UNDEF,
+    )
 }
 
 // ---- SmSurface ----------------------------------------------------------------------
@@ -3527,11 +3545,29 @@ mod curve_bounded_tests {
             {
                 let level = LEVEL_GIVEN;
                 assert!(!surface.assert_valid(&k, None, level, ObjectKey(1)).unwrap());
+                // The failed boundary check (test 1 or 2) is labelled from
+                // `sAssertCurveBoundedSurface_list`; upstream's label lookup has no case
+                // for the class and reads its one-entry default list out of bounds.
                 let mut list = AssertArray::new();
-                assert!(matches!(
-                    surface.assert_valid(&k, Some(&mut list), level, ObjectKey(1)),
-                    Err(SolidError::InvalidInput { .. })
-                ));
+                assert!(!surface
+                    .assert_valid(&k, Some(&mut list), level, ObjectKey(1))
+                    .unwrap());
+                let test = if uv { 2 } else { 1 };
+                let report = list
+                    .reports()
+                    .iter()
+                    .find(|r| r.reporting_type == CURVE_BOUNDED_SURFACE_TYPE)
+                    .unwrap();
+                assert_eq!(report.test_index, test);
+                assert_eq!(report.name, "UNKNOWN");
+                let boundaries = if uv { "UVBoundaries" } else { "3DBoundaries" };
+                assert_eq!(
+                    report.message.as_deref(),
+                    Some(
+                        format!("Contained {boundaries} curve must pass its AssertValid tests")
+                            .as_str()
+                    )
+                );
             }
         }
     }

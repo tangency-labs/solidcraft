@@ -3,7 +3,7 @@
 //! (one start per seam side and pole direction), then every span of the curve cache is
 //! walked with [`DropPt::get_next_point`], tested with [`DropPt::test_span_accuracy`]
 //! and subdivided until it passes, and the passing spans are collected into UV
-//! B-spline curves ([`add_to_curve`], [`flush_curve`]).
+//! B-spline curves ([`super::p2::add_to_curve`], [`super::p2::flush_curve`]).
 //!
 //! Upstream: `source/SMLib/src/SmSurfaceDropLib.cpp`.
 //!
@@ -43,9 +43,8 @@
 //!   `NULL`), and two curve `EvaluatePoint`s (the curve's scaled zero and the end gap
 //!   check) are read after an ignored failure (uninitialised points): here those
 //!   errors propagate (plan/upstream-issues.md UB-129).
-//! - **`bDegenSurfV`** tests the domain's `XLength`, as upstream (WR-100); with
-//!   `Kernel::fixes.drop_curve_v_domain_degeneracy` it tests `YLength` instead (WR-100
-//!   addendum 2026-10-31).
+//! - **`bDegenSurfV`** tests the domain's `YLength`; upstream tests its `XLength`
+//!   again, so a domain degenerate only in V is not caught (WR-100).
 //! - **Exact UV curve on a cylinder.** A curve lying on a cylinder (a plane section)
 //!   gets its exact rational UV curve in its own parameter
 //!   (`surface_drop_lib::cylinder_section`, WR-680) once the domain checks pass, before
@@ -114,13 +113,14 @@ use crate::surface::surface::p7::approx_derivative_lengths;
 use crate::surface::surface::Surface;
 use crate::surface::surface_point_solve::p2::with_out_of_bounds_enabled;
 
+use super::boundary_moves::MoveBound;
 use super::p1::{
     remove_duplicate_drop_point_solutions, DropFailRecord, DropPt, SM_ERR_OUTSIDE_OF_DOMAIN,
     SM_SUCCESS,
 };
 use super::p2::{
-    add_to_curve, flush_curve, DropOffset, SM_ERR_INVALID_INPUT, SM_ERR_NOT_WITHIN_TOLERANCE,
-    SS_NONE,
+    add_to_curve_bounded, flush_curve_bounded, DropOffset, SM_ERR_INVALID_INPUT,
+    SM_ERR_NOT_WITHIN_TOLERANCE, SS_NONE,
 };
 
 /// `SM_ERR_NOT_CONVERGING` (`SmMessages.h`).
@@ -137,6 +137,8 @@ pub use crate::error::SM_ERR_BAD_FIND_DEGEN_PARAM;
 /// (upstream: unbounded).
 pub const MAX_SPAN_DEPTH: usize = 64;
 
+/// The operation of a drop the boundary fix-up refused (`boundary_moves`).
+const OP_REFUSED: &str = "intersect::surface_drop_lib::fix_boundary_curves_bounded";
 const OP: &str = "intersect::surface_drop_lib::Surface::drop_curve_base";
 
 /// The caller's face-aware solving service for a drop: the context that builds the
@@ -708,11 +710,8 @@ impl Surface {
             self.natural_uv_domain_with_nurb(k)?
         };
         let degen_surf_u = s_uv_domain.x_length() < EFF_ZERO;
-        let degen_surf_v = if k.fixes.drop_curve_v_domain_degeneracy {
-            s_uv_domain.y_length() < EFF_ZERO
-        } else {
-            s_uv_domain.x_length() < EFF_ZERO // (sic) WR-100, pinned C++ behaviour
-        };
+        // Not upstream (WR-100): upstream tests `XLength` again here.
+        let degen_surf_v = s_uv_domain.y_length() < EFF_ZERO;
         let contained =
             s_uv_domain.is_contained_by(&self.natural_uv_domain_with_nurb(k)?, EFF_ZERO);
 
@@ -784,6 +783,9 @@ impl Surface {
         // temporarily enable slight out-of-bounds convergence (on an evaluation copy)
         let oob = with_out_of_bounds_enabled(self)?;
         let this = oob.as_ref().unwrap_or(self);
+        // not upstream: a B-spline surface's net bounds the boundary fix-up's moves
+        // (`boundary_moves`); its budget is set before each use
+        let mut move_bound = MoveBound::of(k, this, approx_tol_3d);
 
         // surface singularities and their pole points
         let sings = this.get_singularities(k, true, true)?;
@@ -1495,7 +1497,15 @@ impl Surface {
                         }
 
                         // add the span to the curve (status ignored, SE)
-                        ignore_status(add_to_curve(
+                        // (not upstream: on a B-spline surface or an offset of one, the
+                        // boundary fix-up of a curve it flushes keeps the curve in the
+                        // domain and moves each span by a proved bound within the
+                        // tolerance the trace left, or refuses the curve; the bound is
+                        // added to the deviation, see `boundary_moves`)
+                        if let Some(b) = move_bound.as_mut() {
+                            b.budget = approx_tol_3d - max_approx_dev;
+                        }
+                        ignore_status(add_to_curve_bounded(
                             k,
                             this,
                             &s_uv_domain,
@@ -1508,7 +1518,17 @@ impl Surface {
                             uv_tol_y,
                             &mut out.uv_curves,
                             &mut fix_bc_change,
+                            move_bound.as_ref(),
                         ))?;
+                        if let Some(b) = move_bound.as_ref() {
+                            if b.refused() {
+                                return Err(SolidError::intersect_failed(
+                                    OP_REFUSED,
+                                    "the boundary fix-up refused the dropped curve",
+                                ));
+                            }
+                            max_approx_dev += b.spent();
+                        }
 
                         // next span starts at this end
                         start = end;
@@ -1593,8 +1613,12 @@ impl Surface {
                 }
             }
 
-            // output the curve built for this start point
-            flush_curve(
+            // output the curve built for this start point (not upstream: the bounded
+            // boundary fix-up, as above; a refusal fails the drop)
+            if let Some(b) = move_bound.as_mut() {
+                b.budget = approx_tol_3d - max_approx_dev;
+            }
+            flush_curve_bounded(
                 &s_uv_domain,
                 &mut ctrl_poly,
                 &mut knots,
@@ -1602,7 +1626,11 @@ impl Surface {
                 uv_tol_y,
                 &mut out.uv_curves,
                 &mut fix_bc_change,
+                move_bound.as_ref().map(|b| (k, b)),
             )?;
+            if let Some(b) = move_bound.as_ref() {
+                max_approx_dev += b.spent();
+            }
         }
 
         // no curves (no record, as upstream)
@@ -2025,8 +2053,7 @@ mod tests {
     /// natural lengths classify the degeneracy independently of the record's flags.
     #[test]
     fn wr100_v_domain_degeneracy_flag_reports_a_degenerate_v_surface() {
-        let mut k = Kernel::default();
-        k.fixes.drop_curve_v_domain_degeneracy = true;
+        let k = Kernel::default();
         let srf = wr100_surface(WR100_NORMAL_KNOTS, WR100_TINY_KNOTS);
         let nat = srf.natural_uv_domain_with_nurb(&k).expect("natural domain");
         assert_eq!((nat.x_length(), nat.y_length()), (1.0, 0.0));
@@ -2050,8 +2077,7 @@ mod tests {
     /// the U flag alone triggered the early exit; the wrong V flag only coincided.
     #[test]
     fn wr100_u_domain_degeneracy_keeps_its_status_and_clears_the_v_flag() {
-        let mut k = Kernel::default();
-        k.fixes.drop_curve_v_domain_degeneracy = true;
+        let k = Kernel::default();
         let srf = wr100_surface(WR100_TINY_KNOTS, WR100_NORMAL_KNOTS);
         let nat = srf.natural_uv_domain_with_nurb(&k).expect("natural domain");
         assert_eq!((nat.x_length(), nat.y_length()), (0.0, 1.0));
@@ -2071,32 +2097,26 @@ mod tests {
     }
 
     /// The positive control: both natural lengths are 1, so neither degeneracy applies
-    /// and the fix changes nothing (same `1020 / 19` first-drop failure and zero flags
-    /// with it off and on).
+    /// (`1020 / 19` first-drop failure, both flags 0).
     #[test]
     fn wr100_normal_domain_is_unaffected_by_the_v_domain_fix() {
         let srf = wr100_surface(WR100_NORMAL_KNOTS, WR100_NORMAL_KNOTS);
-        let run = |fix: bool| {
-            let mut k = Kernel::default();
-            k.fixes.drop_curve_v_domain_degeneracy = fix;
-            let nat = srf.natural_uv_domain_with_nurb(&k).expect("natural domain");
-            assert_eq!((nat.x_length(), nat.y_length()), (1.0, 1.0));
-            let (r, fail) = wr100_drop(&k, &srf, [0.0, 0.0, 1.0, 1.0]);
-            // `FirstDropUncontainedFail` returns the (empty) output, not an error.
-            assert!(r
-                .expect("first drop failure returns the output")
-                .uv_curves
-                .is_empty());
+        let k = Kernel::default();
+        let nat = srf.natural_uv_domain_with_nurb(&k).expect("natural domain");
+        assert_eq!((nat.x_length(), nat.y_length()), (1.0, 1.0));
+        let (r, fail) = wr100_drop(&k, &srf, [0.0, 0.0, 1.0, 1.0]);
+        // `FirstDropUncontainedFail` returns the (empty) output, not an error.
+        assert!(r
+            .expect("first drop failure returns the output")
+            .uv_curves
+            .is_empty());
+        assert_eq!(
             (
                 fail.fail_status,
                 fail.create_path_type,
                 fail.degen_surf_u,
                 fail.degen_surf_v,
-            )
-        };
-        assert_eq!(run(false), run(true));
-        assert_eq!(
-            run(true),
+            ),
             (
                 SM_ERR_OUTSIDE_OF_DOMAIN,
                 CreateUvTrimCurvePathType::FirstDropUncontainedFail,
@@ -2104,26 +2124,5 @@ mod tests {
                 0
             )
         );
-    }
-
-    /// Off by default the V-degenerate witness keeps the pinned C++ result (`1020 / 19`,
-    /// both flags 0): the V flag copies the U test, which passes.
-    #[test]
-    fn wr100_v_domain_degeneracy_is_off_by_default() {
-        let k = Kernel::default();
-        assert!(!k.fixes.drop_curve_v_domain_degeneracy);
-        let srf = wr100_surface(WR100_NORMAL_KNOTS, WR100_TINY_KNOTS);
-        let (r, fail) = wr100_drop(&k, &srf, [0.0, 1.0, 1.0, 1.0]);
-        // `FirstDropUncontainedFail` returns the (empty) output, not an error.
-        assert!(r
-            .expect("first drop failure returns the output")
-            .uv_curves
-            .is_empty());
-        assert_eq!(fail.fail_status, SM_ERR_OUTSIDE_OF_DOMAIN);
-        assert_eq!(
-            fail.create_path_type,
-            CreateUvTrimCurvePathType::FirstDropUncontainedFail
-        );
-        assert_eq!((fail.degen_surf_u, fail.degen_surf_v), (0, 0));
     }
 }

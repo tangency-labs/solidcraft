@@ -48,9 +48,21 @@ pub(crate) struct State {
     /// `listed` has been read at least once since the plugins last changed (the ribbon reads it
     /// once rather than every frame).
     pub(crate) loaded: bool,
-    pub(crate) dialog: Option<EntryDialog>,
-    /// The run waiting in the control queue: its request's serial and the session it is for.
-    pending: Option<(u64, u64)>,
+    /// The open entry dialogs, oldest first: each plugin entry has its own, with its own window,
+    /// title and field values, so several can be open at once.
+    pub(crate) dialogs: Vec<EntryDialog>,
+    /// The next dialog's id.
+    next_dialog: u64,
+    /// The runs waiting in the control queue: each one's request serial and the session it is for.
+    pending: Vec<(u64, u64)>,
+}
+
+#[cfg(test)]
+impl State {
+    /// The most recently opened entry dialog.
+    pub(crate) fn dialog(&self) -> Option<&EntryDialog> {
+        self.dialogs.last()
+    }
 }
 
 pub(crate) use crate::plugins::Plugin as Listed;
@@ -556,6 +568,8 @@ pub(crate) fn install_plugin_action(app: &mut SolveApp) {
 
 /// The dialog of one plugin entry.
 pub(crate) struct EntryDialog {
+    /// Names this dialog's window and its runs; no other open dialog has it.
+    pub(crate) id: u64,
     pub(crate) plugin: Listed,
     /// The session (design tab) the dialog was opened on: Run acts on that design only.
     pub(crate) session: u64,
@@ -583,8 +597,17 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
     if !shown(app, &plugin) {
         return;
     }
+    // The entry's dialog is already open on this design: it keeps its values, and stays where it
+    // is. Another design's dialog for the same entry belongs to that design.
+    let session = app.session.uid;
+    if app.plugin_menu.dialogs.iter().any(|d| d.plugin.id == plugin.id && d.entry == entry.name && d.session == session) {
+        return;
+    }
     let fields = form(&entry.input_schema);
-    app.plugin_menu.dialog = Some(EntryDialog {
+    let id = app.plugin_menu.next_dialog;
+    app.plugin_menu.next_dialog += 1;
+    app.plugin_menu.dialogs.push(EntryDialog {
+        id,
         label: command_title(&plugin, entry),
         entry: entry.name.clone(),
         read: entry.effect == solidcraft_engine::plugin::Effect::Read,
@@ -618,10 +641,17 @@ impl EntryDialog {
     }
 }
 
-/// Run the open dialog's entry: one `plugin.run` request with the package's content hash, queued
-/// as the control channel's are, so it computes on its worker and lands as one undo step.
+/// Run the most recently opened dialog's entry.
+#[cfg(test)]
 pub(crate) fn run(app: &mut SolveApp) -> Result<(), String> {
-    let Some(dialog) = app.plugin_menu.dialog.as_ref() else { return Ok(()) };
+    let Some(id) = app.plugin_menu.dialog().map(|d| d.id) else { return Ok(()) };
+    run_dialog(app, id)
+}
+
+/// Run the entry of dialog `id`: one `plugin.run` request with the package's content hash, queued
+/// as the control channel's are, so it computes on its worker and lands as one undo step.
+pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
+    let Some(dialog) = app.plugin_menu.dialogs.iter().find(|d| d.id == id) else { return Ok(()) };
     if dialog.running.is_some() {
         return Ok(());
     }
@@ -630,9 +660,9 @@ pub(crate) fn run(app: &mut SolveApp) -> Result<(), String> {
         "path": dialog.plugin.path, "approval": dialog.plugin.approval, "entry": dialog.entry, "params": params}});
     let (req, reply) = solidcraft_control::ControlRequest::new("engine.execute", request);
     let ticket = req.ticket.clone();
-    app.plugin_menu.pending = Some((req.serial, app.session.uid));
+    app.plugin_menu.pending.push((req.serial, app.session.uid));
     app.control_held.push_back(req);
-    if let Some(dialog) = app.plugin_menu.dialog.as_mut() {
+    if let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id) {
         dialog.running = Some(Running { reply, ticket });
         dialog.error = None;
         dialog.result = None;
@@ -643,19 +673,23 @@ pub(crate) fn run(app: &mut SolveApp) -> Result<(), String> {
 /// A queued run is for the design its dialog was opened on: refused, when its turn comes, if
 /// another design tab is active by then.
 pub(crate) fn check_dispatch(app: &mut SolveApp, req: &solidcraft_control::ControlRequest) -> Result<(), String> {
-    match app.plugin_menu.pending {
-        Some((serial, session)) if serial == req.serial => {
-            app.plugin_menu.pending = None;
-            if session == app.session.uid { Ok(()) } else { Err(app.tr("ui.plugin_dialog_other_design").into()) }
-        }
-        _ => Ok(()),
+    let Some(at) = app.plugin_menu.pending.iter().position(|(serial, _)| *serial == req.serial) else { return Ok(()) };
+    let (_, session) = app.plugin_menu.pending.remove(at);
+    if session == app.session.uid { Ok(()) } else { Err(app.tr("ui.plugin_dialog_other_design").into()) }
+}
+
+/// Take the finished runs' replies: an edit closes its dialog, a read shows its result, an error
+/// stays in its dialog.
+pub(crate) fn poll(app: &mut SolveApp) {
+    let ids: Vec<u64> = app.plugin_menu.dialogs.iter().map(|d| d.id).collect();
+    for id in ids {
+        poll_dialog(app, id);
     }
 }
 
-/// Take a finished run's reply: an edit closes the dialog, a read shows its result, an error
-/// stays in the dialog.
-pub(crate) fn poll(app: &mut SolveApp) {
-    let Some(dialog) = app.plugin_menu.dialog.as_mut() else { return };
+fn poll_dialog(app: &mut SolveApp, id: u64) {
+    let Some(at) = app.plugin_menu.dialogs.iter().position(|d| d.id == id) else { return };
+    let dialog = &mut app.plugin_menu.dialogs[at];
     let Some(running) = &dialog.running else { return };
     let reply = match running.reply.try_recv() {
         Ok(reply) => reply,
@@ -675,14 +709,31 @@ pub(crate) fn poll(app: &mut SolveApp) {
         return;
     }
     let done = solidcraft_ui_text::format("ui.plugin_dialog_done", &[("entry", &dialog.label)]);
-    app.plugin_menu.dialog = None;
+    app.plugin_menu.dialogs.remove(at);
     app.set_status(done, false);
 }
 
-/// Draw the open entry dialog.
+/// Draw every open entry dialog, each in its own window.
 pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     poll(app);
-    let Some(mut dialog) = app.plugin_menu.dialog.take() else { return };
+    for mut dialog in std::mem::take(&mut app.plugin_menu.dialogs) {
+        let id = dialog.id;
+        let (stays, run_it) = show_dialog(app, ctx, &mut dialog);
+        if !stays {
+            continue;
+        }
+        app.plugin_menu.dialogs.push(dialog);
+        if run_it
+            && let Err(error) = run_dialog(app, id)
+            && let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id)
+        {
+            dialog.error = Some(error);
+        }
+    }
+}
+
+/// Draw one dialog. Returns whether it stays open, and whether Run was pressed.
+fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog) -> (bool, bool) {
     let ready = dialog.ready(app);
     let running = dialog.running.is_some();
     if running {
@@ -691,30 +742,23 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Just the command's own title ("Gears"): no plugin or menu name after it.
     let title = dialog.label.clone();
     let (run_label, close_label) = (app.tr("ui.plugin_dialog_run").to_owned(), app.tr(if dialog.read { "ui.close" } else { "ui.cancel" }).to_owned());
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_plugin_entry"), "prefs_plugins", &title)
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_plugin_entry").with(dialog.id), "prefs_plugins", &title)
         .fields()
         .actions(&run_label, &close_label, None)
-        .show(ctx, ready.is_ok() && !running, |ui| body(app, ui, &mut dialog, ready.as_ref().err()));
+        .show(ctx, ready.is_ok() && !running, |ui| body(app, ui, dialog, ready.as_ref().err()));
     for (handle, key) in [("plugin_dialog:run", "dialog:ok"), ("plugin_dialog:cancel", "dialog:cancel")] {
         if let Some(at) = crate::scenario::handle_at(key) {
             crate::scenario::publish_handle(handle, at);
         }
     }
-    let close = closed || action == ui_kit::Action::Cancel;
-    if close {
+    if closed || action == ui_kit::Action::Cancel {
         // A run still computing is stopped: nothing of it is applied.
         if let Some(running) = &dialog.running {
             running.ticket.stop();
         }
-        return;
+        return (false, false);
     }
-    app.plugin_menu.dialog = Some(dialog);
-    if action == ui_kit::Action::Ok
-        && let Err(error) = run(app)
-        && let Some(dialog) = app.plugin_menu.dialog.as_mut()
-    {
-        dialog.error = Some(error);
-    }
+    (true, action == ui_kit::Action::Ok)
 }
 
 fn body(app: &SolveApp, ui: &mut egui::Ui, dialog: &mut EntryDialog, why_not: Option<&String>) {

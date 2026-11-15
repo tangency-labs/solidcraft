@@ -950,6 +950,12 @@ struct Trace {
 fn plane_trace(p: Dv, t: Dv, o: Vec3, nu: Vec3) -> Option<Trace> {
     let nu = Dv::constant(nu);
     let h = Dv::constant(o).sub(p).dot(nu);
+    section_trace(p, t, nu, h)
+}
+
+/// [`plane_trace`] of the plane `ν·(x − p) = h`, its normal `ν` and its height `h` over `p`
+/// enclosed (a radical plane's, [`quadric::Radical`]).
+fn section_trace(p: Dv, t: Dv, nu: Dv, h: Di) -> Option<Trace> {
     let c = nu.dot(t);
     let s = t.dot(t);
     let d = nu.cross(t);
@@ -976,10 +982,25 @@ fn planes_line(p: Vec3, a: Tangent, b: Tangent, tangent_sine: f64) -> Option<Tra
     let (na, nb) = (Dv::constant(a.raw), Dv::constant(b.raw));
     let ha = Dv::constant(a.point).sub(pv).dot(na);
     let hb = Dv::constant(b.point).sub(pv).dot(nb);
+    line_of(pv, (na, ha), (nb, hb), Some(tangent_sine))
+}
+
+/// [`planes_line`] of the planes `na·(x − p) = ha` and `nb·(x − p) = hb`, their normals and
+/// heights over `p` enclosed (a radical plane's, [`quadric::Radical`]). With `tangent_sine`,
+/// planes within it of parallel meet in no line near `p`, as faces do; without it (an
+/// auxiliary plane, which is no face) only a determinant not certified apart from zero
+/// gives `None`.
+fn line_of(
+    pv: Dv,
+    (na, ha): (Dv, Di),
+    (nb, hb): (Dv, Di),
+    tangent_sine: Option<f64>,
+) -> Option<Trace> {
     let (aa, bb, c) = (na.dot(na), nb.dot(nb), na.dot(nb));
     let d = na.cross(nb);
     let det = d.dot(d);
-    let parallel = det.v.lo <= (tangent_sine * tangent_sine).max(EFF_ZERO) * aa.v.hi * bb.v.hi;
+    let parallel = tangent_sine
+        .is_some_and(|sine| det.v.lo <= (sine * sine).max(EFF_ZERO) * aa.v.hi * bb.v.hi);
     if parallel || !det.excludes_zero() {
         return None;
     }
@@ -1316,8 +1337,22 @@ fn plane_quadric_piece(
     quadric: &Implicit,
     tolerance: f64,
 ) -> PieceBound {
+    let trace = |p: Dv, t: Dv| plane_trace(p, t, plane.point, plane.raw);
+    trace_quadric_piece(over, mid, dt, &trace, quadric, tolerance)
+}
+
+/// [`plane_quadric_piece`] of the plane whose trace in the normal section at `p` across `t`
+/// is `trace(p, t)`.
+fn trace_quadric_piece(
+    over: (Dv, Dv),
+    mid: (Dv, Dv),
+    dt: Ivl,
+    trace: &dyn Fn(Dv, Dv) -> Option<Trace>,
+    quadric: &Implicit,
+    tolerance: f64,
+) -> PieceBound {
     let trace = |(p, t): (Dv, Dv)| {
-        let line = plane_trace(p, t, plane.point, plane.raw)?;
+        let line = trace(p, t)?;
         let q = along_line(quadric, &line)?;
         Some((line, q))
     };
@@ -1894,7 +1929,35 @@ fn corner_with_quadric(
     tangent_sine: f64,
     tolerance: f64,
 ) -> CornerMeeting {
-    let Some(line) = planes_line(p, a, b, tangent_sine) else {
+    line_with_quadric(planes_line(p, a, b, tangent_sine), q, tolerance)
+}
+
+/// Where the plane `a` and two cylinders on one axis direction, `q` and another, meet at a
+/// corner, from the vertex `p`: where the line of `a` and their radical plane `radical`
+/// meets `q` ([`quadric::Radical`], [`corner_with_quadric`]). The radical plane is no face,
+/// so a plane a small angle off it still meets it on a line, however far from the vertex
+/// (the tangency tolerance does not apply); a line not established on the enclosures (the
+/// two planes' determinant not certified apart from zero) is not decided, never nowhere.
+fn corner_with_cylinders(
+    p: Vec3,
+    a: Tangent,
+    radical: &quadric::Radical,
+    q: &Implicit,
+    tolerance: f64,
+) -> CornerMeeting {
+    let pv = Dv::constant(p);
+    let na = Dv::constant(a.raw);
+    let ha = Dv::constant(a.point).sub(pv).dot(na);
+    match line_of(pv, (na, ha), radical.over(pv), None) {
+        Some(line) => line_with_quadric(Some(line), q, tolerance),
+        None => CornerMeeting::Uncertified,
+    }
+}
+
+/// [`corner_with_quadric`] on the line where two planes meet near the vertex, `None` where
+/// they meet in no line near it.
+fn line_with_quadric(line: Option<Trace>, q: &Implicit, tolerance: f64) -> CornerMeeting {
+    let Some(line) = line else {
         return CornerMeeting::Nowhere;
     };
     let Some(along) = along_line(q, &line) else {
@@ -2166,8 +2229,12 @@ fn kept_straight_edge_corner(
 /// are ([`quadric_pair`]): one surface, met as far as the edge is from it (a quadric's
 /// distance, as for the move below); or apart, listed and adding nothing (a piece of a
 /// split cylinder or sphere moved off the piece it was split from: a step's wall closes the
-/// gap). Any other two: [`quadric_pair_piece`] proves a root of both implicit equations and
-/// the normal-section plane, uniformly over each edge piece, with a displacement box
+/// gap). Two cylinders on one axis direction otherwise meet where the first meets their
+/// radical plane ([`quadric::Radical`]), as a plane and a quadric do above: in closed form,
+/// a round tangent to a bore included (its gradient parallel to the bore's there, which no
+/// Newton-type certificate proves). Any other two: [`quadric_pair_piece`] proves a root of
+/// both implicit equations and the normal-section plane, uniformly over each edge piece,
+/// with a displacement box
 /// certified by Krawczyk's operator ([`quadric::meet`]). Both cones' positive-radius
 /// sides are checked on the root box. Only a section Jacobian whose determinant excludes
 /// zero marks a crossing. An unproved meeting, including an unresolved tangent or
@@ -2183,8 +2250,10 @@ fn kept_straight_edge_corner(
 /// meetings. Every pair is taken, so the reach bounds the split points from above. Three
 /// planes meet at [`corner_of`]; two planes and a quadric where the planes' line meets it
 /// ([`corner_with_quadric`]); where they meet in no one point, the edges' meetings stand.
-/// A plane and two quadrics meet by the same three-equation certificate, on the
-/// plane at the vertex ([`quadric::meet`]); a plane and two parallel quadrics
+/// A plane and two cylinders on one axis direction meet where the line of the plane and
+/// their radical plane meets the first ([`quadric::Radical`], [`line_with_quadric`]); any
+/// other plane and two quadrics by the same three-equation certificate, on the plane at
+/// the vertex ([`quadric::meet`]); a plane and two parallel quadrics
 /// ([`quadric_pair`]) meet in no one point, and the edges' meetings stand. Where two
 /// quadrics are kept and share a straight edge at the vertex (a round drawn as two faces split along a ruling, or two surfaces
 /// crossing along a line), and the third's new surface a plane: faces that keep their
@@ -2430,9 +2499,23 @@ pub fn local_extension_reach(
                             };
                             pieces(&piece, bounds, pair, surfaces.as_deref())?
                         }
+                        // two cylinders on one axis direction: the first's meeting with
+                        // their radical plane, in closed form, a tangent meeting included
                         _ => {
-                            let piece = |over, mid, dt| quadric_pair_piece(k, over, mid, dt, a, c);
-                            pieces(&piece, bounds, pair, surfaces.as_deref())?
+                            if let Some(radical) = quadric::Radical::of(q, r) {
+                                let trace = |p: Dv, t: Dv| {
+                                    let (nu, h) = radical.over(p);
+                                    section_trace(p, t, nu, h)
+                                };
+                                let piece = |over, mid, dt| {
+                                    Ok(trace_quadric_piece(over, mid, dt, &trace, q, tolerance))
+                                };
+                                pieces(&piece, bounds, pair, surfaces.as_deref())?
+                            } else {
+                                let piece =
+                                    |over, mid, dt| quadric_pair_piece(k, over, mid, dt, a, c);
+                                pieces(&piece, bounds, pair, surfaces.as_deref())?
+                            }
                         }
                     }
                 }
@@ -2469,7 +2552,8 @@ struct Corner {
 /// there moves, every face there must be of a class (`class_of`), and the meetings of the
 /// face's surface with every two others (three planes; two planes and a quadric or a net; a
 /// plane, a quadric and a net; a plane and two nets; a plane and two quadrics, on a kept
-/// straight edge where present, nowhere for parallel quadrics, otherwise by [`quadric::meet`];
+/// straight edge where present, nowhere for parallel quadrics, on the radical plane of two
+/// cylinders on one axis direction ([`quadric::Radical`]), otherwise by [`quadric::meet`];
 /// anything else, or a meeting with a net not proved, is `refuse`d), and each moved
 /// surface's distance from the vertex (a moved net's: the farthest meeting found on it
 /// there), are taken into `found`.
@@ -2575,10 +2659,23 @@ fn corner(
                                 None
                             }
                             (&[plane], [a, c]) => {
-                                let section = quadric::Section::corner(p, plane.point, plane.raw);
-                                let meeting =
-                                    quadric::meet(k, a, c, section, section, Ivl::from(0.0))?;
-                                Some(meeting.ok_or_else(refuse)?.distance.hi)
+                                if let Some(radical) = quadric::Radical::of(a, c) {
+                                    // two cylinders on one axis direction: where the plane's
+                                    // line with their radical plane meets the first
+                                    let meeting =
+                                        corner_with_cylinders(p, plane, &radical, a, at.tolerance);
+                                    match meeting {
+                                        CornerMeeting::Within(reach) => Some(reach),
+                                        CornerMeeting::Nowhere => None,
+                                        CornerMeeting::Uncertified => return Err(refuse()),
+                                    }
+                                } else {
+                                    let section =
+                                        quadric::Section::corner(p, plane.point, plane.raw);
+                                    let meeting =
+                                        quadric::meet(k, a, c, section, section, Ivl::from(0.0))?;
+                                    Some(meeting.ok_or_else(refuse)?.distance.hi)
+                                }
                             }
                             _ => return Err(refuse()),
                         },
@@ -4263,6 +4360,90 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    /// A round tangent to a bore, both moved out along their normals (a shell's outside
+    /// wall, #17158), stays tangent to it along a line, where the three-equation
+    /// certificate proves nothing (the two gradients are parallel). Their radical plane
+    /// holds the meeting: at a corner with a raised floor it is where the floor's line on
+    /// that plane touches the bore, and in the edge's normal section the tangent line's
+    /// point, each within the rounding of a double root.
+    #[test]
+    fn a_round_tangent_to_a_bore_meets_it_and_a_plane_where_they_touch() {
+        let k = Kernel::default();
+        let cylinder = |x: f64, axis: Vec3, radius: f64| Implicit::Cone {
+            origin: Vec3::new(x, 0.0, 0.0),
+            axis,
+            radius,
+            tan_angle: 0.0,
+        };
+        // a bore of radius 12 and a round of radius 3.5 outside it: they touch on x = 12, y = 0
+        let bore = cylinder(0.0, Vec3::Z, 12.0);
+        let round = cylinder(15.5, -Vec3::Z, 3.5);
+        let floor = Tangent {
+            point: Vec3::new(0.0, 0.0, 2.0),
+            normal: Vec3::Z,
+            raw: Vec3::Z,
+        };
+        let p = Vec3::new(12.5, 0.25, 0.0);
+        let section = quadric::Section::corner(p, floor.point, floor.raw);
+        assert!(
+            quadric::meet(&k, &bore, &round, section, section, Ivl::from(0.0))
+                .unwrap()
+                .is_none()
+        );
+        let radical = quadric::Radical::of(&bore, &round).unwrap();
+        // the corner meets at (12, 0, 2)
+        let corner = sqrt(0.5 * 0.5 + 0.25 * 0.25 + 2.0 * 2.0);
+        match corner_with_cylinders(p, floor, &radical, &bore, 1e-6) {
+            CornerMeeting::Within(r) => assert!(corner <= r && r < corner + 1e-6, "{r}"),
+            other => panic!("{other:?}"),
+        }
+        // A plane within the tangency tolerance of their radical plane still meets it on a
+        // line: cylinders on Z about (∓1, 0, 0) widened from 1.9 to 2 (radical plane
+        // x = 0), and the plane x + 0.0001 z = 0 moved to 0.0001, meet at (0, √3, 1),
+        // over 1 from the old vertex (0, √2.61, 0).
+        let left = cylinder(-1.0, Vec3::Z, 2.0);
+        let right = cylinder(1.0, Vec3::Z, 2.0);
+        let raw = Vec3::new(1.0, 0.0, 1e-4);
+        let leaning = Tangent {
+            point: Vec3::new(1e-4, 0.0, 0.0),
+            normal: raw.unitize().unwrap(),
+            raw,
+        };
+        let apart = quadric::Radical::of(&left, &right).unwrap();
+        let old = Vec3::new(0.0, sqrt(1.9 * 1.9 - 1.0), 0.0);
+        let far = (Vec3::new(0.0, sqrt(3.0), 1.0) - old).length();
+        match corner_with_cylinders(old, leaning, &apart, &left, 1e-6) {
+            CornerMeeting::Within(r) => assert!(far - 1e-9 <= r && r < far + 1e-6, "{r}"),
+            other => panic!("{other:?}"),
+        }
+        // the edge's normal section at (12.5, 0.25, 1) across the axis meets at (12, 0, 1)
+        let edge = (
+            Dv::constant(Vec3::new(12.5, 0.25, 1.0)),
+            Dv::constant(Vec3::Z),
+        );
+        let trace = |p: Dv, t: Dv| {
+            let (nu, h) = radical.over(p);
+            section_trace(p, t, nu, h)
+        };
+        let along = sqrt(0.5 * 0.5 + 0.25 * 0.25);
+        match trace_quadric_piece(edge, edge, Ivl::from(0.0), &trace, &bore, 1e-6) {
+            PieceBound::Value { upper, .. } => {
+                assert!(along <= upper && upper < along + 1e-6, "{upper}");
+            }
+            other => panic!("{other:?}"),
+        }
+        // a cone, or an axis a rounding off, is left to the certificate
+        let tilted = cylinder(15.5, Vec3::new(1.44e-13, 0.0, 1.0), 3.5);
+        assert!(quadric::Radical::of(&bore, &tilted).is_none());
+        let cone = Implicit::Cone {
+            origin: Vec3::new(15.5, 0.0, 0.0),
+            axis: Vec3::Z,
+            radius: 3.5,
+            tan_angle: 0.1,
+        };
+        assert!(quadric::Radical::of(&bore, &cone).is_none());
     }
 
     #[test]
