@@ -87,7 +87,10 @@ fn global_point_solve_lands_on_the_flat_direction_of_a_near_flat_patch() {
     // the brute-force drop's first sample point of the mirrored edge (C++ values)
     let p0 = Vec3::new(4.88235812709649, -0.19264343447977827, 14.765413029181282);
     let (u, v) = closest(&k, &s, p0);
-    assert!(u.abs() < 1e-13 && (v - CPP_UV.1).abs() < 5e-5, "{u:e} {v:e}");
+    assert!(
+        u.abs() < 1e-13 && (v - CPP_UV.1).abs() < 5e-5,
+        "{u:e} {v:e}"
+    );
     let at = |u: f64, v: f64| s.evaluate_point(&k, Point2::new(u, v)).unwrap();
     let (ours, cpp) = (at(u, v), at(CPP_UV.0, CPP_UV.1));
     assert!((ours - cpp).length() <= 1e-14, "{ours:?} {cpp:?}");
@@ -106,5 +109,9 @@ fn normal_after_a_failed_evaluation_is_the_evaluation_error() {
     assert!(e.eval().is_err());
     // ... and the normal is that failure, as the fork's `SER( Eval() )` returns it
     let err = e.normal(&k).unwrap_err();
-    assert_eq!(err.operation(), "surface::surface::p2::SurfaceEval::eval", "{err:?}");
+    assert_eq!(
+        err.operation(),
+        "surface::surface::p2::SurfaceEval::eval",
+        "{err:?}"
+    );
 }

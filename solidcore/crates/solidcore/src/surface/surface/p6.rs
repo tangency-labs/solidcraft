@@ -1382,7 +1382,9 @@ impl DerivSurfDefinition<'_> {
                         // 2d dir = projection of 3d binormal into surface UV space (status
                         // ignored upstream; passed on as the fork does, WR-663,
                         // tangency-labs/smlib 21dcf69)
-                        surface.compute_param_direction(k, surface_uv0, binormal)?.unitize()?
+                        surface
+                            .compute_param_direction(k, surface_uv0, binormal)?
+                            .unitize()?
                     }
                     T::TanToEdges | T::MatchNeighbors => {
                         // dir = linear interp between the start and end angles

@@ -3242,7 +3242,10 @@ mod tests {
         let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let k = Kernel::default();
         assert!(s.evaluate_point(&k, Point2::new(0.0, 0.0)).is_err());
-        let closed = s.is_closed(&k, &dom, SurfParamType::U, None, false).unwrap().0;
+        let closed = s
+            .is_closed(&k, &dom, SurfParamType::U, None, false)
+            .unwrap()
+            .0;
         assert!(!closed);
     }
 

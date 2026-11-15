@@ -3467,9 +3467,7 @@ mod curve_bounded_tests {
         // the fork fails test 4 instead (tangency-labs/smlib 21dcf69, WR-663), so the
         // surface is reported invalid.
         for level in [0, 1, 2] {
-            assert!(!surface
-                .assert_valid(&k, None, level, ObjectKey(1))
-                .unwrap());
+            assert!(!surface.assert_valid(&k, None, level, ObjectKey(1)).unwrap());
         }
     }
 

@@ -493,9 +493,9 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         };
 
         // PseudoBox/line intersect
-        let Some((_, pseudo_enter, pseudo_exit)) =
-            pseudo_hit(&Ok(pseudo_box.intersect_line(self.line_point, self.line_vector)?))
-        else {
+        let Some((_, pseudo_enter, pseudo_exit)) = pseudo_hit(&Ok(
+            pseudo_box.intersect_line(self.line_point, self.line_vector)?
+        )) else {
             // no work - no Pseudo intersection
             return Ok(false);
         };

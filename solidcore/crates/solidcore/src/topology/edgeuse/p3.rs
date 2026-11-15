@@ -131,7 +131,6 @@ fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-
 /// The status of `SmVector3d::AngleBetween` of a zero-length vector, which upstream
 /// checks with `SER`: `SM_ERR_INVALID_INPUT` (1007), a failing status, not a null
 /// dereference.

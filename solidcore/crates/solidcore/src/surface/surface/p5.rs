@@ -1313,13 +1313,8 @@ impl Surface {
                             // evaluate Surf(sThisUV) - eval with NonZero tangents
                             // (passed on as the fork does, WR-663,
                             // tangency-labs/smlib 21dcf69)
-                            let (_, du, dv) = evaluate_1st_derivatives(
-                                k,
-                                self,
-                                this_uv,
-                                Side::Left,
-                                Side::Left,
-                            )?;
+                            let (_, du, dv) =
+                                evaluate_1st_derivatives(k, self, this_uv, Side::Left, Side::Left)?;
                             let du = du.unitize_or_z();
                             let dv = dv.unitize_or_z();
 

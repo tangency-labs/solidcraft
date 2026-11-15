@@ -988,8 +988,9 @@ pub fn has_plane_crossings(k: &Kernel, curve: &Curve, planes: &[Plane]) -> Resul
         // find all Curve/Plane intersections
         // (status ignored upstream: an error leaves the solution array empty; as the
         // fork a crossing cannot be ruled out then, tangency-labs/smlib 8311f8e)
-        let Some(solutions) =
-            ignored(plane_global_curve_intersect(k, plane, curve, &ivl, EFF_ZERO))?
+        let Some(solutions) = ignored(plane_global_curve_intersect(
+            k, plane, curve, &ivl, EFF_ZERO,
+        ))?
         else {
             return Ok(true);
         };

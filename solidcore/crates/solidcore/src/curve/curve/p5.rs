@@ -1001,8 +1001,7 @@ pub fn crvs_cleanup(k: &Kernel, curves: &mut Vec<Curve>, tol: f64) -> Result<Cle
         // If this is a tiny curve, check midpoint
         if (end_point1 - start_point1).length_squared() < tol_sq {
             // Test for closed curve by examining near midpoint
-            let Some(mid_point) = ignored(crv1.evaluate_point(k, domain1.evaluate(0.4567)))?
-            else {
+            let Some(mid_point) = ignored(crv1.evaluate_point(k, domain1.evaluate(0.4567)))? else {
                 ii += 1;
                 continue;
             };
@@ -2370,8 +2369,7 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> CcIntersectEnfo<'_,
             // switch to the TangentIntersection Solver Objective Functions
             // (status ignored upstream; passed on as the fork, tangency-labs/smlib
             // 8311f8e)
-            found =
-                CcTangentIntEnfo::static_evaluate(k, self.curve1, self.curve2, x, f, jacobian)?;
+            found = CcTangentIntEnfo::static_evaluate(k, self.curve1, self.curve2, x, f, jacobian)?;
         } else {
             // the usual case, not tangent.
             // Get the unitized derivatives.

@@ -108,10 +108,7 @@ use crate::curve::curve::p4::{
 use crate::curve::curve::p5::{find_additional_cp_guess, is_periodic, local_property_analysis};
 use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
 use crate::error::curve::{CurveFailure, PointSolveOption};
-use crate::error::{
-    ignored, Failure, Result, SolidError,
-    SM_ERR_NULL_POINTER,
-};
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::geom_utility::p1::line_closest_point;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -1113,8 +1110,7 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> EvalNFunctions
             // switch to the TangentIntersection Solver Objective Functions
             // (status ignored upstream; passed on as the fork, tangency-labs/smlib
             // 8311f8e)
-            found =
-                CcTangentIntEnfo::static_evaluate(k, self.curve1, self.curve2, x, f, jacobian)?;
+            found = CcTangentIntEnfo::static_evaluate(k, self.curve1, self.curve2, x, f, jacobian)?;
         } else {
             // the usual case, not tangent.
             // Get the unitized derivatives.

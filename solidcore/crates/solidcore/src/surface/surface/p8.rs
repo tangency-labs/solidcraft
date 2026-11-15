@@ -997,13 +997,9 @@ impl Surface {
                     evaluate_3x3_into(k, other, uv1, &mut pvv1)?;
 
                     // Now check 2nd order terms.
-                    let matched = ignored(check_shape_match(
-                        &mut pvv0,
-                        &mut pvv1,
-                        tol_3d,
-                        ang_tol_rad,
-                    ))?
-                    .unwrap_or(false);
+                    let matched =
+                        ignored(check_shape_match(&mut pvv0, &mut pvv1, tol_3d, ang_tol_rad))?
+                            .unwrap_or(false);
                     if !matched {
                         continue;
                     }
@@ -1052,13 +1048,8 @@ impl Surface {
                 // Point coincidence, check normals and curvature.
                 evaluate_3x3_into(k, self, uv0, &mut pvv0)?;
                 evaluate_3x3_into(k, other, uv1, &mut pvv1)?;
-                if ignored(check_shape_match(
-                    &mut pvv0,
-                    &mut pvv1,
-                    tol_3d,
-                    ang_tol_rad,
-                ))?
-                .unwrap_or(false)
+                if ignored(check_shape_match(&mut pvv0, &mut pvv1, tol_3d, ang_tol_rad))?
+                    .unwrap_or(false)
                 {
                     return Ok(res);
                 }
@@ -1087,13 +1078,8 @@ impl Surface {
                 // Point coincidence, check normals and curvature.
                 evaluate_3x3_into(k, self, uv0, &mut pvv0)?;
                 evaluate_3x3_into(k, other, uv1, &mut pvv1)?;
-                if ignored(check_shape_match(
-                    &mut pvv0,
-                    &mut pvv1,
-                    tol_3d,
-                    ang_tol_rad,
-                ))?
-                .unwrap_or(false)
+                if ignored(check_shape_match(&mut pvv0, &mut pvv1, tol_3d, ang_tol_rad))?
+                    .unwrap_or(false)
                 {
                     return Ok(res);
                 }
@@ -2925,11 +2911,7 @@ impl Surface {
                 surface_cache: Some(surface_cache),
                 curve_handle,
                 surface_handle,
-                edge_tolerance: super::p9::curve_edge_tolerance(
-                    curve,
-                    curve_handle,
-                    face_queries,
-                )?,
+                edge_tolerance: super::p9::curve_edge_tolerance(curve, curve_handle, face_queries)?,
             },
             &mut sols,
         )?;

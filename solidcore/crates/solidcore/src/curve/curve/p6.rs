@@ -104,9 +104,7 @@ use crate::curve::curve::p5::{
     is_point_solution_across_closed_seam_boundary, local_property_analysis,
 };
 use crate::curve::curve_cache::CurveCache;
-use crate::error::{
-    ignore_status, ignored, Result, SolidError,
-};
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{
@@ -2353,31 +2351,30 @@ impl Curve {
             if surface.approx_eq(k, curve.surface())? {
                 let ends = curve.uv_curve().ends(k)?;
                 let domain = surface.natural_uv_domain_with_nurb(k)?;
-                let drop_target = |target: Option<Point3>,
-                                   current: Point3|
-                 -> Result<Option<Point3>> {
-                    let Some(target) = target else {
-                        return Ok(None);
+                let drop_target =
+                    |target: Option<Point3>, current: Point3| -> Result<Option<Point3>> {
+                        let Some(target) = target else {
+                            return Ok(None);
+                        };
+                        let options = crate::surface::surface::p5::DropPointOptions {
+                            guess_uv: Some(crate::math::Vec2::new(current.x, current.y)),
+                            ..Default::default()
+                        };
+                        // (status ignored upstream; as the fork a failed drop is passed on
+                        // and a target that does not drop onto the surface has no UV
+                        // point, SM_ERR, tangency-labs/smlib 8311f8e)
+                        let dropped = surface.drop_point::<crate::surface::surface::p4::NoObject>(
+                            k, target, &domain, &options,
+                        )?;
+                        if !dropped.success {
+                            return Err(SolidError::curve_failed(
+                                OP_DEFORM,
+                                "the point did not drop onto the surface",
+                            ));
+                        }
+                        let uv = dropped.result_uv;
+                        Ok(Some(Point3::new(uv.x, uv.y, 0.0)))
                     };
-                    let options = crate::surface::surface::p5::DropPointOptions {
-                        guess_uv: Some(crate::math::Vec2::new(current.x, current.y)),
-                        ..Default::default()
-                    };
-                    // (status ignored upstream; as the fork a failed drop is passed on
-                    // and a target that does not drop onto the surface has no UV
-                    // point, SM_ERR, tangency-labs/smlib 8311f8e)
-                    let dropped = surface.drop_point::<crate::surface::surface::p4::NoObject>(
-                        k, target, &domain, &options,
-                    )?;
-                    if !dropped.success {
-                        return Err(SolidError::curve_failed(
-                            OP_DEFORM,
-                            "the point did not drop onto the surface",
-                        ));
-                    }
-                    let uv = dropped.result_uv;
-                    Ok(Some(Point3::new(uv.x, uv.y, 0.0)))
-                };
                 let start = drop_target(tgt_start, ends.start)?;
                 let end = drop_target(tgt_end, ends.end)?;
                 let (start, end) = if orientation
