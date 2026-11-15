@@ -59,7 +59,8 @@
     "report.browser_note": "Send report opens tickets.solidcraft.io in your browser to review and file it.",
     "report.github_instead": "Or open a public GitHub issue instead",
     "cmd.diagnostics_report_issue": "Report an Issue",
-    "cmd.diagnostics_report_issue_status": "Report Status"
+    "cmd.diagnostics_report_issue_status": "Report Status",
+    "report.report_action": "Report…"
   },
   "de": {
     "report.title": "Problem melden",
@@ -121,7 +122,8 @@
     "report.browser_note": "„Bericht senden“ öffnet tickets.solidcraft.io in Ihrem Browser, wo Sie ihn prüfen und erstellen.",
     "report.github_instead": "Oder stattdessen ein öffentliches GitHub-Issue öffnen",
     "cmd.diagnostics_report_issue": "Problem melden",
-    "cmd.diagnostics_report_issue_status": "Berichtsstatus"
+    "cmd.diagnostics_report_issue_status": "Berichtsstatus",
+    "report.report_action": "Melden…"
   },
   "ar": {
     "report.title": "الإبلاغ عن مشكلة",
@@ -183,7 +185,8 @@
     "report.browser_note": "يفتح إرسال التقرير tickets.solidcraft.io في متصفحك لمراجعته وإنشائه.",
     "report.github_instead": "أو افتح مشكلة عامة على GitHub بدلًا من ذلك",
     "cmd.diagnostics_report_issue": "الإبلاغ عن مشكلة",
-    "cmd.diagnostics_report_issue_status": "حالة التقرير"
+    "cmd.diagnostics_report_issue_status": "حالة التقرير",
+    "report.report_action": "إبلاغ…"
   },
   "he": {
     "report.title": "דיווח על בעיה",
@@ -245,7 +248,8 @@
     "report.browser_note": "שליחת הדוח פותחת את tickets.solidcraft.io בדפדפן כדי לעבור עליו וליצור אותו.",
     "report.github_instead": "או לפתוח במקום זאת issue ציבורי ב-GitHub",
     "cmd.diagnostics_report_issue": "דיווח על בעיה",
-    "cmd.diagnostics_report_issue_status": "מצב הדוח"
+    "cmd.diagnostics_report_issue_status": "מצב הדוח",
+    "report.report_action": "דיווח…"
   },
   "ja": {
     "report.title": "問題を報告",
@@ -307,7 +311,8 @@
     "report.browser_note": "「レポートを送信」は tickets.solidcraft.io をブラウザーで開き、そこで確認して作成します。",
     "report.github_instead": "または代わりに公開の GitHub Issue を開く",
     "cmd.diagnostics_report_issue": "問題を報告",
-    "cmd.diagnostics_report_issue_status": "レポートの状態"
+    "cmd.diagnostics_report_issue_status": "レポートの状態",
+    "report.report_action": "報告…"
   },
   "vi": {
     "report.title": "Báo cáo sự cố",
@@ -369,7 +374,8 @@
     "report.browser_note": "Gửi báo cáo sẽ mở tickets.solidcraft.io trong trình duyệt để bạn xem lại và tạo phiếu.",
     "report.github_instead": "Hoặc mở issue công khai trên GitHub thay thế",
     "cmd.diagnostics_report_issue": "Báo cáo sự cố",
-    "cmd.diagnostics_report_issue_status": "Trạng thái báo cáo"
+    "cmd.diagnostics_report_issue_status": "Trạng thái báo cáo",
+    "report.report_action": "Báo cáo…"
   },
   "zh": {
     "report.title": "报告问题",
@@ -431,7 +437,8 @@
     "report.browser_note": "“发送报告”会在浏览器中打开 tickets.solidcraft.io，供你检查并提交。",
     "report.github_instead": "或改为创建公开的 GitHub 议题",
     "cmd.diagnostics_report_issue": "报告问题",
-    "cmd.diagnostics_report_issue_status": "报告状态"
+    "cmd.diagnostics_report_issue_status": "报告状态",
+    "report.report_action": "报告…"
   },
   "ko": {
     "report.title": "문제 신고",
@@ -493,6 +500,7 @@
     "report.browser_note": "보고서 보내기를 누르면 브라우저에서 tickets.solidcraft.io가 열려 검토 후 제출할 수 있습니다.",
     "report.github_instead": "또는 대신 공개 GitHub 이슈 열기",
     "cmd.diagnostics_report_issue": "문제 신고",
-    "cmd.diagnostics_report_issue_status": "보고서 상태"
+    "cmd.diagnostics_report_issue_status": "보고서 상태",
+    "report.report_action": "신고…"
   }
 }
