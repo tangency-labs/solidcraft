@@ -400,13 +400,23 @@ fn symmetric_extrude_with_symmetric_offset_leaves_clearance_gap_and_follows_para
 
 #[test]
 fn symmetric_offset_with_second_distance_is_rejected() {
-    let s = fixture(json!({
-        "distance": "10 mm",
-        "distance2": "4 mm",
-        "direction": "symmetric",
-        "start_offset": "3 mm",
-        "symmetric_offset": true,
-    }));
-    let err = s.model.results.iter().find_map(|r| r.error.clone()).unwrap_or_default();
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Square"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let err = s
+        .execute(
+            "solid.extrude",
+            &json!({
+                "sketch": "Square",
+                "distance": "10 mm",
+                "distance2": "4 mm",
+                "direction": "symmetric",
+                "start_offset": "3 mm",
+                "symmetric_offset": true,
+            }),
+        )
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("symmetric offset with a second distance"), "unexpected error: {err}");
 }
