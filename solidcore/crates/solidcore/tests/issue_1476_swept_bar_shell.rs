@@ -221,8 +221,8 @@ fn check_named(
 /// The default kernel, which keeps an inset's cavity regions (WR-667). The operand's
 /// entities all share one name here, so no geometry owner identifies its edge or face; the
 /// merge leaves one finite region, which `make_manifold` keeps whatever its cavity verdict,
-/// so the verdict's point solves over the operand are not run. They used to be, and the
-/// shell failed with `Unsupported` ("point-solve geometry owners must identify one edge or
+/// so the verdict's point solves over the operand are not run. With the former opt-in on
+/// (SolidCraft's preset) they were, and the shell failed with `Unsupported` ("point-solve geometry owners must identify one edge or
 /// face each") while building the operand's point-solve cache (#17393).
 #[test]
 fn issue_1476_swept_bar_shells() {

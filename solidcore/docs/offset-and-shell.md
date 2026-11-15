@@ -276,9 +276,10 @@ face's surface and intersects neighbouring offsets instead of filling convex edg
   edge uses. With `offset_analytic_mate_edges` a marched piece lying on an exact line or conic of
   the two surfaces is replaced by that curve.
 - **The merge** joins the offset faces into one body. When it leaves two or more finite regions,
-  an inset keeps those `cavity::is_cavity_region` finds cavity: a region with a face that has the
-  input's face one wall behind it and none with it one wall ahead (a point solve along the
-  normal). This is a local test, not S4's winding number.
+  an inset solid offset keeps those `cavity::is_cavity_region` finds cavity: a region with a face
+  that has the input's face one wall behind it and none with it one wall ahead (a point solve
+  along the normal). If all or none are cavity, every region is kept. This is a local test, not
+  S4's winding number.
 
 Without `extend_convex_edges` the rounded offset closes convex edges with cylinders and vertices
 with spheres (`edgeuse_offset`, `vertex_offset`, `offset_geometry_creation.rs`).
@@ -435,7 +436,8 @@ local operation.
   one that only touches its side, is the cause. A local operation uses its fixed bound instead.
 - **Check the side and the regions.** A face use opposite its surface negates the distance
   (`faceuse_offset_with_backend`). An inset that keeps a sliver region: check
-  `cavity::is_cavity_region`'s verdict for each finite region of the merge (§5.2).
+  `cavity::is_cavity_region`'s verdict for each finite region of the merge (asked only with two
+  or more finite regions, §5.2).
 - **Look at the tolerances.** Edge tolerances far above the body's after an offset mean a face
   was built across a collapse or a fold; run `cargo run --release -p diagnostics -- FILE.smb --out
   DIR` and read the large-tolerance edges.

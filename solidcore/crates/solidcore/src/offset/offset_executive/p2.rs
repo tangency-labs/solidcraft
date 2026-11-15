@@ -1139,13 +1139,17 @@ impl OffsetExecutive {
             // the body's point solves are not run for it.
             let mut cavities = Vec::new();
             let mut select = false;
-            let infinite = result.infinite_region();
-            let finite: Vec<RegionId> = bp1::regions(&result, None)?
-                .into_iter()
-                .filter(|&region| Some(region) != infinite)
-                .collect();
-            if self.inset() && self.operation() == OffsetOperation::SolidOffset && finite.len() > 1
-            {
+            let finite: Vec<RegionId> =
+                if self.inset() && self.operation() == OffsetOperation::SolidOffset {
+                    let infinite = result.infinite_region();
+                    bp1::regions(&result, None)?
+                        .into_iter()
+                        .filter(|&region| Some(region) != infinite)
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+            if finite.len() > 1 {
                 let mut body_cache = None;
                 for region in finite {
                     if body_cache.is_none() {
