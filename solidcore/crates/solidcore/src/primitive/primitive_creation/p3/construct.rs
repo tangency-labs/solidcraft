@@ -19,8 +19,7 @@
 //! Not upstream (WR-404, tangency-labs/solidcore#411): the curve sweep's caps
 //! come from the side faces at the sweep's ends (`sweep_end_curves`), not the first
 //! and last `count` side faces.
-//! Not upstream (tangency-labs/solidcore#2192, opt-in
-//! `Kernel::fixes.curve_sweep_closed_path_joins_ends`): a sweep along a closed path
+//! Not upstream (tangency-labs/solidcore#2192, WR-675): a sweep along a closed path
 //! whose end sections lie on its start sections (`sweep_ends_coincide`) is not capped,
 //! so the stitch joins its side faces' end edges to their start edges.
 //! Not upstream (the SolidCraft fork's tangency-labs/smlib 5d3939e, WR-523, #1450):
@@ -898,8 +897,8 @@ impl PrimitiveCreation {
             // each composite's side faces (WR-404's caps)
             let mut groups = Vec::new();
             let mut closed_sections = options.cap_ends
-                && a.kernel(brep)?.fixes.curve_sweep_closed_path_joins_ends
-                && !composites.composites.is_empty();
+                && !composites.composites.is_empty()
+                && path_leaves_its_start(&prepared.path, a.brep(brep)?.tolerance())?;
             for (index, mut composite) in composites.composites.into_iter().enumerate() {
                 let profile = composite.make_composite_nurb()?;
                 let want_placements = index == 0 && opt_placements.is_some();
@@ -1113,6 +1112,210 @@ fn sweep_end_curves(
     Ok((starts, ends))
 }
 
+/// Not upstream (WR-675): whether the path leaves the ball of radius `tol` about its
+/// start, so that end sections lying on the start sections mean a path that goes
+/// somewhere and comes back, not one shorter than the tolerance.
+///
+/// Yes needs a certificate: a point of the path whose distance from the start, less
+/// both points' enclosed rounding ([`EnclosedNet::point`]), still exceeds `tol`. The
+/// points tried are the Greville abscissae (each control point's parameter, so a path
+/// whose control polygon goes round a loop is tried near every corner of the loop,
+/// whatever its parameterisation) and the middle of every non-empty knot span. Without
+/// such a point the answer is `false` and the sweep is capped, as upstream caps it: a
+/// miss can only refuse a closed sweep as upstream does, never join one that stays
+/// within the tolerance. A curve the enclosure does not cover (non-positive or mixed
+/// weights, a malformed knot vector, non-finite values) also answers `false`.
+///
+/// A path that goes out and comes back the same way (out-and-back) also passes, as it
+/// did under the retired flag: its end sections lie on its start sections and it leaves
+/// its start.
+fn path_leaves_its_start(path: &BSplineCurve, tol: f64) -> Result<bool> {
+    use crate::nurbs::math::gamma;
+
+    let nurb = path.nurb_ref()?;
+    let Some(net) = EnclosedNet::new(nurb.cpts(), nurb.knots(), nurb.degree()) else {
+        return Ok(false);
+    };
+    let (lo, hi) = nurb.param_bounds();
+    let Some((start, start_radius)) = net.point(lo) else {
+        return Ok(false);
+    };
+    for t in net.sample_parameters(lo, hi) {
+        let Some((point, radius)) = net.point(t) else {
+            continue;
+        };
+        // `Point3::distance` rounds within gamma(6) of the distance between the computed
+        // points (three differences, three squares, two sums and a root); the factors
+        // below also cover the comparison's own roundings.
+        let distance = start.distance(point);
+        let reach = distance * (1.0 - gamma(10));
+        let needed = (tol + (start_radius + radius) * (1.0 + gamma(4))) * (1.0 + gamma(2));
+        if reach.is_finite() && needed.is_finite() && reach > needed {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// A NURBS curve's homogeneous control net, evaluated by de Boor's algorithm with a
+/// bound on the rounding of every point (not upstream; for [`path_leaves_its_start`]).
+struct EnclosedNet {
+    /// `(w x, w y, w z, w)`, with `w = 1` and the coordinates as stored for a
+    /// non-rational curve, `z = 0` for a planar one.
+    points: Vec<[f64; 4]>,
+    knots: Vec<f64>,
+    degree: usize,
+    /// `max_i |Q_i,c|` for each homogeneous coordinate `c`.
+    largest: [f64; 4],
+    /// `min_i w_i`, positive.
+    least_weight: f64,
+}
+
+impl EnclosedNet {
+    /// `None` for mixed rational and non-rational points, a non-positive or non-finite
+    /// value, a knot vector whose length is not `n + p + 2`, or a degree so high that
+    /// `gamma(11 p)` is not small.
+    fn new(cpts: &[crate::nurbs::math::CPoint], knots: &[f64], degree: usize) -> Option<Self> {
+        use crate::nurbs::math::{NOW, NOZ, UNIT};
+
+        let rational = cpts.first()?.w != NOW;
+        let mut points = Vec::new();
+        let mut largest = [0.0_f64; 4];
+        let mut least_weight = f64::INFINITY;
+        for p in cpts {
+            if (p.w != NOW) != rational {
+                return None;
+            }
+            let w = if rational { p.w } else { 1.0 };
+            let z = if p.z == NOZ { 0.0 } else { p.z };
+            let q = [p.x, p.y, z, w];
+            if q.iter().any(|v| !v.is_finite()) || w <= 0.0 {
+                return None;
+            }
+            for (m, v) in largest.iter_mut().zip(q) {
+                *m = m.max(v.abs());
+            }
+            least_weight = least_weight.min(w);
+            points.push(q);
+        }
+        let expected = points.len().checked_add(degree)?.checked_add(1)?;
+        #[allow(clippy::cast_precision_loss)]
+        let small = (11.0 * degree as f64) * UNIT < 0.01;
+        if knots.len() != expected || !small || knots.iter().any(|u| !u.is_finite()) {
+            return None;
+        }
+        Some(Self {
+            points,
+            knots: knots.to_vec(),
+            degree,
+            largest,
+            least_weight,
+        })
+    }
+
+    /// The Greville abscissae and the middle of every non-empty knot span, kept within
+    /// `[lo, hi]`.
+    fn sample_parameters(&self, lo: f64, hi: f64) -> Vec<f64> {
+        let p = self.degree;
+        let mut out = Vec::new();
+        for i in 0..self.points.len() {
+            let window = self.knots.iter().skip(i + 1).take(p);
+            #[allow(clippy::cast_precision_loss)]
+            let t = if p == 0 {
+                self.knots.get(i).copied().unwrap_or(lo)
+            } else {
+                window.sum::<f64>() / p as f64
+            };
+            out.push(t.max(lo).min(hi));
+        }
+        for pair in self.knots.windows(2) {
+            if let [a, b] = *pair {
+                if a < b && a >= lo && b <= hi {
+                    out.push((0.5 * a + 0.5 * b).max(lo).min(hi));
+                }
+            }
+        }
+        out
+    }
+
+    /// The point at `t` and a bound on the Euclidean length of its rounding error, or
+    /// `None` when `t` lies in no non-empty span or a value is not finite.
+    ///
+    /// Bound. Each de Boor level forms `fl(fl(b a) + fl(alpha c))` per coordinate, with
+    /// `alpha = fl(fl(t - u_i) / fl(u_j - u_i))` in `[0, 1]` before rounding and
+    /// `b = fl(1 - alpha)`. Against the exact combination `(1 - alpha) a + alpha c` of
+    /// the same computed inputs, the error is at most `(gamma(3) (1 + gamma(3)) +
+    /// gamma(5)) M <= gamma(11) M` (Higham's `gamma` algebra), where `M` bounds the
+    /// inputs. The exact combination of perturbed inputs carries their error unscaled
+    /// (`alpha` is a convex weight), and exact values stay within `M_c = max_i |Q_i,c|`
+    /// (convex combinations). So after `r` levels the error `E_r <= E_(r-1) (1 +
+    /// gamma(11)) + gamma(11) M_c`, and `E_p <= ((1 + gamma(11))^p - 1) M_c <=
+    /// gamma(11 p) M_c` per homogeneous coordinate.
+    ///
+    /// The Euclidean coordinate is `x = X / W` with `W >= w_min` and `|x| <= M_c / w_min`
+    /// (partition of unity), so `|fl(X^ / W^) - x| <= (E_c + |x| E_W) / (W^ - E_W) +
+    /// u |x^|`. The denominator is taken low by `1 - gamma(2)`, the bound's own at most
+    /// fifteen roundings are covered by `1 + gamma(16)`, and the three coordinates'
+    /// bounds are summed (the sum exceeds the Euclidean length), times `1 + gamma(2)`.
+    fn point(&self, t: f64) -> Option<(Point3, f64)> {
+        use crate::nurbs::math::{gamma, UNIT};
+
+        let p = self.degree;
+        let n = self.points.len().checked_sub(1)?;
+        let knot = |i: usize| self.knots.get(i).copied();
+        // the span `k` in `p..=n` with `u_k <= t < u_(k+1)`, or the last non-empty one
+        // when `t` is its end
+        let mut span = None;
+        let mut last = None;
+        for k in p..=n {
+            let (a, b) = (knot(k)?, knot(k + 1)?);
+            if a < b {
+                if a <= t && t < b {
+                    span = Some(k);
+                    break;
+                }
+                last = Some((k, b));
+            }
+        }
+        let k = match (span, last) {
+            (Some(k), _) => k,
+            (None, Some((k, end))) if t == end => k,
+            _ => return None,
+        };
+        let mut d: Vec<[f64; 4]> = self.points.get(k - p..=k)?.to_vec();
+        for r in 1..=p {
+            for j in (r..=p).rev() {
+                let i = j + k - p;
+                let alpha = (t - knot(i)?) / (knot(i + p + 1 - r)? - knot(i)?);
+                let one_minus = 1.0 - alpha;
+                let previous = *d.get(j - 1)?;
+                let current = d.get_mut(j)?;
+                for (c, a) in current.iter_mut().zip(previous) {
+                    *c = one_minus * a + alpha * *c;
+                }
+            }
+        }
+        let [x, y, z, w] = *d.get(p)?;
+        let g = gamma(11 * p);
+        let [mx, my, mz, mw] = self.largest;
+        let error_w = g * mw;
+        let low = (w - error_w) * (1.0 - gamma(2));
+        if low.is_nan() || low <= 0.0 {
+            return None;
+        }
+        let point = Point3::new(x / w, y / w, z / w);
+        let coordinate = |m: f64, v: f64| {
+            ((g * m + (m / self.least_weight) * error_w) / low + UNIT * v.abs()) * (1.0 + gamma(16))
+        };
+        let radius = (coordinate(mx, point.x) + coordinate(my, point.y) + coordinate(mz, point.z))
+            * (1.0 + gamma(2));
+        let finite = [point.x, point.y, point.z, radius]
+            .iter()
+            .all(|v| v.is_finite());
+        finite.then_some((point, radius))
+    }
+}
+
 /// Whether a complete swept surface's terminal sections coincide within the B-rep's
 /// tolerance. Run before partitioning the surface into faces: a split face may span only
 /// one path piece even when the complete sweep closes (WR-675).
@@ -1224,6 +1427,88 @@ mod tests {
     use crate::curve::line::Line;
     use crate::geom::extent1d::Extent1d;
     use crate::kernel::Kernel;
+
+    fn canonical(
+        degree: usize,
+        points: &[Vec3],
+        multiplicities: &[usize],
+        knots: &[f64],
+        weights: Option<&[f64]>,
+    ) -> BSplineCurve {
+        use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree,
+            control_points: points,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: multiplicities,
+            knots,
+            knot_type: KnotType::Unspecified,
+            weights,
+            trim: None,
+        })
+        .unwrap()
+    }
+
+    /// A review case on #17100: a closed path whose parameter dwells near its start. The
+    /// square loop of side `10 s` spends 90% of its parameter on its first `1e-9 s`, so
+    /// the quarter, half and three-quarter points all lie within the tolerance of the
+    /// start. The Greville points (the polyline's corners) still certify that it leaves.
+    /// Scaled until the whole loop fits inside the tolerance, no point certifies it.
+    #[test]
+    fn a_loop_that_dwells_near_its_start_still_leaves_it() {
+        let tol = 1e-6;
+        let loop_of = |s: f64| {
+            let points = [
+                Vec3::ZERO,
+                Vec3::new(1e-9 * s, 0.0, 0.0),
+                Vec3::new(10.0 * s, 0.0, 0.0),
+                Vec3::new(10.0 * s, 10.0 * s, 0.0),
+                Vec3::new(0.0, 10.0 * s, 0.0),
+                Vec3::ZERO,
+            ];
+            canonical(
+                1,
+                &points,
+                &[2, 1, 1, 1, 1, 2],
+                &[0.0, 0.9, 0.92, 0.94, 0.96, 1.0],
+                None,
+            )
+        };
+        let path = loop_of(1.0);
+        let start = path.evaluate_point(0.0).unwrap();
+        for t in [0.25, 0.5, 0.75] {
+            assert!(start.distance(path.evaluate_point(t).unwrap()) < tol);
+        }
+        assert!(path_leaves_its_start(&path, tol).unwrap());
+        assert!(!path_leaves_its_start(&loop_of(1e-8), tol).unwrap());
+    }
+
+    /// A rational quarter circle of radius `r` about a far centre: the enclosure counts
+    /// the weights and the division. Radius 1 at 1e12 from the origin still leaves a
+    /// ball of 1e-6 (the enclosed rounding there is about 1e-2); radius 1e-8 near the origin
+    /// stays inside it.
+    #[test]
+    fn a_rational_arc_leaves_its_start_by_its_radius() {
+        let half = std::f64::consts::FRAC_1_SQRT_2;
+        let arc = |centre: Vec3, r: f64| {
+            let points = [
+                centre + Vec3::new(r, 0.0, 0.0),
+                centre + Vec3::new(r, r, 0.0),
+                centre + Vec3::new(0.0, r, 0.0),
+            ];
+            canonical(
+                2,
+                &points,
+                &[3, 3],
+                &[0.0, 1.0],
+                Some(&[1.0, half, 1.0][..]),
+            )
+        };
+        assert!(path_leaves_its_start(&arc(Vec3::new(1e12, 0.0, 0.0), 1.0), 1e-6).unwrap());
+        assert!(path_leaves_its_start(&arc(Vec3::new(1.0, 2.0, 3.0), 1.0), 1e-6).unwrap());
+        assert!(!path_leaves_its_start(&arc(Vec3::new(1.0, 2.0, 3.0), 1e-8), 1e-6).unwrap());
+    }
 
     #[test]
     fn closed_sections_allow_proportional_rational_weights() {

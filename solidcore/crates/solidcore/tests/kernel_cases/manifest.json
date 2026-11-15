@@ -135,18 +135,21 @@
       }
     },
     "frames": {
-      "cases": 6,
+      "cases": 7,
       "chain": {
         "1": 4,
+        "17": 1,
         "2": 1
       },
       "expressible": 5,
       "not_expressible": 1,
-      "operation_expressible": 5,
+      "operation_expressible": 6,
       "reasons": {
         "refused or failed in SolidCraft, not in a kernel operation": 1
       },
-      "ungraded": {}
+      "ungraded": {
+        "results": 1
+      }
     },
     "history": {
       "cases": 30,
