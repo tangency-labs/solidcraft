@@ -1419,31 +1419,28 @@ impl<'a> Work<'a> {
         };
         let slope = mag3(diff(comp(o1, 1), comp(o2, 1)));
         // int |D| over the cell
-        let gap = match (taylor, mid.first(), mid.get(1)) {
-            (true, Some(m1), Some(m2)) => {
-                let mut g = Ivl::from(0.0);
-                for i in 0..ord {
-                    let d = mag3(diff(comp(m1, i), comp(m2, i)));
-                    g = g + Ivl::from(d) * abs_moment(xl, xh, i);
-                }
-                let d = mag3(diff(comp(o1, ord), comp(o2, ord)));
-                g + Ivl::from(d) * abs_moment(xl, xh, ord)
+        let gap = if let (true, Some(m1), Some(m2)) = (taylor, mid.first(), mid.get(1)) {
+            let mut g = Ivl::from(0.0);
+            for i in 0..ord {
+                let d = mag3(diff(comp(m1, i), comp(m2, i)));
+                g = g + Ivl::from(d) * abs_moment(xl, xh, i);
             }
-            _ => {
-                let range = Ivl::from(mag3(diff(comp(o1, 0), comp(o2, 0)))) * (xh - xl);
-                match centred {
-                    Some(dm) => {
-                        let mean = Ivl::from(mag3(dm)) * (xh - xl)
-                            + Ivl::from(slope) * abs_moment(xl, xh, 1);
-                        // both hold: the narrower
-                        if mean.hi < range.hi {
-                            mean
-                        } else {
-                            range
-                        }
+            let d = mag3(diff(comp(o1, ord), comp(o2, ord)));
+            g + Ivl::from(d) * abs_moment(xl, xh, ord)
+        } else {
+            let range = Ivl::from(mag3(diff(comp(o1, 0), comp(o2, 0)))) * (xh - xl);
+            match centred {
+                Some(dm) => {
+                    let mean =
+                        Ivl::from(mag3(dm)) * (xh - xl) + Ivl::from(slope) * abs_moment(xl, xh, 1);
+                    // both hold: the narrower
+                    if mean.hi < range.hi {
+                        mean
+                    } else {
+                        range
                     }
-                    None => range,
                 }
+                None => range,
             }
         };
         let w = Ivl::from(zmax) * Ivl::from(speed) * gap;
@@ -1461,12 +1458,11 @@ impl<'a> Work<'a> {
                 .lo
                 .max(0.0)
         };
-        let least = match (taylor, mid.first(), mid.get(1)) {
-            (true, Some(m1), Some(m2)) => at_middle(diff(comp(m1, 0), comp(m2, 0))),
-            _ => {
-                let range = least_sum(diff(comp(o1, 0), comp(o2, 0)));
-                centred.map_or(range, |dm| range.max(at_middle(dm)))
-            }
+        let least = if let (true, Some(m1), Some(m2)) = (taylor, mid.first(), mid.get(1)) {
+            at_middle(diff(comp(m1, 0), comp(m2, 0)))
+        } else {
+            let range = least_sum(diff(comp(o1, 0), comp(o2, 0)));
+            centred.map_or(range, |dm| range.max(at_middle(dm)))
         };
         let kept = (Ivl::from(least) * (xh - xl)).lo;
         let settled = kept + kept >= gap.hi;
