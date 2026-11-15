@@ -189,6 +189,7 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "transform_model_size_from_body_box",
     "transform_scales_each_tolerance",
     "uv_trim_corner_end_points_only",
+    "validation_does_not_make_uv_trims",
     "volume_lift_third_derivative_terms",
     "volume_representational_end_continuities",
 ];

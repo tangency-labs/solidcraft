@@ -54,6 +54,7 @@
   "curve_sweep_closed_path_joins_ends",
   "linear_sweep_arc_is_cylinder",
   "join_touching_loops",
+  "validation_does_not_make_uv_trims",
   "offset_resolve_crossing_loops",
   "edgeuse_convexity_propagates_step_off_failure",
   "local_operation_box_holds_new_surfaces",

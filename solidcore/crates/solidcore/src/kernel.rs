@@ -686,6 +686,18 @@ pub struct UpstreamFixes {
     pub linear_sweep_arc_is_cylinder: bool,
     /// Planar faces from curves join a loop touching another loop at a vertex into that loop (WR-405, #892).
     pub join_touching_loops: bool,
+    /// `sm_CheckEdgeuseGeometry` evaluates the clockwise neighbour in UV space with
+    /// `SmEdgeuse::NormalizedEvaluate(.., TRUE, ..)`, whose `GetOrCreateUVTrimCurve`
+    /// stores a new UV trim curve on that neighbour: a `const` validation
+    /// (`SmBrep::ValidatePointers`, e.g. from `SmBrepConstructor::EndShell(TRUE)`) then
+    /// changes the B-rep it is asked to check (WR-446;
+    /// `plan/upstream-issues/WR-446--brepconstructor-endshell-validatepointers-makes-uv-trim-curves.md`).
+    /// With this set the neighbour is evaluated with `ok_to_make_uv_trim_curve = FALSE`:
+    /// the 3D point is still evaluated and dropped onto the existing face, but no trim
+    /// is made; the self evaluation, the existing trims and the statuses are unchanged.
+    /// Off by default for pinned C++ parity. This is not the WR-406 trim-reversal check:
+    /// validation still repairs existing trims as before.
+    pub validation_does_not_make_uv_trims: bool,
     /// Before the piecewise merge, `do_extended_offset` rebuilds every offset face whose loops cross from the stretches of its loops that bound it (WR-345, #854).
     pub offset_resolve_crossing_loops: bool,
     /// [`crate::topology::edgeuse::p2::is_convex_radial_sector`]
