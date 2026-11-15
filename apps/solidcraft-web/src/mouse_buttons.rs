@@ -111,7 +111,9 @@ impl Tracker {
         }
     }
 
-    /// Match the actual release before adding any button corrections or synthetic input.
+    /// Match the actual release before adding any button corrections or synthetic input: the
+    /// frame's last primary release is the pen's when it is near the lift. Safari reports an Apple
+    /// Pencil's lift twice (`pointerup` and `touchend`), a few points apart.
     fn take_pen_release(&mut self, events: &[Event]) -> Option<Pos2> {
         let at = self.pen_release.take()?;
         events
@@ -121,7 +123,7 @@ impl Tracker {
                 Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, .. } => Some(*pos),
                 _ => None,
             })
-            .filter(|pos| pos.distance(at) <= 1.0)
+            .filter(|pos| pos.distance(at) <= solidcraft_ui_egui::pencil::PEN_RELEASE_SLOP)
     }
 
     /// Note what happened. Returns true when the held buttons changed, so a frame should run.
@@ -404,6 +406,18 @@ mod tests {
         assert_eq!(tracker.stylus.len(), MAX_STYLUS);
     }
 
+    /// An Apple Pencil tap on an iPad, as Safari reported it: `pointerup` at (197, 272) and
+    /// `touchend` at (199.5, 274), and eframe's two releases in one frame. It is a pen tap.
+    #[test]
+    fn safari_reports_a_pencil_lift_twice_a_few_points_apart() {
+        let mut tracker = Tracker::default();
+        let (up, end) = (egui::pos2(197.0, 272.0), egui::pos2(199.5, 274.0));
+        let release = |pos| Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE };
+        tracker.note_pen(-652_795_160, true, true, egui::pos2(198.5, 277.0));
+        tracker.note_pen(-652_795_160, false, false, up);
+        assert_eq!(tracker.take_pen_release(&[release(up), Event::PointerGone, release(end)]), Some(end));
+    }
+
     /// A pen tap is matched once, and only after the same canvas contact releases.
     #[test]
     fn pen_release_matches_only_the_canvas_contact() {
@@ -437,7 +451,7 @@ mod tests {
         assert_eq!(tracker.take_pen_release(&release), None);
 
         tracker.note_pen(7, true, true, P);
-        tracker.note_pen(7, false, false, P + egui::vec2(10.0, 0.0));
+        tracker.note_pen(7, false, false, P + egui::vec2(40.0, 0.0));
         assert_eq!(tracker.take_pen_release(&release), None);
         assert_eq!(tracker.take_pen_release(&release), None);
 
@@ -445,7 +459,7 @@ mod tests {
         tracker.note_pen(7, false, false, P);
         let mut later = press(PointerButton::Primary, false);
         if let Event::PointerButton { pos, .. } = &mut later {
-            *pos += egui::vec2(10.0, 0.0);
+            *pos += egui::vec2(40.0, 0.0);
         }
         assert_eq!(tracker.take_pen_release(&[release[0].clone(), later]), None);
     }

@@ -6537,7 +6537,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::tools::on_click(app, &proj, p, mods.shift);
     }
     if let Some(p) = hover.filter(|_| inside) {
-        let pen_select = app.preferences.pencil_mode && resp.clicked_by(egui::PointerButton::Primary) && app.pen_release == Some(p);
+        let pen_select = app.preferences.pencil_mode && resp.clicked_by(egui::PointerButton::Primary) && crate::pencil::is_pen_release(app.pen_release, p);
         if app.tool.is_some() {
             crate::tools::on_hover(app, &proj, p, mods.shift);
         }
@@ -6654,7 +6654,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             if !add && !took_the_woken_centre(app, cand.as_ref()) {
                                 app.viewport.woken_centre = None;
                             }
-                            let sel = cand.and_then(|c| c.1);
+                            // A pen's tap picks where it lifted: Safari's touch end clears the
+                            // hover in the same frame as the release, before this click is read.
+                            let sel = match cand.and_then(|c| c.1) {
+                                None if pen_select => {
+                                    let hits = pick_cached(app, &proj, p);
+                                    candidate(app, &hits).map(|(_, s)| s)
+                                }
+                                sel => sel,
+                            };
                             // A pen tap on geometry toggles it. A tap on empty space clears.
                             let (add, allow_toggle) = if pen_select { (sel.is_some(), true) } else { (add, allow_toggle) };
                             select(app, sel.clone(), add, allow_toggle);
@@ -6671,7 +6679,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !held
             && app.tool.is_none()
             && app.dialog.is_none()
-            && let Some(items) = app.viewport.hover.as_ref().and_then(|hit| crate::pencil::whole(app, hit))
+            && let Some(hit) = match app.viewport.hover.clone() {
+                Some(hit) => Some(hit),
+                None => {
+                    let hits = pick_cached(app, &proj, p);
+                    candidate(app, &hits).map(|(hit, _)| hit)
+                }
+            }
+            && let Some(items) = crate::pencil::whole(app, &hit)
         {
             let _ = app.run("select.set", json!({ "items": items, "add": true }));
         }
@@ -8939,8 +8954,13 @@ mod tests {
         let pen_down = crate::pencil::PlatformTaps { pen_down: true, ..Default::default() };
         h.frame_with_taps(vec![egui::Event::PointerMoved(pos), button(true)], pen_down.clone());
         h.frame_with_taps(vec![button(true), touch(egui::TouchPhase::Start)], crate::pencil::PlatformTaps { stylus: vec![id], ..pen_down });
+        // `pointerup` and `touchend` report the lift a few points apart (3.2 points on an iPad),
+        // and their two releases come in one frame.
+        let end = pos + egui::vec2(2.5, 2.0);
+        let release = |at| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE };
+        let touch_end = egui::Event::Touch { device_id: egui::TouchDeviceId(1), id, phase: egui::TouchPhase::End, pos: end, force: Some(0.0) };
         h.frame_with_taps(
-            vec![button(false), egui::Event::PointerGone, touch(egui::TouchPhase::End)],
+            vec![button(false), release(end), egui::Event::PointerGone, touch_end],
             crate::pencil::PlatformTaps { pen_release: Some(pos), ..Default::default() },
         );
     }
@@ -9007,7 +9027,7 @@ mod tests {
         pen_tap(&mut h, top);
         h.frames(30);
         let top_face = h.app.session.selection.clone();
-        assert_eq!(top_face.len(), 1);
+        assert_eq!(top_face.len(), 1, "one Pencil tap is one click: {top_face:?}");
         pen_tap(&mut h, side);
         pen_tap(&mut h, side);
         h.frames(30);

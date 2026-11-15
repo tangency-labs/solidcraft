@@ -39,6 +39,15 @@ const ORPHAN_TIME: f64 = 1.0;
 const MAX_CONTACTS: usize = 16;
 /// The most pen touches followed at once.
 const MAX_PENS: usize = 16;
+/// How far a pen tip's lift may be from the release egui sees and still be the pen's, in points.
+/// Safari reports an Apple Pencil's lift twice, as `pointerup` and as `touchend`, a few points
+/// apart (3.2 points on an iPad), and eframe makes a release of each, often in one frame.
+pub const PEN_RELEASE_SLOP: f32 = 12.0;
+
+/// Whether the release at `at` is the pen tip's lifted at `pen`.
+pub(crate) fn is_pen_release(pen: Option<Pos2>, at: Pos2) -> bool {
+    pen.is_some_and(|pen| pen.is_finite() && at.is_finite() && pen.distance(at) <= PEN_RELEASE_SLOP)
+}
 
 /// What the platform knows about this frame's contacts and egui doesn't.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -185,7 +194,7 @@ pub(crate) fn filter(app: &mut SolveApp, ctx: &egui::Context, raw: &mut RawInput
         }
     }
     if !pen_touches.is_empty() {
-        raw.events.retain(|e| !matches!(e, Event::Touch { id, .. } if pen_touches.contains(id)));
+        drop_pen_touches(raw, &pen_touches);
     }
     let fingers = &mut app.viewport.fingers;
     if !fingers.holding {
@@ -207,6 +216,42 @@ pub(crate) fn filter(app: &mut SolveApp, ctx: &egui::Context, raw: &mut RawInput
         fingers.holding = false;
         fingers.several = false;
     }
+}
+
+/// Take a pen's touches out of the frame, with what eframe makes of them: for `touchstart` a
+/// primary press just before the touch, for `touchend` a primary release and the pointer gone.
+/// The pen's own pointer events already press and release, so each pen tap is then one click,
+/// not the two (a double-click) that egui would otherwise count, and the hover stays.
+fn drop_pen_touches(raw: &mut RawInput, pen_touches: &[egui::TouchId]) {
+    let mut kept: Vec<Event> = Vec::with_capacity(raw.events.len());
+    for e in raw.events.drain(..) {
+        match &e {
+            Event::Touch { id, phase, .. } if pen_touches.contains(id) => {
+                // eframe pushes what it makes of a touch right before the touch itself: one of
+                // each, so the pen's own press or release before them stays.
+                let pressed = |k: &Event| matches!(k, Event::PointerButton { button: PointerButton::Primary, pressed: true, .. });
+                let released = |k: &Event| matches!(k, Event::PointerButton { button: PointerButton::Primary, pressed: false, .. });
+                match phase {
+                    TouchPhase::Start => {
+                        if kept.last().is_some_and(pressed) {
+                            kept.pop();
+                        }
+                    }
+                    TouchPhase::End | TouchPhase::Cancel => {
+                        if kept.last().is_some_and(|k| matches!(k, Event::PointerGone)) {
+                            kept.pop();
+                        }
+                        if kept.last().is_some_and(released) {
+                            kept.pop();
+                        }
+                    }
+                    TouchPhase::Move => {}
+                }
+            }
+            _ => kept.push(e),
+        }
+    }
+    raw.events = kept;
 }
 
 /// A finger double-tap at `p`: on a planar face of a body, select the face and start a sketch on
