@@ -40,8 +40,11 @@ pub struct Profile3D {
 
 /// End points within this (mm) are one node; plane coincidence is tested to it too.
 const MERGE_TOL: f64 = 1e-5;
-/// Triple enumeration is O(n³): more nodes than this give up rather than stall evaluation.
+/// Triple enumeration is O(n³): more plane-spanning points than this give up rather than stall
+/// evaluation. Only a curve's key points span planes (see `key_points`), not every sample of it.
 const MAX_NODES: usize = 64;
+/// A wire with more points than this spans planes by its ends and a few points along it.
+const KEY_SAMPLES: usize = 5;
 /// Total lifted segments allowed.
 const MAX_EDGES: usize = 2_000;
 /// Distinct planes considered.
@@ -117,6 +120,10 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
     let mut nodes = Nodes::new();
     let mut edges: Vec<Edge3> = Vec::new();
     let mut plane_line_ids: HashSet<String> = HashSet::new();
+    // The nodes candidate planes are spanned by. A plane bounding a loop holds every point of
+    // the loop's curves, so a few points per curve are enough to find it, and a finely sampled
+    // spline (24 points per span) does not use up `MAX_NODES` on its own (#17296).
+    let mut key: Vec<usize> = Vec::new();
     for c in &sk.curves {
         if c.construction || c.centerline || c.infinite {
             continue;
@@ -127,7 +134,9 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
             let lift = |p: Vec2| plane.origin + plane.x * p.x + plane.y * p.y;
             let (a, b) = (lift(u), lift(v));
             if a.dist(b) > MERGE_TOL && edges.len() < MAX_EDGES {
-                edges.push(Edge3 { a: nodes.add(a), b: nodes.add(b), id: c.id.clone(), from_wire: false });
+                let (a, b) = (nodes.add(a), nodes.add(b));
+                key.extend([a, b]);
+                edges.push(Edge3 { a, b, id: c.id.clone(), from_wire: false });
                 plane_line_ids.insert(c.id.clone());
             }
         }
@@ -138,13 +147,22 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
             continue;
         }
         wire_ids.insert(w.id.clone());
+        let mut ends: Vec<usize> = Vec::with_capacity(w.pts.len());
         for pair in w.pts.windows(2) {
             if pair[0].dist(pair[1]) > MERGE_TOL && edges.len() < MAX_EDGES {
-                edges.push(Edge3 { a: nodes.add(pair[0]), b: nodes.add(pair[1]), id: w.id.clone(), from_wire: true });
+                let (a, b) = (nodes.add(pair[0]), nodes.add(pair[1]));
+                if ends.last() != Some(&a) {
+                    ends.push(a);
+                }
+                ends.push(b);
+                edges.push(Edge3 { a, b, id: w.id.clone(), from_wire: true });
             }
         }
+        key.extend(key_points(&ends, &nodes.pts));
     }
-    if edges.is_empty() || nodes.pts.len() < 3 || nodes.pts.len() > MAX_NODES {
+    key.sort_unstable();
+    key.dedup();
+    if edges.is_empty() || key.len() < 3 || key.len() > MAX_NODES {
         return Vec::new();
     }
     // The planes the nodes span, deduplicated. A plane needs at least three edges on it, one of
@@ -152,10 +170,10 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
     // candidate too (flat 3D loops take part there); profiles bounded only by in-plane curves are
     // dropped below, so nothing is listed twice.
     let mut candidates: Vec<Candidate> = Vec::new();
-    for i in 0..nodes.pts.len() {
-        for j in i + 1..nodes.pts.len() {
-            for k in j + 1..nodes.pts.len() {
-                let (a, b, c) = (nodes.pts[i], nodes.pts[j], nodes.pts[k]);
+    for i in 0..key.len() {
+        for j in i + 1..key.len() {
+            for k in j + 1..key.len() {
+                let (a, b, c) = (nodes.pts[key[i]], nodes.pts[key[j]], nodes.pts[key[k]]);
                 let (ab, ac) = (b - a, c - a);
                 let n = ab.cross(ac);
                 let len = n.len();
@@ -270,6 +288,29 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
                 area: p.area,
                 centroid: basis.origin + basis.x * p.centroid.x + basis.y * p.centroid.y,
             });
+        }
+    }
+    out
+}
+
+/// The nodes of one wire (`ends`, in order along it) that span planes: all of them for a short
+/// wire, otherwise its two ends, the points a quarter, half and three quarters along it, and the
+/// point farthest from the line through its ends (so a curved wire always gives one off that
+/// line). A plane holding the whole wire holds these. A plane they span that misses other points
+/// of the wire gets none of the segments there, as every segment must lie on the plane.
+fn key_points(ends: &[usize], pts: &[Vec3]) -> Vec<usize> {
+    if ends.len() <= KEY_SAMPLES {
+        return ends.to_vec();
+    }
+    let last = ends.len() - 1;
+    let mut out: Vec<usize> = (0..KEY_SAMPLES).filter_map(|q| ends.get(q * last / (KEY_SAMPLES - 1))).copied().collect();
+    if let (Some(&a), Some(&b)) = (ends.first(), ends.last())
+        && let (Some(&a), Some(&b)) = (pts.get(a), pts.get(b))
+    {
+        let chord = b - a;
+        let off = |i: usize| pts.get(i).map_or(0.0, |&p| chord.cross(p - a).len());
+        if let Some(&far) = ends.iter().max_by(|&&i, &&j| off(i).total_cmp(&off(j))) {
+            out.push(far);
         }
     }
     out
