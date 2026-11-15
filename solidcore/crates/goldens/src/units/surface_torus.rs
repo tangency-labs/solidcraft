@@ -1282,12 +1282,14 @@ mod tests {
                 let (dx, dy) = (pts[0] - o, pts[2] - o);
                 let r = dx.length();
                 let scale = o.max_dimension() + 2.0 * r;
-                // rounding counted per coordinate, each relative to `scale`: the stored
-                // homogeneous product (1), the divide by w (1), the midpoint's sum (1), the
-                // subtraction for dx / dy (1), the two additions of `q` (2), the final
-                // difference (1) and the norm (1): gamma_8, times 2 for the 3-vector norm
-                // (sqrt 3 < 2)
-                let bound = 2.0 * solidcore::nurbs::math::gamma(8) * scale;
+                // MEASURED, not a derived bound: the control points come through the
+                // circle builder (`quadratic_arc_tol`, `project_pt_line`,
+                // `combine2_pts`, nurbs/crv_common.rs), whose rounding is not counted
+                // here. The residuals below, in units of f64::EPSILON * scale, were at
+                // most 0.56 on these six rows (measured 2026-11-15); the guard of 16
+                // catches a point off the square by more than rounding (a collapsed or
+                // wrong circle is off by the radius).
+                let bound = 16.0 * f64::EPSILON * scale;
                 assert!((dy.length() - r).abs() <= bound, "{name}: {dy:?} {r}");
                 assert!(dx.dot(dy).abs() <= bound * r, "{name}: axes not square");
                 let expected = [
