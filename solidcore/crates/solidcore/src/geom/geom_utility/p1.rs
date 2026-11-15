@@ -1997,7 +1997,10 @@ mod tests {
         let CircleCircle::Crossing(p, q) = hit else {
             panic!("nearly coincident: two crossings expected, {hit:?}");
         };
-        assert!((p.y + q.y).abs() < 1e-9 && (p.y.abs() - 2.5).abs() < 1e-6, "{p:?} {q:?}");
+        assert!(
+            (p.y + q.y).abs() < 1e-9 && (p.y.abs() - 2.5).abs() < 1e-6,
+            "{p:?} {q:?}"
+        );
         // without a contact tolerance, an overlap from outside below upstream's zero (2e-12
         // at radius 1) touches midway on the outside, not a radius off towards circle 1
         touch(
