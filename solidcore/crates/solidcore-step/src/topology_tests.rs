@@ -2010,6 +2010,71 @@ fn a_spline_cone_closed_in_v_gets_a_seam_to_its_apex() {
     faces_away(&s.brep, 0, |_| [0.0, 0.0, 1.0]);
 }
 
+/// A prism whose side is a B-spline surface closed around u (its first and last control columns
+/// the same), extruded from a closed quintic on 121 points of a wavy outline (a radius of 5 ± 2 mm,
+/// thirty waves round), as a fit-point spline is written; the side's loop has its seam,
+/// a line at the knots' start used both ways. The turns the loop makes round u were counted from
+/// each point's parameters found from the last point's alone, which settled on another wave
+/// millimetres away and counted a turn the loop does not make: the side was refused as "a face
+/// around an open surface of revolution with one bound" and the solid read open (#16723).
+#[test]
+fn a_wavy_spline_prism_with_its_seam_gets_no_other() {
+    let n = 121;
+    let outline: Vec<V> = (0..n)
+        .map(|k| {
+            // The last point is the first, exactly.
+            let t = std::f64::consts::TAU * f64::from(k % (n - 1)) / f64::from(n - 1);
+            let r = 5.0 + 2.0 * (30.0 * t).sin();
+            [r * t.cos(), r * t.sin(), 0.0]
+        })
+        .collect();
+    // Clamped quintic knots: 0 and 1 six times, evenly between.
+    let mults: Vec<&str> = (0..n - 4).map(|k| if k == 0 || k == n - 5 { "6" } else { "1" }).collect();
+    let knots: Vec<String> = (0..n - 4).map(|k| real(f64::from(k) / f64::from(n - 5))).collect();
+    let (mults, knots) = (mults.join(","), knots.join(","));
+    let at = |p: V, z: f64| [p[0], p[1], z];
+    let mut w = W::default();
+    let curve = |w: &mut W, z: f64| {
+        let pts: Vec<u64> = outline.iter().map(|p| w.pt(at(*p, z))).collect();
+        w.add(format!("B_SPLINE_CURVE_WITH_KNOTS('',5,({}),.UNSPECIFIED.,.T.,.F.,({mults}),({knots}),.UNSPECIFIED.)", list(&pts)))
+    };
+    let (v0, v1) = (w.vertex(at(outline[0], 0.0)), w.vertex(at(outline[0], 5.0)));
+    let (kb, kt) = (curve(&mut w, 0.0), curve(&mut w, 5.0));
+    let bottom = w.add(format!("EDGE_CURVE('',#{v0},#{v0},#{kb},.T.)"));
+    let top = w.add(format!("EDGE_CURVE('',#{v1},#{v1},#{kt},.T.)"));
+    let seam = w.line_edge((v0, at(outline[0], 0.0)), (v1, at(outline[0], 5.0)), true, 5.0);
+    let rows: Vec<String> = outline
+        .iter()
+        .map(|p| {
+            let (a, b) = (w.pt(at(*p, 0.0)), w.pt(at(*p, 5.0)));
+            format!("(#{a},#{b})")
+        })
+        .collect();
+    let surface = w.add(format!(
+        "B_SPLINE_SURFACE_WITH_KNOTS('',5,1,({}),.UNSPECIFIED.,.T.,.F.,.F.,({mults}),(2,2),({knots}),(0.,5.),.UNSPECIFIED.)",
+        rows.join(",")
+    ));
+    // Along the outline (counter-clockwise about +z) and up: the side's normal points out. Its
+    // loop runs round the bottom, up the seam, back round the top and down the seam.
+    let uses = [w.oe(bottom, true), w.oe(seam, true), w.oe(top, false), w.oe(seam, false)];
+    let bx = w.bound(&uses, true, true);
+    let side = w.face(&[bx], surface, true);
+    let plane_b = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(bottom, false);
+    let bx = w.bound(&[x], true, true);
+    let cap_b = w.face(&[bx], plane_b, false);
+    let plane_t = w.plane([0.0, 0.0, 5.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(top, true);
+    let bx = w.bound(&[x], true, true);
+    let cap_t = w.face(&[bx], plane_t, true);
+    let shell = closed_shell(&mut w, &[side, cap_b, cap_t]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('wavy prism',#{shell})"));
+    let s = one_solid(&w.file_with_uncertainty(&[solid], 0.01));
+    assert_eq!(counts(&s.brep), [2, 1, 3, 3, 2]);
+    assert!(!s.notes.iter().any(|n| n.contains("seam edges added")), "{:?}", s.notes);
+    faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 4.0)]);
+}
+
 #[test]
 fn pcurves_past_a_quarter_line_the_form_ends_on_are_put_on_the_form() {
     // A cylinder face from 2e-5 rad before the frame's x axis to 0.5 rad (its straight edge 0.2 um

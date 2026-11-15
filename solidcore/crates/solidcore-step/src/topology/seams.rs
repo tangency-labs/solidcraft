@@ -23,7 +23,7 @@
 use crate::vec::Vec3Geom as _;
 use std::f64::consts::{PI, TAU};
 
-use crate::kernel::{CurveEval, SurfaceEval};
+use crate::kernel::{CurveEval, Starts, SurfaceEval};
 use solidcore::nurbs::math::gamma;
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Frame, Surface as BSurface, Vertex};
@@ -484,9 +484,17 @@ impl Builder<'_, '_> {
     /// there is any, and a loop running in to the pole and out again turned as the points either
     /// side of it say (a cap split along a meridian, one half's loop from the rim to the pole and
     /// back, does not wind round the axis).
+    ///
+    /// Each point is taken at the parameters of the surface's point nearest it: of the one found
+    /// from the last point's parameters and the one found by searching the whole surface. A
+    /// search from the last point alone can settle on another part of the surface, near the
+    /// point but not under it (a fit-point spline's wiggles millimetres away, a curl of the
+    /// profile smaller than the tolerance), and a loop with its seam would count a turn it does
+    /// not make.
     fn winding(&self, eval: &SurfaceEval, es: &[(u32, bool)], periods: [Option<f64>; 2], poles: &[Vec3]) -> R<[i64; 2]> {
         let mut last: Option<[f64; 2]> = None;
         let mut total = [0.0; 2];
+        let starts = Starts::default();
         for &(e, forward) in es {
             let edge = self.edges.get(e as usize).ok_or("edge reference")?;
             let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
@@ -499,7 +507,10 @@ impl Builder<'_, '_> {
                 if poles.iter().any(|q| p.dist(*q) <= reach) {
                     continue;
                 }
-                let Some(q) = eval.project(p, last, f64::INFINITY) else { continue };
+                let off = |q: Option<[f64; 2]>| q.and_then(|q| eval.point(q).map(|s| (q, s.dist(p))));
+                let (from_last, searched) = (off(eval.project(p, last, f64::INFINITY)), off(eval.project_with(&starts, p, None, f64::INFINITY)));
+                // The nearer; the one from the last point where they are as near (across a seam).
+                let Some((q, _)) = [from_last, searched].into_iter().flatten().min_by(|a, b| a.1.total_cmp(&b.1)) else { continue };
                 if let Some(l) = last {
                     for (((t, period), q), l) in total.iter_mut().zip(periods).zip(q).zip(l) {
                         if let Some(p) = period {
