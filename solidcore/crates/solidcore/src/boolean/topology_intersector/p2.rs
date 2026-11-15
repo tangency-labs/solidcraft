@@ -65,9 +65,9 @@
 //!   each face pair the face loop of `IntersectTopology` visits adds one to
 //!   [`WorkCounters::face_pairs`](crate::kernel::WorkCounters::face_pairs). It changes no
 //!   result.
-//! - **Not upstream (WR-528).** `CloseIntersectionLoop` relates the target edge to the sole other edge between the
-//!   mated vertices only when its midpoint drops within the edges' tolerance (the
-//!   fork's tangency-labs/smlib@e881cdb).
+//! - **Not upstream (WR-528).** `CloseIntersectionLoop` relates the target edge to the
+//!   sole other edge between the mated vertices only when its midpoint drops within the
+//!   edges' tolerance (the fork's tangency-labs/smlib@e881cdb).
 //! - **Deleted curves.** `IntersectTopology` and `IntersectInsertRelate` return the
 //!   curve handles deleted (by `SplitIntersectingProtoEdges`, the resolution, the
 //!   imprint and the manager's destructor), as [`p1`](super::p1) does.
