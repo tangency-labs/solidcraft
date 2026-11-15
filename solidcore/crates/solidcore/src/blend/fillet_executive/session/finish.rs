@@ -575,7 +575,7 @@ impl FilletSession<'_> {
         let (result, split_and_logged) = self.filleting_split_and_logged(k, None);
         if result.is_err()
             && self.executive.error.code != FilletErrorType::NoRoom as i32
-            && self.executive.error.no_room.is_none()
+            && self.executive.error.no_room == noted_before.no_room
         {
             if let Some(note) = missing_corner_note {
                 self.executive.error = note;

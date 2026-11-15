@@ -7784,31 +7784,61 @@ mod tests {
     }
 
     /// A missing-corner note left on the session before `do_fillet` is not this call's:
-    /// a later failure of a fillet with no unsupported corner (a round of 5 on a unit
-    /// cube's edge) reports its own error info, not the stale note.
+    /// a later failure of a fillet with no unsupported corner reports exactly the error
+    /// info it reports without the stale note. The case's failure is not a no-room
+    /// refusal, so the snapshot of the note (not the no-room guard) is what keeps the
+    /// stale note out.
     #[test]
     fn do_fillet_does_not_keep_a_stale_missing_corner_note() {
-        let mut k = Kernel::default();
-        let mut body =
-            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+        let run = |stale: bool| {
+            let mut k = Kernel::default();
+            let mut body = pentagonal_pyramid(&mut k);
+            let base_edges = crate::topology::brep::p1::edges(&body, None)
+                .unwrap()
+                .into_iter()
+                .filter(|edge| {
+                    crate::topology::edge::vertices(&body, *edge, None)
+                        .unwrap()
+                        .iter()
+                        .flatten()
+                        .all(|v| crate::topology::vertex::point(&body, *v).unwrap().z < 0.5)
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(base_edges.len(), 5);
+            let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+            session
+                .prepare_constant_radius_edges(
+                    &mut k,
+                    &base_edges[..1],
+                    STALE_CASE_RADIUS,
+                    1,
+                    1,
+                    1.0,
+                )
                 .unwrap();
-        let edge = crate::topology::brep::p1::edges(&body, None).unwrap()[0];
-        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
-        session
-            .prepare_constant_radius_edges(&mut k, &[edge], 5.0, 1, 1, 1.0)
-            .unwrap();
-        session.executive.error.code = FilletErrorType::CornerUnsupported as i32;
-        session.executive.error.comment = "a stale note".into();
-        let result = session.do_fillet(&mut k);
-        assert!(result.is_err(), "{result:?}");
-        let error = session.error_info();
-        assert_ne!(error.comment, "a stale note", "{error:?}");
+            if stale {
+                session.executive.error.code = FilletErrorType::CornerUnsupported as i32;
+                session.executive.error.comment = "a stale note".into();
+            }
+            let result = session.do_fillet(&mut k);
+            assert!(result.is_err(), "stale {stale}: {result:?}");
+            let e = session.error_info();
+            (e.code, e.comment.clone(), e.no_room, e.vertex)
+        };
+        let baseline = run(false);
+        assert_ne!(baseline.0, FilletErrorType::NoRoom as i32, "{baseline:?}");
         assert_ne!(
-            error.code,
+            baseline.0,
             FilletErrorType::CornerUnsupported as i32,
-            "{error:?}"
+            "{baseline:?}"
         );
+        assert_eq!(baseline.2, None, "{baseline:?}");
+        assert_eq!(run(true), baseline);
     }
+
+    /// The radius of [`do_fillet_does_not_keep_a_stale_missing_corner_note`]'s round on one
+    /// base edge of the pyramid: larger than the base face allows, so the fillet fails.
+    const STALE_CASE_RADIUS: f64 = 3.0;
 
     #[test]
     fn a_no_room_refusal_after_an_unsupported_corner_names_no_stale_site() {
