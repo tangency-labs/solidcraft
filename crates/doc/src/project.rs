@@ -3037,7 +3037,7 @@ fn fit_chain_with_arcs(raw: &[Vec2], loose: Option<f64>, out: &mut Vec<LinkGeom>
             p.push(l);
         }
     }
-    if p.len() < 2 || ext <= tol {
+    if p.len() < 2 || ext <= 1e-9 {
         return;
     }
     if !exact {
@@ -3095,7 +3095,7 @@ fn fit_piece(p: &[Vec2], tol: f64, exact: bool, preserve_arcs: bool, out: &mut V
         return;
     }
     // A near-straight run is a line, not an arc of huge radius.
-    let curved = |sw: f64| !preserve_arcs || exact || sw.abs() >= 20f64.to_radians();
+    let curved = |sw: f64| !preserve_arcs || exact || sw.abs() >= 2f64.to_radians();
     let fitted_arc = || fits_circle(p, tol, exact, preserve_arcs).filter(|(_, _, sw)| curved(*sw)).and_then(|(c, r, sw)| arc_geom(p, c, r, sw, tol));
     if preserve_arcs
         && (exact || p.len() >= 4)
@@ -3194,5 +3194,21 @@ mod exact_loop_tests {
         let cubic = [p0, p0 * (1.0 / 3.0) + p1 * (2.0 / 3.0), p1 * (2.0 / 3.0) + p2 * (1.0 / 3.0), p2];
         let area = rational_area(&cubic).expect("degree-elevated quarter circle");
         assert!((area - std::f64::consts::FRAC_PI_4).abs() < 1e-8, "{area}");
+    }
+
+    /// A shallow circular arc (e.g. 10 degrees on an R10 torus, #17498) is preserved as an arc
+    /// rather than being flattened into a chord or discarded.
+    #[test]
+    fn shallow_ten_degree_arc_fits_as_an_arc_not_a_chord() {
+        let r = 10.0;
+        let c = Vec2::new(0.0, 20.0);
+        let mut pts = Vec::new();
+        for i in 0..=20 {
+            let theta = (i as f64 / 20.0) * 10f64.to_radians();
+            pts.push(c + Vec2::new(r * theta.cos(), r * theta.sin()));
+        }
+        let mut out = Vec::new();
+        fit_chain_with_arcs(&pts, Some(1e-4), &mut out, true);
+        assert!(matches!(out.as_slice(), [LinkGeom::Arc { .. }]), "expected 10-degree arc preserved, got {out:?}");
     }
 }
