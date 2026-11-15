@@ -248,7 +248,8 @@ fn a_ridge_closes_as_a_ridge_and_a_point_as_an_apex() {
 #[test]
 fn a_ridge_shorter_than_the_tolerance_is_refused() {
     let mut k = kernel();
-    // the B-rep's tolerance, from the 1e-3 case that builds
+    // the B-rep's tolerance, from the 1e-3 case that builds: the taper's walls are closed
+    // to that same tolerance (both the kernel's default B-rep tolerance)
     let curves = polygon(&[p(0.0, 0.0), p(2.001, 0.0), p(2.001, 2.0), p(0.0, 2.0)]);
     let TaperExtrude::Solid(b) = taper(&mut k, &curves, 45.0, OffsetCornerType::LinearExtension)
     else {

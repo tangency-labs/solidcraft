@@ -193,9 +193,8 @@ impl PrimitiveCreation {
     /// [`OffsetCornerType::CurveExtension`], or linear-extension corners (WR-521), a
     /// profile of lines and circular arcs with a sharp corner gets walls that continue
     /// as themselves (or as their tangent planes) to meet along their exact seams, and
-    /// a corner they cannot
-    /// close is refused, the target left as it was. `CurveExtension` on a profile
-    /// without a sharp corner is `LinearExtension`.
+    /// a corner they cannot close is refused, the target left as it was.
+    /// `CurveExtension` on a profile without a sharp corner is `LinearExtension`.
     ///
     /// # Errors
     ///

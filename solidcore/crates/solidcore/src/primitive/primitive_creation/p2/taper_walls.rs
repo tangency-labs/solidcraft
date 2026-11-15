@@ -1567,7 +1567,9 @@ impl EdgeLoop {
 /// point (a pyramid's apex, or the far end of a ridge two walls close along), the whole
 /// section closes there and the walls end at that point (#17265; the fork refused it once
 /// fewer than three walls were left). A wall closing at the far end, a section that
-/// closes with walls still apart, and an arc shrinking to its centre are still refused.
+/// closes with walls still apart, a closure within the tolerance of one point but beyond
+/// its bound ([`Sections::closed_at`]), and an arc shrinking to its centre are still
+/// refused.
 #[allow(clippy::too_many_lines)] // one fork routine
 fn walls_closing_at_apexes(
     a: &mut impl PrimitiveCreationAccess,
