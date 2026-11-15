@@ -549,33 +549,32 @@ impl PrimitiveCreation {
                     // off the axis by more than the B-rep's tolerance, within which a
                     // profile vertex is on the axis
                     let tolerance = a.brep(brep)?.tolerance();
-                    let rev = match analytic {
-                        Some(surface) => Some(surface),
-                        None => {
-                            // Not upstream (#17204): a B-spline end within the B-rep's
-                            // tolerance of the axis is on it for the body, so the surface
-                            // of revolution turns the curve with that end's control point
-                            // on the axis. A curve the analytic rule above recognised (a
-                            // circular arc's sphere) keeps its own ends: its surface puts
-                            // its poles on the axis itself
-                            let profile = spline_ends_on_axis(
-                                a.kernel(brep)?,
-                                curve,
-                                axis_base,
-                                axis,
-                                tolerance,
-                            )?
-                            .unwrap_or_else(|| curve.clone());
-                            ignored(SurfOfRevolution::create_canonical_off_axis(
-                                a.kernel(brep)?,
-                                profile,
-                                axis_base,
-                                axis,
-                                false,
-                                tolerance,
-                            ))?
-                            .map(Surface::from)
-                        }
+                    let rev = if let Some(surface) = analytic {
+                        Some(surface)
+                    } else {
+                        // Not upstream (#17204): a B-spline end within the B-rep's
+                        // tolerance of the axis is on it for the body, so the surface
+                        // of revolution turns the curve with that end's control point
+                        // on the axis. A curve the analytic rule above recognised (a
+                        // circular arc's sphere) keeps its own ends: its surface puts
+                        // its poles on the axis itself
+                        let profile = spline_ends_on_axis(
+                            a.kernel(brep)?,
+                            curve,
+                            axis_base,
+                            axis,
+                            tolerance,
+                        )?
+                        .unwrap_or_else(|| curve.clone());
+                        ignored(SurfOfRevolution::create_canonical_off_axis(
+                            a.kernel(brep)?,
+                            profile,
+                            axis_base,
+                            axis,
+                            false,
+                            tolerance,
+                        ))?
+                        .map(Surface::from)
                     };
                     let mut success = false;
                     if let Some(surface) = rev {
