@@ -200,22 +200,22 @@ fn report(gaps: usize, ellipses: usize, seams: usize) -> Vec<String> {
     v
 }
 
-/// Joins #1529's tubes at `gap` with every fix on when `all`: the report may name no test
-/// that upstream's (WR-575's span removal, the retired flag off), pinned as `off`, doesn't,
-/// and at 1e-5 it must drop the circle's `SmEllipse` #1/#2 (WR-575's own case). Returns
-/// what went wrong.
+/// Joins #1529's tubes at `gap` with every fix on when `all`. Every test the check
+/// reports must also be in `off`, upstream's pinned report (WR-575's span removal,
+/// measured with the retired flag off), and at 1e-5 the circle's `SmEllipse` #1/#2 must
+/// be gone (WR-575's own case). Returns what went wrong.
 fn flag_row(gap: f64, all: bool, off: &[String]) -> Vec<String> {
     let mut failures = Vec::new();
-    let on = join_with_gap(gap, all);
-    println!("gap {gap} all {all}: upstream {off:?}, now {on:?}");
-    if !is_sub_multiset(&on, off) {
+    let now = join_with_gap(gap, all);
+    println!("gap {gap} all {all}: upstream {off:?}, now {now:?}");
+    if !is_sub_multiset(&now, off) {
         failures.push(format!(
-            "gap {gap} all {all}: flag on {on:?} adds to {off:?}"
+            "gap {gap} all {all}: now {now:?} adds to upstream's {off:?}"
         ));
     }
-    if gap == 1e-5 && on.iter().any(|x| x.starts_with("SmEllipse")) {
+    if gap == 1e-5 && now.iter().any(|x| x.starts_with("SmEllipse")) {
         failures.push(format!(
-            "gap {gap} all {all}: flag on {on:?} keeps the ellipse"
+            "gap {gap} all {all}: now {now:?} keeps the ellipse"
         ));
     }
     failures
@@ -230,7 +230,7 @@ fn flag_row(gap: f64, all: bool, off: &[String]) -> Vec<String> {
 /// [`wr575_every_fix_at_1e_6_adds_no_check_failure`].
 #[test]
 fn wr575_tube_ends_join_adds_no_check_failure_at_any_gap() {
-    // (gap, every fix on, the flag-off report). At 1e-5 the flag-off controls changed with
+    // (gap, every fix on, upstream's report). At 1e-5 upstream's reports changed with
     // WR-751 (#2621), `MergeIntoObject` splitting the two end circles where they pass
     // nearest their points (3.1e-6 -> 2.3e-6 and 2.8e-6 -> 2.2e-6 off): one gap pair
     // (7.77e-6 against 7.5e-6) goes, and each split now falls a few micrometres from the

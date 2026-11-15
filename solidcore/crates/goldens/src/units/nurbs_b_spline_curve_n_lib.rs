@@ -2148,8 +2148,10 @@ mod tests {
     /// WR-575's own trim cases (`issue1529_*`, `issue1114_*`, the moved rows of the flag
     /// retirement): a half circle, its knot at 0.5, trimmed 1e-7 (radius 16) or 3.5e-6
     /// (radius 0.14) past the knot. The trim keeps the short end span, so the result is
-    /// the requested interval with the knot kept, and both spans are exact arcs of the
-    /// circle (to a rounding allowance of 256 ulps of `r^2` and of 1). The values
+    /// the requested interval with the knot kept, both spans are exact arcs of the
+    /// circle, and together they run from the circle's point at `a` through its point at
+    /// the knot to its point at `b`, in its plane (to a rounding allowance of 256 ulps of
+    /// `r`, `r^2` and 1, a chosen margin rather than a derived bound). The values
     /// blessed before, upstream's removal of the span, are a single span whose middle
     /// point is off its end tangent by 5.3e-5 (`r^2`-scaled) and whose middle weight is
     /// off the half-angle cosine by 1.3e-7, far past that allowance: the conic it gives
@@ -2182,6 +2184,14 @@ mod tests {
                 assert_eq!(knots, vec![a, a, a, 0.5, 0.5, b, b, b], "{name}");
                 let pts = euclid(&c);
                 assert_eq!(pts.len(), 5, "{name}");
+                // which arc: in the circle's plane, from the circle's point at `a` through
+                // its point at the knot, (0, r), to its point at `b`
+                let orig = build_this(i.this.as_ref().unwrap()).unwrap();
+                let close = |p: Vec3, q: Vec3| (p - q).length() <= 256.0 * u * r;
+                assert!(pts.iter().all(|(p, _)| p.z == 0.0), "{name}: off the plane");
+                assert!(close(pts[0].0, orig.evaluate_point(a).unwrap()), "{name}: start");
+                assert!(close(pts[2].0, Vec3::new(0.0, r, 0.0)), "{name}: knot");
+                assert!(close(pts[4].0, orig.evaluate_point(b).unwrap()), "{name}: end");
                 for span in [&pts[0..3], &pts[2..5]] {
                     let [on, tangent, weight] = arc_departures(span, r);
                     assert!(on <= 256.0 * u * r * r, "{name}: end off the circle {on}");
