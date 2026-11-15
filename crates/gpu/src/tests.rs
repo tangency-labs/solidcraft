@@ -39,6 +39,126 @@ fn gpu() -> Option<TessGpu> {
     }
 }
 
+/// Native teardown can fail after the test body returns, so verify a fresh process's exit too.
+#[test]
+fn fresh_headless_devices_finish_and_their_process_exits() {
+    const CHILD: &str = "SOLIDCRAFT_GPU_LIFETIME_TEST_CHILD";
+    const COMPLETE: &str = "headless GPU lifetimes completed: 10";
+    const UNAVAILABLE: &str = "headless GPU lifetimes unavailable";
+    if std::env::var_os(CHILD).as_deref() == Some(std::ffi::OsStr::new("1")) {
+        let made = std::thread::scope(|scope| {
+            let create = || {
+                let mut made = 0;
+                for _ in 0..5 {
+                    let Some(device) = gpu() else { return made };
+                    assert!(!device.adapter_name().is_empty());
+                    drop(device);
+                    made += 1;
+                }
+                made
+            };
+            let first = scope.spawn(create);
+            let second = scope.spawn(create);
+            [ok(first.join()), ok(second.join())]
+        });
+        if made == [0, 0] && std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() {
+            println!("{UNAVAILABLE}");
+            return;
+        }
+        assert_eq!(made, [5, 5], "both workers must finish every actual GPU lifetime");
+        println!("{COMPLETE}");
+        return;
+    }
+    let mut child = ok(std::process::Command::new(ok(std::env::current_exe()))
+        .args(["--exact", "tests::fresh_headless_devices_finish_and_their_process_exits", "--nocapture", "--test-threads=1"])
+        .env(CHILD, "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn());
+    // This bounds a stuck native destructor; it is not a performance expectation.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+    let stdout_pipe = ok(child.stdout.take().ok_or("missing child stdout pipe"));
+    let stderr_pipe = ok(child.stderr.take().ok_or("missing child stderr pipe"));
+    fn drain(mut pipe: impl std::io::Read) -> (Vec<u8>, std::io::Result<usize>, bool) {
+        const CAPTURE_LIMIT: usize = 4 * 1024 * 1024;
+        let mut bytes = Vec::new();
+        let mut buffer = [0; 8192];
+        let mut total = 0_usize;
+        let mut truncated = false;
+        loop {
+            match pipe.read(&mut buffer) {
+                Ok(0) => return (bytes, Ok(total), truncated),
+                Ok(count) => {
+                    total = total.saturating_add(count);
+                    let keep = count.min(CAPTURE_LIMIT.saturating_sub(bytes.len()));
+                    bytes.extend_from_slice(&buffer[..keep]);
+                    truncated |= keep < count;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) => return (bytes, Err(error), truncated),
+            }
+        }
+    }
+    let (timed_out, poll_error, kill_error, status, stdout, stderr) = std::thread::scope(|scope| {
+        let stdout = match std::thread::Builder::new().name("gpu-test-stdout".into()).spawn_scoped(scope, move || drain(stdout_pipe)) {
+            Ok(reader) => reader,
+            Err(error) => {
+                let kill = child.kill();
+                let status = child.wait();
+                panic!("could not start GPU child stdout reader: {error}; kill={kill:?}, status={status:?}");
+            }
+        };
+        let stderr = match std::thread::Builder::new().name("gpu-test-stderr".into()).spawn_scoped(scope, move || drain(stderr_pipe)) {
+            Ok(reader) => reader,
+            Err(error) => {
+                let kill = child.kill();
+                let status = child.wait();
+                let drained = stdout.join();
+                panic!("could not start GPU child stderr reader: {error}; kill={kill:?}, status={status:?}, stdout={drained:?}");
+            }
+        };
+        let mut poll_error = None;
+        let mut kill_error = None;
+        let timed_out = loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break false,
+                Ok(None) => {}
+                Err(error) => {
+                    poll_error = Some(error);
+                    kill_error = child.kill().err();
+                    break false;
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                kill_error = child.kill().err();
+                break true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        let status = child.wait();
+        (timed_out, poll_error, kill_error, status, ok(stdout.join()), ok(stderr.join()))
+    });
+    let (stdout_bytes, stdout_read, stdout_truncated) = stdout;
+    let (stderr_bytes, stderr_read, stderr_truncated) = stderr;
+    let stdout = String::from_utf8_lossy(&stdout_bytes);
+    let stderr = String::from_utf8_lossy(&stderr_bytes);
+    assert!(
+        !timed_out
+            && poll_error.is_none()
+            && status.as_ref().is_ok_and(|status| status.success())
+            && stdout_read.is_ok()
+            && stderr_read.is_ok()
+            && !stdout_truncated
+            && !stderr_truncated,
+        "native GPU child timed_out={timed_out}, status={status:?}, poll={poll_error:?}, kill={kill_error:?}, stdout={stdout_read:?}, stderr={stderr_read:?}, truncated=({stdout_truncated},{stderr_truncated}):\n{stdout}\n{stderr}"
+    );
+    assert!(
+        stdout.contains(COMPLETE) || (std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() && stdout.contains(UNAVAILABLE)),
+        "the child must execute the scoped GPU lifetimes: {stdout}\n{stderr}"
+    );
+}
+
 /// A shader the device rejects when the pipeline is created (its binding 1 is writable, the
 /// layout's read-only), standing in for one a device's compiler cannot build.
 const REJECTED: &str = "

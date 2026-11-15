@@ -5,8 +5,8 @@
 //! `SmCircularCrossSectionFSG::CreateSurfaceFromCurves` makes the point section at
 //! the first rail's end, but the second rail, a boundary of the skinned surface, kept
 //! its own end, so the result's check refused the surface as close to singular at its
-//! boundary (`SmSurface` test 5). The opt-in `fillet_rails_meet_at_one_end_point`
-//! moves both rails' ends to their midpoint first, so the end collapses exactly.
+//! boundary (`SmSurface` test 5). The kernel now moves both rails' ends to their
+//! midpoint first, so the end collapses exactly (the opt-in flag that did so is retired).
 //!
 //! The peg's two-round sequence did not reach the changed branch in the port (the
 //! second round fails or builds an invalid body before it), so this drives
@@ -32,9 +32,8 @@ const TOL: f64 = 1e-6;
 /// A round of radius 2 about the x axis from x = 0 to 10 whose arc closes from a
 /// quarter turn to a point: the rails start at (0, sqrt 2, +-sqrt 2) and meet at
 /// (10, 2, 0), the second rail's end `MISS` off in z.
-fn round(fix: bool) -> ([Point3; 4], Point3, Point3) {
-    let mut k = Kernel::default();
-    k.fixes.fillet_rails_meet_at_one_end_point = fix;
+fn round() -> ([Point3; 4], Point3, Point3) {
+    let k = Kernel::default();
     let s2 = 2.0_f64.sqrt();
     let p = Point3::new;
     let line = |a: Point3, b: Point3| BSplineCurve::create_line_segment(3, a, b).unwrap();
@@ -74,18 +73,8 @@ fn bits(p: Point3) -> [u64; 3] {
 }
 
 #[test]
-fn rails_keep_their_ends_by_default() {
-    let (corners, e1, e2) = round(false);
-    assert_eq!(bits(e1), bits(Point3::new(10.0, 2.0, 0.0)));
-    assert!((e2.z - MISS).abs() < 1e-15, "{e2:?}");
-    let ends = end_corners(&corners);
-    assert_eq!(ends.len(), 2);
-    assert_ne!(bits(ends[0]), bits(ends[1]), "a near pole");
-}
-
-#[test]
-fn rails_end_at_one_point_with_the_fix() {
-    let (corners, e1, e2) = round(true);
+fn rails_end_at_one_point() {
+    let (corners, e1, e2) = round();
     let meet = Point3::new(10.0, 2.0, MISS / 2.0);
     assert_eq!(bits(e1), bits(e2), "the rails end at one point");
     assert!(e1.distance(meet) < 1e-15, "{e1:?}");

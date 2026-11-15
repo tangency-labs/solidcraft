@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "prefs.show_selected_hidden_edges": "إظهار الحواف المخفية للأجسام المحددة",
+    "prefs.show_selected_hidden_edges_help": "رسم حواف الجسم المحدد باهتة حيث يخفيها النموذج"
+  },
+  "de": {
+    "prefs.show_selected_hidden_edges": "Verdeckte Kanten ausgewählter Körper anzeigen",
+    "prefs.show_selected_hidden_edges_help": "Die Kanten eines ausgewählten Körpers abgeschwächt zeichnen, wo das Modell sie verdeckt"
+  },
+  "en": {
+    "prefs.show_selected_hidden_edges": "Show hidden edges of selected bodies",
+    "prefs.show_selected_hidden_edges_help": "Draw a selected body's edges dimmed where the model hides them"
+  },
+  "he": {
+    "prefs.show_selected_hidden_edges": "הצגת קצוות מוסתרים של גופים נבחרים",
+    "prefs.show_selected_hidden_edges_help": "ציור קצוות של גוף נבחר בעמעום במקומות שהמודל מסתיר אותם"
+  },
+  "ja": {
+    "prefs.show_selected_hidden_edges": "選択したボディの隠れたエッジを表示",
+    "prefs.show_selected_hidden_edges_help": "モデルに隠れている部分の、選択したボディのエッジを薄く描画します"
+  },
+  "ko": {
+    "prefs.show_selected_hidden_edges": "선택한 바디의 숨은 모서리 표시",
+    "prefs.show_selected_hidden_edges_help": "모델에 가려진 곳에서 선택한 바디의 모서리를 흐리게 그립니다"
+  },
+  "vi": {
+    "prefs.show_selected_hidden_edges": "Hiện các cạnh khuất của thân khối đã chọn",
+    "prefs.show_selected_hidden_edges_help": "Vẽ mờ các cạnh của thân khối đã chọn ở chỗ mô hình che khuất chúng"
+  },
+  "zh": {
+    "prefs.show_selected_hidden_edges": "显示所选实体的隐藏边",
+    "prefs.show_selected_hidden_edges_help": "在模型遮挡处以淡色绘制所选实体的边"
+  }
+}
