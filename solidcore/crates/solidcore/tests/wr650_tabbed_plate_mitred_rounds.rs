@@ -215,9 +215,7 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.nurb_cylinder_inside_out_frame = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_clip_right_side_out = true;
-    k.fixes.offset_collapsed_rounds_mated = true;
     k.fixes.offset_excess_faces_after_merge = true;
-    k.fixes.offset_extended_edges_mated = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.offset_point_vertex_caps = true;
@@ -247,7 +245,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.taper_tangent_corner_planes = true;
-    k.fixes.thicken_planar_side_walls = true;
     k.fixes.torus_check_spindle_apex = true;
     k.fixes.torus_iso_circle_axis_from_midpoint = true;
     k.fixes.torus_major_radius_from_origin = true;

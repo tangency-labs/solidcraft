@@ -2767,4 +2767,168 @@ mod tests {
         assert!(positive > MIN_GENERATED / 2 && early > MIN_GENERATED / 4);
         assert!(boxes > 25 && wires > 25 && negatives > 40 && negative_zeros > 5);
     }
+
+    /// WR-346 (collapsed faces mated across, always on): an inset whose offset collapses is
+    /// accounted for from the closed form, not the old blanket `SM_ERR` (1001).
+    ///
+    /// - The unit sphere's extended inset by 1.5 is empty (the inset set
+    ///   `{p : dist(p, outside) >= 1.5}` of a ball of radius 1 is empty): the call succeeds
+    ///   with a body of no faces, edges or vertices, only its one region.
+    /// - The r 1, h 4 cylinder's extended inset by 1 or 1.5 collapses its side wall (its
+    ///   offset radius `1 - d` is 0 or negative): it is refused as
+    ///   `SM_ERR_DEGENERATE_SURFACE` (1034), and the offset built before the refusal is the
+    ///   two caps' offsets, two planes at `z = d` and `z = 4 - d` on the axis's side
+    ///   (`x = 1`, `y = 0` at the seam vertices), with their two seam edges.
+    #[test]
+    fn wr346_collapsed_insets_follow_the_closed_form() {
+        let context = CaseContext {
+            root: repo_root(),
+            seeds: 0,
+        };
+        let fixtures = context.fixture_cases(Runner.id()).unwrap();
+        let run = |name: &str| {
+            let case = fixtures.iter().find(|case| case.name == name).unwrap();
+            let output = Runner.run_rust(case).unwrap();
+            assert!(output.deferred.is_none() && output.error.is_none(), "{name}");
+            output
+        };
+
+        let sphere = run("extended_sphere_inset_past_radius");
+        assert_eq!(sphere.ints["status"], [1000]);
+        assert_eq!(sphere.ints["result.present"], [1]);
+        assert_eq!(sphere.ints["result.counts"], [1, 0, 0, 0, 0, 0, 0]);
+
+        for (name, d) in [
+            ("member_cylinder_extend_inset_at_radius", 1.0),
+            ("member_cylinder_extend_inset_past_radius", 1.5),
+        ] {
+            let cylinder = run(name);
+            assert_eq!(cylinder.ints["status"], [1034], "{name}");
+            assert_eq!(cylinder.ints["executive_offset.present"], [1], "{name}");
+            assert_eq!(
+                cylinder.ints["executive_offset.counts"],
+                [1, 2, 2, 2, 2, 4, 2],
+                "{name}"
+            );
+            assert_eq!(cylinder.ints["executive_offset.face_kinds"], [1, 1], "{name}");
+            let g = &cylinder.values["executive_offset.geometry"];
+            // [tolerance, min x, min y, min z, max x, max y, max z] of the vertices
+            assert_eq!(g.len(), 7, "{name}");
+            let near = |a: f64, b: f64| (a - b).abs() <= 1e-12;
+            assert!(near(g[1], 1.0) && near(g[4], 1.0), "{name}: {g:?}");
+            assert!(near(g[2], 0.0) && near(g[5], 0.0), "{name}: {g:?}");
+            assert!(near(g[3], d) && near(g[6], 4.0 - d), "{name}: {g:?}");
+        }
+    }
+
+    /// WR-564 (planar side walls, always on): every case whose golden row the change
+    /// moved thickens a sheet whose side walls lie in planes. Each is checked on its own
+    /// result body:
+    ///
+    /// - the shell succeeds with one body that is sound (`check_brep` level 2 reports
+    ///   nothing, a manifold solid of positive volume: [`crate::soundness`]);
+    /// - its planar walls are planes (face kind 1), where they were ruled B-spline walls:
+    ///   on a one-face plane or cylinder sheet every face but the sheet's two copies; on
+    ///   the half pipes (whose walls along the bent rims are not flat) at least four;
+    /// - where the sheet has a closed form (a plane sheet: area times thickness; a
+    ///   cylinder sheet r, h thickened by d: `pi |(r + d)^2 - r^2| h`), the volume's
+    ///   certified enclosure holds it.
+    #[test]
+    fn wr564_thickened_sheet_walls_are_planes_and_sound() {
+        use solidcore::mass::enclosure::VolumeSign;
+        let context = CaseContext {
+            root: repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&context).unwrap();
+        let moved = [
+            "gen0038",
+            "gen0073",
+            "gen0175",
+            "issue2611_half_pipe_arc_r12_api_shell_in",
+            "issue2611_half_pipe_arc_r12_api_shell_out",
+            "issue2611_half_pipe_arc_r20_api_shell_in",
+            "issue2611_half_pipe_arc_r20_api_shell_out",
+            "shell_boundary_exactly_two_tol",
+            "static_shell_sheet_sidewalls",
+            "static_shell_thicken_cylinder_sheet_in",
+            "static_shell_thicken_cylinder_sheet_out",
+            "static_shell_thicken_cylinder_sheet_small_in",
+            "static_shell_thicken_cylinder_sheet_small_out",
+            "static_shell_thicken_plane_sheet_attributed_out_nomerge",
+        ];
+        for name in moved {
+            let case = cases.iter().find(|case| case.name == name).unwrap();
+            let inputs = &case.inputs;
+            let d = inputs["config"]["offset_distance"].as_f64().unwrap();
+            let f = |v: &Value| v.as_f64().unwrap();
+            let closed_form = match inputs["source"]["kind"].as_str().unwrap() {
+                "plane_sheet" => {
+                    let s = &inputs["source"];
+                    let (x, y) = (&s["x_axis"], &s["y_axis"]);
+                    let (x, y) = (
+                        [f(&x[0]), f(&x[1]), f(&x[2])],
+                        [f(&y[0]), f(&y[1]), f(&y[2])],
+                    );
+                    let cross = [
+                        x[1] * y[2] - x[2] * y[1],
+                        x[2] * y[0] - x[0] * y[2],
+                        x[0] * y[1] - x[1] * y[0],
+                    ];
+                    let norm = (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2])
+                        .sqrt();
+                    let dom = &s["domain"];
+                    let area = norm
+                        * f(&s["scale"][0])
+                        * f(&s["scale"][1])
+                        * (f(&dom[2]) - f(&dom[0]))
+                        * (f(&dom[3]) - f(&dom[1]));
+                    Some(area * d.abs())
+                }
+                "cylinder_sheet" => {
+                    let (r, h) = (f(&inputs["source"]["radius"]), f(&inputs["source"]["height"]));
+                    Some(std::f64::consts::PI * ((r + d) * (r + d) - r * r).abs() * h)
+                }
+                _ => None,
+            };
+
+            crate::soundness::start();
+            let output = Runner.run_rust(case).unwrap();
+            let found = crate::soundness::take();
+            assert!(output.deferred.is_none() && output.error.is_none(), "{name}");
+            assert_eq!(output.ints["status"], [1000], "{name}");
+            assert_eq!(output.ints["result.present"], [1], "{name}");
+            let kinds = &output.ints["result.face_kinds"];
+            let planes = kinds.iter().filter(|&&k| k == 1).count();
+            if closed_form.is_some() {
+                // a plane or cylinder sheet: one face, so the sheet's face and its offset
+                // are two faces and every other face is a wall between a line or circle
+                // and its offset in one plane: a plane
+                assert_eq!(output.ints["source.before.counts"][0], 1, "{name}");
+                assert!(kinds.len() > 2, "{name}: {kinds:?}");
+                assert!(planes >= kinds.len() - 2, "{name}: {kinds:?}");
+            } else {
+                // the half pipes' walls along their straight edges and end arcs lie in
+                // planes; at least those four are planes
+                assert!(planes >= 4, "{name}: {kinds:?}");
+            }
+            assert_eq!(found.len(), 1, "{name}: {found:?}");
+            let body = &found[0];
+            assert!(body.sound(), "{name}: {}", body.line());
+            assert_eq!(body.manifold, Some(true), "{name}");
+            if let Some(v) = closed_form {
+                let Some(VolumeSign::Positive(e)) = &body.volume else {
+                    panic!("{name}: {:?}", body.volume);
+                };
+                // the closed form's own rounding, a few ulps of its size
+                let slack = 1e-12 * v;
+                assert!(
+                    e.lo - slack <= v && v <= e.hi + slack,
+                    "{name}: {v} not in [{}, {}]",
+                    e.lo,
+                    e.hi
+                );
+            }
+        }
+    }
 }

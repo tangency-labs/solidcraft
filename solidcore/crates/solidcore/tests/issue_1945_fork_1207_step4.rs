@@ -47,8 +47,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_excess_faces_after_merge = true;
     k.fixes.offset_point_vertex_caps = true;
     k.fixes.offset_clip_right_side_out = true;
-    k.fixes.offset_extended_edges_mated = true;
-    k.fixes.thicken_planar_side_walls = true;
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.geometric_g2_continuity = true;
     k.fixes.proto_vertex_miss_is_false = true;
@@ -76,7 +74,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
     k.fixes.local_operation_step_walls = true;
     k.fixes.local_operation_closes_walls_to_nothing = true;
-    k.fixes.offset_collapsed_rounds_mated = true;
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;

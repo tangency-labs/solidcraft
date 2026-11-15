@@ -61,12 +61,11 @@ fn expected(t: f64) -> f64 {
     PI * RD * RD * H - corner - PI * (RD - t) * (RD - t) * (H - t)
 }
 
-/// The rounds' mating across collapsed faces (`offset_collapsed_rounds_mated`), with or
-/// without the revolution's collapse test.
+/// The default kernel (the rounds are mated across collapsed faces), with or without the
+/// revolution's collapse test.
 fn kernel(revolution_collapses: bool) -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
-    f.offset_collapsed_rounds_mated = true;
     f.revolution_round_offset_collapses = revolution_collapses;
     k.fixes = f;
     k

@@ -572,8 +572,6 @@ pub struct UpstreamFixes {
     pub offset_clip_right_side_out: bool,
     /// `SmOffsetExecutive::MapEdgeuses` raises each offset edge it matches to an original edge to that edge's tolerance, and the offset edge's vertices to the original edge's vertices' largest. Upstream builds the offset faces' edges and vertices afresh at the B-rep's zone tolerance, so the offset of a sheet whose edges and vertices carry their own, larger tolerances (a trimmed B-spline patch: B-rep 2.08e-5, edges 4.15e-5, vertices 8.31e-5) is checked against half the B-rep's tolerance at its vertices, and its offset by 0.75 fails `check_brep` with edge/vertex Bad Gaps of 2.4e-5 to 3.9e-5, inside the original's own tolerances (WR-671, #2111).
     pub offset_edges_keep_source_tolerance: bool,
-    /// With extended convex edges, `piecewise_merge` relates the mated offsets of a manifold edge instead of intersecting them again (WR-344, #469; the fork's tangency-labs/smlib@9c21c9a (was 85bbfaf)), except an edge whose mate failed in `EdgeuseOffset`, which is intersected even where it is a tangent sector (#1795; the fork's tangency-labs/smlib@9d8ace9). The merge then no longer refuses some broken offsets, and the difference hands back a wall that bounds nothing (#1818; the fork's `ShellBrep` returns it, its C API refuses it as `SMLIB_ERR_NOT_SOLID`); the shell's refusal of a result that is no closed manifold solid is unconditional, whatever this flag says. Needs no other flag.
-    pub offset_extended_edges_mated: bool,
     /// `SmOffsetSurface::SwapUV` negates the distance once for the extended surface and
     /// again for the base, so an owning offset that has a stored extension comes back
     /// with its distance unchanged and lies on the wrong side of its base; with this
@@ -582,8 +580,6 @@ pub struct UpstreamFixes {
     /// An offset without an extension still negates once. Off by default for pinned C++
     /// parity.
     pub offset_swap_uv_extended_distance: bool,
-    /// Thickening a sheet (`ShellBrep` with `bCreateOffsetSolid` on a non-manifold input) puts every planar side wall onto its plane (the fork's `sm_PutPlanarFaceOnItsPlane`) and deletes the old surface's seam it leaves as a slit, where upstream keeps each wall as the ruled surface between the lamina edge and its offset: a tube's end rings are `SmPlane`s with two loops, not `SmSurfOfRevolution`s (WR-564, #1599; the fork's tangency-labs/smlib#62).
-    pub thicken_planar_side_walls: bool,
     /// A face a Boolean takes over from its second operand keeps that operand's exact UV trims (WR-361, #488).
     pub keep_operand_uv_trims: bool,
     /// `smgu_EvaluateCurveContinuity`'s G2 test compares the two sides' Frenet curvatures and normals (WR-380, #933/#838).
@@ -738,9 +734,7 @@ pub struct UpstreamFixes {
     pub local_operation_step_walls: bool,
     /// With `local_operation_step_walls`: an edge whose vertex a local operation moves onto its other end, where its other vertex is, has closed to a point and is squeezed out of its offset face (`CloseLoopGap`); once every gap is closed the offset faces that closed to nothing (`SmFace::IsDegenerate`, a step's wall whose low top moved onto the high top's plane) are deleted and forgotten, and the merge joins the faces either side. A closed edge on no such face or across from one is still `SM_ERR_OFFSET_EDGE_VANISHES` (WR-566; tangency-labs/smlib ccbf77a). In the face move (`offset::offset_faces`), the edges then left between a moved face and a face that stayed, on one surface, which `IsTopological` finds removable, are removed, so the tops either side of the closed wall are one face (WR-566 addendum; tangency-labs/smlib 9504880).
     pub local_operation_closes_walls_to_nothing: bool,
-    /// An inward shell mates the walls across rounds thinner than it (collapsed faces) (#397).
-    pub offset_collapsed_rounds_mated: bool,
-    /// A surface of revolution whose generatrix is one circular arc (a fillet's round along a circular edge, a torus in all but its type) collapses when an offset runs towards the arc's centre by its radius or more: `Surface::offset_collapses` says so, as a torus's does, and `create_offset_surface` builds no surface, where upstream says it never collapses and builds the generatrix's offset past the arc's centre as the arc turned inside out, so an inward shell thicker than the round fails with 1001 or leaves a wrong volume (WR-567; the fork's tangency-labs/smlib@8b2090f, smlib#64; SolidCraft `shell_of_a_disc_rounded_smaller_than_the_wall`, solidcraft#319). The faces either side are mated across it with `offset_collapsed_rounds_mated`.
+    /// A surface of revolution whose generatrix is one circular arc (a fillet's round along a circular edge, a torus in all but its type) collapses when an offset runs towards the arc's centre by its radius or more: `Surface::offset_collapses` says so, as a torus's does, and `create_offset_surface` builds no surface, where upstream says it never collapses and builds the generatrix's offset past the arc's centre as the arc turned inside out, so an inward shell thicker than the round fails with 1001 or leaves a wrong volume (WR-567; the fork's tangency-labs/smlib@8b2090f, smlib#64; SolidCraft `shell_of_a_disc_rounded_smaller_than_the_wall`, solidcraft#319). The faces either side are mated across it (WR-346).
     pub revolution_round_offset_collapses: bool,
     /// `sm_FixUVTrimCurves` moves only the end control points of the two UV trims meeting at a corner onto the vertex's UV point, without dropping the vertex onto them, trimming there and stretching them back over the edge interval (WR-255, #959/#570; the fork's tangency-labs/smlib@e5606fb (was 5af7070)).
     pub uv_trim_corner_end_points_only: bool,

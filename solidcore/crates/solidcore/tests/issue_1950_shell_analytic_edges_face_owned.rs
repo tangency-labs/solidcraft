@@ -82,7 +82,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.fillet_chamfer_cone_on_arc = true;
     f.offset_excess_faces_after_merge = true;
     f.offset_clip_right_side_out = true;
-    f.offset_extended_edges_mated = true;
     f.keep_operand_uv_trims = true;
     f.geometric_g2_continuity = true;
     f.proto_vertex_miss_is_false = true;
@@ -98,7 +97,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.offset_resolve_crossing_loops = true;
     f.offset_analytic_mate_edges = true;
     f.nurb_cylinder_inside_out_frame = true;
-    f.offset_collapsed_rounds_mated = true;
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
     f.proto_edge_self_loop_on_vertex_degenerate = true;
