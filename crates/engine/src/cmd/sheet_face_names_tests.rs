@@ -115,6 +115,60 @@ fn a_trays_faces_have_readable_sheet_names_that_follow_its_size() {
     assert!((far.z - 30.0).abs() < 1e-9 && (199.0..=200.0).contains(&far.y), "the back flange's far rim: {far:?}");
 }
 
+/// A contour flange's first leg is made by no bend, and its rims are named as every later leg's
+/// are, after what the contour's bend into the next leg leaves: its far edge and its two ends, at
+/// the same ends as the next leg's. Each face of the flange is named after what made it, none by
+/// its place among the faces, so a sketch on each of them keeps its attachment (the corpus's
+/// `modern-sheet-metal`: an L of three legs 50 deep on the default rule).
+#[test]
+fn a_contour_flanges_first_leg_names_its_rims_as_the_others_do() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"name": "Contour", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, -1]}}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.line", json!({"points": ["l1.end", [40, -30]], "ids": ["l2"]}));
+    run(&mut s, "sketch.line", json!({"points": ["l2.end", [70, -30]], "ids": ["l3"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"type": "contour", "sketch": "Contour", "curves": ["l1", "l2", "l3"], "distance": 50}));
+    let f = s.doc.features.last().map_or(0, |f| f.id);
+    let all = faces(&mut s);
+    let mut names: Vec<&str> = all.iter().filter_map(|f| f.0.as_deref()).collect();
+    assert_eq!(names.len(), all.len(), "every face has a name: {all:?}");
+    assert!(names.iter().all(|n| n.starts_with(&format!("F{f}:")) && !n.contains(":face:")), "{names:?}");
+    names.sort_unstable();
+    let n = names.len();
+    names.dedup();
+    assert_eq!(names.len(), n, "{names:?}");
+    // The first leg runs from x = 0 to its bend at x = 40, 50 deep from y = 0; its far rim is its
+    // free end at x = 0, its ends the strips at y = 0 and y = 50, as the next leg's are.
+    let at = |name: &str| {
+        let f = named(&all, name);
+        assert_eq!(f.len(), 1, "{name}: {all:?}");
+        f[0].1
+    };
+    let far = at(&format!("F{f}:far:l1"));
+    assert!(far.x.abs() < 1e-6 && (far.y - 25.0).abs() < 1e-6, "{far:?}");
+    for (end, y) in [("end0", 0.0), ("end1", 50.0)] {
+        let first = at(&format!("F{f}:{end}:l1"));
+        let next = at(&format!("F{f}:{end}:l2"));
+        assert!((first.y - y).abs() < 1e-6 && (next.y - y).abs() < 1e-6 && first.x < 40.0, "{end}: {first:?}, {next:?}");
+    }
+    // A sketch on each of them is attached to the face by its name, as the desktop's pick sends it.
+    let body = s.model.state().bodies[0].name.clone();
+    for rim in ["far", "end0", "end1"] {
+        let name = format!("F{f}:{rim}:l1");
+        let hit = solidcraft_doc::naming::locate_one(&s.model.state(), None, &name).unwrap();
+        let p = hit.point;
+        let made = run(&mut s, "sketch.create", json!({"plane": {"face": [p.x, p.y, p.z], "body": body, "index": hit.face, "path": []}}));
+        let id = made["sketch"].as_u64().unwrap();
+        let status = s.placed_document().sketch_face_attachment(id, &s.model);
+        assert!(
+            matches!(status, solidcraft_doc::FaceAttachmentStatus::Healthy { .. } | solidcraft_doc::FaceAttachmentStatus::Sheet { .. }),
+            "{name}: {status:?}"
+        );
+        run(&mut s, "sketch.finish", json!({}));
+    }
+}
+
 /// `p` lies on face `face` of `body`, on its exact geometry: within rounding at the part's scale
 /// of the plane the face lies on, and inside the boundary its edges trace there (each a line,
 /// counted by crossings).

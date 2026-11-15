@@ -442,7 +442,7 @@ fn rim_edges(
     let outline: Vec<(Vec2, Vec2)> = lines.iter().map(|&(_, a, b)| (a, b)).collect();
     let mut out: Vec<(Vec2, Vec2, Option<RimEdge>, usize)> = Vec::new();
     for &(k, a, b) in &lines {
-        match bend_making(sheet, r) {
+        match bend_making(sheet, r).or_else(|| contour_bend(sheet, recipes, r)) {
             None => out.push((a, b, sketch_line(sheet, curves, r, a, b), k)),
             Some((an, (lo, hi))) => {
                 let along = |p: Vec2| (p - an.origin).dot(an.dir);
@@ -492,6 +492,22 @@ fn bend_making(sheet: &Sheet, i: usize) -> Option<(solidcraft_develop::Anchor, (
     })
 }
 
+/// On a contour flange's first panel, which no bend makes, the anchor on it of the bend into the
+/// contour's next panel, and the span along the anchor the bend's near side runs: its rims are what
+/// that bend leaves, as a later panel's are what the bend that makes it leaves (its far edge, its
+/// two ends), so none is left for the model to name from geometry. None for any other panel, a
+/// later flange's bend on the panel never counting (a rim keeps its name when one is added).
+fn contour_bend(sheet: &Sheet, recipes: &[(String, PanelMade)], i: usize) -> Option<(solidcraft_develop::Anchor, (f64, f64))> {
+    let made = |k: usize| sheet.panels.get(k).and_then(|p| recipes.iter().find(|(key, _)| *key == p.name)).map(|(_, m)| m);
+    let Some(PanelMade::Contour { feature, .. }) = made(i) else { return None };
+    sheet.joints.iter().find_map(|j| match &j.kind {
+        JointKind::Bend(b) if j.a.panel == i && matches!(made(j.b.panel), Some(PanelMade::Contour { feature: f, .. }) if f == feature) => {
+            Some((j.a, b.ends.near))
+        }
+        _ => None,
+    })
+}
+
 /// The sketch line of `curves` that made the edge from `a` to `b` of panel `i` (its chart): one
 /// of that panel's own (by its key) the edge lies on, within its ends.
 fn sketch_line(sheet: &Sheet, curves: &[(String, String, Vec2, Vec2)], i: usize, a: Vec2, b: Vec2) -> Option<RimEdge> {
@@ -517,8 +533,11 @@ fn sketch_line(sheet: &Sheet, curves: &[(String, String, Vec2, Vec2)], i: usize,
 fn edge_of_bend(sheet: &Sheet, outline: &[(Vec2, Vec2)], an: solidcraft_develop::Anchor, (lo, hi): (f64, f64), a: Vec2, b: Vec2) -> Option<RimEdge> {
     let small = sheet.thickness * 1e-3;
     let along = |p: Vec2| (p - an.origin).dot(an.dir);
-    // How far into the panel from its bend an edge along the bend lies.
-    let off = |a: Vec2, b: Vec2| ((a + b) * 0.5 - an.origin).cross(an.dir);
+    // How far into the panel from its bend an edge along the bend lies: the panel's material lies
+    // on one side of its anchor (a bend's second panel's on the right, its first's on the left).
+    let side = |a: Vec2, b: Vec2| ((a + b) * 0.5 - an.origin).cross(an.dir);
+    let sign = if outline.iter().map(|(p, q)| side(*p, *q)).sum::<f64>() < 0.0 { -1.0 } else { 1.0 };
+    let off = |a: Vec2, b: Vec2| side(a, b) * sign;
     let parallel = |a: Vec2, b: Vec2| (b - a).normalized().is_some_and(|d| d.cross(an.dir).abs() < 1e-6);
     if !parallel(a, b) {
         // Numbered along the flat as it is read, which the charts see mirrored.
@@ -558,7 +577,7 @@ impl SurfaceSheet {
             .iter()
             .filter(|(a, b)| (off(*a) - off(*b)).abs() <= small && off(*a).abs() <= band + small)
             .min_by(|x, y| off(x.0).abs().total_cmp(&off(y.0).abs()))?;
-        let edge = match bend_making(&self.sheet, r) {
+        let edge = match bend_making(&self.sheet, r).or_else(|| contour_bend(&self.sheet, &self.recipes, r)) {
             None => sketch_line(&self.sheet, &self.sketch_curves, r, a, b),
             Some((an, span)) => edge_of_bend(&self.sheet, &outline, an, span, a, b),
         }?;
