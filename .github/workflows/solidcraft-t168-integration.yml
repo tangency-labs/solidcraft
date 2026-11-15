@@ -1,4 +1,4 @@
-name: SolidCraft T168 integration validation
+name: SolidCraft T169 integration compilation
 on:
   push:
     branches: [integration/issue-15776-upstream-20261115]
@@ -39,3 +39,8 @@ jobs:
           grep -q 'mod panels;' crates/ui-egui/src/drawing_workspace.rs
           echo "MERGED_WORKSPACE_READY=true"
       - uses: dtolnay/rust-toolchain@stable
+      - name: Compile drawing workspace regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p solidcraft-ui-egui drawing_workspace:: --lib -- --nocapture
