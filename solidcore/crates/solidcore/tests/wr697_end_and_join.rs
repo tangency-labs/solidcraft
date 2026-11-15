@@ -27,6 +27,7 @@ use solidcore::primitive::api_primitives::{create_box, create_cylinder, create_s
 use solidcore::query::api_queries::{get_edges, get_faces};
 use solidcore::topology::brep::p5::{stitch_and_orient, transform, StitchAndOrientOptions};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::topology::vertex::corner;
 use solidcore::topology::{edge, vertex, EdgeId};
 use solidcore::{Brep, Kernel};
 use std::f64::consts::PI;
@@ -725,6 +726,30 @@ fn kinked_plate(k: &mut Kernel, kink: f64, convex: bool) -> (Brep, [[f64; 3]; 2]
     )
 }
 
+/// The largest gap the check measures between a vertex within 3 of `near` and its faces
+/// (`SmVertex::IsWithinXSectTol3dOfFaces`, recomputed).
+fn joint_gap(k: &Kernel, b: &mut Brep, near: [f64; 3]) -> f64 {
+    let mut vs = Vec::new();
+    for e in get_edges(b).unwrap() {
+        let v0 = edge::vertex(b, e).unwrap();
+        let v1 = edge::other_vertex(b, e, v0).unwrap();
+        for v in [v0, v1].into_iter().flatten() {
+            if !vs.contains(&v) {
+                vs.push(v);
+            }
+        }
+    }
+    let mut gap = 0.0_f64;
+    for v in vs {
+        let p = vertex::point(b, v).unwrap();
+        if (p - Point3::new(near[0], near[1], near[2])).length() < 3.0 {
+            let (_, g, _) = corner::is_within_xsect_tol_3d_of_faces(k, b, v, true).unwrap();
+            gap = gap.max(g);
+        }
+    }
+    gap
+}
+
 /// #16627: two rounds r 1 meeting at a corner a kink off straight join on one shared section
 /// only while their sections there stand closer than the B-rep's intersection tolerance, which
 /// the check holds the joint vertex to. At a concave corner the shared section lies behind the
@@ -735,7 +760,8 @@ fn kinked_plate(k: &mut Kernel, kink: f64, convex: bool) -> (Brep, [[f64; 3]; 2]
 /// failed the check. At a convex corner the shared section lies over the second round, whose
 /// own section in its plane stands `sec(kink) - 1` off (#13911, `blend_corner::join_gap`): the
 /// Join up to 0.35 degrees (1.87e-5), the Turn at 0.375 (2.14e-5). Each builds and passes the
-/// check.
+/// check, and at each Join the check's vertex gap is that closed form (`kink` concave,
+/// `sec(kink) - 1` convex) to 1e-4 relative.
 #[test]
 fn a_near_straight_corner_joins_only_below_the_intersection_tolerance() {
     use BlendCornerEvent::{Join, Turn};
@@ -766,6 +792,17 @@ fn a_near_straight_corner_joins_only_below_the_intersection_tolerance() {
             );
             round(&mut k, &mut b, &at_edges, 1.0);
             clean(&mut k, &mut b);
+            // the check's gap at the joint: R (sec beta - 1) over the second round, R kink
+            // behind it (reach R = 1 on the cap, the walls square to it)
+            let gap = joint_gap(&k, &mut b, [50.0, 0.0, 2.0]);
+            let beta = kink.to_radians();
+            let want_gap = if convex { 1.0 / beta.cos() - 1.0 } else { beta };
+            if want == Join {
+                assert!(
+                    (gap - want_gap).abs() <= 1e-4 * want_gap,
+                    "{kink} degrees (convex {convex}): gap {gap:e}, closed form {want_gap:e}"
+                );
+            }
         }
     }
 }
@@ -871,7 +908,7 @@ fn drafted_plate(
 /// 120 degrees it joins at 1.03 (joined at 1.925e-3 degrees, the check finds the vertex
 /// 2.91e-5 off, `r a` to eight digits), and at 60 degrees it turns at 0.97. The convex corner
 /// (the section over the second round, second order: #13911, `blend_corner::join_gap`) is the
-/// Join at both and passes the check.
+/// Join at both and passes the check, its vertex gap at most `max(R, r) (sec(kink) - 1)`.
 #[test]
 fn a_near_straight_corner_s_join_holds_on_acute_and_obtuse_wedges() {
     let d = 30.0_f64.to_radians();
@@ -908,6 +945,22 @@ fn a_near_straight_corner_s_join_holds_on_acute_and_obtuse_wedges() {
                 );
                 round(&mut k, &mut b, &at_edges, 1.0);
                 clean(&mut k, &mut b);
+                if convex {
+                    // second order: the cap's foot R (sec beta - 1) off (reach R = sqrt 3 on
+                    // the 60 degree wedge, 1 / sqrt 3 on the 120), the walls' end r (sec
+                    // beta - 1) at most (MEASURED cos 30 r (sec beta - 1) on both wedges)
+                    let gap = joint_gap(&k, &mut b, kv);
+                    let reach = if z == 0.0 {
+                        3.0_f64.sqrt()
+                    } else {
+                        1.0 / 3.0_f64.sqrt()
+                    };
+                    let second = reach.max(1.0) * (1.0 / kink.to_radians().cos() - 1.0);
+                    assert!(
+                        gap <= second * (1.0 + 1e-3),
+                        "edges at z {z}, {kink} degrees: gap {gap:e}, second order {second:e}"
+                    );
+                }
             }
         }
     }

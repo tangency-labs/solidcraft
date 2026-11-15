@@ -2110,7 +2110,9 @@ fn issue_13911_rails(
 /// its total turning, `d` the section's reach along the plane: a chamfer's setback, a round's
 /// radius on these upright walls), and on the walls, `d` down, the wall rail is `L` long. The
 /// kinks put the top rail off by at most `d` times their angles, and each of the 17 rail pieces
-/// may end within twice the B-rep's intersection tolerance of an exact offset's end.
+/// may end within twice the B-rep's intersection tolerance of an exact offset's end (that
+/// slack is ARGUED, not derived; so is the rails' selection, the result's edges whose middles
+/// stand `reach` off the loop at the two heights).
 #[test]
 fn the_inner_top_outline_of_13911_chamfers_and_rounds_at_every_size() {
     let mut fixes: Vec<String> = serde_json::from_str(include_str!(

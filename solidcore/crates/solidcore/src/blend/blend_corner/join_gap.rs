@@ -3,16 +3,18 @@
 //! that gap is of first or of second order in the corner's angle (#13911).
 //!
 //! Upstream: none (solidcore-native; the fork's Join takes no bound, #16627 added the
-//! first-order one, [`super::join_within_xsect_tolerance_deg`]).
+//! first-order one, [`super::join_within_xsect_tolerance_deg`], in #16681).
 //!
 //! | Rust                     | Upstream |
 //! |--------------------------|----------|
 //! | [`JoinBlend`]            | none     |
+//! | [`EdgeBend`]             | none     |
 //! | [`join_tolerance_deg`]   | none     |
 //! | [`overlap_gap`]          | none     |
 //! | [`rail_curvature`]       | none     |
+//! | [`sagitta`]              | none     |
 //!
-//! A Join ends both blends on one section, the first blend's, in the plane through the
+//! A Join ends both blends on one section, the first blend's, in the plane `S` through the
 //! corner's vertex `v` square to its edge (`FilletBrep::calc_join_section`). On the face the
 //! two blends share, that section's foot is `F = v + R1 b1`: `b1` the first edge's binormal
 //! into the face, `R1` the first blend's reach along the face (`(oB - oA cos phi) / sin phi`
@@ -25,37 +27,83 @@
 //!   where its surface does not reach, so the vertex stands that far off it: first order,
 //!   #16627's bound (`2 size tan(a / 2)`, MEASURED there as `o a` on the concave corners
 //!   of its plates, where the section lies behind).
-//! - **Over** (`b1 . t2 >= 0`): `F` lies over the second blend, whose own section in the
-//!   plane (its ball there, found on its own faces) has its foot on the same line through
-//!   `v`, at `R2 / cos beta` for straight edges. The vertex stands at most
-//!   `|R1 - R2 / cos beta|` off that foot, plus the second blend's rail bending away from its
-//!   tangent over the `R sin beta` it runs: [`overlap_gap`]. With equal reaches that is
-//!   `R (sec beta - 1)`, second order: at the 3.4e-3 degrees of #13911, `1.8e-9 R`.
+//! - **Over** (`b1 . t2 >= 0`): `F` lies over the second blend, whose rail (its surface's
+//!   foot on the shared face) crosses the line `S` cuts from the face at `v + lambda b1`.
+//!   The gap is `|R1 - lambda|`, bounded by [`overlap_gap`]: with equal reaches and straight
+//!   edges `R (sec beta - 1)`, second order (at the 3.4e-3 degrees of #13911, `1.8e-9 R`).
 //!
-//! So where the section lies over the second blend the Join is taken while [`overlap_gap`]
-//! stays below the intersection tolerance, at any angle the solvers take as a continuation,
-//! and behind it only within #16627's bound. The order of the two blends does not matter:
-//! to first order `b1 . t2 = b2 . t1`, and the decision takes both.
+//! **The bound** (PROVEN under the model below). Work in the shared face, a plane, with
+//! `v` the origin, `x` along `t2` and `y` along `b2` (the second edge's binormal into the
+//! face). The face is a plane and `b_i` is `t_i` turned a quarter turn in it toward the face,
+//! so `b1` and `b2` make the angle `beta` the edges make, and on the over side
+//! `b1 = (sin beta, cos beta)`: `S` cuts the face in the points `lambda (sin beta, cos beta)`.
+//! The second rail leaves `(0, R2)` along `x`. Let `K2` bound the second edge's curvature
+//! along the arc the rail is taken over; the rail, its offset by `R2` in the plane, has
+//! curvature at most `kr = K2 / (1 - R2 K2)` there (an offset's curvature is `k / (1 - R2 k)`
+//! for the edge's signed curvature `k`, `|k| <= K2`, `R2 K2 < 1`). A unit-speed plane curve
+//! of curvature at most `kr` turns by at most `kr s` over arc `s`, so while `kr s <= pi / 2`
+//! its `x` grows at least as `sin(kr s) / kr` and its `y` moves at most `(1 - cos(kr s)) /
+//! kr`: at abscissa `x` (with `kr x <= 1`) the rail stands within `sagitta(kr, x) = (1 -
+//! sqrt(1 - kr^2 x^2)) / kr = kr x^2 / (1 + sqrt(1 - kr^2 x^2))` of `y = R2`, and has run at
+//! most `asin(kr x) / kr`, which for `kr x <= 1/2` is at most `1.05 x`. Take
+//! `X = 2 R tan beta` (`R` the larger reach) with `tan beta <= 1/2` and `kr X <= 1/2`: the
+//! sagitta is then at most `X <= R`, so over `0 <= x <= X` the rail lies in the band
+//! `|y - R2| <= sagitta(kr, X)`, below the line at `x = 0` (`y = R2 > 0`) and above it at
+//! `x = X` (where the line stands at `X / tan beta = 2R`). It therefore crosses the line at
+//! some `x <= X`, where `lambda cos beta = R2 + d`, `|d| <= sagitta(kr, X)`: `|lambda - R2 /
+//! cos beta| <= sec beta sagitta(kr, X)`, and `|R1 - lambda| <= |R1 - R2 / cos beta| + sec
+//! beta sagitta(kr, X)`. The order of the two blends is not known here, so both are taken:
+//! [`overlap_gap`] is the larger of the two `|R_i - R_j / cos beta|` plus `sec beta` times the
+//! larger sagitta. The rail runs at most `1.05 X` along its arc and its edge at most `1.05 X
+//! / (1 - R K)` (the rail's speed is `1 - R k` times the edge's), so the curvature bound is
+//! needed only over that much of the edge next to `v`: [`EdgeBend`] carries a bound and the
+//! certified length of the edge it holds over, and a bound over less is refused.
 //!
-//! The bend term is ARGUED, not certified: it takes each rail's curvature at the vertex
-//! ([`rail_curvature`], from the edge's curvature in the face there) as its bound over the
-//! `R sin beta` it runs, which a rail whose curvature changes faster than that over a few
-//! thousandths of a millimetre exceeds. On a curved shared face the edge's curvature in the
-//! face is taken from its 3D acceleration along the binormal, and the face's own bending
-//! over that run is not bounded here. Where any quantity is not finite, a reach is negative,
-//! the faces' normals are parallel, a rail folds (its edge bends toward the face with a radius
-//! no larger than the reach) or the run is not short against the rail's radius, the decision
-//! falls back to #16627's bound, the conservative side.
+//! **The model** (ARGUED, not derived here). The rails are taken as the edges' offsets by a
+//! constant reach in the shared plane: exact where the blend's other face meets the plane
+//! at a constant angle along the edge (a wall extruded square or drafted from the plane,
+//! #13911's walls); where that angle changes, the reach changes along the edge, which this
+//! bound does not count. The shared face must be a plane (anything else falls back to
+//! #16627's bound), so its bending is never a term. That the check's vertex gap is this
+//! distance is ARGUED as the over/behind split above, and MEASURED on #13911's body (a
+//! Join forced at every near-straight corner builds valid at every size).
+//!
+//! **Curvature bounds** ([`EdgeBend`], PROVEN): a line 0; an ellipse of radii `a >= b`
+//! `a / b^2`, its largest; a polynomial B-spline, over the knot span at `v`, `max |C''| /
+//! min |C'|^2` (the curvature is `|C' x C''| / |C'|^3`), with `max |C''|` at most the
+//! largest of the span's second-hodograph control points and `|C'| >= C' . u >= min (Q_i .
+//! u)` for `u` the unit tangent at `v` and `Q_i` the span's first-hodograph control points
+//! (the B-spline basis is non-negative and sums to 1); a B-spline stored with every weight
+//! exactly 1 is that polynomial. Any other rational B-spline or other kind is refused (no
+//! bound is derived for it).
+//!
+//! **Rounding** (PROVEN for this module's arithmetic, [`crate::geom::certified`]): every
+//! unit vector carries `unit_error`, the cosines and sines of `phi` and `beta` their
+//! [`crate::geom::certified::dot`] and `cross_length` bounds, the reach `(e_num + R e_sin)
+//! / (sin phi - e_sin)` (the quotient amplifies the sine's error by `1 / sin phi`, so a
+//! near-tangent pair of faces widens it rather than being floored), the reaches' quotients by
+//! `cos beta` their error through `1 / (cos beta - e_cos)`, and the bend term is evaluated
+//! from upper bounds of every input, each product, quotient and root rounded up by its
+//! `gamma`. The gap is compared with the budget by [`crate::geom::certified::Bounded::at_most`],
+//! so a Join is taken only where the exact gap of the evaluated jets is proved below it.
+//! The jets themselves (the curves' derivatives and the faces' normals as evaluated) are
+//! taken as given; their evaluation error is not bounded here, as in #16627's bound. The
+//! budget keeps #16627's margin for the check's own rounding.
 //!
 //! Deviations: none (no upstream counterpart).
 
-use core::cmp::Ordering;
-
-use crate::error::Result;
+use crate::curve::curve::{Curve, CurveKind};
+use crate::error::{ignored, Result};
+use crate::geom::certified::{above, cross_length, dot, gamma, unit_error, Bounded};
+use crate::geom::extent1d::Extent1d;
 use crate::kernel::Kernel;
 use crate::math::{Vec3, EFF_ZERO};
+use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::math::{NOW, NOZ};
+use crate::surface::surface::SurfaceKind;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
+use crate::topology::face::p2 as face2;
 use crate::topology::{edge, Brep, EdgeuseId, FaceId, VertexId};
 
 /// One blend of a corner as [`join_tolerance_deg`] reads it: its edge use and, for each of
@@ -68,6 +116,16 @@ pub struct JoinBlend {
     pub faces: [(Option<FaceId>, f64); 2],
 }
 
+/// A bound on an edge's curvature next to the corner's vertex, and a lower bound on the
+/// length of edge from the vertex over which it holds (module docs).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EdgeBend {
+    /// At least the edge's curvature over [`Self::arc`] from the vertex.
+    pub curvature: f64,
+    /// At most the length of edge, from the vertex, the bound holds over.
+    pub arc: f64,
+}
+
 /// The blend's geometry at the corner's vertex on the face both blends share.
 #[derive(Clone, Copy, Debug)]
 struct AtVertex {
@@ -75,61 +133,279 @@ struct AtVertex {
     out: Vec3,
     /// The edge's unit binormal into the shared face there.
     binormal: Vec3,
-    /// The blend's reach along the shared face (its section's foot's distance from the edge).
-    reach: f64,
-    /// The edge's curvature in the face there, positive where it bends toward the face.
-    bend: f64,
+    /// The blend's reach along the shared face, certified.
+    reach: Bounded,
+    /// The edge's curvature bound next to the vertex.
+    bend: EdgeBend,
 }
 
-/// The curvature of a rail offset `reach` into the face from an edge whose curvature in the
-/// face is `bend` (positive bending toward the face): `bend / (1 - reach bend)` in size.
-/// `None` where the rail bends toward its centre with `reach bend >= 1` (the offset folds
-/// there: no rail), or for a non-finite input or a negative reach.
+/// `x` rounded up past `n` roundings, for a non-negative `x`.
+fn up(x: f64, n: usize) -> f64 {
+    x * (1.0 + gamma(n))
+}
+
+/// At least the curvature of a rail offset `reach` in the plane from an edge whose
+/// curvature is at most `curvature`: `curvature / (1 - reach curvature)`, rounded up. `None`
+/// where `reach curvature >= 1` (the offset may fold: no bound), or for a non-finite or
+/// negative input.
 #[must_use]
-pub fn rail_curvature(bend: f64, reach: f64) -> Option<f64> {
-    if !(bend.is_finite() && reach.is_finite() && reach >= 0.0) {
+pub fn rail_curvature(curvature: f64, reach: f64) -> Option<f64> {
+    if !(curvature.is_finite() && reach.is_finite() && curvature >= 0.0 && reach >= 0.0) {
         return None;
     }
-    if bend > 0.0 {
-        (reach * bend < 1.0).then(|| bend / (1.0 - reach * bend))
-    } else {
-        Some(bend.abs() / (1.0 + reach * bend.abs()))
+    let rk = up(reach * curvature, 1);
+    if !above(1.0, rk) {
+        return None;
     }
+    // 1 - rk rounds once, down by at most gamma_1 of it
+    let lower = (1.0 - rk) * (1.0 - gamma(2));
+    Some(up(curvature / lower, 1))
 }
 
-/// The vertex stands at most this far off the second blend's section where the shared
-/// section lies over it (module docs): `|R1 - R2 / cos beta|`, either way round, plus each
-/// rail's bend `kr s^2 / 2` over `s = R sin beta` (`kr` the larger [`rail_curvature`],
-/// `R` the larger reach). `None` where `cos beta` is not positive, a reach or bend is not
-/// one [`rail_curvature`] takes, or the run is not short against the rail's radius
-/// (`kr s >= 1/2`), where the quadratic bend no longer bounds it.
+/// At least how far a plane curve of curvature at most `curvature` stands off its tangent
+/// at abscissa `x` along it: `k x^2 / (1 + sqrt(1 - k^2 x^2))` (module docs), rounded up.
+/// `None` past `k x = 1/2` or for a non-finite or negative input.
+#[must_use]
+pub fn sagitta(curvature: f64, x: f64) -> Option<f64> {
+    if !(curvature.is_finite() && x.is_finite() && curvature >= 0.0 && x >= 0.0) {
+        return None;
+    }
+    let kx = up(curvature * x, 1);
+    if kx.is_nan() || kx > 0.5 {
+        return None;
+    }
+    let num = up(kx * x, 1);
+    // the square rounds up, so 1 - it and its root are below their exact values but for
+    // their own rounding: gamma_4 down in all, and the sum once more
+    let den = (1.0 + (1.0 - up(kx * kx, 1)).sqrt()) * (1.0 - gamma(5));
+    Some(up(num / den, 1))
+}
+
+/// The bound on the gap where the shared section lies over the second blend (module docs):
+/// the larger `|R_i - R_j / cos beta|` plus `sec beta` times the larger [`sagitta`] of the
+/// rails over `X = 2 R tan beta`, each rail's curvature from its edge's [`EdgeBend`] by
+/// [`rail_curvature`], certified for the inputs' bounds and its own rounding. `None` where
+/// `cos beta` is not proved positive, `tan beta > 1/2`, a reach is negative, a rail's
+/// curvature or sagitta is refused, or an edge's bound holds over less than the `1.05 X /
+/// (1 - R K)` of edge the rail runs over.
 #[must_use]
 pub fn overlap_gap(
-    reaches: [f64; 2],
-    cos_beta: f64,
-    sin_beta: f64,
-    bends: [f64; 2],
-) -> Option<f64> {
+    reaches: [Bounded; 2],
+    cos_beta: Bounded,
+    sin_beta: Bounded,
+    bends: [EdgeBend; 2],
+) -> Option<Bounded> {
+    let given = [reaches[0], reaches[1], cos_beta, sin_beta];
+    if !given
+        .iter()
+        .all(|x| x.value.is_finite() && x.bound.is_finite() && x.bound >= 0.0)
+    {
+        return None;
+    }
     let [r1, r2] = reaches;
-    if !(cos_beta > 0.0 && sin_beta.is_finite()) {
+    if !(r1.value >= 0.0 && r2.value >= 0.0 && sin_beta.value >= 0.0) {
         return None;
     }
-    let reach = r1.max(r2);
-    let k1 = rail_curvature(bends[0], r1)?;
-    let k2 = rail_curvature(bends[1], r2)?;
-    let run = reach * sin_beta.abs();
-    let kr = k1.max(k2);
-    if (kr * run).partial_cmp(&0.5) != Some(Ordering::Less) {
+    let cos_lo = cos_beta.value - cos_beta.bound;
+    if !above(cos_lo, 0.0) {
         return None;
     }
-    let apart = (r1 - r2 / cos_beta).abs().max((r2 - r1 / cos_beta).abs());
-    let gap = apart + 0.5 * kr * run * run;
-    gap.is_finite().then_some(gap)
+    // r / cos beta, within (e_r + q e_cos) / (cos beta - e_cos) and its rounding
+    let quotient = |r: Bounded| {
+        let q = r.value / cos_beta.value;
+        (
+            q,
+            up((r.bound + q * cos_beta.bound) / cos_lo, 3) + gamma(1) * q,
+        )
+    };
+    let (q1, e1) = quotient(r1);
+    let (q2, e2) = quotient(r2);
+    let a12 = (r1.value - q2).abs();
+    let a21 = (r2.value - q1).abs();
+    let apart = a12.max(a21);
+    let apart_bound =
+        up(r1.bound + e2 + gamma(1) * a12, 2).max(up(r2.bound + e1 + gamma(1) * a21, 2));
+    // the bend, from upper bounds of every input
+    let reach_up = up((r1.value + r1.bound).max(r2.value + r2.bound), 1);
+    let tan_up = up((sin_beta.value + sin_beta.bound) / cos_lo, 2);
+    if tan_up.is_nan() || tan_up > 0.5 {
+        return None;
+    }
+    let x = up(2.0 * reach_up * tan_up, 2);
+    let mut sag = 0.0_f64;
+    for (bend, r) in bends.iter().zip([r1, r2]) {
+        let r_up = up(r.value + r.bound, 1);
+        let kr = rail_curvature(bend.curvature, r_up)?;
+        sag = sag.max(sagitta(kr, x)?);
+        // the edge the rail runs over: 1.05 X / (1 - R K)
+        let shrink = (1.0 - up(r_up * bend.curvature, 1)) * (1.0 - gamma(2));
+        if !(shrink > 0.0 && bend.arc >= up(1.05 * x / shrink, 3)) {
+            return None;
+        }
+    }
+    let bend = up(up(1.0 / cos_lo, 1) * sag, 1);
+    let value = apart + bend;
+    let bound = apart_bound * (1.0 + gamma(1)) + gamma(1) * value;
+    value.is_finite().then_some(Bounded { value, bound })
+}
+
+/// The polynomial B-spline `c`'s [`EdgeBend`] curvature over its knot span at `param` (on
+/// the side toward the edge's interior), with the span's far end: module docs. `None` for a
+/// rational B-spline (other than one whose weights are all exactly 1), a degree-0 one, a span it cannot find, or a tangent along which a
+/// hodograph point does not lead.
+fn spline_curvature(
+    c: &BSplineCurve,
+    param: f64,
+    at_start: bool,
+    tangent: Vec3,
+) -> Result<Option<(f64, f64)>> {
+    let p = c.degree()?;
+    let Ok(p32) = u32::try_from(p) else {
+        return Ok(None);
+    };
+    if p == 0 {
+        return Ok(None);
+    }
+    let cpts = c.control_points()?;
+    // a weight of exactly 1 everywhere is a polynomial stored homogeneously
+    if cpts.iter().any(|q| q.w != NOW && q.w != 1.0) {
+        return Ok(None);
+    }
+    let (unique, mult) = c.knots(None)?;
+    let mut knots = Vec::new();
+    for (t, m) in unique.iter().zip(&mult) {
+        for _ in 0..*m {
+            knots.push(*t);
+        }
+    }
+    let Some(last) = cpts.len().checked_sub(1) else {
+        return Ok(None);
+    };
+    // the span [t_j, t_j+1] next to the vertex, toward the edge
+    let j = if at_start {
+        knots.iter().rposition(|&t| t <= param).map(|j| j.min(last))
+    } else {
+        knots.iter().rposition(|&t| t < param)
+    };
+    let Some(j) = j else { return Ok(None) };
+    let (Some(&lo), Some(&hi)) = (knots.get(j), knots.get(j + 1)) else {
+        return Ok(None);
+    };
+    let inside = if at_start {
+        lo <= param && param < hi
+    } else {
+        lo < param && param <= hi
+    };
+    if !(inside && j >= p && j <= last) {
+        return Ok(None);
+    }
+    let point = |i: usize| {
+        cpts.get(i)
+            .map(|c| Vec3::new(c.x, c.y, if c.z == NOZ { 0.0 } else { c.z }))
+    };
+    let knot = |i: usize| knots.get(i).copied();
+    let pf = f64::from(p32);
+    // the first hodograph's points Q_i = p (P_i+1 - P_i) / (t_i+p+1 - t_i+1), i = j-p..j-1:
+    // the difference of exact doubles rounds once relative to itself, the knot difference
+    // once, the scale and quotient twice: gamma_4 of |Q| per component
+    let mut hodo = Vec::new();
+    for i in (j - p)..j {
+        let (Some(a), Some(b), Some(t0), Some(t1)) =
+            (point(i), point(i + 1), knot(i + 1), knot(i + p + 1))
+        else {
+            return Ok(None);
+        };
+        let dt = t1 - t0;
+        if !above(dt, 0.0) {
+            return Ok(None);
+        }
+        let q = (b - a) * (pf / dt);
+        hodo.push((q, gamma(4) * 2.0 * q.length()));
+    }
+    // |C'| >= C' . u / |u| >= min (Q_i . u) / |u|, each dot within its rounding and Q's error
+    let u_len = 1.0 + 2.0 * unit_error();
+    let mut lead = f64::INFINITY;
+    for &(q, e) in &hodo {
+        let along = q.dot(tangent) - (e * u_len + gamma(3) * q.length() * u_len);
+        lead = lead.min(along);
+    }
+    let lead = lead * (1.0 - gamma(2)) / u_len;
+    if !above(lead, 0.0) {
+        return Ok(None);
+    }
+    // the second hodograph's points (p - 1) (Q_i+1 - Q_i) / (t_i+p+1 - t_i+2), i = j-p..j-2
+    let mut most = 0.0_f64;
+    for (n, w) in hodo.windows(2).enumerate() {
+        let i = j - p + n;
+        let ([(qa, ea), (qb, eb)], Some(t0), Some(t1)) = (w, knot(i + 2), knot(i + p + 1)) else {
+            return Ok(None);
+        };
+        let dt = t1 - t0;
+        if !above(dt, 0.0) {
+            return Ok(None);
+        }
+        let scale = (pf - 1.0) / dt;
+        let r = (*qb - *qa) * scale;
+        let e = up(
+            scale * (ea + eb + gamma(1) * (qa.length() + qb.length()) * 2.0),
+            3,
+        ) + gamma(4) * 2.0 * r.length();
+        most = most.max(up(r.length(), 5) + e);
+    }
+    let far = if at_start { hi } else { lo };
+    Ok(Some((up(most / up(lead * lead, 1), 1), far)))
+}
+
+/// The edge `curve`'s [`EdgeBend`] next to its end at `param` (`at_start`: its interval's
+/// start) within `ivl`, or `None` for a kind no bound is derived for (module docs).
+fn edge_bend(
+    k: &Kernel,
+    curve: &Curve,
+    ivl: &Extent1d,
+    param: f64,
+    at_start: bool,
+    tangent: Vec3,
+) -> Result<Option<EdgeBend>> {
+    let other = if at_start { ivl.max() } else { ivl.min() };
+    let (curvature, far) = match curve.kind() {
+        CurveKind::Line(_) => (0.0, other),
+        CurveKind::Ellipse(el) => {
+            let (a, b) = (el.x_radius().abs(), el.y_radius().abs());
+            let (big, small) = (a.max(b), a.min(b));
+            if !above(small, EFF_ZERO) {
+                return Ok(None);
+            }
+            (up(big / up(small * small, 1), 1), other)
+        }
+        CurveKind::BSpline(c) => {
+            let Some((curvature, end)) = spline_curvature(c, param, at_start, tangent)? else {
+                return Ok(None);
+            };
+            let far = if at_start {
+                end.min(other)
+            } else {
+                end.max(other)
+            };
+            (curvature, far)
+        }
+        _ => return Ok(None),
+    };
+    if !curvature.is_finite() {
+        return Ok(None);
+    }
+    let span = Extent1d::from_min_max(param.min(far), param.max(far));
+    let Some(length) = ignored(curve.length_bound(k, &span, f64::MAX))? else {
+        return Ok(None);
+    };
+    Ok(Some(EdgeBend {
+        curvature,
+        arc: length.lower,
+    }))
 }
 
 /// The blend's [`AtVertex`] on `shared`, or `None` where it cannot be read (no edge use of
-/// the blend's edge on that face, a degenerate tangent or binormal, faces whose normals are
-/// parallel there, a negative reach).
+/// the blend's edge on that face, a degenerate tangent or binormal, faces not proved apart,
+/// a reach not proved non-negative, an edge without a curvature bound).
 fn at_vertex(
     k: &Kernel,
     b: &mut Brep,
@@ -146,12 +422,11 @@ fn at_vertex(
     let Some(curve) = edge::curve(b, e)?.cloned() else {
         return Ok(None);
     };
-    let derivs = curve.evaluate(k, param, 2, !at_start, true)?;
-    let (Some(&d1), Some(&d2)) = (derivs.get(1), derivs.get(2)) else {
+    let derivs = curve.evaluate(k, param, 1, !at_start, true)?;
+    let Some(&d1) = derivs.get(1) else {
         return Ok(None);
     };
-    let speed_sq = d1.length_squared();
-    if speed_sq.partial_cmp(&(EFF_ZERO * EFF_ZERO)) != Some(Ordering::Greater) {
+    if !above(d1.length(), EFF_ZERO) {
         return Ok(None);
     }
     let Ok(tangent) = d1.unitize() else {
@@ -180,9 +455,11 @@ fn at_vertex(
     ) else {
         return Ok(None);
     };
-    let cos_phi = n_shared.dot(n_other);
-    let sin_phi = n_shared.cross(n_other).length();
-    if sin_phi.partial_cmp(&EFF_ZERO) != Some(Ordering::Greater) {
+    let ue = unit_error();
+    let cos_phi = dot(n_shared, n_other, ue, ue);
+    let sin_phi = cross_length(n_shared, n_other, ue, ue);
+    let sin_lo = sin_phi.value - sin_phi.bound;
+    if !above(sin_lo, 0.0) {
         return Ok(None);
     }
     let other_face = eu1::face(b, on_other)?;
@@ -196,32 +473,43 @@ fn at_vertex(
     let (Some(o_shared), Some(o_other)) = (offset_on(Some(shared)), offset_on(other_face)) else {
         return Ok(None);
     };
-    let reach = (o_other - o_shared * cos_phi) / sin_phi;
-    if !(reach.is_finite() && reach >= 0.0) {
+    // (oB - oA cos phi) / sin phi: the offsets are given, the cosine within its bound, the
+    // product and difference round twice; the quotient's error is the numerator's and the
+    // sine's through 1 / (sin phi - e_sin), and its own rounding
+    let num = o_other - o_shared * cos_phi.value;
+    let e_num = up(o_shared.abs() * cos_phi.bound, 1)
+        + gamma(2) * (o_other.abs() + (o_shared * cos_phi.value).abs());
+    let reach = num / sin_phi.value;
+    let e_reach = up((e_num + reach.abs() * sin_phi.bound) / sin_lo, 3) + gamma(1) * reach.abs();
+    if !(reach.is_finite() && e_reach.is_finite() && reach - e_reach >= 0.0) {
         return Ok(None);
     }
-    // the acceleration along the binormal over the speed squared: the edge's curvature in
-    // the face (the binormal is square to the tangent)
-    let bend = d2.dot(binormal) / speed_sq;
+    let Some(bend) = edge_bend(k, &curve, &ivl, param, at_start, tangent)? else {
+        return Ok(None);
+    };
     Ok(Some(AtVertex {
         out,
         binormal,
-        reach,
+        reach: Bounded {
+            value: reach,
+            bound: e_reach,
+        },
         bend,
     }))
 }
 
 /// The angle (degrees) within which the faces across the corner's side edges may meet for
 /// its two blends to Join: the solvers' tangency tolerance `tangency_tol_deg` where the
-/// shared section lies over the second blend and [`overlap_gap`] there stays strictly below
-/// the intersection tolerance `xsect_tol` (less #16627's rounding margin, for the larger
-/// reach, and as much again for the gap's own rounding), else `behind_deg`, #16627's bound
-/// ([`super::join_within_xsect_tolerance_deg`]). `behind_deg` too where the two blends share
-/// no single face, or any quantity cannot be read (module docs).
+/// shared face is a plane, the shared section is proved to lie over the second blend
+/// either way round, and [`overlap_gap`] there is proved below the intersection tolerance
+/// `xsect_tol` (less #16627's margin for the check's own rounding), else `behind_deg`,
+/// #16627's bound ([`super::join_within_xsect_tolerance_deg`]). `behind_deg` too where the
+/// two blends share no single face or any quantity cannot be read or bounded (module docs).
 ///
 /// # Errors
 ///
-/// Those of the topology queries, the curve evaluation and `evaluate_binormal`.
+/// Those of the topology queries, the curve evaluation, `evaluate_binormal` and the
+/// certified edge length.
 pub fn join_tolerance_deg(
     k: &Kernel,
     b: &mut Brep,
@@ -245,19 +533,32 @@ pub fn join_tolerance_deg(
     let [shared] = shared.as_slice() else {
         return Ok(behind_deg);
     };
+    // a plane: its bending is never a term (module docs)
+    let planar = matches!(
+        face2::surface(b, *shared)?.map(|s| s.kind()),
+        Some(SurfaceKind::Plane(_))
+    );
+    if !planar {
+        return Ok(behind_deg);
+    }
     let (Some(one), Some(two)) = (
         at_vertex(k, b, vertex, first, *shared)?,
         at_vertex(k, b, vertex, second, *shared)?,
     ) else {
         return Ok(behind_deg);
     };
-    // over the other blend, either way round (equal to first order); a NaN is not over
-    let over = one.binormal.dot(two.out) >= 0.0 && two.binormal.dot(one.out) >= 0.0;
-    if !over {
+    // over the other blend, either way round, proved (a NaN is not)
+    let ue = unit_error();
+    let over = |x: Bounded| x.value - x.bound >= 0.0;
+    if !(over(dot(one.binormal, two.out, ue, ue)) && over(dot(two.binormal, one.out, ue, ue))) {
         return Ok(behind_deg);
     }
-    let cos_beta = -one.out.dot(two.out);
-    let sin_beta = one.out.cross(two.out).length();
+    let along = dot(one.out, two.out, ue, ue);
+    let cos_beta = Bounded {
+        value: -along.value,
+        bound: along.bound,
+    };
+    let sin_beta = cross_length(one.out, two.out, ue, ue);
     let Some(gap) = overlap_gap(
         [one.reach, two.reach],
         cos_beta,
@@ -266,11 +567,11 @@ pub fn join_tolerance_deg(
     ) else {
         return Ok(behind_deg);
     };
-    // #16627's margin for the budget, and as much again for the gap's own rounding
+    // #16627's margin for the check's own rounding
     let eps = f64::EPSILON;
-    let reach = one.reach.max(two.reach);
+    let reach = (one.reach.value + one.reach.bound).max(two.reach.value + two.reach.bound);
     let budget = xsect_tol * (1.0 - 16.0 * eps) - 8.0 * eps * reach;
-    if gap * (1.0 + 16.0 * eps) + 8.0 * eps * reach < budget {
+    if gap.at_most(budget).is_yes() {
         Ok(tangency_tol_deg)
     } else {
         Ok(behind_deg)
@@ -281,55 +582,158 @@ pub fn join_tolerance_deg(
 mod tests {
     use super::*;
 
+    fn exact(value: f64) -> Bounded {
+        Bounded { value, bound: 0.0 }
+    }
+
+    fn straight(arc: f64) -> EdgeBend {
+        EdgeBend {
+            curvature: 0.0,
+            arc,
+        }
+    }
+
+    fn close(got: f64, want: f64) -> bool {
+        (got - want).abs() <= 1e-14 * want.abs()
+    }
+
+    // These check that the code computes the formulas of the module docs, rounded up: the
+    // bound itself is proved there.
     #[test]
-    fn the_overlap_gap_is_of_second_order() {
-        // equal reaches, straight edges: R (sec beta - 1)
+    fn the_overlap_gap_computes_its_formula() {
         let beta = 5.9e-5_f64;
-        let gap = overlap_gap([1.0, 1.0], beta.cos(), beta.sin(), [0.0, 0.0]).unwrap();
-        assert!((gap - (1.0 / beta.cos() - 1.0)).abs() <= 1e-24, "{gap}");
-        assert!(gap < 2e-9);
-        // a rail bent toward the face adds kr (R sin beta)^2 / 2, kr = k / (1 - R k)
-        let gap = overlap_gap([1.0, 1.0], beta.cos(), beta.sin(), [0.4, 0.0]).unwrap();
-        let kr = 0.4 / (1.0 - 0.4);
-        let want = 1.0 / beta.cos() - 1.0 + 0.5 * kr * beta.sin().powi(2);
-        assert!((gap - want).abs() <= 1e-24, "{gap} {want}");
-        // bent away from the face: k / (1 + R k)
-        let gap = overlap_gap([1.0, 1.0], beta.cos(), beta.sin(), [0.0, -0.625]).unwrap();
-        let kr = 0.625 / (1.0 + 0.625);
-        let want = 1.0 / beta.cos() - 1.0 + 0.5 * kr * beta.sin().powi(2);
-        assert!((gap - want).abs() <= 1e-24, "{gap} {want}");
+        let (c, s) = (exact(beta.cos()), exact(beta.sin()));
+        // equal reaches, straight edges: R (sec beta - 1)
+        let gap = overlap_gap([exact(1.0); 2], c, s, [straight(1.0); 2]).unwrap();
+        let want = 1.0 / beta.cos() - 1.0;
+        assert!(gap.value >= want && gap.value <= want + 1e-15, "{gap:?}");
+        assert!(gap.bound < 1e-14, "{gap:?}");
+        // a rail of an edge of curvature 0.625 at reach 1: kr = 0.625 / 0.375, the sagitta
+        // over X = 2 tan beta, times sec beta
+        let bent = EdgeBend {
+            curvature: 0.625,
+            arc: 1.0,
+        };
+        let gap = overlap_gap([exact(1.0); 2], c, s, [bent, straight(1.0)]).unwrap();
+        let kr = 0.625 / 0.375;
+        let x = 2.0 * beta.tan();
+        let sag = kr * x * x / (1.0 + (1.0 - kr * kr * x * x).sqrt());
+        let want = 1.0 / beta.cos() - 1.0 + sag / beta.cos();
+        assert!(
+            gap.value >= want && close(gap.value, want),
+            "{gap:?} {want}"
+        );
         // unequal reaches stand apart by their difference: first order
-        let gap = overlap_gap([1.0, 0.9], 1.0, 0.0, [0.0, 0.0]).unwrap();
-        assert!((gap - 0.1).abs() < 1e-15);
+        let gap = overlap_gap(
+            [exact(1.0), exact(0.9)],
+            exact(1.0),
+            exact(0.0),
+            [straight(1.0); 2],
+        )
+        .unwrap();
+        assert!((gap.value - 0.1).abs() < 1e-15);
+        // the inputs' bounds carry through
+        let wide = Bounded {
+            value: 1.0,
+            bound: 1e-12,
+        };
+        let gap = overlap_gap([wide, exact(1.0)], c, s, [straight(1.0); 2]).unwrap();
+        assert!(gap.bound >= 1e-12, "{gap:?}");
+    }
+
+    #[test]
+    fn the_sagitta_exceeds_the_quadratic_term() {
+        // k x^2 / (1 + sqrt(1 - k^2 x^2)) > k x^2 / 2, by 7% near k x = 1/2
+        let sag = sagitta(1.0, 0.499).unwrap();
+        assert!(
+            close(
+                sag,
+                0.499 * 0.499 / (1.0 + (1.0 - 0.499_f64 * 0.499).sqrt())
+            ),
+            "{sag}"
+        );
+        assert!(sag > 0.5 * 0.499 * 0.499 * 1.07);
+        assert_eq!(sagitta(1.0, 0.51), None);
+        assert_eq!(sagitta(f64::NAN, 0.1), None);
+        assert_eq!(sagitta(-1.0, 0.1), None);
+        assert_eq!(sagitta(0.0, 1e6), Some(0.0));
     }
 
     #[test]
     fn the_overlap_gap_refuses_what_it_cannot_bound() {
-        assert_eq!(overlap_gap([1.0, 1.0], 0.0, 1.0, [0.0, 0.0]), None);
-        assert_eq!(overlap_gap([1.0, 1.0], -0.5, 0.8, [0.0, 0.0]), None);
-        assert_eq!(overlap_gap([f64::NAN, 1.0], 1.0, 0.0, [0.0, 0.0]), None);
-        assert_eq!(overlap_gap([1.0, -1.0], 1.0, 0.0, [0.0, 0.0]), None);
-        assert_eq!(overlap_gap([1.0, 1.0], f64::NAN, 0.0, [0.0, 0.0]), None);
+        let one = [exact(1.0); 2];
+        let flat = [straight(1.0); 2];
+        assert_eq!(overlap_gap(one, exact(0.0), exact(1.0), flat), None);
+        assert_eq!(overlap_gap(one, exact(-0.5), exact(0.8), flat), None);
         assert_eq!(
-            overlap_gap([1.0, 1.0], 1.0, 0.0, [f64::INFINITY, 0.0]),
+            overlap_gap([exact(f64::NAN), exact(1.0)], exact(1.0), exact(0.0), flat),
             None
         );
-        // a rail folded at its reach, or bent too much over its run
-        assert_eq!(overlap_gap([1.0, 1.0], 1.0, 0.0, [1.0, 0.0]), None);
-        assert!(overlap_gap([1.0, 1.0], 1.0, 0.0, [0.999, 0.0]).is_some());
-        assert_eq!(overlap_gap([1.0, 1.0], 0.6, 0.8, [0.9, 0.0]), None);
-        // bent away, any curvature is bounded
-        assert!(overlap_gap([1.0, 1.0], 1.0, 0.0, [-1e6, 0.0]).is_some());
+        assert_eq!(
+            overlap_gap([exact(1.0), exact(-1.0)], exact(1.0), exact(0.0), flat),
+            None
+        );
+        assert_eq!(overlap_gap(one, exact(f64::NAN), exact(0.0), flat), None);
+        // a cosine not proved positive
+        let unsure = Bounded {
+            value: 1e-20,
+            bound: 1e-19,
+        };
+        assert_eq!(overlap_gap(one, unsure, exact(0.0), flat), None);
+        // tan beta past 1/2
+        assert_eq!(overlap_gap(one, exact(0.8), exact(0.6), flat), None);
+        // a rail that may fold at its reach, or bent too much over its run
+        let folded = EdgeBend {
+            curvature: 1.0,
+            arc: 1.0,
+        };
+        assert_eq!(
+            overlap_gap(one, exact(1.0), exact(0.0), [folded, straight(1.0)]),
+            None
+        );
+        let tight = EdgeBend {
+            curvature: 0.9,
+            arc: 1.0,
+        };
+        assert_eq!(
+            overlap_gap(one, exact(0.9), exact(0.4), [tight, straight(1.0)]),
+            None
+        );
+        // a curvature bound over less edge than the rail runs: 1.05 X
+        let beta = 1e-3_f64;
+        let x = 2.0 * beta.tan();
+        let (c, s) = (exact(beta.cos()), exact(beta.sin()));
+        assert_eq!(
+            overlap_gap(one, c, s, [straight(1.04 * x), straight(1.0)]),
+            None
+        );
+        assert!(overlap_gap(one, c, s, [straight(1.06 * x), straight(1.0)]).is_some());
+        assert_eq!(
+            overlap_gap(
+                one,
+                exact(1.0),
+                exact(0.0),
+                [
+                    EdgeBend {
+                        curvature: f64::INFINITY,
+                        arc: 1.0
+                    },
+                    straight(1.0)
+                ]
+            ),
+            None
+        );
     }
 
     #[test]
-    fn a_rail_s_curvature_follows_its_side() {
+    fn a_rail_s_curvature_bound_follows_its_offset() {
         assert_eq!(rail_curvature(0.0, 1.0), Some(0.0));
-        assert_eq!(rail_curvature(0.25, 1.0), Some(0.25 / 0.75));
-        assert_eq!(rail_curvature(-0.25, 1.0), Some(0.25 / 1.25));
+        assert!(close(rail_curvature(0.25, 1.0).unwrap(), 0.25 / 0.75));
+        assert!(rail_curvature(0.25, 1.0).unwrap() >= 0.25 / 0.75);
+        assert!(close(rail_curvature(0.5, 1.0).unwrap(), 1.0));
         assert_eq!(rail_curvature(1.0, 1.0), None);
-        assert_eq!(rail_curvature(0.5, 1.0), Some(1.0));
         assert_eq!(rail_curvature(f64::NAN, 1.0), None);
         assert_eq!(rail_curvature(0.1, -1.0), None);
+        assert_eq!(rail_curvature(-0.1, 1.0), None);
     }
 }
