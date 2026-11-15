@@ -1729,11 +1729,25 @@ fn reference_parts_hide_each_other_whatever_the_setting() {
 }
 
 /// A reference part's edge on a model part's: the block's right edge moved onto the plate's. Merged
-/// apart, each keeps its whole outline, so the model's line is drawn in the model's width.
+/// apart, each keeps its whole outline, so the model's line is drawn in the model's width. So does a
+/// block as tall as the plate and standing in it, over its right edge (parts may overlap): the
+/// block's right edge is the plate's, one line seen by both, and the block's stays whole although the
+/// plate is tested against it.
 #[test]
 fn a_reference_line_never_takes_a_stretch_from_a_model_line() {
     let (mut s, [_, block]) = plate_and_block(5.0);
     run(&mut s, "occurrence.move", json!({"occurrence": block, "translate": [-10, 0, 0]}));
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
+    assert_lengths(&v, false, 160.0, 0.0);
+    assert_lengths(&v, true, 80.0, 0.0);
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "PlatePart"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let inside = run(&mut s, "component.create", json!({"name": "BlockPart"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 5, "corner": [20, 10, 0], "body_name": "Block", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": inside, "bom_type": "reference"}));
     let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
     assert_lengths(&v, false, 160.0, 0.0);
     assert_lengths(&v, true, 80.0, 0.0);
@@ -1806,7 +1820,7 @@ fn no_reference_parts_means_the_setting_changes_nothing() {
 }
 
 /// The snapshot's scene draws reference parts as saved views do: thin, and first. The reference
-/// block is drawn from the mesh beside the exact plate, and asked to certify, the view says why.
+/// block is drawn exact, as the plate is, so the view certifies any accuracy.
 #[test]
 fn a_scene_draws_reference_parts_thin_under_the_model() {
     let (mut s, _) = plate_and_block(5.0);
@@ -1814,9 +1828,45 @@ fn a_scene_draws_reference_parts_thin_under_the_model() {
     let widths: Vec<f64> = strokes(&v).iter().map(|(_, _, width)| *width).collect();
     let thin = widths.iter().take_while(|w| **w == LineKind::Thin.width_mm(LineGroup::DEFAULT)).count();
     assert!(thin > 0 && widths[thin..].iter().all(|w| *w == LineKind::Visible.width_mm(LineGroup::DEFAULT)), "{widths:?}");
-    assert_eq!(v["status"]["provenance"], "hidden_lines_and_mesh_projection", "{v}");
-    let e = refused(&mut s, json!({"view": "top", "scale": "1:1", "reference_shown_percent": 100, "max_error_mm": 0.01}));
-    assert!(e.contains("bodies drawn from the mesh: 1 for reference parts"), "{e}");
+    assert_eq!(v["status"]["provenance"], "hidden_lines", "{v}");
+    snap(&mut s, json!({"view": "top", "scale": "1:1", "reference_shown_percent": 100, "max_error_mm": 0.0001}));
+}
+
+/// A reference part's arcs stay exact inside the view and are cut on their chords at its edge. On
+/// the plate stand a 10 mm pin round (20, 20) and a 10 mm peg round (40, 20), both reference parts,
+/// seen from above at 1:1 with no room given to reference parts. The pin's rim is one whole analytic
+/// circle round the sheet's centre (210, 148.5). The peg keeps the half of its rim inside the plate's
+/// x 40 (230 on the sheet): one arc on its circle, its ends where its chords (within 0.01 mm) cross
+/// x 40, so sampled, as the mesh projection draws it.
+#[test]
+fn a_reference_parts_arcs_stay_exact_inside_the_view_and_are_cut_at_its_edge() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "PlatePart"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    for (name, x) in [("Pin", 20), ("Peg", 40)] {
+        let occurrence = run(&mut s, "component.create", json!({"name": format!("{name}Part")}))["occurrence"].as_u64().unwrap();
+        run(&mut s, "solid.cylinder", json!({"diameter": 10, "height": 10, "base": [x, 20, 5], "body_name": name, "operation": "new"}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        run(&mut s, "occurrence.bom_type", json!({"occurrence": occurrence, "bom_type": "reference"}));
+    }
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
+    assert_eq!(v["status"]["provenance"], "hidden_lines", "{v}");
+    let of = |body: &str| json!({"lines": v["lines"].as_array().unwrap().iter().filter(|l| l["body"] == body).cloned().collect::<Vec<_>>()});
+    let pin = of("Pin");
+    let rims = arcs(&pin, "visible");
+    let [(centre, radius, sweep, kind)] = rims.as_slice() else { panic!("one rim: {pin}") };
+    assert!(centre.dist(Vec2::new(210.0, 148.5)) < 1e-9 && (radius - 5.0).abs() < 1e-9, "{pin}");
+    assert!((sweep.abs() - std::f64::consts::TAU).abs() < 1e-9 && kind == "analytic", "{pin}");
+    assert!(segments(&pin, "visible").is_empty(), "{pin}");
+    let peg = of("Peg");
+    let rims = arcs(&peg, "visible");
+    let [(centre, radius, sweep, kind)] = rims.as_slice() else { panic!("one arc: {peg}") };
+    assert!(centre.dist(Vec2::new(230.0, 148.5)) < 1e-9 && (radius - 5.0).abs() < 1e-9, "{peg}");
+    // A cut on a chord is at most its sag (0.01 mm) off the circle: that far round on either end.
+    let off = 2.0 * (0.01f64 / 5.0).asin();
+    assert!((sweep.abs() - std::f64::consts::PI).abs() <= off && kind == "sampled", "{sweep}: {peg}");
+    assert!(segments(&peg, "visible").is_empty(), "{peg}");
 }
 
 /// A scene's hidden reference lines are dashed as the model's are, by the reference parts' own

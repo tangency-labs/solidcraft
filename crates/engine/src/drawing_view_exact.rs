@@ -5,17 +5,22 @@
 //! where each is seen.
 //!
 //! A body is drawn exact unless one of [`Fallback`]'s reasons holds; the caller draws the rest from
-//! the mesh projection, which tests them against every shown body, as before.
+//! the mesh projection, which tests them against every shown body, as before. Reference parts follow
+//! the mesh projection's rule: their lines are tested against everything, and the model's see
+//! through them unless the view says they hide it. So their lines come from a second `hlr` call
+//! with them in the scene.
+
+use std::cell::OnceCell;
 
 use solidcore_record::{Seg2, Vec2, Vec3};
-use solidcraft_geom::Similarity2;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::hlr::{self, HlrError, Source, Visibility};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
+use solidcraft_geom::{Aabb2, EPS, Similarity2};
 
 use super::ShownSet;
-use super::lines::{LineRequest, Piece, ViewLine, continues};
+use super::lines::{LineRequest, Piece, ViewLine, continues, on_arc, within};
 use crate::mesh_lines::{self, Placed, Stage};
 
 /// The edges the view draws of a body, in its record's order, and which of them are tangent edges.
@@ -26,8 +31,6 @@ pub(super) type Edges<'a> = dyn Fn(&Placed) -> (Vec<bool>, Vec<bool>) + 'a;
 pub enum Fallback {
     /// A mesh body: it has no record to draw from.
     MeshBody,
-    /// A reference part: its lines stay thin and clipped to the view, from the mesh.
-    Reference,
     /// A face `hlr` doesn't draw exactly: a freeform face, or a trim it can't classify.
     Unsupported,
     /// The body's record, or its edge numbers, couldn't be read for `hlr`.
@@ -45,7 +48,6 @@ impl Fallback {
     pub fn name(self) -> &'static str {
         match self {
             Fallback::MeshBody => "mesh bodies",
-            Fallback::Reference => "reference parts",
             Fallback::Unsupported => "faces the exact lines can't draw",
             Fallback::Unread => "records that can't be read",
             Fallback::Seam => "split faces",
@@ -97,88 +99,228 @@ pub(super) fn lines(
     let cancel = || stage.check().is_err();
     let (defs, groups) = prepare(placed, opts, edges, &cancel)?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
-    let group = |item: &Placed| groups.get(item.group).ok_or(Fallback::Unread).and_then(|g| g.as_ref().map_err(|f| *f));
-    let reference = |i: usize| shown.bodies.get(i).is_some_and(|b| b.reference);
-    let mut drawn: Vec<std::result::Result<Vec<ViewLine>, Fallback>> =
-        placed.iter().enumerate().map(|(i, item)| group(item).and(if reference(i) { Err(Fallback::Reference) } else { Ok(Vec::new()) })).collect();
-    // The `hlr` scene: every body it can draw, reference parts only when they hide the model, so a
-    // body drawn exact is tested exactly against all of them.
-    let mut scene = Vec::new();
-    let mut shown_at = Vec::new();
-    for (i, item) in placed.iter().enumerate() {
-        let Ok(g) = group(item) else { continue };
-        if reference(i) && !request.reference_hides_model {
-            continue;
-        }
-        let column = |c: usize| item.transform.get(c).map_or(Vec3::ZERO, |c| Vec3::new(c[0], c[1], c[2]));
-        scene.push(hlr::Placement { body: g.def, rotation: [column(0), column(1), column(2)], translation: column(3) });
-        shown_at.push(i);
-    }
+    let reference: Vec<bool> = (0..placed.len()).map(|i| shown.bodies.get(i).is_some_and(|b| b.reference)).collect();
+    let mut drawn: Vec<std::result::Result<Vec<ViewLine>, Fallback>> = placed
+        .iter()
+        .map(|item| groups.get(item.group).ok_or(Fallback::Unread).and_then(|g| g.as_ref().map(|_| Vec::new()).map_err(|f| *f)))
+        .collect();
     let basis = frame.basis();
-    in_front(placed, shown, request, &basis, &shown_at, &mut drawn);
-    let mut exact = Exact { drawn, covered: 0, uncertain: 0, prepare_ms, projection_ms: 0.0, occlusion_ms: 0.0 };
-    if !exact.drawn.iter().any(Result::is_ok) {
-        return Some(exact);
+    // The bodies' boxes on the view, read only when a body drawn from the mesh may hide one drawn
+    // exact, or a reference part is drawn exact.
+    let boxes = OnceCell::new();
+    let boxes = || boxes.get_or_init(|| placed.iter().map(|item| view_box(item, &basis)).collect::<Vec<ViewBox>>()).as_slice();
+    if drawn.iter().any(Result::is_err) {
+        in_front(&reference, request.reference_hides_model, boxes(), &mut drawn);
     }
-    let view = hlr::View { x: basis.x, y: basis.y, d: basis.y.cross(basis.x) };
-    let found = match hlr::hidden_lines(&defs, &scene, &view, opts, &cancel) {
-        Ok(found) => found,
-        Err(HlrError::Cancelled) => return None,
-        Err(_) => {
-            refuse_all(&mut exact);
-            return Some(exact);
-        }
-    };
-    stage.advance(placed.len()).ok()?;
-    let [traced, crossed, classified, covered] = found.stats.phase_ms;
-    exact.projection_ms = traced + crossed;
-    exact.occlusion_ms = classified + covered;
+    let mut exact = Exact { drawn, covered: 0, uncertain: 0, prepare_ms, projection_ms: 0.0, occlusion_ms: 0.0 };
     // `hlr` measures x and y from the world origin, the view's plane from the basis's origin.
     let Some(shift) = Similarity2::new(1.0, 0.0, Vec2::new(-basis.origin.dot(basis.x), -basis.origin.dot(basis.y))) else {
-        refuse_all(&mut exact);
+        refuse(&mut exact, |_| true);
         return Some(exact);
     };
-    // Every edge the view draws has a line in `hlr`, hidden or not, unless `hlr` calls it a seam.
-    let mut has_line: Vec<Vec<bool>> =
-        shown_at.iter().map(|i| placed.get(*i).and_then(|p| group(p).ok()).map_or(Vec::new(), |g| vec![false; g.drawn.len()])).collect();
-    for line in &found.lines {
-        if let (Source::Edge { edge, .. }, Some(seen)) = (line.source, has_line.get_mut(line.placement))
-            && let Some(slot) = seen.get_mut(edge)
-        {
-            *slot = true;
-        }
+    let calls = Calls {
+        defs: &defs,
+        groups: &groups,
+        placed,
+        reference: &reference,
+        frame,
+        request,
+        opts,
+        view: hlr::View { x: basis.x, y: basis.y, d: basis.y.cross(basis.x) },
+        shift,
+        clip: reference.contains(&false).then_some(request.shows),
+        model_chord: request.chord_mm / frame.scale().factor(),
+    };
+    // The model's lines, tested against the model, and against the reference parts when they hide it.
+    let model: Vec<usize> = (0..placed.len()).filter(|i| !reference[*i] || request.reference_hides_model).collect();
+    calls.draw(&model, false, &cancel, &mut exact)?;
+    // The reference parts' own lines, tested against everything: every reference part, first, so one
+    // on a model line keeps all of it, then each model body that may hide one drawn exact.
+    let drawn_exact: Vec<usize> = (0..placed.len()).filter(|i| reference[*i] && exact.drawn.get(*i).is_some_and(Result::is_ok)).collect();
+    if !drawn_exact.is_empty() {
+        let hides_one = |i: usize| drawn_exact.iter().any(|r| may_hide(boxes().get(i).copied().flatten(), boxes().get(*r).copied().flatten()));
+        let (parts, others): (Vec<usize>, Vec<usize>) = (0..placed.len()).partition(|i| reference[*i]);
+        let scene: Vec<usize> = parts.into_iter().chain(others.into_iter().filter(|i| hides_one(*i))).collect();
+        calls.draw(&scene, true, &cancel, &mut exact)?;
     }
-    for (at, i) in shown_at.iter().enumerate() {
-        let (Some(item), Some(seen)) = (placed.get(*i), has_line.get(at)) else { continue };
-        let all = group(item).is_ok_and(|g| g.drawn.iter().zip(seen).all(|(drawn, seen)| !drawn || *seen));
-        if let Some(d) = exact.drawn.get_mut(*i).filter(|d| d.is_ok() && !all) {
-            *d = Err(Fallback::Seam);
-        }
-    }
-    for line in found.lines {
-        let Some(&i) = shown_at.get(line.placement) else { continue };
-        let Some(g) = placed.get(i).and_then(|p| group(p).ok()) else { continue };
-        let source = match line.source {
-            Source::Edge { edge, .. } if g.drawn.get(edge) == Some(&true) => Source::Edge { edge, tangent: g.tangent.get(edge) == Some(&true) },
-            Source::Edge { .. } => continue,
-            silhouette @ Source::Silhouette { .. } => silhouette,
-        };
-        let Some(Ok(lines)) = exact.drawn.get_mut(i) else { continue };
-        let mut pieces = Vec::with_capacity(line.pieces.len());
-        for piece in line.pieces {
-            let Some(visibility) = shown_as(piece.visibility, piece.covered, request.hidden, &mut exact.covered, &mut exact.uncertain) else {
-                continue;
-            };
-            // An edge seen end on is a point on the lines that meet at its ends, so `hlr` gives it as
-            // covered; a piece with no length left is dropped with the paper scene's strokes.
-            let (path, accuracy) = on_paper(&piece.geometry, piece.accuracy, frame, &shift, request.chord_mm);
-            pieces.push(Piece { visibility, path, accuracy });
-        }
-        if !pieces.is_empty() {
-            lines.push(ViewLine { shown: i, reference: false, source, pieces });
-        }
-    }
+    stage.advance(placed.len()).ok()?;
     Some(exact)
+}
+
+/// What a view's `hlr` calls share.
+struct Calls<'a> {
+    defs: &'a [hlr::Prepared],
+    groups: &'a [std::result::Result<Group, Fallback>],
+    placed: &'a [Placed<'a>],
+    /// Per shown body, whether it is a reference part.
+    reference: &'a [bool],
+    frame: &'a ViewFrame,
+    request: &'a LineRequest,
+    opts: &'a hlr::Options,
+    view: hlr::View,
+    /// From `hlr`'s screen millimetres to the view's plane.
+    shift: Similarity2,
+    /// What reference lines are cut to: what the view's boundary holds, when it shows model parts too
+    /// (only then can they reach past it).
+    clip: Option<Aabb2>,
+    /// The view's chord in model millimetres.
+    model_chord: f64,
+}
+
+impl Calls<'_> {
+    /// The prepared group of shown body `i`, when `hlr` can draw it.
+    fn group(&self, i: usize) -> Option<&Group> {
+        self.placed.get(i).and_then(|item| self.groups.get(item.group)).and_then(|g| g.as_ref().ok())
+    }
+
+    /// One `hidden_lines` call, its scene each of `members` that `hlr` can draw, in that order: the
+    /// lines of the members still drawn exact that are reference parts, or not, as `of_reference`
+    /// says. `None` when cancelled.
+    fn draw(&self, members: &[usize], of_reference: bool, cancel: &(dyn Fn() -> bool + Sync), exact: &mut Exact) -> Option<()> {
+        let keep: Vec<bool> =
+            (0..self.placed.len()).map(|i| self.reference.get(i) == Some(&of_reference) && exact.drawn.get(i).is_some_and(Result::is_ok)).collect();
+        let mut scene = Vec::new();
+        let mut shown_at = Vec::new();
+        for &i in members {
+            let (Some(item), Some(g)) = (self.placed.get(i), self.group(i)) else { continue };
+            let column = |c: usize| item.transform.get(c).map_or(Vec3::ZERO, |c| Vec3::new(c[0], c[1], c[2]));
+            scene.push(hlr::Placement { body: g.def, rotation: [column(0), column(1), column(2)], translation: column(3) });
+            shown_at.push(i);
+        }
+        if !shown_at.iter().any(|i| keep.get(*i) == Some(&true)) {
+            return Some(());
+        }
+        let found = match hlr::hidden_lines(self.defs, &scene, &self.view, self.opts, cancel) {
+            Ok(found) => found,
+            Err(HlrError::Cancelled) => return None,
+            Err(_) => {
+                refuse(exact, |i| keep.get(i) == Some(&true));
+                return Some(());
+            }
+        };
+        let [traced, crossed, classified, covered] = found.stats.phase_ms;
+        exact.projection_ms += traced + crossed;
+        exact.occlusion_ms += classified + covered;
+        // Every edge the view draws has a line in `hlr`, hidden or not, unless `hlr` calls it a seam.
+        let mut has_line: Vec<Vec<bool>> = shown_at.iter().map(|i| self.group(*i).map_or(Vec::new(), |g| vec![false; g.drawn.len()])).collect();
+        for line in &found.lines {
+            if let (Source::Edge { edge, .. }, Some(seen)) = (line.source, has_line.get_mut(line.placement))
+                && let Some(slot) = seen.get_mut(edge)
+            {
+                *slot = true;
+            }
+        }
+        for (at, i) in shown_at.iter().enumerate().filter(|(_, i)| keep.get(**i) == Some(&true)) {
+            let all = self.group(*i).zip(has_line.get(at)).is_some_and(|(g, seen)| g.drawn.iter().zip(seen).all(|(drawn, seen)| !drawn || *seen));
+            if let Some(d) = exact.drawn.get_mut(*i).filter(|_| !all) {
+                *d = Err(Fallback::Seam);
+            }
+        }
+        let hidden = if of_reference { self.request.reference_hidden } else { self.request.hidden };
+        let clip = self.clip.filter(|_| of_reference);
+        for line in found.lines {
+            let Some(&i) = shown_at.get(line.placement).filter(|i| keep.get(**i) == Some(&true)) else { continue };
+            let Some(g) = self.group(i) else { continue };
+            let source = match line.source {
+                Source::Edge { edge, .. } if g.drawn.get(edge) == Some(&true) => Source::Edge { edge, tangent: g.tangent.get(edge) == Some(&true) },
+                Source::Edge { .. } => continue,
+                silhouette @ Source::Silhouette { .. } => silhouette,
+            };
+            let Some(Ok(lines)) = exact.drawn.get_mut(i) else { continue };
+            let mut pieces = Vec::with_capacity(line.pieces.len());
+            for piece in line.pieces {
+                let Some(visibility) = shown_as(piece.visibility, piece.covered, hidden, &mut exact.covered, &mut exact.uncertain) else {
+                    continue;
+                };
+                // An edge seen end on is a point on the lines that meet at its ends, so `hlr` gives it
+                // as covered; a piece with no length left is dropped with the paper scene's strokes.
+                let geometry: Vec<Seg2> = piece.geometry.iter().map(|seg| seg.similar(&self.shift)).collect();
+                let runs = match clip {
+                    Some(area) => clipped(&geometry, &area, self.model_chord),
+                    None => vec![(geometry, false)],
+                };
+                for (run, chorded) in runs {
+                    let (path, accuracy) = on_paper(&run, piece.accuracy, self.frame, self.request.chord_mm, chorded);
+                    pieces.push(Piece { visibility, path, accuracy });
+                }
+            }
+            if !pieces.is_empty() {
+                lines.push(ViewLine { shown: i, reference: of_reference, source, pieces });
+            }
+        }
+        Some(())
+    }
+}
+
+/// The parts of `path` (on the view's plane) inside `area`, each run end to end, and whether it was
+/// cut on chords within `chord`: a piece inside is kept as it is and a line is cut where it
+/// crosses. Another curve is cut on its chords, and an arc's part (a circular conic's too) then
+/// drawn on its circle ([`on_arc`]), as the mesh projection draws one; an exact cut of a curve at a
+/// box isn't the app's maths to do.
+fn clipped(path: &[Seg2], area: &Aabb2, chord: f64) -> Vec<(Vec<Seg2>, bool)> {
+    let mut runs: Vec<(Vec<Seg2>, bool)> = Vec::new();
+    // The last part kept reached the end of its piece, so a part from the next one's start goes on.
+    let mut going = false;
+    for seg in path {
+        if inside(seg, area) {
+            match runs.last_mut() {
+                Some((run, _)) if going => run.push(*seg),
+                _ => runs.push((vec![*seg], false)),
+            }
+            going = true;
+            continue;
+        }
+        let seg = &match *seg {
+            Seg2::Conic { a, apex, b, w } => circular(a, apex, b, w).unwrap_or(*seg),
+            _ => *seg,
+        };
+        let curve = !matches!(seg, Seg2::Line { .. });
+        let points = if curve { seg.polyline(chord) } else { vec![seg.start(), seg.end()] };
+        // Runs of the chords' parts inside, each with whether it starts at the piece's start.
+        let mut kept: Vec<(Vec<Vec2>, bool)> = Vec::new();
+        let mut ends = false;
+        for (k, w) in points.windows(2).enumerate() {
+            let &[a, b] = w else { continue };
+            ends = false;
+            let Some((p, q)) = within(a, b, area).filter(|(p, q)| p.dist(*q) > EPS) else { continue };
+            match kept.last_mut() {
+                Some((run, _)) if run.last().is_some_and(|last| last.dist(p) <= EPS) => run.push(q),
+                _ => kept.push((vec![p, q], k == 0 && p.dist(a) <= EPS)),
+            }
+            ends = q.dist(b) <= EPS;
+        }
+        let near = |radius: f64| 2.0 * chord + radius * 1e-9;
+        for (points, starts) in kept {
+            let part = match seg {
+                Seg2::Arc { .. } => on_arc(seg, &points, false, near, 0.0).map(|(arc, _)| vec![arc]),
+                _ => None,
+            };
+            let part = part.unwrap_or_else(|| points.windows(2).filter_map(|w| Some(Seg2::Line { a: *w.first()?, b: *w.get(1)? })).collect());
+            match runs.last_mut() {
+                Some((run, chorded)) if going && starts => {
+                    run.extend(part);
+                    *chorded |= curve;
+                }
+                _ => runs.push((part, curve)),
+            }
+            going = false;
+        }
+        going = ends;
+    }
+    runs
+}
+
+/// Whether all of `seg` lies in `area`: a line's or an arc's own box does, or a conic's control
+/// triangle (the conic lies within it). Any other curve is cut on its chords.
+fn inside(seg: &Seg2, area: &Aabb2) -> bool {
+    match *seg {
+        Seg2::Line { .. } | Seg2::Arc { .. } => {
+            let b = seg.bounds();
+            area.contains(b.min) && area.contains(b.max)
+        }
+        Seg2::Conic { a, apex, b, .. } => [a, apex, b].into_iter().all(|p| area.contains(p)),
+        _ => false,
+    }
 }
 
 /// How the view draws a piece `hlr` sees at `visibility`, or `None` when it doesn't: a `covered`
@@ -199,9 +341,9 @@ fn shown_as(visibility: Visibility, covered: bool, hidden: bool, covered_count: 
     }
 }
 
-/// Every body still drawn exact sent to the mesh: `hlr` couldn't draw the view.
-fn refuse_all(exact: &mut Exact) {
-    for d in exact.drawn.iter_mut().filter(|d| d.is_ok()) {
+/// Every body still drawn exact that `which` names sent to the mesh: `hlr` couldn't draw them.
+fn refuse(exact: &mut Exact, which: impl Fn(usize) -> bool) {
+    for (_, d) in exact.drawn.iter_mut().enumerate().filter(|(i, d)| d.is_ok() && which(*i)) {
         *d = Err(Fallback::Refused);
     }
 }
@@ -245,72 +387,63 @@ fn prepare(
     Some((defs, groups))
 }
 
-/// Sends to the mesh each body `drawn` still draws exact that a body outside the `hlr` scene could
-/// hide: one whose box on the view overlaps it and reaches nearer the eye somewhere. The boxes are
-/// the bodies' exact boxes (a mesh body's are its triangles'), read only when there is such a body.
-fn in_front(
-    placed: &[Placed],
-    shown: &ShownSet,
-    request: &LineRequest,
-    basis: &solidcore_record::Plane,
-    shown_at: &[usize],
-    drawn: &mut [std::result::Result<Vec<ViewLine>, Fallback>],
-) {
-    let mut in_scene = vec![false; placed.len()];
-    for i in shown_at {
-        if let Some(slot) = in_scene.get_mut(*i) {
-            *slot = true;
-        }
-    }
-    let hides = |i: usize| !shown.bodies.get(i).is_some_and(|b| b.reference) || request.reference_hides_model;
-    let outside: Vec<usize> = (0..placed.len()).filter(|i| in_scene.get(*i) == Some(&false) && hides(*i)).collect();
-    if outside.is_empty() {
-        return;
-    }
-    // The body's box on the view: x and y across it, and its depth along the line of sight.
+/// A body's box on the view: x and y across it, and its depth along the line of sight. `None` when
+/// its bounds can't be read.
+type ViewBox = Option<([f64; 3], [f64; 3])>;
+
+/// `item`'s box on the view of `basis`, from its exact box (a mesh body's is its triangles').
+fn view_box(item: &Placed, basis: &solidcore_record::Plane) -> ViewBox {
+    let b = item.body.body.exact_bounds().ok()?;
     let d = basis.y.cross(basis.x);
-    let on_view = |i: usize| {
-        let b = placed.get(i)?.body.body.exact_bounds().ok()?;
-        let corners = (0..8).map(|k| {
-            Vec3::new(
-                if k & 1 == 0 { b.min.x } else { b.max.x },
-                if k & 2 == 0 { b.min.y } else { b.max.y },
-                if k & 4 == 0 { b.min.z } else { b.max.z },
-            )
-        });
-        let mut lo = [f64::INFINITY; 3];
-        let mut hi = [f64::NEG_INFINITY; 3];
-        for c in corners {
-            for (k, v) in [c.dot(basis.x), c.dot(basis.y), c.dot(d)].into_iter().enumerate() {
-                lo[k] = lo[k].min(v);
-                hi[k] = hi[k].max(v);
-            }
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for k in 0..8 {
+        let c = Vec3::new(
+            if k & 1 == 0 { b.min.x } else { b.max.x },
+            if k & 2 == 0 { b.min.y } else { b.max.y },
+            if k & 4 == 0 { b.min.z } else { b.max.z },
+        );
+        for (k, v) in [c.dot(basis.x), c.dot(basis.y), c.dot(d)].into_iter().enumerate() {
+            lo[k] = lo[k].min(v);
+            hi[k] = hi[k].max(v);
         }
-        lo.iter().chain(&hi).all(|v| v.is_finite()).then_some((lo, hi))
-    };
-    let blockers: Vec<Option<([f64; 3], [f64; 3])>> = outside.iter().map(|i| on_view(*i)).collect();
+    }
+    lo.iter().chain(&hi).all(|v| v.is_finite()).then_some((lo, hi))
+}
+
+/// Whether the body boxed `other` may hide some of the body boxed `mine`: its box overlaps it on the
+/// view and reaches nearer the eye somewhere. A box that can't be read could stand anywhere.
+fn may_hide(other: ViewBox, mine: ViewBox) -> bool {
+    match (mine, other) {
+        (Some((lo, hi)), Some((olo, ohi))) => olo[0] < hi[0] && lo[0] < ohi[0] && olo[1] < hi[1] && lo[1] < ohi[1] && olo[2] < hi[2],
+        _ => true,
+    }
+}
+
+/// Sends to the mesh each body `drawn` still draws exact that a body drawn from the mesh may hide
+/// ([`may_hide`], on `boxes`): any body hides a reference part, and one that isn't a reference part
+/// (as `reference` says) hides the model, as reference parts do when they `hide_model`.
+fn in_front(reference: &[bool], hide_model: bool, boxes: &[ViewBox], drawn: &mut [std::result::Result<Vec<ViewLine>, Fallback>]) {
+    let outside: Vec<usize> = (0..drawn.len()).filter(|i| drawn.get(*i).is_some_and(Result::is_err)).collect();
+    let is_reference = |i: usize| reference.get(i) == Some(&true);
+    let box_of = |i: usize| boxes.get(i).copied().flatten();
     for (i, slot) in drawn.iter_mut().enumerate().filter(|(_, slot)| slot.is_ok()) {
-        let mine = on_view(i);
-        // A box that can't be read could stand anywhere.
-        let hidden_by = |other: &Option<([f64; 3], [f64; 3])>| match (mine, other) {
-            (Some((lo, hi)), Some((olo, ohi))) => olo[0] < hi[0] && lo[0] < ohi[0] && olo[1] < hi[1] && lo[1] < ohi[1] && olo[2] < hi[2],
-            _ => true,
-        };
-        if blockers.iter().any(hidden_by) {
+        let hides = |j: &usize| is_reference(i) || hide_model || !is_reference(*j);
+        if outside.iter().filter(|j| hides(j)).any(|j| may_hide(box_of(*j), box_of(i))) {
             *slot = Err(Fallback::InFront);
         }
     }
 }
 
-/// A piece's `geometry` (screen millimetres from the world origin) on paper, as lines and arcs,
-/// with its accuracy there. A conic that is a circular arc becomes that arc, and arcs of one circle
-/// join; another conic (a circle seen at an angle) is cut into chords within `chord` on paper, a
-/// proven bound. Anything else is chords of its polyline, sampled.
-fn on_paper(geometry: &[Seg2], accuracy: CurveAccuracy, frame: &ViewFrame, shift: &Similarity2, chord: f64) -> (Vec<Seg2>, CurveAccuracy) {
+/// A piece's `geometry` (on the view's plane) on paper, as lines and arcs, with its accuracy there.
+/// A conic that is a circular arc becomes that arc, and arcs of one circle join; another conic (a
+/// circle seen at an angle) is cut into chords within `chord` on paper, a proven bound. Anything else
+/// is chords of its polyline, sampled, as is geometry already `chorded` by [`clipped`].
+fn on_paper(geometry: &[Seg2], accuracy: CurveAccuracy, frame: &ViewFrame, chord: f64, chorded: bool) -> (Vec<Seg2>, CurveAccuracy) {
     let mut path: Vec<Seg2> = Vec::with_capacity(geometry.len());
-    let (mut flattened, mut proven) = (false, true);
+    let (mut flattened, mut proven) = (chorded, !chorded);
     for seg in geometry {
-        match frame.seg_to_paper(&seg.similar(shift)) {
+        match frame.seg_to_paper(seg) {
             seg @ (Seg2::Line { .. } | Seg2::Arc { .. }) => joined(&mut path, seg),
             Seg2::Conic { a, apex, b, w } => match circular(a, apex, b, w) {
                 Some(arc) => joined(&mut path, arc),

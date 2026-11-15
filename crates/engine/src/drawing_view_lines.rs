@@ -271,7 +271,7 @@ fn meshed(s: &Session, shown: &ShownSet, frame: &ViewFrame, request: &LineReques
 }
 
 /// The part of the line from `a` to `b` inside `area`, if any.
-fn within(a: Vec2, b: Vec2, area: &Aabb2) -> Option<(Vec2, Vec2)> {
+pub(super) fn within(a: Vec2, b: Vec2, area: &Aabb2) -> Option<(Vec2, Vec2)> {
     let (mut lo, mut hi) = (0.0, 1.0);
     let inside = mesh_lines::clip(&mut lo, &mut hi, a.x - area.min.x, b.x - area.min.x)
         && mesh_lines::clip(&mut lo, &mut hi, area.max.x - a.x, area.max.x - b.x)
@@ -410,7 +410,7 @@ fn shift(m: &Mat) -> Vec3 {
 /// point lies further than `near(radius)` from the circle. The ends are the points' own, so a piece
 /// cut where the visibility changes ends where the mesh cut it; ends within `join` of the edge's own
 /// are its ends (the merge stops up to that short of them).
-fn on_arc(arc: &Seg2, points: &[Vec2], only: bool, near: impl Fn(f64) -> f64, join: f64) -> Option<(Seg2, bool)> {
+pub(super) fn on_arc(arc: &Seg2, points: &[Vec2], only: bool, near: impl Fn(f64) -> f64, join: f64) -> Option<(Seg2, bool)> {
     let Seg2::Arc { center, radius, start, sweep } = *arc else { return None };
     let (first, last) = (*points.first()?, *points.last()?);
     if !(radius > 0.0 && sweep != 0.0) || points.iter().any(|p| (p.dist(center) - radius).abs() > near(radius)) {
