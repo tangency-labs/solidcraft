@@ -730,6 +730,11 @@ pub struct ModelState {
     /// a pattern of the feature repeats these, not the points picked when it was made, which a
     /// parameter change may have moved off the edges.
     blend_edges: BTreeMap<u64, Vec<Vec3>>,
+    /// Each feature's face points, as it moved them onto its named faces in this evaluation (by
+    /// feature id, in the order of [`crate::FeatureKind::face_points`]): a pattern or mirror of
+    /// the feature puts its copies there, where the feature found the faces before it ran. A cut
+    /// up to a face it splits leaves no one face of that name for the copies to find (#15054).
+    named_faces: BTreeMap<u64, Vec<Vec3>>,
     /// The radius per edge a fillet used when it reduced a radius too large for some of its edges
     /// (by feature id, see `FilletFit::Reduce`).
     fitted: BTreeMap<u64, Vec<f64>>,
@@ -823,7 +828,7 @@ impl ModelState {
         for n in &self.reserved_body_names {
             n.hash(&mut h);
         }
-        for (feature, points) in &self.blend_edges {
+        for (feature, points) in self.blend_edges.iter().chain(&self.named_faces) {
             feature.hash(&mut h);
             for p in points {
                 [p.x, p.y, p.z].map(f64::to_bits).hash(&mut h);
@@ -2339,6 +2344,8 @@ struct Change {
     tapered: Option<Vec<(Vec3, kernel::Taper)>>,
     /// A join's touching pieces it kept as bodies of their own.
     kept_separate: Option<KeptSeparate>,
+    /// Where the feature found its named faces.
+    named_faces: Option<Vec<Vec3>>,
 }
 
 #[derive(Clone, Debug)]
@@ -2384,6 +2391,7 @@ impl ModelState {
             && others_same(&self.fitted, &before.fitted, feature)
             && self.tapered.keys().filter(|k| **k != feature).eq(before.tapered.keys().filter(|k| **k != feature))
             && others_same(&self.kept_separate, &before.kept_separate, feature)
+            && others_same(&self.named_faces, &before.named_faces, feature)
             && serde_json::to_string(&self.threads).ok() == serde_json::to_string(&before.threads).ok();
         if !same_rest {
             return None;
@@ -2414,6 +2422,7 @@ impl ModelState {
             fitted: self.fitted.get(&feature).cloned(),
             tapered: self.tapered.get(&feature).cloned(),
             kept_separate: self.kept_separate.get(&feature).copied(),
+            named_faces: self.named_faces.get(&feature).cloned(),
         })
     }
 
@@ -2449,6 +2458,10 @@ impl ModelState {
         next.kept_separate.remove(&feature);
         if let Some(k) = change.kept_separate {
             next.kept_separate.insert(feature, k);
+        }
+        next.named_faces.remove(&feature);
+        if let Some(p) = &change.named_faces {
+            next.named_faces.insert(feature, p.clone());
         }
         Some(next)
     }
@@ -3439,6 +3452,7 @@ impl Model {
                         if !notes.is_empty() {
                             warning = Some(notes.join("; "));
                         }
+                        next.named_faces.insert(f.id, g.kind.face_points());
                         renamed = g;
                         &renamed
                     }
@@ -9034,8 +9048,19 @@ fn replay(
         } else {
             // Each copy's faces are named as the source feature's, with the instance. Its face
             // points follow their named faces, as the feature's own did (#2121): a To Object
-            // extrude's copies reach the face where it is now, not where it was picked.
-            let moved = with_named_face_points(doc, vals, named_from.as_ref().unwrap_or(st), src)?.map(|(g, _)| g);
+            // extrude's copies reach the face where it is now, not where it was picked. They follow
+            // them to where the feature found them, before it ran: a cut up to a face it splits has
+            // left no one face of that name to find (#15054).
+            let moved = match st.named_faces.get(&src.id) {
+                Some(points) => {
+                    let mut g = (*src).clone();
+                    for (p, q) in g.kind.face_points_mut().into_iter().zip(points) {
+                        *p = *q;
+                    }
+                    Some(g)
+                }
+                None => with_named_face_points(doc, vals, named_from.as_ref().unwrap_or(st), src)?.map(|(g, _)| g),
+            };
             let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None)?;
             for (k, m) in mats.iter().enumerate() {
                 let start = copies.len();
