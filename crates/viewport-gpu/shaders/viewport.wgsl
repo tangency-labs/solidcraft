@@ -1074,6 +1074,14 @@ fn fs_img(i: IOut) -> @location(0) vec4<f32> {
     return out_color(vec4<f32>(c.rgb, c.a * i.a));
 }
 
+/// The model's edges' depth alone (`line_depth`): where an edge is drawn, cut by a section as it
+/// is, and not where a thin line is only faded in.
+@fragment
+fn fs_line_depth(i: LOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp) || i.c.a < 0.5) { discard; }
+    return vec4<f32>(0.0);
+}
+
 /// Lines the section never cuts (the grid, highlights drawn on top).
 @fragment
 fn fs_line_all(i: LOut) -> @location(0) vec4<f32> {
