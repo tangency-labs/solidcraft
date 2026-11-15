@@ -9197,18 +9197,7 @@ fn nearest_object_face(b: &ModelBody, p: Vec3, normal: Option<Vec3>) -> Option<(
         return Some(nearest);
     }
     let tie = (b.body.size() * 1e-9).max(1e-7);
-    let mesh = b.mesh();
-    mesh.triangles
-        .iter()
-        .zip(&mesh.tri_face)
-        .filter(|(_, fi)| caps.contains(&(**fi as usize)))
-        .filter_map(|(tri, fi)| {
-            let [a, b, c] = mesh.tri(tri)?;
-            let d = crate::appearance::closest_on_triangle(p, a, b, c).dist(p);
-            (d <= nearest.0 + tie).then_some((d, *fi as usize))
-        })
-        .min_by(|a, b| a.0.total_cmp(&b.0))
-        .or(Some(nearest))
+    b.body.nearest_face_in(p, &caps, nearest.0 + tie).or(Some(nearest))
 }
 
 /// The face a To / From Object point stands for, `(body index, face index)`: the face its
