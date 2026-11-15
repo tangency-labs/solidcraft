@@ -1377,6 +1377,9 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         }
 
         let mut decreased_step_size = false;
+        // Not upstream (#16669): the span-end bits the span test accepted, when the
+        // step-growth loop's TestPoint may have moved the point since
+        let mut tested_bits = None;
 
         // try smaller and smaller steps until the point is good
         let mut tries = 0usize;
@@ -1460,6 +1463,7 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
                 last_curve_param = param;
 
                 // passed a through or end point, or a singularity
+                tested_bits = Some(span_end_bits(v.intersector().point(next)?));
                 trace_test(v, k, next, &mut done)?;
                 if done || v.intersector().point(next)?.curve_parameter != last_curve_param {
                     if done {
@@ -1483,6 +1487,8 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
             // the last increase gave a bad point: step back to the last good one
             if !st.found_good_point {
+                // (recomputed and span-tested afresh)
+                tested_bits = None;
                 step_size /= 1.5;
                 let n = v.compute_next_point(k, tsp, step_size, next)?;
                 st.found_good_point = n.found_good_point;
@@ -1552,7 +1558,10 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
         // snap to a through or end point passed, then add the point
         if !done {
-            let before_test = span_end_bits(v.intersector().point(next)?);
+            let before_test = match tested_bits {
+                Some(bits) => bits,
+                None => span_end_bits(v.intersector().point(next)?),
+            };
             trace_test(v, k, next, &mut done)?;
             v.intersector_mut().point_mut(next)?.deviation = st.deviation;
             // a point TestPoint left bit for bit where it was ends a span the span test
