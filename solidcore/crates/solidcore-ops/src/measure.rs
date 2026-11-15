@@ -317,6 +317,15 @@ pub fn point_distance(a: [f64; 3], b: [f64; 3]) -> Result<Distance> {
     q::point_distance(a, b).map(Distance::from).map_err(status)
 }
 
+/// Whether two points meet: their distance is within `tol` (the rounded distance of
+/// [`point_distance`], not more than `tol`).
+///
+/// # Errors
+/// Those of [`point_distance`].
+pub fn points_meet(a: [f64; 3], b: [f64; 3], tol: f64) -> Result<bool> {
+    Ok(point_distance(a, b)?.value <= tol)
+}
+
 impl Body {
     /// Mass properties at `relative_accuracy` (the kernel's rule: finite and positive, clamped
     /// to [1e-8, 1e-1]): the sum over the body's material regions, so several lumps, or lumps
@@ -959,6 +968,9 @@ pub(crate) mod tests {
         }
         let d = point_distance([1.0, 2.0, 3.0], [4.0, 6.0, 15.0]).unwrap();
         assert_eq!(d.value, 13.0);
+        assert!(points_meet([1.0, 2.0, 3.0], [4.0, 6.0, 15.0], 13.0).unwrap());
+        assert!(!points_meet([1.0, 2.0, 3.0], [4.0, 6.0, 15.0], 12.9).unwrap());
+        assert!(points_meet([f64::NAN, 0.0, 0.0], [0.0; 3], 1.0).is_err());
         // the outward normal of each face at each of its edges is an axis, pointing away from the
         // box's middle
         let mut normals = 0;

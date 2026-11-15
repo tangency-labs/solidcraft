@@ -1443,7 +1443,14 @@ impl FilletSolver {
             k.fixes.fillet_statuses_pass_on,
         )? {
             Ok(a) => a,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(e)
+                if matches!(
+                    e,
+                    SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                ) || e.is_not_certified() =>
+            {
+                return Err(e)
+            }
             Err(_) => 0.0,
         };
         if span_ang < ANG_TOL_RAD {
@@ -2007,7 +2014,6 @@ impl FilletSolver {
         // allocate NewtonRaphson evaluator - contains equation definitions being solved
         let mut eval = SphereEval(FilletSphereSolveEnfo::new(plane_normal, plane_d, ops), k);
         let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
-        ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
 
         // set solve parameters
         ls.set_desired_accuracy(EFF_ZERO_SQ);
@@ -2185,7 +2191,6 @@ impl FilletSolver {
             k,
         );
         let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
-        ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
         ls.set_desired_accuracy(EFF_ZERO_SQ);
         ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
         ls.set_maximum_iterations(30);
@@ -2403,7 +2408,6 @@ impl FilletSolver {
             // when the resulting rails are classified and trimmed.
             let bounds = (!affine).then_some(&intervals);
             let mut ls = LocalSolveNd::new(&mut eval, bounds, Some(&periodicities));
-            ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
             ls.set_desired_accuracy(EFF_ZERO_SQ);
             ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
             ls.set_maximum_iterations(30);
