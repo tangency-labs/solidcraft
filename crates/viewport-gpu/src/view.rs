@@ -5079,7 +5079,8 @@ mod tests {
     fn refused_scene_upload_keeps_the_previous_picture_and_retries() {
         use super::*;
         let Ok((adapter, _, _)) = crate::open_headless(crate::test_env::policy()) else { return };
-        let limits = wgpu::Limits { max_buffer_size: 2048, ..wgpu::Limits::downlevel_defaults() };
+        // Above the renderer's own buffers (its viewport uniform is 2080 bytes), below the index buffer refused.
+        let limits = wgpu::Limits { max_buffer_size: 3072, ..wgpu::Limits::downlevel_defaults() };
         let Ok((device, queue)) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { required_limits: limits, ..Default::default() }))
         else {
@@ -5125,7 +5126,7 @@ mod tests {
         let slot: SceneSlot = Arc::new(Mutex::new(Some(scene(&previous))));
         batches.take(&device, &queue, &r.uniform, &r.uniform_bgl, 1, &slot, None, false).unwrap();
         assert_eq!(batches.key, Some(1));
-        // So many runs need an index buffer, and its 4 KiB is over the 2 KiB limit.
+        // So many runs need an index buffer, and its 4 KiB is over the 3 KiB limit.
         let refused = block(1024);
         *slot.lock().unwrap() = Some(scene(&refused));
         for _ in 0..2 {
