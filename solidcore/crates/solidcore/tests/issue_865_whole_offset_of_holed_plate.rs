@@ -3,8 +3,8 @@
 //! fork traced both to #977 (`RemoveExcessFaces` before the merge), whose closed-shell
 //! case the Rust port covers with `issue_977_closed_shell_excess_faces_after_merge`.
 //! The ladder part is not public; this probe takes the whole offset of #977's plate
-//! (30 x 20 x 6, an r1.5 through hole 1 from the front side) 1.5 inward, by default and
-//! with the #977 and #854 opt-ins (with them, a manifold solid of the closed form's volume;
+//! (30 x 20 x 6, an r1.5 through hole 1 from the front side) 1.5 inward, by default (#977's
+//! excess faces after the merge) and with the #854 opt-in too (a manifold solid of the closed form's volume;
 //! plan/findings/offset.offset_executive_p2--issue-400-865-shell-probes.md).
 //!
 //! The inward offset is the plate shrunk by 1.5 (27 x 17 x 3) less the hole's offset
@@ -44,7 +44,6 @@ fn want() -> f64 {
 
 fn run(fixed: bool) -> bool {
     let mut k = Kernel::default();
-    k.fixes.offset_excess_faces_after_merge = fixed;
     k.fixes.offset_resolve_crossing_loops = fixed;
     let mut b = plate(&mut k);
     let result = offset_full(&mut k, &mut b, -1.5);
