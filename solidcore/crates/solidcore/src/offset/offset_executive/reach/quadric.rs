@@ -99,6 +99,71 @@ pub(super) fn value_and_gradient(q: &Implicit, x: I3) -> Option<(Ivl, I3)> {
     evaluate(q, enclosed(x)).map(|(f, g, _)| (f.v, values(g)))
 }
 
+/// The radical plane of two cylinders on one axis direction: where their implicit
+/// functions are equal. For the axis `a` (the second's the same, or its exact negation)
+/// and `P v = v − a (a·v)`, each cylinder is `|P (x − o)|² − r² = 0`, and `|P v|² =
+/// v·v − (2 − a·a)(a·v)²` has the same quadratic part for both, so their difference is
+/// affine: `2 (x − o₁)·n − (r₁² − r₂² + |P w|²)` with `w = o₂ − o₁` and
+/// `n = w − (2 − a·a) a (a·w)`. The cylinders meet exactly where the first meets this plane,
+/// so their meeting with a third plane, or in an edge's normal section, is a plane's with a
+/// quadric ([`super::line_with_quadric`], [`super::trace_quadric_piece`]): in closed form, a
+/// tangent meeting (a round tangent to a bore) included, which Krawczyk's operator cannot
+/// prove (the two gradients are parallel there). The normal and the height are enclosed
+/// in rounded interval arithmetic, so the plane is the exact one. Not for cones (their
+/// meeting also needs the second's nappe), a radius below zero, or axes that differ in any
+/// bit: [`meet`] decides those.
+#[derive(Clone, Copy)]
+pub(super) struct Radical {
+    origin: Vec3,
+    normal: Dv,
+    height: Di,
+}
+
+impl Radical {
+    /// The radical plane of `a` and `b` (`None` for any other pair, above).
+    pub fn of(a: &Implicit, b: &Implicit) -> Option<Self> {
+        let (
+            Implicit::Cone {
+                origin: oa,
+                axis: aa,
+                radius: ra,
+                tan_angle: ta,
+            },
+            Implicit::Cone {
+                origin: ob,
+                axis: ab,
+                radius: rb,
+                tan_angle: tb,
+            },
+        ) = (*a, *b)
+        else {
+            return None;
+        };
+        // no slope, and the same stored axis line, exactly
+        let cylinders = ta == 0.0 && tb == 0.0 && (ab == aa || ab == -aa);
+        if !(cylinders && ra >= 0.0 && rb >= 0.0) {
+            return None;
+        }
+        let axis = Dv::constant(aa);
+        let w = Dv::constant(ob).sub(Dv::constant(oa));
+        let z = w.dot(axis);
+        let pw = w.sub(axis.scale(z));
+        let k = Di::constant(2.0) - axis.dot(axis);
+        let (ra, rb) = (Di::constant(ra), Di::constant(rb));
+        Some(Self {
+            origin: oa,
+            normal: w.sub(axis.scale(k * z)),
+            height: (ra * ra - rb * rb + pw.dot(pw)) * Di::constant(0.5),
+        })
+    }
+
+    /// The plane's normal and its height `n·(x − p)` over `p`.
+    pub fn over(&self, p: Dv) -> (Dv, Di) {
+        let height = self.height - p.sub(Dv::constant(self.origin)).dot(self.normal);
+        (self.normal, height)
+    }
+}
+
 /// A plane through a displacement `d`, `normal.d = height`, based at `point`.
 #[derive(Clone, Copy)]
 pub(super) struct Section {
