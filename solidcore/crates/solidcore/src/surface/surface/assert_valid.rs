@@ -879,10 +879,15 @@ fn index(v: i64) -> Result<usize> {
 
 /// `SmBSplineSurface::HasInternalPole`: some interior knot line has a patch boundary
 /// span whose control points all lie within `tol` (`<= 0`: `SM_ZONE_TOL_3D`) of one
-/// another (for the u lines, also a singularity, `IsSingularity` of `s`).
-/// `false` without NURB. At each interior knot it tests the row through the knot, where
-/// upstream moves one row further for each repeated copy of the knot (WR-505;
-/// tangency-labs/smlib#41).
+/// another (for the u lines, also a singularity, `IsSingularity` of `s` at a Greville
+/// point; the v lines have no such check, as upstream). `false` without NURB.
+///
+/// At each interior knot it tests the rows whose basis functions are nonzero at the
+/// knot, starting at the row through the knot, where upstream moves one row further for
+/// each repeated copy of the knot (WR-505; tangency-labs/smlib#41). A knot repeated more
+/// than degree + 1 times is skipped. At a full break (multiplicity degree + 1) it tests
+/// both rows there, the left piece's end row and the right piece's start row: a span of
+/// either whose points coincide is a pole, with no singularity check (#17028, WR-788).
 ///
 /// # Errors
 ///
@@ -1069,17 +1074,9 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
                 kk -= 1;
             }
 
-            // Not upstream (#17028): the U walk's singularity check [B597], which
-            // upstream's V walk lacks: coincident points alone do not make a pole
-            if test {
-                let uv = Point2::new(
-                    b.greville_abscissa(SurfParamType::U, index(cp_index_u + degree_u)?)?,
-                    b.greville_abscissa(SurfParamType::V, index(cp_index_v + row_cnt_v - 1)?)?,
-                );
-                if !s.is_singularity(k, uv, tolerance, false)?.singular {
-                    test = false;
-                }
-            }
+            // As upstream, no singularity check here (the U walk's [B597] check evaluates
+            // at a Greville point off the knot line when row_cnt > 1, so it misses real
+            // poles; see WR-788)
 
             // remember when patch is degenerate
             rtn |= test;
@@ -3099,6 +3096,61 @@ mod tests {
         };
         assert!(full_break(true, collapse));
         assert!(full_break(false, collapse));
+    }
+
+    /// The knots of a degree-2 direction with one simple interior knot at 0.5 (4 rows; at
+    /// 0.5 only rows 1 and 2 have nonzero basis functions).
+    const SIMPLE_KNOT: [f64; 7] = [0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0];
+
+    /// As [`full_break`] with a simple knot at 0.5 instead (a 4 x 3 or 3 x 4 net).
+    fn simple_knot(u_break: bool, edit: impl Fn(&mut [[f64; 3]], usize)) -> bool {
+        let mut along: Vec<[f64; 3]> = Vec::new();
+        for i in 0..4 {
+            for j in 0..3 {
+                along.push([f64::from(i), f64::from(j), 0.0]);
+            }
+        }
+        edit(&mut along, 3);
+        let s = if u_break {
+            bspline(2, 2, &SIMPLE_KNOT, &BEZ2, &along)
+        } else {
+            let mut pts = vec![[0.0; 3]; 12];
+            for i in 0..4 {
+                for j in 0..3 {
+                    let p = along[i * 3 + j];
+                    pts[j * 4 + i] = [p[1], p[0], p[2]];
+                }
+            }
+            bspline(2, 2, &BEZ2, &SIMPLE_KNOT, &pts)
+        };
+        let k = Kernel::default();
+        let part = make_nurb(&k, &s).unwrap().unwrap();
+        has_internal_pole(&k, &s, &part, ZONE_TOL_3D / 10.0).unwrap()
+    }
+
+    /// Rows 1 and 2 (the two rows nonzero at the simple knot 0.5) collapsed to one point.
+    fn collapse_simple_knot_rows(pts: &mut [[f64; 3]], n: usize) {
+        for i in 1..3 {
+            for j in 0..n {
+                pts[i * n + j] = [1.5, 1.0, 0.0];
+            }
+        }
+    }
+
+    /// A simple knot on a plain grid is no pole, along U or V.
+    #[test]
+    fn a_simple_knot_on_a_plain_grid_is_not_a_pole() {
+        assert!(!simple_knot(true, |_, _| {}));
+        assert!(!simple_knot(false, |_, _| {}));
+    }
+
+    /// #17056 review: rows 1 and 2 collapsed to one point `P` make the iso line at the
+    /// simple v knot 0.5 the point `(N_1 + N_2)(0.5) P = P`, a pole, and the V walk finds
+    /// it. A singularity check at the U walk's Greville point (v = greville(2) = 0.75, off
+    /// the knot line) would reject it, so the V walk keeps upstream's (none).
+    #[test]
+    fn a_collapsed_span_at_a_simple_v_knot_is_a_pole() {
+        assert!(simple_knot(false, collapse_simple_knot_rows));
     }
 
     #[test]
