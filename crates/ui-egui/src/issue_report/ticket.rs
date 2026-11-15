@@ -346,7 +346,17 @@ fn status(app: &mut SolveApp, ui: &mut Ui) {
         }
     }
     match app.tickets.outcome.clone() {
-        Some(Outcome::Opened) => note(ui, "report.opened", tr("report.opened")),
+        Some(Outcome::Opened) => {
+            note(ui, "report.opened", tr("report.opened"));
+            // A browser can block a page opened without a click (the web app): this one is a click.
+            if let Some(url) = app.tickets.opened_url.clone() {
+                let r = ui_kit::button(ui, tr("report.open_draft"), ui_kit::Button::Normal);
+                crate::scenario::publish_target("report:open_draft", r.rect);
+                if r.clicked() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                }
+            }
+        }
         Some(Outcome::Filed(n)) => {
             ui.horizontal_wrapped(|ui| {
                 ui_kit::text(ui, &format("report.filed", &[("number", &n.to_string())]), ui_kit::Text::Heading("report.filed"));
