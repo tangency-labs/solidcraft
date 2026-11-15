@@ -594,7 +594,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 if *direction < 2 {
                     form_row(ui, "Taper Angle", |ui| {
                         let before = taper.clone();
-                        enter |= field(ui, taper);
+                        enter |= ui_kit::stepped_field(ui, taper, "", |text, delta| angle_step(text, delta, 1.0, None));
                         if *taper != before {
                             *taper_present = !taper.trim().is_empty();
                         }
@@ -873,7 +873,7 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
     });
     let mut angle = extra.get("start_angle").and_then(Value::as_str).unwrap_or_default().to_string();
     let before = angle.clone();
-    let enter = hint_row(ui, "Start angle", &mut angle, "0 deg");
+    let enter = ui_kit::step_row(ui, "Start angle", &mut angle, "0 deg", |text, delta| angle_step(text, delta, 10.0, None));
     if angle != before {
         if angle.trim().is_empty() {
             extra.remove("start_angle");
@@ -883,6 +883,23 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
     }
     extra_options(ui, "coil_options", extra, &[("Clockwise", "clockwise")]);
     enter
+}
+
+/// An angle text field stepped by `delta` arrows of `step_deg`: a plain number moves and keeps
+/// its unit, an expression is left as typed, and `max_deg` disables the step past it.
+fn angle_step(text: &str, delta: i64, step_deg: f64, max_deg: Option<f64>) -> Option<String> {
+    if delta > 0 && max_deg.is_some_and(|max| plain_degrees(text).is_some_and(|now| now + step_deg > max)) {
+        return None;
+    }
+    let text = if text.trim().is_empty() { "0 deg" } else { text };
+    crate::dim_view::window::stepped(text, delta as f64, solidcraft_engine::doc::expr::Kind::Angle, "", 0.0, step_deg)
+}
+
+/// A plain number of degrees in `text`, with or without a unit; None for an expression.
+fn plain_degrees(text: &str) -> Option<f64> {
+    let t = text.trim();
+    let number = ["deg", "\u{b0}"].iter().find_map(|unit| t.strip_suffix(unit)).unwrap_or(t).trim();
+    number.parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
@@ -922,7 +939,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                         }
                     }
                 });
-                enter |= expr_row(ui, "Angle", angle);
+                enter |= ui_kit::step_row(ui, "Angle", angle, "", |text, delta| angle_step(text, delta, 10.0, Some(360.0)));
                 if dir == 1 {
                     form_row(ui, "Angle 2", |ui| {
                         enter |= extra_field(ui, &mut d.extra, "angle2", "90 deg");
@@ -1912,6 +1929,15 @@ mod tests {
                 assert!(h.app.dialog.is_some(), "invalid OK stays disabled");
             }
         }
+    }
+
+    #[test]
+    fn plain_degrees_reads_a_number_with_or_without_a_unit() {
+        assert_eq!(plain_degrees("45 deg"), Some(45.0));
+        assert_eq!(plain_degrees(" 30\u{b0} "), Some(30.0));
+        assert_eq!(plain_degrees("360"), Some(360.0));
+        assert_eq!(plain_degrees("a / 2"), None);
+        assert_eq!(plain_degrees(""), None);
     }
 }
 

@@ -999,3 +999,18 @@ fn surface_extrude_dialog_has_the_drag_arrow_on_every_side() {
         assert!((total - expected).abs() < 1.0, "{direction}: dragging the arrow sets the distance, got {distance}");
     }
 }
+
+#[test]
+fn taper_angle_steps_by_one_degree() {
+    let mut h = make(json!({}));
+    open(&mut h);
+    h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
+    let taper = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        crate::dialogs::Kind::Extrude { taper, .. } => taper.clone(),
+        other => panic!("extrude: {other:?}"),
+    };
+    h.step(&json!({"click":{"handle":"dialog:Taper Angle up"}})).unwrap();
+    assert_eq!(taper(&h), "1 deg");
+    h.step(&json!({"click":{"handle":"dialog:Taper Angle down"}})).unwrap();
+    assert_eq!(taper(&h), "0 deg");
+}

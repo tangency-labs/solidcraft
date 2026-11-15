@@ -176,6 +176,25 @@ pub fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -> bool 
     enter
 }
 
+/// Expression editor with up and down step arrows at its right edge, like [`count_field`] for
+/// any value: `next` says what the field's own text steps to for an arrow (`1` up, `-1` down),
+/// and None on an arrow disables it, so an expression can be left as typed. Returns accepted
+/// Enter. Tokens: field tokens, `control_border`, `selected_bg`, `form_ink`, `form_dim`.
+pub fn stepped_field(ui: &mut Ui, value: &mut String, hint: &str, next: impl Fn(&str, i64) -> Option<String>) -> bool {
+    let t = Tokens::get();
+    let reserve = (t.control_height * 0.75).round();
+    let (enter, _, response) = editor_reserving(ui, value, hint, true, reserve);
+    let row = label(ui).to_owned();
+    let stepped = {
+        let text = value.as_str();
+        step_arrows(ui, response.rect, reserve, &row, |delta| next(text, delta))
+    };
+    if let Some(stepped) = stepped {
+        *value = stepped;
+    }
+    enter
+}
+
 /// The up and down step arrows at the right edge of a field (`rect`), in a column `width` wide:
 /// `next(1)` and `next(-1)` say what each arrow steps to, None disabling it. Returns what the
 /// clicked arrow stepped to. Tokens: `control_border`, `control_radius`, `selected_bg`,
