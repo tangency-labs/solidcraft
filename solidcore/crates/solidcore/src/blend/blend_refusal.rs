@@ -400,7 +400,7 @@ pub fn round_too_small(
         }
     }
     // the blend's tangency angle: faces within it are tangent ([`edge::blend_edgeuse`])
-    let tangent = PI / 180.0 * (90.0 - edge::crease_angle(k));
+    let tangent = PI / 180.0 * (90.0 - edge::CREASE_ANGLE);
     let reach = 1.0 / (0.5 * turn).cos() - 1.0;
     if turn <= tangent || !(reach.is_finite() && reach > 0.0) {
         return Ok(None);

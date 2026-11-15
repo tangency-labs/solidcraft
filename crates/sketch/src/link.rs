@@ -230,6 +230,11 @@ pub struct Link {
     /// The reference could not be found on the last recompute; the geometry is the last good one.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub lost: bool,
+    /// The design dropped the vertex or edge name this link saved as it opened, a name an older
+    /// build guessed (#17229): the link is found by its point, and the session stores the name
+    /// of what it was found on, as an edit of its sketch would, then clears this.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub name_dropped: bool,
 }
 
 /// Geometry a link produces, in sketch coordinates.
@@ -758,7 +763,17 @@ impl Sketch {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("j")?;
-        self.links.push(Link { id: id.clone(), kind, source, face_name: None, edge_name: None, vertex_name: None, auto_face: false, lost: false });
+        self.links.push(Link {
+            id: id.clone(),
+            kind,
+            source,
+            face_name: None,
+            edge_name: None,
+            vertex_name: None,
+            auto_face: false,
+            lost: false,
+            name_dropped: false,
+        });
         self.build_link(&id, &lay)?;
         Ok(id)
     }
@@ -1209,7 +1224,8 @@ impl Sketch {
     /// Where this sketch's points were in `stored`, the same sketch before its links were
     /// moved to where their sources are now ([`Sketch::update_link`]): point by point, as
     /// [`crate::solve_after_edit`] takes them. Points are matched by id (a rebuilt link has
-    /// new ones); a point `stored` does not have is where it is now. `None` when none moved.
+    /// new ones where no old one matches); a point `stored` does not have is where it is now.
+    /// `None` when none moved.
     pub fn positions_in(&self, stored: &Sketch) -> Option<Vec<Vec2>> {
         let aligned = self.points.len() == stored.points.len() && self.points.iter().zip(&stored.points).all(|(p, q)| p.id == q.id);
         let was: Vec<Vec2> = if aligned {

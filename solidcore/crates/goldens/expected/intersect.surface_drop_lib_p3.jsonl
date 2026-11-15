@@ -1529,5 +1529,5 @@
 {"case":"gen1498","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[8.0,"inf","NaN"]],"n":21}}}
 {"case":"gen1499","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0,0.0,0.0]}}
 {"case":"wr100_normal_point_far","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[1058.0001,1058.0001,5705.0015]],"n":58}}}
-{"case":"wr100_u_natural_degenerate_point_far","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[2071.0001,2071.0001,6652.0015]],"n":34}}}
-{"case":"wr100_v_natural_degenerate_point_far","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[1075.1000999999999,1075.1000999999999,6183.8015000000005]],"n":58}}}
+{"case":"wr100_u_natural_degenerate_point_far","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[2070.0001,2070.0001,6631.0015]],"n":34}}}
+{"case":"wr100_v_natural_degenerate_point_far","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[2070.0001,2070.0001,6633.0015]],"n":34}}}

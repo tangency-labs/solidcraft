@@ -31,8 +31,8 @@
   },
   "ar": {
     "Open another view": "فتح عرض آخر",
-    "Show views as tabs": "عرض المشاهد كألسنة",
-    "tab_strip.more": "{n} إضافية",
+    "Show views as tabs": "إظهار العروض كعلامات تبويب",
+    "tab_strip.more": "{n} أخرى",
     "tab_strip.switch_view": "تبديل العرض",
     "tab_strip.workspace_animation": "مساحة عمل التحريك",
     "tab_strip.workspace_design": "مساحة عمل التصميم",
