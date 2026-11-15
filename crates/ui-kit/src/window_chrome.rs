@@ -21,7 +21,7 @@
 //! A move or resize hands the press to the OS, which keeps the pointer until the button goes up.
 //! On X11 the window manager then receives that release, not the app, so egui would keep the
 //! button down and the next press would only end the old drag: the bar moved the window every
-//! other time (#13334). An app calls [`release_press_taken_by_os`] first in its raw-input hook.
+//! other time (#13334). An app calls [`release_press_taken_by_os`] first in its raw-input hook, then [`release_stale_input`].
 //!
 //! Adapted from VectorCraft's `crates/ui-egui/src/titlebar.rs` (MIT OR Apache-2.0).
 
@@ -212,6 +212,75 @@ pub fn release_press_taken_by_os(ctx: &egui::Context, raw: &mut egui::RawInput) 
     if let Some(pos) = ctx.data_mut(|d| d.remove_temp::<Pos2>(press_taken_by_os_id())) {
         let release = egui::Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: ctx.input(|i| i.modifiers) };
         raw.events.insert(0, release);
+    }
+}
+
+fn stale_input_id() -> Id {
+    Id::unique("window-chrome-stale-input")
+}
+
+/// Note that a native dialog (a file picker) just closed: the OS may have kept a button release
+/// or a modifier release for itself, so [`release_stale_input`] lets go of what is still held.
+pub fn mark_input_stale(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(stale_input_id(), true));
+}
+
+/// After the window lost focus (or a native dialog closed), on the next frame the window has
+/// focus: release each pointer button egui still holds down, at the last pointer position, before
+/// the frame's own events. On Wayland a file dialog takes the pointer and keyboard, so a release
+/// may never arrive, and egui would keep the button down and ignore canvas picks (#16460). A
+/// regained focus also clears the modifiers; the OS reports the real ones after.
+pub fn release_stale_input(ctx: &egui::Context, raw: &mut egui::RawInput) {
+    let last_lost = raw.events.iter().rposition(|e| matches!(e, egui::Event::WindowFocused(false)));
+    let regained = raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(true)));
+    let marked = ctx.data(|d| d.get_temp::<bool>(stale_input_id())).unwrap_or(false);
+    // Focus ends the frame lost: recover when it is back. Otherwise recover now: at the loss when
+    // the batch also regains focus (later events, a fresh press among them, stay as they are), or
+    // at the start of the frame for a marked dialog.
+    let at = match last_lost {
+        Some(_) if !raw.focused => {
+            mark_input_stale(ctx);
+            return;
+        }
+        Some(i) => i + 1,
+        None if raw.focused && marked => 0,
+        None => {
+            if regained {
+                raw.events.insert(0, egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+            }
+            return;
+        }
+    };
+    ctx.data_mut(|d| d.remove_temp::<bool>(stale_input_id()));
+    let (pos, modifiers) = ctx.input(|i| (i.pointer.latest_pos().or(i.pointer.interact_pos()).unwrap_or(Pos2::ZERO), i.modifiers));
+    let held: Vec<PointerButton> = [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle]
+        .into_iter()
+        .filter(|b| ctx.input(|i| i.pointer.button_down(*b)))
+        .collect();
+    let mut recovery = Vec::new();
+    if !held.is_empty() {
+        // The release must not complete the interrupted press as a click, which would activate
+        // the widget under it: egui drops click eligibility once the pointer is far from the press.
+        let away = pos + egui::vec2(1000.0, 1000.0);
+        recovery.push(egui::Event::PointerMoved(away));
+        recovery.extend(held.into_iter().map(|button| egui::Event::PointerButton { pos: away, button, pressed: false, modifiers }));
+        recovery.push(egui::Event::PointerGone);
+    }
+    recovery.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    raw.events.splice(at..at, recovery);
+}
+
+/// Make the window set its pointer cursor again when focus returns or the pointer comes back
+/// into the window. egui-winit sends a cursor to the window only when the requested icon
+/// changes, but on Wayland the compositor shows the previous program's cursor after the pointer
+/// enters until the client sets its own. `CursorVisible(true)` makes winit apply its current
+/// cursor with the latest enter serial. A native app calls this in its raw-input hook; the web
+/// build has no window cursor to refresh.
+pub fn reapply_cursor_on_return(ctx: &egui::Context, raw: &egui::RawInput) {
+    let focus_back = raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(true)));
+    let pointer_back = ctx.input(|i| i.pointer.latest_pos().is_none()) && raw.events.iter().any(|e| matches!(e, egui::Event::PointerMoved(_)));
+    if focus_back || pointer_back {
+        ctx.send_viewport_cmd(ViewportCommand::CursorVisible(true));
     }
 }
 
@@ -532,5 +601,117 @@ mod tests {
         assert_eq!(dpi_scaled_size((1001, 777), 96, 96), Some((1001, 777)));
         assert_eq!(dpi_scaled_size((1001, 777), 0, 96), None);
         assert_eq!(dpi_scaled_size((0, 777), 96, 144), None);
+    }
+
+    /// Frames of raw input through `release_stale_input`, as the apps' hooks run them.
+    struct Hooked {
+        ctx: egui::Context,
+        time: f64,
+    }
+
+    impl Hooked {
+        fn new() -> Self {
+            Self { ctx: crate::test_support::context(), time: 0.0 }
+        }
+
+        fn frame(&mut self, events: Vec<Event>, focused: bool, add: impl FnMut(&mut egui::Ui)) -> Vec<Event> {
+            self.time += 0.05;
+            let mut raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))),
+                time: Some(self.time),
+                events,
+                focused,
+                ..Default::default()
+            };
+            release_stale_input(&self.ctx, &mut raw);
+            let events = raw.events.clone();
+            let mut add = add;
+            self.ctx.run_ui(raw, |ui| add(ui)).textures_delta.clear();
+            events
+        }
+
+        fn press(&self, at: Pos2, mods: egui::Modifiers) -> Vec<Event> {
+            vec![
+                Event::PointerMoved(at),
+                Event::ModifiersChanged(mods),
+                Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: mods },
+            ]
+        }
+    }
+
+    #[test]
+    fn focus_lost_with_a_button_held_releases_it_on_regain_and_clears_modifiers() {
+        let mut h = Hooked::new();
+        let ctrl = egui::Modifiers { ctrl: true, ..Default::default() };
+        let at = pos2(50.0, 60.0);
+        h.frame(h.press(at, ctrl), true, |_| {});
+        assert!(h.ctx.input(|i| i.pointer.primary_down()));
+        h.frame(vec![Event::PointerGone, Event::WindowFocused(false)], false, |_| {});
+        assert!(h.ctx.input(|i| i.pointer.primary_down()), "egui keeps the button down");
+        let events = h.frame(vec![Event::WindowFocused(true)], true, |_| {});
+        assert!(events.iter().any(|e| matches!(e, Event::PointerButton { button: PointerButton::Primary, pressed: false, .. })));
+        assert!(events.iter().any(|e| matches!(e, Event::ModifiersChanged(m) if m.is_none())));
+        assert!(!h.ctx.input(|i| i.pointer.primary_down()));
+        assert!(h.ctx.input(|i| i.modifiers.is_none()));
+        assert!(h.frame(vec![], true, |_| {}).is_empty(), "nothing is stale the second time");
+    }
+
+    #[test]
+    fn a_closed_native_dialog_releases_a_held_button_and_modifier() {
+        let mut h = Hooked::new();
+        let ctrl = egui::Modifiers { ctrl: true, ..Default::default() };
+        h.frame(h.press(pos2(10.0, 10.0), ctrl), true, |_| {});
+        assert!(h.ctx.input(|i| i.pointer.primary_down() && i.modifiers.ctrl));
+        mark_input_stale(&h.ctx);
+        h.frame(vec![], true, |_| {});
+        assert!(!h.ctx.input(|i| i.pointer.primary_down()));
+        assert!(h.ctx.input(|i| i.modifiers.is_none()), "Ctrl released inside the dialog is not still held");
+    }
+
+    #[test]
+    fn a_press_after_focus_returns_in_the_same_batch_stays_held() {
+        let mut h = Hooked::new();
+        h.frame(h.press(pos2(10.0, 10.0), Default::default()), true, |_| {});
+        let fresh = Event::PointerButton { pos: pos2(80.0, 80.0), button: PointerButton::Primary, pressed: true, modifiers: Default::default() };
+        h.frame(vec![Event::WindowFocused(false), Event::WindowFocused(true), Event::PointerMoved(pos2(80.0, 80.0)), fresh], true, |_| {});
+        assert!(h.ctx.input(|i| i.pointer.primary_down()), "the new press is the user's");
+        assert!(h.frame(vec![], true, |_| {}).is_empty(), "and the next frame does not release it");
+        assert!(h.ctx.input(|i| i.pointer.primary_down()));
+    }
+
+    #[test]
+    fn recovering_a_held_press_does_not_click_the_widget_under_it() {
+        let mut h = Hooked::new();
+        let clicked = std::cell::Cell::new(false);
+        let button = |ui: &mut egui::Ui| {
+            let r = ui.put(Rect::from_min_size(pos2(20.0, 20.0), vec2(100.0, 40.0)), egui::Button::new("Go"));
+            if r.clicked() {
+                clicked.set(true);
+            }
+        };
+        let at = pos2(40.0, 30.0);
+        h.frame(vec![Event::PointerMoved(at)], true, button);
+        h.frame(vec![Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: Default::default() }], true, button);
+        h.frame(vec![Event::WindowFocused(false)], false, button);
+        h.frame(vec![Event::WindowFocused(true)], true, button);
+        assert!(!h.ctx.input(|i| i.pointer.primary_down()));
+        assert!(!clicked.get(), "the interrupted press must not activate the widget");
+    }
+
+    #[test]
+    fn focus_or_pointer_return_asks_the_window_to_set_its_cursor_again() {
+        let ctx = crate::test_support::context();
+        let run = |events: Vec<Event>| {
+            let raw =
+                RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))), time: Some(0.1), events, ..Default::default() };
+            reapply_cursor_on_return(&ctx, &raw);
+            let mut out = ctx.run_ui(raw, |_| {});
+            out.viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default()
+        };
+        let reapplies = |cmds: &[ViewportCommand]| cmds.iter().any(|c| matches!(c, ViewportCommand::CursorVisible(true)));
+        assert!(reapplies(&run(vec![Event::WindowFocused(true)])), "focus regained");
+        assert!(reapplies(&run(vec![Event::PointerMoved(pos2(5.0, 5.0))])), "pointer back in the window");
+        assert!(!reapplies(&run(vec![Event::PointerMoved(pos2(6.0, 6.0))])), "an ordinary move changes nothing");
+        assert!(!reapplies(&run(vec![Event::WindowFocused(false)])), "focus lost");
     }
 }
