@@ -1574,8 +1574,9 @@ mod tests {
 
     /// Every place that reaches a file through a link path goes through the design-path rule
     /// (`vfs::check_design_path` / `read_design_path` / `design_path_is_file` / `link_refusal`):
-    /// no plain file call on a link's path in the link commands, and the font file a design's text
-    /// names is checked before it is read.
+    /// no plain file call on a link's path in the link commands, a drawing's source path judged by the
+    /// rule before `same_file` canonicalises it, and the font file a design's text names is checked
+    /// before it is read.
     #[test]
     fn every_link_path_goes_through_the_design_path_rule() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1608,6 +1609,11 @@ mod tests {
                 assert!(rule < at, "{file}: canonicalize before check_design_path");
             }
         }
+        // A drawing's source path: the rule judges its text before `same_file` canonicalises it (a network touch).
+        let drawing = code("src/cmd/drawing.rs");
+        let source = &drawing[drawing.find("fn linked_source(").unwrap()..];
+        let rule = source.find("check_design_path(given").expect("linked_source goes through the design-path rule");
+        assert!(rule < source.find("same_file(").unwrap(), "src/cmd/drawing.rs: same_file before check_design_path");
         let fonts = std::fs::read_to_string(root.join("../sketch/src/fonts.rs")).unwrap();
         let (check, read) = (fonts.find("FILE_CHECK.get()").unwrap(), fonts.find("read_font(&path)").unwrap());
         assert!(check < read, "a font file named by a design is checked before it is read");
