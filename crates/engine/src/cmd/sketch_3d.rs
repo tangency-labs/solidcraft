@@ -293,16 +293,22 @@ fn lift_point(s: &mut Session, p: &Value, cmd: &str, point: &str) -> Result<Valu
                 .collect::<Result<Vec<Vec3>>>()?;
             fits.push(fit);
         }
-        let mut gone = Vec::new();
+        // A joined point at the origin is not lifted: the origin stays put.
+        if group.contains(&0) {
+            return Err(bad(cmd, format!("`{point}` is joined to the origin; it stays")));
+        }
+        // Joined points that no curve uses at all, by id: the removal below may shift indices.
+        let lone: Vec<String> =
+            group.iter().copied().filter(|g| *g != pi && !sk.curves.iter().any(|c| c.kind.uses(*g))).map(|g| sk.points[g].id.clone()).collect();
+        let mut doomed = Vec::new();
         if through.is_empty() {
             fits.push(vec![from]);
-            gone.push(pi);
+            doomed.push(pi);
         } else {
             sk.remove_curves(&through);
         }
-        // Joined points no curve uses any more go with the lift, and with them their constraints.
-        gone.extend(group.iter().copied().filter(|g| *g != pi && !sk.curves.iter().any(|c| c.kind.uses(*g))));
-        sk.remove_points(&gone);
+        doomed.extend(lone.iter().filter_map(|id| sk.resolve_point(id)));
+        sk.remove_points(&doomed);
         let mut made = Vec::new();
         for fit in &fits {
             made.push(sk.add_drawn_wire_in(fit, WireSpace::Component)?);
