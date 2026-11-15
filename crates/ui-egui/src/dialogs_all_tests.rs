@@ -583,6 +583,7 @@ fn check_form(command: &str, labels: &[&str]) {
         "joint.cam" => &["Other side"],
         "frame.member" => &["All Lines", "Mirror"],
         "construct.plane.at_angle" => &["Use axis direction only"],
+        "solid.pattern.face" => &["Flip side"],
         _ => &[],
     };
     for label in checks {
@@ -622,7 +623,8 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
     use egui::accesskit::Role;
     Some(match label {
         "Type" if matches!(command, "sheet.flange" | "sheet.hem" | "solid.revolve" | "solid.emboss" | "solid.scale") => return None,
-        "Direction" => return None, // segmented buttons, labelled by each choice
+        "Direction" => return None,                                 // segmented buttons, labelled by each choice
+        "Layout" if command == "solid.pattern.face" => return None, // Grid | Staggered
         "ui.fair_strength" | "ui.fair_iterations" => return None,
         "Size" if matches!(command, "solid.cylinder" | "solid.sphere") => return None, // Diameter | Radius
         "Continuity" | "Corners" | "Cells" | "Profile" => return None,
@@ -915,6 +917,45 @@ fn align_components_mode_switches_and_aligns_only_selected_instance() {
 }
 form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing"]);
+form_case!(face_pattern, "solid.pattern.face", ["Type", "Across", "Along", "Layout", "Grid angle", "Margin"]);
+
+/// Pattern on Face's attractors sit behind Advanced: off, the dialog sends a plain pattern and has
+/// no Attractors pick; on, the picked points and the near and far values go with it, and the
+/// pattern it makes scales its copies.
+#[test]
+fn face_pattern_attractors_come_from_the_advanced_option() {
+    let h = fixture();
+    let mut d = representative(&h, "solid.pattern.face");
+    assert!(!d.inputs.iter().any(|i| i.label == crate::dialogs_face_pattern::ATTRACTORS), "no attractor pick until it is switched on");
+    let (command, plain) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(command, "solid.pattern.face");
+    assert!(plain.get("attract").is_none(), "{plain}");
+    assert_eq!(plain["bodies"], json!(["Body1"]));
+    assert!(plain["face"]["face"].is_array(), "{plain}");
+    // Switched on under Advanced (as the checkbox does), with a vertex of the other body picked.
+    if let Kind::FacePattern(f) = &mut d.kind {
+        f.attract = true;
+        f.scale_near = "2".into();
+        f.scale_far = "0.5".into();
+        f.falloff = 1;
+    }
+    super::set_object_accepting(
+        &mut d.inputs,
+        &mut d.active,
+        crate::dialogs_face_pattern::ATTRACTORS,
+        crate::dialogs_face_pattern::ATTRACTOR_PICKS,
+        true,
+    );
+    let attract = d.inputs.iter_mut().find(|i| i.label == crate::dialogs_face_pattern::ATTRACTORS).unwrap();
+    attract.items = vec![Sel::Vertex { body: "Body2".into(), point: Vec3::new(40.0, 0.0, 5.0) }];
+    let (_, params) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(params["attract"]["scale_near"], json!("2"), "{params}");
+    assert_eq!(params["attract"]["falloff"], json!("smooth"));
+    assert_eq!(params["attract"]["points"].as_array().map(Vec::len), Some(1), "{params}");
+    let mut h = h;
+    let reply = h.app.run(&command, params).unwrap();
+    assert!(reply["created_bodies"].as_array().is_some_and(|b| !b.is_empty()), "{reply}");
+}
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
