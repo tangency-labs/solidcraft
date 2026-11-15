@@ -2325,77 +2325,109 @@ mod tests {
         Ok(())
     }
 
-    /// A B-spline surface quadratic in u and linear in v over `[0, 1]^2` from the three
-    /// u rows `rows` (each the v = 0 and v = 1 control point), with out-of-bounds
-    /// evaluation on, as `CoverCoincidentSurface` evaluates it.
-    fn wr_407_quadratic_sheet(rows: [[Vec3; 2]; 3]) -> Result<Surface> {
+    /// The Bezier surface over `[0, 1]^2` with control net `net` (`net[i][j]`: u index
+    /// `i`, v index `j`), with out-of-bounds evaluation on, as `CoverCoincidentSurface`
+    /// evaluates it.
+    fn wr_407_bezier_sheet(net: &[&[[f64; 2]]]) -> Result<Surface> {
         use crate::nurbs::b_spline_surface::p1::BSplineSurface as Bss;
         use crate::nurbs::math::CPoint;
         use crate::nurbs::srf_basic::Surface as NlSurface;
-        let net = rows
+        let bezier = |n: usize| [vec![0.0; n], vec![1.0; n]].concat();
+        let (rows, cols) = (net.len(), net.first().map_or(0, |r| r.len()));
+        let net = net
             .iter()
-            .map(|r| r.iter().map(|p| CPoint::from_point(*p)).collect())
+            .map(|r| {
+                r.iter()
+                    .map(|[x, y]| CPoint::from_point(Vec3::new(*x, *y, 0.0)))
+                    .collect()
+            })
             .collect();
-        let nl = NlSurface::new(
-            net,
-            2,
-            1,
-            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-            vec![0.0, 0.0, 1.0, 1.0],
-        )?;
+        let nl = NlSurface::new(net, rows - 1, cols - 1, bezier(rows), bezier(cols))?;
         let mut s = Surface::from(Bss::from_nurb(nl, false));
         set_out_of_bounds_enabled(&mut s, true);
         Ok(s)
     }
 
-    /// WR-407, tangency-labs/solidcraft#17215: a collapsed edge of the surface's own
-    /// domain is no fold. `P(u, v) = (u, u^2 v, 0)` collapses its edge u = 0 to the
-    /// origin, so the normal `Du x Dv = (0, 0, u^2)` is exactly zero on the grid row
-    /// u = 0 of `[-1, 1] x [0, 1]` (sample 10 of 20), and it points along +z on every
-    /// other row, on the continuation u < 0 too. The fork's cut-off (`SM_EFF_ZERO_SQRT`
-    /// times the normal at the centre of the natural domain) refused this cover.
+    /// WR-407, tangency-labs/solidcraft#17215: a degenerate edge of the surface's own
+    /// domain is no fold. `P(u, v) = (u + v, v^3)` has `Du = (1, 0)` and
+    /// `Dv = (1, 3 v^2)`, parallel on its edge v = 0, so its normal `(0, 0, 3 v^2)` is
+    /// exactly zero on the grid column v = 0 of `[0, 1] x [-1, 1]` (sample 10 of 20) and
+    /// points along +z everywhere else, on the continuation v < 0 too. The fork's rule
+    /// refused this cover (a zero normal is below any cut-off).
     #[test]
-    fn wr_407_collapsed_edge_of_the_domain_is_no_fold() -> Result<()> {
+    fn wr_407_degenerate_edge_of_the_domain_is_no_fold() -> Result<()> {
         let k = Kernel::default();
-        let s = wr_407_quadratic_sheet([
-            [Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0)],
-            [Vec3::new(0.5, 0.0, 0.0), Vec3::new(0.5, 0.0, 0.0)],
-            [Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0)],
+        let s = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [1.0 / 3.0, 0.0], [2.0 / 3.0, 0.0], [1.0, 1.0]],
+            &[[1.0, 0.0], [4.0 / 3.0, 0.0], [5.0 / 3.0, 0.0], [2.0, 1.0]],
         ])?;
-        let domain = Extent2d::from_bounds(-1.0, 0.0, 1.0, 1.0);
-        // The row u = 0 is sampled, and its normal is exactly zero there.
-        let edge = domain.evaluate(0.5, 0.25);
-        assert_eq!(edge.x, 0.0);
-        assert_eq!(s.step_normal(&k, edge)?.map(|(_, length)| length), Some(0.0));
+        let domain = Extent2d::from_bounds(0.0, -1.0, 1.0, 1.0);
+        let edge = domain.evaluate(0.25, 0.5);
+        assert_eq!(edge.y, 0.0);
+        assert_eq!(
+            s.step_normal(&k, edge)?.map(|(_, length)| length),
+            Some(0.0)
+        );
         assert_eq!(s.continuation_fold(&k, &domain)?, None);
         Ok(())
     }
 
-    /// The real defect next to the case above is still caught: `x(u) = 2u - u^2` turns
-    /// back at the natural boundary u = 1, where `Du` (and the normal) is exactly zero.
-    /// The zero row is passed over and u = 1.1 is compared with u = 0.9, whose normals
-    /// are -z and +z.
+    /// The real defect next to the case above is still caught: `P(u, v) = (u + v, v^2)`
+    /// has the normal `(0, 0, 2 v)`, exactly zero on its edge v = 0 and reversed on the
+    /// continuation v < 0. The zero sample is passed over, and v = 0.1 is compared with
+    /// v = -0.1 on the first grid row: their normals are +z and -z.
     #[test]
     fn wr_407_fold_through_a_zero_normal_is_still_a_fold() -> Result<()> {
         let k = Kernel::default();
-        let s = wr_407_quadratic_sheet([
-            [Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)],
-            [Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0)],
-            [Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0)],
+        let s = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [0.5, 0.0], [1.0, 1.0]],
+            &[[1.0, 0.0], [1.5, 0.0], [2.0, 1.0]],
         ])?;
-        let domain = Extent2d::from_bounds(0.0, 0.0, 2.0, 1.0);
-        let fold_row = domain.evaluate(0.5, 0.0);
-        assert_eq!(fold_row.x, 1.0);
-        assert_eq!(s.step_normal(&k, fold_row)?.map(|(_, length)| length), Some(0.0));
-        let Some(ContinuationFold::TurnsBack { uv, neighbour, dot }) =
-            s.continuation_fold(&k, &domain)?
-        else {
-            panic!("the fold at u = 1 must be found");
-        };
-        assert_eq!(uv, domain.evaluate(11.0 / 20.0, 0.0));
-        assert_eq!(neighbour, domain.evaluate(9.0 / 20.0, 0.0));
-        assert!(uv.x > 1.0 && neighbour.x < 1.0, "{uv:?} {neighbour:?}");
-        assert!(dot < -0.999_999, "{dot}");
+        let domain = Extent2d::from_bounds(0.0, -1.0, 1.0, 1.0);
+        let edge = domain.evaluate(0.0, 0.5);
+        assert_eq!(edge.y, 0.0);
+        assert_eq!(
+            s.step_normal(&k, edge)?.map(|(_, length)| length),
+            Some(0.0)
+        );
+        let fold = s.continuation_fold(&k, &domain)?;
+        assert_eq!(
+            fold,
+            Some(ContinuationFold::TurnsBack {
+                uv: domain.evaluate(0.0, 11.0 / 20.0),
+                neighbour: domain.evaluate(0.0, 9.0 / 20.0),
+                dot: -1.0,
+            })
+        );
+        Ok(())
+    }
+
+    /// A collapsed edge: `P(u, v) = (u, u^2 v)` collapses its edge u = 0 to the origin.
+    /// The evaluation replaces the zero `Dv` there by a short tangent along the limit
+    /// direction +y, so the normal on the grid row u = 0 of `[-1, 1] x [0, 1]` is
+    /// shorter than the fork's cut-off (`SM_EFF_ZERO_SQRT` times the normal at the
+    /// centre of the natural domain) but points along +z, as `(0, 0, u^2)` does on every
+    /// other row and on the continuation u < 0. The fork refused this cover; it is no
+    /// fold.
+    #[test]
+    fn wr_407_collapsed_edge_of_the_domain_is_no_fold() -> Result<()> {
+        let k = Kernel::default();
+        let s = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [0.0, 0.0]],
+            &[[0.5, 0.0], [0.5, 0.0]],
+            &[[1.0, 0.0], [1.0, 1.0]],
+        ])?;
+        let domain = Extent2d::from_bounds(-1.0, 0.0, 1.0, 1.0);
+        let edge = domain.evaluate(0.5, 0.25);
+        assert_eq!(edge.x, 0.0);
+        let (normal, length) = s.step_normal(&k, edge)?.unwrap();
+        let (_, reference) = s.step_normal(&k, Point2::new(0.5, 0.5))?.unwrap();
+        assert!(
+            length > 0.0 && length <= EFF_ZERO_SQRT * reference,
+            "{length} {reference}"
+        );
+        assert!(normal.z / length > 0.999, "{normal:?}");
+        assert_eq!(s.continuation_fold(&k, &domain)?, None);
         Ok(())
     }
 
