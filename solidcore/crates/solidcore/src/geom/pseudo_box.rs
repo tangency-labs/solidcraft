@@ -86,9 +86,10 @@
 //!   above 2 are undefined behaviour upstream; here they return `None` or an error.
 //! - `SM_ASSERT*` checks and `SM_DEBUG_CODE` blocks are compiled out upstream (release
 //!   build) and omitted.
-//! - `IsPlanar`'s normal is square to the flattest interval; upstream's is
+//! - `IsPlanar`'s normal runs along the last flat interval's direction; upstream's is
 //!   `basis[0] × basis[1]` whichever interval is flat, which lies in the plane of a box
-//!   flat along its first or second basis vector (WR-790).
+//!   flat along its first or second basis vector only (WR-790). A box flat along its last,
+//!   or not flat, keeps upstream's normal.
 
 use crate::error::{Result, SolidError, SM_ERR};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
@@ -219,9 +220,9 @@ pub struct Planar {
     pub is_planar: bool,
     /// The box centre (`pOptPlanePoint`).
     pub point: Point3,
-    /// Square to the flattest interval: the cross product of the other two basis vectors
-    /// in cyclic order, `basis[0] × basis[1]` when the last is the flattest
-    /// (`pOptPlaneNormal`; not unitised, as upstream).
+    /// Along the last flat interval's direction: the cross product of the other two basis
+    /// vectors in cyclic order; `basis[0] × basis[1]` when the last interval is flat or
+    /// none is (`pOptPlaneNormal`; not unitised, as upstream).
     pub normal: Vec3,
     /// Smallest half interval length (`pOptActualDeviation`).
     pub deviation: f64,
@@ -699,7 +700,7 @@ impl PseudoBox {
 
     /// Whether some half interval length is below `tol` (`IsPlanar`; planes, lines and
     /// points are all planar; `tol == EFF_ZERO`, the upstream default, means "scaled
-    /// zero of the box"), with the normal across the flattest interval.
+    /// zero of the box"), with the normal across the last flat interval.
     #[must_use]
     pub fn is_planar(&self, tol: f64) -> Planar {
         let [i0, i1, i2] = &self.intervals;
@@ -709,13 +710,15 @@ impl PseudoBox {
             .iter()
             .filter(|&&d| d / 2.0 < scaled_zero)
             .count();
-        // the other two basis vectors' cross product, in cyclic order (WR-790: upstream's
-        // is basis[0] x basis[1] whichever interval is flat); the last on a tie
+        // across the last flat interval: the other two basis vectors' cross product, in
+        // cyclic order (WR-790: upstream's is basis[0] x basis[1] whichever interval is
+        // flat); a box flat along its last, or not flat at all, keeps basis[0] x basis[1]
         let [b0, b1, b2] = self.basis;
-        let normal = if d0 < d1.min(d2) {
-            b1.cross(b2)
-        } else if d1 < d2 {
+        let flat = |d: f64| d / 2.0 < scaled_zero;
+        let normal = if !flat(d2) && flat(d1) {
             b2.cross(b0)
+        } else if !flat(d2) && flat(d0) {
+            b1.cross(b2)
         } else {
             b0.cross(b1)
         };
@@ -1301,32 +1304,44 @@ mod tests {
         assert!(flat.is_planar(EFF_ZERO).is_planar);
     }
 
-    /// A box flat along any one of its basis vectors is planar, with its normal square to the
-    /// other two: the flat direction, whichever interval is the flat one. A half ring's box is
-    /// flat across its first basis vector, and the normal `basis[0] × basis[1]` lay in the
-    /// ring's plane.
+    /// The normal of a flat box runs along its last flat basis vector: a box flat along its
+    /// first or second basis vector only (a half ring's box on the world axes is flat along
+    /// x) gets that vector, where `basis[0] × basis[1]` lay in the plane. A box flat along its
+    /// last, or flat nowhere, keeps `basis[0] × basis[1]`. Every set of flat intervals, the
+    /// flat ones a hair thick (below the box's scaled zero) or none.
     #[test]
     fn planar_normal_is_the_flat_direction() {
         let basis = rotated_basis();
-        for flat in 0..3 {
+        // (flat intervals, the basis vector the normal runs along)
+        let cases: [(&[usize], usize); 8] = [
+            (&[], 2),
+            (&[0], 0),
+            (&[1], 1),
+            (&[2], 2),
+            (&[0, 1], 1),
+            (&[0, 2], 2),
+            (&[1, 2], 2),
+            (&[0, 1, 2], 2),
+        ];
+        for (flat, along) in cases {
             let mut pb = PseudoBox::new();
             pb.set_basis(basis[0], basis[1], basis[2]).unwrap();
             for i in 0..3 {
-                let ivl = if i == flat {
-                    Extent1d::from_min_max(0.5, 0.5)
+                let ivl = if flat.contains(&i) {
+                    Extent1d::from_min_max(0.5, 0.5 + 1e-15)
                 } else {
                     Extent1d::from_min_max(-1.0, 2.0)
                 };
                 pb.set_interval(i, ivl).unwrap();
             }
             let planar = pb.is_planar(EFF_ZERO);
-            assert!(planar.is_planar);
+            assert_eq!(planar.is_planar, !flat.is_empty(), "flat {flat:?}");
             let n = planar.normal.unitize().unwrap();
             for (i, b) in basis.iter().enumerate() {
-                let want = if i == flat { 1.0 } else { 0.0 };
+                let want = if i == along { 1.0 } else { 0.0 };
                 assert!(
                     (n.dot(*b).abs() - want).abs() < 1e-12,
-                    "flat {flat}: normal {n:?} against basis {i}"
+                    "flat {flat:?}: normal {n:?} against basis {i}"
                 );
             }
         }
