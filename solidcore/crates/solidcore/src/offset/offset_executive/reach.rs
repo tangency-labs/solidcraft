@@ -1796,20 +1796,54 @@ fn edge_interval_maximum(
     of: EdgeQuantity,
     surfaces: Option<&[u64]>,
 ) -> Result<Option<(f64, bool, bool)>> {
+    edge_interval_maximum_to(b, e, f, tolerance, Slack::Tolerance, bounds, of, surfaces)
+}
+
+/// How near the largest bound found must come to the largest value attained before the
+/// halving in [`interval_maximum`] stops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Slack {
+    /// Within the B-rep's tolerance.
+    Tolerance,
+    /// Within the value attained, or the tolerance where that is less: for a moved net's
+    /// meeting, whose bound is only the length its surfaces are extended by. A moved net's
+    /// move beside the edge is the reach itself (its meetings lie on it), and the margin
+    /// the executive extends by is the reach and that move together, so a bound within the
+    /// move of the reach at most doubles an extension that is already at least twice the
+    /// reach; a longer extension still holds every meeting, and the meetings are found by
+    /// the intersection, not placed by the bound. Halving on to the tolerance would only
+    /// tighten a length nothing measures, and on a helical edge, whose reach is the same
+    /// all along it, it halves every piece down to [`MAX_INTERVALS`].
+    Attained,
+}
+
+/// [`edge_interval_maximum`] halving to `slack`.
+#[allow(clippy::too_many_arguments)] // the edge, the bound, its slack and its record
+fn edge_interval_maximum_to(
+    b: &Brep,
+    e: crate::topology::EdgeId,
+    f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> Result<PieceBound>,
+    tolerance: f64,
+    slack: Slack,
+    bounds: &mut EdgeBounds,
+    of: EdgeQuantity,
+    surfaces: Option<&[u64]>,
+) -> Result<Option<(f64, bool, bool)>> {
     let Some(cn) = edge_nurbs(b, e)? else {
         return Ok(None);
     };
     let interval = edge::interval(b, e)?;
     let Some(surfaces) = surfaces else {
-        return interval_maximum(&cn, interval, f, tolerance);
+        return interval_maximum(&cn, interval, f, tolerance, slack);
     };
-    let on = bound_inputs(&cn, interval, tolerance, surfaces);
+    let mut on = bound_inputs(&cn, interval, tolerance, surfaces);
+    on.push(u64::from(slack == Slack::Attained));
     if let Some(found) = bounds.0.get(&(e, of)) {
         if found.on == on {
             return Ok(found.bound);
         }
     }
-    let bound = interval_maximum(&cn, interval, f, tolerance)?;
+    let bound = interval_maximum(&cn, interval, f, tolerance, slack)?;
     bounds.0.insert((e, of), EdgeBound { on, bound });
     Ok(bound)
 }
@@ -1820,6 +1854,7 @@ fn interval_maximum(
     interval: crate::geom::extent1d::Extent1d,
     f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> Result<PieceBound>,
     tolerance: f64,
+    slack: Slack,
 ) -> Result<Option<(f64, bool, bool)>> {
     let mut undecided = spans(cn, interval);
     // the bound on a piece; a bound that is not finite bounds nothing
@@ -1876,7 +1911,11 @@ fn interval_maximum(
     // the largest bound tightened: it bounds every piece left
     while let Some(top) = bounded.pop() {
         let tm = halves(top.t0, top.t1, top.depth).filter(|_| seen + 2 <= MAX_INTERVALS);
-        let Some(tm) = tm.filter(|_| top.halvable && top.upper > best + tolerance) else {
+        let within = match slack {
+            Slack::Tolerance => tolerance,
+            Slack::Attained => tolerance.max(best),
+        };
+        let Some(tm) = tm.filter(|_| top.halvable && top.upper > best + within) else {
             return Ok(Some((top.upper, apart, crosses && !apart)));
         };
         seen += 2;
@@ -2371,6 +2410,17 @@ pub fn local_extension_reach(
             let hull = |f: &dyn Fn(Vec3) -> f64| -> Result<f64> {
                 edge_maximum(b, e, f, tolerance)?.ok_or_else(uncertified)
             };
+            let pieces_to = |f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> Result<PieceBound>,
+                             slack: Slack,
+                             bounds: &mut EdgeBounds,
+                             of: EdgeQuantity,
+                             surfaces: Option<&[u64]>|
+             -> Result<(f64, bool, bool)> {
+                let found =
+                    edge_interval_maximum_to(b, e, f, tolerance, slack, bounds, of, surfaces)?;
+                k.check_cancelled(LOCAL_OP)?;
+                found.ok_or_else(uncertified)
+            };
             let pieces = |f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> Result<PieceBound>,
                           bounds: &mut EdgeBounds,
                           of: EdgeQuantity,
@@ -2467,7 +2517,13 @@ pub fn local_extension_reach(
                         b.extend(n.bits());
                         b
                     });
-                    pieces(&piece, bounds, pair, surfaces.as_deref())?
+                    // a moved net's reach to within the move ([`Slack::Attained`])
+                    let slack = if net_moved {
+                        Slack::Attained
+                    } else {
+                        Slack::Tolerance
+                    };
+                    pieces_to(&piece, slack, bounds, pair, surfaces.as_deref())?
                 }
                 (Exact::Quadric(a), Exact::Quadric(c)) => {
                     let pair =
