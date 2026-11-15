@@ -2666,7 +2666,7 @@ impl OffsetGeometryCreation {
         uv_curve: Option<O>,
         opt_orig_edgeuse: Option<O>,
     ) -> Result<ReplaceEdgeCurves> {
-        self.replace_edge_curves_oriented(
+        Self::replace_edge_curves_oriented(
             k,
             brep,
             edgeuse,
@@ -2688,7 +2688,6 @@ impl OffsetGeometryCreation {
     /// As [`Self::replace_edge_curves`].
     #[allow(clippy::too_many_arguments)]
     fn replace_edge_curves_oriented<O: ClassObject + SolutionObject>(
-        &self,
         k: &Kernel,
         brep: &mut impl OffsetBrep<O>,
         edgeuse: O,
@@ -4299,7 +4298,7 @@ impl OffsetGeometryCreation {
 
         // change the pOffsetEdgeuse geometry (ReplaceEdgeCurves dereferences it: null is
         // undefined)
-        let r = self.replace_edge_curves_oriented(
+        let r = Self::replace_edge_curves_oriented(
             k,
             brep,
             offset_edgeuse.ok_or(dangling("null offset edge use"))?,
@@ -4319,7 +4318,7 @@ impl OffsetGeometryCreation {
             };
             // GWC:BUG?? These two Edgeuses point to the same edge - these two calls should
             //           have the same 3DCurve
-            self.replace_edge_curves_oriented(
+            Self::replace_edge_curves_oriented(
                 k,
                 brep,
                 other_off,
@@ -4747,7 +4746,7 @@ impl OffsetGeometryCreation {
         let copy_3d_h = store_curve(brep, copy_3d)?;
 
         // when appropriate - change the pOffsetEdgeuse geometry
-        self.replace_edge_curves_oriented(
+        Self::replace_edge_curves_oriented(
             k,
             brep,
             offset_edgeuse,
@@ -4760,7 +4759,7 @@ impl OffsetGeometryCreation {
         // when appropriate - change the pOtherOffsetEdgeuse geometry
         // GWC:BUG?? These two Edgeuses point to the same edge - these two calls should
         //           have the same 3DCurve. It's ok: At this point they do not (yet) point to the same edge.
-        self.replace_edge_curves_oriented(
+        Self::replace_edge_curves_oriented(
             k,
             brep,
             other_offset_edgeuse,

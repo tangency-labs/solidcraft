@@ -109,6 +109,9 @@ struct LoopStretch {
     mid: Point3,
     /// (not upstream) its edge use runs with its edge.
     same: bool,
+    /// (not upstream) of a face of one loop, the stretch it goes on to in the loop it
+    /// closes into (`classify_one_loop`), so that two loops through one crossing stay apart.
+    follows: Option<usize>,
 }
 
 /// A crossing of the loops of an offset face that is not resolved
@@ -282,7 +285,9 @@ fn cut_at_crossings_refusing_touch(
                 Vec::new()
             };
             for solution in solutions.as_slice() {
-                if !shared.is_empty() {
+                // a single touch at a shared vertex is the loop's own corner; a run along
+                // from it still goes on to the refusal below
+                if !shared.is_empty() && solution.solution_type == SolutionType::SingleValue {
                     let e_a = edge_of(b, *at(edgeuses, aa)?)?;
                     let p = edge_curve(b, e_a)?.evaluate_point(kernel, solution.start.param(0)?)?;
                     if shared.iter().any(|v| p.distance(*v) <= tol_3d) {
@@ -439,12 +444,14 @@ fn classify_one_loop(kernel: &Kernel, stretches: &mut [LoopStretch], uvs: &[Curv
         let (keep, floor) = match orientation {
             OrientType::Same => (true, false),
             OrientType::Opposite => (false, true),
-            _ => return Err(unresolved(LoopCrossing::StretchUnclassified)),
+            OrientType::Unknown => return Err(unresolved(LoopCrossing::StretchUnclassified)),
         };
         for &tt in &chain {
+            let follows = Some(*at(&next, tt)?);
             let stretch = at_mut(stretches, tt)?;
             stretch.keep = keep;
             stretch.floor = floor;
+            stretch.follows = follows;
         }
     }
     Ok(())
@@ -746,6 +753,7 @@ impl OffsetExecutive {
                     floor: false,
                     mid,
                     same,
+                    follows: None,
                 });
                 from = to;
                 from_node = to_node;
@@ -819,8 +827,9 @@ impl OffsetExecutive {
                 continue;
             }
             let end = at(&stretches, ss)?.end;
+            let follows = at(&stretches, ss)?.follows;
             for (tt, other) in stretches.iter().enumerate() {
-                if other.floor && other.start == end {
+                if other.floor && other.start == end && follows.is_none_or(|f| f == tt) {
                     *at_mut(&mut next_floor, ss)? = Some(tt);
                 }
             }
@@ -870,7 +879,10 @@ impl OffsetExecutive {
                 continue;
             }
             for (tt, other) in stretches.iter().enumerate() {
-                if !other.keep || other.start != stretch.end {
+                if !other.keep
+                    || other.start != stretch.end
+                    || stretch.follows.is_some_and(|f| f != tt)
+                {
                     continue;
                 }
                 if at(&next, ss)?.is_some() {
