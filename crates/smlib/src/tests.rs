@@ -77,6 +77,25 @@ fn calls_from_many_threads_are_serialised() {
 /// The dump folder is process-wide: the tests that set it take turns.
 static DUMP_DIR_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// `current_call` may return no snapshot while another test changes its process-wide registry.
+/// Tests that require a snapshot run alone, with only the worker calls they control.
+fn in_own_process(test: &str, f: impl FnOnce()) {
+    const CHILD: &str = "SOLIDCRAFT_SMLIB_TEST_CHILD";
+    if std::env::var(CHILD).as_deref() == Ok(test) {
+        f();
+        return;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", test, "--nocapture", "--test-threads=1"])
+        .env(CHILD, test)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{test}: {}\n{stdout}\n{stderr}", output.status);
+    assert!(stdout.contains("test result: ok. 1 passed; 0 failed;"), "child must execute the selected test: {stdout}");
+}
+
 /// Entry points that ask no kernel, so have nothing to say here.
 const NO_KERNEL: [&str; 14] = [
     "inertia_tensor",
@@ -326,31 +345,32 @@ fn only_a_failing_call_serialises_its_inputs() {
 }
 
 /// A failing solidcore call leaves its inputs and what failed, and an answered one leaves nothing;
-/// the call in flight is named, and gone after. A folder is process-wide, so this test is the one
-/// that sets it.
+/// the call in flight is named, and gone after. Its process has no unrelated registry writers.
 #[test]
 fn a_failing_solidcore_call_leaves_a_dump_and_names_itself() {
-    let _dumps = DUMP_DIR_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let dir = std::env::temp_dir().join(format!("solidcraft-smlib-core-dump-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    core::dump::set_dir(Some(dir.clone()));
-    let a = core::make_box([0.0; 3], [10.0; 3]).unwrap();
-    let seen: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
-    let r: Result<()> = core::with_body("smlib_test_failure", &a, |_, _| {
-        *seen.lock().unwrap() = core::dump::current();
-        Err(solidcore::SolidError::invalid_input("test", "refused"))
+    in_own_process("tests::a_failing_solidcore_call_leaves_a_dump_and_names_itself", || {
+        let _dumps = DUMP_DIR_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = std::env::temp_dir().join(format!("solidcraft-smlib-core-dump-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        core::dump::set_dir(Some(dir.clone()));
+        let a = core::make_box([0.0; 3], [10.0; 3]).unwrap();
+        let seen: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+        let r: Result<()> = core::with_body("smlib_test_failure", &a, |_, _| {
+            *seen.lock().unwrap() = core::dump::current();
+            Err(solidcore::SolidError::invalid_input("test", "refused"))
+        });
+        core::dump::set_dir(None);
+        assert!(r.is_err());
+        assert!(seen.lock().unwrap().as_deref().is_some_and(|c| c.contains("smlib_test_failure")), "{seen:?}");
+        assert!(!core::dump::current().is_some_and(|c| c.contains("smlib_test_failure")), "no longer in flight");
+        let got: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        let text = got.iter().find(|n| n.ends_with("-smlib_test_failure.txt")).unwrap_or_else(|| panic!("{got:?}"));
+        assert!(std::fs::read_to_string(dir.join(text)).unwrap().contains("refused"));
+        let smb = got.iter().find(|n| n.ends_with("-smlib_test_failure-brep.smb")).unwrap_or_else(|| panic!("{got:?}"));
+        let back = core::file::read(&dir.join(smb), false).unwrap();
+        assert!((core::volume(&back, 1e-7).unwrap() - 1000.0).abs() < 1e-6);
+        let _ = std::fs::remove_dir_all(&dir);
     });
-    core::dump::set_dir(None);
-    assert!(r.is_err());
-    assert!(seen.lock().unwrap().as_deref().is_some_and(|c| c.contains("smlib_test_failure")), "{seen:?}");
-    assert!(!core::dump::current().is_some_and(|c| c.contains("smlib_test_failure")), "no longer in flight");
-    let got: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
-    let text = got.iter().find(|n| n.ends_with("-smlib_test_failure.txt")).unwrap_or_else(|| panic!("{got:?}"));
-    assert!(std::fs::read_to_string(dir.join(text)).unwrap().contains("refused"));
-    let smb = got.iter().find(|n| n.ends_with("-smlib_test_failure-brep.smb")).unwrap_or_else(|| panic!("{got:?}"));
-    let back = core::file::read(&dir.join(smb), false).unwrap();
-    assert!((core::volume(&back, 1e-7).unwrap() - 1000.0).abs() < 1e-6);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// SMLib may end an edge at a parameter of its own (a knot its vertex lies at, where its drop onto
@@ -439,6 +459,19 @@ fn call_held_open(body: &str) -> (std::sync::mpsc::Sender<()>, std::thread::Join
     (release, held)
 }
 
+/// An unrelated call may have the same name as the dump test's call. It must not affect the
+/// test's assertions about when its own call starts and ends.
+#[test]
+fn the_dump_test_is_independent_of_other_running_calls() {
+    let (release, held) = call_held_open("smlib_test_failure");
+    let result = std::panic::catch_unwind(a_failing_solidcore_call_leaves_a_dump_and_names_itself);
+    release.send(()).unwrap();
+    held.join().unwrap().unwrap();
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
+}
+
 /// Runs `f` on another thread and gives its answer; a failure here rather than a test that hangs
 /// when `f` waits for a call that does not end. The limit is no measure of speed: `f` is free to
 /// take all of it, and only a wait with no end fails.
@@ -454,25 +487,27 @@ fn answered<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
 /// or still open, blocked here on a channel, while another makes and measures a body of its own.
 #[test]
 fn a_kernel_call_that_does_not_end_holds_up_no_other_call() {
-    let (release, held) = call_held_open("held_open_by_no_other_call");
-    let volume = answered(|| {
-        let a = Brep::make_box([0.0; 3], [10.0; 3]).unwrap();
-        let b = Brep::make_box([5.0, 0.0, 0.0], [10.0; 3]).unwrap();
-        a.boolean(&b, BooleanOp::Union).unwrap().unwrap().volume(1e-7).unwrap()
+    in_own_process("tests::a_kernel_call_that_does_not_end_holds_up_no_other_call", || {
+        let (release, held) = call_held_open("held_open_by_no_other_call");
+        let volume = answered(|| {
+            let a = Brep::make_box([0.0; 3], [10.0; 3]).unwrap();
+            let b = Brep::make_box([5.0, 0.0, 0.0], [10.0; 3]).unwrap();
+            a.boolean(&b, BooleanOp::Union).unwrap().unwrap().volume(1e-7).unwrap()
+        });
+        assert!((volume - 1500.0).abs() < 1e-6, "{volume}");
+        assert!(current_call().is_some_and(|c| c.contains("held_open_by_no_other_call")), "the call still runs");
+        // And one holds up no other held open beside it.
+        let (release_too, held_too) = call_held_open("held_open_too_by_no_other_call");
+        assert!(current_call().is_some_and(|c| c.contains("held_open_by_no_other_call") && c.contains("held_open_too_by_no_other_call")));
+        for (release, held) in [(release, held), (release_too, held_too)] {
+            release.send(()).unwrap();
+            held.join().unwrap().unwrap();
+        }
+        assert!(
+            !current_call().is_some_and(|c| c.contains("held_open_by_no_other_call") || c.contains("held_open_too_by_no_other_call")),
+            "neither is in flight any more"
+        );
     });
-    assert!((volume - 1500.0).abs() < 1e-6, "{volume}");
-    assert!(current_call().is_some_and(|c| c.contains("held_open_by_no_other_call")), "the call still runs");
-    // And one holds up no other held open beside it.
-    let (release_too, held_too) = call_held_open("held_open_too_by_no_other_call");
-    assert!(current_call().is_some_and(|c| c.contains("held_open_by_no_other_call") && c.contains("held_open_too_by_no_other_call")));
-    for (release, held) in [(release, held), (release_too, held_too)] {
-        release.send(()).unwrap();
-        held.join().unwrap().unwrap();
-    }
-    assert!(
-        !current_call().is_some_and(|c| c.contains("held_open_by_no_other_call") || c.contains("held_open_too_by_no_other_call")),
-        "neither is in flight any more"
-    );
 }
 
 /// Bodies are made and used on whichever kernel is free, at the same time on several threads, and

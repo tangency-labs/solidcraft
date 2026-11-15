@@ -280,6 +280,56 @@ mod tests {
     }
 
     #[test]
+    fn canvases_on_faces_follow_geometry_edits_and_reopen() {
+        let mut s = Session::default();
+        for (command, params) in [
+            ("parameters.add", json!({"name": "height", "expression": "10 mm"})),
+            ("sketch.create", json!({"plane": "XY"})),
+            ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"distance": "height", "name": "Block"})),
+            ("canvas.insert", json!({"data": png(40, 20), "plane": {"face": [20, 15, 10]}, "name": "Face", "width": 20})),
+            ("canvas.decal", json!({"data": png(40, 20), "face": [20, 15, 10], "name": "Decal", "width": 20})),
+            ("canvas.insert", json!({"data": png(40, 20), "plane": {"face": [20, 15, 10]}, "offset": 2, "name": "Offset", "width": 20})),
+            ("canvas.insert", json!({"data": png(40, 20), "plane": {"face": [20, 15, 10], "fixed": true}, "name": "Fixed", "width": 20})),
+        ] {
+            s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
+        }
+        let check = |s: &Session, height: f64| {
+            let (vals, _) = s.doc.param_values();
+            let state = s.model.state();
+            for canvas in &s.doc.canvases {
+                let expected = match canvas.name.as_str() {
+                    "Offset" => height + 2.0,
+                    "Fixed" => 10.0,
+                    _ => height,
+                };
+                let plane = s.doc.canvas_plane(&vals, canvas, &state).unwrap();
+                for corner in canvas.world_corners(&plane) {
+                    assert!((corner.z - expected).abs() < 1e-9, "{}: expected z={expected}, got {corner:?}", canvas.name);
+                }
+            }
+        };
+        check(&s, 10.0);
+        s.execute("parameters.change", &json!({"name": "height", "expression": "14 mm"})).unwrap();
+        check(&s, 14.0);
+        s.execute("edit.undo", &json!({})).unwrap();
+        check(&s, 10.0);
+        s.execute("edit.redo", &json!({})).unwrap();
+        check(&s, 14.0);
+        check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 14.0);
+        s.execute("timeline.suppress", &json!({"feature": "Block", "suppressed": true})).unwrap();
+        let (vals, _) = s.doc.param_values();
+        let state = s.model.state();
+        for canvas in &s.doc.canvases {
+            let plane = s.doc.canvas_plane(&vals, canvas, &state);
+            assert_eq!(plane.is_ok(), canvas.name == "Fixed", "{}: {plane:?}", canvas.name);
+        }
+        s.execute("timeline.suppress", &json!({"feature": "Block", "suppressed": false})).unwrap();
+        check(&s, 14.0);
+    }
+
+    #[test]
     fn canvases_on_model_planes_follow_rebuilds_and_reopen() {
         use solidcore_record::Vec3;
         use solidcraft_geom::PlaneGeom as _;

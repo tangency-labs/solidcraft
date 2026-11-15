@@ -1,0 +1,178 @@
+{
+  "operation": "Plane::trim_curve_to_plane_domain",
+  "case": "gen0599",
+  "inputs_identical": true,
+  "main_equals_nd_only": true,
+  "arithmetic": "exact Fraction(binary64) dyadics; no curve samples",
+  "tolerance": 0.5,
+  "source_plane_max_residual_upper": 2.2073784383315977e-15,
+  "projected_source_exact_rectangle_intervals": [
+    [
+      0.0347076336502816,
+      0.20171281084005982
+    ],
+    [
+      0.7732852165276186,
+      1.0
+    ]
+  ],
+  "phases": {
+    "main": {
+      "curve_count": 4,
+      "curves": [
+        {
+          "type": "polyline",
+          "interval": [
+            0.02789009945413375,
+            0.03470763365028185
+          ],
+          "source_residual_upper": 1.308589680428319e-15,
+          "rectangle_distance_witness_upper": 0.03233586920973153
+        },
+        {
+          "type": "polyline",
+          "interval": [
+            0.03470763365028185,
+            0.140625
+          ],
+          "source_residual_upper": 2.0866637524513927e-15,
+          "rectangle_distance_witness_upper": 2.0982588787335817e-15
+        },
+        {
+          "type": "polyline",
+          "interval": [
+            0.140625,
+            0.20173595590037774
+          ],
+          "source_residual_upper": 6.115966546072321e-15,
+          "rectangle_distance_witness_upper": 0.002154082892391532
+        },
+        {
+          "type": "polyline",
+          "interval": [
+            0.4856981795830564,
+            1.0
+          ],
+          "source_residual_upper": 3.8721530437799444e-15,
+          "rectangle_distance_witness_upper": 0.49230242729914614
+        }
+      ],
+      "all_returned_spans_rectangle_distance_upper": 0.49230242729914614,
+      "all_returned_spans_source_distance_upper": 6.115966546072321e-15,
+      "exact_rectangle_clip_uncovered_endpoint_distance_upper": 0.0,
+      "uncovered_parameter_intervals": []
+    },
+    "nd-only": {
+      "curve_count": 4,
+      "curves": [
+        {
+          "type": "polyline",
+          "interval": [
+            0.02789009945413375,
+            0.03470763365028185
+          ],
+          "source_residual_upper": 1.308589680428319e-15,
+          "rectangle_distance_witness_upper": 0.03233586920973153
+        },
+        {
+          "type": "polyline",
+          "interval": [
+            0.03470763365028185,
+            0.140625
+          ],
+          "source_residual_upper": 2.0866637524513927e-15,
+          "rectangle_distance_witness_upper": 2.0982588787335817e-15
+        },
+        {
+          "type": "polyline",
+          "interval": [
+            0.140625,
+            0.20173595590037774
+          ],
+          "source_residual_upper": 6.115966546072321e-15,
+          "rectangle_distance_witness_upper": 0.002154082892391532
+        },
+        {
+          "type": "polyline",
+          "interval": [
+            0.4856981795830564,
+            1.0
+          ],
+          "source_residual_upper": 3.8721530437799444e-15,
+          "rectangle_distance_witness_upper": 0.49230242729914614
+        }
+      ],
+      "all_returned_spans_rectangle_distance_upper": 0.49230242729914614,
+      "all_returned_spans_source_distance_upper": 6.115966546072321e-15,
+      "exact_rectangle_clip_uncovered_endpoint_distance_upper": 0.0,
+      "uncovered_parameter_intervals": []
+    },
+    "after": {
+      "curve_count": 6,
+      "curves": [
+        {
+          "type": "polyline",
+          "interval": [
+            0.02789009945413375,
+            0.03470763365028185
+          ],
+          "source_residual_upper": 1.308589680428319e-15,
+          "rectangle_distance_witness_upper": 0.03233586920973153
+        },
+        {
+          "type": "polyline",
+          "interval": [
+            0.03470763365028185,
+            0.140625
+          ],
+          "source_residual_upper": 2.0866637524513927e-15,
+          "rectangle_distance_witness_upper": 2.0982588787335817e-15
+        },
+        {
+          "type": "polyline",
+          "interval": [
+            0.140625,
+            0.20173595590037774
+          ],
+          "source_residual_upper": 6.115966546072321e-15,
+          "rectangle_distance_witness_upper": 0.002154082892391532
+        },
+        {
+          "type": "approximate_contact_point",
+          "source_t": 0.4856981795830564,
+          "source_residual_upper": 1.121363000781991e-15,
+          "rectangle_distance_witness_upper": 0.49230242729914814
+        },
+        {
+          "type": "polyline",
+          "interval": [
+            0.773285216527619,
+            0.859375
+          ],
+          "source_residual_upper": 2.0687495385737943e-15,
+          "rectangle_distance_witness_upper": 2.2677556733679087e-15
+        },
+        {
+          "type": "polyline",
+          "interval": [
+            0.859375,
+            1.0
+          ],
+          "source_residual_upper": 2.0687495385737943e-15,
+          "rectangle_distance_witness_upper": 2.2677556733679087e-15
+        }
+      ],
+      "all_returned_spans_rectangle_distance_upper": 0.49230242729914814,
+      "all_returned_spans_source_distance_upper": 6.115966546072321e-15,
+      "exact_rectangle_clip_uncovered_endpoint_distance_upper": 8.2740383433019e-15,
+      "uncovered_parameter_intervals": [
+        [
+          0.7732852165276186,
+          0.773285216527619
+        ]
+      ]
+    }
+  },
+  "conservative_binary64_rectangle_evaluation_error_bound": 3.341522978729647e-12,
+  "after_distance_upper_with_evaluation_envelope": 0.4923024273024897
+}
