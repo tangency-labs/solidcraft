@@ -4411,10 +4411,10 @@ mod tests {
             normal: raw.unitize().unwrap(),
             raw,
         };
-        let radical = quadric::Radical::of(&left, &right).unwrap();
+        let apart = quadric::Radical::of(&left, &right).unwrap();
         let old = Vec3::new(0.0, sqrt(1.9 * 1.9 - 1.0), 0.0);
         let far = (Vec3::new(0.0, sqrt(3.0), 1.0) - old).length();
-        match corner_with_cylinders(old, leaning, &radical, &left, 1e-6) {
+        match corner_with_cylinders(old, leaning, &apart, &left, 1e-6) {
             CornerMeeting::Within(r) => assert!(far - 1e-9 <= r && r < far + 1e-6, "{r}"),
             other => panic!("{other:?}"),
         }
