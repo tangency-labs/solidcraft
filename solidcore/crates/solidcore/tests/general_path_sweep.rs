@@ -1117,3 +1117,138 @@ fn closed_rounded_rectangle_has_no_internal_pole() {
         }
     }
 }
+
+/// The arc from `start` through `through` to `end` (less than a whole turn), as an
+/// application's three-point arc is made: its centre, axis and angle from the points.
+fn arc_through(k: &Kernel, start: Point3, through: Point3, end: Point3) -> BSplineCurve {
+    use solidcore::curve::arc::ArcDefinition;
+    let (ab, ac) = (through - start, end - start);
+    let n = ab.cross(ac);
+    let centre = start + (n.cross(ab) * ac.dot(ac) + ac.cross(n) * ab.dot(ab)) * (0.5 / n.dot(n));
+    let radius = (start - centre).length();
+    let axis = (start - centre).cross(through - centre);
+    let axis = axis * (1.0 / axis.length());
+    let x = (start - centre) * (1.0 / radius);
+    let to = end - centre;
+    let mut angle = to.dot(axis.cross(x)).atan2(to.dot(x));
+    if angle <= 0.0 {
+        angle += std::f64::consts::TAU;
+    }
+    let arc = ArcDefinition {
+        centre,
+        axis,
+        reference: x,
+        radius,
+        start: 0.0,
+        end: angle,
+    };
+    Ellipse::arc(k, &arc).unwrap().base().clone()
+}
+
+/// #16959: a circle along line, half turn, line, quarter turn, line, the two arcs in
+/// perpendicular planes and the joints off tangent by the rounding of four decimals (so
+/// the path takes the fitted sweep). The frame's z turns along one of the arcs whatever
+/// the start, and the skin of that arc took its end sections' turn from a finite
+/// difference reaching onto the long line next to it: a fraction of the rate, so the
+/// net's inner rows ran backwards at the arc's ends. Every row and column of the net now
+/// goes one way, and every wall passes the surface check.
+#[test]
+fn a_circle_along_arcs_in_perpendicular_planes_has_a_net_that_does_not_double_back() {
+    use solidcore::nurbs::b_spline_surface::BSplineSurface;
+    use solidcore::primitive::primitive_creation::p3::prepare_curve_sweep;
+    use solidcore::surface::surface::assert_valid::grid_has_non_monotonic_points_to_rounding;
+    use solidcore::sweep::api_brep::create_curve_sweep_with_placements;
+    let mut k = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let p = Point3::new;
+    let line = |a: Point3, b: Point3| BSplineCurve::create_line_segment(3, a, b).unwrap();
+    let mut parts = vec![
+        line(p(-6.9065, -30.0, -1.2499), p(-6.6363, -30.0, -0.2871)),
+        arc_through(
+            &k,
+            p(-6.6363, -30.0, -0.2871),
+            p(-8.4718, -30.0, 2.9803),
+            p(-11.7392, -30.0, 1.1448),
+        ),
+        line(p(-11.7392, -30.0, 1.1448), p(-20.9248, -30.0, -31.5909)),
+        arc_through(
+            &k,
+            p(-20.9248, -30.0, -31.5909),
+            p(-21.689, -28.8284, -34.3141),
+            p(-22.0055, -26.0, -35.4421),
+        ),
+        line(p(-22.0055, -26.0, -35.4421), p(-22.0055, -20.0, -35.4421)),
+    ];
+    let path = BSplineCurve::create_by_joining(&mut parts, None).unwrap();
+    let start = path.evaluate_point(path.natural_interval().min()).unwrap();
+    let across = Vec3::new(0.9628139453425012, 0.0, -0.2701653320728017);
+    let profile = Curve::from(
+        BSplineCurve::create_circle_segment(
+            3,
+            &Axis2Placement::new(start, across, Vec3::Y),
+            1.8,
+            0.0,
+            360.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap(),
+    );
+    let options = SweepOptions {
+        cap_ends: true,
+        profile_at_path_start: true,
+        ..SweepOptions::default()
+    };
+    // The net as the sweep builds it, before it is split into faces.
+    let prepared = prepare_curve_sweep(
+        &k,
+        &[Some(profile.clone())],
+        &path,
+        None,
+        None,
+        options,
+        false,
+    )
+    .unwrap();
+    let net = BSplineSurface::create_sweep_surface(
+        &prepared.profiles[0],
+        &prepared.path,
+        None,
+        false,
+        solidcore::geom::tol::ZONE_TOL_3D,
+    )
+    .unwrap();
+    let points = net.control_point_net().unwrap();
+    assert!(
+        !grid_has_non_monotonic_points_to_rounding(&points.points, points.v_count, false, false)
+            .unwrap(),
+        "the net doubles back"
+    );
+    let swept = create_curve_sweep_with_placements(
+        &mut k,
+        &[Some(&profile)],
+        Some(&Curve::from(path)),
+        None,
+        None,
+        Some(&options),
+    )
+    .unwrap()
+    .sweep
+    .brep;
+    let all = walls(&swept);
+    assert!(!all.is_empty());
+    for wall in &all {
+        let mut reports = solidcore::geom::assert_array::AssertArray::new();
+        let valid = wall
+            .assert_valid(
+                &k,
+                Some(&mut reports),
+                0,
+                solidcore::geom::assert_array::ObjectKey(0),
+            )
+            .unwrap();
+        let failed: Vec<_> = reports.reports().iter().filter(|r| !r.ok).collect();
+        assert!(valid, "{failed:?}");
+    }
+}
