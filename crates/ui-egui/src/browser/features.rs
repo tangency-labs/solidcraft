@@ -113,7 +113,7 @@ pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, component: u64, path
         match current_model(app) {
             Some(model) => {
                 let worst = model.folder_status(app, component, compact);
-                (worst.map(|(status, _)| status), worst.and_then(|(_, id)| crate::timeline::feature_message(app, id)))
+                (worst.map(|(status, _)| status), worst.and_then(|(_, id)| crate::timeline::feature_tip(app, id)))
             }
             None => {
                 let ids: Vec<u64> = app
@@ -131,7 +131,7 @@ pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, component: u64, path
     let r = node_row(
         rows,
         Spec { key: &key, ..Default::default() },
-        Row { depth, fold: Some(open), icon: "folder", label, status, tip: tip.as_deref(), ..Default::default() },
+        Row { depth, fold: Some(open), icon: "folder", label, status, status_tip: tip.as_ref(), ..Default::default() },
     );
     if r.fold || r.clicked {
         toggle(app, &key, compact);
@@ -476,7 +476,7 @@ fn feature_row(
         Some(model) => model.status(app, id),
         None => crate::timeline::feature_status(app, id),
     };
-    let tip = status.and_then(|_| crate::timeline::feature_message(app, id));
+    let tip = status.and_then(|_| crate::timeline::feature_tip(app, id));
     // A cut feature has a dashed outline until Paste moves it.
     let cut = app.cut.features.contains(&id);
     let r = node_row(
@@ -496,7 +496,7 @@ fn feature_row(
             action,
             mark,
             status,
-            tip: tip.as_deref(),
+            status_tip: tip.as_ref(),
             ..Default::default()
         },
     );

@@ -722,6 +722,42 @@ pub fn network_surface(u: Vec<NetworkCurve>, v: Vec<NetworkCurve>, tol: Toleranc
             }
         }
     }
+    if nv == 0 {
+        // A loft passes through the curves in turn, so along each end it runs through their ends
+        // in turn. Two neighbours that meet at an end (cross there, within the crossing
+        // tolerance) hold it still for one step; unless every curve ends at that point it then
+        // has to move on, and a smooth path through a point it stands still at overshoots back
+        // past it: the surface folds out past its curves. Curves that meet end to end are the
+        // sides of a patch, not sections across it.
+        for e in [0.0, 1.0] {
+            let ends: Vec<Vec3> = us.iter_mut().map(|t| t.point(e)).collect::<SplineResult<_>>()?;
+            let Some(&first) = ends.first() else { continue };
+            let meet = |a: Vec3, b: Vec3| -> SplineResult<bool> {
+                solidcore_ops::measure::points_meet([a.x, a.y, a.z], [b.x, b.y, b.z], tol.cross)
+                    .or_else(|e| invalid(format!("the ends of the curves can't be compared: {e}")))
+            };
+            let mut all_meet = true;
+            for p in &ends {
+                all_meet &= meet(*p, first)?;
+            }
+            if all_meet {
+                continue;
+            }
+            let mut found = None;
+            for (i, w) in ends.windows(2).enumerate() {
+                if meet(w[0], w[1])? {
+                    found = Some(i);
+                    break;
+                }
+            }
+            if let Some(i) = found {
+                let (a, b) = (&us[i].label, &us[i + 1].label);
+                return invalid(format!(
+                    "{a} and {b} meet at an end the other curves don't reach, so a surface through the curves in turn would fold back past them there. Curves that meet end to end are the sides of a patch: give the two that share a corner (the surface spans to the side across), or cross them with curves of the other direction"
+                ));
+            }
+        }
+    }
 
     // A point is a side: the first or last curve of its direction.
     for ts in [&us, &vs] {
@@ -1425,6 +1461,32 @@ mod tests {
                 let d = pts.iter().map(|q| q.dist(p)).fold(f64::INFINITY, f64::min);
                 assert!(d < 0.3, "section at z = {z} is {d} from the surface's samples");
             }
+        }
+    }
+
+    /// Three curves of one direction that meet end to end (an arc, and two lines up from its ends
+    /// to a common top) are the sides of a patch: a loft through them in turn folded out far past
+    /// them (#17220), so it is refused, naming the two that meet. Two of them that share a corner
+    /// loft to a surface inside the curves' bounding box.
+    #[test]
+    fn curves_one_way_that_meet_end_to_end_are_refused_not_folded() {
+        let (a, b, c) = (Vec3::new(30.0, 0.0, 0.0), Vec3::new(0.0, 30.0, 0.0), Vec3::new(30.0, 15.0, 50.0));
+        let arc = |t: f64| Vec3::new(30.0 * (std::f64::consts::FRAC_PI_2 * t).cos(), 30.0 * (std::f64::consts::FRAC_PI_2 * t).sin(), 0.0);
+        let folded = network_surface(vec![curve("arc", arc), line("line", a, c), line("edge", b, c)], vec![], TOL).unwrap_err();
+        assert!(folded.to_string().contains("arc and line meet at an end"), "{folded}");
+        let s = network_surface(vec![curve("arc", arc), line("line", a, c)], vec![], TOL).unwrap();
+        // The box of the arc and the line: x and y 0 to 30, z 0 to 50.
+        let inside = |q: Vec3| {
+            let m = TOL.cross;
+            (-m..=30.0 + m).contains(&q.x) && (-m..=30.0 + m).contains(&q.y) && (-m..=50.0 + m).contains(&q.z)
+        };
+        let pts = grid(&s, 40);
+        for q in &pts {
+            assert!(inside(*q), "{q:?} outside the curves' bounding box");
+        }
+        // It spans to the side across: the top and the arc's far end are on it.
+        for p in [b, c] {
+            assert!(pts.iter().any(|q| q.dist(p) < TOL.cross), "{p:?} not on the surface");
         }
     }
 
