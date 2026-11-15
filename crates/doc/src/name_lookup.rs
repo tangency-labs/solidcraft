@@ -147,25 +147,23 @@ fn recover_blend_numbered_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<
     if !blend.suffixes.is_empty() || edge.tie.is_some() {
         return None;
     }
-    let edge = EdgeName { faces: edge.faces.clone(), tie: Some(tie) };
-    let blend = crate::persistent_name::FaceName { base: Base::Blend { feature: *feature, rounds: Rounds::Edge(Box::new(edge)) }, suffixes: Vec::new() };
+    let rounds = Rounds::Edge(Box::new(EdgeName { faces: edge.faces.clone(), tie: Some(tie) }));
+    let blend = crate::persistent_name::FaceName { base: Base::Blend { feature: *feature, rounds }, suffixes: Vec::new() };
     let (face, blend) = (face.to_string(), blend.to_string());
-    let m = b.mesh();
     let faces = naming::names(b);
     // The face exactly (see [`exactly`]); the blend face by its name, a piece of it, or a name
     // merged into it.
     let level = |f: u32, x: &str| crate::history_names::matches(&faces, f as usize, x);
-    let cands: Vec<usize> = m
-        .edge_faces
-        .iter()
-        .enumerate()
-        .filter(|(_, fs)| {
-            let [fa, fb] = fs.as_slice() else { return false };
-            [(*fa, *fb), (*fb, *fa)].into_iter().any(|(p, q)| level(p, &face).is_some_and(exactly) && level(q, &blend).is_some_and(|l| l >= Match::Piece))
-        })
-        .map(|(i, _)| i)
-        .collect();
-    one_edge_at(b, &m, cands, near).map(|edge| EdgeHit { edge, point: near, verified: false, on_point: true })
+    let between = |p: u32, q: u32| level(p, &face).is_some_and(exactly) && level(q, &blend).is_some_and(|l| l >= Match::Piece);
+    let reach = pick_reach(b);
+    // Of the B-rep's edges between those faces, the one whose exact curve the point lies on.
+    let mut on = b.body.record().edges.iter().enumerate().filter(|(i, e)| {
+        let [p, q] = e.uses.as_slice() else { return false };
+        (between(p.face, q.face) || between(q.face, p.face))
+            && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach)
+    });
+    let edge = on.next().filter(|_| on.next().is_none())?.0;
+    Some(EdgeHit { edge, point: near, verified: false, on_point: true })
 }
 
 fn recover_numbered_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
@@ -640,13 +638,6 @@ fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: V
             cands.push(i);
         }
     }
-    one_edge_at(b, m, cands, near)
-}
-
-/// Of the edges `cands` of body `b` (whose mesh is `m`), the one whose exact curve the point `near`
-/// lies on (within the pick reach, as [`solidcraft_kernel::edge_distance`] measures it); `None` when
-/// it lies on none of them, or on several.
-fn one_edge_at(b: &ModelBody, m: &Mesh, cands: Vec<usize>, near: Vec3) -> Option<usize> {
     let reach = pick_reach(b);
     let record = b.body.record();
     let sorted = |mut fs: Vec<u32>| {
