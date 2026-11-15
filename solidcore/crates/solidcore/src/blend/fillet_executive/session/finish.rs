@@ -803,6 +803,15 @@ impl FilletSession<'_> {
             // (not upstream) with `Kernel::blend_face_log` on: mark every face made, with
             // what made it, read back from the target after filleting
             session.mark_blend_faces(k)?;
+            // (not upstream, #15129) a body apart: closed on the target's faces into a body
+            // of its own, the target only read
+            if session.bodies_apart() {
+                let result = session.close_body_apart(k);
+                if let Some(output) = error_out {
+                    output.assign(&session.executive.error);
+                }
+                return result;
+            }
             let editing = session.objects.target.editing_enabled();
             session.objects.target.set_editing_enabled(true);
             // The fork's (WR-703, `eb883ad`): a feature standing inside a round's band is kept:

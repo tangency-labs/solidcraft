@@ -657,6 +657,13 @@ impl TargetVertex {
         }
     }
 
+    /// The vertex `vertex` of the caller's body, named by an operation that works on that
+    /// body itself (a weld bead's refusal, #15129).
+    #[must_use]
+    pub(crate) const fn of_target(vertex: VertexId) -> Self {
+        Self(vertex)
+    }
+
     /// The vertex's id in the caller's body.
     #[must_use]
     pub const fn id(self) -> VertexId {

@@ -571,6 +571,7 @@ impl FilletSession<'_> {
         if self.objects.knife_chamfers.len() != knives_before {
             return Err(invalid("a weld bead on a knife edge"));
         }
+        let apart = self.bodies_apart();
         for i in solvers_before..self.objects.solvers.len() {
             if let Some(Some(solver)) = self.objects.solvers.get_mut(i) {
                 let chamfer = solver
@@ -580,8 +581,11 @@ impl FilletSession<'_> {
                 let bead = BeadDefinition::new(chamfer, sagitta)?;
                 // a convex bead leaning back over its face past a toe is trimmed on the
                 // wrong side without `fillet_trim_inside_by_chord` (#15129): refused there,
-                // never built wrong
-                if !k.fixes.fillet_trim_inside_by_chord && sagitta >= bead.overhang_bound() {
+                // never built wrong (a body apart trims nothing, so it is built)
+                if !apart
+                    && !k.fixes.fillet_trim_inside_by_chord
+                    && sagitta >= bead.overhang_bound()
+                {
                     return Err(invalid(
                         "a convex weld bead that overhangs its toe (needs fillet_trim_inside_by_chord)",
                     ));

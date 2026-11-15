@@ -78,7 +78,7 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec2, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
-use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::query::face::p1::{point_3d_classify, Point3dClassifyOptions};
 use crate::surface::offset_surface::OffsetSurface;
 use crate::surface::plane::Plane;
@@ -748,6 +748,10 @@ pub struct Blended {
     /// sheet (the face each solver's fillet geometries' surfaces are on, in solver then
     /// geometry order, a later entry replacing an earlier one).
     pub edge_of_fillet: BTreeMap<FaceId, EdgeId>,
+    /// (not upstream, #15129) A closed chain on a face that is not a plane is closed by
+    /// [`close_annulus`]: a body apart's
+    /// closing (a weld bead round a tube). Off for the cliff overflow (the fork's refusals).
+    pub annulus: bool,
 }
 
 impl Blended {
@@ -1444,6 +1448,8 @@ pub fn close_removal_region(
                 .ok_or_else(|| SolidError::blend_missing(OP, "the host face's surface"))?;
             if plane_of(k, host_surface)?.is_some() {
                 close_round_loop(k, region, target, blended, chain, on_tol, note)?;
+            } else if blended.annulus {
+                close_annulus(k, region, target, blended, chain, on_tol, note)?;
             } else {
                 close_band(k, region, target, blended, chain, on_tol, note)?;
             }
@@ -1878,6 +1884,508 @@ pub fn close_band(
         create_face_in_region_from_surface(k, b, region_id, Some(surface), &band, &mut fenv)
     })?;
     Ok(made.face)
+}
+
+/// Not the fork's (#15129, a body apart): the closing face, on the host's surface, of a chain
+/// of the sheet's boundary that closes on that one face round a closed blended edge of it,
+/// any curve on any surface (a weld bead round a branch where it meets the main tube): the
+/// face between the chain (the rail) and that edge (the joint line). Each loop runs with the
+/// face on its left seen from the surface's normal side: at its samples, `n x t` points
+/// towards the other loop. Refused (`NoRoom`) when no closed blended edge of the host, or
+/// more than one, is found; `NotExact` when the host's surface does not hold both loops.
+///
+/// # Errors
+/// The refusals as `SM_ERR`; `SM_ERR` for a failed drop; those of the curves, the covering
+/// surface and the face construction.
+#[allow(clippy::too_many_lines)]
+pub fn close_annulus(
+    k: &mut Kernel,
+    region: &mut Brep,
+    target: &Brep,
+    blended: &Blended,
+    chain: &Chain,
+    on_tol: f64,
+    note: &mut Option<Refusal>,
+) -> Result<FaceId> {
+    let host = chain.host;
+    if chain.vertices.len() != chain.edges.len() + 1 {
+        return Err(SolidError::blend_failed(
+            OP,
+            "the chain does not have one more vertex than edges",
+        ));
+    }
+    // the closed blended edge of the host the chain's fillet faces blend
+    let mut along: BTreeSet<EdgeId> = BTreeSet::new();
+    for &e in &chain.edges {
+        for f in edge::faces(region, e, None)? {
+            if let Some(&filleted) = blended.edge_of_fillet.get(&f) {
+                along.insert(filleted);
+            }
+        }
+    }
+    let mut rim = None;
+    for e in face::p4::edges(target, host, None, false, None)? {
+        if !along.contains(&e) {
+            continue;
+        }
+        if rim.is_some_and(|r| r != e) {
+            return refuse(
+                note,
+                Refusal::no_room(
+                    NoRoomReason::CliffBoundaryClosed,
+                    "Fillet Error: a body apart's boundary closes on one face round two of its blended edges",
+                ),
+            );
+        }
+        rim = Some(e);
+    }
+    let rim = match rim {
+        Some(e) => {
+            let (s, t) = edge::start_end_vertices(target, e)?;
+            (s == t).then_some(e)
+        }
+        None => None,
+    };
+    let Some(rim) = rim else {
+        return refuse(
+            note,
+            Refusal::no_room(
+                NoRoomReason::CliffBoundaryClosed,
+                "Fillet Error: a body apart's boundary closes on one face round no closed blended edge of it",
+            ),
+        );
+    };
+
+    // the chain, end to end, and the rim
+    let mut rail: Vec<LoopCurve> = Vec::new();
+    for (i, &e) in chain.edges.iter().enumerate() {
+        let (Some(&a), Some(&b)) = (chain.vertices.get(i), chain.vertices.get(i + 1)) else {
+            return Err(SolidError::blend_missing(OP, "the chain's vertex"));
+        };
+        let (from, to) = (vertex::point(region, a)?, vertex::point(region, b)?);
+        add_curve(k, &mut rail, edge_curve(k, region, e)?, from, to)?;
+    }
+    let mut joint = vec![LoopCurve {
+        curve: edge_curve(k, target, rim)?,
+        orient: OrientType::Same,
+    }];
+    let mut points: [Vec<Point3>; 2] = [Vec::new(), Vec::new()];
+    for (lp, out) in [&rail, &joint].into_iter().zip(points.iter_mut()) {
+        for c in lp {
+            let mut along = Vec::new();
+            samples(k, &c.curve, 16, &mut along)?;
+            if c.orient == OrientType::Opposite {
+                along.reverse();
+            }
+            out.extend(along);
+        }
+    }
+    let all: Vec<Point3> = points.iter().flatten().copied().collect();
+    let Some(surface) = covering_surface(k, target, host, &all, on_tol)? else {
+        return refuse(
+            note,
+            Refusal::not_exact(
+                "Fillet Error: a body apart's boundary closes on one face's surface continued, which does not hold it",
+            ),
+        );
+    };
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+
+    // a rail that runs round the host's turn (the bead round a branch, on the branch): the
+    // band between it and the rim, closed along the host's seam
+    if let Some((rot, true)) = revolution(&surface).map(rotation_of) {
+        if let Some(run) = points.first() {
+            if winds_round(k, &surface, &domain, rot, run)? {
+                return close_seamed_band(
+                    k, region, target, surface, &domain, rot, chain, rim, on_tol, note,
+                );
+            }
+        }
+    }
+
+    // each loop with the face on its left: n x t towards the other loop, summed over the
+    // loop's samples
+    let mut keep = [true, true];
+    for (i, slot) in keep.iter_mut().enumerate() {
+        let (Some(own), Some(other)) = (points.get(i), points.get(1 - i)) else {
+            return Err(SolidError::blend_missing(OP, "the loop's samples"));
+        };
+        let mut sum = 0.0;
+        for w in own.windows(2) {
+            let &[a, b] = w else {
+                continue;
+            };
+            let t = b - a;
+            if t.length() <= EFF_ZERO {
+                continue;
+            }
+            let p = a + t * 0.5;
+            let dropped =
+                surface.drop_point::<NoObject>(k, p, &domain, &DropPointOptions::default())?;
+            if !dropped.success {
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the sample does not drop onto the surface",
+                ));
+            }
+            let d = surface.evaluate(k, dropped.result_uv, 1, 1, EvaluateFlags::default())?;
+            let (Some(du), Some(dv)) = (
+                d.get(1).and_then(|r| r.first()),
+                d.first().and_then(|r| r.get(1)),
+            ) else {
+                return Err(SolidError::blend_missing(OP, "the surface's derivatives"));
+            };
+            let n = du.cross(*dv);
+            let nearest = other
+                .iter()
+                .copied()
+                .min_by(|x, y| x.distance(p).total_cmp(&y.distance(p)))
+                .ok_or_else(|| SolidError::blend_missing(OP, "the other loop's samples"))?;
+            sum += n.cross(t).dot(nearest - p).signum();
+        }
+        *slot = sum >= 0.0;
+    }
+    if !keep[0] {
+        reverse_loop(&mut rail);
+    }
+    if !keep[1] {
+        reverse_loop(&mut joint);
+    }
+
+    let mut counts = Vec::new();
+    let mut curves = Vec::new();
+    let mut orientations = Vec::new();
+    for lp in [&rail, &joint] {
+        counts.push(lp.len());
+        for c in lp {
+            curves.push(Some(c.curve.clone()));
+            orientations.push(c.orient);
+        }
+    }
+    let input = FaceCurvesInput {
+        loops: counts,
+        curves_3d: Some(curves),
+        uv_curves: None,
+        orientations,
+        loop_points: Vec::new(),
+    };
+    let made = with_kernel_callbacks(k, region, |k, b, env| {
+        let region_id = b.infinite_region();
+        let key_of = env.key_of;
+        let face_ref = |f: FaceId| key_of(EntityRef::Face(f));
+        make_face_with_curves(
+            k,
+            b,
+            region_id,
+            input,
+            surface,
+            &domain,
+            OrientType::Same,
+            None,
+            &face_ref,
+            env,
+        )
+    })?;
+    made.face
+        .ok_or_else(|| SolidError::blend_missing(OP, "the annulus face"))
+}
+
+/// Whether the closed run of points `run` on `surface` goes once round its turn: its
+/// parameter round the axis (`rot`: 0 = u, 1 = v), unwrapped from point to point, gains or
+/// loses more than half the turn.
+fn winds_round(
+    k: &Kernel,
+    surface: &Surface,
+    domain: &Extent2d,
+    rot: usize,
+    run: &[Point3],
+) -> Result<bool> {
+    let rot_of = |uv: Point2| if rot == 0 { uv.x } else { uv.y };
+    let period = rot_of(domain.max()) - rot_of(domain.min());
+    let mut total = 0.0;
+    let mut prev: Option<f64> = None;
+    for &p in run {
+        let dropped = surface.drop_point::<NoObject>(k, p, domain, &DropPointOptions::default())?;
+        if !dropped.success {
+            return Err(SolidError::blend_failed(
+                OP,
+                "the sample does not drop onto the surface",
+            ));
+        }
+        let at = rot_of(dropped.result_uv);
+        if let Some(before) = prev {
+            let mut step = at - before;
+            if step > 0.5 * period {
+                step -= period;
+            } else if step < -0.5 * period {
+                step += period;
+            }
+            total += step;
+        }
+        prev = Some(at);
+    }
+    Ok(total.abs() > 0.5 * period)
+}
+
+/// Not the fork's (#15129, a body apart): [`close_annulus`] where the chain runs round the
+/// host's turn (a bead round a branch tube, on the branch): the band of the host's surface
+/// between the chain (the rail) and the closed blended edge `rim`, one loop closed along
+/// the surface's seam, as the kernel bounds a face that runs round a turn: the rail from
+/// the seam round to it, the seam to the rim, the rim back round, and the seam again. The
+/// rim starts at the seam (its vertex is where the host's own seam edge ends); the rail is
+/// split where it crosses the seam unless a vertex of it is there. Refused (`NotExact`)
+/// where the rim does not start at the seam, the rail does not cross it, or the seam
+/// between them is not straight (a cylinder's or a cone's is).
+///
+/// # Errors
+/// The refusals as `SM_ERR`; `SM_ERR` for a failed drop, a rail that is not split or does
+/// not run end to end; those of the curves, the split and the face construction.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn close_seamed_band(
+    k: &mut Kernel,
+    region: &mut Brep,
+    target: &Brep,
+    surface: Surface,
+    domain: &Extent2d,
+    rot: usize,
+    chain: &Chain,
+    rim: EdgeId,
+    on_tol: f64,
+    note: &mut Option<Refusal>,
+) -> Result<FaceId> {
+    const NOT_AT_SEAM: Refusal = Refusal::not_exact(
+        "Fillet Error: a body apart's boundary runs round a face off the face's seam",
+    );
+    const BENT_SEAM: Refusal = Refusal::not_exact(
+        "Fillet Error: a body apart's boundary runs round a face whose seam is not straight",
+    );
+    // the rim's vertex, on the seam
+    let (rim_start, _) = edge::start_end_vertices(target, rim)?;
+    let q = vertex::point(
+        target,
+        rim_start.ok_or_else(|| SolidError::blend_missing(OP, "the rim's vertex"))?,
+    )?;
+    let dropped = surface.drop_point::<NoObject>(k, q, domain, &DropPointOptions::default())?;
+    if !dropped.success {
+        return Err(SolidError::blend_failed(
+            OP,
+            "the rim's vertex does not drop onto the surface",
+        ));
+    }
+    let rot_of = |uv: Point2| if rot == 0 { uv.x } else { uv.y };
+    let (lo, hi) = (rot_of(domain.min()), rot_of(domain.max()));
+    let at = rot_of(dropped.result_uv);
+    if (at - lo).abs().min((at - hi).abs()) > EFF_ZERO_SQRT * (hi - lo) {
+        return refuse(note, NOT_AT_SEAM);
+    }
+    let d = surface.evaluate(k, dropped.result_uv, 1, 1, EvaluateFlags::default())?;
+    let (Some(du), Some(dv)) = (
+        d.get(1).and_then(|r| r.first()).copied(),
+        d.first().and_then(|r| r.get(1)).copied(),
+    ) else {
+        return Err(SolidError::blend_missing(OP, "the surface's derivatives"));
+    };
+    let normal = du.cross(dv);
+    let Ok(around) = (if rot == 0 { du } else { dv }).unitize() else {
+        return refuse(note, NOT_AT_SEAM);
+    };
+    // signed distance from the seam's plane (through the axis and the rim's vertex)
+    let side = |p: Point3| (p - q).dot(around);
+
+    // where the rail crosses the seam: the crossing nearest the rim's vertex
+    let mut best: Option<(EdgeId, f64, Point3)> = None;
+    for &e in &chain.edges {
+        let curve = edge_curve(k, region, e)?;
+        let ivl = curve.natural_interval();
+        let count = 128_u32;
+        let mut prev: Option<(f64, f64)> = None;
+        for j in 0..=count {
+            let t = ivl.evaluate(f64::from(j) / f64::from(count));
+            let p = curve.evaluate_point(k, t)?;
+            let g = side(p);
+            // an end of the edge on the seam (its sign there is noise)
+            if (j == 0 || j == count)
+                && g.abs() <= on_tol
+                && best.is_none_or(|(_, _, b)| p.distance(q) < b.distance(q))
+            {
+                best = Some((e, t, p));
+            }
+            if let Some((t0, g0)) = prev {
+                if g0 * g <= 0.0 {
+                    let (mut a, mut ga, mut b) = (t0, g0, t);
+                    for _ in 0..60 {
+                        let m = 0.5 * (a + b);
+                        let gm = side(curve.evaluate_point(k, m)?);
+                        if ga * gm <= 0.0 {
+                            b = m;
+                        } else {
+                            a = m;
+                            ga = gm;
+                        }
+                    }
+                    let tm = 0.5 * (a + b);
+                    let pm = curve.evaluate_point(k, tm)?;
+                    if best.is_none_or(|(_, _, p)| pm.distance(q) < p.distance(q)) {
+                        best = Some((e, tm, pm));
+                    }
+                }
+            }
+            prev = Some((t, g));
+        }
+    }
+    let Some((cut, t, crossing)) = best else {
+        return refuse(note, NOT_AT_SEAM);
+    };
+    // the rail's edges, split at the crossing unless a vertex is there
+    let mut edges = chain.edges.clone();
+    let (s, e) = edge::start_end_vertices(region, cut)?;
+    let mut start = None;
+    for v in [s, e].into_iter().flatten() {
+        let p = vertex::point(region, v)?;
+        if p.distance(crossing) <= on_tol {
+            start = Some(p);
+        }
+    }
+    let start = if let Some(p) = start {
+        p
+    } else {
+        let out = with_kernel_callbacks(k, region, |k, b, env| {
+            let key_of = env.key_of;
+            let curve_ref = |e: EdgeId, kind: i64| crate::geom::object::ObjectRef {
+                key: key_of(EntityRef::Edge(e)).key,
+                type_code: kind,
+            };
+            crate::topology::brep::p9::make_vertex_split_edge(k, b, cut, t, env, &curve_ref)
+        })?;
+        let (Some([first, second]), Some(v)) = (out.edges, out.vertex) else {
+            return Err(SolidError::blend_failed(
+                OP,
+                "the rail is not split at the seam",
+            ));
+        };
+        edges.retain(|&x| x != cut);
+        edges.push(first);
+        edges.push(second);
+        vertex::point(region, v)?
+    };
+    // the seam between the rail and the rim, straight on the surface
+    let mid = start + (q - start) * 0.5;
+    let on = surface.drop_point::<NoObject>(k, mid, domain, &DropPointOptions::default())?;
+    if !on.success || surface.evaluate_point(k, on.result_uv)?.distance(mid) > on_tol {
+        return refuse(note, BENT_SEAM);
+    }
+
+    // the rail from the seam round to it, end to end
+    let mut pieces = Vec::new();
+    for &e in &edges {
+        let c = edge_curve(k, region, e)?;
+        let (a, b) = curve_ends(k, &c)?;
+        pieces.push((c, a, b));
+    }
+    let mut lp: Vec<LoopCurve> = Vec::new();
+    let mut at = start;
+    while !pieces.is_empty() {
+        let Some(pos) = pieces
+            .iter()
+            .position(|(_, a, b)| a.distance(at) <= on_tol || b.distance(at) <= on_tol)
+        else {
+            return Err(SolidError::blend_failed(
+                OP,
+                "the rail does not run end to end",
+            ));
+        };
+        let (curve, a, b) = pieces.swap_remove(pos);
+        let forward = a.distance(at) <= b.distance(at);
+        lp.push(LoopCurve {
+            curve,
+            orient: if forward {
+                OrientType::Same
+            } else {
+                OrientType::Opposite
+            },
+        });
+        at = if forward { b } else { a };
+    }
+    // which way a closed run leaves the seam, round the axis
+    let leaves = |k: &Kernel, c: &LoopCurve| -> Result<f64> {
+        let ivl = c.curve.natural_interval();
+        let (from, to) = if c.orient == OrientType::Same {
+            (0.0, 1.0 / 64.0)
+        } else {
+            (1.0, 63.0 / 64.0)
+        };
+        let step = c.curve.evaluate_point(k, ivl.evaluate(to))?
+            - c.curve.evaluate_point(k, ivl.evaluate(from))?;
+        Ok(step.dot(around))
+    };
+    let Some(first) = lp.first() else {
+        return Err(SolidError::blend_missing(OP, "the rail's first curve"));
+    };
+    let rail_way = leaves(k, first)?;
+    // the face on the rail's left seen from the surface's normal side: towards the rim
+    let rail_step = {
+        let ivl = first.curve.natural_interval();
+        let (from, to) = if first.orient == OrientType::Same {
+            (0.0, 1.0 / 64.0)
+        } else {
+            (1.0, 63.0 / 64.0)
+        };
+        first.curve.evaluate_point(k, ivl.evaluate(to))?
+            - first.curve.evaluate_point(k, ivl.evaluate(from))?
+    };
+    let left = normal.cross(rail_step).dot(q - start) >= 0.0;
+
+    // (with its NURB: the line bounds the face twice, and a body apart is saved as it is)
+    let mut seam = Line::from_points(start, q, 3);
+    seam.make_nurb()?;
+    let seam = Curve::from(seam);
+    let mut rim_curve = LoopCurve {
+        curve: edge_curve(k, target, rim)?,
+        orient: OrientType::Same,
+    };
+    // the rim runs back the other way round
+    if leaves(k, &rim_curve)? * rail_way > 0.0 {
+        rim_curve.orient = OrientType::Opposite;
+    }
+    lp.push(LoopCurve {
+        curve: seam.clone(),
+        orient: OrientType::Same,
+    });
+    lp.push(rim_curve);
+    lp.push(LoopCurve {
+        curve: seam,
+        orient: OrientType::Opposite,
+    });
+    if !left {
+        reverse_loop(&mut lp);
+    }
+
+    let input = FaceCurvesInput {
+        loops: vec![lp.len()],
+        curves_3d: Some(lp.iter().map(|c| Some(c.curve.clone())).collect()),
+        uv_curves: None,
+        orientations: lp.iter().map(|c| c.orient).collect(),
+        loop_points: Vec::new(),
+    };
+    let made = with_kernel_callbacks(k, region, |k, b, env| {
+        let region_id = b.infinite_region();
+        let key_of = env.key_of;
+        let face_ref = |f: FaceId| key_of(EntityRef::Face(f));
+        make_face_with_curves(
+            k,
+            b,
+            region_id,
+            input,
+            surface,
+            domain,
+            OrientType::Same,
+            None,
+            &face_ref,
+            env,
+        )
+    })?;
+    made.face
+        .ok_or_else(|| SolidError::blend_missing(OP, "the band face"))
 }
 
 // ---- WR-674: a round ended at its sections ------------------------------------------------

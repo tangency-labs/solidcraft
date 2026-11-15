@@ -464,6 +464,77 @@ pub fn beads_apart_in_spans(
         .collect()
 }
 
+/// The refusal of weld beads that meet at a vertex.
+const BEADS_MEET: &str = "weld beads that meet at a vertex are not built yet";
+
+/// The weld bead along `edges` of `target` as one body of its own, built by the generic
+/// blend's trace (#15129): the blend traces the edges and builds the bead's faces as it
+/// builds a chamfer's or a round's, on flat and curved faces alike, and instead of trimming
+/// `target`'s faces and merging the blend into it, closes those faces on `target`'s faces
+/// into a body apart ([`FilletSession::set_bodies_apart`]). Edges picked together make one
+/// body (a lump per bead where they do not touch).
+///
+/// `sizes` are one per edge (the chamfer's setbacks, the bead's toes), `sagitta` is the
+/// arc's height over the chord (`> 0` convex, `< 0` concave, `0` flat, the chamfer's own
+/// section), and the first distance of a size runs along the face in `along` where one of
+/// the edge's faces is. A convex bead overhanging its toe is built: nothing is trimmed.
+///
+/// A weld never changes the part it lies on: `target`'s geometry and topology are left as
+/// they were whether the bead is built or refused (it is mutable for the blend's session,
+/// which here only reads it). Beads that meet at a vertex are refused before the blend
+/// starts, since its corners there are not built as bodies apart yet.
+///
+/// # Errors
+///
+/// Native invalid input for no edge or sizes not one per edge; a failure naming the vertex
+/// ([`crate::error::Site::vertex`]) for two of `edges` that meet at one; those of the
+/// blend's preparation ([`FilletSession::prepare_chamfers_along`], a sagitta past its
+/// bound), of its trace and of the closing.
+///
+/// [`FilletSession::set_bodies_apart`]: crate::blend::fillet_executive::session::FilletSession::set_bodies_apart
+/// [`FilletSession::prepare_chamfers_along`]: crate::blend::fillet_executive::session::FilletSession::prepare_chamfers_along
+pub fn bead_body(
+    k: &mut Kernel,
+    target: &mut Brep,
+    edges: &[EdgeId],
+    sizes: &[ChamferSize],
+    sagitta: f64,
+    along: &[FaceId],
+) -> Result<Brep> {
+    use crate::blend::fillet_executive::session::FilletSession;
+    use crate::error::{Site, TargetVertex};
+    if edges.is_empty() || sizes.len() != edges.len() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a weld bead takes edges and one size per edge",
+        ));
+    }
+    // beads meeting at a vertex: refused before the blend's session starts
+    let mut seen: std::collections::BTreeMap<crate::topology::VertexId, EdgeId> =
+        std::collections::BTreeMap::new();
+    for &e in edges {
+        let (start, end) = edge::start_end_vertices(target, e)?;
+        for v in [start, end].into_iter().flatten() {
+            if seen.insert(v, e).is_some_and(|other| other != e) {
+                return Err(SolidError::blend_failed(OP, BEADS_MEET)
+                    .or_at(Site::vertex(TargetVertex::of_target(v))));
+            }
+        }
+    }
+    let mut session = FilletSession::new(k, target)?;
+    session.set_bodies_apart(true);
+    if sagitta == 0.0 {
+        session.prepare_chamfers_along(k, edges, sizes, along)?;
+    } else {
+        session.prepare_beads_along(k, edges, sizes, sagitta, along)?;
+    }
+    session.create_corners(k, None)?;
+    session.do_filleting(k, None)?;
+    session
+        .take_body_apart()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the bead's body"))
+}
+
 /// Two unit vectors square to the unit `dir` and to each other, `u x v = dir`.
 fn square_to(dir: Vec3) -> Result<[Vec3; 2]> {
     let pick = if dir.x.abs() <= dir.y.abs() && dir.x.abs() <= dir.z.abs() {

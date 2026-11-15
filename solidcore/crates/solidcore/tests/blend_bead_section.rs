@@ -28,7 +28,13 @@ use solidcore::surface::procedural_blend::convert::{exact_rebuild, exact_to_reco
 use solidcore::surface::procedural_blend::exact::ExactClass;
 use solidcore::surface::procedural_blend::record::{ChamferRecord, ChamferSizeRecord, ExactRoundRecord};
 use solidcore::surface::procedural_blend::BlendRef;
-use solidcore::blend::weld_bead::{beads_apart, beads_apart_in_spans, span_lengths, BeadEnd};
+use solidcore::blend::weld_bead::{
+    bead_body as trace_bead_body, beads_apart, beads_apart_in_spans, span_lengths, BeadEnd,
+};
+use solidcore::boolean::api_brep::boolean_union;
+use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::primitive::api_primitives::create_cylinder;
+use solidcore::topology::edge;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
@@ -1203,4 +1209,197 @@ fn equal_legs_come_back_from_their_throat() {
         assert!((z - 5.0).abs() <= 1e-12, "{alpha} {h}: {z}");
     }
     assert!((equal_legs_for_throat(3.0, FRAC_PI_2, 0.5) - 3.0 * 2f64.sqrt()).abs() <= 1e-12);
+}
+
+// ---- the bead's body from the blend's trace ----
+//
+// `bead_body`: the generic blend traces the edges and builds the bead's faces, on flat and
+// curved faces alike, and closes them on the part's faces into a body apart. The part is never
+// changed: its file is the same byte for byte before and after, built or refused.
+
+/// No failure of the whole-body check (`SmBrep::AssertValid`, level 2).
+fn assert_sound(k: &mut Kernel, b: &mut Brep, what: &str) {
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    let c = check_brep(k, b, CheckLevel::Level2).unwrap();
+    let fails: Vec<String> = c.failures().map(|r| format!("{r:?}")).collect();
+    assert!(fails.is_empty(), "{what}: {fails:?}");
+}
+
+/// Between planes the trace's bead body is the bead's section along the edge (the chamfer's
+/// triangle at h = 0): convex, concave and overhanging its toe, at 60, 90 and 120 degrees. It
+/// is a sound body of 5 faces that saves, and the corner's file is unchanged.
+#[test]
+fn a_bead_body_from_the_trace_is_its_section_along_the_edge() {
+    for (adeg, h) in [
+        (90.0_f64, 0.0),
+        (90.0, 1.0),
+        (90.0, -1.0),
+        (90.0, 3.0),
+        (60.0, 1.0),
+        (60.0, -1.0),
+        (120.0, 2.6),
+    ] {
+        let alpha = adeg.to_radians();
+        let mut k = kernel();
+        let (mut b, at) = corner(&mut k, alpha);
+        let edge = pick(&k, &b, at);
+        let before = smb(&k, &b);
+        let size = ChamferSize::Distances([SETBACK; 2]);
+        let mut body = trace_bead_body(&mut k, &mut b, &[edge], &[size], h, &[]).unwrap();
+        assert!(smb(&k, &b) == before, "{adeg} {h}: the corner changed");
+        let area = if h == 0.0 {
+            0.5 * SETBACK * SETBACK * alpha.sin()
+        } else {
+            bead_section(alpha, h, 0.0).0.section_area()
+        };
+        let want = area * LENGTH;
+        let got = volume(&k, &mut body);
+        assert!(((got - want) / want).abs() <= 1e-6, "{adeg} {h}: {got} against {want}");
+        assert_eq!(body.face_list().len(), 5, "{adeg} {h}");
+        assert_sound(&mut k, &mut body, "the bead body");
+        assert!(!smb(&k, &body).is_empty());
+    }
+}
+
+/// Two beads that meet at a vertex are refused before the blend starts, naming the vertex,
+/// and the corner's file is unchanged.
+#[test]
+fn beads_that_meet_at_a_vertex_are_refused_naming_it() {
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let first = pick(&k, &b, at);
+    let (start, _) = edge::start_end_vertices(&b, first).unwrap();
+    let start = start.unwrap();
+    let second = b
+        .edge_list()
+        .iter()
+        .copied()
+        .find(|&e| {
+            let (s, t) = edge::start_end_vertices(&b, e).unwrap();
+            e != first && (s == Some(start) || t == Some(start))
+        })
+        .unwrap();
+    let before = smb(&k, &b);
+    let size = ChamferSize::Distances([SETBACK; 2]);
+    let err = trace_bead_body(&mut k, &mut b, &[first, second], &[size; 2], 1.0, &[])
+        .err()
+        .unwrap();
+    let named = err.site().and_then(|s| s.vertex).map(solidcore::error::TargetVertex::id);
+    assert_eq!(named, Some(start), "{err:?}");
+    assert!(smb(&k, &b) == before, "the corner changed");
+}
+
+/// A round tube: its base centre, unit axis, radius and length.
+#[derive(Clone, Copy)]
+struct Tube {
+    o: Point3,
+    d: Vec3,
+    r: f64,
+    len: f64,
+}
+
+impl Tube {
+    /// How far `p` is from the tube's cylinder.
+    fn off(&self, p: Point3) -> f64 {
+        let v = p - self.o;
+        ((v - self.d * v.dot(self.d)).length() - self.r).abs()
+    }
+}
+
+/// The tubes united, and their joint lines: the edges lying on two of them.
+fn tubes(k: &mut Kernel, tubes: &[Tube]) -> (Brep, Vec<EdgeId>) {
+    let body = |k: &mut Kernel, t: Tube| {
+        let mut c = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), t.r, t.len).unwrap();
+        let helper = if t.d.z.abs() < 0.9 {
+            Vec3::new(0.0, 0.0, 1.0)
+        } else {
+            Vec3::new(1.0, 0.0, 0.0)
+        };
+        let x = helper.cross(t.d).unitize().unwrap();
+        let pl = Axis2Placement::new(t.o, x, t.d.cross(x));
+        solidcore::topology::brep::p5::transform(k, &mut c, &pl, None, false).unwrap();
+        c
+    };
+    let mut b = body(k, tubes[0]);
+    for &t in &tubes[1..] {
+        let c = body(k, t);
+        b = boolean_union(k, b, c).unwrap();
+    }
+    let joints = b
+        .edge_list()
+        .iter()
+        .copied()
+        .filter(|&e| {
+            let ivl = edge::interval(&b, e).unwrap();
+            let curve = edge::curve(&b, e).unwrap().unwrap();
+            let m = curve
+                .evaluate(k, 0.5 * (ivl.min() + ivl.max()), 0, true, false)
+                .unwrap()[0];
+            tubes.iter().filter(|t| t.off(m) < 1e-5).count() >= 2
+        })
+        .collect();
+    (b, joints)
+}
+
+/// A main tube of diameter 40 along z, and a branch of diameter `2 r` from its axis along `d`.
+fn branch_on_main(r: f64, d: Vec3) -> [Tube; 2] {
+    [
+        Tube {
+            o: Point3::new(0.0, 0.0, -60.0),
+            d: Vec3::new(0.0, 0.0, 1.0),
+            r: 20.0,
+            len: 120.0,
+        },
+        Tube {
+            o: Point3::new(0.0, 0.0, 0.0),
+            d,
+            r,
+            len: 60.0,
+        },
+    ]
+}
+
+/// Round a branch tube where it meets a main tube (a T-joint, diameter 20 on 40) the trace's
+/// bead body with the chamfer's section is a sound body of 3 faces (the bead face, a strip on
+/// each tube), of the volume the same chamfer adds to the tubes when it is blended into them
+/// (947.880 mm3), and the tubes' file is unchanged.
+#[test]
+fn a_bead_body_runs_round_a_tube_joint() {
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    assert_eq!(joints.len(), 1);
+    let before = smb(&k, &part);
+    let size = ChamferSize::Distances([4.0; 2]);
+    let mut body = trace_bead_body(&mut k, &mut part, &joints, &[size], 0.0, &[]).unwrap();
+    assert!(smb(&k, &part) == before, "the tubes changed");
+    assert_eq!(body.face_list().len(), 3);
+    assert_sound(&mut k, &mut body, "the bead round the joint");
+    let got = volume(&k, &mut body);
+    // the chamfer blended into a copy of the tubes
+    let (mut blended, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    let plain = volume(&k, &mut blended);
+    {
+        let mut s = FilletSession::new(&mut k, &mut blended).unwrap();
+        s.prepare_chamfers_along(&k, &joints, &[size], &[]).unwrap();
+        s.create_corners(&k, None).unwrap();
+        s.do_filleting(&mut k, None).unwrap();
+    }
+    let want = volume(&k, &mut blended) - plain;
+    assert!(((got - want) / want).abs() <= 1e-6, "{got} against {want}");
+}
+
+/// Two branches whose joint lines cross: their beads meet at vertices, so they are refused,
+/// and the tubes' file is unchanged.
+#[test]
+fn beads_on_crossing_joint_lines_are_refused_and_leave_the_tubes() {
+    let mut k = kernel();
+    let [main, x] = branch_on_main(15.0, Vec3::new(1.0, 0.0, 0.0));
+    let [_, y] = branch_on_main(15.0, Vec3::new(0.0, 1.0, 0.0));
+    let (mut part, joints) = tubes(&mut k, &[main, x, y]);
+    assert!(joints.len() > 2);
+    let before = smb(&k, &part);
+    let sizes = vec![ChamferSize::Distances([4.0; 2]); joints.len()];
+    let err = trace_bead_body(&mut k, &mut part, &joints, &sizes, 0.0, &[]).err().unwrap();
+    assert!(err.site().is_some_and(|s| s.vertex.is_some()), "{err:?}");
+    assert!(smb(&k, &part) == before, "the tubes changed");
 }
