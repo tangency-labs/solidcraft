@@ -147,6 +147,7 @@ pub mod surface_blend;
 pub mod surface_boundary;
 pub mod surface_match;
 pub mod surface_ruled;
+pub mod tab_views;
 pub mod timeline_clipboard;
 pub mod ui_prefs;
 pub mod view_navigation;

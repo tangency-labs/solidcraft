@@ -971,6 +971,7 @@ impl Builder<'_, '_> {
         let k = k.ok_or_else(|| format!("face #{step}: a loop around the axis on its pole"))?;
         let k = match ax.kind {
             Kind::Iso { start, .. } => self.seam_start(fi, li, start, ax, eval)?,
+            Kind::Ruled | Kind::Sphere(_) => self.once_start(fi, li, ax, eval)?,
             _ => k,
         };
         let ring = self.rotated(fi, li, k)?;
@@ -1001,6 +1002,50 @@ impl Builder<'_, '_> {
             remove_loop(face, i, li);
         }
         Ok(())
+    }
+
+    /// The use of loop `li` of face `fi` (a cap round a cone's or a sphere's pole) where its seam
+    /// to the pole starts: at an angle about the axis the loop passes only once
+    /// ([`Builder::blocked_angles`]: every piece's angle runs one way there and no other piece
+    /// reaches it), so the loop followed from the seam covers exactly one turn. A loop that turns
+    /// back partway round (an edge across a drill point cut by another) covers the angles it
+    /// turns back over three times; a seam among them left it more than a turn wide, which reads
+    /// as a face winding round its axis. The first vertex at such an angle, else the loop split
+    /// in the middle of the widest range of them. Where the pieces leave no angle known to be
+    /// passed once (a piece whose hull reaches round the axis), the first vertex off the pole, as
+    /// every cap had it before.
+    fn once_start(&mut self, fi: usize, li: usize, ax: &Axis, eval: &SurfaceEval) -> R<usize> {
+        let Some(LoopB::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else { return Err("loop reference".into()) };
+        let es = es.clone();
+        let blocked = self.blocked_angles(fi, li, li, ax)?.ok_or("a cap's loop winds round its axis")?;
+        let frame = Perpendicular::new(ax);
+        let off_pole = |s: &Self, v: u32| -> R<bool> {
+            let x = s.vertices.get(v as usize).ok_or("vertex reference")?;
+            Ok(!ax.poles.iter().flatten().any(|p| Vec3::from(x.point).dist(*p) <= s.tol.max(x.tolerance)))
+        };
+        let mut first = None;
+        for (k, u) in es.iter().enumerate() {
+            let v = self.start(*u)?;
+            if !off_pole(self, v)? {
+                continue;
+            }
+            if first.is_none() {
+                first = Some((k, v));
+            }
+            if blocked.clear(frame.angle(self.vpoint(v)?)) {
+                return Ok(k);
+            }
+        }
+        let (k, first) = first.ok_or("a loop around the axis on its pole")?;
+        let Some(middle) = blocked.widest_clear() else { return Ok(k) };
+        // The surface's angle parameter at that angle about the axis: offset from the frame's by
+        // that of a vertex of the loop (both right-handed about the axis).
+        let u_of = eval.project(self.vpoint(first)?, None, f64::INFINITY).ok_or("a vertex off its surface")?;
+        let target = middle + (u_of[0] - frame.angle(self.vpoint(first)?));
+        let (e, t, _) =
+            self.meets(&es, 0, target, ax.period, eval)?.ok_or_else(|| unsupported("a loop round a pole that misses its seam's angle"))?;
+        let v = self.split_edge(e, t)?;
+        self.use_at(fi, li, v)
     }
 
     /// Join loops `la` (running +u) and `lb` (running −u) of face `fi` by a seam.
@@ -1401,7 +1446,12 @@ impl Builder<'_, '_> {
         for (li, l) in face.loops.iter().enumerate() {
             let es = match l {
                 LoopB::Vertex(v) => {
-                    arcs.push(frame.point_arc(self.vpoint(*v)?, self.tol));
+                    // A vertex loop at a pole (a cone's tip) is every angle at once: a seam to the
+                    // pole ends there and crosses nothing.
+                    let x = self.vertices.get(*v as usize).ok_or("vertex reference")?;
+                    if !ax.poles.iter().flatten().any(|p| Vec3::from(x.point).dist(*p) <= self.tol.max(x.tolerance)) {
+                        arcs.push(frame.point_arc(self.vpoint(*v)?, self.tol));
+                    }
                     continue;
                 }
                 LoopB::Edges(es) => es,
@@ -1424,17 +1474,14 @@ impl Builder<'_, '_> {
                 continue;
             }
             let n = pieces.len();
-            for (i, p) in pieces.iter().enumerate() {
-                if p.runs.is_none() {
-                    arcs.push(p.blocked());
+            arcs.extend(pieces.iter().filter(|p| p.runs.is_none()).map(Piece::blocked));
+            for (i, j) in overlapping_pairs(&pieces) {
+                let (Some(p), Some(q)) = (pieces.get(i), pieces.get(j)) else { continue };
+                let next = j == i + 1 || (i == 0 && j + 1 == n);
+                if next && p.runs.is_some() && p.runs == q.runs {
+                    continue;
                 }
-                for (j, q) in pieces.iter().enumerate().skip(i + 1) {
-                    let next = j == i + 1 || (i == 0 && j + 1 == n);
-                    if next && p.runs.is_some() && p.runs == q.runs {
-                        continue;
-                    }
-                    arcs.extend(overlap(p.arc, q.arc).into_iter().map(|a| padded(a, p.pad.max(q.pad))));
-                }
+                arcs.extend(overlap(p.arc, q.arc).into_iter().map(|a| padded(a, p.pad.max(q.pad))));
             }
         }
         Ok(Some(Blocked { arcs }))
@@ -1802,6 +1849,39 @@ pub(super) fn angular_sign(a: &[[f64; 2]]) -> Option<i8> {
         sign = s;
     }
     Some(sign)
+}
+
+/// The pairs `(i, j)`, `i < j`, of pieces whose arcs may share an angle ([`overlap`]), found by a
+/// sweep over the arcs' starts instead of every pair: each arc (under half a turn) is laid on the
+/// line from its start taken in `[0, 2π)`, and once more a turn before and after, so two arcs
+/// that meet across a whole turn meet there too; sorted by start, an arc meets those still open
+/// when it starts (an end at its start included). Every pair [`overlap`] finds is among them; the
+/// work is the sort and the pairs, not the square of the pieces.
+fn overlapping_pairs(pieces: &[Piece]) -> Vec<(usize, usize)> {
+    let mut laid: Vec<(f64, f64, usize)> = Vec::new();
+    for (i, p) in pieces.iter().enumerate() {
+        let [a, b] = p.arc;
+        let start = a.rem_euclid(TAU);
+        if !(start.is_finite() && (b - a).is_finite()) {
+            continue;
+        }
+        for shift in [-TAU, 0.0, TAU] {
+            laid.push((start + shift, start + shift + (b - a), i));
+        }
+    }
+    laid.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let mut open: Vec<(f64, usize)> = Vec::new();
+    let mut pairs = std::collections::BTreeSet::new();
+    for (start, end, i) in laid {
+        open.retain(|(e, _)| *e >= start);
+        for &(_, j) in &open {
+            if i != j {
+                pairs.insert((i.min(j), i.max(j)));
+            }
+        }
+        open.push((end, i));
+    }
+    pairs.into_iter().collect()
 }
 
 /// The angles two arcs both reach (none, one arc, or two where they meet round both ends).

@@ -350,6 +350,11 @@ pub(crate) fn body_cut_at(
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {
             continue;
         }
+        // A sheet or an open shell has no inside to cut: a ray crossing it once is not within
+        // material, so it must not raise a cap that hides what lies behind (#17177).
+        if !b.is_closed() {
+            continue;
+        }
         if let Some((_, bb)) = bounds.get(i) {
             let pad = bb.diagonal() * 1e-6 + 1e-9;
             match crate::viewport::ray_box(o, d, bb, pad) {
