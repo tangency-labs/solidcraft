@@ -64,10 +64,10 @@
 //!   continued) instead of a fitted intersection of its faces. A curved side edge, a
 //!   corner of more than three edges, or a face other than a plane whose new corner lies
 //!   outside its surface's natural domain fails the removal before the B-rep changes.
-//!   The intersections that find the new edge and the side edges' extensions take each
-//!   plane continued over the domain they search (its analytic domain grown), since
-//!   the intersector keeps to a surface's natural domain and a plane made at its face's
-//!   size would stop the trace at the old corner (#17414).
+//!   The intersection that finds the new edge takes each tangent plane continued over
+//!   the domain it searches (its analytic domain grown), since the intersector keeps
+//!   to a surface's natural domain and a plane made at its face's size would stop the
+//!   trace at the old corner (#17414).
 //!   The fork installs the run-on curve with `SetCurve` and then sets its owner; the
 //!   port names it by the edit's identity first, which `SetCurve` then records (the same
 //!   owner).
@@ -858,18 +858,14 @@ impl FilletRemoval {
             let vtx = ner(corner.vertex)?;
             let start_dir: Vec3 = new_vtx_pt - b.vertex(vtx)?.point;
 
-            let mut end_surf = out_of_bounds_copy(b, self.end_face(which_end)?)?;
-            let mut tan_surf = out_of_bounds_copy(b, self.tan_face(which_side)?)?;
+            let end_surf = out_of_bounds_copy(b, self.end_face(which_end)?)?;
+            let tan_surf = out_of_bounds_copy(b, self.tan_face(which_side)?)?;
             let mut uv_domain_end = end_surf.natural_uv_domain_with_nurb(k)?;
             let mut uv_domain_tan = tan_surf.natural_uv_domain_with_nurb(k)?;
 
             // Also expand the domains, for srf/srf/srf intersect.
             uv_domain_end.expand_relative(2.0);
             uv_domain_tan.expand_relative(2.0);
-            if self.exact_only {
-                continue_plane(&mut end_surf, &uv_domain_end);
-                continue_plane(&mut tan_surf, &uv_domain_tan);
-            }
 
             let int = or_sm_err(end_surf.point_based_surface_intersect(
                 k,
