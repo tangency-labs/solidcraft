@@ -1784,6 +1784,9 @@ fn grouped_thread_faces_reject_invalid_plural_input_atomically() {
         json!({"faces":[{"point":[4,0,2]}]}),
         json!({"faces":[{"body":"missing","point":[4,0,2]}]}),
         json!({"faces":[{"body":false,"point":[4,0,2]}]}),
+        json!({"faces":[{"body":"Shaft","point":[4,0,2]}],"single_face_selection":"true"}),
+        json!({"face":[4,0,2],"single_face_selection":true}),
+        json!({"faces":[{"body":"Shaft","point":[4,0,2]},{"body":"Shaft","point":[4,0,2]}],"single_face_selection":true}),
     ];
     invalid.push(json!({"faces":vec![[4,0,2];1025]}));
     for params in invalid {
@@ -1807,6 +1810,7 @@ fn a_single_thread_keeps_the_legacy_command_and_serialized_face() {
     assert_eq!(thread["face"], json!([4.0, 0.0, 2.0]));
     assert!(thread.get("additional_faces").is_none());
     assert!(thread.get("target_bodies").is_none());
+    assert!(thread.get("single_face_selection").is_none());
     let reopened = Session::new(solidcraft_doc::Document::from_json(&value.to_string()).unwrap());
     assert_eq!(reopened.model.state().threads.len(), 1);
 }

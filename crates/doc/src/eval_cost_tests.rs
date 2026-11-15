@@ -1513,6 +1513,7 @@ fn marking(p: Vec3) -> FeatureKind {
         old_auto_size: false,
         additional_faces: Vec::new(),
         target_bodies: Vec::new(),
+        single_face_selection: false,
     }
 }
 
