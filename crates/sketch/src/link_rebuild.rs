@@ -71,9 +71,17 @@ fn match_points(old: &[Vec2], old_kind: &[u8], new: &[Vec2], new_kind: &[u8], ne
             claims.push((k, i, false));
         }
     }
+    // Per new point: (claims found where they were, all claims).
+    let mut count: BTreeMap<usize, (usize, usize)> = BTreeMap::new();
+    for &(_, i, exact) in &claims {
+        let n = count.entry(i).or_default();
+        n.0 += usize::from(exact);
+        n.1 += 1;
+    }
     for &(k, i, exact) in &claims {
         // A point found where it was wins over one found by its place in the link.
-        let rivals = claims.iter().filter(|(o, j, e)| *j == i && *o != k && (*e || !exact)).count();
+        let (found, all) = count.get(&i).copied().unwrap_or_default();
+        let rivals = if exact { found } else { all }.saturating_sub(1);
         if rivals == 0
             && let Some(slot) = map.get_mut(k)
         {
@@ -167,8 +175,9 @@ impl Sketch {
     /// still are a layout), for its new shape `lay`. A curve of the sketch's own on an old point
     /// moves to the new point that matches it, or else to a free point of its own where it was;
     /// a constraint moves to the new points and curves that match, and goes only when one of
-    /// them has no match. A new point or curve that matches an old one takes its id, whether or
-    /// not anything in the sketch holds it. All or nothing: on an error the sketch is as it was.
+    /// them has no match. A new point or curve that matches an old one takes its id; one that
+    /// nothing in the sketch holds is matched afterwards, to what the held ones left, and not
+    /// at all past [`MAX_MATCH_WORK`]. All or nothing: on an error the sketch is as it was.
     pub(super) fn rebuild_link(&mut self, id: &str, lay: &Layout, points: &[usize], curves: &[usize], cur: Option<&[LCurve]>) -> Result<()> {
         let saved = self.clone();
         let rebuilt = self.rebuild_link_in_place(id, lay, points, curves, cur);
@@ -195,34 +204,49 @@ impl Sketch {
             needed.extend(ps.iter().filter_map(|p| old_point.get(p)));
             needed_curves.extend(cs.iter().filter_map(|c| old_curve.get(c)));
         }
-        // Features outside the sketch refer to its curves too: a profile is picked by the ids of
-        // the curves around it (#14249). So every old entity is matched, as far as the work allows.
-        if points.len().saturating_mul(lay.pts.len()) <= MAX_MATCH_WORK {
-            needed.extend(0..points.len());
-            needed_curves.extend(0..curves.len());
-        }
         for c in needed_curves.iter().filter_map(|k| cur.and_then(|cur| cur.get(*k))) {
             needed.extend(curve_points(c));
         }
         let first_curve = self.curves.len();
         let made = self.build_link(id, lay)?;
         // Old local point -> new layout point, old local curve -> (new layout curve, a piece).
-        let (point_map, curve_map) = match cur {
+        // `id_points` and `id_curves` add the entities nothing in the sketch holds: features
+        // outside it pick a profile by the ids of its curves (#14249). They are matched after the
+        // held ones, only to new entities no held one took, so what the sketch holds moves as
+        // before.
+        let (point_map, curve_map, id_points, id_curves) = match cur {
             Some(cur) => {
                 let kinds = |roles: Vec<[usize; 10]>| roles.iter().map(kind_of).collect::<Vec<_>>();
-                let needed: Vec<usize> = needed.into_iter().collect();
-                let map = match_points(
-                    &old_pos,
-                    &kinds(point_roles(cur, points.len())),
-                    &lay.pts,
-                    &kinds(point_roles(&lay.curves, lay.pts.len())),
-                    &needed,
-                );
+                let (old_kind, mut new_kind) = (kinds(point_roles(cur, points.len())), kinds(point_roles(&lay.curves, lay.pts.len())));
+                let held: Vec<usize> = needed.iter().copied().collect();
+                let map = match_points(&old_pos, &old_kind, &lay.pts, &new_kind, &held);
                 let curve_map: BTreeMap<usize, (usize, bool)> =
                     needed_curves.iter().filter_map(|k| Some((*k, match_curve(cur.get(*k)?, &old_pos, &map, lay)?))).collect();
-                (map, curve_map)
+                // A new point a held one became is no candidate any more.
+                for i in map.iter().flatten() {
+                    if let Some(kind) = new_kind.get_mut(*i) {
+                        *kind = u8::MAX;
+                    }
+                }
+                let rest: Vec<usize> = (0..points.len()).filter(|k| !needed.contains(k)).collect();
+                let mut id_points = match_points(&old_pos, &old_kind, &lay.pts, &new_kind, &rest);
+                for (slot, held) in id_points.iter_mut().zip(&map) {
+                    if held.is_some() {
+                        *slot = *held;
+                    }
+                }
+                let mut taken: BTreeSet<usize> = curve_map.values().map(|(j, _)| *j).collect();
+                let mut id_curves: BTreeMap<usize, usize> = BTreeMap::new();
+                for k in (0..curves.len()).filter(|k| !needed_curves.contains(k)) {
+                    if let Some((j, _)) = cur.get(k).and_then(|c| match_curve(c, &old_pos, &id_points, lay))
+                        && taken.insert(j)
+                    {
+                        id_curves.insert(k, j);
+                    }
+                }
+                (map, curve_map, id_points, id_curves)
             }
-            None => (vec![None; points.len()], BTreeMap::new()),
+            None => (vec![None; points.len()], BTreeMap::new(), vec![None; points.len()], BTreeMap::new()),
         };
         let new_point =
             |p: usize| old_point.get(&p).and_then(|k| point_map.get(*k).copied().flatten()).and_then(|li| made.get(li).copied().flatten());
@@ -251,10 +275,14 @@ impl Sketch {
         self.constraints.retain_mut(|k| !pieces.iter().any(|c| needs_whole_line(&k.kind, *c)) && k.kind.remap(&to_point, &to_curve));
         // A new entity that matches an old one is that entity, moved: it takes the old id, so
         // the solve that follows sees where it was (`positions_in`) and names still find it.
-        let point_ids: BTreeMap<String, String> =
-            points.iter().filter_map(|p| Some((self.points.get(new_point(*p)?)?.id.clone(), self.points.get(*p)?.id.clone()))).collect();
+        let id_point = |k: usize| id_points.get(k).copied().flatten().and_then(|li| made.get(li).copied().flatten());
+        let point_ids: BTreeMap<String, String> = points
+            .iter()
+            .enumerate()
+            .filter_map(|(k, p)| Some((self.points.get(id_point(k)?)?.id.clone(), self.points.get(*p)?.id.clone())))
+            .collect();
         let mut curve_ids: BTreeMap<String, String> = BTreeMap::new();
-        for (k, (j, _)) in &curve_map {
+        for (k, j) in curve_map.iter().map(|(k, (j, _))| (k, j)).chain(&id_curves) {
             if let (Some(new), Some(old)) = (self.curves.get(first_curve + j), curves.get(*k).and_then(|c| self.curves.get(*c))) {
                 curve_ids.entry(new.id.clone()).or_insert_with(|| old.id.clone());
             }

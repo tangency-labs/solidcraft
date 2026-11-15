@@ -609,16 +609,63 @@ fn a_rebuilt_face_keeps_the_ids_of_lines_that_did_not_move() {
         .collect();
     let mut sk = Sketch::new();
     let link = sk.add_link(LinkKind::Project, face(), &saved).unwrap();
-    let ids = |sk: &Sketch, line: bool| -> std::collections::BTreeSet<String> {
-        sk.link_curves(&link).iter().map(|c| &sk.curves[*c]).filter(|c| matches!(c.kind, CurveKind::Line { .. }) == line).map(|c| c.id.clone()).collect()
+    // Each curve's id, with where it lies: a line by its two ends, an arc by its centre.
+    let placed = |sk: &Sketch| -> Vec<(String, Vec<Vec2>)> {
+        let mut out: Vec<(String, Vec<Vec2>)> = sk
+            .link_curves(&link)
+            .iter()
+            .map(|c| {
+                let at = |p: usize| sk.points[p].pos;
+                let mut ends = match sk.curves[*c].kind {
+                    CurveKind::Line { a, b } => vec![at(a), at(b)],
+                    CurveKind::Arc { c, .. } => vec![at(c)],
+                    ref k => panic!("not a line or an arc: {k:?}"),
+                };
+                ends.sort_by(|p, q| p.x.total_cmp(&q.x).then(p.y.total_cmp(&q.y)));
+                (sk.curves[*c].id.clone(), ends)
+            })
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
     };
-    let (lines, arcs) = (ids(&sk, true), ids(&sk, false));
+    let before = placed(&sk);
     assert!(sk.update_link(&link, &fresh).unwrap(), "the holes are split at other points: the projection is rebuilt");
     assert!(!sk.link(&link).unwrap().lost);
-    assert_eq!(ids(&sk, true), lines, "the outline lines keep their ids");
-    assert_eq!(ids(&sk, false), arcs, "each hole's two arcs keep their ids");
-    let picked: Vec<String> = lines.into_iter().collect();
+    assert_eq!(placed(&sk), before, "each line keeps its id on the same two ends, each arc on the same hole");
+    let picked: Vec<String> = before.iter().filter(|(_, ends)| ends.len() == 2).map(|(id, _)| id.clone()).collect();
+    assert_eq!(picked.len(), 4);
     let profiles = crate::find_profiles(&sk);
     let outline = crate::profile_by_curves(&profiles, &picked).expect("the extrude's saved pick finds its profile");
     assert_eq!(profiles[outline].hole_curves.len(), 2, "with both holes in it");
+}
+
+/// #14249: matching the curves nothing holds never takes a match from one the sketch holds. A
+/// face's rounded corner goes back to a sharp one. Both ends of the round are as near to the
+/// new corner; a line of the sketch's own ends on one of them. That end becomes the corner, as
+/// when only held points were matched; the other end, which nothing holds, goes.
+#[test]
+fn a_held_round_end_keeps_the_corner_its_free_neighbour_is_as_near_to() {
+    let rounded = |round: bool| {
+        let (o, x, y) = (Vec2::ZERO, Vec2::new(100.0, 0.0), Vec2::new(0.0, 100.0));
+        let mut out = vec![LinkGeom::Line(o, x)];
+        if round {
+            let (a, b) = (Vec2::new(100.0, 95.0), Vec2::new(95.0, 100.0));
+            out.extend([LinkGeom::Line(x, a), LinkGeom::Arc { c: Vec2::new(95.0, 95.0), a, b }, LinkGeom::Line(b, y)]);
+        } else {
+            let corner = Vec2::new(100.0, 100.0);
+            out.extend([LinkGeom::Line(x, corner), LinkGeom::Line(corner, y)]);
+        }
+        out.push(LinkGeom::Line(y, o));
+        out
+    };
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &rounded(true)).unwrap();
+    let end = sk.link_points(&link).into_iter().find(|p| sk.points[*p].pos == Vec2::new(100.0, 95.0)).unwrap();
+    let free = sk.add_point(Vec2::new(150.0, 95.0), None).unwrap();
+    sk.add_curve(CurveKind::Line { a: end, b: free }, Some("l_mine")).unwrap();
+    assert!(sk.update_link(&link, &rounded(false)).unwrap());
+    let mine = sk.curves.iter().find(|c| c.id == "l_mine").expect("the sketch's line survives the rebuild");
+    let CurveKind::Line { a, .. } = mine.kind else { panic!("not a line") };
+    assert_eq!(sk.points[a].pos, Vec2::new(100.0, 100.0), "it ends on the new corner");
+    assert_eq!(sk.points[a].link.as_deref(), Some(link.as_str()), "on the projected corner, not a point of its own");
 }
