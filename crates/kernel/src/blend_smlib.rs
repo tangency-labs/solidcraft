@@ -537,7 +537,7 @@ mod imp {
             };
             let out = out.with_checked_history(history, &record::counts(&[body])).inherit_regularization_protection(body);
             let out = if step == crate::validation::Step::Defer {
-                out.left_unchecked(&format!("SMLib {what}"), crate::validation::Checked::AsIs, r)
+                out.left_unchecked(&format!("SMLib {what}"), crate::validation::Checked::AsIs, r, &[])
             } else {
                 out
             };

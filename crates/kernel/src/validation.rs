@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
+use solidcraft_smlib::CheckLevel;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
@@ -142,11 +143,14 @@ pub(crate) struct Unchecked {
     what: String,
     how: Checked,
     result: std::sync::Mutex<Option<solidcraft_smlib::Brep>>,
+    /// The records of the bodies the step combined, to name one that already fails the check.
+    operands: Vec<Arc<solidcore_record::brep::Brep>>,
 }
 
 impl Unchecked {
-    pub(crate) fn new(record: &Arc<solidcore_record::brep::Brep>, what: &str, how: Checked, result: solidcraft_smlib::Brep) -> Unchecked {
-        Unchecked { record: Arc::downgrade(record), what: what.to_string(), how, result: std::sync::Mutex::new(Some(result)) }
+    pub(crate) fn new(record: &Arc<solidcore_record::brep::Brep>, what: &str, how: Checked, result: solidcraft_smlib::Brep, operands: &[&Body]) -> Unchecked {
+        let operands = operands.iter().map(|b| b.record.arc().clone()).collect();
+        Unchecked { record: Arc::downgrade(record), what: what.to_string(), how, result: std::sync::Mutex::new(Some(result)), operands }
     }
 
     /// The step's result, taken (once), when this is `record`'s.
@@ -160,17 +164,32 @@ impl Unchecked {
 
 /// SMLib's full check of `r` as a step takes it (`how`): the check's report.
 pub(crate) fn check_result(r: &solidcraft_smlib::Brep, how: Checked) -> std::result::Result<solidcraft_smlib::CheckReport, String> {
-    fn failed(what: &'static str) -> impl Fn(&dyn std::fmt::Display) -> String {
-        move |e| format!("{what}: {e}")
-    }
-    match how {
-        Checked::Combined if !r.is_manifold_solid().map_err(|e| failed("check")(&e))? => {
-            let record = r.to_native().map_err(|e| failed("export")(&e))?;
-            let split = solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| failed("the separate solids")(&e))?;
-            split.check(solidcraft_smlib::CheckLevel::All).map_err(|e| failed("check")(&e))
-        }
-        _ => r.check(solidcraft_smlib::CheckLevel::All).map_err(|e| failed("check")(&e)),
-    }
+    let check = match separate(r, how)? {
+        Some(record) => solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| format!("the separate solids: {e}"))?.check(CheckLevel::All),
+        None => r.check(CheckLevel::All),
+    };
+    check.map_err(|e| format!("check: {e}"))
+}
+
+/// The record of the separate solids a boolean's result `r` exports to where it is not one
+/// manifold solid ([`Checked::Combined`]), which its check takes; `None`: `r` is checked as it is.
+fn separate(r: &solidcraft_smlib::Brep, how: Checked) -> std::result::Result<Option<solidcore_record::brep::Brep>, String> {
+    let split = matches!(how, Checked::Combined) && !r.is_manifold_solid().map_err(|e| format!("check: {e}"))?;
+    split.then(|| r.to_native().map_err(|e| format!("export: {e}"))).transpose()
+}
+
+/// What a step says of a result SMLib's check refuses, naming the operands whose own check
+/// (`checks`, in order) fails too: the fault is then theirs.
+pub(crate) fn refuses(checks: impl ExactSizeIterator<Item = solidcraft_smlib::Result<solidcraft_smlib::CheckReport>>) -> String {
+    let n = checks.len();
+    let name = |i| match (n, i) {
+        (2, 0) => "the first operand".to_string(),
+        (2, _) => "the second operand".to_string(),
+        _ => format!("operand {i}"),
+    };
+    let failing: Vec<String> = checks.enumerate().filter(|(_, c)| c.as_ref().is_ok_and(|c| !c.is_valid())).map(|(i, _)| name(i)).collect();
+    let whose = if failing.is_empty() { String::new() } else { format!(" ({} already fails it)", failing.join(" and ")) };
+    format!("SMLib's check refuses the result{whose}")
 }
 
 /// SMLib's full check of a body a feature keeps, once a step of the feature left its check to
@@ -182,19 +201,20 @@ pub fn check_kept(body: &Body) -> Result<()> {
     if body.is_mesh() {
         return Ok(());
     }
-    let step = body.unchecked.as_deref().and_then(|u| u.take(body.record.arc()).map(|r| (u, r)));
-    let (what, check) = match step {
-        Some((u, r)) => (u.what.as_str(), check_result_owned(r, u.how)),
-        None => ("SMLib", body.smlib()?.check(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))),
-    };
-    verdict(what, check)
+    match body.unchecked.as_deref().and_then(|u| u.take(body.record.arc()).map(|r| (u, r))) {
+        Some((u, r)) => verdict(&u.what, check_result_owned(r, u.how), &u.operands),
+        None => verdict("SMLib", body.smlib()?.check(CheckLevel::All).map_err(|e| format!("check: {e}")), &[]),
+    }
 }
 
-/// What [`check_kept`] makes of SMLib's check of what it read (`what` names the step).
-fn verdict(what: &str, check: std::result::Result<solidcraft_smlib::CheckReport, String>) -> Result<()> {
+/// What [`check_kept`] makes of SMLib's check of what step `what` made of `operands`.
+fn verdict(what: &str, check: std::result::Result<solidcraft_smlib::CheckReport, String>, operands: &[Arc<solidcore_record::brep::Brep>]) -> Result<()> {
     match check {
         Ok(c) if c.is_valid() => Ok(()),
-        Ok(c) => Err(KernelError::Failed(format!("{what}: SMLib's check refuses the result: {c}"))),
+        Ok(c) => {
+            let checks = operands.iter().map(|o| solidcraft_smlib::Brep::from_record(o, true).and_then(|s| s.check_owned(CheckLevel::All)));
+            Err(KernelError::Failed(format!("{what}: {}: {c}", refuses(checks))))
+        }
         Err(e) => Err(KernelError::Failed(format!("{what}: {e}"))),
     }
 }
@@ -202,18 +222,14 @@ fn verdict(what: &str, check: std::result::Result<solidcraft_smlib::CheckReport,
 /// [`check_result`] of a step's result nobody else reads, which it takes: the token over this
 /// thread's work stops it ([`solidcraft_smlib::Brep::check_owned`]).
 fn check_result_owned(r: solidcraft_smlib::Brep, how: Checked) -> std::result::Result<solidcraft_smlib::CheckReport, String> {
-    fn failed(what: &'static str) -> impl Fn(&dyn std::fmt::Display) -> String {
-        move |e| format!("{what}: {e}")
-    }
-    match how {
-        Checked::Combined if !r.is_manifold_solid().map_err(|e| failed("check")(&e))? => {
-            let record = r.to_native().map_err(|e| failed("export")(&e))?;
+    let check = match separate(&r, how)? {
+        Some(record) => {
             drop(r);
-            let split = solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| failed("the separate solids")(&e))?;
-            split.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| failed("check")(&e))
+            solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| format!("the separate solids: {e}"))?.check_owned(CheckLevel::All)
         }
-        _ => r.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| failed("check")(&e)),
-    }
+        None => r.check_owned(CheckLevel::All),
+    };
+    check.map_err(|e| format!("check: {e}"))
 }
 
 /// [`check_kept`] of a body, ready to run on another thread ([`detach_kept`]), under the token
@@ -224,7 +240,7 @@ enum Kept {
     /// A mesh body: nothing to check.
     Nothing,
     /// The step's own result, taken from the body.
-    Step { what: String, how: Checked, result: solidcraft_smlib::Brep },
+    Step { what: String, how: Checked, result: solidcraft_smlib::Brep, operands: Vec<Arc<solidcore_record::brep::Brep>> },
     /// A copy of the body's SMLib form, made when the check was detached.
     Copy(Result<solidcraft_smlib::Brep>),
 }
@@ -238,7 +254,7 @@ pub fn detach_kept(body: &Body) -> KeptCheck {
         return KeptCheck(Kept::Nothing, stop);
     }
     if let Some((u, result)) = body.unchecked.as_deref().and_then(|u| u.take(body.record.arc()).map(|r| (u, r))) {
-        return KeptCheck(Kept::Step { what: u.what.clone(), how: u.how, result }, stop);
+        return KeptCheck(Kept::Step { what: u.what.clone(), how: u.how, result, operands: u.operands.clone() }, stop);
     }
     KeptCheck(Kept::Copy(body.smlib().and_then(|b| b.try_clone().map_err(|e| KernelError::smlib("SMLib copy", e)))), stop)
 }
@@ -256,8 +272,8 @@ impl Kept {
         match self {
             Kept::Nothing => Ok(()),
             // The step's result and the copy are the check's own: the work's token stops it.
-            Kept::Step { what, how, result } => verdict(&what, check_result_owned(result, how)),
-            Kept::Copy(copy) => verdict("SMLib", copy?.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))),
+            Kept::Step { what, how, result, operands } => verdict(&what, check_result_owned(result, how), &operands),
+            Kept::Copy(copy) => verdict("SMLib", copy?.check_owned(CheckLevel::All).map_err(|e| format!("check: {e}")), &[]),
         }
     }
 }
