@@ -42,7 +42,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
-use crate::geom::tol::{xsect_tol3d, xsect_tol_3d_from_zones};
+use crate::geom::tol::{contact_tol_3d, xsect_tol3d, xsect_tol_3d_from_zones};
 use crate::intersect::point_class::{
     ClassGeometry, ClassObject, PointClassType, PointClassification,
 };
@@ -415,6 +415,8 @@ impl<O: ClassObject> CurveClassification<O> {
                 source_cache,
                 &mut None,
                 [None, Some(edge_zone)],
+                // rims a hair less than tangent touch at one point (WR-787, #15429)
+                contact_tol_3d(k),
             )?;
             solutions.extend(
                 found

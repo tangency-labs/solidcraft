@@ -236,9 +236,11 @@ fn drill(x: f64, z: f64, depth: f64) -> Body {
 /// and the rims touch within the intersection tolerance, as for holes a hair apart (ε = −1e-9):
 /// each cut is one valid solid of the counts of the holes a hair apart and the volume less the
 /// overlap (the lens of the two circles; the points' overlap is below 1e-12), in either order,
-/// also for ε between the wall intersection's tolerance (5e-6) and the rims' (2e-5), where the
-/// walls and the rims must still agree; the two cylinders unite to two solids touching along
-/// the line (to ε = 1e-7: beyond it their coplanar caps are not decided here). The drills keep the
+/// also for ε up to the contact tolerance (the zone tolerance, 1e-5), past the wall
+/// intersection's search band (5e-6), where the walls and the rims must still agree; past the
+/// intersection tolerance (2e-5) the walls cross in two lines, as the circles do, and the cut is
+/// one valid solid of the volume. The two cylinders unite to two solids touching along the
+/// line (to ε = 1e-7: beyond it their coplanar caps are not decided here). The drills keep the
 /// counts of drills a hair apart to the issue's ε; from 1e-8 their points, which only the
 /// marching intersection meets, add edges, and they are one valid solid of the volume.
 #[test]
@@ -262,11 +264,13 @@ fn parallel_holes_a_hair_less_than_tangent_cut_as_touching() {
     };
     // either order: the holes at a and b, or at b and a
     let orders = |a: f64, b: f64| [(a, b), (b, a)];
-    for eps in [-1e-9, 1e-9, 2.3e-9, 1e-8, 1e-7, 3e-6, 1e-5, 1.5e-5] {
+    for eps in [-1e-9, 1e-9, 2.3e-9, 1e-8, 1e-7, 3e-6, 9.9e-6, 2.5e-5] {
         let through = 4000.0 - (2.0 * PI * r * r - lens(eps)) * 10.0;
+        // touching along one line, or past the intersection tolerance crossing in two
+        let counts = if eps < 1e-5 { [8, 22, 14] } else { [10, 24, 16] };
         for (y1, y2) in orders(10.0, 5.0 + eps) {
             let c = cut_twice(cylinder(y1), cylinder(y2));
-            one_valid_solid(&c, [8, 22, 14], through);
+            one_valid_solid(&c, counts, through);
         }
     }
     for eps in [-1e-9, 1e-9, 2.3e-9, 1e-8, 1e-7] {
