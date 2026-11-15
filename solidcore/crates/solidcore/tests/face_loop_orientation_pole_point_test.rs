@@ -11,13 +11,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)] // test helpers
 
 use solidcore::geom::assert_array::AssertArray;
-use solidcore::geom::attribute::ObjectKey;
-use solidcore::geom::object::ObjectRef;
 use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::topology::brep::validation::validate_pointers;
 use solidcore::topology::VertexId;
-use solidcore::{EntityRef, Kernel};
+use solidcore::Kernel;
 
 #[test]
 fn moved_grown_pole_vertex_does_not_join_the_trims() {
@@ -41,10 +39,7 @@ fn moved_grown_pole_vertex_does_not_join_the_trims() {
 
     // and the pointer check reports the loop as the C++ does
     let mut reports = AssertArray::new();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     validate_pointers(&k, &mut b, Some(&mut reports), 2, false, &key).unwrap();
     let failed: Vec<String> = reports
         .reports()
