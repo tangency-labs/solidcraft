@@ -34,7 +34,6 @@ const EXACT_CIRCLES_VOLUME: f64 = 49712.42816838713;
 fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_trim_status = true;
     k.fixes.curve_loop_normal_from_area = true;
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_vertex_error_diagnostics = true;
@@ -74,13 +73,10 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
-    k.fixes.slice_coincident_faces_sheet_side = true;
-    k.fixes.boolean_outer_shell_first = true;
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
-    k.fixes.boolean_cleanup_removes_slits = true;
     k.fixes.classify_edge_interval = true;
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
@@ -107,10 +103,8 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.shell_empty_cavity_fails = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
-    k.fixes.ssi_singular_start_inside_direction = true;
     k.fixes.ssi_pole_point_keeps_its_tangent = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;

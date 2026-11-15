@@ -3254,6 +3254,7 @@ mod tests {
     #[test]
     fn the_views_of_a_design_follow_commands_keys_and_the_app() {
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.design_views_as_tabs = true;
         h.app.home.open = false;
         let call =
             |h: &mut crate::scenario::Harness, command: &str, params: Value| h.call("engine.execute", json!({"command": command, "params": params}));
@@ -3841,11 +3842,11 @@ mod tests {
     }
 
     /// Without the preference (the default), a switch cancels the dialog and the tool, as before
-    /// #9360; the design keeps its toolbar tab (`remember_toolbar_tab`, on by default).
+    /// #9360; with `remember_toolbar_tab` on (off by default) the design keeps its toolbar tab.
     #[test]
     fn a_tab_switch_cancels_the_dialog_and_tool_by_default() {
         let defaults = crate::prefs::Prefs::default();
-        assert!(!defaults.keep_work_on_tab_switch && defaults.remember_toolbar_tab);
+        assert!(!defaults.keep_work_on_tab_switch && !defaults.remember_toolbar_tab);
         let (mut a, _) = measuring_and_drawing(false, true);
         switch(&mut a, 0);
         assert!(a.dialog.is_none() && a.tool.is_none());
@@ -3878,6 +3879,7 @@ mod tests {
     #[test]
     fn each_design_remembers_its_own_toolbar_tab() {
         let mut a = app();
+        a.preferences.remember_toolbar_tab = true;
         a.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
         a.ui.tab = "SURFACE".into();
         new_design_with_a_box(&mut a);
