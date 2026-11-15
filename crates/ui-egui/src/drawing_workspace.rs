@@ -161,7 +161,30 @@ fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui.label(format!("Status unavailable: {error}"));
             });
         } else if let Some(snapshot) = app.drawing_workspace.status_controller.snapshot().cloned() {
-            crate::drawing_attention_card::show(ui, &snapshot);
+            // Use the same sheet and browser labels the drawing already displays.
+            // Keep unknown IDs visible rather than inventing a location.
+            let mut dimension_names = std::collections::BTreeMap::new();
+            let mut view_names = std::collections::BTreeMap::new();
+            let mut sheet_names = std::collections::BTreeMap::new();
+            if let Ok(drawing) = app.session.drawing("drawing.inspect") {
+                for sheet in &drawing.sheets {
+                    sheet_names.insert(solidcraft_engine::doc::ids::encode(sheet.id), sheet.name.clone());
+                    let objects = drawing.on_sheet(sheet.id);
+                    for (index, id) in objects.dimensions.iter().enumerate() {
+                        dimension_names.insert(
+                            solidcraft_engine::doc::ids::encode(*id),
+                            solidcraft_ui_text::format("ui.drawing_browser_dimension", &[("number", &(index + 1).to_string())]),
+                        );
+                    }
+                    for (index, id) in objects.views.iter().enumerate() {
+                        view_names.insert(
+                            solidcraft_engine::doc::ids::encode(*id),
+                            solidcraft_ui_text::format("ui.drawing_browser_view", &[("number", &(index + 1).to_string())]),
+                        );
+                    }
+                }
+            }
+            crate::drawing_attention_card::show(ui, &snapshot, &dimension_names, &view_names, &sheet_names);
             let selection = app.session.selection.clone();
             let mut repair_state = std::mem::take(&mut app.drawing_workspace.repair_ui);
             let repaired = crate::drawing_repair_ui::show(
