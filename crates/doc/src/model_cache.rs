@@ -937,6 +937,7 @@ impl Model {
                     .map(|v| serde_json::from_value::<kernel::ImportReport>(v.clone()).map(Arc::new).map_err(|_| bad("saved model: import report")))
                     .transpose()?,
                 repair: None,
+                lost_projections: None,
                 ms,
                 skipped: r.get("skipped").and_then(Json::as_bool).ok_or_else(|| bad("saved model: skipped"))?,
                 stale: false,
@@ -987,6 +988,7 @@ impl Model {
                         warning: r.warning.clone(),
                         import_report: r.import_report.clone(),
                         repair: r.repair.clone(),
+                        lost_projections: None,
                         ms: r.ms,
                         state: r.state.clone(),
                     },

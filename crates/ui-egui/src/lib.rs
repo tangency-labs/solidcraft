@@ -35,6 +35,9 @@ pub mod crash_ui;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
+pub mod design_tab_prefs;
+pub mod design_view_ui;
+pub mod design_views;
 mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
@@ -44,6 +47,7 @@ pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 mod dialogs_hole;
+pub mod dialogs_insert_airfoil;
 pub mod dialogs_insert_drawing;
 pub mod dialogs_library;
 pub mod dialogs_motion;
@@ -110,12 +114,14 @@ pub mod joint_drag;
 pub(crate) mod joint_handles;
 pub(crate) mod joint_symbols;
 pub mod keymap;
+pub mod kicad_import_dialog;
 #[cfg(test)]
 mod kit_gallery_tests;
 #[cfg(test)]
 mod kit_host_tests;
 mod length_input;
 mod linked_source;
+pub mod links;
 #[cfg(test)]
 mod loft_rails_dialog_tests;
 #[cfg(test)]
@@ -200,6 +206,7 @@ mod blend_dialog_tests;
 #[cfg(test)]
 mod boundary_dialog_tests;
 pub(crate) mod display_lod;
+pub(crate) mod edge_detail;
 #[cfg(test)]
 mod file_load_ui_tests;
 #[cfg(test)]
@@ -212,6 +219,7 @@ pub use solidcraft_ui_kit::navigation_bar;
 mod navigation_bar_tests;
 mod navigation_bar_view;
 pub mod navigation_slots;
+pub mod new_window;
 pub use navigation::WebWheelGestures;
 pub mod network_prompt;
 pub mod op_auto;
@@ -225,6 +233,7 @@ pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
+mod plugin_slots;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod prefs;
@@ -316,6 +325,7 @@ pub mod space_mouse_calibration;
 pub mod space_mouse_model;
 pub mod space_mouse_offer;
 pub mod stand_up;
+pub(crate) mod verify_job;
 pub use solidcraft_ui_kit::start_page;
 pub mod starting;
 mod status_bar;
@@ -349,6 +359,7 @@ pub(crate) mod view_angles;
 pub use solidcraft_ui_kit::view_compass;
 mod view_confirm;
 pub mod view_gizmo;
+mod view_memory;
 pub mod view_pick;
 pub mod viewport;
 mod viewport_details;
@@ -356,6 +367,7 @@ mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
 pub use solidcraft_ui_kit::window_chrome;
+mod wireframe_silhouettes;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;
@@ -634,6 +646,8 @@ pub struct SolveApp {
     pub(crate) plugin_install: plugin_install::State,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
+    /// A signature check running on a worker (see [`verify_job`]).
+    verifying: Option<verify_job::Verifying>,
     pub viewport: viewport::ViewportState,
     pub render_workspace: render_workspace::State,
     pub tool: Option<tools::Tool>,
@@ -648,6 +662,8 @@ pub struct SolveApp {
     pub design_properties: Option<design_properties::DesignProperties>,
     /// The Sketch report window (`sketch.inspect` from the ribbon), when open.
     pub sketch_report: Option<sketch_report::SketchReport>,
+    /// The KiCad import options window, when a board is chosen to open.
+    pub kicad_import: Option<kicad_import_dialog::Dialog>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
@@ -847,6 +863,7 @@ pub struct SolveApp {
     control_answering: Vec<control_job::ControlJob>,
     /// Most recent completed inspection per session and package, ordered by request.
     plugin_inspection_versions: std::collections::BTreeMap<(u64, String), usize>,
+    plugin_slots: plugin_slots::State,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -953,6 +970,7 @@ impl SolveApp {
             easyprint: Default::default(),
             plugin_install: Default::default(),
             saving: None,
+            verifying: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
             tool: None,
@@ -962,6 +980,7 @@ impl SolveApp {
             params: None,
             design_properties: None,
             sketch_report: None,
+            kicad_import: None,
             bom: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
@@ -1060,6 +1079,7 @@ impl SolveApp {
             agent_replies: Vec::new(),
             control_answering: Vec::new(),
             plugin_inspection_versions: Default::default(),
+            plugin_slots: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
@@ -1405,6 +1425,9 @@ impl SolveApp {
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, mut params: Value) -> Result<Value, String> {
         crate::plugins::sync_policy(self);
+        if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
+            return Err(self.tr("prefs.plugin_busy").into());
+        }
         if id.eq_ignore_ascii_case("plugin.run")
             || solidcraft_engine::plugin::resolve_call(&self.session, id, &params).map_err(|e| e.to_string())?.is_some()
         {
@@ -1520,9 +1543,14 @@ impl SolveApp {
             // `queued`: it waits for the end of the agent's turn.
             Some("component.edit_in_place") => r.and_then(|v| edit_in_place::command_ran(self, &v).map(|queued| with_queued(v, queued))),
             Some("component.finish_edit") => r.and_then(|v| edit_in_place::finish_command(self).map(|queued| with_queued(v, queued))),
+            Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
             _ => r,
         };
         if let Ok(v) = &r {
+            if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
+                plugins::persist_grants(self);
+                plugin_slots::invalidate(self);
+            }
             if id.eq_ignore_ascii_case("plugin.inspect")
                 && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
             {
@@ -1680,6 +1708,9 @@ impl SolveApp {
             if id == "view.angle_readout" {
                 self.preferences.show_view_angles = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             }
+            if id == "view.origin_axes_across_view" {
+                self.preferences.origin_axes_across_view = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+            }
             if matches!(id, "view.ambient_occlusion" | "view.graphics_preset") {
                 self.preferences.ambient_occlusion = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
                 if id == "view.graphics_preset" {
@@ -1780,8 +1811,22 @@ impl SolveApp {
                     self.home.add_recent(&p);
                     if matches!(id, "file.save" | "file.save_as") {
                         home::remember_session(&mut self.home, &self.session);
-                        // Say where it went, as an export does (#8693).
-                        let saved = self.tr("ui.design_saved").replace("{path}", &p);
+                        // Say where it went, as an export does (#8693), who signed it, and when
+                        // an earlier signature is in the file but does not cover this save.
+                        let signature = v.get("signature").and_then(Value::as_object);
+                        let earlier = signature.is_none() && self.session.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty());
+                        let saved = match signature {
+                            Some(signature) => {
+                                let key = signature
+                                    .get("user_id")
+                                    .and_then(Value::as_str)
+                                    .or_else(|| signature.get("fingerprint").and_then(Value::as_str))
+                                    .unwrap_or("");
+                                self.tr("ui.design_saved_signed").replace("{path}", &p).replace("{key}", key)
+                            }
+                            None if earlier => self.tr("ui.design_saved_earlier_signature").replace("{path}", &p),
+                            None => self.tr("ui.design_saved").replace("{path}", &p),
+                        };
                         self.set_status(saved, false);
                     }
                 }
@@ -1829,12 +1874,15 @@ impl SolveApp {
     }
 
     /// Insert Design's file picker: another design becomes a linked component; a STEP or mesh
-    /// file picked here is inserted the way Insert STEP or Insert Mesh would (#1240).
+    /// file picked here is inserted the way Insert STEP or Insert Mesh would (#1240), and a KiCad
+    /// board asks for its import settings.
     pub(crate) fn pick_design_to_insert(&mut self) {
         self.pick_open(|app, path| {
             let Some(path) = path else { return };
             if solidcraft_engine::io::is_design_path(&path) {
                 app.insert_design_async(&path, None);
+            } else if solidcraft_engine::io::is_kicad_path(&path) {
+                kicad_import_dialog::open(app, &path);
             } else {
                 app.insert_path_async(&path);
             }
@@ -1964,7 +2012,32 @@ impl SolveApp {
             }
             return;
         }
-        // Front … Isometric (Ctrl+1…7 by default) turn the view as the view cube's faces do. The
+        // Toggle Driven Dimension and Toggle Radius / Diameter take the dimension to act on as
+        // `constraint`: from a shortcut or the command search that is the selected one, as in the
+        // context menu (#17189). With none selected they say what to pick, where they used to
+        // answer "`constraint` must be a dimension id".
+        if matches!(id, "sketch.toggle_driven" | "sketch.toggle_diameter") {
+            let dimensions: Vec<String> = self
+                .session
+                .selection
+                .iter()
+                .filter_map(|s| match s {
+                    solidcraft_engine::Sel::SketchConstraint { id } => Some(id.clone()),
+                    _ => None,
+                })
+                .collect();
+            if dimensions.is_empty() {
+                self.set_status(self.tr("ui.toggle_dimension_select_first"), false);
+                return;
+            }
+            for constraint in dimensions {
+                if let Err(why) = self.run(id, json!({ "constraint": constraint })) {
+                    self.set_status(why, true);
+                }
+            }
+            return;
+        }
+        // Front … Isometric (Ctrl+1…7 by default) turn the view as the navigator's faces do. The
         // flat pattern is a 2D page: it has no other side to turn to.
         if solidcraft_engine::standard_view(id).is_some() {
             if !dialogs_sheet::flat_active(self) {
@@ -2031,7 +2104,7 @@ impl SolveApp {
             return;
         }
         // A display toggle leaves the current modelling tool and camera in place, and the ribbon
-        // where it is: F6, the navigation bar and the view cube never went through `start`, so
+        // where it is: F6, the navigation bar and the navigator never went through `start`, so
         // command search and the VIEW tab's menus must not move the tab either (#10540).
         if matches!(
             id,
@@ -2044,6 +2117,8 @@ impl SolveApp {
                 | "view.navigation_bar"
                 | "view.next_tab"
                 | "view.previous_tab"
+                | "tab.view.open"
+                | "tab.view.reopen"
         ) {
             let _ = self.run(id, json!({}));
             return;
@@ -2139,6 +2214,10 @@ impl SolveApp {
             let _ = self.run(id, json!({"enabled": !self.preferences.show_view_angles}));
             return;
         }
+        if id == "view.origin_axes_across_view" {
+            let _ = self.run(id, json!({"enabled": !self.preferences.origin_axes_across_view}));
+            return;
+        }
         // Another command ends Edit Text (its dialog is not a feature edit to keep).
         sketch_text_move::cancel_drag(self);
         if sketch_text::editing(self) || self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::TextMove(_))) {
@@ -2163,6 +2242,15 @@ impl SolveApp {
         }
         if id == "component.finish_edit" {
             edit_in_place::finish(self);
+            return;
+        }
+        // The picked section is placed (chord, pivot, position, angle, previewed) before OK adds it.
+        if id == "sketch.insert_airfoil" {
+            self.pick_file(solidcraft_ui_text::tr("insert_airfoil.filter"), &["dat"], |app, path| {
+                if let Some(path) = path {
+                    dialogs_insert_airfoil::open(app, path);
+                }
+            });
             return;
         }
         // The picked drawing is placed (position and scale, previewed) before OK adds it.
@@ -2201,6 +2289,12 @@ impl SolveApp {
             } else {
                 self.pick_design_to_insert();
             }
+            return;
+        }
+        if id == "doc.open" {
+            // Open asks for the file (and a board for its import options) rather than running
+            // the command with no path.
+            self.pick_open_file();
             return;
         }
         if id == "component.relink" {
@@ -2622,8 +2716,22 @@ impl SolveApp {
             }
             None => {
                 dialogs::restore_editing(self, marker);
-                self.sbox.text = format!("timeline.edit {{\"feature\": {id}, \"set\": {{}}}}");
-                self.ui.palette_open = true;
+                if let Some(f) = self.session.doc.feature(id) {
+                    use solidcraft_engine::doc::FeatureKind;
+                    let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
+                    let kind = match &f.kind {
+                        FeatureKind::Import { .. } => language.text("ui.feature_kind.import"),
+                        FeatureKind::MeshImport { .. } => language.text("ui.feature_kind.mesh_import"),
+                        FeatureKind::MeshConvert { .. } => language.text("ui.feature_kind.mesh_convert"),
+                        FeatureKind::Repair { .. } => language.text("ui.feature_kind.repair"),
+                        FeatureKind::Align { .. } => language.text("ui.feature_kind.align"),
+                        FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),
+                        FeatureKind::ConstructionAxis { .. } => language.text("ui.feature_kind.construction_axis"),
+                        FeatureKind::ConstructionPoint { .. } => language.text("ui.feature_kind.construction_point"),
+                        _ => f.kind.base_name(),
+                    };
+                    self.set_status(language.format("ui.feature_nothing_to_edit", &[("kind", kind)]), false);
+                }
             }
         }
     }
@@ -2899,6 +3007,55 @@ impl SolveApp {
         self.set_status(text, false);
     }
 
+    /// Say what a design's signature check found (a `doc.open {verify: true}` or `file.verify`).
+    pub(crate) fn say_signature(&mut self, result: &serde_json::Value) {
+        let Some(signature) = result.get("signature") else { return };
+        let status = signature.get("status").and_then(serde_json::Value::as_str).unwrap_or("");
+        let key = signature
+            .get("records")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|records| records.last())
+            .map(|record| {
+                record
+                    .get("user_id")
+                    .and_then(serde_json::Value::as_str)
+                    .or_else(|| record.get("key_id").and_then(serde_json::Value::as_str))
+                    .unwrap_or("")
+                    .to_owned()
+            })
+            .unwrap_or_default();
+        let text = match status {
+            "valid" => {
+                let fingerprint = signature
+                    .get("records")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|records| records.last())
+                    .and_then(|record| record.get("key_id"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                let trusted = self
+                    .preferences
+                    .trusted_signing_keys
+                    .split(|c: char| c == ',' || c.is_ascii_whitespace())
+                    .filter(|entry| !entry.is_empty())
+                    .any(|entry| entry.eq_ignore_ascii_case(fingerprint));
+                if trusted {
+                    solidcraft_ui_text::format("ui.open_signature_valid", &[("key", &key)])
+                } else {
+                    solidcraft_ui_text::format("ui.open_signature_valid_untrusted", &[("key", fingerprint)])
+                }
+            }
+            "not_covered" => solidcraft_ui_text::tr("ui.open_signature_not_covered").to_string(),
+            "invalid" => {
+                let reason = signature.get("reason").and_then(serde_json::Value::as_str).unwrap_or("");
+                solidcraft_ui_text::format("ui.open_signature_invalid", &[("reason", reason)])
+            }
+            "unsupported" => solidcraft_ui_text::tr("ui.open_signature_unsupported").to_string(),
+            _ => return,
+        };
+        self.set_status(text, status == "invalid");
+    }
+
     /// Open the design (or file) at `path` here and now: it is read and evaluated before this
     /// returns, which blocks the thread for a large design. The app opens through
     /// [`Self::open_path_async`] or [`Self::open_path_answered`] (progress and Cancel, #10198);
@@ -2930,6 +3087,7 @@ impl SolveApp {
             self.fit_view();
             stand_up::offer(self, path, &[], Some(&r));
             self.say_newer_file();
+            self.say_signature(&r);
         }
     }
 
@@ -2948,6 +3106,33 @@ impl SolveApp {
         }
         rx
     }
+
+    /// Open `path` asynchronously with the command's options (a KiCad board's import settings).
+    pub fn open_path_async_with_options(&mut self, path: &str, options: serde_json::Value) {
+        let mut request = file_load::Request::new(path, file_load::Kind::Open);
+        if let Some(map) = options.as_object() {
+            request.options = map.clone();
+        }
+        let _ = file_load::begin_request(self, request);
+    }
+
+    /// Ask for a file to open: a design, a CAD or mesh file, or a KiCad board.
+    pub fn pick_open_file(&mut self) {
+        self.pick_open(|app, path| {
+            if let Some(path) = path {
+                app.open_chosen_file(&path);
+            }
+        });
+    }
+
+    /// Open a chosen file: a KiCad board asks for its import options first, anything else opens.
+    pub fn open_chosen_file(&mut self, path: &str) {
+        if solidcraft_engine::io::is_kicad_path(path) {
+            kicad_import_dialog::open(self, path);
+        } else {
+            self.open_path_async(path);
+        }
+    }
     pub fn insert_path_async(&mut self, path: &str) {
         file_load::begin(self, path, true);
     }
@@ -2957,7 +3142,14 @@ impl SolveApp {
     fn load_params(&self, path: &str, options: &serde_json::Map<String, Value>) -> Value {
         let mut params = options.clone();
         params.insert("path".into(), json!(path));
+        // The preferences' import options (a FreeCAD file's `history`), unless the caller chose.
+        for (k, v) in file_load::preferred_options(self, path) {
+            params.entry(k).or_insert(v);
+        }
         file_load::step_folder_option(self, path, &mut params);
+        if self.preferences.verify_opened_designs && solidcraft_engine::io::is_design_path(path) {
+            params.insert("verify".into(), json!(true));
+        }
         Value::Object(params)
     }
 
@@ -3003,6 +3195,8 @@ impl SolveApp {
             || solidcraft_engine::cmd::drawing_import_command(path).is_some();
         if import && (!self.session.doc.features.is_empty() || !self.session.doc.point_clouds.is_empty()) {
             self.insert_path_async(path);
+        } else if solidcraft_engine::io::is_kicad_path(path) {
+            self.open_chosen_file(path);
         } else {
             self.open_path_async(path);
         }
@@ -3245,7 +3439,7 @@ impl SolveApp {
         self.pending_fit = Some((to, bounds, true, shared));
     }
 
-    /// A view chosen on a navigator (a cube face, corner or arrow, an axis tip): the view turns
+    /// A view chosen on a navigator (a face, corner or arrow, an axis tip): the view turns
     /// in place, or frames the whole model from the new direction when Preferences › Navigation
     /// asks for it (`navigator_fit`, #10091).
     pub fn animate_turn(&mut self, to: Camera) {
@@ -3374,6 +3568,9 @@ impl SolveApp {
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
         params_dialog::install_expressions(ctx);
+        ui_kit::set_viewport_half_height(ctx, self.cam.half_height());
+        // Tab or Shift+Tab into any text or number box selects its text, app-wide.
+        ui_kit::install_keyboard_focus(ctx);
         // Shortcuts run here, before `ui` installs the language scope: a tool started by its
         // key must build its translated hint in the user's language, not in English.
         let _language = solidcraft_ui_text::scope(&self.preferences.language);
@@ -3395,12 +3592,13 @@ impl SolveApp {
         render_workspace::tick(self, ctx);
         file_load::tick(self, ctx);
         save_job::tick(self, false);
+        verify_job::tick(self);
         edit_in_place::tick(self);
         let typing = ctx.egui_wants_keyboard_input();
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
             edit_in_place::back(self);
         }
-        if self.saving.is_some() || self.edit_in_place.refreshing() {
+        if self.saving.is_some() || self.verifying.is_some() || self.edit_in_place.refreshing() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
         open_meshing::tick(self, ctx);
@@ -3543,7 +3741,6 @@ impl SolveApp {
         }
     }
 
-    /// Lay out the whole window.
     /// The saved language and interface font, for a frame's text: the fonts are set up for them
     /// when they change, and again once the system's CJK, Hangul and Thai faces (read on a thread)
     /// are there. Returns the frame's language; text drawn while it lives is in that language.
@@ -3590,8 +3787,11 @@ impl SolveApp {
         self.apply_look(ctx);
     }
 
+    /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        plugins::tick(self, ui.ctx(), false);
         params_dialog::install_expressions(ui.ctx());
+        ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
         prefs::prepare_blur(self, ui.ctx());
         render_workspace::displayed::begin(self);
         let blur_source = !self.home.open && !render_workspace::result_active(self);
@@ -3630,6 +3830,7 @@ impl SolveApp {
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());
+        documents::sync_views(self);
         documents::sync_window_title(self, ui.ctx());
     }
 
@@ -3658,6 +3859,7 @@ impl SolveApp {
         }
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());
+        kicad_import_dialog::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
@@ -3688,6 +3890,11 @@ impl SolveApp {
                 browser::editors(self, ui);
                 // File › Install plugin… is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
+                // Entry dialogs from every plugin slot are available on Home too.
+                plugin_menu::show(self, ui.ctx());
+                // The unit of an imported mesh is asked on the screen the import starts: the
+                // start page asks it too, or the file would wait for an answer nobody sees (#15598).
+                mesh_units::show(self, ui.ctx());
                 return;
             }
         }
@@ -3740,6 +3947,8 @@ impl SolveApp {
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
         if render_workspace::active(self) {
+            // The model view is not drawn, so no shown dimension can be double-clicked.
+            dim_view::set_model_drawn(Vec::new());
             render_workspace::show(self, ui);
         } else {
             viewport::show(self, ui);
@@ -3843,6 +4052,10 @@ impl SolveApp {
         let reply = req.reply.clone();
         match control::handle(self, ctx, &req) {
             control::Outcome::Done(v) => {
+                if self.preferences.plugin_grants != self.session.plugin_state.grants {
+                    plugins::persist_grants(self);
+                    plugin_slots::invalidate(self);
+                }
                 let _ = reply.send(v);
             }
             control::Outcome::Screenshot { path } => self.shots.request(ctx, path, reply, req.chat_turn, now_ms()),

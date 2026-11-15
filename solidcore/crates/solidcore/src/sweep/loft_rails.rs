@@ -81,14 +81,13 @@
 //! places a fixed count of stations evenly and does not bound the skin between them; here they
 //! are placed where the certificate asks. No recursion: the refinement is a loop.
 
-pub mod certificate;
-
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
+use crate::nurbs::certificate;
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::crv_fit::p1::{interp_given_params, interp_knot_vector};
 use crate::nurbs::knots::{KnotVector, Side};

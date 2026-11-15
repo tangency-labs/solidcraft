@@ -20,8 +20,8 @@
 //! residual, and 6316.944424728): the input cases come from that test (fork capi test of
 //! tangency-labs/solidcore#453, 41a39ec).
 //!
-//! The touching line is a non-manifold edge of the input, so the result's closed-manifold
-//! check (`fillet_refuse_non_manifold_result`, WR-212, solidcore-only) is off here.
+//! The touching line is a non-manifold edge of the input: the holed cube is no closed
+//! manifold solid, so `fillet_edges`' check that a solid stays one (WR-212) does not apply.
 
 #![allow(
     clippy::unwrap_used,
@@ -44,14 +44,13 @@ use solidcore::topology::proto_topology::p1::api_transform::{
 };
 use solidcore::topology::{Brep, EdgeId};
 
-/// Every opt-in fix on, without WR-212's closed-manifold check (the input is not one).
+/// Every opt-in fix on.
 fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
         *f.flag_mut(name).unwrap() = true;
     }
-    f.fillet_refuse_non_manifold_result = false;
     k.fixes = f;
     k
 }

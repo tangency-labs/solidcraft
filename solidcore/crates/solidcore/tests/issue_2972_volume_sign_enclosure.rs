@@ -106,25 +106,53 @@ fn a_thin_shell_below_the_estimates_error_decides_positive() {
             other => panic!("r {r} t {t}: {other:?}, volume {v}"),
         }
         // the solid test reads the same sign: on the estimate (-180.05 at r 1e4) it was false
-        // (r 1e4 is known failing on the loop check: `the_far_thin_shell_is_an_outward_solid`)
-        if r < 1e3 {
-            let mut b = quarter_shell(&mut k, r, t);
-            assert!(is_outward_solid(&mut k, &mut b).unwrap(), "r {r} t {t}");
-        }
+        let mut b = quarter_shell(&mut k, r, t);
+        assert!(is_outward_solid(&mut k, &mut b).unwrap(), "r {r} t {t}");
     }
 }
 
-/// The quarter shell at r 1e4, t 1e-3 is a solid facing out. Known failing since its
-/// faces are checked without UV trims made beforehand (#15040): two faces' loops' orientation
-/// comes out zero area (`compute_loop_orientation`, in UV and in 3D; #15107), so the check fails
-/// Loop Orientation on them. On main the same body failed the same way once its UV
-/// trims were made; before #15040 the check passed those faces unchecked.
+/// The quarter shell at r 1e4, t 1e-3 is a solid facing out. Its faces are checked with
+/// their UV trims made (#15040); two of its loops (area 15.7 against a box of 1e8) came
+/// out zero area while `compute_loop_orientation` compared a sampled polygon's area with
+/// its box's, and are oriented from their certified signed area (#15107).
 #[test]
-#[ignore = "known failing: two of the far thin shell's loops come out zero area in the loop check (#15040, #15107)"]
 fn the_far_thin_shell_is_an_outward_solid() {
     let mut k = Kernel::default();
     let mut b = quarter_shell(&mut k, 1e4, 1e-3);
     assert!(is_outward_solid(&mut k, &mut b).unwrap());
+}
+
+/// The far thin shell's loops are oriented by a decided sign, not by the absence of a
+/// zero-area report: every face's outer loop is `Same` on its UV trims, and run backwards
+/// it is `Opposite`, and the body check then fails Loop Orientation (a reversed loop near
+/// the shell is still caught).
+#[test]
+fn the_far_thin_shells_loops_reversed_are_caught() {
+    use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    use solidcore::topology::face::p2::loops;
+    use solidcore::topology::face::p3::compute_loop_orientation;
+    use solidcore::topology::loopuse::flip_loop_orientation;
+    let mut k = Kernel::default();
+    let count = faces(&quarter_shell(&mut k, 1e4, 1e-3), None)
+        .unwrap()
+        .len();
+    assert_eq!(count, 6);
+    for i in 0..count {
+        let mut b = quarter_shell(&mut k, 1e4, 1e-3);
+        let f = faces(&b, None).unwrap()[i];
+        let l = loops(&b, f, false, None).unwrap()[0];
+        let o = compute_loop_orientation(&k, &mut b, f, l, None, false).unwrap();
+        assert_eq!(o, OrientType::Same, "face {i}");
+        flip_loop_orientation(&mut b, l).unwrap();
+        let o = compute_loop_orientation(&k, &mut b, f, l, None, false).unwrap();
+        assert_eq!(o, OrientType::Opposite, "face {i} reversed");
+        let c = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(
+            c.lines().iter().any(|l| l.contains("Loop Orientation")),
+            "face {i} reversed: {:?}",
+            c.lines()
+        );
+    }
 }
 
 #[test]
@@ -338,7 +366,7 @@ fn a_face_without_a_nurbs_form_is_an_error_not_a_sign() {
 
 /// The solid test names the test a body fails (#15035), the first in the order the tests run:
 /// a sheet is not manifold (and not closed solids, for the touching test); a box with a vertex
-/// tolerance 1000 times the body's, and a box with every face flipped, fail the pointer check;
+/// tolerance below the body's, and a box with every face flipped, fail the pointer check;
 /// the quarter horn torus of #1954, its internal pole read as upstream reads it, fails
 /// `AssertValid`; the box with its material outside is proved inside out; the quarter
 /// shell R 10, t 1e-6 leaves its sign undecided. A box passes every test.
@@ -372,7 +400,7 @@ fn the_solid_test_names_the_test_a_body_fails() {
 
     let mut loose = boxed(&mut k);
     let v = loose.vertex_list()[0];
-    let tolerance = loose.tolerance() * 1000.0;
+    let tolerance = loose.tolerance() * 0.5;
     loose.vertex_mut(v).unwrap().tolerance = tolerance;
     assert!(is_manifold_solid(&loose).unwrap());
     assert_eq!(

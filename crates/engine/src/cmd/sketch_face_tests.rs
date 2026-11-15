@@ -982,3 +982,29 @@ fn a_sketch_on_a_face_of_an_imported_spline_body_meshes_nothing_more() {
     let off = s.execute("sketch.create", &json!({"plane": {"body": name, "index": bottom.index, "face": [100, 0, 0]}}));
     assert!(off.is_err(), "{off:?}");
 }
+
+#[test]
+fn top_of_a_block_with_a_modeled_thread_and_rounded_corners_keeps_its_attachment() {
+    // A modeled thread cuts thousands of facets into the bore. Its splitting planes must not
+    // leave the block's walls and corner edges in pieces: a corner round of such an edge loses
+    // the history that names the faces after it, and the top face can't be attached.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":20,"body_name":"Block","name":"BlockFeature"}));
+    run(&mut s, "solid.hole", json!({"position":[10,10,20],"diameter":5,"depth":20}));
+    run(&mut s, "solid.thread", json!({"face":[12.5,10,10],"designation":"M6","modeled":true}));
+    run(&mut s, "solid.fillet", json!({"edges":[[0,0,10],[20,0,10],[0,20,10],[20,20,10]],"radius":2,"name":"Corners"}));
+    let index = top_pick(&s, "Block")["index"].clone();
+    let id =
+        run(&mut s, "sketch.create", json!({"name":"Top","plane":{"face":[5,5,20],"body":"Block","index":index},"project_edges":false}))["sketch"]
+            .as_u64()
+            .unwrap();
+    let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &s.doc.feature(id).unwrap().kind else { panic!("not a sketch") };
+    let anchor = super::anchor(plane).expect("a durable attachment");
+    assert_eq!(anchor.target.name, "F1:+z");
+    draw(&mut s);
+    let radius = s.doc.find_feature("Corners").unwrap().param_names[0].clone();
+    run(&mut s, "parameters.change", json!({"name":radius,"expression":"3 mm"}));
+    assert!(s.model.result(id).unwrap().error.is_none(), "{:?}", s.model.result(id).unwrap().error);
+    let plane = s.model.state().sketch(id).unwrap().plane;
+    assert!((plane.origin.z - 20.).abs() < 1e-6 && plane.normal().z > 1. - 1e-9, "{plane:?}");
+}

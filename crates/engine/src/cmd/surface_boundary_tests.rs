@@ -265,3 +265,56 @@ fn an_edit_turns_a_loop_into_a_network_and_back() {
     assert!(matches!(kind(&s), Some(solidcraft_doc::FeatureKind::SurfaceBoundary { .. })), "{:?}", kind(&s));
     assert!((areas(&mut s, &body).0 - 100.0).abs() < 1e-6);
 }
+
+/// #16508: a boundary surface and a loft built on one arc stitch into one sheet. The case is the
+/// issue's: a half circle (R 13.8 about z = 5.5) on the plane x = 6 is lofted to the same half
+/// circle on x = 60, and is also one of the four sides of a boundary network whose other sides
+/// are an arc on x = -9 and two lines in the XZ plane. The two surfaces are fitted to the arc each
+/// on its own, and their edges along it end up about 7e-5 apart, so before the fix the stitch was
+/// refused ("Bad Gap ... offset=6.81e-05") at any stitch tolerance.
+///
+/// Edge count: each surface is one four-sided face, 4 + 4 = 8 edges, and the stitch makes the
+/// arc they share one edge, so the sheet has 8 - 1 = 7 edges on 2 faces.
+#[test]
+fn a_boundary_surface_and_a_loft_surface_on_one_curve_stitch() {
+    let mut s = Session::default();
+    let mut arc = |name: &str, offset: f64, start: [f64; 2], end: [f64; 2], through: [f64; 2]| {
+        run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": offset, "name": name}));
+        run(&mut s, "sketch.arc.three_point", json!({"start": start, "end": end, "through": through}));
+        run(&mut s, "sketch.finish", json!({}));
+    };
+    let half = ([0.0, -8.3], [0.0, 19.3], [-13.8, 5.5]);
+    arc("Shared", 6.0, half.0, half.1, half.2);
+    arc("Far", 60.0, half.0, half.1, half.2);
+    // The issue's back arc: centre (1.5255, 0.9839), through both ends and its point farthest out.
+    let (centre, start, end): ([f64; 2], [f64; 2], [f64; 2]) =
+        ([1.5254923566139873, 0.9839315653407356], [0.0, -8.888970788629825], [0.0, 10.856833919298804]);
+    let r = (centre[0] - start[0]).hypot(centre[1] - start[1]);
+    arc("Back", -9.0, start, end, [centre[0] - r, centre[1]]);
+    // The two rails in the XZ plane (a sketch point (u, v) is the model point (u, 0, -v)).
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Rails"}));
+    let low = line(&mut s, [6.0, 8.3], [-9.0, -start[1]]);
+    let high = line(&mut s, [-9.0, -end[1]], [6.0, -19.3]);
+    run(&mut s, "sketch.finish", json!({}));
+    let curve = |sketch: &str, id: &str| json!({"sketch": sketch, "curves": [id]});
+    let loft = run(&mut s, "surface.loft", json!({"sections": [curve("Shared", "a1"), curve("Far", "a1")]}));
+    let boundary = run(
+        &mut s,
+        "surface.boundary",
+        json!({"u": [curve("Rails", &low), curve("Rails", &high)], "v": [curve("Shared", "a1"), curve("Back", "a1")]}),
+    );
+    let (a, b) = (first(&boundary["created_bodies"]), first(&loft["created_bodies"]));
+    assert!(!a.is_empty() && !b.is_empty() && a != b, "{boundary} / {loft}");
+    for body in [&a, &b] {
+        let edges = run(&mut s, "model.edges", json!({"body": body}));
+        assert_eq!(edges["edges"].as_array().map(Vec::len), Some(4), "each surface is four-sided: {edges}");
+    }
+    let stitched = run(&mut s, "surface.stitch", json!({"bodies": [a, b]}));
+    let bodies: Vec<&Value> = ["created_bodies", "changed_bodies"].iter().filter_map(|k| stitched[*k].as_array()).flatten().collect();
+    assert_eq!(bodies.len(), 1, "one sheet: {stitched}");
+    let body = bodies[0].as_str().unwrap_or_default();
+    let faces = run(&mut s, "model.faces", json!({"body": body}));
+    assert_eq!(faces["faces"].as_array().map(Vec::len), Some(2), "{faces}");
+    let edges = run(&mut s, "model.edges", json!({"body": body}));
+    assert_eq!(edges["edges"].as_array().map(Vec::len), Some(7), "{edges}");
+}

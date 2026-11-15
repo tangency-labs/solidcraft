@@ -1,24 +1,36 @@
 //! Free curves: a B-spline from the control points a designer places, one of its control points
 //! moved, the curve under an affine map, the curve seen in two views, its curvature comb, the
-//! blend from one curve's end to another's, circles and arcs, and a curve extended at an end.
+//! blend from one curve's end to another's, circles and arcs, a curve extended at an end, two
+//! curves joined end to end, the point of a curve nearest a given point, and a planar curve
+//! offset in its plane ([`offset_planar`]: the kernel's trimmed offset, its distance measured by
+//! [`solidcore::query::deviation::distance_deviation`]), and a curve on a sheet offset along its
+//! surface ([`offset_on_surface`]: the kernel's
+//! [`solidcore::curve::geodesic_offset::geodesic_offset`]).
 //! The curve is the record's ([`Curve`]); the knots, the map's carrying of the control points,
-//! the views' meeting, the curvature, the blend, the circles and the extension are the
-//! kernel's ([`solidcore::nurbs::knots::clamped_uniform`],
+//! the views' meeting, the curvature, the blend, the circles, the extension and the nearest point
+//! are the kernel's ([`solidcore::nurbs::knots::clamped_uniform`],
 //! [`solidcore::nurbs::crv_basic::Curve::transform`],
 //! [`solidcore::intersect::views::curves_from_views`],
 //! [`solidcore::query::continuity::curve_comb`], [`solidcore::curve::blend::blend_curve`],
 //! [`solidcore::curve::ellipse::Ellipse::arc`],
 //! [`solidcore::curve::ellipse::Ellipse::circle_from_3_points`],
-//! [`solidcore::nurbs::crv_basic::Curve::extend_by_dist`]). Ops checks the inputs and converts.
+//! [`solidcore::nurbs::crv_basic::Curve::extend_by_dist`],
+//! [`solidcore::nurbs::b_spline_curve::BSplineCurve::join_with`],
+//! [`solidcore::curve::curve::Curve::drop_point`],
+//! [`solidcore::intersect::api_intersectors::curve_crossings`]). Ops checks the inputs and
+//! converts.
 
 use solidcore::curve::arc::ArcDefinition;
 use solidcore::curve::blend::{self as kblend, BlendEnd};
 use solidcore::curve::curve::Curve as KCurve;
 use solidcore::curve::ellipse::Ellipse;
-use solidcore::curve::from_parameters::{from_parameters, EdgeCurve};
+use solidcore::curve::from_parameters::{from_parameters, record_parameter, EdgeCurve};
 use solidcore::geom::certified::Verdict;
+use solidcore::geom::global_solver::SolverOperation;
+use solidcore::intersect::api_intersectors;
 use solidcore::intersect::views::{curves_from_views, views_do_not_meet};
 use solidcore::kernel::Kernel;
+use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_adv::p1::{Continuity, CurveEnd};
 use solidcore::nurbs::crv_geom::ToleranceKind;
 use solidcore::nurbs::geom::Interval;
@@ -483,7 +495,8 @@ pub enum CurveExtension {
     /// The same knots and control points, the control polygon stretched along itself from the
     /// other end so each point keeps its share of it (the kernel's
     /// [`solidcore::nurbs::crv_basic::Curve::extend_keeping_proportion`]): the curve grows by the
-    /// length to the kernel's stop, its shape slides along the polygon.
+    /// length, its growth certified within `1e-7` of the growth asked, relatively, its shape slides along the polygon;
+    /// refused ([`Error::NotExact`]) where that is not certified.
     Proportion,
 }
 
@@ -499,7 +512,8 @@ pub enum CurveExtension {
 /// clamped spline or rational spline, a closed one (a periodic curve, or one whose ends meet
 /// to the kernel's model tolerance), or an extension the record cannot hold; the kernel's
 /// status otherwise (a natural extension of a rational curve whose weights leave the
-/// kernel's range).
+/// kernel's range); [`Error::NotExact`] for a proportional extension whose length is not
+/// certified.
 pub fn extend_curve(
     curve: &Curve,
     at: CurveEndAt,
@@ -528,6 +542,7 @@ pub fn extend_curve(
                     extended = match extended.extend_keeping_proportion(length, end) {
                         Ok((curve, _)) => curve,
                         Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+                        Err(SolidError::ExtendRefused { .. }) => return Ok(Err(Error::NotExact)),
                         Err(e) => return Err(e),
                     };
                 }
@@ -544,6 +559,352 @@ pub fn extend_curve(
     })?
 }
 
+/// `a` and `b` joined end to end into one spline (the kernel's `JoinWith`): the end of `a` that
+/// meets an end of `b` within `tolerance` (mm) is joined to it, and the joined curve runs from
+/// `a`'s other end to `b`'s other end. Both are brought to the higher degree and `b` follows on
+/// in parameter, so the joined curve is both curves exactly, with a knot of full multiplicity at
+/// the joint: it is as smooth there as the two curves meet (G1 where their tangents line up, as
+/// a half section and its mirror do). Two lines that continue each other become one line. The
+/// kernel tries `a`'s end first, then its start, each against `b`'s start, then its end.
+/// A clamped spline or rational spline each.
+///
+/// # Errors
+/// [`Error::Argument`] for a `tolerance` not finite and above 0, a curve that is not a valid
+/// clamped spline or rational spline, or a joined curve the record cannot hold (a spline joined
+/// to a rational spline, past the record's size); [`Error::Unsupported`] when no end of `a`
+/// meets an end of `b` within `tolerance` (or the kernel could not join the two there); the
+/// kernel's unported and cancelled statuses.
+pub fn join_curves(a: &Curve, b: &Curve, tolerance: f64) -> Result<Curve> {
+    if !(tolerance.is_finite() && tolerance > 0.0) {
+        return Err(Error::Argument);
+    }
+    let (na, nb) = (nurb_of(a)?, nurb_of(b)?);
+    run("curve::join_curves", |k| {
+        for (a_end, b_end) in [(true, false), (true, true), (false, false), (false, true)] {
+            let mut first = BSplineCurve::from_nurb(na.clone(), 3, false);
+            let mut second = BSplineCurve::from_nurb(nb.clone(), 3, false);
+            match first.join_with(k, a_end, &mut second, b_end, Some(tolerance)) {
+                Ok(()) => {
+                    let Some(joined) = first.gw_nurb() else {
+                        return Ok(Err(Error::Unsupported(
+                            "the joined curve has no NURBS form",
+                        )));
+                    };
+                    return Ok(record_of(joined));
+                }
+                Err(e) if e.is_unported() || e.is_cancelled() => return Err(e),
+                Err(_) => {}
+            }
+        }
+        Ok(Err(Error::Unsupported(
+            "no end of one curve meets an end of the other within the tolerance",
+        )))
+    })?
+}
+
+/// How far one curve strays from another curve or from a sheet ([`curve_deviation`],
+/// [`curve_surface_deviation`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Deviation {
+    /// The largest distance found at the stations.
+    pub max: f64,
+    /// Where on the first curve it is.
+    pub at: [f64; 3],
+    /// Its foot on the other curve or the sheet.
+    pub to: [f64; 3],
+    /// Each station's point and its foot, in order along the first curve: a comb.
+    pub comb: Vec<([f64; 3], [f64; 3])>,
+    /// The kernel's certified bound of the largest distance, where it applies (two
+    /// non-rational splines on one domain); `None` elsewhere.
+    pub bound: Option<f64>,
+}
+
+fn deviation_of(d: solidcore::query::deviation::Deviation) -> Deviation {
+    let a = |p: Point3| [p.x, p.y, p.z];
+    Deviation {
+        max: d.max,
+        at: a(d.at),
+        to: a(d.to),
+        comb: d.comb.into_iter().map(|(p, q)| (a(p), a(q))).collect(),
+        bound: d.bound,
+    }
+}
+
+/// How far curve `a` strays from curve `b`: `samples` stations at even steps of `a`'s range,
+/// each dropped on `b` (the kernel's [`solidcore::query::deviation::curve_deviation`]), the
+/// largest distance found with where it is, the station pairs, and the certified bound where it
+/// applies. The curves are splines, rational splines or polylines, each over its whole range.
+///
+/// # Errors
+/// [`Error::Argument`] for another kind of curve, one the record refuses, or a station count
+/// outside 2..=10000; the kernel's status otherwise (no station dropping onto `b`).
+pub fn curve_deviation(a: &Curve, b: &Curve, samples: usize) -> Result<Deviation> {
+    run("curve::curve_deviation", |k| {
+        let ka = match blend_input(k, a)? {
+            Ok(made) => made,
+            Err(e) => return Ok(Err(e)),
+        };
+        let kb = match blend_input(k, b)? {
+            Ok(made) => made,
+            Err(e) => return Ok(Err(e)),
+        };
+        Ok(
+            match solidcore::query::deviation::curve_deviation(k, &ka.curve, &kb.curve, samples) {
+                Ok(d) => Ok(deviation_of(d)),
+                Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+                Err(e) => return Err(e),
+            },
+        )
+    })?
+}
+
+/// How far curve `c` strays from the one-face `sheet`: as [`curve_deviation`], each station
+/// dropped on the face's surface over its parameter box (the kernel's
+/// [`solidcore::query::deviation::curve_surface_deviation`]); no certified bound.
+///
+/// # Errors
+/// As [`curve_deviation`]; [`Error::Argument`] for a sheet that is not one face; those of
+/// [`crate::Body::from_record`].
+pub fn curve_surface_deviation(
+    c: &Curve,
+    sheet: &solidcore_record::brep::Brep,
+    samples: usize,
+) -> Result<Deviation> {
+    let (body, _) = crate::Body::from_record(sheet, true)?;
+    crate::session::read_body("curve::curve_surface_deviation", &body, |k, b| {
+        let [f] = b.face_list() else {
+            return Ok(Err(Error::Argument));
+        };
+        let face = b.face(*f)?;
+        let Some(surface) = face.surface.as_ref() else {
+            return Ok(Err(Error::Argument));
+        };
+        let kc = match blend_input(k, c)? {
+            Ok(made) => made,
+            Err(e) => return Ok(Err(e)),
+        };
+        Ok(
+            match solidcore::query::deviation::curve_surface_deviation(
+                k,
+                &kc.curve,
+                surface,
+                &face.uv_domain,
+                samples,
+            ) {
+                Ok(d) => Ok(deviation_of(d)),
+                Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+                Err(e) => return Err(e),
+            },
+        )
+    })?
+}
+
+/// The point of a free curve nearest a given point ([`closest_point`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CurvePoint {
+    /// The curve's parameter there, the record's.
+    pub parameter: f64,
+    /// The curve's point there.
+    pub point: [f64; 3],
+    /// Its distance from the given point: the kernel solve's (not certified). A solution
+    /// within the tolerance of an end is snapped to that end and keeps the solve's distance, so
+    /// it is the distance to `point` within the tolerance.
+    pub distance: f64,
+}
+
+/// The record parameter range [`closest_point`] drops over: a line's segment from its start
+/// (0) to its end (1), a circle's or ellipse's one turn from its frame's x axis, any other
+/// curve's own range; `None` for an unbounded range.
+fn own_range(curve: &Curve) -> Option<[f64; 2]> {
+    match (curve, curve.natural()) {
+        (Curve::Line { .. }, _) => Some([0.0, 1.0]),
+        (_, Natural::Periodic) => Some([0.0, std::f64::consts::TAU]),
+        (_, Natural::Range(lo, hi)) => (lo.is_finite() && hi.is_finite()).then_some([lo, hi]),
+    }
+}
+
+/// The point of `curve` nearest `p` over the record's own range (a line between its two
+/// points, a circle or ellipse its whole turn, a polyline or spline its whole range): the
+/// curve as the kernel's ([`from_parameters`]), the kernel's global minimising drop of `p` onto
+/// it ([`KCurve::drop_point`], no guess; a solution within `tolerance` of an end snapped to
+/// that end), the curve's point at the parameter it finds ([`KCurve::evaluate_point`]) and that
+/// parameter as the record's
+/// ([`solidcore::curve::from_parameters::record_parameter`]: radians on a circle or ellipse).
+/// `None` where the drop finds no point.
+///
+/// # Errors
+/// [`Error::Argument`] for a point not finite or past the coordinate bound, a tolerance not
+/// finite and positive, or a curve the record or the kernel's constructors refuse; the kernel's
+/// status otherwise (a traced intersection curve, which has no constructor yet).
+pub fn closest_point(curve: &Curve, p: [f64; 3], tolerance: f64) -> Result<Option<CurvePoint>> {
+    if !coord_ok(&p) || !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(Error::Argument);
+    }
+    if check_curve(curve, &mut Budget::input()).is_err() {
+        return Err(Error::Argument);
+    }
+    let range = own_range(curve).ok_or(Error::Argument)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    run("curve::closest_point", |k| {
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let dropped = match made.curve.drop_point(
+            k,
+            &made.interval,
+            point(p),
+            None,
+            tolerance,
+            None,
+            SolverOperation::Minimize,
+        ) {
+            Ok(dropped) => dropped,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        if !dropped.success {
+            return Ok(Ok(None));
+        }
+        let at = made.curve.evaluate_point(k, dropped.parameter)?;
+        Ok(Ok(Some(CurvePoint {
+            parameter: record_parameter(&record, range, dropped.parameter, at),
+            point: [at.x, at.y, at.z],
+            distance: dropped.distance,
+        })))
+    })?
+}
+
+/// Where two free curves cross ([`crossings`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Crossing {
+    /// The first curve's parameter there, the record's.
+    pub a: f64,
+    /// The second curve's parameter there, the record's.
+    pub b: f64,
+    /// The first curve's point there.
+    pub on_a: [f64; 3],
+    /// The second curve's point there: `on_a` within the tolerance in space; as seen along a
+    /// direction, the point the second curve passes behind or in front of it.
+    pub on_b: [f64; 3],
+}
+
+/// Where curves `a` and `b` cross within `tolerance`, each over the record's own range (as
+/// [`closest_point`] takes it), in order along `a`: in space with `along` `None`, or as seen
+/// along the direction `along` (curves drawn in different planes, crossing in a view). The
+/// curves as the kernel's ([`from_parameters`]), their crossings the kernel's
+/// ([`solidcore::intersect::api_intersectors::curve_crossings`]), each curve's point at its
+/// parameter the kernel's evaluation, and the parameters the record's
+/// ([`solidcore::curve::from_parameters::record_parameter`]: radians on a circle or
+/// ellipse). Curves that do not cross give an empty list; an overlap is given by its start.
+///
+/// # Errors
+/// [`Error::Argument`] for a direction not finite, past the coordinate bound or of no length,
+/// a tolerance not finite and positive, or a curve the record or the kernel's constructors
+/// refuse (or whose range is unbounded); the kernel's status otherwise.
+pub fn crossings(
+    a: &Curve,
+    b: &Curve,
+    along: Option<[f64; 3]>,
+    tolerance: f64,
+) -> Result<Vec<Crossing>> {
+    if along.is_some_and(|d| !coord_ok(&d)) || !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(Error::Argument);
+    }
+    let input = |c: &Curve| -> Result<_> {
+        if check_curve(c, &mut Budget::input()).is_err() {
+            return Err(Error::Argument);
+        }
+        let range = own_range(c).ok_or(Error::Argument)?;
+        let record = solidcore_convert::curve(c).map_err(|_| Error::Argument)?;
+        Ok((record, range))
+    };
+    let ((ra, range_a), (rb, range_b)) = (input(a)?, input(b)?);
+    run("curve::crossings", |k| {
+        let made = |record, range| match from_parameters(k, record, range) {
+            Ok(made) => Ok(Ok(made)),
+            Err(SolidError::InvalidInput { .. }) => Ok(Err(Error::Argument)),
+            Err(e) => Err(e),
+        };
+        let ka = match made(&ra, range_a)? {
+            Ok(m) => m,
+            Err(e) => return Ok(Err(e)),
+        };
+        let kb = match made(&rb, range_b)? {
+            Ok(m) => m,
+            Err(e) => return Ok(Err(e)),
+        };
+        let found = match api_intersectors::curve_crossings(
+            k,
+            &ka.curve,
+            &ka.interval,
+            &kb.curve,
+            &kb.interval,
+            along.map(point),
+            tolerance,
+        ) {
+            Ok(found) => found,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let mut out = Vec::new();
+        for (ta, tb) in found {
+            let pa = ka.curve.evaluate_point(k, ta)?;
+            let pb = kb.curve.evaluate_point(k, tb)?;
+            out.push(Crossing {
+                a: record_parameter(&ra, range_a, ta, pa),
+                b: record_parameter(&rb, range_b, tb, pb),
+                on_a: [pa.x, pa.y, pa.z],
+                on_b: [pb.x, pb.y, pb.z],
+            });
+        }
+        Ok(Ok(out))
+    })?
+}
+
+/// Isolated intersections of `curve` over the record's parameter `interval` with `plane`,
+/// in curve order and in the plane's local coordinates. The kernel solves the exact curve
+/// against the plane at its model tolerance; contacts at both interval endpoints count.
+/// A curve lying in the plane has no isolated intersections and gives an empty list.
+///
+/// # Errors
+/// [`Error::Argument`] for invalid curve data, a nonfinite or reversed interval, or a plane
+/// that is not finite and orthonormal; the kernel's status otherwise.
+pub fn plane_crossings(
+    curve: &Curve,
+    interval: [f64; 2],
+    plane: &solidcore_record::Plane,
+) -> Result<Vec<solidcore_record::Vec2>> {
+    if !interval.iter().all(|t| t.is_finite())
+        || ![plane.origin, plane.x, plane.y]
+            .iter()
+            .all(|p| coord_ok(&<[f64; 3]>::from(*p)))
+        || check_curve(curve, &mut Budget::input()).is_err()
+    {
+        return Err(Error::Argument);
+    }
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    let frame = solidcore_convert::plane(plane);
+    run("curve::plane_crossings", |k| {
+        let made = match from_parameters(k, &record, interval) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let found =
+            match api_intersectors::curve_plane_crossings(k, &made.curve, &made.interval, &frame) {
+                Ok(found) => found,
+                Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+                Err(e) => return Err(e),
+            };
+        Ok(Ok(found
+            .into_iter()
+            .map(|p| solidcore_record::Vec2::new(p.x, p.y))
+            .collect()))
+    })?
+}
+
 pub use solidcore::curve::stretch::Stretch;
 
 /// `curve` with the control points `picked` stretched by a drag `delta` of point `handle` from
@@ -552,7 +913,9 @@ pub use solidcore::curve::stretch::Stretch;
 /// it over its length from the pivot to the handle (the pivot stays, the handle moves by `delta`
 /// whole); with [`Stretch::None`] each by `delta`. With `plane` (as
 /// [`crate::curve_plane::plane_of`] gives it), `delta` is first taken into the plane, so a
-/// planar curve stays planar. A closed periodic spline's repeated points move with their twins.
+/// planar curve stays planar. A closed periodic spline's repeated points are one editable point:
+/// picks, pivot and handle use its first occurrence along the stored control polygon, and all
+/// copies move together. Picking more than one copy does not change the stretch.
 ///
 /// # Errors
 /// [`Error::Argument`] for another kind of curve than a spline or polyline, an index past its
@@ -571,11 +934,32 @@ pub fn stretch_cvs(
     let (Curve::Spline { points, .. } | Curve::Polyline { points }) = curve else {
         return Err(Error::Argument);
     };
+    let period = match curve {
+        Curve::Spline { knots, points } => periodic_twin(knots, points, 0),
+        _ => None,
+    };
+    let canonical = |index: usize| -> Result<usize> {
+        if index >= points.len() {
+            return Err(Error::Argument);
+        }
+        match period {
+            Some(period) => index.checked_rem(period).ok_or(Error::Argument),
+            None => Ok(index),
+        }
+    };
+    let pivot = canonical(pivot)?;
+    let handle = canonical(handle)?;
+    let mut picked: Vec<usize> = picked
+        .iter()
+        .map(|&i| canonical(i))
+        .collect::<Result<_>>()?;
+    picked.sort_unstable();
+    picked.dedup();
     let v = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
     let given: Vec<Point3> = points.iter().map(|p| v(*p)).collect();
     let stretched = solidcore::curve::stretch::stretch_points(
         &given,
-        picked,
+        &picked,
         pivot,
         handle,
         v(delta),
@@ -584,7 +968,14 @@ pub fn stretch_cvs(
     )
     .map_err(|_| Error::Argument)?;
     let mut out = curve.clone();
-    for &i in picked {
+    let (Curve::Spline { points: moved, .. } | Curve::Polyline { points: moved }) = &mut out else {
+        return Err(Error::Argument);
+    };
+    for (i, point) in moved.iter_mut().enumerate() {
+        let i = canonical(i)?;
+        if picked.binary_search(&i).is_err() {
+            continue;
+        }
         let to = stretched
             .get(i)
             .map(|p| [p.x, p.y, p.z])
@@ -592,7 +983,7 @@ pub fn stretch_cvs(
         if !coord_ok(&to) {
             return Err(Error::Argument);
         }
-        out = move_cv(&out, i, to)?;
+        *point = to;
     }
     Ok(out)
 }
@@ -602,6 +993,63 @@ pub fn stretch_cvs(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plane_crossings_keep_line_endpoints_and_refuse_hostile_inputs() {
+        use solidcore_record::{Plane, Vec2, Vec3};
+
+        for (start, end, expected) in [
+            ([-1.0, -2.0, 0.0], [1.0, 0.0, 0.0], 1.0),
+            ([-1.0, 0.0, 0.0], [1.0, -2.0, 0.0], -1.0),
+            ([-1.0, -2.0, 0.0], [1.0, 2.0, 0.0], 0.0),
+        ] {
+            assert_eq!(
+                plane_crossings(&Curve::Line { start, end }, [0.0, 1.0], &Plane::XZ),
+                Ok(vec![Vec2::new(expected, 0.0)])
+            );
+        }
+        let line = Curve::Line {
+            start: [-1.0, -2.0, 0.0],
+            end: [1.0, 2.0, 0.0],
+        };
+        for interval in [[0.0, f64::NAN], [0.0, f64::INFINITY], [1.0, 0.0]] {
+            assert_eq!(
+                plane_crossings(&line, interval, &Plane::XZ),
+                Err(Error::Argument)
+            );
+        }
+        for plane in [
+            Plane {
+                origin: Vec3::new(f64::NAN, 0.0, 0.0),
+                ..Plane::XZ
+            },
+            Plane {
+                x: Vec3::ZERO,
+                ..Plane::XZ
+            },
+            Plane {
+                y: Vec3::X,
+                ..Plane::XZ
+            },
+            Plane {
+                x: Vec3::new(f64::INFINITY, 0.0, 0.0),
+                ..Plane::XZ
+            },
+        ] {
+            assert_eq!(
+                plane_crossings(&line, [0.0, 1.0], &plane),
+                Err(Error::Argument)
+            );
+        }
+        let invalid = Curve::Line {
+            start: [f64::NAN, 0.0, 0.0],
+            end: [1.0, 2.0, 0.0],
+        };
+        assert_eq!(
+            plane_crossings(&invalid, [0.0, 1.0], &Plane::XZ),
+            Err(Error::Argument)
+        );
+    }
 
     const SQUARE: [[f64; 3]; 4] = [
         [0.0, 0.0, 0.0],
@@ -1436,4 +1884,336 @@ mod tests {
             Err(Error::Argument)
         );
     }
+}
+
+/// The curves where the tube of `radius` round `curve` meets the one-face `sheet`: a chamfer's
+/// two boundaries on the sheet, each lying `radius` from the curve in space. The kernel's pipe of
+/// that radius swept along the curve
+/// ([`solidcore::sweep::api_brep::create_pipe_sweep`], uncapped), each of its walls intersected
+/// with the sheet's surface over the two faces' parameter boxes (the kernel's
+/// `Surface::global_surface_intersect`, traced to `tolerance`; a trimmed sheet is met over its
+/// whole box), and every curve found measured from the curve
+/// ([`solidcore::query::deviation::distance_deviation`] at [`OFFSET_STATIONS`] stations).
+///
+/// # Errors
+/// [`Error::Argument`] for a radius or a tolerance not finite and positive, a radius past the
+/// coordinate bound, a traced intersection curve, a curve the record or the kernel's
+/// constructors refuse, or a sheet that is not one face with a surface; [`Error::Unsupported`]
+/// for a curve whose kernel form runs past its record's range (a line); [`Error::Empty`] when
+/// the tube does not meet the sheet; [`Error::OffsetPastTolerance`] for a curve whose measured
+/// distance from `curve` strays past `tolerance`; [`Error::Record`] for a curve the record cannot
+/// hold; the kernel's refusals otherwise (a radius that reaches the centre of a bend: the pipe's
+/// wall would fold through itself); those of [`crate::Body::from_record`].
+pub fn tube_on_surface(
+    curve: &Curve,
+    sheet: &solidcore_record::brep::Brep,
+    radius: f64,
+    tolerance: f64,
+) -> Result<Vec<Curve>> {
+    use solidcore::query::deviation::distance_deviation;
+    use solidcore::sweep::api_brep::create_pipe_sweep;
+    let positive = |x: f64| x.is_finite() && x > 0.0;
+    if !positive(radius) || !coord_ok(&[radius]) || !positive(tolerance) {
+        return Err(Error::Argument);
+    }
+    if matches!(curve, Curve::SurfaceIntersection { .. })
+        || check_curve(curve, &mut Budget::input()).is_err()
+    {
+        return Err(Error::Argument);
+    }
+    let range = own_range(curve).ok_or(Error::Argument)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    let (body, _) = crate::Body::from_record(sheet, true)?;
+    crate::session::read_body("curve::tube_on_surface", &body, |k, b| {
+        let [f] = b.face_list() else {
+            return Ok(Err(Error::Argument));
+        };
+        let face = b.face(*f)?;
+        // copies, held by no face: the two surfaces belong to different bodies
+        let Some(surface) = face.surface.clone() else {
+            return Ok(Err(Error::Argument));
+        };
+        let domain = face.uv_domain;
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let natural = made.curve.natural_interval();
+        if natural.min() != made.interval.min() || natural.max() != made.interval.max() {
+            return Ok(Err(Error::Unsupported(
+                "a curve whose kernel form runs past its record's interval (a line: give it as a spline)",
+            )));
+        }
+        let path = made.curve;
+        let pipe = match create_pipe_sweep(k, radius, Some(&path), false) {
+            Ok(pipe) => pipe,
+            Err(e) => return Ok(Err(crate::error::status(e))),
+        };
+        let mut found = Vec::new();
+        for &wall in pipe.face_list() {
+            let wall_face = pipe.face(wall)?;
+            let Some(wall_surface) = wall_face.surface.clone() else {
+                continue;
+            };
+            let met = match wall_surface.global_surface_intersect(
+                k,
+                &wall_face.uv_domain,
+                &surface,
+                &domain,
+                [true, true],
+                Some(tolerance),
+                None,
+            ) {
+                Ok(met) => met,
+                Err(e) => return Ok(Err(crate::error::status(e))),
+            };
+            found.extend(met.curves_3d);
+        }
+        if found.is_empty() {
+            return Ok(Err(Error::Empty));
+        }
+        let mut out = Vec::new();
+        for c in &found {
+            let measured = distance_deviation(k, c, &path, radius, OFFSET_STATIONS)?;
+            if measured.worst > tolerance {
+                return Ok(Err(Error::OffsetPastTolerance {
+                    tolerance,
+                    worst: measured.worst,
+                }));
+            }
+            let held = solidcore::curve::from_parameters::record_of(k, c, &c.natural_interval())?;
+            match solidcore_convert::record_curve(held.curve) {
+                Ok(r) => out.push(r),
+                Err(Invalid(why)) => return Ok(Err(Error::Record(why.to_owned()))),
+            }
+        }
+        Ok(Ok(out))
+    })?
+}
+
+/// Which side of a planar curve an offset lies on, looking down the plane's normal
+/// ([`PlanarOffset::normal`]): left of the curve's direction of travel, or right of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OffsetSide {
+    /// To the left: the side `normal x tangent` points to.
+    Left,
+    /// To the right.
+    Right,
+}
+
+/// The stations along each piece of an offset at which its distance from the curve is measured
+/// ([`offset_planar`]).
+pub const OFFSET_STATIONS: usize = 129;
+
+/// A planar curve's offset ([`offset_planar`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlanarOffset {
+    /// The offset's pieces, in order along the curve.
+    pub curves: Vec<Curve>,
+    /// The normal of the curve's plane the side is read about (the kernel's
+    /// [`crate::curve_plane::plane_of`]).
+    pub normal: [f64; 3],
+    /// The largest difference found, at [`OFFSET_STATIONS`] stations along each piece, between a
+    /// station's distance from the curve and the distance asked: measured, not proved between
+    /// the stations.
+    pub deviation: f64,
+}
+
+/// `curve` offset `distance` in its own plane to `side` (the kernel's trimmed offset of a planar
+/// curve, `CompositeCurve::create_trimmed_offsets`): each point moved `distance` square to the
+/// curve in the plane, where the offset would cross itself (past a bend tighter than the
+/// distance) the loops trimmed off, the pieces approximated by splines within `tolerance`. Each
+/// piece is then measured ([`solidcore::query::deviation::distance_deviation`] at
+/// [`OFFSET_STATIONS`] stations) and the offset refused when a station lies farther than
+/// `tolerance` from `distance`. The plane is the one the kernel proves the curve lies in
+/// ([`crate::curve_plane::plane_of`]); a line is in no one plane and is refused.
+///
+/// # Errors
+/// [`Error::Argument`] for a distance or a tolerance not finite and positive, a distance past the
+/// coordinate bound, a traced intersection curve or a curve the record or the kernel's
+/// constructors refuse; [`Error::Unsupported`] for a curve in no one plane;
+/// [`Error::Empty`] when no offset is left; [`Error::OffsetPastTolerance`] for an offset whose
+/// measured distance strays past `tolerance`; [`Error::Record`] for a piece the record cannot
+/// hold; the kernel's refusals otherwise.
+pub fn offset_planar(
+    curve: &Curve,
+    distance: f64,
+    side: OffsetSide,
+    tolerance: f64,
+) -> Result<PlanarOffset> {
+    use solidcore::curve::composite_curve::{
+        CompositeCurve, OffsetCornerType, OffsetDirection, OffsetParams,
+    };
+    use solidcore::query::deviation::distance_deviation;
+    let positive = |x: f64| x.is_finite() && x > 0.0;
+    if !positive(distance) || !coord_ok(&[distance]) || !positive(tolerance) {
+        return Err(Error::Argument);
+    }
+    if matches!(curve, Curve::SurfaceIntersection { .. })
+        || check_curve(curve, &mut Budget::input()).is_err()
+    {
+        return Err(Error::Argument);
+    }
+    let Some(plane) = crate::curve_plane::plane_of(std::slice::from_ref(curve))? else {
+        return Err(Error::Unsupported(
+            "the curve lies in no one plane: a planar offset needs a curve that spans a plane",
+        ));
+    };
+    let range = own_range(curve).ok_or(Error::Argument)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    let [nx, ny, nz] = plane.normal;
+    let direction = match side {
+        OffsetSide::Left => OffsetDirection::LeftHandSide,
+        OffsetSide::Right => OffsetDirection::RightHandSide,
+    };
+    let params = OffsetParams {
+        xsect_tol_3d: tolerance,
+        approx_tol_3d: tolerance,
+        plane_normal: Vec3::new(nx, ny, nz),
+        corner: OffsetCornerType::FilletCorner,
+        trim_results: true,
+        offset_distance: distance,
+        match_parameterization: false,
+    };
+    run("curve::offset_planar", |k| {
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let natural = made.curve.natural_interval();
+        if natural.min() != made.interval.min() || natural.max() != made.interval.max() {
+            return Ok(Err(Error::Unsupported(
+                "a curve whose kernel form runs past its record's interval",
+            )));
+        }
+        let source = made.curve;
+        let composite = CompositeCurve::with_curves(3, vec![source.clone()], false, None, None)?;
+        let pieces = composite.create_trimmed_offsets(k, direction, &params)?;
+        if pieces.is_empty() {
+            return Ok(Err(Error::Empty));
+        }
+        let mut worst = 0.0_f64;
+        let mut curves = Vec::with_capacity(pieces.len());
+        for piece in &pieces {
+            let measured = distance_deviation(k, &piece.curve, &source, distance, OFFSET_STATIONS)?;
+            worst = worst.max(measured.worst);
+            let held = solidcore::curve::from_parameters::record_of(
+                k,
+                &piece.curve,
+                &piece.curve.natural_interval(),
+            )?;
+            match solidcore_convert::record_curve(held.curve) {
+                Ok(c) => curves.push(c),
+                Err(Invalid(why)) => return Ok(Err(Error::Record(why.to_owned()))),
+            }
+        }
+        if worst > tolerance {
+            return Ok(Err(Error::OffsetPastTolerance { tolerance, worst }));
+        }
+        Ok(Ok(PlanarOffset {
+            curves,
+            normal: plane.normal,
+            deviation: worst,
+        }))
+    })?
+}
+
+/// A curve offset along a surface ([`offset_on_surface`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SurfaceOffset {
+    /// The offset: a cubic spline on the curve's own parameters, through the ends of the
+    /// geodesics shot from the curve.
+    pub curve: Curve,
+    /// The largest distance found, at the middle of each span, between the offset and the end
+    /// of the geodesic shot from the curve there: measured, not proved.
+    pub deviation: f64,
+}
+
+/// `curve` (lying on the one-face `sheet`) offset `distance` along the sheet's surface to `side`
+/// (left or right of the curve's direction about the surface's own normal, `S_u x S_v`): each
+/// point the end of the geodesic of that length leaving the curve square to it, so the band
+/// between the curve and its offset has the same width along the surface everywhere (the
+/// kernel's [`solidcore::curve::geodesic_offset::geodesic_offset`], its stations doubled until
+/// its measured deviation is within `tolerance`). Refused when the measured deviation is still
+/// past `tolerance` at the kernel's most stations.
+///
+/// # Errors
+/// [`Error::Argument`] for a distance or a tolerance not finite and positive, a distance past the
+/// coordinate bound, a traced intersection curve, a curve the record or the kernel's
+/// constructors refuse, or a sheet that is not one face with a surface;
+/// [`Error::OffsetPastTolerance`] for an offset whose measured deviation strays past
+/// `tolerance`; [`Error::Record`] for an offset the record cannot hold; the kernel's refusals
+/// otherwise (a geodesic leaving the surface, a station off it, a singular surface); those of
+/// [`crate::Body::from_record`].
+pub fn offset_on_surface(
+    curve: &Curve,
+    sheet: &solidcore_record::brep::Brep,
+    distance: f64,
+    side: OffsetSide,
+    tolerance: f64,
+) -> Result<SurfaceOffset> {
+    use solidcore::curve::geodesic_offset::{geodesic_offset, Side};
+    let positive = |x: f64| x.is_finite() && x > 0.0;
+    if !positive(distance) || !coord_ok(&[distance]) || !positive(tolerance) {
+        return Err(Error::Argument);
+    }
+    if matches!(curve, Curve::SurfaceIntersection { .. })
+        || check_curve(curve, &mut Budget::input()).is_err()
+    {
+        return Err(Error::Argument);
+    }
+    let range = own_range(curve).ok_or(Error::Argument)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    let side = match side {
+        OffsetSide::Left => Side::Left,
+        OffsetSide::Right => Side::Right,
+    };
+    let (body, _) = crate::Body::from_record(sheet, true)?;
+    crate::session::read_body("curve::offset_on_surface", &body, |k, b| {
+        let [f] = b.face_list() else {
+            return Ok(Err(Error::Argument));
+        };
+        let face = b.face(*f)?;
+        let Some(surface) = face.surface.as_ref() else {
+            return Ok(Err(Error::Argument));
+        };
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let offset = match geodesic_offset(
+            k,
+            surface,
+            &face.uv_domain,
+            &made.curve,
+            &made.interval,
+            distance,
+            side,
+            tolerance,
+        ) {
+            Ok(o) => o,
+            Err(e) => return Ok(Err(crate::error::status(e))),
+        };
+        if offset.worst > tolerance {
+            return Ok(Err(Error::OffsetPastTolerance {
+                tolerance,
+                worst: offset.worst,
+            }));
+        }
+        let held = solidcore::curve::from_parameters::record_of(
+            k,
+            &offset.curve,
+            &offset.curve.natural_interval(),
+        )?;
+        Ok(match solidcore_convert::record_curve(held.curve) {
+            Ok(c) => Ok(SurfaceOffset {
+                curve: c,
+                deviation: offset.worst,
+            }),
+            Err(Invalid(why)) => Err(Error::Record(why.to_owned())),
+        })
+    })?
 }

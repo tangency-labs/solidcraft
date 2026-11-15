@@ -16,6 +16,7 @@
 //! | [`OffsetFailure::ToleranceUnresolved`] | `SM_ERR_INVALID_INPUT` (solidcore-native, WR-749) |
 //! | [`OffsetFailure::SeamOpened`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::ExactCurveUncut`]     | `SM_ERR` (solidcore-native)               |
+//! | [`OffsetFailure::TangentBranchUncertified`] | `SM_ERR` (solidcore-native)            |
 //! | [`OffsetFailure::TangentEndOffCurve`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
@@ -25,13 +26,19 @@
 //! | [`OffsetFailure::Missing`]             | `SM_ERR_NULL_POINTER`                     |
 //! | [`OffsetFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`                    |
 //! | [`OffsetFailure::Inconsistent`]        | `SM_ERR_ASSERT_FAILURE`                   |
+//! | [`OffsetFailure::StageFailed`]         | the site's (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`) |
+//!
+//! A stage of an offset routine that fails with no reason the kernel names is an
+//! [`OffsetFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping the
+//! error of the call it made as its cause where it has one.
 //!
 //! Deviations: not upstream. Entity ids are those of the operation's input B-rep. The
 //! last four describe, in a phrase, the failures of offset routines that returned a bare
 //! status ([`OffsetFailure::replaces_upstream_status`]); the failure's `operation` path
 //! says which routine and its entity, where the site named one, which face. The files
-//! with open work elsewhere (`offset_executive/{p1,p2,step_gaps,reach}`,
-//! `offset_faces`, `offset_geometry_creation`) do not use them yet.
+//! with open work elsewhere (`offset_executive/{p1,p2}`, `offset_faces`) do not use
+//! them yet, nor do the sites of `offset_geometry_creation`'s shared `SM_ERR` helper, each of
+//! which needs its own cause (several are refusals, not defects).
 
 use super::{
     EntityRef, ErrorKind, Failure, Reason, SM_ERR, SM_ERR_ASSERT_FAILURE, SM_ERR_BAD_INTERSECTIONS,
@@ -59,10 +66,11 @@ pub enum OffsetFailure {
         /// The largest wall that works.
         largest: f64,
     },
-    /// The offset of `face` by `distance` is not proved regular, and no wall size would help:
-    /// the face does not bend towards that side anywhere the sizing looked, so no radius of
-    /// curvature limits the wall. The proof ran out where the face's normal vanishes (a flat
-    /// patch whose boundary curves leave a corner tangent to each other) or out of patches.
+    /// The offset of `face` by `distance` is neither proved regular nor proved to fold, so no
+    /// wall size is named: the proof ran out of patches (where the face's normal vanishes, a
+    /// flat patch whose boundary curves leave a corner tangent to each other; where the
+    /// offset collapses; or where a fold point is not proved), or a fold was proved but the
+    /// face does not bend towards that side anywhere the sizing looked.
     NotCertified {
         /// The face whose offset is not certified.
         face: FaceId,
@@ -83,7 +91,7 @@ pub enum OffsetFailure {
         radius: f64,
     },
     /// Loops of the offset of `face` touch without crossing, so the offset walls they
-    /// come from meet there (opt-in `fixes.offset_walls_touch_refused`).
+    /// come from meet there (with `fixes.offset_resolve_crossing_loops`).
     WallsTouch {
         /// The face whose offset's loops touch, when known.
         face: Option<FaceId>,
@@ -146,6 +154,9 @@ pub enum OffsetFailure {
     /// vertex on the curve: the end is not where the edges meet, and no cut chosen by
     /// distance stands in for it.
     TangentEndOffCurve,
+    /// Two curved faces tangent at the old edge now cross, but the intersection
+    /// branch on their retained sides has not been certified.
+    TangentBranchUncertified,
     /// In a local operation, the new surfaces of `face` and of its neighbour across an
     /// edge meet nowhere near the edge, so no extension of either makes them meet there
     /// and the edge cannot be found again. (The reach,
@@ -192,10 +203,17 @@ pub enum OffsetFailure {
     /// A consistency check of an offset routine's own data did not hold, as the phrase
     /// says.
     Inconsistent(&'static str),
+    /// A stage of an offset routine failed with no reason the kernel names: a defect
+    /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
+    /// reports (for the goldens only), where it was built, and the error of the call it made
+    /// where it has one.
+    StageFailed,
 }
 
 /// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The check that fails names the entity where the reason is about one
+/// ([`Unsoundness::entity`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum Unsoundness {
     /// The check at `SM_LEVEL_2` reports `failures` failure lines more than the input's
@@ -219,6 +237,46 @@ pub enum Unsoundness {
     /// The body is a manifold solid whose volume's enclosure still holds 0 after its
     /// budget: its sign is not proved.
     VolumeUndecided,
+    /// A loop of the body has a certified area that leaves its orientation undecided. No
+    /// check returns it yet (as [`crate::topology::brep::SolidTest::LoopOrientationUndecided`]);
+    /// it is named so a caller's match covers it when one does.
+    LoopOrientationUndecided,
+    /// A gap in a loop of the body cannot be closed within the tolerances its certificates
+    /// allow. No check returns it yet; it is named so a caller's match covers it when one
+    /// does.
+    LoopGapNotClosable,
+    /// The tolerance of an edge or vertex of the body grew to `tolerance`, past the `bound` its
+    /// certificate allows (`docs/validity-and-tolerances.md` §8: a constructed result's
+    /// tolerances come from its certificates). No check returns it yet; it is named so a
+    /// caller's match covers it when one does.
+    ToleranceBeyondBound {
+        /// The entity of the operation's input the edge or vertex comes from (as every entity
+        /// these failures name is the input's), `None` where it comes from none (one the
+        /// operation made): the built body's own ids name nothing a caller holds.
+        entity: Option<EntityRef>,
+        /// Its tolerance.
+        tolerance: f64,
+        /// The largest tolerance its certificate allows.
+        bound: f64,
+    },
+}
+
+impl Unsoundness {
+    /// The entity of the operation's input the reason names: the one the edge or vertex whose
+    /// tolerance grew past its bound comes from.
+    #[must_use]
+    pub const fn entity(&self) -> Option<EntityRef> {
+        match *self {
+            Self::ToleranceBeyondBound { entity, .. } => entity,
+            Self::Check { .. }
+            | Self::GeometryUnchecked
+            | Self::NotManifoldSolid
+            | Self::VolumeNotPositive
+            | Self::VolumeUndecided
+            | Self::LoopOrientationUndecided
+            | Self::LoopGapNotClosable => None,
+        }
+    }
 }
 
 /// How loops of an offset face touch without crossing ([`OffsetFailure::WallsTouch`]).
@@ -277,27 +335,34 @@ impl OffsetFailure {
                 .map(EntityRef::Edge)
                 .or_else(|| face.map(EntityRef::Face)),
             Self::LoopGapUncertified { face } => face.map(EntityRef::Face),
+            Self::Unsound { what } => what.entity(),
             Self::ExactCurveUncut
             | Self::TangentEndOffCurve
-            | Self::Unsound { .. }
+            | Self::TangentBranchUncertified
             | Self::DistanceUnresolved { .. }
             | Self::ToleranceUnresolved { .. }
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
-            | Self::Inconsistent(_) => None,
+            | Self::Inconsistent(_)
+            | Self::StageFailed => None,
         }
     }
 
     /// True for a failure that replaced a bare status an offset routine returned
     /// ([`OffsetFailure::Failed`], [`OffsetFailure::Missing`],
-    /// [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`]): it answers with
+    /// [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`],
+    /// [`OffsetFailure::StageFailed`]): it answers with
     /// that status as the `Upstream` it replaced did. The refusals replaced none.
     #[must_use]
     pub const fn replaces_upstream_status(&self) -> bool {
         matches!(
             self,
-            Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_)
+            Self::Failed(_)
+                | Self::Missing(_)
+                | Self::InvalidValue(_)
+                | Self::Inconsistent(_)
+                | Self::StageFailed
         )
     }
 
@@ -320,10 +385,12 @@ impl OffsetFailure {
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::TangentBranchUncertified
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
-            | Self::Unsound { .. } => false,
+            | Self::Unsound { .. }
+            | Self::StageFailed => false,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 true
             }
@@ -331,13 +398,14 @@ impl OffsetFailure {
     }
 
     /// True for a failure that is the kernel's fault, not a fact of the input: a consistency
-    /// check of a routine's own data that did not hold ([`OffsetFailure::Inconsistent`]).
-    /// Report it. Said per cause, as its class ([`ErrorKind::Failed`]) does not say it, until
+    /// check of a routine's own data that did not hold ([`OffsetFailure::Inconsistent`]), or a
+    /// stage that failed with no reason the kernel names ([`OffsetFailure::StageFailed`],
+    /// whose class [`ErrorKind::StageFailed`] says it too). Report it. Said per cause, as its class ([`ErrorKind::Failed`]) does not say it, until
     /// offset failures move onto a class of their own.
     #[must_use]
     pub const fn is_defect(&self) -> bool {
         match self {
-            Self::Inconsistent(_) => true,
+            Self::Inconsistent(_) | Self::StageFailed => true,
             Self::Folds { .. }
             | Self::NotCertified { .. }
             | Self::Collapses { .. }
@@ -349,6 +417,7 @@ impl OffsetFailure {
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::TangentBranchUncertified
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
@@ -370,9 +439,11 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::TangentBranchUncertified
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
-            | Self::Failed(_) => SM_ERR,
+            | Self::Failed(_)
+            | Self::StageFailed => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
@@ -399,11 +470,13 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::TangentBranchUncertified
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. } => ErrorKind::Unsupported,
             Self::DistanceUnresolved { .. } | Self::ToleranceUnresolved { .. } => {
                 ErrorKind::InvalidInput
             }
+            Self::StageFailed => ErrorKind::StageFailed,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 ErrorKind::of_status(self.comparison_status())
             }
@@ -499,6 +572,28 @@ impl core::fmt::Display for Unsoundness {
                 "the local operation's body is a manifold solid whose volume's sign could \
                  not be proved",
             ),
+            Unsoundness::LoopOrientationUndecided => f.write_str(
+                "a loop of the body built has a certified area that leaves its orientation \
+                 undecided",
+            ),
+            Unsoundness::LoopGapNotClosable => f.write_str(
+                "a gap in a loop of the body built cannot be closed within the tolerances its \
+                 certificates allow",
+            ),
+            Unsoundness::ToleranceBeyondBound {
+                entity,
+                tolerance,
+                bound,
+            } => {
+                match entity {
+                    Some(e) => write!(f, "the tolerance at {e} of the input")?,
+                    None => f.write_str("the tolerance of an edge or vertex")?,
+                }
+                write!(
+                    f,
+                    " grew to {tolerance:e}, past the {bound:e} its certificate allows"
+                )
+            }
         }
     }
 }
@@ -519,9 +614,8 @@ impl core::fmt::Display for OffsetFailure {
             ),
             Self::NotCertified { face, distance } => write!(
                 f,
-                "the offset of face {} by {distance} is not proved regular: its parametrisation \
-                 defeats the proof, and no radius of curvature limits the wall, so no size is \
-                 named",
+                "the offset of face {} by {distance} is neither proved regular nor proved to \
+                 fold, so no size is named",
                 face.index()
             ),
             Self::Collapses {
@@ -607,6 +701,10 @@ impl core::fmt::Display for OffsetFailure {
                  cut into its pieces with their UV curves, so the edge's offsets cannot be \
                  mated",
             ),
+            Self::TangentBranchUncertified => f.write_str(
+                "two curved faces tangent at the old edge now cross, but the intersection \
+                 branch on their retained sides has no certificate",
+            ),
             Self::TangentEndOffCurve => f.write_str(
                 "an edge ends beside a tangent edge whose new faces now cross, and that edge's new \
                  vertex is not on the edge's new curve, so the edge cannot end there",
@@ -620,6 +718,7 @@ impl core::fmt::Display for OffsetFailure {
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::InvalidValue(what) => write!(f, "invalid input: {what}"),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
+            Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
         }
     }
 }
@@ -627,8 +726,20 @@ impl core::fmt::Display for OffsetFailure {
 impl crate::SolidError {
     /// [`crate::SolidError::Failed`] for an offset routine that fails with `failure`.
     #[must_use]
+    #[track_caller]
     pub(crate) fn offset(operation: &'static str, failure: OffsetFailure) -> Self {
         Failure::new(operation, failure).into_error()
+    }
+
+    /// [`crate::SolidError::Failed`] for a stage of an offset routine that failed with no
+    /// reason the kernel names ([`OffsetFailure::StageFailed`], a defect), with `status`, the
+    /// one the C++ reports (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`).
+    #[must_use]
+    #[track_caller]
+    pub(crate) fn offset_stage_failed(operation: &'static str, status: i32) -> Self {
+        Failure::new(operation, OffsetFailure::StageFailed)
+            .with_status(status)
+            .into_error()
     }
 
     /// [`crate::SolidError::Failed`] for something an offset routine needs that is not
@@ -856,6 +967,14 @@ mod tests {
             (O::InvalidValue("x"), ErrorKind::InvalidInput, true, false),
             // a consistency check of the kernel's own data that did not hold: its fault
             (O::Inconsistent("x"), ErrorKind::Failed, true, true),
+            (
+                O::TangentBranchUncertified,
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
+            // a stage that failed with no reason the kernel names: its fault, in its class
+            (O::StageFailed, ErrorKind::StageFailed, false, true),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -878,6 +997,8 @@ mod tests {
                 O::Missing(_) => 16,
                 O::InvalidValue(_) => 17,
                 O::Inconsistent(_) => 18,
+                O::TangentBranchUncertified => 19,
+                O::StageFailed => 20,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
@@ -885,8 +1006,70 @@ mod tests {
             assert_eq!(o.kind(), *class, "{o:?}");
             assert_eq!(o.is_phrase(), *phrase, "{o:?}");
             assert_eq!(o.is_defect(), *defect, "{o:?}");
-            // a phrase is what replaced a bare status, and only a phrase
-            assert_eq!(o.replaces_upstream_status(), *phrase, "{o:?}");
+            // what replaced a bare status is a phrase, or a stage failure built on purpose
+            assert_eq!(
+                o.replaces_upstream_status(),
+                *phrase || matches!(o, O::StageFailed),
+                "{o:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_stage_failure_is_a_defect_with_its_sites_status() {
+        for status in [SM_ERR, SM_ERR_NULL_POINTER] {
+            let e = SolidError::offset_stage_failed("offset::op", status);
+            super::super::tests::assert_stage_failure(&e, "offset::op", status);
+            assert_eq!(e.offset_failure(), Some(&OffsetFailure::StageFailed));
+        }
+    }
+
+    /// A body whose edge or vertex tolerance grew past its certificate's bound is refused
+    /// naming the input's entity it comes from and both numbers (#15035); the reasons without
+    /// an entity name none.
+    #[test]
+    fn an_unsound_body_names_the_entity_its_check_names() {
+        let edge = EntityRef::Edge(EdgeId::from_index(4));
+        let grown = |entity| OffsetFailure::Unsound {
+            what: Unsoundness::ToleranceBeyondBound {
+                entity,
+                tolerance: 2e-4,
+                bound: 1e-5,
+            },
+        };
+        assert_eq!(grown(Some(edge)).entity(), Some(edge));
+        assert_eq!(grown(Some(edge)).kind(), ErrorKind::Unsupported);
+        assert_eq!(
+            grown(Some(edge)).to_string(),
+            "the tolerance at edge 4 of the input grew to 2e-4, past the 1e-5 its certificate \
+             allows: refused, the input unchanged"
+        );
+        // an edge or vertex that comes from none of the input's
+        assert_eq!(grown(None).entity(), None);
+        assert_eq!(
+            grown(None).to_string(),
+            "the tolerance of an edge or vertex grew to 2e-4, past the 1e-5 its certificate \
+             allows: refused, the input unchanged"
+        );
+        for (what, says) in [
+            (
+                Unsoundness::LoopOrientationUndecided,
+                "a loop of the body built has a certified area that leaves its orientation \
+                 undecided",
+            ),
+            (
+                Unsoundness::LoopGapNotClosable,
+                "a gap in a loop of the body built cannot be closed within the tolerances its \
+                 certificates allow",
+            ),
+        ] {
+            let o = OffsetFailure::Unsound { what };
+            assert_eq!(what.entity(), None);
+            assert_eq!(o.entity(), None);
+            assert_eq!(
+                o.to_string(),
+                format!("{says}: refused, the input unchanged")
+            );
         }
     }
 
@@ -901,10 +1084,8 @@ mod tests {
             &[
                 ("offset/offset_executive/p1.rs", 9),
                 ("offset/offset_executive/p2.rs", 9),
-                ("offset/offset_executive/reach.rs", 1),
-                ("offset/offset_executive/step_gaps.rs", 1),
                 ("offset/offset_faces.rs", 4),
-                ("offset/offset_geometry_creation.rs", 17),
+                ("offset/offset_geometry_creation.rs", 1),
             ],
         );
     }

@@ -24,7 +24,7 @@ use solidcore_record::Vec2;
 use super::check::{located, parse_issue, whole};
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
-use super::sketch_shapes::Created;
+use super::sketch_shapes::{CornerPoint, Created};
 use super::types::{AngleExpr, LengthExpr, Point2, Point3, SketchRef, not_blank_pattern, present};
 use crate::params;
 
@@ -220,6 +220,77 @@ pub struct SplineResetHandlesResult {
 /// What `sketch.spline.reverse` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SplineReverseResult {
+    /// The spline's curve id (unchanged).
+    pub curve: String,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Add a point to a fit point spline, where the curve passes nearest to it, between its
+/// neighbours; or make it the spline's new first or last point with `end`. The curve still runs
+/// through the new point and all its old ones, and the constraints on those stay. Refused for a
+/// control point spline, and for an `end` joined to other geometry.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = insert_point_required)]
+pub struct SplineInsertPointParams {
+    /// The spline's curve id.
+    #[serde(deserialize_with = "spline_id")]
+    pub curve: String,
+    // Optional in the type and required in the schema (`insert_point_required`): the handler's
+    // message for a missing `at` is the one it gives for a point it cannot read, so it is the one
+    // a caller should hear.
+    /// Where the curve is to run through the new point: `[x, y]` or `{x, y}` in mm. Without `end`,
+    /// the nearest place along the curve; with it, the new end's place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PointXY")]
+    pub at: Option<PointXY>,
+    /// `start` or `end`: `at` becomes the spline's new first or last point instead, and the curve
+    /// runs on to it.
+    #[serde(default, deserialize_with = "spline_end", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "spline_end_schema")]
+    pub end: Option<SplineEnd>,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+}
+
+/// `at` is required in the schema, though the type leaves it to the handler (#16085).
+fn insert_point_required(schema: &mut Schema) {
+    require(schema, "at");
+}
+
+/// Which end of the spline `at` becomes the new point of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplineEnd {
+    /// The new first point.
+    Start,
+    /// The new last point.
+    End,
+}
+
+/// `end` as the handler reads it: `null` is as left out, and anything that is not `start` or
+/// `end` is refused with its message.
+fn spline_end<'de, D: Deserializer<'de>>(d: D) -> Result<Option<SplineEnd>, D::Error> {
+    nullable(d, |v| match v.as_str() {
+        Some("start") => Ok(SplineEnd::Start),
+        Some("end") => Ok(SplineEnd::End),
+        _ => refuse("`end` must be start or end"),
+    })
+}
+
+fn spline_end_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"enum": ["start", "end"]})
+}
+
+/// What `sketch.spline.insert_point` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SplineInsertPointResult {
+    /// The new point's id.
+    pub point: String,
     /// The spline's curve id (unchanged).
     pub curve: String,
     /// The sketch's solve: `{solved, dof}`.
@@ -861,14 +932,23 @@ impl JsonSchema for ArcSlotCenterParams {
     }
 }
 
-/// The minor radius of an ellipse, as `sketch.ellipse` reads it: a number of mm above 0.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MinorRadius(pub f64);
+/// The minor radius of an ellipse, as `sketch.ellipse` reads it: a number of mm above 0, or
+/// text that is an expression over the design's parameters. Whether an expression evaluates to
+/// a positive size is the handler's to check. Kept as given.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MinorRadius(pub Value);
 
 impl<'de> Deserialize<'de> for MinorRadius {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        match Value::deserialize(d)?.as_f64().and_then(params::finite) {
-            Some(r) if r > 1e-9 && r < 1e8 => Ok(MinorRadius(r)),
+        let v = Value::deserialize(d)?;
+        if v.is_string() {
+            return match params::expr(&json!({ "v": v }), "v") {
+                Some(_) => Ok(MinorRadius(v)),
+                None => Err(D::Error::custom(whole(format!("`minor_radius` {}", params::expr_problem(Some(&v)))))),
+            };
+        }
+        match v.as_f64().and_then(params::finite) {
+            Some(r) if r > 1e-9 && r < 1e8 => Ok(MinorRadius(v)),
             _ => Err(D::Error::custom(whole("the minor radius must be positive"))),
         }
     }
@@ -879,7 +959,13 @@ impl JsonSchema for MinorRadius {
         "MinorRadius".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({"description": "The minor radius in mm: above 0.000000001 and below 100 000 000.", "type": "number", "exclusiveMinimum": 1e-9, "exclusiveMaximum": 1e8})
+        json_schema!({
+            "description": "The minor radius: a number of mm above 0.000000001 and below 100 000 000, or an expression over the design's parameters such as \"w / 4\" (a dimension driven by them; text naming no parameter is just that number, in the design's length unit).",
+            "anyOf": [
+                {"type": "number", "exclusiveMinimum": 1e-9, "exclusiveMaximum": 1e8},
+                {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": not_blank_pattern()}
+            ]
+        })
     }
 }
 
@@ -920,15 +1006,17 @@ fn axes_flag<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = ellipse_required)]
 pub struct EllipseKeys {
-    /// The ellipse's centre, [x, y] in mm.
+    /// The ellipse's centre, [x, y] in mm. A coordinate typed as an expression holds it where
+    /// the parameters put it.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "PointXY")]
-    pub center: Option<PointXY>,
-    /// The end of the major axis, [x, y] in mm; not the centre.
+    #[schemars(with = "CornerPoint")]
+    pub center: Option<CornerPoint>,
+    /// The end of the major axis, [x, y] in mm, as `center` is given; not the centre.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "PointXY")]
-    pub major: Option<PointXY>,
-    /// The minor radius in mm. Wins over `minor`, which is then not read.
+    #[schemars(with = "CornerPoint")]
+    pub major: Option<CornerPoint>,
+    /// The minor radius in mm: a number, or an expression over the design's parameters, which
+    /// makes it a dimension driven by them. Wins over `minor`, which is then not read.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "MinorRadius")]
     pub minor_radius: Option<MinorRadius>,
@@ -957,14 +1045,15 @@ fn ellipse_required(schema: &mut Schema) {
 }
 
 /// `sketch.ellipse`'s parameters: [`EllipseKeys`], with `minor` left unread when there is a
-/// `minor_radius`, and a `minor_radius` that isn't a number left unread, as the handler does.
+/// `minor_radius`, and a `minor_radius` that is neither a number nor text left unread, as the
+/// handler does.
 #[derive(Debug)]
 pub struct EllipseParams(pub EllipseKeys);
 
 impl<'de> Deserialize<'de> for EllipseParams {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let mut value = Value::deserialize(d)?;
-        let radius = params::num(&value, "minor_radius").is_some();
+        let radius = params::num(&value, "minor_radius").is_some() || value.get("minor_radius").is_some_and(Value::is_string);
         if let Some(keys) = value.as_object_mut() {
             keys.remove(if radius { "minor" } else { "minor_radius" });
         }
