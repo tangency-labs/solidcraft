@@ -1801,6 +1801,20 @@ fn iso_curve(
             let mid_vec = mid_point - torus_origin;
             x_axis = torus_z_axis.cross(mid_vec.cross(torus_z_axis));
             length = x_axis.length();
+            // the mid point fixes the meridian plane but not the side: on a spindle torus
+            // the tube can lie wholly past the axis (R 1, r 2, v 120..240: mid at -X, centre
+            // at +X R). Take the side whose centre puts the mid point on the minor circle
+            // (a three-point circle would fail for a full tube, whose start and end
+            // coincide)
+            if length >= EFF_ZERO_SQRT {
+                let off_circle = |side: f64| {
+                    let centre = torus_origin + (side * shape.major_radius / length) * x_axis;
+                    ((mid_point - centre).length() - shape.minor_radius).abs()
+                };
+                if off_circle(-1.0) < off_circle(1.0) {
+                    x_axis = -x_axis;
+                }
+            }
         }
         x_axis = Div::div(x_axis, length);
         (
@@ -2581,5 +2595,65 @@ mod tests {
             (start - frame.origin()).length() < 1e-9,
             "start {start:?} is not the torus origin"
         );
+    }
+
+    /// CodeRabbit on #17008: a spindle torus (R 1, r 2) whose tube runs 120..240 degrees
+    /// starts on the axis (`R + r cos 120 = 0`), and its whole tube lies on the far
+    /// side of the axis: the mid point (v 180) is at `-X` while the minor circle's centre is
+    /// at `+X R`. The midpoint fallback must still put the centre at `+X R`, so the
+    /// analytic circle passes through the closed-form torus points at 120, 180 and 240.
+    #[test]
+    fn spindle_minor_iso_circle_from_axis_start_keeps_the_tube_centre() {
+        let frame = Axis2Placement::IDENTITY;
+        let dom = Extent2d::from_bounds(0.0, 120.0, 90.0, 240.0);
+        let (big, small) = (1.0_f64, 2.0_f64);
+        let t = Torus::create_canonical(
+            &Kernel::default(),
+            &frame,
+            big,
+            small,
+            TorusOptions {
+                swap_uv: false,
+                inside_out: false,
+                circle_nurb: None,
+            },
+            Some(&dom),
+        )
+        .expect("spindle torus");
+        let domain = t.base.base.natural_uv_domain();
+        let k = Kernel::default();
+        let fixed = domain.u_interval().min();
+        // the domain starts at u 0 (STEP conversion is ambiguous on the folded part, where
+        // u 0 and u 180 meet)
+        let u = 0.0_f64;
+        let iso = t
+            .create_iso_parametric_curve(&k, SurfParamType::U, fixed, None, false)
+            .expect("minor iso circle");
+        let CurveKind::Ellipse(circle) = iso.curve.kind() else {
+            panic!("expected a circle");
+        };
+        let radial = Vec3::new(u.cos(), u.sin(), 0.0);
+        assert!(
+            (circle.position().origin() - big * radial).length() < 1e-12,
+            "centre {:?}, want {:?}",
+            circle.position().origin(),
+            big * radial
+        );
+        let ivl = circle.step_interval();
+        for v_deg in [120.0_f64, 180.0, 240.0] {
+            let v = v_deg.to_radians();
+            let want = (big + small * v.cos()) * radial + small * v.sin() * Vec3::new(0.0, 0.0, 1.0);
+            let got = circle
+                .evaluate_step_point(ivl.min() + (v_deg - 120.0))
+                .expect("analytic point");
+            assert!((got - want).length() < 1e-12, "v {v_deg}: {got:?}, want {want:?}");
+        }
+        // the circle's own NURB agrees at its mid parameter (the tube's v 180)
+        let mid = iso
+            .curve
+            .evaluate_point(&k, iso.curve.natural_interval().evaluate(0.5))
+            .expect("nurb mid");
+        let want = (big - small) * radial;
+        assert!((mid - want).length() < 1e-12, "nurb mid {mid:?}, want {want:?}");
     }
 }
