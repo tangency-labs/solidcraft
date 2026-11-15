@@ -848,6 +848,22 @@ mod tests {
         assert_eq!(text.matches("CYLINDRICAL_SURFACE(").count(), 1, "{text}");
     }
 
+    /// A circle touching its revolution axis makes a horn torus: its NURBS must keep its pole,
+    /// even when the kernel proves the torus support. Only ring tori are promoted on export.
+    #[test]
+    fn a_horn_torus_keeps_its_spline_face() {
+        use solidcore_ops::sweep::{Curve, revolve};
+        use std::f64::consts::{FRAC_PI_2, TAU};
+
+        solidcore_ops::session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+        let profile = [Curve::Arc { center: [5.0, 0.0, 0.0], axis: [0.0, -1.0, 0.0], reference: [1.0, 0.0, 0.0], radius: 5.0, start: 0.0, end: TAU }];
+        let horn = revolve(&profile, [0.0; 3], [0.0, 0.0, 1.0], FRAC_PI_2, true).unwrap();
+        let text = solidcore_bodies(&[("Horn", &horn)], &Header::default()).unwrap();
+        assert!(!text.contains("TOROIDAL_SURFACE") && !text.contains("SURFACE_OF_REVOLUTION"), "{text}");
+        assert_eq!(text.matches("(BOUNDED_SURFACE()B_SPLINE_SURFACE(").count(), 1, "{text}");
+        assert_eq!(text.matches("ADVANCED_FACE(").count(), 3, "{text}");
+    }
+
     /// A rounded rim whose round is bent off its torus by one control point is no quadric: its
     /// form proves as no kind, and the face stays the B-spline surface it is.
     #[test]

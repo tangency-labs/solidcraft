@@ -69,6 +69,15 @@
 //!   tight box does, so the two differ only where those calls fail outright. A failed solve
 //!   in the trimmed-face search gives a cell with no solution, which counts with its loose
 //!   box, so the box only grows (safer than the fork's SER, which would fail the box).
+//! - **A hole's outside is the face.** `SectorClassifyCurveOn`'s loop-containment retry
+//!   takes a stepped-off point that an inner loop measured clockwise
+//!   ([`compute_loop_orientation`](crate::topology::face::p3::compute_loop_orientation))
+//!   does not wind around for inside the face when the face's outer loop winds it
+//!   counter-clockwise and none of its inner loops winds it, each loop reading the point
+//!   in its own period of a closed surface (`holds_point_beside_hole`). Upstream reads
+//!   every point its loop does not wind around as outside, so a curve leaving a vertex
+//!   of a hole into the face, tangent to the hole's boundary there, was classified out
+//!   of the face. Every other reading keeps upstream's: outside.
 //! - **Same curve on two edges.** `SectorClassifyCurveOn` compares the curve pointers
 //!   of two different edges; an edge owns its curve in the port, so two edges never
 //!   share one (`bSingleCurveOnEdges` is always false), as in `query::edge`.
@@ -90,7 +99,15 @@
 //!   exact subpatch over the cell, not on the whole surface (a solve's control-net guesses
 //!   read every control point of the surface it is given), and a cell whose subpatch's
 //!   control points reach no higher than the box so far is skipped unsolved. A cell whose
-//!   subpatch gives no solution is divided, and at the limits counts with that bound.
+//!   subpatch gives no solution is divided, and at the limits counts with that bound, its
+//!   control-point hull raised by the subpatch's rounding (its loose box when that has no
+//!   finite bound, a typed error when neither has).
+//!   Not the fork's (#13753): such a cell is set aside only on bounds (its control
+//!   points' greatest; their least, with every solution classified outside; or a
+//!   monotone net), a solve's value at a point in the face only raising the box so far,
+//!   and at the limits it counts with its own bound; a way along which its control
+//!   values are level is not halved. The fork set a cell aside on its solve's value,
+//!   which the surface takes but need not be its greatest.
 //!   Not the fork's (#14460): a cell is divided only the ways a knot lies inside it while
 //!   either way has one, halved both ways only once it lies within one span each way.
 //!   The step-off loops keep upstream's bounds (20 rounds in the sector
@@ -128,6 +145,7 @@ use crate::nurbs::b_spline_surface::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
+use crate::nurbs::math::gamma;
 use crate::query::brep::LazyBrep;
 use crate::query::edge as qe;
 use crate::query::face::p2::{
@@ -730,6 +748,12 @@ struct CellDirectedMax {
     in_face: bool,
     /// Whether the solver gave a solution.
     found: bool,
+    /// The greatest value at a point inside the face (`-BIG_DOUBLE` without one): a value
+    /// the face takes (#13753).
+    face_top: f64,
+    /// Whether every solution was classified, and outside the face (`SM_PC_UNKNOWN`):
+    /// none on its boundary, none left unclassified (#13753).
+    outside: bool,
 }
 
 /// `sm_CellDirectedMax`: `GlobalPointSolve(SM_SO_3D_SIGNED_DIRECTED_MAXIMIZE)` over `cell`
@@ -765,6 +789,8 @@ fn cell_directed_max(
         top: -crate::math::BIG_DOUBLE,
         in_face: false,
         found: !solutions.is_empty(),
+        face_top: -crate::math::BIG_DOUBLE,
+        outside: !solutions.is_empty(),
     };
     let mut in_face_top = -crate::math::BIG_DOUBLE;
     let mut pt_class = PointClassification::new(face_zone_tol_3d);
@@ -777,7 +803,7 @@ fn cell_directed_max(
         let pos = eval_pos(&mut eval)?;
         let value = pos.x * dir.x + pos.y * dir.y + pos.z * dir.z;
         out.top = out.top.max(value);
-        ignored(point_classify(
+        let classified = ignored(point_classify(
             k,
             lb.get_mut()?,
             f,
@@ -789,7 +815,10 @@ fn cell_directed_max(
                 use_uv_classification: true,
                 ..PointClassifyOptions::default()
             },
-        ))?;
+        ))?
+        .is_some();
+        out.outside =
+            out.outside && classified && pt_class.point_class() == PointClassType::Unknown;
         // Inside the face only (`SM_PC_FACE`, tangency-labs/smlib@95bf434). A point on an
         // edge or a vertex lies within the face's zone tolerance of its boundary, inside or
         // out: where the surface runs on past the boundary it is up to that tolerance
@@ -804,6 +833,7 @@ fn cell_directed_max(
     if out.in_face {
         out.top = out.top.max(in_face_top);
     }
+    out.face_top = in_face_top;
     Ok(out)
 }
 
@@ -919,19 +949,8 @@ fn cell_monotone(k: &Kernel, surface: &Surface, cell: &Extent2d, dir: Vec3) -> R
 /// [`cell_monotone`] reads it: `None` for a surface kind with no B-spline base, or a
 /// subpatch short of the cell (`CopySubPatch` snaps to knots).
 fn cell_patch(k: &Kernel, surface: &Surface, cell: &Extent2d) -> Result<Option<BSplineSurface>> {
-    let base = match surface.kind_with_nurb(k)? {
-        SurfaceKind::BSpline(bs) => bs,
-        SurfaceKind::Plane(p) => p.base(),
-        SurfaceKind::SurfOfRevolution(r) => r.base(),
-        SurfaceKind::SurfOfExtrusion(r) => r.base(),
-        SurfaceKind::Cone(c) => c.rev().base(),
-        SurfaceKind::Sphere(s) => s.base().base(),
-        SurfaceKind::Torus(s) => s.base().base(),
-        // (IsKindOf(SmBSplineSurface_TYPE): the fork's SmProceduralBlend, its net's patch)
-        SurfaceKind::ProceduralBlend(pb) => pb.net(),
-        // (the fork's SmBallPatch is an SmBSplineSurface too: its net)
-        SurfaceKind::BallPatch(pb) => pb.net(),
-        _ => return Ok(None),
+    let Some(base) = patch_base(k, surface)? else {
+        return Ok(None);
     };
     // CopySubPatch snaps to knots: a patch short of the cell says nothing about the rest.
     let Ok(patch) = base.copy_sub_patch(cell) else {
@@ -946,6 +965,74 @@ fn cell_patch(k: &Kernel, surface: &Surface, cell: &Extent2d) -> Result<Option<B
         return Ok(None);
     }
     Ok(Some(patch))
+}
+
+/// The B-spline base whose subpatches [`cell_patch`] takes (what `SmBSplineSurface`
+/// `IsKindOf` names), `None` for a surface kind with none.
+fn patch_base<'s>(k: &Kernel, surface: &'s Surface) -> Result<Option<&'s BSplineSurface>> {
+    Ok(Some(match surface.kind_with_nurb(k)? {
+        SurfaceKind::BSpline(bs) => bs,
+        SurfaceKind::Plane(p) => p.base(),
+        SurfaceKind::SurfOfRevolution(r) => r.base(),
+        SurfaceKind::SurfOfExtrusion(r) => r.base(),
+        SurfaceKind::Cone(c) => c.rev().base(),
+        SurfaceKind::Sphere(s) => s.base().base(),
+        SurfaceKind::Torus(s) => s.base().base(),
+        // (IsKindOf(SmBSplineSurface_TYPE): the fork's SmProceduralBlend, its net's patch)
+        SurfaceKind::ProceduralBlend(pb) => pb.net(),
+        // (the fork's SmBallPatch is an SmBSplineSurface too: its net)
+        SurfaceKind::BallPatch(pb) => pb.net(),
+        _ => return Ok(None),
+    }))
+}
+
+/// How far, along a unit direction, a control point of a subpatch [`cell_patch`] takes
+/// of `base` may lie from the exact subpatch's, so that [`patch_hull_max`] plus it bounds
+/// the base surface over the cell although the subpatch was computed in floating point.
+/// `M` is the largest coordinate of the base's Euclidean control points, `W` and `w` its
+/// largest and smallest weights, `u` the unit roundoff, in Higham's standard model.
+/// - Each point of the subpatch comes from at most `n = 2 (p + q)` knot insertions (`p` at
+///   each end of the cell along u, `q` along v: `N_SrfExtractPatch`). Each insertion is
+///   `alf P1 + (1 - alf) P0` of homogeneous points no larger than `W M` (a convex
+///   combination does not grow them), with `alf = (t - a) / (b - a)`: `alf` carries
+///   `gamma(3)` (two differences, one division), `1 - alf` that plus one rounding, and the
+///   two products and the sum two more, so one insertion adds at most
+///   `(3 alf + 3 alf + (1 - alf) + 2) u W M <= 9 u W M`; `n` of them `gamma(9n) W M`. The
+///   weight likewise, at most `W` and at least `w`.
+/// - Dividing back to the Euclidean point:
+///   `|ΔP| <= (gamma(9n) W M + M gamma(9n) W) / (w (1 - gamma(9n))) + u M`.
+/// - The dot product with a unit `dir` (3 products, 2 sums) adds `gamma(5) M`; for the unit
+///   axis directions the tight box passes it is exact.
+///
+/// `3 gamma(9n + 5) M W / w` holds all three. `None` when it is not finite (no net, a weight
+/// not positive, a NaN, an overflow).
+fn sub_patch_rounding(base: &BSplineSurface) -> Option<f64> {
+    let net = base.control_point_net().ok()?;
+    let mut largest = 0.0_f64;
+    for p in &net.points {
+        for c in [p.x, p.y, p.z] {
+            if c.is_nan() {
+                return None;
+            }
+            largest = largest.max(c.abs());
+        }
+    }
+    let ratio = if net.weights.is_empty() {
+        1.0
+    } else {
+        let (mut least, mut most) = (f64::INFINITY, 0.0_f64);
+        for &w in &net.weights {
+            if !is_positive(w) {
+                return None;
+            }
+            least = least.min(w);
+            most = most.max(w);
+        }
+        most / least
+    };
+    let insertions = 2 * (base.degree(SurfParamType::U) + base.degree(SurfParamType::V));
+    let rounding = 3.0 * gamma(insertions.saturating_mul(9).saturating_add(5)) * largest * ratio;
+    rounding.is_finite().then_some(rounding)
 }
 
 /// [`cell_monotone`] of the subpatch over the cell ([`cell_patch`]).
@@ -1012,6 +1099,41 @@ fn patch_hull_max(patch: &BSplineSurface, dir: Vec3) -> Option<f64> {
     hull
 }
 
+/// Whether the control values `P . dir` of `patch` are level along v (`along_v`) or along
+/// u, to [`EFF_ZERO_SQRT`], at every index across (#13753): then `S . dir` is level that
+/// way too (with positive weights each isocurve's value is a convex combination of level
+/// values), and halving the patch that way leaves each half's hull where it was. `false`
+/// when it cannot be told (no net, a NaN).
+fn patch_level_along(patch: &BSplineSurface, dir: Vec3, along_v: bool) -> bool {
+    let Ok(control) = patch.control_point_net() else {
+        return false;
+    };
+    let (nu, nv) = (control.u_count, control.v_count);
+    if nu == 0 || nv == 0 || control.points.len() != nu * nv {
+        return false;
+    }
+    let value = |p: &Point3| p.x * dir.x + p.y * dir.y + p.z * dir.z;
+    let (across, along) = if along_v { (nu, nv) } else { (nv, nu) };
+    (0..across).all(|a| {
+        let mut values = (0..along).filter_map(|t| {
+            let (i, j) = if along_v { (a, t) } else { (t, a) };
+            control.points.get(i * nv + j).map(value)
+        });
+        let Some(first) = values.next() else {
+            return false;
+        };
+        let (mut lo, mut hi) = (first, first);
+        for v in values {
+            if v.is_nan() {
+                return false;
+            }
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+        hi - lo <= EFF_ZERO_SQRT
+    })
+}
+
 /// The face's B-spline surface over `cell` alone: its exact subpatch there
 /// ([`cell_patch`]), owned by the same face with the same zone tolerance, so a solve over
 /// the cell starts from the cell's own control net (the control-net guesses of the
@@ -1022,6 +1144,65 @@ fn cell_sub_surface(surface: &Surface, patch: BSplineSurface) -> Surface {
     sub.set_owner(surface.owner());
     sub.set_owner_zone_tol_3d(surface.owner_zone_tol_3d());
     sub
+}
+
+/// The greatest `S . dir` the surface's loose box over `cell` allows.
+fn loose_top(
+    k: &Kernel,
+    lb: &LazyBrep<'_>,
+    f: FaceId,
+    surface: &Surface,
+    cell: &Extent2d,
+    dir: Vec3,
+) -> Result<f64> {
+    let loose = surface_bounding_box(k, lb.get(), f, surface, cell)?;
+    let (lo, hi) = (loose.min(), loose.max());
+    Ok((lo.x * dir.x).max(hi.x * dir.x)
+        + (lo.y * dir.y).max(hi.y * dir.y)
+        + (lo.z * dir.z).max(hi.z * dir.z))
+}
+
+/// A bound on `S . dir` over a cell [`face_directed_max`] leaves at its limits unsolved or
+/// with control points (#13753):
+/// its subpatch's control-point hull (`hull`, from [`patch_hull_max`]) raised by the
+/// subpatch's rounding ([`sub_patch_rounding`]); without a subpatch, or when that rounding
+/// has no finite bound (a weight not positive, a NaN or an overflow anywhere in the base's
+/// net), the surface's loose box over the cell ([`loose_top`]), the bound the search
+/// already takes for an unsolved cell without a subpatch.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] when the loose box is not finite either: then no bound on
+/// the cell exists to name, and a box that may not hold the face is refused rather than
+/// returned; those of [`loose_top`].
+fn unsolved_cell_top(
+    k: &Kernel,
+    lb: &LazyBrep<'_>,
+    f: FaceId,
+    surface: &Surface,
+    cell: &Extent2d,
+    hull: Option<f64>,
+    dir: Vec3,
+) -> Result<f64> {
+    let rounded = match hull {
+        Some(hull) => patch_base(k, surface)?
+            .and_then(sub_patch_rounding)
+            .map(|rounding| hull + rounding)
+            .filter(|top| top.is_finite()),
+        None => None,
+    };
+    if let Some(top) = rounded {
+        return Ok(top);
+    }
+    let loose = loose_top(k, lb, f, surface, cell, dir)?;
+    if loose.is_finite() {
+        Ok(loose)
+    } else {
+        Err(SolidError::invalid_input(
+            OP_TIGHT,
+            "a trimmed-face cell left at the search's limits has no finite bound",
+        ))
+    }
 }
 
 /// The greatest `S . dir` over the trimmed region of the face's surface, raised to `best`,
@@ -1041,8 +1222,17 @@ fn cell_sub_surface(surface: &Surface, patch: BSplineSurface) -> Surface {
 /// otherwise the cell is divided ([`cell_division`]: at the knots inside it, a way within
 /// one span left whole while the other has a knot inside, else at its middles; WR-651).
 /// A cell left at [`FACE_EXTREME_MAX_DEPTH`] or past [`FACE_EXTREME_MAX_CELLS`] counts
-/// with its greatest value. The cells are an explicit stack (no recursion), taken last
+/// with its greatest value, or unsolved with its own bound ([`unsolved_cell_top`]). The cells are an explicit stack (no recursion), taken last
 /// first, as the fork's.
+///
+/// Not the fork's (#13753): a solve's greatest is a value the surface takes, a lower
+/// bound on the cell's greatest, so the fork's 1.–3. on it can set aside a cell with a
+/// higher point the solve missed. A cell of a B-spline face open both ways (its subpatch,
+/// [`cell_patch`]) is decided on its control points instead: 1. on their greatest; 2. a
+/// solve's value at a point in the face only raises `best`; 3. on their least, less the
+/// subpatch's rounding, above `best` and the zone tolerance, with every solution
+/// classified outside; at the limits it counts with its own bound; and a way along which
+/// its control values are level is not halved. Other faces keep the fork's rules.
 fn face_directed_max(
     k: &Kernel,
     lb: &mut LazyBrep<'_>,
@@ -1051,7 +1241,55 @@ fn face_directed_max(
     uv_domain: &Extent2d,
     face_zone_tol_3d: f64,
     dir: Vec3,
+    best: f64,
+) -> Result<f64> {
+    face_directed_max_with(
+        k,
+        lb,
+        f,
+        surface,
+        uv_domain,
+        face_zone_tol_3d,
+        dir,
+        best,
+        SearchLimits {
+            max_depth: FACE_EXTREME_MAX_DEPTH,
+            max_cells: FACE_EXTREME_MAX_CELLS,
+        },
+        &mut |lb, solve_on, cell, dir| {
+            cell_directed_max(k, lb, f, surface, solve_on, face_zone_tol_3d, cell, dir)
+        },
+    )
+}
+
+/// How far [`face_directed_max_with`] divides: [`FACE_EXTREME_MAX_DEPTH`] and
+/// [`FACE_EXTREME_MAX_CELLS`] in [`face_directed_max`].
+#[derive(Debug, Clone, Copy)]
+struct SearchLimits {
+    max_depth: u32,
+    max_cells: usize,
+}
+
+/// Solves a cell for [`face_directed_max_with`]: the surface to solve on (the cell's
+/// subpatch, or the face's surface), the cell and the direction; [`cell_directed_max`] in
+/// [`face_directed_max`].
+type CellSolve<'a, 'b> =
+    dyn FnMut(&mut LazyBrep<'b>, &Surface, &Extent2d, Vec3) -> Result<CellDirectedMax> + 'a;
+
+/// [`face_directed_max`] within `limits`, each cell solved by `solve`; `zone_tol` is the
+/// face's zone tolerance, how far its trim may lie from its edges.
+#[allow(clippy::too_many_arguments)]
+fn face_directed_max_with<'b>(
+    k: &Kernel,
+    lb: &mut LazyBrep<'b>,
+    f: FaceId,
+    surface: &Surface,
+    uv_domain: &Extent2d,
+    zone_tol: f64,
+    dir: Vec3,
     mut best: f64,
+    limits: SearchLimits,
+    solve: &mut CellSolve<'_, 'b>,
 ) -> Result<f64> {
     // (`IsKindOf(SmBSplineSurface_TYPE)`: `GetKnots` through `GetOrCreateGwNurbPointer`)
     let (knots_u, knots_v) = if has_b_spline_box(surface) {
@@ -1071,9 +1309,16 @@ fn face_directed_max(
         && !surface
             .is_closed(k, uv_domain, SurfParamType::V, None, false)?
             .0;
+    // How far a subpatch's control points may lie from their exact values (3. below).
+    let rounding = if by_patch {
+        patch_base(k, surface)?.and_then(sub_patch_rounding)
+    } else {
+        None
+    };
     let mut cells: Vec<(Extent2d, u32)> = vec![(*uv_domain, 0)];
     let mut divided = 0usize;
     while let Some((cell, depth)) = cells.pop() {
+        k.check_cancelled(OP_TIGHT)?;
         // The cell's subpatch and the greatest `P . dir` of its control points, which no
         // point of the cell exceeds (each is a convex combination of them).
         let patch = if by_patch {
@@ -1093,8 +1338,28 @@ fn face_directed_max(
             .as_ref()
             .map(|(patch, _)| cell_sub_surface(surface, patch.clone()));
         let solve_on = sub.as_ref().unwrap_or(surface);
-        let top = cell_directed_max(k, lb, f, surface, solve_on, face_zone_tol_3d, &cell, dir)?;
-        if top.found {
+        let top = solve(lb, solve_on, &cell, dir)?;
+        if let Some((patch, hull)) = &patch {
+            // (#13753) A solved value is one the surface takes, no bound on the cell's
+            // greatest: the solve over a whole Mixed chamfer face found its edges' value
+            // and missed a dip of 7.2e-4 inside it. With the control points to bound the
+            // cell, a value at a point in the face only raises `best` (2.), and 1. is asked
+            // again of the hull. 3. takes the least control point, less the subpatch's
+            // rounding, above `best` and the zone tolerance (the trim lies within it of the
+            // edges `best` holds), so no trim curve crosses the cell, and every solution
+            // classified outside: the whole cell is.
+            best = best.max(top.face_top);
+            if *hull <= best + EFF_ZERO_SQRT {
+                continue;
+            }
+            if top.outside
+                && patch_hull_max(patch, -dir)
+                    .zip(rounding)
+                    .is_some_and(|(least, rounding)| -least - rounding > best + zone_tol)
+            {
+                continue;
+            }
+        } else if top.found {
             if top.top <= best + EFF_ZERO_SQRT {
                 continue;
             }
@@ -1102,19 +1367,13 @@ fn face_directed_max(
                 best = top.top;
                 continue;
             }
-            let least =
-                cell_directed_max(k, lb, f, surface, solve_on, face_zone_tol_3d, &cell, -dir)?;
+            let least = solve(lb, solve_on, &cell, -dir)?;
             if least.found && -least.top > best {
                 continue;
             }
         } else if patch.is_none() {
             // No solution to decide by: the surface's loose box over the cell holds it.
-            let loose = surface_bounding_box(k, lb.get(), f, surface, &cell)?;
-            let (lo, hi) = (loose.min(), loose.max());
-            let loose_top = (lo.x * dir.x).max(hi.x * dir.x)
-                + (lo.y * dir.y).max(hi.y * dir.y)
-                + (lo.z * dir.z).max(hi.z * dir.z);
-            best = best.max(loose_top);
+            best = best.max(loose_top(k, lb, f, surface, &cell, dir)?);
             continue;
         }
         // (a cell whose subpatch gives no solution, its greatest value on its sides, is
@@ -1126,18 +1385,48 @@ fn face_directed_max(
         if monotone {
             continue;
         }
-        let exhausted = depth >= FACE_EXTREME_MAX_DEPTH || {
+        let exhausted = depth >= limits.max_depth || {
             divided += 1;
-            divided > FACE_EXTREME_MAX_CELLS
+            divided > limits.max_cells
         };
         if exhausted {
-            best = top.top;
+            // Solved without control points, the solver's greatest, above `best` (a lower
+            // one was passed over above). Unsolved, or with control points (#13753), the
+            // cell's own bound, never below `best`: no point of the cell lies above it
+            // (#16249: its `-BIG_DOUBLE` threw away the box so far).
+            best = if top.found && patch.is_none() {
+                top.top
+            } else {
+                best.max(unsolved_cell_top(
+                    k,
+                    lb,
+                    f,
+                    surface,
+                    &cell,
+                    patch.as_ref().map(|(_, hull)| *hull),
+                    dir,
+                )?)
+            };
             continue;
         }
         let (u0, v0, u1, v1) = (cell.min().x, cell.min().y, cell.max().x, cell.max().y);
         // WR-651 (tangency-labs/smlib@326de73): divided at a knot inside the cell, a way
         // within one span left whole while the other has one, else at the middles.
-        let (at_u, at_v) = cell_division(&knots_u, &knots_v, &cell);
+        let (at_u, at_v) = match (cell_division(&knots_u, &knots_v, &cell), &patch) {
+            // (#13753) a way along which the control values are level is not halved: its
+            // halves have the same hull, so a greatest value along a line inside the face
+            // (a cylinder's) would double its cells at every depth to the cell limit
+            ((Some(u), Some(v)), Some((patch, _))) => {
+                if patch_level_along(patch, dir, true) {
+                    (Some(u), None)
+                } else if patch_level_along(patch, dir, false) {
+                    (None, Some(v))
+                } else {
+                    (Some(u), Some(v))
+                }
+            }
+            (at, _) => at,
+        };
         let us = match at_u {
             Some(u) => [(u0, u), (u, u1)].to_vec(),
             None => [(u0, u1)].to_vec(),
@@ -2156,6 +2445,102 @@ fn project(p: Vec3, v: Vec3) -> Vec3 {
     p.cross(v).cross(p)
 }
 
+/// Not upstream (#15247): whether face `f` holds `uv`, a point that its inner loop `hole`,
+/// measured clockwise, does not wind around ([`sector_classify_curve_on`]'s retry). The
+/// face holds it when its outer loop winds it counter-clockwise and none of its inner
+/// loops, `hole` included, winds it. Each loop reads `uv` moved by whole periods of a
+/// closed surface towards the middle of that loop's UV box
+/// ([`into_loop_period`]), so a hole whose trims run past the seam is read in its own
+/// period. Any other reading (a boundary point, an unknown winding, an outer loop that
+/// winds nothing) is not held.
+///
+/// # Errors
+///
+/// Those of the loop list, the surface's closure test, the trim boxes and
+/// [`contains_uv_point`].
+fn holds_point_beside_hole(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    hole: LoopId,
+    uv: Point2,
+    tol: f64,
+) -> Result<bool> {
+    let surface = face_surface(b, f, OP_SECTOR)?.clone_for_evaluation()?;
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let closed_u = surface
+        .is_closed(k, &domain, SurfParamType::U, None, false)?
+        .0;
+    let closed_v = surface
+        .is_closed(k, &domain, SurfParamType::V, None, false)?
+        .0;
+    let periods = (
+        closed_u.then(|| domain.x_length()),
+        closed_v.then(|| domain.y_length()),
+    );
+    let loops = crate::topology::face::p2::loops(b, f, false, None)?;
+    if !loops.contains(&hole) {
+        return Ok(false);
+    }
+    for l in loops {
+        let at = into_loop_period(k, b, l, uv, periods)?;
+        let c = contains_uv_point(k, b, l, None, at, tol)?;
+        let held = if loopuse::is_outer_loop(b, l)? {
+            c.containment == PointContainment::Inside && c.orientation == OrientType::Same
+        } else {
+            c.containment == PointContainment::Outside
+        };
+        if !held {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Not upstream (#15247): `uv` moved by the whole `periods` (`(u, v)`, `None` where the
+/// surface is open) that bring it nearest the middle of loop `l`'s UV box (the union of
+/// its UV trim curves' boxes); `uv` itself on an open surface or for a loop without trim
+/// curves.
+///
+/// # Errors
+///
+/// Those of the loop's edge uses and the trim boxes.
+fn into_loop_period(
+    k: &Kernel,
+    b: &Brep,
+    l: LoopId,
+    uv: Point2,
+    periods: (Option<f64>, Option<f64>),
+) -> Result<Point2> {
+    if periods.0.is_none() && periods.1.is_none() {
+        return Ok(uv);
+    }
+    let mut lo = Point2::new(f64::INFINITY, f64::INFINITY);
+    let mut hi = Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for eu in loopuse::loop_edgeuses(b, l)? {
+        let Some(trim) = eu1::uv_trim_curve(b, eu)?.0 else {
+            continue;
+        };
+        let req = crate::nurbs::b_spline_curve::BoundingBoxRequest {
+            normal: true,
+            ..Default::default()
+        };
+        let boxes = trim.calculate_bounding_box(k, &trim.natural_interval(), req, false)?;
+        if let Some(bx) = boxes.normal {
+            lo = Point2::new(lo.x.min(bx.min().x), lo.y.min(bx.min().y));
+            hi = Point2::new(hi.x.max(bx.max().x), hi.y.max(bx.max().y));
+        }
+    }
+    let shift = |value: f64, low: f64, high: f64, period: Option<f64>| match period {
+        Some(p) if p > 0.0 && low <= high => value + ((0.5 * (low + high) - value) / p).round() * p,
+        _ => value,
+    };
+    Ok(Point2::new(
+        shift(uv.x, lo.x, hi.x, periods.0),
+        shift(uv.y, lo.y, hi.y, periods.1),
+    ))
+}
+
 /// `SmFace::SectorClassifyCurveOn`: classifies the interval of a curve on face `f`
 /// that crosses the face boundary at an edge (both edge uses the same) or a vertex
 /// (two neighbouring edge uses of a loop) as inside or outside the face sector the
@@ -2780,6 +3165,37 @@ pub fn sector_classify_curve_on(
             res.problem = ClassifyProblem::None;
             return Ok(res);
         } else if cont == PointContainment::Outside {
+            // The face lies on the left of its loops, so a point that a hole (an inner
+            // loop measured clockwise) does not wind around is in the face, provided
+            // the outer loop winds it and no other hole does
+            // ([`holds_point_beside_hole`]). `ContainsUVPoint` gives such a point no
+            // orientation, and upstream takes it for outside the face, so a curve
+            // leaving a vertex of a hole into the face was classified out of it. Every
+            // other reading keeps upstream's: outside. (`compute_loop_orientation` runs
+            // at most once per call: both branches return.)
+            // (A loop whose place in the face cannot be read is taken for the outer.)
+            let inner = matches!(loopuse::is_outer_loop(b, loop1), Ok(false));
+            if c.orientation != OrientType::Opposite && inner {
+                let loop_orientation = match crate::topology::face::p3::compute_loop_orientation(
+                    k, b, f, loop1, None, false,
+                ) {
+                    Ok(o) => o,
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                    Err(_) => OrientType::Unknown,
+                };
+                let held = loop_orientation == OrientType::Opposite
+                    && match holds_point_beside_hole(k, b, f, loop1, step_uv, xsect_tol) {
+                        Ok(h) => h,
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                        Err(_) => false,
+                    };
+                if held {
+                    res.inside = true;
+                    res.possible_problem = false;
+                    res.problem = ClassifyProblem::None;
+                    return Ok(res);
+                }
+            }
             res.inside = false;
             res.possible_problem = false;
             res.problem = ClassifyProblem::None;
@@ -2943,6 +3359,12 @@ mod tests {
     /// The tight box of the crowned height field trimmed to the square `[-10, 10]^2` (its
     /// loop is four lines on `z = 0`), with the fix `searches_trim` on or off.
     fn crowned_trimmed_face_box(corner: f64, searches_trim: bool) -> Extent3d {
+        let (k, b, f) = crowned_trimmed_face(corner, searches_trim);
+        calculate_tight_bounding_box(&k, &b, f).unwrap()
+    }
+
+    /// The kernel, B-rep and face of [`crowned_trimmed_face_box`].
+    fn crowned_trimmed_face(corner: f64, searches_trim: bool) -> (Kernel, Brep, FaceId) {
         let mut k = Kernel::default();
         k.fixes.face_tight_box_searches_trim = searches_trim;
         let interval = Extent1d::from_min_max(0.0, 1.0);
@@ -2966,7 +3388,7 @@ mod tests {
             .unwrap();
         let faces = crate::topology::brep::p1::faces(&b, None).unwrap();
         assert_eq!(faces.len(), 1);
-        calculate_tight_bounding_box(&k, &b, faces[0]).unwrap()
+        (k, b, faces[0])
     }
 
     /// WR-588 (#1799): the trimmed face rises to 4 at its middle, where its surface's
@@ -3077,6 +3499,187 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// #16249: a cell left unsolved at the search's limits counts with its subpatch's
+    /// control-point hull (plus its rounding), raised into the bound so far, not with the
+    /// solve's `-BIG_DOUBLE`, which threw away the box of the edges (z 0) and every cell
+    /// before it. Every cell here is unsolved (a solve that fails, whose error is
+    /// ignored) and the crown is no cell's monotone, so the cell holding the peak reaches
+    /// the cell limit, the depth limit, or both. The face rises to 4 at its middle; its
+    /// whole net's hull is 9.
+    #[test]
+    fn unsolved_cell_at_the_search_limits_keeps_a_bound_on_the_face() {
+        let (k, b, f) = crowned_trimmed_face(0.0, true);
+        let face = b.face(f).unwrap();
+        let surface = face.surface.clone().unwrap();
+        let domain = face.uv_domain;
+        let mut lb: LazyBrep<'_> = (&b).into();
+        let mut unsolved = |_: &mut LazyBrep<'_>, _: &Surface, _: &Extent2d, _: Vec3| {
+            Ok(CellDirectedMax {
+                top: -crate::math::BIG_DOUBLE,
+                in_face: false,
+                found: false,
+                face_top: -crate::math::BIG_DOUBLE,
+                outside: false,
+            })
+        };
+        let up = Vec3::new(0.0, 0.0, 1.0);
+        for (max_depth, max_cells) in [(16, 0), (0, 4096), (2, 4096), (2, 3)] {
+            let limits = SearchLimits {
+                max_depth,
+                max_cells,
+            };
+            let top = face_directed_max_with(
+                &k,
+                &mut lb,
+                f,
+                &surface,
+                &domain,
+                1e-6,
+                up,
+                0.0,
+                limits,
+                &mut unsolved,
+            )
+            .unwrap();
+            assert!(
+                (4.0..=9.0 + 1e-9).contains(&top),
+                "depth {max_depth}, cells {max_cells}: z max {top}"
+            );
+        }
+    }
+
+    /// #13753: a solve's value is no bound on its cell. Every solve here finds a point at
+    /// z = 0 on the face's boundary (the edges' value, not inside the face), as the solve
+    /// over the Mixed chamfer face did: a cell is set aside only on its control points, so
+    /// the cell holding the crown's peak (4) is divided to the search's limits and counts
+    /// there with its hull (at most the whole net's, 9), not with the solve's 0, which set
+    /// every cell aside at once.
+    #[test]
+    fn a_solve_that_misses_the_peak_does_not_set_its_cell_aside() {
+        let (k, b, f) = crowned_trimmed_face(0.0, true);
+        let face = b.face(f).unwrap();
+        let surface = face.surface.clone().unwrap();
+        let domain = face.uv_domain;
+        let mut lb: LazyBrep<'_> = (&b).into();
+        let mut missed = |_: &mut LazyBrep<'_>, _: &Surface, _: &Extent2d, _: Vec3| {
+            Ok(CellDirectedMax {
+                top: 0.0,
+                in_face: false,
+                found: true,
+                face_top: -crate::math::BIG_DOUBLE,
+                outside: false,
+            })
+        };
+        let up = Vec3::new(0.0, 0.0, 1.0);
+        for (max_depth, max_cells) in [(16, 4096), (2, 4096), (16, 3)] {
+            let limits = SearchLimits {
+                max_depth,
+                max_cells,
+            };
+            let top = face_directed_max_with(
+                &k,
+                &mut lb,
+                f,
+                &surface,
+                &domain,
+                1e-6,
+                up,
+                0.0,
+                limits,
+                &mut missed,
+            )
+            .unwrap();
+            assert!(
+                (4.0..=9.0 + 1e-9).contains(&top),
+                "depth {max_depth}, cells {max_cells}: z max {top}"
+            );
+        }
+    }
+
+    /// #13753: the search asks for cancellation at every cell, as a face's search can now
+    /// divide to its cell limit. The token is cancelled by the third solve, inside the
+    /// search of one direction: the search stops there with the cancellation.
+    #[test]
+    fn a_cancelled_search_stops_at_its_next_cell() {
+        let (mut k, b, f) = crowned_trimmed_face(0.0, true);
+        let token = crate::kernel::CancelToken::new();
+        k.set_cancel_token(token.clone());
+        let face = b.face(f).unwrap();
+        let surface = face.surface.clone().unwrap();
+        let domain = face.uv_domain;
+        let mut lb: LazyBrep<'_> = (&b).into();
+        let mut solves = 0;
+        let mut cancelling = |_: &mut LazyBrep<'_>, _: &Surface, _: &Extent2d, _: Vec3| {
+            solves += 1;
+            if solves == 3 {
+                token.cancel();
+            }
+            Ok(CellDirectedMax {
+                top: 0.0,
+                in_face: false,
+                found: true,
+                face_top: -crate::math::BIG_DOUBLE,
+                outside: false,
+            })
+        };
+        let limits = SearchLimits {
+            max_depth: FACE_EXTREME_MAX_DEPTH,
+            max_cells: FACE_EXTREME_MAX_CELLS,
+        };
+        let got = face_directed_max_with(
+            &k,
+            &mut lb,
+            f,
+            &surface,
+            &domain,
+            1e-6,
+            Vec3::new(0.0, 0.0, 1.0),
+            0.0,
+            limits,
+            &mut cancelling,
+        );
+        assert!(matches!(got, Err(SolidError::Cancelled { .. })), "{got:?}");
+    }
+
+    /// The rounding of a subpatch's hull is a small finite bound for the crown, and none
+    /// when it overflows (a rational net with coordinates near `1e100` and weights `1e-300`
+    /// and 1): an unsolved cell then counts with the surface's loose box, not the hull.
+    #[test]
+    fn sub_patch_rounding_overflow_falls_back_to_the_loose_box() {
+        let crown = crowned_height_field(0.0);
+        let SurfaceKind::BSpline(bs) = crown.kind() else {
+            panic!("the crown is a B-spline");
+        };
+        let r = sub_patch_rounding(bs).unwrap();
+        assert!(r > 0.0 && r < 1e-11, "rounding {r}");
+
+        let w = [[1e-300, 1.0], [1.0, 1.0]];
+        let net: Vec<Vec<CPoint>> = (0..2)
+            .map(|i| {
+                (0..2)
+                    .map(|j| {
+                        let (x, y) = ([0.0, 1e100][i], [0.0, 1e100][j]);
+                        CPoint::new(x * w[i][j], y * w[i][j], 1e100 * w[i][j], w[i][j])
+                    })
+                    .collect()
+            })
+            .collect();
+        let knots = vec![0.0, 0.0, 1.0, 1.0];
+        let nurb = NurbSurface::new(net, 1, 1, knots.clone(), knots).unwrap();
+        let wild = Surface::from(BSplineSurface::from_nurb(nurb, false));
+        let SurfaceKind::BSpline(wild_bs) = wild.kind() else {
+            panic!("a B-spline");
+        };
+        assert!(sub_patch_rounding(wild_bs).is_none());
+        let (k, b, f) = crowned_trimmed_face(0.0, true);
+        let lb: LazyBrep<'_> = (&b).into();
+        let cell = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        // the cell then counts with the surface's loose box over it, which holds the
+        // patch's highest control value 1e100, not with the hull 1 alone
+        let top = unsolved_cell_top(&k, &lb, f, &wild, &cell, Some(1.0), Vec3::Z).unwrap();
+        assert!(top >= 1e100, "loose top {top}");
     }
 
     /// The surface's global maximum lies inside the trim (no peak outside): both paths
@@ -3548,5 +4151,209 @@ mod tests {
     fn classify_problem_codes() {
         assert_eq!(ClassifyProblem::None as i32, 0);
         assert_eq!(ClassifyProblem::UnresolvedClassification as i32, 7);
+    }
+
+    /// A face on `surface` over `dom` made by `MakeFaceWithCurves` from UV loops: an outer
+    /// rectangle `outer` (fractions of `dom`, counter-clockwise) and clockwise circles
+    /// `holes` (`(u, v, r)` in fractions, `r` of the shorter side).
+    fn face_with_holes(
+        k: &mut Kernel,
+        surface: Surface,
+        dom: &Extent2d,
+        outer: [f64; 4],
+        holes: &[(f64, f64, f64)],
+    ) -> (Brep, FaceId) {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
+        use crate::topology::brep_cache::{arena_identity, CacheObject};
+        let at = |a: f64, c: f64| {
+            Point3::new(
+                dom.min().x + a * dom.x_length(),
+                dom.min().y + c * dom.y_length(),
+                0.0,
+            )
+        };
+        let [u0, v0, u1, v1] = outer;
+        let corners = [at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)];
+        let mut uv = Vec::new();
+        let mut orientations = Vec::new();
+        for i in 0..4 {
+            uv.push(Curve::from(
+                BSplineCurve::create_line_segment(2, corners[i], corners[(i + 1) % 4]).unwrap(),
+            ));
+            orientations.push(OrientType::Same);
+        }
+        let side = dom.x_length().min(dom.y_length());
+        for &(a, c, r) in holes {
+            let mut frame = Axis2Placement::default();
+            frame.set_canonical(at(a, c), Vec3::X, Vec3::Y).unwrap();
+            uv.push(Curve::from(
+                BSplineCurve::create_circle_segment(
+                    2,
+                    &frame,
+                    r * side,
+                    0.0,
+                    360.0,
+                    NurbCircleParam::Quadratic,
+                )
+                .unwrap(),
+            ));
+            orientations.push(OrientType::Opposite);
+        }
+        let mut loops = vec![4];
+        loops.extend(holes.iter().map(|_| 1));
+        let input = FaceCurvesInput {
+            loops,
+            curves_3d: None,
+            uv_curves: Some(uv),
+            orientations,
+            loop_points: Vec::new(),
+        };
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let region = b.infinite_region();
+        let made = {
+            let mut state = ArenaNotifyState::new(&b);
+            let this_face = |face| arena_identity(CacheObject::Face(face));
+            let mut env = state.env(None);
+            make_face_with_curves(
+                k,
+                &mut b,
+                region,
+                input,
+                surface,
+                dom,
+                OrientType::Same,
+                None,
+                &this_face,
+                &mut env,
+            )
+            .unwrap()
+        };
+        (b, made.face.unwrap())
+    }
+
+    /// The loop of `f` that winds `uv` clockwise: the hole around it. (The probes avoid the
+    /// circles' centres, which `ContainsUVPoint` reads as on the boundary.)
+    fn hole_around(k: &Kernel, b: &mut Brep, f: FaceId, uv: Point2) -> LoopId {
+        for l in crate::topology::face::p2::loops(b, f, false, None).unwrap() {
+            let c = contains_uv_point(k, b, l, None, uv, 1e-6).unwrap();
+            if c.containment == PointContainment::Inside && c.orientation == OrientType::Opposite {
+                return l;
+            }
+        }
+        panic!("no hole around {uv:?}");
+    }
+
+    /// #15247: a point beside one hole is held by the face only when the outer loop winds
+    /// it and no other hole does: between two holes 0.02 apart, a point just outside the
+    /// first lies in the second and is not held; past the outer loop nothing is held.
+    #[test]
+    fn a_point_beside_a_hole_is_in_the_face_only_outside_every_other_loop() {
+        let mut k = Kernel::default();
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let plane = Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Y,
+            Vec2::new(1.0, 1.0),
+            &dom,
+        );
+        let (mut b, f) = face_with_holes(
+            &mut k,
+            Surface::from(plane),
+            &dom,
+            [0.05, 0.05, 0.95, 0.95],
+            &[(0.3, 0.5, 0.1), (0.52, 0.5, 0.1)],
+        );
+        let first = hole_around(&k, &mut b, f, Point2::new(0.33, 0.51));
+        let holds = |b: &mut Brep, u: f64, v: f64| {
+            holds_point_beside_hole(&k, b, f, first, Point2::new(u, v), 1e-6).unwrap()
+        };
+        // between the holes (the second spans u 0.42..0.62)
+        assert!(holds(&mut b, 0.41, 0.5));
+        // inside the second hole
+        assert!(!holds(&mut b, 0.45, 0.5));
+        // inside the first hole
+        assert!(!holds(&mut b, 0.33, 0.51));
+        // past the outer loop (u 0.05..0.95)
+        assert!(!holds(&mut b, 0.97, 0.5));
+        assert!(holds(&mut b, 0.8, 0.8));
+    }
+
+    /// #15247: on a cylinder, points are read in each loop's period. A second hole's trims
+    /// lie a period past the face's domain (centred at 1.1 of the period): the point at 0.11,
+    /// in that hole on the cylinder, is not held, though the hole winds it only at 1.11, so
+    /// the test fails if inner loops are not moved. The point at -0.05 (the copy of 0.95 a
+    /// drop onto the closed surface may return) lies in the hole at 0.94 and is not held; the
+    /// point at -0.5 lies in the face and is held, though the outer loop winds it only at
+    /// 0.5, so that fails if the outer loop is not moved.
+    #[test]
+    fn a_point_a_period_away_is_read_in_each_loops_period() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::surface::cone::Cone;
+        let mut k = Kernel::default();
+        let surface = Surface::from(
+            Cone::create_canonical_cylinder(&k, &Axis2Placement::default(), 1.0).unwrap(),
+        );
+        let natural = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let period = natural.x_length();
+        let dom = Extent2d::from_bounds(natural.min().x, 0.0, natural.max().x, period);
+        let (mut b, f) = face_with_holes(
+            &mut k,
+            surface,
+            &dom,
+            [0.0, 0.05, 1.0, 0.95],
+            &[(0.94, 0.5, 0.05), (0.1, 0.3, 0.04)],
+        );
+        let u = |a: f64| natural.min().x + a * period;
+        let hole = hole_around(&k, &mut b, f, Point2::new(u(0.95), 0.51 * period));
+        let holds = |b: &mut Brep, a: f64| {
+            holds_point_beside_hole(&k, b, f, hole, Point2::new(u(a), 0.51 * period), 1e-6).unwrap()
+        };
+        // the second hole's trim stored a period on (the circle about 1.1 of the period): read
+        // where it is, the point at 0.11 is outside it, and it is moved there
+        let beyond = hole_around(&k, &mut b, f, Point2::new(u(0.11), 0.31 * period));
+        {
+            use crate::geom::axis2_placement::Axis2Placement as Frame;
+            use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+            let eu = loopuse::loop_edgeuses(&b, beyond).unwrap()[0];
+            let mut frame = Frame::default();
+            frame
+                .set_canonical(Point3::new(u(1.1), 0.3 * period, 0.0), Vec3::X, Vec3::Y)
+                .unwrap();
+            let circle = BSplineCurve::create_circle_segment(
+                2,
+                &frame,
+                0.04 * period,
+                0.0,
+                360.0,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap();
+            b.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(Curve::from(circle));
+        }
+        let at = Point2::new(u(0.11), 0.31 * period);
+        let c = contains_uv_point(&k, &mut b, beyond, None, at, 1e-6).unwrap();
+        assert_eq!(c.containment, PointContainment::Outside);
+        let moved = into_loop_period(&k, &b, beyond, at, (Some(period), None)).unwrap();
+        assert!((moved.x - u(1.11)).abs() < 1e-9, "{moved:?}");
+        assert!(!holds_point_beside_hole(&k, &mut b, f, hole, at, 1e-6).unwrap());
+        assert!(!holds(&mut b, -0.05));
+        assert!(holds(&mut b, 0.5));
+        // a point of the face one period away is held: each loop reads it in its period
+        assert!(holds(&mut b, -0.5));
+        // read without moving it, the hole does not wind the point
+        let c = contains_uv_point(
+            &k,
+            &mut b,
+            hole,
+            None,
+            Point2::new(u(-0.05), 0.51 * period),
+            1e-6,
+        )
+        .unwrap();
+        assert_eq!(c.containment, PointContainment::Outside);
     }
 }

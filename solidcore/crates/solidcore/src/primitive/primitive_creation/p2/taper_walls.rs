@@ -55,9 +55,13 @@
 //!
 //! Deviations: out-params become return values (a refusal is
 //! `Ok(Err(CornerRefusal))`, the fork's `SM_ERR_INVALID_INPUT` with its refusal set);
-//! a profile curve is matched to its input by index into the caller's list. No
-//! recursion; every loop is bounded by the profile's curve count or a fixed sample
-//! count (the arc span count is at most the arc's angle over a quarter turn).
+//! a profile curve is matched to its input by index into the caller's list; a cone
+//! wall's seam pcurve has its weights scaled to start at 1 (the fork's grow with the
+//! arc's radius, past the weight range of a B-spline, so a large arc's draft was refused); two
+//! sections that touch within the rounding of computing their crossing touch (the fork's took
+//! rounding's sign, so a tip where a line or an arc touches an arc was refused). No recursion;
+//! every loop is bounded by the profile's curve count or a fixed sample count (the arc span
+//! count is at most the arc's angle over a quarter turn).
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
@@ -67,6 +71,7 @@ use crate::curve::curve::p2::{CIRCLE_TYPE, LINE_TYPE};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::certified::gamma;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_line_closest_point;
@@ -187,7 +192,10 @@ fn section(w: &Wall, f: f64) -> (Point3, Vec3, f64) {
 
 /// Where the sections of `a` and `b` at fraction `f` cross, nearest `near` (all in the
 /// profile's plane, whose unit normal is `n`); `None` when they do not cross
-/// (`sm_DraftCrossing`).
+/// (`sm_DraftCrossing`). Sections that touch, as at a profile's tip where a line or an arc
+/// meets an arc at 0 degrees, come out a hair apart or crossing by rounding: they are apart
+/// only where the rounding bound proves it ([`touch_bound`], [`circles_may_meet`]), and touch at
+/// one point otherwise.
 fn crossing(a: &Wall, b: &Wall, f: f64, n: Vec3, near: Point3) -> Option<Point3> {
     let (pa, da, ra) = section(a, f);
     let (pb, db, rb) = section(b, f);
@@ -210,12 +218,23 @@ fn crossing(a: &Wall, b: &Wall, f: f64, n: Vec3, near: Point3) -> Option<Point3>
         let w = l - c;
         let bb = d.dot(w);
         let disc = bb * bb - (w.dot(w) - r * r);
-        if disc < 0.0 {
-            return None;
+        if disc >= 0.0 {
+            let root = disc.sqrt();
+            cand.push(l + (-bb - root) * d);
+            cand.push(l + (-bb + root) * d);
+        } else {
+            // negative (or NaN) as computed: decided from the line's foot from the centre, c + q
+            let dd = d.dot(d);
+            let q = w - (bb / dd) * d;
+            let qn = q.length();
+            if !(qn - r <= touch_bound(w.length(), qn, r)) {
+                return None;
+            }
+            let root = ((r - qn) * (r + qn) / dd).max(0.0).sqrt();
+            let foot = c + q;
+            cand.push(foot - root * d);
+            cand.push(foot + root * d);
         }
-        let root = disc.sqrt();
-        cand.push(l + (-bb - root) * d);
-        cand.push(l + (-bb + root) * d);
     } else {
         if ra <= 0.0 || rb <= 0.0 {
             return None;
@@ -225,13 +244,19 @@ fn crossing(a: &Wall, b: &Wall, f: f64, n: Vec3, near: Point3) -> Option<Point3>
         if dd < EFF_ZERO {
             return None;
         }
+        let d2 = e.dot(e);
         e /= dd;
-        let along = (ra * ra - rb * rb + dd * dd) / (2.0 * dd);
-        let h2 = ra * ra - along * along;
+        let mut along = (ra * ra - rb * rb + dd * dd) / (2.0 * dd);
+        let mut h2 = ra * ra - along * along;
         if h2 < 0.0 {
-            return None;
+            // negative as computed: decided from the radii, the chord from the factored squares
+            if !circles_may_meet(d2, ra, rb) {
+                return None;
+            }
+            along = ((ra - rb) * (ra + rb) + dd * dd) / (2.0 * dd);
+            h2 = (ra - along) * (ra + along);
         }
-        let h = h2.sqrt();
+        let h = h2.max(0.0).sqrt();
         let q = n.cross(e);
         cand.push(pa + along * e + h * q);
         cand.push(pa + along * e - h * q);
@@ -244,6 +269,40 @@ fn crossing(a: &Wall, b: &Wall, f: f64, n: Vec3, near: Point3) -> Option<Point3>
         }
     }
     Some(x)
+}
+
+/// A bound on how far [`crossing`]'s computed `|q| - r` lies from the exact one of the given
+/// `l`, `c`, `d`, `r`, `q = w - (d.w / d.d) d` with `w = l - c` the line's foot from the
+/// centre (the line `l + s d` meets the circle where `|q| <= r`), from the computed `wn = |w|`
+/// and `qn = |q|`. Higham's model: `w` rounds once, `d.w` within `gamma_3 |d| |w|`
+/// (Cauchy-Schwarz) and `d.d` within `gamma_3 |d|^2`, so their quotient times `d` within
+/// `gamma_8` of `|d.w| / |d| <= |w|`, and the difference once, so `q` within `gamma_11 |w| + u
+/// |q|`; `|q|` within `gamma_4`, and `|q| - r` rounds once. Taken as `gamma_16` of
+/// `|w| + |q| + r` for the computed `|w|` and the bound's own rounding. A line that touches
+/// its circle, as at a profile's tip where a line meets an arc at 0 degrees, has `|q| - r`
+/// of about 0 and a computed one of either sign; within the bound the foot (or the points
+/// either side of it) is within the bound of both sections. Read only where the discriminant
+/// `(d.w)^2 - (w.w - r^2)` comes out negative (it rounds with `|w|^2`), so lines that crossed
+/// as computed still do.
+fn touch_bound(wn: f64, qn: f64, r: f64) -> f64 {
+    gamma(16) * (wn + qn + r)
+}
+
+/// Whether two circles of radii `ra` and `rb` whose centres' computed squared distance is
+/// `d2` are not proved apart (they touch or cross): they meet where
+/// `(ra - rb)^2 <= D^2 <= (ra + rb)^2` (from
+/// `4 D^2 h^2 = ((ra + rb)^2 - D^2)(D^2 - (ra - rb)^2)`, `h` the half chord), which
+/// [`crossing`]'s `h^2 = ra^2 - along^2` decides badly conditioned (`along` divides by D);
+/// where they meet, the chord is then taken from `(ra - rb)(ra + rb)` and
+/// `(ra - along)(ra + along)`, which round little where the radii are close.
+/// `d2` is within `gamma_5` of the exact `D^2` (the difference rounds once, the squares and
+/// their sum), each square of a radius sum or difference within `gamma_3`; taken as
+/// `gamma_12` of the two sides for the comparison's own rounding. Read only where `h^2` comes
+/// out negative, so circles that crossed as computed still do.
+fn circles_may_meet(d2: f64, ra: f64, rb: f64) -> bool {
+    let lo = (ra - rb) * (ra - rb);
+    let hi = (ra + rb) * (ra + rb);
+    d2 + gamma(12) * (d2 + lo) >= lo && d2 - gamma(12) * (d2 + hi) <= hi
 }
 
 /// The distance from `q` (in the profile's plane) to the section of `w` at fraction
@@ -469,8 +528,9 @@ fn seam_angles(w: &Wall, seam: &Seam, n: Vec3, h: Vec3, near: f64) -> (f64, f64)
 /// The seam's pcurve on wall `w`, whose surface parameters are
 /// `(u0 + f (u1 - u0), v0 + (t - t0) * v_scale)` for the wall's fraction `f` and curve
 /// parameter `t` (`sm_DraftSeamPcurve`). On an arc's wall the seam is cut where it
-/// crosses from one span to the next, each piece the rational quartic of its span.
-/// `SM_ERR` when a piece leaves its span or a weight is not positive.
+/// crosses from one span to the next, each piece the rational quartic of its span, its
+/// weights scaled to start at 1. `SM_ERR` when a piece leaves its span or a weight is not
+/// positive.
 #[allow(clippy::too_many_arguments)] // the fork's arguments, and the WR-571 mode
 fn seam_pcurve(
     w: &Wall,
@@ -639,9 +699,13 @@ fn seam_pcurve(
         let d4 = quartic(wt, den);
         let u4 = quartic(su, den);
         let t4 = quartic(num, wt);
-        // the pieces join with one weight: scale this piece's to the last one's end
-        let scale = if piece == 0 || !(d4[0] > 0.0) {
+        // the pieces join with one weight: scale this piece's to the last one's end, and the
+        // first piece's to start at 1 (scaled by one factor the curve is the same; as built
+        // the weights grow with the arc's radius, past the range a B-spline takes)
+        let scale = if !(d4[0] > 0.0) {
             1.0
+        } else if piece == 0 {
+            1.0 / d4[0]
         } else {
             prev_w / d4[0]
         };
@@ -1144,8 +1208,11 @@ fn sharp_seam(
         seam.s = 0.5 * (p + seam.x);
         seam.weight = 1.0;
     } else {
-        // the shoulder where the end tangents cross, the weight from the halfway point
-        let (d0, d1) = line_line_closest_point(p, t0, seam.x, t1)?;
+        // the shoulder where the end tangents cross, the weight from the halfway point; end
+        // tangents that are parallel have none, and no conic through a middle off the chord
+        let Ok((d0, d1)) = line_line_closest_point(p, t0, seam.x, t1) else {
+            return refusal(TaperCornerRefusal::NotExact);
+        };
         let s0 = p + d0 * t0;
         let s1 = seam.x + d1 * t1;
         if s0.distance(s1) > EFF_ZERO_SQRT * scale || !(d0 > 0.0) || !(d1 < 0.0) {
@@ -2005,6 +2072,104 @@ mod tests {
         assert_eq!(x, Some(Point3::new(9.0, 1.0, 0.0)));
         // parallel lines do not cross
         assert_eq!(crossing(&a, &a, 1.0, n, b.start), None);
+    }
+
+    /// Two circles touching inside each other, as the arcs of a crescent at its tip: these
+    /// centres and radii, as doubles, are exactly 63.6 = 591.6 - 528 apart, touching at
+    /// (113.92, 0); `h^2` comes out -2.3e-10. Moved apart by a micrometre, they do not meet.
+    #[test]
+    fn two_circles_touching_within_rounding_touch() {
+        let circle = |x: f64, r: f64| Wall {
+            arc: true,
+            center: Point3::new(x, 0.0, 0.0),
+            axis: Vec3::Z,
+            radius: r,
+            ..Wall::default()
+        };
+        let a = circle(-477.68, 591.6);
+        let b = circle(-414.08, 528.0);
+        let tip = Point3::new(113.92, 0.0, 0.0);
+        let x = crossing(&a, &b, 0.0, Vec3::Z, tip);
+        assert!(x.is_some_and(|x| x.distance(tip) < 1e-9), "{x:?}");
+        let c = circle(-414.081, 528.0);
+        assert_eq!(crossing(&a, &c, 0.0, Vec3::Z, tip), None);
+    }
+
+    /// Two large circles touching inside each other, radii 1e8 and 1e8 - 1 with centres 1
+    /// apart: `ra^2 - rb^2` rounds by 1, which put the touching point half a unit off both.
+    #[test]
+    fn two_large_circles_touching_inside_touch_where_they_do() {
+        let circle = |x: f64, r: f64| Wall {
+            arc: true,
+            center: Point3::new(x, 0.0, 0.0),
+            axis: Vec3::Z,
+            radius: r,
+            ..Wall::default()
+        };
+        let tip = Point3::new(1e8, 0.0, 0.0);
+        let x = crossing(
+            &circle(0.0, 1e8),
+            &circle(1.0, 99_999_999.0),
+            0.0,
+            Vec3::Z,
+            tip,
+        );
+        assert!(x.is_some_and(|x| x.distance(tip) < 1e-6), "{x:?}");
+    }
+
+    /// A line starting 1e8 from a circle of radius 1: `(d.w)^2` and `w.w` are 1e16 and round
+    /// by units, so the discriminant's bound did not prove that the line y = 2 misses the
+    /// circle (it touched at (0, 2), a radius off); its foot from the centre does.
+    #[test]
+    fn a_line_far_from_its_start_misses_a_circle_it_misses() {
+        let circle = Wall {
+            arc: true,
+            axis: Vec3::Z,
+            radius: 1.0,
+            ..Wall::default()
+        };
+        let line = |y: f64| Wall {
+            start: Point3::new(1e8, y, 0.0),
+            dir: Vec3::X,
+            ..Wall::default()
+        };
+        assert_eq!(
+            crossing(&line(2.0), &circle, 0.0, Vec3::Z, Point3::ZERO),
+            None
+        );
+    }
+
+    /// A line touching a circle, as at the issue's lower horn's tip (the line from (406, s.y)
+    /// to the circle's point t = (c + r, 0), leaning 1.6e-8 off x = 406): the discriminant
+    /// `(d.w)^2 - (w.w - r^2)` came out -2.2e-11, the foot's `|q| - r` 0, and they meet at the
+    /// line's foot from the centre, 5.3e-8 from t (the line
+    /// crosses the circle at t and 1.1e-7 above it). Moved a micrometre off the circle, they do
+    /// not meet.
+    #[test]
+    fn a_line_touching_a_circle_within_rounding_touches_it() {
+        let c = Point3::new(-340.614_824_473_321_73, 0.0, 0.0);
+        let r = 746.614_824_457_444_7;
+        let t = Point3::new(405.999_999_984_122_95, 0.0, 0.0);
+        let circle = Wall {
+            arc: true,
+            center: c,
+            axis: Vec3::Z,
+            radius: r,
+            ..Wall::default()
+        };
+        let line = |x: f64| {
+            let start = Point3::new(x, -223.013_212_796_215_44, 0.0);
+            Wall {
+                start,
+                dir: (Point3::new(x - 406.0 + t.x, 0.0, 0.0) - start)
+                    .unitize()
+                    .unwrap_or(Vec3::Y),
+                ..Wall::default()
+            }
+        };
+        let x = crossing(&line(406.0), &circle, 0.0, Vec3::Z, t);
+        assert!(x.is_some_and(|x| x.distance(t) < 1e-7), "{x:?}");
+        assert_eq!(crossing(&line(406.001), &circle, 0.0, Vec3::Z, t), None);
     }
 
     #[test]

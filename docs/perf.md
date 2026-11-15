@@ -759,6 +759,80 @@ The GPU evaluates the 561 plans in under 5 ms (the longest GPU workload in an `n
 the same hovers). The remaining CPU time was the copy of the bodies' edges, which drawing the
 model's own edge lines again (the section above) removes as well.
 
+## The History bar: a step out of view only takes its place (2026-11-13)
+
+The History bar paints only the steps in view, but every step of a long history still did work
+at every frame. The bar copied each feature's name into a list and built a table of every
+result. Then, for each step, in view or not, its widget copied the theme, built the step's handle
+name and copied it into the handle registry. For each step out of view it also asked egui twice,
+for the focus and for open menus. On Rover-v7 (3,324 features) that was 0.86 ms of every frame.
+
+What changed:
+- **The bar's list is kept while the features stay the same**: each feature's name, icon, icon
+  accent and handle name. Its key is of the same kind as the vertical History's row plan's: the
+  session, its revision, the document's address and the feature count. When the key changes,
+  the list is checked against the features, value by value and without allocating (about
+  0.06 ms here), and built again only if one differs: a selection or a step of a sketch drag
+  builds nothing. Nothing in the list depends on the theme, the results, the selection or the
+  marker.
+- **A step's result is read at its own place** while the results line up with the features, one
+  result each. Otherwise the table is built as before.
+- **A step out of view takes its place and publishes its kept handle**, nothing more. A run of
+  such steps asks egui once about the focus and open menus.
+
+Every step still publishes its `timeline:` handle, and the marker, drops and Shift+click ranges
+see every step's place as before.
+
+Median UI time of a frame on Rover-v7, in a headless test build (Windows 11, 48 CPU threads,
+`ci` profile, 300 frames a round, window 2560 × 1392, the camera turning every frame). Each
+number is the median of the rounds measured, two before and six after. For the frame, the rounds
+stayed within 0.02 ms of each other before and 0.13 ms after; for the bar, within about 0.01 ms.
+
+| | frame, before | frame, after | inside the bar, before | inside the bar, after |
+|---|---|---|---|---|
+| History bar shown | 3.09 ms | 2.34 ms | 0.86 ms | 0.17 ms |
+| a feature selected | 3.12 ms | 2.40 ms | 0.89 ms | 0.20 ms |
+| "Fold the History bar into groups" on | 3.06 ms | 2.61 ms | 0.84 ms | 0.37 ms |
+| History bar hidden | 2.05 ms | 2.07 ms | — | — |
+
+Nothing drawn changed: each state painted the same number of shapes before and after (562, 566,
+772 and 408), and a test compares a frame drawn from the kept list with the frame that built it
+(the same handles at the same points, the same shapes).
+
+What remains inside the bar is one pass over the steps (about 40 ns each) and, with the groups
+on, the grouping worked out again at every frame.
+
+## A picked Move feature: each body's faces measured once (2026-11-13)
+
+A Move feature makes no body and names no faces, so the highlight of a picked or hovered one
+comes from `changed_faces`, which compares the states either side of the feature. It skipped
+the bodies a feature left alone (#14166), but a Move changes every body it moves: each was
+measured with `Body::faces` before and after, and `Body::faces` meshes the whole body. The
+highlight is built again at every hover change, and the feature's faces are asked for once for
+the selection and once more while the feature is under the pointer.
+
+Now a body's faces are measured once per geometry and tolerance (`ModelBody::faces_at`, shared
+by snapshots like its mesh), so a rebuild of the highlight meshes nothing. The same faces are
+lit: the measurements are the ones `Body::faces` gave, at the same tolerance. The Configuration
+Table's Add Column menu had the same cost: its Face Appearance list of a body's faces measured
+the body again at each frame while it was open, and now reads the joints' measurement
+(`ModelBody::joint_faces`, the same tolerance).
+
+Measured on an assembly of 103 moved bodies (imported STEP parts, 671 faces, about 1.7 million
+triangles in the design), Ryzen 5 7600X, NVIDIA GeForce RTX 5070, Windows, release build, through
+the control channel with `SOLIDCRAFT_PROFILE_FRAMES=1`. Inside one build of the highlight on
+`main`: 1554 ms in `changed_faces`, of it 1552 ms in `Body::faces`; drawing the lit faces 16 ms.
+
+| | before (`main`) | after |
+|---|---|---|
+| the pointer first comes onto the Move feature's row | 1.5 s | 1.6 s, once |
+| click the row | 3.0 s | 6 ms |
+| 25 pointer moves across the model, the feature picked | 28 s | no frame over 50 ms |
+| the pointer onto the first items of the feature's menu | 1.9 s | no frame over 50 ms |
+
+What is left: the first measurement of the moved bodies, once for each body's geometry (the
+1.6 s above), and again for the bodies a later edit of the Move makes.
+
 # Recompute performance
 
 `solidcraft-cli bench-edit <script> <param> "(<old>) * 1.02"` builds a design from its script

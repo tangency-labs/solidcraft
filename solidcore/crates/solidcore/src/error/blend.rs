@@ -14,10 +14,11 @@
 //!
 //! | Cause                                  | Class ([`ErrorKind`])                         |
 //! |----------------------------------------|-----------------------------------------------|
-//! | [`BlendFailure::NoRoom`]               | the reason's ([`no_room_class`]), 101 to 124 or 128 |
+//! | [`BlendFailure::NoRoom`]               | the reason's ([`no_room_class`]), 101 to 124, 128 or 129 |
 //! | [`BlendFailure::StationDidNotConverge`]| [`ErrorKind::StationDidNotConverge`] (125)    |
 //! | [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`] | [`ErrorKind::TrimLeaks`] (126) |
 //! | [`BlendFailure::StageFailed`]          | [`ErrorKind::StageFailed`] (127)              |
+//! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -37,6 +38,7 @@
 //! | [`BlendFailure::OutsideDomain`]        | `SM_ERR_OUTSIDE_OF_DOMAIN`        |
 //! | [`BlendFailure::NotWithinTolerance`]   | `SM_ERR_NOT_WITHIN_TOLERANCE`     |
 //! | [`BlendFailure::PassedOn`]             | the status of the stage passed on |
+//! | [`BlendFailure::NotCertified`]         | `SM_ERR`                          |
 //!
 //! **The phrase causes** ([`BlendFailure::Failed`] to [`BlendFailure::PassedOn`]) are the
 //! shape the blend sites were converted to before the record, some of them refusals not yet
@@ -68,8 +70,8 @@ use crate::blend::fillet_executive::NoRoomReason;
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum BlendFailure {
-    /// A blend larger than its faces allow, for the reason named (classes 101 to 124, and
-    /// 128; [`no_room_class`]). A refusal: the failure's fit, where the
+    /// A blend larger than its faces allow, for the reason named (classes 101 to 124, 128
+    /// and 129; [`no_room_class`]). A refusal: the failure's fit, where the
     /// check computed one, is the size that builds.
     NoRoom(NoRoomReason),
     /// The solve of the ball's position at a station of the blend did not converge: a defect,
@@ -138,11 +140,30 @@ pub enum BlendFailure {
         /// The status the routine answers with (a comparison detail).
         status: i32,
     },
+    /// A blend surface not certified within its tolerance in the work its certificate is
+    /// allowed: the G^n section's certificate would halve spans past its budget
+    /// ([`crate::blend::fillet_section::section::GN_HALVING_BUDGET`]), or has more stations
+    /// than the fork's stop (4096), with spans still over its target (a tenth of the
+    /// tolerance). The round is refused (not built), but not as a fact of its geometry: the
+    /// budget, not the geometry, decides it, so its class is [`ErrorKind::NotWithinTolerance`],
+    /// not one of the refusal classes ([`ErrorKind::is_refusal`] is false), and no size is
+    /// named (the budget says nothing about which size would certify). Like a cancellation, no fallback turns it into
+    /// another result ([`crate::SolidError::is_unported_or_cancelled`]). Status `SM_ERR`: it
+    /// stands for the fork's own stop, the status `SM_ERR` with "the blend could not be
+    /// certified within its tolerance", which the port returned as
+    /// [`BlendFailure::Failed`] before it was typed.
+    NotCertified {
+        /// The spans halved when it was refused.
+        halvings: usize,
+        /// The certificate's stations when it was refused.
+        stations: usize,
+    },
 }
 
 /// The class of a blend larger than its faces allow, for `reason`: one of the blend's
 /// refusal classes 101 to 124 (the cliff overflow's own refusals grouped by what decides
-/// them), or [`ErrorKind::TangentContinuationEnd`] (128).
+/// them), [`ErrorKind::TangentContinuationEnd`] (128) or [`ErrorKind::OverflowKeepsNothing`]
+/// (129).
 /// [`ErrorKind::CliffSubtractionLeavesNoSolid`] is the one defect among them.
 #[must_use]
 pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
@@ -181,6 +202,7 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
         R::EndRollsIntoSmoothEnd => ErrorKind::EndRollsIntoSmoothEnd,
         R::EndAtSeamVertex => ErrorKind::EndAtSeamVertex,
         R::TangentContinuationEndUnsupported => ErrorKind::TangentContinuationEnd,
+        R::OverflowKeepsNothing => ErrorKind::OverflowKeepsNothing,
     }
 }
 
@@ -194,6 +216,7 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::NotCertified { .. }
             | Self::Failed(_) => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
@@ -209,7 +232,9 @@ impl BlendFailure {
     /// The failure's class, its stable [`ErrorKind`], derived from the cause: the reason's
     /// class for [`BlendFailure::NoRoom`] ([`no_room_class`]),
     /// [`ErrorKind::StationDidNotConverge`], [`ErrorKind::TrimLeaks`] for an open or leaking
-    /// trim loop, and [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`]. A phrase
+    /// trim loop, [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`], and
+    /// [`ErrorKind::NotWithinTolerance`] for a surface not certified within its tolerance in
+    /// its work budget ([`BlendFailure::NotCertified`]). A phrase
     /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
     /// [`ErrorKind::InvalidInput`], ...), as before the record ([`BlendFailure::is_phrase`]).
     #[must_use]
@@ -219,6 +244,7 @@ impl BlendFailure {
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
             Self::StageFailed => ErrorKind::StageFailed,
+            Self::NotCertified { .. } => ErrorKind::NotWithinTolerance,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -243,7 +269,8 @@ impl BlendFailure {
             | Self::StationDidNotConverge { .. }
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
-            | Self::StageFailed => false,
+            | Self::StageFailed
+            | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -260,7 +287,9 @@ impl BlendFailure {
     /// [`crate::SolidError::Upstream`] before solidcore described it): the decisions that
     /// read an upstream status ([`crate::error::upstream_status`]) treat it as that status,
     /// and the goldens read it. Every cause does: the status stays reachable for the goldens
-    /// while the cause, not the status, decides the type.
+    /// while the cause, not the status, decides the type. [`BlendFailure::NotCertified`]
+    /// stands for the fork's `SM_ERR` at its certificate's stop (and, past the work budget
+    /// solidcore adds, for the same stop reached sooner).
     #[must_use]
     pub const fn replaces_upstream_status(&self) -> bool {
         match self {
@@ -277,7 +306,8 @@ impl BlendFailure {
             | Self::NotConverged(_)
             | Self::OutsideDomain(_)
             | Self::NotWithinTolerance(_)
-            | Self::PassedOn { .. } => true,
+            | Self::PassedOn { .. }
+            | Self::NotCertified { .. } => true,
         }
     }
 }
@@ -312,6 +342,11 @@ impl core::fmt::Display for BlendFailure {
             | Self::PassedOn { what, .. } => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
+            Self::NotCertified { halvings, stations } => write!(
+                f,
+                "the blend could not be certified within its tolerance in the work allowed \
+                 ({halvings} spans halved, {stations} stations)"
+            ),
         }
     }
 }
@@ -648,6 +683,10 @@ mod tests {
                 ErrorKind::TangentContinuationEnd,
             ),
             (
+                BlendFailure::NoRoom(R::OverflowKeepsNothing),
+                ErrorKind::OverflowKeepsNothing,
+            ),
+            (
                 BlendFailure::StationDidNotConverge {
                     s: 0.42,
                     residual: 3e-6,
@@ -849,32 +888,16 @@ mod tests {
                 None => SolidError::blend("blend::feature_executive", failure),
             }
         };
-        let non_manifold = |entity| {
-            let failure = BlendFailure::Failed("the result is not a closed manifold solid");
-            match entity {
-                Some(at) => {
-                    SolidError::blend_at("blend::fillet_executive::session::finish", failure, at)
-                }
-                None => SolidError::blend("blend::fillet_executive::session::finish", failure),
-            }
-        };
         for entity in [None, Some(edge)] {
-            for e in [open_base(entity), non_manifold(entity)] {
-                let filled = e.clone().or_at(at_edge.or(Site::point(point)));
-                assert_eq!(filled.entity(), e.entity());
-                assert_eq!(filled.upstream_status(), e.upstream_status());
-                assert_eq!(filled.kind(), e.kind());
-                assert_eq!(
-                    crate::blend::feature_executive::is_open_base_refusal(&filled),
-                    crate::blend::feature_executive::is_open_base_refusal(&e)
-                );
-                assert_eq!(
-                    crate::blend::fillet_executive::session::finish::is_non_manifold_refusal(
-                        &filled
-                    ),
-                    crate::blend::fillet_executive::session::finish::is_non_manifold_refusal(&e)
-                );
-            }
+            let e = open_base(entity);
+            let filled = e.clone().or_at(at_edge.or(Site::point(point)));
+            assert_eq!(filled.entity(), e.entity());
+            assert_eq!(filled.upstream_status(), e.upstream_status());
+            assert_eq!(filled.kind(), e.kind());
+            assert_eq!(
+                crate::blend::feature_executive::is_open_base_refusal(&filled),
+                crate::blend::feature_executive::is_open_base_refusal(&e)
+            );
         }
         assert!(crate::blend::feature_executive::is_open_base_refusal(
             &open_base(Some(edge))
@@ -891,10 +914,7 @@ mod tests {
     /// none.
     #[test]
     fn the_blend_routines_build_no_bare_statuses() {
-        const WAITING: &[(&str, usize)] = &[
-            ("blend/fillet_executive/session/finish.rs", 2),
-            ("blend/fillet_section/recertify.rs", 14),
-        ];
+        const WAITING: &[(&str, usize)] = &[("blend/fillet_section/recertify.rs", 14)];
         let found = super::super::query::tests::bare_statuses_in("blend", 100);
         let waiting: Vec<(String, usize)> = WAITING
             .iter()
@@ -919,7 +939,8 @@ mod tests {
             | BlendFailure::StationDidNotConverge { .. }
             | BlendFailure::TrimLoopOpen
             | BlendFailure::TrimLoopDoesNotSeparate
-            | BlendFailure::StageFailed => None,
+            | BlendFailure::StageFailed
+            | BlendFailure::NotCertified { .. } => None,
             BlendFailure::Failed(_) => Some("BlendFailure::Failed("),
             BlendFailure::Missing(_) => Some("BlendFailure::Missing("),
             BlendFailure::InvalidValue(_) => Some("BlendFailure::InvalidValue("),
@@ -939,7 +960,7 @@ mod tests {
     /// sites lowers the pin to the new count, and a new site builds a typed cause.
     #[test]
     fn the_phrase_cause_sites_only_go_down() {
-        const PHRASE_CAUSE_SITES: usize = 1407;
+        const PHRASE_CAUSE_SITES: usize = 1404;
         use crate::blend::fillet_executive::NoRoomReason as R;
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),
@@ -953,6 +974,10 @@ mod tests {
             BlendFailure::TrimLoopOpen,
             BlendFailure::TrimLoopDoesNotSeparate,
             BlendFailure::StageFailed,
+            BlendFailure::NotCertified {
+                halvings: 0,
+                stations: 0,
+            },
             BlendFailure::Failed("x"),
             BlendFailure::Missing("x"),
             BlendFailure::InvalidValue("x"),

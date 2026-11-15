@@ -105,8 +105,6 @@
 //!   otherwise solves globally on the base, which finds a point on a closed surface's seam
 //!   once at each end of the period and refuses the two answers.
 
-use std::borrow::Cow;
-
 use crate::blend::fillet_custom_solver::{
     face_owner, offset_compute_inward_vector, offset_evaluate_1st, offset_evaluate_point,
     offset_local_point_solve, surface_global_point_solve, ConstantRadiusAssistedFs, InitialValues,
@@ -210,6 +208,8 @@ fn interval_at<'a>(ivls: &'a mut ExtentNd, i: usize, op: &'static str) -> Result
 /// out of bounds) are kept.
 fn as_sm_err(e: SolidError, op: &'static str) -> SolidError {
     match e {
+        // a certificate's work budget spent: never flattened into a status
+        e if e.is_not_certified() => e,
         SolidError::Unported { .. }
         | SolidError::Cancelled { .. }
         | SolidError::InvalidInput { .. }
@@ -987,15 +987,13 @@ impl EvalNFunctions for GuessSphereEnfo<'_> {
 
 /// `SmLocalSolveNd(sEvalFun, &sIntervals, &sPeriodicities)` set up as both plane
 /// solves do: desired accuracy `SM_EFF_ZERO_SQ`, at most 8 total boundary hits, 30
-/// iterations; `k`'s `fixes.oscillating_skips_failed_guesses` is passed on.
+/// iterations.
 fn plane_local_solver<'a, E: EvalNFunctions + ?Sized>(
-    k: &Kernel,
     eval: &'a mut E,
     intervals: &'a ExtentNd,
     periodicities: &'a [bool],
 ) -> LocalSolveNd<'a, E> {
     let mut ls = LocalSolveNd::new(eval, Some(intervals), Some(periodicities));
-    ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
     ls.set_desired_accuracy(EFF_ZERO_SQ);
     ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
     ls.set_maximum_iterations(30);
@@ -1091,7 +1089,7 @@ impl ConstantRadiusAssistedFs {
         let plane_d = -plane_orig.dot(plane_normal);
         let approx_tol_3d = self.solver.approx_tol_3d;
         let mut eval = GuessSphereEnfo::new(k, plane_normal, plane_d, self);
-        let mut ls = plane_local_solver(k, &mut eval, &intervals, &periodicities);
+        let mut ls = plane_local_solver(&mut eval, &intervals, &periodicities);
 
         // Solve it
         let mut sol = ls.solve_it(&guess_t, approx_tol_3d)?;
@@ -1282,7 +1280,7 @@ fn fillet_sphere_solve(
     let approx_tol_3d = solver.solver().approx_tol_3d;
     // (the constructor's "sphere centre and radius" are the plane normal and D)
     let mut eval = SphereEquations(k, FilletSphereSolveEnfo::new(plane_normal, plane_d, solver));
-    let mut ls = plane_local_solver(k, &mut eval, intervals, periodicities);
+    let mut ls = plane_local_solver(&mut eval, intervals, periodicities);
 
     // Solve equations with NewtonRaphson iteration
     let mut sol = ls.solve_it(guess_t, approx_tol_3d)?;
@@ -3061,37 +3059,6 @@ pub fn law_in_parameter(lb: &LawBall) -> Result<Option<BSplineCurve>> {
 
 const OP_LAW: &str = "blend::fillet_standard_solver::p2::law_in_parameter";
 
-/// Not the fork's: the face a round's ball rolls on, for the round by its definition: the
-/// surface the trace rolled the ball on. Past its domain the offset of a B-spline, surface
-/// of revolution or surface of extrusion is evaluated on its extended base
-/// (`m_pExtendedSurface`: the base's tangent extension, or a surface of revolution of a
-/// circle's arc carried on as its circle), while the base itself continues otherwise (a
-/// B-spline's end spans carried on, a revolved generator's extrapolation). A round whose
-/// rails run on past the face (an edge's round run on past the edge's ends, or out to an
-/// End round a tube) had no foot on the plain base there: its first station missed the
-/// rails (by more than 1 on a twisted wall) and the round was built as the trace's skinned
-/// B-spline, which is the walls' round only at its sections. So where the offset holds an
-/// extension (the one it holds now, pending or stored, which contains every point the
-/// trace evaluated), the definition rolls on it. A plane, cylinder, cone, sphere or torus
-/// continues as itself and keeps its analytic kind in the definition, and a blend by its
-/// definition keeps its definition.
-fn rolled_on(offset: &crate::surface::offset_surface::OffsetSurface) -> Cow<'_, Surface> {
-    use crate::surface::surface::SurfaceKind;
-    let base = offset.base_surface();
-    let extends = matches!(
-        base.kind(),
-        SurfaceKind::BSpline(_)
-            | SurfaceKind::SurfOfRevolution(_)
-            | SurfaceKind::SurfOfExtrusion(_)
-    );
-    let extended = if extends {
-        offset.with_extended_base_surface(|e| e.map(Surface::clone_keeping_owner))
-    } else {
-        None
-    };
-    extended.map_or(Cow::Borrowed(base), Cow::Owned)
-}
-
 impl CircularCrossSectionFsg {
     /// The fork's `SmGnSectionFSG::CircleSurface` gate (cc08236, 308cc40, c596548; with
     /// `fixes.fillet_round_as_definition`, WR-698): a ball of one radius between faces that are NURBS surfaces is the round by
@@ -3133,7 +3100,9 @@ impl CircularCrossSectionFsg {
         use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
         use crate::blend::fillet_section::definition_box::definition_enclosable;
         use crate::blend::fillet_section::interval::Ivl;
-        use crate::blend::fillet_section::section::{ArcSection, GnLawRound, GnSectionFsg};
+        use crate::blend::fillet_section::section::{
+            rolled_on, ArcSection, GnLawRound, GnSectionFsg,
+        };
         use crate::blend::fillet_standard_solver::touch_circle::{
             corner_angle, fillet_curve_corners,
         };
@@ -3449,7 +3418,7 @@ impl super::p1::LinearCrossSectionFsg {
         uv: [&mut BSplineCurve; 2],
         ball: &CircleBall,
     ) -> Result<Option<Surface>> {
-        use crate::blend::fillet_section::section::GnSectionFsg;
+        use crate::blend::fillet_section::section::{rolled_on, GnSectionFsg};
         use crate::blend::fillet_standard_solver::touch_circle::{
             corner_angle, fillet_curve_corners,
         };
@@ -3964,6 +3933,19 @@ pub struct SurfaceSurfaceStart {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A G^n section certificate that spent its work budget is not flattened to `SM_ERR`.
+    #[test]
+    fn a_certificate_past_its_budget_is_not_flattened_to_sm_err() {
+        let e = SolidError::blend(
+            "t",
+            crate::error::blend::BlendFailure::NotCertified {
+                halvings: 1,
+                stations: 2,
+            },
+        );
+        assert_eq!(as_sm_err(e.clone(), "op"), e);
+    }
     use crate::blend::fillet_standard_solver::p1::{
         FilletLawKind, CONSTANT_RADIUS_FS_TYPE, SURFACE_SURFACE_FS_TYPE, VARIABLE_RADIUS_FS_TYPE,
     };

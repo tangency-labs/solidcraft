@@ -139,7 +139,7 @@ use crate::nurbs::b_spline_curve::p3::DerivedOverrides;
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::crv_basic::ConicType;
-use crate::nurbs::crv_common::{elliptical_arc_tol, EllipseArc};
+use crate::nurbs::crv_common::{elliptical_arc_tol, EllipseArc, DEFAULT_ANGLE_TOL};
 use crate::nurbs::index::at;
 use crate::nurbs::math::gamma;
 use crate::nurbs::nurbs_crv::to_euclid;
@@ -1722,10 +1722,21 @@ impl Ellipse {
     ///
     /// As [`PolarConversion::convert_to_polar_parameter`].
     pub fn convert_t_from_nurbs_to_step(&self, k: &Kernel, nurbs_param: f64) -> Result<f64> {
-        Ok(self
-            .polar
-            .convert_to_polar_parameter(k, self, nurbs_param)?
-            .0)
+        Ok(self.convert_t_from_nurbs_to_step_exact(k, nurbs_param)?.0)
+    }
+
+    /// [`Self::convert_t_from_nurbs_to_step`] with the polar converter's exactness: `false`
+    /// where it could only solve numerically, so the angle is not a closed form's.
+    ///
+    /// # Errors
+    ///
+    /// As [`PolarConversion::convert_to_polar_parameter`].
+    pub(crate) fn convert_t_from_nurbs_to_step_exact(
+        &self,
+        k: &Kernel,
+        nurbs_param: f64,
+    ) -> Result<(f64, bool)> {
+        self.polar.convert_to_polar_parameter(k, self, nurbs_param)
     }
 
     // ---- edits ------------------------------------------------------------------------
@@ -1826,7 +1837,7 @@ impl Ellipse {
                 unit: "geom.tol",
             });
         } else {
-            0.01 // Preserves behavior
+            DEFAULT_ANGLE_TOL // Preserves behavior (0.01)
         };
 
         // Build the circular arc

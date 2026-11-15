@@ -22,6 +22,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::ViewDxf { .. } => Some("file.export_view_dxf"),
         Kind::ViewNavigator(_) => Some("view.navigator"),
         Kind::InsertDrawing(p) => Some(if p.command.ends_with("dxf") { "sketch.insert_dxf" } else { "sketch.insert_svg" }),
+        Kind::InsertAirfoil(_) => Some("sketch.insert_airfoil"),
         Kind::Sketch => Some("sketch.create"),
         Kind::SketchIntersect { .. } => Some("sketch.intersect"),
         Kind::SketchProject { .. } => Some("sketch.project"),
@@ -435,6 +436,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::ViewDxf { dashed, tolerance, zero_origin } => crate::dialogs_view_dxf::rows(app, ui, dashed, tolerance, zero_origin),
         Kind::ViewNavigator(form) => crate::view_gizmo::rows(app, ui, form, &d.inputs),
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::rows(ui, p),
+        Kind::InsertAirfoil(a) => crate::dialogs_insert_airfoil::rows(ui, a),
         Kind::Sketch => {
             if d.error.is_some() && matches!(d.inputs.first().and_then(|i| i.items.first()), Some(Sel::Face { .. })) {
                 ui_kit::text(
@@ -488,6 +490,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             taper_present,
             to_offset,
             start,
+            offset_start,
             all,
             thin,
             wall,
@@ -568,13 +571,14 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     }
                 }
             });
-            let advanced = !start.is_empty() || object_on(&d.inputs, FROM_OBJECT) || *taper_present;
+            let advanced = *offset_start || object_on(&d.inputs, FROM_OBJECT) || *taper_present;
             ui_kit::section(ui, "extrude_advanced", "Advanced", advanced, |ui| {
-                let old = if object_on(&d.inputs, FROM_OBJECT) { 2 } else { usize::from(!start.is_empty()) };
+                let old = if object_on(&d.inputs, FROM_OBJECT) { 2 } else { usize::from(*offset_start) };
                 let mut st = old;
                 form_row(ui, "Start", |ui| {
                     combo(ui, "ex_start", &["Profile Plane", "Offset", "From Object"], &mut st);
                     if st != old {
+                        *offset_start = st == 1;
                         set_object(&mut d.inputs, &mut d.active, FROM_OBJECT, st == 2);
                         if st == 1 && start.is_empty() {
                             *start = length_default(&app.session, "5");
@@ -1079,7 +1083,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::OffsetFaces { distance } => {
             enter |= expr_row(ui, "Distance", distance);
         }
-        Kind::Thread { designation, length, suggested, of, options } => {
+        Kind::Thread { designation, length, suggested, of, options, .. } => {
             let mut modeled = d.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false);
             let before = modeled;
             let (submitted, reset) = crate::dialogs_thread::rows(ui, designation, suggested, length, options, &mut modeled);
@@ -1785,6 +1789,14 @@ mod tests {
         assert_eq!(
             crate::dialogs::fillet_plain_error("the fillet is larger than the faces beside its edges allow", true),
             Some(crate::dialogs::FilletRefusal::Plain(solidcraft_ui_text::tr("ui.fillet_error_too_large").to_string()))
+        );
+        // One that no smaller radius builds either is not told to try a smaller radius: the kernel
+        // tried them down to its least.
+        let none = "not supported yet: the fillet is larger than the faces beside its edges allow; no smaller radius builds either \
+                    (down to 0.001 mm: the operation failed: not supported yet: the fillet is larger than the faces beside its edges allow)";
+        assert_eq!(
+            crate::dialogs::fillet_plain_error(none, false),
+            Some(crate::dialogs::FilletRefusal::Plain(solidcraft_ui_text::tr("ui.fillet_error_no_radius").to_string()))
         );
     }
 

@@ -1437,11 +1437,8 @@ pub const ELEMENTS: &[Element] = &[
             sort_header(ui, "Name", &mut Sort::Ascending);
         });
     }),
-    element!("plus_header", |ui, _| {
-        ui.allocate_ui(vec2(140.0, row_height()), |ui| {
-            ui.set_min_size(vec2(140.0, row_height()));
-            plus_header(ui, |_| {});
-        });
+    element!("add_column_button", |ui, _| {
+        add_column_button(ui, |_| {});
     }),
     element!("table_custom", |ui, _| {
         table_custom(ui, "custom", &[Column::new("Name", 1.0)], "Empty", |ui, table| {
@@ -1744,6 +1741,9 @@ pub const ELEMENTS: &[Element] = &[
     }),
     element!("expr_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         expr_row(ui, "Gallery", &mut s.value);
+    }),
+    element!("action_row", "dialog:action:gallery", Some("dialog:action:gallery"), |ui, _| {
+        action_row(ui, "gallery", "Option");
     }),
     element!("value_row", "dialog:row:Gallery", None, |ui, _| {
         value_row(ui, "Gallery", "XY plane");
