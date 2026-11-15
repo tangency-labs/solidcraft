@@ -2443,3 +2443,33 @@ fn conic_chords_stay_within_the_chord_bound_of_the_curve_for_every_weight() {
         assert!(flatten(&seg, TOL).is_none(), "w {w}");
     }
 }
+
+#[test]
+fn a_conic_whose_chord_is_too_short_to_measure_stays_within_the_tolerance_of_its_chords() {
+    // The squared length of the chord underflows to a subnormal: the height from it is wrong,
+    // so the piece must be bounded by the apex's distance to the nearer end instead.
+    const TOL: f64 = 1e-3;
+    let (a, apex, b, w) = (
+        v(0.0, 0.0),
+        v(5.035e-162, 0.0010001),
+        v(1.007e-161, 0.0),
+        1e12,
+    );
+    let seg = Seg2::Conic { a, apex, b, w };
+    let Some(chords) = flatten(&seg, TOL) else {
+        return;
+    };
+    let conic_at = |t: f64| {
+        let s = 1.0 - t;
+        let (ka, kb, kw) = (s * s, t * t, 2.0 * w * s * t);
+        (a * ka + apex * kw + b * kb) / (ka + kw + kb)
+    };
+    for i in 0..=20_000 {
+        let p = conic_at(f64::from(i) / 20_000.0);
+        let near = chords
+            .windows(2)
+            .map(|c| dist_to_side(p, c[0], c[1]))
+            .fold(f64::INFINITY, f64::min);
+        assert!(near <= TOL, "t {i}/20000: {near} from the chords");
+    }
+}
