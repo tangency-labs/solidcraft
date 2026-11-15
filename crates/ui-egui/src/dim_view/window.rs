@@ -315,7 +315,9 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
     let anchor = place(app, ctx, &e.param, at, last.map_or(guess, |r| r.size()));
     // A click on the window (an arrow) takes the keyboard from its field, as any click away does;
     // the field takes it back instead of closing.
-    let on_window = ctx.input(|i| i.pointer.any_click() && i.pointer.interact_pos().is_some_and(|p| last.is_some_and(|r| r.contains(p))));
+    let on_window = ctx.input(|i| {
+        (i.pointer.any_pressed() || i.pointer.any_click()) && i.pointer.interact_pos().is_some_and(|p| last.is_some_and(|r| r.contains(p)))
+    });
     let mut answer: Option<bool> = None;
     let mut escaped = false;
     let mut by = 0.0;
@@ -410,15 +412,27 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                 let in_row = row_state.focused || on_row;
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 let left = r.lost_focus() || row_state.lost;
+                let left_click_outside = !on_window && ui.input(|i| i.pointer.primary_pressed() || i.pointer.primary_clicked());
+                let press_on_reference = ui.input(|i| i.pointer.primary_pressed())
+                    && ui
+                        .input(|i| i.pointer.interact_pos())
+                        .is_some_and(|p| super::hit_while_editing_active(p, &e.param, e.sketch.is_some()).is_some());
+                let lost_or_outside_press =
+                    left || (e.live.is_none() && (r.has_focus() || row_state.focused) && ui.input(|i| i.pointer.primary_pressed()));
                 let field = if left && enter {
                     Some(true)
-                } else if in_row {
+                } else if in_row && !left_click_outside {
                     None
-                } else if e.fresh > 0 || on_window || by != 0.0 {
+                } else if e.fresh > 0 || on_window || by != 0.0 || (lost_or_outside_press && press_on_reference) {
                     if !r.has_focus() {
                         r.request_focus();
                     }
                     None
+                } else if app.preferences.dimension_accept_outside_click && e.live.is_none() && lost_or_outside_press && left_click_outside {
+                    if !ui.input(|i| i.pointer.primary_clicked()) {
+                        super::CONSUMED_OUTSIDE_PRESS.set(true);
+                    }
+                    Some(true)
                 } else if left && !r.has_focus() {
                     Some(false)
                 } else {

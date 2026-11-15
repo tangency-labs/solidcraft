@@ -7,7 +7,7 @@
 use solidcraft_engine::geom::prelude::*;
 use std::cell::{Cell, RefCell};
 
-use egui::{Align2, FontId, Stroke};
+use egui::Stroke;
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
 use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Sketch};
@@ -243,7 +243,7 @@ pub fn release() -> Option<Value> {
     Some(json!({"command": cmd, "params": params}))
 }
 
-/// The snap of the drag in progress: its dashed guides, a ring on the target and its label.
+/// The snap of the drag in progress: its dashed guides, target highlight, and constraint icon badge.
 pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if app.viewport.point_drag.is_none() {
         return;
@@ -258,13 +258,41 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.extend(crate::ui_kit::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
         }
     }
-    let Some(sp) = to(s.at) else { return };
-    painter.circle_stroke(sp, 6.0, Stroke::new(1.5, tk.accent));
-    let label = s.label();
-    if !label.is_empty() {
-        let r = egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0));
-        painter.rect_filled(r, tk.radius_sm.saturating_sub(1), tk.accent_soft);
-        painter.text(r.center(), Align2::CENTER_CENTER, label, FontId::proportional(solidcraft_theme::Tokens::get().font_micro), tk.text);
+    if app.preferences.sketch_snap_icons {
+        match &s.target {
+            Target::Point(id) => {
+                if let Some(pt_sp) = ss.sketch.point_index(id).and_then(|pi| ss.sketch.point(pi)).and_then(to) {
+                    crate::tools::highlight_point(painter, pt_sp);
+                }
+            }
+            Target::Mid(id) | Target::On(id) => {
+                if let Some(ci) = ss.sketch.curve_index(id) {
+                    let mut display_budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
+                    crate::tools::highlight_curve(&ss.sketch, ci, &ss.plane, painter, proj, &mut display_budget);
+                }
+            }
+            Target::Align => {
+                for (from, _) in &s.guides {
+                    if let Some(pt_sp) = to(*from) {
+                        crate::tools::highlight_point(painter, pt_sp);
+                    }
+                }
+            }
+        }
+        let Some(sp) = to(s.at) else { return };
+        let label = s.label();
+        if !label.is_empty() {
+            crate::sketch_tools::paint_snap_badges(app, painter, proj.rect, sp, &[label], false);
+        }
+    } else {
+        let Some(sp) = to(s.at) else { return };
+        painter.circle_stroke(sp, 6.0, Stroke::new(1.5, tk.accent));
+        let label = s.label();
+        if !label.is_empty() {
+            let r = egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0));
+            painter.rect_filled(r, tk.radius_sm.saturating_sub(1), tk.accent_soft);
+            painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(tk.font_micro), tk.text);
+        }
     }
     crate::scenario::publish_count("drag_guides", s.guides.len() as f64);
 }
@@ -349,5 +377,64 @@ mod tests {
         set_suppressed(true);
         assert!(drag(&s, &end, Vec2::new(10.1, 0.1)).is_none());
         set_suppressed(false);
+    }
+
+    #[test]
+    fn show_renders_icon_badge_and_selection_highlight_without_text_label() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[0, 0], [10, 0]], "infer": false})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[20, 5], [30, 15]], "infer": false})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let proj = crate::viewport::projection(&h.app, rect);
+        h.app.viewport.point_drag = Some(("p3".into(), 0, None, Vec2::ZERO, true));
+        CURRENT.with(|c| {
+            *c.borrow_mut() =
+                Some(Snap { point: "p3".into(), at: Vec2::new(5.0, 0.0), offset: Vec2::ZERO, target: Target::On("l1".into()), guides: Vec::new() });
+        });
+
+        let expected_stroke = Stroke::new(3.5, Tokens::view().sel_edge);
+        let run_once = |scale: f32, app: &mut SolveApp| {
+            app.preferences.constraint_glyph_scale = scale;
+            let ctx = crate::fonts::test_context();
+            ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
+                let painter = ui.ctx().layer_painter(egui::LayerId::background());
+                show(app, &painter, &proj);
+            })
+        };
+
+        let out_1x = run_once(1.0, &mut h.app);
+        let has_target_curve =
+            out_1x.shapes.iter().any(|s| matches!(&s.shape, egui::epaint::Shape::Path(path) if path.stroke == expected_stroke.into()));
+        let has_text = out_1x.shapes.iter().any(|s| matches!(&s.shape, egui::epaint::Shape::Text(_)));
+        let badge_h_1x = out_1x
+            .shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::epaint::Shape::Rect(r) => Some(r.rect.height()),
+                _ => None,
+            })
+            .expect("badge rect at 1x");
+        assert!(has_target_curve, "drag target curve should be highlighted with sel_edge");
+        assert!(!has_text, "drag snap On badge should use an SVG icon, not text");
+        assert!((badge_h_1x - crate::sketch_tools::glyph_px(1.0)).abs() < 0.05);
+
+        let out_2x = run_once(2.0, &mut h.app);
+        let badge_h_2x = out_2x
+            .shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::epaint::Shape::Rect(r) => Some(r.rect.height()),
+                _ => None,
+            })
+            .expect("badge rect at 2x");
+        assert!((badge_h_2x - crate::sketch_tools::glyph_px(2.0)).abs() < 0.05);
+
+        clear();
+        h.app.viewport.point_drag = None;
     }
 }

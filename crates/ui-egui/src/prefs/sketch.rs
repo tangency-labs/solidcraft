@@ -26,6 +26,7 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch.recent_snap",
             "prefs.sketch.align_points",
             "prefs.sketch.snap_to_visible_grid",
+            "prefs.sketch.snap_icons",
         ]
         .into_iter()
         .map(|id| check_width(ui, app.tr(id), true))
@@ -76,6 +77,13 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.sketch_snap_to_visible_grid,
                 );
                 setting::sketch_square_rectangles(app, ui);
+                check(
+                    ui,
+                    "sketch_snap_icons",
+                    "prefs.sketch.snap_icons",
+                    Some("prefs.sketch.snap_icons_note"),
+                    &mut app.preferences.sketch_snap_icons,
+                );
             });
         });
         let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.hold_stop_snapping"));
@@ -123,6 +131,8 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "ui.project_references_construction",
             "prefs.sketch.project_options",
             "prefs.sketch.cursor_coordinates",
+            "prefs.sketch.constraint_preselection",
+            "prefs.sketch.dimension_accept_outside_click",
         ];
         let natural = [left_labels.as_slice(), right_labels.as_slice()]
             .map(|labels| labels.iter().map(|id| check_width(ui, app.tr(id), true)).fold(0.0, f32::max));
@@ -268,6 +278,20 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "prefs.sketch.cursor_coordinates",
                     Some("prefs.sketch.cursor_coordinates_note"),
                     &mut app.preferences.sketch_cursor_coordinates,
+                );
+                check(
+                    ui,
+                    "sketch_constraint_preselection",
+                    "prefs.sketch.constraint_preselection",
+                    Some("prefs.sketch.constraint_preselection_note"),
+                    &mut app.preferences.sketch_constraint_preselection,
+                );
+                check(
+                    ui,
+                    "dimension_accept_outside_click",
+                    "prefs.sketch.dimension_accept_outside_click",
+                    Some("prefs.sketch.dimension_accept_outside_click_note"),
+                    &mut app.preferences.dimension_accept_outside_click,
                 );
             });
         });

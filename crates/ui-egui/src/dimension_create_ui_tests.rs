@@ -833,7 +833,7 @@ fn pending_second_nested_plane_uses_world_picks_but_one_local_dimension() {
 }
 
 #[test]
-fn invalid_zero_negative_failed_open_and_click_away_leave_no_dimension() {
+fn invalid_zero_negative_failed_open_leave_no_dimension_and_left_click_outside_accepts() {
     let mut h = line([20., 0.]);
     let baseline = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
@@ -850,11 +850,34 @@ fn invalid_zero_negative_failed_open_and_click_away_leave_no_dimension() {
     assert!(h.app.run("doc.open", json!({"path":"missing-dimension-draft-design.solidcraft"})).is_err());
     assert!(crate::dim_view::editing(), "failed replacement must preserve the draft");
     assert_eq!(h.app.session.doc.to_json(), baseline);
+    type_value(&mut h, "25 mm");
     h.frames(8);
     h.step(&json!({"click":{"world":[12,-10,0]}})).unwrap();
     assert!(!crate::dim_view::editing());
-    assert_eq!(h.app.session.doc.to_json(), baseline);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.undo.len(), undo + 1, "left-clicking outside accepts the dimension");
+    let state = h.app.session.world_state().unwrap();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let dim = sk.constraints.iter().find(|c| c.param.is_some()).unwrap();
+    assert!((dim.kind.value().unwrap() - 25.).abs() < 1e-6);
+
+    // Type-first pinned flow: picking a line, pinning the text, typing a value, then left-clicking
+    // outside also commits the typed dimension without starting a spurious pick on that click.
+    let mut h = sketch_with(&[("sketch.line", json!({"points":[[0,0],[20,0]],"infer":false}))], [10., 0.]);
+    let dims = dimension_count(&h);
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    assert_live(&h);
+    h.step(&json!({"click":{"world":[10,-7,0]}})).unwrap();
+    assert!(crate::dim_view::editing());
+    assert_eq!(crate::dim_view::live(), None);
+    keys(&mut h, "17");
+    h.frames(8);
+    h.step(&json!({"click":{"world":[12,12,0]}})).unwrap();
+    assert!(!crate::dim_view::editing());
+    let new = added(&h, dims);
+    assert_eq!(new.len(), 1);
+    assert!((new[0].kind.value().unwrap() - 17.).abs() < 1e-6);
+    assert_eq!(h.app.tool.as_ref().map(|t| (t.cmd, t.picks.len())), Some(("sketch.dimension", 0)));
+    crate::dim_view::cancel();
 }
 
 #[test]
@@ -2388,14 +2411,14 @@ fn a_typed_value_does_not_light_a_selected_design_curve() {
     assert!(!crate::viewport::build_highlight(&h.app).overlay.is_empty(), "lit once the value is let go");
 }
 
-/// The Dimension tool's "x, y" readout gives the design's coordinates: while a value is typed it
-/// is not drawn, as the hover highlight is not.
+/// Like other constraint pick tools, the Dimension tool hides the pointer coordinate readout
+/// both while picking/pointing and while typing a value.
 #[test]
 fn a_typed_value_hides_the_pointer_readout() {
     let mut h = sketch_with(&[("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))], [20., 10.]);
     h.step(&json!({"move":{"world":[10,5,0]}})).unwrap();
     h.frames(1);
-    assert!(crate::scenario::rect_of("viewport:readout").is_some(), "the readout is drawn while only pointing");
+    assert!(crate::scenario::rect_of("viewport:readout").is_some(), "readout while picking in Dimension");
     h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
     assert_live(&h);
     keys(&mut h, "60");
@@ -2576,4 +2599,58 @@ fn shown_dimensions_in_a_conflict_take_the_conflict_colour() {
     assert_eq!(model_text_shape_of(&h, reach, &failing).fallback_color, solidcraft_theme::Tokens::get().error);
     h.call("ui.prefs", json!({"theme": "dark"}));
     h.frame();
+}
+
+#[test]
+fn reference_pick_slight_drag_outside_and_pref_gate_work_on_dimension_editor() {
+    crate::dim_view::cancel();
+    let mut h = sketch_with(&[("sketch.line", json!({"points":[[0,0],[40,0]]})), ("sketch.line", json!({"points":[[0,15],[20,15]]}))], [20., 7.5]);
+    let p1 = h.app.run("sketch.dimension", json!({"entities":["l1"],"value":40,"text_at":[20,-6]})).unwrap()["param"].as_str().unwrap().to_string();
+    let p2 = h.app.run("sketch.dimension", json!({"entities":["l2"],"value":20,"text_at":[10,22]})).unwrap()["param"].as_str().unwrap().to_string();
+    h.settle();
+
+    // Open the second dimension for editing (`live == None`) and click the first dimension's
+    // label: `press_on_reference` must recognise the target after `EDIT.take()`.
+    crate::dim_view::edit_param(&h.app, &p2);
+    h.frames(5);
+    assert!(crate::dim_view::editing(), "d2 editor should open");
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":p1}})).unwrap();
+    h.frames(40);
+    assert!(crate::dim_view::editing(), "clicking another dimension inserts reference instead of closing");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.frames(2);
+    assert!(!crate::dim_view::editing());
+
+    // Outside press followed by a slight drag release accepts the editor without passing a pick
+    // through to the active Dimension tool.
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    crate::dim_view::edit_param(&h.app, &p2);
+    h.frames(5);
+    assert!(crate::dim_view::editing());
+    type_value(&mut h, "25");
+    let view = h.app.viewport.rect.unwrap();
+    let proj = crate::viewport::projection(&h.app, view);
+    let end = proj.to_screen(solidcore_record::Vec3::new(30.0, 0.0, 0.0)).unwrap();
+    let start = [end.x + 12.0, end.y - 10.0];
+    h.step(&json!({"drag":[start, [end.x, end.y]], "steps": 4})).unwrap();
+    h.frames(2);
+    assert!(!crate::dim_view::editing(), "outside press accepted on edit box");
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.picks.is_empty()), "slight drag release must not pick in Dimension tool");
+    let d2_val = h.app.session.doc.eval(&p2, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+    assert!((d2_val - 25.0).abs() < 1e-6, "expected accepted value 25, got {d2_val}");
+
+    // When `dimension_accept_outside_click` is off, clicking outside restores cancel semantics.
+    h.app.tool = None;
+    h.app.preferences.dimension_accept_outside_click = false;
+    crate::dim_view::edit_param(&h.app, &p2);
+    h.frames(5);
+    assert!(crate::dim_view::editing());
+    type_value(&mut h, "33");
+    h.step(&json!({"click":start})).unwrap();
+    h.frames(2);
+    assert!(!crate::dim_view::editing());
+    let d2_after = h.app.session.doc.eval(&p2, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+    assert!((d2_after - 25.0).abs() < 1e-6, "turning off preference restores outside-click cancel, got {d2_after}");
+    crate::dim_view::cancel();
 }

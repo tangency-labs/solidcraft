@@ -53,20 +53,55 @@ impl Inference {
 }
 
 thread_local! {
-    static PENDING: RefCell<Option<Inference>> = const { RefCell::new(None) };
+    static PENDING: RefCell<Vec<Inference>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Forget the current inference (another snap won, or the tool ended).
 pub fn clear() {
-    PENDING.with(|p| *p.borrow_mut() = None);
+    PENDING.with(|p| p.borrow_mut().clear());
 }
 
 pub fn current() -> Option<Inference> {
+    PENDING.with(|p| p.borrow().first().cloned())
+}
+
+pub(crate) fn all() -> Vec<Inference> {
     PENDING.with(|p| p.borrow().clone())
 }
 
+pub(crate) fn set_pending(i: Inference) {
+    PENDING.with(|p| *p.borrow_mut() = vec![i]);
+}
+
+pub(crate) fn add_pending(i: Inference) {
+    PENDING.with(|p| {
+        let mut p = p.borrow_mut();
+        if !p.iter().any(|x| x.kind == i.kind && x.curve == i.curve) {
+            p.push(i);
+        }
+    });
+}
+
+/// Line `(origin, unit_dir)` represented by `i` when its endpoint can slide along a direction
+/// rather than being locked to a single point (`Tangent` from off-circle or rim/center `Center`).
+pub(crate) fn direction_line(sk: &Sketch, prev: Vec2, i: &Inference) -> Option<(Vec2, Vec2)> {
+    match i.kind {
+        Kind::Parallel | Kind::Perpendicular => solidcraft_engine::sketch::unit_direction(prev, i.at).map(|dir| (prev, dir)),
+        Kind::Extension => solidcraft_engine::sketch::unit_direction(i.guide.0, i.guide.1).map(|dir| (i.guide.0, dir)),
+        Kind::Center if i.arg.is_none() => solidcraft_engine::sketch::unit_direction(prev, i.at).map(|dir| (prev, dir)),
+        Kind::Tangent => {
+            if solidcraft_engine::sketch::is_on_circle_rim(sk, &i.curve, prev) {
+                solidcraft_engine::sketch::unit_direction(prev, i.at).map(|dir| (prev, dir))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 fn keep(i: Option<Inference>) -> Option<Inference> {
-    PENDING.with(|p| *p.borrow_mut() = i.clone());
+    PENDING.with(|p| *p.borrow_mut() = i.clone().into_iter().collect());
     i
 }
 
@@ -172,9 +207,8 @@ pub fn through_center(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inf
     keep(best)
 }
 
-/// Directions and places from lines: parallel or perpendicular to a line (from `prev`), or on
-/// the extension of a line beyond its ends.
-pub fn lines(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
+/// Line directions inferred from existing lines: parallel or perpendicular from `prev`.
+pub fn lines_directions(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
     let mut best: Option<Inference> = None;
     let mut offer = |i: Inference| {
         if best.as_ref().is_none_or(|b| i.dist < b.dist) {
@@ -212,7 +246,24 @@ pub fn lines(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
                 });
             }
         }
-        // The extension: beyond the ends, on the line's own (infinite) line.
+    }
+    keep(best)
+}
+
+/// Point locus along the infinite extension of an existing line beyond its ends.
+pub fn extension(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
+    let mut best: Option<Inference> = None;
+    let v = lp - prev;
+    if v.len() < tol * 2.0 {
+        return keep(None);
+    }
+    for (i, c) in sk.curves.iter().enumerate() {
+        if c.construction && c.link.is_none() {
+            continue;
+        }
+        let Some((a, b)) = line_ends(sk, i) else { continue };
+        let Some(dir) = (b - a).normalized() else { continue };
+        let touches = a.dist(prev) < 1e-9 || b.dist(prev) < 1e-9;
         let s = (lp - a).dot(dir);
         let len = a.dist(b);
         if !(-tol..=len + tol).contains(&s) {
@@ -220,47 +271,86 @@ pub fn lines(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
             let e = at.dist(lp);
             if e < tol * 0.8 && !touches {
                 let from = if s < 0.0 { a } else { b };
-                offer(Inference { kind: Kind::Extension, curve: c.id.clone(), at, dist: e * 0.9, guide: (from, at), arg: None });
+                let dist = e * 0.9;
+                if best.as_ref().is_none_or(|b| dist < b.dist) {
+                    best = Some(Inference { kind: Kind::Extension, curve: c.id.clone(), at, dist, guide: (from, at), arg: None });
+                }
             }
         }
     }
     keep(best)
 }
 
-/// The Line tool placed a segment ending at `end` (the new line `line`): add the constraint of
-/// the inference it was snapped by.
-pub fn commit(app: &mut SolveApp, line: &str, end: Vec2) {
-    let Some(i) = current().filter(|i| i.at.dist(end) < 1e-9) else { return };
-    clear();
-    // The endpoint is the circle's centre: the line already ends on that point.
-    if matches!(i.kind, Kind::Center) && i.arg.as_deref().is_some_and(|a| a.ends_with(".center")) {
-        return;
-    }
-    let (cmd, mut params) = match i.kind {
-        Kind::Parallel => ("sketch.constraint.parallel", json!({"a": i.curve, "b": line})),
-        Kind::Perpendicular => ("sketch.constraint.perpendicular", json!({"a": i.curve, "b": line})),
-        Kind::Tangent => ("sketch.constraint.tangent", json!({"a": i.curve, "b": line})),
-        Kind::Extension => ("sketch.constraint.coincident", json!({"a": format!("{line}.end"), "b": i.curve})),
-        Kind::Center => ("sketch.constraint.coincident", json!({"a": format!("{}.center", i.curve), "b": line})),
+/// Directions and places from lines: parallel or perpendicular to a line (from `prev`), or on
+/// the extension of a line beyond its ends.
+pub fn lines(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
+    let dir = lines_directions(sk, prev, lp, tol);
+    let ext = extension(sk, prev, lp, tol);
+    let best = match (dir, ext) {
+        (Some(d), Some(e)) => Some(if d.dist <= e.dist { d } else { e }),
+        (Some(d), None) => Some(d),
+        (None, Some(e)) => Some(e),
+        (None, None) => None,
     };
-    // An inference only adds what the sketch does not already have: one that is already implied
-    // (redundant) or would conflict is simply not kept.
-    params["if_redundant"] = json!("refuse");
-    let _ = app.session.execute(cmd, &params);
+    keep(best)
 }
 
-/// The dashed guide of the current inference (its label is the snap hint) (while the Line tool is active).
+/// The Line tool placed a segment ending at `end` (the new line `line`): add every constraint of
+/// the inferences it was snapped by.
+pub fn commit(app: &mut SolveApp, line: &str, end: Vec2, end_arg: Option<&str>) {
+    let items = PENDING.with(|p| std::mem::take(&mut *p.borrow_mut()));
+    for i in items {
+        if i.at.dist(end) >= 1e-9 {
+            continue;
+        }
+        // The endpoint is the circle's centre: the line already ends on that point.
+        if matches!(i.kind, Kind::Center) && end_arg.is_some_and(|a| a.ends_with(".center")) {
+            continue;
+        }
+        let (cmd, mut params) = match i.kind {
+            Kind::Parallel => ("sketch.constraint.parallel", json!({"a": i.curve, "b": line})),
+            Kind::Perpendicular => ("sketch.constraint.perpendicular", json!({"a": i.curve, "b": line})),
+            Kind::Tangent => ("sketch.constraint.tangent", json!({"a": i.curve, "b": line})),
+            Kind::Extension => ("sketch.constraint.coincident", json!({"a": format!("{line}.end"), "b": i.curve})),
+            Kind::Center => ("sketch.constraint.coincident", json!({"a": format!("{}.center", i.curve), "b": line})),
+        };
+        // An inference only adds what the sketch does not already have: one that is already implied
+        // (redundant) or would conflict is simply not kept.
+        params["if_redundant"] = json!("refuse");
+        let _ = app.session.execute(cmd, &params);
+    }
+}
+
+/// The dashed guides of all active inferences (while the Line tool is active).
 pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if app.tool.as_ref().is_none_or(|t| t.cmd != "sketch.line") {
         return;
     }
-    let Some(i) = current() else { return };
+    let items = all();
+    if items.is_empty() {
+        return;
+    }
     let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     let tk = Tokens::get();
-    if let (Some(a), Some(b)) = (to(i.guide.0), to(i.guide.1)) {
-        painter.extend(crate::ui_kit::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
+    let mut display_budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
+    let mut drawn_curves: Vec<String> = Vec::new();
+    for i in items {
+        if !drawn_curves.contains(&i.curve)
+            && let Some(ci) = ss.sketch.curve_index(&i.curve)
+        {
+            crate::tools::highlight_curve(&ss.sketch, ci, &ss.plane, painter, proj, &mut display_budget);
+            drawn_curves.push(i.curve.clone());
+            if matches!(i.kind, Kind::Center)
+                && let Some(center) = ss.sketch.center(ci).and_then(to)
+            {
+                crate::tools::highlight_point(painter, center);
+            }
+        }
+        if let (Some(a), Some(b)) = (to(i.guide.0), to(i.guide.1)) {
+            painter.extend(crate::ui_kit::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
+        }
     }
 }
 
@@ -877,5 +967,93 @@ mod tests {
         let _ = s.add_circle(Vec2::new(0.0, 40.0), 10.0, None, Some("c2"));
         let i = through_center(&s, Vec2::new(-20.0, 0.0), Vec2::new(10.0, 0.2), 0.5).expect("nearer");
         assert_eq!(i.curve, "c1");
+    }
+
+    #[test]
+    fn show_highlights_inference_target_curve_and_center() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.session.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        app.session.execute("sketch.circle.center", &json!({"center": [0, 0], "radius": 10})).unwrap();
+        app.cam.yaw = 0.0;
+        app.cam.pitch = std::f64::consts::FRAC_PI_2;
+        app.cam.distance = 80.0;
+        app.tool = crate::tools::Tool::for_command("sketch.line");
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let proj = crate::viewport::projection(&app, rect);
+        set_pending(Inference {
+            kind: Kind::Center,
+            curve: "c1".into(),
+            at: Vec2::new(10.0, 0.0),
+            dist: 0.0,
+            guide: (Vec2::new(-20.0, 0.0), Vec2::new(10.0, 0.0)),
+            arg: None,
+        });
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
+            let painter = ui.ctx().layer_painter(egui::LayerId::background());
+            show(&app, &painter, &proj);
+        });
+        clear();
+        let tk = solidcraft_theme::Tokens::view();
+        let expected_stroke = Stroke::new(3.5, tk.sel_edge);
+        let mut has_target_curve = false;
+        let mut has_center_fill = false;
+        let mut has_center_ring = false;
+        for clipped in &output.shapes {
+            if let egui::epaint::Shape::Path(path) = &clipped.shape
+                && path.stroke == expected_stroke.into()
+            {
+                has_target_curve = true;
+            }
+            if let egui::epaint::Shape::Circle(circle) = &clipped.shape {
+                if circle.fill == tk.sel_vertex {
+                    has_center_fill = true;
+                }
+                if circle.stroke == Stroke::new(2.0, tk.sel_edge) {
+                    has_center_ring = true;
+                }
+            }
+        }
+        assert!(has_target_curve, "target curve highlight stroke was not painted");
+        assert!(has_center_fill && has_center_ring, "center inference highlight dot was not painted");
+    }
+
+    #[test]
+    fn commit_center_inference_only_skips_when_actual_end_arg_is_center() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        app.run("sketch.circle.center", json!({"center":[10,0],"radius":5})).unwrap();
+        app.run("sketch.line", json!({"points":[[10,-5],[10,5]]})).unwrap();
+        app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+
+        let center_inf = || Inference {
+            kind: Kind::Center,
+            curve: "c1".into(),
+            at: Vec2::new(10.0, 0.0),
+            dist: 0.0,
+            guide: (Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)),
+            arg: Some("c1.center".into()),
+        };
+
+        // Even when `i.arg` names `.center`, snapping to `mid:l1` (overlapping the center)
+        // must still commit the coincident constraint to `c1.center`.
+        set_pending(center_inf());
+        commit(&mut app, "l2", Vec2::new(10.0, 0.0), Some("mid:l1"));
+        let sid = app.session.active_sketch.unwrap();
+        let st = crate::open_meshing::session_world(&app.session);
+        let sk = &st.sketch(sid).unwrap().sketch;
+        let has_coincident_to_center = sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Coincident { .. }));
+        assert!(has_coincident_to_center, "expected center coincident constraint when endpoint placed via mid:l1");
+        drop(st);
+
+        // When the endpoint itself was placed via `c1.center`, the line already ends there so no duplicate is added.
+        let before = {
+            let st = crate::open_meshing::session_world(&app.session);
+            st.sketch(sid).unwrap().sketch.constraints.len()
+        };
+        set_pending(center_inf());
+        commit(&mut app, "l2", Vec2::new(10.0, 0.0), Some("c1.center"));
+        let st = crate::open_meshing::session_world(&app.session);
+        assert_eq!(st.sketch(sid).unwrap().sketch.constraints.len(), before);
     }
 }
