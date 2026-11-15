@@ -2809,15 +2809,18 @@ impl OffsetExecutive {
                                 offset_key_of,
                             )
                         })?;
-                        // Not upstream (WR-671, tangency-labs/solidcore#2111): the offset
+                        // Not upstream (WR-671, tangency-labs/solidcore#2111), opt-in
+                        // `Kernel::fixes.offset_edges_keep_source_tolerance`: the offset
                         // edge and its vertices, made at the B-rep's zone tolerance, keep
                         // the matched original edge's tolerance and its vertices' largest.
-                        keep_source_tolerances(
-                            original,
-                            original_edge,
-                            required(self.offset_brep.as_mut())?,
-                            offset_edge,
-                        )?;
+                        if kernel.kernel().fixes.offset_edges_keep_source_tolerance {
+                            keep_source_tolerances(
+                                original,
+                                original_edge,
+                                required(self.offset_brep.as_mut())?,
+                                offset_edge,
+                            )?;
+                        }
                         if let Some(slot) = original_uses.get_mut(slot) {
                             *slot = None;
                         }
@@ -2864,7 +2867,7 @@ impl OffsetExecutive {
     }
 }
 
-/// (Not upstream, WR-671.) Raises
+/// (Not upstream, WR-671, `Kernel::fixes.offset_edges_keep_source_tolerance`.) Raises
 /// `offset_edge` of `result` to the tolerance of the original edge it was matched to,
 /// and both its vertices to the larger of the original edge's vertices' tolerances
 /// (matched edge uses may run in opposite directions, so the ends are not paired).

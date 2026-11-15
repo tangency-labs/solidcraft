@@ -356,7 +356,7 @@ expectation (`finish`, a closed solid for a thicken).
 B-rep tolerance (`configured_executive`, `p2.rs`), the offset body is allocated with it
 (`allocate_offset_brep`), the merge B-rep takes the original's, the implicit offsets are certified
 within it, and the shell's boolean runs at it. Edge and vertex tolerances only grow from
-there: an offset edge takes at least its source edge's
+there: with `offset_edges_keep_source_tolerance` an offset edge takes at least its source edge's
 tolerance (`keep_source_tolerances`, `p1.rs`). An offset never makes a body tolerance of its own.
 
 ## 8. Invariants

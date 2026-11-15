@@ -131,6 +131,7 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "nurb_cylinder_inside_out_frame",
     "offset_analytic_mate_edges",
     "offset_collapsed_rounds_mated",
+    "offset_edges_keep_source_tolerance",
     "offset_extended_edges_mated",
     "offset_extension_as_itself",
     "offset_extension_from_base",

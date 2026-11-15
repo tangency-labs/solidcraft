@@ -198,6 +198,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_exact_round_classes = true;
     f.check_seam_crossing_unclosed = true;
     f.ascii_doubles_round_trip = true;
+    f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.volume_lift_third_derivative_terms = true;
     f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
