@@ -2620,7 +2620,7 @@ mod tests {
         );
     }
 
-    /// #16669 (CodeRabbit on #16670): a point the step-growth loop's `TestPoint` snaps to a
+    /// #16669 (`CodeRabbit` on #16670): a point the step-growth loop's `TestPoint` snaps to a
     /// through point, leaving the trace unfinished, ends a span no span test saw, which is
     /// certified before it is added. The unit sphere meets the plane z = 0.5 in a circle; the
     /// trace starts at u = `U0` heading toward u = 0 with steps that grow, and the through
