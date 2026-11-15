@@ -702,12 +702,59 @@ impl ModelState {
     }
 }
 
+/// The frames joint origins on a face, an edge or a round face resolved to, kept so that solving
+/// the joints again (a drive, a drag) does not search the bodies' triangles again for an origin
+/// whose bodies did not change. An entry is keyed by the origin's definition, its component and
+/// the identity ([`ModelBody::geometry_key`]) and offset of every body of the component, so a
+/// body that changed finds none, and copies of a state may share one.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct OriginFrames {
+    found: Arc<std::sync::Mutex<std::collections::HashMap<(String, u64, Vec<u64>), (Mat, Vec<Body>)>>>,
+    /// How many origins were resolved from the bodies (not found here).
+    resolved: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl OriginFrames {
+    /// Most frames kept; past it all are dropped, as the contact meshes' cache does.
+    const MAX: usize = 1 << 14;
+
+    /// The frame kept for `key`, if the bodies it was found on are still the very same bodies as
+    /// `bodies`: `ModelBody::body` is public, so a body replaced in place keeps its
+    /// [`ModelBody::geometry_key`] and must not be answered from the old geometry.
+    pub(crate) fn get(&self, key: &(String, u64, Vec<u64>), bodies: &[Body]) -> Option<Mat> {
+        let found = self.found.lock().ok()?;
+        let (frame, kept) = found.get(key)?;
+        (kept.len() == bodies.len() && kept.iter().zip(bodies).all(|(a, b)| a.same(b))).then_some(*frame)
+    }
+
+    /// Count one origin resolved from the bodies, kept or not.
+    pub(crate) fn note_resolved(&self) {
+        self.resolved.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn put(&self, key: (String, u64, Vec<u64>), frame: Mat, bodies: Vec<Body>) {
+        if let Ok(mut found) = self.found.lock() {
+            if found.len() >= Self::MAX {
+                found.clear();
+            }
+            found.insert(key, (frame, bodies));
+        }
+    }
+
+    /// How many origins have been resolved from the bodies, not taken from what was kept.
+    pub(crate) fn resolved(&self) -> usize {
+        self.resolved.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 /// Model after some prefix of the timeline.
 #[derive(Clone, Debug, Default)]
 pub struct ModelState {
     /// Frame placements belong to the evaluator. A weak reference avoids a cycle through
     /// cached bodies' naming origins, which retain earlier model states.
     frame_bodies: std::sync::Weak<std::sync::Mutex<FrameBodies>>,
+    /// Joint origins already resolved against bodies of this model (see [`OriginFrames`]).
+    pub(crate) origin_frames: OriginFrames,
     /// Cosmetic threads (from Thread features and threaded holes).
     pub threads: Vec<ThreadInfo>,
     pub bodies: Vec<ModelBody>,
@@ -779,6 +826,12 @@ impl KeptSeparate {
 }
 
 impl ModelState {
+    /// How many joint origins have been resolved from the bodies of this model (and its copies),
+    /// not taken from the frames kept ([`OriginFrames`]).
+    pub fn origin_resolutions(&self) -> usize {
+        self.origin_frames.resolved()
+    }
+
     /// `body` moved by `matrix` into a feature's frame. The evaluator that made this state keeps
     /// the moved body, so an unchanged body under an unchanged placement is moved (and meshed)
     /// once rather than on every evaluation.
@@ -11666,6 +11719,28 @@ mod world_placement_cache_tests {
         assert_eq!(asked_names(&doc, &state).next().unwrap().1, Some("B"));
         doc.feature_mut(id).unwrap().kind = FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: Vec::new() };
         assert_eq!(asked_names(&doc, &state).next().unwrap().1, Some("A"));
+    }
+
+    /// `ModelBody::body` is public: a body replaced in place keeps its geometry key, and a joint
+    /// origin kept for the old geometry must not be answered for the new (#17074).
+    #[test]
+    fn a_joint_origin_follows_a_body_replaced_in_place() {
+        use crate::joints::{JointOrigin, Snap};
+        let doc = Document::new("replaced keyed body");
+        let mut state = ModelState::default();
+        state.bodies.push(ModelBody::new("Pin".into(), kernel::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 10.0).unwrap(), 0));
+        state.bodies[0].key = 77;
+        assert!(state.bodies[0].geometry_key().is_some());
+        let origin = JointOrigin::new(0, Snap::FaceCenter { pick: Vec3::new(0.0, 0.0, 10.0), face: None, x: None });
+        let first = crate::joints::resolve_origin(&doc, &state, &origin).unwrap();
+        assert!((first[3][2] - 10.0).abs() < 1e-9);
+        assert_eq!(state.origin_resolutions(), 1);
+        crate::joints::resolve_origin(&doc, &state, &origin).unwrap();
+        assert_eq!(state.origin_resolutions(), 1, "the same bodies keep their frame");
+        state.bodies[0].body = kernel::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 12.0).unwrap();
+        let changed = crate::joints::resolve_origin(&doc, &state, &origin).unwrap();
+        assert!((changed[3][2] - 12.0).abs() < 1e-9, "{changed:?}");
+        assert_eq!(state.origin_resolutions(), 2);
     }
 
     #[test]
