@@ -814,11 +814,9 @@ mod tests {
             };
             let volume = brep_volume(&k, &mut elbow, 1e-8, &attributes).unwrap();
             let want = std::f64::consts::PI * r * r * 2.0 * s;
-            // 1e-8 relative: the accuracy the integrator is asked for. The walls are
-            // exact (a rational circle extruded along lines); only the mitre's trim
-            // curves are fitted, and the check covers their fit too. The integrator's
-            // step control is an estimate, not a certificate. MEASURED: 4.5e-11 at all
-            // three sizes, so both errors sit far below the bound.
+            // 1e-8 relative: the integrator's requested accuracy (a step-control
+            // target, not a guaranteed bound; the bisector trims are built within the
+            // sweep tolerance). MEASURED: 4.5e-11 at all three sizes.
             assert!(
                 (volume - want).abs() <= 1e-8 * want,
                 "s {s}: volume {volume}, want {want}"
