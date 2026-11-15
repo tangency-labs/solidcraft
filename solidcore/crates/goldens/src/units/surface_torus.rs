@@ -1527,15 +1527,15 @@ mod tests {
     }
 
     /// How far the offset of `t` by `dist` (`CreateOffsetSurface`) is from the source moved
-    /// along its normal: the largest distance (closed form) from the offset torus
-    /// of the source NURB point plus `dist` times its unit normal `Su x Sv / |Su x Sv|`, at
+    /// along its normal: the distance (closed form) from the offset torus of the source
+    /// NURB point plus `dist` times its unit normal `Su x Sv / |Su x Sv|`, at each point of
     /// a 5 x 5 grid inside the NURB domain (off the axis of a horn torus), and the rounding
     /// allowance for it. A geometric check of the offset's sense, independent of the
     /// formula that sets its minor radius. Points where the tube has crossed the axis
     /// (`R + r cos v <= 0`, a spindle torus's folded part, where the sweep runs backwards
     /// and so does the normal) are left out: there the offset along the normal is not the
     /// minor-radius change. `None` when no point is left.
-    fn offset_off_normal(name: &str, k: &Kernel, t: &Torus, dist: f64, origin: Vec3, axis: Vec3) -> Option<(f64, f64)> {
+    fn offset_off_normal(name: &str, k: &Kernel, t: &Torus, dist: f64, origin: Vec3, axis: Vec3) -> Option<(Vec<f64>, f64)> {
         let off = t
             .create_offset_surface(k, dist, 1e-6)
             .expect("offset")
@@ -1556,7 +1556,7 @@ mod tests {
         let src = t.base().base();
         let nd = src.natural_uv_domain();
         let tol = 1e-9 * (origin.length() + t.major_radius() + t.minor_radius() + dist.abs());
-        let mut worst = None::<f64>;
+        let mut per_point = Vec::new();
         let grid = [0.1, 0.3, 0.5, 0.7, 0.9];
         for (a, b) in grid.iter().flat_map(|a| grid.iter().map(move |b| (*a, *b))) {
             let uv = nd.evaluate(a, b);
@@ -1569,9 +1569,9 @@ mod tests {
             let moved = d[0][0] + dist * (n / n.length());
             let off_by = off_torus(moved);
             assert!(off_by.is_finite(), "{name}: offset check at ({a}, {b})");
-            worst = Some(worst.map_or(off_by, |w| w.max(off_by)));
+            per_point.push(off_by);
         }
-        worst.map(|w| (w, tol))
+        (!per_point.is_empty()).then_some((per_point, tol))
     }
 
     /// The rows whose torus is inside out (50 of the 92), offset to the wrong side
@@ -1661,12 +1661,18 @@ mod tests {
             // exactly 2d until the fix flips this (the torus's own flag: a case given an
             // explicit generator takes it from that circle, not from the input's flag)
             let d = 0.25 * minor;
-            if let Some((off_by, off_tol)) = offset_off_normal(name, &k, &t, d, origin, axis) {
+            // every grid point is checked on its own, so a row only partly on the wrong side
+            // fails both branches
+            if let Some((per_point, off_tol)) = offset_off_normal(name, &k, &t, d, origin, axis) {
                 if t.inside_out() {
                     excluded.push(name);
-                    res.check("offset: inside-out row off by 2d (#17091)", name, (off_by - 2.0 * d).abs(), off_tol);
+                    for off_by in per_point {
+                        res.check("offset: inside-out row, every point off by 2d (#17091)", name, (off_by - 2.0 * d).abs(), off_tol);
+                    }
                 } else {
-                    res.check("offset: source point moved along its normal is on the offset", name, off_by, off_tol);
+                    for off_by in per_point {
+                        res.check("offset: source point moved along its normal is on the offset", name, off_by, off_tol);
+                    }
                 }
             } else {
                 folded.push(name);
@@ -1784,8 +1790,9 @@ mod tests {
         }
         assert_eq!(seen, WR408_501_504_MOVED.len(), "every moved case is checked");
         excluded.sort_unstable();
-        eprintln!("offset check: {} inside-out rows off by 2d, {} rows wholly folded: {folded:?}", excluded.len(), folded.len());
+        eprintln!("offset check: {} inside-out rows off by 2d at every point, {} rows wholly folded: {folded:?}", excluded.len(), folded.len());
         assert_eq!(excluded, INSIDE_OUT_ROWS.to_vec(), "the rows #17091 excludes");
+        assert_eq!(folded, ["gen0355"], "the rows with every grid point on the folded part");
         for (key, used) in &res.0 {
             eprintln!("largest residual / allowance: {used:.3e}  {key}");
         }
