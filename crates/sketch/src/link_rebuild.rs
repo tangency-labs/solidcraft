@@ -167,7 +167,8 @@ impl Sketch {
     /// still are a layout), for its new shape `lay`. A curve of the sketch's own on an old point
     /// moves to the new point that matches it, or else to a free point of its own where it was;
     /// a constraint moves to the new points and curves that match, and goes only when one of
-    /// them has no match. All or nothing: on an error the sketch is as it was.
+    /// them has no match. A new point or curve that matches an old one takes its id, whether or
+    /// not anything in the sketch holds it. All or nothing: on an error the sketch is as it was.
     pub(super) fn rebuild_link(&mut self, id: &str, lay: &Layout, points: &[usize], curves: &[usize], cur: Option<&[LCurve]>) -> Result<()> {
         let saved = self.clone();
         let rebuilt = self.rebuild_link_in_place(id, lay, points, curves, cur);
@@ -193,6 +194,12 @@ impl Sketch {
             let (ps, cs) = k.kind.indices();
             needed.extend(ps.iter().filter_map(|p| old_point.get(p)));
             needed_curves.extend(cs.iter().filter_map(|c| old_curve.get(c)));
+        }
+        // Features outside the sketch refer to its curves too: a profile is picked by the ids of
+        // the curves around it (#14249). So every old entity is matched, as far as the work allows.
+        if points.len().saturating_mul(lay.pts.len()) <= MAX_MATCH_WORK {
+            needed.extend(0..points.len());
+            needed_curves.extend(0..curves.len());
         }
         for c in needed_curves.iter().filter_map(|k| cur.and_then(|cur| cur.get(*k))) {
             needed.extend(curve_points(c));
