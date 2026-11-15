@@ -20,7 +20,7 @@ use solidcore::eval::Frame;
 use solidcore::kernel::Kernel;
 use solidcore::primitive::api_trim_ops::create_planar_faces;
 use solidcore::primitive::primitive_creation::Boolean2d;
-use solidcore::prism::{extrude, measure, profile as kp, read, sheet};
+use solidcore::prism::{extrude, figure as kf, measure, profile as kp, read, sheet};
 use solidcore::Brep;
 use solidcore_convert as convert;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
@@ -420,7 +420,7 @@ pub struct PlacedFigure {
 }
 
 /// `figure` and `points` scaled by `scale`, turned counter-clockwise by `angle` (radians) about
-/// their own origin and moved to `origin` ([`kp::place_figure_2d`]): a drawing symbol, a table of
+/// their own origin and moved to `origin` ([`kf::place_figure_2d`]): a drawing symbol, a table of
 /// segments and text anchors in units of its size, placed on its sheet. An arc's start turns by
 /// the angle and its sweep stays; a mirror is refused.
 ///
@@ -436,12 +436,12 @@ pub fn place_figure(
 ) -> Result<PlacedFigure> {
     let figure: Vec<kp::Seg2> = figure.iter().map(convert::seg2).collect();
     let points: Vec<_> = points.iter().copied().map(convert::vec2).collect();
-    let at = kp::FigurePlacement {
+    let at = kf::FigurePlacement {
         scale,
         angle,
         origin: convert::vec2(origin),
     };
-    let placed = kp::place_figure_2d(&figure, &points, at).map_err(status)?;
+    let placed = kf::place_figure_2d(&figure, &points, at).map_err(status)?;
     Ok(PlacedFigure {
         segments: placed.segments.iter().map(convert::record_seg2).collect(),
         points: placed
@@ -454,7 +454,7 @@ pub fn place_figure(
 }
 
 /// The corners of the regular outline with `sides` sides, each `side` long, about `centre`,
-/// counter-clockwise from the angle `first_angle` ([`kp::regular_polygon_2d`]): a revision tag's
+/// counter-clockwise from the angle `first_angle` ([`kf::regular_polygon_2d`]): a revision tag's
 /// triangle is 3 sides from `π/2`.
 ///
 /// # Errors
@@ -467,7 +467,7 @@ pub fn regular_outline(
     first_angle: f64,
 ) -> Result<Vec<Vec2>> {
     let corners =
-        kp::regular_polygon_2d(convert::vec2(centre), sides, side, first_angle).map_err(status)?;
+        kf::regular_polygon_2d(convert::vec2(centre), sides, side, first_angle).map_err(status)?;
     Ok(corners.into_iter().map(convert::record_vec2).collect())
 }
 
@@ -483,7 +483,7 @@ pub struct LabelFit {
 /// The tallest label box `width_per_height` times as wide as it is tall, centred across on
 /// `x = centre_x`, `margin` clear of each edge of the convex, counter-clockwise `outline`
 /// (square to the edge) and no taller than `max_height`, at its lowest
-/// ([`kp::box_fit_in_convex_polygon`]). `None` when no box fits.
+/// ([`kf::box_fit_in_convex_polygon`]). `None` when no box fits.
 ///
 /// # Errors
 /// The kernel's refusal ([`Error::Status`]): an outline not convex and counter-clockwise, of
@@ -497,7 +497,7 @@ pub fn label_in_outline(
 ) -> Result<Option<LabelFit>> {
     let outline: Vec<_> = outline.iter().copied().map(convert::vec2).collect();
     let fit =
-        kp::box_fit_in_convex_polygon(&outline, centre_x, width_per_height, margin, max_height)
+        kf::box_fit_in_convex_polygon(&outline, centre_x, width_per_height, margin, max_height)
             .map_err(status)?;
     Ok(fit.map(|f| LabelFit {
         height: f.height,

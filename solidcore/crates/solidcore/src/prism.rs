@@ -1,6 +1,7 @@
 //! Planar prisms: profiles of lines, arcs, conics and Béziers in a frame's coordinates, the
 //! exact reading of a curve in a plane, a planar sheet read back as regions, a region extruded
-//! between two levels, and the certified section of a body that is a uniform prism.
+//! between two levels, the certified section of a body that is a uniform prism, and the figures
+//! of a drawing sheet.
 //!
 //! Not upstream: SolidCraft's planar regions and prism measures (`prism_curve.rs`,
 //! `prism_measure.rs` and the geometry of `prism.rs`), moved into the kernel so the layers above
@@ -11,6 +12,7 @@
 //! typed refusal): it decides nothing at a tolerance it cannot prove (owner rule 13564).
 
 pub mod extrude;
+pub mod figure;
 pub mod measure;
 pub mod placement;
 pub mod profile;
