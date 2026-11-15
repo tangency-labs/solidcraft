@@ -20,7 +20,7 @@
 //! vertex past half its tolerance, not the whole. Edge-use marks are a local set. `CollectRegions`'
 //! linear stack and result searches use companion sets (same order).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::{contains_coincident_topology, ERROR};
 use super::{base, brep_object, class, edge, face, loops, seams, shell, vertex, Cx, Rep, Test};
@@ -32,7 +32,7 @@ use crate::query::brep::BrepQuery;
 use crate::topology::brep::{p1, p2, p9};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::{edge as tedge, vertex as tvertex, vertexuse as tvu};
-use crate::topology::{Brep, EdgeuseId, RegionId, VertexuseId};
+use crate::topology::{Brep, EdgeId, EdgeuseId, RegionId, VertexId, VertexuseId};
 
 const C: i64 = class::BREP;
 
@@ -274,7 +274,7 @@ pub(super) fn validate_and_update(
     result
 }
 
-use super::super::pointers::GROWTH_PAST_RATIO;
+use super::super::pointers::{edge_tube_reaches, vertex_ball_reaches, GROWTH_PAST_RATIO};
 
 fn validate_and_update_body(
     k: &mut Kernel,
@@ -311,6 +311,9 @@ fn validate_and_update_body(
 
     // the marked edge uses (an unlocked mark)
     let mut marked: BTreeSet<EdgeuseId> = BTreeSet::new();
+    // the stitch scope's proofs, once per vertex and per edge
+    let mut ball_reaches: BTreeMap<VertexId, bool> = BTreeMap::new();
+    let mut tube_reaches: BTreeMap<EdgeId, bool> = BTreeMap::new();
     let need = rep.need(0);
 
     // for every face
@@ -392,6 +395,8 @@ fn validate_and_update_body(
 
             // arrive here after bad edgeuse vertex gaps had a chance to be fixed:
             // report unfixed bad edgeuse start and end vertex/edge and vertex/face gaps
+            let edge_of_eu = super::super::required(eu1::edge(b, eu)?)?;
+            let face_tol = crate::topology::face::p2::tolerance(b, f)?;
             let start_tol = b.vertex(start_v)?.tolerance;
             let end_tol = b.vertex(end_v)?.tolerance;
             let gaps = [
@@ -401,7 +406,29 @@ fn validate_and_update_body(
                 (3, end_face, end_tol),
             ];
             for (index, gap, tol) in gaps {
-                let ok = !need || gap.is_none_or(|g| g <= tol / 2.0);
+                let mut ok = !need || gap.is_none_or(|g| g <= tol / 2.0);
+                if !ok && rep.stitched {
+                    // the zone it spans: the incident edge's (tests 0, 2) or face's (1, 3)
+                    let (v, incident) = match index {
+                        0 => (start_v, tedge::tolerance(b, edge_of_eu)?),
+                        1 => (start_v, face_tol),
+                        2 => (end_v, tedge::tolerance(b, edge_of_eu)?),
+                        _ => (end_v, face_tol),
+                    };
+                    ok = match gap {
+                        Some(g) if g <= tol + incident => {
+                            let reaches = if let Some(&known) = ball_reaches.get(&v) {
+                                known
+                            } else {
+                                let found = vertex_ball_reaches(k, b, v)?;
+                                ball_reaches.insert(v, found);
+                                found
+                            };
+                            !reaches
+                        }
+                        _ => false,
+                    };
+                }
                 rep.add(b, ok, tolerance_test(index, eu, tol / 2.0), || {
                     gap.unwrap_or(UNDEF_DOUBLE)
                 })?;
@@ -444,7 +471,17 @@ fn validate_and_update_body(
 
             // report unfixed bad edgeuse edge gaps
             let eu_tol = tedge::tolerance(b, e)?;
-            let ok = !need || max_gap <= eu_tol;
+            let mut ok = !need || max_gap <= eu_tol;
+            if !ok && rep.stitched && max_gap <= eu_tol + face_tol {
+                let reaches = if let Some(&known) = tube_reaches.get(&e) {
+                    known
+                } else {
+                    let found = edge_tube_reaches(k, b, e)?;
+                    tube_reaches.insert(e, found);
+                    found
+                };
+                ok = !reaches;
+            }
             rep.add(b, ok, tolerance_test(4, eu, eu_tol), || max_gap)?;
 
             // save max edge/face gap: upstream compares the gap with itself
