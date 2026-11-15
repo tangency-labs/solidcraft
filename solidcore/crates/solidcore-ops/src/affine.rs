@@ -149,7 +149,7 @@ pub fn inverse(matrix: &Matrix) -> Result<Matrix> {
 /// with `direction`, which is as many lengths as `direction` is long (a unit direction gives
 /// the distance itself). Negative behind `origin`.
 pub fn distance_along(origin: [f64; 3], direction: [f64; 3], point: [f64; 3]) -> f64 {
-    (0..3).map(|i| (point[i] - origin[i]) * direction[i]).sum()
+    Vec3::from(point).distance_along(Vec3::from(origin), Vec3::from(direction))
 }
 
 #[cfg(test)]
