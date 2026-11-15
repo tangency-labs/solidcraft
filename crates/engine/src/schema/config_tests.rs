@@ -34,7 +34,7 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<ConfigColumnParams>(),
         &["appearance", "component_appearance", "delete", "face_appearance", "feature", "material", "param"],
     );
-    assert_keys(input_schema_for::<ConfigRowEditParams>(), &["delete", "from", "name", "rename", "values"]);
+    assert_keys(input_schema_for::<ConfigRowEditParams>(), &["delete", "from", "index", "name", "rename", "values"]);
     assert_keys(input_schema_for::<ConfigRuleParams>(), &["delete", "id", "index", "rule", "rules"]);
 }
 
