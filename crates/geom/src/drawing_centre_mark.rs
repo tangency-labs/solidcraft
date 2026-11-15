@@ -57,3 +57,25 @@ pub fn centre_line(a: Vec2, b: Vec2, overshoot_mm: f64) -> Result<Seg2, Invalid>
 #[cfg(test)]
 #[path = "drawing_centre_mark_tests.rs"]
 mod tests;
+
+/// Paper obstacles from dimension lines and measured text, in sheet coordinates.
+#[derive(Clone, Debug, Default)]
+pub struct GapObstacles {
+    pub lines: Vec<(Vec2, Vec2)>,
+    pub boxes: Vec<[Vec2; 4]>,
+}
+
+/// Split a straight centre stroke around dimension crossings and measured text boxes.
+/// Returned start distances let the caller advance the dash phase without restarting it.
+pub fn gaps(a: Vec2, b: Vec2, obstacles: &GapObstacles, margin: f64) -> Result<Vec<(Seg2, f64)>, Invalid> {
+    if obstacles.lines.len().saturating_add(obstacles.boxes.len()) > 100_000 {
+        return Err(Invalid("too many dimension obstacles for centre annotation gaps"));
+    }
+    let lines = obstacles.lines.iter().map(|(p, q)| ([p.x, p.y], [q.x, q.y])).collect::<Vec<_>>();
+    let boxes = obstacles.boxes.iter().map(|c| c.map(|p| [p.x, p.y])).collect::<Vec<_>>();
+    solidcore_ops::paper_gaps::cut([a.x, a.y], [b.x, b.y], &lines, &boxes, margin)
+        .map(|pieces| {
+            pieces.into_iter().map(|p| (Seg2::Line { a: Vec2::new(p.start[0], p.start[1]), b: Vec2::new(p.end[0], p.end[1]) }, p.distance)).collect()
+        })
+        .map_err(|_| Invalid("invalid or excessive dimension gap geometry"))
+}

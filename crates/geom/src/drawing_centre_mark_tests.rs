@@ -52,3 +52,36 @@ fn a_centre_line_extends_both_ends_of_projected_points() {
     assert!(centre_line(Vec2::ZERO, Vec2::new(f64::NAN, 0.0), 0.0).is_err());
     assert!(centre_line(Vec2::ZERO, Vec2::new(MAX_COORDINATE_MM, 0.0), 1.0).is_err());
 }
+
+#[test]
+fn dimension_gaps_merge_and_keep_distances_for_dash_phase() {
+    use super::{GapObstacles, gaps};
+    let obstacle = GapObstacles {
+        lines: vec![(Vec2::new(4.0, -2.0), Vec2::new(4.0, 2.0)), (Vec2::new(5.0, -2.0), Vec2::new(5.0, 2.0))],
+        boxes: vec![[Vec2::new(7.0, -1.0), Vec2::new(8.0, -1.0), Vec2::new(8.0, 1.0), Vec2::new(7.0, 1.0)]],
+    };
+    let pieces = gaps(Vec2::ZERO, Vec2::new(10.0, 0.0), &obstacle, 0.5).unwrap();
+    assert_eq!(pieces.len(), 3);
+    let expected = [(0.0, 3.5), (5.5, 6.5), (8.5, 10.0)];
+    for ((segment, distance), (start, end)) in pieces.iter().zip(expected) {
+        assert!((distance - start).abs() < 1e-9);
+        assert!(segment.start().dist(Vec2::new(start, 0.0)) < 1e-9);
+        assert!(segment.end().dist(Vec2::new(end, 0.0)) < 1e-9);
+    }
+    assert!(gaps(Vec2::ZERO, Vec2::new(10.0, 0.0), &obstacle, f64::NAN).is_err());
+    assert_eq!(gaps(Vec2::ZERO, Vec2::new(10.0, 0.0), &GapObstacles::default(), 0.5).unwrap().len(), 1);
+}
+
+#[test]
+fn measured_text_box_moves_its_gap_and_removing_it_restores_the_stroke() {
+    let box_at = |x: f64| [Vec2::new(x, -1.0), Vec2::new(x + 2.0, -1.0), Vec2::new(x + 2.0, 1.0), Vec2::new(x, 1.0)];
+    let mut obstacles = GapObstacles { lines: Vec::new(), boxes: vec![box_at(2.0)] };
+    let first = gaps(Vec2::ZERO, Vec2::new(10.0, 0.0), &obstacles, 0.5).unwrap();
+    assert_eq!(first.len(), 2);
+    assert!((first[0].0.end().x - 1.5).abs() < 1e-9);
+    obstacles.boxes[0] = box_at(6.0);
+    let moved = gaps(Vec2::ZERO, Vec2::new(10.0, 0.0), &obstacles, 0.5).unwrap();
+    assert!((moved[0].0.end().x - 5.5).abs() < 1e-9);
+    obstacles.boxes.clear();
+    assert_eq!(gaps(Vec2::ZERO, Vec2::new(10.0, 0.0), &obstacles, 0.5).unwrap(), vec![(Seg2::Line { a: Vec2::ZERO, b: Vec2::new(10.0, 0.0) }, 0.0)]);
+}

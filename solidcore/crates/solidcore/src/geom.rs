@@ -25,6 +25,7 @@ pub mod local_solve1d;
 pub mod local_solve_nd;
 pub mod matrix;
 pub mod object;
+pub mod paper_gaps;
 pub mod periodic_extent1d;
 pub mod point_set;
 pub mod polar_box;
