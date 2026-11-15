@@ -1981,12 +1981,18 @@ mod tests {
                         if (m.dot(n).abs() - 1.0).abs() < 1e-9 {
                             rings.push(f.origin.dot(n));
                         } else {
-                            assert!((m.dot(plane.y).abs() - 1.0).abs() < 1e-9 && f.origin.dot(plane.y).abs() < 1e-9, "{what}: a strip off the axis plane: {f:?}");
+                            assert!(
+                                (m.dot(plane.y).abs() - 1.0).abs() < 1e-9 && f.origin.dot(plane.y).abs() < 1e-9,
+                                "{what}: a strip off the axis plane: {f:?}"
+                            );
                             strips += 1;
                         }
                     }
                     rings.sort_by(f64::total_cmp);
-                    assert!(rings.len() == 2 && rings[0].abs() < 1e-9 && (rings[1] - 10.0).abs() < 1e-9 && strips == 2, "{what}: rings at {rings:?}, {strips} strips");
+                    assert!(
+                        rings.len() == 2 && rings[0].abs() < 1e-9 && (rings[1] - 10.0).abs() < 1e-9 && strips == 2,
+                        "{what}: rings at {rings:?}, {strips} strips"
+                    );
                 }
             }
         }
