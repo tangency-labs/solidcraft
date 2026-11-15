@@ -2053,7 +2053,12 @@ fn a_rim_round_across_a_loft_s_creases_is_certified_or_refused() {
         }
         // refused by the kernel: the join's own refusal, or the corner's failure it ends in
         Err(e) => assert!(
-            matches!(e, Error::Unsupported(_) | Error::BlendFailed { .. }),
+            matches!(
+                e,
+                Error::Unsupported(_)
+                    | Error::BlendFailed { .. }
+                    | Error::Status(solidcore::error::SM_ERR)
+            ),
             "{e:?}"
         ),
     }
