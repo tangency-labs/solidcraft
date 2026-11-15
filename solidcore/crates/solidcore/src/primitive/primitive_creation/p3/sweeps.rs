@@ -16,8 +16,7 @@
 //! their full caller tails.
 //! Not upstream (WR-409, tangency-labs/solidcore#1113): a profile that bounds no planar
 //! face becomes wires joined where its curves meet (`join_profile_wire_ends`).
-//! Not upstream (WR-442, tangency-labs/solidcore#478, opt-in
-//! `Kernel::fixes.revolve_nested_shells_as_cavities`): after a full turn's
+//! Not upstream (WR-442, tangency-labs/solidcore#478): after a full turn's
 //! stitch, a closed shell inside another becomes that solid's cavity.
 //! Not upstream (WR-448, tangency-labs/solidcore#545, opt-in
 //! `Kernel::fixes.revolve_analytic_profile_faces`; SolidCraft change, tangency-labs/smlib
@@ -29,8 +28,8 @@
 //! (`sm_CreateAnalyticRotationalSweep`), as fork 9853e54 deletes it: a one-curve profile
 //! goes through the same per-curve rule, so a whole circle's torus has its seam at the
 //! profile (#1491).
-//! Not upstream (WR-590, opt-in `Kernel::fixes.revolve_splits_curves_on_axis`;
-//! SolidCraft change, tangency-labs/smlib e4f1377): a partial turn first splits each
+//! Not upstream (WR-590; SolidCraft change, tangency-labs/smlib e4f1377): a partial
+//! turn first splits each
 //! curve where it meets the axis inside itself ([`split_curves_on_axis`], the fork's
 //! `sm_SplitCurvesOnAxis`), which `CheckCurveSweep` otherwise refuses
 //! (`SM_SC_ROT_ON_CURVE`); a closed curve's last piece is joined back onto its first.
@@ -591,12 +590,10 @@ impl PrimitiveCreation {
         // fork c8f6a31 (WR-662): SER(pBrep->StitchAndOrient()).
         let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
         ignore_status(passed_on(a.stitch_and_orient(brep), p)?)?;
-        // not upstream (WR-442, #478, opt-in): a closed shell inside another is its cavity
-        if a.kernel(brep)?.fixes.revolve_nested_shells_as_cavities {
-            a.with_brep_mut(brep, |k, b, _, env| {
-                crate::topology::brep::p6::nest_closed_shells_as_cavities(k, b, env)
-            })?;
-        }
+        // not upstream (WR-442, #478): a closed shell inside another is its cavity
+        a.with_brep_mut(brep, |k, b, _, env| {
+            crate::topology::brep::p6::nest_closed_shells_as_cavities(k, b, env)
+        })?;
         a.set_editing(brep, false)?;
         Ok(())
     }
@@ -631,11 +628,9 @@ impl PrimitiveCreation {
                 ));
             }
             let tolerance = a.brep(brep)?.tolerance();
-            // Not upstream (WR-590, opt-in): no curve meets the axis inside itself
+            // Not upstream (WR-590): no curve meets the axis inside itself
             // (CheckCurveSweep's SM_SC_ROT_ON_CURVE)
-            if a.kernel(brep)?.fixes.revolve_splits_curves_on_axis {
-                split_curves_on_axis(a.kernel(brep)?, curves, axis_base, axis, tolerance)?;
-            }
+            split_curves_on_axis(a.kernel(brep)?, curves, axis_base, axis, tolerance)?;
             a.set_editing(brep, true)?;
             let mut faces = Vec::new();
             let mut edges = Vec::new();
@@ -839,8 +834,8 @@ mod tests {
         }
     }
 
-    /// A full turn of a half annulus about its diameter is a hollow ball with the
-    /// opt-in; upstream makes the inner ball a second solid.
+    /// A full turn of a half annulus about its diameter is a hollow ball; upstream
+    /// makes the inner ball a second solid.
     #[test]
     fn issue_478_full_turn_nested_shell_is_a_cavity() {
         use crate::geom::attribute::{AttributeStore, ObjectKey};
@@ -857,7 +852,6 @@ mod tests {
         let curves: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
 
         let mut k = Kernel::default();
-        k.fixes.revolve_nested_shells_as_cavities = true;
         let mut ball = create_rotational_sweep(&mut k, &curves, o, x, 360.0, true).unwrap();
         let store = AttributeStore::default();
         let key_of = |_| ObjectKey(0);
@@ -1020,7 +1014,6 @@ mod tests {
         let (o, z) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
 
         let mut k = Kernel::default();
-        k.fixes.revolve_nested_shells_as_cavities = true;
         k.fixes.revolve_holed_profile_void = true;
         let mut ring = create_rotational_sweep(&mut k, &curves, o, z, 360.0, true).unwrap();
         let store = AttributeStore::default();
