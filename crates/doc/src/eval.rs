@@ -912,6 +912,7 @@ impl ModelState {
                     {
                         b.body = b.body.clone().with_split_lines(Some(lines.clone()));
                         b.mirrored_mesh = None;
+                        b.mesh_placement = None;
                     }
                     // An imported look outlives the operations on the body.
                     if b.body.paint().is_none()
@@ -10076,6 +10077,9 @@ fn eval_feature(
                     let name = pattern_copy_name(&mut names, f, slot, &mb.name);
                     copy_sheet(st, &mb.name, &name, &local);
                     let mut body = ModelBody::traced_new(name, copy, f.id);
+                    // A copy is its source moved: it is drawn from the source's triangles and
+                    // display plans, moved, rather than meshed and planned again for every copy.
+                    body.mesh_placement = placed_mesh::PlacedMesh::new(&mb, &local).map(Arc::new);
                     if owner.is_some() {
                         // Kept in that component as a moved body is (and through later features).
                         body.component = mb.component;
