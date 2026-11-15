@@ -29,13 +29,14 @@ pub(crate) mod spatial;
 mod wide_vertices;
 
 pub use assert_valid::{
-    assert_valid, check_brep, check_brep_with_keys, curve_assert_valid,
-    validate_and_update_tolerances, BrepCheck, CheckLevel, FailureClass, ToleranceGaps,
+    assert_valid, assert_valid_scoped, check_brep, check_brep_scoped, check_brep_with_keys,
+    check_brep_with_keys_scoped, curve_assert_valid, validate_and_update_tolerances, BrepCheck,
+    CheckLevel, FailureClass, ToleranceGaps, ValidityScope,
 };
 pub use coincidence::{contains_coincident_topology, CoincidenceResult};
 pub(crate) use pointers::validate_geometry;
-pub use pointers::validate_pointers;
 pub(crate) use pointers::validate_pointers_excluding;
+pub use pointers::{edge_tube_reaches, validate_pointers, vertex_ball_reaches};
 pub(crate) use soundness::lost_manifold;
 pub use soundness::{soundness, standing, volume_sign, Soundness, Standing};
 pub use wide_vertices::update_tolerances_after_boolean;

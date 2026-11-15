@@ -54,6 +54,19 @@ Source today: Interface page (`prefs/interface.rs`, `prefs/navbar.rs`).
 | Show search results in the ribbon | Checkbox | `Prefs.ribbon_reveal` | `false` | none | none | Verify the field: `ribbon_reveal` is the only ribbon search field in the table. |
 | Pinned commands out of menus | Checkbox | `Prefs.ribbon_menus_skip_pinned` | `false` | none | none | |
 
+## Design tabs
+
+Board: `Tabs_Menus`, "Preferences · Layout · Design tabs". Source: `prefs/interface.rs`, read through `design_tab_prefs::DesignTabPrefs`.
+
+| Label | Control | Edits | Default | Hover | Figure | Notes |
+|---|---|---|---|---|---|---|
+| Views of a design | Segmented: Show views as tabs / Show one tab with a view switcher | `Prefs.design_views_as_tabs` | `true` (tabs) | "Each view is a tab inside its design's tab, falling back to the switcher when the bar is too narrow." | none | |
+| Open drawing sheets in a sub-tab | Checkbox | `Prefs.design_sub_tab_sheets` | `true` | none | none | |
+| Open sketches in a sub-tab | Checkbox | `Prefs.design_sub_tab_sketches` | `true` | "Editing a sketch opens it as its own view; Finish Sketch returns to the previous one." | none | |
+| Open Render and Animate in a sub-tab | Checkbox | `Prefs.design_sub_tab_render` | `true` | none | none | One setting for both workspaces. |
+| Reuse a view of the same sheet, sketch or workspace | Checkbox | `Prefs.design_reuse_views` | `true` | "Opening it again shows the view you already have." | none | |
+| Reopen a design's views next time it opens | Checkbox | `Prefs.design_reopen_views` | `false` | none | none | |
+
 ## Navigation bar
 
 Source: `Prefs.navigation_bar` (`navigation_bar::NavigationBar`) and `app.ui.show_navigation_bar`.
