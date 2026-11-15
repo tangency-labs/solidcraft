@@ -677,7 +677,7 @@ fn a_chamfer_saved_on_a_rounds_edge_with_its_number_at_the_end_is_found_at_its_p
     // The round's name with its pick on the flat side's top edge, or on the round side's: neither
     // edge is between the top and a round, and that name asks again.
     let asked = format!("`{}` no longer exists", saved.features[bevel].edge_names[1]);
-    for at in [Vec3::new(6.0, -3.0, 10.0), Vec3::new(5.0, -(200.0f64.sqrt()), 10.0)] {
+    for at in [Vec3::new(6.0, -3.0, 10.0), Vec3::new(5.0, -14.142135623730951, 10.0)] {
         let mut off = saved.clone();
         if let solidcraft_doc::FeatureKind::Chamfer { edges, .. } = &mut off.features[bevel].kind {
             edges[1].0 = at;
