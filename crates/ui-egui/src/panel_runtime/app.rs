@@ -1423,6 +1423,7 @@ impl crate::SolveApp {
             crate::drawing_workspace::panel(self, &mut legacy);
             crate::drawing_workspace::chrome(self, ui, render_domain);
         }
+        crate::drawing_workspace::show_add_sheet(self, ui.ctx());
         if self.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some()) && !self.preferences.agent_chat_popped {
             crate::agent_chat::finish_shared(self, ui.ctx());
         }
