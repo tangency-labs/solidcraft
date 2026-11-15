@@ -102,7 +102,8 @@ impl Turns {
 
     fn add(&mut self, q: [f64; 2]) {
         if let Some(l) = self.last {
-            for (t, s) in self.total.iter_mut().zip(self.steps(l, q)) {
+            let steps = self.steps(l, q);
+            for (t, s) in self.total.iter_mut().zip(steps) {
                 *t += s;
             }
         }
