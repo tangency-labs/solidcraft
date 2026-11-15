@@ -839,6 +839,34 @@ form_case!(replace_face, "solid.replace_face", []);
 form_case!(boundary_fill, "solid.boundary_fill", ["Cells", "Operation"]);
 form_case!(align, "solid.align", ["Object Type", "From Snap", "To Snap"]);
 
+/// Edit Feature opens Cell Grid with every stored value, and OK without a change makes the same
+/// feature again: the shape, the grid, the clip, the anchor and the targets.
+#[test]
+fn cell_grid_edit_refills_every_stored_value() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 62, "width": 62, "height": 3, "body_name": "Plate"})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Field"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [62, 62]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let stored = json!({
+        "sketch": "Field", "shape": "polygon", "sides": "6", "dot_grid": "square", "size": "8 mm", "web": "2 mm",
+        "clip": "whole", "margin": "1 mm", "through_all": true, "direction": "negative", "angle": "30 deg",
+        "anchor": ["1 mm", "2 mm", "0 mm"], "targets": ["Plate"],
+    });
+    h.app.run("solid.cell_grid", stored).unwrap();
+    let kind = h.app.session.doc.find_feature("CellGrid1").unwrap().kind.clone();
+    let (Kind::CellGrid(c), inputs, extra) = crate::dialogs_cell_grid::for_feature(&h.app, &kind).unwrap() else { panic!() };
+    assert_eq!((c.shape, c.dot_grid, c.clip, c.direction), (4, 1, 0, 1), "{c:?}");
+    assert!(c.through_all, "{c:?}");
+    assert!(!inputs[0].items.is_empty() && inputs[1].items == [Sel::Body { name: "Plate".into() }], "{inputs:?}");
+    assert!(extra.contains_key("anchor"), "{extra:?}");
+    let commands = crate::dialogs_cell_grid::commands(&h.app, &c, &inputs, &extra).unwrap();
+    let [(id, p)] = commands.as_slice() else { panic!("{commands:?}") };
+    h.app.run(id, p.clone()).unwrap();
+    let again = h.app.session.doc.find_feature("CellGrid2").unwrap().kind.clone();
+    assert_eq!(serde_json::to_value(&again).unwrap(), serde_json::to_value(&kind).unwrap());
+}
+
 #[test]
 fn align_components_mode_switches_and_aligns_only_selected_instance() {
     let mut h = Harness::new();
