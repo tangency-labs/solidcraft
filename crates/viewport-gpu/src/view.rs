@@ -723,16 +723,17 @@ pub struct BlockTris {
 }
 
 /// A body's edge lines in a model scene block ([`BlockBytes::lines`], by line), drawn again in
-/// two styles ([`lit_line_style`]): a halo and the line over it, where the edge is seen. Where
-/// the model hides the edge nothing is drawn: a lit body does not show its far side's edges
-/// through itself.
+/// up to three styles ([`lit_line_style`]): a halo, the line over it, and where the model hides
+/// the edge, a dimmed line. A style left out (`None`) is not drawn: a hovered body has no dimmed
+/// line, a selected body's hidden edges (a preference) only that one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LitEdges {
     /// The block's key ([`SceneBlock::key`]).
     pub block: u64,
     pub lines: std::ops::Range<u32>,
-    pub halo: u32,
-    pub core: u32,
+    pub halo: Option<u32>,
+    pub core: Option<u32>,
+    pub hidden: Option<u32>,
 }
 
 /// The largest palette index a lit line can name: its style rides in the draw's first vertex,
@@ -1744,16 +1745,17 @@ fn lit_lines(
     p: &wgpu::RenderPipeline,
     blocks: &std::collections::HashMap<u64, BlockGpu>,
     edges: &[LitEdges],
-    style: fn(&LitEdges) -> u32,
+    style: fn(&LitEdges) -> Option<u32>,
     tally: &Tally,
 ) {
-    if edges.is_empty() {
+    if edges.iter().all(|e| style(e).is_none()) {
         return;
     }
     pass.set_pipeline(p);
     for e in edges {
+        let Some(style) = style(e) else { continue };
         let Some(batch) = blocks.get(&e.block).and_then(|b| b.lines.as_ref()) else { continue };
-        let first = style(e).saturating_mul(6);
+        let first = style.saturating_mul(6);
         // The block's lines may span several buffers: each draws its share of the range.
         let mut at = 0u32;
         for (buffer, count) in &batch.parts {
@@ -2559,8 +2561,9 @@ pub struct Renderer {
     /// Lines behind the model (depth test >).
     line_hidden: wgpu::RenderPipeline,
     /// The scene's own lines in another colour and width ([`LitEdges`], `vs_line_lit`), where
-    /// they are seen.
+    /// they are seen and where the model hides them.
     line_lit: wgpu::RenderPipeline,
+    line_lit_hidden: wgpu::RenderPipeline,
     overlay: wgpu::RenderPipeline,
     /// Reference planes, axes and the ground shadow: as `trans` and `line`, but not cut by a section.
     guide_trans: wgpu::RenderPipeline,
@@ -3512,6 +3515,7 @@ impl Renderer {
                 pipeline("sc_lines", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
                 pipeline("sc_lines_hidden", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
                 pipeline("sc_lines_lit", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+                pipeline("sc_lines_lit_hidden", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
             )
         };
         let lines_all = || {
@@ -3562,7 +3566,7 @@ impl Renderer {
                 tri_hl_planned,
             ) = see_through_tris.join();
             let ((glass_far_flat, glass_near_flat, trans_flat), tri_hl_instanced_flat) = see_through_flat.join();
-            let (line, line_hidden, line_lit) = lines.join();
+            let (line, line_hidden, line_lit, line_lit_hidden) = lines.join();
             let (overlay, guide_line) = lines_all.join();
             let (ss_blit, copy_blit, ss_filter) = blits.join();
             let (depth_reset, section_stencil) = resets.join();
@@ -3642,6 +3646,7 @@ impl Renderer {
                 line,
                 line_hidden,
                 line_lit,
+                line_lit_hidden,
                 overlay,
                 guide_trans: guide_trans.join(),
                 guide_line,
@@ -4528,6 +4533,7 @@ impl Renderer {
         lines(pass, &res.line_hidden, &m.hidden);
         in_moving(pass, &|pass, mv| lines(pass, &res.line_hidden, &mv.hidden));
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
+        lit_lines(pass, &res.line_lit_hidden, &m.blocks, &h.lit_edges, |e| e.hidden, tally);
         lines(pass, &res.line_hidden, &h.hidden);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         lines(pass, &res.line, &m.lines);

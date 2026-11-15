@@ -1203,6 +1203,10 @@ preference_settings! {
     /// A small dot at every vertex wherever edges are drawn (#7834). Off by default: the viewport
     /// draws edges only, as it always has.
     vertex_markers: bool = false;
+    /// A selected whole body draws its hidden edges dimmed through the model, as hovering one did
+    /// before. Off by default: a selected body is tinted, and neither hover nor selection shows
+    /// the edges the model hides.
+    show_selected_hidden_edges: bool = false, PAGE_GRAPHICS => check_id("prefs.show_selected_hidden_edges");
     /// A preview of a feature that changes a body draws the surface it adds in the preview
     /// colour, working out face by face which surface that is. Off: the body is drawn as itself
     /// and nothing is worked out (`preview::Colors::tint_new`).
