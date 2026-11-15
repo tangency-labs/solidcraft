@@ -132,7 +132,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "offset_open_edge_second_trim_point",
     "offset_point_vertex_caps",
     "offset_resolve_crossing_loops",
-    "offset_stitch_at_body_tolerance",
     "offset_swap_uv_extended_distance",
     "planar_path_profile_placement_statuses",
     "planar_path_sweep_statuses",

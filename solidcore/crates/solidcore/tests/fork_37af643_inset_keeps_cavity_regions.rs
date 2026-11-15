@@ -186,7 +186,6 @@ fn flag_on_keeps_only_the_cavity() {
 fn flag_on_with_offset_fixes() {
     let mut fixes = keep_cavity();
     fixes.offset_resolve_crossing_loops = true;
-    fixes.offset_stitch_at_body_tolerance = true;
     fixes.offset_extended_edges_mated = true;
     let (manifold, v) = shell(&fixes, 2.5);
     assert!(manifold);

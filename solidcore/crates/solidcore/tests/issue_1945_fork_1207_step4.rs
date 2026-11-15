@@ -103,7 +103,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_nx1_tangent_side_edge = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.shell_edges_on_analytics_exact = true;
-    k.fixes.offset_stitch_at_body_tolerance = true;
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.shell_empty_cavity_fails = true;
     k.fixes.fillet_trace_reaches_rails = true;

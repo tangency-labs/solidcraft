@@ -1111,19 +1111,26 @@ impl OffsetExecutive {
             // FindAndSetInfiniteRegion when >1 region (editing temporarily false),
             // refresh regions, set void flags by infinite-region identity, then
             // transfer result ownership and clear the executive temporary.
-            if kernel.fixes.offset_stitch_at_body_tolerance {
-                // Opt-in (WR-455, #855; tangency-labs/smlib@601d804): one pass at the body's
-                // tolerance. `StitchIntoSolid` doubles its tolerance until no lamina edge is
-                // left, but the lamina edges a merge leaves are the rims of the cut-off
-                // pieces `MakeManifold` removes next; escalating, it welds two of them into
-                // one edge of a far larger tolerance. (SER: a failure propagates.)
-                let mut callback = DefaultStitchCallback::new();
-                let mut one_pass = Stitch::new(&mut callback, result.tolerance(), true, false);
-                one_pass.fast_edge_compare = true;
-                one_pass.split_edges_with_vertices = false;
-                one_pass.making_manifold_solid = true;
-                one_pass.do_stitching(kernel, &mut result, None, None, MinGapRequest::default())?;
-            } else {
+            // WR-455 (#855; tangency-labs/smlib@601d804): first one pass at the body's
+            // tolerance. Upstream's `StitchIntoSolid` doubles its tolerance until no lamina
+            // edge is left, but the lamina edges a merge leaves are mostly the rims of the
+            // cut-off pieces `MakeManifold` removes next; escalating, it welds two of them
+            // into one edge of a far larger tolerance (a vertex whose tolerance no
+            // clearance excuses). (SER: a failure propagates.)
+            let mut callback = DefaultStitchCallback::new();
+            let mut one_pass = Stitch::new(&mut callback, result.tolerance(), true, false);
+            one_pass.fast_edge_compare = true;
+            one_pass.split_edges_with_vertices = false;
+            one_pass.making_manifold_solid = true;
+            one_pass.do_stitching(kernel, &mut result, None, None, MinGapRequest::default())?;
+            // Only when that pass closes no region at all would `MakeManifold` keep
+            // nothing: then the body's own seams are open (a sheet thickened by a few
+            // times the body's tolerance), and the stitch widens as upstream's does.
+            let infinite = result.infinite_region();
+            let closes_a_region = bp1::regions(&result, None)?
+                .into_iter()
+                .any(|region| Some(region) != infinite);
+            if !closes_a_region {
                 crate::error::ignore_status(stitch::stitch_into_solid(kernel, &mut result))?;
             }
             // Opt-in (WR-667; tangency-labs/smlib@37af643): an inset keeps the regions
@@ -2530,6 +2537,7 @@ mod tests {
     use crate::math::{Vec3, PI};
     use crate::surface::plane::Plane;
     use crate::surface::surface::Surface;
+    use crate::topology::brep::validation::{check_brep, CheckLevel};
     use crate::topology::{Faceuse, FaceuseId, Region, Shell};
 
     /// `faceuse_offset` offsets a box face's plane: a plane parallel to it, `distance` away.
@@ -5386,18 +5394,17 @@ mod tests {
     /// tangency-labs/solidcore#855: a 40 x 40 x 10 plate with a 4 mm hole at (4.99, 20)
     /// shelled 1.5 inward open at the top: the hole's offset (r 3.5) crosses the offset
     /// side x = 1.5 only 0.01 mm deep. Upstream's `StitchIntoSolid` doubles its tolerance
-    /// until the cut-off rims of that crossing are welded, and the shell is no solid;
-    /// with the opt-in one pass at the body's tolerance leaves a solid whose volume is
-    /// the inner box less the hole's offset disk (cut by x = 1.5), over the height 8.5.
-    /// `contacts_at_ends` adds the other opt-in of #855 (a tangential contact is found at
-    /// a curve's end), which must not change this shell.
+    /// until the cut-off rims of that crossing are welded, and the shell is no solid.
+    /// The kernel's stitch at the body's tolerance (WR-455) leaves a solid whose volume is
+    /// the inner box less the hole's offset disk (cut by x = 1.5), over the height 8.5,
+    /// valid at every `check_brep` level. `contacts_at_ends` adds the other opt-in of #855
+    /// (a tangential contact is found at a curve's end), which must not change this shell.
     #[test]
     fn issue_855_offset_stitch_keeps_the_bodys_tolerance() {
-        let shell = |stitch: bool, contacts_at_ends: bool| -> Result<Option<f64>> {
+        let shell = |contacts_at_ends: bool| -> Result<Option<f64>> {
             use crate::primitive::api_primitives::{create_box, create_cylinder};
             let mut kernel = Kernel::default();
             kernel.fixes.offset_resolve_crossing_loops = true;
-            kernel.fixes.offset_stitch_at_body_tolerance = stitch;
             kernel.fixes.curve_contacts_at_curve_ends = contacts_at_ends;
             let plate =
                 create_box(&mut kernel, Vec3::new(0.0, 0.0, 0.0), 40.0, 40.0, 10.0).unwrap();
@@ -5427,6 +5434,10 @@ mod tests {
             if !brep_is_manifold_solid(&result)? {
                 return Ok(None);
             }
+            for level in [CheckLevel::Level0, CheckLevel::Level1, CheckLevel::Level2] {
+                let checked = check_brep(&mut kernel, &mut result, level)?;
+                assert!(checked.is_valid(), "{level:?}: {:?}", checked.lines());
+            }
             let store = AttributeStore::default();
             let key_of = |_| ObjectKey(0);
             let attributes = crate::mass::integrator::properties::PropertyAttributes {
@@ -5441,16 +5452,12 @@ mod tests {
             )?;
             Ok(Some(volume))
         };
-        // The default path (the splits are the only path since #2981): the shell's
-        // stitch still welds the rims wrongly, the offset of the plate is no closed
-        // solid, and the WR-578 guard refuses it (1001)
-        assert_status(shell(false, false), 1001);
-        // the case's own opt-in (stitch at the body's tolerance) builds the closed form
-        // 40 x 40 x 10 less the hole, less the cavity: 8.5 high over the inner box (37 x 37)
-        // less the hole's offset disk (r 3.5, centre 3.49 from x = 1.5) cut by x = 1.5
+        // the closed form 40 x 40 x 10 less the hole, less the cavity: 8.5 high over the
+        // inner box (37 x 37) less the hole's offset disk (r 3.5, centre 3.49 from x = 1.5)
+        // cut by x = 1.5
         let expected = 4564.924657;
         for contacts_at_ends in [false, true] {
-            let volume = shell(true, contacts_at_ends).unwrap().unwrap();
+            let volume = shell(contacts_at_ends).unwrap().unwrap();
             assert!(
                 (volume - expected).abs() < 1e-6 * expected,
                 "volume {volume}"
