@@ -320,8 +320,11 @@ What the port does today:
   it at two points `2√(2rδ)` apart and stays within δ of it between them, as two circles do.
   `line_coplanar_circle_intersect_distinct` (`geom/geom_utility/p1.rs`) takes an overlap below
   its contact tolerance as one touching point at the chord's midpoint, unless the whole circle
-  lies within that tolerance of the line. The two sites above that pass `contact_tol_3d` for
-  circles pass it when one of the two is a line: an edge against a face's intersection curve
+  lies within that tolerance of the line. `Ellipse::intersect_with_line` (`curve/ellipse/p2.rs`)
+  moves that point to an end of the arc or the line that lies on the stretch between the two
+  crossings, so an arc that starts on the line there touches it at its start. The two sites
+  above that pass `contact_tol_3d` for circles pass it when one of the two is a line: an edge
+  against a face's intersection curve
   (`curve/ellipse/p2.rs` through `intersect/curve_class/p9.rs`), and the curve/surface
   classifier's line against an osculating circle where an edge meets a face
   (`surface/surface/p4.rs`). A flat side a hair inside a round tangent to it then touches the
