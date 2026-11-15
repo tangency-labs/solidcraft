@@ -145,6 +145,13 @@ pub fn inverse(matrix: &Matrix) -> Result<Matrix> {
     taken(map.inverse())
 }
 
+/// How far `point` stands from `origin` along `direction`: the dot product of `point - origin`
+/// with `direction`, which is as many lengths as `direction` is long (a unit direction gives
+/// the distance itself). Negative behind `origin`.
+pub fn distance_along(origin: [f64; 3], direction: [f64; 3], point: [f64; 3]) -> f64 {
+    Vec3::from(point).distance_along(Vec3::from(origin), Vec3::from(direction))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,5 +278,13 @@ mod tests {
         // a stack whose numbers overflow
         let far = translation([1e308, 0.0, 0.0]).unwrap();
         assert_eq!(then(&far, &far), Err(Error::Argument));
+    }
+
+    #[test]
+    fn distance_along_is_signed_and_ignores_the_sideways_offset() {
+        let (o, d) = ([1.0, 2.0, 3.0], [0.0, 1.0, 0.0]);
+        assert!((distance_along(o, d, [9.0, 6.0, -4.0]) - 4.0).abs() < 1e-12);
+        assert!((distance_along(o, d, [1.0, -1.0, 3.0]) + 3.0).abs() < 1e-12);
+        assert_eq!(distance_along(o, d, o), 0.0);
     }
 }

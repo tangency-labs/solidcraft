@@ -598,11 +598,10 @@ impl FilletSession<'_> {
     /// # Errors
     /// The first stage error, with all earlier mutations retained.
     ///
-    /// With `fixes.fillet_corner_per_vertex_fan` (WR-665, the fork's
-    /// tangency-labs/smlib@e418750) the vertices the fillet parameters split by fans are
-    /// joined again afterwards where the blends left more than one at a split point,
-    /// whether the blends built or not (`JoinBlendedVertexFans`); the filleting's own
-    /// error comes first.
+    /// As the fork does (WR-665, tangency-labs/smlib@e418750), the vertices the fillet
+    /// parameters split by fans are joined again afterwards where the blends left more
+    /// than one at a split point, whether the blends built or not
+    /// (`JoinBlendedVertexFans`); the filleting's own error comes first.
     ///
     /// A round whose radius law has a corner is split there (the fork's
     /// `SplitFilletFacesAtRadiusCorners`, which its `DoFillet` runs), so a session filleted

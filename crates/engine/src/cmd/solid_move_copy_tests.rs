@@ -39,6 +39,165 @@ fn created(reply: &Value) -> String {
 }
 
 #[test]
+fn a_body_copy_keeps_its_placed_position_in_another_component() {
+    for rotated in [false, true] {
+        for target in ["root", "Source", "Target"] {
+            let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+            run(&mut s, "component.create", json!({"name": "Source", "grounded": false}));
+            run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Cube"}));
+            let mut placement = json!({"occurrence": "Source:1", "translate": [50, 10, 20]});
+            if rotated {
+                placement["axis"] = json!([0, 0, 1]);
+                placement["angle"] = json!("90 deg");
+            }
+            run(&mut s, "occurrence.move", placement);
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            if target == "Target" {
+                run(&mut s, "component.create", json!({"name": "Target", "grounded": false}));
+                run(&mut s, "occurrence.move", json!({"occurrence": "Target:1", "translate": [100, 30, -10], "axis": [0, 0, 1], "angle": "90 deg"}));
+            } else {
+                run(&mut s, "component.activate", json!({"component": target}));
+            }
+            let before = s.doc.clone();
+            let owner = s.active_component;
+            let original = s.world_state().unwrap().body("Cube").unwrap().body.exact_bounds().unwrap();
+            let reply = run(&mut s, "solid.move", json!({"bodies": ["Cube"], "copy": true, "translate": [5, 0, 0]}));
+            let copy = created(&reply);
+            assert_eq!(s.doc.feature(reply["feature"].as_u64().unwrap()).unwrap().component, owner);
+            let want_min = if rotated { Vec3::new(35.0, 10.0, 20.0) } else { Vec3::new(55.0, 10.0, 20.0) };
+            let want_max = if rotated { Vec3::new(55.0, 20.0, 50.0) } else { Vec3::new(65.0, 30.0, 50.0) };
+            for session in [&s, &Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap())] {
+                let state = session.world_state().unwrap();
+                let bounds = state.body(&copy).unwrap().body.exact_bounds().unwrap();
+                assert!(bounds.min.dist(want_min) < 1e-7 && bounds.max.dist(want_max) < 1e-7, "{rotated}, {target}: {bounds:?}");
+                assert_eq!(state.body("Cube").unwrap().body.exact_bounds().unwrap(), original);
+                assert!((volume(state.body(&copy).unwrap()) - 6000.0).abs() < 1e-6);
+            }
+            run(&mut s, "edit.undo", json!({}));
+            assert_eq!(s.doc, before);
+            run(&mut s, "edit.redo", json!({}));
+            assert!(s.world_state().unwrap().body(&copy).unwrap().body.exact_bounds().unwrap().min.dist(want_min) < 1e-7);
+        }
+    }
+}
+
+#[test]
+fn copies_of_two_placements_of_one_body_keep_their_separate_positions() {
+    let mut s = Session::default();
+    let (_, first) = part_with_cube(&mut s);
+    run(&mut s, "occurrence.move", json!({"occurrence": first, "translate": [50, 10, 20]}));
+    let second = run(&mut s, "occurrence.copy", json!({"component": "Part", "translate": [100, 0, 0]}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let mut names = s.occurrence_bodies(&[first], true).unwrap();
+    names.extend(s.occurrence_bodies(&[second], true).unwrap());
+    let reply = run(&mut s, "solid.move", json!({"bodies": names, "translate": [5, 0, 0], "copy": true}));
+    let copies = reply["created_bodies"].as_array().unwrap();
+    assert_eq!(copies.len(), 2);
+    let mut xs: Vec<_> =
+        copies.iter().map(|name| s.world_state().unwrap().body(name.as_str().unwrap()).unwrap().body.exact_bounds().unwrap().min.x).collect();
+    xs.sort_by(f64::total_cmp);
+    assert_eq!(xs, [55.0, 155.0]);
+}
+
+#[test]
+fn editing_a_copy_keeps_the_selected_placement_after_the_source_moves() {
+    let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+    let (_, first) = part_with_cube(&mut s);
+    let second = run(&mut s, "occurrence.copy", json!({"component": "Part", "translate": [100, 0, 0]}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let name = s.occurrence_bodies(&[second], true).unwrap().remove(0);
+    let reply = run(&mut s, "solid.move", json!({"bodies": [name], "translate": [5, 0, 0], "copy": true}));
+    let copy = created(&reply);
+    // Return every occurrence to the identity: saved copy frames must survive even when
+    // the command boundary no longer sees a placed component.
+    run(&mut s, "occurrence.move", json!({"occurrence": second, "translate": [-100, 0, 0]}));
+    run(&mut s, "selection.delete", json!({"occurrences": [second]}));
+    assert!(s.doc.occurrences.iter().any(|o| o.id == first));
+    assert!(!crate::frames::placed(&s));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": reply["feature"], "command": "solid.move", "params": {"bodies": ["Peg"], "translate": [6, 0, 0], "copy": true}}),
+    );
+    let bounds = s.world_state().unwrap().body(&copy).unwrap().body.exact_bounds().unwrap();
+    assert!(bounds.min.dist(Vec3::new(106.0, 0.0, 0.0)) < 1e-7, "{bounds:?}");
+}
+
+#[test]
+fn a_copy_keeps_a_transferred_bodys_effective_placement() {
+    let mut s = Session::default();
+    cube20(&mut s, "Cube");
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [50, 10, 20]}));
+    run(&mut s, "component.move_bodies", json!({"component": "Part", "bodies": ["Cube"]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let reply = run(&mut s, "solid.move", json!({"bodies": ["Cube"], "translate": [5, 0, 0], "copy": true}));
+    let bounds = s.world_state().unwrap().body(&created(&reply)).unwrap().body.exact_bounds().unwrap();
+    assert!(bounds.min.dist(Vec3::new(5.0, 0.0, 0.0)) < 1e-7, "{bounds:?}");
+}
+
+#[test]
+fn a_copy_from_root_into_a_turned_component_keeps_its_world_rotation() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Cube"}));
+    run(&mut s, "component.create", json!({"name": "Target", "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Target:1", "translate": [50, 10, 20], "axis": [0, 0, 1], "angle": "90 deg"}));
+    let reply = run(
+        &mut s,
+        "solid.move",
+        json!({"bodies": ["Cube"], "copy": true, "translate": [5, 0, 0], "origin": [0, 0, 0], "axis": [0, 0, 1], "angle": "90 deg"}),
+    );
+    let bounds = s.world_state().unwrap().body(&created(&reply)).unwrap().body.exact_bounds().unwrap();
+    assert!(bounds.min.dist(Vec3::new(-15.0, 0.0, 0.0)) < 1e-7 && bounds.max.dist(Vec3::new(5.0, 10.0, 30.0)) < 1e-7, "{bounds:?}");
+}
+
+#[test]
+fn selecting_another_occurrence_when_editing_a_copy_captures_that_occurrence() {
+    let mut s = Session::default();
+    let (_, first) = part_with_cube(&mut s);
+    let second = run(&mut s, "occurrence.copy", json!({"component": "Part", "translate": [100, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let reply = run(&mut s, "solid.move", json!({"bodies": ["Peg"], "copy": true, "translate": [5, 0, 0]}));
+    let name = s.occurrence_bodies(&[second], true).unwrap().remove(0);
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": reply["feature"], "command": "solid.move", "params": {"bodies": [name], "copy": true, "translate": [6, 0, 0]}}),
+    );
+    let bounds = s.world_state().unwrap().body(&created(&reply)).unwrap().body.exact_bounds().unwrap();
+    assert!(bounds.min.dist(Vec3::new(106.0, 0.0, 0.0)) < 1e-7, "{bounds:?}");
+    assert_eq!(world_min(&s, &[first]), Vec3::ZERO);
+}
+
+#[test]
+fn saved_copy_placements_are_validated_and_missing_ones_keep_legacy_geometry() {
+    let mut s = Session::default();
+    let (_, occurrence) = part_with_cube(&mut s);
+    run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [50, 10, 20]}));
+    let reply = run(&mut s, "solid.move", json!({"bodies": ["Peg"], "copy": true, "translate": [5, 0, 0]}));
+    let id = reply["feature"].as_u64().unwrap();
+    let mut old: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let feature = old["features"].as_array_mut().unwrap().iter_mut().find(|f| f["id"] == id).unwrap();
+    feature.as_object_mut().unwrap().remove("copy_frames");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&old.to_string()).unwrap());
+    assert_eq!(reopened.world_state().unwrap().body(&created(&reply)).unwrap().body.exact_bounds().unwrap().min, Vec3::new(5.0, 0.0, 0.0));
+    run(
+        &mut reopened,
+        "timeline.redefine",
+        json!({"feature": id, "command": "solid.move", "params": {"bodies": ["Peg"], "copy": true, "translate": [5, 0, 0]}}),
+    );
+    assert_eq!(reopened.world_state().unwrap().body(&created(&reply)).unwrap().body.exact_bounds().unwrap().min, Vec3::new(5.0, 0.0, 0.0));
+    let mut scaled = solidcraft_doc::IDENTITY;
+    scaled[0][0] = 2.0;
+    for frames in [json!([solidcraft_doc::IDENTITY, solidcraft_doc::IDENTITY]), json!([scaled])] {
+        let mut invalid = old.clone();
+        let feature = invalid["features"].as_array_mut().unwrap().iter_mut().find(|f| f["id"] == id).unwrap();
+        feature["copy_frames"] = frames;
+        let reopened = Session::new(solidcraft_doc::Document::from_json(&invalid.to_string()).unwrap());
+        assert!(reopened.model.result(id).unwrap().error.is_some());
+    }
+}
+
+#[test]
 fn copy_keeps_the_original_and_adds_a_transformed_body() {
     let mut s = Session::default();
     cube20(&mut s, "Cube");
@@ -387,6 +546,7 @@ fn invalid_move_transforms_are_refused_without_changing_the_design() {
         json!({"axis": "no"}),
         json!({"angle": false}),
         json!({"copy": "true"}),
+        json!({"copy": true, "_copy_frames": [solidcraft_doc::IDENTITY]}),
         json!({"matrix": [1, 2, 3]}),
         json!({"matrix": [2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]}),
         json!({"matrix": [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]}),

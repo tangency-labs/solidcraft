@@ -65,7 +65,7 @@ web-time = { workspace = true }
 solidcore-ops = { workspace = true }
 solidcraft-profile = { workspace = true, features = ["enabled"] }
 # Model-cache tests also run in a source tarball build (no git commit).
-solidcraft-io = { workspace = true, features = ["trust-unknown-source"] }
+solidcraft-io = { workspace = true, features = ["dxf-legacy-baseline-tests", "trust-unknown-source"] }
 # Normal CI exercises profiling assertions without enabling the production feature.
 solidcraft-sketch = { workspace = true, features = ["solver-profiling"] }
 
