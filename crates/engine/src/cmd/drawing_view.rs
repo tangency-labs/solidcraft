@@ -381,8 +381,15 @@ fn measurements(s: &Session, request: &SnapshotParams, basis: &Plane, scale: Sca
 }
 
 /// Refused when saved view `view` of `record` doesn't draw a part that one of the occurrence paths
-/// `paths` places: an annotation attaches only to what its view draws.
+/// `paths` places: an annotation attaches only to what its view draws. With any path, refused too on
+/// a view that draws none of the model's edges ([`crate::drawing_view::no_model_edges`]).
 pub(super) fn check_drawn<'a>(record: &Drawing, view: u64, paths: impl IntoIterator<Item = &'a [u64]>, cmd: &str) -> Result<()> {
+    let mut paths = paths.into_iter().peekable();
+    if paths.peek().is_some()
+        && let Some(why) = record.view(view).and_then(crate::drawing_view::no_model_edges)
+    {
+        return Err(bad(cmd, why));
+    }
     match not_drawn(record, view, paths) {
         Some(why) => Err(bad(cmd, format!("view {} doesn't draw that part: {why}", ids::encode(view)))),
         None => Ok(()),

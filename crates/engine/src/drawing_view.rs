@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::config::RowKey;
-use solidcraft_doc::drawing::view::{ResolvedView, SetBy};
+use solidcraft_doc::drawing::view::{ResolvedView, SetBy, View, ViewKind};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep, ViewConfiguration};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
@@ -548,6 +548,14 @@ pub fn not_drawable_flat(view: &ResolvedView) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// Why nothing on saved view `view` can point at the model, if nothing can (#13030): a flat pattern
+/// view draws its body's flat, whose edges aren't the model's, so no dimension, balloon or note
+/// leader has a place on it. A note on it that points at nothing is drawn.
+pub fn no_model_edges(view: &View) -> Option<&'static str> {
+    let why = "a flat pattern view draws its body's flat, not the model's edges: nothing on it points at the model";
+    matches!(view.kind, ViewKind::Flat { .. }).then_some(why)
 }
 
 /// What saved view `view` shows of `shown`, with its extents on its plane, or why there's nothing to

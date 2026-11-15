@@ -145,11 +145,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
 fn added(s: &mut Session, request: AddParams) -> Result<Value> {
     let mut record = Drawing::clone(s.drawing(ADD)?);
     let view = request.view.0;
-    let on = record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
-    // A flat's edges aren't the model's, so no edge reference finds them (#13030 FV3).
-    if matches!(on.kind, solidcraft_doc::drawing::view::ViewKind::Flat { .. }) {
-        return Err(bad(ADD, "not supported yet: dimensions on a flat pattern view"));
-    }
+    record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
     let (doc, model) = (&s.doc, &s.model);
     let edge = |e: &EdgeParam| doc.edge_reference(model, &e.pick, &e.path).map_err(|why| bad(ADD, why.to_string()));
     let corner = |c: &CornerParam| doc.corner_reference(model, &c.pick, &c.path).map_err(|why| bad(ADD, why.to_string()));
@@ -640,6 +636,9 @@ fn layout_on_sheet(s: &Session, d: &Drawing, dimension: &Dimension, r: &Resolved
     let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
     let s = copy.as_ref().unwrap_or(s);
     let Ok(view) = d.resolve_view(id) else { return not_drawn() };
+    if d.view(id).and_then(crate::drawing_view::no_model_edges).is_some() {
+        return (None, Some(NO_PLACE.to_string()));
+    }
     let unstyled = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
     let unstyled = unstyled.or_else(|| crate::drawing_view::not_cut_yet(&view));
     if unstyled.or_else(|| crate::drawing_view::not_drawable_apart(&view)).is_some() {

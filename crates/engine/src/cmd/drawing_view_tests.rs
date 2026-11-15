@@ -3599,6 +3599,65 @@ fn a_flat_pattern_view_is_never_exploded_posed_or_configured() {
     }
 }
 
+/// A flat pattern view draws its body's flat, not the model's edges, so nothing on it points at the
+/// model. A dimension, dimensions from the model, a balloon, a note on an edge, a note's leader and a
+/// leader added to a note are each refused, and nothing changes. A note on the view that points at
+/// nothing is drawn. Saved on it by hand, a dimension, a note on an edge and a balloon are left out of
+/// the sheet, which says they have no place to draw.
+#[test]
+fn nothing_on_a_flat_pattern_view_points_at_the_model() {
+    let mut s = sheet_plate();
+    let (flat, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1", "position_mm": [100, 150]}));
+    let (_, base) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "view": "top", "scale": "1:1", "position_mm": [300, 150]}));
+    let (on_flat, on_base) = (ids::encode(flat), ids::encode(base));
+    let why = "a flat pattern view draws its body's flat, not the model's edges: nothing on it points at the model";
+    let edge = json!({"point": [50, 60, 2], "path": []});
+    let plain = run(&mut s, "drawing.note.add", json!({"anchor": {"view": on_flat}, "at": [0, -50], "content": "FLAT"}));
+    let plain = ids::decode(plain["note"].as_str().unwrap()).unwrap();
+    let asks = [
+        ("drawing.dimension.add", json!({"view": on_flat, "kind": {"length": {"edge": edge}}})),
+        ("drawing.dimension.from_model", json!({"view": on_flat})),
+        ("drawing.balloon.add", json!({"view": on_flat, "edge": edge, "at": [40, 40]})),
+        ("drawing.note.add", json!({"anchor": {"edge": {"view": on_flat, "edge": edge}}, "at": [40, 40], "content": "Edge"})),
+        ("drawing.note.add", json!({"anchor": {"view": on_flat}, "at": [40, 40], "content": "Edge", "branches": [{"edge": edge}]})),
+        ("drawing.note.edit", json!({"note": ids::encode(plain), "set": {"branches": {"add": [{"edge": edge}]}}})),
+    ];
+    for (cmd, p) in asks {
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = s.execute(cmd, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {cmd} {p}"));
+        assert!(e.contains(why), "{cmd}: {e}");
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps), "{cmd}");
+    }
+    // Made on the base view, then moved onto the flat view by hand.
+    let dimension = run(&mut s, "drawing.dimension.add", json!({"view": on_base, "kind": {"length": {"edge": edge}}}));
+    let dimension = ids::decode(dimension["dimension"].as_str().unwrap()).unwrap();
+    let noted = run(&mut s, "drawing.note.add", json!({"anchor": {"edge": {"view": on_base, "edge": edge}}, "at": [40, 40], "content": "Edge"}));
+    let noted = ids::decode(noted["note"].as_str().unwrap()).unwrap();
+    s.edit_drawing(EDIT, |d| {
+        let at = d.dimensions.iter().position(|r| r.id == dimension).unwrap();
+        Arc::make_mut(&mut d.dimensions[at]).view = flat;
+        let at = d.notes.index_of(noted).unwrap();
+        if let Some(solidcraft_doc::drawing::note::Anchor::Edge { view, .. }) = d.notes.get_mut(at).map(|note| &mut Arc::make_mut(note).anchor) {
+            *view = flat;
+        }
+        // No command puts a balloon there, and this design has no placed part: one saved by hand.
+        let id = d.allocate_id(&mut solidcraft_doc::ids::IdSource::seeded(13030)).unwrap();
+        let edge = solidcraft_doc::drawing::dimension::ModelEdge { body: "Plate".into(), origin_feature: 1, name: "F1:side".into(), path: vec![7] };
+        d.balloons.add([Arc::new(solidcraft_doc::drawing::balloon::Balloon { id, view: flat, edge, at: [40.0, 40.0], parts_list: None })]);
+        Ok(())
+    })
+    .unwrap();
+    let d = s.drawing("test").unwrap();
+    let built = crate::drawing_scene::build(&s, d, d.sheets[0].id).unwrap();
+    let dimension = built.dimensions.iter().find(|one| one.dimension == dimension).unwrap();
+    assert_eq!((dimension.view, dimension.drawn, dimension.why.as_deref()), (flat, false, Some(crate::drawing_scene::NO_PLACE)));
+    let note = |id: u64| built.notes.iter().find(|one| one.note == id).unwrap();
+    assert_eq!((note(noted).view, note(noted).drawn, note(noted).why.as_deref()), (Some(flat), false, Some(crate::drawing_scene::NO_PLACE)));
+    assert_eq!((note(plain).drawn, note(plain).why.as_deref()), (true, None));
+    let [balloon] = built.balloons.as_slice() else { panic!("one balloon: {:?}", built.balloons) };
+    assert_eq!((balloon.view, balloon.drawn, balloon.why.as_deref()), (flat, false, Some(crate::drawing_scene::NO_PLACE)));
+}
+
 /// A bend up is ISO 128's long dash and dot (type 04), a bend down its long dash and two dots (type
 /// 05): dashes 20 widths of the narrow line, gaps 3, dots 1, in every line group. In the 0.35 mm group
 /// a bend up is 3.6, 0.54, 0.18, 0.54 mm. Each, narrow, is a stroke the scene takes across an A0 sheet.
@@ -4011,18 +4070,15 @@ fn a_flat_view_follows_the_flange_and_the_rule() {
     assert!((size_on_sheet(&mut s) - smaller).len() < 1e-6);
 }
 
-/// A flat view inspects as `flat`, with the sheet's status and its other dimensions untouched; a
-/// dimension on it, and a view of any kind made from it, aren't supported yet: each command refuses
-/// with nothing changed, and `drawing.view.projection_for` gives none with the same reason.
+/// A flat view inspects as `flat`, and the drawing's status answers with it on the sheet. No view of
+/// any kind is made from it yet: each command refuses with nothing changed, and
+/// `drawing.view.projection_for` gives none with the same reason.
 #[test]
-fn a_flat_view_inspects_as_flat_and_takes_no_dimension_yet() {
+fn a_flat_view_inspects_as_flat() {
     let mut s = sheet_plate();
     let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1"}));
     assert_eq!(inspect_view(&mut s, id)["kind"], json!("flat"));
     run(&mut s, "drawing.status", json!({}));
-    let error =
-        s.execute("drawing.dimension.add", &json!({"view": ids::encode(id), "kind": {"length": {"edge": [50, 60, 2]}}})).unwrap_err().to_string();
-    assert!(error.contains("not supported yet: dimensions on a flat pattern view"), "{error}");
     let (parent, refusal) = (ids::encode(id), "not supported yet: a view made from a flat pattern view");
     for (cmd, p) in [
         (PROJECTED, json!({"parent": parent, "side": "right"})),
