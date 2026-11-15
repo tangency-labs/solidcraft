@@ -52,7 +52,7 @@ fn fixtures(root: &std::path::Path) -> Vec<String> {
 /// Fixtures whose export is written but does not read back: a face that winds round its axis more
 /// than a turn is written on its multi-turn spline form, and the reader makes no pcurves on a
 /// spline form that overlaps itself (its edge's pcurve comes out on another sheet, 6 mm off).
-/// The export's bytes are still pinned below. Shrinks only.
+/// The export's bytes are still pinned below. Tracked in #17080. Shrinks only.
 const NO_READ_BACK: &[&str] = &["tests/step-regressions/thread_crest_band.step"];
 
 /// (fixture, digest of its export) as written before the move, plus new fixtures; the torus-ring spline
