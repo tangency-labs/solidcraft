@@ -22,12 +22,13 @@ pub type ThemeOptionsUpdate = BTreeMap<String, BTreeMap<String, Option<ThemeOpti
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BrowserScrollWheel {
-    /// Infer a mouse wheel or a two-finger swipe from the event stream.
+    /// Small vertical steps pan like a two-finger swipe, and a one-time notice offers Always zoom when
+    /// the first scrolls look like a steady smooth-scroll mouse wheel.
     #[default]
     Automatic,
     /// Treat unmodified vertical scrolling as wheel zoom.
     AlwaysZoom,
-    /// Keep the earlier behaviour: small vertical steps are two-finger pan, only large notches zoom.
+    /// As automatic, but never offers Always zoom.
     AlwaysPan,
 }
 

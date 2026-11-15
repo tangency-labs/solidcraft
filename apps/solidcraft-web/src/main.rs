@@ -27,6 +27,8 @@ mod linked;
 mod mouse_buttons;
 #[cfg(any(target_arch = "wasm32", test))]
 mod space_mouse;
+#[cfg(target_arch = "wasm32")]
+mod wheel_samples;
 
 /// The browser switches tabs with Ctrl+Tab and Ctrl+Shift+Tab, so the page leaves those keys to
 /// it (#5227); plain Tab and Shift+Tab still move between the app's fields. (Ctrl+PageUp and
@@ -380,6 +382,8 @@ mod web {
         font_language: String,
         space_mouse: SpaceMouse,
         wheel_gestures: solidcraft_ui_egui::WebWheelGestures,
+        /// What the browser said about each wheel event since the last frame (`wheel_samples`).
+        wheel_samples: Rc<std::cell::RefCell<Vec<solidcraft_ui_egui::wheel_hint::WheelSample>>>,
         /// The mouse buttons the browser holds, which egui's are kept to (`mouse_buttons`).
         mouse_buttons: Rc<std::cell::RefCell<crate::mouse_buttons::Tracker>>,
         /// The settings this tab wrote or loaded last, and those another tab wrote since (#8644).
@@ -1157,6 +1161,8 @@ mod web {
             if let Some(delay) = self.wheel_gestures.update(raw, now, self.app.preferences.browser_scroll_wheel) {
                 ctx.request_repaint_after(delay);
             }
+            let samples = std::mem::take(&mut *self.wheel_samples.borrow_mut());
+            solidcraft_ui_egui::wheel_hint::feed(&mut self.app, ctx, &samples);
             if self.launch.persists() {
                 let theme = solidcraft_ui_egui::prefs::theme_drop_target(&self.app, ctx);
                 files::take_drops(&self.files, raw, theme);
@@ -1379,6 +1385,7 @@ mod web {
                             app.home.show(rev);
                         }
                         let mouse_buttons = crate::mouse_buttons::install(&window, &mouse_canvas, &cc.egui_ctx);
+                        let wheel_samples = crate::wheel_samples::install(&window);
                         let api = Api::install(sender, cc.egui_ctx.clone()).map_err(|e| format!("SolidCraft browser API: {e:?}"))?;
                         let font_language = app.preferences.language.clone();
                         let linked = crate::linked::Download::start(launch.open.as_deref(), &cc.egui_ctx);
@@ -1405,6 +1412,7 @@ mod web {
                             font_language,
                             space_mouse: SpaceMouse::default(),
                             wheel_gestures: solidcraft_ui_egui::WebWheelGestures::default(),
+                            wheel_samples,
                             mouse_buttons,
                             prefs_writer: crate::PrefsWriter::default(),
                             prefs_warning: None,
