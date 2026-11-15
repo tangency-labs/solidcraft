@@ -287,8 +287,6 @@ crate::dialog_descriptor::dialog_descriptors! {
                 suggested: Option<String>,
                 /// The picks used for the suggestion, so an unchanged dialog does no geometry work.
                 of: Vec<Sel>,
-                /// A body-qualified feature keeps the plural constructor when edited down to one face.
-                grouped: bool,
                 options: crate::dialogs_thread::Options,
             },
             /// A rib (one wall along open curves) or a web (a wall per curve).
@@ -1045,14 +1043,7 @@ impl Dialog {
                 vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting tool", PLANES | FACES | AXES, false)],
             ),
             "solid.thread" => Dialog::new(
-                Kind::Thread {
-                    designation: String::new(),
-                    length: String::new(),
-                    suggested: None,
-                    of: Vec::new(),
-                    grouped: false,
-                    options: Default::default(),
-                },
+                Kind::Thread { designation: String::new(), length: String::new(), suggested: None, of: Vec::new(), options: Default::default() },
                 crate::dialogs_thread::inputs(),
             ),
             "material.assign" => {
@@ -6333,12 +6324,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "faces")?;
             ("solid.offset_face", with_single_body(json!({"faces": face_points(0)}), sels(d, 0)))
         }
-        Kind::Thread { designation, length, suggested, grouped, options, .. } => {
+        Kind::Thread { designation, length, suggested, options, .. } => {
             need(0, "a cylindrical face")?;
             let mut common = Value::Object(d.extra.clone());
             if let Some(params) = common.as_object_mut() {
                 params.remove("face");
                 params.remove("faces");
+                params.remove("single_face_selection");
             }
             if !designation.trim().is_empty() && suggested.as_deref() != Some(designation.as_str()) {
                 common["designation"] = json!(designation.trim());
@@ -6355,13 +6347,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     faces.push(json!({"body": body, "point": pt(*point)}));
                 }
             }
-            if let [face] = faces.as_slice()
-                && !*grouped
-            {
-                common["face"] = face["point"].clone();
-            } else {
-                common["faces"] = json!(faces);
+            if faces.len() == 1 && d.inputs.first().is_some_and(|input| !input.multi) {
+                common["single_face_selection"] = json!(true);
             }
+            common["faces"] = json!(faces);
             return Ok(vec![("solid.thread".to_string(), common)]);
         }
         Kind::Material { index, editor } => {

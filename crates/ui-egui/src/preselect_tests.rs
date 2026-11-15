@@ -1914,7 +1914,12 @@ fn thread_size_suggestion_reopens_without_changing_saved_thread_parameters() {
             params["designation"] = json!(size);
         }
         let id = h.app.run("solid.thread", params).unwrap()["feature"].as_u64().unwrap();
-        let before = h.app.session.doc.feature(id).unwrap().kind.clone();
+        let mut before = h.app.session.doc.feature(id).unwrap().kind.clone();
+        // Editing a legacy point-only selection records its body, preserving every thread option.
+        if let solidcraft_engine::doc::FeatureKind::Thread { target_bodies, single_face_selection, .. } = &mut before {
+            *target_bodies = vec!["Body1".into()];
+            *single_face_selection = true;
+        }
         h.app.edit_feature(id);
         h.frames(2);
         let d = h.app.dialog.as_ref().unwrap();

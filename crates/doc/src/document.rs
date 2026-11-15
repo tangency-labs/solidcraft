@@ -1138,6 +1138,10 @@ pub enum FeatureKind {
         /// The definition body for each selected face, primary first. Empty keeps legacy selection.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         target_bodies: Vec<BodyName>,
+        /// Keep single-face replacement in the dialog while retaining the target body's identity.
+        /// Missing on older body-qualified groups, which keep their multiple-face selection mode.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        single_face_selection: bool,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {
