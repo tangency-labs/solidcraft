@@ -49,6 +49,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&TOGGLE_VISIBILITY_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::ToggleVisibilityResult>)
         .params("Show or hide what is selected in the app. Headless calls are refused without changing the design; browser.visibility takes explicit items"),
+    CommandSpec::new("ui.dialog_ok", "Dialog OK", crate::checked!("ui.dialog_ok", dialog_ok))
+        .icon("finish")
+        .noundo()
+        .doc_only()
+        .contract(&DIALOG_OK_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::DialogOkResult>)
+        .params("Runs OK in the feature dialog open in the app, as Enter does; bind it to a key in Preferences. Only the app has a dialog: called here it is refused, and changes nothing"),
     CommandSpec::new("edit.undo", "Undo", crate::checked!("edit.undo", undo))
         .icon("undo")
         .key("Ctrl+Z")
@@ -298,6 +305,16 @@ const TOGGLE_VISIBILITY_CONTRACT: crate::schema::TypedContract<crate::schema::ed
 /// it runs in `SolveApp::start`, and its key can be moved in Preferences › Shortcuts.
 fn toggle_visibility(_s: &mut Session, _p: &Value) -> Result<Value> {
     Err(EngineError::Other("ui.toggle_visibility acts on the app's selection; use browser.visibility in a headless session".into()))
+}
+
+const DIALOG_OK_CONTRACT: crate::schema::TypedContract<crate::schema::edit::DialogOkParams> = crate::schema::TypedContract::new();
+
+/// Dialog OK (#17416) confirms the app's open dialog, which only the app has: it does so in
+/// `SolveApp::start` and never reaches this.
+fn dialog_ok(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other(
+        "ui.dialog_ok runs OK in the dialog open in the app; a headless session has no dialog: run the dialog's command itself".into(),
+    ))
 }
 
 const REPEAT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RepeatParams> = crate::schema::TypedContract::new();
