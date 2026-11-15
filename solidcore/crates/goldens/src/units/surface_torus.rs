@@ -1797,4 +1797,83 @@ mod tests {
             eprintln!("largest residual / allowance: {used:.3e}  {key}");
         }
     }
+
+    /// The 2 cases whose golden rows moved with the spindle minor iso circle fix: u iso
+    /// curves of spindle tori (r > R) whose tube interval starts on the folded part.
+    const SPINDLE_ISO_MOVED: [&str; 2] = ["gen0410", "gen0456"];
+
+    /// Every golden row the spindle minor iso circle fix moves holds the exact minor circle
+    /// at the iso: the meridian circle (centre R along a unit x axis normal to the torus's
+    /// axis, radius r, in the plane of x and the axis, so wholly on the torus), its NURB
+    /// exactly arcs of that circle turning the torus's v length, and its ends the torus
+    /// NURB's points at the ends of the iso line. The ends tell it from the opposite
+    /// meridian (centre -R x), which the old rows held.
+    #[test]
+    fn spindle_iso_moved_rows_are_the_minor_circle_at_the_iso() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: MIN_GENERATED,
+        };
+        let cases = Runner.cases(&ctx).expect("cases");
+        let k = Kernel::default();
+        let mut res = Residuals::default();
+        let mut seen = 0;
+        for case in &cases {
+            if !SPINDLE_ISO_MOVED.contains(&case.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let name = case.name.as_str();
+            let i: Inputs = case.parse().expect("inputs");
+            let OpIn::Iso { param, iso, dom } = &i.op else {
+                panic!("{name}: not an iso row");
+            };
+            assert!(*param == 0 && !i.torus.swap && dom.is_none(), "{name}: a whole u iso line");
+            let (major, minor) = (i.torus.major, i.torus.minor);
+            assert!(minor > major, "{name}: a spindle torus");
+            let origin = v3(i.torus.origin);
+            let axis = v3(i.torus.x).cross(v3(i.torus.y));
+            let axis = axis / axis.length();
+            let lengths = input_lengths(&i.torus);
+            let t = rust_torus(&k, &i.torus).expect("harness").expect("torus builds");
+            let c = t
+                .create_iso_parametric_curve(&k, param_of(*param), *iso, None, false)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let CurveKind::Ellipse(e) = c.curve.kind() else {
+                panic!("{name}: not a circle");
+            };
+            let tol = 1e-9 * (origin.length() + major + minor);
+            let x = e.position().x_axis();
+            res.check("iso: unit x axis", name, (x.length() - 1.0).abs(), 1e-12);
+            res.check("iso: x axis normal to the torus's axis", name, x.dot(axis).abs(), 1e-12);
+            let centre = origin + major * x;
+            res.check("iso: centre", name, (e.position().origin() - centre).length(), tol);
+            res.check("iso: x radius", name, (e.x_radius() - minor).abs(), 1e-12 * minor);
+            res.check("iso: y radius", name, (e.y_radius() - minor).abs(), 1e-12 * minor);
+            let normal = x.cross(e.position().y_axis());
+            res.check("iso: plane holds the torus's axis", name, normal.dot(axis).abs(), 1e-12);
+            let net = e.base().gw_nurb().expect("nurb");
+            let pts: Vec<_> = net.cpts().iter().map(|p| (p.to_euclid(), p.w)).collect();
+            let turn = assert_arcs(&mut res, name, &pts, centre, normal, minor, tol);
+            res.check("iso: arcs turn the v length", name, (turn - lengths.1).abs(), 1e-9);
+            let surf = t.base().base();
+            let vi = surf.natural_uv_domain().v_interval();
+            let line_ends = [vi.min(), vi.max()]
+                .map(|v| surf.evaluate_point(Vec2::new(*iso, v)).expect("surface point"));
+            let first = pts.first().expect("control points").0;
+            let last = pts.last().expect("control points").0;
+            let gap = (first - line_ends[0]).length().max((last - line_ends[1]).length());
+            let swapped = (first - line_ends[1]).length().max((last - line_ends[0]).length());
+            res.check("iso: ends on the torus's iso line", name, gap.min(swapped), tol);
+            // the check tells the old rows' circle apart: an iso line end lies off the
+            // opposite meridian circle by far more than the allowance
+            let opposite = origin - major * x;
+            let off = line_ends.map(|p| ((p - opposite).length() - minor).abs());
+            assert!(off[0].max(off[1]) > 1e6 * tol, "{name}: opposite meridian not told apart: {off:?}");
+        }
+        assert_eq!(seen, SPINDLE_ISO_MOVED.len(), "every moved case is checked");
+        for (key, used) in &res.0 {
+            eprintln!("largest residual / allowance: {used:.3e}  {key}");
+        }
+    }
 }
