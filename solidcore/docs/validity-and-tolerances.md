@@ -203,6 +203,18 @@ before any gap is measured**, and its stored tolerance is that bound, raised to 
 where it is smaller (§5.1, invariant 5). A measured gap larger than the bound is evidence against
 the construction, not a quantity to cover (§8).
 
+A body a stitch produced is checked under `ValidityScope::Stitched` (`check_brep_scoped`, used by the
+stitch's result check only). The rule for every body is unchanged: vertex/edge and vertex/face gaps within
+half the vertex tolerance, the edge/face gap within the edge tolerance. A stitch closes a gap by giving the
+glued entity the tolerance that covers it, so a gap may exceed those and still lie inside the two zones it
+spans. The scoped check takes such a gap, up to τ_v + τ_e (vertex/edge), τ_v + τ_f (vertex/face) or
+τ_e + τ_f (edge/face), only where the tolerance ball that covers it provably reaches no topology it does
+not bound: the vertex ball by the clearance proof of Test #82 (`vertex_ball_reaches`), the edge tube by
+boxes over pairs of curve and surface pieces against every face and edge not incident to the edge or its
+end vertices (`edge_tube_reaches`, `assert_valid`'s sibling `pointers.rs`). Boxes only, never samples;
+a box that cannot be had, a piece that cannot be split or a proof that runs out of boxes leaves the gap
+reported. The explicit `validate_and_update_tolerances` repair API is unaffected.
+
 The gaps themselves are measured, not enclosed. `calc_max_edge_face_gap`
 (`topology/edgeuse/p1.rs`) takes the largest of 20 samples of the distance from C to the face's
 surface (`GapFunction::crv_srf`, `heal/gap.rs`); a vertex/face gap is the distance from the vertex to
@@ -224,6 +236,18 @@ sphere or cone has poles where a whole parameter line is one point. The B-rep ma
 - **a pole is a vertex.** A pole inside a face must be marked by a vertex (Face 24), and a trim must
   not turn along the collapsed boundary near it (Edgeuse 20, `has_dog_leg_near_pole`);
 - **a trim never jumps** across a periodic boundary (Edgeuse 7, `assert_no_periodic_jump_of`).
+
+A vertex at a shared classification boundary ends a coincident seam interval when that
+interval is on either side of the boundary. The near-miss check applies its existing local
+vertex-zone rule from both sides; a separate edge beside the seam still counts as a near miss
+(`intersect/curve_class/p7.rs`).
+When dropping a curve along a seam, equivalent parameter endpoints stay on one side only when
+the two are the same 3D point (a crossing keeps the approximation bound) (`intersect/surface_drop_lib/p1.rs`).
+Subdivision drops a pending endpoint again only when the new span makes its seam branch
+ambiguous, and a failed redrop falls back to the saved endpoint
+(`intersect/surface_drop_lib/p3.rs`). Within a boundary's tolerance band, a trace whose tangent
+runs mostly across the boundary keeps that tangent; only a curve running along the boundary, or
+touching it, is flattened onto it (`surface_drop_lib/p1.rs`).
 
 The healer's seam steps (§7.2) repair the same three: `fix_move_seam` turns a face's seam away from
 its boundary, `fix_split_edges_at_seam` splits boundary edges at interior poles and then at the U and

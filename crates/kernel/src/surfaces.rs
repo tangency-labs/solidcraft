@@ -1261,6 +1261,16 @@ mod imp {
         r.to_native().map_err(|e| failed(format!("SMLib {what}: {e}")))
     }
 
+    /// [`checked`] for a body a stitch produced: its gaps are held to the sums of the zones they
+    /// span, each proven to reach no topology it does not bound (`Brep::check_stitched`).
+    fn checked_stitched(r: &SmBrep, what: &'static str) -> Result<Brep> {
+        let check = r.check_stitched(CheckLevel::All).map_err(sm(what))?;
+        if !check.is_valid() {
+            return Err(failed(format!("SMLib {what}: SMLib's check refuses the result: {check}")));
+        }
+        r.to_native().map_err(|e| failed(format!("SMLib {what}: {e}")))
+    }
+
     /// Whether two records of one body number its faces, edges and vertices alike: the same
     /// loops of the same edges, run the same ways, and each edge between the same vertices.
     fn same_numbering(a: &Brep, b: &Brep) -> bool {
@@ -1284,7 +1294,7 @@ mod imp {
     /// and edges by their index in `r`); none where SMLib's import of `r` does not number it as
     /// `r` does.
     pub(super) fn stitched(r: &Brep, tol: f64) -> Result<(Body, Option<History>)> {
-        stitched_with(r, tol, |_, sewn| checked(sewn, "stitch").map(|_| ()))
+        stitched_with(r, tol, |_, sewn| checked_stitched(sewn, "stitch").map(|_| ()))
     }
 
     /// [`stitched`], taking a result whose check fails no more tests outside `exempt` than the

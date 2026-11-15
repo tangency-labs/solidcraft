@@ -919,6 +919,7 @@ impl ModelState {
                     {
                         b.body = b.body.clone().with_split_lines(Some(lines.clone()));
                         b.mirrored_mesh = None;
+                        b.mesh_placement = None;
                     }
                     // An imported look outlives the operations on the body.
                     if b.body.paint().is_none()
@@ -4094,20 +4095,18 @@ fn pattern_name_slot(stored: usize, sources: usize, copies: usize, s: usize, k: 
 /// `source`. Once `body.rename` has stored this feature's names, a copy beyond them (the count
 /// was raised) is numbered after the highest stored `source (n)`, so it never takes a number
 /// freed by a rename (#372). Features without stored names keep the first free `source (n)`.
-fn pattern_copy_name(state: &ModelState, f: &Feature, slot: Option<usize>, source: &str) -> String {
+fn pattern_copy_name(names: &mut BodyNames, f: &Feature, slot: Option<usize>, source: &str) -> String {
     if let Some(k) = slot
-        && f.body_names.get(k).is_some_and(|name| !name.trim().is_empty())
+        && let Some(name) = f.body_names.get(k).filter(|name| !name.trim().is_empty())
     {
-        return copy_body_name(state, f, k, source);
+        return names.unique(name);
     }
     let base = if source.trim().is_empty() { "Body" } else { source.trim() };
     let prefix = format!("{base} (");
     let highest = f.body_names.iter().filter_map(|n| n.trim().strip_prefix(prefix.as_str())?.strip_suffix(')')?.parse::<u32>().ok()).max();
     match highest {
-        Some(h) => {
-            (u64::from(h) + 1..).map(|i| format!("{base} ({i})")).find(|n| state.body(n).is_none()).unwrap_or_else(|| unique_body_name(state, base))
-        }
-        None => unique_body_name(state, base),
+        Some(h) => names.first_free(base, u64::from(h) + 1),
+        None => names.unique(base),
     }
 }
 
@@ -5751,6 +5750,24 @@ fn blend_body(
     r: f64,
     warning: &mut Option<String>,
 ) -> Result<(Traced, Option<Vec<f64>>, Tapered)> {
+    let (nb, from, used, tapered) = blend_raw(vals, f, mb, edges, r, warning)?;
+    // Keeping the input's planar certificates may join faces; their history stays over the same
+    // operand.
+    Ok((Traced::step(nb.with_preserved_planar_sources(&mb.body)?, &[&from]), used, tapered))
+}
+
+/// The blended body of [`blend_body`], with the stage its last blend started from (the input,
+/// or the body after the edges before the last for a blend made one edge at a time), the radii a
+/// fitted fillet used and the edges it tapered. Every type, fit, corner and setback of `f` is
+/// built here, so a pattern's or a mirror's copy of a blend is the same blend (#16912).
+fn blend_raw(
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    mb: &ModelBody,
+    edges: &[Vec3],
+    r: f64,
+    warning: &mut Option<String>,
+) -> Result<(kernel::Body, Traced, Option<Vec<f64>>, Tapered)> {
     let input = mb.traced();
     let (mut used, mut tapered) = (None, Vec::new());
     if let FeatureKind::Fillet { turn: crate::FilletTurn::Swept, style, fit, corner, setbacks, .. } = &f.kind
@@ -5819,9 +5836,7 @@ fn blend_body(
         FeatureKind::Chamfer { distance2, angle, flip, .. } => (chamfer_with(vals, &mb.body, edges, r, distance2, angle, *flip)?, input),
         _ => return Err(DocError::Invalid("blend".into())),
     };
-    // Keeping the input's planar certificates may join faces; their history stays over the same
-    // operand.
-    Ok((Traced::step(nb.with_preserved_planar_sources(&mb.body)?, &[&from]), used, tapered))
+    Ok((nb, from, used, tapered))
 }
 
 /// `f` as the naming of its faces reads it: a revolve's explicit axis origin written as the values
@@ -8671,6 +8686,36 @@ fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelSta
     }
 }
 
+/// Resolve the ordered identity domain of a new plural Thread using only input-state metadata.
+/// Legacy threads have no domain. Repeated bodies are intentional: several faces may share one body.
+fn thread_target_bodies<'a>(doc: &Document, st: &'a ModelState, kind: &FeatureKind) -> Result<Option<Vec<&'a ModelBody>>> {
+    let FeatureKind::Thread { target_bodies, additional_faces, .. } = kind else { return Ok(None) };
+    if target_bodies.is_empty() {
+        return Ok(None);
+    }
+    if target_bodies.len() != 1 + additional_faces.len() || target_bodies.len() > 1024 {
+        return Err(DocError::Invalid("a Thread target body is required for each selected face".into()));
+    }
+    let mut owner = None;
+    let mut bodies = Vec::with_capacity(target_bodies.len());
+    for name in target_bodies {
+        let mut matches = st.bodies.iter().filter(|body| body.name == name.as_ref());
+        let body = matches
+            .next()
+            .filter(|_| matches.next().is_none())
+            .ok_or_else(|| DocError::Invalid(format!("Thread target body `{name}` is missing or ambiguous")))?;
+        let component = doc.model_body_component(body);
+        if owner.is_some_and(|owner| owner != component) {
+            return Err(DocError::Invalid(
+                "all faces of one Thread feature must belong to the same component; create a separate Thread feature for each component".into(),
+            ));
+        }
+        owner = Some(component);
+        bodies.push(body);
+    }
+    Ok(Some(bodies))
+}
+
 /// The copies a pattern or mirror of `features` at `mats` makes, source by source: the source
 /// feature, the transforms of its copies, and the instance number of its first copy less one.
 /// A source that is itself a pattern or mirror of features (#395) stands for what it copied: its
@@ -8683,6 +8728,7 @@ fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelSta
 /// it to be picked again), or when the frame the faces are looked up in cannot be made. A hole
 /// placed by length expressions is looked up where they evaluate in `vals`, not where it was made.
 fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state: &ModelState, f: &Feature) -> Result<Option<(Feature, Vec<String>)>> {
+    thread_target_bodies(doc, state, &f.kind)?;
     // Cylindrical emboss resolves its named face in the selected body's frame
     // and certifies an analytic anchor; mesh projection here would undo that.
     let explicit_emboss = matches!(&f.kind, FeatureKind::Emboss { face: Some(_), .. });
@@ -8708,11 +8754,19 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
             continue;
         }
         let from = if k == 0 { placed.unwrap_or(*p) } else { *p };
+        let scoped;
+        let input = if let Some(body) = f.kind.thread_target_body(k) {
+            scoped = ModelState { bodies: fst.bodies.iter().filter(|b| b.name == body).cloned().collect(), ..ModelState::default() };
+            &scoped
+        } else {
+            &fst
+        };
+        let body = f.kind.thread_target_body(k).or_else(|| f.kind.face_body());
         // Only a thread may find a numbered piece of a round side again as its whole face (#16602).
         let hit = if matches!(f.kind, FeatureKind::Thread { .. }) {
-            crate::name_lookup::locate_thread_face_on_body(&fst, f.kind.face_body(), n, from)
+            crate::name_lookup::locate_thread_face_on_body(input, body, n, from)
         } else {
-            crate::name_lookup::locate_face_on_body(&fst, f.kind.face_body(), n, from)
+            crate::name_lookup::locate_face_on_body(input, body, n, from)
         };
         match hit {
             Some(hit) => {
@@ -8720,7 +8774,7 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
                     notes.push(note);
                 }
                 match (k, hole_axis) {
-                    (0, Some(axis)) => match hit.along(&fst, from, axis) {
+                    (0, Some(axis)) => match hit.along(input, from, axis) {
                         Some(q) => *p = q,
                         // The place still lies on the face (the axis may run along it).
                         None if hit.on_point => {}
@@ -8729,7 +8783,7 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
                             from.x, from.y, from.z
                         )),
                     },
-                    _ => *p = hit.pick_point(&fst, *p),
+                    _ => *p = hit.pick_point(input, *p),
                 }
             }
             None => return Err(DocError::reselect(n.as_str())),
@@ -8805,6 +8859,21 @@ fn copy_instances(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelStat
     Ok(all)
 }
 
+/// Blend `src` (a fillet or chamfer) as its copy placed by `m` reads it: the points its radius
+/// law starts from and its corner setbacks' vertices moved with its edges.
+fn moved_blend(src: &Feature, m: &Mat) -> Feature {
+    let mut copy = src.clone();
+    if let FeatureKind::Fillet { style, setbacks, .. } = &mut copy.kind {
+        if let crate::FilletStyle::Variable { start, .. } | crate::FilletStyle::Spline { start, .. } = style {
+            start.0 = crate::apply_point(m, start.0);
+        }
+        for c in setbacks {
+            c.vertex.0 = crate::apply_point(m, c.vertex.0);
+        }
+    }
+    copy
+}
+
 /// Apply transformed copies of the tools of `features` (patterns, mirrors).
 fn replay(
     doc: &Document,
@@ -8866,20 +8935,22 @@ fn replay(
                 for (ti, idx) in groups {
                     let moved: Vec<Vec3> = idx.iter().filter_map(|i| moved_all.get(*i).copied()).collect();
                     let Some(mb) = st.bodies.get(ti).cloned() else { continue };
-                    let nb = match &src.kind {
-                        FeatureKind::Chamfer { distance2, angle, flip, .. } => chamfer_with(vals, &mb.body, &moved, r, distance2, angle, *flip)?,
+                    let nb = match (&src.kind, st.fitted.get(&src.id)) {
                         // A copy is congruent to the original: the radius it was reduced to first.
-                        FeatureKind::Fillet { fit, turn, .. } => match st.fitted.get(&src.id) {
-                            Some(used) => {
-                                let used: Vec<f64> = idx.iter().map(|i| used.get(*i).copied().unwrap_or(r)).collect();
-                                kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?
-                            }
-                            None => fillet_fitted(&mb.body, &moved, r, *fit, turn.kernel())?.0,
-                        },
-                        _ => kernel::fillet(&mb.body, &moved, r)?,
+                        (FeatureKind::Fillet { turn, .. }, Some(used)) => {
+                            let used: Vec<f64> = idx.iter().map(|i| used.get(*i).copied().unwrap_or(r)).collect();
+                            mb.traced().then(kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?)
+                        }
+                        // Otherwise the copy is the same blend, with its type, fit, corners and
+                        // setbacks, at the copied edges (#16912): a curvature or spline fillet's
+                        // copy was a constant-radius round. Its notes are the original's.
+                        _ => {
+                            let (nb, from, _, _) = blend_raw(vals, &moved_blend(src, m), &mb, &moved, r, &mut None)?;
+                            // A copy blends edges the pattern's own copies made: named after the
+                            // body so far.
+                            from.then(nb)
+                        }
                     };
-                    // A copy blends edges the pattern's own copies made: named after the body so far.
-                    let nb = mb.traced().then(nb);
                     if let Some(slot) = st.bodies.get_mut(ti) {
                         *slot = mb.remade(nb);
                     }
@@ -8929,8 +9000,12 @@ fn replay(
                 let mut copy = (*src).clone();
                 copy.id = f.id;
                 copy.face_names.clear();
-                if let FeatureKind::Thread { face, from, up_to, .. } = &mut copy.kind {
+                if let FeatureKind::Thread { face, additional_faces, from, up_to, .. } = &mut copy.kind {
                     face.0 = crate::apply_point(m, face.0);
+                    // Keep each explicit target body while moving its picked point.
+                    for q in additional_faces {
+                        q.0 = crate::apply_point(m, q.0);
+                    }
                     if let Some(q) = from {
                         q.0 = crate::apply_point(m, q.0);
                     }
@@ -9607,10 +9682,21 @@ fn eval_feature(
             }
             Ok(())
         }
-        FeatureKind::Hole { thread, thread_depth, diameter, hand, modeled, ease_out, depth, to, .. } => {
+        FeatureKind::Hole { thread, thread_depth, thread_class, diameter, hand, modeled, ease_out, depth, to, .. } => {
             let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;
             if thread_depth.is_some() && thread.is_none() {
                 return Err(DocError::Invalid("thread depth requires a tapped hole".into()));
+            }
+            // A class the command would refuse (a hand-edited file) fails the hole, saying why.
+            // An unknown thread fails where the thread is cut, with its own reason.
+            match (thread_class, thread) {
+                (None, _) => {}
+                (Some(_), None) => return Err(DocError::Invalid("a thread class needs a tapped hole".into())),
+                (Some(class), Some(t)) => {
+                    if let Some(tapped) = crate::parse_tapped_thread(t) {
+                        tapped.check_class(class).map_err(DocError::Invalid)?;
+                    }
+                }
             }
             if *modeled && thread.is_none() {
                 return Err(DocError::Invalid("a modelled thread needs a tapped hole".into()));
@@ -10032,6 +10118,9 @@ fn eval_feature(
                     Ok::<_, DocError>((frame, crate::mat_inverse(&frame).ok_or_else(singular)?, crate::mat_inverse(&here).ok_or_else(singular)?))
                 });
                 let owner = owner.transpose()?;
+                // Named against an index of the names in use: searching every body for every
+                // name tried took time cubic in the copies.
+                let mut names = BodyNames::new(st);
                 for (k, m) in mats.iter().enumerate() {
                     let local = match &owner {
                         Some((frame, frame_inv, here_inv)) => {
@@ -10041,9 +10130,12 @@ fn eval_feature(
                     };
                     let copy = moved_copy(&mb, kernel::transform_matrix(&mb.body, local)?, k + 1);
                     let slot = pattern_name_slot(f.body_names.len(), bodies.len(), mats.len(), s, k, f.pattern_names_in_order);
-                    let name = pattern_copy_name(st, f, slot, &mb.name);
+                    let name = pattern_copy_name(&mut names, f, slot, &mb.name);
                     copy_sheet(st, &mb.name, &name, &local);
                     let mut body = ModelBody::traced_new(name, copy, f.id);
+                    // A copy is its source moved: it is drawn from the source's triangles and
+                    // display plans, moved, rather than meshed and planned again for every copy.
+                    body.mesh_placement = placed_mesh::PlacedMesh::new(&mb, &local).map(Arc::new);
                     if owner.is_some() {
                         // Kept in that component as a moved body is (and through later features).
                         body.component = mb.component;
@@ -10179,7 +10271,9 @@ fn eval_feature(
                 reduced |= used.is_some();
                 fitted.extend(used.unwrap_or_else(|| vec![r; edges.len()]));
                 tapered_all.extend(tapered);
-                found.extend(edges);
+                // A pattern repeats each edge at a moved copy of a point on it: the edge's middle,
+                // never the pick, which at a vertex two edges share finds either on a copy (#16934).
+                found.extend(kernel::blend_edge_middles(&mb.body, &edges)?);
                 blended.push((*ti, nb));
             }
             if !notes.is_empty() {
@@ -10461,6 +10555,21 @@ fn eval_feature(
                 let Some(name) = name else { continue };
                 let carried = f.link_faces.get(k).map_or(&[][..], Vec::as_slice);
                 let b = crate::lineage::linked_tool(b.body.clone().with_import_certificate(&digest, f.id)?, f.id, carried);
+                for record in f.link_threads.get(k).into_iter().flatten() {
+                    if !record.axis_point.is_finite()
+                        || !record.start.is_finite()
+                        || !record.end.is_finite()
+                        || record.end <= record.start
+                        || !(1..=8).contains(&record.starts)
+                        || [record.major_diameter, record.radius, record.pitch].iter().any(|v| !v.is_finite() || *v <= 0.0)
+                    {
+                        return Err(DocError::Invalid("invalid cosmetic thread record in linked body".into()));
+                    }
+                    let mut thread = record.clone();
+                    thread.feature = f.id;
+                    thread.body.clone_from(&name);
+                    st.threads.push(thread);
+                }
                 st.bodies.push(ModelBody::traced_new(name, b, f.id));
             }
             if !imp.warnings.is_empty() {
@@ -10637,6 +10746,18 @@ impl BodyNames {
         };
         self.next.insert(base.to_string(), i);
         name
+    }
+
+    /// The first free `base (i)` from `from` on, taken now.
+    fn first_free(&mut self, base: &str, from: u64) -> String {
+        let mut i = from.max(self.next.get(base).map_or(0, |n| *n as u64));
+        loop {
+            let candidate = format!("{base} ({i})");
+            i += 1;
+            if self.taken.insert(candidate.clone()) {
+                return candidate;
+            }
+        }
     }
 }
 
@@ -10856,15 +10977,43 @@ pub fn face_point_state<'a>(doc: &Document, st: &'a ModelState, kind: &FeatureKi
 /// resting a hair from the picked face would otherwise take its name. Another feature's point is
 /// named on the bodies of the feature's own component first: each component's bodies lie in its
 /// own coordinates there, where a part inserted twice has a face at the same point in each.
+/// A feature that names the body whose faces it picks ([`FeatureKind::face_body`]) names each
+/// point on that body first: another body with a face a hair from the pick (#16871) would
+/// otherwise take the name, and evaluation would move the pick onto that body's face.
 pub fn face_point_names(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64) -> Result<Vec<String>> {
     let pts = kind.face_points();
+    if thread_target_bodies(doc, st, kind)?.is_some() {
+        let mut names = Vec::with_capacity(pts.len());
+        for (slot, point) in pts.iter().enumerate() {
+            let scoped;
+            let input = if let Some(body) = kind.thread_target_body(slot) {
+                scoped = ModelState { bodies: st.bodies.iter().filter(|b| b.name == body).cloned().collect(), ..ModelState::default() };
+                &scoped
+            } else {
+                st
+            };
+            names.push(crate::naming::face_names_at(input, std::slice::from_ref(point)).pop().unwrap_or_default());
+        }
+        return Ok(names);
+    }
     if !matches!(kind, FeatureKind::Extrude { .. } | FeatureKind::Revolve { .. }) {
+        let named =
+            kind.face_body().map(|n| ModelState { bodies: st.bodies.iter().filter(|b| b.name == n).cloned().collect(), ..ModelState::default() });
+        let on_named: Vec<String> = match &named {
+            Some(one) if !one.bodies.is_empty() => crate::naming::face_names_at(one, &pts),
+            _ => vec![String::new(); pts.len()],
+        };
         let own = ModelState { bodies: st.bodies.iter().filter(|b| doc.model_body_component(b) == comp).cloned().collect(), ..ModelState::default() };
-        let names = crate::naming::face_names_at(&own, &pts);
-        return Ok(names
+        return Ok(on_named
             .into_iter()
             .zip(&pts)
-            .map(|(name, p)| if name.is_empty() { crate::naming::face_names_at(st, std::slice::from_ref(p)).pop().unwrap_or_default() } else { name })
+            .map(|(name, p)| {
+                if !name.is_empty() {
+                    return name;
+                }
+                let name = crate::naming::face_names_at(&own, std::slice::from_ref(p)).pop().unwrap_or_default();
+                if name.is_empty() { crate::naming::face_names_at(st, std::slice::from_ref(p)).pop().unwrap_or_default() } else { name }
+            })
             .collect());
     }
     let fst = face_point_state(doc, st, kind, comp)?;
@@ -11770,6 +11919,23 @@ mod body_name_tests {
         let last = (0..50_000).map(|_| names.unique("R_0603")).last().unwrap();
         assert_eq!(last, "R_0603 (50000)");
         assert!(began.elapsed() < std::time::Duration::from_secs(5), "{:?}", began.elapsed());
+    }
+
+    /// Copies of a renamed pattern numbered after its highest stored name (#372) take the first
+    /// free number from there, as searching the bodies one name at a time gave them.
+    #[test]
+    fn pattern_copies_past_the_stored_names_take_the_first_free_numbers() {
+        let mut st = ModelState::default();
+        let body = kernel::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        for name in ["Pin", "Pin (5)", "Pin (7)"] {
+            st.bodies.push(ModelBody::new(name.into(), body.clone(), 1));
+        }
+        let mut names = BodyNames::new(&st);
+        let got: Vec<String> = (0..4).map(|_| names.first_free("Pin", 5)).collect();
+        assert_eq!(got, ["Pin (6)", "Pin (8)", "Pin (9)", "Pin (10)"]);
+        // After first-free naming from 2, a later start never hands out a name twice.
+        assert_eq!(names.unique("Pin"), "Pin (2)");
+        assert_eq!(names.first_free("Pin", 2), "Pin (3)");
     }
 }
 

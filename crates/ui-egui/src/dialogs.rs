@@ -287,6 +287,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 suggested: Option<String>,
                 /// The picks used for the suggestion, so an unchanged dialog does no geometry work.
                 of: Vec<Sel>,
+                /// A body-qualified feature keeps the plural constructor when edited down to one face.
+                grouped: bool,
                 options: crate::dialogs_thread::Options,
             },
             /// A rib (one wall along open curves) or a web (a wall per curve).
@@ -732,7 +734,8 @@ fn display_quality(app: &SolveApp) -> solidcraft_engine::doc::display_quality::D
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn begin_applying(app: &SolveApp, d: &Dialog) -> Option<Applying> {
     let wait = app.apply_off_thread?;
-    if !d.previews() && d.editing.is_none() {
+    let multiple_threads = matches!(d.kind, Kind::Thread { .. }) && sels(d, 0).len() > 1;
+    if !d.previews() && !multiple_threads && d.editing.is_none() {
         return None;
     }
     let computation = DialogComputation::new(app, d).ok()?;
@@ -1044,7 +1047,14 @@ impl Dialog {
                 vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting tool", PLANES | FACES | AXES, false)],
             ),
             "solid.thread" => Dialog::new(
-                Kind::Thread { designation: String::new(), length: String::new(), suggested: None, of: Vec::new(), options: Default::default() },
+                Kind::Thread {
+                    designation: String::new(),
+                    length: String::new(),
+                    suggested: None,
+                    of: Vec::new(),
+                    grouped: false,
+                    options: Default::default(),
+                },
                 crate::dialogs_thread::inputs(),
             ),
             "material.assign" => {
@@ -1298,6 +1308,7 @@ impl Dialog {
                     && !i.rejects(sel)
             };
             if let Some(inp) = d.inputs.iter_mut().find(|i| takes(i)) {
+                retain_profile_list_sketch(&d.kind, inp, sel);
                 if matches!(d.kind, Kind::Fillet { .. }) {
                     for x in crate::viewport::grouped_selection(s, sel) {
                         if !d.picked_edges.iter().any(|y| selection::same_item(y, &x)) {
@@ -1934,11 +1945,8 @@ impl Dialog {
         let picked = if chain { fillet_edges(s, &sel, true) } else { single.clone() };
         // Extrude and revolve take profiles of one sketch; both lofts take sections
         // from several sketches and must keep their pick order.
-        if let Sel::Profile { sketch, .. } = &sel
-            && !matches!(self.kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. }))
-            && let Some(inp) = self.inputs.get_mut(self.active)
-        {
-            inp.items.retain(|x| !matches!(x, Sel::Profile { sketch: s2, .. } if s2 != sketch));
+        if let Some(inp) = self.inputs.get_mut(self.active) {
+            retain_profile_sketch(&self.kind, inp, &sel);
         }
         let is_fillet = matches!(self.kind, Kind::Fillet { .. }) && self.active == 0;
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
@@ -2004,6 +2012,10 @@ impl Dialog {
             self.picked_edges.clear();
         }
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
+        // Only an explicit add opts into grouped Thread selection; a replacement keeps one face.
+        if self.active == 0 && matches!(self.kind, Kind::Thread { .. }) && add {
+            inp.multi = true;
+        }
         if !add {
             inp.items.clear();
         }
@@ -2030,6 +2042,7 @@ impl Dialog {
             if !fits(inp.accept, &x) {
                 continue;
             }
+            retain_profile_list_sketch(&self.kind, inp, &x);
             accepted = true;
             if !inp.multi {
                 inp.items.clear();
@@ -2268,6 +2281,26 @@ pub(crate) fn fillet_least_setback(ctx: &egui::Context, s: &Session, items: &[Se
         .reduce(f64::max);
     ctx.data_mut(|d| d.insert_temp(id, (key, least)));
     least
+}
+
+/// Profiles are indices within one sketch. Only lofts consume sections from several sketches.
+/// Keep batch and preselection inputs consistent with successive clicks: the latest sketch wins.
+fn retain_profile_list_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
+    if matches!(
+        kind,
+        Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. } | Kind::Sweep { .. } | Kind::Surface(_) | Kind::Frame(_) | Kind::Sheet(_)
+    ) {
+        retain_profile_sketch(kind, input, sel);
+    }
+}
+
+/// Keep the profile picks of the sketch just picked; lofts retain their separate sections.
+fn retain_profile_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
+    if let Sel::Profile { sketch, .. } = sel
+        && !matches!(kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. }))
+    {
+        input.items.retain(|x| !matches!(x, Sel::Profile { sketch: other, .. } if other != sketch));
+    }
 }
 
 /// The profiles of a sketch that aren't the island inside another profile's hole: a circle in a
@@ -3126,6 +3159,12 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
     if (m == 1) != opts.multiple {
         opts.multiple = m == 1;
         d.inputs = if opts.multiple { vec![SelInput::new("Points", selection::POINTS, true)] } else { single_hole_inputs() };
+        if !opts.multiple
+            && d.editing.is_some()
+            && let Some(face) = d.inputs.first_mut()
+        {
+            face.multi = false;
+        }
         d.active = 0;
         d.extra.remove("direction");
     }
@@ -5347,7 +5386,8 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
     if let Kind::SaveMesh(k) = &d.kind {
         return crate::dialogs_save_mesh::run(app, k, &d.inputs);
     }
-    if d.previews() {
+    let multiple_threads = matches!(d.kind, Kind::Thread { .. }) && sels(d, 0).len() > 1;
+    if d.previews() || multiple_threads {
         let prepared = DialogComputation::new(app, d)?.compute()?;
         return adopt_dialog(app, prepared, d);
     }
@@ -5630,7 +5670,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     let need = |i: usize, what: &str| -> Result<(), String> { if sels(d, i).is_empty() { Err(format!("select {what} first")) } else { Ok(()) } };
     let profiles = || -> (Value, Value) {
         let ps: Vec<(u64, usize)> = sels(d, 0).profiles();
-        (ps.first().map(|x| json!(x.0)).unwrap_or(Value::Null), json!(ps.iter().map(|x| x.1).collect::<Vec<_>>()))
+        let sketch = ps.first().map(|x| x.0);
+        (sketch.map(|id| json!(id)).unwrap_or(Value::Null), json!(ps.iter().filter(|x| Some(x.0) == sketch).map(|x| x.1).collect::<Vec<_>>()))
     };
     let face_points = |i: usize| -> Vec<Value> { sels(d, i).face_points().into_iter().map(pt).collect() };
     // An empty Thickness is no value to shell with: OK waits for one instead of the command
@@ -5954,7 +5995,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     Sel::Profile { sketch, index } => {
                         let last = sections.last_mut().filter(|sec| sec.get("sketch").and_then(Value::as_u64) == Some(*sketch));
                         match last.and_then(|sec| sec.get_mut("profiles")).and_then(Value::as_array_mut) {
-                            Some(profiles) => profiles.push(json!(index)),
+                            Some(profiles) => {
+                                let index = json!(index);
+                                if !profiles.contains(&index) {
+                                    profiles.push(index);
+                                }
+                            }
                             None => sections.push(json!({"sketch": sketch, "profiles": [index]})),
                         }
                         profile_sketches.push(*sketch);
@@ -6262,14 +6308,36 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "faces")?;
             ("solid.offset_face", with_single_body(json!({"faces": face_points(0)}), sels(d, 0)))
         }
-        Kind::Thread { designation, length, suggested, options, .. } => {
+        Kind::Thread { designation, length, suggested, grouped, options, .. } => {
             need(0, "a cylindrical face")?;
-            let mut p = json!({"face": face_points(0).into_iter().next().unwrap_or(Value::Null)});
-            if !designation.trim().is_empty() && suggested.as_deref() != Some(designation.as_str()) {
-                p["designation"] = json!(designation.trim());
+            let mut common = Value::Object(d.extra.clone());
+            if let Some(params) = common.as_object_mut() {
+                params.remove("face");
+                params.remove("faces");
             }
-            crate::dialogs_thread::put_params(&mut p, length, options, &d.inputs);
-            ("solid.thread", p)
+            if !designation.trim().is_empty() && suggested.as_deref() != Some(designation.as_str()) {
+                common["designation"] = json!(designation.trim());
+            }
+            crate::dialogs_thread::put_params(&mut common, length, options, &d.inputs);
+            let mut seen = std::collections::BTreeSet::new();
+            let mut faces = Vec::new();
+            for pick in sels(d, 0) {
+                let Sel::Face { body, index, point } = pick else { continue };
+                if *index == usize::MAX {
+                    return Err(solidcraft_engine::doc::DocError::reselect("face").to_string());
+                }
+                if seen.insert((body, index)) {
+                    faces.push(json!({"body": body, "point": pt(*point)}));
+                }
+            }
+            if let [face] = faces.as_slice()
+                && !*grouped
+            {
+                common["face"] = face["point"].clone();
+            } else {
+                common["faces"] = json!(faces);
+            }
+            return Ok(vec![("solid.thread".to_string(), common)]);
         }
         Kind::Material { index, editor } => {
             if editor.editing() {
@@ -6930,7 +6998,7 @@ const AXIS_PICK: &str =
 /// Which profiles of a sketch a profile selection means.
 pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &ProfileSel) -> Vec<usize> {
     let ps = &ss.profiles;
-    match sel {
+    let mut indices: Vec<usize> = match sel {
         ProfileSel::All => (0..ps.len()).collect(),
         ProfileSel::Indices { indices } => indices.iter().copied().filter(|i| *i < ps.len()).collect(),
         ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
@@ -6943,7 +7011,12 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
             })
             .collect(),
         ProfileSel::Points { points } => points.iter().filter_map(|q| solidcraft_engine::doc::sketch::profile_at_point(ps, *q)).collect(),
-    }
+    };
+    // Saved places or curve references can converge on one region after a sketch changes.
+    // Refill bypasses SelInput::toggle, so keep each resolved region only once here.
+    let mut seen = std::collections::BTreeSet::new();
+    indices.retain(|index| seen.insert(*index));
+    indices
 }
 
 thread_local! {
@@ -7047,6 +7120,15 @@ pub(crate) fn face_sel_on(s: &Session, only: Option<&str>, p0: Vec3) -> Option<S
 /// Resolve a stored name on the current input body before placing its pick in the viewport.
 /// Keep the resolved index: a face point can lie on a boundary shared with another face.
 pub(crate) fn named_refill(s: &Session, body: Option<&str>, name: &str, point: Vec3, edge: bool) -> Option<Sel> {
+    named_refill_in(s, body, name, point, edge, false)
+}
+
+/// A saved grouped Thread names each target body independently; never fall back to another body.
+pub(crate) fn named_refill_on_body(s: &Session, body: &str, name: &str, point: Vec3) -> Option<Sel> {
+    named_refill_in(s, Some(body), name, point, false, true)
+}
+
+fn named_refill_in(s: &Session, body: Option<&str>, name: &str, point: Vec3, edge: bool, strict: bool) -> Option<Sel> {
     use solidcraft_engine::doc::naming;
 
     if name.is_empty() {
@@ -7063,6 +7145,8 @@ pub(crate) fn named_refill(s: &Session, body: Option<&str>, name: &str, point: V
         (b, hit.edge, hit.point)
     } else if let Some((b, (index, point))) = body.and_then(|n| st.body(n)).and_then(|b| naming::face_on_body(b, name, point).map(|hit| (b, hit))) {
         (b, index, point)
+    } else if strict {
+        return None;
     } else {
         let hit = naming::locate_face(&st, name, point)?;
         (st.bodies.get(hit.body)?, hit.face, hit.point)
@@ -7614,6 +7698,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             ease_out,
             to,
             references,
+            // Not in the Hole window yet: an edit keeps it (`timeline.redefine`).
+            thread_class: _,
             old_surface_start: _,
         } => {
             let mut d = start("solid.hole")?;
@@ -8257,7 +8343,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         }
         FeatureKind::Thread { .. } => {
             let mut d = start("solid.thread")?;
-            crate::dialogs_thread::reopen(&mut d, s, &f.kind);
+            crate::dialogs_thread::reopen(&mut d, s, &f);
             d.sync_thread(s);
             d
         }

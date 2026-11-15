@@ -1660,6 +1660,42 @@ fn thread_size_suggestion_follows_picks_without_overwriting_manual_sizes() {
     assert_eq!(apply_commands(&app, &d).unwrap()[0].1["designation"], "M8x1");
 }
 
+/// Explicitly adding faces keeps automatic sizing separate for different shaft diameters.
+#[test]
+fn threads_on_different_selected_diameters_keep_each_faces_automatic_size() {
+    let mut app = app_with(json!([
+        {"command":"solid.cylinder","params":{"radius":4,"height":10}},
+        {"command":"solid.cylinder","params":{"base":[30,0,0],"radius":10,"height":10}}
+    ]));
+    let small = thread_face(&app, "Body1");
+    let large = thread_face(&app, "Body2");
+    let before = app.session.doc.to_json();
+    let mut d = start(&mut app, vec![small.clone(), large.clone()], "solid.thread");
+    assert!(!d.inputs[0].multi);
+    assert_eq!(d.inputs[0].items, vec![small.clone()]);
+    d.take_box(&app.session, vec![large.clone()], true);
+    assert!(d.inputs[0].multi);
+    assert_eq!(d.inputs[0].items, vec![small, large]);
+    assert!(matches!(&d.kind, Kind::Thread { designation, .. } if designation == "M8"));
+    assert_eq!(app.session.doc.to_json(), before, "suggesting a size is read-only");
+    let commands = apply_commands(&app, &d).unwrap();
+    assert_eq!(commands.len(), 1);
+    let (command, params) = &commands[0];
+    assert_eq!(command, "solid.thread");
+    assert_eq!(params["faces"].as_array().unwrap().len(), 2);
+    assert!(params.get("designation").is_none(), "each face must keep automatic sizing");
+    let reply = app.session.execute(command, params).unwrap();
+    let id = reply["feature"].as_u64().unwrap();
+    let state = app.session.model.state();
+    assert_eq!(state.threads.len(), 2);
+    for (thread, (body, expected)) in state.threads.iter().zip([("Body1", "M8"), ("Body2", "M20")]) {
+        assert_eq!(thread.body, body);
+        assert_eq!(thread.designation, expected);
+        assert!(!thread.internal);
+        assert_eq!(thread.feature, id, "different automatic sizes still belong to one feature");
+    }
+}
+
 #[test]
 fn thread_size_suggestion_reopens_without_changing_saved_thread_parameters() {
     for designation in [None, Some("M8"), Some("M8x1")] {
@@ -1675,6 +1711,7 @@ fn thread_size_suggestion_reopens_without_changing_saved_thread_parameters() {
         h.app.edit_feature(id);
         h.frames(2);
         let d = h.app.dialog.as_ref().unwrap();
+        assert!(!d.inputs[0].multi, "a saved single face keeps replacement clicks");
         assert!(matches!(&d.kind, Kind::Thread { designation: size, .. } if size == designation.unwrap_or("M8")), "{d:?}");
         let (command, params) = apply_commands(&h.app, d).unwrap().remove(0);
         h.app.session.execute(&command, &params).unwrap();
@@ -2781,6 +2818,39 @@ fn patch_dialog_fills_a_loop_of_edges_that_is_not_planar() {
     let area = fill.mesh().measure().area;
     let want = 28.0 * 40.0 * 2.0 * (14.0f64 / 40.0).asin();
     assert!((area - want).abs() < want * 1e-2, "{area} vs {want}");
+}
+
+#[test]
+fn the_patch_tool_takes_a_3d_spline() {
+    // #16186: the Patch tool took no 3D spline. Its Boundary row wanted profiles or edges, so a
+    // click on a spline of a 3D sketch found nothing to select. A tilted square of 3D splines is
+    // a planar loop of its own: picking one of them fills the Patch with that loop.
+    let mut app = app_with(json!([
+        {"command": "sketch.create", "params": {"plane": "XY"}},
+        {"command": "sketch.options", "params": {"sketch_3d": true}},
+        {"command": "sketch.line3d", "params": {"points": [[0, 0, 0], [10, 0, 10]]}},
+        {"command": "sketch.line3d", "params": {"points": [[10, 0, 10], [10, 10, 10]]}},
+        {"command": "sketch.line3d", "params": {"points": [[10, 10, 10], [0, 10, 0]]}},
+        {"command": "sketch.line3d", "params": {"points": [[0, 10, 0], [0, 0, 0]]}},
+        {"command": "sketch.finish", "params": {}}
+    ]));
+    let sk = app.session.doc.features.last().unwrap().id;
+    let st = app.session.model.state();
+    let ss = st.sketch(sk).unwrap();
+    assert_eq!(ss.profiles_3d.len(), 1, "the tilted square is one planar 3D loop");
+    let spline = ss.sketch.wires[0].id.clone();
+    let mut d = start(&mut app, vec![], "surface.patch");
+    assert!(d.inputs[0].accept & crate::selection::CURVES != 0, "the Boundary row takes a spline");
+    d.inputs[0].items = vec![Sel::SketchCurve { id: spline, sketch: Some(sk) }];
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].0, "surface.patch");
+    assert_eq!(cmds[0].1, json!({"sketch": sk, "profiles_3d": [0]}), "the loop the spline bounds");
+    // The patch builds the face of the tilted square.
+    app.session.execute(&cmds[0].0, &cmds[0].1).unwrap();
+    let st = app.session.model.state();
+    assert_eq!(st.bodies.len(), 1, "the patch is a body of its own");
+    assert!(st.bodies[0].body.is_surface() && st.bodies[0].body.face_count() == 1);
 }
 
 #[test]

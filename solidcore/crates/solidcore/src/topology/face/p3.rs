@@ -825,7 +825,7 @@ impl LoopOrientationSampler<'_> {
 /// holds 0 or a curve has no NURBS form. With `bounds`, it receives the samples of
 /// upstream's `ComputeProjectedLoopOrientation` walk, as before (the box only; its
 /// orientation is not used).
-fn uv_loop_orientation(
+pub(crate) fn uv_loop_orientation(
     k: &Kernel,
     uv_curves: &[Curve],
     senses: &[bool],
