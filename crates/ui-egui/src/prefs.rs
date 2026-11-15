@@ -1379,7 +1379,7 @@ preference_settings! {
     keep_work_on_tab_switch: bool = false, PAGE_LAYOUT;
     /// Each design tab keeps its toolbar tab (MODEL, SURFACE, ...) while another design is shown,
     /// with or without `keep_work_on_tab_switch`. Off: a switch shows the MODEL tab, as before.
-    remember_toolbar_tab: bool = true, PAGE_LAYOUT;
+    remember_toolbar_tab: bool = false, PAGE_LAYOUT;
     /// Hovering a result in Search commands shows the command's place in the ribbon: its tab,
     /// its button or its row in a section's drop-down (#7287). A command started from the search
     /// blinks there, and a running command that sits in a drop-down marks its section label. Off
@@ -1397,7 +1397,7 @@ preference_settings! {
     tab_double_click_renames: bool = true, PAGE_LAYOUT;
     /// A design's views (Model, Sketch, Sheet, Render, Animation) are tabs inside its tab; off, the
     /// design keeps one tab and a view switcher lists them.
-    design_views_as_tabs: bool = true, PAGE_LAYOUT;
+    design_views_as_tabs: bool = false, PAGE_LAYOUT;
     /// A drawing sheet opens as a view (a sub-tab) of its design.
     design_sub_tab_sheets: bool = true, PAGE_LAYOUT;
     /// Editing a sketch opens it as a view of its design; Finish Sketch returns to the previous view.
@@ -7372,7 +7372,7 @@ mod tests {
         let on = DesignTabPrefs::from(&h.app.preferences);
         assert_eq!(
             [on.views_as_tabs, on.sub_tab_sheets, on.sub_tab_sketches, on.sub_tab_render, on.reuse_views, on.reopen_views],
-            [true, true, true, true, true, false]
+            [false, true, true, true, true, false]
         );
         let old = lenient(&json!({"theme": "light"}));
         assert_eq!(DesignTabPrefs::from(&old), on, "saved before they existed");
@@ -7398,7 +7398,7 @@ mod tests {
                 flipped.reuse_views,
                 flipped.reopen_views
             ],
-            [false, false, false, false, false, true]
+            [true, false, false, false, false, true]
         );
         defaults(&mut h.app, PAGE_LAYOUT);
         assert_eq!(DesignTabPrefs::from(&h.app.preferences), on, "Layout's Restore Defaults");
