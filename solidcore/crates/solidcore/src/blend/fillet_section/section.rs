@@ -65,8 +65,8 @@ use std::sync::Arc;
 ///   order 1 in h. A halving divides it by 2 only.
 ///
 /// So the halvings allowed are those that shrink the proof's contraction (order 1) as much
-/// as one halving shrinks a proved smooth bound (order 4): 2^4 = 16 is 4 halvings of order
-/// 1. A span over the target after that many halvings in a row, none of which halved its
+/// as one halving shrinks a proved smooth bound (order 4): 2^4 = 16 is 4 halvings of order 1.
+/// A span over the target after that many halvings in a row, none of which halved its
 /// bound, is not one more resolution fixes: its section is degenerate there (an offset
 /// collapsing to a curve, as where a ball's radius is a face's own radius of curvature),
 /// and halving further only multiplies the work, the stations doubling each round to the
