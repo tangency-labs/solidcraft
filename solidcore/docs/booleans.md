@@ -96,7 +96,11 @@ temporary origin shift (`merge/p1.rs`, `temporary_brep_transform`) that it undoe
 
 Between steps 2 and 3, `mark_common` (`merge/p4.rs`) closes intersection loops that end at a common
 vertex used by one common edge (`close_intersection_loop`) and, with more than one such vertex,
-closes the gaps (`fix_gaps`); it repeats at most ten times. The classify and select steps also repeat
+closes the gaps (`fix_gaps`); it repeats at most ten times. A pass goes on past each closure that
+deleted no topology and gave the vertex a second common edge, so ten passes are not a limit of ten
+gaps; a closure that leaves the vertex a loop end still ends the pass. A loop end is closed first along
+an edge to another loop end, which closes the gap between them rather than branching the loop at a
+vertex it already passes through. The classify and select steps also repeat
 (at most ten times) when a coincidence repair changes the topology (§5).
 
 After the cleanup of step 5, `place_vertices_on_face_corners` (`merge/p1.rs`) moves a vertex that lies
