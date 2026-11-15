@@ -1434,8 +1434,8 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
     if app.preferences.free_orbit {
         target = snapped_quarter_roll(target, free);
     }
-    // The cursor, origin and view-centre pivots stay still; the axis gizmo has no pivot (it orbits about the
-    // view centre, see `axis_view`).
+    // The cursor, origin and view-centre pivots stay still. The axis gizmo uses the origin when selected;
+    // otherwise it orbits about the camera target, see `axis_view`.
     let pivot = if around_cursor {
         match app.preferences.orbit_around {
             crate::prefs::OrbitAround::Origin => Some(Vec3::ZERO),
