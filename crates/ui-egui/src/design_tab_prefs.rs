@@ -1,7 +1,7 @@
 //! The Layout page's "Design tabs" choices, read from one place by the tab strip and the views code.
 
-use solidcraft_views::ViewKind;
 use crate::prefs::Prefs;
+use solidcraft_views::ViewKind;
 
 /// How a design's views are shown and opened, copied from the preferences.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

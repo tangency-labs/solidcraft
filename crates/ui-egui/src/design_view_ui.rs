@@ -9,8 +9,8 @@
 use std::path::Path;
 
 use crate::app_bar::{TabAction, TabMenuRow};
-use solidcraft_views::ViewKind;
 use crate::{SolveApp, documents, new_window, ui_kit};
+use solidcraft_views::ViewKind;
 
 /// Menu row ids of a view's right-click menu ([`VIEW_MENU`]).
 pub const VIEW_RENAME: &str = "view.rename";
