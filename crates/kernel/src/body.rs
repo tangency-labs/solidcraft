@@ -767,6 +767,14 @@ impl Body {
         }
     }
 
+    /// Exact polyline samples along `edge` of `self`, or `None` for a mesh body or invalid index.
+    pub fn edge_points(&self, edge: usize) -> Option<Vec<Vec3>> {
+        if self.is_mesh() {
+            return None;
+        }
+        edge_points(self.record.edges.get(edge)?, (self.size() * 1e-3).max(1e-4)).ok()
+    }
+
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
     pub fn with_cylinder_certificate(mut self, producer: u64) -> Result<Self> {
         if producer == 0 {

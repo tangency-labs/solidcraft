@@ -5691,8 +5691,7 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
 /// of the edge (an upstream edit moved the edge along it), where the edges meeting there are as
 /// near: then the edge's middle.
 fn off_the_ends(mb: &ModelBody, edge: usize, p: Vec3) -> Vec3 {
-    let m = mb.mesh();
-    let Some(e) = m.edges.get(edge) else { return p };
+    let Some(e) = mb.body.edge_points(edge) else { return p };
     let tight = (mb.body.size() * 2e-3).max(1e-3);
     let (Some(a), Some(b)) = (e.first(), e.last()) else { return p };
     if p.dist(*a) > tight && p.dist(*b) > tight {
