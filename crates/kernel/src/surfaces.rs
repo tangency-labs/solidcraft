@@ -1951,6 +1951,53 @@ mod tests {
         }
     }
 
+    /// A half circle of radius 5 extruded 10 as a sheet on each origin plane, thickened by 1, 2
+    /// and 4 out, in and half each way: a half tube between radii r0 and r1, π/2·(r1² − r0²)·10,
+    /// closed by a half ring at each end and a strip along each side (6 faces, 12 edges, 8
+    /// vertices), that every check accepts. The end rings lie square to the extrusion whatever
+    /// axis it runs along (#13348: off the XY plane the rings went onto planes through the axis).
+    #[test]
+    fn thicken_a_half_tube_on_every_origin_plane() {
+        use std::f64::consts::PI;
+        let arc = vec![Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: 5.0, start: 0.0, sweep: PI }];
+        for (name, plane) in [("XY", Plane::XY), ("YZ", Plane::YZ), ("XZ", Plane::XZ)] {
+            let sheet = extrude_sheet(&plane, std::slice::from_ref(&arc), 0.0, 10.0).unwrap();
+            for t in [1.0, 2.0, 4.0] {
+                for (thickness, symmetric, r0, r1) in [(t, false, 5.0, 5.0 + t), (-t, false, 5.0 - t, 5.0), (t, true, 5.0 - t / 2.0, 5.0 + t / 2.0)] {
+                    let what = format!("{name}, {thickness} mm, symmetric {symmetric}");
+                    let b = thicken(&sheet, thickness, symmetric).unwrap_or_else(|e| panic!("{what}: {e}"));
+                    assert!(!b.is_surface() && b.shell_count() == 1, "{what}");
+                    assert_eq!((b.face_count(), b.edge_count(), b.vertex_count()), (6, 12, 8), "{what}");
+                    assert!(b.validity().is_empty(), "{what}: {:?}", b.validity());
+                    let (v, want) = (measure(&b).unwrap().volume, PI / 2.0 * (r1 * r1 - r0 * r0) * 10.0);
+                    assert!(rel(v, want) < 1e-9, "{what}: {v} vs {want}");
+                    // The four flat faces: the rings square to the extrusion at 0 and 10 along it,
+                    // the strips in the sketch's x axis' plane through the axis.
+                    let n = plane.normal().normalized().unwrap();
+                    let mut rings = Vec::new();
+                    let mut strips = 0;
+                    for f in (0..b.face_count()).filter_map(|i| b.planar_face(i)) {
+                        let m = f.normal().normalized().unwrap();
+                        if (m.dot(n).abs() - 1.0).abs() < 1e-9 {
+                            rings.push(f.origin.dot(n));
+                        } else {
+                            assert!(
+                                (m.dot(plane.y).abs() - 1.0).abs() < 1e-9 && f.origin.dot(plane.y).abs() < 1e-9,
+                                "{what}: a strip off the axis plane: {f:?}"
+                            );
+                            strips += 1;
+                        }
+                    }
+                    rings.sort_by(f64::total_cmp);
+                    assert!(
+                        rings.len() == 2 && rings[0].abs() < 1e-9 && (rings[1] - 10.0).abs() < 1e-9 && strips == 2,
+                        "{what}: rings at {rings:?}, {strips} strips"
+                    );
+                }
+            }
+        }
+    }
+
     /// A saddle B-spline patch thickened by 1.5 holds the volume its offsets sweep: by Steiner,
     /// the offset's area is quadratic in the distance, so Simpson's rule over sampled offsets
     /// (Offset Surface at 0, ¾ and 1.5) is exact.

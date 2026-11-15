@@ -16,7 +16,8 @@ use super::measure::{equivalent, section};
 use super::placement::LoopPlacement;
 use super::profile::rational_curve;
 use super::profile::{
-    check_regions, curve_on_frame, tapered_flange_ends, Loop2, ProfileRefusal, Region2, Seg2,
+    check_regions, curve_on_frame, largest_arc_sweep, smallest_arc_sweep, tapered_flange_ends,
+    Loop2, ProfileRefusal, Region2, Seg2,
 };
 use super::read::{planar_curves, planar_pieces, PlanarPiece, Run};
 use super::sheet::{region_loops, sheet_regions};
@@ -29,6 +30,9 @@ use crate::math::{Point2, Vec2};
 use crate::primitive::api_trim_ops::create_planar_faces;
 use crate::primitive::primitive_creation::Boolean2d;
 use crate::topology::Brep;
+
+/// The default kernel's zone tolerance, which the profile checks here build at.
+const ZONE: f64 = 1e-5;
 
 fn xy() -> Frame {
     Frame {
@@ -322,7 +326,7 @@ fn hostile_profiles_are_refused_by_kind() {
         b: p(1.0, 0.0),
     };
     assert_eq!(
-        check_regions([&bad].into_iter(), 1e-7),
+        check_regions([&bad].into_iter(), 1e-7, ZONE),
         Err(ProfileRefusal::LineOrArc)
     );
     let mut conic = Region2 {
@@ -333,7 +337,7 @@ fn hostile_profiles_are_refused_by_kind() {
         apex.x = f64::NAN;
     }
     assert_eq!(
-        check_regions([&conic].into_iter(), 1e-7),
+        check_regions([&conic].into_iter(), 1e-7, ZONE),
         Err(ProfileRefusal::FreeForm)
     );
     let open = Region2 {
@@ -343,10 +347,10 @@ fn hostile_profiles_are_refused_by_kind() {
         holes: vec![],
     };
     assert_eq!(
-        check_regions([&open].into_iter(), 1e-7),
+        check_regions([&open].into_iter(), 1e-7, ZONE),
         Err(ProfileRefusal::Budget)
     );
-    assert_eq!(check_regions([&plate].into_iter(), 1e-7), Ok(()));
+    assert_eq!(check_regions([&plate].into_iter(), 1e-7, ZONE), Ok(()));
 }
 
 fn run<'a>(k: &Kernel, c: &'a Curve, interval: Extent1d, forward: bool) -> Run<'a> {
@@ -478,6 +482,300 @@ fn a_piece_made_a_curve_reads_back_as_itself() {
                 assert!(apex.distance(a0) < 1e-9 && (w - w0).abs() < 1e-12, "{b:?}");
             }
         }
+    }
+}
+
+/// The absolute tolerance of the arc closed-form checks below. Chosen, not derived: the
+/// coordinates they compare stay within |x| <= 5, where an ulp is at most 8.9e-16, so this is
+/// about 1000 ulps.
+const ARC_CLOSED_FORM_TOL: f64 = 1e-12;
+
+/// `center + radius (cos t, sin t)` on the plain frame.
+fn on_circle(center: Point2, radius: f64, t: f64) -> [f64; 3] {
+    [
+        center.x + radius * t.cos(),
+        center.y + radius * t.sin(),
+        0.0,
+    ]
+}
+
+/// The largest coordinate difference between `q` and `want`.
+fn off(q: crate::geom::vector3d::Point3, want: [f64; 3]) -> f64 {
+    [q.x, q.y, q.z]
+        .into_iter()
+        .zip(want)
+        .map(|(g, w)| (g - w).abs())
+        .fold(0.0, f64::max)
+}
+
+/// The arc `curve_on_frame` builds on the plain frame against its closed form: it starts at
+/// `center + radius (cos start, sin start)` and ends at the same with `start + sweep`, every point
+/// between lies on the circle, and its angle from the start, turned the way `sweep` runs, rises
+/// strictly from 0 to `|sweep|` (the curve's own parameter need not be linear in the angle).
+fn assert_arc_closed_form(k: &Kernel, center: Point2, radius: f64, start: f64, sweep: f64) {
+    let s = Seg2::Arc {
+        center,
+        radius,
+        start,
+        sweep,
+    };
+    let c = curve_on_frame(k, &xy(), 0.0, &s).unwrap();
+    let iv = c.natural_interval();
+    let a = c.evaluate_point(k, iv.min()).unwrap();
+    let b = c.evaluate_point(k, iv.max()).unwrap();
+    for (q, t) in [(a, start), (b, start + sweep)] {
+        let want = on_circle(center, radius, t);
+        assert!(
+            off(q, want) < ARC_CLOSED_FORM_TOL,
+            "{s:?}: {q:?} vs {want:?}"
+        );
+    }
+    let mut last = 0.0;
+    for i in 1..64 {
+        let f = f64::from(i) / 64.0;
+        let q = c
+            .evaluate_point(k, iv.min() + f * (iv.max() - iv.min()))
+            .unwrap();
+        let (dx, dy) = (q.x - center.x, q.y - center.y);
+        assert!(
+            (dx.hypot(dy) - radius).abs() < ARC_CLOSED_FORM_TOL && q.z.abs() < ARC_CLOSED_FORM_TOL,
+            "{s:?} at f = {f}: {q:?} off the circle"
+        );
+        let turned = (sweep.signum() * (dy.atan2(dx) - start)).rem_euclid(TAU);
+        assert!(
+            turned > last && turned < sweep.abs(),
+            "{s:?} at f = {f}: angle {turned} after {last}"
+        );
+        last = turned;
+    }
+}
+
+/// A single arc that is a whole turn, starting away from the frame's `x`: its own circle, angle
+/// 0 at the start, so it closes at the start and runs through the closed form all the way round.
+#[test]
+fn a_full_circle_arc_at_a_nonzero_start_is_the_closed_form() {
+    let k = Kernel::default();
+    assert_arc_closed_form(&k, p(1.0, -2.0), 3.0, 1.0, TAU);
+    assert_arc_closed_form(&k, p(1.0, -2.0), 3.0, 1.0, -TAU);
+}
+
+/// A counter-clockwise arc whose start is past a whole turn is the same arc as at `start - 2π`:
+/// its trim never crosses a seam, whatever the start.
+#[test]
+fn a_ccw_arc_starting_past_a_whole_turn_is_the_closed_form() {
+    let k = Kernel::default();
+    assert_arc_closed_form(&k, p(0.5, 0.25), 2.0, TAU + 1.25, 1.5);
+    assert_arc_closed_form(&k, p(0.5, 0.25), 2.0, 3.0 * TAU - 0.5, 2.0);
+}
+
+/// The sweep limits come from the radius and the kernel's circle builder (`tol` the default zone
+/// tolerance; `floor` the builder's 1e-6 degree smallest angle and `win` its 0.01 degree
+/// full-turn window, each plus the margin): at r = 1 and r = 1e8, on both sides of `tol / r`,
+/// `floor` and `win`. Refused: at most [`smallest_arc_sweep`], past [`largest_arc_sweep`], or
+/// inside the window short of a turn with the end farther than `tol`. Built: the arc's ends in
+/// closed form (to the rounding of coordinates of size r), or the closed circle with its end
+/// within `tol` of `start + sweep`. `check_regions` accepts exactly the arcs `curve_on_frame`
+/// builds.
+#[test]
+fn an_arc_builds_exactly_within_the_limits_its_radius_sets() {
+    let k = Kernel::default();
+    let tol = k.tolerances.zone_tol_3d;
+    let floor = (1e-6_f64 + 1e-11).to_radians();
+    let win = (0.01_f64 + 1e-11).to_radians();
+    for r in [1.0, 1e8] {
+        let arc = |sweep: f64| Seg2::Arc {
+            center: p(0.0, 0.0),
+            radius: r,
+            start: 0.5,
+            sweep,
+        };
+        let exact = r * 1e-14 + ARC_CLOSED_FORM_TOL;
+        assert_eq!(largest_arc_sweep(r, tol), TAU + tol / r);
+        assert_eq!(smallest_arc_sweep(r, tol), (tol / r).max(floor));
+        // tol / r is inside the window at both radii (1e-5 and 1e-13 against 1.7e-4)
+        let refused = [
+            0.0,
+            0.5 * tol / r,
+            0.99 * floor,
+            smallest_arc_sweep(r, tol),
+            TAU + 2.0 * tol / r,
+            TAU - 2.0 * tol / r,
+            TAU - 0.99 * win,
+            7.0,
+        ];
+        // the closed circle, its end within tol of the arc's
+        let closed = [TAU, TAU + 0.5 * tol / r, TAU - 0.5 * tol / r];
+        // an arc, its ends the closed form
+        let open = [1.01 * smallest_arc_sweep(r, tol), TAU - 1.01 * win, 2.0];
+        let ends = |sweep: f64| {
+            let c = curve_on_frame(&k, &xy(), 0.0, &arc(sweep)).unwrap();
+            let iv = c.natural_interval();
+            let a = c.evaluate_point(&k, iv.min()).unwrap();
+            let b = c.evaluate_point(&k, iv.max()).unwrap();
+            (a, b)
+        };
+        let start = on_circle(p(0.0, 0.0), r, 0.5);
+        for &s in &refused {
+            for sweep in [s, -s] {
+                let c = curve_on_frame(&k, &xy(), 0.0, &arc(sweep));
+                assert!(
+                    matches!(
+                        c,
+                        Err(crate::error::SolidError::InvalidInput {
+                            operation: "prism::profile::curve_on_frame",
+                            ..
+                        })
+                    ),
+                    "r {r}, sweep {sweep}: {c:?}"
+                );
+            }
+        }
+        for &s in &open {
+            for sweep in [s, -s] {
+                let (a, b) = ends(sweep);
+                let end = on_circle(p(0.0, 0.0), r, 0.5 + sweep);
+                assert!(
+                    off(a, start) <= exact && off(b, end) <= exact,
+                    "r {r}, sweep {sweep}: {a:?} {b:?} vs {start:?} {end:?}"
+                );
+            }
+        }
+        for &s in &closed {
+            for sweep in [s, -s] {
+                let (a, b) = ends(sweep);
+                let end = on_circle(p(0.0, 0.0), r, 0.5 + sweep);
+                assert!(
+                    off(a, start) <= exact && off(b, start) <= exact,
+                    "r {r}, sweep {sweep}: {a:?} {b:?} not closed at {start:?}"
+                );
+                assert!(off(b, end) <= tol, "r {r}, sweep {sweep}: {b:?} vs {end:?}");
+            }
+        }
+        // the profile check accepts exactly what builds (a loop of the arc, closed by a line
+        // where its ends are apart; checked at a closure tolerance any of them meets)
+        for &s in refused.iter().chain(&open).chain(&closed) {
+            for sweep in [s, -s] {
+                let seg = arc(sweep);
+                let mut segs = vec![seg];
+                if seg.start().distance(seg.end()) > 1e-6 {
+                    segs.push(Seg2::Line {
+                        a: seg.end(),
+                        b: seg.start(),
+                    });
+                }
+                let region = Region2 {
+                    outer: Loop2 { segs },
+                    holes: vec![],
+                };
+                let builds = curve_on_frame(&k, &xy(), 0.0, &seg).is_ok();
+                let checked = check_regions([&region].into_iter(), 1.0, tol);
+                assert_eq!(
+                    checked,
+                    if builds {
+                        Ok(())
+                    } else {
+                        Err(ProfileRefusal::LineOrArc)
+                    },
+                    "r {r}, sweep {sweep}"
+                );
+            }
+        }
+    }
+}
+
+/// A circle whose whole length is within the zone tolerance builds no arc, whatever the sweep:
+/// at r = 1e-7 (length 6.3e-7 against 1e-5) a sweep of 101 rad clears `smallest_arc_sweep`
+/// (100) and its end lies within the tolerance of a whole turn, but it is more than a turn,
+/// which `Seg2::spans` and the conversion do not take. Refused by `curve_on_frame` and
+/// `check_regions` alike, as is every sweep on that circle.
+#[test]
+fn an_arc_on_a_circle_within_the_zone_tolerance_is_refused() {
+    let k = Kernel::default();
+    let tol = k.tolerances.zone_tol_3d;
+    assert_eq!(tol, ZONE);
+    let r = 1e-7;
+    for sweep in [101.0, -101.0, TAU, 1.0, 105.0] {
+        let seg = Seg2::Arc {
+            center: p(0.0, 0.0),
+            radius: r,
+            start: 0.5,
+            sweep,
+        };
+        if sweep.abs() > 2.0 * TAU {
+            assert!(seg.spans().is_none(), "{sweep}");
+        }
+        let c = curve_on_frame(&k, &xy(), 0.0, &seg);
+        assert!(
+            matches!(c, Err(crate::error::SolidError::InvalidInput { .. })),
+            "{sweep}: {c:?}"
+        );
+        let region = Region2 {
+            outer: Loop2 { segs: vec![seg] },
+            holes: vec![],
+        };
+        assert_eq!(
+            check_regions([&region].into_iter(), 1.0, tol),
+            Err(ProfileRefusal::LineOrArc),
+            "{sweep}"
+        );
+    }
+}
+
+/// The profile check takes the zone tolerance of the kernel that builds: at r = 1 a sweep of
+/// 5e-6 (length 5e-6) is within the default 1e-5, refused by both, and over a zone tolerance of
+/// 1e-7, built as an arc with its ends in closed form and accepted by the check, in a loop a line
+/// closes exactly.
+#[test]
+fn the_profile_check_holds_the_building_kernels_zone_tolerance() {
+    let seg = Seg2::Arc {
+        center: p(0.0, 0.0),
+        radius: 1.0,
+        start: 0.5,
+        sweep: 5e-6,
+    };
+    let region = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                seg,
+                Seg2::Line {
+                    a: seg.end(),
+                    b: seg.start(),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let k = Kernel::default();
+    assert!(curve_on_frame(&k, &xy(), 0.0, &seg).is_err());
+    assert_eq!(
+        check_regions([&region].into_iter(), 1e-7, k.tolerances.zone_tol_3d),
+        Err(ProfileRefusal::LineOrArc)
+    );
+    let mut k = Kernel::default();
+    k.tolerances.zone_tol_3d = 1e-7;
+    let c = curve_on_frame(&k, &xy(), 0.0, &seg).unwrap();
+    let iv = c.natural_interval();
+    let a = c.evaluate_point(&k, iv.min()).unwrap();
+    let b = c.evaluate_point(&k, iv.max()).unwrap();
+    let (s0, e0) = (
+        on_circle(p(0.0, 0.0), 1.0, 0.5),
+        on_circle(p(0.0, 0.0), 1.0, 0.5 + 5e-6),
+    );
+    assert!(
+        off(a, s0) < ARC_CLOSED_FORM_TOL && off(b, e0) < ARC_CLOSED_FORM_TOL,
+        "{a:?} {b:?}"
+    );
+    assert_eq!(
+        check_regions([&region].into_iter(), 1e-7, k.tolerances.zone_tol_3d),
+        Ok(())
+    );
+    // a zone tolerance that is not finite and positive refuses every arc
+    for zone in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(
+            check_regions([&region].into_iter(), 1e-7, zone),
+            Err(ProfileRefusal::LineOrArc),
+            "{zone}"
+        );
     }
 }
 

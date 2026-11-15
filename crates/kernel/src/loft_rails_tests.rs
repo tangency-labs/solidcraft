@@ -133,6 +133,24 @@ fn two_rails_carry_the_sections_between_them() {
     assert!(close(v, want, 1e-4), "scaled: volume {v} vs {want}");
 }
 
+/// Two rails that run 5 mm on past the last of three sections (#17238), bulging out to radius 15
+/// halfway up: they meet the last section where they cross its plane, and the loft ends there,
+/// the solid of revolution of the rails (volume 4500π + 8000), as rails that end at it make.
+#[test]
+fn rails_that_run_on_past_the_last_section_meet_it_where_they_cross_it() {
+    let want = 4500.0 * PI + 8000.0;
+    let sections = [(at(0.0), circle(10.0)), (at(20.0), circle(15.0)), (at(40.0), circle(10.0))];
+    let longer =
+        |side: f64| -> Vec<Vec3> { (0..=90).map(|i| f64::from(i) * 0.5).map(|z| Vec3::new(side * (10.0 + 5.0 * bulge(z)), 0.0, z)).collect() };
+    let b = loft_with_rails(&sections, &[longer(1.0), longer(-1.0)], RailFit::Scale).unwrap();
+    let ending = [rail(|z| 10.0 + 5.0 * bulge(z)), rail(|z| -10.0 - 5.0 * bulge(z))];
+    let ended = volume(&loft_with_rails(&sections, &ending, RailFit::Scale).unwrap());
+    assert!(close(volume(&b), want, 1e-4), "volume {} vs {want}", volume(&b));
+    assert!(close(volume(&b), ended, 1e-9), "volume {} vs {ended} with rails that end at the last section", volume(&b));
+    let m = measure(&b).unwrap();
+    assert!(m.bbox.min.z.abs() < 1e-9 && (m.bbox.max.z - 40.0).abs() < 1e-9, "{:?}", m.bbox);
+}
+
 /// A sheet lofted between two 20 mm lines with a rail from one end bulging out by 5: the lines
 /// between grow about their middles, 2(10 + 5 sin) long; area 800 + 800/π.
 #[test]
