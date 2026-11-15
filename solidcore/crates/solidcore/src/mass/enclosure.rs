@@ -1383,6 +1383,41 @@ impl<'a> Work<'a> {
             IZ,
         ]);
         let zmax = (o1[2].at(0, 0) - z0).mag().max((o2[2].at(0, 0) - z0).mag());
+        // Where a side's box may cross a knot line of its surface: the gap at the middle, and
+        // its derivative's bound over the cell (the hull over every piece the box meets). `D`
+        // is continuous and piecewise smooth on the cell (one polynomial piece of each curve on
+        // a surface continuous across its knot lines), so `|D(t) - D(tc)| <= |D'| |t - tc|`
+        // component by component, and `int |D|` is at most `|D(tc)| h + |D'| int |x|`. The
+        // range's `|D|` bounds `X_2` and `X_1` each alone: it is as wide as `|X'| h` however
+        // close the sides are, and `int |D|` from it shrinks with the cell's square. `|D'|`
+        // is as wide as `|X''| h` where the sides meet, so this shrinks with the cube.
+        let centred = if taylor {
+            None
+        } else {
+            let mut middle = Vec::new();
+            for side in 0..2 {
+                let (face, cn) = self.strip_side(strip, side)?;
+                let sp = spans
+                    .get(side)
+                    .copied()
+                    .ok_or_else(|| SolidError::mass_failed(OP, "no such strip side"))?;
+                let (hu, hv) = piece_hull(cn, sp);
+                let d = curve_derivs_over(cn, Ivl::from(tc), 0, Some(sp))?;
+                let (u0, du) = curve_series(&d, 0, 0);
+                let (v0, dv) = curve_series(&d, 1, 0);
+                let u = Ivl::new(u0.lo.max(hu.lo), u0.hi.min(hu.hi));
+                let v = Ivl::new(v0.lo.max(hv.lo), v0.hi.min(hv.hi));
+                let Some(p) = partials_over(&face.cn, u, v, 0)? else {
+                    break;
+                };
+                middle.push(comp(&compose(&p, &du, &dv, 0), 0));
+            }
+            match (middle.first(), middle.get(1)) {
+                (Some(&c1), Some(&c2)) => Some(diff(c1, c2)),
+                _ => None,
+            }
+        };
+        let slope = mag3(diff(comp(o1, 1), comp(o2, 1)));
         // int |D| over the cell
         let gap = match (taylor, mid.first(), mid.get(1)) {
             (true, Some(m1), Some(m2)) => {
@@ -1394,7 +1429,22 @@ impl<'a> Work<'a> {
                 let d = mag3(diff(comp(o1, ord), comp(o2, ord)));
                 g + Ivl::from(d) * abs_moment(xl, xh, ord)
             }
-            _ => Ivl::from(mag3(diff(comp(o1, 0), comp(o2, 0)))) * (xh - xl),
+            _ => {
+                let range = Ivl::from(mag3(diff(comp(o1, 0), comp(o2, 0)))) * (xh - xl);
+                match centred {
+                    Some(dm) => {
+                        let mean = Ivl::from(mag3(dm)) * (xh - xl)
+                            + Ivl::from(slope) * abs_moment(xl, xh, 1);
+                        // both hold: the narrower
+                        if mean.hi < range.hi {
+                            mean
+                        } else {
+                            range
+                        }
+                    }
+                    None => range,
+                }
+            }
         };
         let w = Ivl::from(zmax) * Ivl::from(speed) * gap;
         // the gap's least size over the cell, in the norm `int |D|` is taken in (the sum of
@@ -1405,16 +1455,18 @@ impl<'a> Work<'a> {
                 .fold(Ivl::from(0.0), |sum, c| sum + Ivl::from(c.mig()))
                 .lo
         };
-        let least = match (taylor, mid.first(), mid.get(1)) {
-            (true, Some(m1), Some(m2)) => {
-                let slope = mag3(diff(comp(o1, 1), comp(o2, 1)));
-                let half = xl.mag().max(xh.mag());
-                (Ivl::from(least_sum(diff(comp(m1, 0), comp(m2, 0))))
-                    - Ivl::from(slope) * Ivl::from(half))
+        let half = xl.mag().max(xh.mag());
+        let at_middle = |d: [Ivl; 3]| {
+            (Ivl::from(least_sum(d)) - Ivl::from(slope) * Ivl::from(half))
                 .lo
                 .max(0.0)
+        };
+        let least = match (taylor, mid.first(), mid.get(1)) {
+            (true, Some(m1), Some(m2)) => at_middle(diff(comp(m1, 0), comp(m2, 0))),
+            _ => {
+                let range = least_sum(diff(comp(o1, 0), comp(o2, 0)));
+                centred.map_or(range, |dm| range.max(at_middle(dm)))
             }
-            _ => least_sum(diff(comp(o1, 0), comp(o2, 0))),
         };
         let kept = (Ivl::from(least) * (xh - xl)).lo;
         let settled = kept + kept >= gap.hi;
@@ -1829,6 +1881,41 @@ fn pcurve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<NurbsCurve> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Where a strip's two sides meet, its cells' enclosures shrink with the cube of their
+    /// length, on a knot line of a side's surface too. The cylinder's side meets its caps
+    /// along circles whose pieces end on the side's knot lines (every quarter turn): a cell
+    /// ending there is enclosed by its range, not its Taylor model. That range's gap
+    /// (`X_2` less `X_1`, each bounded alone) shrinks only with the cell's length, so its
+    /// enclosure with the square: at 0.1 long it was 8e-2, where the Taylor cells are
+    /// within 1e-12.
+    #[test]
+    fn strips_that_meet_shrink_with_the_cube_on_knot_lines() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_cylinder(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            2.0,
+            5.0,
+        )
+        .unwrap();
+        let w = Work::new(&k, &mut b).unwrap();
+        let mut ranged = 0;
+        for it in &w.items {
+            let Kind::Strip { strip, spans } = it.kind else {
+                continue;
+            };
+            for h in [0.1, 0.05, 0.025] {
+                let t = (it.t.1 - h, it.t.1);
+                let (e, _) = w.strip_cell(strip, spans, t, ORDER).unwrap();
+                assert!(e.lo <= 0.0 && 0.0 <= e.hi, "{strip} {t:?}: {e:?}");
+                assert!(e.hi <= 4.0 * h * h * h, "{strip} {t:?}: {e:?}");
+                ranged += usize::from(e.hi > 1e-9);
+            }
+        }
+        // the cells on knot lines were reached
+        assert!(ranged >= 6, "{ranged}");
+    }
 
     /// A product of series is the product of the polynomials, truncated.
     #[test]
