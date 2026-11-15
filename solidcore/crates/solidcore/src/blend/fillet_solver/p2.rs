@@ -1463,12 +1463,13 @@ impl FilletSolver {
         // not start at 0), not from the start section, so it is no part of that turn
         let mut angle_span = rad_to_deg(span_ang);
 
-        // Not upstream: a round whose end section is its start one (along a whole closed
-        // edge, both at its seam) turns exactly once. The two sections are solved apart, so
-        // the turn measured between them falls a rounding either side of the wrap: just past
-        // 0 the line above makes it a full turn (clamped to 360 below), but just short of
-        // 2 pi it stayed short, a sweep some 1e-9 degrees short of the closed circle its
-        // polar converter takes, which `SmSurfOfRevolution`'s check refuses (Test #7).
+        // Not upstream (WR-789): a round whose end section is its start one (along a whole
+        // closed edge, both at its seam) turns exactly once. The two sections are solved
+        // apart, so the turn measured between them falls a rounding either side of the wrap:
+        // just past 0 the `ANG_TOL_RAD` test above makes it a full turn (clamped to 360
+        // below), but just short of 2 pi it stayed short, a sweep a few 1e-9 degrees short of
+        // the closed circle its polar converter takes, which `SmSurfOfRevolution`'s check
+        // refuses (Test #7).
         if p0.distance(end_p0) < center_tol && p1.distance(end_p1) < center_tol {
             angle_span = 360.0;
         }
