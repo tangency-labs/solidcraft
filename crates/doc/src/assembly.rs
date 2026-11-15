@@ -421,6 +421,13 @@ impl Document {
         crate::occurrence_tree::OccurrenceTree::new(self).placements_with(|o| o.transform)
     }
 
+    /// Every placement inside `component`, `component` itself first: (component, occurrence
+    /// path ids from `component`, transform into `component`'s frame). Limited as
+    /// [`Document::placements`] is.
+    pub fn placements_within(&self, component: u64) -> Vec<(u64, Vec<u64>, Mat)> {
+        crate::occurrence_tree::OccurrenceTree::new(self).placements_from(component, |o| o.transform)
+    }
+
     /// Every body as the world shows it: its world name ("Body1", or "Body1 (Occ:2)" for a
     /// further instance), its component, the occurrence path, and the transform from the frame
     /// its geometry is in to the world.

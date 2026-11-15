@@ -205,3 +205,46 @@ fn excluded_pairs_are_left_out_and_pairs_name_their_place() {
         assert!(s.execute("inspect.interference", &json!({"exclude_pairs": bad})).is_err(), "{bad}");
     }
 }
+
+/// A component's envelope is left out unless named, never meets a body inside it, and with
+/// `envelopes` is intersected instead of the bodies inside it: a 10 mm housing and a 4 mm insert
+/// sharing 8 mm³ in a component, and a lid that overlaps the envelope but neither part.
+#[test]
+fn an_envelope_stands_in_for_its_components_bodies_when_asked() {
+    let mut s = Session::default();
+    let cube = |s: &mut Session, name: &str, size: f64, corner: [f64; 3]| {
+        run(s, "solid.box", json!({"length": size, "width": size, "height": size, "corner": corner, "operation": "new", "body_name": name}));
+    };
+    run(&mut s, "component.create", json!({"name": "Bought"}));
+    cube(&mut s, "Housing", 10.0, [0.0, 0.0, 0.0]);
+    run(&mut s, "component.create", json!({"name": "Insert part"}));
+    cube(&mut s, "Insert", 4.0, [8.0, 3.0, 3.0]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "solid.bounding_solid", json!({"component": "Bought", "body_name": "Envelope"}));
+    // Over the insert's end (x 10..12), above the housing: inside the envelope only.
+    cube(&mut s, "Lid", 1.0, [10.5, 0.0, 0.0]);
+    let names = |i: &Value| -> Vec<[String; 2]> {
+        i["interferences"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|h| {
+                let mut p = [h["a"].as_str().unwrap_or("").to_string(), h["b"].as_str().unwrap_or("").to_string()];
+                p.sort();
+                p
+            })
+            .collect()
+    };
+    let all = run(&mut s, "inspect.interference", json!({}));
+    assert_eq!(names(&all), vec![["Housing".to_string(), "Insert".to_string()]], "{all}");
+    assert!((f(&all["interferences"][0]["volume_mm3"]) - 2.0 * 4.0 * 4.0).abs() < 1e-6, "{all}");
+    assert_eq!(all["checked"], 3, "{all}");
+    let env = run(&mut s, "inspect.interference", json!({"envelopes": true}));
+    assert_eq!(names(&env), vec![["Envelope".to_string(), "Lid".to_string()]], "{env}");
+    assert!((f(&env["interferences"][0]["volume_mm3"]) - 1.0).abs() < 1e-6, "{env}");
+    assert_eq!(env["checked"], 2, "{env}");
+    // Named, the envelope is checked, but not against the housing it encloses.
+    let named = run(&mut s, "inspect.interference", json!({"bodies": ["Envelope", "Housing", "Lid"]}));
+    assert_eq!(names(&named), vec![["Envelope".to_string(), "Lid".to_string()]], "{named}");
+    assert_eq!(named["pairs_excluded"], 1, "{named}");
+}

@@ -147,7 +147,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("bounding_solid")
         .contract(&BOUNDING_SOLID_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("bodies?: [names] (default: all); margin?: expr; name?, body_name?"),
+        .params("bodies?: [names] (default: all); margin?: expr; component?: id or name (instead of `bodies`: an envelope of that component, a box around every body placed inside it, its subcomponents' at any depth and every placement, in its own axes; the box is added to that component, so it moves with it, and is built again when a part inside it moves. inspect.clearance and inspect.interference leave envelopes out unless named, and `envelopes: true` there checks each envelope instead of its contents); name?, body_name?"),
     CommandSpec::new("solid.scale", "Scale", crate::checked!("solid.scale", scale))
         .at("SOLID", "MODIFY")
         .icon("scale")
@@ -4271,7 +4271,26 @@ fn bounding_solid(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.bounding_solid";
     let margin = expr(p, "margin").unwrap_or_else(|| "0".into());
     check_expr(s, &margin, Kind::Length, cmd, "margin")?;
-    add_feature(s, p, FeatureKind::BoundingSolid { bodies: string_list(cmd, p, "bodies")?.into_iter().map(BodyName).collect(), margin })
+    let bodies: Vec<BodyName> = string_list(cmd, p, "bodies")?.into_iter().map(BodyName).collect();
+    if p.get("component").is_none_or(Value::is_null) {
+        return add_feature(s, p, FeatureKind::BoundingSolid { bodies, margin, contents: false });
+    }
+    if !bodies.is_empty() {
+        return Err(bad(cmd, "give `bodies` or `component`, not both"));
+    }
+    let component = super::component::component(s, p, "component", cmd)?;
+    envelope_in(s, p, component, margin)
+}
+
+/// Add an envelope of `component` (a Bounding Solid of its contents, grown by `margin`) with the
+/// feature parameters `p` (`name`, `body_name`). It is made in the component it bounds, in its
+/// frame, as if that component were active.
+pub(crate) fn envelope_in(s: &mut Session, p: &Value, component: u64, margin: Expr) -> Result<Value> {
+    let active = (s.active_component, s.active_occurrence_path.take());
+    s.active_component = component;
+    let out = add_feature(s, p, FeatureKind::BoundingSolid { bodies: Vec::new(), margin, contents: true });
+    (s.active_component, s.active_occurrence_path) = active;
+    out
 }
 
 fn scale(s: &mut Session, p: &Value) -> Result<Value> {

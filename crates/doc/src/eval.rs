@@ -2868,6 +2868,9 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             // fold in here, each relative to the reading component, as `reads.paths` does.
             return mirror_placements_digest(doc, f, plane, placements, bodies) ^ datum_paths_digest(doc, f, &datums);
         }
+        // A component's envelope bounds what is placed inside it, where it stands in its frame:
+        // moving a part inside it builds it again, moving the component does not.
+        FeatureKind::BoundingSolid { contents: true, .. } => return contents_digest(doc, f, st),
         // A combine moves tools placed differently from its target into the target's frame (#3383).
         FeatureKind::Combine { target, tools, .. } => {
             frame = st.and_then(|st| st.body(target)).map(|b| body_world(doc, b));
@@ -3006,6 +3009,23 @@ fn hash_placed_bodies(doc: &Document, st: Option<&ModelState>, names: &std::coll
             None => u8::MAX.hash(h),
         }
     }
+}
+
+/// [`placement_digest`] of a component's envelope: each placement inside its component, relative
+/// to that component, and the bodies each holds with their offsets. Never 0.
+fn contents_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64 {
+    let Some(st) = st else { return placements_hash(doc) | 1 };
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    match crate::envelope::placed_contents(doc, st, f.component) {
+        Ok(placed) => {
+            for (b, m) in placed {
+                b.name.hash(&mut h);
+                hash_placement(&m, &mut h);
+            }
+        }
+        Err(e) => e.to_string().hash(&mut h),
+    }
+    h.finish() | 1
 }
 
 /// Every occurrence's placement and every body offset (a feature read from a frame that cannot
@@ -10611,14 +10631,19 @@ fn eval_feature(
         }
         FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
-        FeatureKind::BoundingSolid { bodies, margin } => {
+        FeatureKind::BoundingSolid { bodies, margin, contents } => {
             let m = val(vals, margin, Kind::Length)?;
-            let mut bb = solidcraft_geom::Aabb3::EMPTY;
-            for b in st.bodies.iter().filter(|b| bodies.is_empty() || bodies.iter().any(|t| *t == b.name)) {
-                bb = bb.union(&b.mesh().bounds());
-            }
+            let bb = if *contents {
+                crate::envelope::contents_bounds(doc, st, f.component)?
+            } else {
+                let mut bb = solidcraft_geom::Aabb3::EMPTY;
+                for b in st.bodies.iter().filter(|b| bodies.is_empty() || bodies.iter().any(|t| *t == b.name)) {
+                    bb = bb.union(&b.body.exact_bounds()?);
+                }
+                bb
+            };
             if bb.is_empty() {
-                return Err(DocError::Invalid("no bodies to bound".into()));
+                return Err(DocError::Invalid(if *contents { "the component holds no bodies to bound".into() } else { "no bodies to bound".into() }));
             }
             let pad = Vec3::new(m, m, m);
             let b = crate::lineage::numbered_tool(kernel::box_solid(bb.min - pad, bb.max + pad)?);

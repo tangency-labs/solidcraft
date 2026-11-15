@@ -67,14 +67,20 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let budget = std::time::Duration::from_secs_f64(budget_s);
     let want = string_list(cmd, p, "bodies")?;
+    let use_envelopes = super::envelopes::use_envelopes(p, cmd)?;
     let st = s.world_state()?;
     // A name that is no body is refused, as inspect.clearance refuses it. Dropped, a misspelled
     // body was never checked and the answer read as no interference (#9740).
     if let Some(n) = want.iter().find(|n| st.body(n).is_none()) {
         return Err(bad(cmd, super::no_body(n, st.bodies.iter().map(|b| b.name.as_str()))));
     }
+    // Component envelopes are left out unless named; with `envelopes`, each stands in for the
+    // bodies inside it, a body named inside one meaning it.
+    let envelopes = super::envelopes::Envelopes::of(s, &st);
+    let want: Vec<String> = if use_envelopes { want.iter().map(|n| envelopes.standing_in(n).to_string()).collect() } else { want };
+    let taken = |name: &String| if want.is_empty() { envelopes.by_default(name, use_envelopes) } else { want.contains(name) };
     let (meshes_left, bodies): (Vec<&solidcraft_doc::ModelBody>, Vec<&solidcraft_doc::ModelBody>) =
-        st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).partition(|b| b.body.is_mesh());
+        st.bodies.iter().filter(|b| taken(&b.name)).partition(|b| b.body.is_mesh());
 
     // Prune by bounding boxes first (sort and sweep), so the cost follows the pairs that can
     // touch rather than the square of the body count.
@@ -91,7 +97,9 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let left_out = |i: usize, j: usize| {
         let (Some(a), Some(b)) = (bodies.get(i), bodies.get(j)) else { return false };
-        excluded.iter().any(|(x, y)| (matches(x, &a.name) && matches(y, &b.name)) || (matches(x, &b.name) && matches(y, &a.name)))
+        // An envelope around the other body is no finding.
+        envelopes.encloses(&a.name, &b.name)
+            || excluded.iter().any(|(x, y)| (matches(x, &a.name) && matches(y, &b.name)) || (matches(x, &b.name) && matches(y, &a.name)))
     };
     let before = pairs.len();
     let pairs: Vec<(usize, usize)> = pairs.into_iter().filter(|&(i, j)| !left_out(i, j)).collect();

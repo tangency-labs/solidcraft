@@ -68,6 +68,27 @@ fn matrix_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<MatrixParam>, D:
     Ok(Some(MatrixParam(value)))
 }
 
+/// What `envelope` says when it is not `"box"`, as `insert_step` has it.
+pub(crate) const ENVELOPE_MESSAGE: &str = "`envelope` must be \"box\" (a box around the import, kept in its component and hidden) or null (none)";
+
+/// `envelope`: `"box"`, `null` as left out, with the handler's message for anything else.
+fn envelope_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(kind) if kind == "box" => Ok(Some(kind)),
+        _ => Err(D::Error::custom(whole(ENVELOPE_MESSAGE))),
+    }
+}
+
+/// The envelopes `file.insert_step` can add.
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+enum EnvelopeParam {
+    /// A box around every body of the import, where each is placed.
+    #[serde(rename = "box")]
+    Box,
+}
+
 /// The keys `file.insert_step` reads. See [`InsertStepParams`], which leaves out the keys the
 /// handler does not read for the call.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -112,6 +133,13 @@ pub struct InsertStepKeys {
     /// Default: 1e-9. Read nowhere else, and `matrix::rigid` is the one that refuses both.
     #[serde(default)]
     pub tolerance: Option<MatrixTolerance>,
+    /// `box` also adds the import's envelope: a Bounding Solid around every body it placed (its
+    /// subcomponents' at any depth), in the import's component and axes, named `<component>
+    /// Envelope` and hidden. It moves with the import; `inspect.clearance` and
+    /// `inspect.interference` check it instead of the parts with `envelopes: true`. Default: none.
+    #[serde(default, deserialize_with = "envelope_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<EnvelopeParam>")]
+    pub envelope: Option<String>,
 }
 
 /// Leaves out the keys the handler does not read for this call, in the order it looks at them.
@@ -122,7 +150,7 @@ fn leave_unread(value: &mut Value) {
     };
     if !solidcraft_io::is_step_path(path) {
         // A file of another kind is refused before any other key is read.
-        for key in ["name", "up", "names", "folder", "history", "matrix", "tolerance"] {
+        for key in ["name", "up", "names", "folder", "history", "matrix", "tolerance", "envelope"] {
             keys.remove(key);
         }
         return;
@@ -244,6 +272,9 @@ pub struct StepInserted {
     /// stores a placement: 4 rows of 4 numbers, its translation in the last row.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transform: Option<[[f64; 4]; 4]>,
+    /// With `envelope`: the envelope body's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope: Option<String>,
     /// While the profiler records: the import's share of what it recorded, as `diagnostics.profile`
     /// reports it.
     #[serde(default, skip_serializing_if = "Option::is_none")]

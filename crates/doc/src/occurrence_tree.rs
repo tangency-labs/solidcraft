@@ -30,8 +30,14 @@ impl<'a> OccurrenceTree<'a> {
     /// order. A branch stops past [`MAX_PLACEMENT_DEPTH`] levels, the walk past [`MAX_PLACEMENTS`]
     /// placements.
     pub(crate) fn placements_with(&self, transform: impl Fn(&Occurrence) -> Mat) -> Vec<(u64, Vec<u64>, Mat)> {
-        let mut out = vec![(0, Vec::new(), IDENTITY)];
-        let mut stack: Vec<(u64, Vec<u64>, Mat)> = vec![(0, Vec::new(), IDENTITY)];
+        self.placements_from(0, transform)
+    }
+
+    /// [`OccurrenceTree::placements_with`] from `root` instead of the design's root: every
+    /// placement inside `root`, `root` itself first, each path and transform relative to `root`.
+    pub(crate) fn placements_from(&self, root: u64, transform: impl Fn(&Occurrence) -> Mat) -> Vec<(u64, Vec<u64>, Mat)> {
+        let mut out = vec![(root, Vec::new(), IDENTITY)];
+        let mut stack: Vec<(u64, Vec<u64>, Mat)> = vec![(root, Vec::new(), IDENTITY)];
         while let Some((comp, path, m)) = stack.pop() {
             if out.len() > MAX_PLACEMENTS {
                 break;

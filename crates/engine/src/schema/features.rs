@@ -581,6 +581,10 @@ pub struct BoundingSolidParams {
     /// How much larger than the bodies on every side. Default: 0.
     #[serde(default)]
     pub margin: Option<LengthExpr>,
+    /// Instead of `bodies`: an envelope of this component, a box around every body placed inside
+    /// it (its subcomponents' at any depth, every placement), added to the component in its axes.
+    #[serde(default)]
+    pub component: Option<super::component_link::ComponentRef>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

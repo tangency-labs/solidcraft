@@ -262,6 +262,57 @@ fn an_imported_assembly_moves_as_one_until_it_is_unlocked() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The box around boxes.
+fn union(boxes: &[[i64; 6]]) -> [i64; 6] {
+    let mut u = [i64::MAX, i64::MAX, i64::MAX, i64::MIN, i64::MIN, i64::MIN];
+    for b in boxes {
+        for i in 0..3 {
+            u[i] = u[i].min(b[i]);
+            u[i + 3] = u[i + 3].max(b[i + 3]);
+        }
+    }
+    u
+}
+
+/// The world box of the body `name`, and that of every other body.
+fn envelope_and_parts(s: &Session, name: &str) -> ([i64; 6], [i64; 6]) {
+    let world = s.world_state().unwrap();
+    let boxed = |b: &solidcraft_doc::ModelBody| key(solidcraft_kernel::measure(&b.body).unwrap().bbox);
+    let parts: Vec<[i64; 6]> = world.bodies.iter().filter(|b| b.name != name).map(boxed).collect();
+    (boxed(world.body(name).unwrap()), union(&parts))
+}
+
+/// `envelope: "box"` keeps a hidden box around every body the import placed, the turned arm and
+/// each repeated part included, in the import's component: it moves with the import, and is
+/// built again around a part moved once the import is unlocked.
+#[test]
+fn an_import_with_an_envelope_keeps_a_hidden_box_around_its_parts() {
+    let dir = temp_dir("envelope");
+    let path = rig_file(&dir);
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_step", json!({"path": path, "envelope": "box"}));
+    assert_eq!(r["envelope"], "rig Envelope", "{r}");
+    assert!(s.visibility.hidden_bodies.iter().any(|b| b == "rig Envelope"), "{:?}", s.visibility.hidden_bodies);
+    let rig = s.doc.find_component("rig").unwrap();
+    assert_eq!(s.doc.features.last().map(|f| f.component), Some(rig));
+    let (envelope, parts) = envelope_and_parts(&s, "rig Envelope");
+    assert_eq!(envelope, union(&file_boxes(&path)));
+    assert_eq!(envelope, parts);
+
+    run(&mut s, "occurrence.ground", json!({"occurrence": "rig:1", "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "rig:1", "translate": [0, 0, 50]}));
+    let (moved, parts) = envelope_and_parts(&s, "rig Envelope");
+    assert_eq!(moved, parts);
+    assert_eq!(moved[2], envelope[2] + 50_000, "{moved:?}");
+
+    run(&mut s, "component.unlock", json!({"component": "rig"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Pin:2", "translate": [0, 0, 30]}));
+    let (grown, parts) = envelope_and_parts(&s, "rig Envelope");
+    assert_eq!(grown, parts);
+    assert_ne!(grown, moved, "the pin left the old box");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_mesh_file_comes_in_as_one_component() {
     let dir = temp_dir("stl");

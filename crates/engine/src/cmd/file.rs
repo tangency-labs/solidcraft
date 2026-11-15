@@ -62,7 +62,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("import")
         .contract(&INSERT_STEP_CONTRACT)
         .output(output_schema_for::<StepInserted>)
-        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move); envelope?: \"box\" (also add the import's envelope, a hidden box around every body it placed, in its component, as solid.bounding_solid with `component` makes it → envelope: the body; inspect.clearance and inspect.interference check it instead of the parts with `envelopes: true`)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -468,6 +468,7 @@ fn add_read_step(
         stand_up: turned,
         group: folder,
         transform: None,
+        envelope: None,
         profile: profiled.map(|mark| crate::schema::diagnostics::ProfileReport::new(&mark.report(), 20)),
         param_warnings: Vec::new(),
     };
@@ -588,6 +589,7 @@ fn add_rebuilt(
         stand_up: turned,
         group: None,
         transform: None,
+        envelope: None,
         profile: None,
         param_warnings: Vec::new(),
     };
@@ -772,7 +774,15 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => None,
         Some(m) => Some(super::component::matrix::rigid(m, super::component::matrix::tolerance(p, cmd)?, cmd)?),
     };
+    let envelope = match p.get("envelope") {
+        None | Some(Value::Null) => false,
+        Some(Value::String(kind)) if kind == "box" => true,
+        Some(_) => return Err(bad(cmd, crate::schema::insert_step::ENVELOPE_MESSAGE)),
+    };
     let mut out = add_step(s, path, str_(p, "name"), &options)?;
+    if envelope {
+        out["envelope"] = json!(import_envelope(s, &out)?);
+    }
     if let Some(m) = placement {
         let occ = out["occurrence"].as_u64().ok_or_else(|| EngineError::Other("the import has no placement to move".into()))?;
         if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ) {
@@ -786,6 +796,21 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
         s.refresh();
     }
     Ok(out)
+}
+
+/// Add the envelope of an import that answered `out`: a box around every body it placed, in its
+/// component, named `<component> Envelope` and hidden, so the parts stay in view. Returns the
+/// body's name.
+fn import_envelope(s: &mut Session, out: &Value) -> Result<String> {
+    let component = out["component"].as_u64().ok_or_else(|| EngineError::Other("the import has no component to bound".into()))?;
+    let name = format!("{} Envelope", out["component_name"].as_str().unwrap_or("Import"));
+    let made = super::features::envelope_in(s, &json!({"name": name, "body_name": name}), component, "0".into())?;
+    let body = made["created_bodies"].get(0).and_then(Value::as_str).map(str::to_string).unwrap_or(name);
+    if !s.visibility.hidden_bodies.contains(&body) {
+        s.visibility.hidden_bodies.push(body.clone());
+    }
+    s.refresh_display();
+    Ok(body)
 }
 
 /// The KiCad import options a command's parameters name.

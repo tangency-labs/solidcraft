@@ -1292,6 +1292,12 @@ pub enum FeatureKind {
     /// A box around bodies, grown by a margin.
     BoundingSolid {
         bodies: Vec<BodyName>,
+        /// Bound every body placed inside the feature's own component instead of `bodies`: its
+        /// subcomponents' at any depth and each of their placements, where they stand in its
+        /// frame. The box is that component's envelope: it moves with the component, and stands
+        /// in for its contents where a check is asked to use envelopes.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        contents: bool,
         #[serde(default = "zero_expr")]
         #[walk(length = "Margin")]
         margin: Expr,

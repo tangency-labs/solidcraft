@@ -2463,6 +2463,50 @@ fn pipe_scale_offset_bounding_and_materials() {
     assert!(s.execute("material.assign", &json!({"bodies": ["Cube"], "material": "unobtainium"})).is_err());
 }
 
+/// A component's envelope (`solid.bounding_solid` with `component`) bounds every body placed inside
+/// it, its subcomponents' and each placement of a part placed twice, in its own frame: it moves
+/// with the component and is built again when a part inside it moves.
+#[test]
+fn a_components_envelope_bounds_its_parts_where_they_are_placed() {
+    let mut s = Session::default();
+    let bought = run(&mut s, "component.create", json!({"name": "Bought", "grounded": false}))["component"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Plate"}));
+    let pin = run(&mut s, "component.create", json!({"name": "Pin"}))["component"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 10], "length": 2, "width": 2, "height": 4, "body_name": "Peg"}));
+    // The pin placed again 20 mm along X: only an occurrence, no body of its own in the model.
+    let copy = run(&mut s, "occurrence.copy", json!({"component": pin, "translate": [20, 0, 0]}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let bounds = |s: &mut Session| {
+        let m = run(s, "inspect.measure", json!({"bodies": ["Bought Envelope"]}));
+        let bb = &m["bodies"][0]["bbox"];
+        let v = |k: &str, i: usize| bb[k][i].as_f64().unwrap();
+        [v("min", 0), v("min", 1), v("min", 2), v("max", 0), v("max", 1), v("max", 2)]
+    };
+    let close = |a: [f64; 6], b: [f64; 6]| a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-9);
+    let out = run(&mut s, "solid.bounding_solid", json!({"component": "Bought", "body_name": "Bought Envelope"}));
+    assert_eq!(out["created_bodies"], json!(["Bought Envelope"]), "{out}");
+    let f = s.doc.features.last().unwrap();
+    assert!(matches!(f.kind, solidcraft_doc::FeatureKind::BoundingSolid { contents: true, .. }) && f.component == bought);
+    assert!(s.active_component == 0, "the active component is left as it was");
+    let b = bounds(&mut s);
+    assert!(close(b, [0.0, 0.0, 0.0, 22.0, 10.0, 14.0]), "{b:?}");
+    // The whole component moves: the envelope goes with it.
+    let occurrence = s.doc.occurrence_of(bought).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [100, 0, 0]}));
+    let b = bounds(&mut s);
+    assert!(close(b, [100.0, 0.0, 0.0, 122.0, 10.0, 14.0]), "{b:?}");
+    // A part inside it moves: the envelope is built again around where it now stands.
+    run(&mut s, "occurrence.move", json!({"occurrence": copy, "translate": [5, 0, 3]}));
+    let b = bounds(&mut s);
+    assert!(close(b, [100.0, 0.0, 0.0, 127.0, 10.0, 17.0]), "{b:?}");
+    // It survives saving and opening, and `bodies` with `component` is refused.
+    let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert!(matches!(back.features.last().unwrap().kind, solidcraft_doc::FeatureKind::BoundingSolid { contents: true, .. }));
+    assert!(Session::new(back).model.state().body("Bought Envelope").is_some());
+    let e = s.execute("solid.bounding_solid", &json!({"component": "Bought", "bodies": ["Plate"]})).unwrap_err().to_string();
+    assert!(e.contains("not both"), "{e}");
+}
+
 /// A body stretched by a non-uniform `solid.scale` keeps its flat faces flat, so a boolean whose
 /// tool crosses a stretched side wall comes out right (#14409). The faces used to become free-form
 /// surfaces, and then a cylinder standing on the x side wall made the join and the cut fail SMLib's

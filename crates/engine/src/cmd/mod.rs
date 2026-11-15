@@ -38,6 +38,7 @@ mod construct_auto;
 mod delete;
 pub(crate) mod diagnostics;
 mod edit;
+mod envelopes;
 mod face;
 mod features;
 mod features_more;

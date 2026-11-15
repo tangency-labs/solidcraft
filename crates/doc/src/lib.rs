@@ -28,6 +28,7 @@ pub mod display_units;
 mod document;
 pub mod drawing;
 pub mod end_cap;
+mod envelope;
 mod eval;
 pub mod expr;
 pub mod face_anchor;
