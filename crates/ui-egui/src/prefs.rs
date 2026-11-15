@@ -1899,6 +1899,9 @@ pub struct PrefsWindow {
     pub(crate) plugin_query: String,
     pub(crate) plugin_limit_inputs: Option<crate::plugins::LimitInputs>,
     pub(crate) plugin_job: Option<crate::plugins::PackageJob>,
+    /// Counts changes to the stored plugin grants made through preferences, so a package job can tell
+    /// that a decision was written while it ran, even one that leaves the value as it was.
+    pub(crate) grants_revision: u64,
     pub(crate) plugin_remove: Option<(String, String)>,
     panel_restore_details: bool,
     panel_restore_retry: bool,
@@ -4494,6 +4497,14 @@ fn prepare_preferences(
     {
         return Err("`plugin_grants` must contain at most 256 valid plugin ids and bounded approved groups and folders".into());
     }
+    // A scoped caller may not hand a plugin a folder outside its own scope: a later run without that
+    // scope would receive the stored authority.
+    for (id, grants) in &new.plugin_grants {
+        let before = app.preferences.plugin_grants.get(id);
+        for grant in grants.folders.iter().filter(|g| !before.is_some_and(|b| b.folders.contains(g))) {
+            solidcraft_engine::io::vfs::check(&grant.folder.to_string_lossy()).map_err(|e| format!("`plugin_grants` folder for `{id}`: {e}"))?;
+        }
+    }
     if new.disabled_plugins.len() > crate::plugins::MAX_DISABLED || new.disabled_plugins.iter().any(|id| !crate::plugins::valid_id(id)) {
         return Err(format!("`disabled_plugins` must be at most {} ids of lowercase letters, digits and hyphens", crate::plugins::MAX_DISABLED));
     }
@@ -4583,6 +4594,9 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     }
     if new.select_other_hidden != app.preferences.select_other_hidden {
         crate::select_other::close(app);
+    }
+    if p.get("plugin_grants").is_some() {
+        app.prefs_window.grants_revision += 1;
     }
     app.preferences = new;
     crate::plugins::sync_policy(app);

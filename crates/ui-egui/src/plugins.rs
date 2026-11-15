@@ -264,6 +264,8 @@ pub(crate) struct PackageJob {
     command: &'static str,
     action: PackageAction,
     grants_before: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants>,
+    /// `PrefsWindow::grants_revision` when the job started.
+    revision: u64,
     done: std::sync::mpsc::Receiver<PackageReply>,
 }
 
@@ -304,7 +306,7 @@ fn spawn_package(
                 let _ = send.send(reply);
             })
             .map_err(|e| e.to_string())?;
-        app.prefs_window.plugin_job = Some(PackageJob { command, action, grants_before, done });
+        app.prefs_window.plugin_job = Some(PackageJob { command, action, grants_before, revision: app.prefs_window.grants_revision, done });
         Ok(())
     }
     #[cfg(target_arch = "wasm32")]
@@ -341,9 +343,16 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
                 app.session.plugin_state.packages.remove(id);
             }
             // Preferences can change while package I/O runs. Keep a newer decision for this id.
-            if app.session.plugin_state.grants.get(id) == job.grants_before.get(id) {
+            // A write to the stored grants during the job counts as a newer decision, unless the record this
+            // job started from is still exactly as it was (an unrelated write).
+            let live = app.session.plugin_state.grants.get(id);
+            let undecided = if app.prefs_window.grants_revision == job.revision { live == job.grants_before.get(id) } else { live.is_some() && live == job.grants_before.get(id) };
+            if undecided {
                 if let Some(grants) = state.grants.get(id) {
-                    app.session.plugin_state.grants.insert(id.into(), grants.clone());
+                    // A record added meanwhile may have filled the map: keep what is stored.
+                    if app.session.plugin_state.grants.contains_key(id) || app.session.plugin_state.grants.len() < MAX_DISABLED {
+                        app.session.plugin_state.grants.insert(id.into(), grants.clone());
+                    }
                 } else {
                     app.session.plugin_state.grants.remove(id);
                 }
@@ -847,14 +856,16 @@ mod tests {
     #[test]
     fn plugins_install_keeps_grant_changes_made_while_package_job_runs() {
         use serde_json::json;
-        for change in ["unchanged", "changed", "revoked", "unrelated"] {
+        for change in ["unchanged", "changed", "revoked", "revoked_first", "unrelated"] {
             let mut h = crate::scenario::Harness::new();
             let root = h.dir.join("installed");
             h.app.session.plugin_state.plugins_dir = Some(root.clone());
             let path = package(&h, "workshop-helper");
             let zip = zip_package(&path);
             let package = solidcraft_engine::plugin::install::unpack(&std::fs::read(&zip).unwrap()).unwrap();
-            crate::prefs::set(&mut h.app, &json!({"plugin_grants":{"workshop-helper":{"command_groups":["file"]}}})).unwrap();
+            if change != "revoked_first" {
+                crate::prefs::set(&mut h.app, &json!({"plugin_grants":{"workshop-helper":{"command_groups":["file"]}}})).unwrap();
+            }
             start_package(
                 &mut h.app,
                 "plugin.install",
@@ -865,7 +876,7 @@ mod tests {
             // The worker can finish at any point; only tick may publish its copied grants.
             match change {
                 "changed" => crate::prefs::set(&mut h.app, &json!({"plugin_grants":{"workshop-helper":{"command_groups":[]}}})).map(drop).unwrap(),
-                "revoked" => crate::prefs::set(&mut h.app, &json!({"plugin_grants":{}})).map(drop).unwrap(),
+                "revoked" | "revoked_first" => crate::prefs::set(&mut h.app, &json!({"plugin_grants":{}})).map(drop).unwrap(),
                 "unrelated" => crate::prefs::set(
                     &mut h.app,
                     &json!({"plugin_grants":{"workshop-helper":{"command_groups":["file"]},"other-plugin":{"command_groups":[]}}}),
@@ -878,7 +889,7 @@ mod tests {
             tick(&mut h.app, &h.ctx, true);
             assert!(root.join("workshop-helper").exists(), "{change}: installation finishes");
             assert!(h.app.session.plugin_state.packages.contains_key("workshop-helper"));
-            if matches!(change, "changed" | "revoked") {
+            if matches!(change, "changed" | "revoked" | "revoked_first") {
                 assert_eq!(h.app.session.plugin_state.grants, before, "{change}: keep the live decision");
             } else {
                 let installed = &h.app.session.plugin_state.grants["workshop-helper"];
@@ -891,6 +902,24 @@ mod tests {
             restored.load_prefs(&h.app.prefs());
             assert_eq!(restored.session.plugin_state.grants, h.app.session.plugin_state.grants, "{change}: reload preserves the merge");
         }
+    }
+
+    #[test]
+    fn a_scoped_caller_cannot_grant_a_folder_outside_its_scope() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        let (inside, outside) = (h.dir.join("inside"), h.dir.join("outside"));
+        std::fs::create_dir_all(&inside).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let grants = |folder: &std::path::Path| {
+            json!({"plugin_grants":{"workshop-helper":{"folders":[{"name":"work","folder":folder,"read":true,"write":false}]}}})
+        };
+        let scope = || Some(solidcraft_engine::io::vfs::PathScope::new([inside.clone()]));
+        let refused = solidcraft_engine::io::vfs::scoped(scope(), || crate::prefs::set(&mut h.app, &grants(&outside)));
+        assert!(refused.is_err(), "a folder outside the caller's scope is refused");
+        assert!(h.app.preferences.plugin_grants.is_empty());
+        solidcraft_engine::io::vfs::scoped(scope(), || crate::prefs::set(&mut h.app, &grants(&inside))).unwrap();
+        assert_eq!(h.app.preferences.plugin_grants.len(), 1, "a folder inside it is accepted");
     }
 
     #[test]
