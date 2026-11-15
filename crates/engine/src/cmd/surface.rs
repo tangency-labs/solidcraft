@@ -1161,6 +1161,8 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
+        // A profile beside them, for a section that picks both.
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 100], "p1": [110, 110]}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Flat"}));
         run(&mut s, "sketch.line", json!({"points": [[0, 90], [40, 90]], "ids": ["f"]}));
