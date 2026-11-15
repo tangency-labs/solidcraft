@@ -587,39 +587,36 @@ mod near_parallel {
         moved_to(&b, &upper, 4.0, v, [9, 17, 10]);
     }
 
-    /// The upper half of a cylinder's side given its offset r 54 turned 0.3 degrees: a real angle,
-    /// not a rounding. Over the body the axes run about 0.5 apart, far past the tolerance, so
-    /// the pair is not decided as parallel and stays with the Krawczyk proof, which finds no
-    /// meeting near the edge: the move is refused as `ReachUncertified`, as before, and the body
-    /// is left as it came in (the cylinder's volume 2500 pi 100, its split's 4 faces, 5 edges
-    /// and 3 vertices).
+    /// [`three_cylinder_faces_at_a_corner_move_out_over_a_step`] with each upper piece given its
+    /// offset r 54 turned 3e-16 radians about the axis along (1, 2, 0) through (0, 0, 1e5), as
+    /// [`half_a_cylinders_side_moves_out_on_an_axis_a_few_roundings_off`] turns the band: at the
+    /// corners where a ruling meets the circle at z = 50, the kept lower band and the two moved
+    /// pieces are three cylinders every two of which are parallel, a pair of them only within
+    /// a ball (the turned axis is not the kept one's vector), so the corner's decision holds only
+    /// where the face's extension lies inside that ball, which is checked. The cylinders stay
+    /// within 1e-10 of coaxial over the body: V = 2500 pi 100 + (54² - 50²) pi 50 = 850743.291
+    /// (the turn moves the moved sides by under 1e-10 over their area, a relative 3e-12), with
+    /// the exact move's 9 faces, 17 edges and 10 vertices.
     #[test]
-    #[allow(clippy::disallowed_methods)] // the turned axis, a test input
-    fn half_a_cylinders_side_on_an_axis_turned_a_third_of_a_degree_is_refused() {
-        use solidcore::error::offset::OffsetFailure;
+    fn three_cylinder_faces_at_a_corner_move_out_on_an_axis_a_few_roundings_off() {
         all_fixes();
-        let b = split_at_height(
+        let halves = split_at_height(
             &make_cylinder([0.0; 3], 50.0, 100.0).unwrap(),
             [50.0, 0.0, 25.0],
             50.0,
         );
-        let turn = 0.3_f64.to_radians();
-        let refused = given_surfaces(&b, &[[50.0, 0.0, 75.0]], &|k, brep, f| {
-            moved_out(k, brep, f, &[(turn, 0.0)], &[])
-        })
-        .unwrap_err();
-        let reason = refused.failure().map(|f| &f.reason);
-        assert!(
-            matches!(
-                reason,
-                Some(solidcore::error::Reason::Offset(
-                    OffsetFailure::ReachUncertified { .. }
-                ))
-            ),
-            "{refused:?}"
+        let b = split_by_plane(
+            &halves,
+            [-50.0, 0.0, 75.0],
+            ([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
         );
-        assert!(rel(volume(&b), PI * 2500.0 * 100.0) < 1e-9);
-        assert_eq!(b.counts().unwrap(), [4, 5, 3]);
+        let upper = [[-50.0, 0.0, 75.0], [30.0, 40.0, 75.0], [30.0, -40.0, 75.0]];
+        given_surfaces(&b, &upper, &|k, brep, f| {
+            moved_out(k, brep, f, &[(3e-16, 1e5)], &[])
+        })
+        .unwrap();
+        let v = PI * 2500.0 * 100.0 + PI * (54.0 * 54.0 - 2500.0) * 50.0;
+        sound(&b, v, [9, 17, 10]);
     }
 }
 
