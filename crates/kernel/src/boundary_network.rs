@@ -157,12 +157,17 @@ pub fn boundary_surface(u: &[BoundaryCurve], v: &[BoundaryCurve]) -> Result<Body
     }
 }
 
-/// The record curve `c` as a spline on its own parameter (a line as a degree-1 spline over
-/// `[0, 1]`, its parameter as the line's); `None` for a curve with no spline form here.
-fn as_spline(c: solidcore_record::brep::Curve) -> Option<solidcore_record::brep::Curve> {
+/// The record curve `c` as a spline on its own parameter over `interval` (a line as a degree-1
+/// spline whose knots span `interval`, its parameter as the line's: `start + t * (end - start)`,
+/// which an edge's interval need not keep inside `[0, 1]`); `None` for a curve with no spline form
+/// here.
+fn as_spline(c: solidcore_record::brep::Curve, [t0, t1]: [f64; 2]) -> Option<solidcore_record::brep::Curve> {
     use solidcore_record::brep::Curve as C;
     match c {
-        C::Line { start, end } => Some(C::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![start, end] }),
+        C::Line { start, end } => {
+            let at = |t: f64| std::array::from_fn(|i| start[i] + t * (end[i] - start[i]));
+            Some(C::Spline { knots: vec![t0, t0, t1, t1], points: vec![at(t0), at(t1)] })
+        }
         C::Spline { .. } | C::RationalSpline { .. } => Some(c),
         _ => None,
     }
@@ -177,8 +182,8 @@ fn input_curves(c: &BoundaryCurve) -> Result<Option<Vec<(solidcore_record::brep:
         CurveSource::Sketch { plane, segs } => {
             for s in segs {
                 let (curve, _) = crate::freeform::segment(plane, s)?;
-                let Some(curve) = as_spline(curve) else {
-                    return Err(unproved(&c.label));
+                let Some(curve) = as_spline(curve, [0.0, 1.0]) else {
+                    return Err(unproved(&c.label, "a curve has no spline form"));
                 };
                 out.push((curve, [0.0, 1.0]));
             }
@@ -187,8 +192,8 @@ fn input_curves(c: &BoundaryCurve) -> Result<Option<Vec<(solidcore_record::brep:
             for w in pts.windows(2) {
                 if w[0].dist(w[1]) > 0.0 {
                     let line = solidcore_record::brep::Curve::Line { start: [w[0].x, w[0].y, w[0].z], end: [w[1].x, w[1].y, w[1].z] };
-                    let Some(curve) = as_spline(line) else {
-                        return Err(unproved(&c.label));
+                    let Some(curve) = as_spline(line, [0.0, 1.0]) else {
+                        return Err(unproved(&c.label, "a curve has no spline form"));
                     };
                     out.push((curve, [0.0, 1.0]));
                 }
@@ -199,10 +204,10 @@ fn input_curves(c: &BoundaryCurve) -> Result<Option<Vec<(solidcore_record::brep:
             let r = body.record();
             for (e, _) in chain {
                 let Some(edge) = r.edges.get(e) else {
-                    return Err(unproved(&c.label));
+                    return Err(unproved(&c.label, "an edge reference"));
                 };
-                let Some(curve) = as_spline(edge.nurbs.clone().unwrap_or_else(|| edge.curve.clone())) else {
-                    return Err(unproved(&c.label));
+                let Some(curve) = as_spline(edge.parameters().clone(), edge.interval) else {
+                    return Err(unproved(&c.label, "a curve has no spline form"));
                 };
                 out.push((curve, edge.interval));
             }
@@ -210,7 +215,7 @@ fn input_curves(c: &BoundaryCurve) -> Result<Option<Vec<(solidcore_record::brep:
         CurveSource::Point(_) => return Ok(None),
     }
     if out.is_empty() {
-        return Err(unproved(&c.label));
+        return Err(unproved(&c.label, "no curve"));
     }
     Ok(Some(out))
 }
@@ -232,7 +237,7 @@ fn input_gap(c: &BoundaryCurve, made: &Body, zone: f64) -> Result<Option<([Vec3;
         gap = gap.max(proved_or_refused(&c.label, bound)?);
         let eval = CurveEval::new(curve).map_err(|e| KernelError::Failed(format!("boundary surface: {e}")))?;
         for t in *interval {
-            let p = eval.point(t).ok_or_else(|| unproved(&c.label))?;
+            let p = eval.point(t).ok_or_else(|| unproved(&c.label, "an end is not evaluated"))?;
             // a piece's end another piece starts or ends at is inside the chain
             match ends.iter().position(|q| q.dist(p) <= CROSS_TOLERANCE) {
                 Some(i) => {
@@ -246,7 +251,7 @@ fn input_gap(c: &BoundaryCurve, made: &Body, zone: f64) -> Result<Option<([Vec3;
         [a, z] => Ok(Some(([*a, *z], gap))),
         // a side with other than two free ends is a closed chain: the network takes none (its
         // corners are the sides' ends), so a bound that cannot reach the end vertices is refused
-        _ => Err(unproved(&c.label)),
+        _ => Err(unproved(&c.label, "its ends")),
     }
 }
 
@@ -254,12 +259,12 @@ fn input_gap(c: &BoundaryCurve, made: &Body, zone: f64) -> Result<Option<([Vec3;
 /// cannot be enclosed has no certificate for its edges' tolerance, so the construction is
 /// refused and names the side.
 fn proved_or_refused(label: &str, bound: Option<f64>) -> Result<f64> {
-    bound.ok_or_else(|| unproved(label))
+    bound.ok_or_else(|| unproved(label, "the surface's gap is not enclosed"))
 }
 
 /// The refusal of a non-point side whose distance from the surface is not proved.
-fn unproved(label: &str) -> KernelError {
-    KernelError::Failed(format!("boundary surface: {label}: its distance from the surface can't be proved"))
+fn unproved(label: &str, why: &str) -> KernelError {
+    KernelError::Failed(format!("boundary surface: {label}: its distance from the surface can't be proved ({why})"))
 }
 
 /// `made` (a boundary surface) sewn into `target` along the edges they share: one body, a solid
