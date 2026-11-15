@@ -513,7 +513,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         },
         direction: direction(&resolved.basis),
-        place: view.place.into(),
+        place: PlaceParam(view.place),
         settings: SettingsResult {
             scale: setting(resolved.scale, own.scale, |s| s.to_string()),
             visual_style: setting(resolved.visual_style, own.visual_style, snake_name),
@@ -728,10 +728,7 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet, found: &Found) -> Result<Vec<
         *looking = direction.0;
     }
     if let Some(place) = set.place {
-        view.place = match place {
-            PlaceParam::At(at) => ViewPlace::At(at),
-            PlaceParam::Aligned(along) => ViewPlace::Aligned(along),
-        };
+        view.place = place.0;
     }
     // Placed apart, it needs a letter; then its label is typed over.
     d.give_letter(id).map_err(|e| bad(EDIT, e.to_string()))?;
@@ -1036,7 +1033,7 @@ fn move_view(s: &mut Session, p: &Value) -> Result<Value> {
     let id = request.view.0;
     let moved = s.edit_drawing(DRAG, |d| drag(d, id, request.to_mm.0, request.break_alignment, DRAG))?;
     let d = s.drawing(DRAG)?;
-    let place = find(d, id, DRAG)?.place.into();
+    let place = PlaceParam(find(d, id, DRAG)?.place);
     let centre = d.view_centre(id).map_err(|e| bad(DRAG, e.to_string()))?;
     let outside = outside_results(crate::drawing_view::outside(s, d, &moved, DRAG)?);
     let followers = moved.iter().skip(1).map(|v| ids::encode(*v)).collect();
@@ -1272,11 +1269,7 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
         Beside::Side(side) => (ViewKind::Projected { parent, side }, ViewPlace::Aligned(side.along(parent_centre))),
         Beside::Diagonal(diagonal) => (ViewKind::Pictorial { parent, diagonal }, ViewPlace::At([parent_centre.x, parent_centre.y])),
     };
-    let place = match request.place {
-        Some(PlaceParam::At(at)) => ViewPlace::At(at),
-        Some(PlaceParam::Aligned(along)) => ViewPlace::Aligned(along),
-        None => staged_place,
-    };
+    let place = request.place.map_or(staged_place, |place| place.0);
     let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None };
     if request.place.is_none() {
         // Staged on its parent's centre to measure it, then moved until its boundary is the gap past
@@ -1343,11 +1336,7 @@ fn auxiliary(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let toward = auxiliary_side(&basis, what, side).map_err(fold_refused)?;
     let parent_centre = record.view_centre(parent).map_err(|e| bad(AUXILIARY, e.to_string()))?;
-    let place = match request.place {
-        Some(PlaceParam::At(at)) => ViewPlace::At(at),
-        Some(PlaceParam::Aligned(along)) => ViewPlace::Aligned(along),
-        None => ViewPlace::At([parent_centre.x, parent_centre.y]),
-    };
+    let place = request.place.map_or(ViewPlace::At([parent_centre.x, parent_centre.y]), |place| place.0);
     let kind = ViewKind::Auxiliary { parent, toward: [toward.x, toward.y] };
     let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None };
     // Staged (on its parent's centre unless placed): the record's rules, then measured to unfold it.
