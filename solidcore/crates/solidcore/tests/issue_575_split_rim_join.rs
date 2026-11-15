@@ -8,8 +8,8 @@
 //! the merged face on both sides: a strut. Joining the regions to the disc leaves one at
 //! each chord end on the wall, from the rim up to z = -1.2. Joining the annulus removes
 //! the rim under them, and each strut becomes a loop of its two edge uses, of zero area.
-//! The opt-in `Kernel::fixes.boolean_cleanup_removes_slits` (WR-304, #1120) also checks
-//! the edges a face merge leaves with one face, and removes the struts.
+//! The port (WR-304, #1120; the only path since its flag was retired) also checks the
+//! edges a face merge leaves with one face, and removes the struts.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -119,14 +119,11 @@ struct Joined {
     check: Vec<String>,
 }
 
-/// Body1 of the sketch with `chords`, built with the strut clean-up `body_fix`, joined
-/// with Body2 with the clean-up `join_fix`.
-fn join(chords: &[f64], body_fix: bool, join_fix: bool) -> Joined {
+/// Body1 of the sketch with `chords`, joined with Body2.
+fn join(chords: &[f64]) -> Joined {
     let mut k = Kernel::default();
-    k.fixes.boolean_cleanup_removes_slits = body_fix;
     let b1 = body1(&mut k, chords);
     let b2 = body2(&mut k);
-    k.fixes.boolean_cleanup_removes_slits = join_fix;
     let mut joined = boolean_union(&mut k, b1, b2).unwrap();
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {
@@ -155,34 +152,12 @@ fn assert_volume(j: &Joined, what: &str) {
 }
 
 #[test]
-fn issue_575_join_is_refused_by_the_check_by_default() {
-    // upstream: the right volume, but SMLib's check refuses the wall's strut loops
-    let j = join(&[0.0, 8.0], false, false);
-    assert_volume(&j, "default");
-    assert!(
-        j.check
-            .iter()
-            .any(|l| l.contains("Test #3 Loop Orientation") && l.contains("bad orientation"))
-            && j.check
-                .iter()
-                .any(|l| l.contains("Test #4") && l.contains("zero area")),
-        "default: {:?}",
-        j.check
-    );
-}
-
-#[test]
 fn issue_575_join_is_valid_with_the_strut_clean_up() {
-    // the issue's two chords and its other failing pair, with the clean-up throughout,
-    // and with Body1 built without it (its struts already there) and only the join
-    // cleaned up
-    for (chords, body_fix) in [
-        (&[0.0, 8.0][..], true),
-        (&[32.0, 35.0][..], true),
-        (&[0.0, 8.0][..], false),
-    ] {
-        let what = format!("chords {chords:?}, Body1 cleaned up {body_fix}");
-        let j = join(chords, body_fix, true);
+    // the issue's two chords and its other failing pair (upstream: the right volume, but
+    // SMLib's check refuses the wall's strut loops, tests #3 and #4)
+    for chords in [&[0.0, 8.0][..], &[32.0, 35.0][..]] {
+        let what = format!("chords {chords:?}");
+        let j = join(chords);
         assert_volume(&j, &what);
         assert!(j.manifold, "{what}: not a manifold solid");
         assert!(j.check.is_empty(), "{what}: {:?}", j.check);

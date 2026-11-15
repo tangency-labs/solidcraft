@@ -80,7 +80,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_excess_faces_after_merge = true;
     f.offset_clip_right_side_out = true;
     f.offset_extended_edges_mated = true;
-    f.keep_operand_uv_trims = true;
     f.proto_vertex_miss_is_false = true;
     f.check_loop_vertex_tolerance = true;
     f.check_loop_projected_seam_ends = true;
@@ -108,11 +107,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
     f.proto_edge_self_loop_on_vertex_degenerate = true;
-    f.slice_coincident_faces_sheet_side = true;
-    f.boolean_outer_shell_first = true;
     f.cover_refuses_folded_continuation = true;
     f.boolean_vertex_by_best_crossing = true;
-    f.boolean_cleanup_removes_slits = true;
     f.classify_edge_interval = true;
     f.ellipse_trim_seam_lines_span_cone_height = true;
     f.degenerate_proto_edge_in_one_vertex = true;
@@ -123,7 +119,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_point_step_per_point = true;
     f.analytic_copy_keeps_parameterization = true;
     f.offset_extension_from_base = true;
-    f.fillet_cleanup_keeps_target_faces = true;
     f.fillet_nx1_tangent_side_edge = true;
     f.fillet_3x2_mixed_concave_side_edge = true;
     f.offset_stitch_at_body_tolerance = true;
@@ -214,7 +209,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
     f.volume_representational_end_continuities = true;
     f.offset_open_edge_second_trim_point = true;
-    f.close_loop_relates_only_coincident_edges = true;
     f.ssi_split_curves_at_singular_points = true;
     f.surface_parallel_to_vector_checks = true;
     f.geometric_g2_continuity = true;

@@ -6,8 +6,8 @@
 //! passed on `Inversion`'s `SM_ERR` for a curve/curve range solution's end refined
 //! 2e-15 past the range (12.149466823226815 against the range's max 12.149466823226813,
 //! while the round's insertion classifies a curve on a face), so the fillet failed with
-//! 1001. The body the boolean builds with `keep_operand_uv_trims` and the offset extension
-//! flags is what puts an end there. The fork's later 8ea6a20 takes such a parameter as
+//! 1001. The body the boolean builds with the operand's exact trims (WR-361, always on
+//! now) and the offset extension flags is what puts an end there. The fork's later 8ea6a20 takes such a parameter as
 //! the answer it is and leaves an end alone only for a range with no fraction; solidcore
 //! now does that under the same flag (#2264).
 //!
@@ -48,9 +48,7 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "analytic_copy_keeps_parameterization",
     "analytic_inversion_answers_apart",
     "ascii_doubles_round_trip",
-    "boolean_cleanup_removes_slits",
     "boolean_new_face_closure_both_sides",
-    "boolean_outer_shell_first",
     "boolean_splits_definition_across_split",
     "boolean_union_refuses_solid_leak",
     "boolean_vertex_by_best_crossing",
@@ -62,7 +60,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "check_loop_vertex_tolerance",
     "check_seam_crossing_unclosed",
     "classify_edge_interval",
-    "close_loop_relates_only_coincident_edges",
     "cone_create_canonical_preserves_inside_out_and_checks_height",
     "corner_patch_face_side_twist",
     "cover_refuses_folded_continuation",
@@ -88,7 +85,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_3x2_mixed_concave_side_edge",
     "fillet_chamfer_cone_on_arc",
     "fillet_chamfer_cone_stored_as_cone",
-    "fillet_cleanup_keeps_target_faces",
     "fillet_cliff_overflow",
     "fillet_corner_per_vertex_fan",
     "fillet_exact_round_classes",
@@ -122,7 +118,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "imprint_reuses_coincident_face_edge",
     "internal_pole_row_through_knot",
     "join_touching_loops",
-    "keep_operand_uv_trims",
     "linear_sweep_arc_is_cylinder",
     "local_operation_box_holds_new_surfaces",
     "local_operation_closes_walls_to_nothing",
@@ -170,7 +165,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "shell_edges_on_analytics_exact",
     "shell_empty_cavity_fails",
     "simple_coincidence_crossing_is_point",
-    "slice_coincident_faces_sheet_side",
     "ssi_low_angle_start_on_probation",
     "ssi_pole_point_keeps_its_tangent",
     "ssi_proto_topology_statuses_pass_on",
@@ -265,12 +259,12 @@ fn solidcraft_profile_pipe_gn_round_completes() {
     check_round(SOLIDCRAFT_C494A18);
 }
 
-/// The four flags the failure needed together (`keep_operand_uv_trims`,
-/// `query_statuses_pass_on`, `offset_extension_from_base`, `offset_extension_as_itself`).
+/// The flags the failure needed together (`query_statuses_pass_on`,
+/// `offset_extension_from_base`, `offset_extension_as_itself`; it also needed
+/// `keep_operand_uv_trims`, always on since that flag was retired).
 #[test]
 fn reduced_profile_pipe_gn_round_completes() {
     check_round(&[
-        "keep_operand_uv_trims",
         "query_statuses_pass_on",
         "offset_extension_from_base",
         "offset_extension_as_itself",
@@ -281,9 +275,5 @@ fn reduced_profile_pipe_gn_round_completes() {
 /// completes with the same volume.
 #[test]
 fn without_pass_on_pipe_gn_round_completes() {
-    check_round(&[
-        "keep_operand_uv_trims",
-        "offset_extension_from_base",
-        "offset_extension_as_itself",
-    ]);
+    check_round(&["offset_extension_from_base", "offset_extension_as_itself"]);
 }

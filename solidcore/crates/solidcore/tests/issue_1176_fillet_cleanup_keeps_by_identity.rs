@@ -4,7 +4,7 @@
 //! passed `BooleanPostProcess`'s kept test and was never cleaned up: the result depended
 //! on heap layout (`prog_test` fillets case 306, `Fillet/extrusion0210.smb`).
 //!
-//! The port keeps them by arena id (`Kernel::fixes.fillet_cleanup_keeps_target_faces`),
+//! The port keeps them by arena id (`CleanupRelations::kept_edges` and `kept_faces`),
 //! and an arena never hands a deleted record's id to a new one, so the membership is the
 //! fork's fix (`SM_AI_FILLET_INPUT`, which dies with its entity): no entity made while
 //! filleting is kept. This runs case 306's constant radius rounds (edges 10 to 14 at 0.5,
@@ -132,7 +132,6 @@ struct Case306 {
 
 /// Case 306 filleted with the clean-up keeping the target's faces.
 fn case_306(k: &mut Kernel) -> Option<Case306> {
-    k.fixes.fillet_cleanup_keeps_target_faces = true;
     let mut b = read(k, "Fillet/extrusion0210.smb")?;
     let before: BTreeSet<EdgeId> = p1::edges(&b, None).unwrap().into_iter().collect();
     // (arena ids are never reused: every id past the target's highest is a new record)

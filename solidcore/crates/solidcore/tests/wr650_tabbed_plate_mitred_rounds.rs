@@ -156,9 +156,7 @@ fn top_edges(k: &Kernel, b: &Brep) -> Vec<EdgeId> {
 fn round() -> (f64, Result<(bool, f64), i32>) {
     let mut k = Kernel::default();
     k.fixes.analytic_copy_keeps_parameterization = true;
-    k.fixes.boolean_cleanup_removes_slits = true;
     k.fixes.boolean_new_face_closure_both_sides = true;
-    k.fixes.boolean_outer_shell_first = true;
     k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.box_face_failures_propagate = true;
@@ -180,7 +178,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_3x2_mixed_concave_side_edge = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_chamfer_cone_stored_as_cone = true;
-    k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_half_degree_crease = true;
     k.fixes.fillet_knife_edge_rounds = true;
@@ -208,7 +205,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.imprint_reuses_coincident_face_edge = true;
     k.fixes.internal_pole_row_through_knot = true;
     k.fixes.join_touching_loops = true;
-    k.fixes.keep_operand_uv_trims = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.local_operation_box_holds_new_surfaces = true;
     k.fixes.local_operation_closes_walls_to_nothing = true;
@@ -243,7 +239,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.shell_empty_cavity_fails = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
-    k.fixes.slice_coincident_faces_sheet_side = true;
     k.fixes.ssi_low_angle_start_on_probation = true;
     k.fixes.ssi_pole_point_keeps_its_tangent = true;
     k.fixes.ssi_singular_start_inside_direction = true;
