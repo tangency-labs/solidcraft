@@ -317,6 +317,16 @@ pub fn point_distance(a: [f64; 3], b: [f64; 3]) -> Result<Distance> {
     q::point_distance(a, b).map(Distance::from).map_err(status)
 }
 
+/// The largest distance from `p` to a point of the box `[lo, hi]`: to its farthest corner
+/// (`geom::extent3d::Extent3d::max_distance_to_point`).
+///
+/// # Errors
+/// [`Error::Argument`] for a coordinate that is not finite.
+pub fn box_max_distance_to_point(lo: [f64; 3], hi: [f64; 3], p: [f64; 3]) -> Result<f64> {
+    let e = solidcore::geom::extent3d::Extent3d::from_points(point(lo)?, point(hi)?);
+    Ok(e.max_distance_to_point(point(p)?))
+}
+
 impl Body {
     /// Mass properties at `relative_accuracy` (the kernel's rule: finite and positive, clamped
     /// to [1e-8, 1e-1]): the sum over the body's material regions, so several lumps, or lumps

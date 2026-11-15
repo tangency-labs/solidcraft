@@ -1053,7 +1053,7 @@ mod imp {
     /// grown to reach every corner of the prism's box (rails can widen the section past `reach`).
     fn mitre_near_prism(straight: &Brep, at: Vec3, lead: f64, reach: f64) -> Result<f64> {
         let (lo, hi) = straight.bounds().map_err(|e| failed("sweep mitre", e))?;
-        let far = (0..8).map(|i| Vec3::new([lo, hi][i & 1][0], [lo, hi][(i >> 1) & 1][1], [lo, hi][(i >> 2) & 1][2]).dist(at)).fold(0.0f64, f64::max);
+        let far = solidcore_ops::measure::box_max_distance_to_point(lo, hi, [at.x, at.y, at.z]).map_err(|e| failed("sweep mitre", e.to_string()))?;
         Ok(mitre_near(lead, reach).max(1.05 * far + 1e-3))
     }
 
