@@ -346,7 +346,11 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
             // A write to the stored grants during the job counts as a newer decision, unless the record this
             // job started from is still exactly as it was (an unrelated write).
             let live = app.session.plugin_state.grants.get(id);
-            let undecided = if app.prefs_window.grants_revision == job.revision { live == job.grants_before.get(id) } else { live.is_some() && live == job.grants_before.get(id) };
+            let undecided = if app.prefs_window.grants_revision == job.revision {
+                live == job.grants_before.get(id)
+            } else {
+                live.is_some() && live == job.grants_before.get(id)
+            };
             if undecided {
                 if let Some(grants) = state.grants.get(id) {
                     // A record added meanwhile may have filled the map: keep what is stored.
@@ -911,9 +915,7 @@ mod tests {
         let (inside, outside) = (h.dir.join("inside"), h.dir.join("outside"));
         std::fs::create_dir_all(&inside).unwrap();
         std::fs::create_dir_all(&outside).unwrap();
-        let grants = |folder: &std::path::Path| {
-            json!({"plugin_grants":{"workshop-helper":{"folders":[{"name":"work","folder":folder,"read":true,"write":false}]}}})
-        };
+        let grants = |folder: &std::path::Path| json!({"plugin_grants":{"workshop-helper":{"folders":[{"name":"work","folder":folder,"read":true,"write":false}]}}});
         let scope = || Some(solidcraft_engine::io::vfs::PathScope::new([inside.clone()]));
         let refused = solidcraft_engine::io::vfs::scoped(scope(), || crate::prefs::set(&mut h.app, &grants(&outside)));
         assert!(refused.is_err(), "a folder outside the caller's scope is refused");
