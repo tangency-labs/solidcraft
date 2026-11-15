@@ -55,14 +55,13 @@
 //! - **Iso endpoint angles.** Correct upstream's explicit-domain endpoint vectors
 //!   to be relative to the iso circle's center, not the torus origin (#774).
 //!   Extraction, periodic wrapping and interval-length policy remain unchanged.
-//! - **Copies.** As upstream's copy constructor, which leaves `m_bInsideOut` at its
-//!   default, `Clone` (and [`Torus::copy`]) resets [`Torus::inside_out`] to `false`.
-//!   The constructor also leaves it `false` (its `bInsideOut` only orients the minor
-//!   circle); only [`Torus::rebuild_step_from_nurb_parameters`] and
-//!   [`Torus::read_from_db`] set it. With the opt-in
-//!   `Kernel::fixes.torus_keeps_inside_out` (WR-500, #1490) the constructor sets it
-//!   from `bInsideOut` and a torus made, rebuilt or read that way keeps it in its
-//!   copies (`SmSurfOfRevolution` Test #11 compares it with the generator's).
+//! - **Inside out (WR-500, #1490).** The constructor sets [`Torus::inside_out`] from
+//!   its generator's bit (`bInsideOut` for the circle it makes, the given curve's own
+//!   for `pOptCircleNurb`), and `Clone` (and [`Torus::copy`]) copies it, so the surface and
+//!   its generating circle always agree (`SmSurfOfRevolution` Test #11 compares them).
+//!   Upstream's constructor only orients the minor circle with `bInsideOut`, leaving
+//!   `m_bInsideOut` `FALSE`, and its copy constructor resets it; a torus that forgot it
+//!   was written to STEP with the wrong `same_sense`.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments and the
 //!   arguments upstream marks `NotUsed` (`EvaluateSTEP`'s side flags,
 //!   `CreateIsoParametricCurve`'s approximation tolerance, `ReadFromDB`'s type) are
@@ -173,23 +172,17 @@ pub struct Torus {
     pub(crate) minor_radius: f64,
     /// `m_bInsideOut`.
     pub(crate) inside_out: bool,
-    /// Not upstream (WR-500, #1490): made, rebuilt or read with
-    /// `Kernel::fixes.torus_keeps_inside_out`, so the copy keeps
-    /// [`Self::inside_out`].
-    pub(crate) keeps_inside_out: bool,
 }
 
-/// The copy constructor: copies the surface of revolution and the radii; the
-/// inside-out flag keeps its default (`false`), as upstream, unless the torus keeps it
-/// (`Kernel::fixes.torus_keeps_inside_out`, WR-500).
+/// The copy constructor: copies the surface of revolution, the radii and the inside-out
+/// flag (WR-500: upstream's resets the flag).
 impl Clone for Torus {
     fn clone(&self) -> Self {
         Self {
             base: self.base.clone(),
             major_radius: self.major_radius,
             minor_radius: self.minor_radius,
-            inside_out: self.keeps_inside_out && self.inside_out,
-            keeps_inside_out: self.keeps_inside_out,
+            inside_out: self.inside_out,
         }
     }
 }
@@ -229,7 +222,6 @@ impl Torus {
             major_radius: UNDEF_DOUBLE,
             minor_radius: UNDEF_DOUBLE,
             inside_out: false,
-            keeps_inside_out: false,
         }
     }
 
@@ -239,8 +231,9 @@ impl Torus {
     /// minor circle at `origin + major_radius x_axis` in the plane of `x_axis` and
     /// `x_axis x y_axis` over the domain's V interval, inside out with
     /// `opts.inside_out` (`SmCircle::CreateCanonical`); the generator is then not
-    /// tested for planarity (it is marked planar). The surface's own inside-out flag
-    /// stays `false`, as upstream.
+    /// tested for planarity (it is marked planar). The surface's own inside-out flag is
+    /// its generator's (WR-500; upstream leaves it `false`): `opts.inside_out` for the
+    /// circle made here, the given curve's own for `opts.circle_nurb`.
     ///
     /// # Errors
     ///
@@ -293,15 +286,14 @@ impl Torus {
         };
 
         // (the self-intersection test of a major radius below the minor radius only
-        // warns upstream); not upstream (WR-500, opt-in): the surface is inside out
-        // with its generator
-        let keeps_inside_out = k.fixes.torus_keeps_inside_out;
+        // warns upstream); not upstream (WR-500): the surface is inside out with its
+        // generator, the circle made inside out with `opts.inside_out` or the one given
+        let inside_out = base.gen_curve.as_ref().is_some_and(Curve::inside_out_bit);
         Ok(Self {
             base,
             major_radius,
             minor_radius,
-            inside_out: keeps_inside_out && opts.inside_out,
-            keeps_inside_out,
+            inside_out,
         })
     }
 
@@ -518,6 +510,77 @@ impl Torus {
             &|s, k, uv| convert_uv_from_nurbs_to_step(s, k, uv),
             &|s, k, p, t| Ok(iso_curve(s, shape, k, p, t, None, false)?.curve),
         )
+    }
+
+    /// Carry a stored support on this recognised parametrisation. Both converters must
+    /// use the support's circle, not the independently fitted circle recognition found.
+    pub(crate) fn on_support(
+        &mut self,
+        k: &Kernel,
+        placement: Axis2Placement,
+        major: f64,
+        minor: f64,
+        form: BSplineSurface,
+    ) -> Result<()> {
+        let domain = form.natural_uv_domain();
+        let generator = form
+            .create_iso_parametric_curve(
+                k,
+                if self.base.swap_uv {
+                    SurfParamType::V
+                } else {
+                    SurfParamType::U
+                },
+                if self.base.swap_uv {
+                    domain.v_min()
+                } else {
+                    domain.u_min()
+                },
+                IsoCurveOptions::default(),
+            )?
+            .curve;
+        let interval = generator.natural_interval();
+        let x = placement.x_axis();
+        let z = placement.z_axis();
+        let centre = placement.origin() + x * major;
+        let (v0, v1) = torus_gen_curve_interval(
+            [x, generator.evaluate_point(interval.min())? - centre],
+            [x, generator.evaluate_point(interval.max())? - centre],
+            z,
+            self.inside_out,
+            EFF_ZERO_DEG,
+        )?;
+        // The fitted sweep interval carries the fitted axis's error too. Its ends
+        // must come from the form's meridians about the installed support's axis.
+        let d = self.base.anal_uv_domain;
+        let (_, _, sweep) = sweep_frame(
+            placement.origin(),
+            z,
+            fitted_sides(&self.base.position, d.u_interval()),
+            meridians(&form, self.base.swap_uv)?,
+        )
+        .ok_or_else(|| {
+            SolidError::surface_failed(OP_REBUILD, "a meridian has no radial direction")
+        })?;
+        self.base.anal_uv_domain = Extent2d::from_bounds(sweep.min(), v0, sweep.max(), v1);
+        self.base.gen_curve = Some(Curve::from(Ellipse::new_circle(
+            k,
+            centre,
+            x,
+            z,
+            Extent1d::from_min_max(v0, v1),
+            minor,
+            &EllipseOptions {
+                dim: 3,
+                nurb: Some(&generator),
+                inside_out: self.inside_out,
+            },
+        )?));
+        self.base.position = placement;
+        self.major_radius = major;
+        self.minor_radius = minor;
+        self.base.base = form;
+        self.rebuild_polar_converter(k)
     }
 
     /// `RebuildPolarConverter` with the torus's iso circles.
@@ -783,6 +846,19 @@ impl Torus {
     /// circle; those of the conversions.
     pub fn convert_uv_from_nurbs_to_step(&self, k: &Kernel, nurbs_uv: Point2) -> Result<Point2> {
         convert_uv_from_nurbs_to_step(&self.base, k, nurbs_uv)
+    }
+
+    /// [`Self::convert_uv_from_nurbs_to_step`] with the polar converters' exactness.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::convert_uv_from_nurbs_to_step`].
+    pub(crate) fn convert_uv_from_nurbs_to_step_exact(
+        &self,
+        k: &Kernel,
+        nurbs_uv: Point2,
+    ) -> Result<(Point2, bool)> {
+        convert_uv_from_nurbs_to_step_exact(&self.base, k, nurbs_uv)
     }
 
     // ---- STEP evaluation ------------------------------------------------------------
@@ -1491,8 +1567,6 @@ impl Torus {
         self.major_radius = maj_rad;
         self.minor_radius = min_rad;
         self.inside_out = inside_out;
-        // not upstream (WR-500, opt-in): its copies keep the flag
-        self.keeps_inside_out |= k.fixes.torus_keeps_inside_out;
         self.base.planar_generator = true;
         self.base.position = ref_frame;
         self.base.swap_uv = swap_uv;
@@ -1588,8 +1662,6 @@ impl Torus {
     pub fn read_from_db(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Self> {
         // init output object
         let mut torus = Self::empty();
-        // not upstream (WR-500, opt-in): its copies keep the flag read
-        torus.keeps_inside_out = k.fixes.torus_keeps_inside_out;
 
         if db.file_type() == FileType::Ascii {
             if let Some(s) = db.in_stream_mut() {
@@ -1883,6 +1955,16 @@ fn convert_uv_from_nurbs_to_step(
     k: &Kernel,
     nurbs_uv: Point2,
 ) -> Result<Point2> {
+    Ok(convert_uv_from_nurbs_to_step_exact(base, k, nurbs_uv)?.0)
+}
+
+/// [`convert_uv_from_nurbs_to_step`] with the polar converters' exactness: `false` where
+/// the sweep or generator angle is not a closed form's.
+fn convert_uv_from_nurbs_to_step_exact(
+    base: &SurfOfRevolution,
+    k: &Kernel,
+    nurbs_uv: Point2,
+) -> Result<(Point2, bool)> {
     // m_bSwapUV - Nurb and STEP parameters are swapped
     let nurb_uv = if base.swap_uv {
         Point2::new(nurbs_uv.y, nurbs_uv.x)
@@ -1895,14 +1977,14 @@ fn convert_uv_from_nurbs_to_step(
         OP_CONVERT,
         "polar converter has no curve",
     ))?;
-    let (step_x, _exact) = base
+    let (step_x, exact_x) = base
         .polar
         .convert_to_polar_parameter(k, polar_curve, nurb_uv.x)?;
 
     // convert genCurve NurbParam to PolarParam
     let circle = gen_circle(base.gen_curve.as_ref(), OP_CONVERT)?;
-    let polar_param = circle.convert_t_from_nurbs_to_step(k, nurb_uv.y)?;
-    Ok(Point2::new(step_x, polar_param))
+    let (polar_param, exact_y) = circle.convert_t_from_nurbs_to_step_exact(k, nurb_uv.y)?;
+    Ok((Point2::new(step_x, polar_param), exact_x && exact_y))
 }
 
 /// Not upstream (WR-408, tangency-labs/solidcore#1112; the SolidCraft fork's

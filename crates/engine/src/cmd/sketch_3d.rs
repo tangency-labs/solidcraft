@@ -3,7 +3,7 @@
 //! fit points, exact arcs keeping their analytic form): drawn and snapped to, movable point by
 //! point, and usable as sweep and pipe paths.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcore_record::Vec3;
 use solidcraft_sketch::WireSpace;
 
@@ -11,12 +11,13 @@ use super::sketch::edit;
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, req_vec3, vec3};
-use crate::schema::sketch_3d::{Curves3dResult, Line3dParams, Move3dParams, Move3dResult, Point3dParams, Point3dResult, Spline3dParams};
+use crate::schema::sketch_3d::{Arc3dParams, Curves3dResult, Line3dParams, Move3dParams, Move3dResult, Point3dParams, Point3dResult, Spline3dParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 const LINE3D_CONTRACT: TypedContract<Line3dParams> = TypedContract::new();
 const SPLINE3D_CONTRACT: TypedContract<Spline3dParams> = TypedContract::new();
+const ARC3D_CONTRACT: TypedContract<Arc3dParams> = TypedContract::new();
 const POINT3D_CONTRACT: TypedContract<Point3dParams> = TypedContract::new();
 const MOVE3D_CONTRACT: TypedContract<Move3dParams> = TypedContract::new();
 
@@ -36,9 +37,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLINE3D_CONTRACT)
         .output(output_schema_for::<Curves3dResult>)
         .params(concat!("points: [[x,y,z]…] world fit points (2 or more): a smooth 3D curve through them (needs 3D Sketch on)", created_doc!())),
-    CommandSpec::new("sketch.arc3d", "3D Arc", arc3d)
+    CommandSpec::new("sketch.arc3d", "3D Arc", crate::checked!("sketch.arc3d", arc3d))
         .icon("arc3")
         .enabled(in_sketch_3d)
+        .contract(&ARC3D_CONTRACT)
+        .output(output_schema_for::<Curves3dResult>)
         .params(concat!(
             "start, through, end: [x,y,z] world points: an exact circular arc through them, from start through through to end (needs 3D Sketch on). Stored exactly (centre, radius, angles), so path consumers can treat it as a true arc",
             created_doc!()
@@ -158,7 +161,7 @@ fn arc3d(s: &mut Session, p: &Value) -> Result<Value> {
         needs_3d(sk, cmd)?;
         Ok(sk.add_drawn_arc_in(&pts, WireSpace::Component)?)
     })?;
-    Ok(json!({"curves": [id], "sketch": info}))
+    reply(cmd, Curves3dResult { curves: vec![id], sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 fn point3d(s: &mut Session, p: &Value) -> Result<Value> {

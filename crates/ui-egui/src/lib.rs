@@ -35,6 +35,7 @@ pub mod crash_ui;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
+pub mod design_tab_prefs;
 mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
@@ -44,6 +45,7 @@ pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 mod dialogs_hole;
+pub mod dialogs_insert_airfoil;
 pub mod dialogs_insert_drawing;
 pub mod dialogs_library;
 pub mod dialogs_motion;
@@ -110,12 +112,14 @@ pub mod joint_drag;
 pub(crate) mod joint_handles;
 pub(crate) mod joint_symbols;
 pub mod keymap;
+pub mod kicad_import_dialog;
 #[cfg(test)]
 mod kit_gallery_tests;
 #[cfg(test)]
 mod kit_host_tests;
 mod length_input;
 mod linked_source;
+pub mod links;
 #[cfg(test)]
 mod loft_rails_dialog_tests;
 #[cfg(test)]
@@ -200,6 +204,7 @@ mod blend_dialog_tests;
 #[cfg(test)]
 mod boundary_dialog_tests;
 pub(crate) mod display_lod;
+pub(crate) mod edge_detail;
 #[cfg(test)]
 mod file_load_ui_tests;
 #[cfg(test)]
@@ -212,6 +217,7 @@ pub use solidcraft_ui_kit::navigation_bar;
 mod navigation_bar_tests;
 mod navigation_bar_view;
 pub mod navigation_slots;
+pub mod new_window;
 pub use navigation::WebWheelGestures;
 pub mod network_prompt;
 pub mod op_auto;
@@ -225,6 +231,7 @@ pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
+mod plugin_slots;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod prefs;
@@ -652,6 +659,8 @@ pub struct SolveApp {
     pub design_properties: Option<design_properties::DesignProperties>,
     /// The Sketch report window (`sketch.inspect` from the ribbon), when open.
     pub sketch_report: Option<sketch_report::SketchReport>,
+    /// The KiCad import options window, when a board is chosen to open.
+    pub kicad_import: Option<kicad_import_dialog::Dialog>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
@@ -851,6 +860,7 @@ pub struct SolveApp {
     control_answering: Vec<control_job::ControlJob>,
     /// Most recent completed inspection per session and package, ordered by request.
     plugin_inspection_versions: std::collections::BTreeMap<(u64, String), usize>,
+    plugin_slots: plugin_slots::State,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -967,6 +977,7 @@ impl SolveApp {
             params: None,
             design_properties: None,
             sketch_report: None,
+            kicad_import: None,
             bom: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
@@ -1065,6 +1076,7 @@ impl SolveApp {
             agent_replies: Vec::new(),
             control_answering: Vec::new(),
             plugin_inspection_versions: Default::default(),
+            plugin_slots: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
@@ -1410,6 +1422,9 @@ impl SolveApp {
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, mut params: Value) -> Result<Value, String> {
         crate::plugins::sync_policy(self);
+        if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
+            return Err(self.tr("prefs.plugin_busy").into());
+        }
         if id.eq_ignore_ascii_case("plugin.run")
             || solidcraft_engine::plugin::resolve_call(&self.session, id, &params).map_err(|e| e.to_string())?.is_some()
         {
@@ -1528,6 +1543,10 @@ impl SolveApp {
             _ => r,
         };
         if let Ok(v) = &r {
+            if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
+                plugins::persist_grants(self);
+                plugin_slots::invalidate(self);
+            }
             if id.eq_ignore_ascii_case("plugin.inspect")
                 && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
             {
@@ -1851,12 +1870,15 @@ impl SolveApp {
     }
 
     /// Insert Design's file picker: another design becomes a linked component; a STEP or mesh
-    /// file picked here is inserted the way Insert STEP or Insert Mesh would (#1240).
+    /// file picked here is inserted the way Insert STEP or Insert Mesh would (#1240), and a KiCad
+    /// board asks for its import settings.
     pub(crate) fn pick_design_to_insert(&mut self) {
         self.pick_open(|app, path| {
             let Some(path) = path else { return };
             if solidcraft_engine::io::is_design_path(&path) {
                 app.insert_design_async(&path, None);
+            } else if solidcraft_engine::io::is_kicad_path(&path) {
+                kicad_import_dialog::open(app, &path);
             } else {
                 app.insert_path_async(&path);
             }
@@ -1986,7 +2008,7 @@ impl SolveApp {
             }
             return;
         }
-        // Front … Isometric (Ctrl+1…7 by default) turn the view as the view cube's faces do. The
+        // Front … Isometric (Ctrl+1…7 by default) turn the view as the navigator's faces do. The
         // flat pattern is a 2D page: it has no other side to turn to.
         if solidcraft_engine::standard_view(id).is_some() {
             if !dialogs_sheet::flat_active(self) {
@@ -2053,7 +2075,7 @@ impl SolveApp {
             return;
         }
         // A display toggle leaves the current modelling tool and camera in place, and the ribbon
-        // where it is: F6, the navigation bar and the view cube never went through `start`, so
+        // where it is: F6, the navigation bar and the navigator never went through `start`, so
         // command search and the VIEW tab's menus must not move the tab either (#10540).
         if matches!(
             id,
@@ -2191,6 +2213,15 @@ impl SolveApp {
             edit_in_place::finish(self);
             return;
         }
+        // The picked section is placed (chord, pivot, position, angle, previewed) before OK adds it.
+        if id == "sketch.insert_airfoil" {
+            self.pick_file(solidcraft_ui_text::tr("insert_airfoil.filter"), &["dat"], |app, path| {
+                if let Some(path) = path {
+                    dialogs_insert_airfoil::open(app, path);
+                }
+            });
+            return;
+        }
         // The picked drawing is placed (position and scale, previewed) before OK adds it.
         if let Some(ext) = id.strip_prefix("sketch.insert_").filter(|e| matches!(*e, "dxf" | "svg")) {
             let command = id.to_string();
@@ -2227,6 +2258,12 @@ impl SolveApp {
             } else {
                 self.pick_design_to_insert();
             }
+            return;
+        }
+        if id == "doc.open" {
+            // Open asks for the file (and a board for its import options) rather than running
+            // the command with no path.
+            self.pick_open_file();
             return;
         }
         if id == "component.relink" {
@@ -3038,6 +3075,33 @@ impl SolveApp {
         }
         rx
     }
+
+    /// Open `path` asynchronously with the command's options (a KiCad board's import settings).
+    pub fn open_path_async_with_options(&mut self, path: &str, options: serde_json::Value) {
+        let mut request = file_load::Request::new(path, file_load::Kind::Open);
+        if let Some(map) = options.as_object() {
+            request.options = map.clone();
+        }
+        let _ = file_load::begin_request(self, request);
+    }
+
+    /// Ask for a file to open: a design, a CAD or mesh file, or a KiCad board.
+    pub fn pick_open_file(&mut self) {
+        self.pick_open(|app, path| {
+            if let Some(path) = path {
+                app.open_chosen_file(&path);
+            }
+        });
+    }
+
+    /// Open a chosen file: a KiCad board asks for its import options first, anything else opens.
+    pub fn open_chosen_file(&mut self, path: &str) {
+        if solidcraft_engine::io::is_kicad_path(path) {
+            kicad_import_dialog::open(self, path);
+        } else {
+            self.open_path_async(path);
+        }
+    }
     pub fn insert_path_async(&mut self, path: &str) {
         file_load::begin(self, path, true);
     }
@@ -3100,6 +3164,8 @@ impl SolveApp {
             || solidcraft_engine::cmd::drawing_import_command(path).is_some();
         if import && (!self.session.doc.features.is_empty() || !self.session.doc.point_clouds.is_empty()) {
             self.insert_path_async(path);
+        } else if solidcraft_engine::io::is_kicad_path(path) {
+            self.open_chosen_file(path);
         } else {
             self.open_path_async(path);
         }
@@ -3342,7 +3408,7 @@ impl SolveApp {
         self.pending_fit = Some((to, bounds, true, shared));
     }
 
-    /// A view chosen on a navigator (a cube face, corner or arrow, an axis tip): the view turns
+    /// A view chosen on a navigator (a face, corner or arrow, an axis tip): the view turns
     /// in place, or frames the whole model from the new direction when Preferences › Navigation
     /// asks for it (`navigator_fit`, #10091).
     pub fn animate_turn(&mut self, to: Camera) {
@@ -3692,6 +3758,7 @@ impl SolveApp {
 
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        plugins::tick(self, ui.ctx(), false);
         params_dialog::install_expressions(ui.ctx());
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
         prefs::prepare_blur(self, ui.ctx());
@@ -3760,6 +3827,7 @@ impl SolveApp {
         }
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());
+        kicad_import_dialog::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
@@ -3790,6 +3858,8 @@ impl SolveApp {
                 browser::editors(self, ui);
                 // File › Install plugin… is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
+                // Entry dialogs from every plugin slot are available on Home too.
+                plugin_menu::show(self, ui.ctx());
                 // The unit of an imported mesh is asked on the screen the import starts: the
                 // start page asks it too, or the file would wait for an answer nobody sees (#15598).
                 mesh_units::show(self, ui.ctx());
@@ -3845,6 +3915,8 @@ impl SolveApp {
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
         if render_workspace::active(self) {
+            // The model view is not drawn, so no shown dimension can be double-clicked.
+            dim_view::set_model_drawn(Vec::new());
             render_workspace::show(self, ui);
         } else {
             viewport::show(self, ui);
@@ -3948,6 +4020,10 @@ impl SolveApp {
         let reply = req.reply.clone();
         match control::handle(self, ctx, &req) {
             control::Outcome::Done(v) => {
+                if self.preferences.plugin_grants != self.session.plugin_state.grants {
+                    plugins::persist_grants(self);
+                    plugin_slots::invalidate(self);
+                }
                 let _ = reply.send(v);
             }
             control::Outcome::Screenshot { path } => self.shots.request(ctx, path, reply, req.chat_turn, now_ms()),

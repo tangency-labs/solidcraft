@@ -39,7 +39,7 @@ env:
 jobs:
   image:
     if: ${{ !github.event.repository.private }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 60
     permissions:
       contents: read

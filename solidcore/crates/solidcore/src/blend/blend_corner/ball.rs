@@ -761,6 +761,7 @@ fn ball_centre(
             let bx = crate::query::face::p1::calculate_bounding_box(k, target, face, false)?;
             size = max(size, (bx.max - bx.min).length());
         }
+        k.work_counters.add_ball_certified_root();
         let (root, proved) = ball_certified_root(&f, 1e-12 * max(size, 1.0));
         if !proved {
             return Err(err());
