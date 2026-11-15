@@ -2862,6 +2862,83 @@ fn loft_through_sections_too_large_to_pair_builds() {
     assert!(rel(m.volume, area * 10.0) < 1e-9, "{} vs {}", m.volume, area * 10.0);
 }
 
+/// The re-splitting that sections too large to match fall back to
+/// ([`crate::build::resplit_numbered_loops`]), on a small case: a 40 x 20 rectangle and the same
+/// rectangle with its bottom in thirds, numbered from its top right corner. The rectangle takes
+/// the most segments a section has (six) by halving its longest sides, the top first, each half
+/// over the side it came from; the thirded one is not split; and each is turned once, to the
+/// start whose vertices line up best (the largest sum of dot products of their directions from
+/// the centroids) with those of the same number in the section it follows (the rectangle follows
+/// the thirded one, which has the most segments, and the thirded one follows the rectangle).
+#[test]
+fn sections_too_large_to_match_are_re_split_and_turned_once() {
+    let poly = |p: &[(f64, f64)]| Loop2::polygon(&p.iter().map(|&(x, y)| Vec2::new(x, y)).collect::<Vec<_>>());
+    let rect = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)]);
+    let thirds = poly(&[(40.0, 20.0), (0.0, 20.0), (0.0, 0.0), (40.0 / 3.0, 0.0), (80.0 / 3.0, 0.0), (40.0, 0.0)]);
+    let secs = [(Plane::XY, rect), (Plane::XY.offset(10.0), thirds.clone())];
+    let numbered: Vec<_> = secs.iter().map(|(p, _)| *p).zip(crate::numbered::number_loops(secs.iter().map(|(_, l)| l))).collect();
+    let out = crate::build::resplit_numbered_loops(&numbered).unwrap();
+    let [(_, a), (_, b)] = out.as_slice() else { panic!("two sections") };
+    assert_eq!((a.lp.segs.len(), b.lp.segs.len()), (6, 6));
+    assert!(a.lp.segs.iter().all(|s| (s.length() - 20.0).abs() < 1e-12), "the long sides halved: {:?}", a.lp.segs);
+    // Every half runs over the side it came from (the rectangle's segments are 0..4, bottom,
+    // right, top, left), in the order round the rectangle, from wherever it was turned to start.
+    let sides: Vec<usize> = a.from.iter().map(|f| *f.first().unwrap()).collect();
+    let round = [0, 0, 1, 2, 2, 3];
+    assert!((0..6).any(|k| (0..6).all(|i| sides[i] == round[(i + k) % 6])), "{:?}", a.from);
+    // The thirded section is not split: its segments as given, in their order round.
+    let starts = |l: &Loop2| l.segs.iter().map(Seg2::start).collect::<Vec<_>>();
+    let given = starts(&thirds);
+    let (sa, sb) = (starts(&a.lp), starts(&b.lp));
+    assert!((0..6).any(|k| (0..6).all(|i| sb[i] == given[(i + k) % 6])), "{sb:?}");
+    // Each is turned to the best start against the one it follows: no turn of it fits better.
+    let fit = |pts: &[Vec2], of: &Loop2, to: &[Vec2], to_of: &Loop2, k: usize| -> f64 {
+        let (c, d) = (of.centroid(), to_of.centroid());
+        (0..6).map(|i| (pts[(i + k) % 6] - c).dot(to[i] - d)).sum()
+    };
+    for k in 1..6 {
+        assert!(fit(&sa, &a.lp, &given, &thirds, 0) >= fit(&sa, &a.lp, &given, &thirds, k) - 1e-9, "the rectangle turned by {k} fits better");
+        assert!(fit(&sb, &b.lp, &sa, &a.lp, 0) >= fit(&sb, &b.lp, &sa, &a.lp, k) - 1e-9, "the thirded one turned by {k} fits better");
+    }
+}
+
+/// The 40 x 20 rectangle in `n` segments, all but three of them along its bottom side (or its
+/// top side).
+fn rectangle_split_along(top: bool, n: usize) -> Loop2 {
+    let split = n - 3;
+    let along = |k: usize| 40.0 * k as f64 / split as f64;
+    let mut pts = vec![Vec2::new(0.0, 0.0)];
+    if top {
+        pts.extend([Vec2::new(40.0, 0.0), Vec2::new(40.0, 20.0)]);
+        pts.extend((1..split).map(|k| Vec2::new(40.0 - along(k), 20.0)));
+        pts.push(Vec2::new(0.0, 20.0));
+    } else {
+        pts.extend((1..split).map(|k| Vec2::new(along(k), 0.0)));
+        pts.extend([Vec2::new(40.0, 0.0), Vec2::new(40.0, 20.0), Vec2::new(0.0, 20.0)]);
+    }
+    Loop2::polygon(&pts)
+}
+
+/// Two sections of 12 000 segments whose vertices do not pair (one's along the bottom of the
+/// rectangle, the other's along its top): solidcore's match would give each about 24 000
+/// segments, past the kernel's 20 000, so the ops call gives `None` and the sections are re-split
+/// as main split them, 12 000 each ([`crate::build::loft_numbered_loops`]). The solid loft of them
+/// is still refused, as on main: 24 000 curves are past the smlib wrapper's `MAX_CURVES` (16 384)
+/// whichever way they are matched. (A solid loft whose match is past 20 000 a section is always
+/// past that bound re-split too; the surface loft, which skins each column on its own, is what
+/// this fallback builds.)
+#[test]
+fn sections_whose_match_is_past_the_segment_bound_are_re_split() {
+    let n = 12_000;
+    let secs = [(Plane::XY, rectangle_split_along(false, n)), (Plane::XY.offset(10.0), rectangle_split_along(true, n))];
+    let given: Vec<_> = secs.iter().map(|(p, l)| solidcore_ops::sweep::LoftSection { plane: *p, segs: l.segs.clone() }).collect();
+    assert!(solidcore_ops::sweep::match_loft_sections(&given, 20_000).unwrap().is_none(), "the match is past the bound");
+    for l in matched_sections(&secs) {
+        assert_eq!(l.segs.len(), n, "re-split to the most segments a section has");
+    }
+    assert!(loft(&secs).is_err(), "24 000 curves are past the wrapper's bound, as on main");
+}
+
 /// A 40 x 0.001 strip whose bottom side is cut at `cuts` of the points 40 k / 8200 (k = 1 to
 /// 8199): each of `missing` left out.
 fn strip_cut_at(missing: &[usize]) -> Loop2 {
@@ -2874,11 +2951,11 @@ fn strip_cut_at(missing: &[usize]) -> Loop2 {
 /// Two sections of 8103 segments each, a 40 x 0.001 strip whose bottom side is cut at the same
 /// points except 100 that each leaves out where the other has one (30 points apart, so pairing
 /// them would shift 30 pairs a step along). Those 200 vertices do not pair: matching gives each
-/// section 8203 segments, 16 406 curves in all, past the 16 384 the skin takes, so the sections
+/// section 8203 segments, 16 406 curves in all, past the 16 384 the smlib wrapper takes (`MAX_CURVES`), so the sections
 /// are re-split as before the matching (each to the most segments a section has, numbered from
 /// where they line up best), 16 206 curves, and the loft builds: the strip's prism, as the
 /// sections are the same strip. Main refuses no fewer: two sections of 12 000 segments are
-/// 24 000 curves, past the skin's bound whichever way they are matched.
+/// 24 000 curves, past the wrapper's bound whichever way they are matched.
 #[test]
 fn loft_through_sections_whose_match_is_past_the_skins_bound_builds() {
     let left: Vec<usize> = (0..100).map(|i| 50 + 80 * i).collect();

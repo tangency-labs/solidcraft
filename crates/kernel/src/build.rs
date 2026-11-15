@@ -1004,7 +1004,7 @@ pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: Ra
         loops.iter().map(|(p, l)| (*p, crate::smlib_sweeps::pieces([l]))).collect()
     };
     let mut pieces = pieces_of(&loops);
-    // The skin takes at most `MAX_CURVES` curves in all its sections (and stations): matching
+    // The smlib wrapper's `MAX_CURVES` bounds the curves in all its sections (and stations): matching
     // can give each section more segments than the largest has, so past that bound the sections
     // are re-split instead, to no more than the largest has.
     if rails.is_empty() {
@@ -1113,8 +1113,8 @@ fn smlib_loft_regions(outlines: &[(Plane, NumberedLoop)], planes: &[Plane], numb
 }
 
 /// [`smlib_loft_regions`], every loop re-split ([`resplit_numbered_loops`]) when `resplit`. The
-/// matched loops can have more segments than [`MAX_SEGS`] a section, or than the skin takes in
-/// all, where the re-split ones (the largest section's count of each loop) do not: those are
+/// matched loops can have more segments than [`MAX_SEGS`] a section, or than the smlib wrapper's
+/// `MAX_CURVES` in all, where the re-split ones (the largest section's count of each loop) do not: those are
 /// re-split.
 fn smlib_loft_regions_by(
     outlines: &[(Plane, NumberedLoop)],
@@ -1141,7 +1141,7 @@ fn smlib_loft_regions_by(
         }
     }
     // Pairing can give a loop more segments than any of its sections has: past the bound on a
-    // section, or on all the curves the skin takes, the loops are re-split instead, to the counts
+    // section, or the smlib wrapper's `MAX_CURVES` on all the curves, the loops are re-split instead, to the counts
     // `loft_regions` bounded.
     if !resplit
         && (sections.iter().any(|(_, pieces)| pieces.len() > MAX_SEGS)
@@ -1192,7 +1192,7 @@ pub(crate) fn loft_reversed(sections: &[(Plane, Loop2)]) -> Result<bool> {
 /// match would have more than [`MAX_SEGS`] segments, or that are too large to pair, are
 /// re-split instead ([`resplit_numbered_loops`]), which needs no more segments than the largest
 /// section has; the builders re-split too where the matched sections are more curves in all than
-/// the skin takes ([`loft_with_rails`], [`loft_regions`]). So no loft is refused for its size
+/// the smlib wrapper's `MAX_CURVES` allows ([`loft_with_rails`], [`loft_regions`]). So no loft is refused for its size
 /// that the re-splitting builds.
 pub(crate) fn loft_numbered_loops(sections: &[(Plane, NumberedLoop)], reversed: bool) -> Result<Vec<(Plane, NumberedLoop)>> {
     loft_numbered_loops_by(sections, reversed, false)
