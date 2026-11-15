@@ -86,7 +86,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let Some(tiles) = app.docs.views.tiles().cloned() else { return };
     let focus = app.docs.views.active().id;
     // Below the ribbon and above the bottom strip: they float over the ground, but a card is never put under them.
-    let free = crate::shell::bottom_readout_rect(app, crate::shell::panel_bounds(app, crate::shell::workspace_content(app, crate::shell::content_rect(app, area)))).shrink(MARGIN);
+    let free = crate::shell::bottom_readout_rect(
+        app,
+        crate::shell::panel_bounds(app, crate::shell::workspace_content(app, crate::shell::content_rect(app, area))),
+    )
+    .shrink(MARGIN);
     let free = if free.is_positive() { free } else { area };
     let mut places: Vec<(u64, Rect)> = tiles.rects(to_tile(free), GUTTER).into_iter().map(|(id, r)| (id, from_tile(r))).collect();
     // The focused view is drawn last: what it leaves in the app (the viewport's rectangle, its
@@ -250,7 +254,9 @@ fn empty_picker(app: &SolveApp, ui: &mut egui::Ui, ordinal: usize, cell: Rect) -
         y += 34.0;
     }
     let close = Rect::from_center_size(cell.right_top() + vec2(-18.0, 18.0), vec2(22.0, 22.0));
-    let resp = ui.interact(close, ui.scope_id().with(("empty_cell_close", ordinal)), Sense::click()).on_hover_text(solidcraft_ui_text::tr_label("Close this cell"));
+    let resp = ui
+        .interact(close, ui.scope_id().with(("empty_cell_close", ordinal)), Sense::click())
+        .on_hover_text(solidcraft_ui_text::tr_label("Close this cell"));
     let ink = Stroke::new(1.6, if resp.hovered() { t.text } else { t.text_dim });
     let c = close.center();
     painter.line_segment([c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)], ink);
@@ -260,7 +266,6 @@ fn empty_picker(app: &SolveApp, ui: &mut egui::Ui, ordinal: usize, cell: Rect) -
     }
     action
 }
-
 
 /// What a card's header buttons ask for.
 enum CardAction {
