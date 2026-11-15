@@ -3867,6 +3867,7 @@ mod tests {
         let input_rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
         for (release_x, expected_inside) in [(150.0, true), (750.0, false)] {
             let mut app = crate::SolveApp::new(Default::default(), Default::default());
+            app.preferences.touchscreen_navigation = true;
             let ctx = crate::fonts::test_context();
             let mut time = 0.0;
             let bounds = input_rect;
@@ -3891,6 +3892,7 @@ mod tests {
         let input_rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
         for (second_x, expected_owned) in [(150.0, true), (50.0, false)] {
             let mut app = crate::SolveApp::new(Default::default(), Default::default());
+            app.preferences.touchscreen_navigation = true;
             let ctx = crate::fonts::test_context();
             let mut time = 0.0;
             let bounds = input_rect;
@@ -3939,6 +3941,7 @@ mod tests {
     fn touchscreen_six_point_threshold_uses_the_kernel_distance() {
         use egui::TouchPhase::{Move, Start};
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.preferences.touchscreen_navigation = true;
         let ctx = crate::fonts::test_context();
         let mut time = 0.0;
         touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false);
@@ -3960,6 +3963,7 @@ mod tests {
     fn touchscreen_three_contact_pinch_uses_mean_radius_for_nonuniform_motion() {
         use egui::TouchPhase::{Move, Start};
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.preferences.touchscreen_navigation = true;
         app.preferences.zoom_to_cursor = false;
         let ctx = crate::fonts::test_context();
         let mut time = 0.0;
@@ -4101,6 +4105,7 @@ mod tests {
     fn touchscreen_two_fingers_pan_and_pinch_without_orbit_or_double_zoom() {
         use egui::TouchPhase::{End, Move, Start};
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.preferences.touchscreen_navigation = true;
         app.preferences.zoom_to_cursor = false;
         let ctx = crate::fonts::test_context();
         let mut time = 0.0;
@@ -4132,6 +4137,7 @@ mod tests {
         use egui::TouchPhase::{Move, Start};
         for reverse in [false, true] {
             let mut app = crate::SolveApp::new(Default::default(), Default::default());
+            app.preferences.touchscreen_navigation = true;
             app.preferences.zoom_to_cursor = false;
             app.preferences.zoom_reverse = reverse;
             let ctx = crate::fonts::test_context();
@@ -4153,6 +4159,7 @@ mod tests {
     fn touchscreen_outside_gesture_does_not_capture_on_entering_the_view() {
         use egui::TouchPhase::{Move, Start};
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.preferences.touchscreen_navigation = true;
         let ctx = crate::fonts::test_context();
         let mut time = 0.0;
         touchscreen_frame(&mut app, &ctx, pointer(50.0, 300.0, None), &mut time, true);
@@ -4170,6 +4177,7 @@ mod tests {
     fn touchscreen_cancel_clears_contacts_and_flat_views_pan() {
         use egui::TouchPhase::{Cancel, Move, Start};
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.preferences.touchscreen_navigation = true;
         let ctx = crate::fonts::test_context();
         let mut time = 0.0;
         touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false);
@@ -4211,6 +4219,7 @@ mod tests {
     fn touchscreen_tool_cancels_an_existing_gesture() {
         use egui::TouchPhase::{Move, Start};
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.preferences.touchscreen_navigation = true;
         let ctx = crate::fonts::test_context();
         let mut time = 0.0;
         touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, true);
@@ -4241,6 +4250,7 @@ mod tests {
     fn touchscreen_second_finger_on_axes_cannot_join_the_camera_gesture() {
         use egui::TouchPhase::{Move, Start};
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.preferences.touchscreen_navigation = true;
         let ctx = crate::fonts::test_context();
         let mut time = 0.0;
         touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, true);
@@ -4262,6 +4272,7 @@ mod tests {
         use egui::TouchPhase::{End, Move, Start};
         use serde_json::json;
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.touchscreen_navigation = true;
         h.app.run("solid.box", json!({"length":80,"width":50,"height":20})).unwrap();
         h.app.fit_view();
         h.frames(2);
