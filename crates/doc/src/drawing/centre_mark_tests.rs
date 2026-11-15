@@ -35,6 +35,72 @@ fn marked() -> (Drawing, u64) {
     (d, id)
 }
 
+fn with_symbols_and_centres() -> (Drawing, [u64; 3]) {
+    use crate::drawing::centre_line::CentreLine;
+    use crate::drawing::dimension::ModelPoint;
+    use crate::drawing::symbol::{Piece, Symbol};
+    use solidcore_record::{Seg2, Vec2};
+    use solidcraft_geom::paper::line::LineKind;
+
+    let (mut d, mark) = marked();
+    let mut ids = IdSource::seeded(13064);
+    let line = d.allocate_id(&mut ids).unwrap();
+    let point = |name: &str| ModelPoint { body: "Part".into(), origin_feature: 1, edges: vec![name.into()], centre: true, path: vec![7] };
+    d.add_centre_lines([Arc::new(CentreLine { id: line, view: d.views[0].id, a: point("rim-a"), b: point("rim-b"), overshoot_mm: 2.0 })]);
+    let symbol = d.allocate_id(&mut ids).unwrap();
+    d.symbols.add([Arc::new(Symbol {
+        id: symbol,
+        name: "Target".into(),
+        pieces: vec![Piece::Stroke { path: vec![Seg2::Line { a: Vec2::ZERO, b: Vec2::new(2.0, 0.0) }], closed: false, line: LineKind::Visible }],
+    })]);
+    (d, [mark, line, symbol])
+}
+
+#[test]
+fn symbols_and_centre_annotations_keep_distinct_saved_ids() {
+    let (mut d, [mark, line, _]) = with_symbols_and_centres();
+    d.validate().unwrap();
+    assert_eq!(Drawing::from_json(&d.to_json().unwrap()).unwrap(), d);
+    for id in [mark, line] {
+        let mut invalid = d.clone();
+        Arc::make_mut(&mut invalid.symbols[0]).id = id;
+        assert!(invalid.validate().is_err(), "a symbol and centre annotation cannot share an id");
+    }
+    let symbols = d.symbols.clone();
+    d.remove_sheet(d.sheets[0].id);
+    assert!(d.centre_marks.is_empty());
+    assert!(d.centre_lines.is_empty());
+    assert_eq!(d.symbols, symbols, "drawing-level definitions remain after sheet removal");
+}
+
+#[test]
+fn known_annotations_remain_editable_in_a_newer_drawing() {
+    use crate::format::DRAWING;
+    use serde_json::{Value, json};
+
+    let (d, _) = with_symbols_and_centres();
+    let mut file: Value = serde_json::from_str(&d.to_json().unwrap()).unwrap();
+    file["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    file["future_annotations"] = json!({"policy": "keep"});
+    let mut opened = Drawing::from_value(file.clone()).unwrap();
+    assert_eq!(opened.centre_marks, d.centre_marks);
+    assert_eq!(opened.centre_lines, d.centre_lines);
+    assert_eq!(opened.symbols, d.symbols);
+    assert_eq!(opened.newer_file.as_ref().unwrap().not_understood, ["field `future_annotations`"]);
+
+    Arc::make_mut(&mut opened.centre_marks[0]).overshoot_mm = 7.0;
+    opened.centre_lines.clear();
+    Arc::make_mut(&mut opened.symbols[0]).name = "Edited target".into();
+    let saved = opened.to_json().unwrap();
+    let reopened = Drawing::from_json(&saved).unwrap();
+    assert_eq!(reopened.centre_marks, opened.centre_marks);
+    assert!(reopened.centre_lines.is_empty());
+    assert_eq!(reopened.symbols, opened.symbols);
+    let saved: Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(saved["future_annotations"], file["future_annotations"]);
+    assert_eq!(saved["format"], file["format"]);
+}
+
 #[test]
 fn saves_and_reopens_intent_and_removes_it_with_its_sheet() {
     let (mut d, id) = marked();

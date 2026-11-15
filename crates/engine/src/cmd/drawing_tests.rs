@@ -818,13 +818,13 @@ fn inspect_lists_each_sheets_views_in_order() {
     let dimension = run(&mut s, "drawing.dimension.add", json!({"view": front_id, "kind": {"length": {"edge": [50, 0, 20]}}}));
     let (features, evaluations) = (s.doc.features.clone(), s.evaluations);
     let reply = run(&mut s, "drawing.inspect", json!({}));
-    let mut expected = vec![json!({"id": front_id, "kind": "base", "label": "Front", "dimensions": [dimension["record"]["id"]], "balloons": []})];
+    let mut expected =
+        vec![json!({"id": front_id, "kind": "base", "label": "Front", "dimensions": [dimension["record"]["id"]], "balloons": [], "notes": []})];
     let right_and_top = [
-        json!({"id": right_id, "kind": "projected", "parent": front_id, "side": "right", "label": "Right of Front", "dimensions": [], "balloons": [ids::encode(balloon)]}),
-        json!({"id": top_id, "kind": "projected", "parent": right_id, "side": "above", "label": "Above Right of Front", "dimensions": [], "balloons": []}),
+        json!({"id": right_id, "kind": "projected", "parent": front_id, "side": "right", "label": "Right of Front", "dimensions": [], "balloons": [ids::encode(balloon)], "notes": []}),
+        json!({"id": top_id, "kind": "projected", "parent": right_id, "side": "above", "label": "Above Right of Front", "dimensions": [], "balloons": [], "notes": []}),
     ];
-    let left_entry =
-        json!({"id": left_id, "kind": "projected", "parent": front_id, "side": "left", "label": "Left of Front", "dimensions": [], "balloons": []});
+    let left_entry = json!({"id": left_id, "kind": "projected", "parent": front_id, "side": "left", "label": "Left of Front", "dimensions": [], "balloons": [], "notes": []});
     // The front's two views in id order, each followed by what is projected from it.
     if right < left {
         expected.extend(right_and_top);
@@ -848,6 +848,80 @@ fn inspect_lists_each_sheets_views_in_order() {
     let staying: Vec<Value> = expected.iter().map(|v| v["id"].clone()).filter(|id| *id != json!(top_id)).collect();
     assert_eq!((here, there), (staying, vec![json!(top_id)]));
     assert_eq!((&moved["parent"], &moved["label"]), (&json!(right_id), &json!("Above Right of Front")), "{moved}");
+}
+
+/// Inspect lists everything on each sheet, from the one rule the Browser and a sheet's delete use
+/// ([`Drawing::on_sheet`]): its views, a note in a view under its view, a note on the sheet with the
+/// sheet, and the sheet's tables, images and revision tags, each on its own sheet only. An empty sheet
+/// lists nothing, a deleted object is gone, and nothing is evaluated.
+#[test]
+fn inspect_lists_everything_on_each_sheet() {
+    let (mut s, [front, ..]) = crate::cmd::drawing_view::tests::three_views();
+    let folder = Folder::new("drawing-inspect-sheets");
+    let picture = folder.path("logo.png");
+    std::fs::write(&picture, crate::drawing_pictures::tests::png(4, 2)).unwrap();
+    let row = run(&mut s, "drawing.revision.add", json!({"set": {}}))["row"].clone();
+    let first = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let other = run(&mut s, "drawing.sheet.add", json!({"name": "Other"}))["sheet"].as_str().unwrap().to_string();
+    run(&mut s, "drawing.sheet.add", json!({"name": "Empty"}));
+    // One of each on a sheet: its id by kind.
+    let on = |s: &mut Session, sheet: &str| {
+        let note = |content: &str| json!({"anchor": {"sheet": sheet}, "at": [20, 20], "content": content});
+        [
+            run(s, "drawing.note.add", note("General"))["note"].clone(),
+            run(s, "drawing.table.add", json!({"sheet": sheet, "kind": "parts_list"}))["table"].clone(),
+            run(s, "drawing.image.add", json!({"sheet": sheet, "file": picture, "rect_mm": [10, 10, 30, 20]}))["image"].clone(),
+            run(s, "drawing.revision.tag.add", json!({"row": row, "sheet": sheet, "at": [40.0, 40.0]}))["tag"].clone(),
+        ]
+    };
+    let here = on(&mut s, &first);
+    let there = on(&mut s, &other);
+    let in_view = json!({"anchor": {"view": ids::encode(front)}, "at": [60, 40], "content": "Break"});
+    let in_view = run(&mut s, "drawing.note.add", in_view)["note"].clone();
+
+    let (evaluations, features) = (s.evaluations, s.doc.features.clone());
+    let reply = run(&mut s, "drawing.inspect", json!({}));
+    assert_eq!((s.evaluations, &s.doc.features), (evaluations, &features), "nothing evaluated");
+    let lists = |sheet: &Value| ["notes", "tables", "images", "revision_tags"].map(|list| sheet[list].clone());
+    let one = |objects: &[Value; 4]| objects.clone().map(|object| json!([object]));
+    assert_eq!(lists(&reply["sheets"][0]), one(&here), "{reply}");
+    assert_eq!(lists(&reply["sheets"][1]), one(&there), "{reply}");
+    assert_eq!(lists(&reply["sheets"][2]), [json!([]), json!([]), json!([]), json!([])], "{reply}");
+    let views = reply["sheets"][0]["views"].as_array().unwrap();
+    let notes: Vec<&Value> = views.iter().map(|view| &view["notes"]).collect();
+    assert_eq!(notes, [&json!([in_view]), &json!([]), &json!([])], "the note in the front view, under it only");
+
+    // The same lists as the rule itself gives.
+    let d = s.drawing("test").unwrap().clone();
+    for (at, sheet) in d.sheets.iter().enumerate() {
+        let on = d.on_sheet(sheet.id);
+        let encoded = |list: &[u64]| json!(list.iter().map(|id| ids::encode(*id)).collect::<Vec<_>>());
+        let listed = &reply["sheets"][at];
+        assert_eq!(
+            [&listed["tables"], &listed["images"], &listed["revision_tags"]],
+            [&encoded(&on.tables), &encoded(&on.images), &encoded(&on.tags)]
+        );
+        let mut notes: Vec<Value> = listed["notes"].as_array().unwrap().clone();
+        notes.extend(listed["views"].as_array().unwrap().iter().flat_map(|view| view["notes"].as_array().unwrap().clone()));
+        notes.sort_by_key(|id| ids::decode(id.as_str().unwrap()));
+        assert_eq!(json!(notes), encoded(&on.notes), "sheet {at}");
+        let mut views: Vec<Value> = listed["views"].as_array().unwrap().iter().map(|view| view["id"].clone()).collect();
+        views.sort_by_key(|id| ids::decode(id.as_str().unwrap()));
+        assert_eq!(json!(views), encoded(&on.views), "sheet {at}: its views are the rule's");
+    }
+
+    // Deleted, each by its own command, is gone from its list. Selection delete takes notes; a table and a
+    // revision tag have their own deletes; a placed image has no delete yet, so it stays listed.
+    let [note, table, image, tag] = here;
+    let drawing = ids::encode(d.id);
+    let items: Vec<Value> = [&note, &in_view].map(|object| json!({"type": "drawing", "drawing": drawing, "object": object})).to_vec();
+    run(&mut s, "selection.delete", json!({"items": items}));
+    run(&mut s, "drawing.table.delete", json!({"table": table}));
+    run(&mut s, "drawing.revision.tag.delete", json!({"tag": tag}));
+    let reply = run(&mut s, "drawing.inspect", json!({}));
+    assert_eq!(lists(&reply["sheets"][0]), [json!([]), json!([]), json!([image]), json!([])], "{reply}");
+    assert_eq!(reply["sheets"][0]["views"][0]["notes"], json!([]));
+    assert_eq!(lists(&reply["sheets"][1]), one(&there), "the other sheet's are kept");
 }
 
 /// Base views come in id order whatever order they were added in, and a view looking any other way
