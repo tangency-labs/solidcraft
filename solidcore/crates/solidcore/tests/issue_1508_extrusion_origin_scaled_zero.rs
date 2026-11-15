@@ -97,7 +97,7 @@ fn issue_scale_origin_at_the_solver_residual_needs_the_scaled_zero() {
 }
 
 #[test]
-fn translated_quadratic_origin_is_valid_with_the_fix() {
+fn translated_quadratic_origin_is_valid() {
     // An origin evaluated exactly on the curve, far from the origin of coordinates:
     // the solve's absolute residual can exceed the unscaled zero depending on the
     // platform's rounding; the scaled zero must accept it.
