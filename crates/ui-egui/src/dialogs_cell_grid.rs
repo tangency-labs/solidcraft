@@ -23,7 +23,9 @@ const DIRECTIONS: [&str; 3] = ["positive", "negative", "symmetric"];
 const PROFILES_INPUT: usize = 0;
 const BODIES_INPUT: usize = 1;
 const ANCHOR_INPUT: usize = 2;
-const ANCHOR_PICKS: crate::selection::Accept = crate::selection::VERTICES | crate::selection::SNAP_POINTS;
+/// A corner, the origin or a snap point (an edge's middle or end, a hole's centre): each is picked
+/// as a vertex with its point.
+const ANCHOR_PICKS: crate::selection::Accept = crate::selection::VERTICES | crate::selection::ORIGIN | crate::selection::SNAP_POINTS;
 
 #[derive(Clone, Debug)]
 pub struct CellGrid {
@@ -228,7 +230,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         angle: angle.as_ref().map_or(defaults.angle, |e| shown_expr(e, ValueKind::Angle)),
     };
     let mut inputs = inputs();
-    let state = app.session.model.state();
+    let state = crate::open_meshing::session_world(&app.session);
     if let Some(input) = inputs.get_mut(PROFILES_INPUT) {
         let items = state.sketch(sketch.0).map(|ss| crate::dialogs::profile_indices(ss, profiles)).unwrap_or_default();
         input.items = items.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
