@@ -423,16 +423,17 @@ mod tests {
             .unwrap();
         assert!(d.unaligned);
         assert_eq!(d.params, vec![0.0, 0.25, 0.5, 1.0]);
+        // the ends are discontinuous; degree 3 less multiplicity 1 and 2 inside (WR-49)
         assert_eq!(
             d.conts,
             vec![
-                ContinuityType::C0,
+                ContinuityType::Discontinuous,
                 ContinuityType::C1C2,
                 ContinuityType::C1,
-                ContinuityType::Undefined,
+                ContinuityType::Discontinuous,
             ]
         );
-        assert_eq!(d.min_cont, ContinuityType::C0);
+        assert_eq!(d.min_cont, ContinuityType::C1);
     }
 
     #[test]
@@ -475,8 +476,9 @@ mod tests {
         let k = &Kernel::default();
         let v = unit_cube();
         let mut d = Discontinuities3d::new();
-        // representational: the end knots are C0
-        assert!(v
+        // representational: a single span has no interior knot, and the end knots are
+        // discontinuous, not C0 (WR-49)
+        assert!(!v
             .has_discontinuities_simple(k, Some(&mut d), false)
             .unwrap());
         assert_eq!(d.u.conts.len(), 2);
