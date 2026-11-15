@@ -928,6 +928,13 @@ border settings safely fall back to legacy styling. The optional field requires 
 version change. There is no general border editor in Preferences; theme file import/export
 and the existing preference/control workflow own this extension.
 
+`pointer_light` is the one source of motion that follows the pointer: `pointer_light::light()`
+(-1 to 1 each way from the window's middle, eased) and `pointer_light::drift(size, depth)`
+(how far a layer moves in an area). Both are zero while Preferences › Appearance › **Light follows
+the pointer** (`background_motion`) is off, its default, so a painter that reads them draws
+exactly as a still one and asks for no frames. Patterns, a glass theme's streaks and any future
+theme effect read it rather than following the pointer themselves.
+
 ## Theme icon and tab colours
 
 Theme files optionally supply `icon_palette` SVG roles and semantic ramps. The
