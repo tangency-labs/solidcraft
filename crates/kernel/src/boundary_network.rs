@@ -326,8 +326,8 @@ impl NetCurve for SketchChain {
         let mut sharpest: Option<(Vec3, f64)> = None;
         for w in self.segs.windows(2) {
             let (a, b) = (w[0].end_tangent(), w[1].start_tangent());
-            let angle = (a.x * b.y - a.y * b.x).abs().atan2(a.x * b.x + a.y * b.y);
-            if angle.is_finite() && sharpest.is_none_or(|(_, most)| angle > most) {
+            let Ok(angle) = solidcore_ops::joint_turn::joint_turn([a.x, a.y], [b.x, b.y]) else { continue };
+            if sharpest.is_none_or(|(_, most)| angle > most) {
                 sharpest = Some((self.plane.to_world(w[0].end()), angle));
             }
         }
