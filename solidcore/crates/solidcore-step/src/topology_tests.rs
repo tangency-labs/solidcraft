@@ -355,6 +355,70 @@ fn a_loop_whose_ends_are_apart_is_still_refused() {
     assert!(r.solids[0].brep.faces.len() < 6, "{}", r.solids[0].brep.faces.len());
 }
 
+/// A builder over `ex` at its 1e-7 mm uncertainty, for reading single bounds and edges.
+fn with_builder<T>(ex: &p21::Exchange, f: impl FnOnce(&mut Builder<'_, '_>) -> T) -> T {
+    let mut reader = crate::read::Reader::new(ex, crate::read::Units::default());
+    let mut budget = MAX_FILE_FACES;
+    let mut b = Builder::new(ex, &mut reader, 1e-7, &mut budget, None);
+    f(&mut b)
+}
+
+/// Two vertices 1.5e-7 mm apart (within their two 1e-7 mm tolerances) that are the two ends of
+/// one LINE edge are never joined, even when a loop read before that edge meets them: the
+/// loop is refused and the edge, read later, stays a line between two vertices.
+#[test]
+fn the_two_ends_of_an_edge_read_later_are_never_joined() {
+    let mut w = W::default();
+    let (x, p, q) = ([0.0, 5.0, 0.0], [0.0; 3], [1.5e-7, 0.0, 0.0]);
+    let (vx, vp, vq) = ((w.vertex(x), x), (w.vertex(p), p), (w.vertex(q), q));
+    let short = w.line_edge(vp, vq, true, 1.0);
+    let (xp, qx) = (w.line_edge(vx, vp, true, 1.0), w.line_edge(vq, vx, true, 1.0));
+    let (a, z) = (w.oe(xp, true), w.oe(qx, true));
+    let bound = w.bound(&[a, z], true, true);
+    let ex = w.file(&[bound]);
+    with_builder(&ex, |b| {
+        let mut edges = 0;
+        let err = b.bound(bound, &mut edges).err().unwrap_or_default();
+        assert!(err.contains("is not connected"), "{err}");
+        let (e, _) = b.edge(short).unwrap();
+        let [s, t] = b.edges[e as usize].vertices;
+        assert_ne!(s, t);
+    });
+}
+
+/// A loop X→B, C→C (a circle), D→X with B, C and D at one point: every join resolves the
+/// vertex the last one left, so B, C and D are one vertex and the loop's edges meet there.
+#[test]
+fn a_loop_through_three_vertices_at_one_point_joins_all_three() {
+    let mut w = W::default();
+    let (x, c) = ([0.0, 5.0, 0.0], [0.0; 3]);
+    let vx = (w.vertex(x), x);
+    let (vb, vc, vd) = ((w.vertex(c), c), w.vertex(c), (w.vertex(c), c));
+    let xb = w.line_edge(vx, vb, true, 1.0);
+    let circle = w.circle([-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 1.0);
+    let cc = w.add(format!("EDGE_CURVE('',#{vc},#{vc},#{circle},.T.)"));
+    let dx = w.line_edge(vd, vx, true, 1.0);
+    let oes = [w.oe(xb, true), w.oe(cc, true), w.oe(dx, true)];
+    let bound = w.bound(&oes, true, true);
+    let ex = w.file(&[bound]);
+    with_builder(&ex, |b| {
+        let mut edges = 0;
+        let (LoopB::Edges(uses), _) = b.bound(bound, &mut edges).unwrap() else { panic!("an edge loop") };
+        b.join_vertices().unwrap();
+        let ends: Vec<[u32; 2]> = uses
+            .iter()
+            .map(|&(e, fwd)| {
+                let [s, t] = b.edges[e as usize].vertices;
+                if fwd { [s, t] } else { [t, s] }
+            })
+            .collect();
+        for (k, e) in ends.iter().enumerate() {
+            assert_eq!(e[1], ends[(k + 1) % ends.len()][0], "{ends:?}");
+        }
+        assert_eq!(b.edges.iter().flat_map(|e| e.vertices).collect::<HashSet<_>>().len(), 2);
+    });
+}
+
 #[test]
 fn faces_and_edges_written_against_their_sense_are_read_by_their_loops_and_vertices() {
     let s = one_solid(&cube(BoxStyle { wrong_face: true, wrong_edge: true, ..Default::default() }));
