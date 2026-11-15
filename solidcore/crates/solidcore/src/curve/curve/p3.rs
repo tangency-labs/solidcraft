@@ -96,7 +96,6 @@
 //!   evaluators and the projected `LocalCurveSolve`'s check; `CrvsFixGaps` leaves a gap
 //!   that cannot be measured or closed open (not counted).
 
-use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p2::{
     proj_signed_angle, property_angle, unitize_tangent, Curve, CurveEvaluate, CurveKind,
     CurvePropertyGs, CurvePropertyType,
@@ -656,7 +655,9 @@ impl Curve {
         // First, find the span containing dStartParam. (As the fork, the statuses of
         // the knots, intervals and span lengths are passed on, tangency-labs/smlib
         // 8311f8e.)
-        let (knots, _) = knots_ignoring_status(Ok(self.knots_with_status(k, None)?))?;
+        let with_status = self.knots_with_status(k, None)?;
+        with_status.status?;
+        let knots = with_status.knots;
         let num_knots = knots.len() as i64;
         let knot = |i: i64| -> Result<f64> {
             usize::try_from(i)

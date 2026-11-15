@@ -66,8 +66,9 @@
 //!   returns `void`).
 //! - **No evidence (WR-663).** `IsEdgeuseSideInSurface` answers `true` at a sample
 //!   whose point or drop fails and `HasDogLegNearPole` shows no dog-leg without the
-//!   polygon or its angles, as the fork (tangency-labs/smlib 666242b); upstream reads
-//!   the unset values.
+//!   polygon, as the fork (tangency-labs/smlib 666242b); upstream reads the unset
+//!   values. A control point whose angles cannot be measured (a zero polygon segment)
+//!   is skipped and the scan goes on, where the fork ends it with no dog-leg.
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::Curve;
@@ -1312,19 +1313,21 @@ pub fn has_dog_leg_near_pole(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<DogL
                         let next_vec = next_cpt - cpt;
 
                         // Angle in Control Polygon at target ControlPoint (a zero vector
-                        // gives 0 upstream; the fork shows no dog-leg then)
+                        // gives 0 upstream; the fork ends the scan with no dog-leg). A
+                        // point without its angles is no evidence either way: skip it
+                        // (the angles do not depend on jj) and go on to the next one.
                         let Ok(ang_vec_rad) = last_vec.angle_between(next_vec) else {
-                            return Ok(out);
+                            break;
                         };
 
                         // Angles between ControlPolygon Next/Last Vecs and the
                         // singularity direction (upstream sets [1 0 0] for both checks)
                         let sing_vec = Vec3::new(1.0, 0.0, 0.0);
                         let Ok(ang_last_pole_rad) = last_vec.angle_between(sing_vec) else {
-                            return Ok(out);
+                            break;
                         };
                         let Ok(ang_next_pole_rad) = next_vec.angle_between(sing_vec) else {
-                            return Ok(out);
+                            break;
                         };
 
                         let ang_last_pole_deg = rad_to_deg(ang_last_pole_rad);

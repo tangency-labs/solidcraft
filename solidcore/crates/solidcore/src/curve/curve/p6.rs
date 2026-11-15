@@ -94,7 +94,6 @@
 //!   line/line check) samples the interval midpoints (`per = 0.5`) instead of dividing
 //!   `0 / 0 = NaN` as upstream does.
 
-use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p1::{ApproximateCurveOptions, GlobalPointSolveOptions};
 use crate::curve::curve::p2::{
     at, snap_sol_to_specified_endpoint, Curve, CurveKind, CurvePropertyType,
@@ -1089,12 +1088,11 @@ impl Curve {
             do_precise = true;
             // (statuses ignored upstream; passed on as the fork, tangency-labs/smlib
             // 8311f8e)
-            let knots = knots_ignoring_status(Ok(self.knots_with_status(k, None)?))?
-                .0
-                .len();
-            let other_knots = knots_ignoring_status(Ok(other.knots_with_status(k, None)?))?
-                .0
-                .len();
+            let mine = self.knots_with_status(k, None)?;
+            mine.status?;
+            let theirs = other.knots_with_status(k, None)?;
+            theirs.status?;
+            let (knots, other_knots) = (mine.knots.len(), theirs.knots.len());
             num_samples = 22 + knots as u64 + other_knots as u64;
         }
 
