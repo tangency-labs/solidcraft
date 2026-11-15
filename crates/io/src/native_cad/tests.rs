@@ -285,3 +285,141 @@ fn freecad_shown_tip_and_binders_are_not_imported_twice() {
     let v = solidcraft_kernel::measure(&built[0].body).unwrap().volume;
     assert!((v - 7818.009).abs() < 0.05, "volume {v}");
 }
+
+/// The route a FreeCAD or Rhino file took before its solids were read into records, kept here to
+/// compare the two: cadmpeg's STEP writer (AP214), then SolidCraft's STEP reader. Returns the
+/// import, or why there is none, and the writer's losses.
+fn by_step_text(ir: &cadmpeg_ir::document::CadIr) -> (Result<solidcraft_kernel::StepImport, String>, Vec<String>) {
+    use cadmpeg_ir::codec::write::{EncodeInput, target::TargetRequest};
+    let plan =
+        match cadmpeg_registry::build_encoder(cadmpeg_registry::Format::Step).plan(EncodeInput::new(ir, None), TargetRequest::Explicit("ap214")) {
+            Ok(plan) => plan,
+            Err(e) => return (Err(e.to_string()), Vec::new()),
+        };
+    let losses: Vec<String> = plan.report().losses.iter().map(|l| format!("{}: {}", l.code, l.message)).collect();
+    let mut out = Vec::new();
+    if let Err(e) = plan.write_to(&mut out) {
+        return (Err(e.to_string()), losses);
+    }
+    (solidcraft_kernel::step_import(&String::from_utf8_lossy(&out)).map_err(|e| e.to_string()), losses)
+}
+
+/// The route they take now: the neutral model read into records, the records made into bodies.
+fn by_records(ir: &cadmpeg_ir::document::CadIr) -> (Result<solidcraft_kernel::StepImport, String>, Vec<String>) {
+    let records = cadir_records(ir, "compared", "test");
+    let warnings = records.warnings.clone();
+    (solidcraft_kernel::records_import(&records).map_err(|e| e.to_string()), warnings)
+}
+
+/// A file decoded by cadmpeg into its neutral model: FreeCAD, Rhino or (for comparison) STEP.
+fn neutral(bytes: &[u8], name: &str) -> cadmpeg_ir::document::CadIr {
+    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    let (_, decoded) = convert::decode_at(name, &ext, bytes, &["fcstd", "rhino", "step"], cadmpeg_core::decode::DecodeDepth::Full).unwrap();
+    decoded.into_parts().0
+}
+
+/// What an import built, body by body, ordered by volume: whether it is whole (not a surface body
+/// of the faces that read), its faces, volume and bounding box.
+fn built(imp: &solidcraft_kernel::StepImport) -> Vec<(bool, usize, f64, [f64; 6])> {
+    let mut out: Vec<_> = imp
+        .bodies
+        .iter()
+        .map(|b| {
+            let m = solidcraft_kernel::measure(&b.body).unwrap();
+            (b.refused.is_none(), m.faces, m.volume, [m.bbox.min.x, m.bbox.min.y, m.bbox.min.z, m.bbox.max.x, m.bbox.max.y, m.bbox.max.z])
+        })
+        .collect();
+    out.sort_by(|a, b| a.2.total_cmp(&b.2));
+    out
+}
+
+/// Whether two imports built the same bodies: the same number, each as whole, with as many faces,
+/// the same volume and the same box (to a millionth of the part's size).
+fn same_bodies(a: &[(bool, usize, f64, [f64; 6])], b: &[(bool, usize, f64, [f64; 6])]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(a, b)| {
+            let size = a.3.iter().chain(&b.3).fold(1.0f64, |m, v| m.max(v.abs()));
+            a.0 == b.0
+                && a.1 == b.1
+                && (a.2 - b.2).abs() <= 1e-6 * a.2.abs().max(b.2.abs()).max(1.0)
+                && a.3.iter().zip(&b.3).all(|(x, y)| (x - y).abs() <= 1e-6 * size)
+        })
+}
+
+/// The parts compared between the two routes: every FreeCAD and Rhino fixture.
+fn compared_parts() -> Vec<(String, Vec<u8>)> {
+    [
+        ("block.FCStd", BLOCK_FCSTD),
+        ("block.3dm", BLOCK_3DM),
+        ("bracket.FCStd", BRACKET_FCSTD),
+        ("knob.FCStd", KNOB_FCSTD),
+        ("plate.FCStd", PLATE_FCSTD),
+    ]
+    .into_iter()
+    .map(|(n, b)| (n.to_string(), b.to_vec()))
+    .collect()
+}
+
+/// The compared parts whose bodies differ between the two routes, with why.
+const DIFFER: [(&str, &str); 0] = [];
+
+/// Reading the neutral model into records builds the bodies the STEP route built (cadmpeg's
+/// STEP writer, then our STEP reader): the same bodies, each as whole, with as many faces, the
+/// same volume and the same box, for every part in [`compared_parts`] but those in [`DIFFER`].
+#[test]
+fn records_build_the_bodies_the_step_route_built() {
+    let mut differ = Vec::new();
+    for (name, bytes) in &compared_parts() {
+        let ir = neutral(bytes, name);
+        let (old, _) = by_step_text(&ir);
+        let (new, warnings) = by_records(&ir);
+        let old = built(&old.unwrap_or_else(|e| panic!("{name}: the STEP route: {e}")));
+        let new = built(&new.unwrap_or_else(|e| panic!("{name}: the records: {e} {warnings:?}")));
+        if !same_bodies(&old, &new) {
+            differ.push(name.clone());
+        }
+    }
+    assert_eq!(differ, DIFFER.map(|(n, _)| n.to_string()), "parts whose bodies differ between the two routes");
+}
+
+/// What the STEP route did with what the records now leave out, each with the reason. A body placed
+/// by a mirror: cadmpeg's STEP writer could not write the placement, so the body came in unplaced
+/// (a loss noted, the geometry in the wrong place). An elliptical cone: the writer wrote a circular
+/// cone, its ratio dropped, so the body came in as if the cone were round.
+#[test]
+fn what_the_records_leave_out_the_step_route_imported_wrongly() {
+    // The 10 × 20 × 30 mm block, mirrored in x and moved 100 mm along it: it belongs at x 90..100.
+    let mut ir = neutral(BLOCK_FCSTD, "block.FCStd");
+    let unplaced = built(&by_step_text(&ir).0.unwrap());
+    for b in &mut ir.model.bodies {
+        b.transform = Some(cadmpeg_ir::transform::Transform::affine([[-1.0, 0.0, 0.0, 100.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]]).unwrap());
+    }
+    let (old, losses) = by_step_text(&ir);
+    assert!(same_bodies(&built(&old.unwrap()), &unplaced), "the STEP route imported the mirrored block where it was before the move");
+    assert!(!losses.is_empty(), "with a loss noted");
+    let (new, warnings) = by_records(&ir);
+    assert!(new.is_ok_and(|imp| imp.bodies.is_empty()), "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.contains("not imported: its placement:")), "{warnings:?}");
+
+    // The knob's chamfer, a cone, made elliptical (the ratio of its minor to its major radius halved).
+    let ir = neutral(KNOB_FCSTD, "knob.FCStd");
+    let round = built(&by_step_text(&ir).0.unwrap());
+    let mut json = serde_json::to_value(&ir).unwrap();
+    fn halve_ratio(v: &mut serde_json::Value) -> usize {
+        match v {
+            serde_json::Value::Object(m) if m.contains_key("half_angle") && m.contains_key("ratio") => {
+                m.insert("ratio".into(), 0.5.into());
+                1
+            }
+            serde_json::Value::Object(m) => m.values_mut().map(halve_ratio).sum(),
+            serde_json::Value::Array(a) => a.iter_mut().map(halve_ratio).sum(),
+            _ => 0,
+        }
+    }
+    assert!(halve_ratio(&mut json) > 0, "a cone in the model");
+    let ir: cadmpeg_ir::document::CadIr = serde_json::from_value(json).unwrap();
+    let (old, _) = by_step_text(&ir);
+    assert!(same_bodies(&built(&old.unwrap()), &round), "the STEP route imported the elliptical cone as the round one");
+    let (_, warnings) = by_records(&ir);
+    assert!(warnings.iter().any(|w| w.contains("an elliptical cone")), "{warnings:?}");
+}

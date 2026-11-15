@@ -6165,6 +6165,7 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "sha2 0.10.9",
+ "solidcore-cadir",
  "solidcore-ops",
  "solidcore-record",
  "solidcore-tess",
@@ -6187,13 +6188,11 @@ dependencies = [
 name = "solidcraft-kernel"
 version = "0.45.0-rc.1"
 dependencies = [
- "cadmpeg-ir",
  "log",
  "proptest",
  "rayon",
  "serde",
  "serde_json",
- "solidcore-cadir",
  "solidcore-ops",
  "solidcore-record",
  "solidcore-step",

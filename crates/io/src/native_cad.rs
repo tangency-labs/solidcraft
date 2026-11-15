@@ -1,6 +1,6 @@
 //! Other CAD formats read through [cadmpeg](https://github.com/cadmpeg/cadmpeg): FreeCAD
 //! `.FCStd` and Rhino `.3dm`. cadmpeg decodes the file into its neutral model (CADIR), which is
-//! read straight into B-rep records (`solidcraft_kernel::cadir_records`); the Import feature keeps
+//! read straight into B-rep records ([`cadir_records`]); the Import feature keeps
 //! those records, with no STEP text in between.
 //!
 //! Only codecs for open formats are compiled in (the workspace enables cadmpeg-registry's
@@ -64,6 +64,43 @@ pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, Strin
     let theirs: Vec<_> = file_solids.import.bodies.iter().zip(0u64..).filter(|(_, i)| !skip.contains(i)).map(|(b, _)| b.body.clone()).collect();
     design::check_against(&rebuilt, &theirs)?;
     Ok(design)
+}
+
+/// `ir`'s bodies as an import kept as records, one product called `product`, written by
+/// `system`: each body region assembled into a record by `solidcore_cadir`, its pcurves without a
+/// closed form made as a STEP import's are ([`solidcraft_kernel::import_trims`]). Nothing passes
+/// through STEP text. CADIR's bodies come with their own names, visibility and rigid placements,
+/// which the records keep. What could not be read (and what was repaired on the way) is in the
+/// warnings, each naming its body.
+pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, system: &str) -> solidcraft_kernel::ImportRecords {
+    use solidcraft_kernel::{ImportRecords, RecordBody, StepNode};
+    let _span = solidcraft_profile::span("import", "cadir.records");
+    let read = solidcore_cadir::read_bodies(ir, Some(solidcraft_kernel::import_trims()));
+    let by_id: std::collections::HashMap<&str, &cadmpeg_ir::topology::Body> = ir.model.bodies.iter().map(|b| (b.id.as_str(), b)).collect();
+    let label = |id: &str| by_id.get(id).and_then(|b| b.name.clone()).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| id.to_string());
+    let mut warnings = Vec::new();
+    let mut bodies = Vec::with_capacity(read.read.len());
+    for r in read.read {
+        let body = by_id.get(r.body.as_str());
+        warnings.extend(r.solid.notes.iter().map(|n| format!("{}: {n}", label(&r.body))));
+        bodies.push(RecordBody {
+            name: body.and_then(|b| b.name.clone()).unwrap_or_default(),
+            path: vec![product.to_string()],
+            instance: None,
+            // Not yet: a Rhino object's colour is often its layer's default (black), which is not
+            // how Rhino shades it; the STEP route brought no colour over either.
+            color: None,
+            hidden: body.is_some_and(|b| b.visible == Some(false)),
+            placement: r.placement,
+            brep: r.solid.brep,
+            face_origin: r.solid.face_origin,
+            sheet: r.solid.sheet,
+        });
+    }
+    warnings.extend(read.failures.iter().map(|f| format!("{}: not imported: {}", label(&f.body), f.message)));
+    let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+    let tree = vec![StepNode { name: product.to_string(), transform: identity, bodies: (0..bodies.len()).collect(), children: Vec::new() }];
+    ImportRecords { bodies, tree, warnings, system: system.to_string() }
 }
 
 mod design;
@@ -282,7 +319,7 @@ mod convert {
             "rhino" => "Rhino",
             other => other,
         };
-        let records = solidcraft_kernel::cadir_records(&ir, &product, system);
+        let records = super::cadir_records(&ir, &product, system);
         if records.bodies.is_empty() {
             let why = records.warnings.first().map(|w| format!(" ({w})")).unwrap_or_default();
             return Err(format!("{name}: this {format} file has no solids that can be imported{why}"));

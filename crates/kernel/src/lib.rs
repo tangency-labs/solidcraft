@@ -25,7 +25,6 @@ mod boundary;
 mod boundary_network;
 mod bridge;
 mod build;
-mod cadir_in;
 #[cfg(test)]
 mod chamfer_sides_curved_tests;
 mod continuity;
@@ -182,7 +181,6 @@ pub use build::{
     PathSeg, box_solid, canonical_revolve_axis, cylinder, extrude, extrude_tapered, extrude_tapered_between, extrude_whole_sides, loft, loft_regions,
     loft_with_rails, path_polyline, planar_face_record, revolve, revolve_whole, sphere, sweep, sweep_with, torus,
 };
-pub use cadir_in::cadir_records;
 pub use continuity::{
     ContinuityReport, ContinuityTolerances, DEFAULT_SAMPLES, EdgePick, MAX_SAMPLES, MIN_SAMPLES, SeamReport, SeamStation, SeamVerdict, SeamWorst,
     pick_edges, seam_diagnostics,
@@ -233,7 +231,7 @@ pub use splitface::{SplitTool, face_split_if_on_face, has_cap_at, split_body, sp
 pub use step::{step_export, step_export_with_face_ids};
 /// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
 pub use step_in::p21::{max_bytes as step_max_bytes, set_max_bytes as set_step_max_bytes};
-pub use step_in::records::{ImportRecords, RecordBody, records_import, records_import_shared, records_text};
+pub use step_in::records::{ImportRecords, RecordBody, import_trims, records_import, records_import_shared, records_text};
 pub use step_in::{
     ImportChecks, ImportIssue, ImportReport, ImportedBody, IssueKind, LeftOut, StepImport, StepNode, StepReading, step_cache_alive, step_import,
     step_import_shared, step_orientation_errors, step_validate,
