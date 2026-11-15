@@ -2593,8 +2593,8 @@ pub fn split_at_seam_notified<O: LoopObject>(
 /// through `env` when given. The cover keeps the merged domain within the period it spans,
 /// so the trims of the covered part cross the seam; without the seam edges the loops'
 /// UV trims jump by the period where they cross it. `SmMerge::BooleanPostProcess`
-/// ([`crate::boolean::merge::p1::boolean_post_process`]) calls this after each face merge
-/// under `Kernel::fixes.cover_wraps_across_closed_seam`, and
+/// ([`crate::boolean::merge::p1::boolean_post_process`]) calls this after each face merge,
+/// and
 /// `SmBrep::RemoveTopologicalEdgesAndVertices`
 /// ([`crate::topology::brep::p5::remove_topological_edges_and_vertices`]) after each one
 /// (#16866).
