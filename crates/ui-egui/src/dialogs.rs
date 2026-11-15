@@ -2051,6 +2051,8 @@ impl Dialog {
             return;
         }
         self.chain_applied = *chain;
+        // Ticked or unticked here, the box decides over an edited feature's saved choice.
+        self.extra.remove("tangent_chain");
         let Some(inp) = self.inputs.first_mut() else { return };
         let mut items = Vec::new();
         for pick in &self.picked_edges {
@@ -5781,8 +5783,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             ("solid.revolve", p)
         }
-        Kind::Fillet { radius, chamfer, ctype, distance2, angle, flip, setback, .. } => {
+        Kind::Fillet { radius, chamfer, ctype, distance2, angle, flip, setback, chain } => {
             need(0, "edges")?;
+            // Tangent Chain unticked: the command rounds the picked edges alone, not their chains
+            // (#15939). An edited feature's saved choice rides in `extra` until the box is changed.
+            let lone_edges = !*chain && !d.extra.contains_key("tangent_chain");
             let st = crate::open_meshing::session_world(s);
             // Faces stand for all their edges. Picks on several bodies are split per body below (#12453).
             let edges: Vec<Value> = edges_by_body(s, sels(d, 0)).into_iter().flat_map(|(_, pts)| pts).map(pt).collect();
@@ -5796,9 +5801,15 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 if *ctype > 0 && *flip {
                     p["flip"] = json!(true);
                 }
+                if lone_edges {
+                    p["tangent_chain"] = json!(false);
+                }
                 ("solid.chamfer", p)
             } else {
                 let mut p = with_single_body(json!({"edges": edges, "radius": radius}), sels(d, 0));
+                if lone_edges {
+                    p["tangent_chain"] = json!(false);
+                }
                 let style = d.extra.get("type").and_then(Value::as_str);
                 if matches!(style, Some("variable" | "spline")) {
                     // The start radius goes at one end of the first edge (Swap Ends: the other).
@@ -7428,6 +7439,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let chamfer = matches!(f.kind, FeatureKind::Chamfer { .. });
             let mut d = start(if chamfer { "solid.chamfer" } else { "solid.fillet" })?;
             d.kind = fillet_kind(&shown_expr(radius, ValueKind::Length), chamfer);
+            // The saved edges are the picks alone; whether their chains were rounded with them is
+            // kept as saved (#15939).
+            if let FeatureKind::Fillet { tangent_chain, .. } | FeatureKind::Chamfer { tangent_chain, .. } = &f.kind {
+                d.extra.insert("tangent_chain".into(), json!(tangent_chain));
+            }
             if let Kind::Fillet { chain, ctype, distance2, angle, flip, .. } = &mut d.kind {
                 *chain = false;
                 // An unequal chamfer: two distances, or a distance and an angle.

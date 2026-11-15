@@ -1380,12 +1380,12 @@ mod tests {
         // Editing it keeps the chain off; a fillet a script saved with the chain on keeps it on.
         let saved = h.app.session.doc.features.last().unwrap().id;
         h.app.edit_feature(saved);
-        assert_eq!(parameters(&h)["tangent_chain"], json!(false));
+        assert_eq!(redefined(&h)["tangent_chain"], json!(false));
         h.step(&json!({"widget":"Cancel"})).unwrap();
         h.app.run("solid.fillet", json!({"edges": [[0, 15, 0]], "radius": "1"})).unwrap();
         let scripted = h.app.session.doc.features.last().unwrap().id;
         h.app.edit_feature(scripted);
-        assert_ne!(parameters(&h)["tangent_chain"], json!(false));
+        assert_ne!(redefined(&h)["tangent_chain"], json!(false));
     }
 
     fn fillet_harness() -> Harness {
@@ -1403,6 +1403,15 @@ mod tests {
         let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
         assert_eq!(commands.first().unwrap().0, "solid.fillet");
         commands.first().unwrap().1.clone()
+    }
+
+    /// The parameters an edit dialog's OK gives its feature again.
+    fn redefined(h: &Harness) -> Value {
+        let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let (cmd, p) = commands.first().unwrap();
+        assert_eq!(cmd, "timeline.redefine", "{p}");
+        assert_eq!(p["command"], json!("solid.fillet"), "{p}");
+        p["params"].clone()
     }
 
     fn choose(h: &mut Harness, row: &str, option: &str) {
