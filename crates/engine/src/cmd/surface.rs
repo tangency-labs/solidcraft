@@ -1754,6 +1754,42 @@ mod tests {
         assert!((area(&s, "Tube") - before).abs() < 1e-9, "{before}");
     }
 
+    /// A 10 mm box and, through it, a surface tube (an open cylinder wall).
+    fn box_and_tube(s: &mut Session) {
+        run(s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        run(s, "sketch.create", json!({"plane": "XY", "name": "C"}));
+        run(s, "sketch.circle.center", json!({"center": [5, 5], "radius": 2}));
+        run(s, "sketch.finish", json!({}));
+        run(s, "surface.extrude", json!({"sketch": "C", "distance": 20, "body_name": "Tube"}));
+    }
+
+    /// #15913: a Combine join with a surface body, as target or as a tool in any position, is
+    /// refused up front and names the surface body; the bodies are left as they were.
+    #[test]
+    fn a_join_with_a_surface_body_is_refused_and_names_it() {
+        for (target, tools) in [("Tube", vec!["Block"]), ("Block", vec!["Tube", "Peer"]), ("Block", vec!["Peer", "Tube"])] {
+            let mut s = Session::default();
+            box_and_tube(&mut s);
+            run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 0], "body_name": "Peer"}));
+            let err = s.execute("solid.combine", &json!({"target": target, "tools": tools, "operation": "join"})).unwrap_err().to_string();
+            assert!(err.contains("Tube is a surface body, and a join needs solids"), "{target} {tools:?}: {err}");
+            let st = s.world_state().unwrap();
+            assert!(st.body("Tube").unwrap().body.is_surface());
+            assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
+        }
+    }
+
+    /// #15913 negative control: a join of overlapping solids still makes one body of the union.
+    #[test]
+    fn a_join_of_solids_is_unchanged() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "A"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [5, 0, 0], "body_name": "B"}));
+        run(&mut s, "solid.combine", json!({"target": "A", "tools": ["B"], "operation": "join"}));
+        assert_eq!(s.world_state().unwrap().bodies.len(), 1);
+        assert!((volume(&s, "A") - 1500.0).abs() < 1e-6);
+    }
+
     /// `surface.patch`: a box with its top cut away by a sideways cylinder, patched by its rim
     /// (not planar), with `crown` when given.
     fn saddle_cover(crown: Option<f64>) -> (Session, Value) {

@@ -68,6 +68,9 @@ pub struct CellGridSpec {
     /// with `Clip::Whole`.
     #[serde(default)]
     pub margin: f64,
+    /// What happens to a cell a keep-out's edge crosses (`None`: the same as `clip`).
+    #[serde(default)]
+    pub keepout_clip: Option<Clip>,
 }
 
 /// How a cell's opening came about.
