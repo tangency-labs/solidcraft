@@ -106,7 +106,11 @@
 //!   only locates the comparison; samples cannot grant relief.
 //!   A cut wall whose seam edge ends on a body edge 1e-7 to 1e-5 across the
 //!   seam (the cut's sketch circle that far off the edge) read as a near miss; its loop
-//!   closes at the vertex within tolerance, and no sliver lies beside the seam.
+//!   closes at the vertex within tolerance, and no sliver lies beside the seam. The
+//!   tolerance is withheld where another edge at the vertex runs beside the seam and
+//!   bounds a face with one of the seam's own edges (a sliver); an edge beside it on
+//!   other faces, the tip of another hole touching the wall along the seam (#9216), does
+//!   not withhold it.
 //! - **Recursion.** None.
 
 use std::borrow::Cow;
@@ -905,11 +909,12 @@ impl<O: ClassObject> CurveClassification<O> {
     /// Whether an edge at the vertex end `pc` other than the curve's own edges runs beside
     /// the curve: its middle within the vertex's tolerance of the curve, and it bounds a
     /// face that one of the curve's own edges bounds too. Such an edge and the curve bound a
-    /// sliver (that face, a tolerance wide between them), where an edge that leaves the
-    /// vertex across the curve makes a corner. An edge beside the curve on faces none of
-    /// the curve's edges bound (the tip of another hole's wall touching the face's wall
-    /// along the seam, #9216) bounds no face with it. `false` where the vertex, its edges,
-    /// their faces or the curve cannot be resolved, or a drop fails.
+    /// sliver (a face between them a tolerance wide, which has the curve's edge on its
+    /// boundary), where an edge that leaves the vertex across the curve makes a corner. An
+    /// edge beside the curve on faces none of the curve's edges bound (the tip of another
+    /// hole's wall touching the face's wall along the seam, #9216) bounds no such face.
+    /// Where the own edges' faces cannot be resolved, every edge beside counts. `false`
+    /// where the vertex, its edges or the curve cannot be resolved, or a drop fails.
     ///
     /// # Errors
     ///
@@ -964,7 +969,7 @@ impl<O: ClassObject> CurveClassification<O> {
             return Ok(false);
         };
         for e in edges.into_iter().filter(|e| !own.contains(e)) {
-            if !faces_of(e)?.iter().any(|f| own_faces.contains(f)) {
+            if !own_faces.is_empty() && !faces_of(e)?.iter().any(|f| own_faces.contains(f)) {
                 continue;
             }
             let Ok(edge) = b.edge(e) else { continue };
