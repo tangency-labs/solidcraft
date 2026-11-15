@@ -10595,6 +10595,15 @@ fn eval_feature(
                 return Ok(()); // the pieces were all joined back into the body they are part of
             }
             let op = if *operation == Operation::NewBody { Operation::Join } else { *operation };
+            // #15913: a join of a surface body fails deep in the kernel or swallows the surface; refuse it here, by name.
+            if op == Operation::Join {
+                let surface = std::iter::once(target).chain(tools.iter()).find(|n| st.body(n).is_some_and(|b| b.is_surface()));
+                if let Some(name) = surface {
+                    return Err(DocError::Invalid(format!(
+                        "{name} is a surface body, and a join needs solids: Thicken it first, or Stitch closed surfaces with Surface › Stitch"
+                    )));
+                }
+            }
             apply_traced(doc, st, f, tb, op, std::slice::from_ref(&target.0))?;
             if !keep_tools {
                 st.bodies.retain(|b| !tools.iter().any(|t| *t == b.name));
