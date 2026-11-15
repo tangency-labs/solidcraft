@@ -364,14 +364,29 @@ fn past_end_through_side_edge(
         return Ok(None);
     }
     let curve = filleted_curve(target, fil_edge)?;
-    let [(start, start_tangent), (end, end_tangent)] =
-        end_jets(k, curve, &edge::interval(target, fil_edge)?)?;
+    let jets = end_jets(k, curve, &edge::interval(target, fil_edge)?)?;
     // the side it leaves toward, or comes from
     let (point, heading) = rail_jet(k, rail, rail_param, leaving)?;
+    Ok(crossing_end(&ends, jets, point, heading, leaving))
+}
+
+/// Of the ends `ends` (0 the start, 1 the end) of a filleted edge whose point and tangent
+/// there are `jets`, the one a rail crossing a side edge at `point`, heading `heading`, is
+/// past: `leaving` its face heading out past that end, else coming back heading in from
+/// beyond it. Where the side edge joins both ends (a loop of two edges), the crossing is at
+/// the nearer one, and only that end is judged.
+pub(super) fn crossing_end(
+    ends: &[usize],
+    jets: [(Point3, Point3); 2],
+    point: Point3,
+    heading: Point3,
+    leaving: bool,
+) -> Option<usize> {
+    let [(start, start_tangent), (end, end_tangent)] = jets;
     let nearer = if ends.len() > 1 {
         usize::from(point.distance(end) < point.distance(start))
     } else {
-        ends.first().copied().unwrap_or_default()
+        *ends.first()?
     };
     // the edge's tangent at that end, pointing out past it
     let ahead = if nearer == 0 {
@@ -379,7 +394,7 @@ fn past_end_through_side_edge(
     } else {
         heading.dot(end_tangent)
     };
-    Ok(((leaving && ahead > 0.0) || (!leaving && ahead < 0.0)).then_some(nearer))
+    ((leaving && ahead > 0.0) || (!leaving && ahead < 0.0)).then_some(nearer)
 }
 
 /// The end of the filleted edge a run of a rail off its face between two stretches on it
