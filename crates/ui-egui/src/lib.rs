@@ -2012,6 +2012,31 @@ impl SolveApp {
             }
             return;
         }
+        // Toggle Driven Dimension and Toggle Radius / Diameter take the dimension to act on as
+        // `constraint`: from a shortcut or the command search that is the selected one, as in the
+        // context menu (#17189). With none selected they say what to pick, where they used to
+        // answer "`constraint` must be a dimension id".
+        if matches!(id, "sketch.toggle_driven" | "sketch.toggle_diameter") {
+            let dimensions: Vec<String> = self
+                .session
+                .selection
+                .iter()
+                .filter_map(|s| match s {
+                    solidcraft_engine::Sel::SketchConstraint { id } => Some(id.clone()),
+                    _ => None,
+                })
+                .collect();
+            if dimensions.is_empty() {
+                self.set_status(self.tr("ui.toggle_dimension_select_first"), false);
+                return;
+            }
+            for constraint in dimensions {
+                if let Err(why) = self.run(id, json!({ "constraint": constraint })) {
+                    self.set_status(why, true);
+                }
+            }
+            return;
+        }
         // Front … Isometric (Ctrl+1…7 by default) turn the view as the navigator's faces do. The
         // flat pattern is a 2D page: it has no other side to turn to.
         if solidcraft_engine::standard_view(id).is_some() {
