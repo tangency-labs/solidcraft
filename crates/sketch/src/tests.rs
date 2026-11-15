@@ -1967,6 +1967,52 @@ fn a_fillet_follows_its_corner_when_the_corner_mirrors() {
 }
 
 #[test]
+fn a_midpoint_on_a_fillet_stays_satisfied_when_the_corner_mirrors() {
+    // The fillet carries a point at its middle. When the corner mirrors, the arc is stored the
+    // other way round (its ends swapped), which puts the middle at the opposite end of the
+    // circle: the solve must either keep the point at the middle of the arc or fail.
+    let (mut sk, _, arc, _, _, far2) = filleted_corner();
+    let m = sk.add_point(v(38.0, 12.0), None).unwrap();
+    let id = sk.add_constraint(ConstraintKind::Midpoint { p: m, l: arc }, None).unwrap();
+    let q = sk.add_point(v(40.0, -20.0), None).unwrap();
+    sk.points[q].fixed = true;
+    sk.add_constraint(ConstraintKind::Coincident { p: far2, q }, None).unwrap();
+    let rep = solve(&mut sk);
+    let ci = sk.constraints.iter().position(|c| c.id == id).unwrap();
+    let residual = constraint_residual(&sk, ci).unwrap();
+    assert!(!rep.ok() || residual < 1e-6, "reported ok with the midpoint {residual} off: {rep:?}");
+}
+
+#[test]
+fn a_midpoint_on_a_fillet_stays_satisfied_when_the_solve_swaps_its_ends() {
+    // The corner of `a_fillet_the_solve_leaves_in_place_keeps_its_short_arc_against_a_mirrored_reference`
+    // with a point at the arc's middle: judged against a mirrored reference the arc is swapped
+    // after the solve. The point must end at the middle of the arc that stays, or the solve fails.
+    let mut sk = Sketch::new();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let l1 = sk.add_line(v(10.0, 10.0), v(35.0, 10.0), None, None, None).unwrap();
+    let CurveKind::Line { b: ta, .. } = sk.curves[l1].kind else { panic!() };
+    let end = v(35.0 + 5.0 * s, 15.0 - 5.0 * s);
+    let arc = sk.add_arc(v(35.0, 15.0), v(35.0, 10.0), end, [None, Some(ta), None], None).unwrap();
+    let CurveKind::Arc { b: tb, .. } = sk.curves[arc].kind else { panic!() };
+    let l2 = sk.add_line(end, end + v(10.0, 10.0), Some(tb), None, None).unwrap();
+    sk.add_constraint(ConstraintKind::Radius { c: arc, value: 5.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l1, b: arc }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l2, b: arc }, None).unwrap();
+    for p in &mut sk.points {
+        p.fixed = true;
+    }
+    let m = sk.add_point(v(37.0, 11.0), None).unwrap();
+    let id = sk.add_constraint(ConstraintKind::Midpoint { p: m, l: arc }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    let mirrored: Vec<Vec2> = sk.points.iter().map(|p| v(80.0 - p.pos.x, p.pos.y)).collect();
+    let rep = solve_with(&mut sk, &Hold::default(), Some(&mirrored), Analysis::Full, None);
+    let ci = sk.constraints.iter().position(|c| c.id == id).unwrap();
+    let residual = constraint_residual(&sk, ci).unwrap();
+    assert!(!rep.ok() || residual < 1e-6, "reported ok with the midpoint {residual} off: {rep:?}");
+}
+
+#[test]
 fn a_fillet_folded_through_flat_is_refused_like_a_fold() {
     // Without the horizontal and vertical, the second line turns about the corner: the arc
     // shrinks towards flat (the lines collinear) and the lines keep leaving it. Past flat the

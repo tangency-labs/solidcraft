@@ -3161,7 +3161,22 @@ fn solve_sensed(
         .filter(|(_, t)| matches!(t, Turn::Mirror { .. }))
         .flat_map(|(arc, _)| before.iter().find(|b| b.arc == *arc).map(|b| b.lines.iter().map(|l| l.2).collect::<Vec<_>>()).unwrap_or_default())
         .collect();
-    let folded: Vec<String> = over.into_iter().chain(mirrored_still).filter_map(|ci| sk.constraints.get(ci).map(|c| c.id.clone())).collect();
+    let mut folded: Vec<String> = over.into_iter().chain(mirrored_still).filter_map(|ci| sk.constraints.get(ci).map(|c| c.id.clone())).collect();
+    // A swap puts the arc on the other side of its chord: a point held at its middle would now sit
+    // at the opposite end of the circle while the solve reported success. Read it again.
+    for (arc, t) in &turns {
+        if !matches!(t, Turn::Swap) {
+            continue;
+        }
+        for (ci, c) in sk.constraints.iter().enumerate() {
+            if matches!(c.kind, ConstraintKind::Midpoint { l, .. } if l == *arc)
+                && constraint_residual(sk, ci).is_some_and(|r| r > 1e-6)
+                && !folded.contains(&c.id)
+            {
+                folded.push(c.id.clone());
+            }
+        }
+    }
     if folded.is_empty() {
         return report;
     }
