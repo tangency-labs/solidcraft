@@ -100,7 +100,7 @@ use crate::kernel::Kernel;
 use crate::math::{Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::math::{NOW, NOZ};
-use crate::surface::surface::SurfaceKind;
+use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::face::p2 as face2;
@@ -535,7 +535,7 @@ pub fn join_tolerance_deg(
     };
     // a plane: its bending is never a term (module docs)
     let planar = matches!(
-        face2::surface(b, *shared)?.map(|s| s.kind()),
+        face2::surface(b, *shared)?.map(Surface::kind),
         Some(SurfaceKind::Plane(_))
     );
     if !planar {
