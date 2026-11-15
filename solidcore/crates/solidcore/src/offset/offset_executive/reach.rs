@@ -234,6 +234,44 @@ pub fn extension_reach(
     Ok(met.then_some(reach))
 }
 
+/// `base` extended on every side by `margin` as the executive extends a face's surface
+/// (`get_create_extended_surface`, the one construction both use): ruled, keeping its
+/// parameters; an extension meets its distance at the middle of each side, and a margin is
+/// needed at every station of it (#2908), so where the rows narrow along a side it is
+/// asked again, scaled by the shortest length across (Ruled: the lengths at a station grow
+/// together). A margin of 0 is `base` itself.
+///
+/// # Errors
+///
+/// Those of the extension, but its refusal of the larger distance asked again (a surface
+/// that cannot go that far keeps what it has).
+pub(super) fn extended_by_margin(k: &Kernel, base: &Surface, margin: f64) -> Result<Surface> {
+    if margin == 0.0 {
+        return Ok(base.clone());
+    }
+    let extend = |asked: f64| {
+        base.extended_sides_keeping_parameters(
+            k,
+            &BoxSide::ALL,
+            crate::surface::extend::Continuity::Ruled,
+            asked,
+        )
+    };
+    let mut made = extend(margin)?;
+    if let Some(shortest) = shortest_across(k, base, &made)? {
+        if shortest < margin * (1.0 - 1.0e-9) {
+            // a surface that cannot go that far keeps what it has: the extension
+            // above is what its faces have always had
+            match extend(margin * margin / shortest) {
+                Ok(grown) => made = grown,
+                Err(SolidError::ExtendRefused { .. }) => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    Ok(made.surface)
+}
+
 /// A lower bound of the distance from each extended side of `base`'s B-spline to the same
 /// side of `extended`, over the side's stations on `base`'s box: `None` where `base` is no
 /// B-spline or the offset of one, a side's two rows differ in weights, or the bound is not positive. Each row is a
@@ -2683,7 +2721,8 @@ pub fn local_extension_reach(
     }
     if !horizons.is_empty() {
         let face = own_face.ok_or_else(uncertified)?;
-        let within = extension_within(k, b, face, moved, &found, tolerance)?;
+        let given: Vec<(FaceId, &Surface)> = moved.iter().chain(kept).copied().collect();
+        let within = extension_within(k, b, face, &given, &found, tolerance)?;
         // a decision taken where the extension could leave its ball has no bound here
         if !horizons
             .iter()
@@ -2695,35 +2734,42 @@ pub fn local_extension_reach(
     Ok(Some(found))
 }
 
-/// The farthest a point of `face`'s extended surface can lie from a point, as a function
-/// of the point, rounded up: the farthest corner of the box of `face`'s surface (its NURBS
-/// form's control net, the whole net, which holds the face), past which the surface is
-/// extended by the margin the executive gives it (its reach and its move,
-/// `record_extension_reach`), at most that far again for the move of a moved face's new
-/// surface off the old face, and the gap between each stored form and the surface its
-/// exact class names ([`form_gap`]). `None` for a box not made or not finite, or a gap not
-/// bounded.
+/// The farthest a point of `face`'s surface, as it stands and as the executive extends it,
+/// can lie from a point, as a function of the point, rounded up: the farthest corner of
+/// the box holding the control nets of `face`'s surface and of its given surface (a moved
+/// or kept face's, else its own) extended on every side by the margin the executive gives
+/// it ([`extended_by_margin`], the executive's own construction, with
+/// `record_extension_reach`'s margin `max(reach + shift, tolerance)`), grown by the gap
+/// between each stored form and the surface its exact class names ([`form_gap`]) and the
+/// box corners' rounding. `None` for a box not made or not finite, or a gap not bounded.
 ///
-/// ARGUED, not checked by a certificate: the box holds the stored NURBS form by the
-/// convex hull property (its corners are the net's Euclidean points, each a rounding of
-/// `H / W`: within an ulp of their size, counted below). The decisions are on the exact
-/// classes' implicit surfaces ([`Implicit`]), which the stored forms lie within
-/// [`form_gap`] of; the margin is the extension's own size and absorbs none of that gap,
-/// so the gap is added: the old surface's (where the face and its moves are measured) and,
-/// for a moved face, its new surface's (the one extended). For the kernel's cylinder r 50,
-/// z 0 to 100 the bound is `2.53·10⁻⁵` (MEASURED by a unit test): the square root of
+/// The extension is built, not estimated from the margin: it extends each side by the
+/// margin at the side's middle, by more where the rows narrow along it (asked again,
+/// scaled by the shortest length across), and a corner patch by both of its sides' at
+/// once, so a scalar margin past the face's box would miss its corners (by up to `√2`
+/// times the margin in a flat face's plane) and a side asked again.
+///
+/// ARGUED, not checked by a certificate: the box holds each stored NURBS form by the
+/// convex hull property (its corners are the nets' Euclidean points, each a rounding of
+/// `H / W`: within an ulp of their size, counted below), and the executive extends this
+/// face's given surface by this margin (the face's recorded reach). The decisions are on
+/// the exact classes' implicit surfaces ([`Implicit`]), which the stored forms lie within
+/// [`form_gap`] of, so the gap is added: the old surface's and, for a moved or kept face,
+/// its given surface's (the one extended; its extension is taken to stay as near its
+/// class's surface as the form it extends). For the kernel's cylinder r 50, z 0 to 100
+/// the bound is `2.53·10⁻⁵` (MEASURED by a unit test): the square root of
 /// [`lies_on`](implicit::lies_on)'s rounding, the bound near a cone's apex, taken
 /// everywhere. That is above the tolerance, so the margin's floor does not absorb it, but
 /// it is far below a near-parallel ball's radius (about `tolerance × 10¹⁴`).
 ///
 /// # Errors
 ///
-/// Those of the face's surface, of its box and of [`form_gap`].
+/// Those of the face's surface, of its extension, of the boxes and of [`form_gap`].
 fn extension_within(
     k: &Kernel,
     b: &Brep,
     face: FaceId,
-    moved: &[(FaceId, &Surface)],
+    given: &[(FaceId, &Surface)],
     found: &LocalReach,
     tolerance: f64,
 ) -> Result<Option<impl Fn(Vec3) -> f64>> {
@@ -2731,29 +2777,45 @@ fn extension_within(
         return Ok(None);
     };
     let domain = crate::topology::face::p2::uv_domain(b, face)?;
-    let Some(bx) = surface
-        .calculate_bounding_box(k, &domain, [true, false, false], false)?
-        .normal_box
-    else {
+    let new = given
+        .iter()
+        .find(|(f, _)| *f == face)
+        .map_or(surface, |(_, s)| *s);
+    // the executive's margin for the face (`record_extension_reach`) and its extension
+    let extension = extended_by_margin(k, new, (found.reach + found.shift).max(tolerance))?;
+    let extended_domain = extension.natural_uv_domain_with_nurb(k)?;
+    let net_box = |s: &Surface, d: &Extent2d| -> Result<Option<[f64; 6]>> {
+        Ok(s.calculate_bounding_box(k, d, [true, false, false], false)?
+            .normal_box
+            .map(|bx| [bx.min.x, bx.min.y, bx.min.z, bx.max.x, bx.max.y, bx.max.z]))
+    };
+    let (Some(own), Some(far)) = (
+        net_box(surface, &domain)?,
+        net_box(&extension, &extended_domain)?,
+    ) else {
         return Ok(None);
     };
-    // the stored forms' gaps from their classes' surfaces: the old surface's, and a
-    // moved face's new one's
+    // the box holding both nets
+    let mut ends = own;
+    for (n, (e, f)) in ends.iter_mut().zip(far).enumerate() {
+        *e = if n < 3 { e.min(f) } else { e.max(f) };
+    }
+    let [x0, y0, z0, x1, y1, z1] = ends;
+    // the stored forms' gaps from their classes' surfaces: the old surface's, and the
+    // given one's
     let Some(mut gap) = form_gap(k, surface)? else {
         return Ok(None);
     };
-    if let Some((_, new)) = moved.iter().find(|(f, _)| *f == face) {
+    if !std::ptr::eq(new, surface) {
         let Some(more) = form_gap(k, new)? else {
             return Ok(None);
         };
         gap = round_up(gap + more);
     }
-    let ends = [bx.min.x, bx.min.y, bx.min.z, bx.max.x, bx.max.y, bx.max.z];
     // the corners' own rounding (each `H / W`, rounded once): an ulp of the largest
     let rounded = ends.iter().fold(0.0_f64, |m, x| m.max(x.abs())) * 2.0 * f64::EPSILON;
-    let margin = round_up(round_up(found.reach + found.shift).max(tolerance) + found.shift);
-    let margin = round_up(round_up(margin + gap) + rounded);
-    let ordered = bx.min.x <= bx.max.x && bx.min.y <= bx.max.y && bx.min.z <= bx.max.z;
+    let margin = round_up(gap + rounded);
+    let ordered = x0 <= x1 && y0 <= y1 && z0 <= z1;
     if !(ordered && margin.is_finite() && ends.iter().all(|x| x.is_finite())) {
         return Ok(None);
     }
@@ -2763,9 +2825,7 @@ fn extension_within(
             let far = (i(lo) - i(c)).mag().max((i(hi) - i(c)).mag());
             i(far) * i(far)
         };
-        let squared = side(bx.min.x, bx.max.x, p.x)
-            + side(bx.min.y, bx.max.y, p.y)
-            + side(bx.min.z, bx.max.z, p.z);
+        let squared = side(x0, x1, p.x) + side(y0, y1, p.y) + side(z0, z1, p.z);
         let far = round_up(squared.sqrt().hi + margin);
         // not a number: past any radius
         if far.is_nan() {
@@ -4971,5 +5031,136 @@ mod tests {
         assert!(bound(50.0, 30.0, [short, short]).is_some());
         // `δ > 0`: every height has a point
         assert!(bound(30.0, 0.0, [f64::EPSILON, f64::EPSILON]).is_some());
+    }
+
+    /// [`implicit::distance_bound`] with homogeneous points of tiny weight: a bilinear patch
+    /// at x = 2 (a unit away from the unit cylinder about Z), every weight 1e-200. Its
+    /// equation's coefficients, their rounding and the weight's square underflow to 0, so
+    /// [`implicit::lies_on`]'s test passes on zeros; the bound refuses (`None`) instead of
+    /// giving 0, and the same patch at weight 1 is refused as off the cylinder.
+    #[test]
+    fn tiny_weights_give_no_gap_bound() {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::{
+            BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
+        };
+        // the patch made at weight 1 (the constructor refuses tiny weights), then every
+        // homogeneous point `(P w, w)` scaled to weight `w`
+        let patch = |w: f64| {
+            let made = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+                u_degree: 1,
+                v_degree: 1,
+                control_points: &[
+                    Point3::new(2.0, 0.0, 0.0),
+                    Point3::new(2.0, 1.0, 0.0),
+                    Point3::new(2.0, 0.0, 1.0),
+                    Point3::new(2.0, 1.0, 1.0),
+                ],
+                form: BSplineSurfaceForm::Unspecified,
+                u_multiplicities: &[2, 2],
+                v_multiplicities: &[2, 2],
+                u_knots: &[0.0, 1.0],
+                v_knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: Some(&[1.0; 4]),
+                uv_domain: None,
+            })
+            .unwrap();
+            let mut nurb = made.gw_nurb().unwrap().clone();
+            let net: Vec<Vec<CPoint>> = nurb
+                .cpts()
+                .into_iter()
+                .map(|row| {
+                    row.into_iter()
+                        .map(|c| {
+                            let weight = if c.w == NOW { 1.0 } else { c.w };
+                            let scale = w / weight;
+                            CPoint {
+                                x: c.x * scale,
+                                y: c.y * scale,
+                                z: c.z * scale,
+                                w,
+                            }
+                        })
+                        .collect()
+                })
+                .collect();
+            let (u, v) = (nurb.u_knots().to_vec(), nurb.v_knots().to_vec());
+            nurb.set_cpts_and_knots(net, u, v).unwrap();
+            let scaled = BSplineSurface::from_nurb(nurb, false);
+            // the premise: the stored weights are `w`
+            for c in scaled.gw_nurb().unwrap().rows().flatten() {
+                assert_eq!(c.w.to_bits(), w.to_bits(), "{c:?}");
+            }
+            scaled
+        };
+        let cylinder = Implicit::Cone {
+            origin: Vec3::ZERO,
+            axis: Vec3::Z,
+            radius: 1.0,
+            tan_angle: 0.0,
+        };
+        assert_eq!(
+            implicit::distance_bound(&patch(1e-200), &cylinder, [0.0, 0.0]).unwrap(),
+            None
+        );
+        assert_eq!(
+            implicit::distance_bound(&patch(1.0), &cylinder, [0.0, 0.0]).unwrap(),
+            None
+        );
+    }
+
+    /// [`extension_within`] holds the face's surface as the executive extends it, corners
+    /// included: the box's top (z = 3, x 0 to 1, y 0 to 2) with a margin of 1 is extended on
+    /// every side, so its corners move 1 along both sides at once, to (2, 3, 3) and the
+    /// like, √1.5² + 2² = 2.5 from the face's centre, past the face's box's farthest corner
+    /// plus the margin (√1.25 + 1 ≈ 2.118). The bound covers every corner of the extension,
+    /// evaluated on the surface.
+    #[test]
+    fn a_faces_extension_is_held_at_its_corners() {
+        let mut k = Kernel::default();
+        let (b, _) = box_faceuses(&mut k, false);
+        let (top, _) = box_face(&b, Vec3::Z);
+        let found = LocalReach {
+            reach: 1.0,
+            ..LocalReach::default()
+        };
+        let within = extension_within(&k, &b, top, &[], &found, b.tolerance())
+            .unwrap()
+            .unwrap();
+        let centre = Vec3::new(0.5, 1.0, 3.0);
+        let surface = b.face(top).unwrap().surface.as_ref().unwrap();
+        let extension = extended_by_margin(&k, surface, 1.0).unwrap();
+        let d = extension.natural_uv_domain_with_nurb(&k).unwrap();
+        let mut farthest = 0.0_f64;
+        for u in [d.min.x, d.max.x] {
+            for v in [d.min.y, d.max.y] {
+                let p = extension.evaluate_point(&k, Point2::new(u, v)).unwrap();
+                farthest = farthest.max((p - centre).length());
+            }
+        }
+        // the extension reaches a corner 2.5 away, past a scalar margin's 2.118: the face's
+        // net box's farthest corner plus the margin
+        assert!(farthest >= 2.5 - 1e-9, "{farthest}");
+        let domain = crate::topology::face::p2::uv_domain(&b, top).unwrap();
+        let bx = surface
+            .calculate_bounding_box(&k, &domain, [true, false, false], false)
+            .unwrap()
+            .normal_box
+            .unwrap();
+        let reach = |lo: f64, hi: f64, c: f64| (lo - c).abs().max((hi - c).abs());
+        let scalar = Vec3::new(
+            reach(bx.min.x, bx.max.x, centre.x),
+            reach(bx.min.y, bx.max.y, centre.y),
+            reach(bx.min.z, bx.max.z, centre.z),
+        )
+        .length()
+            + 1.0;
+        assert!(scalar < farthest, "{scalar} vs {farthest}");
+        assert!(
+            within(centre) >= farthest,
+            "{} < {farthest}",
+            within(centre)
+        );
     }
 }

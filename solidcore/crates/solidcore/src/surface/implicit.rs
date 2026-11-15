@@ -365,7 +365,9 @@ fn bezier_on<'a>(
 /// [`lies_on`]'s acceptance turned into a distance, ARGUED (not checked by a certificate):
 /// how far a point of the surface `form` describes can lie from `a`'s surface, where
 /// [`lies_on`] accepts `form`; `None` where it does not, for a torus, for a weight that is
-/// not positive, or for a bound that is not finite.
+/// not positive, for a patch whose rounding `τ` or weight power `W₀^d` falls below the
+/// normal range (the rounding model holds only above it: points of tiny weight underflow to
+/// zeros that pass on nothing), or for a bound (any patch's) that is not finite.
 ///
 /// On a Bézier patch with least weight `W₀ > 0` (a rational patch's weight is a convex
 /// combination of its points' weights, so at least `W₀` everywhere), every coefficient of
@@ -439,11 +441,17 @@ pub fn distance_bound(form: &BSplineSurface, a: &Implicit, delta: [f64; 2]) -> R
                     return Ok(None);
                 }
             }
-            let exact = 2.0 * r.tol;
-            let residual = match r.degree {
-                1 => exact / w0,
-                _ => exact / (w0 * w0),
+            // `τ`'s rounding model holds only above the subnormal range: a residual scale or
+            // a weight power that underflows (homogeneous points of tiny weight) has no bound
+            let power = match r.degree {
+                1 => w0,
+                _ => w0 * w0,
             };
+            if !(r.tol >= f64::MIN_POSITIVE && power >= f64::MIN_POSITIVE) {
+                return Ok(None);
+            }
+            let exact = 2.0 * r.tol;
+            let residual = exact / power;
             let off = match *a {
                 // the normal's length, a few roundings from 1
                 Implicit::Plane { normal, .. } => {
@@ -454,7 +462,12 @@ pub fn distance_bound(form: &BSplineSurface, a: &Implicit, delta: [f64; 2]) -> R
             let g = gamma(4 * (p + q) + 4);
             // (`absolute` is a largest coordinate: a Euclidean length is under twice it)
             let slack = 2.0 * g * r.absolute * (1.0 + r.wmax / w0) / w0;
-            bound = bound.max(off + slack);
+            // (`max` would drop a value that is not a number)
+            let patch_bound = off + slack;
+            if !patch_bound.is_finite() {
+                return Ok(None);
+            }
+            bound = bound.max(patch_bound);
         }
     }
     let bound = bound * (1.0 + 8.0 * f64::EPSILON);
