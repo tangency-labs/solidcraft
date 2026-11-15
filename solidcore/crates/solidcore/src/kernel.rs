@@ -616,8 +616,6 @@ pub struct UpstreamFixes {
     pub edge_check_orders_tangent_faces: bool,
     /// `SmEllipse::AdjustSTEPInterval` rejects inverted STEP edits and collapsed or non-finite converted NURBS intervals before mutation, and revolution edits install their domain only after their generator accepts it (WR-211, #428).
     pub ellipse_step_interval_checks: bool,
-    /// `SmSurface::GetFlatCorners` tests each corner bit instead of clearing the others (WR-384, #525).
-    pub flat_corners_test_bits: bool,
     /// `SmSurfaceCache::GetSurfaceContinuity` checks the last internal V knot (`iv + 1 < rVConts.GetSize()`) rather than skipping it (`iv + 1 < rVConts.GetSize() - 1`) (WR-42).
     pub surface_continuity_checks_last_v_knot: bool,
     /// `sm_GoodDropResult` (`SmSurface::DropPoint` given a guess) refuses a local solve's result when the result is farther from the point than its guess, as its comment says; upstream measures its two distances the wrong way round (`dDsqGuess` to the result, `dDsqResult` to the guess), so it refused a result nearer than its guess, sending the drop to the global solve, and took one farther. The same fork change also takes a local result as the foot only when the gap's components along the unit tangents are within the local solve's tight tolerance, `SM_EFF_ZERO (1 + max|P|)` (their sum under it; an interior result each under it), where upstream takes any foot 1e-4 off (an interior one 1e-3 off in each direction); a stalled solve goes to the global solve (WR-56, #1852; the fork's tangency-labs/smlib@eaa998a (was 0b4de8c) / eaa998a, fork PR #70).
@@ -648,14 +646,6 @@ pub struct UpstreamFixes {
     pub cylinder_rebuild_mean_radius: bool,
     /// `SmCylinder::IsNurbSurfaceCylinder` gives an inside-out NURB (its iso circles turning against the line through their centres) the frame `IsNurbSurfaceCone` gives one: Z against the NURB's linear direction, origin at its top-knot circle; upstream keeps the bottom-knot circle and the NURB's direction, so the cylinder's Z is reversed and its STEP evaluation is mirrored in height (WR-496, #1463).
     pub nurb_cylinder_inside_out_frame: bool,
-    /// `SmCurveBoundedSurface::ReadFromDB` dispatches each UV boundary curve on its own
-    /// stream header type (`lUVType`) instead of reusing the last 3D boundary's type
-    /// (`l3DType`, `0` when there are no 3D boundaries), and passes the read
-    /// `bImplicitOuter` flag to the constructed `SmCurveBoundedSurface` instead of
-    /// dropping it and defaulting to `false` (WR-43, #2164; see
-    /// `plan/upstream-issues/WR-43--addendum-2026-10-31-read-uv-type-and-implicit-outer.md`).
-    /// Off by default for pinned C++ parity.
-    pub curve_bounded_surface_read_uv_type_and_implicit_outer: bool,
     /// `PositionProfileCurves` returns the first failing status of its two
     /// `SmAxis2Placement::SetCanonical` calls, its three profile `Transform` calls and
     /// `MakeUnitOrthoVectors`, instead of ignoring them and positioning the profiles
@@ -833,8 +823,6 @@ pub struct UpstreamFixes {
     pub fillet_statuses_pass_on: bool,
     /// `CoverCoincidentSurface` refuses a cover that extends a B-spline-based surface onto a continuation whose normal vanishes or turns back (a fold) over the domain the merge would use (WR-407, #434; SolidCraft change, tangency-labs/smlib e960ca1 (was 1b6f5fa)).
     pub cover_refuses_folded_continuation: bool,
-    /// `SmSurface::CoverCoincidentSurface` covers a face straddling this surface's seam in a direction the surface already wraps (`IsClosed` over its natural domain: a cylinder's full turn): a step of its boundary walk across that seam is no failure, and the domain in that direction stays the period it spans; a crossing in an open direction, or at a pole, still refuses. `SmMerge::BooleanPostProcess` then completes each merged face as a periodic face has it (`HasSeamProblem`, then `SplitAtSeam` when a seam is crossed or missing), so the seam runs on through the covered part; `SmBrep::RemoveTopologicalEdgesAndVertices` does the same after each merge whatever the fix set (#16866). Upstream refuses every crossing and the two walls stay apart (WR-599; the fork's tangency-labs/smlib@16bf1cb). `sm_CoverOtherCoincidentFace` lets only its trim-derived attempt cross such a seam (`bAcrossWrappedSeams`): the stored-domain attempt stays within one period, so faces whose stored domains are their whole surfaces do not merge to those (360 x 208 for half-turn faces spanning 180 x 3; tangency-labs/smlib@b518bbe).
-    pub cover_wraps_across_closed_seam: bool,
     /// A boolean vertex takes its position from the intersection curve that crosses its edge most steeply (WR-410, #1059).
     pub boolean_vertex_by_best_crossing: bool,
     /// `SmProtoTopologyManager::UpdateEdges` splits a coincident edge definition on a split edge that runs across the split point (away from both its ends, on its curve) there, with its proto edge (`SmProtoEdge::Split`), and classifies each part to the piece it lies on; upstream re-points the whole definition to the piece under its midpoint, whose vertices are not its ends, and the imprint finds no vertex for them (`SM_ERR_NULL_POINTER`, 1006) (WR-533; the fork's tangency-labs/smlib@f11d0ac).

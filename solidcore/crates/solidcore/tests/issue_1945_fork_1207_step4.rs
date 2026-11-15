@@ -56,7 +56,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.check_loop_projected_seam_ends = true;
     k.fixes.edge_check_orders_tangent_faces = true;
     k.fixes.ellipse_step_interval_checks = true;
-    k.fixes.flat_corners_test_bits = true;
     k.fixes.good_drop_result_distances_in_order = true;
     k.fixes.torus_check_spindle_apex = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
@@ -82,7 +81,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.slice_coincident_faces_sheet_side = true;
     k.fixes.boolean_outer_shell_first = true;
     k.fixes.cover_refuses_folded_continuation = true;
-    k.fixes.cover_wraps_across_closed_seam = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;

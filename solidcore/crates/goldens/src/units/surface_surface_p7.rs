@@ -1879,3 +1879,75 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod flat_corner_bits_tests {
+    use super::*;
+
+    /// Rows that moved when `GetFlatCorners` stopped clearing the other corners' bits
+    /// while it fills the points (WR-384): each asks for the points.
+    const MOVED: [&str; 13] = [
+        "flat_mask_1_points_1", "flat_mask_2_points_1", "flat_mask_4_points_1",
+        "flat_mask_8_points_1", "flat_mask_all_points_1", "gen0191", "gen0796", "gen1186",
+        "gen1584", "gen2327", "gen2351", "gen2373", "gen2405",
+    ];
+
+    /// Replays every `flat` case that asks for the points: the corners reported with the
+    /// points are exactly those reported without them (the pass upstream gets right), and
+    /// each reported corner's point is the surface at that corner of its natural domain.
+    #[test]
+    fn flat_corners_with_points_keep_every_bit() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: MIN_GENERATED,
+        };
+        let k = Kernel::default();
+        let mut checked = Vec::new();
+        let mut failed = Vec::new();
+        for c in Runner.cases(&ctx).unwrap() {
+            let i: Inputs = c.parse().unwrap();
+            let OpIn::Flat { angle, want: true } = i.op else {
+                continue;
+            };
+            let Ok(s) = surface_of(&i.surface) else {
+                continue;
+            };
+            let (Ok(without), Ok(with)) =
+                (s.flat_corners(&k, angle, false), s.flat_corners(&k, angle, true))
+            else {
+                continue;
+            };
+            assert_eq!(with.flags, without.flags, "{}", c.name);
+            let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+            let corners = [
+                Point2::new(d.u_min(), d.v_min()),
+                Point2::new(d.u_min(), d.v_max()),
+                Point2::new(d.u_max(), d.v_min()),
+                Point2::new(d.u_max(), d.v_max()),
+            ];
+            let pts = with.points.unwrap();
+            for (bit, (uv, p)) in [1u32, 2, 4, 8].iter().zip(corners.iter().zip(pts)) {
+                if with.flags & bit != 0 {
+                    // `GetFlatCorners` ignores a failed evaluation: the point stays
+                    // undefined
+                    if let Ok(e) = s.evaluate_point(&k, *uv) {
+                        assert_eq!(p, e, "{} corner {bit}", c.name);
+                    } else {
+                        assert_eq!(p, Vec3::UNDEF, "{} corner {bit}", c.name);
+                        failed.push(c.name.clone());
+                    }
+                } else {
+                    assert_eq!(p, Vec3::UNDEF, "{} corner {bit}", c.name);
+                }
+            }
+            if with.flags != 0 {
+                checked.push(c.name.clone());
+            }
+        }
+        for m in MOVED {
+            assert!(checked.iter().any(|n| n == m), "{m} not among the checked cases");
+            // every flagged corner of a moved row evaluates
+            assert!(!failed.iter().any(|n| n == m), "{m} has a corner that fails to evaluate");
+        }
+    }
+}

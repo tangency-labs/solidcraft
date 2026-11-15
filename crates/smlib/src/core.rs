@@ -85,7 +85,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.proto_vertex_miss_is_false = true;
     f.check_loop_vertex_tolerance = true;
     f.check_loop_projected_seam_ends = true;
-    f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
     f.taper_tangent_corner_planes = true;
@@ -151,7 +150,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.linear_sweep_arc_is_cylinder = true;
     f.loops_go_on_round_the_vertex = true;
     f.revolve_splits_curves_on_axis = true;
-    f.cover_wraps_across_closed_seam = true;
     f.fillet_trace_reaches_rails = true;
     f.delete_vertex_joins_seam_iso_curve = true;
     f.box_face_failures_propagate = true;
@@ -204,7 +202,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.volume_lift_third_derivative_terms = true;
-    f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
     f.volume_representational_end_continuities = true;
     f.offset_open_edge_second_trim_point = true;
     f.close_loop_relates_only_coincident_edges = true;
