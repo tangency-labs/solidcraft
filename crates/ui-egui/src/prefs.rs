@@ -1192,6 +1192,10 @@ preference_settings! {
     /// Opaque bodies are lit by a soft studio in the viewport: metal and glossy appearances (PBR)
     /// reflect it, other bodies get a satin finish. Off: shaded flat in their colour, as before.
     viewport_material_finish: bool = true, PAGE_GRAPHICS => check_id("prefs.viewport_material_finish");
+    /// In the shaded views with edges, once the view stands still the edges hidden behind faces
+    /// are worked out from the exact faces and left out (`crate::exact_edges`). Off: the edges
+    /// are drawn by the GPU's depth test alone, as before.
+    exact_hidden_edges: bool = true, PAGE_GRAPHICS => check_id("prefs.exact_hidden_edges");
     /// Optional schematic markings on threaded cylindrical walls; off for new and older preferences.
     cosmetic_threads: bool = false, PAGE_GRAPHICS;
     /// A section hatches each cut body its own way (the default), or every one alike, in the cap

@@ -3003,3 +3003,91 @@ fn an_edge_shows_through_a_slit_narrower_than_its_samples_between_two_bodies() {
     let [a, b] = got.visible[0];
     assert!((a - 0.56).abs() < 0.003 && (b - 0.58).abs() < 0.003, "{got:?}");
 }
+
+/// The spline ray test looks for hits only in the grid cells whose grown boxes the ray crosses,
+/// and starts Newton where the ray meets a cell's corners. Against crossings found by bisection
+/// along rays straight down, slanted and nearly grazing over a wavy quintic patch, it misses none,
+/// repeats none, and every hit it gives lies on the patch where the ray is.
+#[test]
+fn the_spline_ray_test_finds_every_crossing_of_a_wavy_patch() {
+    // A quintic Bezier patch over x, y in [-20, 20] (x and y even in u and v), waving by 6 mm.
+    let n = 6;
+    let points: Vec<Vec<[f64; 3]>> = (0..n)
+        .map(|i| {
+            (0..n)
+                .map(|j| {
+                    let (x, y) = (-20. + 8. * i as f64, -20. + 8. * j as f64);
+                    [x, y, 6. * (1.3 * i as f64).sin() * (1.1 * j as f64).cos()]
+                })
+                .collect()
+        })
+        .collect();
+    let knots = [vec![0.; n], vec![1.; n]].concat();
+    let label = Surface::Spline { u_knots: knots.clone(), v_knots: knots, points }.label();
+    let s = S3::of_face(&rec::Face { surface: label, nurbs: None, domain: [[0., 1.]; 2], loops: Vec::new() }).unwrap();
+    // How far a point is above the patch, or None off it.
+    let above = |p: Vec3| {
+        let (u, v) = ((p.x + 20.) / 40., (p.y + 20.) / 40.);
+        ((0. ..=1.).contains(&u) && (0. ..=1.).contains(&v)).then(|| p.z - s.point([u, v]).z)
+    };
+    let (mut rays, mut crossings) = (0, 0);
+    for slope in [0., 0.4, 1.5, 5.0] {
+        for turn in 0..6 {
+            let a = f64::from(turn) * 1.05 + 0.2;
+            let Some(d) = Vec3::new(slope * a.cos(), slope * a.sin(), -1.).normalized() else { continue };
+            for cx in [-17.5, -9.3, -0.7, 6.1, 14.9] {
+                for cy in [-16.2, -5.5, 2.3, 11.8, 18.6] {
+                    let p0 = Vec3::new(cx, cy, 0.) - d * 40.;
+                    let at = |lam: f64| p0 + d * lam;
+                    let mut hits = Vec::new();
+                    s.ray(p0, d, [0., 400.], &mut hits);
+                    for (k, h) in hits.iter().enumerate() {
+                        assert!(s.point(h.uv).dist(at(h.lam)) < 1e-6, "a hit off the patch: {h:?} along {d:?} from {p0:?}");
+                        assert!(!hits.iter().take(k).any(|g| (g.lam - h.lam).abs() <= 1e-7 * (1. + h.lam)), "a repeated hit: {hits:?}");
+                    }
+                    // Crossings by bisection between samples 0.05 mm apart along the ray, leaving
+                    // out rays that cross at a grazing angle or at the patch's border, where a
+                    // crossing is a matter of rounding.
+                    let step = 0.05;
+                    let (mut prev, mut roots, mut unclear) = (None::<(f64, f64)>, Vec::new(), false);
+                    for k in 0..=4_000 {
+                        let lam = f64::from(k) * step;
+                        let Some(v) = above(at(lam)) else {
+                            prev = None;
+                            continue;
+                        };
+                        if let Some((l0, v0)) = prev
+                            && v0.signum() != v.signum()
+                        {
+                            let (mut lo, mut hi) = (l0, lam);
+                            for _ in 0..60 {
+                                let mid = 0.5 * (lo + hi);
+                                if above(at(mid)).is_some_and(|m| m.signum() == v0.signum()) {
+                                    lo = mid;
+                                } else {
+                                    hi = mid;
+                                }
+                            }
+                            let p = at(lo);
+                            unclear |= (v - v0).abs() / step < 0.05 || 20. - p.x.abs().max(p.y.abs()) < 1e-3;
+                            roots.push(lo);
+                        }
+                        prev = Some((lam, v));
+                    }
+                    if unclear {
+                        continue;
+                    }
+                    rays += 1;
+                    for r in roots {
+                        crossings += 1;
+                        assert!(
+                            hits.iter().any(|h| (h.lam - r).abs() < 1e-6 * (1. + r)),
+                            "the crossing at {r} along {d:?} from {p0:?} is missed: {hits:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    assert!(rays > 500 && crossings > 500, "{rays} rays, {crossings} crossings checked");
+}

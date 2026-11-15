@@ -46,14 +46,10 @@ const EXTENT_MM: f64 = 1e10;
 const EDGE_WIDTH: f32 = 1.3;
 const HIDDEN_WIDTH: f32 = 1.0;
 
-/// Whether the viewport works out its edges: `SOLIDCRAFT_EXACT_EDGES=0` turns it off (to compare
-/// pictures and timings with and without it). Never in the browser, which has no threads.
-pub(crate) fn enabled() -> bool {
-    if cfg!(target_arch = "wasm32") {
-        return false;
-    }
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("SOLIDCRAFT_EXACT_EDGES").map_or(true, |v| v != "0"))
+/// Whether the viewport works out its edges: the `exact_hidden_edges` preference (off: the GPU's
+/// depth test alone, as before). Never in the browser, which has no threads.
+pub(crate) fn enabled(prefs: &crate::prefs::Prefs) -> bool {
+    !cfg!(target_arch = "wasm32") && prefs.exact_hidden_edges
 }
 
 /// What the last finished job did.
@@ -160,7 +156,7 @@ struct Draw {
 /// The edge layer to draw this frame, if one is ready for the view; starts its job once the view
 /// has stood still.
 pub(crate) fn update(app: &mut SolveApp, ctx: &egui::Context, proj: &crate::viewport::Proj) -> Option<Arc<EdgeLayer>> {
-    if !enabled() || app.viewport.gpu.is_none() || !matches!(app.ui.visual_style, 0 | 3) || crate::render_workspace::active(app) {
+    if !enabled(&app.preferences) || app.viewport.gpu.is_none() || !matches!(app.ui.visual_style, 0 | 3) || crate::render_workspace::active(app) {
         let e = &mut app.viewport.exact_edges;
         e.layer = None;
         e.job = None;
