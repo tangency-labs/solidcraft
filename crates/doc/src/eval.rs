@@ -9458,23 +9458,14 @@ fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> 
     let mut best: Option<(f64, f64)> = None; // (distance from `at`, plane offset along n)
     for b in &st.bodies {
         let tol = (b.body.size() * 1e-3).max(1e-3);
-        let (Ok(faces), Ok(mesh)) = (b.body.faces(tol), b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol))) else { continue };
-        for f in faces {
-            let Some(fnrm) = f.plane_normal else { continue };
-            if fnrm.dot(n) < 1.0 - 1e-6 {
-                continue;
-            }
-            let d = mesh
-                .triangles
-                .iter()
-                .zip(&mesh.tri_face)
-                .filter(|(_, tf)| **tf as usize == f.index)
-                .filter_map(|(t, _)| mesh.tri(t))
-                .map(|[a, bb, c]| crate::project::closest_on_triangle(at, a, bb, c).dist(at))
-                .fold(f64::INFINITY, f64::min);
-            if best.is_none_or(|x| d < x.0) {
-                best = Some((d, f.centroid.dot(n)));
-            }
+        let Ok(faces) = b.body.faces(tol) else { continue };
+        let caps: std::collections::BTreeSet<usize> =
+            faces.iter().filter(|f| f.plane_normal.is_some_and(|fnrm| fnrm.dot(n) >= 1.0 - 1e-6)).map(|f| f.index).collect();
+        if let Some((d, fi)) = b.body.nearest_face_in(at, &caps, f64::INFINITY)
+            && let Some(f) = faces.iter().find(|f| f.index == fi)
+            && best.is_none_or(|x| d < x.0)
+        {
+            best = Some((d, f.centroid.dot(n)));
         }
     }
     Ok(match best {
