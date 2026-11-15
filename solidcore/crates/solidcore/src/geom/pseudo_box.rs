@@ -1286,6 +1286,37 @@ mod tests {
         assert!(flat.is_planar(EFF_ZERO).is_planar);
     }
 
+    /// A box flat along any one of its basis vectors is planar, with its normal square to the
+    /// other two: the flat direction, whichever interval is the flat one. A half ring's box is
+    /// flat across its first basis vector, and the normal `basis[0] × basis[1]` lay in the
+    /// ring's plane.
+    #[test]
+    fn planar_normal_is_the_flat_direction() {
+        let basis = rotated_basis();
+        for flat in 0..3 {
+            let mut pb = PseudoBox::new();
+            pb.set_basis(basis[0], basis[1], basis[2]).unwrap();
+            for i in 0..3 {
+                let ivl = if i == flat {
+                    Extent1d::from_min_max(0.5, 0.5)
+                } else {
+                    Extent1d::from_min_max(-1.0, 2.0)
+                };
+                pb.set_interval(i, ivl).unwrap();
+            }
+            let planar = pb.is_planar(EFF_ZERO);
+            assert!(planar.is_planar);
+            let n = planar.normal.unitize().unwrap();
+            for (i, b) in basis.iter().enumerate() {
+                let want = if i == flat { 1.0 } else { 0.0 };
+                assert!(
+                    (n.dot(*b).abs() - want).abs() < 1e-12,
+                    "flat {flat}: normal {n:?} against basis {i}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn singular_basis_rejected() {
         let mut pb = PseudoBox::new();
