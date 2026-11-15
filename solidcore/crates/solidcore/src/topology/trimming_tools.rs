@@ -3743,7 +3743,7 @@ mod tests {
             // the goldens record this refusal as 1007 (`SolidError::InvalidInput`), as
             // upstream's degenerate swept face; run backwards it was 1025, axis inside face
             assert!(
-                matches!(e, crate::SolidError::InvalidInput { .. })
+                matches!(e, SolidError::InvalidInput { .. })
                     && e.to_string().contains("degenerates to a curve or point"),
                 "top {top}: {e}"
             );
