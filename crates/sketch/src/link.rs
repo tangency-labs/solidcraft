@@ -1209,7 +1209,8 @@ impl Sketch {
     /// Where this sketch's points were in `stored`, the same sketch before its links were
     /// moved to where their sources are now ([`Sketch::update_link`]): point by point, as
     /// [`crate::solve_after_edit`] takes them. Points are matched by id (a rebuilt link has
-    /// new ones); a point `stored` does not have is where it is now. `None` when none moved.
+    /// new ones where no old one matches); a point `stored` does not have is where it is now.
+    /// `None` when none moved.
     pub fn positions_in(&self, stored: &Sketch) -> Option<Vec<Vec2>> {
         let aligned = self.points.len() == stored.points.len() && self.points.iter().zip(&stored.points).all(|(p, q)| p.id == q.id);
         let was: Vec<Vec2> = if aligned {
