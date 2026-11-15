@@ -44,6 +44,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("geometry.publications", "Public Geometries", crate::checked!("geometry.publications", publications))
         .icon("construction")
         .noundo()
+        .read_only()
         .contract(&PUBLICATIONS_CONTRACT)
         .output(output_schema_for::<PublicationsResult>)
         .params("path?: another design file, to list what it shares (default: this design) → publications: [{name, items: [{name, feature, type}]}], one per public geometry"),
@@ -60,6 +61,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("geometry.copies", "Geometry Copies", crate::checked!("geometry.copies", copies))
         .icon("construction")
         .noundo()
+        .read_only()
         .contract(&COPIES_CONTRACT)
         .output(output_schema_for::<CopiesResult>)
         .params("→ copies: [{name, file, publication, component, items, state, reason}]; state is up_to_date, out_of_date, missing, unreadable or not_allowed"),
@@ -237,6 +239,20 @@ fn take(s: &Session, file: &Path, publication: &str) -> std::result::Result<Take
     Ok(Taken { geometry, skipped, digest, publication: group.name.clone() })
 }
 
+/// `kind`, which the source authored in world coordinates, in `component`'s own frame, so a
+/// copy lands where it is in the source even in a placed component.
+fn framed(s: &Session, component: u64, kind: &FeatureKind) -> FeatureKind {
+    let mut kind = kind.clone();
+    let m = s.doc.component_transform(component);
+    if component != 0
+        && !solidcraft_doc::is_identity(&m)
+        && let Some(inv) = solidcraft_doc::mat_inverse(&m)
+    {
+        kind.transform_geometry(&inv);
+    }
+    kind
+}
+
 /// Add the feature `kind` to `component` under the published name `item`, or under
 /// `item (copy)` where a feature here already has that name (most designs have a `Sketch1`).
 fn add(s: &mut Session, cmd: &str, component: u64, copy: &str, item: &str, kind: &FeatureKind) -> Result<u64> {
@@ -332,6 +348,7 @@ fn update(s: &mut Session, p: &Value) -> Result<Value> {
             }
         };
         for (item, kind) in &taken.geometry {
+            let kind = &framed(s, copy.component, kind);
             let held = copy.items.iter().find(|i| i.name.eq_ignore_ascii_case(item)).map(|i| i.feature);
             match held.filter(|id| s.doc.feature(*id).is_some()) {
                 Some(id) => {
@@ -358,7 +375,8 @@ fn update(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(kept) = s.doc_mut().geometry_copies.iter_mut().find(|c| c.name == copy.name) {
             *kept = copy;
         }
-        report.push(UpdatedCopy { name, state, changed, added, lost, reason: None });
+        let reason = (!taken.skipped.is_empty()).then(|| format!("could not be taken from the source: {}", taken.skipped.join(", ")));
+        report.push(UpdatedCopy { name, state, changed, added, lost, reason });
     }
     reply(UpdateResult { copies: report, param_warnings: Vec::new() })
 }
