@@ -160,6 +160,8 @@ pub(crate) fn update(app: &mut SolveApp, ctx: &egui::Context, proj: &crate::view
         let e = &mut app.viewport.exact_edges;
         e.layer = None;
         e.job = None;
+        // Turned on again (or back in a style with edges), the same view is worked out again.
+        e.tried = 0;
         return None;
     }
     let ppp = app.viewport.pixels_per_point();
