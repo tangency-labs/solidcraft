@@ -1496,14 +1496,14 @@ fn gap_closure(
             let edge = edge::curve(b, e)?.map(|c| (c.clone(), ivl.min(), ivl.max()));
             sides.push((
                 eu,
-                ClosureSide {
+                Some(ClosureSide {
                     trim,
                     edge,
                     vertex,
                     same,
                     trim_ends: [vertex; 2],
                     edge_ends: [vertex; 2],
-                },
+                }),
             ));
         }
         pools.push(sides);
@@ -1520,7 +1520,7 @@ fn gap_closure(
     for mut pool in pools {
         let Some(&count) = counts.next() else {
             // a loop the boundary does not integrate keeps its edge uses' order
-            loops.push(pool.into_iter().map(|(_, side)| side).collect());
+            loops.push(pool.into_iter().filter_map(|(_, side)| side).collect());
             continue;
         };
         let curves = at_curve..at_curve + count;
@@ -1532,13 +1532,17 @@ fn gap_closure(
                 Some(Some(eu)) => {
                     // the side of this boundary curve's own edge use, whatever its place
                     // in the loop; the gap lines before it end at its vertex
-                    let Some(at) = pool.iter().position(|(id, _)| id == eu) else {
+                    // (taken once: a second curve of the same edge use finds it gone)
+                    let Some(side) = pool
+                        .iter_mut()
+                        .find(|(id, _)| id == eu)
+                        .and_then(|(_, side)| side.take())
+                    else {
                         return Err(SolidError::mass_failed(
                             OP,
                             "the face's boundary has a trim of no edge use of its loop",
                         ));
                     };
-                    let (_, side) = pool.swap_remove(at);
                     for trim in core::mem::take(&mut gaps) {
                         closed.push(gap_side(trim, side.vertex));
                     }
@@ -1564,7 +1568,7 @@ fn gap_closure(
                 closed.push(gap_side(trim, first));
             }
         }
-        if !pool.is_empty() {
+        if pool.iter().any(|(_, side)| side.is_some()) {
             return Err(SolidError::mass_failed(
                 OP,
                 "the face's loop has more edge uses than its boundary",

@@ -196,7 +196,7 @@ fn trims_inside_domain(k: &Kernel, b: &Brep, margin: f64) -> Result<(), String> 
                         return Err(format!("face {f:?}: a control point not homogeneous"));
                     };
                     // written so a NaN fails
-                    if !(w > 0.0) {
+                    if w.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
                         return Err(format!("face {f:?}: a control point's weight {w}"));
                     }
                     let (x, y) = (xw / w, yw / w);
