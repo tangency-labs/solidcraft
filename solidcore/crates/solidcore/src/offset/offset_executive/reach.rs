@@ -2754,9 +2754,11 @@ pub fn local_extension_reach(
 /// `H / W`: within an ulp of their size, counted below), and the executive extends this
 /// face's given surface by this margin (the face's recorded reach). The decisions are on
 /// the exact classes' implicit surfaces ([`Implicit`]), which the stored forms lie within
-/// [`form_gap`] of, so the gap is added: the old surface's and, for a moved or kept face,
-/// its given surface's (the one extended; its extension is taken to stay as near its
-/// class's surface as the form it extends). For the kernel's cylinder r 50, z 0 to 100
+/// [`form_gap`] of, so the gap is added: the old surface's, the given surface's, and the
+/// extension's own (its NURBS form is made anew, so its gap is computed against the given
+/// surface's class, [`form_gap_from`], not taken from the form it extends; an extension
+/// [`implicit::distance_bound`] does not take, one off that class's surface past
+/// [`implicit::lies_on`]'s rounding, refuses). For the kernel's cylinder r 50, z 0 to 100
 /// the bound is `2.53·10⁻⁵` (MEASURED by a unit test): the square root of
 /// [`lies_on`](implicit::lies_on)'s rounding, the bound near a cone's apex, taken
 /// everywhere. That is above the tolerance, so the margin's floor does not absorb it, but
@@ -2801,16 +2803,20 @@ fn extension_within(
         *e = if n < 3 { e.min(f) } else { e.max(f) };
     }
     let [x0, y0, z0, x1, y1, z1] = ends;
-    // the stored forms' gaps from their classes' surfaces: the old surface's, and the
-    // given one's
+    // the stored forms' gaps from their classes' surfaces: the old surface's, the given
+    // one's, and the extension's own form's (made anew, from the given surface's class)
     let Some(mut gap) = form_gap(k, surface)? else {
         return Ok(None);
     };
+    let mut more = vec![form_gap_from(k, &extension, new)?];
     if !std::ptr::eq(new, surface) {
-        let Some(more) = form_gap(k, new)? else {
+        more.push(form_gap(k, new)?);
+    }
+    for g in more {
+        let Some(g) = g else {
             return Ok(None);
         };
-        gap = round_up(gap + more);
+        gap = round_up(gap + g);
     }
     // the corners' own rounding (each `H / W`, rounded once): an ulp of the largest
     let rounded = ends.iter().fold(0.0_f64, |m, x| m.max(x.abs())) * 2.0 * f64::EPSILON;
@@ -2848,7 +2854,19 @@ fn extension_within(
 ///
 /// Those of making the NURBS form and of the Bézier decomposition.
 fn form_gap(k: &Kernel, surface: &Surface) -> Result<Option<f64>> {
-    let Some(support) = AnalyticSupport::of(surface) else {
+    form_gap_from(k, surface, surface)
+}
+
+/// [`form_gap`] of `surface`'s stored form from the surface `class`'s exact class names:
+/// a face's surface extended ([`extended_by_margin`]) against the class of the surface it
+/// extends, whose implicit surface the decisions are on (`0` where `class` has no analytic
+/// label: a bare net and its extension are their own forms).
+///
+/// # Errors
+///
+/// As [`form_gap`].
+fn form_gap_from(k: &Kernel, surface: &Surface, class: &Surface) -> Result<Option<f64>> {
+    let Some(support) = AnalyticSupport::of(class) else {
         return Ok(Some(0.0));
     };
     let Some(form) = crate::blend::fillet_section::station::as_b_spline(k, surface)? else {

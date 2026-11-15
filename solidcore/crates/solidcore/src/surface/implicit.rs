@@ -365,9 +365,13 @@ fn bezier_on<'a>(
 /// [`lies_on`]'s acceptance turned into a distance, ARGUED (not checked by a certificate):
 /// how far a point of the surface `form` describes can lie from `a`'s surface, where
 /// [`lies_on`] accepts `form`; `None` where it does not, for a torus, for a weight that is
-/// not positive, for a patch whose rounding `τ` or weight power `W₀^d` falls below the
-/// normal range (the rounding model holds only above it: points of tiny weight underflow to
-/// zeros that pass on nothing), or for a bound (any patch's) that is not finite.
+/// not positive, for a patch whose rounding `τ` is below `MIN_POSITIVE / ε` or whose weight
+/// power `W₀^d` is below `MIN_POSITIVE`, or for a bound (any patch's) that is not finite.
+/// The `γ` model of `τ` leaves out underflow: each of a coefficient's `n` operations
+/// (`n = 4d(p+1)(q+1) + 16`) may add up to `2⁻¹⁰⁷⁴` absolutely, `n · 2⁻¹⁰⁷⁴` in all. With
+/// `τ ≥ MIN_POSITIVE / ε = 2⁻⁹⁷⁰` that is at most `n · 2⁻¹⁰⁴ · τ`, far inside the final
+/// growth by `8ε` for any `n` below `2⁴⁹`. Points of tiny weight, whose coefficients
+/// underflow to zeros that pass on nothing, are refused that way.
 ///
 /// On a Bézier patch with least weight `W₀ > 0` (a rational patch's weight is a convex
 /// combination of its points' weights, so at least `W₀` everywhere), every coefficient of
@@ -441,13 +445,15 @@ pub fn distance_bound(form: &BSplineSurface, a: &Implicit, delta: [f64; 2]) -> R
                     return Ok(None);
                 }
             }
-            // `τ`'s rounding model holds only above the subnormal range: a residual scale or
-            // a weight power that underflows (homogeneous points of tiny weight) has no bound
+            // `τ`'s rounding model leaves out underflow: with `τ ≥ MIN_POSITIVE / ε` the
+            // coefficients' underflow (`n · 2⁻¹⁰⁷⁴`) is a relative `n · 2⁻¹⁰⁴` of `τ`, inside
+            // the final growth; a smaller residual scale, or a weight power that underflows
+            // (homogeneous points of tiny weight), has no bound
             let power = match r.degree {
                 1 => w0,
                 _ => w0 * w0,
             };
-            if !(r.tol >= f64::MIN_POSITIVE && power >= f64::MIN_POSITIVE) {
+            if !(r.tol >= f64::MIN_POSITIVE / f64::EPSILON && power >= f64::MIN_POSITIVE) {
                 return Ok(None);
             }
             let exact = 2.0 * r.tol;
