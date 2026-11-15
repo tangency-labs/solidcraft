@@ -8706,9 +8706,11 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
             crate::name_lookup::locate_face_on_body(&fst, f.kind.face_body(), n, from)
         };
         match hit {
-            // A vertex or an edge point saved with a face's name, before such points named none
-            // (#12968), stays where it is: the name would move it onto the face.
-            Some(hit) if normal.is_some_and(|d| on_edge_without_cap(&fst, (hit.body, hit.face), *p, d)) => {}
+            // A vertex or an edge point saved with the name of a wall along the extrusion, before
+            // such points named none (#12968), stays where it is: the name would move it into the
+            // wall. A point named after a face square to the extrusion follows that face.
+            Some(hit)
+                if normal.is_some_and(|d| plane_along(&fst, (hit.body, hit.face), d) && on_edge_without_cap(&fst, (hit.body, hit.face), *p, d)) => {}
             Some(hit) => {
                 if let Some(note) = hit.note(n) {
                     notes.push(note);
@@ -10896,6 +10898,13 @@ pub fn face_point_state<'a>(doc: &Document, st: &'a ModelState, kind: &FeatureKi
         FeatureKind::Revolve { .. } => state_in_frame(doc, st, comp),
         _ => Ok(std::borrow::Cow::Borrowed(st)),
     }
+}
+
+/// Whether a face is a plane that runs along `n` (its normal square to `n`).
+fn plane_along(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> bool {
+    st.bodies.get(bi).is_some_and(
+        |b| matches!(kernel::face_surface(&b.body, fi), Some(kernel::FaceSurface::Plane { normal, .. }) if normal.vec().dot(n).abs() < 1e-6),
+    )
 }
 
 /// The direction an extrude runs along: its sketch plane's normal in the feature's frame.
