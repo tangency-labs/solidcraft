@@ -167,7 +167,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.check_loop_vertex_tolerance = true;
     k.fixes.classify_edge_interval = true;
     k.fixes.cover_refuses_folded_continuation = true;
-    k.fixes.cover_wraps_across_closed_seam = true;
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
@@ -180,7 +179,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_cliff_overflow = true;
-    k.fixes.fillet_half_degree_crease = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_mitre_concave_face_corners = true;
     k.fixes.fillet_mitre_gap_patch = true;
@@ -197,7 +195,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_trim_status = true;
     k.fixes.fillet_variable_span_follows_fillet = true;
     k.fixes.fillet_vertex_error_diagnostics = true;
-    k.fixes.flat_corners_test_bits = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.good_drop_result_distances_in_order = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
@@ -223,14 +220,12 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.offset_point_vertex_caps = true;
     k.fixes.offset_resolve_crossing_loops = true;
     k.fixes.offset_stitch_at_body_tolerance = true;
-    k.fixes.oscillating_skips_failed_guesses = true;
     k.fixes.planar_path_profile_placement_statuses = true;
     k.fixes.planar_path_sweep_statuses = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.proto_vertex_miss_is_false = true;
-    k.fixes.refine_cc_range_ends = true;
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.revolve_holed_profile_void = true;

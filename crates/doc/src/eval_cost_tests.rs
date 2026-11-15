@@ -29,6 +29,7 @@ pub(super) struct Counts {
     pub digested: usize,
     pub mesh_digested: usize,
     pub joint_faces: usize,
+    pub faces_at: usize,
     pub measures: usize,
     pub body_searches: usize,
     pub feature_searches: usize,
@@ -48,6 +49,7 @@ thread_local! {
             digested: 0,
             mesh_digested: 0,
             joint_faces: 0,
+            faces_at: 0,
             measures: 0,
             body_searches: 0,
             feature_searches: 0,
@@ -223,6 +225,71 @@ fn an_edge_origin_measures_its_faces_once() {
         }
     });
     assert_eq!(work.joint_faces, 1, "a solve must not measure the faces again: {work:?}");
+}
+
+/// The summed area of `body`'s faces as [`ModelBody::faces_at`] measures them at `tol`.
+fn measured_area(body: &ModelBody, tol: f64) -> f64 {
+    body.faces_at(tol).unwrap().iter().map(|f| f.area).sum()
+}
+
+/// The viewport asks which faces a feature changed at every rebuild of its highlight: a body's
+/// faces are measured once per geometry and tolerance, snapshots share the measurement, and a
+/// replaced body never answers with the old one.
+#[test]
+fn face_measurements_are_made_once_per_body_and_tolerance() {
+    let mut state = ModelState::default();
+    state.bodies.push(ModelBody::new("Block".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap(), 0));
+    let snapshot = state.clone();
+    let work = counted(|| {
+        for _ in 0..8 {
+            assert_eq!(state.bodies[0].faces_at(0.01).unwrap().len(), 6);
+            assert!((measured_area(&state.bodies[0], 0.01) - 2200.0).abs() < 1e-6);
+            assert!((measured_area(&snapshot.bodies[0], 0.01) - 2200.0).abs() < 1e-6);
+        }
+    });
+    assert_eq!(work.faces_at, 1, "every rebuild and every snapshot shares one measurement: {work:?}");
+
+    // Another tolerance is another measurement, kept beside the first.
+    let work = counted(|| {
+        for tol in [0.02, 0.01, 0.02, 0.01] {
+            assert!((measured_area(&state.bodies[0], tol) - 2200.0).abs() < 1e-6);
+        }
+    });
+    assert_eq!(work.faces_at, 1, "{work:?}");
+
+    // Body is public; a clone's old measurement must never mask a direct replacement.
+    state.bodies[0].body = kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let work = counted(|| {
+        for _ in 0..3 {
+            assert!((measured_area(&state.bodies[0], 0.01) - 600.0).abs() < 1e-6);
+            assert!((measured_area(&snapshot.bodies[0], 0.01) - 2200.0).abs() < 1e-6);
+        }
+    });
+    assert_eq!(work.faces_at, 1, "only the replaced body is measured, and the snapshot keeps its own: {work:?}");
+}
+
+/// Face measurements take any tolerance and stay bounded: a hostile tolerance answers as the
+/// uncached measurement does, a body keeps [`super::FACES_KEPT`] measurements however many
+/// tolerances it is asked at, and a dropped one is made again with the same answer.
+#[test]
+fn face_measurements_are_bounded_and_take_any_tolerance() {
+    let body = ModelBody::new("Block".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap(), 0);
+    for tol in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 0.0, 1e300] {
+        let direct = body.body.faces(tol).map(|faces| faces.len()).map_err(|e| e.to_string());
+        for _ in 0..2 {
+            let cached = body.faces_at(tol).map(|faces| faces.len()).map_err(|e| e.to_string());
+            assert_eq!(cached, direct, "tolerance {tol}");
+        }
+    }
+    for k in 1..=3 * super::FACES_KEPT {
+        assert_eq!(body.faces_at(k as f64 * 1e-3).unwrap().len(), 6);
+    }
+    assert_eq!(body.faces.lock().unwrap().len(), super::FACES_KEPT, "the measurements kept are bounded");
+    let work = counted(|| {
+        assert!((measured_area(&body, 1e-3) - 2200.0).abs() < 1e-6);
+        assert!((measured_area(&body, 1e-3) - 2200.0).abs() < 1e-6);
+    });
+    assert_eq!(work.faces_at, 1, "a dropped measurement is made again, once: {work:?}");
 }
 
 /// `parts` imported files of two boxes each, every one in its own component placed away from
@@ -1444,7 +1511,176 @@ fn marking(p: Vec3) -> FeatureKind {
         steep_flank: Default::default(),
         continuous_flanks: false,
         old_auto_size: false,
+        additional_faces: Vec::new(),
+        target_bodies: Vec::new(),
     }
+}
+
+/// Four selected cylindrical faces on one plate for a grouped Thread feature.
+fn grouped_thread_document(modeled: bool) -> (Document, u64) {
+    let mut doc = Document::new("grouped threads");
+    block(&mut doc, "Part", Vec3::new(-15.0, -15.0, 0.0), [30.0, 30.0, 2.0]);
+    let mut faces = Vec::new();
+    for (x, y) in [(-8.0, -8.0), (8.0, -8.0), (-8.0, 8.0), (8.0, 8.0)] {
+        doc.add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::new(x, y, 2.0)),
+                axis: Dir(Vec3::Z),
+                radius: "3".into(),
+                height: "4".into(),
+                operation: Operation::Join,
+                references: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+        faces.push(FacePick(Vec3::new(x + 3.0, y, 5.0)));
+    }
+    let mut kind = marking(faces.remove(0).0);
+    if let FeatureKind::Thread { additional_faces, modeled: value, designation, .. } = &mut kind {
+        *additional_faces = faces;
+        *value = modeled;
+        *designation = Some("M6x0.75".into());
+    }
+    let id = doc.add_feature(kind, None).unwrap();
+    (doc, id)
+}
+
+/// A cosmetic group keeps one feature and one marking at each selected cylindrical face.
+#[test]
+fn a_grouped_thread_marks_every_selected_face_with_one_feature() {
+    let (doc, id) = grouped_thread_document(false);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert_eq!(model.result(id).unwrap().error, None);
+    assert_eq!(doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Thread { .. })).count(), 1);
+    let state = model.state();
+    let threads = &state.threads;
+    assert_eq!(threads.len(), 4);
+    assert!(threads.iter().all(|t| t.feature == id && t.designation == "M6x0.75"));
+    let origins: Vec<_> = threads.iter().map(|t| (t.axis_point.x.round() as i64, t.axis_point.y.round() as i64)).collect();
+    assert_eq!(origins, vec![(-8, -8), (8, -8), (-8, 8), (8, 8)]);
+}
+
+#[test]
+fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
+    let (mut doc, id) = grouped_thread_document(false);
+    if let FeatureKind::Thread { additional_faces, target_bodies, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        additional_faces.truncate(1);
+        *target_bodies = vec!["Part".into(); 2];
+    }
+    let pattern = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: vec![FeatureId(id)],
+                pattern: PatternKind::Rectangular {
+                    dir1: Dir(Vec3::Y),
+                    count1: "2".into(),
+                    spacing1: "16".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: solidcraft_sketch::PatternAlignment::Right,
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                },
+                bodies: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert_eq!(model.result(id).unwrap().error, None);
+    assert_eq!(model.result(pattern).unwrap().error, None);
+    let state = model.state();
+    let copied: Vec<_> = state
+        .threads
+        .iter()
+        .filter(|t| t.feature == pattern)
+        .map(|t| (t.body.as_str(), t.axis_point.x.round() as i64, t.axis_point.y.round() as i64))
+        .collect();
+    assert_eq!(copied, vec![("Part", -8, 8), ("Part", 8, 8)]);
+}
+
+/// Different points on the same cylindrical interval create just one marking.
+#[test]
+fn duplicate_grouped_thread_picks_resolve_to_one_marking() {
+    let (mut doc, id) = grouped_thread_document(false);
+    if let FeatureKind::Thread { additional_faces, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        additional_faces.push(FacePick(Vec3::new(-8.0, -5.0, 4.0)));
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert_eq!(model.result(id).unwrap().error, None);
+    assert_eq!(model.state().threads.len(), 4);
+}
+
+/// A malformed saved group is bounded before expensive geometry is visited.
+#[test]
+fn an_oversized_grouped_thread_is_refused() {
+    let (mut doc, id) = grouped_thread_document(false);
+    if let FeatureKind::Thread { additional_faces, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        *additional_faces = vec![FacePick(Vec3::new(-5.0, -8.0, 5.0)); 1024];
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.result(id).unwrap().error.as_ref().is_some_and(|e| e.contains("at most 1024")));
+    assert!(model.state().threads.is_empty());
+}
+
+/// A body-qualified modelled group cuts every selected shaft within one timeline feature.
+#[test]
+fn a_grouped_modelled_thread_cuts_every_selected_shaft() {
+    let (mut doc, id) = grouped_thread_document(true);
+    if let FeatureKind::Thread { target_bodies, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        *target_bodies = vec!["Part".into(); 4];
+    }
+    assert_eq!(doc.feature(id).unwrap().kind.input_bodies(), ["Part"; 4]);
+    assert_eq!(doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Thread { .. })).count(), 1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert_eq!(model.result(id).unwrap().error, None);
+    let before = model.state_before(id);
+    let after = model.state();
+    assert_eq!(after.bodies.len(), 1);
+    assert!(!before.bodies[0].body.same_shape(&after.bodies[0].body));
+    assert!(after.threads.is_empty(), "modelled threads are geometry, not tap markings");
+    let base_volume = kernel::measure(&before.bodies[0].body).unwrap().volume;
+    let threaded_volume = kernel::measure(&after.bodies[0].body).unwrap().volume;
+    assert!(base_volume - threaded_volume > 8.0, "all four grooves remove material");
+    for (x, y) in [(-8.0, -8.0), (8.0, -8.0), (-8.0, 8.0), (8.0, 8.0)] {
+        // Four phases at radius 2.9 mm, inside the original 3 mm shaft. A 0.75 mm
+        // ISO groove spans more than a quarter turn there, so at least one is cut.
+        let probes = [Vec3::new(x + 2.9, y, 4.0), Vec3::new(x, y + 2.9, 4.0), Vec3::new(x - 2.9, y, 4.0), Vec3::new(x, y - 2.9, 4.0)];
+        assert!(probes.iter().all(|p| before.bodies[0].body.classify_point(*p).unwrap() == kernel::PointClass::Inside));
+        assert!(
+            probes.iter().any(|p| after.bodies[0].body.classify_point(*p).unwrap() == kernel::PointClass::Outside),
+            "shaft at ({x}, {y}) is threaded"
+        );
+        assert_eq!(after.bodies[0].body.classify_point(Vec3::new(x, y, 4.0)).unwrap(), kernel::PointClass::Inside, "the shaft core stays intact");
+        assert_eq!(
+            after.bodies[0].body.classify_point(Vec3::new(x, y, 1.0)).unwrap(),
+            kernel::PointClass::Inside,
+            "the supporting plate stays intact"
+        );
+    }
+}
+
+/// A bad later pick refuses the complete group rather than leaving earlier markings behind.
+#[test]
+fn an_invalid_grouped_thread_face_keeps_the_starting_model() {
+    let (mut doc, id) = grouped_thread_document(false);
+    if let FeatureKind::Thread { additional_faces, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        additional_faces.push(FacePick(Vec3::new(1000.0, 0.0, 0.0)));
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.result(id).unwrap().error.is_some());
+    assert!(model.state().threads.is_empty());
+    let before = model.state_before(id);
+    assert!(model.state().bodies[0].body.same_shape(&before.bodies[0].body));
 }
 
 /// A tap marking looks for its cylinder in the bodies near it only: each body searched was
