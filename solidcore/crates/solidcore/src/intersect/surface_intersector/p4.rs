@@ -2623,11 +2623,11 @@ mod tests {
     /// #16669 (`CodeRabbit` on #16670): a point the step-growth loop's `TestPoint` snaps to a
     /// through point, leaving the trace unfinished, ends a span no span test saw, which is
     /// certified before it is added. The unit sphere meets the plane z = 0.5 in a circle; the
-    /// trace starts at u = `U0` heading toward u = 0 with steps that grow, and the through
-    /// point lies 0.1 along the circle with its sphere uv moved 0.01 along u, so a growth
-    /// step's `TestPoint` snaps to it but the span to it does not certify. The trace refuses
-    /// the snap (`approach_certified`) rather than add it. Without the check the span from
-    /// u = 0.15 to u = 0.1416 was added uncertified.
+    /// trace starts at u = `U0` heading toward u = 0 with steps that grow. The through point
+    /// is a point of the circle whose sphere uv alone is moved 0.01 along u, so its sphere and
+    /// plane uv disagree: a growth step's `TestPoint` snaps to it, but the span to it does not
+    /// certify. The trace refuses the snap (`approach_certified`) with exactly that reason.
+    /// Without the check the span from u = 0.15 to u = 0.1416 was added uncertified.
     #[test]
     fn a_span_snapped_during_step_growth_on_a_sphere_is_certified() {
         use crate::geom::axis2_placement::Axis2Placement;
@@ -2680,10 +2680,10 @@ mod tests {
         // steps of 0.05 that grow (100 times the tolerance, turning under a quarter of the
         // 20 degree limit on the circle of radius 0.866)
         si.this_approx_tol_3d = 5e-4;
-        // a through point 0.1 along the circle, between the first step (0.05) and the
-        // growth steps past it (0.075, 0.1125), its uv on the sphere moved 0.01 along u:
-        // inside the span's uv box, so TestPoint takes it, but off the circle (by about
-        // 0.05), so the snapped span's image misses its 3D span
+        // a through point: the circle's point at sphere u = `at`, with only its sphere uv then
+        // moved 0.01 along u. Its 3D point and plane uv stay where they were, so the sphere and
+        // plane uv no longer name the same point and the snapped span's two images disagree;
+        // its moved sphere uv lies inside a growth step's uv box, so TestPoint takes it
         let at = U0 - 0.1 / (2.0 * PI * 0.75_f64.sqrt());
         let mut far = on_circle(&si, at, v);
         let fu = far.uv_pos(SrfIndex::First);
@@ -2694,29 +2694,27 @@ mod tests {
         let du = start_pnt.uv_deriv(SrfIndex::First).x;
         si.curve_trace_direction = if du > 0.0 { -1.0 } else { 1.0 };
         let start = si.alloc_point(start_pnt);
-        match si.trace_curve(k, start, &[]) {
-            Ok(()) => {
-                let ps = si.curve_points().to_vec();
-                for w in ps.windows(2) {
-                    let (a, b) = (si.point(w[0]).unwrap(), si.point(w[1]).unwrap());
-                    let step = b.curve_parameter - a.curve_parameter;
-                    assert!(
-                        si.span_images_certified(a, b, step),
-                        "an uncertified span from u = {} to u = {} was added",
-                        a.uv_pos(SrfIndex::First).x,
-                        b.uv_pos(SrfIndex::First).x,
-                    );
-                }
-            }
-            Err(e) => {
-                let refusals = [
-                    "no trace step toward the snapped point passes",
-                    "a trace step toward the snapped point hit a domain boundary",
-                    "the span to the snapped point does not certify within the bound",
-                ]
-                .map(|why| SolidError::intersect_failed(OP_APPROACH, why));
-                assert!(refusals.contains(&e), "{e:?}");
+        let r = si.trace_curve(k, start, &[]);
+        if r.is_ok() {
+            // name the span that should have been refused
+            let ps = si.curve_points().to_vec();
+            for w in ps.windows(2) {
+                let (a, b) = (si.point(w[0]).unwrap(), si.point(w[1]).unwrap());
+                let step = b.curve_parameter - a.curve_parameter;
+                assert!(
+                    si.span_images_certified(a, b, step),
+                    "an uncertified span from u = {} to u = {} was added",
+                    a.uv_pos(SrfIndex::First).x,
+                    b.uv_pos(SrfIndex::First).x,
+                );
             }
         }
+        assert_eq!(
+            r,
+            Err(SolidError::intersect_failed(
+                OP_APPROACH,
+                "the span to the snapped point does not certify within the bound",
+            )),
+        );
     }
 }
