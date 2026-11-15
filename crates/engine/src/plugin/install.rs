@@ -98,15 +98,28 @@ pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
         let module = runtime.module.clone();
         return Err(if source { InstallError::SourceOnly(module) } else { InstallError::MissingModule(module) });
     }
+    // Removal walks every file and folder up to a fixed count, so an install must not create more.
+    let mut folders = std::collections::BTreeSet::new();
+    for file in &files {
+        let mut path = file.path.as_str();
+        while let Some((parent, _)) = path.rsplit_once('/') {
+            folders.insert(parent);
+            path = parent;
+        }
+    }
+    if files.len() + folders.len() > super::package::MAX_FILES {
+        return Err(InstallError::Manifest(HostError::LimitExceeded { limit: "a plugin folder holds at most 1024 files and folders".into() }));
+    }
+    // Every file but the plugin's component stays within a command component's budget.
+    let component_path = manifest.runtime.as_ref().map(|r| r.module.as_str());
+    if files.iter().any(|f| Some(f.path.as_str()) != component_path && f.bytes.len() > craft_plugin::MAX_COMPONENT_BYTES) {
+        return Err(InstallError::Manifest(HostError::LimitExceeded { limit: "a plugin file other than its component is over 16 MiB".into() }));
+    }
     let component = if let Some(runtime) = &manifest.runtime {
         let module = files.iter().find(|f| f.path == runtime.module).ok_or_else(|| InstallError::MissingModule(runtime.module.clone()))?;
         if module.bytes.len() > runtime.max_component_bytes() {
             let mib = runtime.max_component_bytes() >> 20;
             return Err(InstallError::Manifest(HostError::LimitExceeded { limit: format!("component size: {} is over {mib} MiB", runtime.module) }));
-        }
-        // Every other file stays within a command component's budget.
-        if files.iter().any(|f| f.path != runtime.module && f.bytes.len() > craft_plugin::MAX_COMPONENT_BYTES) {
-            return Err(InstallError::Manifest(HostError::LimitExceeded { limit: "a plugin file other than its component is over 16 MiB".into() }));
         }
         module.bytes.as_slice()
     } else {

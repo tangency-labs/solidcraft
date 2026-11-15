@@ -74,7 +74,7 @@ Dry-run description is the package review path; there is no separate review comm
 
 A zip holds one plugin, with `plugin.json` and its component at the top or inside one top-level folder.
 The existing `solidcraft_io::safe_zip` reader refuses absolute paths, `..`, symlinks and device entries.
-The installer limits the archive to 256 entries, each file to 16 MiB, and input and unpacked content to
+The installer limits the archive to 256 entries, each file to 16 MiB (an importer component may be up to 64 MiB), and input and unpacked content to
 64 MiB. The manifest has a separate 16 KiB cap. Before publication, the host parses the manifest and
 refuses unknown or newer capabilities. It unpacks into a hidden `.install-…` folder beside the installed
 plugins, then renames it to `plugins/<id>/`. The entries resolve immediately, with no restart.
@@ -126,8 +126,9 @@ For example, `{"kind":"menu","name":"File"}` places an entry in File;
 Clicking a File, Help or ribbon item opens the same input-schema dialog as the Plugins menu.
 The host finds the entry by its namespaced `<plugin-id>.<entry>` command. The dialog uses the same
 enabled state and grant checks from every placement. Missing command-group grants leave Run off
-with an explanation. Opening the dialog executes no plugin code; Run submits the existing
-`plugin.run` transaction.
+with an explanation. Opening the dialog executes no plugin code; for a command entry, Run submits the
+existing `plugin.run` transaction. An importer entry is not a command: its dialog shows the options,
+then its button chooses the file and opens it as a new design with `file.import`, as File > Open does.
 
 ## Integration APIs
 
@@ -223,7 +224,7 @@ extensions it claims, lowercase without the dot:
   one gets a fresh instance. The compiled component stays in memory, so the next file opens
   without compiling again; nothing compiled is written to disk.
 - **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
-  `stack_kib` up to 64 MiB. Its fuel has to fit the user's ceiling in Preferences › Plugins, and
+  `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel has to fit the user's ceiling in Preferences › Plugins, and
   its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with
   `wasm-tools component new`: the host links no WASI, so a component that imports any is refused.
 

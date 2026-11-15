@@ -1,5 +1,7 @@
 use crate::{ImportRequest, Imported, RuntimeOptions};
 use cap_std::fs::{Dir, OpenOptions};
+#[cfg(unix)]
+use cap_std::fs::OpenOptionsExt;
 use craft_plugin::{
     CommandSchema, Effect, HostError, Limits, LossReport, MAX_IMPORT_CHUNK_BYTES, MAX_IMPORT_DESIGN_BYTES, MAX_IMPORT_INPUT_BYTES, MAX_JSON_BYTES,
     Manifest, PluginHost, Result,
@@ -28,6 +30,11 @@ const MAX_CALLS: usize = 256;
 const MAX_IMPORT_CALLS: usize = 1 << 20;
 /// Files an importer may look at beside the one it imports, and names a folder listing reads.
 const MAX_IMPORT_FILES: usize = 4096;
+/// `O_NONBLOCK` for the platforms the runtime targets (the flag is not in `std`).
+#[cfg(all(unix, any(target_os = "linux", target_os = "android")))]
+const O_NONBLOCK: i32 = 0o4000;
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+const O_NONBLOCK: i32 = 0x4;
 const MAX_LOG_BYTES: usize = 64 * 1024;
 const EPOCH_POLL: Duration = Duration::from_millis(10);
 static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
@@ -326,7 +333,13 @@ impl<H: PluginHost> source::Host for State<H> {
         let read = (|| -> std::io::Result<Vec<u8>> {
             use std::io::{Seek, SeekFrom};
             let import = self.import.as_ref().ok_or_else(|| std::io::Error::other("not an import"))?;
-            let mut file = import.dir.open(&target)?;
+            // Non-blocking, so a named pipe in the folder cannot hold the import in `open`; the
+            // opened handle is then checked, not the path.
+            let mut options = OpenOptions::new();
+            options.read(true);
+            #[cfg(unix)]
+            options.custom_flags(O_NONBLOCK);
+            let mut file = import.dir.open_with(&target, &options)?;
             if !file.metadata()?.is_file() {
                 return Err(std::io::Error::other("only regular files are read"));
             }
@@ -371,7 +384,13 @@ impl<H: PluginHost> source::Host for State<H> {
         let listing = if parent.as_os_str().is_empty() { import.dir.entries() } else { import.dir.read_dir(parent) };
         let Ok(listing) = listing else { return Ok(None) };
         let mut found = None;
-        for entry in listing.take(MAX_IMPORT_FILES).flatten() {
+        let mut scanned = 0;
+        for entry in listing.flatten() {
+            scanned += 1;
+            if scanned > MAX_IMPORT_FILES {
+                // A partial scan cannot show the match is the only one.
+                return Ok(None);
+            }
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.starts_with('.') || name.to_lowercase() != wanted || !entry.file_type().is_ok_and(|t| t.is_file()) {
                 continue;
@@ -505,7 +524,7 @@ pub(super) fn run<H: PluginHost + 'static>(
         if params.len() > MAX_JSON_BYTES {
             return Err(limit("parameters exceed 1 MiB"));
         }
-        let (engine, component) = compile(bytes, stack_bytes(&runtime.limits, options)?)?;
+        let (engine, component) = compile(bytes, stack_bytes(&runtime.limits, options, false)?)?;
         let commands = host.command_catalog().into_iter().filter(|s| runtime.commands.contains(&s.name)).map(|s| (s.name.clone(), s)).collect();
         let groups: BTreeSet<String> = host.granted_command_groups().intersection(&runtime.permissions.command_groups).cloned().collect();
         let mut folders = BTreeMap::new();
@@ -667,11 +686,18 @@ fn with_interrupts<T>(engine: &Engine, call: impl FnOnce() -> wasmtime::Result<T
     Ok(response)
 }
 
+/// The most stack a command's manifest may ask for: a command runs on the caller's own thread.
+/// An importer runs on a thread sized for its request, so it may ask for more.
+const COMMAND_STACK_MAX_BYTES: usize = 1024 * 1024;
+
 /// The guest stack: the manifest's `stack_kib` when it asks for one, else the app's default.
-fn stack_bytes(limits: &Limits, options: RuntimeOptions) -> Result<usize> {
+fn stack_bytes(limits: &Limits, options: RuntimeOptions, importer: bool) -> Result<usize> {
     let bytes = limits.stack_kib.map_or(options.stack_bytes, |kib| kib as usize * 1024);
     if !(64 * 1024..=64 * 1024 * 1024).contains(&bytes) {
         return Err(HostError::InvalidInput { field: "stack_bytes".into(), reason: "must be 64 KiB..64 MiB".into() });
+    }
+    if !importer && bytes > COMMAND_STACK_MAX_BYTES.max(options.stack_bytes) {
+        return Err(limit("stack_kib: a command may ask for at most 1 MiB"));
     }
     Ok(bytes)
 }
@@ -747,7 +773,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         if size > MAX_IMPORT_INPUT_BYTES {
             return Err(limit("source: the file is larger than 1 GiB"));
         }
-        let (engine, component) = compile(bytes, stack_bytes(&runtime.limits, runtime_options)?)?;
+        let (engine, component) = compile(bytes, stack_bytes(&runtime.limits, runtime_options, true)?)?;
         let import = ImportState {
             dir,
             name: name.clone(),

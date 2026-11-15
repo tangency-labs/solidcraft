@@ -13,6 +13,8 @@ pub(crate) struct Item {
     pub entry: String,
     pub label: String,
     pub slot: Slot,
+    /// An importer chooses its own file, so it needs no open design.
+    pub importer: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Slot {
@@ -91,6 +93,7 @@ fn declared(plugin: &plugins::Plugin) -> Vec<Item> {
                 entry: entry.name.clone(),
                 label: format!("{} · {}", plugin.name, entry.name),
                 slot,
+                importer: entry.kind == solidcraft_engine::plugin::EntryKind::Importer,
             });
         }
     }

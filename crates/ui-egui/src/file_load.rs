@@ -474,7 +474,7 @@ pub(crate) fn step_folder_option(app: &SolveApp, path: &str, options: &mut serde
 /// The preference's `reuse_import` default for an import-backed open only: a native design's
 /// request keeps empty options, so `reuse_open` can still switch to its open tab.
 fn default_reuse_import(app: &SolveApp, request: &mut Request) {
-    if request.kind == Kind::Open && solidcraft_engine::io::is_step_path(&request.path) {
+    if request.kind == Kind::Open && !request.plugin_import && solidcraft_engine::io::is_step_path(&request.path) {
         request.options.entry("reuse_import").or_insert(Value::Bool(app.preferences.reuse_imports));
     }
 }
@@ -493,6 +493,7 @@ pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<S
 /// Queue a file operation; on the web (no threads) it runs now.
 pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
     if request.kind == Kind::Open
+        && !request.plugin_import
         && app.preferences.verify_opened_designs
         && solidcraft_engine::io::is_design_path(&request.path)
         && !request.options.contains_key("verify")
@@ -508,7 +509,7 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
     if app.file_load.idle() && reuse_open(app, &request) {
         return Ok(());
     }
-    if matches!(request.kind, Kind::Open | Kind::Insert) {
+    if matches!(request.kind, Kind::Open | Kind::Insert) && !request.plugin_import {
         // After `reuse_open`: an already open tab is kept whatever the import preferences say,
         // as the folder option is.
         for (k, v) in preferred_options(app, &request.path) {

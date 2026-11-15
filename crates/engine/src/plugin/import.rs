@@ -188,6 +188,10 @@ pub fn import_file(session: &mut Session, importer: &Importer, path: &str, optio
         fresh.undo.clear();
         fresh.redo.clear();
         fresh.mark_unsaved();
+        // Cancel pressed while the new design was evaluated leaves the open one alone.
+        if solidcraft_doc::progress::cancelled() {
+            return Err(HostError::Cancelled.into());
+        }
         session.replace_design(fresh);
         Ok(ImportedDesign {
             path: path.into(),
