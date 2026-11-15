@@ -57,6 +57,7 @@ pub(crate) struct State {
     pending: Vec<(u64, u64)>,
 }
 
+#[cfg(test)]
 impl State {
     /// The most recently opened entry dialog.
     pub(crate) fn dialog(&self) -> Option<&EntryDialog> {
@@ -641,6 +642,7 @@ impl EntryDialog {
 }
 
 /// Run the most recently opened dialog's entry.
+#[cfg(test)]
 pub(crate) fn run(app: &mut SolveApp) -> Result<(), String> {
     let Some(id) = app.plugin_menu.dialog().map(|d| d.id) else { return Ok(()) };
     run_dialog(app, id)
@@ -740,7 +742,7 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     // Just the command's own title ("Gears"): no plugin or menu name after it.
     let title = dialog.label.clone();
     let (run_label, close_label) = (app.tr("ui.plugin_dialog_run").to_owned(), app.tr(if dialog.read { "ui.close" } else { "ui.cancel" }).to_owned());
-    let (closed, action) = ui_kit::Window::new(egui::Id::new(("sc_plugin_entry", dialog.id)), "prefs_plugins", &title)
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_plugin_entry").with(dialog.id), "prefs_plugins", &title)
         .fields()
         .actions(&run_label, &close_label, None)
         .show(ctx, ready.is_ok() && !running, |ui| body(app, ui, dialog, ready.as_ref().err()));
