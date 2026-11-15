@@ -8,7 +8,10 @@ use crate::{
     ui_kit::{choice_row, expr_row, row},
 };
 use serde_json::{Map, Value, json};
-use solidcore_record::cell_grid::{CellShape, Clip, DotGrid};
+use solidcore_record::{
+    Vec3,
+    cell_grid::{CellShape, Clip, DotGrid},
+};
 use solidcraft_engine::{
     Sel,
     doc::{Direction, FeatureKind, expr::Kind as ValueKind},
@@ -23,9 +26,13 @@ const DIRECTIONS: [&str; 3] = ["positive", "negative", "symmetric"];
 const PROFILES_INPUT: usize = 0;
 const BODIES_INPUT: usize = 1;
 const ANCHOR_INPUT: usize = 2;
-/// A corner, the origin or a snap point (an edge's middle or end, a hole's centre): each is picked
-/// as a vertex with its point.
-const ANCHOR_PICKS: crate::selection::Accept = crate::selection::VERTICES | crate::selection::ORIGIN | crate::selection::SNAP_POINTS;
+/// A corner, the origin or a snap point (an edge's middle or end, a hole's centre), each picked as
+/// a vertex with its point; a sketch point; a construction point.
+const ANCHOR_PICKS: crate::selection::Accept = crate::selection::VERTICES
+    | crate::selection::ORIGIN
+    | crate::selection::SNAP_POINTS
+    | crate::selection::POINTS
+    | crate::selection::CONSTRUCTION_POINTS;
 
 #[derive(Clone, Debug)]
 pub struct CellGrid {
@@ -172,11 +179,22 @@ pub fn commands(app: &SolveApp, c: &CellGrid, inputs: &[SelInput], extra: &Map<S
         if !bodies.is_empty() {
             args.insert("targets".into(), json!(bodies));
         }
-        if let Some(Sel::Vertex { point, .. }) = crate::selection::items(inputs, ANCHOR_INPUT).first() {
-            args.insert("anchor".into(), crate::selection::point_value(*point));
+        // Editing: the stored anchor stays as typed (it may follow parameters) while its point is
+        // still the one in the field; a new pick replaces it, an empty field is the sketch origin.
+        let kept = extra.get("anchor").filter(|kept| stored_point(app, kept).is_some());
+        match crate::selection::items(inputs, ANCHOR_INPUT).first() {
+            Some(Sel::Vertex { body, point })
+                if body.is_empty() && kept.and_then(|k| stored_point(app, k)).is_some_and(|k| k.dist(*point) < 1e-9) =>
+            {
+                args.insert("anchor".into(), kept.cloned().unwrap_or_default());
+            }
+            Some(pick) => {
+                let point = anchor_point(app, pick).ok_or_else(|| app.tr("error.cell_grid_anchor").to_string())?;
+                args.insert("anchor".into(), crate::selection::point_value(point));
+            }
+            None => {}
         }
-        // Editing: the stored anchor and targets stay unless new ones are picked.
-        for (k, v) in extra {
+        for (k, v) in extra.iter().filter(|(k, _)| *k != "anchor") {
             args.entry(k.clone()).or_insert_with(|| v.clone());
         }
     }
@@ -244,9 +262,42 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         input.items = targets.iter().map(|name| Sel::Body { name: name.to_string() }).collect();
     }
     let mut extra = Map::new();
-    // The anchor may follow parameters: it is kept as typed, not as a picked point.
+    // The anchor may follow parameters: it is kept as typed, and the field shows its point, so
+    // that clearing the field goes back to the sketch origin.
     if let Some(anchor) = anchor {
-        extra.insert("anchor".into(), json!(anchor.iter().map(length).collect::<Vec<_>>()));
+        let typed = json!(anchor.iter().map(length).collect::<Vec<_>>());
+        if let (Some(input), Some(point)) = (inputs.get_mut(ANCHOR_INPUT), stored_point(app, &typed)) {
+            input.items = vec![Sel::Vertex { body: String::new(), point }];
+        }
+        extra.insert("anchor".into(), typed);
     }
     Some((Kind::CellGrid(c), inputs, extra))
+}
+
+/// Where an anchor pick is: a vertex comes with its point; a sketch point and a construction
+/// point are looked up in the model.
+fn anchor_point(app: &SolveApp, pick: &Sel) -> Option<Vec3> {
+    let world = crate::open_meshing::session_world(&app.session);
+    match pick {
+        Sel::Vertex { point, .. } => Some(*point),
+        Sel::SketchPoint { id } => crate::canvas::sketch_point_at(app, &world, id),
+        Sel::ConstructionPoint { name } => {
+            let c = world.construct.iter().find(|c| c.name == *name)?;
+            let solidcraft_engine::doc::construct::ConstructGeom::Point(p) = c.geom else { return None };
+            // A point of a component's construction sits where that component's occurrence is.
+            let component = app.session.doc.feature(c.feature).map_or(0, |f| f.component);
+            let occurrence = if component == 0 { None } else { app.session.doc.occurrence_of(component) };
+            Some(
+                occurrence
+                    .map_or(p, |o| solidcraft_engine::doc::apply_point(&solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, o.id), p)),
+            )
+        }
+        _ => None,
+    }
+}
+
+/// The point of a stored anchor, `[x, y, z]` as typed.
+fn stored_point(app: &SolveApp, typed: &Value) -> Option<Vec3> {
+    let coord = |i: usize| crate::length_input::eval(&app.session.doc, typed.get(i)?.as_str()?, ValueKind::Length).ok();
+    Some(Vec3::new(coord(0)?, coord(1)?, coord(2)?))
 }

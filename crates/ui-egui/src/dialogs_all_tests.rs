@@ -905,6 +905,12 @@ fn cell_grid_edit_refills_every_stored_value() {
     assert!(c.through_all, "{c:?}");
     assert!(!inputs[0].items.is_empty() && inputs[1].items == [Sel::Body { name: "Plate".into() }], "{inputs:?}");
     assert!(extra.contains_key("anchor"), "{extra:?}");
+    // The field shows the stored anchor's point; emptied, it is the sketch origin: no anchor is sent.
+    assert_eq!(inputs[2].items, [Sel::Vertex { body: String::new(), point: Vec3::new(1.0, 2.0, 0.0) }], "{inputs:?}");
+    let mut cleared = inputs.clone();
+    cleared[2].items.clear();
+    let to_origin = crate::dialogs_cell_grid::commands(&h.app, &c, &cleared, &extra).unwrap();
+    assert!(to_origin[0].1.get("anchor").is_none(), "{to_origin:?}");
     let commands = crate::dialogs_cell_grid::commands(&h.app, &c, &inputs, &extra).unwrap();
     let [(id, p)] = commands.as_slice() else { panic!("{commands:?}") };
     h.app.run(id, p.clone()).unwrap();
