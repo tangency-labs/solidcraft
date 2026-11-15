@@ -1724,45 +1724,11 @@ struct WoundUse {
 
 /// Where the ruling at angle `theta` meets a Bézier piece (parameters `on` of the NURBS form `c`)
 /// whose angle is monotone and spans under half a turn: `(true, point, parameter)` where the
-/// angle reaches `theta` between the piece's ends (bisected on the form), else `(false, end,
-/// parameter)` with the end whose angle is nearer: the ruling passes within the piece's pad of
-/// it, somewhere over its hull's heights.
-fn ruling_crossing(frame: &Perpendicular, c: &CurveEval, [s, t]: [f64; 2], theta: f64) -> R<Option<(bool, Vec3, f64)>> {
-    let off = |x: f64| -> Option<(f64, Vec3)> {
-        let p = c.point(x)?;
-        Some((wrap(frame.angle(p) - theta), p))
-    };
-    let (Some((d0, p0)), Some((d1, p1))) = (off(s), off(t)) else { return Ok(None) };
-    if d0 == 0.0 {
-        return Ok(Some((true, p0, s)));
-    }
-    if d1 == 0.0 {
-        return Ok(Some((true, p1, t)));
-    }
-    if d0.signum() == d1.signum() {
-        return Ok(Some(if d0.abs() <= d1.abs() { (false, p0, s) } else { (false, p1, t) }));
-    }
-    let (mut a, mut b, mut fa) = (s, t, d0);
-    for _ in 0..200 {
-        let m = 0.5 * (a + b);
-        if !(a < m && m < b) {
-            break;
-        }
-        let Some((fm, _)) = off(m) else { return Ok(None) };
-        if fm == 0.0 {
-            a = m;
-            b = m;
-            break;
-        }
-        if fm.signum() == fa.signum() {
-            a = m;
-            fa = fm;
-        } else {
-            b = m;
-        }
-    }
-    let m = 0.5 * (a + b);
-    Ok(off(m).map(|(_, p)| (true, p, m)))
+/// angle reaches `theta` between the piece's ends, else `(false, end, parameter)` with the end
+/// whose angle is nearer: the ruling passes within the piece's pad of it, somewhere over its
+/// hull's heights. The geometry is the kernel's ([`crate::kernel::angle_crossing`]).
+fn ruling_crossing(frame: &Perpendicular, c: &CurveEval, on: [f64; 2], theta: f64) -> R<Option<(bool, Vec3, f64)>> {
+    Ok(crate::kernel::angle_crossing(c, frame.origin, frame.x, frame.y, on, theta))
 }
 
 /// A Bézier piece of a loop's edge: the arc of angles about the axis it lies within, and the
