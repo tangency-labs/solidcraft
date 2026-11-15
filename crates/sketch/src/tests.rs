@@ -83,6 +83,340 @@ fn line_pts(sk: &Sketch, l: usize) -> (Vec2, Vec2) {
 }
 
 #[test]
+fn editing_one_biarc_ratio_keeps_curve_ids_and_tangents() {
+    let mut sk = Sketch::new();
+    let nodes = [(v(-20., 0.), Vec2::X), (v(0., 10.), Vec2::X), (v(20., 10.), Vec2::X)];
+    let spline = sk.add_biarc_spline(&nodes, None, false).unwrap();
+    assert_eq!(spline.spans.iter().map(|span| span.ratio).collect::<Vec<_>>(), vec![0.5, 0.5]);
+    let [left, right] = &spline.spans[0].curves;
+    let joint = sk.resolve_point(&format!("{left}.end")).unwrap();
+    assert_eq!(sk.resolve_point(&format!("{right}.start")), Some(joint));
+    assert!(sk.point(joint).unwrap().dist(v(-10., 5.)) < 1e-10);
+    let joint_id = sk.points[joint].id.clone();
+    let before = sk.clone();
+    let edited = sk.set_biarc_ratio(right, 0, 0.25).unwrap();
+    assert_eq!(spline.nodes, edited.nodes);
+    assert_eq!(edited.spans[0].curves, spline.spans[0].curves);
+    assert_eq!(edited.spans[1], spline.spans[1]);
+    assert_eq!(sk.resolve_point(&format!("{left}.end")), sk.point_index(&joint_id));
+    assert!(sk.point(joint).unwrap().dist(v(-15., 2.5)) < 1e-10);
+    // Both prescribed tangents are horizontal. The clockwise and counter-clockwise pieces
+    // retain their forward travel across the joint.
+    let exact = |id: &str| {
+        let i = sk.curve_index(id).unwrap();
+        let piece = sk.segs(i)[0];
+        if sk.curves[i].reversed { piece.reversed() } else { piece }
+    };
+    assert!(exact(left).start_tangent().dist(Vec2::X) < 1e-12);
+    assert!(exact(right).end_tangent().dist(Vec2::X) < 1e-12);
+    assert!(exact(left).end_tangent().dist(exact(right).start_tangent()) < 1e-12);
+    for id in &spline.spans[1].curves {
+        let i = sk.curve_index(id).unwrap();
+        assert_eq!(sk.segs(i), before.segs(i));
+        assert!(matches!(sk.curves[i].kind, CurveKind::Line { .. }));
+    }
+    assert!(sk.curves.iter().all(|curve| !curve.fixed));
+    let report = solve(&mut sk);
+    assert!(report.keeps_orientation());
+    assert_eq!(report.dof, 12);
+    assert!(report.curve_determined.iter().all(|determined| !*determined));
+    let saved = serde_json::to_string(&sk).unwrap();
+    let reopened: Sketch = serde_json::from_str(&saved).unwrap();
+    reopened.validate_biarc_splines().unwrap();
+    assert_eq!(reopened, sk);
+}
+
+#[test]
+fn point_along_a_clockwise_biarc_matches_its_stored_arc() {
+    let mut sk = Sketch::new();
+    let spline = sk.add_biarc_spline(&[(v(-10., 0.), Vec2::Y), (v(10., 0.), -Vec2::Y)], None, false).unwrap();
+    let c = sk.curve_index(&spline.spans[0].curves[0]).unwrap();
+    assert!(sk.curves[c].reversed);
+    let at = 0.25;
+    // The first quarter circle is stored from the top (π/2) to the left (π).
+    let expected = Vec2::from_angle(5. * PI / 8.) * 10.;
+    assert!(point_along(&sk, c, at).unwrap().dist(expected) < 1e-12);
+    let p = sk.add_point(expected + v(1., 2.), None).unwrap();
+    sk.add_constraint(ConstraintKind::PointAlong { p, c, at }, None).unwrap();
+    let points =
+        spline.nodes.iter().flat_map(|node| [&node.point, &node.handle.as_ref().unwrap().point]).map(|id| sk.point_index(id).unwrap()).collect();
+    let report = solve_with(&mut sk, &Hold { points, ..Hold::default() }, None, Analysis::Full, None);
+    assert!(report.ok(), "{report:?}");
+    assert!(sk.points[p].pos.dist(expected) < 1e-8, "{:?}", sk.points[p].pos);
+    assert!(sk.points[p].pos.dist(point_along(&sk, c, at).unwrap()) < 1e-8);
+}
+
+#[test]
+fn invalid_biarc_edits_are_atomic_and_a_member_deletes_the_group() {
+    let mut sk = Sketch::new();
+    let nodes = [(v(0., 0.), Vec2::X), (v(10., 0.), Vec2::X), (v(20., 0.), Vec2::X)];
+    let spline = sk.add_biarc_spline(&nodes, None, false).unwrap();
+    let member = &spline.spans[0].curves[0];
+    let end = sk.point_index(&spline.nodes[2].point).unwrap();
+    let other = sk.add_line(v(20., 0.), v(25., 5.), Some(end), None, None).unwrap();
+    let other_id = sk.curves[other].id.clone();
+    let before = sk.clone();
+    assert!(sk.set_biarc_ratios(member, &[0.75, 1.0]).is_err());
+    assert!(sk.set_biarc_ratios(member, &[f64::NAN, 0.5]).is_err());
+    assert!(sk.add_biarc_spline(&[(v(30., 0.), Vec2::X), (v(40., 0.), Vec2::ZERO)], None, false).is_err());
+    assert_eq!(before, sk);
+    let mut damaged = before.clone();
+    damaged.biarc_splines[0].spans[0].ratio = 0.75;
+    assert!(damaged.validate_biarc_splines().is_err());
+    damaged.biarc_splines[0].nodes[0].point = "missing".into();
+    assert!(damaged.validate_biarc_splines().is_err());
+
+    sk.remove_curves(&[sk.curve_index(member).unwrap()]);
+    assert!(sk.biarc_splines.is_empty());
+    assert_eq!(sk.curves.len(), 1);
+    assert!(sk.curve_index(&other_id).is_some());
+    assert_eq!(sk.points.len(), 3);
+    assert!(!sk.point_locked(sk.point_index(&spline.nodes[2].point).unwrap()));
+}
+
+#[test]
+fn deleting_a_line_at_a_reserved_biarc_center_keeps_the_spline() {
+    let mut sk = Sketch::new();
+    let spline = sk.add_biarc_spline(&[(Vec2::ZERO, Vec2::X), (v(10., 0.), Vec2::X)], None, false).unwrap();
+    let center = sk.point_index(spline.spans[0].centers[0].as_deref().unwrap()).unwrap();
+    assert!(!sk.point_used_by_curve(center));
+    let before = sk.clone();
+    let end = sk.add_point(v(12., 3.), None).unwrap();
+    let attached = sk.add_line_pts(center, end, None).unwrap();
+    sk.remove_curves(&[attached]);
+    assert_eq!(sk.biarc_splines, before.biarc_splines);
+    assert_eq!(sk.points, before.points);
+    assert_eq!(sk.curves, before.curves);
+    sk.validate_biarc_splines().unwrap();
+}
+
+#[test]
+fn deleting_a_biarc_point_removes_its_private_geometry() {
+    let mut sk = Sketch::new();
+    let spline = sk.add_biarc_spline(&[(v(0., 0.), Vec2::X), (v(20., 10.), Vec2::X)], None, true).unwrap();
+    let point = sk.resolve_point(&format!("{}.center", spline.spans[0].curves[0])).unwrap();
+    sk.remove_points(&[point]);
+    assert!(sk.biarc_splines.is_empty());
+    assert!(sk.curves.is_empty());
+    assert_eq!(sk.points, Sketch::new().points);
+}
+
+#[test]
+fn a_biarc_piece_can_change_between_an_arc_and_a_line() {
+    let mut sk = Sketch::new();
+    let spline = sk.add_biarc_spline(&[(v(0., 0.), Vec2::X), (v(3., 1.), Vec2::Y)], None, false).unwrap();
+    let [first, second] = &spline.spans[0].curves;
+    let left = sk.curve_index(first).unwrap();
+    let right = sk.curve_index(second).unwrap();
+    let joint = sk.resolve_point(&format!("{first}.end")).unwrap();
+    assert!(matches!(sk.curves[left].kind, CurveKind::Line { .. }));
+    assert!(matches!(sk.curves[right].kind, CurveKind::Arc { .. }));
+    assert_eq!(sk.point(joint).unwrap(), v(2., 0.));
+    let count = sk.points.len();
+    sk.set_biarc_ratio(&spline.id, 0, 0.25).unwrap();
+    assert!(matches!(sk.curves[left].kind, CurveKind::Arc { .. }));
+    let center = sk.resolve_point(&format!("{first}.center")).unwrap();
+    assert_eq!(sk.points.len(), count);
+    sk.add_constraint(ConstraintKind::Coincident { p: center, q: 0 }, None).unwrap();
+    assert!(sk.set_biarc_ratio(&spline.id, 0, 0.5).is_err());
+    assert!(matches!(sk.curves[left].kind, CurveKind::Arc { .. }));
+    sk.constraints.clear();
+    sk.set_biarc_ratio(&spline.id, 0, 0.5).unwrap();
+    assert_eq!(sk.points.len(), count);
+    assert!(matches!(sk.curves[left].kind, CurveKind::Line { .. }));
+    assert_eq!(sk.resolve_point(&format!("{first}.end")), Some(joint));
+    assert_eq!(sk.resolve_point(&format!("{second}.start")), Some(joint));
+}
+
+#[test]
+fn a_biarc_can_bend_slightly_and_return_to_straight() {
+    let mut sk = Sketch::new();
+    let spline = sk.add_biarc_spline(&[(v(0., 15.), v(2., 0.)), (v(4., 15.), v(2., 0.))], None, false).unwrap();
+    let [a, b] = spline.spans[0].curves.each_ref().map(|id| sk.curve_index(id).unwrap());
+    let node = &spline.nodes[1];
+    let end = sk.point_index(&node.point).unwrap();
+    let tip = sk.point_index(&node.handle.as_ref().unwrap().point).unwrap();
+    let before = sk.clone();
+    // The first span of a 400 mm cubic profile with a 14 mm rise. Both arcs have short
+    // chords on large supporting circles, so computing their contacts loses a few ulps.
+    sk.points[end].pos.y += 0.000014;
+    sk.points[tip].pos.y += 0.000035;
+    let report = solve(&mut sk);
+    assert!(report.ok(), "{report:?}");
+    assert_eq!(report.dof, 8);
+    sk.validate_biarc_splines().unwrap();
+
+    let forward = |c: usize| {
+        let piece = sk.segs(c)[0];
+        if sk.curves[c].reversed { piece.reversed() } else { piece }
+    };
+    let (left, right) = (forward(a), forward(b));
+    assert!(matches!(left, Seg2::Arc { .. }) && matches!(right, Seg2::Arc { .. }));
+    assert!(left.end().dist(right.start()) <= 1e-8);
+    assert!(left.end_tangent().dist(right.start_tangent()) <= 1e-10);
+    assert!(left.start_tangent().dist(Vec2::X) <= 1e-10);
+    let direction = (sk.points[tip].pos - sk.points[end].pos).normalized().unwrap();
+    assert!(right.end_tangent().dist(direction) <= 1e-10);
+    let reopened: Sketch = serde_json::from_str(&serde_json::to_string(&sk).unwrap()).unwrap();
+    reopened.validate_biarc_splines().unwrap();
+    assert_eq!(reopened.biarc_splines, before.biarc_splines);
+
+    sk.points[end].pos = before.points[end].pos;
+    sk.points[tip].pos = before.points[tip].pos;
+    assert!(solve(&mut sk).ok());
+    assert_eq!(sk, before);
+}
+
+#[test]
+fn a_biarc_refuses_a_ratio_that_loses_its_stored_tangent() {
+    let start = v(100_000_000., -100_000_000.);
+    let end = v(100_000_030., -99_999_990.);
+    let nodes = [(start, v(10., 0.)), (end, v(0., 10.))];
+    let ratio = 1e-9;
+    // The kernel can represent both pieces by retaining their angles. The sketch
+    // reconstructs them from three rounded points, which can lose the join tangent.
+    assert!(solidcore_ops::curve::biarc(start, nodes[0].1, end, nodes[1].1, ratio).is_ok());
+    let mut sk = Sketch::new();
+    let spline = sk.add_biarc_spline(&nodes, None, false).unwrap();
+    let before = sk.clone();
+    assert!(sk.set_biarc_ratio(&spline.id, 0, ratio).is_err());
+    assert_eq!(sk, before);
+    assert!(sk.add_biarc_spline(&nodes, Some(&[ratio]), false).is_err());
+    assert_eq!(sk, before);
+}
+
+#[test]
+fn biarc_span_modes_preview_and_reset_without_changing_ids() {
+    use BiarcSpanMode::{Auto, StraightEnd, StraightStart};
+
+    let start = (Vec2::ZERO, Vec2::X);
+    let end = (v(12., 4.), Vec2::Y);
+    for (nodes, mode, other, straight) in
+        [([start, end], StraightStart, StraightEnd, 0), ([(end.0, -end.1), (start.0, -start.1)], StraightEnd, StraightStart, 1)]
+    {
+        let mut sk = Sketch::new();
+        let spline = sk.add_biarc_spline(&nodes, None, false).unwrap();
+        let member = &spline.spans[0].curves[straight];
+        let saved = serde_json::to_value(&sk).unwrap();
+        assert!(saved["biarc_splines"][0]["spans"][0].get("mode").is_none());
+        let older: Sketch = serde_json::from_value(saved).unwrap();
+        assert_eq!(older.biarc_splines[0].spans[0].mode, Auto);
+
+        let inputs = sk.biarc_span_preview(member, 0).unwrap();
+        let (joint, pieces) = inputs.geometry(0.75, mode).unwrap();
+        assert_eq!(sk.preview_biarc_span(&spline.id, 0, 0.75, mode).unwrap(), (joint, pieces));
+        assert!(joint.dist(v(8., 0.)) < 1e-12);
+        assert!(matches!(pieces[straight], Seg2::Line { .. }));
+        assert!(matches!(pieces[1 - straight], Seg2::Arc { radius, .. } if (radius - 4.).abs() < 1e-12));
+
+        let before = sk.clone();
+        assert!(inputs.geometry(0.75, other).is_err());
+        assert!(sk.set_biarc_span(member, 0, Some(0.75), Some(other)).is_err());
+        assert!(sk.set_biarc_span(member, usize::MAX, None, Some(mode)).is_err());
+        assert_eq!(sk, before);
+
+        let changed = sk.set_biarc_span(member, 0, Some(0.75), Some(mode)).unwrap();
+        assert_eq!(changed.spans[0].mode, mode);
+        assert_eq!(changed.spans[0].ratio, 0.75);
+        assert_eq!(changed.nodes, spline.nodes);
+        assert_eq!(changed.spans[0].curves, spline.spans[0].curves);
+        assert_eq!(changed.spans[0].centers, spline.spans[0].centers);
+        assert_eq!(sk.points.len(), before.points.len());
+        assert!(matches!(sk.curves[sk.curve_index(member).unwrap()].kind, CurveKind::Line { .. }));
+        assert!(solve(&mut sk).ok());
+
+        let mut moved = sk.clone();
+        let arc_node = &changed.nodes[1 - straight];
+        for id in [&arc_node.point, &arc_node.handle.as_ref().unwrap().point] {
+            let index = moved.point_index(id).unwrap();
+            moved.points[index].pos.x += 3.;
+        }
+        assert!(solve(&mut moved).ok());
+        let joint_ref = if straight == 0 { "end" } else { "start" };
+        let moved_joint = moved.resolve_point(&format!("{member}.{joint_ref}")).unwrap();
+        assert!(moved.points[moved_joint].pos.dist(v(11., 0.)) < 1e-9);
+        moved.validate_biarc_splines().unwrap();
+
+        let saved = serde_json::to_value(&sk).unwrap();
+        let mut reopened: Sketch = serde_json::from_value(saved).unwrap();
+        reopened.validate_biarc_splines().unwrap();
+        assert_eq!(reopened.biarc_spline(member).unwrap(), &changed);
+        let updated = reopened.set_biarc_ratios(member, &[0.25]).unwrap();
+        assert_eq!(updated.spans[0].mode, mode);
+        assert_eq!(reopened.preview_biarc_span(member, 0, 0.25, mode).unwrap(), (joint, pieces));
+        assert_eq!(reopened.set_biarc_span(member, 0, Some(0.5), Some(Auto)).unwrap(), spline);
+        assert_eq!(reopened.curves, before.curves);
+    }
+}
+
+#[test]
+fn biarc_solves_endpoint_contacts_and_moves_with_a_driving_circle() {
+    let mut sk = Sketch::new();
+    let spline = sk.add_biarc_spline(&[(v(-30., 0.), -Vec2::Y), (v(0., -16.), Vec2::X), (v(30., 0.), Vec2::Y)], None, false).unwrap();
+    let circle = sk.add_circle(Vec2::ZERO, 30., Some(0), None).unwrap();
+    let circle_radius = sk.add_constraint(ConstraintKind::Radius { c: circle, value: 30. }, None).unwrap();
+    let outer = [(&spline.nodes[0], &spline.spans[0].curves[0]), (&spline.nodes[2], &spline.spans[1].curves[1])];
+    let initial = solve(&mut sk);
+    assert!(initial.ok());
+    assert_eq!(initial.dof, 12);
+    for (node, curve) in outer {
+        let point = sk.point_index(&node.point).unwrap();
+        let member = sk.curve_index(curve).unwrap();
+        sk.add_constraint(ConstraintKind::PointOnCurve { p: point, c: circle }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Tangent { a: member, b: circle }, None).unwrap();
+    }
+    let on_circle = solve(&mut sk);
+    assert!(on_circle.ok(), "{on_circle:?}");
+    assert_eq!(on_circle.dof, 8);
+    let known = sk.driving_values();
+    sk.constraints.iter_mut().find(|constraint| constraint.id == circle_radius).unwrap().kind.set_value(34.);
+    let changed = crate::solve_after_value_edit(&mut sk, &known);
+    assert!(changed.keeps_orientation(), "{changed:?}");
+    assert_eq!(changed.dof, 8);
+    sk.validate_biarc_splines().unwrap();
+    for (node, _) in outer {
+        let point = sk.point(sk.point_index(&node.point).unwrap()).unwrap();
+        let tip = sk.point(sk.point_index(&node.handle.as_ref().unwrap().point).unwrap()).unwrap();
+        assert!((point.len() - 34.).abs() < 1e-7);
+        assert!((tip - point).normalized().unwrap().dot(point / 34.).abs() < 1e-7);
+    }
+    // Constraining the middle guide determines only the middle point and tangent, not the
+    // sliding contacts at either end. Removing its fix gives those coordinates freedom again.
+    let guide = spline.nodes[1].handle.as_ref().unwrap();
+    let guide_index = sk.curve_index(&guide.curve).unwrap();
+    let point = sk.point_index(&spline.nodes[1].point).unwrap();
+    sk.curves[guide_index].fixed = true;
+    let constrained = solve(&mut sk);
+    assert_eq!(constrained.dof, 4);
+    assert!(constrained.point_determined[point]);
+    assert!(spline.curves().all(|id| !constrained.curve_determined[sk.curve_index(id).unwrap()]));
+    sk.curves[guide_index].fixed = false;
+    assert_eq!(solve(&mut sk).dof, 8);
+}
+
+#[test]
+fn a_biarc_span_is_determined_when_only_its_guide_lengths_can_move() {
+    let mut sk = Sketch::new();
+    let nodes = [(v(-20., 0.), Vec2::X), (v(0., 15.), Vec2::Y), (v(20., 30.), Vec2::X)];
+    let spline = sk.add_biarc_spline(&nodes, None, false).unwrap();
+    for (i, node) in spline.nodes.iter().take(2).enumerate() {
+        let p = sk.point_index(&node.point).unwrap();
+        let l = sk.curve_index(&node.handle.as_ref().unwrap().curve).unwrap();
+        sk.add_constraint(ConstraintKind::Fix { p }, None).unwrap();
+        sk.add_constraint(if i == 0 { ConstraintKind::Horizontal { l } } else { ConstraintKind::Vertical { l } }, None).unwrap();
+    }
+    let report = solve(&mut sk);
+    assert!(report.ok(), "{report:?}");
+    assert_eq!(report.dof, 6);
+    for (i, span) in spline.spans.iter().enumerate() {
+        for id in &span.curves {
+            assert_eq!(report.curve_determined[sk.curve_index(id).unwrap()], i == 0);
+        }
+    }
+    assert!(spline.handle_curves().all(|id| !report.curve_determined[sk.curve_index(id).unwrap()]));
+}
+
+#[test]
 fn fully_constrained_rectangle() {
     let mut sk = Sketch::new();
     let l = rect(&mut sk, [v(0.3, -0.2), v(38.0, 1.0), v(41.0, 29.0), v(-1.0, 31.0)]);

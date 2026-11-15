@@ -246,6 +246,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sketch.slot.center_point",
     "sketch.slot.center_to_center",
     "sketch.slot.overall",
+    "sketch.spline.biarc",
     "sketch.spline.control_point",
     "sketch.spline.control_point_5",
     "sketch.spline.fit_point",

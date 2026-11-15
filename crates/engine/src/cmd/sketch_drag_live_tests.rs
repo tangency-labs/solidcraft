@@ -2,7 +2,7 @@
 //! rank analysis, and evaluates nothing after it; the gesture's end evaluates the model once.
 
 use serde_json::{Value, json};
-use solidcore_record::Vec3;
+use solidcore_record::{Seg2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
 use super::solve_counts;
@@ -100,6 +100,87 @@ fn body_contains(s: &Session, p: Vec3) -> bool {
 fn pt(s: &Session, id: &str) -> solidcore_record::Vec2 {
     let sk = s.active_sketch.and_then(|i| s.doc.sketch(i).ok()).expect("sketch mode");
     sk.resolve_point(id).and_then(|i| sk.point(i)).expect("the point")
+}
+
+#[test]
+fn a_live_biarc_drag_follows_its_node_guide_and_member() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let made = run(
+        &mut s,
+        "sketch.spline.biarc",
+        json!({"nodes": [
+            {"point": [5, 5], "tangent": [8, 0]},
+            {"point": [25, 15], "tangent": [8, 0]}
+        ]}),
+    );
+    let member = made["curves"][0].as_str().expect("biarc member");
+    let before = sketch_of(&s);
+    let spline = before.biarc_spline(member).expect("biarc spline").clone();
+    let first = &spline.nodes[0];
+    let tip = &first.handle.as_ref().expect("tangent guide").point;
+    let member_seg = |sk: &solidcraft_sketch::Sketch| -> Seg2 {
+        let index = sk.curve_index(member).expect("member");
+        let seg = sk.segs(index)[0];
+        if sk.curves[index].reversed { seg.reversed() } else { seg }
+    };
+    // Moving a node translates its guide without altering the tangent.
+    let reply = run(&mut s, "sketch.drag", json!({"entity": first.point, "from": [5, 5], "to": [8, 7], "live": true}));
+    assert_eq!(reply["reached"], json!(1.0));
+    assert_eq!(reply["at"], json!([8.0, 7.0]));
+    assert_eq!(pt(&s, tip), Vec2::new(16.0, 7.0));
+    let after = sketch_of(&s);
+    after.validate_biarc_splines().unwrap();
+    assert!(member_seg(&after).start_tangent().dist(Vec2::X) < 1e-9);
+    // Moving only the tip turns the tangent and keeps the node where it was.
+    run(&mut s, "sketch.drag", json!({"entity": tip, "from": [16, 7], "to": [16, 9], "live": true}));
+    assert_eq!(pt(&s, &first.point), Vec2::new(8.0, 7.0));
+    assert!(member_seg(&sketch_of(&s)).start_tangent().dist(Vec2::new(8.0, 2.0).normalized().unwrap()) < 1e-9);
+    // Grabbing either generated piece moves the whole spline by the same translation.
+    let origin = member_seg(&sketch_of(&s)).mid();
+    let d = Vec2::new(-3.0, 4.0);
+    let to = origin + d;
+    let before = sketch_of(&s);
+    let reply = run(&mut s, "sketch.drag", json!({"entity": member, "from": [origin.x, origin.y], "to": [to.x, to.y], "live": true}));
+    assert_eq!(reply["reached"], json!(1.0));
+    let after = sketch_of(&s);
+    for node in &spline.nodes {
+        for id in [&node.point, &node.handle.as_ref().unwrap().point] {
+            assert!(pt(&s, id).dist(before.point(before.point_index(id).unwrap()).unwrap() + d) < 1e-9);
+        }
+    }
+    let mid = member_seg(&after).mid();
+    assert!(mid.dist(to) < 1e-9);
+    assert_eq!(after.biarc_spline(member).unwrap(), &spline);
+    after.validate_biarc_splines().unwrap();
+    run(&mut s, "sketch.drag_end", json!({}));
+}
+
+#[test]
+fn a_biarc_node_drag_releases_its_guide_when_the_tip_is_constrained() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let made = run(
+        &mut s,
+        "sketch.spline.biarc",
+        json!({"nodes": [
+            {"point": [5, 5], "tangent": [8, 0]},
+            {"point": [25, 15], "tangent": [8, 0]}
+        ]}),
+    );
+    let before = sketch_of(&s);
+    let spline = before.biarc_spline(made["curve"].as_str().unwrap()).unwrap();
+    let node = &spline.nodes[0].point;
+    let tip = &spline.nodes[0].handle.as_ref().unwrap().point;
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"points": ["origin", tip], "mode": "vertical"}));
+    let tip_x_before = pt(&s, tip).x;
+    let at = pt(&s, node);
+    let moved = at + Vec2::new(2.0, 1.0);
+    let reply = run(&mut s, "sketch.drag", json!({"entity": node, "from": [at.x, at.y], "to": [moved.x, moved.y], "live": true}));
+    assert_eq!(reply["reached"], json!(1.0));
+    assert!(pt(&s, node).dist(moved) < 1e-9);
+    assert!((pt(&s, tip).x - tip_x_before).abs() < 1e-8);
+    sketch_of(&s).validate_biarc_splines().unwrap();
 }
 
 fn corner(s: &Session) -> solidcore_record::Vec2 {

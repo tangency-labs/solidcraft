@@ -187,6 +187,9 @@ fn curve_arg(sk: &Sketch, p: &Value, cmd: &str) -> Result<usize> {
 
 fn curve_by_id(sk: &Sketch, id: &str, cmd: &str) -> Result<usize> {
     let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+    if sk.biarc_spline(id).is_some() || sk.biarc_guide_spline(id).is_some() {
+        return Err(bad(cmd, BIARC_EDIT));
+    }
     if sk.curves.get(c).is_some_and(|curve| curve.spline_handle_of.is_some()) {
         return Err(bad(cmd, "spline tangent construction lines cannot be trimmed, split, or extended"));
     }
@@ -206,6 +209,8 @@ fn curve_by_id(sk: &Sketch, id: &str, cmd: &str) -> Result<usize> {
     }
     Ok(c)
 }
+
+const BIARC_EDIT: &str = "use Edit Biarc Spline to change its generated geometry";
 
 /// Parameter of `p` on the bounded shape, ends included.
 fn on_bounded(sh: &Shape, p: Vec2) -> Option<f64> {
@@ -539,7 +544,7 @@ enum TrimHoverOf {
 pub fn trim_hover(sk: &Sketch, curve: &str) -> Option<TrimHover> {
     let ci = sk.curve_index(curve)?;
     let c = sk.curves.get(ci)?;
-    if c.infinite {
+    if c.infinite || sk.biarc_spline(curve).is_some() || sk.biarc_guide_spline(curve).is_some() {
         return None;
     }
     if c.kind.is_freeform() {
@@ -806,8 +811,11 @@ fn hold_cut(sk: &mut Sketch, before: Option<&Sketch>, midpoints: &[usize], pi: u
 /// side, or the whole curve when nothing crosses it. Returns what `sketch.trim` reports and the
 /// removed piece as a polyline.
 fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(TrimOutcome, Vec<Vec2>)> {
-    loosen_along(sk, ci);
     let id = sk.curves.get(ci).map(|c| c.id.clone()).unwrap_or_default();
+    if sk.biarc_spline(&id).is_some() || sk.biarc_guide_spline(&id).is_some() {
+        return Err(bad(cmd, BIARC_EDIT));
+    }
+    loosen_along(sk, ci);
     if sk.curves.get(ci).is_some_and(|c| c.infinite) {
         return Err(bad(cmd, "an infinite line has no ends to trim back to: make it a normal line first"));
     }
@@ -2035,6 +2043,30 @@ fn release_corner_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, corne
     release_offsets(sk, doc, affected, cmd)
 }
 
+fn refuse_biarc_corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<()> {
+    let mut points = std::collections::BTreeSet::new();
+    if let Some(point) = str_(p, "point").and_then(|id| sk.resolve_point(id)) {
+        points.insert(point);
+        for k in &sk.constraints {
+            if let ConstraintKind::Coincident { p, q } = k.kind {
+                if p == point {
+                    points.insert(q);
+                } else if q == point {
+                    points.insert(p);
+                }
+            }
+        }
+    }
+    let names = ["a", "b"].into_iter().filter_map(|key| str_(p, key));
+    if names
+        .chain(sk.curves.iter().filter(|c| points.iter().any(|&p| c.kind.uses(p))).map(|c| c.id.as_str()))
+        .any(|id| sk.biarc_spline(id).is_some() || sk.biarc_guide_spline(id).is_some())
+    {
+        return Err(bad(cmd, BIARC_EDIT));
+    }
+    Ok(())
+}
+
 /// Two lines given as `a` and `b` that share no end are brought to where they meet, so they
 /// make a corner to round or cut (#6912, #7759, #7985). Each line's end nearer that point moves
 /// onto it: a line that stops short is extended, and one that runs past the other is cut there,
@@ -2413,6 +2445,7 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
     refuse_spatial_corner(sk, p, cmd)?;
     refuse_infinite_corner(sk, p, cmd)?;
     refuse_offset_corner(sk, p, cmd)?;
+    refuse_biarc_corner(sk, p, cmd)?;
     weld_corner(sk, p);
     meet_lines(sk, p, cmd)?;
     let (la, lb, c, fa, fb) = match corner(sk, p, cmd) {
@@ -2639,6 +2672,7 @@ fn prepare_corner(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
     refuse_spatial_corner(sk, p, cmd)?;
     refuse_infinite_corner(sk, p, cmd)?;
     refuse_offset_corner(sk, p, cmd)?;
+    refuse_biarc_corner(sk, p, cmd)?;
     weld_corner(sk, p);
     meet_lines(sk, p, cmd)
 }

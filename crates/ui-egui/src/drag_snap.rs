@@ -94,8 +94,15 @@ pub fn find(sk: &Sketch, moving: &[(usize, Vec2)], exclude: &[usize], mm_px: f64
     let visible = solidcraft_engine::view::SketchPointVisibility::new(sk);
     let targets: Vec<(usize, Vec2)> =
         sk.points.iter().enumerate().filter(|(i, p)| !exclude.contains(i) && visible.takes(p)).map(|(i, p)| (i, p.pos)).collect();
-    let free_curves: Vec<usize> =
-        (0..sk.curves.len()).filter(|&c| sk.curves.get(c).is_some_and(|cu| !exclude.iter().any(|&p| cu.kind.uses(p)))).collect();
+    let hidden_guides: std::collections::HashSet<_> =
+        sk.biarc_splines.iter().filter(|_| sk.view.hide_construction).flat_map(|spline| spline.handle_curves()).collect();
+    let free_curves: Vec<usize> = sk
+        .curves
+        .iter()
+        .enumerate()
+        .filter(|(_, curve)| !exclude.iter().any(|&p| curve.kind.uses(p)) && !hidden_guides.contains(curve.id.as_str()))
+        .map(|(i, _)| i)
+        .collect();
     let mut best: Option<(f64, Snap)> = None;
     let offer = |best: &mut Option<(f64, Snap)>, d: f64, s: Snap| {
         if best.as_ref().is_none_or(|b| d < b.0) {
@@ -184,6 +191,8 @@ pub fn moving_points<'a>(sk: &Sketch, entities: impl IntoIterator<Item = &'a str
         .flat_map(|entity| {
             if let Some(p) = sk.point_index(entity) {
                 vec![p]
+            } else if let Some(spline) = sk.biarc_spline(entity) {
+                spline.nodes.iter().filter_map(|node| sk.point_index(&node.point)).collect()
             } else {
                 match sk.curve_index(entity).and_then(|c| sk.curves.get(c)) {
                     // Only lines slide whole; a circle or arc grabbed on its edge changes its radius.
@@ -222,6 +231,23 @@ pub fn moving_points<'a>(sk: &Sketch, entities: impl IntoIterator<Item = &'a str
     for c in &sk.curves {
         if moved.iter().any(|&p| c.kind.uses(p)) {
             ex.extend(c.kind.point_ids());
+        }
+    }
+    // A node or guide edit regenerates the spline. Its own segments and guides cannot be snap targets.
+    if !sk.biarc_splines.is_empty() {
+        let moved: std::collections::HashSet<_> = moved.iter().filter_map(|&i| sk.points.get(i)).map(|p| p.id.as_str()).collect();
+        for spline in &sk.biarc_splines {
+            if spline
+                .nodes
+                .iter()
+                .any(|node| moved.contains(node.point.as_str()) || node.handle.as_ref().is_some_and(|handle| moved.contains(handle.point.as_str())))
+            {
+                for id in spline.curves().chain(spline.handle_curves()) {
+                    if let Some(curve) = sk.curve_index(id).and_then(|i| sk.curves.get(i)) {
+                        ex.extend(curve.kind.point_ids());
+                    }
+                }
+            }
         }
     }
     ex.sort_unstable();

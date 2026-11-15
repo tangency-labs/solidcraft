@@ -376,7 +376,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     if matches!(d.kind, Kind::Appearance(_)) {
         ui.spacing_mut().item_spacing.y = t.space_10;
     }
-    if matches!(d.kind, Kind::Sketch | Kind::SketchModify(_) | Kind::Text(_) | Kind::TextMove(_) | Kind::EditParam { .. }) {
+    if matches!(d.kind, Kind::Sketch | Kind::SketchModify(_) | Kind::Text(_) | Kind::TextMove(_) | Kind::EditParam { .. })
+        && !matches!(d.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Biarc { .. }))
+    {
         let prompt = if let Some(input) = d.active_input() {
             tr(hint(input)).to_owned()
         } else {

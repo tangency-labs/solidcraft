@@ -45,6 +45,7 @@ pub(super) fn read(doc: &Document, id: u64) -> Result<&Sketch> {
 
 /// Keep `sk` as sketch `id`.
 pub(super) fn write(doc: &mut Document, id: u64, sk: Sketch) -> Result<()> {
+    sk.validate_biarc_splines()?;
     *doc.sketch_mut(id)? = sk;
     Ok(())
 }

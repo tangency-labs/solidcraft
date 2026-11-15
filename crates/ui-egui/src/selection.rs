@@ -60,6 +60,23 @@ pub(crate) fn coincident_operands(selection: &[Sel]) -> Option<serde_json::Value
     (a != b).then(|| serde_json::json!({"a": a, "b": b}))
 }
 
+/// A selected Biarc through point and another curve can meet tangentially at that point.
+pub(crate) fn biarc_tangent_operands(sk: &solidcraft_engine::sketch::Sketch, selection: &[Sel]) -> Option<serde_json::Value> {
+    let (point, target) = match selection {
+        [Sel::SketchPoint { id }, Sel::SketchCurve { id: target, .. }] | [Sel::SketchCurve { id: target, .. }, Sel::SketchPoint { id }] => {
+            (id, target)
+        }
+        _ => return None,
+    };
+    let index = sk.resolve_point(point)?;
+    let id = &sk.points.get(index)?.id;
+    let spline = sk.biarc_splines.iter().find(|spline| spline.nodes.iter().any(|node| &node.point == id))?;
+    if spline.curves().chain(spline.handle_curves()).any(|id| id == target) {
+        return None;
+    }
+    coincident_operands(selection)
+}
+
 /// The current middle of a finite straight sketch edge.
 pub(crate) fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, line: usize) -> Option<solidcore_record::Vec2> {
     let curve = sk.curves.get(line)?;

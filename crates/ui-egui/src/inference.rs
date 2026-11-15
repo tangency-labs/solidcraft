@@ -127,7 +127,7 @@ pub fn tangent(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference>
 pub fn through_center(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
     let mut best: Option<Inference> = None;
     for (i, c) in sk.curves.iter().enumerate() {
-        if !matches!(c.kind, CurveKind::Circle { .. } | CurveKind::Arc { .. }) {
+        if !matches!(c.kind, CurveKind::Circle { .. } | CurveKind::Arc { .. }) || sk.biarc_spline(&c.id).is_some() {
             continue;
         }
         let (Some(o), Some(r)) = (sk.center(i), sk.radius(i)) else { continue };
@@ -290,9 +290,10 @@ impl Tracking {
         if !solidcraft_engine::view::sketch_curve_visible(sk, index) {
             return None;
         }
-        match sk.curves.get(index)?.kind {
+        let curve = sk.curves.get(index)?;
+        match curve.kind {
             CurveKind::Line { a, b } => Some((sk.point(a)? + sk.point(b)?) * 0.5),
-            CurveKind::Circle { .. } | CurveKind::Arc { .. } => sk.center(index),
+            CurveKind::Circle { .. } | CurveKind::Arc { .. } if sk.biarc_spline(&curve.id).is_none() => sk.center(index),
             _ => None,
         }
     }

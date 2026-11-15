@@ -335,6 +335,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
     // The triad only registers an egui hit widget after a handle is under the pointer.
     // Test its geometry before navigation, including the first frame entering a handle.
     crate::joint_handles::owns_pointer(app, proj, p)
+        || crate::sketch_biarc_edit::owns_pointer(app, proj, p)
         || app.dialog.as_ref().and_then(|d| crate::dialogs_move::triad(app, d)).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
         || app
             .dialog

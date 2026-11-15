@@ -823,8 +823,7 @@ fn auto_project(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// `"x:<a>+<b>:x,y"` from interactive snapping: two distinct curve ids and a hint point.
-fn curve_intersection_arg(v: &Value, cmd: &str) -> Result<Option<(String, String, Vec2)>> {
-    let Some(raw) = v.as_str() else { return Ok(None) };
+fn curve_intersection_arg<'a>(raw: &'a str, cmd: &str) -> Result<Option<(&'a str, &'a str, Vec2)>> {
     let Some(t) = raw.strip_prefix("x:") else { return Ok(None) };
     if t.len() > 256 {
         return Err(bad(cmd, "`x:` snap is too long"));
@@ -843,9 +842,136 @@ fn curve_intersection_arg(v: &Value, cmd: &str) -> Result<Option<(String, String
     }
     let n: Vec<f64> = xy.split(',').map(str::trim).filter(|s| !s.is_empty()).filter_map(|x| x.parse().ok()).collect();
     match n.as_slice() {
-        [x, y] if x.is_finite() && y.is_finite() => Ok(Some((a.to_string(), b.to_string(), Vec2::new(*x, *y)))),
+        [x, y] if x.is_finite() && y.is_finite() => Ok(Some((a, b, Vec2::new(*x, *y)))),
         _ => Err(bad(cmd, "`x:` point must be two finite numbers")),
     }
+}
+
+enum DrawingSnap<'a> {
+    Curve(&'a str, Vec2),
+    Crossing(&'a str, &'a str, Vec2),
+    Midpoint(&'a str),
+    Vertex(&'a str, Vec3),
+    Edge(&'a str, Vec3),
+}
+
+fn drawing_snap_arg<'a>(v: &'a Value, cmd: &str) -> Result<Option<DrawingSnap<'a>>> {
+    let raw = v.as_str().unwrap_or("");
+    let on = raw.strip_prefix("on:").and_then(|t| {
+        let (curve, xy) = t.rsplit_once(':')?;
+        let n: Vec<f64> = xy.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        match n[..] {
+            [x, y] if x.is_finite() && y.is_finite() => Some(DrawingSnap::Curve(curve, Vec2::new(x, y))),
+            _ => None,
+        }
+    });
+    let crossing = curve_intersection_arg(raw, cmd)?.map(|(a, b, near)| DrawingSnap::Crossing(a, b, near));
+    let midpoint = raw.strip_prefix("mid:").map(DrawingSnap::Midpoint);
+    let vertex = v.get("vertex").and_then(vec3).or_else(|| {
+        let t = raw.strip_prefix("vertex:")?;
+        let n: Vec<f64> = t.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        match n[..] {
+            [x, y, z] if x.is_finite() && y.is_finite() && z.is_finite() => Some(Vec3::new(x, y, z)),
+            _ => None,
+        }
+    });
+    let body = str_(v, "body").unwrap_or("");
+    Ok(on
+        .or(crossing)
+        .or(midpoint)
+        .or(vertex.map(|p| DrawingSnap::Vertex(body, p)))
+        .or(v.get("on_edge").and_then(vec3).map(|p| DrawingSnap::Edge(body, p))))
+}
+
+enum SnapRelation {
+    Coincident(usize),
+    Curve(usize),
+    Crossing(usize, usize),
+    Midpoint(usize),
+}
+
+/// The place and relationship given by a drawing snap, for a newly made or owned point.
+pub(super) struct ResolvedSnap {
+    pub at: Vec2,
+    relation: SnapRelation,
+}
+
+impl ResolvedSnap {
+    pub(super) fn attach(self, sk: &mut Sketch, p: usize) -> Result<()> {
+        let kind = match self.relation {
+            SnapRelation::Coincident(q) => ConstraintKind::Coincident { p, q },
+            SnapRelation::Curve(c) => ConstraintKind::PointOnCurve { p, c },
+            SnapRelation::Midpoint(l) => ConstraintKind::Midpoint { p, l },
+            SnapRelation::Crossing(a, b) => {
+                sk.add_constraint(ConstraintKind::PointOnCurve { p, c: a }, None)?;
+                ConstraintKind::PointOnCurve { p, c: b }
+            }
+        };
+        sk.add_constraint(kind, None)?;
+        Ok(())
+    }
+
+    fn materialize(self, sk: &mut Sketch) -> Result<usize> {
+        if let SnapRelation::Coincident(p) = self.relation {
+            return Ok(p);
+        }
+        let point = sk.add_point(self.at, None)?;
+        self.attach(sk, point)?;
+        Ok(point)
+    }
+}
+
+impl DrawingSnap<'_> {
+    fn resolve(self, s: &Session, doc: &Document, id: u64, sk: &mut Sketch, cmd: &str) -> Result<ResolvedSnap> {
+        let curve = |sk: &Sketch, id: &str| sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")));
+        let (at, relation) = match self {
+            Self::Curve(name, near) => {
+                let c = curve(sk, name)?;
+                (sk.shape(c).map_or(near, |shape| shape.project(near)), SnapRelation::Curve(c))
+            }
+            Self::Crossing(a, b, near) => {
+                let (ci, cj) = (curve(sk, a)?, curve(sk, b)?);
+                if ci == cj {
+                    return Err(bad(cmd, "`x:` needs two distinct curves"));
+                }
+                sk.shape(ci).ok_or_else(|| bad(cmd, format!("`{a}` is not a line, circle or arc")))?;
+                sk.shape(cj).ok_or_else(|| bad(cmd, format!("`{b}` is not a line, circle or arc")))?;
+                let at = sk.nearest_crossing(ci, cj, near).ok_or_else(|| bad(cmd, "those curves do not meet"))?;
+                (at, SnapRelation::Crossing(ci, cj))
+            }
+            Self::Midpoint(line) => {
+                let l = curve(sk, line)?;
+                let Some(solidcraft_sketch::Shape::Line { a, b }) = sk.shape(l) else { return Err(bad(cmd, format!("`{line}` is not a line"))) };
+                ((a + b) * 0.5, SnapRelation::Midpoint(l))
+            }
+            Self::Vertex(body, at) => {
+                let link = add_link(s, doc, id, sk, LinkKind::Project, LinkSource::Vertex { body: body.into(), at })
+                    .map_err(|e| bad(cmd, format!("vertex: {e}")))?;
+                let point = sk.link_points(&link).first().copied().ok_or_else(|| bad(cmd, "vertex projects to nothing"))?;
+                (sk.point(point).ok_or_else(|| bad(cmd, "vertex projects to nothing"))?, SnapRelation::Coincident(point))
+            }
+            Self::Edge(body, at) => {
+                let link = add_link(s, doc, id, sk, LinkKind::Project, LinkSource::Edge { body: body.into(), at })
+                    .map_err(|e| bad(cmd, format!("edge: {e}")))?;
+                let before = s.model.state_before(id);
+                let plane = sketch_plane(doc, id, &*state_for_sketch(s, doc, id, &before, &[])?)?;
+                let curve = sk.link_curves(&link).first().copied().ok_or_else(|| bad(cmd, "the edge projects to a point"))?;
+                (plane.to_local(at), SnapRelation::Curve(curve))
+            }
+        };
+        Ok(ResolvedSnap { at, relation })
+    }
+}
+
+/// Resolve a drawing reference for a feature that must add its own point at the snap.
+pub(super) fn resolve_snap_reference(s: &Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Value, cmd: &str) -> Result<ResolvedSnap> {
+    if let Some(snap) = drawing_snap_arg(v, cmd)? {
+        return snap.resolve(s, doc, id, sk, cmd);
+    }
+    let name = v.as_str().ok_or_else(|| bad(cmd, "`reference` must be a point or a snap reference"))?;
+    let target =
+        sk.resolve_point(name).and_then(|p| sk.point(p).map(|at| (p, at))).ok_or_else(|| bad(cmd, format!("unknown sketch point `{name}`")))?;
+    Ok(ResolvedSnap { at: target.1, relation: SnapRelation::Coincident(target.0) })
 }
 
 /// Point arguments that snap to model geometry while drawing, rewritten to sketch point ids:
@@ -859,30 +985,7 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
     let mut out = p.clone();
     let mut doc: Option<(Document, Sketch)> = None;
     let fix = |v: &mut Value, s: &Session, doc: &mut Option<(Document, Sketch)>| -> Result<()> {
-        let (vertex, edge) = (v.get("vertex").and_then(vec3), v.get("on_edge").and_then(vec3));
-        // String forms from interactive snapping: "vertex:x,y,z" and "mid:<line>".
-        let vertex = vertex.or_else(|| {
-            let t = v.as_str()?.strip_prefix("vertex:")?;
-            let n: Vec<f64> = t.split(',').filter_map(|x| x.trim().parse().ok()).collect();
-            match n[..] {
-                [x, y, z] if x.is_finite() && y.is_finite() && z.is_finite() => Some(Vec3::new(x, y, z)),
-                _ => None,
-            }
-        });
-        let mid = v.as_str().and_then(|x| x.strip_prefix("mid:")).map(str::to_string);
-        // "on:<curve>:x,y": a point on a curve of the sketch near x,y.
-        let on = v.as_str().and_then(|x| x.strip_prefix("on:")).and_then(|t| {
-            let (c, xy) = t.rsplit_once(':')?;
-            let n: Vec<f64> = xy.split(',').filter_map(|x| x.trim().parse().ok()).collect();
-            match n[..] {
-                [x, y] if x.is_finite() && y.is_finite() => Some((c.to_string(), Vec2::new(x, y))),
-                _ => None,
-            }
-        });
-        let crossing = curve_intersection_arg(v, cmd)?;
-        if vertex.is_none() && edge.is_none() && mid.is_none() && on.is_none() && crossing.is_none() {
-            return Ok(());
-        }
+        let Some(snap) = drawing_snap_arg(v, cmd)? else { return Ok(()) };
         if doc.is_none() {
             let d = (*s.doc).clone();
             let mut sk = sketch_store::read(&d, id)?.clone();
@@ -890,53 +993,8 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
             *doc = Some((d, sk));
         }
         let Some((d, sk)) = doc.as_mut() else { return Ok(()) };
-        let body = str_(v, "body").unwrap_or("").to_string();
-        let pid = if let Some((curve, near)) = on {
-            let c = sk.curve_index(&curve).ok_or_else(|| bad(cmd, format!("unknown curve `{curve}`")))?;
-            let at = match sk.shape(c) {
-                Some(sh) => sh.project(near),
-                None => near,
-            };
-            let pi = sk.add_point(at, None)?;
-            sk.add_constraint(ConstraintKind::PointOnCurve { p: pi, c }, None)?;
-            sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
-        } else if let Some((a, b, near)) = crossing {
-            let ci = sk.curve_index(&a).ok_or_else(|| bad(cmd, format!("unknown curve `{a}`")))?;
-            let cj = sk.curve_index(&b).ok_or_else(|| bad(cmd, format!("unknown curve `{b}`")))?;
-            if ci == cj {
-                return Err(bad(cmd, "`x:` needs two distinct curves"));
-            }
-            sk.shape(ci).ok_or_else(|| bad(cmd, format!("`{a}` is not a line, circle or arc")))?;
-            sk.shape(cj).ok_or_else(|| bad(cmd, format!("`{b}` is not a line, circle or arc")))?;
-            let at = sk.nearest_crossing(ci, cj, near).ok_or_else(|| bad(cmd, "those curves do not meet"))?;
-            let pi = sk.add_point(at, None)?;
-            sk.add_constraint(ConstraintKind::PointOnCurve { p: pi, c: ci }, None)?;
-            sk.add_constraint(ConstraintKind::PointOnCurve { p: pi, c: cj }, None)?;
-            sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
-        } else if let Some(line) = mid {
-            // "mid:<line>": a new point at the line's midpoint, kept there.
-            let l = sk.curve_index(&line).ok_or_else(|| bad(cmd, format!("unknown curve `{line}`")))?;
-            let Some(solidcraft_sketch::Shape::Line { a, b }) = sk.shape(l) else { return Err(bad(cmd, format!("`{line}` is not a line"))) };
-            let pi = sk.add_point((a + b) * 0.5, None)?;
-            sk.add_constraint(ConstraintKind::Midpoint { p: pi, l }, None)?;
-            sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
-        } else if let Some(at) = vertex {
-            let l = add_link(s, d, id, sk, LinkKind::Project, LinkSource::Vertex { body, at }).map_err(|e| bad(cmd, format!("vertex: {e}")))?;
-            let pi = sk.link_points(&l).first().copied().ok_or_else(|| bad(cmd, "vertex projects to nothing"))?;
-            sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
-        } else if let Some(at) = edge {
-            let l = add_link(s, d, id, sk, LinkKind::Project, LinkSource::Edge { body, at }).map_err(|e| bad(cmd, format!("edge: {e}")))?;
-            let before = s.model.state_before(id);
-            let plane = sketch_plane(d, id, &*state_for_sketch(s, d, id, &before, &[])?)?;
-            let q = plane.to_local(at);
-            let ci = sk.link_curves(&l).first().copied().ok_or_else(|| bad(cmd, "the edge projects to a point"))?;
-            let pi = sk.add_point(q, None)?;
-            sk.add_constraint(ConstraintKind::PointOnCurve { p: pi, c: ci }, None)?;
-            sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
-        } else {
-            return Ok(());
-        };
-        *v = Value::String(pid);
+        let point = snap.resolve(s, d, id, sk, cmd)?.materialize(sk)?;
+        *v = Value::String(sk.points.get(point).map(|q| q.id.clone()).unwrap_or_default());
         Ok(())
     };
     if let Some(o) = out.as_object_mut() {

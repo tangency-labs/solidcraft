@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::prelude::*;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::link::{LinkGeom, LinkKind, LinkSource, sketch_axis_geom};
 use crate::union_find::{find, union};
@@ -73,7 +73,7 @@ pub struct SketchBatch<'a> {
 impl SketchBatch<'_> {
     /// [`Sketch::add_point`].
     pub fn add_point(&mut self, p: Vec2, id: Option<&str>) -> Result<usize> {
-        let i = self.sketch.add_point_with(p, id, Some(&self.taken))?;
+        let i = self.sketch.add_point_with(p, id, Some(&self.taken), crate::limits::max_points())?;
         self.keep(|sk| sk.points.get(i).map(|p| p.id.clone()));
         Ok(i)
     }
@@ -846,6 +846,9 @@ pub struct Sketch {
     /// Curves drawn from formulas (#8352): the fit point splines they place, with their formulas.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub equations: Vec<crate::equation::EquationCurve>,
+    /// Editable chains whose geometry consists of ordinary circular arcs and line segments.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub biarc_splines: Vec<crate::biarc::BiarcSpline>,
     /// Next number per id prefix (`l` → l1, l2…).
     #[serde(default)]
     counters: std::collections::BTreeMap<String, u64>,
@@ -878,6 +881,7 @@ impl Sketch {
             wire_constraints: Vec::new(),
             wires_joined: false,
             equations: Vec::new(),
+            biarc_splines: Vec::new(),
             counters: Default::default(),
             view: SketchView::default(),
         }
@@ -915,6 +919,7 @@ impl Sketch {
             .saturating_add(self.links.len())
             .saturating_add(self.wires.len())
             .saturating_add(self.wire_constraints.len())
+            .saturating_add(self.biarc_splines.len())
             .saturating_add(
                 self.offsets.iter().filter_map(|r| r.topology.as_ref()).fold(0usize, |n, r| n.saturating_add(r.roles.len()).saturating_add(1)),
             )
@@ -941,10 +946,8 @@ impl Sketch {
         Err(SketchError::TooLarge)
     }
 
-    /// Every id the sketch holds: its points, curves, constraints, patterns, links, wires and
-    /// their 3D constraints, and offset topologies with their outputs (what
-    /// [`Sketch::id_taken`] searches).
-    fn all_ids(&self) -> impl Iterator<Item = &str> {
+    /// Every ID reserved by [`Sketch::id_taken`], including offset topology outputs.
+    pub(crate) fn all_ids(&self) -> impl Iterator<Item = &str> {
         self.points
             .iter()
             .map(|p| p.id.as_str())
@@ -954,6 +957,7 @@ impl Sketch {
             .chain(self.links.iter().map(|l| l.id.as_str()))
             .chain(self.wires.iter().map(|w| w.id.as_str()))
             .chain(self.wire_constraints.iter().map(|c| c.id.as_str()))
+            .chain(self.biarc_splines.iter().map(|b| b.id.as_str()))
             .chain(
                 self.offsets
                     .iter()
@@ -978,6 +982,7 @@ impl Sketch {
             || self.links.iter().any(|l| l.id == id)
             || self.wires.iter().any(|w| w.id == id)
             || self.wire_constraints.iter().any(|c| c.id == id)
+            || self.biarc_splines.iter().any(|b| b.id == id)
             || self.offsets.iter().filter_map(|r| r.topology.as_ref()).any(|r| r.id == id || r.roles.iter().any(|role| role.output == id))
     }
 
@@ -1001,13 +1006,18 @@ impl Sketch {
 
     /// Add a free point (or reuse an existing one within `merge_tol` of `p` when `merge_tol > 0`).
     pub fn add_point(&mut self, p: Vec2, id: Option<&str>) -> Result<usize> {
-        self.add_point_with(p, id, None)
+        self.add_point_with(p, id, None, crate::limits::max_points())
     }
 
-    /// [`Sketch::add_point`], with the ids a [`SketchBatch`] keeps when given.
-    fn add_point_with(&mut self, p: Vec2, id: Option<&str>, taken: Option<&HashSet<String>>) -> Result<usize> {
+    /// Add a point with a generated ID, using the specified editing or storage limit.
+    pub(crate) fn add_point_limited(&mut self, p: Vec2, max_points: usize) -> Result<usize> {
+        self.add_point_with(p, None, None, max_points)
+    }
+
+    /// Allocate a point with the ids a [`SketchBatch`] keeps when given.
+    fn add_point_with(&mut self, p: Vec2, id: Option<&str>, taken: Option<&HashSet<String>>, max_points: usize) -> Result<usize> {
         let p = Self::check_pos(p)?;
-        if self.points.len() >= crate::limits::max_points() {
+        if self.points.len() >= max_points {
             return Err(SketchError::TooLarge);
         }
         let id = self.new_id(id, "p", taken)?;
@@ -1345,6 +1355,11 @@ impl Sketch {
         {
             return Err(SketchError::Invalid("the pierced curve does not cross this sketch's plane".into()));
         }
+        if let Pierce { p, .. } | Fix { p } = k
+            && self.biarc_owns_point(*p)
+        {
+            return Err(SketchError::Invalid("constrain the biarc's fit points or tangent guides".into()));
+        }
         Ok(())
     }
 
@@ -1479,7 +1494,10 @@ impl Sketch {
             axes.insert(link.id.as_str(), [a, b]);
         }
         let axis_point = |i: usize| self.points.get(i).is_some_and(|p| p.link.as_deref().is_some_and(|id| axes.contains_key(id)));
-        if self.points.iter().enumerate().any(|(i, p)| (p.fixed || p.link.is_some()) && (i != 0 || p.pos != Vec2::ZERO) && !axis_point(i)) {
+        let dependent = if self.biarc_splines.is_empty() { Vec::new() } else { self.biarc_dependent_points() };
+        if self.points.iter().enumerate().any(|(i, p)| {
+            (p.fixed || p.link.is_some()) && (i != 0 || p.pos != Vec2::ZERO) && !axis_point(i) && !dependent.get(i).copied().unwrap_or(false)
+        }) {
             return None;
         }
         let drawn_curves = || self.curves.iter().filter(|c| c.link.is_none());
@@ -1568,6 +1586,7 @@ impl Sketch {
         for t in out.constraints.iter_mut().filter_map(|c| c.text.as_mut()) {
             *t = scale(*t);
         }
+        out.refresh_biarc_splines().ok()?;
         Some(out)
     }
 
@@ -1902,6 +1921,18 @@ impl Sketch {
             }
         }
         let locked = self.locked_points();
+        let plans = self.biarc_span_plans().unwrap_or_default();
+        let mut derived_points = HashMap::new();
+        let mut derived_curves = HashMap::new();
+        for plan in plans.iter().filter(|plan| plan.movable()) {
+            for p in std::iter::once(plan.joint).chain(plan.centers.into_iter().flatten()) {
+                derived_points.insert(p, plan);
+            }
+            for curve in plan.curves {
+                derived_curves.insert(curve, plan);
+            }
+        }
+        let point_nodes = |p| derived_points.get(&p).map_or_else(|| vec![p], |span| span.inputs().collect());
         let free = |v: usize| {
             if seed.get(v).copied().unwrap_or(true) {
                 return false;
@@ -1915,15 +1946,16 @@ impl Sketch {
             }
         };
         let curve_nodes = |c: usize| {
-            let mut v = self.curves.get(c).map(|x| x.kind.point_ids()).unwrap_or_default();
-            v.push(n + c);
-            v
+            if let Some(span) = derived_curves.get(&c) {
+                return span.inputs().collect::<Vec<_>>();
+            }
+            self.curves.get(c).into_iter().flat_map(|x| x.kind.point_ids()).flat_map(point_nodes).chain(std::iter::once(n + c)).collect()
         };
         // What the solver's equations join (see `solve_with`): an arc's centre and ends, a
         // periodic spline's first and last points, and each driving constraint's entities. A
         // curve alone joins nothing (a circle's radius and centre move independently).
-        let own = self.curves.iter().filter_map(|x| match &x.kind {
-            CurveKind::Arc { c, a, b } => Some(vec![*c, *a, *b]),
+        let own = self.curves.iter().enumerate().filter_map(|(i, x)| match &x.kind {
+            CurveKind::Arc { c, a, b } if !derived_curves.contains_key(&i) => Some([*c, *a, *b].into_iter().flat_map(point_nodes).collect()),
             CurveKind::Spline { pts, periodic: true, .. } => match (pts.first(), pts.last()) {
                 (Some(a), Some(b)) if a != b => Some(vec![*a, *b]),
                 _ => None,
@@ -1931,9 +1963,8 @@ impl Sketch {
             _ => None,
         });
         let edges = own.chain(self.constraints.iter().filter(|c| !c.driven).map(|c| {
-            let (mut v, curves) = c.kind.indices();
-            v.extend(curves.into_iter().flat_map(curve_nodes));
-            v
+            let (points, curves) = c.kind.indices();
+            points.into_iter().flat_map(point_nodes).chain(curves.into_iter().flat_map(curve_nodes)).collect()
         }));
         for e in edges {
             let mut join = e.iter().copied().filter(|&v| free(v));
@@ -1946,7 +1977,8 @@ impl Sketch {
         }
         let r = find(&mut root, held);
         let mut coupled = |v: usize| seed.get(v).copied().unwrap_or(false) || (free(v) && find(&mut root, v) == r);
-        ((0..n).map(&mut coupled).collect(), (n..n + m).map(&mut coupled).collect())
+        let point = (0..n).map(|p| point_nodes(p).into_iter().any(&mut coupled)).collect();
+        (point, (n..n + m).map(&mut coupled).collect())
     }
 
     /// Is curve `c` held in place: fixed or projected (linked).
@@ -1986,14 +2018,7 @@ impl Sketch {
                 None => Vec::new(),
             },
             CurveKind::Arc { c, a, b } => match (self.point(c), self.point(a), self.point(b)) {
-                (Some(c), Some(pa), Some(pb)) => {
-                    let start = (pa - c).angle();
-                    let mut sweep = (pb - c).angle() - start;
-                    while sweep <= 1e-12 {
-                        sweep += std::f64::consts::TAU;
-                    }
-                    vec![Seg2::Arc { center: c, radius: c.dist(pa), start, sweep }]
-                }
+                (Some(c), Some(a), Some(b)) => vec![solidcore_ops::prism::stored_arc(c, a, b, false)],
                 _ => Vec::new(),
             },
             _ => Vec::new(),
@@ -2414,6 +2439,7 @@ impl Sketch {
     /// Center Rectangle's centre stays), and constraints that referred to removed entities.
     pub fn remove_curves(&mut self, which: &[usize]) {
         let mut which = which.to_vec();
+        self.include_biarc_members(&mut which);
         let removed_ids: std::collections::BTreeSet<String> = which
             .iter()
             .filter_map(|index| self.curves.get(*index))
@@ -2449,6 +2475,13 @@ impl Sketch {
                 owned.extend(c.kind.point_ids());
             }
         }
+        owned.extend(
+            self.biarc_splines
+                .iter()
+                .filter(|spline| spline.all_curves().any(|id| self.curve_index(id).is_some_and(|i| which.binary_search(&i).is_ok())))
+                .flat_map(crate::BiarcSpline::reserved_centers)
+                .filter_map(|id| self.point_index(id)),
+        );
         // An ellipse going while one of its axes stays leaves its centre, which still bisects
         // them, as a Center Rectangle's centre stays with its edges gone.
         let centres: Vec<usize> = which
@@ -2466,7 +2499,10 @@ impl Sketch {
             // Only a full sketch refuses one more; the point then comes loose as before.
             let _ = self.add_constraint(ConstraintKind::Coincident { p, q }, None);
         }
-        let mut orphans: Vec<usize> = owned.into_iter().filter(|p| *p != 0 && !self.point_used_by_curve(*p)).collect();
+        // A surviving biarc can reserve a center even while neither piece uses it.
+        let biarc_points = if self.biarc_splines.is_empty() { Vec::new() } else { self.biarc_dependent_points() };
+        let mut orphans: Vec<usize> =
+            owned.into_iter().filter(|p| *p != 0 && !biarc_points.get(*p).copied().unwrap_or(false) && !self.point_used_by_curve(*p)).collect();
         orphans.sort_unstable();
         orphans.dedup();
         self.keep_ties_through(&orphans);
@@ -2554,6 +2590,7 @@ impl Sketch {
         self.prune_offsets_for_removed_curves(which);
         let removed: std::collections::BTreeSet<String> = which.iter().filter_map(|i| self.curves.get(*i).map(|c| c.id.clone())).collect();
         self.prune_equations(&removed);
+        self.prune_biarc_splines(&removed);
         let mut cmap = vec![None; self.curves.len()];
         let mut n = 0;
         for (i, slot) in cmap.iter_mut().enumerate() {
@@ -2581,6 +2618,8 @@ impl Sketch {
         let gone = |p: usize| p != 0 && which.contains(&p);
         let mut dead_curves: Vec<usize> =
             self.curves.iter().enumerate().filter(|(_, c)| c.kind.point_ids().into_iter().any(gone)).map(|(i, _)| i).collect();
+        self.include_biarc_points(&mut dead_curves, which);
+        self.include_biarc_members(&mut dead_curves);
         // A spline that goes takes its tangent lines (#6502): none is left without its spline.
         let dead_splines: std::collections::BTreeSet<String> = dead_curves
             .iter()
@@ -2594,17 +2633,24 @@ impl Sketch {
             }
         }
         dead_curves.sort_unstable();
-        // Points only a removed curve owned go too when nothing else uses them: an offset's
-        // generated points, and a removed spline's handle points.
-        let private = dead_curves
+        // A removed curve's generated points and spline handle points go when nothing else uses them.
+        let biarc_members = self.biarc_splines.iter().flat_map(crate::BiarcSpline::all_curves).collect::<HashSet<_>>();
+        let mut private = dead_curves
             .iter()
             .filter_map(|i| self.curves.get(*i))
             .flat_map(|c| match &c.kind {
-                _ if self.freeform_offsets.iter().any(|r| r.output == c.id) => c.kind.point_ids(),
+                _ if biarc_members.contains(c.id.as_str()) || self.freeform_offsets.iter().any(|r| r.output == c.id) => c.kind.point_ids(),
                 CurveKind::Spline { handles, .. } => handles.clone(),
                 _ => Vec::new(),
             })
             .collect::<std::collections::BTreeSet<_>>();
+        private.extend(
+            self.biarc_splines
+                .iter()
+                .filter(|spline| spline.all_curves().any(|id| self.curve_index(id).is_some_and(|i| dead_curves.binary_search(&i).is_ok())))
+                .flat_map(crate::BiarcSpline::reserved_centers)
+                .filter_map(|id| self.point_index(id)),
+        );
         self.drop_curves(&dead_curves);
         let mut removed = which.iter().copied().filter(|i| *i != 0).collect::<std::collections::BTreeSet<_>>();
         // Keep any node still named by a surviving curve or constraint.

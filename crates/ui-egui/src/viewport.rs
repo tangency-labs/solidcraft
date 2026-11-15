@@ -304,6 +304,8 @@ pub struct ViewportState {
     /// A sketch point or curve being dragged (its id, the undo depth when the drag began: the
     /// whole drag is one undo step, and for a curve where it was last under the cursor).
     pub point_drag: Option<(String, usize, Option<Vec2>, Vec2, bool)>,
+    /// The selected Biarc span's ratio gesture, kept off the document until release.
+    pub(crate) biarc_edit: crate::sketch_biarc_edit::State,
     /// Checkpoint and source for a cancellable whole-text drag.
     pub(crate) text_drag: Option<(u64, String)>,
     /// A part that joints place, being dragged.
@@ -805,6 +807,7 @@ fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     // The open sketch follows a dimension's typed value.
     crate::dim_view::preview_solve(app).hash(&mut h);
+    app.session.active_sketch.and_then(|id| crate::sketch_biarc_edit::replaced_members(app, id)).hash(&mut h);
     crate::sketch_display::projection_key(proj, app.viewport.pixels_per_point()).hash(&mut h);
     h.finish()
 }
@@ -2251,6 +2254,7 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         // Sampled here, past the display cache: the open sketch as a typed value leaves it, or a
         // failed sketch no world state holds.
         let here = failed || (active && typed.is_some());
+        let preview_members = if failed { None } else { crate::sketch_biarc_edit::replaced_members(app, sid) };
         // Its curves are sampled before its profiles, which share their budget: past it a fill
         // goes missing rather than a curve.
         let mut typed_curves: std::collections::HashMap<usize, Vec<Vec<Vec3>>> = if here {
@@ -2267,6 +2271,9 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         let profiles = if hidden { &[][..] } else { &ss.profiles[..] };
         let profile_fill = sc.color(c4(tk.profile_fill));
         for (index, profile) in profiles.iter().enumerate() {
+            if crate::sketch_biarc_edit::replaced_profile(preview_members, profile) {
+                continue;
+            }
             let (sampled, cached);
             let display = if here {
                 sampled = uncached.profile(&profile.region, &ss.plane, proj, ppp);
@@ -2292,7 +2299,10 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         // them, before the virtual corners and 3D curves: `owners` names each part's curve.
         let conflict = if active { Conflict::of(app, &ss.sketch, &ss.report) } else { Conflict::default() };
         let mut owners = Vec::new();
-        let lines = sketch_lines_with_sampler(&ss.sketch, &ss.plane, active, &ss.report.curve_determined, |_, index, plane| {
+        let lines = sketch_lines_with_sampler(&ss.sketch, &ss.plane, active, &ss.report.curve_determined, |sketch, index, plane| {
+            if preview_members.is_some_and(|members| sketch.curves.get(index).is_some_and(|curve| members.contains(&curve.id))) {
+                return Vec::new();
+            }
             let parts = if here {
                 typed_curves.remove(&index).unwrap_or_default()
             } else {
@@ -4272,7 +4282,8 @@ pub(crate) fn sel_hit(app: &SolveApp, sel: &Sel) -> Option<Hit> {
     let active = app.session.active_sketch;
     let point = |sketch: u64, id: &str| {
         let sk = &st.sketch(sketch)?.sketch;
-        sk.resolve_point(id).and_then(|i| sk.point(i))
+        let i = sk.resolve_point(id)?;
+        (shown_hover_point(app, sk, sketch, i)).then(|| sk.point(i)).flatten()
     };
     let curve = |sketch: u64, id: &str| {
         let ss = st.sketch(sketch)?;
@@ -4651,6 +4662,9 @@ pub(crate) fn profile_fill(sc: &mut GpuScene, app: &SolveApp, sketch: u64, index
     let st = crate::open_meshing::shown_world(app);
     let Some(ss) = st.sketch(sketch) else { return };
     let Some(p) = ss.profiles.get(index) else { return };
+    if crate::sketch_biarc_edit::replaced_profile(crate::sketch_biarc_edit::replaced_members(app, sketch), p) {
+        return;
+    }
     let plane = match crate::dialogs::emboss_profile_plane(app, sketch) {
         Ok(Some(plane)) => plane,
         Ok(None) => ss.plane,
@@ -4832,6 +4846,7 @@ fn highlight_key_with_projection(app: &SolveApp, projection: impl FnOnce() -> Pr
     for p in preview_points(app) {
         [p.x, p.y, p.z].map(f64::to_bits).hash(&mut h);
     }
+    app.session.active_sketch.and_then(|id| crate::sketch_biarc_edit::replaced_members(app, id)).hash(&mut h);
     // Body triangles and outlines live in world space; the GPU applies the new camera.
     // Sketch feedback follows the projection, as do the clipped extensions of long origin axes.
     // Neither changes the key of the cached world-space feedback block.
@@ -5499,7 +5514,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             // A curve picked into a dialog from another sketch than the active one names it.
             // Not the curves of the sketch drawn at a typed value: the design has them elsewhere.
             Sel::ExternalSketchCurve { sketch, id } | Sel::SketchCurve { id, sketch: Some(sketch) }
-                if crate::dim_view::previewed_sketch(app) != Some(*sketch) =>
+                if crate::dim_view::previewed_sketch(app) != Some(*sketch)
+                    && !crate::sketch_biarc_edit::replaced_members(app, *sketch).is_some_and(|members| members.contains(id)) =>
             {
                 let sel_edge = feedback.color(c4(t.sel_edge));
                 if let Some(ss) = st.sketch(*sketch)
@@ -5520,6 +5536,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             }
             Sel::SketchCurve { id, .. } if crate::dim_view::previewed_sketch(app).is_none() => {
                 if let Some(ss) = app.session.active_sketch.and_then(|sid| st.sketch(sid))
+                    && !crate::sketch_biarc_edit::replaced_members(app, ss.feature).is_some_and(|members| members.contains(id))
                     && let Some(ci) = ss.sketch.curve_index(id)
                 {
                     let sel_edge = feedback.color(c4(t.sel_edge));
@@ -6024,13 +6041,27 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         || app.viewport.spin
         || app.cam_anim.is_some();
     let joint_handle_pointer = hover.is_some_and(|p| inside && crate::joint_handles::owns_pointer(app, &proj, p));
+    let biarc_pointer = crate::sketch_biarc_edit::interact(
+        app,
+        ui,
+        &proj,
+        &resp,
+        hover.filter(|_| inside),
+        middle || secondary_down || mode.is_some() || primary_nav.is_some() || joint_handle_pointer || resp.secondary_clicked(),
+    );
     // Nor while a component's triad drags it as a layer, unless the preference asks for the
     // highlight (`drag_layer::holds_pointer`). A part dragged along its joint owns the pointer
     // too: nothing under it lights up (#5137).
     let dragging_layer = drag_layer::holds_pointer(app, layered, manipulator_dragging);
     let hits = hover
         .filter(|_| {
-            inside && app.viewport.boxsel.is_none() && !crate::joint_drag::active(app) && !joint_handle_pointer && !navigating && !dragging_layer
+            inside
+                && app.viewport.boxsel.is_none()
+                && !crate::joint_drag::active(app)
+                && !joint_handle_pointer
+                && !biarc_pointer
+                && !navigating
+                && !dragging_layer
         })
         .map(|p| pick_cached(app, &proj, p))
         .unwrap_or_default();
@@ -6049,19 +6080,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !(hover_frozen && inside) {
         app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
     }
-    wake_centre(app, &hits, hover, &proj);
+    wake_centre(app, &hits, hover.filter(|_| !biarc_pointer), &proj);
 
     let keep = crate::tool_modifiers::keep_snap_points(crate::tool_modifiers::Held::new(
         ui.input(|i| i.modifiers),
         crate::tool_modifiers::Platform::of(ui.ctx()),
     ));
-    crate::snap_wake::update(app, &hits, keep, hover.filter(|_| inside).map(|p| (&proj, p)));
+    crate::snap_wake::update(app, &hits, keep, hover.filter(|_| inside && !biarc_pointer).map(|p| (&proj, p)));
     // Select Other: a press held still opens the list of everything under it; while the list is
     // open its row under the pointer is what lights up. A mode lit in the navigation bar or a
     // held Space owns drags, not a still press, so only a navigation that has started cancels
     // it. A preset's modifier binding (Maya Alt, Alias Shift+Alt) or Ctrl+left orbit is a
     // gesture to navigate from the press on, so it still cancels the hold at once.
-    let navigating_from_press = mode.is_some() || app.viewport.primary_nav.is_some() || joint_handle_pointer;
+    let navigating_from_press = mode.is_some() || app.viewport.primary_nav.is_some() || joint_handle_pointer || biarc_pointer;
     let held = crate::select_other::track_hold(app, ui.ctx(), &proj, inside, primary_pressed, primary_down, hover, navigating_from_press);
     crate::select_other::hover_override(app);
     list_hover(app);
@@ -6292,7 +6323,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::tools::on_hover(app, &proj, p, mods.shift);
         crate::tools::on_click(app, &proj, p, mods.shift);
     }
-    if let Some(p) = hover.filter(|_| inside) {
+    if let Some(p) = hover.filter(|_| inside && !biarc_pointer) {
         if app.tool.is_some() {
             crate::tools::on_hover(app, &proj, p, mods.shift);
         }
@@ -6507,7 +6538,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     // Dragging a sketch point of the active sketch moves it; the solver keeps the constraints.
-    if app.tool.is_none() && app.dialog.is_none() && primary_nav.is_none() && mode.is_none() && app.session.active_sketch.is_some() && !held {
+    if app.tool.is_none()
+        && app.dialog.is_none()
+        && primary_nav.is_none()
+        && mode.is_none()
+        && app.session.active_sketch.is_some()
+        && !held
+        && !biarc_pointer
+    {
         let on_plane = |app: &SolveApp, p: Pos2| {
             let ss = app.session.active_sketch.and_then(|sid| crate::open_meshing::shown_world(app).sketch(sid).cloned())?;
             let (o, d) = proj.ray(p);
@@ -6757,6 +6795,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !crate::joint_drag::active(app)
         && !crate::joint_handles::active(app)
         && !joint_handle_pointer
+        && !biarc_pointer
         && !crate::occurrence_drag::active(app)
         && !crate::drag_extrude::started(app)
         && !crate::dim_view::dragging()
@@ -6806,7 +6845,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::dim_view::show(app, ui, &painter, &proj);
     crate::sketch_text_handles::show(app, ui, &painter, &proj, hover);
     crate::sketch3d::show(app, &painter, &proj);
-    let tracking_cursor = hover.filter(|_| inside && !navigating && !app.esc_handled && !ui.input(|i| i.key_pressed(egui::Key::Escape)));
+    crate::sketch_biarc_edit::show(app, ui, &painter, &proj, hover.filter(|_| inside && !navigating));
+    let tracking_cursor =
+        hover.filter(|_| inside && !navigating && !biarc_pointer && !app.esc_handled && !ui.input(|i| i.key_pressed(egui::Key::Escape)));
     crate::inference::track_and_show(app, &painter, &proj, tracking_cursor);
     crate::inference::show(app, &painter, &proj);
     crate::drag_snap::show(app, &painter, &proj);
@@ -7839,6 +7880,11 @@ fn grid_centre(tf: Vec3, back: Vec3, n: Vec3, ext: f64) -> Vec3 {
     if len > ext && len > 0.0 { under + along * (ext / len) } else { under + along }
 }
 
+fn shown_hover_point(app: &SolveApp, sk: &solidcraft_engine::sketch::Sketch, sketch: u64, i: usize) -> bool {
+    solidcraft_engine::view::sketch_point_visible(sk, i)
+        || (Some(sketch) == app.session.active_sketch && selected_spline_handles(sk, &app.session.selection).1.contains(&i))
+}
+
 /// Hover feedback for the active sketch's points and curves (drawn on top of everything).
 fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     // While a dimension's value is typed the open sketch is drawn at that value, but hover follows
@@ -7875,8 +7921,9 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                 midpoint_marker(painter, p, col);
             }
         }
-        Some(Hit::SketchPoint { sketch, at, .. }) => {
+        Some(Hit::SketchPoint { sketch, id, at }) => {
             if let Some(ss) = st.sketch(*sketch)
+                && (ss.sketch.biarc_splines.is_empty() || ss.sketch.resolve_point(id).is_some_and(|i| shown_hover_point(app, &ss.sketch, *sketch, i)))
                 && let Some(p) = proj.to_screen(ss.plane.to_world(*at))
             {
                 painter.circle_stroke(p, 6.0, Stroke::new(2.0, col));
@@ -7889,7 +7936,9 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         && previewed != Some(*sketch)
         && !matches!(&app.viewport.hover, Some(Hit::SketchPoint { id: h, .. }) if h == id)
         && let Some(ss) = st.sketch(*sketch)
-        && let Some(at) = ss.sketch.resolve_point(id).and_then(|i| ss.sketch.point(i))
+        && let Some(i) = ss.sketch.resolve_point(id)
+        && solidcraft_engine::view::sketch_point_visible(&ss.sketch, i)
+        && let Some(at) = ss.sketch.point(i)
         && let Some(p) = proj.to_screen(ss.plane.to_world(at))
     {
         let stroke = Stroke::new(1.5, col);
@@ -7929,6 +7978,9 @@ fn wake_centre(app: &mut SolveApp, hits: &[Hit], pointer: Option<Pos2>, proj: &P
                     CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => c,
                     _ => return None,
                 };
+                if !solidcraft_engine::view::sketch_point_visible(sk, c) {
+                    return None;
+                }
                 Some(sk.points.get(c)?.id.clone())
             });
             app.viewport.woken_centre = centre.map(|id| (active, id));
@@ -8061,7 +8113,9 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     for item in &app.session.selection {
         if let Sel::ExternalSketchPoint { sketch, id } = item
             && let Some(ss) = st.sketch(*sketch)
-            && let Some(point) = ss.sketch.resolve_point(id).and_then(|i| ss.sketch.point(i))
+            && let Some(i) = ss.sketch.resolve_point(id)
+            && solidcraft_engine::view::sketch_point_visible(&ss.sketch, i)
+            && let Some(point) = ss.sketch.point(i)
             && let Some(pos) = proj.to_screen(ss.plane.to_world(point))
         {
             painter.circle_stroke(pos, 6.0, Stroke::new(2.0, t.sel_edge));

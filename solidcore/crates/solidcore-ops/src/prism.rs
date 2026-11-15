@@ -21,7 +21,7 @@ use solidcore::primitive::primitive_creation::Boolean2d;
 use solidcore::prism::{extrude, measure, profile as kp, read, sheet};
 use solidcore::Brep;
 use solidcore_convert as convert;
-use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 pub use solidcore::prism::measure::Interval;
 pub use solidcore::prism::placement::LoopPlacement;
@@ -39,6 +39,127 @@ pub const MIN_TOLERANCE: f64 = 1e-9;
 pub const MAX_TOLERANCE: f64 = 1.0;
 /// The tolerance the planar extrusion closes and splits its loops with (mm).
 pub const EXTRUDE_TOLERANCE: f64 = 1e-7;
+
+/// Move a planar point by a fraction of a displacement, with separate scale and addition.
+#[inline]
+#[must_use]
+pub fn translate_point(point: Vec2, displacement: Vec2, fraction: f64) -> Vec2 {
+    convert::record_vec2(kp::translate_point(
+        convert::vec2(point),
+        convert::vec2(displacement),
+        fraction,
+    ))
+}
+
+/// The directed displacement from `a` to `b` and its length.
+#[inline]
+#[must_use]
+pub fn chord(a: Vec2, b: Vec2) -> (Vec2, f64) {
+    let (direction, length) = kp::chord(convert::vec2(a), convert::vec2(b));
+    (convert::record_vec2(direction), length)
+}
+
+/// A point at an unrestricted fraction along the chord from `a` to `b`.
+#[inline]
+#[must_use]
+pub fn chord_point(a: Vec2, b: Vec2, fraction: f64) -> Vec2 {
+    convert::record_vec2(kp::chord_point(
+        convert::vec2(a),
+        convert::vec2(b),
+        fraction,
+    ))
+}
+
+/// The directed chord's left unit normal. A too-short or non-finite chord has none.
+#[must_use]
+pub fn left_unit_normal(a: Vec2, b: Vec2, minimum_length: f64) -> Option<Vec2> {
+    kp::left_unit_normal(convert::vec2(a), convert::vec2(b), minimum_length)
+        .map(convert::record_vec2)
+}
+
+/// Place a tangent guide at the supplied vector length, or at the first allowed fallback length
+/// whose tip fits inside `coord_limit` and is distinct from `at`.
+#[must_use]
+pub fn tangent_guide_tip(
+    at: Vec2,
+    tangent: Vec2,
+    min_length: f64,
+    fallback_lengths: &[f64],
+    coord_limit: f64,
+) -> Option<Vec2> {
+    kp::tangent_guide_tip(
+        convert::vec2(at),
+        convert::vec2(tangent),
+        min_length,
+        fallback_lengths,
+        coord_limit,
+    )
+    .map(convert::record_vec2)
+}
+
+/// Lengthen a finite nonzero direction to `min_length` if it is shorter than that.
+#[must_use]
+pub fn lengthen_direction(direction: Vec2, min_length: f64) -> Vec2 {
+    convert::record_vec2(kp::lengthen_direction(convert::vec2(direction), min_length))
+}
+
+/// Read a stored circular arc from its center and endpoints, clockwise when `reversed`.
+#[must_use]
+pub fn stored_arc(center: Vec2, start: Vec2, end: Vec2, reversed: bool) -> Seg2 {
+    convert::record_seg2(&kp::stored_arc(
+        convert::vec2(center),
+        convert::vec2(start),
+        convert::vec2(end),
+        reversed,
+    ))
+}
+
+/// Whether the stored arc keeps the signed sweep and endpoint tangents of the expected arc.
+#[must_use]
+pub fn arc_contacts_match(expected: &Seg2, stored: &Seg2, angle_tolerance: f64) -> bool {
+    kp::arc_contacts_match(
+        &convert::seg2(expected),
+        &convert::seg2(stored),
+        angle_tolerance,
+    )
+}
+
+/// Compare stored and expected positions with an absolute and coordinate-scale allowance.
+#[must_use]
+pub fn points_agree(actual: Vec2, expected: Vec2, absolute_tolerance: f64) -> bool {
+    kp::points_agree(
+        convert::vec2(actual),
+        convert::vec2(expected),
+        absolute_tolerance,
+    )
+}
+
+/// Curvature vector at a circular contact, pointing towards `center`.
+#[must_use]
+pub fn circle_curvature(center: Vec2, point: Vec2, radius: f64) -> Vec2 {
+    convert::record_vec2(kp::circle_curvature(
+        convert::vec2(center),
+        convert::vec2(point),
+        radius,
+    ))
+}
+
+/// Intersect the ray's line with `plane` and project the intersection onto the chord in plane
+/// coordinates. The resulting fraction is unrestricted.
+#[must_use]
+pub fn ray_chord_parameter(
+    plane: &Plane,
+    origin: Vec3,
+    direction: Vec3,
+    endpoints: [Vec2; 2],
+) -> Option<f64> {
+    kp::ray_chord_parameter(
+        &convert::plane(plane),
+        convert::vec3(origin),
+        convert::vec3(direction),
+        endpoints.map(convert::vec2),
+    )
+}
 
 /// A call's own refusal, else its value, as a kernel call answers inside [`run`].
 struct Out<T>(std::result::Result<T, Error>);

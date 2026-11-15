@@ -402,8 +402,20 @@ pub(super) fn edit<T>(
     strict: bool,
     f: impl FnOnce(&mut Sketch, &mut solidcraft_doc::Document) -> Result<T>,
 ) -> Result<(T, Value)> {
-    let (out, info) = edit_solve(s, p, cmd, strict, f)?;
-    Ok((out, info.and_then(|info| serde_json::to_value(info).ok()).unwrap_or(Value::Null)))
+    edit_with_model(s, p, cmd, strict, |_, _, sk, doc| f(sk, doc))
+}
+
+/// A sketch edit that can read the model to resolve references while building the candidate.
+pub(super) fn edit_with_model<T>(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    strict: bool,
+    f: impl FnOnce(&Session, u64, &mut Sketch, &mut solidcraft_doc::Document) -> Result<T>,
+) -> Result<(T, Value)> {
+    let id = sketch_store::target(s, p, cmd)?;
+    let (out, rep) = edit_solved_with_model(s, id, strict, Analysis::Freedom, |s, sk, doc| Ok((f(s, id, sk, doc)?, Left::Unsolved)))?;
+    Ok((out, rep.as_ref().map(report_json).unwrap_or(Value::Null)))
 }
 
 /// [`edit`] with the solve as its typed value (`None`: the edit did not solve the sketch again).
@@ -469,6 +481,16 @@ pub(super) fn edit_solved<T>(
     analysis: Analysis,
     f: impl FnOnce(&mut Sketch, &mut solidcraft_doc::Document) -> Result<(T, Left)>,
 ) -> Result<(T, Option<SolveReport>)> {
+    edit_solved_with_model(s, id, strict, analysis, |_, sk, doc| f(sk, doc))
+}
+
+fn edit_solved_with_model<T>(
+    s: &mut Session,
+    id: u64,
+    strict: bool,
+    analysis: Analysis,
+    f: impl FnOnce(&Session, &mut Sketch, &mut solidcraft_doc::Document) -> Result<(T, Left)>,
+) -> Result<(T, Option<SolveReport>)> {
     let mut doc = (*s.doc).clone();
     let mut sk = sketch_store::read(&doc, id)?.clone();
     if sk.patterns.iter().any(|p| p.count_expression.is_some() || !p.expressions.is_empty()) {
@@ -498,16 +520,17 @@ pub(super) fn edit_solved<T>(
             sk.points.clone(),
             sk.curves.clone(),
             sk.constraints.clone(),
+            sk.biarc_splines.clone(),
             sk.wires.clone(),
             sk.wire_constraints.clone(),
             sk.wire_constraints_holding(),
             big,
         )
     });
-    let (out, left) = f(&mut sk, &mut doc)?;
+    let (out, left) = f(s, &mut sk, &mut doc)?;
     let strictness = match before {
-        Some((points, curves, constraints, wires, wire_constraints, held, was_big)) => Strict {
-            planar: sk.points != points || sk.curves != curves || sk.constraints != constraints,
+        Some((points, curves, constraints, biarc_splines, wires, wire_constraints, held, was_big)) => Strict {
+            planar: sk.points != points || sk.curves != curves || sk.constraints != constraints || sk.biarc_splines != biarc_splines,
             wires: sk.wires != wires || sk.wire_constraints != wire_constraints,
             held,
             was_big,
@@ -717,10 +740,15 @@ pub(crate) fn collapse_reason(before: &Sketch, after: &Sketch) -> Option<String>
 /// Did solving `before` into `after` throw some point further than [`FLUNG`] times the sketch's
 /// size, or to no number at all?
 fn flung(before: &Sketch, after: &Sketch) -> bool {
+    // Near a straight piece, a biarc's centre can move arbitrarily far while the piece itself
+    // stays near its interpolation points. Measure the motion of the authored geometry.
+    let dependent = if before.biarc_splines.is_empty() { Vec::new() } else { before.biarc_dependent_points() };
+    let authored = |i: usize| !dependent.get(i).copied().unwrap_or(false);
     let (lo, hi) = before
         .points
         .iter()
-        .map(|p| p.pos)
+        .enumerate()
+        .filter_map(|(i, p)| authored(i).then_some(p.pos))
         .filter(|p| p.x.is_finite() && p.y.is_finite())
         .fold((Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY)), |(lo, hi), p| {
             (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y)))
@@ -728,7 +756,7 @@ fn flung(before: &Sketch, after: &Sketch) -> bool {
     let size = if lo.x <= hi.x { lo.dist(hi) } else { 0.0 };
     let longest = after.driving_values().values().map(|v| v.abs()).filter(|v| v.is_finite()).fold(0.0, f64::max);
     let reach = FLUNG * (size + longest).max(1.0);
-    after.points.iter().zip(&before.points).any(|(a, b)| !(a.pos.dist(b.pos) <= reach))
+    after.points.iter().zip(&before.points).enumerate().any(|(i, (a, b))| authored(i) && !(a.pos.dist(b.pos) <= reach))
 }
 
 /// The sketch solves of `edit` and drags, counted in tests (see [`solve_with`]).
@@ -2516,6 +2544,20 @@ fn ent_locked(sk: &Sketch, rep: &SolveReport, e: Ent) -> bool {
     }
 }
 
+/// The interpolation points and tangent tips that position a generated biarc piece.
+fn biarc_piece_inputs(sk: &Sketch, id: &str) -> Option<Vec<usize>> {
+    let spline = sk.biarc_spline(id)?;
+    let span = spline.spans.iter().position(|span| span.curves.iter().any(|curve| curve == id))?;
+    let nodes = spline.nodes.get(span..span + 2)?;
+    Some(
+        nodes
+            .iter()
+            .flat_map(|node| std::iter::once(node.point.as_str()).chain(node.handle.as_ref().map(|handle| handle.point.as_str())))
+            .filter_map(|point| sk.point_index(point))
+            .collect(),
+    )
+}
+
 /// Hold entities: their points, and with `radius` their radii too.
 fn hold_of(sk: &Sketch, ents: &[Ent], radius: bool) -> Hold {
     let mut h = Hold::default();
@@ -2523,7 +2565,9 @@ fn hold_of(sk: &Sketch, ents: &[Ent], radius: bool) -> Hold {
         match *e {
             Ent::Point(i) => h.points.push(i),
             Ent::Curve(c) => {
-                h.points.extend(sk.curves.get(c).map(|c| c.kind.point_ids()).unwrap_or_default());
+                if let Some(curve) = sk.curves.get(c) {
+                    h.points.extend(biarc_piece_inputs(sk, &curve.id).unwrap_or_else(|| curve.kind.point_ids()));
+                }
                 h.radii.push(c);
             }
         }
@@ -3053,17 +3097,26 @@ fn tangent_end(sk: &Sketch, p: &Value, key: &str) -> Option<usize> {
     sk.resolve_point(id)
 }
 
-/// The one curve that ends at point `q`, leaving out `other`; `None` when no curve or more than
-/// one does.
-fn ended_by(sk: &Sketch, q: usize, other: Option<usize>) -> Option<usize> {
+/// The curve that ends at `q`. A biarc through point uses its profile tangent, which is shared
+/// by both adjacent pieces at an interior node.
+fn ended_by(sk: &Sketch, q: usize, other: Option<usize>, reference: Option<&str>) -> Option<usize> {
+    if let Some((id, "start" | "end")) = reference.and_then(|r| r.rsplit_once('.'))
+        && sk.biarc_spline(id).is_some()
+        && let Some(c) = sk.curve_index(id)
+        && Some(c) != other
+    {
+        return Some(c);
+    }
     let mut owners = sk
         .curves
         .iter()
         .enumerate()
         .filter(|(i, c)| Some(*i) != other && c.kind.ends().is_some_and(|(start, end)| start == q || end == q))
-        .map(|(i, _)| i);
-    let first = owners.next()?;
-    owners.next().is_none().then_some(first)
+        .filter(|(_, c)| !matches!(c.kind, CurveKind::Line { a, .. } if a == q && sk.biarc_guide_spline(&c.id).is_some()));
+    let (first, curve) = owners.next()?;
+    let Some((_, second)) = owners.next() else { return Some(first) };
+    let spline = sk.biarc_spline(&curve.id)?;
+    (owners.next().is_none() && spline.curves().any(|id| id == second.id)).then_some(first)
 }
 
 /// Whether `k` already holds through the sketch's own constraints, so Tangent need not add it
@@ -3104,14 +3157,15 @@ fn tangent_at_end(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         let (pa, pb) = (tangent_end(sk, p, "a"), tangent_end(sk, p, "b"));
         let ca = if pa.is_none() { Some(line_or_axis_ref(sk, p.get("a"), cmd, "a")?) } else { None };
         let cb = if pb.is_none() { Some(line_or_axis_ref(sk, p.get("b"), cmd, "b")?) } else { None };
+        let named = |key| p.get(key).and_then(Value::as_str);
         let a = match (ca, pa) {
             (Some(c), _) => c,
-            (None, Some(q)) => ended_by(sk, q, cb).ok_or_else(|| not_an_end("a"))?,
+            (None, Some(q)) => ended_by(sk, q, cb, named("a")).ok_or_else(|| not_an_end("a"))?,
             (None, None) => return Err(not_an_end("a")),
         };
         let b = match (cb, pb) {
             (Some(c), _) => c,
-            (None, Some(q)) => ended_by(sk, q, Some(a)).ok_or_else(|| not_an_end("b"))?,
+            (None, Some(q)) => ended_by(sk, q, Some(a), named("b")).ok_or_else(|| not_an_end("b"))?,
             (None, None) => return Err(not_an_end("b")),
         };
         let (a, b) = two_different(cmd, (a, b))?;
@@ -3144,11 +3198,13 @@ fn tangent_at_end(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
             (None, Some(r)) => Some((r, b, a)),
             _ => None,
         };
-        let far = end.filter(|_| !joint).and_then(|(q, line, other)| match sk.curves.get(line).map(|c| &c.kind) {
+        let biarc_end = end.filter(|&(_, own, _)| sk.curves.get(own).is_some_and(|c| sk.biarc_spline(&c.id).is_some()));
+        let far = end.filter(|_| !joint && biarc_end.is_none()).and_then(|(q, line, other)| match sk.curves.get(line).map(|c| &c.kind) {
             Some(k @ CurveKind::Line { .. }) => k.ends().map(|(start, end)| (q, if start == q { end } else { start }, other)),
             _ => None,
         });
-        let (stay, moves) = end.filter(|_| joint).map_or((a, b), |(_, own, other)| (own, other));
+        let (stay, moves) =
+            biarc_end.map_or_else(|| end.filter(|_| joint).map_or((a, b), |(_, own, other)| (own, other)), |(_, own, other)| (other, own));
         match far {
             Some((q, f, other)) => apply_in_order(sk, &rep, &[Ent::Curve(other), Ent::Point(f)], Ent::Point(q), cmd, &ids)?,
             None => apply_in_order(sk, &rep, &[Ent::Curve(stay)], Ent::Curve(moves), cmd, &ids)?,
@@ -3496,6 +3552,8 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
         for r in &refs {
             if let Some(i) = sk.resolve_point(r) {
                 pts.push(i);
+            } else if let Some(inputs) = biarc_piece_inputs(sk, r) {
+                pts.extend(inputs);
             } else {
                 curves.push(sk.curve_index(r).ok_or_else(|| bad(cmd, format!("unknown entity `{r}`")))?);
             }
@@ -4401,8 +4459,16 @@ fn construction(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let want = bool_(p, "value");
     let (n, info) = edit_solve(s, p, cmd, false, |sk, _| {
-        let cs: Vec<usize> =
-            ids.iter().map(|id| sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))).collect::<Result<_>>()?;
+        let mut cs = std::collections::BTreeSet::new();
+        for id in &ids {
+            if let Some(spline) = sk.biarc_spline(id) {
+                cs.extend(spline.curves().filter_map(|id| sk.curve_index(id)));
+            } else if sk.biarc_guide_spline(id).is_some() {
+                return Err(bad(cmd, "a biarc tangent guide is construction geometry"));
+            } else {
+                cs.insert(sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?);
+            }
+        }
         // The selection switches together (a slot or polygon as a whole): to construction
         // unless all of it already is. Projected curves may switch too. A centerline that
         // becomes construction stops being a centerline (one line type at a time).
@@ -4441,7 +4507,9 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
         // constraint can be deleted together.
         let (mut wire_cons, mut wires) = (Vec::new(), Vec::new());
         for id in &ids {
-            if let Some(c) = sk.curve_index(id) {
+            if let Some(spline) = sk.biarc_spline(id) {
+                curves.extend(spline.all_curves().filter_map(|id| sk.curve_index(id)));
+            } else if let Some(c) = sk.curve_index(id) {
                 curves.push(c);
             } else if let Some(q) = sk.point_index(id) {
                 if q == 0 {

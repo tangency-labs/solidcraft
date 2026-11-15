@@ -17,6 +17,7 @@ name = "solve_profile"
 required-features = ["solver-profiling"]
 
 [dependencies]
+solidcore-ops = { workspace = true }
 solidcore-record = { workspace = true }
 harfrust = "0.12"
 solidcraft-geom = { workspace = true }
