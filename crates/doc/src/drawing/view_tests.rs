@@ -24,7 +24,7 @@ fn front() -> (Drawing, IdSource, u64) {
     let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let mut d = Drawing::new("Plate", "en", "Sheet 1", a3, None, &BTreeSet::new(), &mut id_source).unwrap();
     let source = d.allocate_id(&mut id_source).unwrap();
-    d.sources.push(Source { id: source });
+    d.sources.push(Source { id: source, path: None });
     let front = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let id = add(&mut d, &mut id_source, front, ViewPlace::At([150.0, 150.0]), scaled("1:2"));
     (d, id_source, id)

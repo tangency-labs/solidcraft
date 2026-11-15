@@ -34,7 +34,7 @@ pub(crate) fn plate() -> Drawing {
     let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let mut d = Drawing::new("Plate assembly", "en-GB", "Assembly", a3, Some(DrawingBorderProfile::iso()), &BTreeSet::new(), &mut id_source).unwrap();
     let id = d.allocate_id(&mut id_source).unwrap();
-    d.sources.push(Source { id });
+    d.sources.push(Source { id, path: None });
     let plate_id = d.sources[0].id;
     let id = d.allocate_id(&mut id_source).unwrap();
     d.sheets.push(Arc::new(Sheet {
@@ -221,15 +221,31 @@ fn every_cap_holds_on_both_sides() {
     for n in [0, 1001] {
         assert_eq!(refusal(&with("sheets", sheets(n))), "damaged drawing: a drawing has 1 to 1000 sheets", "{n} sheets");
     }
-    // Sources from id 1: the drawing's and the sheet's ids are the seed's, far from them. A drawing
-    // draws the design it is in, by an id alone: a path is a field this build doesn't know.
-    let sources = |n: u64| Value::Array((1..=n).map(|id| json!({"id": ids::encode(id)})).collect());
-    for n in [0, 1] {
-        assert_eq!(read(&with("sources", sources(n))).unwrap().sources.len(), n as usize);
+    // Sources from id 1: the drawing's and the sheet's ids are the seed's, far from them. Each names
+    // another design's file by its path, but at most one: the design the drawing is in, by an id alone.
+    let linked = |n: u64| Value::Array((1..=n).map(|id| json!({"id": ids::encode(id), "path": format!("parts/{id}.sc")})).collect());
+    for n in [0, 1, 64] {
+        assert_eq!(read(&with("sources", linked(n))).unwrap().sources.len(), n as usize);
     }
-    assert_eq!(refusal(&with("sources", sources(2))), "damaged drawing: a drawing draws only the design it is in");
-    let with_path = refusal(&with("sources", json!([{"id": ids::encode(1), "path": "plate.solidcraft"}])));
-    assert!(with_path.starts_with("damaged drawing: unknown field `path`"), "{with_path}");
+    assert_eq!(refusal(&with("sources", linked(65))), "damaged drawing: a drawing draws at most 64 designs");
+    let own = |id: u64| json!({"id": ids::encode(id)});
+    let both = json!([own(1), {"id": ids::encode(2), "path": "plate.sc"}]);
+    assert_eq!(read(&with("sources", both)).unwrap().own_source(), Some(1));
+    assert_eq!(refusal(&with("sources", json!([own(1), own(2)]))), "damaged drawing: a drawing draws the design it is in at most once");
+    for broken in ["", "  ", "a\0b.sc", "a\nb.sc"] {
+        let one = json!([{"id": ids::encode(1), "path": broken}]);
+        let rule = "damaged drawing: a source's path is not empty, not only spaces, without control characters";
+        assert_eq!(refusal(&with("sources", one)), rule, "{broken:?}");
+    }
+    // One file named twice still reads: only the file system can say two paths are one file, so
+    // the engine refuses it when a source is added, never the record.
+    let twice = json!([{"id": ids::encode(1), "path": "plate.sc"}, {"id": ids::encode(2), "path": "plate.sc"}]);
+    assert_eq!(read(&with("sources", twice)).unwrap().sources.len(), 2);
+    // No cap on a path's bytes but the drawing's own: a design deep in folders keeps its sources'
+    // whole paths in memory, as a component link keeps its file's.
+    let long = "é".repeat(3000) + ".sc";
+    let deep = read(&with("sources", json!([{"id": ids::encode(1), "path": long}]))).unwrap();
+    assert_eq!(deep.sources[0].path.as_deref(), Some(long.as_str()));
     let names = |name: &str| {
         let mut sheet_named = base.clone();
         sheet_named["sheets"][0]["name"] = json!(name);
@@ -244,6 +260,25 @@ fn every_cap_holds_on_both_sides() {
         let expected = (format!("damaged drawing: the drawing's {rule}"), format!("damaged drawing: sheet {sheet_id}: its {rule}"));
         assert_eq!(names(broken.as_str()), expected, "{broken:?}");
     }
+}
+
+/// Sources read in id order whatever order a file lists them in, and a drawing that draws another
+/// design's file saves the same bytes again: on its own (a design container's entry for it) and
+/// inline in a design's JSON. A `null` path reads as none and is never written.
+#[test]
+fn sources_read_in_id_order_and_save_the_same_bytes() {
+    let mut v = file(&bare());
+    v["sources"] = json!([{"id": ids::encode(9), "path": "../parts/plate.sc"}, {"id": ids::encode(3), "path": null}]);
+    let d = read(&v).unwrap();
+    assert_eq!(d.sources, [Source { id: 3, path: None }, Source { id: 9, path: Some("../parts/plate.sc".into()) }]);
+    let saved = d.to_json().unwrap();
+    assert_eq!(Drawing::from_json(&saved).unwrap().to_json().unwrap(), saved, "save, open, save: the same bytes");
+    let written: Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(written["sources"], json!([{"id": ids::encode(3)}, {"id": ids::encode(9), "path": "../parts/plate.sc"}]));
+    let mut doc = crate::Document::new("Case");
+    doc.drawings = vec![Arc::new(d)];
+    let inline = doc.to_json();
+    assert_eq!(crate::Document::from_json(&inline).unwrap().to_json(), inline);
 }
 
 /// The content language is a well-formed BCP 47 tag of 2 to 35 characters.
@@ -928,4 +963,17 @@ fn a_newer_builds_drawing_opens_and_keeps_what_it_cant_read() {
     assert_eq!(again["future_views"], file["future_views"]);
     assert_eq!(again["sheets"].as_array().unwrap().len(), d.sheets.len() + 1);
     assert_eq!(again["format"], json!(newer));
+    // A source of another design's file reads; one it can't read (a field a later build adds) stays
+    // out, named by its path, and goes back.
+    let nut = json!({"id": ids::encode(2), "path": "parts/nut.sc"});
+    let bolt = json!({"id": ids::encode(1), "path": "parts/bolt.sc", "future_digest": "ab"});
+    file["sources"].as_array_mut().unwrap().extend([nut, bolt.clone()]);
+    let opened = Drawing::from_json(&file.to_string()).unwrap();
+    let nut = Source { id: 2, path: Some("parts/nut.sc".into()) };
+    assert_eq!(opened.sources, [&[nut][..], &d.sources[..]].concat());
+    assert_eq!(opened.own_source(), Some(d.sources[0].id));
+    let said = &opened.newer_file.as_ref().unwrap().not_understood;
+    assert!(said.iter().any(|what| what.contains("parts/bolt.sc")), "{said:?}");
+    let again: Value = serde_json::from_str(&opened.to_json().unwrap()).unwrap();
+    assert_eq!(again["sources"].as_array().unwrap().last(), Some(&bolt));
 }

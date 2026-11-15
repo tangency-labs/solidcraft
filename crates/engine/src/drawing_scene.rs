@@ -731,10 +731,8 @@ fn drawn_notes(
         let base =
             DrawnDimension { dimension: note.id, view, kind: ObjectKind::Note, status, group: None, fonts: Vec::new(), why: None, pending: false };
         let (Some(resolved), Some((frame, group))) = (resolved, frame(view)) else { return base };
-        let text = d
-            .sheet_of(&note.anchor)
-            .and_then(|at| title_block_text::read(&s.doc, tree, d, at, std::iter::once(&note.content)).pop())
-            .unwrap_or_default();
+        let text =
+            d.sheet_of(&note.anchor).and_then(|at| title_block_text::read(s, tree, d, at, std::iter::once(&note.content)).pop()).unwrap_or_default();
         let tips: Vec<Vec2> =
             std::iter::once(&resolved.anchor).chain(&resolved.branches).filter_map(|end| end.point).map(|p| frame.to_paper(p)).collect();
         // Centred on the view, as its frame is: the scene moves it to the view's centre.
@@ -762,7 +760,7 @@ fn sheet_notes(s: &Session, d: &Drawing, sheet: u64, lettering: &Lettering, wait
     let Some(at) = d.sheets.iter().position(|one| one.id == sheet).filter(|_| !on.is_empty()) else { return (Vec::new(), false) };
     let line_mm = LineKind::Thin.width_mm(d.sheets.get(at).and_then(|one| one.line_group).unwrap_or(d.line_group));
     let state = s.model.state();
-    let texts = title_block_text::read(&s.doc, &mut Tree::new(&s.doc, &state), d, at, on.iter().map(|note| &note.content));
+    let texts = title_block_text::read(s, &mut Tree::new(&s.doc, &state), d, at, on.iter().map(|note| &note.content));
     let fonts = PaperFonts::new(&lettering.font, &lettering.language, wait);
     let mut pending = false;
     let mut set = |(note, text): (&&Arc<Note>, String)| {
@@ -1105,7 +1103,7 @@ pub(crate) fn moved(group: &Group, by: Vec2) -> Group {
 fn cell_texts(s: &Session, d: &Drawing, sheet: u64) -> Vec<CellText> {
     let Some(at) = d.sheets.iter().position(|x| x.id == sheet && x.title_block.is_some()) else { return Vec::new() };
     let state = s.model.state();
-    title_block_text::shown(&s.doc, &mut Tree::new(&s.doc, &state), d, at)
+    title_block_text::shown(s, &mut Tree::new(&s.doc, &state), d, at)
 }
 
 /// Sheet `record`'s title block text, its cells as `cells` gives them, set on paper in `lettering`'s

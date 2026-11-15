@@ -17,13 +17,14 @@ use solidcraft_doc::drawing::table::Kind;
 use solidcraft_doc::drawing::view::{MAX_VIEW_DEPTH, View, ViewKind};
 use solidcraft_doc::drawing::{self, Drawing, Source, template};
 use solidcraft_doc::drawing_view::ViewDirection;
-use solidcraft_doc::{Document, ids};
+use solidcraft_doc::ids;
 use solidcraft_geom::cell::Warning;
 use solidcraft_geom::drawing_view::ProjectedSide;
 use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_sketch::PaperFonts;
 
 use super::CommandSpec;
+use super::design_link::{absolute, link_presence, same_file, stored};
 use crate::params::{bad, str_};
 use crate::schema::drawing::{
     DrawingCreateParams, DrawingSetParams, SheetTemplateChange, TemplateApplyParams, TemplateApplyResult, TemplateEntry, TemplateListParams,
@@ -34,7 +35,7 @@ use crate::schema::{TypedContract, output_schema_for};
 use crate::title_block_text::{self, CellText, Note};
 use crate::{EngineError, Result, Session};
 
-/// The longest template file path taken, in bytes, as the sheet export's.
+/// The longest template or source file path taken, in bytes, as the sheet export's.
 const MAX_PATH_BYTES: usize = 4096;
 const CREATE_CONTRACT: TypedContract<DrawingCreateParams> = TypedContract::new();
 const SET_CONTRACT: TypedContract<DrawingSetParams> = TypedContract::new();
@@ -44,7 +45,7 @@ const TEMPLATE_SAVE_CONTRACT: TypedContract<TemplateSaveParams> = TypedContract:
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.create", "Create Drawing", crate::checked!("drawing.create", create)).any_part().icon("new").doc_only().contract(&CREATE_CONTRACT).params(
-        "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3-part for a part, iso-a2-assembly for an assembly, a design that places components) or a .json template file (drawing.template.save); language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins); font?: the font family its text is set in, by name (default: the template's, the built-in font for the built-ins); line_group?: the ISO 128 line group its lines are drawn in, by its wide line, one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2 (default: the template's, 0.5 for the built-ins). Adds a drawing of this design made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
+        "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3-part for a part, iso-a2-assembly for an assembly, a design that places components) or a .json template file (drawing.template.save); language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins); font?: the font family its text is set in, by name (default: the template's, the built-in font for the built-ins); line_group?: the ISO 128 line group its lines are drawn in, by its wide line, one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2 (default: the template's, 0.5 for the built-ins); source?: another design file to draw instead of this design, which may then be empty: a design file's path of at most 4096 bytes, kept relative to this design's folder when saved. Adds a drawing of this design (or of the file) made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
     ),
     CommandSpec::new("drawing.template.apply", "Apply Drawing Template", crate::checked!("drawing.template.apply", template_apply))
         .in_drawing()
@@ -97,7 +98,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "drawing: id → deleted: its id; closed when it was open (one undo step of the model)",
     ),
     CommandSpec::new("drawing.inspect", "Inspect Drawing", inspect).in_drawing().icon("inspect").noundo().doc_only().params(
-        "→ {id, name, units, projection, updates: automatic or deferred, language, font, line_group, view_letters: {reuse, given} (whether a deleted view's letter is given again, and how many letters have been given), font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, font_fallbacks: which font set each script of its title blocks' text that the drawing's font lacks, as lines such as \"Kana set in BIZ UDPGothic\", properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?, notes?}] (each text cell as the sheet shows it, a cell that shows a logo, its `image` in `title_block`, left out: its fields' values, nothing for one with none, or the text typed over it with the value it hides as `value`; `notes` are what doesn't fit on paper, each {fit: chars (with count and max), height or width}, shown whole, or {refused: why} for a label or value the drawing's font can't set, left off the sheet), title_block_overrides, dpi, line_group (its own, or null for the drawing's), documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids], notes: [ids]}], base views by id, each followed by those projected from it, notes: [ids] (on the sheet itself), tables, images, revision_tags: [ids], each list by id: what the sheet shows, as the Browser lists it}], symbols: [{id, name, prompts: [keys]}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
+        "→ {id, name, units, projection, updates: automatic or deferred, language, font, line_group, view_letters: {reuse, given} (whether a deleted view's letter is given again, and how many letters have been given), font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, font_fallbacks: which font set each script of its title blocks' text that the drawing's font lacks, as lines such as \"Kana set in BIZ UDPGothic\", properties, sources: [{id, path?: another design's file, as this design's file keeps it; none for the design itself}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?, notes?}] (each text cell as the sheet shows it, a cell that shows a logo, its `image` in `title_block`, left out: its fields' values, nothing for one with none, or the text typed over it with the value it hides as `value`; `notes` are what doesn't fit on paper, each {fit: chars (with count and max), height or width}, shown whole, or {refused: why} for a label or value the drawing's font can't set, left off the sheet), title_block_overrides, dpi, line_group (its own, or null for the drawing's), documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids], notes: [ids]}], base views by id, each followed by those projected from it, notes: [ids] (on the sheet itself), tables, images, revision_tags: [ids], each list by id: what the sheet shows, as the Browser lists it}], symbols: [{id, name, prompts: [keys]}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
     ),
     CommandSpec::new("drawing.set", "Drawing Settings", crate::checked!("drawing.set", set))
         .in_drawing()
@@ -150,11 +151,15 @@ fn named(cmd: &str, s: &Session, p: &Value) -> Result<u64> {
 
 fn create(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.create";
-    if s.doc.features.is_empty() {
-        return Err(bad(cmd, "the design is empty: there is nothing to draw yet"));
-    }
     drawing::check_count(s.doc.drawings.len() + 1).map_err(|e| bad(cmd, e.to_string()))?;
     let request: DrawingCreateParams = crate::schema::read(cmd, p)?;
+    let linked = match request.source.as_deref() {
+        Some(given) => Some(linked_source(cmd, s, given)?),
+        None => None,
+    };
+    if linked.is_none() && s.doc.features.is_empty() {
+        return Err(bad(cmd, "the design is empty: there is nothing to draw yet"));
+    }
     let name = request.name.unwrap_or_else(|| s.doc.name.clone());
     let fail = |e: solidcraft_doc::DocError| bad(cmd, e.to_string());
     let from = request.template.as_deref().unwrap_or_else(|| template::default_for(template::is_assembly(&s.doc)));
@@ -172,8 +177,9 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(LineGroupParam(group)) = request.line_group {
         d.line_group = group;
     }
+    // The design it is in, unless it draws another design's file.
     let source = d.allocate_id(&mut s.ids).map_err(fail)?;
-    d.sources.push(Source { id: source });
+    d.sources.push(Source { id: source, path: linked });
     if let Some(units) = request.units {
         d.units = units;
     }
@@ -184,6 +190,30 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     s.open_drawing = Some(d.id);
     s.doc_mut().put_drawing(Arc::new(d));
     inspect(s, &Value::Null)
+}
+
+/// The whole path of the design file `given` names as a new drawing's source, or why it can't be one,
+/// each refused before the next is asked: the record's rule for a path and the parameter's length,
+/// a network location not allowed or a device (judged from the text, before anything asks the disk
+/// or the network), a design file's name, not this design's own file, and a file there.
+fn linked_source(cmd: &str, s: &Session, given: &str) -> Result<String> {
+    drawing::check_source_path(given).map_err(|e| bad(cmd, e.to_string()))?;
+    if given.len() > MAX_PATH_BYTES {
+        return Err(bad(cmd, format!("`source` is at most {MAX_PATH_BYTES} bytes")));
+    }
+    let own = s.path.as_deref();
+    solidcraft_io::vfs::check_design_path(given, own).map_err(|e| bad(cmd, e.to_string()))?;
+    if !solidcraft_io::is_design_path(given) {
+        return Err(bad(cmd, format!("{given}: not a .{} design", solidcraft_io::DESIGN_EXT)));
+    }
+    let file = absolute(Path::new(given));
+    if own.is_some_and(|own| same_file(Path::new(own), &file)) {
+        return Err(bad(cmd, "`source` is this design's own file: leave it out to draw the design it is in"));
+    }
+    if let Some(problem) = link_presence(&file, own) {
+        return Err(bad(cmd, problem.reason));
+    }
+    Ok(file.to_string_lossy().into_owned())
 }
 
 fn template_apply(s: &mut Session, p: &Value) -> Result<Value> {
@@ -404,7 +434,7 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
     let mut texts: Vec<String> = Vec::new();
     for (at, sheet) in d.sheets.iter().enumerate() {
         let size = sheet.sheet.size_mm().map_err(|e| bad(cmd, e.to_string()))?;
-        let cells = title_block_cells(&s.doc, &mut tree, d, at)?;
+        let cells = title_block_cells(s, &mut tree, d, at)?;
         texts.extend(cells.iter().filter_map(|cell| cell["text"].as_str()).map(str::to_string));
         texts.extend(sheet.title_block.iter().flat_map(|block| &block.cells).filter_map(|cell| cell.label.as_ref()).map(|label| label.text.clone()));
         let mut listed = json!({
@@ -439,7 +469,7 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
         "font_note": solidcraft_sketch::paper_font_note(&solidcraft_sketch::font_dirs(), &d.font),
         "font_fallbacks": solidcraft_sketch::paper_fallback_notes(&solidcraft_sketch::font_dirs(), &d.font, &d.language, texts.iter().map(String::as_str)),
         "properties": d.properties,
-        "sources": d.sources.iter().map(|source| json!({"id": ids::encode(source.id)})).collect::<Vec<_>>(),
+        "sources": d.sources.iter().map(|source| listed_source(s.path.as_deref(), source)).collect::<Vec<_>>(),
         "sheets": sheets,
         "parts_lists": parts_lists,
         "symbols": d.symbols.iter().map(|symbol| json!({"id": ids::encode(symbol.id), "name": symbol.name, "prompts": symbol.prompts()})).collect::<Vec<_>>(),
@@ -451,6 +481,15 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
             "tags": super::drawing_revision::tags(&d.revisions),
         },
     }))
+}
+
+/// A source as `drawing.inspect` lists it: another design's file as the file of the design saved at
+/// `design` keeps it (relative to its folder), the design itself by its id alone.
+fn listed_source(design: Option<&str>, source: &Source) -> Value {
+    match &source.path {
+        None => json!({"id": ids::encode(source.id)}),
+        Some(path) => json!({"id": ids::encode(source.id), "path": stored(design, Path::new(path))}),
+    }
 }
 
 /// Each parts list with how many balloons point at each of its rows, its editor's ballooned column
@@ -480,8 +519,8 @@ pub(super) fn ballooned(d: &Drawing, tree: &mut Tree<'_>) -> Vec<(u64, Option<Ve
 
 /// The text cells of sheet `at`'s title block as the sheet shows them (`drawing.inspect`), each
 /// with what doesn't fit on paper or why its text is off the sheet.
-fn title_block_cells(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Result<Vec<Value>> {
-    let shown = title_block_text::shown(doc, tree, d, at);
+fn title_block_cells(s: &Session, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Result<Vec<Value>> {
+    let shown = title_block_text::shown(s, tree, d, at);
     // Laid out for its notes only: nothing is placed on a sheet here.
     // `Drawing::validate` checks the layout, so an error here is a drawing that skipped it.
     let block = match d.sheets.get(at) {

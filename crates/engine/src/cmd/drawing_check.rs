@@ -204,7 +204,7 @@ fn fields_and_rows(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Finding> {
     let mut tree = Tree::new(&s.doc, &state);
     let mut out = Vec::new();
     for (at, sheet) in d.sheets.iter().enumerate().filter(|(_, sheet)| sheets.contains(&sheet.id)) {
-        title_block_text::shown_with(&s.doc, &mut tree, d, at, |cell, content, values| {
+        title_block_text::shown_with(s, &mut tree, d, at, |cell, content, values| {
             let block = object(CheckedKind::TitleBlock, sheet.id);
             match cell.replaced {
                 // Typed text over an empty value fills the cell: nothing is hidden.

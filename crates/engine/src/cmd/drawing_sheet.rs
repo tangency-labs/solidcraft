@@ -170,15 +170,8 @@ fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<Vec<String>> {
         Some(Value::Null) => sheet.line_group = None,
         Some(group) => sheet.line_group = Some(super::drawing::line_group(cmd, group)?),
     }
-    match p.get("documents") {
-        None => {}
-        Some(Value::Null) => sheet.documents = None,
-        Some(documents) => {
-            let source = str_(documents, "source").and_then(ids::decode).ok_or_else(|| bad(cmd, "`documents.source` must be a source's id"))?;
-            let component =
-                documents.get("component").map_or(Some(0), Value::as_u64).ok_or_else(|| bad(cmd, "`documents.component` must be a component id"))?;
-            sheet.documents = Some(SheetComponent { source, component });
-        }
+    if let Some(documents) = documents(cmd, p)? {
+        sheet.documents = documents;
     }
     if let Some(excluded) = p.get("excluded") {
         // An object of the two flags: anything else (a mistyped key) would change nothing unseen.
@@ -194,8 +187,30 @@ fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<Vec<String>> {
     Ok(lost)
 }
 
+/// `p`'s `documents`: `None` when not given, else the component the sheet documents, or none.
+fn documents(cmd: &str, p: &Value) -> Result<Option<Option<SheetComponent>>> {
+    let Some(documents) = p.get("documents").filter(|documents| !documents.is_null()) else {
+        return Ok(p.get("documents").map(|_| None));
+    };
+    let source = str_(documents, "source").and_then(ids::decode).ok_or_else(|| bad(cmd, "`documents.source` must be a source's id"))?;
+    let component =
+        documents.get("component").map_or(Some(0), Value::as_u64).ok_or_else(|| bad(cmd, "`documents.component` must be a component id"))?;
+    Ok(Some(Some(SheetComponent { source, component })))
+}
+
+/// Refuses `p`'s `documents` when its design can't be read ([`Session::drawn`]): the sheet's title
+/// block would read another design's fields.
+fn check_documents(s: &Session, cmd: &str, p: &Value) -> Result<()> {
+    if let Some(Some(documents)) = documents(cmd, p)? {
+        let source = documents.source;
+        s.drawn(s.drawing(cmd)?, source).map_err(|why| bad(cmd, format!("it documents source {}: {why}", ids::encode(source))))?;
+    }
+    Ok(())
+}
+
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.add";
+    check_documents(s, cmd, p)?;
     let record = s.drawing(cmd)?.clone();
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(cmd, e.to_string()))?;
     s.edit_drawing(cmd, |d| {
@@ -213,6 +228,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.set";
+    check_documents(s, cmd, p)?;
     let (id, room, lost) = s.edit_drawing(cmd, |d| {
         let at = sheet_at(cmd, d, p, "sheet")?;
         let sheet = Arc::make_mut(d.sheets.get_mut(at).ok_or_else(|| bad(cmd, "no such sheet"))?);

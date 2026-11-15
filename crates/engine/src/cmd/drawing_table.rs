@@ -69,7 +69,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let sheet = sheet_id(&record, &request.sheet, ADD)?;
     let kind = match request.kind {
         KindParam::Revision => Kind::Revision,
-        KindParam::PartsList => Kind::PartsList(new_list(&record, sheet)?),
+        KindParam::PartsList => Kind::PartsList(new_list(s, &record, sheet)?),
     };
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
     let mut table = SheetTable { id, sheet, table: kind.default_table(), place: kind.default_place(), kind };
@@ -112,11 +112,13 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(DeleteResult { table: ids::encode(id), balloons }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-/// The list a parts list on `sheet` starts with: what its sheet documents, else the design.
-fn new_list(d: &Drawing, sheet: u64) -> Result<PartsList> {
+/// The list a parts list on `sheet` starts with: what its sheet documents, else the design the
+/// drawing is in, else the first it draws; a design `s` can read ([`Session::drawn`]).
+fn new_list(s: &Session, d: &Drawing, sheet: u64) -> Result<PartsList> {
     let documents = d.sheets.iter().find(|s| s.id == sheet).and_then(|s| s.documents);
-    let design = || d.sources.first().map(|source| SheetComponent { source: source.id, component: 0 });
+    let design = || d.own_source().or_else(|| d.sources.first().map(|source| source.id)).map(|source| SheetComponent { source, component: 0 });
     let of = documents.or_else(design).ok_or_else(|| bad(ADD, "the drawing draws no design to list"))?;
+    s.drawn(d, of.source).map_err(|why| bad(ADD, why.to_string()))?;
     Ok(PartsList { of, view: Default::default(), group: Default::default(), fold: false, purchased_contents: false, mass: MassFormat::default() })
 }
 
@@ -134,7 +136,7 @@ fn apply(s: &Session, d: &Drawing, table: &mut SheetTable, set: TableSet, cmd: &
     }
     if let Some(list) = set.list {
         let Kind::PartsList(old) = &mut table.kind else { return Err(bad(cmd, "`list` is for a parts list")) };
-        apply_list(s, old, list, cmd)?;
+        apply_list(s, d, old, list, cmd)?;
     }
     if let Some(place) = set.place {
         table.place = serde_json::from_value(place).map_err(|e| bad(cmd, format!("`place`: {e}")))?;
@@ -154,15 +156,17 @@ fn apply(s: &Session, d: &Drawing, table: &mut SheetTable, set: TableSet, cmd: &
     Ok(())
 }
 
-/// `set` on a parts list, in the words it saves them in.
-fn apply_list(s: &Session, list: &mut PartsList, set: ListSet, cmd: &str) -> Result<()> {
+/// `set` on a parts list of `d`, in the words it saves them in: a component found in the design it
+/// lists ([`Session::drawn`]).
+fn apply_list(s: &Session, d: &Drawing, list: &mut PartsList, set: ListSet, cmd: &str) -> Result<()> {
     if let Some(component) = set.component {
         let key = match &component {
             Value::String(key) => key.clone(),
             Value::Number(id) => id.to_string(),
             _ => return Err(bad(cmd, "`component` must be a component id or name")),
         };
-        list.of.component = s.doc.find_component(&key).ok_or_else(|| bad(cmd, format!("no component `{key}`")))?;
+        let design = s.drawn(d, list.of.source).map_err(|why| bad(cmd, why.to_string()))?;
+        list.of.component = design.doc.find_component(&key).ok_or_else(|| bad(cmd, format!("no component `{key}`")))?;
     }
     *list = merged(
         list,
