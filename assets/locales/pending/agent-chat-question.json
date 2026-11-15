@@ -1,0 +1,38 @@
+{
+  "en": {
+    "ui.agent_chat_decline": "Decline",
+    "ui.agent_chat_declined": "Declined",
+    "ui.agent_chat_question": "The agent asks: {message}",
+    "ui.agent_chat_question_link": "Address: {url}"
+  },
+  "ar": {
+    "ui.agent_chat_decline": "رفض",
+    "ui.agent_chat_declined": "مرفوض",
+    "ui.agent_chat_question": "يطلب الوكيل: {message}",
+    "ui.agent_chat_question_link": "العنوان: {url}"
+  },
+  "he": {
+    "ui.agent_chat_decline": "דחייה",
+    "ui.agent_chat_declined": "נדחה",
+    "ui.agent_chat_question": "הסוכן שואל: {message}",
+    "ui.agent_chat_question_link": "כתובת: {url}"
+  },
+  "ja": {
+    "ui.agent_chat_decline": "辞退する",
+    "ui.agent_chat_declined": "辞退しました",
+    "ui.agent_chat_question": "エージェントの質問: {message}",
+    "ui.agent_chat_question_link": "アドレス: {url}"
+  },
+  "vi": {
+    "ui.agent_chat_decline": "Từ chối",
+    "ui.agent_chat_declined": "Đã từ chối",
+    "ui.agent_chat_question": "AI Agent hỏi: {message}",
+    "ui.agent_chat_question_link": "Địa chỉ: {url}"
+  },
+  "zh": {
+    "ui.agent_chat_decline": "拒绝",
+    "ui.agent_chat_declined": "已拒绝",
+    "ui.agent_chat_question": "智能体询问：{message}",
+    "ui.agent_chat_question_link": "地址：{url}"
+  }
+}
