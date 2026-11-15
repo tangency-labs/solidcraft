@@ -1,0 +1,16 @@
+{
+  "en": {
+    "ui.agent_chat_thinking": "Thinking",
+    "ui.agent_chat_thinking_hide": "Hide the model's thinking",
+    "ui.agent_chat_thinking_show": "Show the model's thinking",
+    "ui.agent_thinking_folded": "Folded in each reply",
+    "ui.agent_thinking_folded_note": "The model's thinking in each reply starts folded; click Thinking to open it. Off: it is shown open."
+  },
+  "de": {
+    "ui.agent_chat_thinking": "Denken",
+    "ui.agent_chat_thinking_hide": "Das Denken des Modells ausblenden",
+    "ui.agent_chat_thinking_show": "Das Denken des Modells anzeigen",
+    "ui.agent_thinking_folded": "In jeder Antwort eingeklappt",
+    "ui.agent_thinking_folded_note": "Das Denken des Modells beginnt in jeder Antwort eingeklappt; ein Klick auf Denken öffnet es. Aus: es wird offen gezeigt."
+  }
+}
