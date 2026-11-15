@@ -333,7 +333,7 @@ mod tests {
         assert_eq!(verdicts, vec![Verdict::Wheel, Verdict::Wheel]);
     }
 
-    fn app() -> (SolveApp, egui::Context) {
+    fn new_app() -> (SolveApp, egui::Context) {
         let ctx = egui::Context::default();
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         app.viewport.rect = Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0)));
@@ -345,14 +345,19 @@ mod tests {
         if let Some(pos) = pointer {
             raw.events.push(egui::Event::PointerMoved(pos));
         }
-        let _ = ctx.run(raw, run);
+        let mut run = Some(run);
+        let _ = ctx.run_ui(raw, |ui| {
+            if let Some(run) = run.take() {
+                run(ui.ctx());
+            }
+        });
     }
 
     #[test]
     fn the_notice_asks_once_then_zoom_or_dismiss_is_saved() {
         let samples: Vec<WheelSample> = (0..6).map(|i| step(f64::from(i) * 0.016, 3.0)).collect();
         // Outside the viewport nothing is judged.
-        let (mut app, ctx) = app();
+        let (mut app, ctx) = new_app();
         frame(&ctx, Some(egui::pos2(900.0, 100.0)), 0.0, |ctx| feed(&mut app, ctx, &samples));
         assert!(!pending(&app));
         // Over it, a steady wheel makes the notice due, with the default still two-finger pan.
@@ -369,7 +374,7 @@ mod tests {
         frame(&ctx, Some(egui::pos2(100.0, 100.0)), 0.5, |ctx| feed(&mut app, ctx, &samples));
         assert!(!pending(&app), "Always zoom is not asked about");
         // Dismiss: saved, the choice stays Automatic, and a steady wheel never asks again.
-        let (mut app, ctx) = app();
+        let (mut app, ctx) = new_app();
         frame(&ctx, Some(egui::pos2(100.0, 100.0)), 0.1, |ctx| feed(&mut app, ctx, &samples));
         act(&mut app, Action::Dismiss);
         assert!(app.preferences.browser_wheel_hint_dismissed);
@@ -379,7 +384,7 @@ mod tests {
         let restored: crate::prefs::Prefs = serde_json::from_value(serde_json::to_value(&app.preferences).unwrap()).unwrap();
         assert!(restored.browser_wheel_hint_dismissed, "it is saved with the settings");
         // Without an answer it times out for this run only.
-        let (mut app, ctx) = app();
+        let (mut app, ctx) = new_app();
         frame(&ctx, Some(egui::pos2(100.0, 100.0)), 0.1, |ctx| feed(&mut app, ctx, &samples));
         frame(&ctx, None, 1.0, |ctx| assert!(due(&mut app, ctx).is_some()));
         frame(&ctx, None, 1.0 + SHOW_SECONDS, |ctx| assert!(due(&mut app, ctx).is_none()));
