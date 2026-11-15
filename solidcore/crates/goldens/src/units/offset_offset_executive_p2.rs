@@ -2960,8 +2960,10 @@ mod tests {
             // below (the 2e-6 slab is the widest); the half pipes' refinement ends at its
             // cell budget, near 2e-6 (R 12) and 1e-4 (R 20) of it, on main as here. On the
             // half pipes the closed form inside the enclosure so certifies the body's
-            // volume only to 2e-4 of it: acceptance slack set from the measured R 20 width,
-            // enough here because the rows moved only in face kinds and seams
+            // volume only to 2e-4 of it: acceptance slack set from the measured R 20 width.
+            // It is enough here (argued) because a wall is replaced only where its control
+            // points lie within SM_EFF_ZERO of the new plane, so the replacement moves the
+            // volume by at most the replaced walls' area times SM_EFF_ZERO
             let width = if closed_form.is_some() { 1e-7 } else { 2e-4 };
             assert!(e.lo > 0.0 && e.hi - e.lo <= width * e.hi, "{name}: [{}, {}]", e.lo, e.hi);
             if let Some(v) = closed_form {

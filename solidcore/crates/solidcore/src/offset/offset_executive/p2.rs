@@ -285,8 +285,9 @@ fn refuse_singular_offset(
 /// and it is only reported: the refusal itself rests on the collapse test. A face without a
 /// recorded displacement, or that the proof finds nothing on or fails on (no surface, no
 /// NURB, a radius it does not reach, an error), reports `|distance|`: its collapse test
-/// (`Surface::offset_collapses`) found the radius left below the tolerance, so a radius
-/// within the tolerance of that is attained. Never fails, so the typed refusal is never
+/// (`Surface::offset_collapses`) found the radius left below the tolerance, so the face's
+/// least radius is at most `|distance|` plus the tolerance; that is an upper bound, not a
+/// radius the face is known to attain. Never fails, so the typed refusal is never
 /// replaced by another error.
 fn collapsed_face_radius(
     kernel: &Kernel,

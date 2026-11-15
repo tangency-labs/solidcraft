@@ -87,13 +87,15 @@ pub enum OffsetFailure {
     /// the face is dropped and its neighbours mated across it) where that mating cannot
     /// bridge it: there the face is not built inside out, it is left out, so what fails is
     /// the collapse, not a fold. `radius` is then a radius the face attains, sampled, not
-    /// a certified minimum.
+    /// a certified minimum, or, where the proof finds none, `|distance|`: an upper bound
+    /// (within the tolerance) on the face's least radius, not one it is known to attain.
     Collapses {
         /// The face whose offset collapses.
         face: FaceId,
         /// The offset distance asked for (signed, as the operation takes it).
         distance: f64,
-        /// A radius of curvature the face attains on the displaced side.
+        /// A radius of curvature the face attains on the displaced side, or (WR-346, where
+        /// no radius is proved) `|distance|`, an upper bound on its least radius.
         radius: f64,
     },
     /// Loops of the offset of `face` touch without crossing, so the offset walls they
