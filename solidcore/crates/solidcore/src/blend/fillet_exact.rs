@@ -2090,6 +2090,149 @@ pub fn ball_zone_open_at_an_end(
     Ok(None)
 }
 
+/// Not the fork's (#16768): whether a round's definition is a rolling ball's of one radius
+/// `|off|` (within `tol`): the ball's circle as its section (order 1), no radius law, no
+/// chamfer and equal offsets from both supports. Such a round is the envelope of the balls
+/// along its spine, every point of it at the ball's radius from the spine across it.
+fn round_of_one_radius(
+    order: u32,
+    law: bool,
+    chamfer: bool,
+    offsets: [f64; 2],
+    off: f64,
+    tol: f64,
+) -> bool {
+    let [o0, o1] = offsets;
+    order == 1
+        && !law
+        && !chamfer
+        && (o0.abs() - o1.abs()).abs() <= tol
+        && (o0.abs() - off.abs()).abs() <= tol
+}
+
+/// Not the fork's (#16768): whether the face `surface` at `uv` (on the edge) has an offset by
+/// `off` (the ball's signed offset along its normal) that collapses, read from the face's
+/// definition, never from a net or from samples:
+///
+/// - an analytic cylinder, sphere or torus ([`BlendQuadric::from_surface`] reads their own
+///   data), or a surface of revolution that is one (a round turned about an axis, as a
+///   round along a circular edge is: its rational net is the surface itself, the profile
+///   turned exactly, not an approximation of a definition, so the torus the recognisers read
+///   off it is the face): its offset is its axis, its centre or its tube's circle
+///   ([`QuadricKind::Line`], [`QuadricKind::Point`], [`QuadricKind::Circle`]), its radius
+///   (a torus's tube radius) the ball's within `tol` with the ball on its inner side;
+/// - a round of one radius ([`round_of_one_radius`]) with the ball on its spine's side
+///   (its curvature toward the ball positive): every point of it is that radius from the
+///   spine, so its offset by that radius toward the spine is the spine.
+///
+/// The collapse is of the whole face's offset, so it holds wherever along the edge the
+/// ball would touch it. Any other face (a B-spline, or a procedural blend's net, even one
+/// recognised as a quadric) is not judged collapsed (`false`).
+///
+/// # Errors
+///
+/// Those of the evaluations.
+fn offset_collapses_by_definition(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    off: f64,
+    tol: f64,
+) -> Result<bool> {
+    match surface.kind() {
+        SurfaceKind::Cone(_)
+        | SurfaceKind::Sphere(_)
+        | SurfaceKind::Torus(_)
+        | SurfaceKind::SurfOfRevolution(_) => {
+            let face = BlendQuadric::from_surface(k, surface, uv, tol)?;
+            Ok(matches!(
+                face.offset(off, tol).kind,
+                QuadricKind::Line | QuadricKind::Point | QuadricKind::Circle
+            ))
+        }
+        SurfaceKind::ProceduralBlend(pb) => {
+            let offsets = [pb.offset(0).unwrap_or(0.0), pb.offset(1).unwrap_or(0.0)];
+            if !round_of_one_radius(
+                pb.order(),
+                pb.law().is_some(),
+                pb.chamfer().is_some(),
+                offsets,
+                off,
+                tol,
+            ) {
+                return Ok(false);
+            }
+            // the spine on the ball's side: the face curves toward the ball (by 1 / radius)
+            Ok(bending_toward_ball(k, surface, uv, off)?.is_some_and(|b| b.k_max > 0.0))
+        }
+        _ => Ok(false),
+    }
+}
+
+/// Not the fork's (#16768): whether a constant ball of `radius` is as wide as one of the
+/// solver's two faces, so that the face's offset by the ball, the surface its centre rolls
+/// on, collapses ([`offset_collapses_by_definition`]: decided from the face's definition).
+/// The side the ball is on is read from the solver's offset of the face at the edge's
+/// middle, as [`ball_zone_open_at_an_end`] reads it. `false` where the edge's middle does not
+/// drop onto a face.
+///
+/// `false` too for a solver without its edge use, its edge's curve or an offset surface.
+///
+/// # Errors
+///
+/// Those of the drops, the evaluations and the topology lookups.
+pub fn ball_as_wide_as_a_face_along_the_edge(
+    ops: &mut dyn FilletSolverOps,
+    k: &Kernel,
+    b: &Brep,
+    radius: f64,
+) -> Result<bool> {
+    use crate::surface::surface::p4::NoObject;
+    use crate::surface::surface::p5::DropPointOptions;
+    use crate::topology::edge;
+    // (a solver without its edge use or its edge's curve proves nothing: not judged)
+    let Some(eu0) = ops.solver().edgeuse(0)? else {
+        return Ok(false);
+    };
+    let Some(e) = eu::edge(b, eu0)? else {
+        return Ok(false);
+    };
+    let Some(curve) = edge::evaluation_curve(b, e)? else {
+        return Ok(false);
+    };
+    let ivl = edge::interval(b, e)?;
+    let tol = b.tolerance();
+    let mid = curve.evaluate_point(k, ivl.evaluate(0.5))?;
+    for i in 0..2 {
+        let (base, p, n, uv) = {
+            let Some(off) = ops.solver().surface(i)? else {
+                return Ok(false);
+            };
+            let base = off.surface.base_surface().clone();
+            let domain = base.natural_uv_domain_with_nurb(k)?;
+            let dropped =
+                base.drop_point::<NoObject>(k, mid, &domain, &DropPointOptions::default())?;
+            if !dropped.success {
+                return Ok(false);
+            }
+            let uv = dropped.result_uv;
+            let (p, n) = point_and_normal(k, &base, uv)?;
+            (base, p, n, uv)
+        };
+        // the ball's side of the face: its centre's signed offset along the face's normal
+        let q = crate::blend::fillet_solver::p2::eval_offset(k, ops.solver_mut(), i, uv)?;
+        let off = if (q - p).dot(n) < 0.0 {
+            -radius
+        } else {
+            radius
+        };
+        if offset_collapses_by_definition(k, &base, uv, off, tol)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// [`ball_past_an_end`]'s refusal: the edge's end the ball lies past, and the radius at which
 /// it first has a section of the round between the edge's ends (an open bound).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -3264,6 +3407,42 @@ mod tests {
             }
         }
         assert!(v.abs() < 1e-14);
+    }
+
+    /// #16768: a torus's offset by its tube radius collapses onto its tube's circle only with
+    /// the ball inside the tube; a cylinder far wider than the ball (a knife edge's R21 wall
+    /// against a 2 mm ball) does not collapse.
+    #[test]
+    fn a_torus_collapses_by_its_tube_and_a_wide_cylinder_not() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let torus = BlendQuadric {
+            kind: QuadricKind::Torus,
+            dir: z,
+            radius: 10.0,
+            tube: 1.0,
+            side: -1.0,
+            ..BlendQuadric::default()
+        };
+        assert_eq!(torus.offset(1.0, 1e-9).kind, QuadricKind::Circle);
+        assert_eq!(torus.offset(-1.0, 1e-9).kind, QuadricKind::Torus);
+        assert_eq!(torus.offset(0.99, 1e-9).kind, QuadricKind::Torus);
+        let wall = cylinder(Point3::ZERO, z, 21.0, -1.0);
+        assert_eq!(wall.offset(2.0, 1e-9).kind, QuadricKind::Cylinder);
+        assert_eq!(wall.offset(-2.0, 1e-9).kind, QuadricKind::Cylinder);
+    }
+
+    /// #16768: only a round whose definition is one ball's (its circle as section, no law,
+    /// no chamfer, equal offsets) of the ball's radius is read as collapsing under it.
+    #[test]
+    fn only_a_round_of_the_balls_radius_collapses_under_it() {
+        let tol = 1e-6;
+        assert!(round_of_one_radius(1, false, false, [1.0, 1.0], 1.0, tol));
+        assert!(round_of_one_radius(1, false, false, [1.0, -1.0], -1.0, tol));
+        assert!(!round_of_one_radius(1, false, false, [1.0, 1.0], 0.99, tol));
+        assert!(!round_of_one_radius(2, false, false, [1.0, 1.0], 1.0, tol));
+        assert!(!round_of_one_radius(1, true, false, [1.0, 1.0], 1.0, tol));
+        assert!(!round_of_one_radius(0, false, true, [1.0, 1.0], 1.0, tol));
+        assert!(!round_of_one_radius(1, false, false, [1.0, 2.0], 1.0, tol));
     }
 
     fn collapsed(a: BlendQuadric, b: BlendQuadric, r: f64, centre: Point3) -> ExactBlend {

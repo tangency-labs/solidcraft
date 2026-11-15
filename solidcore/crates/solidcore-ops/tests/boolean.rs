@@ -1517,6 +1517,47 @@ fn a_traced_cut_meeting_an_earlier_cut_removes_its_tool() {
     one_valid_solid_of_volume(&r, [46, 132, 88], want, 1e-9);
 }
 
+/// #16935's intersect as SolidCraft passed it. Both bodies are a decagon of side 10, 10 tall, with
+/// a 6 tall top tapered at 45°. The target has a 6 mm groove down the middle of each slope, its
+/// edges rounded at 1 mm; the tool has the ten edges between the slopes rounded at 5 mm. Near the
+/// top each 5 mm round's cylinder runs within the tolerance of a 1 mm round and the corner patch
+/// beside it, so each of the twenty gaps it leaves in the intersection loop is closed along the
+/// target's edge between them. Ten passes of one closure each left ten of them open, and the
+/// first closure taken at a corner ran up the round's tangent line: the faces were classified
+/// across the gaps, the intersect lost eight of the ten 5 mm rounds and said nothing.
+///
+/// The intersection is the target less the ten wedges between the tool's sharp edges and its
+/// rounds, `V(sharp tool) - V(tool)`, plus what the target's 1 mm rounds and their corner
+/// patches already took out of those wedges near the top: under 1e-3 (the wedges classified
+/// against the target, column by column along the slopes' normals). Before, the intersect gave
+/// 6.38 more: eight wedges kept.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_traced_intersect_keeps_every_5_mm_round_beside_the_grooves_1_mm_rounds() {
+    all_fixes();
+    let body = traced_operands("issue_16935_hip_rounds_over_groove_rounds");
+    // the decagon's apothem and area, the top's apothem 6 less (45°), the frustum on the prism
+    let apothem = 10.0 / (2.0 * 18_f64.to_radians().tan());
+    let base = 10.0 * apothem * apothem * 18_f64.to_radians().tan();
+    let top = base * ((apothem - 6.0) / apothem).powi(2);
+    let sharp_tool = 10.0 * base + 6.0 / 3.0 * (base + top + (base * top).sqrt());
+    let wedges = sharp_tool - body("tool").volume(1e-11).unwrap();
+    let want = body("target").volume(1e-11).unwrap() - wedges;
+    let r = boolean(body("target"), body("tool"), BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    // the target's 92 faces and the ten rounds
+    assert_eq!(r.counts().unwrap(), [102, 320, 220]);
+    let v = r.volume(1e-11).unwrap();
+    assert!(
+        v >= want && v <= want + 1e-3,
+        "volume {v}, target less the wedges {want}"
+    );
+}
+
 /// A 10 mm cube with the vertical edge at x = 0, y = 0 rounded to radius 2.
 fn filleted_cube() -> Body {
     let block = make_box([0.0; 3], [10.0, 10.0, 10.0]).unwrap();

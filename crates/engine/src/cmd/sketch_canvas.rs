@@ -280,6 +280,78 @@ mod tests {
     }
 
     #[test]
+    fn canvases_on_model_planes_follow_rebuilds_and_reopen() {
+        use solidcore_record::Vec3;
+        use solidcraft_geom::PlaneGeom as _;
+
+        let mut s = Session::default();
+        for (command, params) in [
+            ("parameters.add", json!({"name": "station", "expression": "0.25", "unit": ""})),
+            ("sketch.create", json!({"plane": "XY", "name": "Path"})),
+            ("sketch.line", json!({"points": [[0, 0], [20, 0], [20, 10]], "ids": ["a", "b"]})),
+            ("sketch.finish", json!({})),
+            (
+                "construct.plane.three_points",
+                json!({"a": {"point": [0, 0, 5]}, "b": {"point": [1, 0, 5]}, "c": {"point": [0, 1, 5]}, "name": "Numeric"}),
+            ),
+            (
+                "construct.plane.three_points",
+                json!({"a": {"sketch": "Path", "point": "a.start"}, "b": {"sketch": "Path", "point": "a.end"},
+                    "c": {"sketch": "Path", "point": "b.end"}, "name": "Points"}),
+            ),
+            ("construct.plane.along_path", json!({"path": {"sketch": "Path", "curve": "a"}, "t": "station", "name": "Along"})),
+            ("construct.plane.offset", json!({"base": "Along", "offset": 2, "name": "AlongOffset"})),
+            ("construct.plane.at_angle", json!({"base": "Numeric", "axis": "X", "angle": 90, "name": "Angled"})),
+            ("construct.plane.offset", json!({"base": "Angled", "offset": 2, "name": "Derived"})),
+        ] {
+            s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
+        }
+        for plane in ["XY", "Numeric", "Points", "Along", "AlongOffset", "Angled", "Derived"] {
+            s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": plane, "name": plane, "width": 40})).unwrap();
+        }
+        let check = |s: &Session, station: f64| {
+            let (vals, _) = s.doc.param_values();
+            let state = s.model.state();
+            for (name, origin, normal, expected_corners) in [
+                ("XY", [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [[-20.0, -10.0, 0.0], [20.0, -10.0, 0.0], [20.0, 10.0, 0.0], [-20.0, 10.0, 0.0]]),
+                ("Numeric", [0.0, 0.0, 5.0], [0.0, 0.0, 1.0], [[-20.0, -10.0, 5.0], [20.0, -10.0, 5.0], [20.0, 10.0, 5.0], [-20.0, 10.0, 5.0]]),
+                ("Points", [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [[-20.0, -10.0, 0.0], [20.0, -10.0, 0.0], [20.0, 10.0, 0.0], [-20.0, 10.0, 0.0]]),
+                (
+                    "Along",
+                    [station, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [[station, -20.0, -10.0], [station, 20.0, -10.0], [station, 20.0, 10.0], [station, -20.0, 10.0]],
+                ),
+                (
+                    "AlongOffset",
+                    [station + 2.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [[station + 2.0, -20.0, -10.0], [station + 2.0, 20.0, -10.0], [station + 2.0, 20.0, 10.0], [station + 2.0, -20.0, 10.0]],
+                ),
+                ("Angled", [0.0, -5.0, 0.0], [0.0, -1.0, 0.0], [[-20.0, -5.0, -10.0], [20.0, -5.0, -10.0], [20.0, -5.0, 10.0], [-20.0, -5.0, 10.0]]),
+                ("Derived", [0.0, -7.0, 0.0], [0.0, -1.0, 0.0], [[-20.0, -7.0, -10.0], [20.0, -7.0, -10.0], [20.0, -7.0, 10.0], [-20.0, -7.0, 10.0]]),
+            ] {
+                let c = s.doc.canvases.iter().find(|c| c.name == name).unwrap();
+                let plane = s.doc.canvas_plane(&vals, c, &state).unwrap_or_else(|e| panic!("{name}: {e}"));
+                let assert_components = |actual: Vec3, expected: [f64; 3], context: &str| {
+                    for ((axis, actual), expected) in ["x", "y", "z"].into_iter().zip([actual.x, actual.y, actual.z]).zip(expected) {
+                        assert!((actual - expected).abs() < 1e-9, "{name} {context}.{axis}: expected {expected}, got {actual}");
+                    }
+                };
+                assert_components(plane.origin, origin, "origin");
+                assert_components(plane.normal(), normal, "normal");
+                for (index, (actual, expected)) in c.world_corners(&plane).into_iter().zip(expected_corners).enumerate() {
+                    assert_components(actual, expected, &format!("corner {index}"));
+                }
+            }
+        };
+        check(&s, 5.0);
+        s.execute("parameters.change", &json!({"name": "station", "expression": "0.75"})).unwrap();
+        check(&s, 15.0);
+        check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 15.0);
+    }
+
+    #[test]
     fn deleted_canvas_ids_are_not_reused_after_reopening() {
         let mut s = Session::default();
         let params = json!({"data": png(10, 10)});

@@ -45,6 +45,7 @@ pub mod contact;
 pub mod continuity;
 pub mod curve;
 pub mod curve_fit;
+pub mod curve_gap;
 pub mod curve_knots;
 pub mod curve_plane;
 pub mod cylinder_wall;

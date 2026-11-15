@@ -13,6 +13,7 @@
 pub mod extrude;
 pub mod measure;
 pub mod path_export;
+pub mod placement;
 pub mod profile;
 pub mod read;
 pub mod recognition;

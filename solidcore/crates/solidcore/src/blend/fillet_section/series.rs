@@ -44,6 +44,14 @@ pub trait GnScalar:
     /// Storage for a series' coefficients, inline for floating-point scalars and
     /// heap-owned for enclosures, whose many inline tables exhaust small stacks.
     type Storage: SeriesStorage<Self>;
+    /// Whether the blend's system takes each face's offset point `S + r N` as one Taylor
+    /// expansion in the foot's parameters ([`super::station::offset_taylor`]) rather than
+    /// as the sum of the expansions of `S` and of `r N`. The two are the same algebra; an
+    /// enclosure (an interval or a Taylor model) keeps the cancellation between `S` and
+    /// `r N` only in the first, which matters where the offset nears the face's focal
+    /// distance (a cylinder's chamfer near its radius). The floating-point jets keep the
+    /// sum, as the fork computes them.
+    const JOINT_OFFSET: bool = false;
     /// `T(double)`.
     fn of(d: f64) -> Self;
     /// `sm_Positive`: (every number in) it is positive.
@@ -68,6 +76,7 @@ impl GnScalar for f64 {
 
 impl GnScalar for Ivl {
     type Storage = Box<[[Self; STORE_E + 1]]>;
+    const JOINT_OFFSET: bool = true;
     fn of(d: f64) -> Self {
         Ivl::from(d)
     }
