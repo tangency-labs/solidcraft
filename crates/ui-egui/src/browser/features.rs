@@ -783,7 +783,8 @@ mod tests {
     #[test]
     fn a_construction_plane_feature_row_has_an_eye_to_show_and_hide_it() {
         let mut h = Harness::new();
-        h.app.run("construct.plane.offset", json!({"base":"XY","offset":10,"name":"WorkPlane"})).unwrap();
+        let made = h.app.run("construct.plane.offset", json!({"base":"XY","offset":10,"name":"WorkPlane"})).unwrap();
+        let row = format!("row:browser-feature:c0:{}", made["feature"].as_u64().unwrap());
         h.app.tree.expanded.insert("c0/features".into());
         h.settle();
         assert!(crate::scenario::handle_at("eye:WorkPlane").is_some(), "plane row has an eye handle");
@@ -793,7 +794,7 @@ mod tests {
         assert!(h.app.session.visibility.hidden_origin.is_empty());
 
         // Pressing V on a selected plane row also toggles visibility.
-        h.step(&json!({"click":{"handle":"row:WorkPlane"}})).unwrap();
+        h.step(&json!({"click":{"handle": row}})).unwrap();
         h.step(&json!({"key":"V"})).unwrap();
         assert_eq!(h.app.session.visibility.hidden_origin, ["WorkPlane"]);
         h.step(&json!({"key":"V"})).unwrap();
