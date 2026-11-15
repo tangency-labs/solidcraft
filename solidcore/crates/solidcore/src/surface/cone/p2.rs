@@ -62,8 +62,10 @@
 //! - **Cylinder rebuild (#713, WR-385).** An `SmCylinder` keeps a zero
 //!   semi-angle. Its recovered end radii must agree within
 //!   `EFF_ZERO_SQRT * (1 + bottom_radius)`;
-//!   their mean becomes its radius. A larger taper returns `SM_ERR` before editing
-//!   the analytic state. The pinned C++ instead assigns a nonzero semi-angle to
+//!   their mean becomes its radius, and the NURB's control points are moved radially
+//!   onto that cylinder (heights, weights and knots kept), so the NURB is the exact
+//!   rational form of the analytic surface. A larger taper returns `SM_ERR` before
+//!   editing the analytic state or the NURB. The pinned C++ instead assigns a nonzero semi-angle to
 //!   cylinders. Ordinary `SmCone` objects retain upstream's radius/angle rules.
 //! - **Cylinder recogniser.** [`Cone::is_nurb_surface_cylinder`] returns an error
 //!   where a `SER` call returns its status (a truthy result without cylinder) and
@@ -1226,6 +1228,55 @@ impl Cone {
 
     // ---- RebuildSTEPFromNURBParameters ---------------------------------------------
 
+    /// Not upstream (WR-385): moves every control point of the NURB radially about the
+    /// axis through `centre` along the unit `z`, from the radius the frustum between the
+    /// end circles has at its height (`radii.0` at height 0, `radii.1` at `height`) to
+    /// `radius`. Heights, weights, knots and parameterisation are kept, so the net of
+    /// near-equal end circles becomes the exact rational form of the cylinder of
+    /// `radius` that the rebuild records.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` (nothing changed) when the frustum's radius at a control point's height
+    /// is not positive and finite; those of the control point access.
+    fn move_net_onto_cylinder(
+        &mut self,
+        centre: Point3,
+        z: Vec3,
+        height: f64,
+        radii: (f64, f64),
+        radius: f64,
+    ) -> Result<()> {
+        use crate::nurbs::b_spline_curve::ControlPointForm::EuclideanRational;
+        let (bot_radius, top_radius) = radii;
+        let (nu, nv) = (
+            self.rev.base.number_control_points(SurfParamType::U),
+            self.rev.base.number_control_points(SurfParamType::V),
+        );
+        let mut moved = Vec::new();
+        for i in 0..nu {
+            for j in 0..nv {
+                let (p, w) = self.rev.base.control_point(EuclideanRational, i, j)?;
+                let d = p - centre;
+                let h = d.dot(z);
+                let here = bot_radius + (top_radius - bot_radius) * (h / height);
+                if !(here > 0.0 && here.is_finite()) {
+                    return Err(SolidError::surface_failed(
+                        OP_REBUILD,
+                        "the cylinder's net has no positive radius at a control point",
+                    ));
+                }
+                moved.push((i, j, centre + z * h + (d - z * h) * (radius / here), w));
+            }
+        }
+        for (i, j, p, w) in moved {
+            self.rev
+                .base
+                .set_control_point(EuclideanRational, i, j, p, w)?;
+        }
+        Ok(())
+    }
+
     /// Rebuilds the analytic data from the NURB after an edit
     /// (`RebuildSTEPFromNURBParameters`): the circles at both ends of the linear
     /// direction (tested as [`Self::is_nurb_surface_cone`] does with the scale `1000`,
@@ -1235,7 +1286,9 @@ impl Cone {
     /// generator line over the NURB's linear interval; the polar converter is rebuilt
     /// before the generator is replaced.
     /// Cylinders require end radii equal within `EFF_ZERO_SQRT * (1 + bottom_radius)`;
-    /// they use the mean radius and an exactly zero semi-angle (WR-385, #713).
+    /// they use the mean radius and an exactly zero semi-angle, and the NURB's control
+    /// points are moved radially onto that cylinder, so the NURB and the analytic form
+    /// describe one surface (WR-385, #713).
     ///
     /// # Errors
     ///
@@ -1353,6 +1406,10 @@ impl Cone {
         // (upstream also computes the STEP Y axis from the top frame's X axis here;
         // it is unused)
 
+        // the fitted end radii (bottom, top) when the NURB's net must be moved onto the
+        // mean-radius cylinder below
+        let mut net_onto_cylinder = None;
+
         // when top and bot radius values are nearly equal - make them exactly equal
         if (bot.radius - top.radius).abs() < EFF_ZERO * (1.0 + bot.radius) {
             top.radius = bot.radius;
@@ -1362,6 +1419,9 @@ impl Cone {
             // radius (their mean); further apart, the NURB is no longer a cylinder
             if (bot.radius - top.radius).abs() < EFF_ZERO_SQRT * (1.0 + bot.radius) {
                 let mean = 0.5 * (bot.radius + top.radius);
+                // the NURB becomes that cylinder too (below, once the placement is
+                // set), so it and the analytic form describe one surface
+                net_onto_cylinder = Some((bot.radius, top.radius));
                 bot.radius = mean;
                 top.radius = mean;
             } else {
@@ -1394,6 +1454,19 @@ impl Cone {
         self.rev.planar_generator = true;
         self.rev.position = if inside_out { top.frame } else { bot.frame };
         self.rev.swap_uv = swap_uv;
+        // Not upstream (WR-385): about the recorded placement's axis, so the net and
+        // the analytic cylinder share one axis and radius; heights along it run from
+        // the placement's end circle to the other one
+        if let Some((bot_radius, top_radius)) = net_onto_cylinder {
+            let radii = if inside_out {
+                (top_radius, bot_radius)
+            } else {
+                (bot_radius, top_radius)
+            };
+            let (origin, z) = (self.rev.position.origin(), self.rev.position.z_axis());
+            let radius = self.base_radius;
+            self.move_net_onto_cylinder(origin, z, height, radii, radius)?;
+        }
         let _ = self
             .rev
             .anal_uv_domain
@@ -2115,6 +2188,56 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// WR-385 (#16982 review): a cylinder rebuilt from near-equal end radii keeps its
+    /// NURB on the analytic cylinder. Every control point (weight divided out) lies the
+    /// cylinder's radius from its axis, or `sqrt 2` times it for a corner of weight
+    /// `sqrt(2)/2`, up to rounding. Before, the net kept the unequal end radii, half the
+    /// difference off the analytic surface (2.5e-6 for r 9, about 2.5e-7 (1 + r)).
+    /// The guard of 64 ulp of `1 + r` is MEASURED, not derived: the worst observed
+    /// residual is 4 ulp (the radial scale, the frame's axis and the distance taken
+    /// here each round), 16 times below the guard and 9 orders below the old offset.
+    #[test]
+    fn rebuild_cylinder_moves_its_net_onto_the_mean_radius() {
+        use crate::nurbs::b_spline_curve::ControlPointForm::EuclideanRational;
+        let k = kernel();
+        let mut worst: f64 = 0.0;
+        for (radius, top) in [(9.0000000000985, 9.0000000000757)].into_iter().chain(
+            [0.009, 9.0, 90_000.0]
+                .into_iter()
+                .flat_map(|r| [-0.5, 0.5].map(|sign| (r, r + sign * EFF_ZERO_SQRT * (1.0 + r)))),
+        ) {
+            for swap in [false, true] {
+                for inside in [false, true] {
+                    let mut c = edited_cylinder(&k, radius, top, swap, inside);
+                    c.rebuild_step_from_nurb_parameters(&k).unwrap();
+                    let r = c.base_radius();
+                    let pos = c.rev().position();
+                    let (o, z) = (pos.origin(), pos.z_axis());
+                    let s = c.rev().base();
+                    let (nu, nv) = (
+                        s.number_control_points(SurfParamType::U),
+                        s.number_control_points(SurfParamType::V),
+                    );
+                    for i in 0..nu {
+                        for j in 0..nv {
+                            let (p, w) = s.control_point(EuclideanRational, i, j).unwrap();
+                            let d = p - o;
+                            let dist = (d - z * d.dot(z)).length();
+                            let want = if w == 1.0 { r } else { r * 2f64.sqrt() };
+                            let off = (dist - want).abs() / (1.0 + r);
+                            worst = worst.max(off / f64::EPSILON);
+                            assert!(
+                                off <= 64.0 * f64::EPSILON,
+                                "{radius} {top} {swap} {inside} ({i}, {j}): {dist} vs {want}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        println!("worst {worst} eps (1 + r)");
     }
 
     #[test]
