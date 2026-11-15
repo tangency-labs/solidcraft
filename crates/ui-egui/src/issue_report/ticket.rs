@@ -24,6 +24,8 @@ pub struct TicketDraft {
     pub evidence: payload::Evidence,
     /// The report is about a failed operation (its Report… or Create Issue button).
     pub from_failure: bool,
+    /// The agent report this dialog is for (its id), when an agent opened it.
+    pub agent: Option<String>,
     /// The title was found empty on Send.
     missing_title: bool,
 }
@@ -155,7 +157,16 @@ fn failing_of(draft: &Draft) -> Option<payload::Failing> {
         let command = v.get("command").and_then(|c| c.get("command")).and_then(Value::as_str).map(str::to_string);
         let params = v.get("command").and_then(|c| c.get("params")).cloned();
         let error = v.get("message").and_then(Value::as_str).unwrap_or("internal error").to_string();
-        return Some(payload::Failing { command, params, error, origin: None, code: Some(format!("crash {id}")) });
+        // Where it broke, from the kind the crash handler recorded (never from its message): a
+        // panic the kernel caught is the kernel's, one in a command the app's.
+        let kind = v.get("kind").and_then(Value::as_str).unwrap_or_default();
+        let origin = match kind {
+            "kernel_panic_recovered" => Some("solidcore-kernel".to_string()),
+            "command_panic" => Some("app".to_string()),
+            _ => None,
+        };
+        let code = (!kind.is_empty()).then(|| format!("{kind} ({id})"));
+        return Some(payload::Failing { command, params, error, origin, code });
     }
     let super::Origin::View { error: Some(error) } = &draft.origin else { return None };
     let (command, params) = draft.failed_command.clone().map_or((None, None), |(c, p)| (Some(c), Some(p)));
@@ -210,7 +221,9 @@ pub fn outgoing(draft: &Draft, ticket: &TicketDraft) -> payload::Outgoing {
     if ticket.ticks.screenshot {
         evidence.screenshot = draft.view.as_ref().or(draft.image.as_ref()).and_then(|i| png(i));
     }
-    payload::build(&ticket.form, ticket.ticks, &evidence, &format!("solidcraft {}", crate::help::VERSION))
+    // An agent's report sent from this dialog: the person pressed Send, with what they ticked.
+    let via = if ticket.agent.is_some() { payload::Via::Agent { confirmed_by: Some("user".into()) } } else { payload::Via::Dialog };
+    payload::build_via(&ticket.form, ticket.ticks, &evidence, &format!("solidcraft {}", crate::help::VERSION), &via)
 }
 
 /// The form for a draft, pre-filled with what the app knows.
@@ -225,15 +238,22 @@ pub fn new_ticket(app: &mut SolveApp, draft: &Draft, ctx: Option<&egui::Context>
         }
         _ => (draft.title.clone(), draft.description.clone()),
     };
-    let form = payload::Form { app: api::DEFAULT_APP.into(), title, description, kind: payload::Kind::Bug };
-    tickets::load_apps(app);
-    TicketDraft {
-        form,
-        ticks: payload::Ticks { crash: draft.crash.is_some(), ..Default::default() },
-        evidence,
-        from_failure: failing.is_some(),
-        missing_title: false,
+    let mut form = payload::Form { app: api::DEFAULT_APP.into(), title, description, kind: payload::Kind::Bug };
+    let mut ticks = payload::Ticks { crash: draft.crash.is_some(), ..Default::default() };
+    if let Some(ask) = &draft.agent {
+        // What the agent asked for, but the design and crash report stay the person's to tick.
+        ticks = payload::Ticks { design: false, crash: false, ..ask.ticks };
+        form.kind = ask.kind;
+        form.app.clone_from(&ask.app);
+        if !draft.title.is_empty() {
+            form.title.clone_from(&draft.title);
+        }
+        if !draft.description.is_empty() {
+            form.description = if failing.is_some() { format!("{}\n\n{}", draft.description, form.description) } else { draft.description.clone() };
+        }
     }
+    tickets::load_apps(app);
+    TicketDraft { form, ticks, evidence, from_failure: failing.is_some(), agent: draft.agent.as_ref().map(|a| a.id.clone()), missing_title: false }
 }
 
 fn heading(ui: &mut Ui, id: &str) {

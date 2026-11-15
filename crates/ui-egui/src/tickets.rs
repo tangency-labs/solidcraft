@@ -13,6 +13,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use crate::SolveApp;
 use crate::agent_chat::backend::HttpRequest;
 
+pub mod agent;
 pub mod api;
 pub mod payload;
 pub mod queue;
@@ -124,6 +125,12 @@ pub struct Tickets {
     retry_at: f64,
     /// A draft's page to open in the browser (on the next frame, which has the context).
     open_url: Option<String>,
+    /// The agent report being sent or waiting in the dialog (`agent`), and the agents' reports
+    /// waiting their turn.
+    pub agent: Option<String>,
+    pub agent_waiting: Vec<solidcraft_engine::report_issue::Request>,
+    /// The last draft's page opened in the browser (for an agent's report status).
+    pub opened_url: Option<String>,
     /// A draft opened in the browser, watched until it is filed: (draft, next poll, give up at,
     /// the poll on its way).
     watch: Option<(api::Draft, f64, f64, Option<Call>)>,
@@ -318,6 +325,7 @@ fn finish(app: &mut SolveApp, s: Sending) {
     match s.draft {
         Some(draft) => {
             app.tickets.open_url = Some(draft.url.clone());
+            app.tickets.opened_url = Some(draft.url.clone());
             app.tickets.outcome = Some(Outcome::Opened);
             let now = crate::now_ms();
             app.tickets.watch = Some((draft, now + WATCH_EVERY_MS, now + WATCH_MS, None));
@@ -375,6 +383,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     }
     tick_send(app);
     tick_watch(app, now);
+    agent::tick(app, ctx);
     if let Some(url) = app.tickets.open_url.take() {
         ctx.open_url(egui::OpenUrl::new_tab(url));
     }

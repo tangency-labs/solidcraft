@@ -127,7 +127,7 @@ pub struct Draft {
     title_prefix: String,
     /// Collected technical context, separately reviewable and editable.
     pub body: String,
-    description: String,
+    pub(crate) description: String,
     steps: String,
     expected: String,
     image: Option<Arc<ColorImage>>,
@@ -156,6 +156,9 @@ pub struct Draft {
     failed_command: Option<(String, serde_json::Value)>,
     /// The person chose the public GitHub draft over the ticket server.
     github: bool,
+    /// An agent's `diagnostics.report_issue` opened this report for the person to agree to
+    /// attachments only they can agree to.
+    pub(crate) agent: Option<crate::tickets::agent::Ask>,
 }
 
 impl Draft {
@@ -182,6 +185,7 @@ impl Draft {
             crash: None,
             failed_command: None,
             github: false,
+            agent: None,
         }
     }
 
@@ -2410,11 +2414,12 @@ mod tests {
                     json!({"status":"claimed","ticket_id":77,"ticket_url":"x","access_token":"tkt_remembered_456","token_type":"Bearer","scope":"tickets:report"})
                 }
                 ("POST", "/api/uploads") => {
-                    // Parts of 8 bytes, so a file goes in several.
+                    // Small parts (8 bytes for small files), so a file goes in several.
                     let b: serde_json::Value = serde_json::from_slice(r.body.as_deref().unwrap()).unwrap();
                     let size = b["size"].as_u64().unwrap();
                     assert_eq!(b["sha256"].as_str().map(str::len), Some(64), "the server checks the hash");
-                    json!({"id": format!("up{}", requests.lock().unwrap().len()), "part_size": 8, "part_count": size.div_ceil(8), "received": []})
+                    let part = if size < 1024 { 8 } else { 4096 };
+                    json!({"id": format!("up{}", requests.lock().unwrap().len()), "part_size": part, "part_count": size.div_ceil(part), "received": []})
                 }
                 ("PUT", p) if p.contains("/parts/") => json!({"part": p.rsplit('/').next(), "size": r.body.as_ref().map_or(0, Vec::len)}),
                 ("POST", p) if p.ends_with("/complete") => json!({"attachment":{"id":"a"}}),
@@ -2694,5 +2699,94 @@ mod tests {
         cancel_capture(&mut app);
         let _ = ctx.run_ui(Default::default(), |ui| show(&mut app, ui.ctx()));
         assert!(app.issue_report.draft.as_ref().unwrap().ticket.is_none(), "the GitHub draft, as before");
+    }
+
+    /// Frames until `done` says stop, collecting the addresses opened in the browser.
+    fn frames_until(app: &mut SolveApp, ctx: &egui::Context, mut done: impl FnMut(&SolveApp) -> bool) -> Vec<String> {
+        let mut opened = Vec::new();
+        for _ in 0..400 {
+            let out = ctx.run_ui(Default::default(), |ui| tickets::tick(app, ui.ctx()));
+            opened.extend(out.platform_output.commands.into_iter().filter_map(|c| match c {
+                egui::OutputCommand::OpenUrl(u) => Some(u.url),
+                _ => None,
+            }));
+            if done(app) {
+                break;
+            }
+        }
+        opened
+    }
+
+    fn agent_status(app: &mut SolveApp, id: &str) -> serde_json::Value {
+        app.run("diagnostics.report_issue_status", json!({"report": id})).unwrap()
+    }
+
+    #[test]
+    fn report_issue_from_an_agent_opens_a_draft_and_never_sends_the_design_on_its_word() {
+        let ctx = crate::fonts::test_context();
+        // No design asked for: the app gathers the report, sends it as a draft and opens it.
+        let (mut app, _, requests, _) = ticket_app(true, None);
+        app.home.open = false;
+        frames_until(&mut app, &ctx, |_| true);
+        let reply =
+            app.run("diagnostics.report_issue", json!({"title": "Fillet refuses 2 mm", "description": "Seen while modelling a bracket"})).unwrap();
+        assert_eq!(reply["status"], "pending");
+        let id = reply["report"].as_str().unwrap().to_string();
+        let opened = frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none() && a.tickets.outcome.is_some());
+        frames_until(&mut app, &ctx, |_| true);
+        let status = agent_status(&mut app, &id);
+        assert_eq!(status["status"], "opened", "{status}");
+        assert!(status["url"].as_str().is_some_and(|u| opened.contains(&u.to_string())), "{status} {opened:?}");
+        {
+            let requests = requests.lock().unwrap();
+            let draft = requests.iter().find(|r| r.url.ends_with("/api/drafts")).unwrap();
+            let body: serde_json::Value = serde_json::from_slice(draft.body.as_deref().unwrap()).unwrap();
+            assert_eq!((body["title"].as_str(), body["consent"]["via"].as_str()), (Some("Fillet refuses 2 mm"), Some("agent")));
+            assert!(!body["consent"]["kinds"].as_array().unwrap().contains(&json!("design")));
+            assert!(!requests.iter().any(|r| r.body.as_ref().is_some_and(|b| String::from_utf8_lossy(b).contains("\"kind\":\"design\""))));
+        }
+
+        // The design asked for: nothing is sent; the dialog opens for the person, the box unticked.
+        let (mut app, _, requests, _) = ticket_app(true, None);
+        app.home.open = false;
+        frames_until(&mut app, &ctx, |_| true);
+        let reply = app.run("diagnostics.report_issue", json!({"title": "Needs the model", "design": true})).unwrap();
+        let id = reply["report"].as_str().unwrap().to_string();
+        frames_until(&mut app, &ctx, |a| a.issue_report.draft.is_some());
+        cancel_capture(&mut app);
+        let _ = ctx.run_ui(Default::default(), |ui| show(&mut app, ui.ctx()));
+        assert_eq!(agent_status(&mut app, &id)["status"], "awaiting_user");
+        assert!(requests.lock().unwrap().iter().all(|r| !r.url.contains("/api/drafts") && !r.url.contains("/api/uploads")), "nothing sent");
+        let ticket = app.issue_report.draft.as_ref().unwrap().ticket.as_ref().unwrap();
+        assert!(!ticket.ticks.design && ticket.form.title == "Needs the model");
+
+        // The person ticks the model and sends: it goes, recorded as confirmed by them.
+        let draft = app.issue_report.draft.as_mut().unwrap();
+        let mut ticket = draft.ticket.take().unwrap();
+        ticket.ticks.design = true;
+        let report = ticket::outgoing(draft, &ticket);
+        assert_eq!(report.ticket["consent"]["confirmed_by"], "user");
+        app.issue_report.draft = None;
+        tickets::send(&mut app, report);
+        frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
+        frames_until(&mut app, &ctx, |_| true);
+        assert_eq!(agent_status(&mut app, &id)["status"], "opened");
+        assert!(requests.lock().unwrap().iter().any(|r| r.body.as_ref().is_some_and(|b| String::from_utf8_lossy(b).contains("\"kind\":\"design\""))));
+
+        // Offline: the agent's report waits, and goes when the person sends what waits.
+        let (mut app, online, _, _) = ticket_app(false, None);
+        let dir = temp_dir("agent");
+        app.tickets.queue_dir = Some(dir.clone());
+        frames_until(&mut app, &ctx, |_| true);
+        let id = app.run("diagnostics.report_issue", json!({"title": "Offline"})).unwrap()["report"].as_str().unwrap().to_string();
+        frames_until(&mut app, &ctx, |a| a.tickets.outcome.is_some());
+        frames_until(&mut app, &ctx, |_| true);
+        assert_eq!(agent_status(&mut app, &id)["status"], "queued");
+        online.store(true, std::sync::atomic::Ordering::SeqCst);
+        tickets::send_waiting(&mut app);
+        frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
+        frames_until(&mut app, &ctx, |_| true);
+        assert_eq!(agent_status(&mut app, &id)["status"], "opened");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

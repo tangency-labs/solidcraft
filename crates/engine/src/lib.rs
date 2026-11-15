@@ -33,6 +33,7 @@ pub mod recovery;
 pub mod render_jobs;
 pub mod render_lights;
 pub mod render_preparation;
+pub mod report_issue;
 pub mod sample;
 pub mod schema;
 #[cfg(not(target_arch = "wasm32"))]

@@ -39,6 +39,21 @@ A report that cannot reach the server is kept in `<data folder>/report-queue` an
 offers Send now. With a remembered token it is sent by itself when SolidCraft starts or every
 five minutes. The queue never holds a token.
 
+## From an agent
+
+An agent driving SolidCraft (MCP or the control channel) files a report with
+`diagnostics.report_issue {title, description?, type?, app?, system?, repro?, log?, screenshot?,
+design?, crash?}`; it should ask the person first. The app gathers what the dialog would (the
+screenshot is a render of the view), sends it as a draft, opens it in the person's browser and
+answers `{report, status: "pending"}`. `diagnostics.report_issue_status {report}` says where it is:
+`sending`, `opened` (with the draft's `url`), `filed`, `queued` (offline) or `failed`.
+
+An agent cannot agree to send the person's design or crash report. Asking for them (`design` or
+`crash: true`) sends nothing: the report dialog opens filled in with those boxes unticked
+(`awaiting_user`), and only the person can tick them and press Send report. The ticket's
+`consent` records `via: "agent"` and, when the person sent it from the dialog,
+`confirmed_by: "user"`. The command needs the app; a headless session refuses it.
+
 ## Replaying a failure
 
 The attached `.sc` holds the design's whole history, so a failure replays on the same build
