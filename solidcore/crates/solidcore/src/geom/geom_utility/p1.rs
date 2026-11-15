@@ -2158,7 +2158,11 @@ mod tests {
                     panic!("r {r}, δ {delta}, contact {contact}: two crossings expected, {t:?}");
                 };
                 let want = 2.0 * (2.0 * r * delta).sqrt();
-                assert!(((t1 - t0) - want).abs() < 1e-2 * want, "{} vs {want}", t1 - t0);
+                assert!(
+                    ((t1 - t0) - want).abs() < 1e-2 * want,
+                    "{} vs {want}",
+                    t1 - t0
+                );
                 for t in [t0, t1] {
                     let p = line + t * Vec3::X;
                     assert!((p.distance(c) - r).abs() < 1e-9, "{p:?}");
