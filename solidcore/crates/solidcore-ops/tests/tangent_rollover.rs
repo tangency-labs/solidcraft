@@ -1392,10 +1392,13 @@ fn a_corner_round_whose_rail_meets_the_top_next_to_w_keeps_main_s_outcome() {
 /// side round R = (-36, -80, 5), from x = -37 to -30, so the rail of the corner round r4 = 15
 /// meets z = 5 past W but off the side (in the hole), and the hole's edges on the side cross
 /// the cap edge's place from W to R. The turned-back end is not taken, and main's outcome
-/// stands: refused, with the corpus's fixes as its rail leaving its face (fit 14.49), without
-/// them naming 10.68, the closed form less the fit margin (MEASURED 1e-5). MEASURED: with the membership conditions (R inside the side, no edge
-/// crossing W to R) removed, the turned-back end is taken and the round without the corpus's
-/// fixes fails with status 1001 instead.
+/// stands: refused as its rail leaving its face, with a fit below the radius asked (MEASURED
+/// 14.49). The rail classification's refusal is the default path since the cliff-overflow
+/// flags were retired (#16445), so the run without the corpus's fixes takes it too, with the
+/// same fit; before, without them the round was refused by the later fit check naming 10.68,
+/// the closed form less the fit margin. MEASURED: with the membership conditions (R inside
+/// the side, no edge crossing W to R) removed, the turned-back end is taken and the round
+/// without the corpus's fixes fails with status 1001 instead.
 #[test]
 fn a_corner_round_whose_rail_ends_past_w_off_the_side_is_refused_as_on_main() {
     let r4 = 15.0;
@@ -1404,22 +1407,20 @@ fn a_corner_round_whose_rail_ends_past_w_off_the_side_is_refused_as_on_main() {
     let b = boolean(b, hole, BooleanOp::Subtract).unwrap().unwrap();
     assert!(b.check(CheckLevel::All).unwrap().is_valid());
     assert!(-65.0 - r4 < top_end_on_side());
-    match corner_round(&b, r4, true) {
+    let fit = |corpus: bool| match corner_round(&b, r4, corpus) {
         Err(Error::TooLarge {
+            size,
             why: Some(RoomReason::RailLeavesFace),
             ..
-        }) => {}
-        other => panic!("corpus: {other:?}"),
-    }
-    match corner_round(&b, r4, false) {
-        Err(Error::TooLarge {
-            size, why: None, ..
-        }) => assert!(
-            size < CORNER_ROUND_REACHES_W && size > CORNER_ROUND_REACHES_W - 1e-4,
-            "no fixes: fit {size}, the closed form {CORNER_ROUND_REACHES_W} less the fit margin"
-        ),
-        other => panic!("no fixes: {other:?}"),
-    }
+        }) => size,
+        other => panic!("corpus {corpus}: {other:?}"),
+    };
+    let (with, without) = (fit(true), fit(false));
+    assert!(with < r4, "corpus: fit {with} not below r4 {r4}");
+    assert!(
+        (with - without).abs() <= 1e-9 * with,
+        "fit {with} with the corpus's fixes, {without} without"
+    );
 }
 
 /// A real miss of the segment certificate alone: [`arm_boss_foot_only`] with a slot 1 x 1

@@ -1,13 +1,23 @@
 //! tangency-labs/solidcraft#16686: when a round's trace cannot skin its fillet surface, the
 //! flush notes the solver's status (`SurfSkinningFailure`) and stops before the rails get
 //! their curves. Upstream's `CalcFilletGeom` then returns success with every trace point
-//! processed, and a later step fails on the rails it never made (a null pointer, 1006, in
-//! the goldens case `sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1`). The solver's
-//! geometry step now fails, as `CreateFilletBrep` reports a failed `CalcFilletGeom`:
+//! processed, and a later step fails on the rails it never made (a null pointer, 1006, was
+//! how the goldens case `sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1` ended). The
+//! solver's geometry step now fails, as `CreateFilletBrep` reports a failed `CalcFilletGeom`:
 //! `SM_FILERR_EDGE_PROBLEM` (4) with status 10 at the edge.
 //!
-//! The case is the goldens one: `Fillet/sphere_diff_3cylinders.smb`, edge 30 rounded
-//! r 0.1 (circular cross section, G1, thumbweight 1).
+//! The case is the goldens one `sweep5-sphere_diff_3cylinders-e29-r1.0`:
+//! `Fillet/sphere_diff_3cylinders.smb`, edge 29 rounded r 1 (circular cross section, G1,
+//! thumbweight 1). Edge 30 at r 0.1 no longer reaches the skinning: since #16373's
+//! projection changes its trace stops earlier, where the fillet touches the base surface's
+//! boundary a second time (upstream's own error, solver status left `Unprocessed`; MEASURED),
+//! and #16373 moved that row from 1006 to 1001. Edge 29 at r 1 still fails to skin
+//! (MEASURED: the flush's error is "the fillet surface could not be skinned"). It is not a
+//! regression case for the trace's refusal: with that refusal disabled the case still ends
+//! with the same (4, 10) note (MEASURED), and no goldens case now reaches a skinning
+//! failure whose outcome the refusal changes. The refusal's own sequences are pinned by
+//! `fillet_solver::p4`'s `UnmadeGeometry` and `c4_trace` unit tests.
+
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -65,9 +75,9 @@ fn a_fillet_surface_that_cannot_be_skinned_fails_the_solver_s_geometry() {
     let Some(mut b) = read(&mut k, "Fillet/sphere_diff_3cylinders.smb") else {
         return;
     };
-    let edge = p1::edges(&b, None).unwrap()[30];
+    let edge = p1::edges(&b, None).unwrap()[29];
     let mut s = FilletSession::new(&mut k, &mut b).unwrap();
-    s.prepare_constant_radius_edges(&mut k, &[edge], 0.1, 1, 1, 1.0)
+    s.prepare_constant_radius_edges(&mut k, &[edge], 1.0, 1, 1, 1.0)
         .unwrap();
     let result = s.do_fillet(&mut k);
     assert!(result.is_err(), "{result:?}");
