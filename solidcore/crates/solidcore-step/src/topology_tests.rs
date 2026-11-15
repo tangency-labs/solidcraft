@@ -2075,6 +2075,30 @@ fn a_wavy_spline_prism_with_its_seam_gets_no_other() {
     faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 4.0)]);
 }
 
+/// A loop's samples each within the tolerance of two parts of a surface periodic in u: the one
+/// the loop runs on, and another between 0.4 and 0.6 of a period away, nearer for the middle
+/// half of the loop. Taking the nearer at each sample jumps about +0.45 of a period out and +0.45 back
+/// (the offset now past half a period, wrapped the other way) and counts a turn the loop does
+/// not make. The count keeps to the part the loop is on: no turn for a loop running along v,
+/// one for a loop running once round u.
+#[test]
+fn a_loop_within_the_tolerance_of_two_parts_of_a_surface_keeps_its_turns() {
+    let n = 20;
+    let reach = 0.01;
+    for (turns, expected) in [(0.0, [0, 0]), (1.0, [1, 0])] {
+        let mut t = seams::Turns::new([Some(1.0), None]);
+        for k in 0..=n {
+            let s = f64::from(k) / f64::from(n);
+            let on = [(turns * s).rem_euclid(1.0), s];
+            let other = [(on[0] + 0.4 + 0.2 * s).rem_euclid(1.0), s];
+            let nearer = (5..15).contains(&k);
+            assert!(t.step(&[(on, 0.5 * reach), (other, if nearer { 0.4 } else { 0.6 } * reach)], reach));
+        }
+        t.close();
+        assert_eq!(t.count(), expected, "{turns} turns");
+    }
+}
+
 #[test]
 fn pcurves_past_a_quarter_line_the_form_ends_on_are_put_on_the_form() {
     // A cylinder face from 2e-5 rad before the frame's x axis to 0.5 rad (its straight edge 0.2 um
