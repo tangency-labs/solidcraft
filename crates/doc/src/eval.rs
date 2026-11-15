@@ -9226,49 +9226,34 @@ fn curved_face(st: &ModelState, face: Option<(usize, usize)>, n: Option<Vec3>) -
     (!planar).then_some(bi)
 }
 
-/// Whether a face runs along `n` everywhere: its surface normal is square to `n` over the whole
-/// face (the side of a cylinder or prism parallel to `n`), so a sweep along `n` never meets it.
+/// Whether a face runs along `n` everywhere, from its exact surface: a plane whose normal is
+/// square to `n`, or a cylinder whose axis is parallel to `n` (the side of a prism or a cylinder
+/// parallel to `n`), so a sweep along `n` never meets it.
 fn runs_along(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> bool {
     let Some(b) = st.bodies.get(bi) else { return false };
-    let m = b.mesh();
-    let mut seen = false;
-    for (tri, f) in m.triangles.iter().zip(&m.tri_face) {
-        if *f as usize != fi {
-            continue;
-        }
-        for v in tri {
-            let Some(normal) = m.normals.get(*v as usize).and_then(|x| x.normalized()) else { return false };
-            if normal.dot(n).abs() > 1e-4 {
-                return false;
-            }
-            seen = true;
-        }
+    let Some(n) = n.normalized() else { return false };
+    match kernel::face_surface(&b.body, fi) {
+        Some(kernel::FaceSurface::Plane { normal, .. }) => normal.vec().dot(n).abs() < 1e-6,
+        Some(kernel::FaceSurface::Cylinder { axis, .. }) => axis.vec().cross(n).len() < 1e-6,
+        _ => false,
     }
-    seen
 }
 
-/// Whether a face, seen along the normal of `plane`, meets one of the profile `regions`: a vertex
-/// of its mesh lies in one of them, or an edge of its mesh crosses one of their loops. A wall
-/// along the extrusion is seen edge-on, as a curve, so a profile narrower than the spacing of its
-/// vertices can cross it between two of them: the edges catch that.
+/// Whether a face that runs along the normal of `plane` ([`runs_along`]), seen along that
+/// normal, meets one of the profile `regions`. Seen so, the face is the curve its boundary edges
+/// make: their exact curves, sampled finely, meet a region where a sample lies in it or a step
+/// between two samples crosses one of its loops (a profile narrower than the steps).
 fn meets_footprint(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane, regions: &[Region2]) -> bool {
     let Some(b) = st.bodies.get(bi) else { return false };
-    let m = b.mesh();
-    let tris: Vec<[Vec2; 3]> = m
-        .triangles
-        .iter()
-        .zip(&m.tri_face)
-        .filter(|(_, f)| **f as usize == fi)
-        .filter_map(|(tri, _)| {
-            let at = |k: usize| m.positions.get(tri[k] as usize).map(|q| plane.to_local(*q));
-            Some([at(0)?, at(1)?, at(2)?])
-        })
-        .collect();
-    if tris.iter().flatten().any(|q| regions.iter().any(|r| r.contains(*q))) {
+    let tol = (b.body.size() * 1e-4).max(1e-4);
+    let Ok(edges) = b.body.edges(tol) else { return true };
+    let own = kernel::face_edge_indices(&b.body, fi);
+    let curves: Vec<Vec<Vec2>> = own.iter().filter_map(|e| edges.get(*e)).map(|e| e.points.iter().map(|q| plane.to_local(*q)).collect()).collect();
+    if curves.iter().flatten().any(|q| regions.iter().any(|r| r.contains(*q))) {
         return true;
     }
     let loops: Vec<_> = regions.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).map(|l| l.polyline(1e-3)).collect();
-    tris.iter().any(|t| (0..3).any(|k| loops.iter().any(|l| l.edges().any(|(a, b)| segments_meet(t[k], t[(k + 1) % 3], *a, *b)))))
+    curves.iter().flat_map(|c| c.windows(2)).any(|w| loops.iter().any(|l| l.edges().any(|(a, b)| segments_meet(w[0], w[1], *a, *b))))
 }
 
 /// Whether segments `p`-`q` and `a`-`b` cross or touch.
