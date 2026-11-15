@@ -336,7 +336,8 @@ fn style_menu(app: &SolveApp) -> Menu {
     Menu { entries, close_on_pick: true }
 }
 
-/// The View menu: graphics preset, what the view shows, projection, cursor and the assistant.
+/// The View menu: graphics preset, what the view shows, projection, cursor, saved panel layouts
+/// and the assistant.
 fn display_menu(app: &SolveApp) -> Menu {
     let row = |id: &str, label: &str, icon: &str, target: &str, selected: bool| {
         let mut row = MenuRow::new(id, label, icon, target);
@@ -394,7 +395,18 @@ fn display_menu(app: &SolveApp) -> Menu {
     // The View angles readout under the orientation gizmo (#6032).
     let mut angles = row("view_angles", app.tr("ui.view_angles"), "select", "view:view_angles", app.preferences.show_view_angles);
     angles.tip = Some(app.tr("ui.view_angles_help").to_owned());
-    entries.extend([MenuEntry::Row(angles), MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.assistant").to_owned())]);
+    entries.push(MenuEntry::Row(angles));
+    // The panel layouts the user saved, each applied by name (#17131).
+    let layouts = crate::panel_runtime::user_preset_names(app);
+    if !layouts.is_empty() {
+        let mut saved = MenuRow::new("panel_layout", app.tr("ui.panel_layout.panel_layout"), "", "view:panel_layout");
+        saved.submenu = layouts
+            .iter()
+            .map(|name| MenuRow::new(format!("{SAVED_LAYOUT}{name}"), name.as_str(), "", format!("view:panel_layout:{name}")))
+            .collect();
+        entries.extend([MenuEntry::Separator, MenuEntry::Row(saved)]);
+    }
+    entries.extend([MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.assistant").to_owned())]);
     entries.push(MenuEntry::Row(row("agent_cursor", app.tr("navbar.agent_cursor"), "select", "view:agent_cursor", app.ui.agent_cursor.show)));
     if crate::agent_chat::shown(app) {
         entries.push(MenuEntry::Row(row("agent_chat", app.tr("navbar.agent_chat"), "agent_chat", "view:agent_chat", app.agent_chat.open)));
@@ -402,8 +414,15 @@ fn display_menu(app: &SolveApp) -> Menu {
     Menu { entries, close_on_pick: false }
 }
 
+/// The prefix of a View menu pick that applies the saved panel layout named after it.
+const SAVED_LAYOUT: &str = "saved_layout:";
+
 /// A View menu pick.
 fn display_pick(app: &mut SolveApp, item: &str) {
+    if let Some(name) = item.strip_prefix(SAVED_LAYOUT) {
+        crate::prefs::panel_layout::apply(app, name);
+        return;
+    }
     match item {
         "performance" | "quality" => {
             let _ = app.run("view.graphics_preset", json!({"preset":item}));
@@ -459,6 +478,40 @@ mod tests {
         app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         let caps = canvas_caps(&app);
         assert!(find("visual_style").unwrap().available(caps.orbit, caps.pick), "the previous bar kept style available in a sketch");
+    }
+
+    #[test]
+    fn view_menu_lists_saved_panel_layouts_and_applies_the_one_picked() {
+        use solidcraft_engine::panels::{LayoutAction, LogicalRect, Mutation, Point, Size};
+        let saved_rows = |app: &crate::SolveApp| -> Vec<(String, String)> {
+            display_menu(app)
+                .entries
+                .into_iter()
+                .filter_map(|entry| match entry {
+                    MenuEntry::Row(row) if row.id == "panel_layout" => Some(row.submenu),
+                    _ => None,
+                })
+                .flatten()
+                .map(|row| (row.label, row.target))
+                .collect()
+        };
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        assert!(saved_rows(&app).is_empty(), "no saved layouts, no Panel layout row");
+        crate::panel_runtime::control_specimen(&mut app, &json!({"preset":"docks","remember":true})).unwrap();
+        let area = LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 1600.0, height: 1000.0 } };
+        app.panel_runtime.as_mut().unwrap().prepare_host(&app.session, area).unwrap();
+        app.run("layout.save", json!({"name":"Wide"})).unwrap();
+        let wide = app.panel_runtime().unwrap().layout().layout().clone();
+        assert_eq!(saved_rows(&app), [("Wide".to_owned(), "view:panel_layout:Wide".to_owned())]);
+        let section = wide.sections.first().unwrap().id.clone();
+        app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::Collapse { section, collapsed: true }] })
+            .unwrap();
+        assert_ne!(app.panel_runtime().unwrap().layout().layout(), &wide);
+        display_pick(&mut app, "saved_layout:Wide");
+        assert_eq!(app.panel_runtime().unwrap().layout().layout(), &wide, "the pick applies the saved layout");
+        assert!(app.status.as_ref().is_some_and(|(text, _, error)| !error && text.contains("Wide")), "{:?}", app.status);
+        display_pick(&mut app, "saved_layout:Gone");
+        assert!(app.status.as_ref().is_some_and(|(_, _, error)| *error), "an unknown name reports an error: {:?}", app.status);
     }
 
     #[test]
