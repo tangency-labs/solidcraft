@@ -63,9 +63,14 @@
 //!   semi-angle. Its recovered end radii must agree within
 //!   `EFF_ZERO_SQRT * (1 + bottom_radius)`;
 //!   their mean becomes its radius, and the NURB's control points are moved radially
-//!   onto that cylinder (heights, weights and knots kept), so the NURB is the exact
-//!   rational form of the analytic surface. A larger taper returns `SM_ERR` before
-//!   editing the analytic state or the NURB. The pinned C++ instead assigns a nonzero semi-angle to
+//!   onto that cylinder about the recorded axis (heights, weights and knots kept).
+//!   For coaxial end circles the NURB is then the exact rational form of the analytic
+//!   surface; a top circle tilted within the angle tolerance keeps its centre's
+//!   offset from the axis (ARGUED: at most about `height * angle tolerance`, since the
+//!   centre line must be parallel to the bottom circle's normal within it; not
+//!   removed). A larger
+//!   taper, or a net that cannot be moved, returns `SM_ERR` before editing the
+//!   analytic state or the NURB. The pinned C++ instead assigns a nonzero semi-angle to
 //!   cylinders. Ordinary `SmCone` objects retain upstream's radius/angle rules.
 //! - **Cylinder recogniser.** [`Cone::is_nurb_surface_cylinder`] returns an error
 //!   where a `SER` call returns its status (a truthy result without cylinder) and
@@ -1228,25 +1233,27 @@ impl Cone {
 
     // ---- RebuildSTEPFromNURBParameters ---------------------------------------------
 
-    /// Not upstream (WR-385): moves every control point of the NURB radially about the
-    /// axis through `centre` along the unit `z`, from the radius the frustum between the
-    /// end circles has at its height (`radii.0` at height 0, `radii.1` at `height`) to
-    /// `radius`. Heights, weights, knots and parameterisation are kept, so the net of
-    /// near-equal end circles becomes the exact rational form of the cylinder of
-    /// `radius` that the rebuild records.
+    /// Not upstream (WR-385): the NURB's control points moved radially about the axis
+    /// through `centre` along the unit `z`, from the radius the frustum between the end
+    /// circles has at their height (`radii.0` at height 0, `radii.1` at `height`) to
+    /// `radius`, as `(i, j, point, weight)` for [`Self::set_net`]. Heights, weights,
+    /// knots and parameterisation are kept, so a net of coaxial end circles becomes the
+    /// exact rational form of the cylinder of `radius` (a top circle tilted within the
+    /// angle tolerance keeps its centre's offset from the axis). Reads only, so the
+    /// rebuild calls it before changing any state.
     ///
     /// # Errors
     ///
-    /// `SM_ERR` (nothing changed) when the frustum's radius at a control point's height
-    /// is not positive and finite; those of the control point access.
-    fn move_net_onto_cylinder(
-        &mut self,
+    /// `SM_ERR` when the frustum's radius at a control point's height is not positive
+    /// and finite; those of the control point access.
+    fn cylinder_net(
+        &self,
         centre: Point3,
         z: Vec3,
         height: f64,
         radii: (f64, f64),
         radius: f64,
-    ) -> Result<()> {
+    ) -> Result<Vec<(usize, usize, Point3, f64)>> {
         use crate::nurbs::b_spline_curve::ControlPointForm::EuclideanRational;
         let (bot_radius, top_radius) = radii;
         let (nu, nv) = (
@@ -1269,6 +1276,18 @@ impl Cone {
                 moved.push((i, j, centre + z * h + (d - z * h) * (radius / here), w));
             }
         }
+        Ok(moved)
+    }
+
+    /// Not upstream (WR-385): writes the control points [`Self::cylinder_net`] computed.
+    /// Their indices and weights come from this NURB, so the writes cannot fail on a
+    /// bad index or weight.
+    ///
+    /// # Errors
+    ///
+    /// Those of the control point access.
+    fn set_net(&mut self, moved: Vec<(usize, usize, Point3, f64)>) -> Result<()> {
+        use crate::nurbs::b_spline_curve::ControlPointForm::EuclideanRational;
         for (i, j, p, w) in moved {
             self.rev
                 .base
@@ -1287,8 +1306,9 @@ impl Cone {
     /// before the generator is replaced.
     /// Cylinders require end radii equal within `EFF_ZERO_SQRT * (1 + bottom_radius)`;
     /// they use the mean radius and an exactly zero semi-angle, and the NURB's control
-    /// points are moved radially onto that cylinder, so the NURB and the analytic form
-    /// describe one surface (WR-385, #713).
+    /// points are moved radially onto that cylinder about the recorded axis, before any
+    /// state changes, so for coaxial end circles the NURB and the analytic form describe
+    /// one surface (WR-385, #713; see [`Self::cylinder_net`] for a tilted top circle).
     ///
     /// # Errors
     ///
@@ -1419,8 +1439,8 @@ impl Cone {
             // radius (their mean); further apart, the NURB is no longer a cylinder
             if (bot.radius - top.radius).abs() < EFF_ZERO_SQRT * (1.0 + bot.radius) {
                 let mean = 0.5 * (bot.radius + top.radius);
-                // the NURB becomes that cylinder too (below, once the placement is
-                // set), so it and the analytic form describe one surface
+                // the NURB becomes that cylinder too (below), so for coaxial end
+                // circles it and the analytic form describe one surface
                 net_onto_cylinder = Some((bot.radius, top.radius));
                 bot.radius = mean;
                 top.radius = mean;
@@ -1431,6 +1451,24 @@ impl Cone {
                 ));
             }
         }
+
+        // Not upstream (WR-385): the net moved onto the mean-radius cylinder, about the
+        // axis of the placement recorded below so the net and the analytic cylinder
+        // share one axis and radius (heights along it run from the placement's end
+        // circle to the other one). Computed before any state changes, so a refused net
+        // leaves the cone as it was
+        let moved_net = match net_onto_cylinder {
+            Some((bot_radius, top_radius)) => {
+                let (frame, radii) = if inside_out {
+                    (&top.frame, (top_radius, bot_radius))
+                } else {
+                    (&bot.frame, (bot_radius, top_radius))
+                };
+                let (origin, z) = (frame.origin(), frame.z_axis());
+                Some(self.cylinder_net(origin, z, height, radii, bot.radius)?)
+            }
+            None => None,
+        };
 
         // modify m_dSemiAngleDeg for nonCylinder shapes
         let radius_diff = if inside_out {
@@ -1454,18 +1492,8 @@ impl Cone {
         self.rev.planar_generator = true;
         self.rev.position = if inside_out { top.frame } else { bot.frame };
         self.rev.swap_uv = swap_uv;
-        // Not upstream (WR-385): about the recorded placement's axis, so the net and
-        // the analytic cylinder share one axis and radius; heights along it run from
-        // the placement's end circle to the other one
-        if let Some((bot_radius, top_radius)) = net_onto_cylinder {
-            let radii = if inside_out {
-                (top_radius, bot_radius)
-            } else {
-                (bot_radius, top_radius)
-            };
-            let (origin, z) = (self.rev.position.origin(), self.rev.position.z_axis());
-            let radius = self.base_radius;
-            self.move_net_onto_cylinder(origin, z, height, radii, radius)?;
+        if let Some(moved) = moved_net {
+            self.set_net(moved)?;
         }
         let _ = self
             .rev
@@ -2149,8 +2177,19 @@ mod tests {
     }
 
     fn edited_cylinder(k: &Kernel, radius: f64, top: f64, swap: bool, inside: bool) -> Cone {
+        edited_cylinder_at(k, Vec3::ZERO, radius, top, swap, inside)
+    }
+
+    fn edited_cylinder_at(
+        k: &Kernel,
+        origin: Point3,
+        radius: f64,
+        top: f64,
+        swap: bool,
+        inside: bool,
+    ) -> Cone {
         let mut c = Cone::new_cylinder_bounded(
-            Vec3::ZERO,
+            origin,
             Vec3::X,
             Vec3::Y,
             radius,
@@ -2195,49 +2234,71 @@ mod tests {
     /// cylinder's radius from its axis, or `sqrt 2` times it for a corner of weight
     /// `sqrt(2)/2`, up to rounding. Before, the net kept the unequal end radii, half the
     /// difference off the analytic surface (2.5e-6 for r 9, about 2.5e-7 (1 + r)).
-    /// The guard of 64 ulp of `1 + r` is MEASURED, not derived: the worst observed
-    /// residual is 4 ulp (the radial scale, the frame's axis and the distance taken
-    /// here each round), 16 times below the guard and 9 orders below the old offset.
+    ///
+    /// The rounding bound (standard model, `u` = unit roundoff, every quantity at most
+    /// `S = |o| + 1.5 r + h` in the object's frame: the net lies within `sqrt 2` times
+    /// the radius of an axis of length `h` from `o`) counts per coordinate:
+    /// reading the point (divide by `w`) 1; `d = p - c` 1; `h = d . z` 3; `z h` 1;
+    /// `d - z h` 1; the scale `radius / here` 1 plus the lerp's `h / height`, product
+    /// and sum 3; applying the scale 1; the recompose `c + z h + ..` 2; storing
+    /// (times `w`) and reading back (divide by `w`) 2; `z` from a unitised frame,
+    /// not exactly unit, in the move and the measure 4; the measure `p - o` 1,
+    /// `d . z` 3, `z (d . z)` 1, the difference 1, `length` 4; `want` (`sqrt`,
+    /// product) 2 and `dist - want` 1: `k = 32`, so each coordinate is off by at most
+    /// `gamma(32) S` and the distance by `sqrt 3` times that. The lerp also cancels:
+    /// `h`'s error `gamma(4) S` enters `here` times `|top - bot| / height`, which moves
+    /// the point by at most `sqrt 2 gamma(4) S |top - bot| / height` more. The test
+    /// asserts the sum, at the origin and at an offset origin.
     #[test]
     fn rebuild_cylinder_moves_its_net_onto_the_mean_radius() {
         use crate::nurbs::b_spline_curve::ControlPointForm::EuclideanRational;
+        use crate::nurbs::math::gamma;
         let k = kernel();
+        let height = 3.0;
         let mut worst: f64 = 0.0;
-        for (radius, top) in [(9.0000000000985, 9.0000000000757)].into_iter().chain(
-            [0.009, 9.0, 90_000.0]
-                .into_iter()
-                .flat_map(|r| [-0.5, 0.5].map(|sign| (r, r + sign * EFF_ZERO_SQRT * (1.0 + r)))),
-        ) {
-            for swap in [false, true] {
-                for inside in [false, true] {
-                    let mut c = edited_cylinder(&k, radius, top, swap, inside);
-                    c.rebuild_step_from_nurb_parameters(&k).unwrap();
-                    let r = c.base_radius();
-                    let pos = c.rev().position();
-                    let (o, z) = (pos.origin(), pos.z_axis());
-                    let s = c.rev().base();
-                    let (nu, nv) = (
-                        s.number_control_points(SurfParamType::U),
-                        s.number_control_points(SurfParamType::V),
-                    );
-                    for i in 0..nu {
-                        for j in 0..nv {
-                            let (p, w) = s.control_point(EuclideanRational, i, j).unwrap();
-                            let d = p - o;
-                            let dist = (d - z * d.dot(z)).length();
-                            let want = if w == 1.0 { r } else { r * 2f64.sqrt() };
-                            let off = (dist - want).abs() / (1.0 + r);
-                            worst = worst.max(off / f64::EPSILON);
-                            assert!(
-                                off <= 64.0 * f64::EPSILON,
-                                "{radius} {top} {swap} {inside} ({i}, {j}): {dist} vs {want}"
-                            );
+        // (the offset is along the axis: `edit_last_radius` scales x and y about the
+        // world origin, so a sideways offset would tilt the edited cylinder)
+        for origin in [Vec3::ZERO, Vec3::new(0.0, 0.0, 1000.0)] {
+            for (radius, top) in [(9.0000000000985, 9.0000000000757)].into_iter().chain(
+                [0.009, 9.0, 90_000.0].into_iter().flat_map(|r| {
+                    [-0.5, 0.5].map(|sign| (r, r + sign * EFF_ZERO_SQRT * (1.0 + r)))
+                }),
+            ) {
+                for swap in [false, true] {
+                    for inside in [false, true] {
+                        let mut c = edited_cylinder_at(&k, origin, radius, top, swap, inside);
+                        c.rebuild_step_from_nurb_parameters(&k).unwrap();
+                        let r = c.base_radius();
+                        let pos = c.rev().position();
+                        let (o, z) = (pos.origin(), pos.z_axis());
+                        let scale = o.length() + 1.5 * r + height;
+                        let bound = 3f64.sqrt() * gamma(32) * scale
+                            + 2f64.sqrt() * gamma(4) * scale * (top - radius).abs() / height;
+                        let s = c.rev().base();
+                        let (nu, nv) = (
+                            s.number_control_points(SurfParamType::U),
+                            s.number_control_points(SurfParamType::V),
+                        );
+                        for i in 0..nu {
+                            for j in 0..nv {
+                                let (p, w) = s.control_point(EuclideanRational, i, j).unwrap();
+                                let d = p - o;
+                                let dist = (d - z * d.dot(z)).length();
+                                let want = if w == 1.0 { r } else { r * 2f64.sqrt() };
+                                let off = (dist - want).abs();
+                                worst = worst.max(off / bound);
+                                assert!(
+                                    off <= bound,
+                                    "{origin:?} {radius} {top} {swap} {inside} ({i}, {j}): \
+                                     {dist} vs {want}, bound {bound}"
+                                );
+                            }
                         }
                     }
                 }
             }
         }
-        println!("worst {worst} eps (1 + r)");
+        println!("worst {worst} of the bound");
     }
 
     #[test]
