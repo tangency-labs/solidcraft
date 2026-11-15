@@ -983,7 +983,6 @@ fn closed_rounded_rectangle_has_no_internal_pole() {
     let mut k = Kernel::default();
     // Match the application's pole, closure and exact-trim handling.
     k.fixes.internal_pole_row_through_knot = true;
-    k.fixes.curve_sweep_closed_path_joins_ends = true;
     k.fixes.sweep_statuses_pass_on = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;

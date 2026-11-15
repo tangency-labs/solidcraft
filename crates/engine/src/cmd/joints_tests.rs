@@ -692,11 +692,11 @@ fn a_to_object_extrude_to_another_component_moves_rigidly_with_its_slider() {
     }
 }
 
-/// The design as the last release saved it, before the pending changes: its format number one
-/// back and no list of the changes it has, so each pending step runs as it opens.
+/// The design as it was saved before the format that pins a To Object extrude's placements
+/// (format 57, `v57/extrude-to-object-keeps-picked-placements.rs`): that step runs as it opens,
+/// whatever changes are pending after it, and no list of the changes it has says otherwise.
 fn as_last_release_saved(file: &mut Value) {
-    let number = file["format"].as_str().and_then(|f| f.rsplit('/').next()).and_then(|n| n.parse::<u32>().ok()).unwrap_or(1);
-    file["format"] = json!(format!("solidcraft/{}", number.saturating_sub(1)));
+    file["format"] = json!("solidcraft/56");
     if let Some(o) = file.as_object_mut() {
         o.remove("format_pending");
     }
