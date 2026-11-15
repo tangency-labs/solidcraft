@@ -830,7 +830,26 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
     let rounds: Vec<Option<Round>> = (0..m).map(|k| round_of(sk, k)).collect();
     let line = |l: usize| lines.get(l).copied().flatten();
     let round = |k: usize| rounds.get(k).copied().flatten();
-    let cons: Vec<&ConstraintKind> = sk.constraints.iter().filter(|c| !c.driven && !sk.follows_its_source(&c.kind)).map(|c| &c.kind).collect();
+    let dependent = sk.biarc_dependent_points();
+    let members: std::collections::HashSet<_> = sk.biarc_splines.iter().flat_map(crate::BiarcSpline::curves).collect();
+    let cons: Vec<&ConstraintKind> = sk
+        .constraints
+        .iter()
+        .filter(|c| !c.driven && !sk.follows_its_source(&c.kind))
+        .filter(|c| {
+            if members.is_empty() {
+                return true;
+            }
+            let (points, curves) = c.kind.indices();
+            let derived = |p: usize| dependent.get(p).copied().unwrap_or(false);
+            !points.into_iter().any(derived)
+                && !curves
+                    .into_iter()
+                    .filter_map(|i| sk.curves.get(i))
+                    .any(|curve| members.contains(curve.id.as_str()) || curve.kind.point_ids().into_iter().any(derived))
+        })
+        .map(|c| &c.kind)
+        .collect();
     let dim = |v: f64| (v.is_finite() && (0.0..=MAX_COORD).contains(&v)).then_some(v);
 
     // Radii and lengths the dimensions set, also through equal curves.

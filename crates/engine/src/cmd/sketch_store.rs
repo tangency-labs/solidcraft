@@ -56,6 +56,7 @@ pub(super) fn read_for_command(s: &Session, p: &Value, cmd: &str) -> Result<Sket
 
 /// Keep `sk` as sketch `id`.
 pub(super) fn write(doc: &mut Document, id: u64, sk: Sketch) -> Result<()> {
+    sk.validate_biarc_splines()?;
     *doc.sketch_mut(id)? = sk;
     Ok(())
 }

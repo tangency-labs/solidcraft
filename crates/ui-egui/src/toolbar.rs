@@ -2821,6 +2821,7 @@ pub(crate) fn unfinished(app: &SolveApp) -> bool {
         || app.menu.joint_move_warning.is_some()
         || app.viewport.joint_handles.is_some()
         || app.viewport.text_drag.is_some()
+        || crate::sketch_biarc_edit::dragging(app)
         || crate::occurrence_drag::active(app)
         || crate::joint_drag::cancellable(app)
 }
@@ -2831,6 +2832,7 @@ pub(crate) fn unfinished(app: &SolveApp) -> bool {
 pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
     if crate::joint_handles::cancel(app)
         || crate::sketch_text_move::cancel_drag(app)
+        || crate::sketch_biarc_edit::cancel(app)
         || crate::occurrence_drag::cancel(app)
         || crate::joint_drag::cancel(app)
     {
@@ -2838,9 +2840,11 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
     }
     if crate::select_other::is_open(app) {
         crate::select_other::close(app);
-    } else if !app.preferences.escape_closes_analyses && app.tool.as_ref().is_some_and(|t| t.cmd == "inspect.curvature_comb") {
+    } else if app.tool.as_ref().is_some_and(|tool| {
         // Escape puts the comb tool down and keeps its combs on; a right click or the button
         // still turns them off. `escape_closes_analyses` brings back Escape turning them off.
+        tool.cmd == crate::sketch_biarc_ui::COMMAND || (!app.preferences.escape_closes_analyses && tool.cmd == "inspect.curvature_comb")
+    }) {
         app.tool = None;
     } else if app.tool.is_some() {
         crate::tools::finish(app);
@@ -3150,6 +3154,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 // puts it down, and the next quick one finishes.
                 if again
                     && !(crate::viewport_status::enabled(app) && crate::viewport_status::owns_escape(app))
+                    && !crate::sketch_biarc_edit::dragging(app)
                     && app.tool.is_none()
                     && app.dialog.is_none()
                     && let Some(sketch) = crate::workspace::focused_sketch(app)

@@ -20,6 +20,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
+use solidcraft_sketch::BiarcSpanMode;
 
 use super::check::{located, parse_issue, whole};
 use super::motion::require;
@@ -27,6 +28,94 @@ use super::sketch_ends::SketchTarget;
 use super::sketch_shapes::{CornerPoint, Created, SlotWidth};
 use super::types::{AngleExpr, LengthExpr, Point2, Point3, SketchRef, not_blank_pattern, present};
 use crate::params;
+
+/// A point on a Biarc Spline and its tangent in the direction of traversal.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BiarcNodeParams {
+    /// Point on the sketch plane, in mm.
+    pub point: Point2,
+    /// Nonzero tangent direction [dx, dy]. Its magnitude is immaterial.
+    pub tangent: Point2,
+    /// An existing sketch point or a drawing snap such as "mid:l1", "on:c1:x,y", "x:l1+l2:x,y",
+    /// or "vertex:x,y,z". Places the fit point at the reference and keeps the relationship.
+    #[schemars(length(min = 1, max = 512))]
+    pub reference: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(transparent)]
+pub struct BiarcRatio(#[schemars(schema_with = "biarc_ratio_schema")] pub f64);
+
+fn biarc_ratio_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({ "type": "number", "exclusiveMinimum": 0.0, "exclusiveMaximum": 1.0 })
+}
+
+/// Draw an analytic spline through ordered points with specified tangent directions.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BiarcSplineParams {
+    /// Ordered points and their tangent directions.
+    #[schemars(length(min = 2, max = solidcraft_sketch::MAX_BIARC_NODES))]
+    pub nodes: Vec<BiarcNodeParams>,
+    /// One ratio per interval between the points. The default is 0.5 for every interval.
+    pub ratios: Option<Vec<BiarcRatio>>,
+    /// Make the spline construction geometry. Default false.
+    pub construction: Option<bool>,
+    /// The sketch (default: the one being edited).
+    pub sketch: Option<SketchRef>,
+}
+
+/// Change every ratio at once, or edit the ratio or mode of one Biarc Spline span.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BiarcSplineEditParams {
+    /// The spline ID or any of its member curve IDs.
+    pub curve: String,
+    /// A ratio for every interval, in order from the first point. Use this without `span`, `ratio` or `mode`.
+    pub ratios: Option<Vec<BiarcRatio>>,
+    /// Zero-based index of a single interval to edit. Supply `ratio`, `mode` or both.
+    pub span: Option<usize>,
+    /// New ratio for the selected span. A mixed straight and arc fit has a single possible join.
+    pub ratio: Option<BiarcRatio>,
+    /// Choose the start or end piece to straighten, or restore automatic fitting.
+    #[schemars(schema_with = "optional_biarc_span_mode_schema")]
+    pub mode: Option<BiarcSpanMode>,
+    /// The sketch (default: the one being edited).
+    pub sketch: Option<SketchRef>,
+}
+
+fn biarc_span_mode_schema() -> Schema {
+    json_schema!({ "type": "string", "enum": ["auto", "straight_start", "straight_end"] })
+}
+
+fn optional_biarc_span_mode_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({ "anyOf": [biarc_span_mode_schema(), { "type": "null" }] })
+}
+
+fn biarc_span_modes_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({ "type": "array", "items": biarc_span_mode_schema() })
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BiarcSplineResult {
+    /// Stable ID of the spline.
+    pub curve: String,
+    /// Ordered IDs of the circular arcs or lines that make up the spline.
+    pub curves: Vec<String>,
+    /// One ratio per interval.
+    pub ratios: Vec<f64>,
+    /// One fitting mode per interval.
+    #[schemars(schema_with = "biarc_span_modes_schema")]
+    pub modes: Vec<BiarcSpanMode>,
+    /// The sketch solve, with `solved` and `dof`.
+    pub sketch: Value,
+    /// Everything that creation added to the sketch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
 
 /// Create a reference line in the active sketch: infinite, or a segment of a given length.
 #[derive(Debug, Deserialize, JsonSchema)]

@@ -422,6 +422,38 @@ fn tangent_at_a_lines_end_puts_the_end_on_the_circle() {
     assert!(e.contains("end"), "{e}");
 }
 
+#[test]
+fn tangent_at_a_biarc_fit_point_puts_the_profile_on_a_fixed_circle() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 30}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "c1"}));
+    run(
+        &mut s,
+        "sketch.spline.biarc",
+        json!({"nodes": [{"point": [-27, 2], "tangent": [1, -4]}, {"point": [0, -16], "tangent": [1, 0]}, {"point": [30, 0], "tangent": [0, 1]}]}),
+    );
+    let before = sketch(&s);
+    let spline = &before.biarc_splines[0];
+    let endpoint = &spline.nodes[0].point;
+    let member = &spline.spans[0].curves[0];
+    for operand in [endpoint.clone(), format!("{member}.start")] {
+        let mut session = Session::new(s.doc.as_ref().clone());
+        run(&mut session, "sketch.edit", json!({"sketch": s.active_sketch.unwrap()}));
+        let result = run(&mut session, "sketch.constraint.tangent", json!({"a": "c1", "b": operand}));
+        assert_eq!(result["constraints"].as_array().map(Vec::len), Some(2), "{result}");
+        let after = sketch(&session);
+        let p = after.point_index(endpoint).unwrap();
+        let contact = after.point(p).unwrap();
+        let guide = after.point(after.point_index(&spline.nodes[0].handle.as_ref().unwrap().point).unwrap()).unwrap();
+        assert!((contact.len() - 30.0).abs() < 1e-7, "{contact:?}");
+        assert!((guide - contact).normalized().unwrap().dot(contact / 30.0).abs() < 1e-7, "{contact:?} {guide:?}");
+        assert!(after.constraints.iter().any(|c| matches!(c.kind, solidcraft_sketch::ConstraintKind::Tangent { a, b }
+            if after.curves[a].id == "c1" && after.curves[b].id == *member)));
+        assert_eq!(snap(&s, "c1"), snap(&session, "c1"));
+        assert_eq!(solidcraft_sketch::solve(&mut after.clone()).dof, 10);
+    }
+}
+
 /// A line whose end is already joined to an arc's end (the coincident a click there adds): Tangent
 /// on that end and the arc, or on the two ends in either order, adds only the tangent, since the
 /// end already lies on the arc. The joint holds. With the end and the arc the line stays and the

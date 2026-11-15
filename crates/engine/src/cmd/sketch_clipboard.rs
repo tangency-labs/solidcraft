@@ -5,13 +5,13 @@
 //! the copied geometry (to the origin, to projected edges, to other curves) are left behind, as
 //! are fixes, so the pasted geometry can be moved straight away.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
 use solidcraft_doc::Document;
 use solidcraft_geom::Aabb2;
-use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch};
+use solidcraft_sketch::{BiarcSpline, ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::sketch::edit;
 use super::sketch_store;
@@ -75,6 +75,15 @@ pub struct ClipConstraint {
     pub text: Option<Vec2>,
 }
 
+/// An editable spline and the clipboard indices of its original point and curve IDs.
+#[derive(Clone, Debug)]
+struct ClipBiarc {
+    spline: BiarcSpline,
+    points: BTreeMap<String, usize>,
+    curves: BTreeMap<String, usize>,
+    fixed: BTreeSet<usize>,
+}
+
 /// Sketch geometry copied with `sketch.copy`, in the sketch coordinates it was copied from.
 #[derive(Clone, Debug, Default)]
 pub struct SketchClip {
@@ -83,6 +92,7 @@ pub struct SketchClip {
     pub points: Vec<Vec2>,
     pub curves: Vec<ClipCurve>,
     pub constraints: Vec<ClipConstraint>,
+    biarcs: Vec<ClipBiarc>,
     /// Text sources (their outlines are made again on paste). A path, when kept, is the index of
     /// a clipboard curve.
     pub texts: Vec<(LinkSource, Option<usize>)>,
@@ -186,8 +196,20 @@ fn clip_of(doc: &Document, sk: &Sketch, id: u64, ids: &[String], whole: bool, cm
                 None if !ps.contains(&q) => ps.push(q),
                 None => {}
             }
-        } else {
+        } else if sk.biarc_spline(e).is_none() {
             return Err(bad(cmd, format!("unknown sketch entity `{e}`")));
+        }
+    }
+    let chosen: BTreeSet<_> = ids.iter().map(String::as_str).collect();
+    let biarcs: Vec<_> =
+        sk.biarc_splines.iter().filter(|spline| chosen.contains(spline.id.as_str()) || spline.all_curves().any(|id| chosen.contains(id))).collect();
+    let mut seen: BTreeSet<_> = cs.iter().copied().collect();
+    for spline in &biarcs {
+        for member in spline.all_curves() {
+            let ci = sk.curve_index(member).ok_or_else(|| bad(cmd, "missing biarc curve"))?;
+            if seen.insert(ci) {
+                cs.push(ci);
+            }
         }
     }
     let mut clip = SketchClip { sketch: id, ..Default::default() };
@@ -213,6 +235,45 @@ fn clip_of(doc: &Document, sk: &Sketch, id: u64, ids: &[String], whole: bool, cm
         cmap.insert(c, clip.curves.len());
         // Projected geometry comes in as ordinary geometry.
         clip.curves.push(ClipCurve { kind, construction: cu.construction, centerline: cu.centerline, reversed: cu.reversed, infinite: cu.infinite });
+    }
+    if !biarcs.is_empty() {
+        let dependent = sk.biarc_dependent_points();
+        for spline in biarcs {
+            let mut points = BTreeMap::new();
+            let mut fixed = BTreeSet::new();
+            let mut add_point = |id: &str, legacy_node: bool| -> Result<()> {
+                let index = sk.point_index(id).ok_or_else(|| bad(cmd, "missing biarc point"))?;
+                let copied = take(index, &mut clip, &mut pmap);
+                points.insert(id.to_string(), copied);
+                if legacy_node || dependent.get(index).copied().unwrap_or(false) {
+                    fixed.insert(copied);
+                }
+                Ok(())
+            };
+            for node in &spline.nodes {
+                add_point(&node.point, node.handle.is_none())?;
+                if let Some(handle) = &node.handle {
+                    add_point(&handle.point, false)?;
+                }
+            }
+            // A straight piece does not use its reserved center until it becomes an arc.
+            for center in spline.reserved_centers() {
+                add_point(center, false)?;
+            }
+            let mut curves = BTreeMap::new();
+            for member in spline.all_curves() {
+                let index = sk.curve_index(member).ok_or_else(|| bad(cmd, "missing biarc curve"))?;
+                let curve = sk.curves.get(index).ok_or_else(|| bad(cmd, "missing biarc curve"))?;
+                let copied = *cmap.get(&index).ok_or_else(|| bad(cmd, "missing copied biarc curve"))?;
+                curves.insert(member.to_string(), copied);
+                for point in curve.kind.point_ids() {
+                    if dependent.get(point).copied().unwrap_or(false) {
+                        fixed.insert(*pmap.get(&point).ok_or_else(|| bad(cmd, "missing copied biarc point"))?);
+                    }
+                }
+            }
+            clip.biarcs.push(ClipBiarc { spline: spline.clone(), points, curves, fixed });
+        }
     }
     for &q in &ps {
         let known = pmap.contains_key(&q);
@@ -286,25 +347,40 @@ fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
 }
 
 fn cut(s: &mut Session, p: &Value) -> Result<Value> {
-    // `q["entities"] = …` below panics on anything but an object.
+    let cmd = "sketch.cut";
     if !(p.is_object() || p.is_null()) {
-        return Err(bad("sketch.cut", "params must be an object"));
+        return Err(bad(cmd, "params must be an object"));
     }
-    let entities = chosen(s, p, "sketch.cut")?;
-    let mut q = if p.is_null() { json!({}) } else { p.clone() };
-    q["entities"] = json!(entities);
-    let out = copy(s, &q)?;
+    let entities = chosen(s, p, cmd)?;
+    if entities.is_empty() {
+        return Err(bad(cmd, "select the sketch curves or points to cut"));
+    }
+    let target = sketch_store::target(s, p, cmd)?;
+    let sk = sketch_store::read(&s.doc, target)?;
+    let mut copied = entities.clone();
+    if !sk.biarc_splines.is_empty() {
+        // Deleting a point that belongs to a spline also deletes the spline.
+        let points: BTreeSet<_> = entities.iter().filter_map(|id| sk.resolve_point(id)).collect();
+        if !points.is_empty() {
+            let removed: BTreeSet<_> =
+                sk.curves.iter().filter(|curve| curve.kind.point_ids().iter().any(|p| points.contains(p))).map(|curve| curve.id.as_str()).collect();
+            for spline in &sk.biarc_splines {
+                if spline.all_curves().any(|id| removed.contains(id))
+                    || spline.reserved_centers().filter_map(|id| sk.point_index(id)).any(|index| points.contains(&index))
+                {
+                    copied.push(spline.id.clone());
+                }
+            }
+        }
+    }
+    let (mut clip, out) = clip_of(&s.doc, sk, target, &copied, false, cmd)?;
+    let out = reply(cmd, out)?;
     let delete = super::find_command("sketch.delete").ok_or_else(|| bad("sketch.cut", "sketch.delete is missing"))?;
-    let mut d = json!({ "entities": entities });
-    if let Some(sk) = p.get("sketch") {
-        d["sketch"] = sk.clone();
-    }
-    delete.run_nested(s, &d)?;
+    delete.run_nested(s, &json!({ "entities": entities, "sketch": target }))?;
     s.selection.clear();
     // The cut geometry is gone: a paste back into this sketch goes where it was, not offset.
-    if let Some(c) = s.sketch_clipboard.as_mut() {
-        c.sketch = u64::MAX;
-    }
+    clip.sketch = u64::MAX;
+    s.sketch_clipboard = Some(clip);
     Ok(out)
 }
 
@@ -431,6 +507,7 @@ fn replace(s: &mut Session, p: &Value) -> Result<Value> {
         fresh.freeform_offsets.clear();
         fresh.wires.clear();
         fresh.equations.clear();
+        fresh.biarc_splines.clear();
         // The old contents' own dimension parameters go with them; one something else uses stays.
         sketch_store::write(doc, target, fresh.clone())?;
         for name in &old {
@@ -453,6 +530,49 @@ fn replace(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// The ids of what a paste added: curves (those of texts included), lone points, constraints.
 type PastedIds = (Vec<String>, Vec<String>, Vec<String>);
+
+impl ClipBiarc {
+    fn paste(&self, sk: &mut Sketch, points: &[usize], curves: &[usize]) -> Result<()> {
+        let missing = || solidcraft_sketch::SketchError::Invalid("missing pasted biarc entity".into());
+        for index in &self.fixed {
+            let point = points.get(*index).and_then(|&i| sk.points.get_mut(i)).ok_or_else(missing)?;
+            point.fixed = true;
+        }
+        let point = |id: &str| -> Result<String> {
+            let point = self.points.get(id).and_then(|&i| points.get(i)).and_then(|&i| sk.points.get(i)).ok_or_else(missing)?;
+            Ok(point.id.clone())
+        };
+        let curve = |id: &str| -> Result<String> {
+            let curve = self.curves.get(id).and_then(|&i| curves.get(i)).and_then(|&i| sk.curves.get(i)).ok_or_else(missing)?;
+            Ok(curve.id.clone())
+        };
+        let mut spline = self.spline.clone();
+        for node in &mut spline.nodes {
+            node.point = point(&node.point)?;
+            if let Some(handle) = &mut node.handle {
+                handle.point = point(&handle.point)?;
+                handle.curve = curve(&handle.curve)?;
+            }
+        }
+        for span in &mut spline.spans {
+            for id in &mut span.curves {
+                *id = curve(id)?;
+            }
+            for id in span.centers.iter_mut().flatten() {
+                *id = point(id)?;
+            }
+        }
+        if spline.nodes.iter().all(|node| node.handle.is_none()) {
+            for index in self.curves.values() {
+                let curve = curves.get(*index).and_then(|&i| sk.curves.get_mut(i)).ok_or_else(missing)?;
+                curve.fixed = true;
+            }
+        }
+        spline.id = sk.fresh("biarc")?;
+        sk.biarc_splines.push(spline);
+        Ok(())
+    }
+}
 
 /// Add a copy of `clip`, moved by `t`, to `sk`.
 fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2) -> Result<PastedIds> {
@@ -479,6 +599,13 @@ fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2) -
             cu.infinite = c.infinite;
         }
         made.push(i);
+    }
+    if !clip.biarcs.is_empty() {
+        for biarc in &clip.biarcs {
+            biarc.paste(sk, &pts, &made)?;
+        }
+        sk.refresh_biarc_splines()?;
+        sk.validate_biarc_splines()?;
     }
     let mut cons = Vec::new();
     for c in &clip.constraints {

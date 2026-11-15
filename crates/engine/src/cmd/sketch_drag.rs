@@ -16,7 +16,7 @@ use solidcraft_geom::prelude::*;
 use std::f64::consts::{PI, TAU};
 
 use solidcore_record::Vec2;
-use solidcraft_sketch::{Analysis, Budget, ConstraintKind, CurveKind, Hold, Sketch, conic_rho_from_point};
+use solidcraft_sketch::{Analysis, BiarcSpline, Budget, ConstraintKind, CurveKind, Hold, Sketch, conic_rho_from_point};
 
 use super::{Ent, Left, counted_solve};
 
@@ -70,6 +70,36 @@ enum Path {
     ConicRho { c: usize, from: f64, to: f64 },
 }
 
+/// Index and drag-start pose of the other endpoint of a biarc tangent guide.
+struct TangentGuide {
+    other: usize,
+    translated_from: Option<Vec2>,
+}
+
+impl TangentGuide {
+    fn by_point(sk: &Sketch, point: usize) -> Option<(usize, usize)> {
+        let id = &sk.points.get(point)?.id;
+        let (node, handle) = sk.biarc_splines.iter().flat_map(|spline| &spline.nodes).find_map(|node| {
+            let handle = node.handle.as_ref()?;
+            (&node.point == id || &handle.point == id).then_some((&node.point, &handle.point))
+        })?;
+        Some((sk.point_index(node)?, sk.point_index(handle)?))
+    }
+
+    fn dragged(sk: &Sketch, grabbed: Ent, with: &[Ent]) -> Option<Self> {
+        let Ent::Point(point) = grabbed else { return None };
+        if !with.is_empty() {
+            return None;
+        }
+        let (node, handle) = Self::by_point(sk, point)?;
+        let other = if point == node { handle } else { node };
+        if sk.point_locked(other) {
+            return None;
+        }
+        Some(Self { other, translated_from: (point == node).then(|| sk.point(handle)).flatten() })
+    }
+}
+
 impl Path {
     fn length(&self) -> f64 {
         match self {
@@ -97,7 +127,7 @@ impl Path {
         match self {
             Path::Slide { pts, d } => {
                 for &(q, at) in pts {
-                    set(q, at + *d * t);
+                    set(q, solidcore_ops::prism::translate_point(at, *d, t));
                 }
             }
             Path::ArcRadius { o, ends, from, to } => {
@@ -121,11 +151,10 @@ impl Path {
 }
 
 /// Drag: the grabbed entity follows the cursor where possible (a point or a material point on a
-/// line moves toward it; a spline slides by the cursor's move; a circle or arc changes radius about its
-/// centre; a conic grabbed on its curve reads its fullness, `rho`, off the cursor) and the rest
-/// of the sketch moves as little as it can, staying on the
-/// solution it started on. Fixed geometry stays. A step that cannot be solved with the entity
-/// held (the path crosses where the geometry cannot reach) is approached by halving the way to
+/// line moves toward it; a spline or biarc spline slides by the cursor's move; a circle or arc
+/// changes radius about its centre; a conic grabbed on its curve reads its fullness, `rho`, off
+/// the cursor). The rest of the sketch moves as little as it can on the same solution branch.
+/// A step that cannot be solved with the entity held is approached by halving the way to
 /// it, and the next steps are tried from the last solved state, the last of them being the whole
 /// remaining move. A point or line whose exact pin fails instead minimizes cursor distance in
 /// the design's remaining freedom, retaining only corrected, feasible poses. For other entities,
@@ -171,6 +200,7 @@ pub(super) fn drag_entity(
     let Some((path, hold, n, short)) = prepare(sk, e, with, from, to) else {
         return (Dragged::default(), Left::Unsolved);
     };
+    let guide = TangentGuide::dragged(sk, e, with);
     // Splines whose tangent handles nobody turned stay the natural curve through their moved fit
     // points: their handles follow each step. Dragging a handle itself turns it.
     let natural: Vec<usize> = {
@@ -180,19 +210,29 @@ pub(super) fn drag_entity(
             .filter(|&c| !matches!(sk.curves.get(c).map(|x| &x.kind), Some(CurveKind::Spline { handles, .. }) if handles.iter().any(|h| moved.contains(h))))
             .collect()
     };
+    // A fit point moves with its tangent handle when the sketch permits it. Dragging the handle
+    // itself turns the tangent at the node. Try these poses first, with the other end held.
+    //
     // A point dragged alone that ends tangent lines: each step first tries with their other ends
     // held too, and only when that can't be solved lets them move. Unheld, the solver spread its
     // correction over every free point, so the line's far end moved (towards the dragged one)
     // where the curve it is tangent to could have taken the change, as holding that end by hand
     // showed.
-    let keep = keep_line_ends(sk, e, with, &hold);
+    let mut keep = keep_line_ends(sk, e, with, &hold);
+    if let Some(guide) = &guide {
+        let pts = &mut keep.get_or_insert_with(|| hold.clone()).points;
+        if !pts.contains(&guide.other) {
+            pts.push(guide.other);
+        }
+    }
     #[cfg(test)]
     let (n, short) = (n.min(step_cap::get()), short.min(step_cap::get()));
     let moving: Vec<_> = path.points().filter_map(|q| Some((q, sk.point(q)?))).collect();
     let line_grab = if with.is_empty() { LineGrab::new(sk, e, from) } else { None };
     let start = line_grab.and_then(|g| g.point(sk)).or_else(|| if let Ent::Point(q) = e { sk.point(q) } else { None });
     let mut frame = live.then(frame_budget);
-    let reach = FLUNG * (extent(sk) + path.length()).max(1.0);
+    let generated = GeneratedGeometry::new(sk);
+    let reach = FLUNG * (extent(sk, &generated) + path.length()).max(1.0);
     // The sketch as the drag found it: no step may press one of its lines to no length.
     let mut as_found = Geometry::default();
     as_found.take(sk);
@@ -204,15 +244,25 @@ pub(super) fn drag_entity(
     let mut solves = Solves::default();
     // Whether the sketch follows step `t` (with the tangent lines' far ends held, else free).
     let held = |sk: &mut Sketch, last: &Geometry, t: f64, budget: &mut Budget| {
+        let translate_handle = |sk: &mut Sketch| {
+            if let (Some(guide), Path::Slide { d, .. }) = (&guide, &path)
+                && let Some(from) = guide.translated_from
+                && let Some(point) = sk.points.get_mut(guide.other)
+            {
+                point.pos = solidcore_ops::prism::translate_point(from, *d, t);
+            }
+        };
         path.apply(sk, t);
+        translate_handle(sk);
         sk.renew_natural_handles(&natural);
         let kept = keep.as_ref().is_some_and(|keep| {
             let ok = counted_solve(sk, keep, Some(&last.pos), Analysis::StatusOnly, Some(&mut *budget)).ok()
-                && !last.sweep_wrapped(sk)
+                && !last.sweep_wrapped(sk, &generated)
                 && !last.shrank(sk);
             if !ok {
                 last.restore(sk);
                 path.apply(sk, t);
+                translate_handle(sk);
                 sk.renew_natural_handles(&natural);
             }
             ok
@@ -225,9 +275,9 @@ pub(super) fn drag_entity(
         // A step that shrank a line to a point only met its constraints without that line.
         let outcome = if !ok || last.shrank(sk) {
             Step::Failed
-        } else if last.sweep_wrapped(sk) {
+        } else if last.sweep_wrapped(sk, &generated) {
             Step::Wrapped
-        } else if last.flung(sk, reach) || as_found.squashed(sk) {
+        } else if last.flung(sk, &generated, reach) || as_found.squashed(sk) {
             Step::Failed
         } else {
             return Step::Solved;
@@ -398,9 +448,9 @@ pub(super) fn drag_entity(
         let valid = |before: &Sketch, after: &Sketch| {
             let mut geometry = Geometry::default();
             geometry.take(before);
-            !geometry.sweep_wrapped(after)
+            !geometry.sweep_wrapped(after, &generated)
                 && !geometry.shrank(after)
-                && !geometry.flung(after, reach)
+                && !geometry.flung(after, &generated, reach)
                 && !as_found.squashed(after)
                 && solidcraft_sketch::fillets_kept(before, after)
         };
@@ -433,7 +483,14 @@ pub(super) fn drag_entity(
         // The failed step is left placed for the edit's solve, seeded on the last solved state.
         Some(t) => {
             path.apply(sk, t);
-            Left::MovedFrom(last.pos)
+            // A raw pin can collapse a biarc handle or put the span on a singular branch.
+            // Keep the feasible pose when the Biarc Spline cannot follow the pin.
+            if sk.refresh_biarc_splines().is_err() {
+                last.restore(sk);
+                Left::Solved
+            } else {
+                Left::MovedFrom(last.pos)
+            }
         }
         None if good > 0.0 => Left::Solved,
         None => Left::Unsolved,
@@ -630,7 +687,11 @@ pub(super) struct LineGrab {
 impl LineGrab {
     fn new(sk: &Sketch, e: Ent, from: Vec2) -> Option<Self> {
         let Ent::Curve(curve) = e else { return None };
-        let CurveKind::Line { a, b } = sk.curves.get(curve)?.kind else { return None };
+        let kind = sk.curves.get(curve)?;
+        if sk.biarc_spline(&kind.id).is_some() {
+            return None;
+        }
+        let CurveKind::Line { a, b } = kind.kind else { return None };
         let pa = sk.point(a)?;
         let d = sk.point(b)? - pa;
         let len2 = d.dot(d);
@@ -644,6 +705,51 @@ impl LineGrab {
         let a = sk.point(self.a)?;
         let d = sk.point(self.b)? - a;
         Some(a + d * self.local.x + Vec2::new(-d.y, d.x) * self.local.y)
+    }
+}
+
+/// Generated biarc pieces follow their guides. Their centre can move far when a piece
+/// approaches a line, and its directed arc can become a line without passing its own end.
+#[derive(Default)]
+struct GeneratedGeometry {
+    centers: Vec<bool>,
+    curves: Vec<bool>,
+}
+
+impl GeneratedGeometry {
+    fn new(sk: &Sketch) -> Self {
+        if sk.biarc_splines.is_empty() {
+            return Self::default();
+        }
+        let mut generated = Self { centers: vec![false; sk.points.len()], curves: vec![false; sk.curves.len()] };
+        let points: std::collections::HashMap<_, _> = sk.points.iter().enumerate().map(|(i, p)| (p.id.as_str(), i)).collect();
+        let curves: std::collections::HashMap<_, _> = sk.curves.iter().enumerate().map(|(i, c)| (c.id.as_str(), (i, &c.kind))).collect();
+        for spline in &sk.biarc_splines {
+            for center in spline.reserved_centers().filter_map(|id| points.get(id)) {
+                if let Some(flag) = generated.centers.get_mut(*center) {
+                    *flag = true;
+                }
+            }
+            for (i, kind) in spline.curves().filter_map(|id| curves.get(id)) {
+                if let Some(flag) = generated.curves.get_mut(*i) {
+                    *flag = true;
+                }
+                if let CurveKind::Arc { c, .. } = kind
+                    && let Some(flag) = generated.centers.get_mut(*c)
+                {
+                    *flag = true;
+                }
+            }
+        }
+        generated
+    }
+
+    fn center(&self, point: usize) -> bool {
+        self.centers.get(point).copied().unwrap_or(false)
+    }
+
+    fn curve(&self, curve: usize) -> bool {
+        self.curves.get(curve).copied().unwrap_or(false)
     }
 }
 
@@ -686,18 +792,18 @@ impl Geometry {
     }
 
     /// Did the step throw some point further than `reach` (or to no number at all)?
-    fn flung(&self, sk: &Sketch, reach: f64) -> bool {
-        sk.points.iter().zip(&self.pos).any(|(p, was)| !(p.pos.dist(*was) <= reach))
+    fn flung(&self, sk: &Sketch, generated: &GeneratedGeometry, reach: f64) -> bool {
+        sk.points.iter().zip(&self.pos).enumerate().any(|(i, (p, was))| !generated.center(i) && !(p.pos.dist(*was) <= reach))
     }
 
     /// Did the step drive some arc's end through its start: the sweep jumped through 0 / a full
     /// turn, or ran from clear of them onto one? An arc already that close may still move.
     /// Measured on the arc's ends as they were before the step (a solve may swap them).
-    fn sweep_wrapped(&self, sk: &Sketch) -> bool {
+    fn sweep_wrapped(&self, sk: &Sketch, generated: &GeneratedGeometry) -> bool {
         let was = |q: usize| self.pos.get(q).copied();
         let now = |q: usize| sk.point(q);
         let clear = |s: f64| (SWEEP_EPS..=TAU - SWEEP_EPS).contains(&s);
-        self.curves.iter().any(|(kind, _)| {
+        self.curves.iter().enumerate().filter(|(i, _)| !generated.curve(*i)).any(|(_, (kind, _))| {
             let CurveKind::Arc { c, a, b } = *kind else { return false };
             let (Some(s0), Some(s1)) = (sweep(was(c), was(a), was(b)), sweep(now(c), now(a), now(b))) else { return false };
             (s1 - s0).abs() > PI || (clear(s0) && !clear(s1))
@@ -821,10 +927,14 @@ fn plan(sk: &Sketch, e: Ent, from: Vec2, to: Vec2) -> Option<(Path, Hold)> {
             Path::Slide { pts: vec![(q, at)], d: to - at }
         }
         Ent::Curve(c) => {
+            let curve = sk.curves.get(c)?;
+            if sk.biarc_spline(&curve.id).is_some() {
+                return plan_group(sk, e, &[], to - from);
+            }
             if sk.curve_locked(c) {
                 return None;
             }
-            let kind = sk.curves.get(c).map(|x| x.kind.clone())?;
+            let kind = curve.kind.clone();
             let locked = sk.locked_points();
             let free = |q: &usize| !locked.get(*q).copied().unwrap_or(true);
             // A cursor on the centre leaves the radius as it is.
@@ -898,9 +1008,21 @@ fn plan_group(sk: &Sketch, e: Ent, with: &[Ent], d: Vec2) -> Option<(Path, Hold)
     let mut hold = Hold::default();
     for e in std::iter::once(&e).chain(with) {
         match *e {
-            Ent::Point(q) => hold.points.push(q),
+            Ent::Point(q) => {
+                hold.points.push(q);
+                if let Some((node, handle)) = TangentGuide::by_point(sk, q)
+                    && node == q
+                {
+                    hold.points.push(handle);
+                }
+            }
             Ent::Curve(c) => {
-                let Some(kind) = sk.curves.get(c).map(|x| &x.kind) else { continue };
+                let Some(curve) = sk.curves.get(c) else { continue };
+                if let Some(spline) = sk.biarc_spline(&curve.id) {
+                    hold.points.extend(biarc_translation_points(sk, spline));
+                    continue;
+                }
+                let kind = &curve.kind;
                 hold.points.extend(kind.point_ids());
                 if matches!(kind, CurveKind::Circle { .. } | CurveKind::Ellipse { .. }) {
                     hold.radii.push(c);
@@ -923,12 +1045,26 @@ fn plan_group(sk: &Sketch, e: Ent, with: &[Ent], d: Vec2) -> Option<(Path, Hold)
     hold.radii.sort_unstable();
     hold.radii.dedup();
     let locked = sk.locked_points();
+    let dependent = (!sk.biarc_splines.is_empty()).then(|| sk.biarc_dependent_points());
+    if let Some(dependent) = dependent {
+        hold.points.retain(|&q| !dependent.get(q).copied().unwrap_or(true));
+    }
     let pts: Vec<(usize, Vec2)> =
         hold.points.iter().filter(|q| !locked.get(**q).copied().unwrap_or(true)).filter_map(|&q| Some((q, sk.point(q)?))).collect();
     if pts.is_empty() {
         return None;
     }
     Some((Path::Slide { pts, d }, hold))
+}
+
+/// The authored points that translate when a biarc member is grabbed. Generated arc centers
+/// and junctions are updated by the solve.
+fn biarc_translation_points<'a>(sk: &'a Sketch, spline: &'a BiarcSpline) -> impl Iterator<Item = usize> + 'a {
+    spline
+        .nodes
+        .iter()
+        .flat_map(|node| std::iter::once(node.point.as_str()).chain(node.handle.as_ref().map(|handle| handle.point.as_str())))
+        .filter_map(|id| sk.point_index(id))
 }
 
 /// Steps for a move of `length`: enough that none is longer than `fraction` of the smallest
@@ -960,11 +1096,12 @@ impl Group<'_> {
 }
 
 /// The size of the sketch: the diagonal of its points' box and its circles' diameters.
-fn extent(sk: &Sketch) -> f64 {
+fn extent(sk: &Sketch, generated: &GeneratedGeometry) -> f64 {
     let (lo, hi) = sk
         .points
         .iter()
-        .map(|p| p.pos)
+        .enumerate()
+        .filter_map(|(i, p)| (!generated.center(i)).then_some(p.pos))
         .filter(|p| p.x.is_finite() && p.y.is_finite())
         .fold((Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY)), |(lo, hi), p| {
             (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y)))

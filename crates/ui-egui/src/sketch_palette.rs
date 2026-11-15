@@ -112,7 +112,7 @@ pub fn toggle_construction(app: &mut SolveApp) {
 
 /// Curves a drawing command just made take the drawing line type.
 pub fn apply_mode(app: &mut SolveApp, id: &str, result: &Value) {
-    if solidcraft_engine::cmd::construction_line_mode(id).is_some() {
+    if id == crate::sketch_biarc_ui::COMMAND || solidcraft_engine::cmd::construction_line_mode(id).is_some() {
         return;
     }
     let m = mode(app);

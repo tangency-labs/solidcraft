@@ -322,6 +322,8 @@ mod sketch3d_frame_ui_tests;
 mod sketch_attachment_ui;
 #[cfg(test)]
 mod sketch_attachment_ui_tests;
+mod sketch_biarc_edit;
+mod sketch_biarc_ui;
 mod sketch_construction;
 mod sketch_cursor_readout;
 pub mod sketch_dims;

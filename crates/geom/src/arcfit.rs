@@ -35,70 +35,9 @@ fn dist_to(s: &Seg2, p: Vec2) -> f64 {
     }
 }
 
-/// The two arcs (or lines) from `p0` leaving along unit `d0` to `p1` arriving along unit `d1`,
-/// meeting tangentially: the tangent lines from both ends are cut at one length `d`, and the
-/// arcs join at the middle of the line between the two cut points (which is `2 d` long).
+/// The kernel's equal-distance biarc for an approximate span with unit endpoint tangents.
 fn biarc(p0: Vec2, d0: Vec2, p1: Vec2, d1: Vec2) -> Option<Vec<Seg2>> {
-    let v = p1 - p0;
-    let vv = v.dot(v);
-    if vv < 1e-24 {
-        return None;
-    }
-    let len = vv.sqrt();
-    let chord = v / len;
-    if d0.cross(chord).abs() < 1e-12 && d1.cross(chord).abs() < 1e-12 && d0.dot(chord) > 0.0 && d1.dot(chord) > 0.0 {
-        return Some(vec![Seg2::Line { a: p0, b: p1 }]);
-    }
-    // |v − d (d0 + d1)| = 2 d, the positive root.
-    let t = d0 + d1;
-    let vt = v.dot(t);
-    let a = 2.0 * (1.0 - d0.dot(d1));
-    let d = if a < 1e-12 {
-        if vt <= 1e-12 * len {
-            return None;
-        }
-        vv / (2.0 * vt)
-    } else {
-        (-vt + (vt * vt + a * vv).max(0.0).sqrt()) / a
-    };
-    if !(d.is_finite() && d > 0.0) {
-        return None;
-    }
-    let j = ((p0 + d0 * d) + (p1 - d1 * d)) * 0.5;
-    let mut out = Vec::with_capacity(2);
-    if j.dist(p0) > 1e-12 {
-        out.push(arc_from(p0, d0, j)?);
-    }
-    if j.dist(p1) > 1e-12 {
-        out.push(arc_from(p1, -d1, j)?.reversed());
-    }
-    (!out.is_empty()).then_some(out)
-}
-
-/// The arc leaving `p` along unit `d` that ends at `q` (a line when `q` lies straight ahead).
-fn arc_from(p: Vec2, d: Vec2, q: Vec2) -> Option<Seg2> {
-    let c = q - p;
-    let cc = c.dot(c);
-    let n = d.perp();
-    let h = n.dot(c);
-    // Sagitta of the arc over the chord: a line when the bulge is negligible.
-    if h.abs() * cc.sqrt() < 1e-12 * cc || (cc / (2.0 * h)).abs() > 1e7 {
-        return (d.dot(c) > 0.0).then_some(Seg2::Line { a: p, b: q });
-    }
-    let r = cc / (2.0 * h);
-    let center = p + n * r;
-    let start = (p - center).angle();
-    let mut sweep = (q - center).angle() - start;
-    if r > 0.0 {
-        while sweep <= 0.0 {
-            sweep += TAU;
-        }
-    } else {
-        while sweep >= 0.0 {
-            sweep -= TAU;
-        }
-    }
-    (sweep.is_finite() && sweep.abs() <= TAU).then_some(Seg2::Arc { center, radius: r.abs(), start, sweep })
+    solidcore_ops::curve::fit_biarc(p0, d0, p1, d1).ok()
 }
 
 /// `s` moved to start exactly at `p` (an arc keeps its centre; `p` is within a rounding error).

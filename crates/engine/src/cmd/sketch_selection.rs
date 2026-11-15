@@ -49,6 +49,9 @@ pub fn constraint_params(command: &str, selection: &[Sel], sketch: Option<&Sketc
         }
         ("sketch.constraint.horizontal_vertical", _) => alignment_points(selection).map(|points| json!({"points": points})),
         ("sketch.constraint.coincident", [_, _]) => coincident_operands(selection),
+        ("sketch.constraint.tangent", [SketchPoint { .. }, SketchCurve { .. }] | [SketchCurve { .. }, SketchPoint { .. }]) => {
+            biarc_tangent_operands(sketch?, selection)
+        }
         ("sketch.constraint.concentric", [SketchCurve { id: a, .. }, SketchPoint { id: b }] | [SketchPoint { id: a }, SketchCurve { id: b, .. }])
             if a != b =>
         {
@@ -115,6 +118,26 @@ fn curve_pair(command: &str, selection: &[Sel]) -> Option<Value> {
     (a != b).then(|| json!({"a": a, "b": b}))
 }
 
+/// A Biarc fit point can meet a circle or arc outside its spline tangentially.
+fn biarc_tangent_operands(sketch: &Sketch, selection: &[Sel]) -> Option<Value> {
+    use crate::sketch::CurveKind;
+    let (point, target) = match selection {
+        [Sel::SketchPoint { id }, Sel::SketchCurve { id: target, .. }] | [Sel::SketchCurve { id: target, .. }, Sel::SketchPoint { id }] => {
+            (id, target)
+        }
+        _ => return None,
+    };
+    let point = &sketch.points.get(sketch.resolve_point(point)?)?.id;
+    if !sketch.biarc_splines.iter().any(|spline| spline.nodes.iter().any(|node| &node.point == point)) || sketch.biarc_spline(target).is_some() {
+        return None;
+    }
+    let curve = sketch.curves.get(sketch.curve_index(target)?)?;
+    if !matches!(curve.kind, CurveKind::Circle { .. } | CurveKind::Arc { .. }) {
+        return None;
+    }
+    coincident_operands(selection)
+}
+
 /// What a selected sketch entity is, for [`kinds_fit`].
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
@@ -155,7 +178,7 @@ pub fn kinds_fit(command: &str, selection: &[Sel], sketch: &Sketch) -> bool {
     match command.strip_prefix("sketch.constraint.").unwrap_or_default() {
         "parallel" | "perpendicular" | "collinear" => n == 2 && l == 2,
         "equal" => n >= 2 && (l == n || r == n),
-        "tangent" => n == 2 && p == 0 && l < 2,
+        "tangent" => (n == 2 && p == 0 && l < 2) || biarc_tangent_operands(sketch, selection).is_some(),
         "concentric" => n == 2 && (r == 2 || (r == 1 && p == 1)),
         "curvature" => n == 2 && p == 0 && c >= 1,
         "horizontal_vertical" => n != 1 || l == 1,

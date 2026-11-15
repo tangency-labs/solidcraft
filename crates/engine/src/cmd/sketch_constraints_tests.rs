@@ -1999,6 +1999,34 @@ fn constraints_take_the_selection_from_their_own_specs() {
     assert!(fits(&s).is_empty(), "{:?}", fits(&s));
 }
 
+#[test]
+fn biarc_fit_points_offer_tangent_from_the_shared_selection_rules() {
+    use crate::Sel;
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 30, "id": "c"}));
+    run(&mut s, "sketch.line", json!({"points": [[40, 0], [50, 0]]}));
+    run(&mut s, "sketch.spline.biarc", json!({"nodes": [{"point": [-20, 0], "tangent": [1, 1]}, {"point": [20, 0], "tangent": [1, -1]}]}));
+    let sk = sketch(&s);
+    let spline = &sk.biarc_splines[0];
+    let node = &spline.nodes[0].point;
+    let curve = |id: &str| Sel::SketchCurve { id: id.into(), sketch: None };
+    let point = |id: &str| Sel::SketchPoint { id: id.into() };
+    let command = "sketch.constraint.tangent";
+    let spec = crate::find_command(command).unwrap();
+    for (selection, expected) in
+        [(vec![point(node), curve("c")], json!({"a": node, "b": "c"})), (vec![curve("c"), point(node)], json!({"a": "c", "b": node}))]
+    {
+        s.selection = selection;
+        assert_eq!(super::super::sketch_selection::constraint_params(command, &s.selection, Some(&sk)), Some(expected.clone()));
+        assert!(super::super::sketch_selection::kinds_fit(command, &s.selection, &sk));
+        assert_eq!(spec.for_selection(&s), Some(expected), "the menu and ribbon use the same operands");
+    }
+    for selection in [vec![point("c.center"), curve("c")], vec![point(node), curve("l1")], vec![point(node), curve(&spline.spans[0].curves[0])]] {
+        s.selection = selection;
+        assert!(spec.for_selection(&s).is_none(), "unrelated points and spline members do not fit: {:?}", s.selection);
+    }
+}
+
 /// A point placed by a parameter expression (#16554): the inspection says why it is fixed,
 /// Unfix frees it as plain numbers, and moving it before that is refused with the expression.
 #[test]
