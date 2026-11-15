@@ -1,4 +1,4 @@
-//! The SolidCraft fork's tangency-labs/smlib@a307480 (`fillet_cliff_overflow`, WR-631): a
+//! The SolidCraft fork's tangency-labs/smlib@a307480 (the cliff overflow, WR-631): a
 //! fillet whose end section runs off its end face overflows it, and is built by
 //! subtraction. SolidCraft rig fillets/cov-chamfer-outer-corner-edge-of-a-shelled-box-
 //! with-a-lip: an 80 x 50 x 30 box shelled 2 open at the top, a 1 x 2 lip on the inner
@@ -25,15 +25,12 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::{edge, vertex, EdgeId};
 use solidcore::{Brep, Kernel};
 
-fn kernel(cliff: bool) -> Kernel {
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.fillet_run_on_bspline_trims = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.offset_extension_as_itself = true;
-    k.fixes.fillet_cliff_overflow = cliff;
     k
 }
 
@@ -80,8 +77,8 @@ fn edge_between(b: &Brep, a: Point3, q: Point3) -> EdgeId {
 
 /// Chamfers the outer corner edge at (0, 50) by 3: the volume, or the error code and
 /// comment (or "not a closed solid").
-fn chamfer_corner(cliff: bool) -> Result<f64, (i32, String)> {
-    let mut k = kernel(cliff);
+fn chamfer_corner() -> Result<f64, (i32, String)> {
+    let mut k = kernel();
     let mut b = shelled_box_with_lip(&mut k);
     let v0 = volume(&k, &mut b);
     assert!((v0 - 22608.0).abs() < 1e-6, "V0 {v0}");
@@ -102,15 +99,9 @@ fn chamfer_corner(cliff: bool) -> Result<f64, (i32, String)> {
 
 #[test]
 fn a307480_chamfer_end_section_under_the_lip_overflows_its_end_face() {
-    let v = chamfer_corner(true).unwrap_or_else(|e| panic!("{e:?}"));
+    let v = chamfer_corner().unwrap_or_else(|e| panic!("{e:?}"));
     assert!(
         (v - 22473.0).abs() <= 1e-8 * 22473.0,
         "volume {v} against 22473"
     );
-}
-
-/// Without the flag the chamfer is not built as an overflow (refused, or left unsewn).
-#[test]
-fn a307480_without_the_flag_no_overflow() {
-    assert!(chamfer_corner(false).is_err());
 }

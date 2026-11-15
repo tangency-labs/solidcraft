@@ -26,6 +26,7 @@
 //! | [`EndEdges`], `end_face_runs_on_past_side_edge`, `rail_face` (private) | none: an end face running on tangentially past the side edge is the global merge's, not refused |
 //! | `classify_rail_end` (private), `rail_end_on_surfaces` (crate) | none (an End's rail end off its side face at the face's zone solved on the faces, and classified there) |
 //! | `run_on_leaves_the_part` (private) | none (#2656: a blend run on past a smooth vertex that runs out of the part ends on the end face, not capped) |
+//! | `depth_under_edge_continued` (private) | none (a bend at the smooth vertex that takes the continuing edge to the far side of the blended edge continued: the part stands across the blend run on, which is capped) |
 //! | `runs_on_across_seam` (private), [`RUNS_ON_ACROSS_SEAM`] | none (#2864: a round does not end at a seam's vertex; a variable round's End there is refused, every other blend runs on across it) |
 //!
 //! Deviations: the fork's `NoteError(SM_FILERR_NO_ROOM, ...)` and `NoteFitRadius` before
@@ -272,7 +273,8 @@ pub fn continuing_edges(
 /// not the fork's).
 ///
 /// The two edges E (blended) and E' (continuing) share a face A, and leave the vertex V
-/// opposite to each other with one tangent. The blend run on past V keeps its section, the
+/// opposite to each other, within the corner's tangency tolerance of one tangent. The blend
+/// run on past V keeps its section, the
 /// corner between A and E's other face continued; the part there is bounded on A by E'.
 /// Where E' turns into A away from E continued (towards the blend's side of E: the rail on A
 /// lies that way), the part falls away from the blend run on, which takes off (or, concave,
@@ -283,9 +285,20 @@ pub fn continuing_edges(
 /// tangency-labs/solidcore#2176), E' along E continued, or one face round V (#453's rim).
 ///
 /// The two curves are compared in A's binormal `d` into A at V (unit, square to the edge),
-/// each as its height `c2 x^2 + c3 x^3` along `d` over the distance `x` past V along the
-/// tangent, from its derivatives at V (E's run on past V), at `x` the shorter of the two
-/// edges' chords from V, against A's zone tolerance. Where the second orders' difference
+/// each as its height `c1 x + c2 x^2 + c3 x^3` along `d` over the distance `x` past V along
+/// E's tangent, from its derivatives at V (E's run on past V; E's `c1` is zero, `d` being
+/// square to it), over the shorter of the two edges' chords from V, against A's zone
+/// tolerance.
+///
+/// First the bend. E' leaving V on the far side of E continued from the blend (its `c1`
+/// below E's) runs under E continued until their curvatures bring it back, if they do
+/// ([`depth_under_edge_continued`]). Where that is deeper than the tolerance, the part
+/// stands across the blend run on from V on, which cannot run out through it, whatever E'
+/// does farther along, and the cap stays: an arc meeting a circle a few degrees off
+/// tangent, where the circle crosses the arc continued a second time past V. A bend the
+/// other way, or one that takes E' no deeper than the tolerance, decides nothing.
+///
+/// Then the turn, at the chord's end. Where the second orders' difference
 /// there exceeds both third orders, it decides: E' turns away where its height exceeds E's
 /// continued. Otherwise the curvatures nearly agree (an edge of a curvature-continuous round,
 /// which leaves its face with little curvature and turns as it goes), and E' turns away only
@@ -362,8 +375,10 @@ fn run_on_leaves_the_part(
     };
     // past V, along the continuing edge
     let along = -leave;
-    // (c2, c3) of an edge's curve at V, its parameter turned to run past V along `along`
-    let heights = |target: &Brep, e: EdgeId| -> Result<Option<(f64, f64)>> {
+    // (c1, c2, c3) of an edge's curve at V, its parameter turned to run past V along `along`:
+    // the height h over the distance x, both functions of the parameter, differentiated
+    // by x
+    let heights = |target: &Brep, e: EdgeId| -> Result<Option<(f64, f64, f64)>> {
         let start = at_start(target, e)?;
         let c = edge::curve(target, e)?.ok_or_else(nul)?;
         let ds = c.evaluate(k, param_at(target, e)?, 3, !start, true)?;
@@ -380,12 +395,16 @@ fn run_on_leaves_the_part(
         if x1 <= 0.0 {
             return Ok(None);
         }
-        let (x2, h2, h3) = (d2.dot(along), d2.dot(d), d3.dot(d));
-        let c2 = h2 / (2.0 * x1 * x1);
-        let c3 = h3 / (6.0 * x1 * x1 * x1) - h2 * x2 / (2.0 * x1 * x1 * x1 * x1);
-        Ok(Some((c2, c3)))
+        let (x2, x3) = (d2.dot(along), d3.dot(along));
+        let (h1, h2, h3) = (d1.dot(d), d2.dot(d), d3.dot(d));
+        let c1 = h1 / x1;
+        // h'' x' - h' x'', the second derivative by x times x'^3
+        let turn = h2 * x1 - h1 * x2;
+        let c2 = turn / (2.0 * x1 * x1 * x1);
+        let c3 = ((h3 * x1 - h1 * x3) * x1 - 3.0 * x2 * turn) / (6.0 * x1 * x1 * x1 * x1 * x1);
+        Ok(Some((c1, c2, c3)))
     };
-    let (Some((e2, e3)), Some((o2, o3))) =
+    let (Some((e1, e2, e3)), Some((o1, o2, o3))) =
         (heights(target, fil_edge)?, heights(target, other_edge)?)
     else {
         return Ok(false);
@@ -402,11 +421,38 @@ fn run_on_leaves_the_part(
         return Ok(false);
     }
     let tol = zone_tol3d(k, target.face(face_of(target, eu_a)?)?.tolerance);
+    // the bend: the part stands across the blend run on from V on
+    if depth_under_edge_continued(o1 - e1, o2 - e2, span) > tol {
+        return Ok(false);
+    }
     let second = (o2 - e2) * span * span;
     if second.abs() > (o3.abs() + e3.abs()) * span * span * span {
         return Ok(second > tol);
     }
     Ok(o3 * span * span * span > tol)
+}
+
+/// How deep the bend at V takes the continuing edge E' under the blended edge E continued,
+/// on the far side of it from the blend ([`run_on_leaves_the_part`]): E' stands
+/// `first x + second x^2` over E continued at the distance `x` past V, to second order
+/// (`first` the bend's slope, `second` the difference of the two edges' second orders), over
+/// `0 < x <= span`.
+///
+/// 0 where E' leaves V on the blend's side or along E continued (`first >= 0`). Else, where
+/// the curvatures bring E' back (`second > 0`), its depth where it turns back, at
+/// `x = -first / (2 second)`: `first^2 / (4 second)`, or its depth at `span` where it turns
+/// back past it. Where they never do (`second <= 0`), the bend's own share at `span`,
+/// `-first span`: the second order's share there is the turn's to judge, as without a bend.
+fn depth_under_edge_continued(first: f64, second: f64, span: f64) -> f64 {
+    if first >= 0.0 {
+        return 0.0;
+    }
+    if second > 0.0 {
+        let x = (-first / (2.0 * second)).min(span);
+        -first * x - second * x * x
+    } else {
+        -first * span
+    }
 }
 
 /// The fork's `SmBlendCorner::BallTouchingAt` (54a4ee7; 41a39ec's
@@ -2189,5 +2235,69 @@ mod tests {
         // the offset is signed: a ball on G's other side (x > a) would need its centre at
         // radius 2 with x = a + 1 > 2, which no point of F gives, so nothing is solved
         assert_eq!(solve(1.0), None);
+    }
+
+    /// A circle of radius R meeting, at the angle `b` off tangent, the arc of radius `rho`
+    /// continued, on the far side of it from the blend, and curving back across it (their
+    /// centres on opposite sides): over the arc's tangent it stands `-tan(b) x` to first order
+    /// and `x^2 / (2 R cos^3 b)` to second, the arc `-x^2 / (2 rho)`.
+    fn circle_over_arc(big: f64, rho: f64, b: f64) -> (f64, f64) {
+        (
+            -b.tan(),
+            1.0 / (2.0 * big * b.cos().powi(3)) + 1.0 / (2.0 * rho),
+        )
+    }
+
+    #[test]
+    fn the_bend_takes_the_continuing_edge_under_the_edge_continued_until_it_turns_back() {
+        // it turns back at x = 0.1 / (2 * 0.02) = 2.5, 0.1 * 2.5 - 0.02 * 2.5^2 deep
+        assert!((depth_under_edge_continued(-0.1, 0.02, 40.0) - 0.125).abs() < 1e-15);
+        // past the span's end: its depth there
+        let at_end = 0.1 * 2.0 - 0.02 * 2.0 * 2.0;
+        assert!((depth_under_edge_continued(-0.1, 0.02, 2.0) - at_end).abs() < 1e-15);
+        // never: the bend's own share at the span's end, whatever the second order
+        assert!((depth_under_edge_continued(-0.1, 0.0, 40.0) - 4.0).abs() < 1e-15);
+        assert!((depth_under_edge_continued(-0.1, -0.02, 40.0) - 4.0).abs() < 1e-15);
+        // circles of R 55 and R 49 meeting 6 degrees off tangent: first^2 / (4 second), which
+        // is, to second order, how thick the two discs' overlap is: the radii less the
+        // distance between the centres
+        let b = 6.0_f64.to_radians();
+        let (first, second) = circle_over_arc(55.0, 49.0, b);
+        let depth = depth_under_edge_continued(first, second, 33.9);
+        assert!((depth - first * first / (4.0 * second)).abs() < 1e-15);
+        let apart = (55.0_f64 * 55.0 + 49.0 * 49.0 + 2.0 * 55.0 * 49.0 * b.cos()).sqrt();
+        assert!((depth - (55.0 + 49.0 - apart)).abs() < 2e-4, "{depth}");
+    }
+
+    #[test]
+    fn a_bend_towards_the_blend_or_none_takes_the_continuing_edge_nowhere_under() {
+        for second in [-0.02, 0.0, 0.02] {
+            assert_eq!(depth_under_edge_continued(0.0, second, 40.0), 0.0);
+            assert_eq!(depth_under_edge_continued(0.1, second, 40.0), 0.0);
+        }
+        // an undefined slope decides nothing: no depth exceeds a tolerance
+        let undefined = depth_under_edge_continued(f64::NAN, 0.02, 40.0);
+        assert!(undefined.is_nan() || undefined == 0.0);
+    }
+
+    /// The bend whose depth is the tolerance, on the same circles: `tan(b) = 2 sqrt(second
+    /// tol)` with `second` at that bend (two steps of the fixed point; it barely moves).
+    /// Just inside it the depth is under the tolerance, just past it over.
+    #[test]
+    fn the_depth_crosses_the_tolerance_at_the_bend_that_reaches_it() {
+        let tol = 1e-5;
+        let mut b = 0.0_f64;
+        for _ in 0..4 {
+            let (_, second) = circle_over_arc(55.0, 49.0, b);
+            b = (2.0 * (second * tol).sqrt()).atan();
+        }
+        // about 0.05 degrees
+        assert!((b.to_degrees() - 0.0503).abs() < 1e-3, "{}", b.to_degrees());
+        let depth = |b: f64| {
+            let (first, second) = circle_over_arc(55.0, 49.0, b);
+            depth_under_edge_continued(first, second, 33.9)
+        };
+        assert!(depth(b * (1.0 - 1e-6)) < tol);
+        assert!(depth(b * (1.0 + 1e-6)) > tol);
     }
 }

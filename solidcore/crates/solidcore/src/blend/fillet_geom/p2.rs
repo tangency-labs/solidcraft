@@ -26,8 +26,7 @@
 //!   evaluates a blend by its definition as its certified net where the net's bound is
 //!   within its approximation tolerance
 //!   ([`crate::surface::procedural_blend::NetScope::within`]).
-//! - **Rail end on the continued surface (WR-630, #960).** With
-//!   `fixes.fillet_rail_end_on_continued_surface`, `CalcRailIntEdgeuse` evaluates the
+//! - **Rail end on the continued surface (WR-630, #960).** `CalcRailIntEdgeuse` evaluates the
 //!   rail's end on its base surface with out-of-bounds evaluation on (the fork's
 //!   tangency-labs/smlib@3f22e97).
 //! - **A closed curve between two points (not upstream).** `SrfSrfIntersection` trims a
@@ -2662,16 +2661,12 @@ impl FilletBrep {
                 .offset_surface(self, g1, rail_index)?
                 .ok_or_else(|| SolidError::blend_missing(OP, "the rail's offset surface"))?
                 .base_surface();
-            // Opt-in, not upstream (`fixes.fillet_rail_end_on_continued_surface`, WR-630;
+            // Not upstream (WR-630;
             // the fork's tangency-labs/smlib@3f22e97): on the base surface continued, as
             // the solve found it (over the surface's extended domain). Clamped to the
             // surface's own domain, a rail meeting a side edge's line just past the
             // edge's end (a cliff overflow) was placed on the edge's end vertex instead.
-            let pnt = if k.fixes.fillet_rail_end_on_continued_surface {
-                with_out_of_bounds_enabled_in_place(base, || base.evaluate_point(k, uv))?
-            } else {
-                base.evaluate_point(k, uv)?
-            };
+            let pnt = with_out_of_bounds_enabled_in_place(base, || base.evaluate_point(k, uv))?;
 
             // project it onto the side edge's curve
             let side_e = eu1::edge(target, side_eu1)?
