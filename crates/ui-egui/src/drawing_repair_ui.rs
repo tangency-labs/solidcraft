@@ -17,10 +17,31 @@ pub fn selected_geometry(selection: &[Sel]) -> Result<(String, Value), String> {
 }
 
 
+
+/// Allowed reference slots come from the saved dimension kind, never from a guess.
+/// The engine validates the chosen slot and pick again on confirmation.
+pub fn reference_slots(inspection: &Value) -> Vec<String> {
+    let Some(kind) = inspection.get("record").and_then(|r| r.get("kind")).and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    if kind.len() != 1 { return Vec::new(); }
+    let (name, fields) = kind.iter().next().expect("single checked entry");
+    match name.as_str() {
+        "linear" | "angle" | "silhouettes" | "faces" => vec!["a".into(), "b".into()],
+        "length" | "radial" => vec!["edge".into()],
+        "cylinder" | "sphere" | "cone" => vec!["face".into()],
+        "chain" => fields.get("points").and_then(Value::as_array)
+            .map(|points| (0..points.len()).map(|index| index.to_string()).collect())
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
 #[derive(Default)]
 pub struct RepairUiState {
     dimension: Option<String>,
     slot: String,
+    slots: Vec<String>,
     candidates: Vec<Value>,
     candidate_index: usize,
     awaiting_confirmation: bool,
@@ -49,9 +70,16 @@ pub fn show(ui: &mut egui::Ui, selection: &[Sel], state: &mut RepairUiState, sna
         if ui.button(format!("Repair {}", dim.id)).clicked() {
             state.clear();
             state.dimension = Some(dim.id.clone());
-            state.slot = "edge".into();
+            state.slot.clear();
             match run("drawing.dimension.inspect", serde_json::json!({"dimension": dim.id})) {
                 Ok(inspection) => {
+                    state.slots = reference_slots(&inspection);
+                    if state.slots.len() == 1 {
+                        state.slot = state.slots[0].clone();
+                    }
+                    if state.slots.is_empty() {
+                        state.message = Some("The dimension has no supported reference slots.".into());
+                    }
                     state.candidates = inspection.get("candidates").and_then(Value::as_array).cloned().unwrap_or_default()
                         .into_iter().filter(|candidate| candidate.is_object()).collect();
                     if state.candidates.is_empty() {
@@ -70,7 +98,11 @@ pub fn show(ui: &mut egui::Ui, selection: &[Sel], state: &mut RepairUiState, sna
         if ui.button("Use selected geometry").clicked() {
             match selected_geometry(selection) {
                 Ok((slot, pick)) => {
-                    state.slot = slot;
+                    if state.slots.contains(&slot) {
+                        state.slot = slot;
+                    } else if state.slots.len() == 1 {
+                        state.slot = state.slots[0].clone();
+                    }
                     state.candidates = vec![pick];
                     state.candidate_index = 0;
                     state.awaiting_confirmation = false;
@@ -82,8 +114,20 @@ pub fn show(ui: &mut egui::Ui, selection: &[Sel], state: &mut RepairUiState, sna
                 }
             }
         }
-        ui.label(format!("Reference: {}", state.slot));
-        if !state.candidates.is_empty() {
+        if state.slots.len() > 1 {
+            egui::ComboBox::from_id_salt("drawing_repair_slot")
+                .selected_text(if state.slot.is_empty() { "Choose reference" } else { &state.slot })
+                .show_ui(ui, |ui| {
+                    for slot in &state.slots {
+                        if ui.selectable_value(&mut state.slot, slot.clone(), slot).changed() {
+                            state.awaiting_confirmation = false;
+                        }
+                    }
+                });
+        } else if !state.slot.is_empty() {
+            ui.label(format!("Reference: {}", state.slot));
+        }
+        if !state.candidates.is_empty() && !state.slot.is_empty() {
             egui::ComboBox::from_id_salt("drawing_repair_candidate")
                 .selected_text(format!("Candidate {}", state.candidate_index + 1))
                 .show_ui(ui, |ui| {
@@ -133,6 +177,21 @@ pub fn show(ui: &mut egui::Ui, selection: &[Sel], state: &mut RepairUiState, sna
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slots_follow_dimension_kind_without_guessing() {
+        for (kind, expected) in [
+            ("radial", vec!["edge"]),
+            ("cylinder", vec!["face"]),
+            ("linear", vec!["a", "b"]),
+            ("angle", vec!["a", "b"]),
+        ] {
+            let inspection = json!({"record":{"kind":{kind: {}}}});
+            assert_eq!(reference_slots(&inspection), expected);
+        }
+        assert_eq!(reference_slots(&json!({"record":{"kind":{"chain":{"points":[{},{},{}]}}}})), vec!["0","1","2"]);
+        assert!(reference_slots(&json!({"record":{}})).is_empty());
+    }
     #[test]
     fn only_repairable_states_expose_repair_action() {
         assert!(eligible("lost"));
@@ -147,7 +206,7 @@ mod tests {
     }
     #[test]
     fn cancel_clears_selection_and_confirmation() {
-        let mut state = RepairUiState { dimension: Some("d".into()), slot: "edge".into(), candidates: vec![serde_json::json!({"edge":{"body":"b","index":1}})], candidate_index: 0, awaiting_confirmation: true, message: None };
+        let mut state = RepairUiState { dimension: Some("d".into()), slot: "edge".into(), slots: vec!["edge".into()], candidates: vec![serde_json::json!({"edge":{"body":"b","index":1}})], candidate_index: 0, awaiting_confirmation: true, message: None };
         state.clear();
         assert!(state.dimension.is_none());
         assert!(!state.awaiting_confirmation);
