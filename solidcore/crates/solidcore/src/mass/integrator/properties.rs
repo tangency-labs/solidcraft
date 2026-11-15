@@ -40,7 +40,8 @@
 //! one-sided limit from inside the piece (WR-670, #2091): upstream takes the span above.
 //! An edge's tube area, volume and moments each have an error scale of their own size
 //! (#2887): upstream's are `BIG_DOUBLE`, so only the edge's length was under error control.
-//! [`brep_mass_properties_estimated`] with [`MassPropertyRequest::exact_box`] integrates
+//! [`brep_mass_properties_estimated`] with [`MassPropertyRequest::exact_box`] (and
+//! [`brep_properties_in_box`] given that box) integrates
 //! about the middle of the body's exact box and scales its errors by that box's size
 //! (#17361): the loose box upstream takes holds the control points of every span of an
 //! edge's curve that the edge touches, so a short arc of a circle of large radius puts it
@@ -951,11 +952,12 @@ pub fn brep_properties(
     attributes: &PropertyAttributes<'_>,
 ) -> Result<PreciseProperties> {
     let bbox = qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
-    properties_in_box(k, b, accuracy, origin, behavior, attributes, &bbox)
+    brep_properties_in_box(k, b, accuracy, origin, behavior, attributes, &bbox)
 }
 /// [`brep_properties`] with the body's box given: its largest side sets every face's
-/// error scale.
-fn properties_in_box(
+/// error scale (not upstream: [`brep_properties`] takes the loose box, whose arc of a large
+/// circle reaches a quarter of that circle away, #17361).
+pub fn brep_properties_in_box(
     k: &Kernel,
     b: &mut Brep,
     accuracy: f64,
@@ -1564,7 +1566,7 @@ fn estimate(
     if request.area_centroid_without_material && !has_material(b)? {
         return area_centroid(k, b, accuracy, mid);
     }
-    let properties = properties_in_box(
+    let properties = brep_properties_in_box(
         k,
         b,
         accuracy,
