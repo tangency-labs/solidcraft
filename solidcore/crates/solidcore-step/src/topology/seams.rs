@@ -1474,17 +1474,14 @@ impl Builder<'_, '_> {
                 continue;
             }
             let n = pieces.len();
-            for (i, p) in pieces.iter().enumerate() {
-                if p.runs.is_none() {
-                    arcs.push(p.blocked());
+            arcs.extend(pieces.iter().filter(|p| p.runs.is_none()).map(Piece::blocked));
+            for (i, j) in overlapping_pairs(&pieces) {
+                let (Some(p), Some(q)) = (pieces.get(i), pieces.get(j)) else { continue };
+                let next = j == i + 1 || (i == 0 && j + 1 == n);
+                if next && p.runs.is_some() && p.runs == q.runs {
+                    continue;
                 }
-                for (j, q) in pieces.iter().enumerate().skip(i + 1) {
-                    let next = j == i + 1 || (i == 0 && j + 1 == n);
-                    if next && p.runs.is_some() && p.runs == q.runs {
-                        continue;
-                    }
-                    arcs.extend(overlap(p.arc, q.arc).into_iter().map(|a| padded(a, p.pad.max(q.pad))));
-                }
+                arcs.extend(overlap(p.arc, q.arc).into_iter().map(|a| padded(a, p.pad.max(q.pad))));
             }
         }
         Ok(Some(Blocked { arcs }))
@@ -1886,6 +1883,39 @@ pub(super) fn angular_sign(a: &[[f64; 2]]) -> Option<i8> {
         sign = s;
     }
     Some(sign)
+}
+
+/// The pairs `(i, j)`, `i < j`, of pieces whose arcs may share an angle ([`overlap`]), found by a
+/// sweep over the arcs' starts instead of every pair: each arc (under half a turn) is laid on the
+/// line from its start taken in `[0, 2π)`, and once more a turn before and after, so two arcs
+/// that meet across a whole turn meet there too; sorted by start, an arc meets those still open
+/// when it starts (an end at its start included). Every pair [`overlap`] finds is among them; the
+/// work is the sort and the pairs, not the square of the pieces.
+fn overlapping_pairs(pieces: &[Piece]) -> Vec<(usize, usize)> {
+    let mut laid: Vec<(f64, f64, usize)> = Vec::new();
+    for (i, p) in pieces.iter().enumerate() {
+        let [a, b] = p.arc;
+        let start = a.rem_euclid(TAU);
+        if !(start.is_finite() && (b - a).is_finite()) {
+            continue;
+        }
+        for shift in [-TAU, 0.0, TAU] {
+            laid.push((start + shift, start + shift + (b - a), i));
+        }
+    }
+    laid.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let mut open: Vec<(f64, usize)> = Vec::new();
+    let mut pairs = std::collections::BTreeSet::new();
+    for (start, end, i) in laid {
+        open.retain(|(e, _)| *e >= start);
+        for &(_, j) in &open {
+            if i != j {
+                pairs.insert((i.min(j), i.max(j)));
+            }
+        }
+        open.push((end, i));
+    }
+    pairs.into_iter().collect()
 }
 
 /// The angles two arcs both reach (none, one arc, or two where they meet round both ends).
