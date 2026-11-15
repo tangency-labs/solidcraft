@@ -318,3 +318,31 @@ fn a_boundary_surface_and_a_loft_surface_on_one_curve_stitch() {
     let edges = run(&mut s, "model.edges", json!({"body": body}));
     assert_eq!(edges["edges"].as_array().map(Vec::len), Some(7), "{edges}");
 }
+
+/// #17053: a boundary surface through two curves that meet at one end (a quarter arc on the
+/// ground and a straight side rising from the arc's end) is a loft whose side between them
+/// collapses to that point. Each side's distance from the surface is proved; a side starting at
+/// the collapsed corner was refused ("gap is not enclosed") because its first nearest point could
+/// fall anywhere along the collapsed side. Every direction of each curve builds the one face.
+#[test]
+fn two_curves_meeting_at_a_corner_bound_their_distance_from_the_surface() {
+    let h = 15.0 * std::f64::consts::FRAC_1_SQRT_2;
+    let arcs = [([-15.0, 0.0], [0.0, -15.0]), ([0.0, -15.0], [-15.0, 0.0])];
+    // On XZ a sketch point (u, v) is the model point (u, 0, -v): from (-15, 0, 0) up to (-30, 0, 50).
+    let lines = [([-15.0, 0.0], [-30.0, -50.0]), ([-30.0, -50.0], [-15.0, 0.0])];
+    for (start, end) in arcs {
+        for (a, b) in lines {
+            let mut s = Session::default();
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Ground"}));
+            let arc = first(&run(&mut s, "sketch.arc.three_point", json!({"start": start, "end": end, "through": [-h, -h]}))["created"]["curves"]);
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Side"}));
+            let side = line(&mut s, a, b);
+            run(&mut s, "sketch.finish", json!({}));
+            let r = run(&mut s, "surface.boundary", json!({"u": [{"sketch": "Ground", "curves": [arc]}, {"sketch": "Side", "curves": [side]}]}));
+            let body = first(&r["created_bodies"]);
+            let faces = run(&mut s, "model.faces", json!({"body": body}));
+            assert_eq!(faces["faces"].as_array().map(Vec::len), Some(1), "arc {start:?}, side {a:?}: {faces}");
+        }
+    }
+}
