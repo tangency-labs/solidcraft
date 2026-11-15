@@ -2340,20 +2340,20 @@ mod tests {
             for (p, uv) in r.uv.iter().enumerate() {
                 let (col, j) = (p as u64 / rows, p as u64 % rows);
                 let u_want = umin + (col + 1) as f64 * du;
-                // c + 1 roundings in the sampler's sum and 2 in u_want (the product and
-                // the sum); the shared increment's rounding cancels. Each is within eps of
-                // a magnitude below |umin| + L_u
-                let u_slack = (col + 3) as f64 * eps * (umin.abs() + lu);
+                // the sampler and u_want each round once in the product and once in the
+                // sum (the shared increment's rounding cancels), each within eps of a
+                // magnitude below |umin| + L_u
+                let u_slack = 4.0 * eps * (umin.abs() + lu);
                 assert!(
                     (uv.x - u_want).abs() <= u_slack,
                     "{name}: point {p} u {} not {u_want}",
                     uv.x
                 );
-                // likewise j + 1 roundings in the sum and 2 in v_centre, plus the
+                // likewise 2 roundings in the sampler's row and 2 in v_centre, plus the
                 // dither's product and its addition
                 let v_centre = vmin + (j + 1) as f64 * dv;
                 let v_slack = if count > 1 { dither * dv } else { 0.0 }
-                    + (j + 5) as f64 * eps * (vmin.abs() + lv);
+                    + 6.0 * eps * (vmin.abs() + lv);
                 assert!(
                     (uv.y - v_centre).abs() <= v_slack,
                     "{name}: point {p} v {} not within {v_slack} of {v_centre}",

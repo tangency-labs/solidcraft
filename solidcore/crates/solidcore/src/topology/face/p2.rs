@@ -1712,11 +1712,14 @@ pub fn points_in_face(
     if rectangular_trim == 1 {
         // when faced is rectangularly trimmed
         trim_curve_cnt = point_count.min(30);
-        // the columns start at the domain's minimum u, with an increment of the
-        // domain's u length over the column count plus one (WR-86; upstream keeps the
-        // search count's increment and starts from zero)
+        // column i at the domain's minimum u plus i + 1 increments of the domain's u
+        // length over the column count plus one, row j likewise in v (WR-86; upstream
+        // starts from zero with the search count's increment). Each is one product and
+        // one sum from the minimum, not a running sum: added up from a large minimum,
+        // the increments' roundings carry later columns past the domain's maximum.
+        let u_min = u_interval.min();
+        let v_min = v_interval.min();
         let u_inc = u_len / (trim_curve_cnt + 1) as f64;
-        let mut u = u_interval.min() + u_inc;
         let j_cnt = if (point_count / trim_curve_cnt) * trim_curve_cnt < point_count {
             (point_count / trim_curve_cnt) + 1
         } else {
@@ -1725,21 +1728,20 @@ pub fn points_in_face(
         v_inc /= (j_cnt + 1) as f64;
 
         // generate an array of sample points
-        for _ in 0..trim_curve_cnt {
-            let mut v = v_interval.min() + v_inc;
-            for _ in 0..j_cnt {
+        for i in 0..trim_curve_cnt {
+            let u = u_min + (i + 1) as f64 * u_inc;
+            for j in 0..j_cnt {
                 if out.uv.len() == count {
                     break;
                 }
+                let v = v_min + (j + 1) as f64 * v_inc;
                 let v_dither = if point_count > 1 {
                     rand_dither(k) * v_inc
                 } else {
                     0.0
                 };
                 out.uv.push(Point2::new(u, v + v_dither));
-                v += v_inc;
             }
-            u += u_inc;
         }
     } else {
         // face is trimmed - classify UV isoParameterUVTrimCurves
@@ -3945,6 +3947,19 @@ mod tests {
                 drawn.rng.next_f64();
             }
             assert_eq!(sampled.rng.next_f64(), drawn.rng.next_f64());
+        }
+
+        // a domain far from the origin: each column is one product and one sum from the
+        // minimum, so none is carried past the maximum (a running sum from 2^53 in steps
+        // of 32/31 rounds to multiples of 2 and leaves the domain from column 15)
+        let far = (9_007_199_254_740_992.0, 0.0, 9_007_199_254_741_024.0, 1.0);
+        let (mut b_far, f_far) = rectangular_face(far);
+        let mut k = Kernel::new(&opts);
+        let r = points_in_face(&mut k, &mut b_far, f_far, 30).unwrap();
+        assert_eq!(r.uv.len(), 30);
+        for uv in &r.uv {
+            assert_inside(far, *uv);
+            assert!(uv.x < far.2, "{uv:?} on the domain's maximum");
         }
 
         // 31 points still fill only 16 of the 30 columns: the row planner is unchanged
