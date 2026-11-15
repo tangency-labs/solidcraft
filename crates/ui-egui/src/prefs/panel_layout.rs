@@ -37,6 +37,7 @@ struct Popover {
 enum PopoverKind {
     Save { name: String, chosen: usize },
     Replace { name: String },
+    Delete { name: String },
 }
 
 /// Reserve the first Escape for our popover, before the Preferences footer.
@@ -252,6 +253,7 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
             list.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ListBox, ui.is_enabled(), &label));
             let mut activate = false;
             let mut menu = false;
+            let mut delete = false;
             let previous_focus = state.focused;
             if list.has_focus() && state.popup.is_none() {
                 ui.memory_mut(|memory| {
@@ -277,6 +279,9 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
                     activate =
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) || input.consume_key(egui::Modifiers::NONE, egui::Key::Space);
                     menu = input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10) || input.consume_key(egui::Modifiers::NONE, egui::Key::Menu);
+                    // Only a layout the user saved can be deleted; the key does nothing on other tiles.
+                    delete = matches!(items.get(state.focused), Some(Tile::Saved(entry)) if entry.user)
+                        && input.consume_key(egui::Modifiers::NONE, egui::Key::Delete);
                 });
             }
             reveal_focus |= state.focused != previous_focus || list.gained_focus();
@@ -333,6 +338,15 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
                                 if let Tile::Saved(entry) = item
                                     && entry.user
                                 {
+                                    // The focused tile, or the one under the pointer: a click does not
+                                    // always leave the keyboard focus on the list.
+                                    let hovered_delete = !delete
+                                        && state.popup.is_none()
+                                        && response.hovered()
+                                        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete));
+                                    if (delete && state.focused == index) || hovered_delete {
+                                        open_delete(ui.ctx(), state, &response, entry);
+                                    }
                                     tile_menu(app, ui, state, &response, entry, menu && state.focused == index);
                                 }
                             }
@@ -459,7 +473,7 @@ fn tile_menu(app: &SolveApp, ui: &mut Ui, state: &mut State, tile: &Response, en
             for x in [-4.0, 0.0, 4.0] {
                 ui.painter().circle_filled(at.center() + vec2(x, 0.0), 1.0, t.form_dim);
             }
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), app.tr("ui.panel_layout.replace_current")));
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), app.tr("ui.options")));
             crate::scenario::publish_target(&format!("prefs:panel_layout:menu:{}", entry.name), at);
             response
         },
@@ -472,11 +486,23 @@ fn tile_menu(app: &SolveApp, ui: &mut Ui, state: &mut State, tile: &Response, en
                 state.popup = Some(Popover { origin: tile.id, kind: PopoverKind::Replace { name: entry.name.clone() }, first: true });
                 ui.close();
             }
+            let delete = ui_kit::button(ui, app.tr("ui.panel_layout.delete"), ui_kit::Button::Ghost);
+            crate::scenario::publish_target("prefs:panel_layout:delete", delete.rect);
+            if delete.clicked() {
+                open_delete(ui.ctx(), state, tile, entry);
+                ui.close();
+            }
         },
     );
     if popup.inner.is_some() {
         crate::ui_kit::settings_search::note_key_sink(ui.ctx());
     }
+}
+
+/// Deleting always asks first, from the menu and from the Delete key alike.
+fn open_delete(ctx: &egui::Context, state: &mut State, tile: &Response, entry: &LayoutPreferenceEntry) {
+    state.popup = Some(Popover { origin: tile.id, kind: PopoverKind::Delete { name: entry.name.clone() }, first: true });
+    ctx.request_repaint();
 }
 
 fn open_save(ctx: &egui::Context, state: &mut State, tile: &Response, view: &LayoutPreferencesView) {
@@ -533,6 +559,7 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
     let mut close = false;
     let mut replace = None;
     let mut save = None;
+    let mut delete = None;
     let mut focus_ids = Vec::new();
     let shown = Container::new(ui.ctx(), Surface::Popup)
         .menu(&anchor)
@@ -618,6 +645,25 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
                                 }
                             });
                         }
+                        PopoverKind::Delete { name } => {
+                            let question = solidcraft_ui_text::format("ui.panel_layout.confirm_delete", &[("name", name)]);
+                            ui.label(egui::RichText::new(question).size(t.font_label).color(t.form_ink));
+                            ui.horizontal_wrapped(|ui| {
+                                let cancel = ui_kit::button(ui, app.tr("ui.panel_layout.cancel"), ui_kit::Button::Ghost);
+                                focus_ids.push(cancel.id);
+                                crate::scenario::publish_target("prefs:panel_layout:delete_cancel", cancel.rect);
+                                if first {
+                                    cancel.request_focus();
+                                }
+                                close |= cancel.clicked();
+                                let response = danger_button(ui, app.tr("ui.panel_layout.delete"));
+                                focus_ids.push(response.id);
+                                crate::scenario::publish_target("prefs:panel_layout:delete_confirm", response.rect);
+                                if response.clicked() {
+                                    delete = Some(name.clone());
+                                }
+                            });
+                        }
                     }
                     trap_focus(ui, &focus_ids);
                     crate::ui_kit::settings_search::pop_force(ui);
@@ -627,7 +673,11 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
     if let Some(shown) = &shown {
         crate::scenario::publish_rect("prefs:panel_layout:popover", shown.response.rect);
         crate::scenario::publish_rect(
-            if matches!(popup.kind, PopoverKind::Replace { .. }) { "prefs:panel_layout:replace_popover" } else { "prefs:panel_layout:save_popover" },
+            match popup.kind {
+                PopoverKind::Replace { .. } => "prefs:panel_layout:replace_popover",
+                PopoverKind::Delete { .. } => "prefs:panel_layout:delete_popover",
+                PopoverKind::Save { .. } => "prefs:panel_layout:save_popover",
+            },
             shown.response.rect,
         );
     }
@@ -642,6 +692,16 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
             state.source_name = Some(name);
             close = true;
         }
+    }
+    if let Some(name) = delete
+        && run(app, "layout.delete", json!({"name":name}), None)
+    {
+        // The panels stay as they are; a hint must not name a layout that is gone.
+        if state.source_name.as_ref().is_some_and(|source| commands::preset_names_equal(source, &name)) {
+            state.source_name = None;
+        }
+        app.set_status(solidcraft_ui_text::format("ui.panel_layout.deleted", &[("name", &name)]), false);
+        close = true;
     }
     if close {
         egui::Popup::close_id(ui.ctx(), popup_id);

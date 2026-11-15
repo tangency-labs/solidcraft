@@ -1,0 +1,58 @@
+{
+  "en": {
+    "cmd.layout.delete": "Delete Layout",
+    "help.layout.delete": "Delete a layout you saved. Built-in layouts stay, and the panels stay where they are.",
+    "ui.panel_layout.confirm_delete": "Delete “{name}”?",
+    "ui.panel_layout.delete": "Delete",
+    "ui.panel_layout.deleted": "Deleted layout {name}"
+  },
+  "ar": {
+    "cmd.layout.delete": "حذف التخطيط",
+    "help.layout.delete": "حذف تخطيط حفظته. تبقى التخطيطات المدمجة، وتبقى اللوحات في أماكنها.",
+    "ui.panel_layout.confirm_delete": "حذف «{name}»؟",
+    "ui.panel_layout.delete": "حذف",
+    "ui.panel_layout.deleted": "تم حذف التخطيط {name}"
+  },
+  "de": {
+    "cmd.layout.delete": "Layout löschen",
+    "help.layout.delete": "Ein selbst gespeichertes Layout löschen. Eingebaute Layouts bleiben, und die Bereiche bleiben, wo sie sind.",
+    "ui.panel_layout.confirm_delete": "„{name}“ löschen?",
+    "ui.panel_layout.delete": "Löschen",
+    "ui.panel_layout.deleted": "Layout {name} gelöscht"
+  },
+  "he": {
+    "cmd.layout.delete": "מחיקת פריסה",
+    "help.layout.delete": "מחיקת פריסה ששמרת. הפריסות המובנות נשארות, והחלוניות נשארות במקומן.",
+    "ui.panel_layout.confirm_delete": "למחוק את „{name}”?",
+    "ui.panel_layout.delete": "מחיקה",
+    "ui.panel_layout.deleted": "הפריסה {name} נמחקה"
+  },
+  "ja": {
+    "cmd.layout.delete": "レイアウトを削除",
+    "help.layout.delete": "保存したレイアウトを削除します。組み込みのレイアウトは残り、パネルの配置も変わりません。",
+    "ui.panel_layout.confirm_delete": "「{name}」を削除しますか？",
+    "ui.panel_layout.delete": "削除",
+    "ui.panel_layout.deleted": "レイアウト {name} を削除しました"
+  },
+  "ko": {
+    "cmd.layout.delete": "레이아웃 삭제",
+    "help.layout.delete": "저장한 레이아웃을 삭제합니다. 기본 제공 레이아웃은 남고, 패널은 그대로 있습니다.",
+    "ui.panel_layout.confirm_delete": "“{name}”을(를) 삭제할까요?",
+    "ui.panel_layout.delete": "삭제",
+    "ui.panel_layout.deleted": "레이아웃 {name}을(를) 삭제했습니다"
+  },
+  "vi": {
+    "cmd.layout.delete": "Xóa bố cục",
+    "help.layout.delete": "Xóa một bố cục bạn đã lưu. Các bố cục có sẵn vẫn giữ nguyên, và các bảng vẫn ở chỗ cũ.",
+    "ui.panel_layout.confirm_delete": "Xóa “{name}”?",
+    "ui.panel_layout.delete": "Xóa",
+    "ui.panel_layout.deleted": "Đã xóa bố cục {name}"
+  },
+  "zh": {
+    "cmd.layout.delete": "删除布局",
+    "help.layout.delete": "删除你保存的布局。内置布局会保留，面板位置也不变。",
+    "ui.panel_layout.confirm_delete": "删除“{name}”？",
+    "ui.panel_layout.delete": "删除",
+    "ui.panel_layout.deleted": "已删除布局 {name}"
+  }
+}

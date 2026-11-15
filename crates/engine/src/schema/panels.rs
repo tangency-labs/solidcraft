@@ -263,6 +263,13 @@ pub struct Apply {
     pub name: String,
     pub expected_revision: Option<u64>,
 }
+/// Delete a layout the user saved. Built-in layouts can't be deleted.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Delete {
+    pub name: String,
+    pub expected_revision: Option<u64>,
+}
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceSelect {
@@ -295,6 +302,13 @@ pub struct ListReply {
 pub struct SaveReply {
     pub name: String,
     pub overwritten: bool,
+    pub state: LayoutReply,
+}
+/// `name` is the deleted layout's name as it was saved. The panels are not moved.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteReply {
+    pub name: String,
     pub state: LayoutReply,
 }
 #[derive(Debug, Serialize, JsonSchema)]

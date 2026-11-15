@@ -10704,6 +10704,104 @@ mod tests {
         assert_eq!(crate::panel_runtime::user_preset_names(&h.app).len(), 64);
     }
 
+    /// A layout window with "Bench setup" saved from collapsed panels, so no built-in matches them.
+    fn layout_page_with_a_saved_layout() -> crate::scenario::Harness {
+        use solidcraft_engine::panels::{LayoutAction, Mutation};
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1100}));
+        h.call("ui.panel_fixture", json!({"preset":"docks","remember":true}));
+        h.frames(2);
+        let section = h.app.panel_runtime().unwrap().layout().layout().sections.first().unwrap().id.clone();
+        h.app
+            .dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::Collapse { section, collapsed: true }] })
+            .unwrap();
+        h.app.run_panel_command("layout.save", &json!({"name":"Bench setup"})).unwrap();
+        h.call("ui.prefs", json!({"open":"Layout","language":"en"}));
+        h.frames(3);
+        h
+    }
+
+    #[test]
+    fn deleting_a_saved_layout_from_its_menu_asks_first_and_keeps_the_panels() {
+        let mut h = layout_page_with_a_saved_layout();
+        let layout = h.app.panel_runtime().unwrap().layout().layout().clone();
+        assert!(crate::scenario::rect_of("prefs:panel_layout:custom").is_none(), "the panels match the saved layout");
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:menu:Bench setup"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:delete"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:panel_layout:delete_popover").is_some(), "Delete asks first");
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:delete_cancel"}})).unwrap();
+        h.frames(2);
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"], "Cancel keeps the layout");
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:menu:Bench setup"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:delete"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:delete_confirm"}})).unwrap();
+        h.frames(3);
+        assert!(crate::panel_runtime::user_preset_names(&h.app).is_empty());
+        assert_eq!(h.app.panel_runtime().unwrap().layout().layout(), &layout, "deleting the applied layout leaves the panels where they are");
+        assert!(crate::scenario::rect_of("prefs:panel_layout:tile:Bench setup").is_none());
+        assert!(crate::scenario::rect_of("prefs:panel_layout:custom").is_some(), "the arrangement now shows as Custom");
+        assert_eq!(h.app.status.clone().map(|(text, ..)| text).as_deref(), Some("Deleted layout Bench setup"));
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(!h.app.prefs_window.shell.open);
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"], "Preferences Cancel brings the deleted layout back");
+    }
+
+    #[test]
+    fn the_delete_key_asks_before_deleting_a_saved_layout_and_ignores_built_ins() {
+        let mut h = layout_page_with_a_saved_layout();
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:tile:Bench setup"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:panel_layout:delete_popover").is_some(), "the Delete key asks first");
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"], "Cancel has the focus, so Enter keeps the layout");
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open, "the first Escape belongs to the confirmation");
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"]);
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:delete_confirm"}})).unwrap();
+        h.frames(3);
+        assert!(crate::panel_runtime::user_preset_names(&h.app).is_empty());
+
+        let builtin = crate::panel_runtime::layout_preferences_view(&h.app).unwrap().entries.into_iter().find(|entry| !entry.user).unwrap().name;
+        h.step(&json!({"click":{"handle":format!("prefs:panel_layout:tile:{builtin}")}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:panel_layout:delete_popover").is_none(), "a built-in layout can't be deleted");
+        assert!(crate::panel_runtime::layout_preferences_view(&h.app).unwrap().entries.iter().any(|entry| entry.name == builtin));
+    }
+
+    #[test]
+    fn delete_with_preferences_open_never_deletes_the_design_selection_behind_it() {
+        let mut h = layout_page_with_a_saved_layout();
+        h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        let body = h.app.session.model.state().bodies.last().unwrap().name.clone();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
+        h.frames(2);
+        // Nothing in Preferences has the keyboard focus, as after a click on a layout tile.
+        for key in ["Delete", "Backspace"] {
+            h.step(&json!({"key":key})).unwrap();
+            h.frames(2);
+        }
+        assert!(h.app.prefs_window.shell.open);
+        assert!(h.app.session.model.state().body(&body).is_some(), "the selected body stays");
+        assert!(h.app.menu.confirm.is_none(), "and nothing asks to delete it");
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"]);
+    }
+
     #[test]
     fn absent_panel_layout_is_held_as_absent_and_cancel_restores_absence() {
         let mut app = SolveApp::new(Default::default(), Default::default());

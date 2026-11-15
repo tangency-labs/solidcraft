@@ -60,6 +60,7 @@ Query replies contain no new host effects.
 | `panel.reset_pair` | `{first,second,expected_revision?}`. Resets adjacent sections to the registered default ratio within intersected bounds. |
 | `panel.native_close` | `{target:{type:"native_host",id:HostId},expected_revision?}`. Native window close redocks its whole section; it does not explicitly close/cancel content. |
 | `layout.save` | `{name,overwrite?:false,expected_revision?}` → `{name,overwritten,state}`. Saves the complete current envelope in the injected catalogue. |
+| `layout.delete` | `{name,expected_revision?}` → `{name,state}`. Deletes a user layout from the injected catalogue. Built-ins return a capability error, unknown names a missing-target error. The panels stay where they are, even when they match the deleted layout. |
 | `layout.apply` | `{name,expected_revision?}`. Applies a named preset to the **current** workspace, rebinding its known layout workspace ID. |
 | `layout.reset` | `{expected_revision?}`. Applies the selected workspace's registered immutable default. User presets and other workspace histories remain. Missing defaults return a capability error. |
 | `layout.get` | `{}` → `{state,workspaces:[{id,title_key,default_preset,has_remembered_layout}]}`. Selection is only `state.layout.workspace`. |
@@ -202,7 +203,7 @@ trailing data, invalid envelope identities and all existing aggregate/node/depth
 limits before a candidate can be published. This seam performs no disk storage.
 
 With application panel preferences enabled, the existing Layout preferences page
-uses these commands for workspace selection, named layout save/apply and reset.
+uses these commands for workspace selection, named layout save/apply/delete and reset.
 Reset changes only the current workspace and keeps the named layout library.
 Preferences Cancel restores the layout and catalogue through runtime admission;
 if restoration is refused, the dialog and its saved baseline stay open. Periodic

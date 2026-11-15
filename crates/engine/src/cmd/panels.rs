@@ -27,6 +27,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         crate::panels::LayoutReply,
         "name, expected_revision?: apply preset to current workspace through retained runtime"
     ),
+    command!(
+        "layout.delete",
+        "delete",
+        "Delete Layout",
+        wire::Delete,
+        wire::DeleteReply,
+        "name, expected_revision?: delete a saved user layout from the injected catalogue; panels stay where they are"
+    ),
     command!("layout.get", "list", "Inspect Layout", wire::Empty, wire::GetReply, "{}: committed state and registered workspace summaries"),
     command!(
         "layout.reset",
