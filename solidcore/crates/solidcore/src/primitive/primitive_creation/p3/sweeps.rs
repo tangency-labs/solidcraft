@@ -465,14 +465,6 @@ impl PrimitiveCreation {
             }
         }
         for slot in curves.iter_mut() {
-            // Not upstream (#17204): a B-spline end within the B-rep's tolerance of the
-            // axis is on it for the body, so its control point is put on the axis
-            let tolerance = a.brep(brep)?.tolerance();
-            if let Some(ended) =
-                spline_ends_on_axis(a.kernel(brep)?, slot.as_ref(), axis_base, axis, tolerance)?
-            {
-                *slot = Some(ended);
-            }
             let curve = slot
                 .as_ref()
                 .ok_or_else(|| SolidError::primitive_missing(OP, "a profile curve"))?;
@@ -559,15 +551,31 @@ impl PrimitiveCreation {
                     let tolerance = a.brep(brep)?.tolerance();
                     let rev = match analytic {
                         Some(surface) => Some(surface),
-                        None => ignored(SurfOfRevolution::create_canonical_off_axis(
-                            a.kernel(brep)?,
-                            curve.clone(),
-                            axis_base,
-                            axis,
-                            false,
-                            tolerance,
-                        ))?
-                        .map(Surface::from),
+                        None => {
+                            // Not upstream (#17204): a B-spline end within the B-rep's
+                            // tolerance of the axis is on it for the body, so the surface
+                            // of revolution turns the curve with that end's control point
+                            // on the axis. A curve the analytic rule above recognised (a
+                            // circular arc's sphere) keeps its own ends: its surface puts
+                            // its poles on the axis itself
+                            let profile = spline_ends_on_axis(
+                                a.kernel(brep)?,
+                                curve,
+                                axis_base,
+                                axis,
+                                tolerance,
+                            )?
+                            .unwrap_or_else(|| curve.clone());
+                            ignored(SurfOfRevolution::create_canonical_off_axis(
+                                a.kernel(brep)?,
+                                profile,
+                                axis_base,
+                                axis,
+                                false,
+                                tolerance,
+                            ))?
+                            .map(Surface::from)
+                        }
                     };
                     let mut success = false;
                     if let Some(surface) = rev {
@@ -710,15 +718,12 @@ impl PrimitiveCreation {
 /// Those of the curve's ends and control points.
 fn spline_ends_on_axis(
     k: &Kernel,
-    curve: Option<&Curve>,
+    curve: &Curve,
     axis_base: Point3,
     axis: Vec3,
     tolerance: f64,
 ) -> Result<Option<Curve>> {
     use crate::nurbs::b_spline_curve::p2::ControlPointForm;
-    let Some(curve) = curve else {
-        return Ok(None);
-    };
     let CurveKind::BSpline(spline) = curve.kind() else {
         return Ok(None);
     };
