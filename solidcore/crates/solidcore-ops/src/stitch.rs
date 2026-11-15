@@ -1,5 +1,6 @@
 //! Sewing and merging: a body's faces sewn along the vertices and edges that coincide within a
-//! tolerance, then oriented; and faces merged across the edges between them.
+//! tolerance, then oriented; several bodies gathered into one and sewn ([`gather`], [`sew`]);
+//! the edges one face uses ([`open_edges`]); and faces merged across the edges between them.
 //!
 //! A stitch is `SmBrep::StitchFaces` at the caller's tolerance, once, then
 //! `SmBrep::OrientTrimmedSurfaces`: outward where the faces close into a solid, else only made to
@@ -33,10 +34,12 @@ use solidcore::mass::integrator::properties::region_material;
 use solidcore::topology::brep::p1 as bl;
 use solidcore::topology::brep::p2::{is_manifold_solid, ArenaNotifyState};
 use solidcore::topology::brep::p3::{
-    brep_copy, delete_face, orient_trimmed_surfaces, with_kernel_callbacks, DeleteFaceOptions,
+    brep_copy, delete_face, merge_brep, notify_serial, orient_trimmed_surfaces, topology_ref,
+    with_kernel_callbacks, DeleteFaceOptions,
 };
 use solidcore::topology::brep::p4::stitch_faces;
 use solidcore::topology::brep::p5::remove_topological_edges_and_vertices;
+use solidcore::topology::edgeuse::p1::edge_is_lamina;
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{edge, Brep, EdgeId, FaceId, FaceuseId, RegionId};
@@ -44,7 +47,7 @@ use solidcore::topology::{edge, Brep, EdgeId, FaceId, FaceuseId, RegionId};
 use crate::body::{finish, Body, Expect};
 use crate::error::status;
 use crate::order::{self, Order};
-use crate::session::run_taking;
+use crate::session::{read_body, run_on, run_taking};
 use crate::{Error, Result};
 
 type Out<T> = std::result::Result<T, Error>;
@@ -93,6 +96,88 @@ pub fn stitch(body: Body, tolerance: f64) -> Result<(Body, bool)> {
         let closed = lamina == 0 && is_manifold_solid(&b)?;
         Ok(Ok((Body::new(b), closed)))
     })?
+}
+
+/// Copies of `bodies` put in one body, unsewn: the first copied, the others merged into it
+/// ([`merge_brep`]). The bodies are unchanged; a body given twice is taken once.
+///
+/// # Errors
+/// [`Error::Argument`] for no body; [`Error::Empty`]; the kernel's.
+pub fn gather(bodies: &[&Body]) -> Result<Body> {
+    let inputs: Vec<(&'static str, &Body)> = bodies.iter().map(|b| ("brep", *b)).collect();
+    let made = run_on("stitch::gather", &inputs, |k| {
+        let Some((first, rest)) = bodies.split_first() else {
+            return Ok(Err(Error::Argument));
+        };
+        let mut gathered = {
+            let g = first.lock();
+            brep_copy(k, &g)?
+        };
+        let mut taken: Vec<&Body> = vec![*first];
+        for body in rest {
+            if taken.iter().any(|t| std::ptr::eq(*t, *body)) {
+                continue;
+            }
+            taken.push(*body);
+            let mut copy = {
+                let g = body.lock();
+                brep_copy(k, &g)?
+            };
+            let serial = notify_serial(&mut k.context, &mut copy)?;
+            let source_key = move |e| topology_ref(serial, e);
+            with_kernel_callbacks(k, &mut gathered, |k, g, env| {
+                merge_brep(k, env, g, &copy, &source_key, None, None, true)
+            })?;
+        }
+        gathered.refresh_cached_topology();
+        finish(k, gathered, Expect::FACES)
+    })??;
+    Ok(Body::new(made))
+}
+
+/// Several bodies sewn into one ([`sew`]).
+#[derive(Debug)]
+pub struct Sewn {
+    /// The sewn body.
+    pub body: Body,
+    /// Whether it closed into a solid ([`stitch`]).
+    pub closed: bool,
+    /// Its edges still used by one face, as record edge indices of `body` ([`open_edges`]).
+    pub open_edges: Vec<usize>,
+}
+
+/// Copies of `bodies` gathered into one body ([`gather`]) and sewn at `tolerance` ([`stitch`]),
+/// with the edges left open. The bodies are unchanged.
+///
+/// # Errors
+/// Those of [`gather`], [`stitch`] and [`open_edges`].
+pub fn sew(bodies: &[&Body], tolerance: f64) -> Result<Sewn> {
+    let (body, closed) = stitch(gather(bodies)?, tolerance)?;
+    let open_edges = open_edges(&body)?;
+    Ok(Sewn {
+        body,
+        closed,
+        open_edges,
+    })
+}
+
+/// The record edge indices (in [`Body::to_record`]'s order) of `body`'s edges used by one face
+/// once (`SmEdge::IsLamina`), ascending: the edges a sewing leaves open. An edge a face uses
+/// twice (a seam) and an edge of two or more faces are not open.
+///
+/// # Errors
+/// Those of [`Body::to_record`]; the kernel's.
+pub fn open_edges(body: &Body) -> Result<Vec<usize>> {
+    let (_, order) = body.to_record()?;
+    read_body("stitch::open_edges", body, |_, b| {
+        let mut open = Vec::new();
+        for (i, &e) in order.edges.iter().enumerate() {
+            if edge_is_lamina(b, e)? {
+                open.push(i);
+            }
+        }
+        Ok(open)
+    })
 }
 
 /// Whether region `r` (a side's, `None` for a side with no region: void) is material
