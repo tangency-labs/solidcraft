@@ -69,6 +69,7 @@ use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletBrep, FilletCornerId, FilletCornerType, FilletSolverId, FilletVertexType,
 };
 use crate::blend::fillet_geom::p3::SplitCorners;
+use crate::blend::fillet_geom::p4::rail_crossing_nearest;
 use crate::blend::fillet_geom::p5::FilletEdgeContext;
 use crate::blend::fillet_section::section::OperationScope;
 use crate::blend::fillet_solver::curve_blend_sih::MakeCurveBlendSih;
@@ -83,6 +84,7 @@ use crate::blend::fillet_standard_solver::p1::{
 use crate::curve::curve_cache::CurveCache;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::{ids, Attribute, AttributeHandle, AttributeStore, Behavior};
+use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::heal::stitch::p1::{
@@ -260,6 +262,21 @@ impl SolverObject {
             Self::ConstantDistance(solver) => FilletSolverOps::solver_type(solver.as_ref()),
             Self::VariableRadius(solver) => FilletSolverOps::solver_type(solver.as_ref()),
             Self::SurfaceSurface(solver) => FilletSolverOps::solver_type(solver.as_ref()),
+        }
+    }
+
+    /// Not upstream (#15906): the fixed offset distances of a constant-radius solver's two
+    /// surfaces ([`ConstantRadiusFs::oriented_offsets`]); `None` for a solver whose offsets
+    /// change along the blend (constant distance: its offset is solved at each section;
+    /// variable radius: its law's).
+    ///
+    /// # Errors
+    /// Those of [`ConstantRadiusFs::oriented_offsets`].
+    pub fn constant_offsets(&self) -> Result<Option<[f64; 2]>> {
+        match self {
+            Self::ConstantRadius(solver) => Ok(Some(solver.oriented_offsets()?)),
+            Self::SurfaceSurface(solver) => Ok(Some(solver.base.oriented_offsets()?)),
+            Self::ConstantDistance(_) | Self::VariableRadius(_) => Ok(None),
         }
     }
 
@@ -578,6 +595,13 @@ impl crate::blend::blend_corner::swept::SweptSolvers for SweptSessionSolvers<'_>
             .and_then(Option::as_ref)
             .map(SolverObject::base)
             .ok_or_else(|| invalid("swept turn solver is not live"))
+    }
+    fn constant_offsets(&self, id: FilletSolverId) -> Result<Option<[f64; 2]>> {
+        self.solvers
+            .get(id.0 as usize)
+            .and_then(Option::as_ref)
+            .ok_or_else(|| invalid("swept turn solver is not live"))?
+            .constant_offsets()
     }
 }
 
@@ -2088,7 +2112,7 @@ impl<'target> FilletSession<'target> {
         // (not upstream, solidcore #2541) a lone round's solver takes the rims it may end
         // on before the corners trace it
         self.end_round_on_outline(k)?;
-        // (not upstream) a lone round rolls over its faces' smooth far edges, the whole length
+        // (not upstream) a round rolls over its faces' smooth far edges, the whole length
         self.roll_over_tangent_edges(k)?;
         let SessionObjects {
             target,
@@ -2298,7 +2322,6 @@ impl<'target> FilletSession<'target> {
                         &lookup,
                         crate::math::rad_to_deg(corner.tangency_tol_radians),
                         set_back_fills,
-                        false,
                     );
                     match classified {
                         Err(_) => {
@@ -2799,7 +2822,7 @@ impl<'target> FilletSession<'target> {
     /// (`blend_edges_stopping`, then `corners`), and the goldens runner's
     /// `setback_fillet_edges`. Where the corner is the Setback it takes the N x N
     /// corner's place, with its fill asked as [`Self::set_set_back_fill`] asks one; elsewhere
-    /// (beside a curved face, no setback set) it stays the N x N corner.
+    /// (a corner `classify_setback` does not take, no setback set) it stays the N x N corner.
     ///
     /// # Errors
     /// Those of the classification.
@@ -2857,7 +2880,6 @@ impl<'target> FilletSession<'target> {
                 &lookup,
                 crate::math::rad_to_deg(corner.tangency_tol_radians),
                 &asked,
-                true,
             )?;
             if class.event == crate::blend::blend_corner::BlendCornerEvent::Setback {
                 *corner = setback_corner_of(corner, class.order);
@@ -3274,6 +3296,15 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             if crate::blend::blend_corner::end::end_awaits_rollover(
                 k, target, pseudo, corner, &lookup, rolls_over,
             )? {
+                // in the adjusted corner's pass the rollover has run: an End that would wait
+                // again would be left without edges, its cap built on none (#15906). A stage
+                // failure with no reason the kernel names (a defect), built on purpose
+                if executive.rollover_adjusting {
+                    return Err(SolidError::blend(
+                        "SmBlendCorner::CalcEndEdgeGeom",
+                        crate::error::blend::BlendFailure::StageFailed,
+                    ));
+                }
                 return Ok(());
             }
             let refusal = crate::blend::blend_corner::end::calc_end_edge_geom(
@@ -3313,15 +3344,8 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             }
         } else {
             // WR-674: a round's end where its edge runs on tangentially is left open too.
-            let tangent_ends = k.fixes.fillet_round_ends_at_tangent_continuation;
-            let dropped = corner.drop_end_rib(
-                k,
-                target,
-                pseudo,
-                cliff_overflow,
-                tangent_ends,
-                &mut note_open_end,
-            )?;
+            let dropped =
+                corner.drop_end_rib(k, target, pseudo, cliff_overflow, true, &mut note_open_end)?;
             executive.open_ends.append(&mut open_ends);
             if dropped == EndRibDrop::GlobalMerge {
                 executive.options.global_merge = true;
@@ -4249,9 +4273,10 @@ fn band_rails(
                 // The rail runs on past its ends (the surfaces are not trimmed yet),
                 // as far as a mitre at a corner needs and beyond: the band is the
                 // rail's part between the vertices that end it, where the corners have
-                // placed them (an end no corner has placed is the rail's own; a rail
-                // whose ends are one vertex is closed and whole). The fork's
-                // tangency-labs/smlib@d548305 (WR-649).
+                // placed them, or, at an End at a smooth vertex, where its cap will (any
+                // other end no corner has placed is the rail's own; a rail whose ends are
+                // one vertex is closed and whole). The fork's tangency-labs/smlib@d548305
+                // (WR-649).
                 let ivl = curve.natural_interval();
                 let pseudo = this.pseudo.brep();
                 let prim = eu::primary_edgeuse(pseudo, rail)?
@@ -4270,7 +4295,28 @@ fn band_rails(
                 let mut t_ends = [ivl.min(), ivl.max()];
                 if end0 != end1 {
                     for (t_end, end) in t_ends.iter_mut().zip([end0, end1]) {
-                        if !this.pseudo.fillet_vertex(end)?.is_processed() {
+                        let fv = this.pseudo.fillet_vertex(end)?;
+                        if !fv.is_processed() {
+                            // An End at a smooth vertex places its rails' ends on its cap
+                            // only in the corners' second pass, after this check. Where the
+                            // face a rail rolls on runs on past that vertex, its run-on would
+                            // be taken for band: its end is the rail's crossing with the cap
+                            // nearest the vertex, as that pass finds it.
+                            let Some(id) = fv.fillet_corner() else {
+                                continue;
+                            };
+                            let corner = CornerLookup::table(&this.corners).corner(id)?;
+                            let (Some(cap), Some(vertex)) =
+                                (corner.end_cap.as_ref(), corner.filleted_vertex())
+                            else {
+                                continue;
+                            };
+                            let near = crate::topology::vertex::point(this.target, vertex)?;
+                            if let Some((t, _)) =
+                                rail_crossing_nearest(k, &curve, cap, near, base.approx_tol_3d)?
+                            {
+                                *t_end = t;
+                            }
                             continue;
                         }
                         let at = crate::topology::vertex::point(pseudo, end)?;
@@ -5376,6 +5422,18 @@ impl RailTrimAccess<FilletObject> for SessionObjects<'_> {
             pseudo.trim_rail_curves_with_solver(k, geometry, id, actual_solver, target)
         })
     }
+    fn rails_rolled_on_their_faces(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+        executive: &mut FilletExecutive<FilletObject>,
+    ) -> Result<bool> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let lone = executive.solvers.len() == 1;
+        self.rolled_rails_on_their_faces(k, id, lone)
+    }
 }
 
 impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
@@ -5635,9 +5693,35 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         solvers: &[FilletObject],
     ) -> Result<bool> {
         use crate::geom::global_solver::SolverOperation;
-        use crate::intersect::point_class::{PointClassType, PointClassification};
         let (rails, edges, tol) = band_rails(self, k, solvers)?;
         let apart = 10.0 * tol;
+        // Pruning by boxes (#16645: the pair loop is quadratic in the blends). A pair
+        // `(a, b)` can refuse only through a sample `p` of rail `a`'s kept part for which,
+        // with `e` on edge `b` and `r` on rail `b`, `|p - e| < |e - r|`. So `p` lies
+        // within `|e - r|` of `e`, and `|e - r|` is at most the diagonal of the union of
+        // a box holding edge `b` and a box holding rail `b`. A box holding rail `a`
+        // (so `p`) that is separated from edge `b`'s box grown by that diagonal (plus a
+        // margin) on some axis leaves every `p` farther than the diagonal from every
+        // `e`, so no sample of the pair can pass the band test. The boxes are
+        // guaranteed bounds, never sampled extremes: the control polygon's box of a
+        // B-spline (or line) with positive weights holds the whole curve (the convex
+        // hull property), and a curve of any other kind is not pruned.
+        let margin = 100.0 * tol + apart;
+        let mut edge_boxes: Vec<Option<Extent3d>> = Vec::new();
+        for &(edge, _) in &edges {
+            let e = self.target.edge(edge)?;
+            edge_boxes.push(e.curve.as_ref().and_then(control_hull_box));
+        }
+        let rail_boxes: Vec<Vec<Option<Extent3d>>> = rails
+            .iter()
+            .map(|own| {
+                own.iter()
+                    .map(|(_, curve, _)| control_hull_box(curve))
+                    .collect()
+            })
+            .collect();
+        // faces whose guards main runs at their first sample, kept as it ran them
+        let mut guarded: BTreeSet<FaceId> = BTreeSet::new();
         for (a, &(edge_a, ends_a)) in edges.iter().enumerate() {
             for (b, &(edge_b, ends_b)) in edges.iter().enumerate() {
                 if a == b || edge_a == edge_b {
@@ -5646,6 +5730,17 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                 if ends_a.iter().any(|v| ends_b.contains(v)) {
                     continue; // a corner trims them where they meet
                 }
+                let (Some(rails_a), Some(rails_b)) = (rails.get(a), rails.get(b)) else {
+                    continue;
+                };
+                // only rails on a face the two blends share can refuse
+                if !rails_a
+                    .iter()
+                    .any(|(fa, _, _)| rails_b.iter().any(|(fb, _, _)| fa == fb))
+                {
+                    continue;
+                }
+                let edge_box_b = edge_boxes.get(b).and_then(|x| x.as_ref());
                 let edge_curve_b = self
                     .target
                     .edge(edge_b)?
@@ -5655,38 +5750,47 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                 let edge_ivl_b = self.target.edge(edge_b)?.interval;
                 let edge_start_b = edge_curve_b.evaluate_point(k, edge_ivl_b.min())?;
                 let edge_end_b = edge_curve_b.evaluate_point(k, edge_ivl_b.max())?;
-                let (Some(rails_a), Some(rails_b)) = (rails.get(a), rails.get(b)) else {
-                    continue;
-                };
-                for (face_a, curve_a, kept_a) in rails_a {
-                    for (face_b, curve_b, _) in rails_b {
+                for (ia, (face_a, curve_a, kept_a)) in rails_a.iter().enumerate() {
+                    for (ib, (face_b, curve_b, _)) in rails_b.iter().enumerate() {
                         if face_a != face_b {
                             continue;
+                        }
+                        if guarded.insert(*face_a) {
+                            // what main's first classification of a sample on this face
+                            // refuses before it looks at the sample: the face's own
+                            // hostile-coordinate check and its tolerance
+                            crate::query::face::p3::check_face_coordinates(
+                                k,
+                                self.target,
+                                *face_a,
+                                "query::face::p1::point_3d_classify",
+                            )?;
+                            crate::topology::face::p2::tolerance(self.target, *face_a)?;
+                        }
+                        if let (Some(eb), Some(Some(box_a)), Some(Some(box_b))) = (
+                            edge_box_b,
+                            rail_boxes.get(a).and_then(|r| r.get(ia)),
+                            rail_boxes.get(b).and_then(|r| r.get(ib)),
+                        ) {
+                            let reach = eb.union(box_b).size().length() + margin;
+                            let mut grown = *eb;
+                            grown.expand_absolute(reach);
+                            if box_a.are_disjoint(&grown, 0.0) {
+                                continue; // no sample can fall inside the band
+                            }
                         }
                         let ivl_a = *kept_a;
                         let ivl_b = curve_b.natural_interval();
                         for s in 1..16_u32 {
                             let p =
                                 curve_a.evaluate_point(k, ivl_a.evaluate(f64::from(s) / 16.0))?;
-                            let face_tol = crate::geom::tol::zone_tol3d(
-                                k,
-                                crate::topology::face::p2::tolerance(self.target, *face_a)?,
-                            );
-                            let mut on = PointClassification::<EntityRef>::new(face_tol);
-                            crate::query::face::p1::point_3d_classify(
-                                k,
-                                self.target,
-                                *face_a,
-                                p,
-                                face_tol,
-                                true,
-                                &mut on,
-                                crate::query::face::p1::Point3dClassifyOptions::default(),
-                            )?;
-                            if on.point_class() == PointClassType::Unknown {
-                                continue; // off the face
-                            }
-                            let on_edge = edge_curve_b.drop_point(
+                            // Main classifies the sample first and drops a sample off its
+                            // face before any of the geometry below. The classification is
+                            // the costly step, so the geometry runs first; where it fails
+                            // (an error main would only reach for a sample on the face),
+                            // the sample is classified at once, as main did: off the face
+                            // it is dropped, on it the error is main's.
+                            let on_edge = match edge_curve_b.drop_point(
                                 k,
                                 &edge_ivl_b,
                                 p,
@@ -5694,8 +5798,16 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                 crate::math::BIG_DOUBLE,
                                 None,
                                 SolverOperation::Minimize,
-                            )?;
-                            let on_rail = curve_b.drop_point(
+                            ) {
+                                Ok(v) => v,
+                                Err(error) => {
+                                    if sample_off_face(k, self.target, *face_a, p)? {
+                                        continue;
+                                    }
+                                    return Err(error);
+                                }
+                            };
+                            let on_rail = match curve_b.drop_point(
                                 k,
                                 &ivl_b,
                                 p,
@@ -5703,7 +5815,15 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                 crate::math::BIG_DOUBLE,
                                 None,
                                 SolverOperation::Minimize,
-                            )?;
+                            ) {
+                                Ok(v) => v,
+                                Err(error) => {
+                                    if sample_off_face(k, self.target, *face_a, p)? {
+                                        continue;
+                                    }
+                                    return Err(error);
+                                }
+                            };
                             let t = on_edge.parameter;
                             if !on_edge.success
                                 || !on_rail.success
@@ -5712,7 +5832,18 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             {
                                 continue; // beside the band, not across it
                             }
-                            let e = edge_curve_b.evaluate_point(k, t)?;
+                            let (e, r) = match (
+                                edge_curve_b.evaluate_point(k, t),
+                                curve_b.evaluate_point(k, on_rail.parameter),
+                            ) {
+                                (Ok(e), Ok(r)) => (e, r),
+                                (Err(error), _) | (_, Err(error)) => {
+                                    if sample_off_face(k, self.target, *face_a, p)? {
+                                        continue;
+                                    }
+                                    return Err(error);
+                                }
+                            };
                             // A constrained closest point can return an endpoint one
                             // parameter ulp inside the interval. It is still beside
                             // the band: testing only t would extend the band's chord
@@ -5724,7 +5855,6 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             {
                                 continue;
                             }
-                            let r = curve_b.evaluate_point(k, on_rail.parameter)?;
                             let mut chord = e - r;
                             let width = chord.length();
                             if !matches!(
@@ -5742,6 +5872,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             if from_rail > apart
                                 && from_rail < width - apart
                                 && (p - e).length() < width
+                                && !sample_off_face(k, self.target, *face_a, p)?
                             {
                                 return Ok(false);
                             }
@@ -5752,6 +5883,55 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         }
         Ok(true)
     }
+}
+
+/// Whether `p` lies off `face` (the band check's classification of a sample).
+fn sample_off_face(
+    k: &Kernel,
+    target: &mut Brep,
+    face: FaceId,
+    p: crate::math::Point3,
+) -> Result<bool> {
+    use crate::intersect::point_class::{PointClassType, PointClassification};
+    let face_tol =
+        crate::geom::tol::zone_tol3d(k, crate::topology::face::p2::tolerance(target, face)?);
+    let mut on = PointClassification::<EntityRef>::new(face_tol);
+    crate::query::face::p1::point_3d_classify(
+        k,
+        target,
+        face,
+        p,
+        face_tol,
+        true,
+        &mut on,
+        crate::query::face::p1::Point3dClassifyOptions::default(),
+    )?;
+    Ok(on.point_class() == PointClassType::Unknown)
+}
+
+/// The box of a curve's control polygon when that holds the whole curve for certain: a
+/// B-spline or line whose points are finite and whose weights, if rational, are positive
+/// (the convex hull property). Any other curve has none.
+fn control_hull_box(curve: &crate::curve::curve::Curve) -> Option<Extent3d> {
+    use crate::curve::curve::CurveKind;
+    let (points, weights) = match curve.kind() {
+        CurveKind::BSpline(c) => c.control_polygon().ok()?,
+        CurveKind::Line(l) => l.base_with_nurb().ok()?.control_polygon().ok()?,
+        _ => return None,
+    };
+    if weights.iter().any(|w| !(*w > 0.0 && w.is_finite())) {
+        return None;
+    }
+    let mut it = points.iter();
+    let first = *it.next()?;
+    let mut hull = Extent3d::from_point(first);
+    for &p in std::iter::once(&first).chain(it) {
+        if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
+            return None;
+        }
+        hull.add_point(p);
+    }
+    Some(hull)
 }
 
 impl SolverLoadingAccess<FilletObject> for SessionObjects<'_> {
@@ -7376,6 +7556,31 @@ mod tests {
     use crate::topology::brep::p8::{create_planar_face_with_3d_curves, FaceBuildEnv};
     use crate::topology::loopuse;
     use crate::topology::topology_traverser::Marks;
+
+    /// Only the constant-radius solvers have fixed offsets an End's rail end can be solved
+    /// with (#15906): a constant-distance solver solves its offset at each section and a
+    /// variable-radius one takes it from its law.
+    #[test]
+    fn only_constant_radius_solvers_have_constant_offsets() {
+        use crate::blend::fillet_standard_solver::p1::{
+            CurveBasedFs, FilletLawKind, VariableRadiusFs,
+        };
+        let constant_distance = SolverObject::ConstantDistance(Box::new(ConstantDistanceFs {
+            solver: FilletSolver::new(1e-6, 0.5, 0.03),
+            distance: 2.0,
+        }));
+        assert_eq!(constant_distance.constant_offsets().unwrap(), None);
+        let variable = SolverObject::VariableRadius(Box::new(VariableRadiusFs {
+            curve_based: CurveBasedFs::new(1e-6, 0.5, 0.03),
+            law: FilletLaw::new(FilletLawKind::Linear {
+                start_radius: 1.0,
+                end_radius: 2.0,
+            }),
+            law_orientation: false,
+            law_interval: crate::geom::extent1d::Extent1d::from_min_max(0.0, 1.0),
+        }));
+        assert_eq!(variable.constant_offsets().unwrap(), None);
+    }
 
     /// An empty edge list is a typed refusal of the value, with the status of the bare
     /// `SM_ERR_INVALID_INPUT` it replaced (#13790), for every prepare that checks it.

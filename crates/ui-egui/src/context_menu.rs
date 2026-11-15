@@ -88,6 +88,10 @@ pub enum Target {
     Joint {
         id: u64,
     },
+    /// A motion link under the browser's Joints folder, as `joint.list` numbers them (#6825).
+    Link {
+        index: usize,
+    },
     /// A command (toolbar button, panel drop-down row, S box row).
     ToolbarCommand {
         id: String,
@@ -104,7 +108,7 @@ pub enum Target {
     },
     /// The workspace switcher.
     Workspace,
-    /// The view gizmo (axes, cube or a custom body) at the viewport's corner.
+    /// The view gizmo (axes or a custom body) at the viewport's corner.
     ViewGizmo,
     /// The Named Views folder, and one view (saved or standard) in it.
     NamedViews,
@@ -378,6 +382,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::ViewGizmo => crate::view_gizmo::menu_items(app),
         Target::Section => crate::browser::section_items(app),
         Target::Joint { id } => joint_items(app, *id),
+        Target::Link { index } => link_items(app, *index),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
         Target::Quick => crate::quick_menu::items(app),
@@ -967,6 +972,19 @@ fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::sep(),
         // Hiding a joint hides only its glyph: it still constrains and moves the parts.
         act("browser.visibility", "Show/Hide", "eye").key("V").with(json!({ "joints": joints, "visible": hidden })),
+    ]
+}
+
+/// The menu of a motion link's browser row: the Edit dialog opens on the link's kind with its
+/// current values, and Delete runs `joint.delete` with the link's number (#6825).
+fn link_items(app: &SolveApp, index: usize) -> Vec<Item> {
+    if index >= app.session.doc.assembly.links.len() {
+        return Vec::new();
+    }
+    vec![
+        act("ui.editLink", "Edit Link", "edit").with(json!({ "link": index })),
+        Item::sep(),
+        cmd(app, "joint.delete", "Delete").key("Del").with(json!({ "link": index })),
     ]
 }
 
@@ -1957,6 +1975,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 }
             }
         }
+        "ui.editLink" => {
+            if let Some(index) = p.get("link").and_then(Value::as_u64).and_then(|i| usize::try_from(i).ok())
+                && let Some(d) = crate::dialogs_assembly::edit_link(app, index)
+            {
+                app.tool = None;
+                app.dialog = Some(d);
+            }
+        }
         "ui.newView" => drop(crate::browser::save_view(app, None)),
         "ui.restoreView" => {
             if let Some(v) = p.get("view").and_then(Value::as_str) {
@@ -2377,15 +2403,7 @@ fn pick_body(sel: &Sel) -> Option<&str> {
 /// own or through an occurrence: the menu is then about the bodies, and the right-click leaves
 /// the selection alone (#5849).
 fn in_selection(app: &SolveApp, sel: &Sel) -> bool {
-    if context_target_selected(&app.session.selection, sel) {
-        return true;
-    }
-    let Some(body) = pick_body(sel) else { return false };
-    app.session.selection.iter().any(|x| match x {
-        Sel::Body { name } => name == body,
-        Sel::Occurrence { path } => app.session.occurrence_bodies(path, true).is_ok_and(|b| b.iter().any(|n| n == body)),
-        _ => false,
-    })
+    context_target_selected(&app.session.selection, sel) || pick_body(sel).is_some_and(|body| crate::selection::holds_body(&app.session, body))
 }
 
 /// Open the viewport menu at a screen position. A right-click on something not selected
@@ -2516,6 +2534,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
             component(*id) && ["bodies", "sketches", "construction"].contains(&folder.as_str()) && crate::browser::scope_shows(app, scope, *id)
         }
         Target::Joint { id } => doc.assembly.joints.iter().any(|j| j.id == *id),
+        Target::Link { index } => *index < doc.assembly.links.len(),
         Target::ToolbarCommand { id } => solidcraft_engine::find_command(id).is_some(),
         Target::NamedView { name } => {
             doc.named_views.iter().any(|v| v.name == *name) || crate::browser::STANDARD_VIEWS.iter().any(|(label, _)| label == name)
@@ -2750,7 +2769,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.menu.pending = None;
         if target == Target::Viewport { open(app, at, crate::tool_modifiers::Held::default()) } else { open_for(app, at, target) }
     }
-    crate::browser::dims_overlay(app, ctx);
     track_hold(app, ctx);
     show_rename(app, ctx);
     crate::design_properties::show_object(app, ctx);

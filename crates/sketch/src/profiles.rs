@@ -8,6 +8,7 @@
 //! rectangle with a hole, and the disc.
 
 use solidcraft_geom::prelude::*;
+use std::collections::HashSet;
 use std::f64::consts::TAU;
 use std::sync::{Arc, OnceLock};
 
@@ -37,6 +38,22 @@ const ON_CARRIER_TOL: f64 = MERGE_TOL * 0.1;
 /// one direction, so that their curvature says which turns first. Curves the solver holds
 /// tangent differ by about 1e-7 there.
 const TANGENT_ANGLE_TOL: f64 = 1e-6;
+
+/// Whether two pieces leaving one corner `angle` radians apart, with curvatures `dk` apart and
+/// the shorter `reach` mm long, leave it the same way, so that curvature orders them: their
+/// tangents are within [`TANGENT_ANGLE_TOL`], or the bend crosses them back within
+/// [`TANGENT_JOIN_TOL`] of the corner and within both pieces. An end joined that far along a
+/// tangent tilts an arc's tangent by about that over its radius (7e-6 rad for 1e-4 mm on a
+/// radius of 15).
+fn leave_same_way(angle: f64, dk: f64, reach: f64) -> bool {
+    angle.abs() <= TANGENT_ANGLE_TOL.max(dk.abs() * reach.clamp(0.0, TANGENT_JOIN_TOL) * 0.5)
+}
+
+/// A piece's chord, the length [`leave_same_way`] gives the bend to cross back within.
+fn chord(s: &Seg2) -> f64 {
+    s.start().dist(s.end())
+}
+
 const MAX_EDGES: usize = 50_000;
 
 /// A closed region usable by features, with the ids of the curves bounding it.
@@ -423,14 +440,26 @@ fn join_point(a: Seg2, b: Seg2, tol: f64) -> Option<Vec2> {
             let near = (a.end() + b.start()) * 0.5;
             Some(center + Vec2::from_angle((near - center).angle()) * radius)
         }
-        (Seg2::Arc { center, radius, .. }, Seg2::Arc { center: c2, radius: r2, .. }) => intersections_within(
-            &Shape::Round { c: center, r: radius, start: 0.0, sweep: TAU },
-            &Shape::Round { c: c2, r: r2, start: 0.0, sweep: TAU },
-            tol,
-        )
-        .into_iter()
-        .filter(|p| p.dist((a.end() + b.start()) * 0.5) <= tol * 2.0)
-        .min_by(|p, q| p.dist((a.end() + b.start()) * 0.5).total_cmp(&q.dist((a.end() + b.start()) * 0.5))),
+        (Seg2::Arc { center, radius, .. }, Seg2::Arc { center: c2, radius: r2, .. }) => {
+            let mid = (a.end() + b.start()) * 0.5;
+            // Two arcs whose ends both lie on both circles meet there: keep that point. Where the
+            // circles touch tangentially (an arc leaving another's end along its tangent, as two
+            // corner arcs of one outline do) their intersection moves along the tangent by about
+            // sqrt(2 * radius * gap) for a gap between them, 3e-5 mm for a 1e-9 mm round-off, and
+            // trimming both arcs there moved the outline's corner off the sketch's point.
+            let on_a = center + Vec2::from_angle((mid - center).angle()) * radius;
+            if (on_a.dist(c2) - r2).abs() <= ON_CARRIER_TOL && on_a.dist(mid) <= ON_CARRIER_TOL {
+                return Some(on_a);
+            }
+            intersections_within(
+                &Shape::Round { c: center, r: radius, start: 0.0, sweep: TAU },
+                &Shape::Round { c: c2, r: r2, start: 0.0, sweep: TAU },
+                tol,
+            )
+            .into_iter()
+            .filter(|p| p.dist(mid) <= tol * 2.0)
+            .min_by(|p, q| p.dist(mid).total_cmp(&q.dist(mid)))
+        }
         _ => None,
     }
 }
@@ -626,6 +655,35 @@ fn merge_nearby_endpoints(sk: &Sketch, endpoints: &[(usize, usize)], groups: &mu
             let b_is_unique_nearest = nearest.get(&b).is_some_and(|(_, closest)| *closest == Some(a));
             if a_is_unique_nearest && b_is_unique_nearest {
                 union(groups, a, b);
+            }
+        }
+        // A third end at a corner (a line's end and two caps' arcs leaving it along the line) is
+        // nobody's unique nearest end, and left out it cuts the other two curves a hair from the
+        // corner. When every end it could join is already one corner, it joins that corner; an
+        // end near two separate corners still stays open.
+        let mut candidates = std::collections::BTreeMap::<usize, Vec<usize>>::new();
+        for &(a, b) in joins.keys() {
+            if !connected_endpoints.contains(&(a, b)) {
+                candidates.entry(a).or_default().push(b);
+                candidates.entry(b).or_default().push(a);
+            }
+        }
+        for _ in 0..4 {
+            let mut joined = false;
+            for (&point, others) in &candidates {
+                if others.len() < 2 {
+                    continue;
+                }
+                let root = find(groups, point);
+                let mut roots = others.iter().map(|&o| find(groups, o));
+                let Some(first) = roots.next() else { continue };
+                if first != root && roots.all(|r| r == first) {
+                    union(groups, point, first);
+                    joined = true;
+                }
+            }
+            if !joined {
+                break;
             }
         }
     }
@@ -826,8 +884,42 @@ fn find_profiles_bounded(sk: &Sketch, max_edges: usize) -> Vec<Profile> {
     search(sk, max_edges, true, true).profiles
 }
 
+type BezierDefinition = (u8, Vec<(u64, u64)>);
+
+/// Exact single-span control-spline data, independent of direction and point IDs. Other spline
+/// modes can depend on knots, weights or handles; multi-span conversion can round differently
+/// on reversal. Keep those unchanged, and never infer duplicates from sampled chords.
+fn bezier_definition(sk: &Sketch, kind: &CurveKind) -> Option<BezierDefinition> {
+    let CurveKind::Spline { pts, control: true, degree, periodic: false, nurbs: None, handles } = kind else { return None };
+    if !handles.is_empty() || !(1..=MAX_BEZIER_DEGREE).contains(&usize::from(*degree)) || pts.len() != usize::from(*degree) + 1 {
+        return None;
+    }
+    let bits = |v: f64| if v == 0.0 { 0 } else { v.to_bits() };
+    let mut points: Vec<(u64, u64)> = pts
+        .iter()
+        .map(|i| {
+            let p = sk.point(*i)?;
+            p.is_finite().then(|| (bits(p.x), bits(p.y)))
+        })
+        .collect::<Option<_>>()?;
+    if points.iter().rev().cmp(points.iter()).is_lt() {
+        points.reverse();
+    }
+    Some((*degree, points))
+}
+
 fn search(sk: &Sketch, max_edges: usize, split: bool, cached: bool) -> ProfileSearch {
-    let curves: Vec<usize> = sk.curves.iter().enumerate().filter(|(_, c)| !c.construction && !c.centerline && !c.infinite).map(|(i, _)| i).collect();
+    // Repeated SVG outlines contribute one graph boundary. Keep the first curve's identity,
+    // and retain all source curves in the sketch so editing a duplicate can separate it again.
+    let mut definitions = HashSet::new();
+    let curves: Vec<usize> = sk
+        .curves
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| !c.construction && !c.centerline && !c.infinite)
+        .filter(|(_, c)| bezier_definition(sk, &c.kind).is_none_or(|key| definitions.insert(key)))
+        .map(|(i, _)| i)
+        .collect();
     let groups = if split { islands(sk, &curves) } else { vec![curves] };
     let found: Vec<Arc<Island>> = groups
         .iter()
@@ -1713,12 +1805,12 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
             // First clockwise turn from the way back. Directions are compared a short way
             // along each segment (curvature decides between equal tangents, e.g. a line tangent
             // to an arc, or an arc leaving back along the incoming line).
-            // Tangents within [`TANGENT_ANGLE_TOL`] are equal: a solved tangency leaves them that
-            // far apart either way, and the turn the round-off picked lost every region at a
-            // corner where two arcs leave along one line.
+            // Tangents that [`leave_same_way`] are equal: a solved tangency leaves them that far
+            // apart either way, and the turn the round-off picked lost every region at a corner
+            // where two arcs leave along one line.
             let kt = half(twin).map(|(ts, _, _)| curvature(&ts)).unwrap_or(0.0);
-            // (clockwise turn from the way back, curvature, half-edge)
-            let mut turns: Vec<(f64, f64, usize)> = Vec::new();
+            // (clockwise turn from the way back, curvature, chord, half-edge)
+            let mut turns: Vec<(f64, f64, f64, usize)> = Vec::new();
             for &o in outgoing.get(to).map(Vec::as_slice).unwrap_or(&[]) {
                 if o == twin {
                     continue;
@@ -1728,19 +1820,19 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 let mut raw = (back - os.start_tangent().angle()).rem_euclid(TAU);
                 // Leaving along the way back: just clockwise of it when it bends away to the
                 // right of it, a whole turn round otherwise.
-                if raw < TANGENT_ANGLE_TOL || raw > TAU - TANGENT_ANGLE_TOL {
+                if leave_same_way(raw.min(TAU - raw), kt - k, chord(&seg).min(chord(&os))) {
                     raw = if kt - k > 1e-12 { 0.0 } else { TAU };
                 }
-                turns.push((raw, k, o));
+                turns.push((raw, k, chord(&os), o));
             }
             // Of the first turns, the one bending most to the left comes first; between equal
             // bends (two lines) the tangents decide.
-            let first = turns.iter().map(|t| t.0).fold(f64::INFINITY, f64::min);
+            let first = turns.iter().copied().min_by(|a, b| a.0.total_cmp(&b.0));
             let best = turns
                 .into_iter()
-                .filter(|t| t.0 <= first + TANGENT_ANGLE_TOL)
+                .filter(|t| first.is_some_and(|f| leave_same_way(t.0 - f.0, t.1 - f.1, t.2.min(f.2))))
                 .min_by(|a, b| b.1.total_cmp(&a.1).then(a.0.total_cmp(&b.0)))
-                .map(|(d, _, o)| (d, o));
+                .map(|(d, _, _, o)| (d, o));
             let Some((_, next)) = best else {
                 ok = false;
                 break;
@@ -2445,6 +2537,84 @@ mod tests {
         }
         let curves: Vec<usize> = (0..sk.curves.len()).collect();
         islands(sk, &curves).len()
+    }
+
+    fn cubic_lens(sk: &mut Sketch, reversed: bool) {
+        // SVG's default pixel scale. The two cubic integrals give area 1353/20 before scaling.
+        let scale = 25.4 / 96.0;
+        for mut controls in [[(0.0, 0.0), (0.0, 5.0), (12.0, 4.0), (11.0, -1.0)], [(11.0, -1.0), (10.0, -6.0), (-1.0, -5.0), (0.0, 0.0)]] {
+            if reversed {
+                controls.reverse();
+            }
+            // Equal coordinates deliberately use separate point IDs, as imported curves can.
+            let pts = controls.into_iter().map(|(x, y)| sk.add_point(Vec2::new(x * scale, -y * scale), None).unwrap()).collect();
+            sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+        }
+    }
+
+    /// #15408: repeated SVG outlines must not erase the region when their direction reverses.
+    #[test]
+    fn duplicate_cubic_outlines_keep_the_profile_and_source_curves() {
+        for reversed in [true, false] {
+            let mut sk = Sketch::new();
+            cubic_lens(&mut sk, false);
+            let original = find_profiles(&sk);
+            assert_eq!(original.len(), 1);
+            let expected = 1353.0 / 20.0 * (25.4_f64 / 96.0).powi(2);
+            assert!((original[0].area - expected).abs() < 1e-12);
+            let first_copy = sk.points.len();
+            cubic_lens(&mut sk, reversed);
+            for point in &mut sk.points[first_copy..] {
+                if point.pos.x == 0.0 {
+                    point.pos.x = -point.pos.x;
+                }
+                if point.pos.y == 0.0 {
+                    point.pos.y = -point.pos.y;
+                }
+            }
+            let source = serde_json::to_string(&sk).unwrap();
+            islands_match_whole(&sk);
+            assert_same(&find_profiles(&sk), &original);
+            assert_eq!(sk.curves.len(), 4);
+            assert_eq!(serde_json::to_string(&sk).unwrap(), source, "finding profiles preserves every imported curve and point");
+        }
+    }
+
+    #[test]
+    fn moving_a_duplicate_cubic_outline_updates_cached_profiles() {
+        let mut sk = Sketch::new();
+        cubic_lens(&mut sk, false);
+        let first_copy = sk.points.len();
+        cubic_lens(&mut sk, true);
+        assert_eq!(find_profiles(&sk).len(), 1);
+        for point in &mut sk.points[first_copy..] {
+            point.pos.x += 10.0;
+        }
+        islands_match_whole(&sk);
+        let profiles = find_profiles(&sk);
+        assert_eq!(profiles.len(), 2, "moving the duplicate restores its independent region");
+        for curve in &sk.curves {
+            assert!(profiles.iter().any(|profile| profile.outer_curves.contains(&curve.id)));
+        }
+    }
+
+    #[test]
+    fn cubic_boundaries_with_the_same_ends_keep_their_distinct_regions() {
+        let mut sk = Sketch::new();
+        for controls in [
+            [(0.0, 0.0), (0.0, 3.0), (3.0, 3.0), (3.0, 0.0)],
+            [(3.0, 0.0), (3.0, -3.0), (0.0, -3.0), (0.0, 0.0)],
+            [(0.0, 0.0), (0.0, 2.0), (3.0, 2.0), (3.0, 0.0)],
+        ] {
+            let pts = controls.into_iter().map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
+            sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+        }
+        islands_match_whole(&sk);
+        let profiles = find_profiles(&sk);
+        assert_eq!(profiles.len(), 2);
+        for curve in &sk.curves {
+            assert!(profiles.iter().any(|profile| profile.outer_curves.contains(&curve.id)));
+        }
     }
 
     /// #6896: letters with counters (holes), a frame round them that touches none (its holes
