@@ -2097,33 +2097,31 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             if splits.is_empty() {
                 break built;
             }
-            if round == SKIN_ROUNDS || pnts.len().saturating_add(splits.len()) > station_cap {
+            // (the refusal names the skin just measured: its distance, its stations and
+            // its round)
+            let measured = pnts.len();
+            let past_cap = || {
                 let failure = match not_finite_at {
                     Some(s) => BlendFailure::SkinMeasureNotFinite { s },
                     None => BlendFailure::SkinPastStationCap {
                         asked: self.base.base.this_approx_tol_3d,
                         reached: worst,
-                        stations: pnts.len(),
+                        stations: measured,
                         rounds: round,
                     },
                 };
-                return Err(SolidError::blend(OP_FLUSH, failure));
+                SolidError::blend(OP_FLUSH, failure)
+            };
+            if round == SKIN_ROUNDS || measured.saturating_add(splits.len()) > station_cap {
+                return Err(past_cap());
             }
-            // each split's section after the station it follows
-            let mut splits = splits.into_iter().peekable();
-            let mut merged = Vec::new();
-            let mut merged_knots = Vec::new();
-            for (i, (p, knot)) in pnts.into_iter().zip(knots).enumerate() {
-                merged.push(p);
-                merged_knots.push(knot);
-                if let Some((_, mid_knot, mid)) = splits.next_if(|(j, ..)| *j == i) {
-                    merged.push(mid);
-                    merged_knots.push(mid_knot);
-                }
-            }
-            pnts = merged;
-            knots = merged_knots;
-            self.equalise_spans(solver, k, &mut pnts, &mut knots)?;
+            let Some((more, more_knots)) =
+                self.add_skin_stations(solver, k, pnts, knots, splits, station_cap)?
+            else {
+                return Err(past_cap());
+            };
+            pnts = more;
+            knots = more_knots;
             round += 1;
         };
         let FlushGeometry {
@@ -2158,6 +2156,42 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
 
         // all done
         Ok(())
+    }
+
+    /// The stations `pnts` at `knots` with the skin check's `splits` added, each after the
+    /// station it follows, and the spans equalised again ([`Self::equalise_spans`])
+    /// (#15256); `None` where they are then more than `station_cap`. The equalisation adds
+    /// stations of its own (up to about six times those it starts with), so the count is
+    /// checked after it: a skin is never built, so never kept, on more stations than the cap.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::equalise_spans`].
+    fn add_skin_stations<S: FilletSolverOps<FilletGeom = G>>(
+        &self,
+        solver: &mut S,
+        k: &Kernel,
+        pnts: Vec<TsectPnt>,
+        knots: Vec<f64>,
+        splits: Vec<SkinSplit>,
+        station_cap: usize,
+    ) -> Result<Option<(Vec<TsectPnt>, Vec<f64>)>> {
+        let mut splits = splits.into_iter().peekable();
+        let mut merged = Vec::new();
+        let mut merged_knots = Vec::new();
+        for (i, (p, knot)) in pnts.into_iter().zip(knots).enumerate() {
+            merged.push(p);
+            merged_knots.push(knot);
+            if let Some((_, mid_knot, mid)) = splits.next_if(|(j, ..)| *j == i) {
+                merged.push(mid);
+                merged_knots.push(mid_knot);
+            }
+        }
+        self.equalise_spans(solver, k, &mut merged, &mut merged_knots)?;
+        if merged.len() > station_cap {
+            return Ok(None);
+        }
+        Ok(Some((merged, merged_knots)))
     }
 
     /// Whether `FlushCurve` holds the skin to the tolerance between stations (#15256):
@@ -2220,9 +2254,9 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
     ///
     /// # Errors
     ///
-    /// [`BlendFailure::StationDidNotConverge`] where no middle section is found from the
-    /// interpolated guess nor from either end station's (with the last solve's error as its
-    /// cause, where one failed); a cancellation or port failure of the plane solve as it is;
+    /// [`BlendFailure::StationDidNotConverge`] where the middle section's one solve, from
+    /// the interpolated guess, does not find it (with the solve's error as its cause, where
+    /// it failed); a cancellation or port failure of the plane solve as it is;
     /// [`SolidError::PortInvariant`] for skins that do not run over the stations' parameters,
     /// which they are built from, or of a kind the generator does not build; a cancellation
     /// (polled for each span); [`BlendFailure::BallsNest`] from
@@ -2304,42 +2338,42 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                     "no skin runs over a span's middle",
                 ));
             };
-            // from the interpolated guess, then from either end station's, retried after a
-            // failed solve too (#15034 rule 5: a solve that does not converge is a defect,
-            // never "no section"); a cancellation or a port failure is not retried
-            let mut mid = None;
-            let mut failed = None;
-            for start in [None, Some(pj), Some(pj1)] {
-                match self.solve_mid_point_from(solver, k, pj, pj1, frac, start) {
-                    Ok(Some(found)) => {
-                        mid = Some(found);
-                        break;
-                    }
-                    Ok(None) => {}
-                    Err(e) if e.is_port_failure() || matches!(e, SolidError::Cancelled { .. }) => {
-                        return Err(e);
-                    }
-                    Err(e) => failed = Some(e),
+            // solved once, from the interpolated guess. Why that start: the plane is square
+            // to the interpolated centre-line tangent through the interpolated centre-line
+            // point at the span's middle, and the guess's feet are the midpoints, in each
+            // face's uv, of the two end stations' converged feet. Both stations are half a
+            // span from the plane in parameter (frac = 1/2), so neither is nearer, and
+            // either's feet are half a span off the plane; the guess's feet are the linear
+            // (first-order) estimate of the section's feet at the span's middle. It is also the start step 5a (`equalise_spans`, upstream's
+            // `FlushCurve`) gives the same solve on the same plane, so the section a span
+            // is measured against is the one the span equaliser would add there. It is not
+            // proved inside the solve's basin; a solve that fails from it is refused, not
+            // retried from another start (#15034 rule 5: a solve that does not converge is a
+            // defect, never "no section"; a cancellation or a port failure is passed on)
+            let mid = match self.try_solve_mid_point(solver, k, pj, pj1, frac) {
+                Ok(Some(found)) => found,
+                Err(e) if e.is_port_failure() || matches!(e, SolidError::Cancelled { .. }) => {
+                    return Err(e);
                 }
-            }
-            let Some(mid) = mid else {
-                // (the plane solve reports neither its residual, its last step nor its
-                // iterations, only whether it found the section)
-                let failure = Failure::new(
-                    OP_FLUSH,
-                    BlendFailure::StationDidNotConverge {
-                        s: knot,
-                        residual: None,
-                        tolerance: self.base.base.this_approx_tol_3d,
-                        step: None,
-                        iterations: None,
-                    },
-                );
-                return Err(match failed {
-                    Some(e) => failure.caused_by(e),
-                    None => failure,
+                found => {
+                    // (the plane solve reports neither its residual, its last step nor its
+                    // iterations, only whether it found the section)
+                    let failure = Failure::new(
+                        OP_FLUSH,
+                        BlendFailure::StationDidNotConverge {
+                            s: knot,
+                            residual: None,
+                            tolerance: self.base.base.this_approx_tol_3d,
+                            step: None,
+                            iterations: None,
+                        },
+                    );
+                    return Err(match found {
+                        Err(e) => failure.caused_by(e),
+                        Ok(_) => failure,
+                    }
+                    .into_error());
                 }
-                .into_error());
             };
             mids.push((j, knot, net, mid));
         }
@@ -2600,25 +2634,23 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         pj1: &TsectPnt,
         frac: f64,
     ) -> Result<TsectPnt> {
-        self.solve_mid_point_from(solver, k, pj, pj1, frac, None)?
+        self.try_solve_mid_point(solver, k, pj, pj1, frac)?
             .ok_or_else(|| SolidError::blend_failed(OP_FLUSH, "no mid-point section was found"))
     }
 
-    /// [`Self::solve_mid_point`], its plane solve started from `start`'s surface
-    /// parameters instead of the interpolated guess's (not upstream, #15256: the skin
-    /// check retries from each end station), and `None` where the plane has no solution.
+    /// [`Self::solve_mid_point`], with `None` where the plane has no solution (not
+    /// upstream, #15256: the skin check refuses that case with its own typed failure).
     ///
     /// # Errors
     ///
     /// Those of the solver.
-    fn solve_mid_point_from<S: FilletSolverOps<FilletGeom = G>>(
+    fn try_solve_mid_point<S: FilletSolverOps<FilletGeom = G>>(
         &self,
         solver: &mut S,
         k: &Kernel,
         pj: &TsectPnt,
         pj1: &TsectPnt,
         frac: f64,
-        start: Option<&TsectPnt>,
     ) -> Result<Option<TsectPnt>> {
         let uv_domains = self.base.base.uv_domains;
         let curve_trace_direction = self.base.base.curve_trace_direction;
@@ -2626,9 +2658,8 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         find_guess_mid_tsect_pnt(pj, pj1, frac, &mut mid_pnt);
 
         let plane_orig = mid_pnt.crv_pos();
-        let guess = start.unwrap_or(&mid_pnt);
-        let uv1 = guess.uv_pos(SrfIndex::First);
-        let uv2 = guess.uv_pos(SrfIndex::Second);
+        let uv1 = mid_pnt.uv_pos(SrfIndex::First);
+        let uv2 = mid_pnt.uv_pos(SrfIndex::Second);
         let plane_normal = mid_pnt.crv_deriv().unitize()?;
 
         // find filletPoint on given plane satisfying geometry
@@ -3932,15 +3963,17 @@ mod tests {
 
     /// A solver for the skin check (#15256): balls centred on the x axis at `x = t`, radius
     /// `r0 + rate t`, with rails at `(t, 0, r)` and `(t, r, 0)`; both surfaces' parameters
-    /// are `(t, v)`. Its plane solve finds no section `fail_first` times (or always), then
-    /// the one on the plane; `skin` is the round's surface it builds.
+    /// are `(t, v)`. Its plane solve fails with an error `err_first` times, finds no
+    /// section `fail_first` times (counting those), then
+    /// the one on the plane, and records each solve's start; `skin` is the round's surface
+    /// it builds.
     struct SkinMock {
         r0: f64,
         rate: f64,
         fail_first: usize,
         err_first: usize,
-        always_fail: bool,
         calls: usize,
+        starts: Vec<[Point2; 2]>,
         skin: Option<Surface>,
     }
 
@@ -3951,8 +3984,8 @@ mod tests {
                 rate,
                 fail_first: 0,
                 err_first: 0,
-                always_fail: false,
                 calls: 0,
+                starts: Vec::new(),
                 skin,
             }
         }
@@ -3968,15 +4001,16 @@ mod tests {
             _plane_normal: Vec3,
             _uv_domain1: &Extent2d,
             _uv_domain2: &Extent2d,
-            _uv1: Point2,
-            _uv2: Point2,
+            uv1: Point2,
+            uv2: Point2,
             point: &mut TsectPnt,
         ) -> Result<bool> {
             self.calls += 1;
+            self.starts.push([uv1, uv2]);
             if self.calls <= self.err_first {
                 return Err(SolidError::sm_err("test"));
             }
-            if self.always_fail || self.calls <= self.fail_first {
+            if self.calls <= self.fail_first {
                 return Ok(false);
             }
             *point.uv_pos_mut(SrfIndex::First) = Point2::new(plane_origin.x, 0.5);
@@ -4296,23 +4330,22 @@ mod tests {
     }
 
     #[test]
-    fn a_middle_section_is_retried_from_both_end_stations_then_refused_as_not_converging() {
+    fn a_middle_section_is_solved_once_from_the_interpolated_guess_then_refused_as_not_converging()
+    {
         let skin = chord_skin(1.0, 0.0);
-        // found on the third start: the check goes on
+        // the stations' feet are at (0, 1/2) and (1, 1/2) on both faces: the one solve
+        // starts from their midpoint, never from a station
+        let guess = [Point2::new(0.5, 0.5), Point2::new(0.5, 0.5)];
+        // found from the guess: the check goes on
         let mut mock = SkinMock::new(1.0, 0.0, None);
-        mock.fail_first = 2;
         let c = skin_check(&mut mock, &[0.0, 1.0], &skin).unwrap();
-        assert_eq!((mock.calls, c.splits.len()), (3, 1));
-        // a failed solve is retried too
+        assert_eq!((mock.calls, c.splits.len()), (1, 1));
+        assert_eq!(mock.starts, vec![guess]);
+        // not found from the guess (a later start would find it): refused, not retried
         let mut mock = SkinMock::new(1.0, 0.0, None);
-        mock.err_first = 2;
-        let c = skin_check(&mut mock, &[0.0, 1.0], &skin).unwrap();
-        assert_eq!((mock.calls, c.splits.len()), (3, 1));
-        // found from none of the three: a defect with its station
-        let mut mock = SkinMock::new(1.0, 0.0, None);
-        mock.always_fail = true;
+        mock.fail_first = 1;
         let e = skin_check(&mut mock, &[0.0, 1.0], &skin).unwrap_err();
-        assert_eq!(mock.calls, 3);
+        assert_eq!(mock.starts, vec![guess]);
         match e.blend_failure() {
             Some(&BlendFailure::StationDidNotConverge {
                 s,
@@ -4327,6 +4360,63 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert!(e.is_defect());
+        assert!(e.cause().is_none(), "{e:?}");
+        // a solve that fails with an error: refused, not retried, with that error as cause
+        let mut mock = SkinMock::new(1.0, 0.0, None);
+        mock.err_first = 1;
+        let e = skin_check(&mut mock, &[0.0, 1.0], &skin).unwrap_err();
+        assert_eq!(mock.starts, vec![guess]);
+        assert!(
+            matches!(
+                e.blend_failure(),
+                Some(&BlendFailure::StationDidNotConverge { s, .. }) if s == 0.5
+            ),
+            "{e:?}"
+        );
+        assert!(e.is_defect());
+        assert!(e.cause().is_some(), "{e:?}");
+    }
+
+    /// The station cap is checked after the span equalisation, not only before it: one
+    /// split at the small end of stations graded by 2.5 (within the equaliser's 2.8) passes
+    /// the check before (7 stations and 1 split, against a cap of 8), and the equalisation
+    /// then cascades along the grading to 13 stations. Past the cap they are refused, so no
+    /// skin is built on them; at a cap of 13 they are kept.
+    #[test]
+    fn stations_the_span_equalisation_takes_past_the_cap_are_refused() {
+        let mut ts = vec![0.0];
+        let mut span = 1.0;
+        for _ in 0..6 {
+            ts.push(ts.last().unwrap() + span);
+            span *= 2.5;
+        }
+        let end = *ts.last().unwrap();
+        let ts: Vec<f64> = ts.iter().map(|t| t / end).collect();
+        let k = &Kernel::default();
+        let (a, b) = surfaces();
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
+            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
+        let add = |cap: usize| {
+            let mut mock = SkinMock::new(1.0, 0.0, None);
+            let mid = 0.5 * ts[1];
+            let split = (0, mid, skin_stations(&[mid]).remove(0));
+            fi.add_skin_stations(
+                &mut mock,
+                k,
+                skin_stations(&ts),
+                ts.clone(),
+                vec![split],
+                cap,
+            )
+            .unwrap()
+        };
+        // (the stations are already equalised: the cascade is the split's)
+        assert_eq!(ts.len() + 1, 8);
+        assert!(add(8).is_none());
+        assert!(add(12).is_none());
+        let (pnts, knots) = add(13).unwrap();
+        assert_eq!((pnts.len(), knots.len()), (13, 13));
     }
 
     /// A skin that stays off its balls whatever the stations (the mock builds the same flat
