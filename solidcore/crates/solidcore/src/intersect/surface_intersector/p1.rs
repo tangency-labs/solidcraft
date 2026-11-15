@@ -104,6 +104,12 @@
 //!   still taken at the stepped-back point's distance from the pole, on the curve's
 //!   direction (across the seam from the parameter the point keeps, when the curve's
 //!   last step crossed the seam into the pole).
+//! - **Certified spans on a sphere (not upstream, #16669).** `TestSpanAccuracy`'s five
+//!   clamped samples are kept. A span on an analytic sphere is accepted only once its UV
+//!   image is also certified within `this_approx_tol_3d` of the 3D span over the whole
+//!   span ([`SurfaceIntersector::span_images_certified`], [`super::sphere_span`],
+//!   bisection depth bound [`super::sphere_span::MAX_DEPTH`]). Otherwise it is rejected as
+//!   a sampled failure is, and the trace shortens its step.
 //! - **Not ported here.** `SmTsectPnt::Dump` / `Draw` (debug output) and the
 //!   `SM_DEBUG_CODE` blocks (graphics and jump statistics).
 //!
@@ -128,6 +134,8 @@ use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p2::TsectCurveType;
 use crate::surface::surface::{Surface, SurfaceKind};
+
+use super::sphere_span;
 
 /// The singular parameter of a curve point at a pole
 /// ([`SurfaceIntersector::pole_singular_parameter`]).
@@ -1358,6 +1366,18 @@ impl<'s> SurfaceIntersector<'s> {
             }
         }
 
+        // Not upstream (#16669): the samples above are clamped to the domains and see five
+        // parameters; a span is accepted only once its UV images are certified within the
+        // tolerance of the 3D span over the whole span, or a shorter step is taken.
+        if !self.span_images_certified(&tsect, &next_tsp, step_size) {
+            self.demote_singularity(next)?;
+            return Ok(SpanAccuracy {
+                found_good_point: false,
+                deviation_found: Some(sqrt(max_dist_sq)),
+                angle_found_rad,
+            });
+        }
+
         Ok(SpanAccuracy {
             found_good_point: true,
             deviation_found: Some(sqrt(max_dist_sq)),
@@ -1382,8 +1402,10 @@ impl<'s> SurfaceIntersector<'s> {
         b: &TsectPnt,
     ) -> Result<bool> {
         let step_size = b.curve_parameter - a.curve_parameter;
+        // a span this short passes the sampled tests; on a sphere it is still certified
+        // (#16669: a snapped seam point can be a whole period away in u)
         if step_size <= EFF_ZERO * 100.0 {
-            return Ok(true);
+            return Ok(self.span_images_certified(a, b, step_size));
         }
         if a.crv_deriv().angle_between(b.crv_deriv())? > self.this_ang_tol_rad {
             return Ok(false);
@@ -1428,7 +1450,38 @@ impl<'s> SurfaceIntersector<'s> {
                 return Ok(false);
             }
         }
-        Ok(true)
+        Ok(self.span_images_certified(a, b, step_size))
+    }
+
+    /// Not upstream (#16669): whether, on each surface that is an analytic sphere, the UV
+    /// Hermite span from `a` to `b` maps within `this_approx_tol_3d` of the 3D Hermite span
+    /// at every parameter, certified ([`sphere_span::sphere_span_image`]); other surface
+    /// kinds keep the sampled test alone. The spans are those [`Self::test_span_accuracy`]
+    /// builds, their derivatives scaled by `step_size`.
+    pub(super) fn span_images_certified(&self, a: &TsectPnt, b: &TsectPnt, step_size: f64) -> bool {
+        let lift = |p: Point2| Vec3::new(p.x, p.y, 0.0);
+        let lift_d = |d: Vec2| Vec3::new(d.x * step_size, d.y * step_size, 0.0);
+        let xyz = [
+            a.crv_pos(),
+            a.crv_deriv() * step_size,
+            b.crv_pos(),
+            b.crv_deriv() * step_size,
+        ];
+        [SrfIndex::First, SrfIndex::Second]
+            .into_iter()
+            .zip(self.surfaces)
+            .all(|(srf, surface)| {
+                let uv = [
+                    lift(a.uv_pos(srf)),
+                    lift_d(a.uv_deriv(srf)),
+                    lift(b.uv_pos(srf)),
+                    lift_d(b.uv_deriv(srf)),
+                ];
+                !matches!(
+                    sphere_span::sphere_span_image(surface, uv, xyz, self.this_approx_tol_3d),
+                    sphere_span::SpanImage::NotCertified(_)
+                )
+            })
     }
 
     /// A rejected span: a singular point becomes a crossing point.
