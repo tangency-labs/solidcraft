@@ -2706,6 +2706,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         fonts: Vec::new(),
         why: None,
         pending: false,
+        layout: Default::default(),
     };
     let too_many = dimension(1, vec![stroke(Vec2::X); MAX_RECORDS + 1]);
     let off_paper = dimension(2, vec![stroke(Vec2::new(1e9, 0.0))]);
@@ -2751,6 +2752,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
             fonts,
             why: None,
             pending: false,
+            layout: Default::default(),
         }
     };
     let glyphs = |one: &DrawnDimension| one.fonts[0].glyphs.len();
@@ -5429,4 +5431,172 @@ fn automatic_centre_marks_and_a_view_label_move_and_undo_together() {
     assert!(after.annotation_failures.is_empty());
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&before.scene));
+}
+
+#[test]
+fn centre_line_gaps_follow_dimension_edits_and_survive_svg_export() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":100,"width":50,"height":20,"body_name":"Block"}));
+    run(&mut s, "solid.box", json!({"corner":[50,0,0],"length":10,"width":10,"height":20,"body_name":"Post","operation":"new"}));
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    let line = run(&mut s, "drawing.center_line.add", json!({"view":ids::encode(front),"a":[50,0,0],"b":[50,0,20],"overshoot_mm":30.0}));
+    let line = ids::decode(line["line"].as_str().unwrap()).unwrap();
+    let before = settled(&mut s, sheet);
+    let original = group_of(&before.scene, line).clone();
+    let dimension = top_edge(&mut s, front);
+    // Move the short dimension text away so only the painted line crosses at x=150.
+    run(&mut s, "drawing.dimension.edit", json!({"dimension":ids::encode(dimension),"set":{"text":{"at":[20.0,0.0]},"override_text":"1"}}));
+    let crossing = settled(&mut s, sheet);
+    let cut = group_of(&crossing.scene, line);
+    let ends = |group: &Group| -> Vec<(f64, f64)> {
+        group
+            .items
+            .iter()
+            .map(|item| {
+                let Item::Stroke { path, .. } = item else { panic!("expected stroke") };
+                (path[0].start().y, path[0].end().y)
+            })
+            .collect()
+    };
+    // The view's top edge is at y=155; the dimension line is at y=165. A 1 mm
+    // clearance on each side leaves [115,164] and [166,185].
+    assert_eq!(ends(cut), vec![(115.0, 164.0), (166.0, 185.0)]);
+    assert_eq!(bytes(&crossing.scene), bytes(&built(&s, sheet).scene));
+    let svg = run(&mut s, "drawing.export", json!({"sheet":ids::encode(sheet)}));
+    let svg = svg["svg"].as_str().unwrap();
+    let marker = format!("<g data-object=\"{line}\" data-kind=\"centre_line\">");
+    let xml = svg.split_once(&marker).unwrap().1.split_once("</g>").unwrap().0;
+    let Item::Stroke { path, .. } = &cut.items[0] else { panic!("expected stroke") };
+    let x = path[0].start().x;
+    // The A3 sheet is 297 mm high, and SVG reverses the paper y axis.
+    assert!(xml.contains(&format!("M{x} 182L{x} 133")), "{xml}");
+    assert!(xml.contains(&format!("M{x} 131L{x} 112")), "{xml}");
+    assert!(xml.contains("stroke-dashoffset=\"0.82\"") && xml.contains("stroke-dashoffset=\"3.22\""), "{xml}");
+
+    run(&mut s, "drawing.dimension.edit", json!({"dimension":ids::encode(dimension),"set":{"offset_mm":20.0}}));
+    let moved = settled(&mut s, sheet);
+    assert_eq!(ends(group_of(&moved.scene, line)), vec![(115.0, 174.0), (176.0, 185.0)]);
+    assert_eq!(bytes(&moved.scene), bytes(&built(&s, sheet).scene));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "selection.delete", json!({"items":[{"type":"drawing","drawing":drawing,"object":ids::encode(dimension)}]}));
+    let restored = settled(&mut s, sheet);
+    assert_eq!(group_of(&restored.scene, line), &original);
+}
+
+#[test]
+fn centre_line_gap_follows_measured_dimension_text_and_deferred_publication() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let added = run(&mut s, "drawing.center_line.add", json!({"view":ids::encode(front),"a":[0,0,20],"b":[100,0,20],"overshoot_mm":2.0}));
+    let line = ids::decode(added["line"].as_str().unwrap()).unwrap();
+    let original = group_of(&settled(&mut s, sheet).scene, line).clone();
+    let dimension = top_edge(&mut s, front);
+    // Dimension line y=153 is parallel to centre line y=155; only its measured text crosses it.
+    run(
+        &mut s,
+        "drawing.dimension.edit",
+        json!({"dimension":ids::encode(dimension),"set":{"offset_mm":-2.0,"text":{"at":[0.0,0.0]},"override_text":"WIDE TEXT"}}),
+    );
+    let accepted = settled(&mut s, sheet);
+    let first = group_of(&accepted.scene, line).clone();
+    assert_eq!(first.items.len(), 2, "measured text alone cuts the centre line");
+    let layout = &s.drawing_scenes.dimensions[&dimension].drawn.layout;
+    let text = layout.text_boxes.first().unwrap();
+    let left = text.iter().map(|p| p.x).fold(f64::INFINITY, f64::min) + 150.0 - 1.0;
+    let right = text.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max) + 150.0 + 1.0;
+    let Item::Stroke { path: first_path, .. } = &first.items[0] else { panic!("expected stroke") };
+    let Item::Stroke { path: second_path, .. } = &first.items[1] else { panic!("expected stroke") };
+    assert!((first_path[0].end().x - left).abs() < 1e-7);
+    assert!((second_path[0].start().x - right).abs() < 1e-7);
+    assert_eq!(bytes(&accepted.scene), bytes(&built(&s, sheet).scene));
+    run(&mut s, "drawing.set", json!({"updates":"deferred"}));
+    run(&mut s, "drawing.dimension.edit", json!({"dimension":ids::encode(dimension),"set":{"text":{"at":[100.0,0.0]}}}));
+    let held = settled(&mut s, sheet);
+    assert_eq!(group_of(&held.scene, line), &first, "deferred sheet keeps its accepted text gap");
+    assert_eq!(bytes(&held.scene), bytes(&accepted.scene));
+    run(&mut s, "drawing.update", json!({}));
+    let updated = settled(&mut s, sheet);
+    assert_eq!(group_of(&updated.scene, line), &original, "moving text away restores the stroke");
+    assert_eq!(bytes(&updated.scene), bytes(&built(&s, sheet).scene));
+}
+
+#[test]
+fn centre_gap_pieces_keep_the_original_dash_phase() {
+    use solidcraft_geom::drawing_centre_mark::GapObstacles;
+    let original = marks::group(42, Vec2::ZERO, 5.0, 2.0).unwrap();
+    let obstacles = GapObstacles { lines: vec![(Vec2::new(2.0, -1.0), Vec2::new(2.0, 1.0))], boxes: Vec::new() };
+    let cut = marks::cut_gaps(original.clone(), &obstacles).unwrap();
+    assert_eq!(cut.items.len(), 3);
+    let Item::Stroke { pattern: Some(first), .. } = &original.items[0] else { panic!("expected patterned stroke") };
+    let Item::Stroke { path, pattern: Some(later), .. } = &cut.items[1] else { panic!("expected second piece") };
+    let original_start = Vec2::new(-7.0, 0.0);
+    let distance = path[0].start().dist(original_start);
+    let period: f64 = first.lengths_mm.iter().sum();
+    assert!((later.phase_mm - (first.phase_mm + distance).rem_euclid(period)).abs() < 1e-9);
+}
+
+#[test]
+fn an_arrow_tip_without_a_painted_dimension_line_does_not_cut_a_centre_line() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let added = run(&mut s, "drawing.center_line.add", json!({"view":ids::encode(front),"a":[0,0,0],"b":[0,0,20],"overshoot_mm":30.0}));
+    let line = ids::decode(added["line"].as_str().unwrap()).unwrap();
+    let original = group_of(&settled(&mut s, sheet).scene, line).clone();
+    let dimension = top_edge(&mut s, front);
+    run(&mut s, "drawing.dimension.edit", json!({"dimension":ids::encode(dimension),"set":{"text":{"at":[20.0,0.0]},"override_text":"1"}}));
+    let with_dimension = settled(&mut s, sheet);
+    assert_eq!(group_of(&with_dimension.scene, line), &original, "the unpainted arrow-tip span is not a dimension-line crossing");
+    assert_eq!(bytes(&with_dimension.scene), bytes(&built(&s, sheet).scene));
+}
+
+#[test]
+fn automatic_centre_mark_gaps_follow_dimension_and_export_the_same_pattern() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":100,"width":50,"height":20,"body_name":"Block"}));
+    run(&mut s, "solid.cylinder", json!({"radius":6,"height":52,"base":[50,-1,10],"axis":"Y","operation":"cut","targets":["Block"],"name":"Hole"}));
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view":ids::encode(front),"enabled":true}));
+    let original = automatic_scene_groups(&settled(&mut s, sheet).scene, front);
+    assert_eq!(original.len(), 1);
+    assert_eq!(original[0].items.len(), 2);
+    let dimension = top_edge(&mut s, front);
+    run(
+        &mut s,
+        "drawing.dimension.edit",
+        json!({"dimension":ids::encode(dimension),"set":{"offset_mm":-3.0,"text":{"at":[20.0,0.0]},"override_text":"1"}}),
+    );
+    let crossing = settled(&mut s, sheet);
+    let groups = automatic_scene_groups(&crossing.scene, front);
+    assert_eq!(groups.len(), 1);
+    let mark = &groups[0];
+    assert_eq!(mark.items.len(), 3, "the vertical stroke is cut into two");
+    let vertical: Vec<_> = mark
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Stroke { path, pattern: Some(pattern), .. } if (path[0].start().x - path[0].end().x).abs() < 1e-9 => Some((&path[0], pattern)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(vertical.len(), 2);
+    assert!((vertical[0].0.start().y - 145.0).abs() < 1e-8);
+    assert!((vertical[0].0.end().y - 151.0).abs() < 1e-8);
+    assert!((vertical[1].0.start().y - 153.0).abs() < 1e-8);
+    assert!((vertical[1].0.end().y - 155.0).abs() < 1e-8);
+    assert!((vertical[0].1.phase_mm - 1.66).abs() < 1e-8);
+    assert!((vertical[1].1.phase_mm - 4.8).abs() < 1e-8);
+    assert_eq!(bytes(&crossing.scene), bytes(&built(&s, sheet).scene));
+    let svg = run(&mut s, "drawing.export", json!({"sheet":ids::encode(sheet)}));
+    let svg = svg["svg"].as_str().unwrap();
+    let marker = format!("<g data-object=\"{front}\" data-kind=\"centre_mark\">");
+    let xml = svg.split_once(&marker).unwrap().1.split_once("</g>").unwrap().0;
+    assert!(xml.contains("M150 152L150 146") && xml.contains("M150 144L150 142"), "{xml}");
+    assert!(xml.contains("stroke-dashoffset=\"1.66\"") && xml.contains("stroke-dashoffset=\"4.8\""), "{xml}");
+    run(&mut s, "drawing.dimension.edit", json!({"dimension":ids::encode(dimension),"set":{"offset_mm":-4.0}}));
+    let moved = settled(&mut s, sheet);
+    assert_ne!(automatic_scene_groups(&moved.scene, front), groups);
+    assert_eq!(bytes(&moved.scene), bytes(&built(&s, sheet).scene));
+    run(&mut s, "drawing.dimension.edit", json!({"dimension":ids::encode(dimension),"set":{"offset_mm":20.0}}));
+    assert_eq!(automatic_scene_groups(&settled(&mut s, sheet).scene, front), original);
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "selection.delete", json!({"items":[{"type":"drawing","drawing":drawing,"object":ids::encode(dimension)}]}));
+    assert_eq!(automatic_scene_groups(&settled(&mut s, sheet).scene, front), original);
 }

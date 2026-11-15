@@ -254,3 +254,31 @@ fn stroke(line: solidcore_record::Seg2) -> Item {
     let phase_mm = (long / 2.0 - line.length() / 2.0).rem_euclid(period);
     Item::Stroke { path: vec![line], closed: false, width_mm: WIDTH_MM, pattern: Some(Dashes { lengths_mm, phase_mm }) }
 }
+
+/// Apply the same sheet obstacles to manual and automatic centre strokes at assembly time.
+pub(super) fn cut_gaps(mut group: Group, obstacles: &drawing_centre_mark::GapObstacles) -> std::result::Result<Group, String> {
+    let mut items = Vec::new();
+    for item in group.items {
+        match item {
+            Item::Stroke { path, closed: false, width_mm, pattern: Some(pattern) } if path.len() == 1 => {
+                if let Some(solidcore_record::Seg2::Line { a, b }) = path.first().copied() {
+                    let pieces = drawing_centre_mark::gaps(a, b, obstacles, 1.0).map_err(|e| e.to_string())?;
+                    let period: f64 = pattern.lengths_mm.iter().sum();
+                    for (piece, from) in pieces {
+                        items.push(Item::Stroke {
+                            path: vec![piece],
+                            closed: false,
+                            width_mm,
+                            pattern: Some(Dashes { lengths_mm: pattern.lengths_mm.clone(), phase_mm: (pattern.phase_mm + from).rem_euclid(period) }),
+                        });
+                    }
+                } else {
+                    items.push(Item::Stroke { path, closed: false, width_mm, pattern: Some(pattern) });
+                }
+            }
+            other => items.push(other),
+        }
+    }
+    group.items = items;
+    Ok(group)
+}

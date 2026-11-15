@@ -548,6 +548,7 @@ struct DrawnDimension {
     why: Option<String>,
     /// Whether its text waits for a font to fall back to: [`extract`] reads it again until it doesn't.
     pending: bool,
+    layout: crate::drawing_dimension_paper::Layout,
 }
 
 /// What a view's dimensions path reads: a dimension, or a note that moves with the view, and the view.
@@ -708,7 +709,7 @@ fn draw_dimensions(
         Ok(Some(resolved)) => {
             let paper = frame(record.view)
                 .and_then(|(frame, lines)| crate::drawing_dimension_paper::paper_group(record, resolved, &frame, lines, &lettering));
-            let drawn = |group, fonts, why, pending| DrawnDimension {
+            let drawn = |group, fonts, why, pending, layout| DrawnDimension {
                 dimension: record.id,
                 view: record.view,
                 kind: ObjectKind::Dimension,
@@ -717,19 +718,30 @@ fn draw_dimensions(
                 fonts,
                 why,
                 pending,
+                layout,
             };
             match paper {
-                Some(paper) => drawn(Some(Arc::new(paper.group)), paper.fonts, paper.why, paper.pending),
+                Some(paper) => drawn(Some(Arc::new(paper.group)), paper.fonts, paper.why, paper.pending, paper.layout),
                 None => {
                     let nothing = !resolved.points.is_empty() && frame(record.view).is_some();
-                    drawn(None, Vec::new(), nothing.then(|| NO_PLACE.to_string()), false)
+                    drawn(None, Vec::new(), nothing.then(|| NO_PLACE.to_string()), false, Default::default())
                 }
             }
         }
         Ok(None) | Err(_) => {
             let status = dimension::Status::Unmeasurable(format!("dimension {} can't be read", ids::encode(record.id)));
             let kind = ObjectKind::Dimension;
-            DrawnDimension { dimension: record.id, view: record.view, kind, status, group: None, fonts: Vec::new(), why: None, pending: false }
+            DrawnDimension {
+                dimension: record.id,
+                view: record.view,
+                kind,
+                status,
+                group: None,
+                fonts: Vec::new(),
+                why: None,
+                pending: false,
+                layout: Default::default(),
+            }
         }
     };
     // Each dimension by its place among the dimensions read, each note in turn.
@@ -779,8 +791,17 @@ fn drawn_notes(
         let unread = || dimension::Status::Unmeasurable(format!("note {} can't be read", ids::encode(note.id)));
         let resolved = read.as_ref().ok().and_then(|all| all.get(at));
         let status = resolved.map_or_else(unread, |r| r.anchor.status.clone());
-        let base =
-            DrawnDimension { dimension: note.id, view, kind: ObjectKind::Note, status, group: None, fonts: Vec::new(), why: None, pending: false };
+        let base = DrawnDimension {
+            dimension: note.id,
+            view,
+            kind: ObjectKind::Note,
+            status,
+            group: None,
+            fonts: Vec::new(),
+            why: None,
+            pending: false,
+            layout: Default::default(),
+        };
         let (Some(resolved), Some((frame, group))) = (resolved, frame(view)) else { return base };
         let text = d
             .sheet_of(&note.anchor)
@@ -912,6 +933,8 @@ struct Assembly {
     dimensions: Vec<DimensionState>,
     notes: Vec<NoteState>,
     annotation_failures: Vec<AnnotationFailure>,
+    gap_obstacles: solidcraft_geom::drawing_centre_mark::GapObstacles,
+    gap_checks: usize,
 }
 
 /// Why a group stayed out of a scene.
@@ -957,6 +980,15 @@ impl Assembly {
                 (Some(centre), Some(group)) => match self.add(group, &one.fonts, centre, DrawnFor::View) {
                     Ok(bounds_mm) => {
                         drawn = true;
+                        if one.kind == ObjectKind::Dimension {
+                            for points in &one.layout.painted_dimension_lines {
+                                self.gap_obstacles.lines.extend(points.windows(2).filter_map(|p| {
+                                    let (a, b) = (*p.first()?, *p.get(1)?);
+                                    (a != b).then_some((a + centre, b + centre))
+                                }));
+                            }
+                            self.gap_obstacles.boxes.extend(one.layout.text_boxes.iter().map(|corners| corners.map(|p| p + centre)));
+                        }
                         self.objects.extend(SheetObject::on_paper(one.dimension, one.kind, bounds_mm, None).map(banded(DrawnFor::View)));
                     }
                     Err(LeftOut::TooManyRecords) => {
@@ -1001,6 +1033,25 @@ impl Assembly {
     fn add_mark(&mut self, mark: Mark) {
         let mut why = mark.why;
         if let Some(group) = mark.group {
+            let obstacles = self.gap_obstacles.lines.len().saturating_add(self.gap_obstacles.boxes.len());
+            let checks = group.items.len().saturating_mul(obstacles);
+            self.gap_checks = self.gap_checks.saturating_add(checks);
+            if self.gap_checks > 1_000_000 {
+                self.annotation_failures.push(AnnotationFailure {
+                    object: mark.object,
+                    view: mark.view,
+                    kind: mark.kind,
+                    reason: "centre annotation gap work exceeds the sheet limit".into(),
+                });
+                return;
+            }
+            let group = match marks::cut_gaps(group, &self.gap_obstacles) {
+                Ok(group) => group,
+                Err(reason) => {
+                    self.annotation_failures.push(AnnotationFailure { object: mark.object, view: mark.view, kind: mark.kind, reason });
+                    return;
+                }
+            };
             match self.add(&group, &[], Vec2::ZERO, DrawnFor::View) {
                 Ok(bounds_mm) => {
                     if mark.object != mark.view {
@@ -1102,7 +1153,20 @@ fn assemble<D: Borrow<Drawn>>(
     scene.add_fonts(fonts);
     let records = records.saturating_add(alone.font_records_beyond(&scene.fonts));
     let (states, placed, dimensions, notes) = (Vec::new(), BTreeMap::new(), Vec::new(), Vec::new());
-    let mut assembly = Assembly { scene, groups, records, alone, states, objects, placed, dimensions, notes, annotation_failures: Vec::new() };
+    let mut assembly = Assembly {
+        scene,
+        groups,
+        records,
+        alone,
+        states,
+        objects,
+        placed,
+        dimensions,
+        notes,
+        annotation_failures: Vec::new(),
+        gap_obstacles: Default::default(),
+        gap_checks: 0,
+    };
     for (view, centre, drawn) in views {
         let drawn: &Drawn = drawn.borrow();
         let mut status = drawn.status.clone();
