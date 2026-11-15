@@ -112,3 +112,205 @@ fn a_shell_that_opens_no_face_seals_its_void() {
         assert!((got - want).abs() < 1e-6 * want, "{direction}: volume {got}, want {want}");
     }
 }
+
+/// A loft through closed fit-point splines (12 points each) on YZ planes at the given offsets.
+fn fit_point_loft(sections: &[(f64, &[[f64; 2]])]) -> Session {
+    let mut s = Session::default();
+    let mut names = Vec::new();
+    for (i, (x, points)) in sections.iter().enumerate() {
+        let name = format!("Sec{i}");
+        run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": x, "name": name}));
+        run(&mut s, "sketch.spline.fit_point", json!({"points": points, "periodic": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        names.push(json!({"sketch": name}));
+    }
+    run(&mut s, "solid.loft", json!({"sections": names, "operation": "new"}));
+    s
+}
+
+/// The shell of `s`'s loft, 1 mm thick with the end face through `open` removed, is one sound
+/// body. Its walls are the loft's faces moved 1 mm in; the loft is convex, so the area of the
+/// surface 1 mm in is at most the loft's: the wall's volume lies between `t` times the inner
+/// wall's area (the shell's area less the loft's, which holds the open cap the rim lies in)
+/// and `t` times the loft's area.
+fn shells_in_one_mm(mut s: Session, open: [f64; 3]) {
+    let loft = solidcraft_kernel::measure(&s.model.state().bodies[0].body).unwrap();
+    run(&mut s, "solid.shell", json!({"faces": [open], "thickness": 1.0}));
+    sound(&s);
+    let shell = solidcraft_kernel::measure(&s.model.state().bodies[0].body).unwrap();
+    let (lo, hi) = (shell.area - loft.area, loft.area);
+    assert!(lo <= shell.volume && shell.volume <= hi, "wall volume {} outside [{lo}, {hi}]", shell.volume);
+}
+
+/// #15859: a loft through three fit-point splines (loft A) was refused by Shell ("a gap in its
+/// offset's loops cannot be bridged within tolerance"). Each section's pieces are G1 but not
+/// C1, with their own derivative ratios at the joints, so the loft's side had creases between
+/// the sections and its exact offset parted there. The loft now meets its sections with one
+/// ratio per joint, so its side is G1 everywhere.
+#[test]
+fn shell_of_a_loft_through_fit_point_splines() {
+    let a = fit_point_loft(&[
+        (
+            -30.0,
+            &[
+                [0.0, 10.0],
+                [7.5, 11.34],
+                [12.99, 15.0],
+                [15.0, 20.0],
+                [12.99, 25.0],
+                [7.5, 28.66],
+                [0.0, 30.0],
+                [-7.5, 28.66],
+                [-12.99, 25.0],
+                [-15.0, 20.0],
+                [-12.99, 15.0],
+                [-7.5, 11.34],
+            ],
+        ),
+        (
+            0.0,
+            &[
+                [0.0, 8.0],
+                [10.0, 9.608],
+                [17.321, 14.0],
+                [20.0, 20.0],
+                [17.321, 26.0],
+                [10.0, 30.392],
+                [0.0, 32.0],
+                [-10.0, 30.392],
+                [-17.321, 26.0],
+                [-20.0, 20.0],
+                [-17.321, 14.0],
+                [-10.0, 9.608],
+            ],
+        ),
+        (
+            30.0,
+            &[
+                [0.0, 12.0],
+                [7.5, 13.34],
+                [12.99, 17.0],
+                [15.0, 22.0],
+                [12.99, 27.0],
+                [7.5, 30.66],
+                [0.0, 32.0],
+                [-7.5, 30.66],
+                [-12.99, 27.0],
+                [-15.0, 22.0],
+                [-12.99, 17.0],
+                [-7.5, 13.34],
+            ],
+        ),
+    ]);
+    shells_in_one_mm(a, [30.0, 0.0, 22.0]);
+}
+
+/// #15859 (loft C): six superellipse sections, fit points at equal angle steps.
+#[test]
+fn shell_of_a_six_section_loft_through_fit_point_splines() {
+    let c = fit_point_loft(&[
+        (
+            -50.0,
+            &[
+                [2.070552, 15.170371],
+                [5.656854, 16.464466],
+                [7.727407, 18.705905],
+                [7.727407, 21.294095],
+                [5.656854, 23.535534],
+                [2.070552, 24.829629],
+                [-2.070552, 24.829629],
+                [-5.656854, 23.535534],
+                [-7.727407, 21.294095],
+                [-7.727407, 18.705905],
+                [-5.656854, 16.464466],
+                [-2.070552, 15.170371],
+            ],
+        ),
+        (
+            -30.0,
+            &[
+                [4.753197, 10.144903],
+                [13.641449, 12.421417],
+                [17.739175, 17.359335],
+                [17.739175, 22.640665],
+                [13.641449, 27.578583],
+                [4.753197, 29.855097],
+                [-4.753197, 29.855097],
+                [-13.641449, 27.578583],
+                [-17.739175, 22.640665],
+                [-17.739175, 17.359335],
+                [-13.641449, 12.421417],
+                [-4.753197, 10.144903],
+            ],
+        ),
+        (
+            -10.0,
+            &[
+                [6.390064, 6.088642],
+                [19.048813, 8.888193],
+                [23.848042, 16.272463],
+                [23.848042, 23.727537],
+                [19.048813, 31.111807],
+                [6.390064, 33.911358],
+                [-6.390064, 33.911358],
+                [-19.048813, 31.111807],
+                [-23.848042, 23.727537],
+                [-23.848042, 16.272463],
+                [-19.048813, 8.888193],
+                [-6.390064, 6.088642],
+            ],
+        ),
+        (
+            10.0,
+            &[
+                [6.537189, 5.361726],
+                [18.243501, 9.053899],
+                [24.397123, 16.077686],
+                [24.397123, 23.922314],
+                [18.243501, 30.946101],
+                [6.537189, 34.638274],
+                [-6.537189, 34.638274],
+                [-18.243501, 30.946101],
+                [-24.397123, 23.922314],
+                [-24.397123, 16.077686],
+                [-18.243501, 9.053899],
+                [-6.537189, 5.361726],
+            ],
+        ),
+        (
+            30.0,
+            &[
+                [5.311867, 9.096713],
+                [15.614184, 11.412199],
+                [19.824158, 17.078473],
+                [19.824158, 22.921527],
+                [15.614184, 28.587801],
+                [5.311867, 30.903287],
+                [-5.311867, 30.903287],
+                [-15.614184, 28.587801],
+                [-19.824158, 22.921527],
+                [-19.824158, 17.078473],
+                [-15.614184, 11.412199],
+                [-5.311867, 9.096713],
+            ],
+        ),
+        (
+            50.0,
+            &[
+                [2.329371, 14.204445],
+                [6.363961, 15.757359],
+                [8.693332, 18.447086],
+                [8.693332, 21.552914],
+                [6.363961, 24.242641],
+                [2.329371, 25.795555],
+                [-2.329371, 25.795555],
+                [-6.363961, 24.242641],
+                [-8.693332, 21.552914],
+                [-8.693332, 18.447086],
+                [-6.363961, 15.757359],
+                [-2.329371, 14.204445],
+            ],
+        ),
+    ]);
+    shells_in_one_mm(c, [50.0, 0.0, 20.0]);
+}
