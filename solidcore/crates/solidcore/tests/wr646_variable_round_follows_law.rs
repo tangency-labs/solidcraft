@@ -1635,10 +1635,12 @@ fn certify_the_moved_rows_skins_within_t() {
                     })
                 })
                 .collect();
-            // progress at least every 30 s, so a slow run is told from a stuck one
+            // progress at least every 30 s, so a slow run is told from a stuck one; the wait
+            // ends when every worker has, so a worker's panic (a failed node certificate)
+            // reaches the joins below instead of leaving its patch counted as never done
             let start = std::time::Instant::now();
             let mut last = start;
-            while done.load(Ordering::Relaxed) < work.len() {
+            while handles.iter().any(|h| !h.is_finished()) {
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 if last.elapsed().as_secs() >= 30 {
                     last = std::time::Instant::now();
