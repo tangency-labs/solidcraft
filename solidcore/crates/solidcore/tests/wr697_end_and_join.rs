@@ -727,19 +727,29 @@ fn kinked_plate(k: &mut Kernel, kink: f64, convex: bool) -> (Brep, [[f64; 3]; 2]
 
 /// #16627: two rounds r 1 meeting at a corner a kink off straight join on one shared section
 /// only while their sections there stand closer than the B-rep's intersection tolerance, which
-/// the check holds the joint vertex to: 1 x kink < 2e-5 (the B-rep's tolerance is 1e-5). Just
+/// the check holds the joint vertex to. At a concave corner the shared section lies behind the
+/// second round's end, `1 x kink` off it (the B-rep's tolerance is 1e-5, the check's 2e-5): just
 /// below that (1.14e-3 degrees, 1.99e-5 apart) the corner is the Join; just above (1.15e-3
-/// degrees, 2.007e-5 apart) it is the Turn. Both build and pass the check, concave and convex.
-/// The Join used to be allowed up to the corner's approximation tolerance (4e-5): a concave
-/// corner 1.5e-3 degrees off straight was joined and failed the check.
+/// degrees, 2.007e-5 apart) it is the Turn. The Join used to be allowed up to the corner's
+/// approximation tolerance (4e-5): a concave corner 1.5e-3 degrees off straight was joined and
+/// failed the check. At a convex corner the shared section lies over the second round, whose
+/// own section in its plane stands `sec(kink) - 1` off (#13911, `blend_corner::join_gap`): the
+/// Join up to 0.35 degrees (1.87e-5), the Turn at 0.375 (2.14e-5). Each builds and passes the
+/// check.
 #[test]
 fn a_near_straight_corner_joins_only_below_the_intersection_tolerance() {
-    for (kink, want) in [
-        (1.14e-3, BlendCornerEvent::Join),
-        (1.15e-3, BlendCornerEvent::Turn),
-        (1.5e-3, BlendCornerEvent::Turn),
+    use BlendCornerEvent::{Join, Turn};
+    for (kink, convex, want) in [
+        (1.14e-3, false, Join),
+        (1.14e-3, true, Join),
+        (1.15e-3, false, Turn),
+        (1.15e-3, true, Join),
+        (1.5e-3, false, Turn),
+        (1.5e-3, true, Join),
+        (0.35, true, Join),
+        (0.375, true, Turn),
     ] {
-        for convex in [false, true] {
+        {
             let mut k = all_fixes();
             let (mut b, at_edges) = kinked_plate(&mut k, kink, convex);
             assert_eq!(b.tolerance(), 1e-5);
@@ -855,11 +865,13 @@ fn drafted_plate(
 /// shared one where the two offsets cross (`blend_corner::join_within_xsect_tolerance_deg`).
 /// That holds on the 60 degree wedge at z = 0 and the 120 degree one at z = -2 alike: the
 /// radius, not the round's reach along the faces (`r cot(w / 2)`, sqrt 3 and 1 / sqrt 3). So
-/// the corner is the Join at 0.97 of the kink where `2 r tan(a / 2)` reaches the intersection
-/// tolerance 2e-5, and the Turn at 1.03, on both wedges and with the kink either way, and each
-/// passes the check. A bound on the reach fails both ways: at 120 degrees it joins at 1.03
-/// (joined at 1.925e-3 degrees, the check finds the vertex 2.91e-5 off, `r a` to eight
-/// digits), and at 60 degrees it turns at 0.97.
+/// the concave corner (the shared section behind the second round's end) is the Join at 0.97 of
+/// the kink where `2 r tan(a / 2)` reaches the intersection tolerance 2e-5, and the Turn at
+/// 1.03, on both wedges, and each passes the check. A bound on the reach fails both ways: at
+/// 120 degrees it joins at 1.03 (joined at 1.925e-3 degrees, the check finds the vertex
+/// 2.91e-5 off, `r a` to eight digits), and at 60 degrees it turns at 0.97. The convex corner
+/// (the section over the second round, second order: #13911, `blend_corner::join_gap`) is the
+/// Join at both and passes the check.
 #[test]
 fn a_near_straight_corner_s_join_holds_on_acute_and_obtuse_wedges() {
     let d = 30.0_f64.to_radians();
@@ -868,11 +880,17 @@ fn a_near_straight_corner_s_join_holds_on_acute_and_obtuse_wedges() {
     let a_max = 2.0 * (a_max / 2.0).atan();
     let k_max = ((a_max.cos() - s * s) / (c * c)).acos().to_degrees();
     for z in [0.0, -2.0] {
-        for (f, want) in [
+        for (f, concave) in [
             (0.97, BlendCornerEvent::Join),
             (1.03, BlendCornerEvent::Turn),
         ] {
             for convex in [false, true] {
+                // convex, the shared section lies over the second round: second order (#13911)
+                let want = if convex {
+                    BlendCornerEvent::Join
+                } else {
+                    concave
+                };
                 let kink = f * k_max;
                 let mut k = all_fixes();
                 let (mut b, at_edges, kv) = drafted_plate(&mut k, kink, convex, z);
