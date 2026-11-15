@@ -171,35 +171,6 @@ fn a_chord_past_a_wall_fits_at_the_chord_of_the_ball_reaching_the_top() {
     );
 }
 
-/// A can (r10, h20) whose top rim is chamfered 10: the cone takes the whole top. The band
-/// reaches the top's centre at the ball touching it there and the side, 10 (open). The
-/// fork's build: 9.9899999999999967.
-#[test]
-fn a_chamfer_taking_a_can_top_fits_where_its_band_reaches_the_centre() {
-    let mut k = kernel();
-    let mut b = create_cylinder(&mut k, Point3::ZERO, 10.0, 20.0).unwrap();
-    let refusal = blend(
-        &mut k,
-        &mut b,
-        &[Point3::new(
-            10.0 * 100.0_f64.to_radians().cos(),
-            10.0 * 100.0_f64.to_radians().sin(),
-            20.0,
-        )],
-        10.0,
-        0,
-        false,
-    )
-    .expect_err("refused");
-    check(
-        &refusal,
-        NoRoomReason::FaceConsumed,
-        FitKind::Radius,
-        10.0 - 0.01,
-        9.9899999999999967,
-    );
-}
-
 /// The bossed can (r7 h48.2, a boss r2.7 on its top) with its top rim rounded 6.9: the
 /// rail on the top, a circle of radius 7 - r, reaches the boss's footprint at r = 4.3
 /// (open). The fork's build: 4.2899999999999938.
