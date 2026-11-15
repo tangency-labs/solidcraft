@@ -907,10 +907,13 @@ fn loft_blend(
             pieces.push(Piece::Body(name.to_string(), crate::plain(&sec.edges)));
             continue;
         }
-        let raw = st.sketch(sec.sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", sec.sketch)))?;
+        let raw =
+            st.sketch(sec.sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", sec.sketch)))?;
         if section_in_space(st, sec) {
-            // 3D sketch curves are followed through their points, as a boundary surface's are.
-            let one_chain = || DocError::Invalid("each loft section must be one chain: one profile without holes, or curves meeting end to end".into());
+            // 3D sketch curves are followed through their points, as a boundary surface's u and v
+            // curves are.
+            let one_chain =
+                || DocError::Invalid("each loft section must be one chain: one profile without holes, or curves meeting end to end".into());
             if sec.profiles.is_some() {
                 return Err(one_chain());
             }
@@ -941,6 +944,17 @@ fn loft_blend(
     // open sketch section is turned to run the way the section before it does, as the plain
     // loft turns its open sections.
     let turn = pieces.iter().any(|p| matches!(p, Piece::Space(_)));
+    // Closed sections would need their winding and seam matched, as the plain loft does.
+    let closed = |p: &Piece| match p {
+        Piece::Space(pts) => pts.first().zip(pts.last()).is_some_and(|(a, b)| a.dist(*b) <= 1e-3),
+        Piece::Sketch(plane, chain) => {
+            chain.first().zip(chain.last()).is_some_and(|(a, b)| plane.to_world(a.start()).dist(plane.to_world(b.end())) <= 1e-6)
+        }
+        Piece::Body(..) => false,
+    };
+    if turn && pieces.iter().any(closed) {
+        return Err(DocError::Invalid("not supported yet: a closed section in a loft through 3D sketch curves".into()));
+    }
     let mut frames: Vec<Vec<kernel::Frame>> = Vec::with_capacity(pieces.len());
     for (i, piece) in pieces.iter().enumerate() {
         let (from, to) = if i < last { (i, i + 1) } else { (last, last.saturating_sub(1)) };
@@ -960,7 +974,6 @@ fn loft_blend(
         let ends = |f: &[kernel::Frame]| f.first().zip(f.last()).map(|(s, e)| (s.p, e.p));
         if turn
             && let (Some((ps, pe)), Some((s, e))) = (frames.last().and_then(|f| ends(f)), ends(&these))
-            && s.dist(e) > 1e-9
             && s.dist(ps) + e.dist(pe) > s.dist(pe) + e.dist(ps)
         {
             these.reverse();

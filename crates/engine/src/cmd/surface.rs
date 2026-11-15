@@ -89,7 +89,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_loft")
         .contract(&SURFACE_LOFT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sections: [{sketch, curves?: [curve ids], profiles?} | {body, edges: [[x,y,z]]}] (2…50 in order; each one chain: a profile without holes, or curves meeting end to end, planar or of a 3D sketch; all open or all closed; a body edge chain takes the face the chain bounds as the surface the end repeats); continuity?: [g0|g1|g2|g3, g0|g1|g2|g3] (each end, default g0: how much of the surface at the first and last section the loft repeats — the tangent plane, the curvature, or how that curvature changes); crown?: [number, number] (default 0: how full each end leaves, -0.9 flattest to 3 fullest); rails?, rail_fit? (as solid.loft; planar sketch sections only, both ends g0); name?, body_name? (a surface body: ruled between two sections, smooth through three or more; no caps)"),
+        .params("sections: [{sketch, curves?: [curve ids], profiles?} | {body, edges: [[x,y,z]]}] (2…50 in order; each one chain: a profile without holes, or curves meeting end to end, planar or of a 3D sketch; all open or all closed (all open with a 3D sketch curve); a body edge chain takes the face the chain bounds as the surface the end repeats); continuity?: [g0|g1|g2|g3, g0|g1|g2|g3] (each end, default g0: how much of the surface at the first and last section the loft repeats — the tangent plane, the curvature, or how that curvature changes); crown?: [number, number] (default 0: how full each end leaves, -0.9 flattest to 3 fullest); rails?, rail_fit? (as solid.loft; planar sketch sections only, both ends g0); name?, body_name? (a surface body: ruled between two sections, smooth through three or more; no caps)"),
     CommandSpec::new("surface.offset", "Offset Surface", crate::checked!("surface.offset", offset))
         .at("SURFACE", "CREATE")
         .icon("surface_offset")
@@ -1150,17 +1150,20 @@ mod tests {
         let near = line3d(&mut s, [0.0, 120.0, 0.0], [20.0, 120.0, 0.0]);
         let far = line3d(&mut s, [20.0, 120.0, 0.0], [40.0, 120.0, 0.0]);
         let apart = line3d(&mut s, [0.0, 150.0, 0.0], [10.0, 150.0, 0.0]);
-        let w1 = run(&mut s, "sketch.spline3d", json!({"points": [[-40, 0, -4], [-20, 0, -1], [0, 0, 0], [20, 0, -1], [40, 0, -4]]}))["curves"]
+        let ring = [
+            line3d(&mut s, [0.0, 200.0, 0.0], [10.0, 200.0, 0.0]),
+            line3d(&mut s, [10.0, 200.0, 0.0], [5.0, 200.0, 8.0]),
+            line3d(&mut s, [5.0, 200.0, 8.0], [0.0, 200.0, 0.0]),
+        ];
+        let w1 = run(&mut s, "sketch.spline3d", json!({"points": [[-40, 0, -4], [-20, 0, -1], [0, 0, 0], [20, 0, -1], [40, 0, -4]]}))["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let w2 = run(&mut s, "sketch.spline3d", json!({"points": [[-40, 40, -4], [-20, 40, -1], [0, 40, 0], [20, 40, -1], [40, 40, -4]]}))["curves"]
             [0]
         .as_str()
         .unwrap()
         .to_string();
-        let w2 =
-            run(&mut s, "sketch.spline3d", json!({"points": [[-40, 40, -4], [-20, 40, -1], [0, 40, 0], [20, 40, -1], [40, 40, -4]]}))["curves"]
-                [0]
-            .as_str()
-            .unwrap()
-            .to_string();
         // A profile beside them, for a section that picks both.
         run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 100], "p1": [110, 110]}));
         run(&mut s, "sketch.finish", json!({}));
@@ -1174,7 +1177,11 @@ mod tests {
         };
         let close = |got: f64, want: f64| assert!((got - want).abs() < want * 1e-6, "{got} vs {want}");
 
-        run(&mut s, "surface.loft", json!({"sections": [{"sketch": "Space", "curves": [a]}, {"sketch": "Space", "curves": [b]}], "body_name": "Strip"}));
+        run(
+            &mut s,
+            "surface.loft",
+            json!({"sections": [{"sketch": "Space", "curves": [a]}, {"sketch": "Space", "curves": [b]}], "body_name": "Strip"}),
+        );
         assert!(s.world_state().unwrap().body("Strip").unwrap().body.is_surface());
         close(area(&s, "Strip"), 30.0 * 1700f64.sqrt());
         assert_eq!(topology(&s, "Strip"), (1, 4, 4, 1));
@@ -1212,6 +1219,12 @@ mod tests {
         assert!(gap.contains("not connected"), "{gap}");
         let both = err(&mut s, json!({"sections": [{"sketch": "Space", "curves": [a], "profiles": [0]}, {"sketch": "Space", "curves": [b]}]}));
         assert!(both.contains("one chain"), "{both}");
+        // A closed section, of 3D sketch curves or a planar profile, next to a 3D one: its winding
+        // and seam are not matched yet.
+        let ring = err(&mut s, json!({"sections": [{"sketch": "Space", "curves": ring}, {"sketch": "Space", "curves": [b]}]}));
+        assert!(ring.contains("not supported yet") && ring.contains("closed section"), "{ring}");
+        let profile = err(&mut s, json!({"sections": [{"sketch": "Space", "profiles": [0]}, {"sketch": "Space", "curves": [b]}]}));
+        assert!(profile.contains("not supported yet") && profile.contains("closed section"), "{profile}");
         // Ends that leave tangent take 3D sections too.
         run(
             &mut s,
