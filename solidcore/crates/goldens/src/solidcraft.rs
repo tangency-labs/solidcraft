@@ -1758,7 +1758,6 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "imprint_extends_edge_to_proto_vertex" => &mut k.fixes.imprint_extends_edge_to_proto_vertex,
         "delete_vertex_joins_seam_iso_curve" => &mut k.fixes.delete_vertex_joins_seam_iso_curve,
         "cover_refuses_folded_continuation" => &mut k.fixes.cover_refuses_folded_continuation,
-        "cover_wraps_across_closed_seam" => &mut k.fixes.cover_wraps_across_closed_seam,
         "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
         "boolean_new_face_closure_both_sides" => &mut k.fixes.boolean_new_face_closure_both_sides,
         "loops_go_on_round_the_vertex" => &mut k.fixes.loops_go_on_round_the_vertex,

@@ -15,7 +15,7 @@
 
 use solidcore::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
 use solidcore::eval::Frame;
-use solidcore::kernel::Kernel;
+use solidcore::kernel::{Kernel, Tolerances};
 use solidcore::primitive::api_trim_ops::create_planar_faces;
 use solidcore::primitive::primitive_creation::Boolean2d;
 use solidcore::prism::{extrude, measure, profile as kp, read, sheet};
@@ -147,12 +147,14 @@ fn sheet_of(
     })
 }
 
-/// The profile check's refusal as the call's.
+/// The profile check's refusal as the call's, at the zone tolerance of the session's kernel,
+/// which builds the profile: the kernel's default, since ops offers no way to change its
+/// tolerances ([`crate::session`]), so the check accepts exactly the arcs the build makes.
 fn checked<'a>(
     regions: impl Iterator<Item = &'a kp::Region2>,
     tol: f64,
 ) -> std::result::Result<(), Error> {
-    kp::check_regions(regions, tol).map_err(Error::Profile)
+    kp::check_regions(regions, tol, Tolerances::default().zone_tol_3d).map_err(Error::Profile)
 }
 
 /// The boolean of planar regions bounded by lines, circular arcs and free-form segments, exact:

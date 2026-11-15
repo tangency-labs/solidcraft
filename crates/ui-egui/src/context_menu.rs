@@ -3089,6 +3089,76 @@ mod tests {
         assert!(!items(&h.app, &Target::Viewport).iter().any(|i| i.id == "sketch.toggle_driven"));
     }
 
+    /// #17189: Toggle Driven Dimension started from a shortcut or the command search (no params)
+    /// acts on the selected dimension, as the menu item does; with nothing selected it says what to
+    /// pick instead of failing with "`constraint` must be a dimension id".
+    #[test]
+    fn toggle_driven_from_a_shortcut_acts_on_the_selected_dimension() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let sid = h.app.session.active_sketch.unwrap();
+        let l = h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"connect":false,"infer":false})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let dparam = h.app.run("sketch.dimension", json!({"entities":[l],"value":10})).unwrap()["param"].as_str().unwrap().to_owned();
+        let dim = h.app.run("sketch.glyphs", json!({})).unwrap()["glyphs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["param"].as_str() == Some(dparam.as_str()))
+            .and_then(|x| x["id"].as_str())
+            .expect("the dimension glyph carries its constraint id")
+            .to_owned();
+        let is_driven = |h: &crate::scenario::Harness| {
+            crate::open_meshing::session_world(&h.app.session).sketch(sid).unwrap().sketch.constraints.iter().any(|c| c.id == dim && c.driven)
+        };
+        // Nothing selected: a hint, and no error naming a missing parameter.
+        h.app.session.selection.clear();
+        h.app.start("sketch.toggle_driven");
+        let (text, _, error) = h.app.status.clone().expect("a message");
+        assert!(!error && !text.contains("must be a dimension id"), "{text}");
+        assert!(!is_driven(&h));
+        // The selected dimension flips, both ways, as it does from the menu.
+        h.app.session.selection = vec![Sel::SketchConstraint { id: dim.clone() }];
+        h.app.start("sketch.toggle_driven");
+        assert!(is_driven(&h), "the dimension is driven now");
+        h.app.start("sketch.toggle_driven");
+        assert!(!is_driven(&h), "and driving again");
+    }
+
+    /// #17189: Toggle Radius / Diameter started from a shortcut acts on the selected circle's
+    /// dimension, as the menu item does.
+    #[test]
+    fn toggle_diameter_from_a_shortcut_acts_on_the_selected_dimension() {
+        use solidcraft_engine::sketch::ConstraintKind;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let sid = h.app.session.active_sketch.unwrap();
+        let c = h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":10})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+        let pc = h.app.run("sketch.dimension", json!({"entities":[c]})).unwrap()["param"].as_str().unwrap().to_owned();
+        let dimension = |h: &crate::scenario::Harness| {
+            crate::open_meshing::session_world(&h.app.session)
+                .sketch(sid)
+                .unwrap()
+                .sketch
+                .constraints
+                .iter()
+                .find(|k| matches!(k.kind, ConstraintKind::Radius { .. } | ConstraintKind::Diameter { .. }))
+                .unwrap()
+                .clone()
+        };
+        let before = dimension(&h);
+        assert!(matches!(before.kind, ConstraintKind::Diameter { .. }), "{pc}: a circle is dimensioned by its diameter first");
+        h.app.session.selection = vec![Sel::SketchConstraint { id: before.id.clone() }];
+        h.app.start("sketch.toggle_diameter");
+        assert!(matches!(dimension(&h).kind, ConstraintKind::Radius { .. }), "the diameter became a radius");
+        h.app.start("sketch.toggle_diameter");
+        assert!(matches!(dimension(&h).kind, ConstraintKind::Diameter { .. }), "and a diameter again");
+    }
+
     /// #7499: a selected circle's dimension offers Toggle Radius / Diameter, which switches it
     /// both ways; a line's length does not.
     #[test]

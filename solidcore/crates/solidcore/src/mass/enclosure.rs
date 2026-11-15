@@ -539,6 +539,20 @@ fn piece_of(cn: &Nurbs, u: Ivl, v: Ivl) -> Option<(usize, usize)> {
     inside.then_some((ku, kv))
 }
 
+/// Whether an interior knot of `degree + 1` or more repeats (where the surface may not be
+/// continuous) lies in `x`, its ends included.
+fn breaks_within(knots: &[f64], degree: usize, x: Ivl) -> bool {
+    let (Some(&first), Some(&last)) = (knots.first(), knots.last()) else {
+        return false;
+    };
+    knots.chunk_by(|a, b| a == b).any(|run| {
+        run.len() > degree
+            && run
+                .first()
+                .is_some_and(|&k| first < k && k < last && x.lo <= k && k <= x.hi)
+    })
+}
+
 /// The partials of piece `(ku, kv)` over the box ([`nurbs_partials_within_span`]), or `None`
 /// where its weights are not proved positive over it (its one failure: a box too large for
 /// the interval evaluation, which a smaller one proves; a cell answers it by refining).
@@ -1383,18 +1397,74 @@ impl<'a> Work<'a> {
             IZ,
         ]);
         let zmax = (o1[2].at(0, 0) - z0).mag().max((o2[2].at(0, 0) - z0).mag());
-        // int |D| over the cell
-        let gap = match (taylor, mid.first(), mid.get(1)) {
-            (true, Some(m1), Some(m2)) => {
-                let mut g = Ivl::from(0.0);
-                for i in 0..ord {
-                    let d = mag3(diff(comp(m1, i), comp(m2, i)));
-                    g = g + Ivl::from(d) * abs_moment(xl, xh, i);
+        // Where a side's box may cross a knot line of its surface: the gap at the middle, and
+        // its derivative's bound over the cell (the hull over every piece the box meets). `D`
+        // is continuous and piecewise smooth on the cell (one polynomial piece of each curve on
+        // a surface continuous across the knot lines its box meets: none of full multiplicity,
+        // [`breaks_within`], else the range alone), so `|D(t) - D(tc)| <= |D'| |t - tc|`
+        // component by component, and `int |D|` is at most `|D(tc)| h + |D'| int |x|`. The
+        // range's `|D|` bounds `X_2` and `X_1` each alone: it is as wide as `|X'| h` however
+        // close the sides are, and `int |D|` from it shrinks with the cell's square. `|D'|`
+        // is as wide as `|X''| h` where the sides meet, so this shrinks with the cube.
+        let centred = if taylor {
+            None
+        } else {
+            let mut middle = Vec::new();
+            for side in 0..2 {
+                let (face, cn) = self.strip_side(strip, side)?;
+                let sp = spans
+                    .get(side)
+                    .copied()
+                    .ok_or_else(|| SolidError::mass_failed(OP, "no such strip side"))?;
+                let (hu, hv) = piece_hull(cn, sp);
+                let cell = curve_derivs_over(cn, Ivl::new(t.0, t.1), 0, Some(sp))?;
+                let (uc, _) = curve_series(&cell, 0, 0);
+                let (vc, _) = curve_series(&cell, 1, 0);
+                if breaks_within(&face.cn.u, face.cn.p, uc)
+                    || breaks_within(&face.cn.v, face.cn.q, vc)
+                {
+                    break;
                 }
-                let d = mag3(diff(comp(o1, ord), comp(o2, ord)));
-                g + Ivl::from(d) * abs_moment(xl, xh, ord)
+                let d = curve_derivs_over(cn, Ivl::from(tc), 0, Some(sp))?;
+                let (u0, du) = curve_series(&d, 0, 0);
+                let (v0, dv) = curve_series(&d, 1, 0);
+                let u = Ivl::new(u0.lo.max(hu.lo), u0.hi.min(hu.hi));
+                let v = Ivl::new(v0.lo.max(hv.lo), v0.hi.min(hv.hi));
+                let Some(p) = partials_over(&face.cn, u, v, 0)? else {
+                    break;
+                };
+                middle.push(comp(&compose(&p, &du, &dv, 0), 0));
             }
-            _ => Ivl::from(mag3(diff(comp(o1, 0), comp(o2, 0)))) * (xh - xl),
+            match (middle.first(), middle.get(1)) {
+                (Some(&c1), Some(&c2)) => Some(diff(c1, c2)),
+                _ => None,
+            }
+        };
+        let slope = mag3(diff(comp(o1, 1), comp(o2, 1)));
+        // int |D| over the cell
+        let gap = if let (true, Some(m1), Some(m2)) = (taylor, mid.first(), mid.get(1)) {
+            let mut g = Ivl::from(0.0);
+            for i in 0..ord {
+                let d = mag3(diff(comp(m1, i), comp(m2, i)));
+                g = g + Ivl::from(d) * abs_moment(xl, xh, i);
+            }
+            let d = mag3(diff(comp(o1, ord), comp(o2, ord)));
+            g + Ivl::from(d) * abs_moment(xl, xh, ord)
+        } else {
+            let range = Ivl::from(mag3(diff(comp(o1, 0), comp(o2, 0)))) * (xh - xl);
+            match centred {
+                Some(dm) => {
+                    let mean =
+                        Ivl::from(mag3(dm)) * (xh - xl) + Ivl::from(slope) * abs_moment(xl, xh, 1);
+                    // both hold: the narrower
+                    if mean.hi < range.hi {
+                        mean
+                    } else {
+                        range
+                    }
+                }
+                None => range,
+            }
         };
         let w = Ivl::from(zmax) * Ivl::from(speed) * gap;
         // the gap's least size over the cell, in the norm `int |D|` is taken in (the sum of
@@ -1405,16 +1475,17 @@ impl<'a> Work<'a> {
                 .fold(Ivl::from(0.0), |sum, c| sum + Ivl::from(c.mig()))
                 .lo
         };
-        let least = match (taylor, mid.first(), mid.get(1)) {
-            (true, Some(m1), Some(m2)) => {
-                let slope = mag3(diff(comp(o1, 1), comp(o2, 1)));
-                let half = xl.mag().max(xh.mag());
-                (Ivl::from(least_sum(diff(comp(m1, 0), comp(m2, 0))))
-                    - Ivl::from(slope) * Ivl::from(half))
+        let half = xl.mag().max(xh.mag());
+        let at_middle = |d: [Ivl; 3]| {
+            (Ivl::from(least_sum(d)) - Ivl::from(slope) * Ivl::from(half))
                 .lo
                 .max(0.0)
-            }
-            _ => least_sum(diff(comp(o1, 0), comp(o2, 0))),
+        };
+        let least = if let (true, Some(m1), Some(m2)) = (taylor, mid.first(), mid.get(1)) {
+            at_middle(diff(comp(m1, 0), comp(m2, 0)))
+        } else {
+            let range = least_sum(diff(comp(o1, 0), comp(o2, 0)));
+            centred.map_or(range, |dm| range.max(at_middle(dm)))
         };
         let kept = (Ivl::from(least) * (xh - xl)).lo;
         let settled = kept + kept >= gap.hi;
@@ -1829,6 +1900,126 @@ fn pcurve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<NurbsCurve> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The cylinder r 2, h 5, its side moved along x by `shift`.
+    fn cylinder_side_moved(k: &mut Kernel, shift: f64) -> Brep {
+        let mut b = crate::primitive::api_primitives::create_cylinder(
+            k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            2.0,
+            5.0,
+        )
+        .unwrap();
+        let side = crate::topology::brep::p1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                let face = b.face(f).unwrap();
+                let s = face.surface.as_ref().unwrap();
+                s.evaluate_point(k, face.uv_domain.mid())
+                    .is_ok_and(|p| (p.x * p.x + p.y * p.y - 4.0).abs() < 1e-9)
+            })
+            .unwrap();
+        let mut by = crate::geom::axis2_placement::Axis2Placement::default();
+        by.translate(crate::math::Vec3::new(shift, 0.0, 0.0));
+        b.face_mut(side)
+            .unwrap()
+            .surface
+            .as_mut()
+            .unwrap()
+            .transform(k, &by, None)
+            .unwrap();
+        b
+    }
+
+    /// Whether either side's box over the cell crosses or touches a knot line of its surface
+    /// (the cell is then enclosed by its range).
+    fn on_knot_line(w: &Work, strip: usize, spans: [usize; 2], t: (f64, f64)) -> bool {
+        (0..2).any(|side| {
+            let (face, cn) = w.strip_side(strip, side).unwrap();
+            let d = curve_derivs_over(cn, Ivl::new(t.0, t.1), 0, Some(spans[side])).unwrap();
+            let (u, _) = curve_series(&d, 0, 0);
+            let (v, _) = curve_series(&d, 1, 0);
+            piece_of(&face.cn, u, v).is_none()
+        })
+    }
+
+    /// The strip cells ending on each strip's pieces' ends, `h` long.
+    fn end_cells(w: &Work, h: f64) -> Vec<(usize, [usize; 2], (f64, f64))> {
+        w.items
+            .iter()
+            .filter_map(|it| match it.kind {
+                Kind::Strip { strip, spans } => Some((strip, spans, (it.t.1 - h, it.t.1))),
+                Kind::Sweep { .. } => None,
+            })
+            .collect()
+    }
+
+    /// Where a strip's two sides meet, its cells' enclosures shrink with the cube of their
+    /// length, on a knot line of a side's surface too. The cylinder's side meets its caps
+    /// along circles whose pieces end on the side's knot lines (every quarter turn): a cell
+    /// ending there is enclosed by its range, not its Taylor model. That range's gap
+    /// (`X_2` less `X_1`, each bounded alone) shrinks only with the cell's length, so its
+    /// enclosure with the square: at 0.1 long it was 8.2e-2 (`4 h^3` is 4e-3), where the
+    /// Taylor cells are within 1e-12.
+    #[test]
+    fn strips_that_meet_shrink_with_the_cube_on_knot_lines() {
+        let mut k = Kernel::default();
+        let mut b = cylinder_side_moved(&mut k, 0.0);
+        let w = Work::new(&k, &mut b).unwrap();
+        let mut on_knots = 0;
+        for h in [0.1, 0.05, 0.025] {
+            for (strip, spans, t) in end_cells(&w, h) {
+                let (e, _) = w.strip_cell(strip, spans, t, ORDER).unwrap();
+                assert!(e.hi <= 4.0 * h * h * h, "{strip} {t:?}: {e:?}");
+                on_knots += usize::from(on_knot_line(&w, strip, spans, t));
+            }
+        }
+        assert!(on_knots >= 9, "{on_knots}");
+    }
+
+    /// Where the sides do not meet, a strip cell's enclosure still holds the strip: the side
+    /// moved along x by `d` leaves at each cap a flat strip between a circle's arc and the
+    /// same arc moved by `d`, whose flux of `(0, 0, z - z0)` is `(z - z0) d dy` in closed
+    /// form (the sheared area `d dy` at the cap's height). Every cell ending on a piece's
+    /// end, on a knot line or not, at lengths 0.4 to 1/40, encloses that.
+    #[test]
+    fn strips_apart_on_knot_lines_hold_their_closed_form() {
+        let d = 1e-3;
+        let mut k = Kernel::default();
+        let mut b = cylinder_side_moved(&mut k, d);
+        let w = Work::new(&k, &mut b).unwrap();
+        let (mut checked, mut on_knots) = (0, 0);
+        for h in [0.4, 0.1, 0.025] {
+            for (strip, spans, t) in end_cells(&w, h) {
+                let p = |side, at| w.point(strip, side, at).unwrap().map(Ivl::mid);
+                let (a0, a1, b0) = (p(0, t.0), p(0, t.1), p(1, t.0));
+                let flat = (a0[2] - a1[2]).abs() < 1e-12;
+                let moved = (b0[0] - a0[0]).abs() - d;
+                if !flat || moved.abs() > 1e-9 || (b0[1] - a0[1]).abs() > 1e-9 {
+                    continue; // the seam: both sides on the moved face, which meet
+                }
+                let flux = ((a0[2] - w.z0) * d * (a1[1] - a0[1])).abs();
+                let (e, _) = w.strip_cell(strip, spans, t, ORDER).unwrap();
+                assert!(e.hi >= flux, "{strip} {t:?}: {e:?} < {flux}");
+                checked += 1;
+                on_knots += usize::from(on_knot_line(&w, strip, spans, t));
+            }
+        }
+        assert!(checked >= 18 && on_knots >= 6, "{checked} {on_knots}");
+    }
+
+    /// A knot of full multiplicity inside the vector breaks continuity; one at the ends, or
+    /// one of the degree's multiplicity, does not.
+    #[test]
+    fn breaks_are_interior_knots_of_full_multiplicity() {
+        let k = [0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0];
+        assert!(breaks_within(&k, 2, Ivl::new(0.4, 0.5)));
+        assert!(!breaks_within(&k, 2, Ivl::new(0.0, 0.4)));
+        assert!(!breaks_within(&k, 3, Ivl::new(0.0, 1.0)));
+        let c0 = [0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0];
+        assert!(!breaks_within(&c0, 2, Ivl::new(0.0, 1.0)));
+    }
 
     /// A product of series is the product of the polynomials, truncated.
     #[test]
