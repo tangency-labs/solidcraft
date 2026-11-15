@@ -74,8 +74,9 @@ pub use nurbs::Nurbs;
 pub use offset::OffsetChain;
 pub use offset_topology::{OffsetCreated, OffsetRole, OffsetRoleFlags, OffsetRoleKind, OffsetTopology};
 pub use paper_text::{
-    Outcome, PaperFonts, PaperLines, paper_fallback_notes, paper_font_note, paper_lines, paper_lines_in, paper_lines_now, paper_text, paper_text_in,
-    paper_text_now,
+    FlowedPaperText, Outcome, PaperFonts, PaperLines, PaperSourceFlow, PaperTextFlow, paper_fallback_notes, paper_font_note, paper_lines,
+    paper_lines_in, paper_lines_now, paper_text, paper_text_in, paper_text_now, paper_text_with_flow, paper_text_with_flow_in,
+    paper_text_with_flow_now,
 };
 pub use pattern::{PatternAlignment, PatternInstance, SketchPattern, SketchPatternKind};
 pub use periodic::periodic_beziers;
