@@ -545,14 +545,19 @@ impl PrimitiveCreation {
                     } else {
                         None
                     };
+                    // Not upstream (#17204): the frame comes from a point of the curve
+                    // off the axis by more than the B-rep's tolerance, within which a
+                    // profile vertex is on the axis
+                    let tolerance = a.brep(brep)?.tolerance();
                     let rev = match analytic {
                         Some(surface) => Some(surface),
-                        None => ignored(SurfOfRevolution::create_canonical(
+                        None => ignored(SurfOfRevolution::create_canonical_off_axis(
                             a.kernel(brep)?,
                             curve.clone(),
                             axis_base,
                             axis,
                             false,
+                            tolerance,
                         ))?
                         .map(Surface::from),
                     };
@@ -827,6 +832,73 @@ mod tests {
                 "block at {corner:?} minus the hollow ball: volume {got}, want {want}"
             );
         }
+    }
+
+    /// A dome turned a whole turn about z: a cubic Bezier from the pole on the axis down
+    /// to the rim at r 10, a line across the base and one up the axis. With the pole and
+    /// the axis line a hair past the axis (3.4e-11 mm on the far side, as a sketch
+    /// solver leaves them, #17204), well within the B-rep's tolerance, the body is the
+    /// one built with them on it: the surface of revolution's frame faces the profile.
+    /// Before, the frame faced the pole's side, half a turn from the profile, and the
+    /// check found the face's edges 10.7 mm off its surface.
+    #[test]
+    fn issue_17204_dome_pole_a_hair_past_the_axis() {
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let dome = |x: f64| {
+            let pts = [
+                [x, 0.0, 5.0],
+                [5.0, 0.0, 5.0],
+                [10.0, 0.0, 3.0],
+                [10.0, 0.0, 0.0],
+            ];
+            let pw = pts
+                .iter()
+                .map(|&[x, y, z]| CPoint::new(x, y, z, NOW))
+                .collect();
+            let nurb = NurbCurve::new(pw, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap();
+            let profile = [
+                Curve::from(BSplineCurve::from_nurb(nurb, 3, false)),
+                segment([10.0, 0.0, 0.0], [x, 0.0, 0.0]),
+                segment([x, 0.0, 0.0], [x, 0.0, 5.0]),
+            ];
+            let curves: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+            let (o, z) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+            let mut k = Kernel::default();
+            k.fixes.revolve_analytic_profile_faces = true;
+            k.fixes.revolve_nested_shells_as_cavities = true;
+            let mut b = create_rotational_sweep(&mut k, &curves, o, z, 360.0, true).unwrap();
+            let check = crate::topology::brep::validation::check_brep(
+                &mut k,
+                &mut b,
+                crate::topology::brep::validation::CheckLevel::Level2,
+            )
+            .unwrap();
+            assert_eq!(
+                check.failure_count(),
+                0,
+                "pole at x {x}: {:?}",
+                check.lines()
+            );
+            let store = AttributeStore::default();
+            let key_of = |_| ObjectKey(0);
+            let attributes = PropertyAttributes {
+                store: &store,
+                key_of: &key_of,
+            };
+            brep_volume(&k, &mut b, 1e-8, &attributes).unwrap()
+        };
+        let on = dome(0.0);
+        let past = dome(-3.4e-11);
+        assert!(on > 0.0, "volume {on}");
+        assert!(
+            (past - on).abs() <= 1e-6 * on,
+            "volume {past}, on the axis {on}"
+        );
     }
 
     /// A square with a square hole (20 x 20 at r 10 to 30, the hole 8 x 8 centred in it)
