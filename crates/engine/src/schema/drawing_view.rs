@@ -1288,6 +1288,29 @@ pub struct LineResult {
     pub pieces: Vec<PieceResult>,
 }
 
+/// One cosmetic thread's lines in a view.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ThreadResult {
+    /// The occurrences that place its body, from the design's root.
+    pub occurrence: Vec<u64>,
+    /// Its body's name in its definition.
+    pub body: String,
+    /// Whether the body is a reference part.
+    pub reference: bool,
+    pub pieces: Vec<ThreadPieceResult>,
+}
+
+/// A run of a thread line at one visibility, in paper millimetres.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ThreadPieceResult {
+    /// `root`: the root diameter's line, drawn thin (a three-quarter arc seen end on); `limit`: the
+    /// line across where the thread stops inside its face.
+    pub stroke: &'static str,
+    /// `visible` or `hidden`.
+    pub visibility: &'static str,
+    pub path: Vec<PathSegResult>,
+}
+
 /// What drew a line: an edge of the body (as `model.edges` numbers them), or a silhouette across
 /// one of its faces.
 #[derive(Debug, Serialize, JsonSchema)]
@@ -1581,6 +1604,9 @@ pub struct SnapshotResult {
     pub boundary_mm: BoxResult,
     /// Each placed source's lines, in placement order, then edges before silhouettes.
     pub lines: Vec<LineResult>,
+    /// Each cosmetic thread's lines, in placement order: drawn by ISO 6410's convention where the
+    /// view drew the thread's crest, and seen where that crest is seen.
+    pub threads: Vec<ThreadResult>,
     pub status: LinesStatusResult,
     pub stats: LinesStatsResult,
     /// With `scene: true`: the lines as a paper scene of the sheet.

@@ -53,6 +53,7 @@ use solidcraft_doc::drawing::cutting_line::CuttingLine;
 use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, reading_label};
 use solidcraft_doc::drawing::fold::{FoldFor, FoldRefusal, FoldSide, auxiliary_side};
 use solidcraft_doc::drawing::note::Note;
+use solidcraft_doc::drawing::thread_lines::{ThreadPiece, ThreadStroke};
 use solidcraft_doc::drawing::view::{Beside, ResolvedView, SetBy, Setting, View, ViewKind, ViewLabel, ViewPlace, check_occurrence_paths, check_pose};
 use solidcraft_doc::drawing_view::{
     Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides,
@@ -80,7 +81,8 @@ use crate::schema::drawing_view::{
     FromResult, InspectParams, InspectResult, LabelResult, LabelSet, LineResult, LinesStatusResult, MeasureParam, MeasurementResult, MoveParams,
     OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams, ProjectionForParams,
     ProjectionForResult, ScaleResult, SceneResult, SectionParams, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult,
-    StudyPoseParam, StudyStepResult, ToSheetResult, ViewLineParam, ViewMoveParams, ViewMoveResult, ViewResult, ViewSet,
+    StudyPoseParam, StudyStepResult, ThreadPieceResult, ThreadResult, ToSheetResult, ViewLineParam, ViewMoveParams, ViewMoveResult, ViewResult,
+    ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -294,6 +296,7 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         extents: extents_result(&extents, None, false),
         boundary_mm: BoxResult { min: boundary.min.into(), max: boundary.max.into() },
         lines: line_results(&set, &drawn),
+        threads: thread_results(&set, &drawn),
         status: LinesStatusResult {
             lines: if drawn.lines.iter().flat_map(|l| &l.pieces).any(|p| matches!(p.accuracy, CurveAccuracy::Sampled { .. })) {
                 "approximate"
@@ -506,6 +509,24 @@ fn line_results(shown: &ShownSet, drawn: &Lines) -> Vec<LineResult> {
         }
     };
     drawn.lines.iter().map(line).collect()
+}
+
+fn thread_results(shown: &ShownSet, drawn: &Lines) -> Vec<ThreadResult> {
+    let thread = |t: &crate::drawing_view::ThreadLine| {
+        let body = shown.bodies.get(t.shown);
+        let piece = |p: &ThreadPiece| ThreadPieceResult {
+            stroke: if p.stroke == ThreadStroke::Limit { "limit" } else { "root" },
+            visibility: if p.visibility == Visibility::Hidden { "hidden" } else { "visible" },
+            path: vec![PathSegResult(p.seg)],
+        };
+        ThreadResult {
+            occurrence: body.map(|b| b.path.clone()).unwrap_or_default(),
+            body: body.map(|b| b.body.clone()).unwrap_or_default(),
+            reference: t.reference,
+            pieces: t.pieces.iter().map(piece).collect(),
+        }
+    };
+    drawn.threads.iter().map(thread).collect()
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {

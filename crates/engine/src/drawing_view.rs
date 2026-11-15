@@ -31,9 +31,12 @@ use crate::{Result, Session};
 mod exact;
 #[path = "drawing_view_lines.rs"]
 mod lines;
+#[path = "drawing_view_threads.rs"]
+mod threads;
 
 pub use exact::{Fallback, PreparedBodies};
 pub use lines::{CHORD_MM, CHORD_RANGE, LineRequest, Lines, MIN_MODEL_CHORD_MM, Made, Piece, Stats, ViewLine, lines, paper_group, paper_lines};
+pub use threads::ThreadLine;
 
 #[path = "drawing_view_flat.rs"]
 mod flat;
@@ -151,7 +154,9 @@ impl Styles {
     /// Leaves out a shaded part's own lines: its picture draws it, and it still hides what lies
     /// behind it.
     pub fn leave_shaded_to_pictures(&self, lines: &mut Lines) {
-        lines.lines.retain(|l| !(if l.reference { self.reference } else { self.display }).is_shaded());
+        let shaded = |reference: bool| (if reference { self.reference } else { self.display }).is_shaded();
+        lines.lines.retain(|l| !shaded(l.reference));
+        lines.threads.retain(|t| !shaded(t.reference));
     }
 }
 
