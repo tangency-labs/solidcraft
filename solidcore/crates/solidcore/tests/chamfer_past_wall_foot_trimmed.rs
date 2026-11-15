@@ -48,10 +48,7 @@ const BAR: f64 = (10.0 * 5.0 + 7.0 * 5.0) * LENGTH;
 
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_overflow_trim_at_creases = true;
     k
 }

@@ -147,6 +147,22 @@ mod tests {
         assert!((b.min.x - first.min.x - 5.0).abs() < 1e-9 && (b.max.x - first.max.x - 5.0).abs() < 1e-9, "{b:?} against {first:?}");
     }
 
+    /// A tool whose vertices' box meets the body's is not apart from it, and neither exact box is
+    /// measured to show it (a pattern's every cut asked for its target's, ever more holes); tools
+    /// whose vertices' boxes do not meet are judged by the exact boxes, as before.
+    #[test]
+    fn a_tool_among_the_bodys_vertices_is_not_apart_without_measuring() {
+        let plate = crate::box_solid(Vec3::ZERO, Vec3::new(200.0, 100.0, 1.0)).unwrap();
+        let pin = crate::box_solid(Vec3::new(4.0, 4.0, -2.0), Vec3::new(6.0, 6.0, 2.0)).unwrap();
+        assert!(!crate::apart(&plate, &pin).unwrap());
+        assert_eq!(*plate.bounds.lock().unwrap(), None);
+        assert_eq!(*pin.bounds.lock().unwrap(), None);
+        // Clear of the plate: the exact boxes show it, measured as before.
+        let far = crate::box_solid(Vec3::new(300.0, 0.0, 0.0), Vec3::new(310.0, 10.0, 1.0)).unwrap();
+        assert!(crate::apart(&plate, &far).unwrap());
+        assert!(plate.bounds.lock().unwrap().is_some());
+    }
+
     /// A cube 1000 mm from the origin with one 0.5 mm² facet left out: about the box's centre
     /// the sums miss a cone of that facet to the centre (0.08 %), where about the origin they are
     /// 17 % over. Closed, it measures the same about either.
