@@ -1373,6 +1373,9 @@ preference_settings! {
     /// shown, and has them back when it is shown again (#9360). Off by default: a switch cancels
     /// them and shows the MODEL tab.
     keep_work_on_tab_switch: bool = false, PAGE_LAYOUT;
+    /// Each design tab keeps its toolbar tab (MODEL, SURFACE, ...) while another design is shown,
+    /// with or without `keep_work_on_tab_switch`. Off: a switch shows the MODEL tab, as before.
+    remember_toolbar_tab: bool = true, PAGE_LAYOUT;
     /// Hovering a result in Search commands shows the command's place in the ribbon: its tab,
     /// its button or its row in a section's drop-down (#7287). A command started from the search
     /// blinks there, and a running command that sits in a drop-down marks its section label. Off
@@ -6851,6 +6854,7 @@ mod tests {
             ("viewport_status_summary", json!(false), PAGE_GRAPHICS),
             ("sketch_tab_always", json!(true), PAGE_LAYOUT),
             ("keep_work_on_tab_switch", json!(true), PAGE_LAYOUT),
+            ("remember_toolbar_tab", json!(false), PAGE_LAYOUT),
             ("ribbon_reveal", json!(true), PAGE_LAYOUT),
             ("pinned_constraints_in_grid", json!(false), PAGE_LAYOUT),
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
