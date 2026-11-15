@@ -42,9 +42,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_trim_inside_by_best_dot = true;
     k.fixes.fillet_knife_edge_rounds = true;
-    k.fixes.offset_excess_faces_after_merge = true;
-    k.fixes.offset_point_vertex_caps = true;
-    k.fixes.offset_clip_right_side_out = true;
     k.fixes.offset_extended_edges_mated = true;
     k.fixes.thicken_planar_side_walls = true;
     k.fixes.keep_operand_uv_trims = true;
@@ -70,7 +67,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.local_operation_box_holds_new_surfaces = true;
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
     k.fixes.local_operation_step_walls = true;
-    k.fixes.local_operation_closes_walls_to_nothing = true;
     k.fixes.offset_collapsed_rounds_mated = true;
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.uv_trim_corner_end_points_only = true;
@@ -104,7 +100,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.offset_stitch_at_body_tolerance = true;
     k.fixes.curve_contacts_at_curve_ends = true;
-    k.fixes.shell_empty_cavity_fails = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
