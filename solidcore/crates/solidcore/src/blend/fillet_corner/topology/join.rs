@@ -446,8 +446,8 @@ fn largest_ball_on_side_edge(
     Ok(Some(f1.max(f2)))
 }
 
-/// Not the fork's (#17224): whether the edge of `eu` has its end other than `vertex` on the
-/// face `face` (a vertex of one of that face's edges).
+/// Not the fork's (#17224): the end of the edge of `eu` other than `vertex` where it lies on
+/// the face `face` (a vertex of one of that face's edges), else `None`.
 ///
 /// # Errors
 /// Those of the topology queries.
@@ -456,24 +456,24 @@ fn far_end_on_face(
     eu: EdgeuseId,
     vertex: Option<crate::topology::VertexId>,
     face: FaceId,
-) -> Result<bool> {
+) -> Result<Option<crate::topology::VertexId>> {
     let Some(e) = eu1::edge(target, eu)? else {
-        return Ok(false);
+        return Ok(None);
     };
     let Some(far) = crate::topology::edge::other_vertex(target, e, vertex)? else {
-        return Ok(false);
+        return Ok(None);
     };
     if Some(far) == vertex {
-        return Ok(false);
+        return Ok(None);
     }
     for g in crate::topology::face::p4::edges(target, face, None, false, None)? {
         if crate::topology::edge::start_vertex(target, g)? == Some(far)
             || crate::topology::edge::end_vertex(target, g)? == Some(far)
         {
-            return Ok(true);
+            return Ok(Some(far));
         }
     }
-    Ok(false)
+    Ok(None)
 }
 
 impl FilletCorner {
@@ -551,13 +551,17 @@ impl FilletCorner {
         // past them the edge's line leaves its face across the other face, so the contact line
         // crosses the edge between its ends or nowhere. An edge running on to another face (a
         // rim's seam down a wall) is not judged: its contact line may cross the edge's line past
-        // its far end (`calc_rail_int_edgeuse`'s run-on), as a rim round past its wall does
+        // its far end (`calc_rail_int_edgeuse`'s run-on), as a rim round past its wall does;
+        // nor one split at its far end only by a seam, which the rail's search continues across
+        // (`side_edgeuse_across_seam_vertex`). Where both sides are judged and refused, the
+        // smaller size is named, the one both sides build at
         if let (2, Some(&Some(id)), Some(&eu1_)) =
             (blends, solver_eu_solvers.first(), solver_eus.first())
         {
             if let Some(SolverObject::ConstantRadius(object)) =
                 solvers.get(id.0 as usize).and_then(Option::as_ref)
             {
+                let mut fit: Option<f64> = None;
                 for s in 0..2 {
                     let (Some(true), Some(&[only])) =
                         (on_edge.get(s).copied(), between.get(s).map(Vec::as_slice))
@@ -569,16 +573,30 @@ impl FilletCorner {
                     else {
                         continue;
                     };
-                    if !far_end_on_face(target, only, self.vertex, other_face)? {
+                    let Some(far) = far_end_on_face(target, only, self.vertex, other_face)? else {
                         continue;
-                    }
+                    };
                     let side_eu = find_side_edgeuse(target, eu1_, only)?
                         .ok_or_else(|| SolidError::blend_missing(OP, "the side edge use"))?;
+                    if crate::blend::blend_corner::end::side_edgeuse_across_seam_vertex(
+                        k,
+                        target,
+                        side_eu,
+                        far,
+                        crate::math::rad_to_deg(self.tangency_tol_radians),
+                    )?
+                    .is_some()
+                    {
+                        continue;
+                    }
                     if let Some(builds) =
                         largest_ball_on_side_edge(k, target, &object.solver, side_eu, other_face)?
                     {
-                        return Ok(JoinTopology::RefusedRailMissesSideEdge { builds });
+                        fit = Some(fit.map_or(builds, |f| f.min(builds)));
                     }
+                }
+                if let Some(builds) = fit {
+                    return Ok(JoinTopology::RefusedRailMissesSideEdge { builds });
                 }
             }
         }

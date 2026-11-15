@@ -5211,7 +5211,7 @@ fn a_round_as_large_as_the_round_it_runs_along_is_refused_not_failed() {
 /// ball touching the cylinder on the seam (x = 15, z = 10.1) and the sphere inside has radius
 /// (297.99 - y^2) / 80, at most 3.725: a larger round's contact line never reaches the seam, and
 /// it failed there with "Unable to Compute Geometry". It is refused naming the largest radius
-/// that fits (3.71 mm by the corner, less the fit margin; 3.724 mm builds); 2 mm builds as before.
+/// that fits (297.99 / 80 less the fit margin; 3.724 mm builds); 2 mm builds as before.
 fn sphere_with_a_cylindrical_cut() -> Session {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XZ", "flip": true}));
@@ -5241,7 +5241,16 @@ fn a_round_whose_contact_line_misses_the_seam_it_joins_across_names_the_radius_t
     s.set_validation(solidcraft_kernel::Validation::Off);
     let e = s.execute("solid.fillet", &json!({"edges": loop_edges, "radius": 6})).unwrap_err().to_string();
     assert!(!e.contains("Unable to Compute Geometry"), "{e}");
-    assert!(e.contains("larger than the faces beside its edges allow") && e.contains("the largest radius that fits is 3.7"), "{e}");
+    assert!(e.contains("larger than the faces beside its edges allow"), "{e}");
+    // The size named: the largest ball touching the seam, 297.99 / 80 at y = 0, less the fit
+    // margin (a thousand of the edge's tolerances, about 1.2e-5 here: 0.012).
+    let named: f64 = e
+        .split_once("the largest radius that fits is ")
+        .and_then(|(_, rest)| rest.split_once(" mm"))
+        .and_then(|(n, _)| n.parse().ok())
+        .unwrap_or_else(|| panic!("no radius named: {e}"));
+    let bound = 297.99 / 80.0;
+    assert!(named < bound && bound - named < 0.02, "named {named}, bound {bound}: {e}");
 }
 
 #[test]
