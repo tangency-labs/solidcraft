@@ -1973,16 +1973,17 @@ fn chamfers_join_at_a_near_straight_corner_within_their_offsets() {
 }
 
 /// One closed section of [`a_rim_round_across_a_loft_s_creases_is_certified_or_refused`]: the
-/// cubic Bezier pieces through 12 points at 30 degree steps round an ellipse in the plane
-/// x = `x` (half-axes `a` along y and `b` along z, centre (x, 0, 20)), as a fit-point spline
+/// cubic Bezier pieces through 12 points at 30 degree steps from `phase` (radians, from the
+/// bottom) round an ellipse in the plane x = `x` (half-axes `a` along y and `b` along z,
+/// centre (x, 0, 20)), as a fit-point spline
 /// gives them, each piece on [0, 1]: the tangent at a point is the chord-length one, so two
 /// pieces meet in one direction at speeds in the ratio of their chords. On a circle the chords
 /// are equal and the pieces join smoothly; on an ellipse they are not, and a ruled loft to it
 /// creases its side along those joints.
-fn fit_point_ellipse(x: f64, a: f64, b: f64) -> Vec<Curve> {
+fn fit_point_ellipse(x: f64, a: f64, b: f64, phase: f64) -> Vec<Curve> {
     let p: Vec<[f64; 3]> = (0..12)
         .map(|i| {
-            let t = f64::from(i) * PI / 6.0;
+            let t = phase + f64::from(i) * PI / 6.0;
             [x, a * t.sin(), 20.0 - b * t.cos()]
         })
         .collect();
@@ -2029,8 +2030,8 @@ fn fit_point_ellipse(x: f64, a: f64, b: f64) -> Vec<Curve> {
 fn a_rim_round_across_a_loft_s_creases_is_certified_or_refused() {
     all_fixes();
     let sections = [
-        fit_point_ellipse(-30.0, 15.0, 15.0),
-        fit_point_ellipse(30.0, 20.0, 18.0),
+        fit_point_ellipse(-30.0, 15.0, 15.0, 0.0),
+        fit_point_ellipse(30.0, 20.0, 18.0, 0.0),
     ];
     let b = solidcore_ops::sweep::loft(&sections, 1, true).unwrap();
     assert!(
@@ -2062,4 +2063,54 @@ fn a_rim_round_across_a_loft_s_creases_is_certified_or_refused() {
             "{e:?}"
         ),
     }
+}
+
+/// #17016: the round at the foot of a cylinder boss (radius 6 about the z axis, from z = 25)
+/// standing through the top of a hull lofted through six elliptic sections, each the 12 fit
+/// pieces of [`fit_point_ellipse`] from 15 degrees, so no piece joint lies on the top. The
+/// boss meets the hull's top face in one closed edge; the round's rails cross the joints
+/// beside it, so the rollover splits the round into pieces, the first starting at the edge's
+/// seam and the last ending there. The seam is both ends of the closed edge's parameter, and
+/// the last piece's end belongs at the parameter's end: taken at its start, the piece was
+/// traced the long way round the edge and its rail trimmed to a negative interval, failing
+/// the fillet ("Unable to Process Rollover").
+#[test]
+fn a_round_split_by_rollover_ends_its_last_piece_at_a_closed_edge_s_seam() {
+    use solidcore_ops::{boolean, BooleanOp};
+    all_fixes();
+    let phase = PI / 12.0;
+    let sections = [
+        fit_point_ellipse(-50.0, 8.0, 5.0, phase),
+        fit_point_ellipse(-30.0, 18.0, 10.0, phase),
+        fit_point_ellipse(-10.0, 24.0, 14.0, phase),
+        fit_point_ellipse(10.0, 24.5, 14.5, phase),
+        fit_point_ellipse(30.0, 20.0, 11.0, phase),
+        fit_point_ellipse(50.0, 8.5, 5.5, phase),
+    ];
+    let hull = solidcore_ops::sweep::loft(&sections, 3, true).unwrap();
+    let boss = make_cylinder([0.0, 0.0, 25.0], 6.0, 14.0).unwrap();
+    let b = boolean(hull, boss, BooleanOp::Union).unwrap().unwrap();
+    // the boss's foot: the edge nearest its side at x = 6 on the hull's top
+    let (k, brep) = kernel_copy(&b);
+    let foot = Vec3::new(6.0, 0.0, 34.0);
+    let distance = |e: EdgeId| edge_closest_point(&k, &brep, e, foot).unwrap().closest;
+    let (index, near) = brep
+        .edge_list()
+        .iter()
+        .enumerate()
+        .map(|(i, &e)| (i, distance(e)))
+        .min_by(|a, c| a.1.distance.total_cmp(&c.1.distance))
+        .unwrap();
+    assert!(
+        (near.point.x.hypot(near.point.y) - 6.0).abs() < 1e-6 && near.point.z > 25.0,
+        "the edge picked is not the boss's foot: {near:?}"
+    );
+    drop(k);
+    let before = volume(&b);
+    blend(&b, Blend::Round, &[index], &[1.0], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the boss's foot does not round: {e:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    // a round at a concave foot adds material
+    assert!(volume(&b) > before, "{} <= {before}", volume(&b));
 }

@@ -1127,6 +1127,10 @@ impl FilletBrep {
 
         let mut tsect_pnts: Vec<VertexuseId> = Vec::new();
         let mut proj_params: Vec<f64> = Vec::new();
+        // each rail-end point's vertex use and parameter on the solver edge, and whether it
+        // is the start or the end of a main rail (not of a rail split off it), in the order
+        // met
+        let mut projected: Vec<(VertexuseId, f64, Option<OrientType>)> = Vec::new();
         for jj in 0..2usize {
             if !b3d_test {
                 let eu_on_surf = solver
@@ -1147,7 +1151,7 @@ impl FilletBrep {
             };
             all_rails.extend(others.iter().copied().map(Some));
 
-            for rail in all_rails {
+            for (rail_index, rail) in all_rails.into_iter().enumerate() {
                 let rail = rail.ok_or_else(|| nul("the geometry's rail"))?;
                 let fil_eus = self.brep().edge(rail)?.edgeuses.clone();
                 if fil_eus.len() != 2 {
@@ -1267,27 +1271,67 @@ impl FilletBrep {
                         t = ivl.max();
                     }
 
-                    let mut index_of_insert = proj_params.len();
-                    let mut do_insertion = true;
-                    for (kk, &p) in proj_params.iter().enumerate() {
-                        if (t - p).abs() < EFF_ZERO_SQRT * scale {
-                            do_insertion = false;
-                            break;
-                        } else if t < p {
-                            index_of_insert = kk;
-                            break;
-                        }
-                    }
-                    if do_insertion {
-                        proj_params.insert(index_of_insert, t);
-                        self.fillet_vertexuse_mut(vu)?
-                            .tsect_pnt_mut()
-                            .curve_parameter = -BIG_DOUBLE;
-                        tsect_pnts.insert(index_of_insert, vu);
-                    }
+                    let main_end = if rail_index == 0 {
+                        Some(eu1::orientation(self.brep(), eu)?)
+                    } else {
+                        None
+                    };
+                    projected.push((vu, t, main_end));
                 } // end loop on both edgeuses of this rail
             } // end loop on all rails on this side
-        } // end loop on both main rails, sorting SmTsectPnts
+        } // end loop on both main rails
+
+        // Not upstream (#17016): on a closed solver edge the geometry runs forward along the
+        // edge from its start (its main rails' starts, the edge uses of the same orientation)
+        // to its end. When a main rail's end lies before that start, the geometry runs
+        // across the edge's seam, and each point before the start lies past the seam: one
+        // period on. Upstream sorts such points by their parameter as they are (moving only
+        // an end exactly on the seam, and only in the 3D test), so the last piece of a round
+        // split by rollover, which ends at the seam, was traced from the seam the long way
+        // round to its start and its rails trimmed to a negative interval. A 2D test drops
+        // the end to the edge's UV trim curve from its section's UV point, so it lands near
+        // the seam, not on it.
+        if is_closed_solver_edge {
+            let start = projected
+                .iter()
+                .filter(|(_, _, end)| *end == Some(OrientType::Same))
+                .map(|(_, t, _)| *t)
+                .reduce(f64::min);
+            if let Some(start) = start {
+                let wraps = projected
+                    .iter()
+                    .any(|(_, t, end)| *end == Some(OrientType::Opposite) && *t < start);
+                if wraps {
+                    for (_, t, _) in &mut projected {
+                        if *t < start {
+                            *t += ivl.length();
+                        }
+                    }
+                }
+            }
+        }
+
+        // sorting SmTsectPnts
+        for (vu, t, _) in projected {
+            let mut index_of_insert = proj_params.len();
+            let mut do_insertion = true;
+            for (kk, &p) in proj_params.iter().enumerate() {
+                if (t - p).abs() < EFF_ZERO_SQRT * scale {
+                    do_insertion = false;
+                    break;
+                } else if t < p {
+                    index_of_insert = kk;
+                    break;
+                }
+            }
+            if do_insertion {
+                proj_params.insert(index_of_insert, t);
+                self.fillet_vertexuse_mut(vu)?
+                    .tsect_pnt_mut()
+                    .curve_parameter = -BIG_DOUBLE;
+                tsect_pnts.insert(index_of_insert, vu);
+            }
+        }
 
         let mut fillet_created = false;
         let exact_classes = k.fixes.fillet_exact_round_classes;
