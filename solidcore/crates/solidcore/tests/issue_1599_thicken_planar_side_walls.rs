@@ -31,6 +31,7 @@ use solidcore::surface::cone::p1::Cone;
 use solidcore::surface::plane::p1::Plane;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::edge::NotifyEnv;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::topology_traverser::Marks;
@@ -214,7 +215,11 @@ fn plane_sheet(k: &mut Kernel) -> Brep {
 /// seams are open at the body's tolerance, so the merge's stitch at that tolerance closes
 /// no region, and it widens as upstream's does (WR-455). The result is the slab, a
 /// manifold solid of six faces and volume 6 t. (Stitching at the body's tolerance alone,
-/// the former opt-in, left an open body.)
+/// the former opt-in, left an open body; the default kernel widened already.) At 100
+/// times the tolerance the slab passes `check_brep` at every level. At 3 and 10 times the
+/// widened stitch joins the side walls' edges to the faces' without raising their
+/// tolerance over the gap (Test #4, an edge/surface gap above the edge's tolerance),
+/// as upstream's stitch does; that is the stitch's, not checked here.
 #[test]
 fn thin_thickened_sheet_is_a_closed_slab() {
     for times in [3.0, 10.0, 100.0] {
@@ -242,6 +247,12 @@ fn thin_thickened_sheet_is_a_closed_slab() {
         slab.refresh_cached_topology();
         assert!(brep_is_manifold_solid(&slab).unwrap(), "{t}");
         assert_eq!(slab.face_list().len(), 6, "{t}");
+        if times >= 100.0 {
+            for level in [CheckLevel::Level0, CheckLevel::Level1, CheckLevel::Level2] {
+                let checked = check_brep(&mut k, &mut slab, level).unwrap();
+                assert!(checked.is_valid(), "{t} {level:?}: {:?}", checked.lines());
+            }
+        }
         let v = volume(&k, &mut slab).unwrap();
         assert!((v - 6.0 * t).abs() <= 1e-6 * 6.0 * t, "{t}: volume {v}");
     }

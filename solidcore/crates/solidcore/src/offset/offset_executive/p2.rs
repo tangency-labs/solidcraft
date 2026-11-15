@@ -1123,14 +1123,18 @@ impl OffsetExecutive {
             one_pass.split_edges_with_vertices = false;
             one_pass.making_manifold_solid = true;
             one_pass.do_stitching(kernel, &mut result, None, None, MinGapRequest::default())?;
-            // Only when that pass closes no region at all would `MakeManifold` keep
-            // nothing: then the body's own seams are open (a sheet thickened by a few
-            // times the body's tolerance), and the stitch widens as upstream's does.
+            // Only when the offset is to be a solid (an offset solid is asked for, or the
+            // body is one) and that pass closes no region at all would `MakeManifold`
+            // keep nothing: then the body's own seams are open (a sheet thickened by a
+            // few times the body's tolerance), and the stitch widens as upstream's does.
+            // An offset sheet is never widened: welding its lamina edges at up to a
+            // 200th of its size could close its slots.
             let infinite = result.infinite_region();
             let closes_a_region = bp1::regions(&result, None)?
                 .into_iter()
-                .any(|region| Some(region) != infinite);
-            if !closes_a_region {
+                .any(|region| infinite.is_some_and(|outside| region != outside));
+            let to_be_solid = self.create_offset_solid() || brep_is_manifold_solid(original)?;
+            if to_be_solid && !closes_a_region {
                 crate::error::ignore_status(stitch::stitch_into_solid(kernel, &mut result))?;
             }
             // Opt-in (WR-667; tangency-labs/smlib@37af643): an inset keeps the regions
