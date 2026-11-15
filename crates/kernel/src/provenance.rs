@@ -263,19 +263,15 @@ pub fn revolve_origins(tool: &Body, plane: &Plane, regions: &[Region2], axis_ori
 /// edge indices in `input`'s mesh order): each blend face comes from the edge it lies along.
 pub fn blend_origins(result: &Body, input: &Body, edges: &[usize], prov: &mut History) -> Result<()> {
     let size = input.size().max(1e-9);
-    let rm = result.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
-    let im = input.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
-    let rfaces = face_tris(&rm);
+    let rfaces = result.faces((size * 1e-3).max(1e-3))?;
     for (fi, fp) in prov.faces.iter_mut().enumerate() {
         if fp.change != Change::Generated {
             continue;
         }
         let Some(rf) = rfaces.get(fi) else { continue };
-        let samples = face_samples(rf);
         let mean = |e: usize| {
-            let Some(pts) = im.edges.get(e) else { return f64::INFINITY };
-            samples.iter().map(|(p, _)| pts.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min)).sum::<f64>()
-                / samples.len().max(1) as f64
+            let Some(pts) = input.edge_points(e) else { return f64::INFINITY };
+            pts.windows(2).map(|w| rf.centroid.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min)
         };
         if let Some(e) = edges.iter().copied().min_by(|a, b| mean(*a).total_cmp(&mean(*b))) {
             fp.origins = vec![FaceOrigin::Edge { operand: 0, edge: e }];
