@@ -270,8 +270,12 @@ fn lift_point(s: &mut Session, p: &Value, cmd: &str, point: &str) -> Result<Valu
         };
         let through: Vec<usize> = sk.curves.iter().enumerate().filter(|(_, c)| c.kind.uses(pi)).map(|(i, _)| i).collect();
         let mut fits = Vec::new();
-        for &ci in &through {
+        let mut k = 0;
+        for (n, &ci) in through.iter().enumerate() {
             let ids = liftable(&sk.curves[ci], cmd)?;
+            if n == 0 {
+                k = ids.iter().position(|i| *i == pi).ok_or_else(|| bad(cmd, format!("`{point}` is not a point of `{}`", sk.curves[ci].id)))?;
+            }
             let fit = ids
                 .iter()
                 .map(|i| sk.points.get(*i).map(|q| place(q.pos)).ok_or_else(|| bad(cmd, "a curve's point is missing")))
@@ -288,7 +292,6 @@ fn lift_point(s: &mut Session, p: &Value, cmd: &str, point: &str) -> Result<Valu
         for fit in &fits {
             made.push(sk.add_drawn_wire_in(fit, WireSpace::Component)?);
         }
-        let k = fits[0].iter().position(|q| q.dist(from) < 1e-9).unwrap_or(0);
         let n = sk.move_drawn_point(&made[0], k, goal)?;
         Ok((n, made, k))
     })?;
