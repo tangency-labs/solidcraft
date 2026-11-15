@@ -192,7 +192,7 @@ async function claimStatus(github, context, issue, now) {
       }
       if (pr && pr.state === 'closed') {
         const merged = Boolean(pr.merged || pr.merged_at);
-        return { pulls, since, expires: since, release: true, reason: merged ? 'merged PR' : 'closed PR', pr: recorded.pr };
+        return { pulls, since, expires: since, release: true, reason: merged ? 'merged PR' : 'closed PR', pr: recorded.pr, who: recorded.who };
       }
       if (pr && pr.state === 'open') pulls.push({ number: recorded.pr });
     }
@@ -444,6 +444,9 @@ function closingIssues(body) {
 async function handlePullClosed({ github, context }) {
   const pull = context.payload.pull_request;
   if (!pull || pull.state !== 'closed') return [];
+  // The payload is from when the event fired: a PR reopened since must keep its claims.
+  const { data: live } = await github.rest.pulls.get({ ...repoArgs(context), pull_number: pull.number });
+  if (live && live.state === 'open') return [];
   const merged = Boolean(pull.merged || pull.merged_at);
   // Closing keywords in the title close the issue too (a squash merge puts the title in the commit).
   const closing = merged ? closingIssues(`${pull.title || ''}\n${pull.body || ''}`) : new Set();
@@ -451,7 +454,13 @@ async function handlePullClosed({ github, context }) {
   const released = [];
   for (const n of mentionedIssues(pull.title, pull.body)) {
     if (n === pull.number || closing.has(n)) continue;
-    const timeline = await getTimeline(github, context, n);
+    let timeline;
+    try {
+      timeline = await getTimeline(github, context, n);
+    } catch (e) {
+      if (e.status === 404 || e.status === 410) continue; // a mention of an issue that doesn't exist
+      throw e;
+    }
     const recorded = recordedClaim(timeline);
     if (!recorded || recorded.pr !== pull.number) continue;
     if (holdingPulls(timeline, context, n, recorded.who).some((p) => p.number !== pull.number)) continue;
@@ -498,7 +507,9 @@ async function sweep({ github, context, now = Date.now() }) {
     if (skip) continue;
     const status = await claimStatus(github, context, issue, now);
     if (!status.release) continue;
-    if (!(await freshForRelease(github, context, issue.number))) continue;
+    // For a closed PR's claim, the live assignee must still be the recorded claimant.
+    const fresh = await freshForRelease(github, context, issue.number, status.who);
+    if (!fresh) continue;
     await release(github, context, issue, assignees);
     await github.rest.issues.createComment({
       ...repoArgs(context),

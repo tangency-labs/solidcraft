@@ -522,3 +522,34 @@ test('the claimant\'s own open "Part of" PR keeps the claim; someone else\'s doe
   w = fake({ byNumber: { 7: openIssue(7, ['alice'], ['in progress']) }, timeline: [...claimedThrough50, rest('bob')] });
   assert.deepEqual(await claim.handlePullClosed({ github: w.github, context: closedCtx('Tight box', 'Part of #7', true) }), [7]);
 });
+
+test('a mention of a nonexistent issue does not stop the later issues being freed', async () => {
+  const { github, calls } = fake({ byNumber: { 7: openIssue(7, ['alice'], ['in progress']) }, timeline: claimedThrough50 });
+  const paginate = github.paginate;
+  github.paginate = async (fn, args) => {
+    if (args.issue_number === 9999999) throw Object.assign(new Error('gone'), { status: 404 });
+    return paginate(fn, args);
+  };
+  assert.deepEqual(await claim.handlePullClosed({ github, context: closedCtx('Thing', 'Part of #9999999 and #7', false) }), [7]);
+  assert.ok(find(calls, 'removeLabel'));
+});
+
+test('a PR reopened since its closed event frees nothing', async () => {
+  const { github, calls } = fake({
+    byNumber: { 7: openIssue(7, ['alice'], ['in progress']) },
+    timeline: claimedThrough50,
+    pulls: { 50: { state: 'open' } },
+  });
+  assert.deepEqual(await claim.handlePullClosed({ github, context: closedCtx('Thing', 'Fixes #7', false) }), []);
+  assert.equal(find(calls, 'removeLabel'), undefined);
+});
+
+test('sweep does not free a closed PR\'s claim once the issue was reassigned', async () => {
+  const w = fake({
+    issues: [issue(7, ['dave'])],
+    timeline: claimedThrough50,
+    pulls: { 50: { state: 'closed', merged: true } },
+  });
+  assert.deepEqual(await claim.sweep({ github: w.github, context: { repo }, now: NOW }), []);
+  assert.equal(find(w.calls, 'removeLabel'), undefined);
+});
