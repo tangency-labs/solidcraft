@@ -95,12 +95,13 @@ fn case(name: &str) -> Case {
             Some(9000.0),
             None,
         ),
-        // Fifteen 10 mm cubes in a row, each overlapping its neighbour by 5 mm (SolidCraft issue
-        // #16552's join of fifteen tools): the level-by-level union or the one-by-one retry builds
-        // them all into one body of 15000 - 14 * 125 mm3.
+        // Fifteen 10 mm cubes in a row, each overlapping its neighbour by 5 mm along x
+        // (SolidCraft issue #16552's join of fifteen tools): the level-by-level union or the
+        // one-by-one retry builds them all into one 80 x 10 x 10 cuboid, 8000 mm3 (each of the
+        // 14 adjacent overlaps is 5 x 10 x 10 = 500).
         "union_all_fifteen_chain" => plain(
             Op::UnionAll((0..15).map(|i| Shape::Box([f64::from(i) * 5.0, 0.0, 0.0], [10.0; 3])).collect()),
-            Some(15.0 * 1000.0 - 14.0 * 125.0),
+            Some(15.0 * 1000.0 - 14.0 * 500.0),
             None,
         ),
         "intersect_disjoint" => plain(Op::Boolean(A, Shape::Box([20.0; 3], [10.0; 3]), BooleanOp::Intersect), None, None),

@@ -184,12 +184,11 @@ pub(crate) fn union_all(bodies: &[&Body]) -> Result<Body> {
         let solid_in = all_solid(&level)?;
         match union_level_by_level(k, level) {
             Ok(r) => finish(r, solid_in, true),
-            Err(first) if first.is_unported() => Err(first),
+            Err(first) if first.is_unported() || first.is_cancelled() => Err(first),
             Err(first) => {
                 let fresh = copies(k, bodies)?;
                 match union_one_by_one(k, fresh) {
                     Ok(r) => finish(r, solid_in, true),
-                    // a cancellation of the retry is the answer, not the first failure
                     Err(e) if e.is_cancelled() => Err(e),
                     Err(_) => Err(first),
                 }
@@ -231,6 +230,8 @@ fn union_one_by_one(k: &mut Kernel, breps: Vec<Brep>) -> SolidResult<Brep> {
         let tool = brep_copy(k, &b)?;
         match sm::boolean(k, acc_try, tool, BooleanOperation::Union) {
             Ok(r) => acc = r.result,
+            // a cancellation is the answer now, not a body to try later
+            Err(e) if e.is_cancelled() => return Err(e),
             Err(_) => deferred.push(b),
         }
     }
