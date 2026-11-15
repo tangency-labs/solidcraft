@@ -8779,14 +8779,18 @@ fn source_label(doc: &Document, id: FeatureId) -> String {
 /// What a pattern or mirror of features copies, when it is the source of another one (#395): its
 /// own sources, and the transforms of its copies. `None` for any other feature, and for a pattern
 /// or mirror of bodies (its copies are bodies, which a pattern or mirror of features can't take).
-fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, src: &Feature) -> Result<Option<(Vec<FeatureId>, Vec<Mat>)>> {
+/// Each transform comes with whether its copy is made (`false` for a copy the pattern skips).
+type CopiedFeatures = (Vec<FeatureId>, Vec<Mat>, Vec<bool>);
+fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, src: &Feature) -> Result<Option<CopiedFeatures>> {
     match &src.kind {
-        FeatureKind::Pattern { features, pattern, bodies } if bodies.is_empty() => {
-            Ok(Some((features.clone(), pattern_transforms(doc, vals, st, src.component, pattern)?)))
+        FeatureKind::Pattern { features, pattern, bodies, skip } if bodies.is_empty() => {
+            let mats = pattern_transforms(doc, vals, st, src.component, pattern)?;
+            let kept = kept_copies(skip, mats.len());
+            Ok(Some((features.clone(), mats, kept)))
         }
         FeatureKind::Mirror { features, plane, bodies, .. } if bodies.is_empty() => {
             let pl = doc.resolve_plane_in(vals, plane, 0, src.component, Some(st))?;
-            Ok(Some((features.clone(), vec![mirror_matrix(&pl)])))
+            Ok(Some((features.clone(), vec![mirror_matrix(&pl)], vec![true])))
         }
         _ => Ok(None),
     }
@@ -8823,11 +8827,13 @@ fn thread_target_bodies<'a>(doc: &Document, st: &'a ModelState, kind: &FeatureKi
 }
 
 /// The copies a pattern or mirror of `features` at `mats` makes, source by source: the source
-/// feature, the transforms of its copies, and the instance number of its first copy less one.
+/// feature, and each of its copies' instance numbers and transforms.
 /// A source that is itself a pattern or mirror of features (#395) stands for what it copied: its
 /// own sources, at each of its transforms moved by each of ours. Those copies are numbered after
 /// `mats`' own (which keep the numbers they always had), each nested source in a block of its
-/// own, so no two copies of one feature share an instance. Suppressed sources copy nothing.
+/// own, so no two copies of one feature share an instance. Suppressed sources copy nothing. The
+/// copies `skip` names, and copies of copies a nested pattern skips, are left out; the others keep
+/// their numbers.
 /// `f` with each face point moved onto its named face (on the body the feature names, when it
 /// names one and the face is there) in `state`, and notes on how the faces were found. `None`
 /// when `f` names no face; an error when a name no longer finds its face (the feature asks for
@@ -8904,7 +8910,8 @@ fn copy_plan<'a>(
     st: &ModelState,
     features: &[FeatureId],
     mats: &[Mat],
-) -> Result<Vec<(&'a Feature, Vec<Mat>, usize)>> {
+    skip: &[u32],
+) -> Result<Vec<(&'a Feature, Vec<(usize, Mat)>)>> {
     #[allow(clippy::too_many_arguments)]
     fn walk<'a>(
         doc: &'a Document,
@@ -8912,52 +8919,81 @@ fn copy_plan<'a>(
         st: &ModelState,
         features: &[FeatureId],
         mats: &[Mat],
+        kept: &[bool],
         first: usize,
         next: &mut usize,
         depth: usize,
-        out: &mut Vec<(&'a Feature, Vec<Mat>, usize)>,
+        out: &mut Vec<(&'a Feature, Vec<(usize, Mat)>)>,
     ) -> Result<()> {
         for id in features {
             if doc.feature(id.0).is_some_and(|x| x.suppressed) {
                 continue;
             }
             let src = source_feature(doc, *id)?;
-            let Some((inner, inner_mats)) = copied_features(doc, vals, st, src)? else {
-                out.push((src, mats.to_vec(), first));
+            let Some((inner, inner_mats, inner_kept)) = copied_features(doc, vals, st, src)? else {
+                // A skipped copy is left out, and the others keep their instance numbers.
+                let copies = mats.iter().zip(kept).enumerate().filter(|(_, (_, keep))| **keep).map(|(k, (m, _))| (first + k + 1, *m));
+                out.push((src, copies.collect()));
                 continue;
             };
             if depth >= MAX_NESTING {
                 return Err(DocError::Invalid(format!("patterns and mirrors of patterns and mirrors nest at most {MAX_NESTING} deep")));
             }
             let moved: Vec<Mat> = mats.iter().flat_map(|m| inner_mats.iter().map(move |mi| crate::mat_mul(m, mi))).collect();
+            // A copy of a copy is made when both are.
+            let moved_kept: Vec<bool> = kept.iter().flat_map(|k| inner_kept.iter().map(move |ki| *k && *ki)).collect();
             if moved.len() > MAX_INSTANCES || next.saturating_add(moved.len()) > MAX_INSTANCES * MAX_NESTING {
                 return Err(DocError::Invalid("too many pattern instances".into()));
             }
             let block = *next;
             *next += moved.len();
-            walk(doc, vals, st, &inner, &moved, block, next, depth + 1, out)?;
+            walk(doc, vals, st, &inner, &moved, &moved_kept, block, next, depth + 1, out)?;
         }
         Ok(())
     }
     let mut next = mats.len();
     let mut out = Vec::new();
-    walk(doc, vals, st, features, mats, 0, &mut next, 0, &mut out)?;
+    walk(doc, vals, st, features, mats, &kept_copies(skip, mats.len()), 0, &mut next, 0, &mut out)?;
     Ok(out)
+}
+
+/// Whether each of `copies` copies is made: all but the instances `skip` names (instance 1 is the
+/// original, so copy `k` is instance `k + 2`). Numbers that name no copy skip nothing.
+fn kept_copies(skip: &[u32], copies: usize) -> Vec<bool> {
+    let mut kept = vec![true; copies];
+    for n in skip {
+        if let Some(k) = (*n as usize).checked_sub(2)
+            && let Some(slot) = kept.get_mut(k)
+        {
+            *slot = false;
+        }
+    }
+    kept
+}
+
+/// The numbers in `skip` that name no copy of a pattern with `copies` copies (the original, 1, or
+/// past the last instance), in a warning, or `None` when every number names a copy.
+fn skip_outside(skip: &[u32], copies: usize) -> Option<String> {
+    let last = copies.saturating_add(1);
+    let outside: Vec<String> = skip.iter().filter(|n| **n < 2 || **n as usize > last).map(u32::to_string).collect();
+    (!outside.is_empty()).then(|| {
+        format!("skip: instance {} is not a copy of this pattern (its copies are instances 2 to {last}), so it skips nothing", outside.join(", "))
+    })
 }
 
 /// The transforms of a pattern's or mirror's copies in their instance order (instance `k + 1`
 /// is the `k`-th): `mats`, then those of the copies made through patterns and mirrors among
 /// `features` ([`copy_plan`]). Naming finds a copy's faces through them.
 fn copy_instances(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, features: &[FeatureId], mats: &[Mat]) -> Result<Vec<Mat>> {
-    let plan = copy_plan(doc, vals, st, features, mats)?;
-    let len = plan.iter().map(|(_, ms, first)| first + ms.len()).max().unwrap_or(0).max(mats.len());
+    let plan = copy_plan(doc, vals, st, features, mats, &[])?;
+    let len = plan.iter().flat_map(|(_, copies)| copies.iter().map(|(n, _)| *n)).max().unwrap_or(0).max(mats.len());
     let mut all = vec![crate::IDENTITY; len];
     for (slot, m) in all.iter_mut().zip(mats) {
         *slot = *m;
     }
-    for (_, ms, first) in &plan {
-        for (k, m) in ms.iter().enumerate() {
-            if let Some(slot) = all.get_mut(first + k) {
+    for (_, copies) in &plan {
+        for (n, m) in copies {
+            if let Some(slot) = n.checked_sub(1).and_then(|k| all.get_mut(k)) {
                 *slot = *m;
             }
         }
@@ -8988,6 +9024,7 @@ fn replay(
     st: &mut ModelState,
     features: &[FeatureId],
     mats: &[Mat],
+    skip: &[u32],
     warning: &mut Option<String>,
 ) -> Result<()> {
     if features.is_empty() {
@@ -9010,21 +9047,21 @@ fn replay(
     kept.sort_by_key(at);
     kept.dedup();
     let (mut missed, mut total) = (0usize, 0usize);
-    let plan = copy_plan(doc, vals, st, &kept, mats)?;
+    let plan = copy_plan(doc, vals, st, &kept, mats, skip)?;
     // A source's named faces are looked up in the model as it was before any copy was made: the
     // copy of an earlier source (a boss joined to the body) changes the faces a later source (a cut
     // starting on the boss) names, though the later source means the original's (#11792).
     // A hole placed from edges names those edges too (#16799): the second hole's edge names
     // mean the original's edges, which the first hole's copy has already cut into.
-    let named_from = plan.iter().any(|(src, _, _)| src.face_names.iter().chain(&src.edge_names).any(|n| !n.is_empty())).then(|| st.clone());
-    for (src, mats, first) in &plan {
+    let named_from = plan.iter().any(|(src, _)| src.face_names.iter().chain(&src.edge_names).any(|n| !n.is_empty())).then(|| st.clone());
+    for (src, mats) in &plan {
         // A fillet or chamfer repeats at the copied edges.
         if let FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } = &src.kind {
             let r = val(vals, radius, Kind::Length)?;
             // The edges the feature blended in this evaluation (found by name), falling back to
             // its picked points.
             let found = st.blend_edges.get(&src.id).cloned().unwrap_or_else(|| crate::plain(edges));
-            for m in mats {
+            for (_, m) in mats {
                 let moved_all: Vec<Vec3> = found.iter().map(|p| crate::apply_point(m, *p)).collect();
                 // The copies of a blend over several bodies blend each body's own edges.
                 let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
@@ -9068,7 +9105,7 @@ fn replay(
         if let FeatureKind::OffsetFace { faces, distance, body } = &src.kind {
             let d = val(vals, distance, Kind::Length)?;
             let picked = crate::plain(faces);
-            for m in mats {
+            for (_, m) in mats {
                 let moved: Vec<Vec3> = picked.iter().map(|p| crate::apply_point(m, *p)).collect();
                 let i = body_at(st, body, &moved)?;
                 let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
@@ -9089,9 +9126,9 @@ fn replay(
                 return Err(DocError::Invalid(format!("{} made no {what} to repeat", src.name)));
             }
             let mut output = 0;
-            for (k, m) in mats.iter().enumerate() {
+            for (n, m) in mats {
                 for mb in &made {
-                    let moved = moved_copy(mb, kernel::transform_matrix(&mb.body, *m)?, first + k + 1);
+                    let moved = moved_copy(mb, kernel::transform_matrix(&mb.body, *m)?, *n);
                     let name = copy_body_name(st, f, output, &mb.name);
                     st.bodies.push(ModelBody::traced_new(name, moved, f.id));
                     output += 1;
@@ -9102,7 +9139,7 @@ fn replay(
         // A thread is cut again on the copy of its face. A copy keeps the thread's hand: the
         // mirror of a right-hand M8 hole is a right-hand M8 hole, not a left-hand one.
         if matches!(src.kind, FeatureKind::Thread { .. }) {
-            for m in mats {
+            for (_, m) in mats {
                 let mut copy = (*src).clone();
                 copy.id = f.id;
                 copy.face_names.clear();
@@ -9155,7 +9192,7 @@ fn replay(
                 FeatureKind::Hole { points: Some(sp), .. } if !sp.single => st.sketch(sp.sketch.0).map(|ss| (ss.plane.normal(), sp.flip)),
                 _ => None,
             };
-            for (k, m) in mats.iter().enumerate() {
+            for (n, m) in mats {
                 let d = match sketch_side {
                     Some((n, flip)) => {
                         let moved: Vec<Vec3> = spots.iter().map(|p| crate::apply_point(m, *p)).collect();
@@ -9174,7 +9211,7 @@ fn replay(
                     let depth = hole_depth_to(st, &at, d, &to, depth)?;
                     // Each copy's faces are named as the hole's, with the instance.
                     copies.extend(hole_tools(vals, st, &at, d, diameter, &depth, hole, !from_inside)?.into_iter().map(|t| Traced {
-                        lineage: t.lineage.map(|l| l.copied(src.id, first + k + 1)),
+                        lineage: t.lineage.map(|l| l.copied(src.id, *n)),
                         body: t.body,
                         recipe: None,
                     }));
@@ -9185,11 +9222,11 @@ fn replay(
         } else if let FeatureKind::Rib { .. } = &src.kind {
             // A rib is built again at each copy of its sketch, against the bodies there (#4593):
             // its walls run until they meet the body, which may not lie the same way there.
-            for (k, m) in mats.iter().enumerate() {
+            for (n, m) in mats {
                 for body in more::rib_tools(vals, st, src, Some(m))? {
                     // Each copy's faces are named as the rib's, with the instance.
                     let t = Traced::unnamed(body);
-                    copies.push(Traced { lineage: t.lineage.map(|l| l.copied(src.id, first + k + 1)), body: t.body, recipe: None });
+                    copies.push(Traced { lineage: t.lineage.map(|l| l.copied(src.id, *n)), body: t.body, recipe: None });
                 }
             }
         } else {
@@ -9209,11 +9246,11 @@ fn replay(
                 None => with_named_face_points(doc, vals, named_from.as_ref().unwrap_or(st), src)?.map(|(g, _)| g),
             };
             let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None)?;
-            for (k, m) in mats.iter().enumerate() {
+            for (n, m) in mats {
                 let start = copies.len();
                 for t in &tools {
-                    let recipe = t.recipe.map(|r| moved_recipe(r, m, src.id, first + k + 1));
-                    copies.push(t.copied(kernel::transform_matrix(&t.body, *m)?, src.id, first + k + 1).with_recipe(recipe));
+                    let recipe = t.recipe.map(|r| moved_recipe(r, m, src.id, *n));
+                    copies.push(t.copied(kernel::transform_matrix(&t.body, *m)?, src.id, *n).with_recipe(recipe));
                 }
                 instances.push(start..copies.len());
             }
@@ -9243,7 +9280,7 @@ fn replay(
         // (#6841): each machined into the sheets in turn, then cut from the other targets.
         if op == Operation::Cut && matches!(src.kind, FeatureKind::Extrude { .. }) && !st.sheets.is_empty() && instances.len() == mats.len() {
             let mut handled = Vec::with_capacity(mats.len());
-            for (m, instance) in mats.iter().zip(&instances) {
+            for ((_, m), instance) in mats.iter().zip(&instances) {
                 let bodies: Vec<Body> = copies.get(instance.clone()).unwrap_or_default().iter().map(|t| t.body.clone()).collect();
                 handled.push(more::sheet_cut_copy(f, src, m, st, &bodies, &targets, warning)?);
             }
@@ -10254,11 +10291,15 @@ fn eval_feature(
             }
             Ok(())
         }
-        FeatureKind::Pattern { features, pattern, bodies } => {
+        FeatureKind::Pattern { features, pattern, bodies, skip } => {
             let mats = pattern_transforms(doc, vals, st, f.component, pattern)?;
-            if bodies.is_empty() {
-                return replay(doc, vals, f, st, features, &mats, warning);
+            if let Some(note) = skip_outside(skip, mats.len()) {
+                append_warning(warning, note);
             }
+            if bodies.is_empty() {
+                return replay(doc, vals, f, st, features, &mats, skip, warning);
+            }
+            let kept = kept_copies(skip, mats.len());
             // Bodies: each copy is a new body named after its source.
             let here = doc.component_transform(f.component);
             for (s, n) in bodies.iter().enumerate() {
@@ -10277,6 +10318,10 @@ fn eval_feature(
                 // name tried took time cubic in the copies.
                 let mut names = BodyNames::new(st);
                 for (k, m) in mats.iter().enumerate() {
+                    // A skipped copy is left out; the others keep their numbers and names.
+                    if kept.get(k) == Some(&false) {
+                        continue;
+                    }
                     let local = match &owner {
                         Some((frame, frame_inv, here_inv)) => {
                             crate::mat_mul(&crate::mat_mul(frame_inv, &here), &crate::mat_mul(&crate::mat_mul(m, here_inv), frame))
@@ -10304,7 +10349,7 @@ fn eval_feature(
         FeatureKind::Mirror { features, plane, bodies, combine, placements } => {
             let pl = doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?;
             if bodies.is_empty() {
-                return replay(doc, vals, f, st, features, &[mirror_matrix(&pl)], warning);
+                return replay(doc, vals, f, st, features, &[mirror_matrix(&pl)], &[], warning);
             }
             let m = mirror_matrix(&pl);
             let mut output = 0;

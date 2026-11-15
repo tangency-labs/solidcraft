@@ -1573,6 +1573,7 @@ fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
         .add_feature(
             FeatureKind::Pattern {
                 features: vec![FeatureId(id)],
+                skip: Vec::new(),
                 pattern: PatternKind::Rectangular {
                     dir1: Dir(Vec3::Y),
                     count1: "2".into(),

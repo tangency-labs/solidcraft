@@ -1784,6 +1784,42 @@ fn editing_a_circular_pattern_keeps_its_origin_expressions() {
     assert_eq!(origin(&h), json!(["cx", 15.0, 0.0]), "the expression is kept, not its value now");
 }
 
+/// #3247: the pattern editor shows the instances a pattern skips in its Skip row and sends them
+/// back as numbers; text that is not a list of numbers is refused before anything runs.
+#[test]
+fn the_pattern_editor_shows_and_sends_the_instances_it_skips() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (id, params) in [
+        ("solid.box", json!({"length":100,"width":30,"height":10,"corner":[0,0,0],"body_name":"Plate"})),
+        ("solid.hole", json!({"position":[10,15,10],"diameter":4,"name":"Hole1"})),
+        ("solid.pattern.rectangular", json!({"features":["Hole1"],"dir1":[1,0,0],"count1":5,"spacing1":20,"skip":[3,5],"name":"Pattern"})),
+    ] {
+        h.app.run(id, params).unwrap();
+    }
+    let pattern = h.app.session.doc.features.last().unwrap().id;
+    let mut d = crate::dialogs::for_feature(&h.app, pattern, None).unwrap();
+    assert_eq!(d.extra.get("skip"), Some(&json!("3, 5")));
+    let sent = |d: &Dialog| {
+        let cmds = crate::dialogs::apply_commands(&h.app, d).unwrap();
+        cmds.iter().find(|(id, _)| id == "timeline.redefine").map(|(_, p)| p["params"]["skip"].clone()).unwrap()
+    };
+    assert_eq!(sent(&d), json!([3, 5]));
+    d.extra.insert("skip".into(), json!(" 2;4 "));
+    assert_eq!(sent(&d), json!([2, 4]));
+    d.extra.insert("skip".into(), json!(""));
+    assert_eq!(sent(&d), json!([]));
+    d.extra.insert("skip".into(), json!("2, x"));
+    let error = crate::dialogs::apply_commands(&h.app, &d).unwrap_err();
+    assert!(error.contains("`x`"), "{error}");
+    d.extra.insert("skip".into(), json!("2, 4"));
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let kind = serde_json::to_value(&h.app.session.doc.feature(pattern).unwrap().kind).unwrap();
+    assert_eq!(kind["skip"], json!([2, 4]));
+}
+
 /// The Circular Pattern dialog must show only one field active at a time (#10066): the pick
 /// field's accent ring yields while a text field holds the keyboard, and clicking a pick field
 /// takes the keyboard back.

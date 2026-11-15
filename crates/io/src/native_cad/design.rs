@@ -495,6 +495,7 @@ impl Builder {
                 let dir = dir.map(|d| rotate(&self.frame, d)).and_then(Vec3::normalized).ok_or_else(|| format!("{name}: no direction"))?;
                 FeatureKind::Pattern {
                     features,
+                    skip: Vec::new(),
                     pattern: solidcraft_doc::PatternKind::Rectangular {
                         dir1: Dir(dir),
                         count1: Expr::from(count("count")?.to_string().as_str()),
@@ -519,6 +520,7 @@ impl Builder {
                 let axis = along.map(|d| rotate(&self.frame, d)).and_then(Vec3::normalized).ok_or_else(|| format!("{name}: no axis"))?;
                 FeatureKind::Pattern {
                     features,
+                    skip: Vec::new(),
                     pattern: solidcraft_doc::PatternKind::Circular {
                         origin: solidcraft_doc::point_expr(origin),
                         axis: Dir(axis),

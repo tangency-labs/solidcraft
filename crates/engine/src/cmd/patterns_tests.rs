@@ -1715,3 +1715,233 @@ fn pattern_copies_share_their_bodys_meshes_through_a_move_to_a_component() {
     run(&mut s, "component.move_bodies", json!({"bodies": copies, "component": "Grid"}));
     check(&s, "moved into a component");
 }
+
+/// Whether the plate of [`plate_with_hole`] is solid at `(x, y)`, halfway through it.
+fn solid_at(s: &Session, x: f64, y: f64) -> bool {
+    let state = s.world_state().unwrap();
+    let plate = &state.bodies.first().unwrap().body;
+    plate.classify_point(solidcore_record::Vec3::new(x, y, 2.5)).unwrap() == solidcraft_kernel::PointClass::Inside
+}
+
+/// The name of the wall of the hole of radius 2 at `(x, y)` in [`plate_with_hole`].
+fn hole_wall_name(s: &Session, x: f64, y: f64) -> String {
+    solidcraft_doc::naming::face_names_at(&s.model.state(), &[solidcore_record::Vec3::new(x + 2.0, y, 2.5)]).pop().unwrap_or_default()
+}
+
+/// A rectangular pattern of a hole leaves out the instances `skip` names (#3247): along one
+/// direction and over two, by instance number (1 is the original). The copies it keeps keep the
+/// names they had, the skip is saved, and leaving it out again brings the copies back.
+#[test]
+fn a_feature_pattern_skips_copies_and_the_others_keep_their_names() {
+    let mut s = plate_with_hole();
+    let row = |skip: Value| json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 4, "spacing1": 20, "skip": skip});
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 4, "spacing1": 20, "name": "Pat"}));
+    assert!(rel(volume(&mut s), PLATE - 4.0 * HOLE) < 1e-4);
+    let (first, third) = (hole_wall_name(&s, 30.0, 10.0), hole_wall_name(&s, 70.0, 10.0));
+    assert!(!first.is_empty() && !third.is_empty() && first != third, "{first} / {third}");
+
+    // Instance 3 (x = 50) is left out; instances 2 and 4 keep their places and names.
+    run(&mut s, "timeline.redefine", json!({"feature": "Pat", "command": "solid.pattern.rectangular", "params": row(json!([3]))}));
+    assert!(rel(volume(&mut s), PLATE - 3.0 * HOLE) < 1e-4);
+    assert!(solid_at(&s, 50.0, 10.0), "instance 3 is skipped");
+    assert!(!solid_at(&s, 30.0, 10.0) && !solid_at(&s, 70.0, 10.0) && !solid_at(&s, 10.0, 10.0));
+    assert_eq!(hole_wall_name(&s, 30.0, 10.0), first);
+    assert_eq!(hole_wall_name(&s, 70.0, 10.0), third);
+    let saved = s.doc.to_json();
+    let pattern = s.doc.features.iter().find(|f| f.name == "Pat").unwrap();
+    assert!(matches!(&pattern.kind, solidcraft_doc::FeatureKind::Pattern { skip, .. } if skip == &[3]));
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    assert!(rel(volume(&mut reopened), PLATE - 3.0 * HOLE) < 1e-4);
+    assert!(solid_at(&reopened, 50.0, 10.0));
+    assert_eq!(hole_wall_name(&reopened, 70.0, 10.0), third);
+    assert_eq!(reopened.doc.to_json(), saved, "saved again as it was read");
+
+    // Without `skip`, every copy is back.
+    run(&mut s, "timeline.redefine", json!({"feature": "Pat", "command": "solid.pattern.rectangular", "params": row(json!([]))}));
+    assert!(rel(volume(&mut s), PLATE - 4.0 * HOLE) < 1e-4);
+    assert_eq!(hole_wall_name(&s, 70.0, 10.0), third);
+    assert!(!s.doc.to_json().contains("\"skip\""), "an empty skip is not saved");
+
+    // Over two directions, instance i × count2 + j + 1 is step i along dir1 and j along dir2:
+    // instance 4 is (30, 30).
+    let mut s = plate_with_hole();
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20, "dir2": [0, 1, 0], "count2": 2, "spacing2": 20, "skip": [4]}),
+    );
+    assert!(rel(volume(&mut s), PLATE - 5.0 * HOLE) < 1e-4);
+    assert!(solid_at(&s, 30.0, 30.0), "instance 4 is skipped");
+    for (x, y) in [(10.0, 30.0), (30.0, 10.0), (50.0, 10.0), (50.0, 30.0)] {
+        assert!(!solid_at(&s, x, y), "({x}, {y}) is drilled");
+    }
+}
+
+/// The issue's example (#3247): four bosses round a disc with the second instance skipped make
+/// three.
+#[test]
+fn a_circular_feature_pattern_skips_copies() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 40}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "operation": "new"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.circle.center", json!({"center": [25, 0], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 6, "operation": "join", "name": "Boss"}));
+    let (disc, boss) = (PI * 40.0 * 40.0 * 10.0, PI * 4.0 * 4.0 * 6.0);
+    run(&mut s, "solid.pattern.circular", json!({"features": ["Boss"], "axis": "Z", "count": 4, "skip": [2]}));
+    // 50565.818 + 2 × 301.593 = 51169.0 mm³, as the issue expects.
+    assert!(rel(volume(&mut s), disc + 3.0 * boss) < 1e-4, "{}", volume(&mut s));
+    assert!(rel(volume(&mut s), 51169.0) < 1e-4);
+    // No boss at instance 2 (90°), bosses at instances 3 (180°) and 4 (270°).
+    let st = s.world_state().unwrap();
+    let body = &st.bodies.first().unwrap().body;
+    let at = |x: f64, y: f64| body.classify_point(solidcore_record::Vec3::new(x, y, 13.0)).unwrap() == solidcraft_kernel::PointClass::Inside;
+    assert!(at(25.0, 0.0) && !at(0.0, 25.0) && at(-25.0, 0.0) && at(0.0, -25.0));
+}
+
+/// A pattern on a path skips copies by their place along the path, and a mirror of a pattern
+/// copies only the copies the pattern made.
+#[test]
+fn path_patterns_and_mirrors_of_patterns_leave_skipped_copies_out() {
+    let mut s = plate_with_hole();
+    run(
+        &mut s,
+        "solid.pattern.path",
+        json!({"features": ["Hole1"], "path_sketch": "Path", "path": ["l1"], "count": 5, "spacing": 20, "skip": [2, 4]}),
+    );
+    assert!(rel(volume(&mut s), PLATE - 3.0 * HOLE) < 1e-4);
+    assert!(solid_at(&s, 30.0, 10.0) && solid_at(&s, 70.0, 10.0));
+    assert!(!solid_at(&s, 50.0, 10.0) && !solid_at(&s, 90.0, 10.0));
+
+    let mut s = plate_with_hole();
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 4, "spacing1": 20, "skip": [3], "name": "Pat"}),
+    );
+    run(&mut s, "solid.mirror", json!({"features": ["Hole1", "Pat"], "plane": {"origin": [0, 25, 0], "normal": [0, 1, 0]}}));
+    assert!(rel(volume(&mut s), PLATE - 6.0 * HOLE) < 1e-4);
+    assert!(solid_at(&s, 50.0, 40.0), "the skipped copy is not mirrored");
+    for x in [10.0, 30.0, 70.0] {
+        assert!(!solid_at(&s, x, 40.0), "the copy at x {x} is mirrored");
+    }
+}
+
+/// A body pattern skips instances too. Each copy keeps its name when another one is skipped or
+/// brought back: for one body, and for several, whose names are kept source by source (#12114).
+#[test]
+fn a_body_pattern_skips_copies_and_each_copy_keeps_its_name() {
+    let names = |s: &Session| -> Vec<String> { s.model.state().bodies.iter().map(|b| b.name.clone()).collect() };
+    // Where a body is: the centre of its box, rounded.
+    let centre = |s: &mut Session, body: &str| {
+        let m = run(s, "inspect.measure", json!({"bodies": [body]}));
+        let c = |i: usize| ((m["bodies"][0]["bbox"]["min"][i].as_f64().unwrap() + m["bodies"][0]["bbox"]["max"][i].as_f64().unwrap()) / 2.0).round();
+        (c(0), c(1))
+    };
+    let redefine = |s: &mut Session, skip: Value| {
+        let params = json!({"bodies": ["Cube"], "axis": "Z", "count": 4, "skip": skip});
+        run(s, "timeline.redefine", json!({"feature": "Pat", "command": "solid.pattern.circular", "params": params}));
+    };
+    // Skipped from the start: instances 2 and 4 are made; 3 comes back under a name of its own.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "body_name": "Cube"}));
+    run(&mut s, "solid.pattern.circular", json!({"bodies": ["Cube"], "axis": "Z", "count": 4, "skip": [3], "name": "Pat"}));
+    assert_eq!(names(&s), ["Cube", "Cube (2)", "Cube (3)"]);
+    assert_eq!(centre(&mut s, "Cube (2)"), (-5.0, 25.0), "instance 2");
+    assert_eq!(centre(&mut s, "Cube (3)"), (5.0, -25.0), "instance 4");
+    redefine(&mut s, json!([]));
+    assert_eq!(names(&s).len(), 4);
+    assert_eq!(centre(&mut s, "Cube (2)"), (-5.0, 25.0));
+    assert_eq!(centre(&mut s, "Cube (3)"), (5.0, -25.0), "instance 4 keeps its name");
+    assert_eq!(centre(&mut s, "Cube (4)"), (-25.0, -5.0), "instance 3 is new");
+    // Skipped later, and back again: every copy keeps its name, through a reopen.
+    redefine(&mut s, json!([2]));
+    assert_eq!(names(&s), ["Cube", "Cube (4)", "Cube (3)"]);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(names(&reopened), ["Cube", "Cube (4)", "Cube (3)"]);
+    redefine(&mut reopened, json!([]));
+    assert_eq!(names(&reopened), ["Cube", "Cube (2)", "Cube (4)", "Cube (3)"]);
+    assert_eq!(centre(&mut reopened, "Cube (2)"), (-5.0, 25.0));
+
+    // Two bodies: their copies' names stay with their own body and place.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new_body", "body_name": "Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 0, 10], "operation": "new_body", "body_name": "Post"}));
+    let rect = |skip: Value| json!({"bodies": ["Base", "Post"], "dir1": [1, 0, 0], "count1": 4, "spacing1": 30, "skip": skip});
+    let mut params = rect(json!([]));
+    params["name"] = json!("Two");
+    run(&mut s, "solid.pattern.rectangular", params);
+    let all = ["Base", "Post", "Base (2)", "Base (3)", "Base (4)", "Post (2)", "Post (3)", "Post (4)"];
+    assert_eq!(names(&s), all);
+    for skip in [json!([3]), json!([2, 4]), json!([4]), json!([])] {
+        run(&mut s, "timeline.redefine", json!({"feature": "Two", "command": "solid.pattern.rectangular", "params": rect(skip.clone())}));
+        for (n, x) in [(2, 30.0), (3, 60.0), (4, 90.0)] {
+            let shown = skip.as_array().unwrap().iter().all(|k| k != n);
+            for (source, y) in [("Base", 0.0), ("Post", 0.0)] {
+                let name = format!("{source} ({n})");
+                assert_eq!(names(&s).contains(&name), shown, "{name} with skip {skip}");
+                if shown {
+                    assert_eq!(centre(&mut s, &name), (x, y), "{name} with skip {skip}");
+                }
+            }
+        }
+    }
+    assert_eq!(names(&s), all);
+}
+
+/// `skip` names copies the pattern makes: not the original (instance 1), not past the last
+/// instance, whole numbers only, and not with components. A refusal leaves the design as it was. A parameter
+/// that lowers the count past a skipped copy skips nothing and says so; raised again, the copy is
+/// skipped again.
+#[test]
+fn skip_refuses_numbers_that_name_no_copy_and_follows_the_count() {
+    let mut s = plate_with_hole();
+    let before = s.doc.to_json();
+    let rect = |skip: Value| json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 4, "spacing1": 20, "skip": skip});
+    for (skip, says) in [
+        (json!([1]), "the original"),
+        (json!([0]), "the original"),
+        (json!([5]), "instances 2 to 4"),
+        (json!([2, 9]), "instance 9"),
+        (json!(["2"]), "instance numbers"),
+        (json!([2.5]), "instance numbers"),
+        (json!(2), "instance numbers"),
+    ] {
+        let error = s.execute("solid.pattern.rectangular", &rect(skip.clone())).unwrap_err().to_string();
+        assert!(error.contains(says), "{skip}: {error}");
+        assert_eq!(s.doc.to_json(), before, "{skip}");
+    }
+    let path = json!({"features": ["Hole1"], "path_sketch": "Path", "path": ["l1"], "count": 3, "spacing": 20, "skip": [4]});
+    assert!(s.execute("solid.pattern.path", &path).unwrap_err().to_string().contains("instances 2 to 3"));
+    for skip in [json!([5]), json!([1]), json!([-1])] {
+        assert!(s.execute("solid.pattern.circular", &json!({"features": ["Hole1"], "axis": "Z", "count": 4, "skip": skip})).is_err(), "{skip}");
+    }
+    assert_eq!(s.doc.to_json(), before);
+
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Peg"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let before = s.doc.to_json();
+    let error = s.execute("solid.pattern.rectangular", &json!({"components": ["Peg"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20, "skip": [2]}));
+    assert!(error.unwrap_err().to_string().contains("not supported yet"));
+    assert_eq!(s.doc.to_json(), before);
+
+    let mut s = plate_with_hole();
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "4", "unit": ""}));
+    let reply =
+        run(&mut s, "solid.pattern.rectangular", json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": "n", "spacing1": 20, "skip": [4]}));
+    let id = reply["feature"].as_u64().unwrap();
+    assert!(rel(volume(&mut s), PLATE - 3.0 * HOLE) < 1e-4);
+    run(&mut s, "parameters.change", json!({"name": "n", "expression": "3"}));
+    assert!(rel(volume(&mut s), PLATE - 3.0 * HOLE) < 1e-4, "instances 2 and 3 are made");
+    let warning = s.model.result(id).and_then(|r| r.warning.clone()).unwrap_or_default();
+    assert!(warning.contains("skip: instance 4 is not a copy"), "{warning}");
+    run(&mut s, "parameters.change", json!({"name": "n", "expression": "4"}));
+    assert!(rel(volume(&mut s), PLATE - 3.0 * HOLE) < 1e-4);
+    assert!(solid_at(&s, 70.0, 10.0), "instance 4 is skipped again");
+    assert!(s.model.result(id).and_then(|r| r.warning.clone()).is_none());
+}

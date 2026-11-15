@@ -1513,19 +1513,46 @@ impl Session {
             // slot by slot, a name of the old count would stay in a later source's place. One
             // saved before then reads its names in order; stored as its copies have them, they
             // mean the same copies read source by source.
-            if f.pins_every_body_name() && (f.pattern_names_in_order || made.len() != f.body_names.len()) {
-                pins.push((f.id, made.iter().map(|n| n.to_string()).collect()));
+            // A body Pattern that skips copies keeps its names by copy number: its built copies
+            // pass the skipped copies' slots by, which keep the names stored for them.
+            let slots: Vec<usize> = if f.skips_copies() { f.body_name_slots(made.len()) } else { (0..made.len()).collect() };
+            let end = slots.last().map_or(0, |s| s + 1);
+            if f.pins_every_body_name() && (f.pattern_names_in_order || end != f.body_names.len()) {
+                let mut names = vec![String::new(); end];
+                // The names stored for skipped copies stay with their source and copy, read in
+                // the blocks they were stored in.
+                if f.skips_copies() && !f.pattern_names_in_order {
+                    let sources = match &f.kind {
+                        solidcraft_doc::FeatureKind::Pattern { bodies, .. } => bodies.len().max(1),
+                        _ => 1,
+                    };
+                    let (old, new) = (f.body_names.len() / sources, end / sources);
+                    if f.body_names.len().is_multiple_of(sources) {
+                        for (slot, name) in names.iter_mut().enumerate() {
+                            let (s, k) = (slot / new.max(1), slot % new.max(1));
+                            if let Some(stored) = f.body_names.get(s * old + k).filter(|_| k < old) {
+                                name.clone_from(stored);
+                            }
+                        }
+                    }
+                }
+                for (slot, name) in slots.iter().zip(&made) {
+                    if let Some(stored) = names.get_mut(*slot) {
+                        *stored = name.to_string();
+                    }
+                }
+                pins.push((f.id, names));
                 continue;
             }
             // Nothing to pin when every slot the bodies take already holds a name.
-            if made.len() <= f.body_names.len() && f.body_names.iter().take(made.len()).all(|slot| !slot.trim().is_empty()) {
+            if slots.iter().all(|slot| f.body_names.get(*slot).is_some_and(|name| !name.trim().is_empty())) {
                 continue;
             }
             let mut names = f.body_names.clone();
-            names.resize(names.len().max(made.len()), String::new());
-            for (slot, name) in names.iter_mut().zip(&made) {
-                if slot.trim().is_empty() {
-                    *slot = name.to_string();
+            names.resize(names.len().max(end), String::new());
+            for (slot, name) in slots.iter().zip(&made) {
+                if let Some(stored) = names.get_mut(*slot).filter(|stored| stored.trim().is_empty()) {
+                    *stored = name.to_string();
                 }
             }
             if names != f.body_names {

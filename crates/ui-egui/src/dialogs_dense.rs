@@ -705,6 +705,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::PatternRect { .. } => {
             enter |= pattern_direction_group(app, d, ui, 0);
             enter |= pattern_direction_group(app, d, ui, 1);
+            enter |= pattern_skip_row(ui, &mut d.extra);
         }
         Kind::PatternCirc { count, angle } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
@@ -712,6 +713,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
                 feature_pattern_alignment_row(ui, &mut d.extra, 0);
             }
+            enter |= pattern_skip_row(ui, &mut d.extra);
         }
         Kind::Hole { kind, opts, cb_diameter, cb_depth, .. } => {
             let doc = &app.session.doc;
@@ -1050,6 +1052,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::PathPattern { count, spacing } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
             enter |= expr_row(ui, if d.extra.contains_key("distance") { "Distance" } else { "Spacing" }, spacing);
+            enter |= pattern_skip_row(ui, &mut d.extra);
         }
         Kind::Pipe { diameter, wall, operation } => {
             enter |= expr_row(ui, "Diameter", diameter);

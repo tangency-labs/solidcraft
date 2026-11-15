@@ -29,6 +29,16 @@ copies on its two sides. For four instances the slots are `0, +1, -1, +2`;
 Flip changes them to `0, -1, +1, -2`. This also chooses the extra side for an even
 centered circular pattern. Rectangular directions have independent controls.
 
+**Skip** leaves pattern instances out by number, separated by commas, such as
+`3, 5`. Instance 1 is the original and always stays; the first copy is 2. A
+rectangular pattern numbers its instances along the first direction in steps of
+the second direction's quantity: with Quantity 3 and Quantity 2 = 2, instances 1
+and 2 sit at the first step along the first direction, 3 and 4 at the second.
+The other instances keep their places and their names, so faces and bodies
+picked later on a copy stay picked. A number past the quantity skips nothing
+and the pattern says so. Rectangular, circular and path patterns of features or
+bodies take Skip; patterns of components do not yet.
+
 Double-click a saved feature in the timeline to edit it. Mirrors and patterns
 retain their feature sources, including features that created bodies, and
 patterns retain their placement controls and arbitrary direction vectors after
@@ -42,6 +52,10 @@ The command forms share sketch patterns' alignment names:
 
 ```json
 {"command":"solid.pattern.circular","params":{"features":["Hole1"],"axis":{"origin":[40,60,0],"dir":[0,0,1]},"count":6,"angle":"90 deg","alignment":"center","reversed":true}}
+```
+
+```json
+{"command":"solid.pattern.rectangular","params":{"features":["Hole1"],"dir1":[1,0,0],"count1":10,"spacing1":10,"skip":[4,7]}}
 ```
 
 Omitted alignments default to `right`, and omitted reversals to `false`, preserving

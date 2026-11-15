@@ -1728,6 +1728,7 @@ mod tests {
         use solidcraft_engine::doc::{FeatureKind, PatternKind};
         let feature = FeatureKind::Pattern {
             features: Vec::new(),
+            skip: Vec::new(),
             bodies: Vec::new(),
             pattern: PatternKind::Path {
                 path_sketch: solidcraft_engine::doc::SketchId(0),

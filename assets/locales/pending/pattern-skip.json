@@ -1,0 +1,42 @@
+{
+  "en": {
+    "ui.pattern_skip": "Skip",
+    "ui.pattern_skip_hint": "e.g. 3, 5",
+    "ui.pattern_skip_tip": "Instances to leave out, by number, separated by commas. Instance 1 is the original and always stays; the first copy is 2. The other copies keep their places and names."
+  },
+  "ar": {
+    "ui.pattern_skip": "تخطٍّ",
+    "ui.pattern_skip_hint": "مثلًا 3، 5",
+    "ui.pattern_skip_tip": "النسخ المراد استبعادها، بأرقامها، مفصولة بفواصل. النسخة 1 هي الأصل وتبقى دائمًا؛ أول نسخة مكررة هي 2. تحتفظ النسخ الأخرى بمواضعها وأسمائها."
+  },
+  "de": {
+    "ui.pattern_skip": "Auslassen",
+    "ui.pattern_skip_hint": "z. B. 3, 5",
+    "ui.pattern_skip_tip": "Auszulassende Exemplare, nach Nummer, durch Kommas getrennt. Exemplar 1 ist das Original und bleibt immer; die erste Kopie ist 2. Die übrigen Kopien behalten Lage und Namen."
+  },
+  "he": {
+    "ui.pattern_skip": "דילוג",
+    "ui.pattern_skip_hint": "למשל 3, 5",
+    "ui.pattern_skip_tip": "מופעים שיש להשמיט, לפי מספר, מופרדים בפסיקים. מופע 1 הוא המקור ותמיד נשאר; העותק הראשון הוא 2. שאר העותקים שומרים על מקומם ועל שמם."
+  },
+  "ja": {
+    "ui.pattern_skip": "スキップ",
+    "ui.pattern_skip_hint": "例: 3, 5",
+    "ui.pattern_skip_tip": "除外するインスタンスの番号をカンマ区切りで入力します。インスタンス 1 は元の形状で、常に残ります。最初のコピーは 2 です。ほかのコピーは位置と名前を保ちます。"
+  },
+  "ko": {
+    "ui.pattern_skip": "건너뛰기",
+    "ui.pattern_skip_hint": "예: 3, 5",
+    "ui.pattern_skip_tip": "제외할 인스턴스 번호를 쉼표로 구분해 입력합니다. 인스턴스 1은 원본이며 항상 남습니다. 첫 번째 복사본은 2입니다. 나머지 복사본은 위치와 이름을 유지합니다."
+  },
+  "vi": {
+    "ui.pattern_skip": "Bỏ qua",
+    "ui.pattern_skip_hint": "ví dụ 3, 5",
+    "ui.pattern_skip_tip": "Các phiên bản cần bỏ đi, theo số, cách nhau bằng dấu phẩy. Phiên bản 1 là bản gốc và luôn được giữ; bản sao đầu tiên là 2. Các bản sao khác giữ nguyên vị trí và tên."
+  },
+  "zh": {
+    "ui.pattern_skip": "跳过",
+    "ui.pattern_skip_hint": "例如 3, 5",
+    "ui.pattern_skip_tip": "要省略的实例编号，用逗号分隔。实例 1 是原始对象，始终保留；第一个副本是 2。其余副本保持其位置和名称。"
+  }
+}

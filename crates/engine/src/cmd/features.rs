@@ -119,17 +119,17 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
-        .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?; alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip)"),
+        .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?; alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip); skip?: [instance numbers] (instances left out, the others keeping their numbers and names: 1 is the original, always kept, 2 the first copy; instance i × count2 + j + 1 is step i along dir1 and j along dir2)"),
     CommandSpec::new("solid.pattern.circular", "Circular Pattern", crate::checked!("solid.pattern.circular", pattern_circ))
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
         .contract(&PATTERN_CIRCULAR_CONTRACT)
         .output(output_schema_for::<PatternCircularResult>)
-        .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | construction axis name (followed when edited) | {origin, dir} (origin coordinates may be length expressions; the pattern follows them) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); count; angle? (default 360 deg; partial arcs include both ends); alignment?: left|center|right (default right; original stays fixed); reversed?: bool (Flip; selects the extra side for even centered counts)"),
+        .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | construction axis name (followed when edited) | {origin, dir} (origin coordinates may be length expressions; the pattern follows them) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); count; angle? (default 360 deg; partial arcs include both ends); alignment?: left|center|right (default right; original stays fixed); reversed?: bool (Flip; selects the extra side for even centered counts); skip?: [instance numbers] (instances left out, the others keeping their numbers and names: 1 is the original, always kept, 2 the first copy)"),
     CommandSpec::new("solid.pattern.path", "Pattern on Path", pattern_path)
         .at("SOLID", "CREATE")
         .icon("pattern_path")
-        .params("features: [names] | bodies: [names]; path_sketch: sketch; path: [curve ids in order]; count; spacing (between instances) | distance (first to last); orientation?: identical|path; flip?: bool"),
+        .params("features: [names] | bodies: [names]; path_sketch: sketch; path: [curve ids in order]; count; spacing (between instances) | distance (first to last); orientation?: identical|path; flip?: bool; skip?: [instance numbers] (instances left out, the others keeping their numbers and names: 1 is the original, always kept, 2 the first copy along the path)"),
     CommandSpec::new("solid.mirror", "Mirror", mirror).at("SOLID", "CREATE").icon("mirror").params("features: [names] | bodies: [names] (combine?: join with the original); plane: XY|XZ|YZ|construction plane name or id|{origin, normal}|{origin, x_dir, y_dir} (origin coordinates may be length expressions; the mirror follows them, or a construction plane)"),
     CommandSpec::new("solid.hole", "Hole", hole)
         .at("SOLID", "CREATE")
@@ -2650,9 +2650,10 @@ fn finish_pattern(
     bodies: Vec<String>,
 ) -> Result<Value> {
     let comps = string_list(UNKNOWN_COMMAND, p, "components")?;
+    let skip = pattern_skip(s, p, &pattern, !comps.is_empty())?;
     if comps.is_empty() {
         let copied = bodies.clone();
-        let reply = add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect() })?;
+        let reply = add_feature(s, p, FeatureKind::Pattern { features, skip, pattern, bodies: bodies.into_iter().map(BodyName).collect() })?;
         // The pattern is added either way: when it made no copies (the feature failed to
         // evaluate) or an uneven number of them, there is nothing to tell the copies apart by
         // and they keep no look, as before.
@@ -2677,6 +2678,45 @@ fn finish_pattern(
         }
     }
     Ok(json!({"occurrences": made}))
+}
+
+/// The pattern instances a pattern leaves out (`skip: [instance numbers]`), sorted and each once.
+/// A number must name a copy the pattern makes now: instance 1 is the original, which cannot be
+/// skipped, and 2 is the first copy. Copies of components are placed once, not kept by a feature,
+/// so they skip nothing yet.
+fn pattern_skip(s: &Session, p: &Value, pattern: &solidcraft_doc::PatternKind, components: bool) -> Result<Vec<u32>> {
+    let cmd = match pattern {
+        solidcraft_doc::PatternKind::Rectangular { .. } => "solid.pattern.rectangular",
+        solidcraft_doc::PatternKind::Circular { .. } => "solid.pattern.circular",
+        solidcraft_doc::PatternKind::Path { .. } => "solid.pattern.path",
+    };
+    let Some(given) = p.get("skip").filter(|v| !v.is_null()) else { return Ok(Vec::new()) };
+    let list = given.as_array().ok_or_else(|| bad(cmd, "`skip` must list instance numbers, such as [2, 5]"))?;
+    if list.is_empty() {
+        return Ok(Vec::new());
+    }
+    if components {
+        return Err(bad(cmd, "not supported yet: `skip` with `components`; leave `skip` out and delete the placements you don't want"));
+    }
+    let copies = solidcraft_doc::pattern_matrices(&s.doc, &s.model.state(), pattern)?.len();
+    let mut skip = Vec::with_capacity(list.len().min(copies));
+    for v in list {
+        let n = v.as_u64().ok_or_else(|| bad(cmd, format!("`skip` must list instance numbers (whole numbers from 2), not {v}")))?;
+        if n < 2 {
+            return Err(bad(
+                cmd,
+                format!("`skip` cannot name instance {n}: instance 1 is the original, which a pattern always keeps, and 2 is the first copy"),
+            ));
+        }
+        let last = copies.saturating_add(1);
+        let n = u32::try_from(n).ok().filter(|n| *n as usize <= last).ok_or_else(|| {
+            bad(cmd, format!("`skip` names instance {n}, but this pattern's copies are instances 2 to {last} (instance 1 is the original)"))
+        })?;
+        skip.push(n);
+    }
+    skip.sort_unstable();
+    skip.dedup();
+    Ok(skip)
 }
 
 /// What a pattern copies: features (replayed), bodies (`bodies: [names]`), or components

@@ -992,6 +992,10 @@ pub struct PatternCircularParams {
     #[serde(default, deserialize_with = "pattern_reversed", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub reversed: Option<bool>,
+    /// Pattern instances to leave out, by number: 1 is the original, which is always kept, and 2
+    /// the first copy. The other instances keep their numbers and names. Not with `components`.
+    #[serde(default)]
+    pub skip: Option<Vec<u32>>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

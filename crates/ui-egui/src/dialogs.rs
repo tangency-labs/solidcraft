@@ -3559,6 +3559,32 @@ pub(crate) fn pattern_toggle(ui: &mut egui::Ui, row: &str, label: &str, icon: &s
     crate::ui_kit::toggle_icon(ui, row, label, selected, icon);
 }
 
+/// A solid pattern's Skip row: the pattern instances it leaves out, typed as numbers ("3, 5";
+/// instance 1 is the original). The text stays as typed in `extra`; [`pattern_skip_param`] reads
+/// it for the command.
+fn pattern_skip_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
+    let mut text = extra.get("skip").and_then(Value::as_str).unwrap_or_default().to_string();
+    let (enter, changed) =
+        form_row(ui, "ui.pattern_skip", |ui| crate::ui_kit::text_field_tip(ui, &mut text, tr("ui.pattern_skip_hint"), tr("ui.pattern_skip_tip")));
+    if changed {
+        extra.insert("skip".into(), json!(text));
+    }
+    enter
+}
+
+/// The `skip` parameter from a pattern dialog's Skip row: the numbers typed there, separated by
+/// commas or spaces. The command checks that each names a copy the pattern makes.
+fn pattern_skip_param(d: &Dialog, p: &mut Value) -> Result<(), String> {
+    let text = d.extra.get("skip").and_then(Value::as_str).unwrap_or_default();
+    let mut skip = Vec::new();
+    for part in text.split(|c: char| c == ',' || c == ';' || c.is_whitespace()).filter(|part| !part.is_empty()) {
+        let n = part.parse::<u32>().map_err(|_| format!("Skip: type instance numbers separated by commas, such as 3, 5 (not `{part}`)"))?;
+        skip.push(n);
+    }
+    p["skip"] = json!(skip);
+    Ok(())
+}
+
 /// A refusal that only says nothing is picked yet ("Select the curves to offset first", "select the
 /// corner to cut first"): guidance, not a failure. The sources word it with or without a capital.
 fn awaiting_selection(error: &str) -> bool {
@@ -5977,6 +6003,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 p["count2"] = json!(count2);
                 p["spacing2"] = json!(spacing2);
             }
+            pattern_skip_param(d, &mut p)?;
             ("solid.pattern.rectangular", p)
         }
         Kind::PatternCirc { count, angle } => {
@@ -5988,6 +6015,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             let mut p = json!({"axis": axis, "count": count, "angle": angle});
             pattern_objects(s, sels(d, 0), &mut p);
+            pattern_skip_param(d, &mut p)?;
             ("solid.pattern.circular", p)
         }
         Kind::Loft { operation, rail_fit } => {
@@ -6272,6 +6300,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             // A saved extent stays first-to-last distance when the quantity changes.
             p[if d.extra.contains_key("distance") { "distance" } else { "spacing" }] = json!(spacing);
             pattern_objects(s, sels(d, 0), &mut p);
+            pattern_skip_param(d, &mut p)?;
             ("solid.pattern.path", p)
         }
         Kind::Pipe { wall, .. } => {
@@ -8096,7 +8125,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Pattern { features, pattern, bodies: copied } => {
+        FeatureKind::Pattern { features, pattern, bodies: copied, skip } => {
             let ids: Vec<u64> = features.iter().map(|f| f.0).collect();
             let bodies: Vec<Sel> = if copied.is_empty() {
                 st.bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| Sel::Body { name: b.name.clone() }).collect()
@@ -8179,6 +8208,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     d
                 }
             };
+            if !skip.is_empty() {
+                d.extra.insert("skip".into(), json!(skip.iter().map(u32::to_string).collect::<Vec<_>>().join(", ")));
+            }
             // Replay references stay features, including features that created a body.
             let as_features = !features.is_empty();
             if let Some(inp) = d.inputs.first_mut() {

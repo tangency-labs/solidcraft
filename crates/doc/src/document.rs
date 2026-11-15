@@ -993,6 +993,13 @@ pub enum FeatureKind {
     /// The copied features are named by id (#1134).
     Pattern {
         features: Vec<FeatureId>,
+        /// Pattern instances left out, by number: instance 1 is the original, which always
+        /// stays, and 2 is the first copy. A rectangular pattern numbers its instances
+        /// `i × count2 + j + 1` for step `i` along the first direction and `j` along the second.
+        /// The other instances keep their numbers and names. A number past the count skips
+        /// nothing.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skip: Vec<u32>,
         pattern: PatternKind,
         /// Copy these bodies (as new bodies) instead of replaying features.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -3339,13 +3346,38 @@ impl Feature {
     /// Where in `body_names` the names of the first `count` bodies the feature builds are kept,
     /// in the order it builds them. The same index for most features. An Import keeps its names
     /// by the file's body index, and builds no body for the file bodies it skips, so its built
-    /// bodies pass their slots by (#2175).
+    /// bodies pass their slots by (#2175). A body Pattern that skips instances keeps its names
+    /// by source and instance, so its built copies pass the skipped instances' slots by.
     pub fn body_name_slots(&self, count: usize) -> Vec<usize> {
+        if let Some(slots) = self.skipped_pattern_slots(count) {
+            return slots;
+        }
         let skip: std::collections::HashSet<u64> = match &self.kind {
             FeatureKind::Import { skip, .. } => skip.iter().copied().collect(),
             _ => Default::default(),
         };
         (0..count.saturating_add(skip.len())).filter(|k| !skip.contains(&(*k as u64))).take(count).collect()
+    }
+
+    /// Whether this is a body Pattern that skips instances, whose names are kept by instance.
+    pub fn skips_copies(&self) -> bool {
+        matches!(&self.kind, FeatureKind::Pattern { bodies, skip, .. } if !bodies.is_empty() && !skip.is_empty())
+    }
+
+    /// The slots of the `count` bodies a body Pattern that skips instances builds: source by
+    /// source, the copy of instance `n` at `n - 2`, in blocks as long as the last copy built, as
+    /// the pattern reads them back. The copies built are the first ones `skip` leaves, whatever
+    /// the count. `None` for any other feature, or when `count` does not split evenly by source.
+    fn skipped_pattern_slots(&self, count: usize) -> Option<Vec<usize>> {
+        let FeatureKind::Pattern { bodies, skip, .. } = &self.kind else { return None };
+        if bodies.is_empty() || skip.is_empty() || !count.is_multiple_of(bodies.len()) {
+            return None;
+        }
+        let each = count / bodies.len();
+        let skipped: std::collections::BTreeSet<usize> = skip.iter().map(|n| *n as usize).collect();
+        let built: Vec<usize> = (0..).filter(|k: &usize| !skipped.contains(&(k + 2))).take(each).collect();
+        let per = built.last().map_or(0, |k| k + 1);
+        Some((0..bodies.len()).flat_map(|s| built.iter().map(move |k| s * per + k)).collect())
     }
 
     /// Keep `made`, the names the feature's bodies have now (in the order it builds them), as
