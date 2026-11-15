@@ -63,9 +63,6 @@ impl Walk for crate::document::CoilSection {}
 impl Walk for crate::document::ThinSide {}
 impl Walk for crate::document::ExtendMode {}
 impl Walk for crate::document::RuledMode {}
-impl Walk for crate::sheet::PrintJoint {}
-impl Walk for crate::sheet::PrintFilament {}
-impl Walk for crate::sheet::PrintSocket {}
 impl Walk for crate::document::RuledCorners {}
 impl Walk for crate::document::ExtrudeConvention {}
 impl Walk for crate::thread_forms::ThreadForm {}

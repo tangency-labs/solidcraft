@@ -29,7 +29,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&START_CONTRACT)
         .output(crate::schema::output_schema_for::<PrintUnfoldState>)
-        .params("body: its name; face: [x, y, z] on a flat face of it, in mm; generator?: 1 | 2 (default 1: the printable body is a foldable print with joints; 2: the body's own walls, mitred where they meet, no joints yet) → the state of the unfolded print: copies the body into a new design, lying on that face (the base face) at Z = 0 with its centre of mass over the origin, and starts unfolding it there. The new design replaces the session's (the app shows it in a tab of its own, leaving the design the body came from as it is). Every face of the body must be flat. Then set the bends with print.unfold.bend"),
+        .params("body: its name; face: [x, y, z] on a flat face of it, in mm → the state of the unfolded print: copies the body into a new design, lying on that face (the base face) at Z = 0 with its centre of mass over the origin, and starts unfolding it there. The new design replaces the session's (the app shows it in a tab of its own, leaving the design the body came from as it is). Every face of the body must be flat. Then set the bends with print.unfold.bend"),
     CommandSpec::new("print.unfold.bend", "Set Bend Edge", crate::checked!("print.unfold.bend", bend))
         .icon("print_unfold")
         .contract(&BEND_CONTRACT)
@@ -69,17 +69,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("print_unfold")
         .contract(&JOINTS_CONTRACT)
         .output(crate::schema::output_schema_for::<PrintUnfoldState>)
-        .params("wall?: the wall thickness, a length; bends?: film | filament | press, what every bend is; cuts?: butt | mitre | filament | press, how walls meet at every cut → the state of the unfolded print. What is left out stays as it is (2 mm, film and butt at first)"),
+        .params("wall?: the wall thickness, a length; bends?: film | filament | press, what every bend is; cuts?: mitre | filament | press, how walls meet at every cut → the state of the unfolded print. What is left out stays as it is (3 mm, film and mitre at first)"),
     CommandSpec::new("print.unfold.joint", "Set Edge Joint", crate::checked!("print.unfold.joint", joint))
         .icon("print_unfold")
         .contract(&JOINT_CONTRACT)
         .output(crate::schema::output_schema_for::<PrintUnfoldState>)
-        .params("edge: [x, y, z] on an edge of the flat pattern, in mm; kind: plain | filament | press | default → the state of the unfolded print: that edge gets a joint of its own (plain: a bend's film, a cut's butt or mitre), or follows what all bends or cuts get again (default)"),
+        .params("edge: [x, y, z] on an edge of the flat pattern, in mm; kind: plain | filament | press | default → the state of the unfolded print: that edge gets a joint of its own (plain: a bend's film, a cut's mitre), or follows what all bends or cuts get again (default)"),
     CommandSpec::new("print.unfold.make", "Make Printable Body", crate::checked!("print.unfold.make", make))
         .icon("print_unfold")
         .contract(&EMPTY_CONTRACT)
         .output(crate::schema::output_schema_for::<PrintUnfoldState>)
-        .params("→ the state of the unfolded print: makes the printable body from the flat pattern, with the wall thickness and the joints chosen (a foldable print of Convert to Sheet Metal: it lies flat, and sheet.refold folds it up). The surface model is removed"),
+        .params("→ the state of the unfolded print: makes the printable body from the flat pattern, with the wall thickness and the joints chosen: each part of the pattern a body of its own, the walls of the body's faces laid flat and joined by a film under each bend. The surface model is removed"),
     CommandSpec::new("print.unfold.unmake", "Back to Wall and Joints", crate::checked!("print.unfold.unmake", unmake))
         .icon("print_unfold")
         .contract(&EMPTY_CONTRACT)
@@ -148,7 +148,6 @@ pub fn unfold_design(s: &Session, name: &str, face: Vec3) -> Result<Session> {
         body: name.to_string(),
         base: solidcraft_doc::apply_point(&lay, face),
         bends: Vec::new(),
-        generator: 1,
         groups: Vec::new(),
         step: PrintUnfoldStep::Edges,
         source: Some(source),
@@ -156,8 +155,7 @@ pub fn unfold_design(s: &Session, name: &str, face: Vec3) -> Result<Session> {
         splits: Vec::new(),
         bed: None,
         joints: None,
-        solid: None,
-        group_solids: None,
+        parts: None,
     });
     // Nothing is sketched here: the origin's planes and axes would only lie over the edges to click.
     fresh.visibility.origin_hidden = Some(true);
@@ -173,14 +171,7 @@ pub fn unfold_design(s: &Session, name: &str, face: Vec3) -> Result<Session> {
 fn start(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "print.unfold.start";
     let name = crate::params::str_(p, "body").ok_or_else(|| bad(cmd, "give `body`"))?;
-    let mut fresh = unfold_design(s, name, point(p, "face", cmd)?)?;
-    let generator = match p.get("generator") {
-        None | Some(Value::Null) => 1,
-        Some(v) => v.as_u64().filter(|g| (1..=2).contains(g)).ok_or_else(|| bad(cmd, "`generator` must be 1 or 2"))? as u8,
-    };
-    if let Some(u) = fresh.doc_mut().print_unfold.as_mut() {
-        u.generator = generator;
-    }
+    let fresh = unfold_design(s, name, point(p, "face", cmd)?)?;
     s.replace_design(fresh);
     reply(s, cmd)
 }
@@ -216,7 +207,6 @@ pub fn state_of(s: &Session, cmd: &str) -> Result<PrintUnfoldState> {
         let joints = u.joints.clone().unwrap_or_default();
         return Ok(PrintUnfoldState {
             body: u.body.clone(),
-            generator: u.generator,
             step: "solid".into(),
             base: 0,
             faces: 0,
@@ -255,7 +245,6 @@ pub fn state_of(s: &Session, cmd: &str) -> Result<PrintUnfoldState> {
     };
     Ok(PrintUnfoldState {
         body: unfold.body.clone(),
-        generator: unfold.generator,
         step: match unfold.step {
             PrintUnfoldStep::Edges => "edges".into(),
             PrintUnfoldStep::Surface => "surface".into(),
@@ -337,20 +326,19 @@ fn flat_state(unfold: &PrintUnfold, graph: &UnfoldGraph, layout: &UnfoldLayout, 
             }
         })
         .collect();
-    // Generator 2: a cut is a press fit only where it gets fingers. It gets none where another
-    // wall lies beside it in the flat, and is mitred there.
-    let fingers = (unfold.generator == 2).then(|| {
-        let kinds: Vec<String> = (0..graph.edges.len()).map(|e| joint_of(unfold, graph, layout, splits, e).0).collect();
-        graph.press_edges(layout, flat, splits, walls_of(unfold), &kinds)
-    });
+    // An edge has a joint only where it gets fingers. A cut gets none where another wall lies
+    // beside it in the flat, and is mitred there.
+    let kinds: Vec<String> = (0..graph.edges.len()).map(|e| joint_of(unfold, graph, layout, splits, e).0).collect();
+    let fingers = graph.jointed_edges(layout, flat, splits, walls_hint(unfold), &kinds);
     let (mut bends, mut cuts) = (Vec::new(), Vec::new());
     for (e, edge) in graph.edges.iter().enumerate() {
         let on = |f: usize| -> Option<PrintUnfoldFlatEdge> {
             let m = flat.moves.get(f)?;
             let (a, b) = (solidcraft_doc::apply_point(m, edge.ends.0), solidcraft_doc::apply_point(m, edge.ends.1));
             let (joint, own) = joint_of(unfold, graph, layout, splits, e);
-            let bare = joint == "press" && fingers.as_ref().is_some_and(|f| f.get(e) == Some(&false));
-            let joint = if bare { "mitre".to_string() } else { joint };
+            let bare = ["press", "filament"].contains(&joint.as_str()) && fingers.get(e) == Some(&false);
+            let folds = layout.kinds.get(e) == Some(&EdgeKind::Bend) && !splits.contains(&e);
+            let joint = if bare { if folds { "film" } else { "mitre" }.to_string() } else { joint };
             Some(PrintUnfoldFlatEdge { start: [a.x, a.y, a.z], end: [b.x, b.y, b.z], edge: e, split: splits.contains(&e), joint, own })
         };
         if layout.kinds.get(e) == Some(&EdgeKind::Bend) && !splits.contains(&e) {
@@ -377,119 +365,74 @@ fn flat_state(unfold: &PrintUnfold, graph: &UnfoldGraph, layout: &UnfoldLayout, 
     (parts, bends, cuts, overlapping)
 }
 
-/// Whether a rigid joint (fingers with a filament channel or a press fit) can be made at edge `e`:
-/// its faces meet round the outside of the body, and a bend folds by an angle the joint's
-/// geometry allows.
-fn rigid_possible(graph: &UnfoldGraph, e: usize, folds: bool) -> bool {
-    match graph.edges.get(e).map(|x| x.turn) {
-        Some(EdgeTurn::Outside(angle)) => {
-            let degrees = angle.to_degrees();
-            let (lo, hi) = solidcraft_doc::sheet::FOLD_JOINT_ANGLES;
-            !folds || (degrees >= lo - 1e-6 && degrees <= hi + 1e-6)
-        }
-        _ => false,
-    }
-}
-
-/// Whether a face of a carved-out group lies at edge `e`.
-fn carved_edge(graph: &UnfoldGraph, layout: &UnfoldLayout, e: usize) -> bool {
-    graph.edges.get(e).is_some_and(|edge| [edge.faces.0, edge.faces.1].iter().any(|f| layout.group.get(*f).copied().flatten().is_some()))
-}
-
 /// A wall thickness typed as a plain number of millimetres (`2`, `2.4 mm`, `2,4`).
 fn wall_mm(text: &str) -> Option<f64> {
     text.trim().trim_end_matches("mm").trim().replace(',', ".").parse::<f64>().ok().filter(|w| w.is_finite() && *w > 0.0 && *w < 1000.0)
 }
 
-/// The walls generator 2 makes: as thick as chosen (2 mm while that is no plain number).
+/// The walls of the print: as thick as chosen (its default while that is no plain number).
 fn walls_of(unfold: &PrintUnfold) -> solidcraft_doc::print_unfold_walls::WallPrint {
     solidcraft_doc::print_unfold_walls::WallPrint {
-        wall: unfold.joints.as_ref().and_then(|j| wall_mm(&j.wall)).unwrap_or(2.0),
-        film: solidcraft_doc::sheet::DEFAULT_FILM,
-        clearance: solidcraft_doc::sheet::DEFAULT_PRINT_CLEARANCE,
+        wall: unfold.joints.as_ref().and_then(|j| wall_mm(&j.wall)).unwrap_or(solidcraft_doc::print_unfold_walls::DEFAULT_WALL),
+        film: solidcraft_doc::print_joint::DEFAULT_FILM,
+        clearance: solidcraft_doc::print_joint::DEFAULT_PRINT_CLEARANCE,
+        gap: solidcraft_doc::print_unfold_walls::DEFAULT_FINGER_GAP,
     }
 }
 
-/// Whether generator 2 can make edge `e` a press fit: its faces meet square round the outside
-/// of the body, and it is long enough for a finger clear of both its ends.
-fn press_at(unfold: &PrintUnfold, graph: &UnfoldGraph, e: usize) -> bool {
-    graph
-        .edges
-        .get(e)
-        .is_some_and(|edge| solidcraft_doc::print_unfold_walls::press_possible(edge.turn, edge.ends.0.dist(edge.ends.1), walls_of(unfold)))
+/// The walls as the joints are shown before the body is made: thick enough for
+/// any of them, so a joint chosen is shown and the wall it needs is asked for.
+fn walls_hint(unfold: &PrintUnfold) -> solidcraft_doc::print_unfold_walls::WallPrint {
+    let mut w = walls_of(unfold);
+    w.wall = w.wall.max(solidcraft_doc::print_unfold_walls::FILAMENT_MIN_WALL);
+    w
+}
+
+/// Whether edge `e` can be the joint `kind` (`press` or `filament`). A cut: its faces meet
+/// square round the outside of the body, and it is long enough for its fingers clear of both its
+/// ends. A bend (`folds`): it folds by an angle the fingers round it can do, and is long enough
+/// for two of them.
+fn joint_at(unfold: &PrintUnfold, graph: &UnfoldGraph, e: usize, kind: &str, folds: bool) -> bool {
+    use solidcraft_doc::print_unfold_walls::{bend_joint_possible, cut_filament_possible, press_possible};
+    let w = walls_hint(unfold);
+    graph.edges.get(e).is_some_and(|edge| {
+        let len = edge.ends.0.dist(edge.ends.1);
+        match (kind, folds) {
+            ("press", false) => press_possible(edge.turn, len, w),
+            ("filament", false) => cut_filament_possible(edge.turn, len, w),
+            (_, true) => bend_joint_possible(edge.turn, len, w, kind == "press"),
+            _ => false,
+        }
+    })
 }
 
 /// The joint edge `e` gets, and whether it is its own: a bend that folds gets what bends get, a
-/// cut and a split bend what cuts get. Where a rigid joint can't be made (an inside corner, or a
-/// fold angle the fingers can't do), what all bends or cuts get is the film alone for a bend and
-/// a mitre for a cut: the bend then turns on the thin film.
+/// cut and a split bend what cuts get. A bend turns on its film, a cut is mitred; either is a
+/// press fit or a filament joint where that is chosen and can be made, and plain where it can't.
 fn joint_of(unfold: &PrintUnfold, graph: &UnfoldGraph, layout: &UnfoldLayout, splits: &[usize], e: usize) -> (String, bool) {
     let joints = unfold.joints.clone().unwrap_or_default();
     let folds = layout.kinds.get(e) == Some(&EdgeKind::Bend) && !splits.contains(&e);
-    // Generator 2: a bend turns on the film; a cut is mitred, or a press fit where it can be.
-    if unfold.generator == 2 {
-        if folds {
-            return ("film".into(), false);
-        }
-        let own = joints.edges.iter().find(|(p, _)| graph.edge_at(*p) == Some(e)).map(|(_, kind)| kind.as_str());
-        let press = press_at(unfold, graph, e);
-        return match own {
-            Some("press") if press => ("press".into(), true),
-            Some(_) => ("mitre".into(), true),
-            None => (if joints.cuts == "press" && press { "press" } else { "mitre" }.into(), false),
-        };
-    }
-    // An edge of a carved-out group: its bends turn on the film; at its border it follows what
-    // all cuts get (fingers in sockets where the two faces meet square and the edge is long
-    // enough, else a mitre); its other edges end square.
-    if carved_edge(graph, layout, e) {
-        let Some(edge) = graph.edges.get(e).filter(|_| !folds) else { return ("film".into(), false) };
-        let border = layout.group.get(edge.faces.0) != layout.group.get(edge.faces.1);
-        let outside = matches!(edge.turn, EdgeTurn::Outside(_));
-        let sockets = solidcraft_doc::print_unfold_group::socket_possible(edge.turn)
-            && !solidcraft_doc::sheet::socket_fingers(edge.ends.0.dist(edge.ends.1)).is_empty();
-        let kind = match joints.cuts.as_str() {
-            _ if !(border && outside) => "butt",
-            "press" | "filament" if sockets => joints.cuts.as_str(),
-            "butt" => "butt",
-            _ => "mitre",
-        };
-        return (kind.into(), false);
-    }
-    let plain = if folds {
-        "film"
-    } else if joints.cuts == "mitre" {
-        "mitre"
-    } else {
-        "butt"
-    };
+    let plain = if folds { "film" } else { "mitre" };
     let own = joints.edges.iter().find(|(p, _)| graph.edge_at(*p) == Some(e)).map(|(_, kind)| kind.as_str());
-    match own {
-        Some("plain") => (plain.into(), true),
-        Some(kind) => (kind.to_string(), true),
-        None => {
-            let all = if folds { joints.bends } else { joints.cuts };
-            if (all == "filament" || all == "press") && !rigid_possible(graph, e, folds) {
-                (if folds { "film" } else { "mitre" }.into(), false)
-            } else {
-                (all, false)
-            }
-        }
-    }
+    let all = if folds { joints.bends.as_str() } else { joints.cuts.as_str() };
+    let kind = own.unwrap_or(all);
+    let able = ["press", "filament"].contains(&kind) && joint_at(unfold, graph, e, kind, folds);
+    (if able { kind } else { plain }.into(), own.is_some())
 }
 
-/// The least wall the joints chosen need over all edges of the flat pattern (mm), at the default
-/// film, filament and nub: a filament channel (the filament and the tolerance) and a press-fit
-/// nub (twice its radius) each with the film either side.
+/// The least wall the joints chosen need over all edges of the flat pattern (mm): a press fit
+/// on a cut room for its nub, a filament joint on a cut the channel with a film of wall either
+/// side. Round a bend the fingers carry the joint: the wall can be thinner than it.
 pub fn min_wall(unfold: &PrintUnfold, graph: &UnfoldGraph, layout: &UnfoldLayout, bends: &[usize]) -> f64 {
-    use solidcraft_doc::sheet::{DEFAULT_CHANNEL_TOLERANCE, DEFAULT_FILAMENT, DEFAULT_FILM, DEFAULT_NUB_RADIUS};
+    use solidcraft_doc::print_unfold_walls::{FILAMENT_MIN_WALL, PRESS_MIN_WALL};
     let splits = unfold.resolve_splits(graph, bends);
     let mut least: f64 = 0.0;
     for e in 0..graph.edges.len() {
+        let folds = layout.kinds.get(e) == Some(&EdgeKind::Bend) && !splits.contains(&e);
         let need = match joint_of(unfold, graph, layout, &splits, e).0.as_str() {
-            "press" if unfold.generator == 2 => solidcraft_doc::print_unfold_walls::PRESS_MIN_WALL,
-            "filament" => DEFAULT_FILAMENT + DEFAULT_CHANNEL_TOLERANCE + 2.0 * DEFAULT_FILM,
-            "press" => 2.0 * (DEFAULT_NUB_RADIUS + DEFAULT_FILM),
+            _ if folds => 0.0,
+            "press" => PRESS_MIN_WALL,
+            "filament" => FILAMENT_MIN_WALL,
             _ => 0.0,
         };
         least = least.max(need);
@@ -516,8 +459,8 @@ fn joints(s: &mut Session, p: &Value) -> Result<Value> {
         joints.bends = kind.into();
     }
     if let Some(kind) = crate::params::str_(p, "cuts") {
-        if !["butt", "mitre", "filament", "press"].contains(&kind) {
-            return Err(bad(cmd, "`cuts` must be butt, mitre, filament or press"));
+        if !["mitre", "filament", "press"].contains(&kind) {
+            return Err(bad(cmd, "`cuts` must be mitre, filament or press"));
         }
         joints.cuts = kind.into();
     }
@@ -555,43 +498,40 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
     let flat = graph.flat(&layout, &unfold.resolve_splits(&graph, &bends)).map_err(|e| invalid(cmd, e))?;
     let e = flat_edge_at(&graph, &flat, at).ok_or_else(|| bad(cmd, "no edge of the flat pattern at `edge`"))?;
     let folds = layout.kinds.get(e) == Some(&EdgeKind::Bend) && !unfold.resolve_splits(&graph, &bends).contains(&e);
-    if unfold.generator == 2 {
-        if kind != "default" && folds {
-            return Err(bad(cmd, "with generator 2 a bend turns on the film and takes no joint: choose a cut"));
-        }
-        if kind == "filament" {
-            return Err(bad(cmd, "generator 2 has no filament joints: a cut is `plain` (mitred) or `press`"));
-        }
-        if kind == "press" && !press_at(&unfold, &graph, e) {
+    if ["press", "filament"].contains(&kind) {
+        let name = if kind == "press" { "press fit" } else { "filament joint" };
+        if !joint_at(&unfold, &graph, e, kind, folds) {
             return Err(bad(
                 cmd,
-                "this cut can't be a press fit: its faces don't meet square round the outside of the body, or it is too short for a finger clear of its ends (it is mitred)",
+                if folds {
+                    format!(
+                        "this bend can't be a {name}: its faces meet in an inside corner of the body, fold by an angle the fingers can't do, or it is too short for two fingers clear of its ends (it turns on its film)"
+                    )
+                } else {
+                    format!(
+                        "this cut can't be a {name}: its faces don't meet square round the outside of the body, or it is too short for its fingers clear of its ends (it is mitred)"
+                    )
+                },
             ));
         }
-        if kind == "press" {
-            // Asked of this cut alone: has it room for a finger in the flat?
-            let mut kinds = vec![String::new(); graph.edges.len()];
-            if let Some(k) = kinds.get_mut(e) {
-                *k = "press".into();
-            }
-            let splits = unfold.resolve_splits(&graph, &bends);
-            if graph.press_edges(&layout, &flat, &splits, walls_of(&unfold), &kinds).get(e) != Some(&true) {
-                return Err(bad(
-                    cmd,
-                    "this cut can't be a press fit: another wall of the flat pattern lies beside it, and its fingers would print as one with that wall (it is mitred)",
-                ));
-            }
+        // Asked of this edge alone: has it room for its fingers?
+        let mut kinds = vec![String::new(); graph.edges.len()];
+        if let Some(k) = kinds.get_mut(e) {
+            *k = kind.into();
         }
-    } else if kind != "default" && carved_edge(&graph, &layout, e) {
-        return Err(bad(
-            cmd,
-            "this edge is on a carved-out group: its bends turn on the film, and its border follows what all cuts get (no joint of its own yet)",
-        ));
-    } else if ["filament", "press"].contains(&kind) && !rigid_possible(&graph, e, folds) {
-        return Err(bad(
-            cmd,
-            "this edge can't take a filament or press joint: its faces meet in an inside corner of the body, or fold by an angle the fingers can't do (it gets the film or a mitre by itself)",
-        ));
+        let splits = unfold.resolve_splits(&graph, &bends);
+        if graph.jointed_edges(&layout, &flat, &splits, walls_hint(&unfold), &kinds).get(e) != Some(&true) {
+            return Err(bad(
+                cmd,
+                if folds {
+                    format!("this bend can't be a {name}: its fingers would stand in another wall of the body (it turns on its film)")
+                } else {
+                    format!(
+                        "this cut can't be a {name}: another wall of the flat pattern lies beside it, and its fingers would print as one with that wall (it is mitred)"
+                    )
+                },
+            ));
+        }
     }
     let mut joints = unfold.joints.unwrap_or_default();
     joints.edges.retain(|(p, _)| graph.edge_at(*p) != Some(e));
@@ -617,144 +557,15 @@ fn make(s: &mut Session, _: &Value) -> Result<Value> {
     if flat.parts.iter().any(|p| !p.overlaps.is_empty()) {
         return Err(bad(cmd, "faces of the flat pattern lie on each other: split it at a bend first (print.unfold.split)"));
     }
-    if unfold.generator == 2 {
-        return make_walls(s, cmd, &unfold, &graph, &layout, &flat, &splits);
-    }
-    let joints = unfold.joints.clone().unwrap_or_default();
-    let xyz = |e: usize| graph.edges.get(e).map(|edge| edge.middle()).map(|p| serde_json::json!([p.x, p.y, p.z]));
-    // The carved-out groups are made on their own (below): the body's sheet has none of their edges.
-    let main = |e: &&usize| !carved_edge(&graph, &layout, **e);
-    let folding: Vec<Value> = bends.iter().filter(|e| !splits.contains(e)).filter(main).filter_map(|e| xyz(*e)).collect();
-    let split_at: Vec<Value> = splits.iter().filter(main).filter_map(|e| xyz(*e)).collect();
-    let carved = if layout.roots.is_empty() {
-        Vec::new()
-    } else {
-        let wall = joints
-            .wall
-            .trim()
-            .trim_end_matches("mm")
-            .trim()
-            .replace(',', ".")
-            .parse::<f64>()
-            .ok()
-            .filter(|w| w.is_finite() && *w > 0.0)
-            .ok_or_else(|| bad(cmd, "with carved-out groups, give the wall thickness as a number in mm"))?;
-        let w = solidcraft_doc::print_unfold_group::GroupWall {
-            wall,
-            film: solidcraft_doc::sheet::DEFAULT_FILM,
-            clearance: solidcraft_doc::sheet::DEFAULT_PRINT_CLEARANCE,
-        };
-        let kinds: Vec<String> = (0..graph.edges.len()).map(|e| joint_of(&unfold, &graph, &layout, &splits, e).0).collect();
-        graph.group_solids(&layout, &flat, &splits, w, &kinds).map_err(|e| invalid(cmd, e))?
-    };
-    // The faces a group meets at its border: mitred to match it, or notched for its fingers.
-    let (mut mitred, mut sockets) = (Vec::new(), Vec::new());
-    for (e, edge) in graph.edges.iter().enumerate() {
-        if !carved_edge(&graph, &layout, e) || layout.group.get(edge.faces.0) == layout.group.get(edge.faces.1) {
-            continue;
-        }
-        let xyz = |p: Vec3| serde_json::json!([p.x, p.y, p.z]);
-        match joint_of(&unfold, &graph, &layout, &splits, e).0.as_str() {
-            "mitre" => mitred.push(xyz(edge.middle())),
-            kind @ ("press" | "filament") => {
-                let fingers: Vec<Value> = solidcraft_doc::sheet::socket_fingers(edge.ends.0.dist(edge.ends.1))
-                    .into_iter()
-                    .map(|(lo, hi)| serde_json::json!([lo, hi]))
-                    .collect();
-                sockets.push(serde_json::json!({"a": xyz(edge.ends.0), "b": xyz(edge.ends.1), "fingers": fingers, "filament": kind == "filament"}));
-            }
-            _ => {}
-        }
-    }
-    let with = |kind: &str| -> Vec<Value> {
-        (0..graph.edges.len())
-            .filter(|e| !carved_edge(&graph, &layout, *e) && joint_of(&unfold, &graph, &layout, &splits, *e).0 == kind)
-            .filter_map(xyz)
-            .map(|at| serde_json::json!({"at": at}))
-            .collect()
-    };
-    let mut params = serde_json::json!({
-        "body": unfold.body,
-        "face": [unfold.base.x, unfold.base.y, unfold.base.z],
-        "bends": folding,
-        "print_fold": true,
-        "print_wall": joints.wall,
-        "print_joint": if ["mitre", "filament", "press"].contains(&joints.cuts.as_str()) { "mitre" } else { "butt" },
-    });
-    for (key, list) in [
-        ("print_splits", split_at),
-        ("print_filament", with("filament")),
-        ("print_press", with("press")),
-        ("print_mitres", mitred),
-        ("print_sockets", sockets),
-    ] {
-        if !list.is_empty() {
-            params[key] = Value::Array(list);
-        }
-    }
-    s.visibility.hidden_bodies.retain(|b| *b != unfold.body);
-    let made = super::sheet::convert(s, &params)?;
-    let feature = made.get("feature").and_then(Value::as_u64);
-    // The groups' bodies beside the body made, their lower edges level with its.
-    let mut beside = Vec::with_capacity(carved.len());
-    if !carved.is_empty() {
-        let world = s.world_state()?;
-        let made = world.body(&unfold.body).ok_or_else(|| bad(cmd, "the printable body was not made"))?;
-        let bbox = solidcraft_kernel::measure(&made.body)?.bbox;
-        let mut right = bbox.max.x;
-        for body in &carved {
-            let own = solidcraft_kernel::measure(body)?.bbox;
-            let gap = solidcraft_doc::print_unfold_flat::PART_GAP;
-            let shift =
-                solidcraft_doc::rigid(Vec3::new(right + gap - own.min.x, bbox.min.y - own.min.y, bbox.min.z - own.min.z), Vec3::ZERO, Vec3::Z, 0.0);
-            beside.push(solidcraft_kernel::transform_matrix(body, shift)?);
-            right += gap + (own.max.x - own.min.x);
-        }
-    }
-    let mut scratch = s.scratch();
-    if let Some(old) = unfold.surface {
-        scratch.doc_mut().delete_feature(old)?;
-    }
-    let mut group_solids = None;
-    if !beside.is_empty() {
-        let refs: Vec<&solidcraft_kernel::Body> = beside.iter().collect();
-        let text = solidcraft_kernel::step_export(&refs, "SolidCraft unfold for printing")?;
-        let kind = FeatureKind::Import { file: format!("{} carved faces", unfold.body), step: text.into(), components: Vec::new(), skip: Vec::new() };
-        let id = scratch.doc_mut().add_feature(kind, None)?;
-        if let Some(f) = scratch.doc_mut().feature_mut(id) {
-            f.body_names = (1..=beside.len()).map(|i| format!("{} Group {i}", unfold.body)).collect();
-        }
-        group_solids = Some(id);
-    }
-    if let Some(u) = scratch.doc_mut().print_unfold.as_mut() {
-        u.step = PrintUnfoldStep::Solid;
-        u.surface = None;
-        u.solid = feature;
-        u.group_solids = group_solids;
-    }
-    scratch.refresh();
-    s.accept_computed(scratch);
-    reply(s, cmd)
-}
-
-/// Generator 2: the parts of the flat pattern made from the body's own walls, each a body of
-/// its own where the pattern has it. The solid stays as it is, hidden.
-fn make_walls(
-    s: &mut Session,
-    cmd: &str,
-    unfold: &PrintUnfold,
-    graph: &UnfoldGraph,
-    layout: &UnfoldLayout,
-    flat: &FlatLayout,
-    splits: &[usize],
-) -> Result<Value> {
+    // The parts of the flat pattern made from the body's own walls, each a body of its own where
+    // the pattern has it. The solid stays as it is, hidden.
     let joints = unfold.joints.clone().unwrap_or_default();
     if wall_mm(&joints.wall).is_none() {
-        return Err(bad(cmd, "with generator 2, give the wall thickness as a number in mm"));
+        return Err(bad(cmd, "give the wall thickness as a number in mm"));
     }
-    let w = walls_of(unfold);
-    let kinds: Vec<String> = (0..graph.edges.len()).map(|e| joint_of(unfold, graph, layout, splits, e).0).collect();
-    let parts = graph.wall_solids(layout, flat, splits, w, &kinds).map_err(|e| invalid(cmd, e))?;
+    let w = walls_of(&unfold);
+    let kinds: Vec<String> = (0..graph.edges.len()).map(|e| joint_of(&unfold, &graph, &layout, &splits, e).0).collect();
+    let parts = graph.wall_solids(&layout, &flat, &splits, w, &kinds).map_err(|e| invalid(cmd, e))?;
     let refs: Vec<&solidcraft_kernel::Body> = parts.iter().collect();
     let text = solidcraft_kernel::step_export(&refs, "SolidCraft unfold for printing")?;
     let mut scratch = s.scratch();
@@ -769,8 +580,7 @@ fn make_walls(
     if let Some(u) = scratch.doc_mut().print_unfold.as_mut() {
         u.step = PrintUnfoldStep::Solid;
         u.surface = None;
-        u.solid = None;
-        u.group_solids = Some(id);
+        u.parts = Some(id);
     }
     scratch.refresh();
     if let Some(error) = scratch.model.result(id).and_then(|r| r.error.as_ref()) {
@@ -791,13 +601,12 @@ fn unmake(s: &mut Session, _: &Value) -> Result<Value> {
     }
     let splits = unfold.splits.clone();
     let mut scratch = s.scratch();
-    for id in unfold.group_solids.into_iter().chain(unfold.solid) {
+    if let Some(id) = unfold.parts {
         scratch.doc_mut().delete_feature(id)?;
     }
     if let Some(u) = scratch.doc_mut().print_unfold.as_mut() {
         u.step = PrintUnfoldStep::Surface;
-        u.solid = None;
-        u.group_solids = None;
+        u.parts = None;
     }
     scratch.refresh();
     s.accept_computed(scratch);

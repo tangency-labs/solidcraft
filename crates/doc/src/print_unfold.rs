@@ -78,17 +78,17 @@ pub struct PrintJoints {
     pub wall: String,
     /// What a bend is: `film` (the film alone), `filament` or `press`.
     pub bends: String,
-    /// How two walls meet at a cut: `butt`, `mitre`, `filament` or `press`.
+    /// How two walls meet at a cut: `mitre`, `filament` or `press`.
     pub cuts: String,
     /// Edges with a joint of their own: a point on the edge (its middle on the body) and
-    /// `plain` (a bend's film, a cut's butt or mitre), `filament` or `press`.
+    /// `plain` (a bend's film, a cut's mitre), `filament` or `press`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub edges: Vec<(Vec3, String)>,
 }
 
 impl Default for PrintJoints {
     fn default() -> Self {
-        PrintJoints { wall: "2 mm".into(), bends: "film".into(), cuts: "butt".into(), edges: Vec::new() }
+        PrintJoints { wall: "3 mm".into(), bends: "film".into(), cuts: "mitre".into(), edges: Vec::new() }
     }
 }
 
@@ -156,14 +156,6 @@ pub struct PrintGroup {
     pub faces: Vec<Vec3>,
 }
 
-fn first_generator() -> u8 {
-    1
-}
-
-fn is_first_generator(generator: &u8) -> bool {
-    *generator == 1
-}
-
 /// A design's unfolded print: the body lying on its base face, and its bends.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PrintUnfold {
@@ -174,10 +166,6 @@ pub struct PrintUnfold {
     /// A point on each bend edge (its middle), in the order they were set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bends: Vec<Vec3>,
-    /// Which generator makes the printable body: 1 (a foldable print of Convert to Sheet Metal,
-    /// with its joints) or 2 (the body's own walls, mitred, [`crate::print_unfold_walls`]).
-    #[serde(default = "first_generator", skip_serializing_if = "is_first_generator")]
-    pub generator: u8,
     /// The groups of faces carved out of the pattern.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub groups: Vec<PrintGroup>,
@@ -198,12 +186,10 @@ pub struct PrintUnfold {
     /// The wall and joints chosen for the print.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub joints: Option<PrintJoints>,
-    /// The feature that makes the printable body, once [`PrintUnfoldStep::Solid`] made it.
+    /// The feature that holds the printable bodies, one for each part of the pattern, once
+    /// [`PrintUnfoldStep::Solid`] made them ([`crate::print_unfold_walls`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub solid: Option<u64>,
-    /// The feature that holds the printable bodies of the carved-out groups, made with it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub group_solids: Option<u64>,
+    pub parts: Option<u64>,
 }
 
 /// How the two faces at an edge meet.
@@ -256,7 +242,7 @@ impl UnfoldFace {
     }
 
     /// How far `p` is from the face's boundary.
-    fn boundary_distance(&self, p: Vec3) -> f64 {
+    pub(crate) fn boundary_distance(&self, p: Vec3) -> f64 {
         let mut best = f64::INFINITY;
         for lp in &self.loops {
             let n = lp.len();

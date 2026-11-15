@@ -59,13 +59,13 @@ fn the_first_step_opens_the_body_in_a_tab_of_its_own_and_leaves_its_design_alone
     super::run(&mut app, &split, &[]).unwrap();
     let joints = step(&app).unwrap();
     assert!(matches!(joints, Pu::Joints { .. }), "{joints:?}");
-    // The film and butt joints need no more than the wall given; a press fit asks for 2.4 mm.
+    // The film and mitred cuts need no more than the wall given; a press fit on a cut asks for 1.5 mm.
     assert!(super::ready(&app, &joints, &[]));
-    app.run("print.unfold.joints", json!({"cuts": "press", "wall": "2 mm"})).unwrap();
+    app.run("print.unfold.joints", json!({"cuts": "press", "wall": "1 mm"})).unwrap();
     let Pu::Joints { .. } = &joints else { panic!("no joints step") };
-    let short = Pu::Joints { wall: "2 mm".into(), bends: 0, cuts: 3, assign: 0 };
+    let short = Pu::Joints { wall: "1 mm".into(), bends: 0, cuts: 2, assign: 0 };
     assert!(!super::ready(&app, &short, &[]));
-    let enough = Pu::Joints { wall: "2.4 mm".into(), bends: 0, cuts: 3, assign: 0 };
+    let enough = Pu::Joints { wall: "1.5 mm".into(), bends: 0, cuts: 2, assign: 0 };
     assert!(super::ready(&app, &enough, &[]));
     // Back to the edges, from any of the steps after.
     app.run("print.unfold.edit", json!({})).unwrap();

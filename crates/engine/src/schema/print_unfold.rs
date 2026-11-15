@@ -14,10 +14,6 @@ pub struct StartParams {
     pub body: String,
     /// A point on the face it will lie on (the base face), in mm, in the design's coordinates.
     pub face: Point3,
-    /// Which generator makes the printable body: 1 (with joints, the default) or 2 (the body's
-    /// own walls, mitred where they meet, a cut a press fit where chosen).
-    #[serde(default)]
-    pub generator: Option<u8>,
 }
 
 /// Set a bend at an edge of the body being unfolded, or clear the bend that is there.
@@ -68,14 +64,14 @@ pub struct SplitParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct JointsParams {
-    /// The wall thickness, a length (default: as it is, 2 mm at first).
+    /// The wall thickness, a length (default: as it is, 3 mm at first).
     #[serde(default)]
     pub wall: Option<String>,
     /// What every bend is: `film`, `filament` or `press` (default: as it is, `film` at first).
     #[serde(default)]
     pub bends: Option<String>,
-    /// How walls meet at every cut: `butt`, `mitre`, `filament` or `press` (default: as it is,
-    /// `butt` at first). Generator 2 makes a `press` cut a press fit and mitres every other.
+    /// How walls meet at every cut: `mitre`, `filament` or `press` (default: as it is, `mitre`
+    /// at first).
     #[serde(default)]
     pub cuts: Option<String>,
 }
@@ -86,9 +82,8 @@ pub struct JointsParams {
 pub struct JointParams {
     /// A point on the edge in the flat pattern, in mm.
     pub edge: Point3,
-    /// `plain` (a bend's film, a cut's butt or mitre), `filament`, `press`, or `default` to
-    /// follow what all bends or cuts get again. With generator 2 only a cut takes one: `plain`
-    /// (mitred) or `press`.
+    /// `plain` (a bend's film, a cut's mitre), `filament`, `press`, or `default` to follow what
+    /// all bends or cuts get again.
     pub kind: String,
 }
 
@@ -150,7 +145,7 @@ pub struct PrintUnfoldFlatEdge {
     pub edge: usize,
     /// A bend the pattern is split at.
     pub split: bool,
-    /// The joint it gets: `film`, `butt`, `mitre`, `filament` or `press`.
+    /// The joint it gets: `film`, `mitre`, `filament` or `press`.
     pub joint: String,
     /// Whether that joint is the edge's own, not what all bends or cuts get.
     pub own: bool,
@@ -161,8 +156,6 @@ pub struct PrintUnfoldFlatEdge {
 pub struct PrintUnfoldState {
     /// The body being unfolded.
     pub body: String,
-    /// The generator that makes the printable body: 1 or 2.
-    pub generator: u8,
     /// `edges`: the bends and cuts are being set. `surface`: the surface model is made. `flat`: it
     /// is laid flat. `solid`: the printable body is made.
     pub step: String,
@@ -190,9 +183,8 @@ pub struct PrintUnfoldState {
     pub group_points: Vec<[f64; 3]>,
     /// The wall thickness and what all bends and all cuts get.
     pub wall: String,
-    /// The least wall thickness the joints chosen need, in mm: a filament channel and the film
-    /// either side, a press-fit nub and the film either side. 0 while the joints are the film
-    /// and butt or mitre alone.
+    /// The least wall thickness the joints chosen need, in mm: on a cut, a filament channel and
+    /// a film of wall either side, or room for a press fit's nub. 0 while the cuts are mitred.
     pub min_wall: f64,
     pub bend_joint: String,
     pub cut_joint: String,
