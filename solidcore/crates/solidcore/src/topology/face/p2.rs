@@ -116,10 +116,10 @@
 //!   plan only `min(count, 30)` columns and stop once the requested count is reached, so
 //!   when those rows do not divide the requested count the last sampled column is
 //!   truncated and later columns are not sampled (31 points fill 16 of 30 columns), and
-//!   the V dither is still drawn once per point from `kernel.rng`. It takes the B-rep mutably: its UV-domain and
-//!   iso-line classifications run on it (the classification's snapshot hands back the
-//!   UV trim curves, the tolerance growth that fits them and the gap caches), so what
-//!   upstream's `const` queries leave on the B-rep stays there.
+//!   the V dither is still drawn once per point from `kernel.rng`. It takes the B-rep
+//!   mutably: its UV-domain and iso-line classifications run on it (the classification's
+//!   snapshot hands back the UV trim curves, the tolerance growth that fits them and the
+//!   gap caches), so what upstream's `const` queries leave on the B-rep stays there.
 //! - **`CreateCurvesByTrimming`** drops its unused `bForceUVClassify` argument; the
 //!   output arrays are asked for with `want_3d` / `want_uv`.
 //! - **`CalculateAnInternalPoint` / `CreateCurvesByTrimming`** take the B-rep mutably:

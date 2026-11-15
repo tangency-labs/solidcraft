@@ -24,8 +24,8 @@
 //! - **Files.** [`BrepData::write_to_file`] returns the file's bytes (no filesystem on
 //!   wasm32); only a new file (`bNewFile = TRUE`) is supported.
 //! - **ASCII doubles.** [`write_brep_to_file`] (through
-//!   [`BrepData::write_to_file_with_nurbs`]) writes an ASCII file's doubles so that
-//!   they read back unchanged ([`BrepData::write_to_file_with`]; WR-655), where
+//!   [`BrepData::write_to_file_with_nurbs`]) writes an ASCII file's finite doubles so
+//!   that they read back unchanged ([`BrepData::write_to_file_with`]; WR-655), where
 //!   upstream's `%.16f` loses digits below 1. [`BrepData::write_to_file`] keeps
 //!   upstream's `%.16f` text.
 //! - **Native formats only.** `bWriteAsBSplines = TRUE` approximates every non-B-spline
@@ -791,7 +791,7 @@ impl BrepData {
     /// [`Self::write_to_file`] after [`make_missing_nurb`] on every surface: upstream's
     /// `SmBSplineSurface::WriteToDB` reaches the NURB through
     /// `GetOrCreateGwNurbPointer`, so a lazy surface is written with the NURB it makes.
-    /// An ASCII file's doubles are written so that they read back unchanged
+    /// An ASCII file's finite doubles are written so that they read back unchanged
     /// ([`Self::write_to_file_with`]; WR-655).
     ///
     /// # Errors

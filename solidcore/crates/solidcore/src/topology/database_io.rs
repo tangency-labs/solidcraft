@@ -1131,10 +1131,10 @@ pub fn fixed16(x: f64) -> String {
     }
 }
 
-/// A double as the shortest text that reads back as the same double, in exponent
-/// notation (`3.0000000000000004e-1`, `1e0`, `-0e0`), with [`fixed16`]'s `inf`, `-inf`,
-/// `nan` and `-nan` (not upstream: WR-655's fix). Every ASCII reader
-/// accepts it: `>>` reads the exponent.
+/// A finite double as the shortest text that reads back as the same double, in exponent
+/// notation (`3.0000000000000004e-1`, `1e0`, `-0e0`) (not upstream: WR-655's fix); every
+/// ASCII reader accepts it, as `>>` reads the exponent. A non-finite value is written as
+/// [`fixed16`] writes it, which does not read back.
 #[must_use]
 pub fn round_trip(x: f64) -> String {
     if x.is_finite() {
