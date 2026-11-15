@@ -165,11 +165,14 @@ pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
 
 /// What Clear History deletes: every feature the History shows, as selecting them all and
 /// pressing Delete would. When the History shows the whole design, its timeline folders go too,
-/// so no empty folder is left behind; a History that shows one component keeps the folders,
-/// which can hold other components' features (#15969).
+/// so no empty folder is left behind; a History that shows one component, or leaves out the
+/// components marked out of it, keeps the folders, which can hold features it does not show
+/// (#15969). The features are those the bar draws, not the stepping view ([`transport_view`]),
+/// which with `history_steps_component` off also lists the components marked out of the bar.
 pub(crate) fn clear_targets(app: &SolveApp) -> (Vec<u64>, Vec<u64>) {
     let doc = &app.session.doc;
-    let view = transport_view(app);
+    let within = crate::timeline_scope::shown(app).map(|c| crate::timeline_scope::components_within(app, c));
+    let view = crate::timeline_fold::View::of(doc, within.as_ref(), app.tree.history_show_hidden);
     match view.shown() {
         None => {
             let features = doc.features.iter().map(|f| f.id).collect();
@@ -1631,21 +1634,26 @@ mod tests {
         assert_eq!(names, ["First", "Second"], "one Undo brings every step back");
         assert_eq!(h.app.session.doc.timeline_groups.len(), 1, "and the folder");
 
-        // A component whose History is hidden stays out of the History, so Clear History keeps it.
-        let mut h = Harness::new();
-        h.app.home.open = false;
-        h.app.run("component.create", json!({ "name": "Copy" })).unwrap();
-        h.app.run("solid.box", json!({ "length": 10, "width": 10, "height": 10, "name": "CopyBox" })).unwrap();
-        h.app.run("component.activate", json!({ "component": "root" })).unwrap();
-        h.app
-            .run("solid.box", json!({ "length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "operation": "new_body", "name": "RootBox" }))
-            .unwrap();
-        h.app.run("component.hide_history", json!({ "component": "Copy" })).unwrap();
-        h.frames(4);
-        let item = clear(&h);
-        run_and_wait(&mut h, &item);
-        let names: Vec<&str> = h.app.session.doc.features.iter().map(|f| f.name.as_str()).collect();
-        assert!(names.contains(&"CopyBox") && !names.contains(&"RootBox"), "only the shown steps go: {names:?}");
+        // A component whose History is hidden stays out of the History, so Clear History keeps it,
+        // whether or not the History steps follow one component (the stepping view lists hidden
+        // components when they don't).
+        for steps_component in [true, false] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.history_steps_component = steps_component;
+            h.app.run("component.create", json!({ "name": "Copy" })).unwrap();
+            h.app.run("solid.box", json!({ "length": 10, "width": 10, "height": 10, "name": "CopyBox" })).unwrap();
+            h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+            h.app
+                .run("solid.box", json!({ "length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "operation": "new_body", "name": "RootBox" }))
+                .unwrap();
+            h.app.run("component.hide_history", json!({ "component": "Copy" })).unwrap();
+            h.frames(4);
+            let item = clear(&h);
+            run_and_wait(&mut h, &item);
+            let names: Vec<&str> = h.app.session.doc.features.iter().map(|f| f.name.as_str()).collect();
+            assert!(names.contains(&"CopyBox") && !names.contains(&"RootBox"), "only the shown steps go ({steps_component}): {names:?}");
+        }
     }
 
     #[test]
