@@ -56,11 +56,10 @@
 //!   cluster with either of its ends (`SurfaceIntersector::remove_end_tangent_clusters`);
 //!   the SolidCraft fork's tangency-labs/smlib@0ce09f2. Off by default (upstream
 //!   behaviour).
-//! - **Opt-in fix (WR-77, #393, #2110).** With
-//!   [`UpstreamFixes::ssi_split_curves_at_singular_points`](crate::kernel::UpstreamFixes::ssi_split_curves_at_singular_points)
-//!   the curves are split at the singular points they pass through after the tangent
-//!   nodes are added (`super::singular_splits`); the SolidCraft fork's
-//!   tangency-labs/smlib@3c9d1d3. Off by default (upstream behaviour).
+//! - **Splits at singular points (WR-77, #393, #2110, not upstream).** The curves
+//!   (of a non-self intersection) are split at the singular points they pass through
+//!   after the tangent nodes are added (`super::singular_splits`); the SolidCraft
+//!   fork's tangency-labs/smlib@3c9d1d3.
 //! - **Empty trace (WR-80).** A curve is traced back the other way
 //!   ([`SurfaceIntersector::trace_back`], part 4) only when `TraceCurve` produced
 //!   points. Upstream also reverses the empty curve of a trace
@@ -877,9 +876,9 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             )?;
         }
 
-        // not upstream (WR-77, opt-in; the fork's sm_SplitCurvesAtSingularPoints): split
+        // not upstream (WR-77; the fork's sm_SplitCurvesAtSingularPoints): split
         // crossing curves at singular points (parallel normals) they pass through
-        if k.fixes.ssi_split_curves_at_singular_points && !self.base.doing_self_intersection {
+        if !self.base.doing_self_intersection {
             super::singular_splits::split_curves_at_singular_points(
                 k,
                 self.base.surface(SrfIndex::First),
