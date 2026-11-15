@@ -6,6 +6,7 @@ use std::f64::consts::TAU;
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_geom::Vec3Geom;
 
 use crate::Session;
 
@@ -284,4 +285,69 @@ fn a_curved_faces_perimeter_counts_its_rims_and_not_its_seam() {
     let ball = face_of(&s, |f| matches!(f, solidcraft_kernel::FaceSurface::Sphere { .. }));
     let r = measure(&mut s, vec![ball]);
     assert!(r["items"][0].get("perimeter_mm").is_none(), "{r}");
+}
+
+/// Intersections and a positive gap are measured on curved surfaces, with both witnesses.
+#[test]
+fn exact_curved_measurement_has_exact_closest_points() {
+    for sphere in [false, true] {
+        for (start, end, want) in [([0., 10., 0.], [0., 10., 50.], 0.), ([0., 10., 17.], [0., 10., 18.], 0.), ([-5., 25., 0.], [5., 25., 0.], 5.)] {
+            let mut s = Session::default();
+            if sphere {
+                run(&mut s, "solid.sphere", json!({"radius":20, "operation":"new"}));
+            } else {
+                run(&mut s, "solid.cylinder", json!({"radius":20, "height":40, "base":[-20,0,0], "axis":[1,0,0], "operation":"new"}));
+            }
+            let face = face_of(&s, |f| {
+                if sphere {
+                    matches!(f, solidcraft_kernel::FaceSurface::Sphere { .. })
+                } else {
+                    matches!(f, solidcraft_kernel::FaceSurface::Cylinder { .. })
+                }
+            });
+            run(&mut s, "sketch.create", json!({"plane":"XY"}));
+            run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+            let lines = run(&mut s, "sketch.line3d", json!({"points":[start,end]}));
+            let sketch = run(&mut s, "sketch.finish", json!({}))["sketch"].as_u64().unwrap();
+            let line = json!({"type":"sketch_curve", "sketch":sketch, "id":lines["created"]["wires"][0]});
+            for items in [vec![face.clone(), line.clone()], vec![line, face]] {
+                let r = measure(&mut s, items);
+                println!("sphere={sphere}, segment={start:?}..{end:?}, expected={want}, min={}, from={}, to={}", r["min"], r["from"], r["to"]);
+                assert!(close(&r["min"], want, 1e-6), "sphere={sphere}, want={want}: {r}");
+                assert!(close(&r["distance_mm"], want, 1e-6), "{r}");
+                let point = |name: &str| Vec3::new(r[name][0].as_f64().unwrap(), r[name][1].as_f64().unwrap(), r[name][2].as_f64().unwrap());
+                let (p, q) = (point("from"), point("to"));
+                assert!((p.dist(q) - want).abs() < 1e-6, "{r}");
+                if want == 0. {
+                    assert!(p.dist(Vec3::new(0., 10., 300_f64.sqrt())) < 1e-6, "{r}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn exact_curved_measurement_of_a_straight_body_edge() {
+    for sphere in [false, true] {
+        let mut s = Session::default();
+        if sphere {
+            run(&mut s, "solid.sphere", json!({"radius":20, "operation":"new"}));
+        } else {
+            run(&mut s, "solid.cylinder", json!({"radius":20, "height":40, "base":[-20,0,0], "axis":[1,0,0], "operation":"new"}));
+        }
+        let face = face_of(&s, |f| {
+            if sphere {
+                matches!(f, solidcraft_kernel::FaceSurface::Sphere { .. })
+            } else {
+                matches!(f, solidcraft_kernel::FaceSurface::Cylinder { .. })
+            }
+        });
+        run(&mut s, "solid.box", json!({"length":1, "width":1, "height":50, "corner":[0,10,0], "body_name":"Probe", "operation":"new"}));
+        let r = measure(&mut s, vec![face, json!({"type":"edge", "body":"Probe", "point":[0,10,25]})]);
+        println!("sphere={sphere}, body edge: min={}, from={}, to={}", r["min"], r["from"], r["to"]);
+        assert!(close(&r["min"], 0., 1e-6), "sphere={sphere}: {r}");
+        for name in ["from", "to"] {
+            assert!(close(&r[name][0], 0., 1e-6) && close(&r[name][1], 10., 1e-6) && close(&r[name][2], 300_f64.sqrt(), 1e-6), "{r}");
+        }
+    }
 }

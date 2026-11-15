@@ -1259,3 +1259,55 @@ fn a_tolerance_whose_zone_underflows_is_refused() {
         Err(Unsupported::Invalid(_))
     ));
 }
+
+#[test]
+fn exact_curved_measurement_imports_wire_and_vertex_selections() {
+    let mut k = kernel();
+    let tolerance = 1e-9;
+    let record = Record {
+        version: VERSION,
+        tolerance,
+        regions: vec![Region {
+            shells: vec![0, 1],
+            void: false,
+        }],
+        shells: vec![Shell::Wire { edges: vec![0] }, Shell::Vertex { vertex: 2 }],
+        faces: vec![],
+        edges: vec![Edge {
+            curve: Curve::Line {
+                start: [0., 10., 0.],
+                end: [0., 10., 50.],
+            },
+            nurbs: None,
+            interval: [0., 1.],
+            vertices: [0, 1],
+            tolerance,
+            uses: vec![],
+        }],
+        vertices: vec![
+            Vertex {
+                point: [0., 10., 0.],
+                tolerance,
+            },
+            Vertex {
+                point: [0., 10., 50.],
+                tolerance,
+            },
+            Vertex {
+                point: [2., 3., 4.],
+                tolerance,
+            },
+        ],
+    };
+    let (mut body, order) = to_kernel(&mut k, &record, true).unwrap();
+    assert_eq!(
+        (order.faces.len(), order.edges.len(), order.vertices.len()),
+        (0, 1, 3)
+    );
+    for (&v, expected) in order.vertices.iter().zip(&record.vertices) {
+        assert_eq!(body.vertex(v).unwrap().point.to_array(), expected.point);
+    }
+    let edge = body.edge(order.edges[0]).unwrap();
+    assert_eq!(edge.vertices, [order.vertices[0], order.vertices[1]]);
+    valid(&mut k, &mut body);
+}

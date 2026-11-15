@@ -199,7 +199,7 @@ fn undefined(t: &mut TopologyData) {
 /// # Errors
 ///
 /// [`Unsupported::Invalid`] for a record that fails its validation or a tolerance past the
-/// kernel's limit; [`Unsupported::NotYet`] for wire and vertex shells, wire edges and traced
+/// kernel's limit; [`Unsupported::NotYet`] for embedded wire edges and traced
 /// intersection curves, and for an untrusted record whose topology the healer changed (its
 /// record order is then not known: [`to_kernel_body`] gives the body alone);
 /// [`Unsupported::Kernel`] for a step the kernel refuses.
@@ -344,6 +344,7 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
     };
     let listed = |s: u32| rec.regions.iter().filter(|g| g.shells.contains(&s)).count();
     let mut start_shell = 0u64;
+    let mut wire_shells = Vec::new();
     for (ri, region) in rec.regions.iter().enumerate() {
         let mut rd = RegionData::default();
         rd.start_shell = start_shell;
@@ -354,8 +355,28 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
         start_shell += rd.num_shells;
         d.regions.push(rd);
         for (pos, &s) in region.shells.iter().enumerate() {
-            let r::Shell::Faces { faces, wires } = at(&rec.shells, s)? else {
-                return Err(Unsupported::NotYet("wire and vertex shells"));
+            let shell = at(&rec.shells, s)?;
+            let r::Shell::Faces { faces, wires } = shell else {
+                let mut sd = ShellData::default();
+                undefined(&mut sd.topology);
+                match shell {
+                    r::Shell::Wire { edges } => {
+                        sd.shell_type = 1;
+                        sd.edge = u64::from(
+                            *edges
+                                .first()
+                                .ok_or(Unsupported::Invalid("empty wire shell"))?,
+                        );
+                        wire_shells.push((int(d.shells.len())?, edges));
+                    }
+                    r::Shell::Vertex { vertex } => {
+                        sd.shell_type = 2;
+                        sd.vertex = u64::from(*vertex);
+                    }
+                    r::Shell::Faces { .. } => return Err(Unsupported::Invalid("shell kind")),
+                }
+                d.shells.push(sd);
+                continue;
             };
             if !wires.is_empty() {
                 return Err(Unsupported::NotYet("wire edges embedded in a shell"));
@@ -597,6 +618,28 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
                 }
             }
             d.loops.push(ld);
+        }
+    }
+
+    // A wire edge owns a radial cycle of its two opposite uses, attached to its shell.
+    for (shell, edges) in wire_shells {
+        for &edge in edges {
+            let here = i64::try_from(d.edgeuses.len())
+                .map_err(|_| Unsupported::Invalid("edge use count"))?;
+            let mut ud = EuData::default();
+            ud.eu_type = 2;
+            ud.edge = u64::from(edge);
+            ud.shell = shell;
+            ud.orientation = 1;
+            ud.uv_curve = NO_OBJECT;
+            ud.next_eu = -here - 1;
+            ud.mate_next_eu = here;
+            undefined(&mut ud.topology);
+            d.edges
+                .get_mut(edge as usize)
+                .ok_or(Unsupported::Invalid("wire edge"))?
+                .prim_eu = here;
+            d.edgeuses.push(ud);
         }
     }
 
