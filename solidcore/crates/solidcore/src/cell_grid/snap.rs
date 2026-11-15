@@ -507,13 +507,22 @@ fn mark_lattice_segments(lp: &Loop, lat: &Lattice) -> Loop {
     Loop::new(prims, Some(lp.flattened)).unwrap_or_else(|| lp.clone())
 }
 
-/// Snaps every loop that can. Returns the region and a warning for each loop that collapsed.
-pub(crate) fn snap_region(region: &Region, lat: &Lattice) -> (Region, Vec<String>) {
+/// Snaps every loop that can (the fields, the keep-outs, or both, as asked). Returns the region and a warning for each loop that collapsed.
+pub(crate) fn snap_region(
+    region: &Region,
+    lat: &Lattice,
+    (snap_fields, snap_keepouts): (bool, bool),
+) -> (Region, Vec<String>) {
     let mut warnings = Vec::new();
     let mut parts = Vec::new();
     for (outer, holes) in &region.parts {
         let mut new = Vec::new();
-        for lp in std::iter::once(outer).chain(holes) {
+        let loops = std::iter::once((outer, false)).chain(holes.iter().map(|h| (h, true)));
+        for (lp, keepout) in loops {
+            if keepout && !snap_keepouts || !keepout && !snap_fields {
+                new.push(mark_lattice_segments(lp, lat));
+                continue;
+            }
             // A loop with a flattened curve is followed, never snapped.
             let tried = if lp.flattened {
                 Err("has curves")

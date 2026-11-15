@@ -3253,19 +3253,28 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
     let sketch_name = |id| {
         s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_else(|| solidcraft_ui_text::format("browser.sketch_name", &[("number", &id.to_string())]))
     };
+    // Another sketch's point (a Sphere's centre, #9403), named as Select Other names it.
+    let external_point = |sketch: u64, id: &str| {
+        let state = crate::open_meshing::session_world(s);
+        let point = state.sketch(sketch).map_or_else(|| id.to_string(), |ss| crate::select_other::point_label(&ss.sketch, id));
+        solidcraft_ui_text::format("dialog.selection_external_point", &[("point", &point), ("sketch", &sketch_name(sketch))])
+    };
     match item {
         Sel::SketchCurve { id, .. } => id.clone(),
-        Sel::SketchPoint { id } => crate::sketch_modify_ui::point_id(s, item).unwrap_or(id).to_string(),
+        Sel::SketchPoint { id } => match crate::sketch_modify_ui::point_id(s, item) {
+            Some(point) => point.to_string(),
+            // A point of a sketch that isn't being edited, such as a Hole's points (#17445): its
+            // sketch's name and the point, not the internal `sketch:point` id.
+            None => match id.split_once(':').and_then(|(sketch, point)| Some((sketch.parse::<u64>().ok()?, point))) {
+                Some((sketch, point)) => external_point(sketch, point),
+                None => id.clone(),
+            },
+        },
         Sel::SketchMidpoint { id } => solidcraft_ui_text::format("dialog.selection_midpoint", &[("id", id)]),
         Sel::ExternalSketchCurve { sketch, id } => {
             solidcraft_ui_text::format("dialog.selection_external_curve", &[("sketch", &sketch_name(*sketch)), ("id", id)])
         }
-        // Another sketch's point (a Sphere's centre, #9403), named as Select Other names it.
-        Sel::ExternalSketchPoint { sketch, id } => {
-            let state = crate::open_meshing::session_world(s);
-            let point = state.sketch(*sketch).map_or_else(|| id.clone(), |ss| crate::select_other::point_label(&ss.sketch, id));
-            solidcraft_ui_text::format("dialog.selection_external_point", &[("point", &point), ("sketch", &sketch_name(*sketch))])
-        }
+        Sel::ExternalSketchPoint { sketch, id } => external_point(*sketch, id),
         Sel::SketchConstraint { id } => solidcraft_ui_text::format("dialog.selection_constraint", &[("id", id)]),
         Sel::Profile { sketch, index } => solidcraft_ui_text::format(
             "dialog.selection_profile",
@@ -8784,6 +8793,26 @@ mod refused_ok_tests {
         let f = h.app.session.doc.find_feature("Holes").unwrap();
         assert!(matches!(&f.kind, FeatureKind::Hole { points: Some(sp), .. } if sp.ids == ["a"]), "{:?}", f.kind);
         assert_eq!(warning(&h), None);
+    }
+
+    /// #17445: Edit Hole names the sketch and the point a Hole on sketch points is placed on,
+    /// not the internal `sketch:point` id.
+    #[test]
+    fn editing_a_hole_names_the_sketch_of_its_points() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 20, "height": 10})).unwrap();
+        h.app.run("sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Hole points"})).unwrap();
+        h.app.run("sketch.point", json!({"point": [15, 10], "id": "v1"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.hole", json!({"sketch": "Hole points", "points": ["v1"], "diameter": 8, "name": "Holes"})).unwrap();
+        let feature = h.app.session.doc.find_feature("Holes").unwrap().id;
+        h.app.edit_feature(feature);
+        h.frames(1);
+        let d = h.app.dialog.as_ref().unwrap();
+        let input = &d.inputs[0];
+        assert!(matches!(input.items.as_slice(), [Sel::SketchPoint { id }] if id.ends_with(":v1")), "{:?}", input.items);
+        let label = selection_label(&h.app.session, h.app.preferences.origin_plane_names, d, input, &input.items[0]);
+        assert_eq!(label, "Point 1 · Hole points");
     }
 
     fn set_depth(h: &mut Harness, depth: &str) {
