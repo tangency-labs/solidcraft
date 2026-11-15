@@ -37,10 +37,10 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    // Test change: show_design_view_switcher, the setting the owner asked for, is a portable key.
+    // Test change: show_design_view_switcher plus the three sketch interaction keys added in #17330.
     assert_eq!(
         keys.len(),
-        108,
+        111,
         "include document browser visibility and sizing and the repeated-shortcut preference among the current portable settings"
     );
     for key in [
@@ -819,6 +819,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "design_sub_tab_sketches",
         "design_views_as_tabs",
         "dialog_buttons",
+        "dimension_accept_outside_click",
         "direct_interaction",
         "escape_twice_finishes_sketch",
         "free_orbit",
@@ -880,11 +881,13 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "sketch_auto_dimensions",
         "sketch_auto_locate",
         "sketch_conflict_colour",
+        "sketch_constraint_preselection",
         "sketch_construction_lines",
         "sketch_exit_view",
         "sketch_face_activates_part",
         "sketch_open_look_at",
         "sketch_recent_snap",
+        "sketch_snap_icons",
         "sketch_snap_to_visible_grid",
         "sketch_state_icons",
         "sketch_tab_always",
@@ -919,8 +922,8 @@ fn profile_keys_cover_the_current_portable_preferences() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
-    assert_eq!(expected.len(), 108);
+    // Test change: show_design_view_switcher plus the three sketch interaction keys added in #17330.
+    assert_eq!(expected.len(), 111);
     assert_eq!(actual, expected);
 }
 

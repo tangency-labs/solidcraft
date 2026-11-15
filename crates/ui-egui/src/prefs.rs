@@ -1968,6 +1968,16 @@ preference_settings! {
     /// less than `sketch_tools::MIN_GLYPH_SPAN_PX` (#10518). Off: glyphs stay at a fixed screen
     /// size at every zoom, as before.
     hide_constraint_glyphs_zoomed_out: bool = true, PAGE_SKETCH;
+    /// Draw sketch snap hints, drag-snap hints, and active constraint/dimension cursor tools with
+    /// constraint icons instead of plain text badges (`Pt`, `Mid`, `On`) (#17330).
+    /// Off preserves the legacy text badges, drag-snap target ring, and suppresses the constraint cursor badge.
+    sketch_snap_icons: bool = true, PAGE_SKETCH;
+    /// Clear incompatible selections, keep compatible preselected geometry, and auto-exit after
+    /// committing a preselected sketch constraint or dimension (#17330). Off keeps prior tool-entry selection behaviour.
+    sketch_constraint_preselection: bool = true, PAGE_SKETCH;
+    /// Accept an open sketch dimension box/window when left-clicking outside it in the viewport
+    /// (#17330). Off restores legacy outside-click cancellation.
+    dimension_accept_outside_click: bool = true, PAGE_SKETCH;
     /// The Ellipse tool draws the major and minor axes as construction lines with the ellipse, so
     /// its half-axes and axes can be dimensioned. Off: the ellipse alone, and D on it gives its
     /// minor radius, labelled R, as before.
@@ -7307,6 +7317,9 @@ mod tests {
             ("select_hidden_edges", json!(true), PAGE_SKETCH),
             ("sketch_conflict_colour", json!(false), PAGE_SKETCH),
             ("hide_constraint_glyphs_zoomed_out", json!(false), PAGE_SKETCH),
+            ("sketch_snap_icons", json!(false), PAGE_SKETCH),
+            ("sketch_constraint_preselection", json!(false), PAGE_SKETCH),
+            ("dimension_accept_outside_click", json!(false), PAGE_SKETCH),
             ("constraint_glyph_scale", json!(2.0), PAGE_SKETCH),
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
             ("sketch_state_icons", json!(false), PAGE_SKETCH),
@@ -8905,6 +8918,9 @@ mod tests {
                 ("sketch_recent_snap", "prefs.sketch.recent_snap"),
                 ("sketch_align_points", "prefs.sketch.align_points"),
                 ("sketch_snap_to_visible_grid", "prefs.sketch.snap_to_visible_grid"),
+                ("sketch_snap_icons", "prefs.sketch.snap_icons"),
+                ("sketch_constraint_preselection", "prefs.sketch.constraint_preselection"),
+                ("dimension_accept_outside_click", "prefs.sketch.dimension_accept_outside_click"),
                 ("line_drag_draws_one", "prefs.line_drag_draws_one"),
                 ("line_hover_tangent_arc", "prefs.line_hover_tangent_arc"),
                 ("center_arc_follows_cursor", "prefs.sketch.center_arc"),

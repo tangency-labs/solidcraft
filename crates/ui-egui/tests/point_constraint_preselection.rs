@@ -84,10 +84,29 @@ fn rejected_and_ambiguous_preselection_preserve_document_and_selection() {
     for command in ["coincident", "midpoint", "symmetry"] {
         h.app.session.selection = vec![Sel::SketchPoint { id: "a".into() }];
         h.step(&json!({"start":format!("sketch.constraint.{command}")})).unwrap();
-        assert!(h.app.tool.as_ref().unwrap().picks.is_empty());
-        assert_eq!(h.app.session.selection.len(), 1);
+        assert_eq!(h.app.tool.as_ref().unwrap().picks, vec!["a"]);
+        assert!(h.app.session.selection.is_empty());
         assert_eq!(h.app.session.doc.to_json(), before);
+        h.step(&json!({"key":"Escape"})).unwrap();
     }
+    // Seeded single point completes the constraint on one click and unselects the operator.
+    let mut h = setup();
+    h.app.session.selection = vec![Sel::SketchPoint { id: "a".into() }];
+    h.step(&json!({"start": "sketch.constraint.coincident"})).unwrap();
+    assert_eq!(h.app.tool.as_ref().unwrap().picks, vec!["a"]);
+    h.step(&json!({"click": {"sketch": [25, 30]}})).unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
+    assert!(h.app.tool.is_none(), "preselected coincident should exit tool once applied");
+
+    // Incompatible / over-limit selection is unselected and enters tool-first picking empty.
+    let mut h = setup();
+    let doc_before = h.app.session.doc.to_json();
+    let over = vec![Sel::SketchPoint { id: "a".into() }, Sel::SketchPoint { id: "b".into() }, Sel::Axis { name: "X".into() }];
+    h.app.session.selection = over;
+    h.step(&json!({"start":"sketch.constraint.coincident"})).unwrap();
+    assert!(h.app.tool.as_ref().unwrap().picks.is_empty());
+    assert!(h.app.session.selection.is_empty());
+    assert_eq!(h.app.session.doc.to_json(), doc_before);
 }
 
 // MidPoint centres one line on another when the tool picks two lines.

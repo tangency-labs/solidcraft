@@ -86,7 +86,10 @@ pub use profiles::{
     find_profiles_checked, merge_regions, profile_at_point, profile_by_curves, without_text_counters,
 };
 pub use profiles3d::{Profile3D, find_planar_3d_profiles};
-pub use shape::{Shape, intersections, intersections_within, nearest_crossing, nearest_curve_intersection};
+pub use shape::{
+    Shape, axis_mode_between, intersect_curve_with_line, intersect_extension_ray, intersect_infinite_lines, intersections, intersections_within,
+    is_on_circle_rim, nearest_crossing, nearest_curve_intersection, unit_direction,
+};
 pub use solver::solve_after_edit_with_analysis;
 pub use solver::{
     Analysis, CONSISTENT, DrivingValues, Hold, MAX_COMPONENT_VARS, SolveReport, SolveStatus, constraint_residual, determined_by, fillets_kept,
