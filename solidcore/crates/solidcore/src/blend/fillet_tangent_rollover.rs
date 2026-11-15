@@ -84,7 +84,8 @@ pub struct Rollover {
 /// # Errors
 ///
 /// Those of the topology queries, the curves' recognisers, the evaluations and the tangency
-/// test; `SM_ERR` for a face without a surface.
+/// test; `SM_ERR` for a face of a straight edge without a surface (the planes' section,
+/// `planar_section`, reads both faces first).
 pub fn tangent_rollover_supports(
     k: &Kernel,
     target: &mut Brep,
@@ -361,6 +362,36 @@ impl Profile {
         }
     }
 
+    /// Whether the profile, leaving the origin in the sense the point `towards` of it lies in
+    /// ([`Profile::travel`]), runs along `direction` (a unit vector in the section): its unit
+    /// tangent there in that sense makes an angle below 60 degrees with `direction`. `false`
+    /// where `towards` names no sense, and for a non-finite value.
+    fn leads_into(self, towards: (f64, f64), direction: (f64, f64), tol: f64) -> bool {
+        let tangent = match self {
+            Self::Line { n, .. } => {
+                let u = (-n.1, n.0);
+                let s = towards.0 * u.0 + towards.1 * u.1;
+                if s.is_nan() || s.abs() <= tol {
+                    return false;
+                }
+                (u.0 * s.signum(), u.1 * s.signum())
+            }
+            Self::Circle { c, radius, .. } => {
+                let angle = |p: (f64, f64)| (p.1 - c.1).atan2(p.0 - c.0);
+                let origin = angle((0.0, 0.0));
+                let s = (angle(towards) - origin).sin();
+                if s.is_nan() || s.abs() * radius <= tol {
+                    return false;
+                }
+                // counterclockwise round the axis at the origin, turned by the sense
+                let r = (-c.0 / radius, -c.1 / radius);
+                (-r.1 * s.signum(), r.0 * s.signum())
+            }
+        };
+        let cos = tangent.0 * direction.0 + tangent.1 * direction.1;
+        cos > 0.5
+    }
+
     /// The profile's surface offset by `offset` along its normal (where the ball's centre lies):
     /// a line moved along its normal, a circle of radius `radius + side offset`.
     fn offset(self, offset: f64) -> Self {
@@ -532,6 +563,8 @@ struct CylinderSection {
     ends: [Point3; 2],
     /// The edge's middle, the section's origin.
     m: Point3,
+    /// The edge's parameter there.
+    t_mid: f64,
     /// The section's axes, square to the edge and to each other.
     x: Vec3,
     /// See `x`.
@@ -570,7 +603,8 @@ fn cylinder_section(
         curve.evaluate_point(k, ivl.min())?,
         curve.evaluate_point(k, ivl.max())?,
     ];
-    let m = curve.evaluate_point(k, ivl.evaluate(0.5))?;
+    let t_mid = ivl.evaluate(0.5);
+    let m = curve.evaluate_point(k, t_mid)?;
     let axis = if d.x.abs() <= d.y.abs() && d.x.abs() <= d.z.abs() {
         Vec3::new(1.0, 0.0, 0.0)
     } else if d.y.abs() <= d.z.abs() {
@@ -602,6 +636,7 @@ fn cylinder_section(
         d,
         ends,
         m,
+        t_mid,
         x,
         y,
         profiles,
@@ -624,8 +659,8 @@ fn cylinder_section(
 ///
 /// # Errors
 ///
-/// Those of the topology queries, the curves' recognisers, the evaluations and the tangency
-/// test; `SM_ERR` for a face without a surface.
+/// Those of the topology queries, the curves' recognisers, the evaluations, the binormals and
+/// the tangency test.
 fn cylinder_rollover_supports(
     k: &Kernel,
     target: &mut Brep,
@@ -640,6 +675,7 @@ fn cylinder_rollover_supports(
         d,
         ends,
         m,
+        t_mid,
         x,
         y,
         profiles,
@@ -654,6 +690,12 @@ fn cylinder_rollover_supports(
         let v = p - m;
         (v.dot(x), v.dot(y))
     };
+    // the section stands for every point of the edge up to the skew of its three lines (the
+    // edge, a cylinder's axis or a plane's direction, the far edge), each within DIR_TOL of the
+    // edge's direction: over the edge's length a point of the section moves at most that much
+    let [e0, e1] = ends;
+    let length = e1.distance(e0);
+    let drift = 3.0 * length * DIR_TOL;
     let mut out = none;
     for (((slot, &profile), &offset), &face) in
         out.iter_mut().zip(&profiles).zip(&offsets).zip(&faces)
@@ -664,6 +706,15 @@ fn cylinder_rollover_supports(
         let Some(reach) = profile.travel(contact, contact, tol) else {
             continue;
         };
+        // the face lies on the side of the edge the contact moves to: the profile's direction at
+        // the edge's point, in the contact's sense, is the face's binormal there (its normal x
+        // the edge use's tangent, into the face), not the other way round the profile
+        let Some(binormal) = face_binormal(k, target, filleted, face, t_mid)? else {
+            continue;
+        };
+        if !profile.leads_into(contact, to2(m + binormal), tol) {
+            continue;
+        }
         // the face's nearest other edge along its profile, in the contact's sense, of those that
         // run the filleted edge's whole length
         let mut nearest: Option<(EdgeId, f64, (f64, f64))> = None;
@@ -688,7 +739,7 @@ fn cylinder_rollover_supports(
         let Some((e, along, t)) = nearest else {
             continue;
         };
-        if reach.is_nan() || reach <= along + tol {
+        if reach.is_nan() || reach <= along + tol + drift {
             continue;
         }
         let (tangent, opposite_normals) =
@@ -717,6 +768,42 @@ fn cylinder_rollover_supports(
         });
     }
     Ok(out)
+}
+
+/// The unit binormal of `face`'s edge use of `filleted` at the edge's parameter `t` (the face
+/// use's normal x the edge use's tangent, into the face, `SmEdgeuse::EvaluateBinormal` on the 3D
+/// curve), or `None` where the face has no edge use of it or the binormal is not found.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] and a cancellation from the evaluation; those of the topology
+/// queries.
+fn face_binormal(
+    k: &Kernel,
+    target: &mut Brep,
+    filleted: EdgeId,
+    face: FaceId,
+    t: f64,
+) -> Result<Option<Vec3>> {
+    for eu in edge::edgeuses(target, filleted, None, None)? {
+        if crate::topology::edgeuse::p1::face(target, eu)? != Some(face) {
+            continue;
+        }
+        let eval = crate::topology::edgeuse::p3::evaluate_binormal(
+            k,
+            target,
+            eu,
+            t,
+            true,
+            &crate::topology::edgeuse::p3::BinormalOptions::default(),
+        );
+        return match eval {
+            Ok(eval) => Ok(eval.binormal.unitize().ok()),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
+            Err(_) => Ok(None),
+        };
+    }
+    Ok(None)
 }
 
 /// A point of edge `e` when it is a line parallel to the unit `d` (within [`DIR_TOL`]) whose
@@ -886,8 +973,10 @@ pub(crate) fn section_seeds(
 /// Whether the offset of `face`'s surface by `offset` (along its surface normal) folds across the
 /// direction square to `along` at the point of the face nearest `at`: `1 - kappa offset <= 0`, with
 /// `kappa` the surface's normal curvature in that direction (`II(t, t) / I(t, t)`). A ball of that
-/// signed offset cannot roll on the face there. A point the face does not take, or a degenerate
-/// frame, counts as folding (the rollover is then not attempted).
+/// signed offset cannot roll on the face there. A point the face does not take, a degenerate
+/// frame, a factor `1 - kappa offset` not proved above its rounding (`gamma_16` of the larger of
+/// 1 and `|kappa offset|`), and a non-finite one count as folding (the rollover is then not
+/// attempted).
 fn offset_folds(
     k: &Kernel,
     target: &Brep,
@@ -920,12 +1009,16 @@ fn offset_folds(
     let a = (g22 * r1 - g12 * r2) / det;
     let b = (g11 * r2 - g12 * r1) / det;
     let kappa = (duu * (a * a) + duv * (2.0 * a * b) + dvv * (b * b)).dot(n);
-    Ok(1.0 - kappa * offset <= 0.0)
+    // the factor proved positive by more than its rounding (a few operations on the
+    // derivatives, relative to the larger of 1 and the product), so NaN folds too
+    let product = kappa * offset;
+    let margin = crate::nurbs::math::gamma(16) * (1.0 + product.abs());
+    Ok(!(1.0 - product > margin))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{seam_side_hint, section_seeds, SectionSeed};
+    use super::{seam_side_hint, section_seeds, Profile, SectionSeed};
     use crate::blend::fillet_solver::p1::FilletSolver;
     use crate::curve::curve::Curve;
     use crate::kernel::Kernel;
@@ -1056,5 +1149,48 @@ mod tests {
         );
         let nan = Point3::new(f64::NAN, 2.0, 3.0);
         assert_eq!(seam_side_hint(nan, point, tol), None);
+    }
+
+    /// The side check of the cylinders' closed form: a face whose arc leaves the edge's point
+    /// the other way round its circle from the contact (the shorter arc to the contact is not
+    /// the face's, which may run more than half way round) is not judged from that arc. On the
+    /// circle of radius 10 about (0, -10) through the origin (its top), the contact at 60 deg
+    /// about the axis lies clockwise of the origin (at 90 deg): the profile leads into a face
+    /// whose binormal at the origin is +x (clockwise), not into one whose binormal is -x
+    /// (counterclockwise, the long way round to the contact). Likewise on a line, and a
+    /// contact at the origin or opposite it names no sense.
+    #[test]
+    fn the_cylinder_closed_form_judges_only_a_face_on_the_contact_s_side() {
+        let circle = Profile::Circle {
+            c: (0.0, -10.0),
+            radius: 10.0,
+            side: 1.0,
+        };
+        let at = |deg: f64| {
+            let a = deg.to_radians();
+            (10.0 * a.cos(), -10.0 + 10.0 * a.sin())
+        };
+        let tol = 1e-9;
+        assert!(circle.leads_into(at(60.0), (1.0, 0.0), tol));
+        assert!(!circle.leads_into(at(60.0), (-1.0, 0.0), tol));
+        assert!(circle.leads_into(at(120.0), (-1.0, 0.0), tol));
+        assert!(!circle.leads_into(at(120.0), (1.0, 0.0), tol));
+        // the shorter arc to the contact, whichever way the face runs
+        let travel = circle.travel(at(60.0), at(60.0), tol).unwrap();
+        assert!(
+            (travel - 10.0 * 30.0_f64.to_radians()).abs() < 1e-12,
+            "{travel}"
+        );
+        // no sense: the contact at the origin or opposite it
+        assert!(!circle.leads_into(at(90.0), (1.0, 0.0), tol));
+        assert!(!circle.leads_into(at(270.0), (1.0, 0.0), tol));
+        assert!(!circle.leads_into((f64::NAN, 0.0), (1.0, 0.0), tol));
+        let line = Profile::Line {
+            n: (0.0, 1.0),
+            h: 0.0,
+        };
+        assert!(line.leads_into((3.0, 0.0), (1.0, 0.0), tol));
+        assert!(!line.leads_into((3.0, 0.0), (-1.0, 0.0), tol));
+        assert!(!line.leads_into((0.0, 0.0), (1.0, 0.0), tol));
     }
 }

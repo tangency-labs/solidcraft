@@ -1907,11 +1907,17 @@ fn a_lone_round_between_two_cylinders_does_not_roll_over_a_sharp_edge() {
         assert!(r > reach);
         let b = input.copy().unwrap();
         let e = edge_at(&b, [px, py, LOBE_HEIGHT / 2.0]);
+        // the size named is the radius at which the contact reaches the sharp edge, open: at
+        // most the closed form's reach and within the fit margin of it
         match blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled) {
             Err(Error::TooLarge {
+                size,
                 why: Some(RoomReason::RailLeavesFace),
                 ..
-            }) => {}
+            }) => assert!(
+                size <= reach && size > reach - 0.02,
+                "r {r}: named {size}, the contact reaches the edge at {reach}"
+            ),
             other => panic!("r {r}: {other:?}"),
         }
     }
