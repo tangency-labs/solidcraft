@@ -491,64 +491,147 @@ fn surfaces_of_other_kinds(primary: &Brep, pf: FaceId, other: &Brep, of: FaceId)
 /// copy of that part of its partner. The operation keeps one copy of coincident faces or none
 /// ([`coincident_keep`]). With none, the patch goes. With one, the copy is the partner's when
 /// the partner is kept, so the patch goes, and the patch's when the partner is deleted. A
-/// patch whose partner is still unclassified is left to the ray, as before.
+/// patch whose partner is classified by a later patch is visited again, so the order of the
+/// list does not matter; a patch whose partner is still unclassified when a pass classifies
+/// nothing more is left to the ray, as before.
 fn resolve_tangent_patches(
     kernels: &BooleanKernels<'_>,
     state: &mut ManifoldState,
     faces: &mut Faces,
     marks: (MarkType, MarkType),
 ) {
-    for patch in std::mem::take(&mut faces.tangent_patches) {
-        let TangentPatch {
-            reverse,
-            pf,
-            of,
-            keep,
-        } = patch;
-        let Some(keep_copy) = keep else {
-            continue;
-        };
-        let (source_marked, partner_kept, partner_deleted) = if reverse {
-            (
-                state
-                    .other_marks
-                    .is_marked(kernels.other(), Entity::Face(of), marks.1),
-                faces.keep.contains(&pf),
-                faces.delete.contains(&pf),
-            )
-        } else {
-            (
-                state
-                    .primary_marks
-                    .is_marked(kernels.primary, Entity::Face(pf), marks.0),
-                faces.other_keep.contains(&of),
-                faces.other_delete.contains(&of),
-            )
-        };
-        if source_marked || (keep_copy && !partner_kept && !partner_deleted) {
-            continue;
-        }
-        let keep_source = keep_copy && partner_deleted;
-        if reverse {
-            state
-                .other_marks
-                .mark(kernels.other(), Entity::Face(of), marks.1);
-            if keep_source {
-                faces.other_keep.push(of);
-            } else {
-                faces.other_delete.push(of);
-            }
-        } else {
-            state
-                .primary_marks
-                .mark(kernels.primary, Entity::Face(pf), marks.0);
-            if keep_source {
-                faces.keep.push(pf);
-            } else {
-                faces.delete.push(pf);
-            }
+    let mut pending = std::mem::take(&mut faces.tangent_patches);
+    loop {
+        let count = pending.len();
+        pending.retain(|&patch| !resolve_tangent_patch(kernels, state, faces, marks, patch));
+        if pending.len() == count {
+            break;
         }
     }
+}
+
+/// One patch of [`resolve_tangent_patches`]: whether it is settled (classified, or never to be
+/// classified here); `false` while its partner is unclassified.
+fn resolve_tangent_patch(
+    kernels: &BooleanKernels<'_>,
+    state: &mut ManifoldState,
+    faces: &mut Faces,
+    marks: (MarkType, MarkType),
+    patch: TangentPatch,
+) -> bool {
+    let TangentPatch {
+        reverse,
+        pf,
+        of,
+        keep,
+    } = patch;
+    let Some(keep_copy) = keep else {
+        return true;
+    };
+    let (source_marked, partner_kept, partner_deleted) = if reverse {
+        (
+            state
+                .other_marks
+                .is_marked(kernels.other(), Entity::Face(of), marks.1),
+            faces.keep.contains(&pf),
+            faces.delete.contains(&pf),
+        )
+    } else {
+        (
+            state
+                .primary_marks
+                .is_marked(kernels.primary, Entity::Face(pf), marks.0),
+            faces.other_keep.contains(&of),
+            faces.other_delete.contains(&of),
+        )
+    };
+    if source_marked {
+        return true;
+    }
+    if keep_copy && !partner_kept && !partner_deleted {
+        return false;
+    }
+    let keep_source = keep_copy && partner_deleted;
+    if reverse {
+        state
+            .other_marks
+            .mark(kernels.other(), Entity::Face(of), marks.1);
+        if keep_source {
+            faces.other_keep.push(of);
+        } else {
+            faces.other_delete.push(of);
+        }
+    } else {
+        state
+            .primary_marks
+            .mark(kernels.primary, Entity::Face(pf), marks.0);
+        if keep_source {
+            faces.keep.push(pf);
+        } else {
+            faces.delete.push(pf);
+        }
+    }
+    true
+}
+
+/// Not upstream (#17118): how far `f` strays from the surface of `partner_face`, which must be
+/// analytic (`None` otherwise), measured at its vertices, three points along each edge and the
+/// middle of its UV domain, where a face whose edges lie on the partner can bulge off it.
+fn face_gap(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    partner: &Brep,
+    partner_face: FaceId,
+) -> Result<Option<f64>> {
+    let Some(surface) = partner.face(partner_face)?.surface.as_ref() else {
+        return Ok(None);
+    };
+    let Some(support) = crate::surface::implicit::AnalyticSupport::of(surface) else {
+        return Ok(None);
+    };
+    let implicit = support.implicit();
+    let mut gap = 0.0_f64;
+    if let Some(own) = crate::topology::face::p2::surface(b, f)? {
+        let middle = crate::topology::face::p2::uv_domain(b, f)?.evaluate(0.5, 0.5);
+        gap = implicit.distance(own.evaluate_point(k, middle)?);
+    }
+    for v in crate::topology::face::p4::vertices(b, f, None, false, None)? {
+        gap = gap.max(implicit.distance(vertex::point(b, v)?));
+    }
+    for e in crate::topology::face::p4::edges(b, f, None, false, None)? {
+        let edge = b.edge(e)?;
+        let Some(curve) = edge.curve.as_ref() else {
+            continue;
+        };
+        for t in [0.25, 0.5, 0.75] {
+            gap = gap.max(implicit.distance(curve.evaluate_point(k, edge.interval.evaluate(t))?));
+        }
+    }
+    Ok(Some(gap))
+}
+
+/// Not upstream (#17118): whether the source face of a tangent patch (`of` when `reverse`, `pf`
+/// otherwise) lies within the tolerance of its partner's surface ([`face_gap`]), so that the
+/// whole face is the patch. A face that leaves the partner's surface somewhere is only
+/// partly a copy of it, and is left to the ray.
+fn within_partner(
+    k: &Kernel,
+    primary: &Brep,
+    pf: FaceId,
+    other: &Brep,
+    of: FaceId,
+    reverse: bool,
+) -> Result<bool> {
+    let (sb, sf, pb, ppf) = if reverse {
+        (other, of, primary, pf)
+    } else {
+        (primary, pf, other, of)
+    };
+    let tol = crate::topology::face::p2::tolerance(sb, sf)?
+        .max(crate::topology::face::p2::tolerance(pb, ppf)?);
+    let gap = face_gap(k, sb, sf, pb, ppf)?;
+    Ok(gap.is_some_and(|g| g <= tol))
 }
 
 fn region_pair(b: &Brep, fu: FaceuseId) -> Result<(RegionId, RegionId)> {
@@ -838,7 +921,8 @@ fn classify_edge_faces(
                 BooleanOperation::Union
                     | BooleanOperation::Difference
                     | BooleanOperation::Intersection
-            ) && surfaces_of_other_kinds(primary, pf, other, of)?;
+            ) && surfaces_of_other_kinds(primary, pf, other, of)?
+                && within_partner(kernels.primary, primary, pf, other, of, reverse)?;
             let keep = coincident_keep(operation, same_side, non_solid, None);
             if if reverse {
                 state
