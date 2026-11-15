@@ -303,7 +303,8 @@ mod tests {
 
     /// A box with one corner moved off its three edges: SMLib's check refuses it. Under each_step
     /// the boolean that takes it refuses its result there; under each_feature it is not checked,
-    /// says the check was left for later, and the check of the body kept refuses it.
+    /// says the check was left for later, and the check of the body kept refuses it. Both name
+    /// the operand that already fails the check (#17230), also when the check runs detached.
     #[test]
     fn a_body_the_check_refuses_is_refused_at_the_step_or_at_the_end() {
         use solidcore_record::Vec3;
@@ -321,7 +322,15 @@ mod tests {
         let (joined, deferred) = validating(Validation::EachFeature, || crate::boolean(&bad, &tool, crate::BoolOp::Union));
         assert!(deferred);
         let joined = joined.unwrap().unwrap();
-        assert!(check_kept(&joined).unwrap_err().to_string().contains("SMLib's check refuses the result"));
+        let detached = detach_kept(&joined).run().unwrap_err().to_string();
+        assert!(detached.contains("SMLib boolean: SMLib's check refuses the result (the first operand already fails it)"), "{detached}");
+        let (joined, _) = validating(Validation::EachFeature, || crate::boolean(&bad, &tool, crate::BoolOp::Union));
+        let e = check_kept(&joined.unwrap().unwrap()).unwrap_err().to_string();
+        assert!(e.contains("SMLib boolean: SMLib's check refuses the result (the first operand already fails it)"), "{e}");
+        // Only the operand that fails is named.
+        let (joined, _) = validating(Validation::EachFeature, || crate::boolean(&tool, &bad, crate::BoolOp::Union));
+        let e = check_kept(&joined.unwrap().unwrap()).unwrap_err().to_string();
+        assert!(e.contains("(the second operand already fails it)"), "{e}");
         let (off, deferred) = validating(Validation::Off, || crate::boolean(&bad, &tool, crate::BoolOp::Union));
         assert!(off.is_ok_and(|b| b.is_some()) && !deferred);
     }
