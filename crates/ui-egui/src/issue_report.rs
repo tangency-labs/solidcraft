@@ -2692,6 +2692,10 @@ mod tests {
         assert!(t.form.description.contains("**Error:**") && t.form.description.contains(solidcraft_ui_text::tr("report.trying_to_do")));
         assert_eq!(t.evidence.failing.as_ref().map(|f| f.error.clone()), Some(limited(&error, 8000)));
 
+        // The preference brings back the GitHub draft for every report.
+        app.preferences.report_on_github = true;
+        assert!(!ticket::enabled(&app));
+        app.preferences.report_on_github = false;
         // The public GitHub draft stays one click away.
         let mut draft = draft;
         draft.github = true;

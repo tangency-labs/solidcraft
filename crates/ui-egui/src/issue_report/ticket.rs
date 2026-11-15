@@ -32,7 +32,7 @@ pub struct TicketDraft {
 
 /// Whether this build can file reports on the ticket server (the GitHub draft otherwise).
 pub fn enabled(app: &SolveApp) -> bool {
-    app.services.tickets_http.is_some()
+    app.services.tickets_http.is_some() && !app.preferences.report_on_github
 }
 
 /// The build and machine: what "System info" sends, as fields and as the exact text shown.

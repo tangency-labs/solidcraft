@@ -77,6 +77,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         ui_kit::settings_section(ui, "reports", app.tr("prefs.reports"), |ui| {
+            setting::report_on_github(app, ui);
             ui_kit::settings_form(ui, labels, |ui| {
                 if crate::tickets::signed_in(app) {
                     ui_kit::settings_inline_note(ui, app.tr("prefs.reports.signed_in"));

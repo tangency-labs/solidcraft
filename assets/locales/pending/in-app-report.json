@@ -60,7 +60,9 @@
     "report.github_instead": "Or open a public GitHub issue instead",
     "cmd.diagnostics_report_issue": "Report an Issue",
     "cmd.diagnostics_report_issue_status": "Report Status",
-    "report.report_action": "Report…"
+    "report.report_action": "Report…",
+    "prefs.reports.github": "Report a bug opens a public GitHub draft instead",
+    "prefs.reports.github_help": "Off: Report a bug files a ticket on tickets.solidcraft.io. On: it opens a public GitHub issue draft, as before."
   },
   "de": {
     "report.title": "Problem melden",
@@ -123,7 +125,9 @@
     "report.github_instead": "Oder stattdessen ein öffentliches GitHub-Issue öffnen",
     "cmd.diagnostics_report_issue": "Problem melden",
     "cmd.diagnostics_report_issue_status": "Berichtsstatus",
-    "report.report_action": "Melden…"
+    "report.report_action": "Melden…",
+    "prefs.reports.github": "„Fehler melden“ öffnet stattdessen einen öffentlichen GitHub-Entwurf",
+    "prefs.reports.github_help": "Aus: „Fehler melden“ erstellt ein Ticket auf tickets.solidcraft.io. Ein: Es öffnet wie bisher einen öffentlichen GitHub-Issue-Entwurf."
   },
   "ar": {
     "report.title": "الإبلاغ عن مشكلة",
@@ -186,7 +190,9 @@
     "report.github_instead": "أو افتح مشكلة عامة على GitHub بدلًا من ذلك",
     "cmd.diagnostics_report_issue": "الإبلاغ عن مشكلة",
     "cmd.diagnostics_report_issue_status": "حالة التقرير",
-    "report.report_action": "إبلاغ…"
+    "report.report_action": "إبلاغ…",
+    "prefs.reports.github": "زر الإبلاغ عن خطأ يفتح مسودة عامة على GitHub بدلًا من ذلك",
+    "prefs.reports.github_help": "إيقاف: ينشئ زر الإبلاغ عن خطأ تذكرة على tickets.solidcraft.io. تشغيل: يفتح مسودة مشكلة عامة على GitHub كما كان سابقًا."
   },
   "he": {
     "report.title": "דיווח על בעיה",
@@ -249,7 +255,9 @@
     "report.github_instead": "או לפתוח במקום זאת issue ציבורי ב-GitHub",
     "cmd.diagnostics_report_issue": "דיווח על בעיה",
     "cmd.diagnostics_report_issue_status": "מצב הדוח",
-    "report.report_action": "דיווח…"
+    "report.report_action": "דיווח…",
+    "prefs.reports.github": "דיווח על באג פותח טיוטה ציבורית ב-GitHub במקום זאת",
+    "prefs.reports.github_help": "כבוי: דיווח על באג יוצר כרטיס ב-tickets.solidcraft.io. מופעל: הוא פותח טיוטת issue ציבורית ב-GitHub, כמו קודם."
   },
   "ja": {
     "report.title": "問題を報告",
@@ -312,7 +320,9 @@
     "report.github_instead": "または代わりに公開の GitHub Issue を開く",
     "cmd.diagnostics_report_issue": "問題を報告",
     "cmd.diagnostics_report_issue_status": "レポートの状態",
-    "report.report_action": "報告…"
+    "report.report_action": "報告…",
+    "prefs.reports.github": "「バグを報告」で代わりに GitHub の公開下書きを開く",
+    "prefs.reports.github_help": "オフ: 「バグを報告」は tickets.solidcraft.io にチケットを作成します。オン: 以前と同様に GitHub の公開 Issue の下書きを開きます。"
   },
   "vi": {
     "report.title": "Báo cáo sự cố",
@@ -375,7 +385,9 @@
     "report.github_instead": "Hoặc mở issue công khai trên GitHub thay thế",
     "cmd.diagnostics_report_issue": "Báo cáo sự cố",
     "cmd.diagnostics_report_issue_status": "Trạng thái báo cáo",
-    "report.report_action": "Báo cáo…"
+    "report.report_action": "Báo cáo…",
+    "prefs.reports.github": "Nút Báo lỗi mở bản nháp GitHub công khai thay thế",
+    "prefs.reports.github_help": "Tắt: Báo lỗi tạo phiếu trên tickets.solidcraft.io. Bật: mở bản nháp issue công khai trên GitHub như trước."
   },
   "zh": {
     "report.title": "报告问题",
@@ -438,7 +450,9 @@
     "report.github_instead": "或改为创建公开的 GitHub 议题",
     "cmd.diagnostics_report_issue": "报告问题",
     "cmd.diagnostics_report_issue_status": "报告状态",
-    "report.report_action": "报告…"
+    "report.report_action": "报告…",
+    "prefs.reports.github": "“报告缺陷”改为打开公开的 GitHub 草稿",
+    "prefs.reports.github_help": "关闭：“报告缺陷”会在 tickets.solidcraft.io 上创建工单。开启：像以前一样打开公开的 GitHub 议题草稿。"
   },
   "ko": {
     "report.title": "문제 신고",
@@ -501,6 +515,8 @@
     "report.github_instead": "또는 대신 공개 GitHub 이슈 열기",
     "cmd.diagnostics_report_issue": "문제 신고",
     "cmd.diagnostics_report_issue_status": "보고서 상태",
-    "report.report_action": "신고…"
+    "report.report_action": "신고…",
+    "prefs.reports.github": "버그 신고가 대신 공개 GitHub 초안을 엽니다",
+    "prefs.reports.github_help": "끄기: 버그 신고가 tickets.solidcraft.io에 티켓을 만듭니다. 켜기: 이전처럼 공개 GitHub 이슈 초안을 엽니다."
   }
 }

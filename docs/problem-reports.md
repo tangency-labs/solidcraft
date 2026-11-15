@@ -74,6 +74,8 @@ waiting to be filed, to check whether it was. There is no telemetry.
 
 The dialog's "Or open a public GitHub issue instead" link switches it to the public GitHub issue
 draft the button opened before, with the same title and description.
+Preferences › Security › "Report a bug opens a public GitHub draft instead"
+(`report_on_github`) makes every report the GitHub draft, as before.
 
 ## Server API
 

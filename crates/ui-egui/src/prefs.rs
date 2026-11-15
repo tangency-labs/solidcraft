@@ -1082,6 +1082,9 @@ preference_settings! {
     trusted_signing_keys: String = String::new(), PAGE_SECURITY;
     /// Verify a design's signature when it opens. Off: opening reads no payload twice.
     verify_opened_designs: bool = false, PAGE_SECURITY => check_id_help("prefs.security.verify_opened", "prefs.security.verify_opened_help");
+    /// Report a bug (the title bar's button, Help › Report an Issue, Create Issue) opens the
+    /// public GitHub draft it opened before tickets, instead of the report that files a ticket.
+    report_on_github: bool = false, PAGE_SECURITY => check_id_help("prefs.reports.github", "prefs.reports.github_help");
     /// With a dialog open, typing the first letter of a button's label presses it: O for OK,
     /// C for Cancel (#9841). Off by default: typing does nothing to the buttons, as before.
     /// A letter that fits two buttons does nothing, and a focused text field keeps the keystroke.
