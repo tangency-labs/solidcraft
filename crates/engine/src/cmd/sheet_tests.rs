@@ -911,6 +911,27 @@ fn contour_flange_orientation_thickness_width_direction_and_radius() {
     }
 }
 
+/// A profile with a sharp corner at an arc: a 30 mm line along x, then at a right angle a quarter
+/// turn of radius 10 about (20, 0) down to (20, −10), under a rule 2 thick. Its surfaces lie off
+/// the profile at every orientation (the shifted line and circle crossing at the corner, see
+/// `offset_profile`'s tests), and the sheet then meets the same limit at each: a bend on the edge
+/// of a roll is not made yet. The orientation adds no refusal of its own.
+#[test]
+fn contour_flange_orientation_meets_the_same_limit_at_a_sharp_corner_at_an_arc() {
+    let h = 10.0 * std::f64::consts::FRAC_1_SQRT_2;
+    for orientation in ["side1", "center", "side2"] {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": 2, "k_factor": 0.5, "bend_radius": 2, "active": true}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sharp"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]], "ids": ["l1"]}));
+        run(&mut s, "sketch.arc.three_point", json!({"start": [30, 0], "end": [20, -10], "through": [20.0 + h, -h], "id": "a1"}));
+        run(&mut s, "sketch.finish", json!({}));
+        let p = json!({"sketch": "Sharp", "curves": ["l1", "a1"], "distance": 50, "rule": "R", "orientation": orientation});
+        let e = s.execute("sheet.flange", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("a bend on the edge of a roll"), "{orientation}: {e}");
+    }
+}
+
 /// The orientation reaches every bend of a chain, not only the first line (#6790): in each bend
 /// the sketched profile's corner, the virtual sharp of the reference lines, lies where the
 /// surfaces' sharp is moved by the orientation, and the flat material of either panel ends a
