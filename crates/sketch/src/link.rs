@@ -230,6 +230,11 @@ pub struct Link {
     /// The reference could not be found on the last recompute; the geometry is the last good one.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub lost: bool,
+    /// The design dropped the vertex or edge name this link saved as it opened, a name an older
+    /// build guessed (#17229): the link is found by its point, and the session stores the name
+    /// of what it was found on, as an edit of its sketch would, then clears this.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub name_dropped: bool,
 }
 
 /// Geometry a link produces, in sketch coordinates.
@@ -758,7 +763,17 @@ impl Sketch {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("j")?;
-        self.links.push(Link { id: id.clone(), kind, source, face_name: None, edge_name: None, vertex_name: None, auto_face: false, lost: false });
+        self.links.push(Link {
+            id: id.clone(),
+            kind,
+            source,
+            face_name: None,
+            edge_name: None,
+            vertex_name: None,
+            auto_face: false,
+            lost: false,
+            name_dropped: false,
+        });
         self.build_link(&id, &lay)?;
         Ok(id)
     }

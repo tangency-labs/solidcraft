@@ -432,6 +432,7 @@ fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
         vertex_name: None,
         auto_face: false,
         lost: false,
+        name_dropped: false,
     });
     let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
     assert_eq!(ids.len(), 2, "the saved link holds the pair");
