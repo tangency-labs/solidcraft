@@ -3,6 +3,7 @@
 //! directly on the body's schema 4 record (the band's walls continue the walls below, which a
 //! boolean union can't join: their faces would coincide).
 
+use solidcore_ops::prism::{LoopPlacement, loop_placement};
 use solidcore_record::brep::{Brep, Curve, Frame, Surface};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec3};
 use solidcraft_geom::Ring;
@@ -259,153 +260,6 @@ pub enum LipRefusal {
     BandCrossesRim,
 }
 
-/// Where the band's far edge lies against the face's other loop.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Reach {
-    /// Inside the face, between the band's own loop and the other loop: the face keeps its sense.
-    Within,
-    /// Past the other loop entirely: what is left of the face is the band's overhang, facing the
-    /// other way.
-    Past,
-}
-
-/// How far `p` is from the piece (exact: a segment or an arc of its circle).
-fn point_dist(p: Vec3, q: &Piece, n: Vec3) -> f64 {
-    match q.arc {
-        None => {
-            let d = q.b - q.a;
-            let l2 = d.len2();
-            let t = if l2 > 0.0 { ((p - q.a).dot(d) / l2).max(0.0).min(1.0) } else { 0.0 };
-            p.dist(q.a + d * t)
-        }
-        Some(Arc { centre, sweep }) => {
-            let (xa, xp) = (q.a - centre, p - centre);
-            let ang = n.dot(xa.cross(xp)).atan2(xa.dot(xp)) * sweep.signum();
-            let ang = if ang < 0.0 { ang + std::f64::consts::TAU } else { ang };
-            if ang <= sweep.abs() { (xp.len() - xa.len()).abs() } else { p.dist(q.a).min(p.dist(q.b)) }
-        }
-    }
-}
-
-/// The points where the circles or lines carrying two pieces cross (coplanar with normal `n`).
-fn carrier_crossings(a: &Piece, b: &Piece, n: Vec3) -> Vec<Vec3> {
-    let line_circle = |l: &Piece, c: Vec3, r: f64| -> Vec<Vec3> {
-        let d = l.b - l.a;
-        let l2 = d.len2();
-        if l2 <= 0.0 {
-            return Vec::new();
-        }
-        let foot = l.a + d * ((c - l.a).dot(d) / l2);
-        let h2 = r * r - foot.dist(c).powi(2);
-        if h2 < 0.0 {
-            return Vec::new();
-        }
-        let along = d * (h2.sqrt() / l2.sqrt());
-        vec![foot + along, foot - along]
-    };
-    match (a.arc, b.arc) {
-        (None, None) => {
-            let (d1, d2) = (a.b - a.a, b.b - b.a);
-            let cr = d1.cross(d2);
-            let den = cr.len2();
-            if den <= 1e-24 * d1.len2() * d2.len2() {
-                return Vec::new();
-            }
-            vec![a.a + d1 * ((b.a - a.a).cross(d2).dot(cr) / den)]
-        }
-        (None, Some(c)) => line_circle(a, c.centre, b.a.dist(c.centre)),
-        (Some(c), None) => line_circle(b, c.centre, a.a.dist(c.centre)),
-        (Some(c1), Some(c2)) => {
-            let (r1, r2) = (a.a.dist(c1.centre), b.a.dist(c2.centre));
-            let d = c1.centre.dist(c2.centre);
-            if d <= 0.0 || d > r1 + r2 || d < (r1 - r2).abs() {
-                return Vec::new();
-            }
-            let x = (d * d + r1 * r1 - r2 * r2) / (2.0 * d);
-            let h = (r1 * r1 - x * x).max(0.0).sqrt();
-            let u = (c2.centre - c1.centre) * (1.0 / d);
-            let m = c1.centre + u * x;
-            vec![m + n.cross(u) * h, m - n.cross(u) * h]
-        }
-    }
-}
-
-/// How close two pieces come (0 where they cross): the least of the distances from the points
-/// where a distance can be least (the ends, and on an arc the points on the line from its centre
-/// to the other piece's centre or its foot on the other line) to the other piece.
-fn piece_dist(a: &Piece, b: &Piece, n: Vec3, tol: f64) -> f64 {
-    if carrier_crossings(a, b, n).iter().any(|x| point_dist(*x, a, n) <= tol && point_dist(*x, b, n) <= tol) {
-        return 0.0;
-    }
-    let towards = |arc: &Piece, other: &Piece| -> Vec<Vec3> {
-        let Some(Arc { centre, .. }) = arc.arc else { return Vec::new() };
-        let r = arc.a.dist(centre);
-        let target = match other.arc {
-            Some(o) => o.centre,
-            None => {
-                let d = other.b - other.a;
-                let l2 = d.len2();
-                if l2 <= 0.0 {
-                    return Vec::new();
-                }
-                other.a + d * ((centre - other.a).dot(d) / l2)
-            }
-        };
-        match (target - centre).normalized() {
-            Some(u) => vec![centre + u * r, centre - u * r],
-            None => Vec::new(),
-        }
-    };
-    let from = |x: &Piece, y: &Piece| -> Vec<f64> {
-        let mut pts = vec![x.a, x.b];
-        pts.extend(towards(x, y));
-        pts.into_iter().filter(|p| point_dist(*p, x, n) <= tol).map(|p| point_dist(p, y, n)).collect()
-    };
-    from(a, b).into_iter().chain(from(b, a)).fold(f64::INFINITY, f64::min)
-}
-
-/// How many times the loop winds about `p` (0 outside it): the angles each piece subtends, an
-/// arc's as its chord's plus a full turn when `p` lies between the arc and its chord.
-fn winding(p: Vec3, lp: &[Piece], n: Vec3) -> i64 {
-    let angle = |a: Vec3, b: Vec3| n.dot((a - p).cross(b - p)).atan2((a - p).dot(b - p));
-    let mut total = 0.0;
-    for q in lp {
-        total += angle(q.a, q.b);
-        if let Some(Arc { centre, sweep }) = q.arc {
-            let side = |x: Vec3| n.dot((q.b - q.a).cross(x - q.a));
-            let chord_len = q.a.dist(q.b);
-            let in_segment = p.dist(centre) < q.a.dist(centre) && (chord_len <= 0.0 || side(p) * side(q.at(n, 0.5)) > 0.0);
-            if in_segment {
-                total += std::f64::consts::TAU * sweep.signum();
-            }
-        }
-    }
-    (total / std::f64::consts::TAU).round() as i64
-}
-
-/// Where the band's far edge `moved` lies against the face's `other` loop, decided from the two
-/// loops' own geometry. `tol` (derived from the body's size) is how near the loops may come
-/// before they count as meeting. The loops meeting everywhere is a band as wide as the rim;
-/// meeting in places only, a far edge that crosses the other loop in part.
-fn reach(moved: &[Piece], other: &[Piece], n: Vec3, outside: bool, tol: f64) -> Result<Reach> {
-    let mut nearest = f64::INFINITY;
-    for a in moved {
-        for b in other {
-            nearest = nearest.min(piece_dist(a, b, n, tol));
-        }
-    }
-    if nearest <= tol {
-        let samples = moved.iter().flat_map(|p| [p.a, p.at(n, 0.5)]);
-        let everywhere = samples.into_iter().all(|s| other.iter().any(|b| point_dist(s, b, n) <= tol));
-        return Err(if everywhere { LipRefusal::BandFillsRim } else { LipRefusal::BandCrossesRim }.into());
-    }
-    let probe = moved.first().map(|p| p.a).ok_or_else(|| fail("piece"))?;
-    let inside = winding(probe, other, n) != 0;
-    // The band's edge follows the outer loop (the other is the hole) or the hole (the other is the
-    // outer loop): it clears the other loop on the face's side, or has gone past it.
-    Ok(if inside == outside { Reach::Past } else { Reach::Within })
-}
-
 /// An edge from vertex `a` to vertex `b` along `p` (a line, or an arc of its circle about `n`):
 /// the use that runs from `a` to `b`.
 fn piece_edge(asm: &mut Assembly, a: u32, b: u32, p: &Piece, n: Vec3) -> Result<AUse> {
@@ -473,7 +327,19 @@ pub fn raise_band(body: &Body, at: Vec3, width: f64, height: f64, outside: bool)
         let face = asm.faces.get_mut(fi).and_then(Option::take).ok_or_else(|| fail("face"))?;
         let below = pieces(&asm, &along, n)?;
         let moved = offset_loop(&below, n, width, tol)?;
-        let past = reach(&moved, &pieces(&asm, &other, n)?, n, outside, tol)? == Reach::Past;
+        // Where the band's far edge lies against the face's other loop, decided by the kernel from
+        // the two loops' exact lines and arcs, loops within `tol` (from the body's size) meeting.
+        let plane = Plane::from_normal(at, n).ok_or_else(|| fail("rim plane"))?;
+        let (far, other_loop) = (profile(&moved, &plane)?, profile(&pieces(&asm, &other, n)?, &plane)?);
+        let placed = loop_placement(&far, &other_loop, tol).ok_or_else(|| fail("where the band's far edge lies"))?;
+        // The band's edge follows the outer loop (the other is the hole) or the hole (the other is
+        // the outer loop): it clears the other loop on the face's side, or reaches past it.
+        let past = match placed {
+            LoopPlacement::Coincident => return Err(LipRefusal::BandFillsRim.into()),
+            LoopPlacement::Crossing => return Err(LipRefusal::BandCrossesRim.into()),
+            LoopPlacement::Inside => outside,
+            LoopPlacement::Outside => !outside,
+        };
         let k = moved.len();
         let up = n * height;
         // The band's other edge, on the face, and the band's top edges above both.
