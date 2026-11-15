@@ -3173,7 +3173,7 @@ mod tests {
     }
 
     /// A cut carried to an earlier section lands at the same share of its segment's length, not
-    /// at the same parameter (CodeRabbit). Three 40 x 20 rectangles: the first's bottom the cubic
+    /// at the same parameter (a review on #16943). Three 40 x 20 rectangles: the first's bottom the cubic
     /// above (its length from the start to a point is the point's x), the second's a line, the
     /// third's bottom in two halves. The first pairing needs no cuts; the second cuts the line at
     /// 0.5, which before cut the cubic at its parameter 0.5, x = 5. Every section's vertex is now
@@ -3217,7 +3217,7 @@ mod tests {
     }
 
     /// Where a curve's derivative is zero at an end (control points repeated there), its tangent
-    /// there is the limit, towards the first control point apart (CodeRabbit), not the chord: the
+    /// there is the limit, towards the first control point apart (a review on #16943), not the chord: the
     /// cubic (0, 0), (0, 0), (0, 10), (10, 10) leaves along +y (the chord is the diagonal), and
     /// (0, 0), (10, 0), (10, 10), (10, 10) arrives along +y.
     #[test]
