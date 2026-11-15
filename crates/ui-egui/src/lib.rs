@@ -253,9 +253,9 @@ mod plugin_events;
 mod plugin_images;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
-mod plugin_slots;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod plugin_shaders;
+mod plugin_slots;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod policy;

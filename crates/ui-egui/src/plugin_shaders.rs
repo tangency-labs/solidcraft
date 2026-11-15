@@ -89,7 +89,7 @@ pub(crate) fn choices(app: &mut SolveApp, now: f64) -> Vec<Choice> {
 /// Each background with the plugin folder it comes from.
 fn installed(app: &SolveApp) -> Vec<(Choice, String)> {
     let mut paths: Vec<String> = app.session.plugin_state.packages.values().cloned().collect();
-    if let Some(dir) = crate::plugins::plugins_dir()
+    if let Some(dir) = app.session.plugin_state.plugins_dir()
         && let Ok(folders) = std::fs::read_dir(dir)
     {
         let mut found: Vec<String> = folders
