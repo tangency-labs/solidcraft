@@ -19,9 +19,10 @@
 //! closure that deleted no topology and left the vertex with two common edges, instead of
 //! starting a new pass, so the ten passes are not a limit of ten gaps.
 //! Not upstream (#17118): in a union, difference or intersection, a face found coincident at a
-//! common edge with a face of the other body on a surface of another analytic kind takes the
-//! class the coincidence gives when the pair is not made (the partner already classified, or
-//! `FixFoundFaceCoincidence` pairing nothing), instead of being left to a ray.
+//! common edge with a face of the other body on a surface of another analytic kind, when the
+//! pair is not made (the partner already classified, or `FixFoundFaceCoincidence` pairing
+//! nothing), is classified once every common edge has been visited, as a copy of that part of
+//! its partner (`resolve_tangent_patches`), instead of being left to a ray.
 //! Global cache queue limits are absent (the port has no global caches).
 //! The temporary origin shift goes through `merge_p1`, before any topology
 //! mutation. Its inverse token spans the entire operation,
@@ -410,6 +411,21 @@ struct Faces {
     other_delete: Vec<FaceId>,
     primary_sets: Vec<Vec<FaceId>>,
     other_sets: Vec<Vec<FaceId>>,
+    /// Not upstream (#17118): the tangent patches found at common edges, resolved by
+    /// [`resolve_tangent_patches`] once every common edge has been visited.
+    tangent_patches: Vec<TangentPatch>,
+}
+
+/// Not upstream (#17118): a face found coincident at a common edge with a face of the other
+/// body on a surface of another analytic kind, which the coincidence repair did not pair with
+/// it (or whose partner was classified first). The source face is `of` when `reverse`, `pf`
+/// otherwise; `keep` is what [`coincident_keep`] gives the pair.
+#[derive(Clone, Copy)]
+struct TangentPatch {
+    reverse: bool,
+    pf: FaceId,
+    of: FaceId,
+    keep: Option<bool>,
 }
 
 // `slice_same` (`Slice` with a primary face bounding material only; WR-254): that
@@ -469,37 +485,68 @@ fn surfaces_of_other_kinds(primary: &Brep, pf: FaceId, other: &Brep, of: FaceId)
     Ok(surface(primary, pf)?.is_other_analytic_kind(surface(other, of)?))
 }
 
-/// Classifies the source face of a coincident pair, `of` when `reverse` and `pf` otherwise,
-/// by the coincidence's `keep`, and marks it, without pairing the two faces.
-fn classify_by_coincidence(
+/// Not upstream (#17118): classifies each tangent patch still unclassified once every common
+/// edge has been visited. A face on a surface of another kind than the face it coincides with
+/// lies on it only over a tangent patch within the tolerance, so within the tolerance it is a
+/// copy of that part of its partner. The operation keeps one copy of coincident faces or none
+/// ([`coincident_keep`]). With none, the patch goes. With one, the copy is the partner's when
+/// the partner is kept, so the patch goes, and the patch's when the partner is deleted. A
+/// patch whose partner is still unclassified is left to the ray, as before.
+fn resolve_tangent_patches(
     kernels: &BooleanKernels<'_>,
     state: &mut ManifoldState,
     faces: &mut Faces,
     marks: (MarkType, MarkType),
-    reverse: bool,
-    (pf, of): (FaceId, FaceId),
-    keep: Option<bool>,
 ) {
-    let Some(keep) = keep else {
-        return;
-    };
-    if reverse {
-        state
-            .other_marks
-            .mark(kernels.other(), Entity::Face(of), marks.1);
-        if keep {
-            faces.other_keep.push(of);
+    for patch in std::mem::take(&mut faces.tangent_patches) {
+        let TangentPatch {
+            reverse,
+            pf,
+            of,
+            keep,
+        } = patch;
+        let Some(keep_copy) = keep else {
+            continue;
+        };
+        let (source_marked, partner_kept, partner_deleted) = if reverse {
+            (
+                state
+                    .other_marks
+                    .is_marked(kernels.other(), Entity::Face(of), marks.1),
+                faces.keep.contains(&pf),
+                faces.delete.contains(&pf),
+            )
         } else {
-            faces.other_delete.push(of);
+            (
+                state
+                    .primary_marks
+                    .is_marked(kernels.primary, Entity::Face(pf), marks.0),
+                faces.other_keep.contains(&of),
+                faces.other_delete.contains(&of),
+            )
+        };
+        if source_marked || (keep_copy && !partner_kept && !partner_deleted) {
+            continue;
         }
-    } else {
-        state
-            .primary_marks
-            .mark(kernels.primary, Entity::Face(pf), marks.0);
-        if keep {
-            faces.keep.push(pf);
+        let keep_source = keep_copy && partner_deleted;
+        if reverse {
+            state
+                .other_marks
+                .mark(kernels.other(), Entity::Face(of), marks.1);
+            if keep_source {
+                faces.other_keep.push(of);
+            } else {
+                faces.other_delete.push(of);
+            }
         } else {
-            faces.delete.push(pf);
+            state
+                .primary_marks
+                .mark(kernels.primary, Entity::Face(pf), marks.0);
+            if keep_source {
+                faces.keep.push(pf);
+            } else {
+                faces.delete.push(pf);
+            }
         }
     }
 }
@@ -780,11 +827,12 @@ fn classify_edge_faces(
             // coincides with lies on it only over a tangent patch within the tolerance,
             // whose boundary the imprint need not draw in that face. Such a pair is often
             // not one `FixFoundFaceCoincidence` accepts (it pairs nothing), or the partner
-            // was classified at another edge first. Either way the source face takes the
-            // class the coincidence gives. Left to the ray instead, it was classified from a
-            // point within the tolerance of the other boundary, where the answer can go
-            // either way: a sliver of a groove's round lying in a wedge thinner than the
-            // tolerance was kept by a cut, and the result was not closed.
+            // was classified at another edge first. The patch is classified once every
+            // common edge has been visited (`resolve_tangent_patches`). Left to the ray
+            // instead, it was classified from a point within the tolerance of the other
+            // boundary, where the answer can go either way: a sliver of a groove's round
+            // lying in a wedge thinner than the tolerance was kept by a cut, and the result
+            // was not closed.
             let tangent_patch = matches!(
                 operation,
                 BooleanOperation::Union
@@ -802,7 +850,12 @@ fn classify_edge_faces(
                     .is_marked(kernels.other(), Entity::Face(of), marks.1)
             } {
                 if tangent_patch {
-                    classify_by_coincidence(kernels, state, faces, marks, reverse, (pf, of), keep);
+                    faces.tangent_patches.push(TangentPatch {
+                        reverse,
+                        pf,
+                        of,
+                        keep,
+                    });
                 }
                 continue;
             }
@@ -817,7 +870,12 @@ fn classify_edge_faces(
                 compatible.contains(&pf)
             };
             if tangent_patch && !source_paired {
-                classify_by_coincidence(kernels, state, faces, marks, reverse, (pf, of), keep);
+                faces.tangent_patches.push(TangentPatch {
+                    reverse,
+                    pf,
+                    of,
+                    keep,
+                });
             }
             pairs(&compatible, &other_compatible)?;
             if operation == BooleanOperation::ExtractSeparate {
@@ -1505,6 +1563,7 @@ fn editing_stages(
         faces.other_keep.clear();
         faces.delete.clear();
         faces.other_delete.clear();
+        faces.tangent_patches.clear();
         mark_common(
             kernels,
             primary,
@@ -1573,6 +1632,7 @@ fn editing_stages(
             break;
         }
     }
+    resolve_tangent_patches(kernels, state, faces, marks);
     classify_remaining(kernels, primary, other, state, operation, marks, faces)?;
     if operation != BooleanOperation::ExtractSeparate {
         repair_lists(primary, other, operation, faces)?;

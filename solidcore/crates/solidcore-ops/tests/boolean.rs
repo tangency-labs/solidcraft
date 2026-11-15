@@ -1964,6 +1964,47 @@ fn a_traced_cut_by_each_of_ten_wedges_in_turn_is_the_target_less_the_wedges() {
     );
 }
 
+/// The ten wedges of the test above joined to the target one at a time. Each wedge reaches out
+/// of the target only where the target's groove rounds and corner patches dip below the slopes,
+/// so each join adds the part the cut leaves behind, 6.8e-5. The sliver of a groove's round in
+/// a wedge's thin edge lies on the wedge's plane within the tolerance; the plane is kept, so
+/// the sliver goes. Classified as a coincident face the join keeps, it was kept beside the
+/// plane, and the first join left a body that was not closed. Nine of the joins add 7.3e-5 each,
+/// 5e-6 more than the cut leaves. The sixth adds 1.3e-4 more than the others, although its result
+/// has the same faces and vertices as theirs, rotated; only the area of the top face differs, by
+/// 3.7e-6 mm2, so the bound below allows 3e-5 a wedge.
+#[test]
+fn a_traced_join_of_each_of_ten_wedges_in_turn_adds_what_lies_outside_the_target() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    let target = body("target").volume(1e-11).unwrap();
+    // what the first wedge leaves when it is cut from the target: the part outside it
+    let wedge = body("wedge0");
+    let inside = target
+        - boolean(body("target"), body("wedge0"), BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+            .volume(1e-11)
+            .unwrap();
+    let outside = wedge.volume(1e-11).unwrap() - inside;
+    let mut r = body("target");
+    for i in 0..10 {
+        r = boolean(r, body(&format!("wedge{i}")), BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "after wedge {i}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "after wedge {i}");
+    }
+    // the target's 92 faces and two faces of each wedge, its cylinder and its plane's piece
+    assert_eq!(r.counts().unwrap()[0], 112);
+    let added = r.volume(1e-11).unwrap() - target;
+    assert!(
+        (added - 10.0 * outside).abs() <= 10.0 * 3e-5,
+        "added {added}, ten times the part of a wedge outside the target {outside}"
+    );
+}
+
 /// A 10 mm cube with the vertical edge at x = 0, y = 0 rounded to radius 2.
 fn filleted_cube() -> Body {
     let block = make_box([0.0; 3], [10.0, 10.0, 10.0]).unwrap();
