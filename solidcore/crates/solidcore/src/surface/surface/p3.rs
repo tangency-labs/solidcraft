@@ -42,8 +42,8 @@
 //!   plane normal's unitization) the port returns it too, and a boundary that cannot be
 //!   evaluated is not shown singular. When `LocalSurfaceSolve`'s equations cannot be
 //!   evaluated at the guess (upstream's solver reports that guess found), the guess is
-//!   kept only when the two surface points there coincide within the solve's accuracy
-//!   and the operation is not a maximum; otherwise there is no solution. This makes
+//!   kept only for a minimum whose two surface points there coincide by the equations'
+//!   own small-gap test; otherwise there is no solution. This makes
 //!   `oscillating_skips_failed_guesses`'s first-evaluation rule unconditional at this
 //!   call site, and checks the guess as that rule does not.
 //! - **Tolerance of a surface.** `SmTol::GetApproxTol3d(this)` is the system value for a
@@ -1672,22 +1672,22 @@ impl Surface {
         Ok(None)
     }
 
-    /// `local_surface_solve`'s answer at a guess its equations cannot evaluate: the
-    /// guess when both surfaces give points there (the position an evaluation writes
-    /// even when its status fails, as at a cone's apex) within `EFF_ZERO_SQRT` (the
-    /// solve's accuracy) and the operation is not a maximum; `None` otherwise.
+    /// `local_surface_solve`'s answer at a guess its equations cannot evaluate: for a
+    /// minimum only, the guess when both surfaces give points there (the position an
+    /// evaluation writes even when its status fails, as at a cone's apex) that coincide
+    /// by the equations' own small-gap test (`SsNormalizeEnfo`: `|gap|^2 <
+    /// 1000 EFF_ZERO (1 + max |p1|)`); `None` otherwise. A zero gap is the least
+    /// distance, so it is a minimum; whether it solves any other operation (a
+    /// normalization's parallel normals, a directed minimum's tangents) cannot be
+    /// checked without the normal that failed.
     fn unevaluated_guess_solution(
         &self,
         k: &Kernel,
         other: &Surface,
         operation: SolverOperation,
-        opt_vectors: &[Vec3],
         guess: &[f64],
     ) -> Result<Option<LocalSurfaceSolution>> {
-        if matches!(
-            operation,
-            SolverOperation::Maximize | SolverOperation::Signed3dDirectedMaximize
-        ) {
+        if operation != SolverOperation::Minimize {
             return Ok(None);
         }
         let uv = uv_at(guess, 0, OP_LOCAL_SOLVE)?;
@@ -1699,20 +1699,13 @@ impl Surface {
             return Ok(None);
         };
         let gap = p2 - p1;
-        let mut dist = p1.distance(p2);
-        if !dist.is_finite() || dist > EFF_ZERO_SQRT {
+        let tol = EFF_ZERO * 1000.0 * (1.0 + p1.max_dimension());
+        let gap_sq = gap.length_squared();
+        if gap_sq.is_nan() || gap_sq >= tol {
             return Ok(None);
         }
-        if operation == SolverOperation::Signed3dDirectedMinimize {
-            let along = opt_vectors
-                .first()
-                .ok_or_else(|| SolidError::invalid_input(OP_LOCAL_SOLVE, "no direction vector"))?;
-            if gap.dot(*along) < 0.0 {
-                dist = -dist;
-            }
-        }
         Ok(Some(LocalSurfaceSolution {
-            distance: dist,
+            distance: p1.distance(p2),
             uv,
             other_uv,
         }))
@@ -1768,11 +1761,9 @@ impl Surface {
         // a guess the equations cannot evaluate (a surface without normal there, an
         // apex) is checked by its points alone: upstream's solver reports it found,
         // which with the evaluation statuses passed on (WR-663) would hand back the
-        // unchecked guess. Two coincident points (gap within the solve's accuracy) are
-        // a zero gap: the least distance, perpendicular to both tangent planes and
-        // along any direction; anything else, or a maximum, is no solution.
+        // unchecked guess. Only a minimum can be shown, by two coincident points.
         if solver.guess_unevaluated() {
-            return self.unevaluated_guess_solution(k, other, operation, opt_vectors, &guess);
+            return self.unevaluated_guess_solution(k, other, operation, &guess);
         }
 
         if !solution.found {
@@ -2410,9 +2401,10 @@ mod tests {
         assert!(singular > 0, "no surface had a singular side");
     }
 
-    /// A guess the local solve's equations cannot evaluate is kept only as a zero gap:
-    /// a cone's apex on the plane through it is the least distance, so a minimum keeps
-    /// it; a maximum, or a guess a unit away, is no solution.
+    /// A guess the local solve's equations cannot evaluate is kept only as a zero gap
+    /// of a minimum: a cone's apex on the plane through it is the least distance, so a
+    /// minimum keeps it; a maximum, a normalization, or a guess a unit away, is no
+    /// solution.
     #[test]
     fn unevaluated_guess_is_kept_only_as_a_zero_gap() {
         use crate::geom::extent2d::Extent2d;
@@ -2456,18 +2448,23 @@ mod tests {
             .expect("a domain corner is the apex");
         let guess = [apex_uv.x, apex_uv.y, 0.0, 0.0];
         let found = cone
-            .unevaluated_guess_solution(&k, &plane, SolverOperation::Minimize, &[], &guess)
+            .unevaluated_guess_solution(&k, &plane, SolverOperation::Minimize, &guess)
             .unwrap()
             .expect("the apex touches the plane");
         assert_eq!((found.uv, found.other_uv), (apex_uv, Point2::new(0.0, 0.0)));
         assert!(found.distance.abs() < 1e-12);
         let maximum = cone
-            .unevaluated_guess_solution(&k, &plane, SolverOperation::Maximize, &[], &guess)
+            .unevaluated_guess_solution(&k, &plane, SolverOperation::Maximize, &guess)
             .unwrap();
         assert!(maximum.is_none());
+        // a normalization needs parallel normals, which cannot be checked here
+        let normalize = cone
+            .unevaluated_guess_solution(&k, &plane, SolverOperation::Normalize, &guess)
+            .unwrap();
+        assert!(normalize.is_none());
         let away = [apex_uv.x, apex_uv.y, 1.0, 0.0];
         let gap = cone
-            .unevaluated_guess_solution(&k, &plane, SolverOperation::Minimize, &[], &away)
+            .unevaluated_guess_solution(&k, &plane, SolverOperation::Minimize, &away)
             .unwrap();
         assert!(gap.is_none());
     }
