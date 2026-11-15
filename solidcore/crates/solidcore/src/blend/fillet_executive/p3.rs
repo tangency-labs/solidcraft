@@ -3725,7 +3725,17 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut worst_solver: Option<(O, bool)> = None;
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
-            let (first, const_radius) = access.creation_ball_is_regular(k, solver)?;
+            let (mut first, const_radius) = access.creation_ball_is_regular(k, solver)?;
+            // (#16768) a collapsed offset whose ball zone is open at an end of the edge is the
+            // collapsed-offset refusal's (#2401, `refuse_collapsed_offsets`), which names the
+            // size that builds: left to it
+            if matches!(
+                first.check,
+                BallCheck::Collapsed | BallCheck::CollapsedUnjudged
+            ) && access.creation_ball_zone_open(k, solver, None)?.is_some()
+            {
+                first.check = BallCheck::Regular;
+            }
             if first.check != BallCheck::Regular
                 && (worst.check == BallCheck::Regular || first.works < worst.works)
             {

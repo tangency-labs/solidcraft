@@ -2170,10 +2170,11 @@ fn offset_collapses_by_definition(
 /// middle, as [`ball_zone_open_at_an_end`] reads it. `false` where the edge's middle does not
 /// drop onto a face.
 ///
+/// `false` too for a solver without its edge use, its edge's curve or an offset surface.
+///
 /// # Errors
 ///
-/// Those of the drops, the evaluations and the topology lookups; `SM_ERR_NULL_POINTER` for
-/// a solver without its edge use, offset surfaces or edge curve.
+/// Those of the drops, the evaluations and the topology lookups.
 pub fn ball_as_wide_as_a_face_along_the_edge(
     ops: &mut dyn FilletSolverOps,
     k: &Kernel,
@@ -2183,23 +2184,24 @@ pub fn ball_as_wide_as_a_face_along_the_edge(
     use crate::surface::surface::p4::NoObject;
     use crate::surface::surface::p5::DropPointOptions;
     use crate::topology::edge;
-    let eu0 = ops
-        .solver()
-        .edgeuse(0)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
-    let e =
-        eu::edge(b, eu0)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
-    let curve = edge::evaluation_curve(b, e)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's evaluation curve"))?;
+    // (a solver without its edge use or its edge's curve proves nothing: not judged)
+    let Some(eu0) = ops.solver().edgeuse(0)? else {
+        return Ok(false);
+    };
+    let Some(e) = eu::edge(b, eu0)? else {
+        return Ok(false);
+    };
+    let Some(curve) = edge::evaluation_curve(b, e)? else {
+        return Ok(false);
+    };
     let ivl = edge::interval(b, e)?;
     let tol = b.tolerance();
     let mid = curve.evaluate_point(k, ivl.evaluate(0.5))?;
     for i in 0..2 {
         let (base, p, n, uv) = {
-            let off = ops
-                .solver()
-                .surface(i)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
+            let Some(off) = ops.solver().surface(i)? else {
+                return Ok(false);
+            };
             let base = off.surface.base_surface().clone();
             let domain = base.natural_uv_domain_with_nurb(k)?;
             let dropped =
