@@ -1,4 +1,4 @@
-name: SolidCraft T177 i18n collision fix and GUI regression
+name: SolidCraft T178 duplicate import fix and GUI regression
 on:
   push:
     branches: [integration/issue-15776-upstream-20261115]
