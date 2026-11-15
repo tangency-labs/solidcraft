@@ -172,6 +172,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
         5,
         "the link pills' brand fills (Ko-fi coral, Discord blurple: the services' own colours, the same in every theme), their white ink and the hover veil on the x",
     ),
+    ("workspace.rs", 1, "the view kinds' icon strokes, drawn on the Tabs board: a fixed palette per kind in each theme"),
     ("links.rs", 1, "the link pills' white ink on the brand fills"),
     ("ui_kit/icons/mod.rs", 1, "the white tint that carries an icon image's opacity"),
     ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),

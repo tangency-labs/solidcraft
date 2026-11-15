@@ -1153,9 +1153,7 @@ fn count_badge(ui: &egui::Ui, at: Pos2, n: usize, strong: bool) -> Rect {
 }
 
 fn chevron_down(p: &Painter, c: Pos2, size: f32, ink: egui::Color32) {
-    let s = size / 24.0;
-    let points = [(6.0, 9.0), (12.0, 15.0), (18.0, 9.0)].map(|(x, y)| c + vec2((x - 12.0) * s, (y - 12.0) * s));
-    p.add(egui::Shape::line(points.to_vec(), Stroke::new(2.2 * s, ink)));
+    crate::disclosure::dropdown_indicator(p, Rect::from_center_size(c, vec2(size, size)), ink);
 }
 
 /// The strokes of a view icon in a 24 by 24 box.
