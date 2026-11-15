@@ -7261,7 +7261,13 @@ fn feature_tools_with_constructor(
             // lies before its surface (the tool less the body, the piece at the start). An end
             // the offset carries back across the start, away from that face, never meets it: it
             // ends at its level, as for a plane, instead of running out through the whole body.
-            let curved = curved_face(&tst, to_face, Some(n)).filter(|_| toward_to);
+            // A wall that runs along the extrusion (a cylinder's side, when extruding along its
+            // axis) and lies clear of the profile is never reached: the point picked on it stands
+            // for the plane through it, as a point in space does (#11923). A wall that crosses the
+            // profile seen along the extrusion still trims the tool to the body.
+            let curved = curved_face(&tst, to_face, Some(n))
+                .filter(|_| toward_to)
+                .filter(|_| !to_face.is_some_and(|face| runs_along(&tst, face, n) && !meets_footprint(&tst, face, &ss.plane, &regions)));
             // The tool is cut back to that surface below, which removes the part a To offset adds
             // past it: the offset would change nothing, so say so instead of cutting nothing (#12617).
             if curved.is_some()
@@ -9417,6 +9423,44 @@ fn curved_face(st: &ModelState, face: Option<(usize, usize)>, n: Option<Vec3>) -
         None => normal.is_some_and(|fnrm| fnrm.is_some()),
     };
     (!planar).then_some(bi)
+}
+
+/// Whether a face runs along `n` everywhere, from its exact surface: a plane whose normal is
+/// square to `n`, or a cylinder whose axis is parallel to `n` (the side of a prism or a cylinder
+/// parallel to `n`), so a sweep along `n` never meets it.
+fn runs_along(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> bool {
+    let Some(b) = st.bodies.get(bi) else { return false };
+    let Some(n) = n.normalized() else { return false };
+    match kernel::face_surface(&b.body, fi) {
+        Some(kernel::FaceSurface::Plane { normal, .. }) => normal.vec().dot(n).abs() < 1e-6,
+        Some(kernel::FaceSurface::Cylinder { axis, .. }) => axis.vec().cross(n).len() < 1e-6,
+        _ => false,
+    }
+}
+
+/// Whether a face that runs along the normal of `plane` ([`runs_along`]), seen along that
+/// normal, meets one of the profile `regions`. Seen so, the face is the curve its boundary edges
+/// make: their exact curves, sampled finely, meet a region where a sample lies in it or a step
+/// between two samples crosses one of its loops (a profile narrower than the steps).
+fn meets_footprint(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane, regions: &[Region2]) -> bool {
+    let Some(b) = st.bodies.get(bi) else { return false };
+    let tol = (b.body.size() * 1e-4).max(1e-4);
+    let Ok(edges) = b.body.edges(tol) else { return true };
+    let own = kernel::face_edge_indices(&b.body, fi);
+    let curves: Vec<Vec<Vec2>> = own.iter().filter_map(|e| edges.get(*e)).map(|e| e.points.iter().map(|q| plane.to_local(*q)).collect()).collect();
+    if curves.iter().flatten().any(|q| regions.iter().any(|r| r.contains(*q))) {
+        return true;
+    }
+    let loops: Vec<_> = regions.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).map(|l| l.polyline(1e-3)).collect();
+    curves.iter().flat_map(|c| c.windows(2)).any(|w| loops.iter().any(|l| l.edges().any(|(a, b)| segments_meet(w[0], w[1], *a, *b))))
+}
+
+/// Whether segments `p`-`q` and `a`-`b` cross or touch.
+fn segments_meet(p: Vec2, q: Vec2, a: Vec2, b: Vec2) -> bool {
+    let side = |o: Vec2, u: Vec2, v: Vec2| (u.x - o.x) * (v.y - o.y) - (u.y - o.y) * (v.x - o.x);
+    let (d1, d2) = (side(a, b, p), side(a, b, q));
+    let (d3, d4) = (side(p, q, a), side(p, q, b));
+    d1 * d2 <= 0.0 && d3 * d4 <= 0.0 && !(d1 == 0.0 && d2 == 0.0 && d3 == 0.0 && d4 == 0.0)
 }
 
 /// The body at `p` when the face there is not planar.
