@@ -3,8 +3,8 @@
 use crate::drawing_dimension_repair;
 use crate::drawing_dimension_status::DrawingAttention;
 use serde_json::Value;
-use solidcraft_engine::Sel;
 use serde_json::json;
+use solidcraft_engine::Sel;
 
 /// Convert exactly one existing viewport selection to a repair pick. Never guess.
 pub fn selected_geometry(selection: &[Sel]) -> Result<(String, Value), String> {
@@ -16,21 +16,23 @@ pub fn selected_geometry(selection: &[Sel]) -> Result<(String, Value), String> {
     }
 }
 
-
-
 /// Allowed reference slots come from the saved dimension kind, never from a guess.
 /// The engine validates the chosen slot and pick again on confirmation.
 pub fn reference_slots(inspection: &Value) -> Vec<String> {
     let Some(kind) = inspection.get("record").and_then(|r| r.get("kind")).and_then(Value::as_object) else {
         return Vec::new();
     };
-    if kind.len() != 1 { return Vec::new(); }
+    if kind.len() != 1 {
+        return Vec::new();
+    }
     let (name, fields) = kind.iter().next().expect("single checked entry");
     match name.as_str() {
         "linear" | "angle" | "silhouettes" | "faces" => vec!["a".into(), "b".into()],
         "length" | "radial" => vec!["edge".into()],
         "cylinder" | "sphere" | "cone" => vec!["face".into()],
-        "chain" => fields.get("points").and_then(Value::as_array)
+        "chain" => fields
+            .get("points")
+            .and_then(Value::as_array)
             .map(|points| (0..points.len()).map(|index| index.to_string()).collect())
             .unwrap_or_default(),
         _ => Vec::new(),
@@ -59,7 +61,13 @@ pub fn eligible(status: &str) -> bool {
 }
 
 /// Returns true only after a successful mutation. Caller must invalidate/refresh status.
-pub fn show(ui: &mut egui::Ui, selection: &[Sel], state: &mut RepairUiState, snapshot: &DrawingAttention, mut run: impl FnMut(&str, Value) -> Result<Value, String>) -> bool {
+pub fn show(
+    ui: &mut egui::Ui,
+    selection: &[Sel],
+    state: &mut RepairUiState,
+    snapshot: &DrawingAttention,
+    mut run: impl FnMut(&str, Value) -> Result<Value, String>,
+) -> bool {
     if let Some(selected) = &state.dimension {
         if !snapshot.dimensions.iter().any(|d| &d.id == selected && eligible(&d.status)) {
             state.clear();
@@ -80,10 +88,19 @@ pub fn show(ui: &mut egui::Ui, selection: &[Sel], state: &mut RepairUiState, sna
                     if state.slots.is_empty() {
                         state.message = Some("The dimension has no supported reference slots.".into());
                     }
-                    state.candidates = inspection.get("candidates").and_then(Value::as_array).cloned().unwrap_or_default()
-                        .into_iter().filter(|candidate| candidate.is_object()).collect();
+                    state.candidates = inspection
+                        .get("candidates")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|candidate| candidate.is_object())
+                        .collect();
                     if state.candidates.is_empty() {
-                        state.message = Some("No candidate geometry was supplied by the engine. Select a replacement in the drawing before repair can be implemented.".into());
+                        state.message = Some(
+                            "No candidate geometry was supplied by the engine. Select a replacement in the drawing before repair can be implemented."
+                                .into(),
+                        );
                     }
                 }
                 Err(error) => state.message = Some(format!("Inspection failed: {error}")),
@@ -128,15 +145,16 @@ pub fn show(ui: &mut egui::Ui, selection: &[Sel], state: &mut RepairUiState, sna
             ui.label(format!("Reference: {}", state.slot));
         }
         if !state.candidates.is_empty() && !state.slot.is_empty() {
-            egui::ComboBox::from_id_salt("drawing_repair_candidate")
-                .selected_text(format!("Candidate {}", state.candidate_index + 1))
-                .show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt("drawing_repair_candidate").selected_text(format!("Candidate {}", state.candidate_index + 1)).show_ui(
+                ui,
+                |ui| {
                     for (index, candidate) in state.candidates.iter().enumerate() {
                         if ui.selectable_value(&mut state.candidate_index, index, candidate.to_string()).changed() {
                             state.awaiting_confirmation = false;
                         }
                     }
-                });
+                },
+            );
             if !state.awaiting_confirmation {
                 if ui.button("Review repair").clicked() {
                     state.awaiting_confirmation = true;
@@ -150,8 +168,10 @@ pub fn show(ui: &mut egui::Ui, selection: &[Sel], state: &mut RepairUiState, sna
                         state.awaiting_confirmation = false;
                         return false;
                     };
-                    match drawing_dimension_repair::prepare(&id, status, &state.slot, candidate)
-                        .and_then(|request| run("drawing.dimension.repair", serde_json::json!({"dimension":request.dimension,"slot":request.slot,"pick":request.pick})).map(|_| ())) {
+                    match drawing_dimension_repair::prepare(&id, status, &state.slot, candidate).and_then(|request| {
+                        run("drawing.dimension.repair", serde_json::json!({"dimension":request.dimension,"slot":request.slot,"pick":request.pick}))
+                            .map(|_| ())
+                    }) {
                         Ok(()) => {
                             changed = true;
                             state.clear();
@@ -194,7 +214,7 @@ mod tests {
             let inspection = json!({"record":{"kind":{(kind): {}}}});
             assert_eq!(reference_slots(&inspection), expected);
         }
-        assert_eq!(reference_slots(&json!({"record":{"kind":{"chain":{"points":[{},{},{}]}}}})), vec!["0","1","2"]);
+        assert_eq!(reference_slots(&json!({"record":{"kind":{"chain":{"points":[{},{},{}]}}}})), vec!["0", "1", "2"]);
         assert!(reference_slots(&json!({"record":{}})).is_empty());
         assert!(reference_slots(&json!({"record":{"kind":{"unknown":{}}}})).is_empty());
         assert!(reference_slots(&json!({"record":{"kind":{"linear":{},"radial":{}}}})).is_empty());
@@ -213,7 +233,15 @@ mod tests {
     }
     #[test]
     fn cancel_clears_selection_and_confirmation() {
-        let mut state = RepairUiState { dimension: Some("d".into()), slot: "edge".into(), slots: vec!["edge".into()], candidates: vec![serde_json::json!({"edge":{"body":"b","index":1}})], candidate_index: 0, awaiting_confirmation: true, message: None };
+        let mut state = RepairUiState {
+            dimension: Some("d".into()),
+            slot: "edge".into(),
+            slots: vec!["edge".into()],
+            candidates: vec![serde_json::json!({"edge":{"body":"b","index":1}})],
+            candidate_index: 0,
+            awaiting_confirmation: true,
+            message: None,
+        };
         state.clear();
         assert!(state.dimension.is_none());
         assert!(!state.awaiting_confirmation);

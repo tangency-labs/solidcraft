@@ -174,14 +174,21 @@ mod w23a_engine_integration_tests {
         let view = replies.last().expect("W23a creates a view")["view"].clone();
         let centre = Vec3::from([20.0, 20.0, 20.0]);
         let mesh = session.model.state().body("Plate").expect("Plate body").mesh();
-        let index = mesh.edges.iter().position(|edge| {
-            !edge.is_empty() && edge.iter().all(|point| (point.dist(centre) - 5.0).abs() < 1e-6)
-        }).expect("Bore1 circular edge");
-        let dimension = command(&mut session, "drawing.dimension.add", json!({
-            "view": view,
-            "kind": {"radial": {"edge": {"body": "Plate", "index": index}}},
-            "text": {"at": [12.0, 24.0]}
-        }))["dimension"].clone();
+        let index = mesh
+            .edges
+            .iter()
+            .position(|edge| !edge.is_empty() && edge.iter().all(|point| (point.dist(centre) - 5.0).abs() < 1e-6))
+            .expect("Bore1 circular edge");
+        let dimension = command(
+            &mut session,
+            "drawing.dimension.add",
+            json!({
+                "view": view,
+                "kind": {"radial": {"edge": {"body": "Plate", "index": index}}},
+                "text": {"at": [12.0, 24.0]}
+            }),
+        )["dimension"]
+            .clone();
         assert_eq!(command(&mut session, "drawing.dimension.inspect", json!({"dimension": dimension}))["status"], "ok");
 
         let drawing = command(&mut session, "drawing.close", json!({}))["closed"].clone();
@@ -191,7 +198,10 @@ mod w23a_engine_integration_tests {
         let engine_status = command(&mut session, "drawing.status", json!({}));
         let attention = from_status(&engine_status);
         let id = dimension.as_str().expect("dimension ID");
-        let lost = attention.dimensions.iter().find(|item| item.id == id)
+        let lost = attention
+            .dimensions
+            .iter()
+            .find(|item| item.id == id)
             .unwrap_or_else(|| panic!("W23a dimension absent from drawing.status: {engine_status}"));
         assert_eq!(lost.status, "lost", "{engine_status}");
         assert!(lost.needs_attention());

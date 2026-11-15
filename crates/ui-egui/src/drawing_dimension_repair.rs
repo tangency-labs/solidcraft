@@ -1,6 +1,6 @@
 //! Explicit, user-confirmed repair of a lost or ambiguous drawing dimension.
 //! No CAD mutation occurs until confirm() is called with a valid selection.
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use solidcraft_engine::Session;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -16,8 +16,7 @@ fn valid_slot(slot: &str) -> bool {
 
 fn valid_pick(pick: &Value) -> bool {
     let Some(obj) = pick.as_object() else { return false };
-    obj.len() == 1 && ["edge", "corner", "face"].iter().any(|k| obj.contains_key(*k))
-        && !pick.to_string().contains("\"path\"")
+    obj.len() == 1 && ["edge", "corner", "face"].iter().any(|k| obj.contains_key(*k)) && !pick.to_string().contains("\"path\"")
 }
 
 /// Prepare a repair request, but never issue a mutating command.
@@ -37,11 +36,16 @@ pub fn confirm(session: &mut Session, selection: &RepairSelection, confirmed: bo
     if !confirmed {
         return Err("Repair was not confirmed".into());
     }
-    session.execute("drawing.dimension.repair", &json!({
-        "dimension": selection.dimension,
-        "slot": selection.slot,
-        "pick": selection.pick,
-    })).map_err(|e| e.to_string())
+    session
+        .execute(
+            "drawing.dimension.repair",
+            &json!({
+                "dimension": selection.dimension,
+                "slot": selection.slot,
+                "pick": selection.pick,
+            }),
+        )
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

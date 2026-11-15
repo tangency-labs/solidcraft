@@ -4,8 +4,12 @@ use crate::drawing_dimension_status::{DimensionItem, DrawingAttention};
 use crate::ui_kit;
 use std::collections::BTreeMap;
 
-fn tr(id: &str) -> String { solidcraft_ui_text::format(id, &[]) }
-fn fmt(id: &str, values: &[(&str, &str)]) -> String { solidcraft_ui_text::format(id, values) }
+fn tr(id: &str) -> String {
+    solidcraft_ui_text::format(id, &[])
+}
+fn fmt(id: &str, values: &[(&str, &str)]) -> String {
+    solidcraft_ui_text::format(id, values)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AttentionRow {
@@ -19,17 +23,33 @@ pub fn rows(snapshot: &DrawingAttention) -> Vec<AttentionRow> {
     rows_with_names(snapshot, &BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new())
 }
 
-pub fn rows_with_names(snapshot: &DrawingAttention, dimensions: &BTreeMap<String, String>, views: &BTreeMap<String, String>, sheets: &BTreeMap<String, String>) -> Vec<AttentionRow> {
-    snapshot.dimensions.iter().filter(|d| d.needs_attention()).map(|d| AttentionRow {
-        id: dimensions.get(&d.id).cloned().unwrap_or_else(|| d.id.clone()),
-        state: state(d),
-        reason: reason(d),
-        location: match (&d.sheet, &d.view) {
-            (Some(sheet), Some(view)) => fmt("ui.issue15776_attention.sheet_view", &[("sheet", sheets.get(sheet).map(String::as_str).unwrap_or(sheet)), ("view", views.get(view).map(String::as_str).unwrap_or(view))]),
-            (None, Some(view)) => fmt("ui.issue15776_attention.view_only", &[("view", views.get(view).map(String::as_str).unwrap_or(view))]),
-            _ => tr("ui.issue15776_attention.unknown"),
-        },
-    }).collect()
+pub fn rows_with_names(
+    snapshot: &DrawingAttention,
+    dimensions: &BTreeMap<String, String>,
+    views: &BTreeMap<String, String>,
+    sheets: &BTreeMap<String, String>,
+) -> Vec<AttentionRow> {
+    snapshot
+        .dimensions
+        .iter()
+        .filter(|d| d.needs_attention())
+        .map(|d| AttentionRow {
+            id: dimensions.get(&d.id).cloned().unwrap_or_else(|| d.id.clone()),
+            state: state(d),
+            reason: reason(d),
+            location: match (&d.sheet, &d.view) {
+                (Some(sheet), Some(view)) => fmt(
+                    "ui.issue15776_attention.sheet_view",
+                    &[
+                        ("sheet", sheets.get(sheet).map(String::as_str).unwrap_or(sheet)),
+                        ("view", views.get(view).map(String::as_str).unwrap_or(view)),
+                    ],
+                ),
+                (None, Some(view)) => fmt("ui.issue15776_attention.view_only", &[("view", views.get(view).map(String::as_str).unwrap_or(view))]),
+                _ => tr("ui.issue15776_attention.unknown"),
+            },
+        })
+        .collect()
 }
 
 fn state(d: &DimensionItem) -> String {
@@ -59,7 +79,13 @@ fn reason(d: &DimensionItem) -> String {
 
 /// Draw a status card only; callers decide its position and refresh cadence.
 /// State is conveyed by both text and a shape, never by colour alone.
-pub fn show(ui: &mut egui::Ui, snapshot: &DrawingAttention, dimensions: &BTreeMap<String, String>, views: &BTreeMap<String, String>, sheets: &BTreeMap<String, String>) {
+pub fn show(
+    ui: &mut egui::Ui,
+    snapshot: &DrawingAttention,
+    dimensions: &BTreeMap<String, String>,
+    views: &BTreeMap<String, String>,
+    sheets: &BTreeMap<String, String>,
+) {
     let items = rows_with_names(snapshot, dimensions, views, sheets);
     ui.group(|ui| {
         ui_kit::section_heading(ui, solidcraft_ui_text::tr("ui.issue15776_attention.title"));

@@ -187,13 +187,9 @@ fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::drawing_attention_card::show(ui, &snapshot, &dimension_names, &view_names, &sheet_names);
             let selection = app.session.selection.clone();
             let mut repair_state = std::mem::take(&mut app.drawing_workspace.repair_ui);
-            let repaired = crate::drawing_repair_ui::show(
-                ui,
-                &selection,
-                &mut repair_state,
-                &snapshot,
-                |command, args| app.run(command, args).map_err(|error| error.to_string()),
-            );
+            let repaired = crate::drawing_repair_ui::show(ui, &selection, &mut repair_state, &snapshot, |command, args| {
+                app.run(command, args).map_err(|error| error.to_string())
+            });
             app.drawing_workspace.repair_ui = repair_state;
             if repaired {
                 invalidate_status(app);
@@ -964,11 +960,11 @@ mod tests {
 }
 
 #[cfg(test)]
-mod repair_gui_acceptance_t158 {
+mod repair_through_the_browser {
     use super::*;
     use crate::scenario::Harness;
     #[test]
-fn repair_lost_bore_through_visible_buttons_review_confirm_and_undo() {
+    fn repair_lost_bore_through_visible_buttons_review_confirm_and_undo() {
         use solidcore_record::Vec3;
         use solidcraft_viewport::vec::Vec3Ops;
         let mut h = Harness::new();
@@ -976,17 +972,21 @@ fn repair_lost_bore_through_visible_buttons_review_confirm_and_undo() {
         h.app.ui.show_browser = true;
 
         // Real M2 acceptance plate, not a fixture card or a fake status response.
-        let recipe: serde_json::Value =
-            serde_json::from_str(include_str!("../../../examples/acceptance/drawing_m2.json")).unwrap();
+        let recipe: serde_json::Value = serde_json::from_str(include_str!("../../../examples/acceptance/drawing_m2.json")).unwrap();
         let executed = h.app.session.run_script(&recipe).unwrap();
         assert_eq!(executed.len(), 27);
         let view = executed.last().unwrap()["view"].clone();
-        let drawing = h.app.run("drawing.inspect", serde_json::json!({})).unwrap()["id"]
-            .as_str().unwrap().to_owned();
-        let added = h.app.run("drawing.dimension.add", serde_json::json!({
-            "view": view,
-            "kind": {"radial": {"edge": [25, 20, 20]}}
-        })).unwrap();
+        let drawing = h.app.run("drawing.inspect", serde_json::json!({})).unwrap()["id"].as_str().unwrap().to_owned();
+        let added = h
+            .app
+            .run(
+                "drawing.dimension.add",
+                serde_json::json!({
+                    "view": view,
+                    "kind": {"radial": {"edge": [25, 20, 20]}}
+                }),
+            )
+            .unwrap();
         let id = added["dimension"].as_str().unwrap().to_owned();
         assert_eq!(added["status"], "ok");
         enter(&mut h.app, true).unwrap();
@@ -995,9 +995,14 @@ fn repair_lost_bore_through_visible_buttons_review_confirm_and_undo() {
         // Round the upper Bore1 rim: engine reference is lost but a lower rim survives as a lead.
         h.app.run("drawing.close", serde_json::json!({})).unwrap();
         h.frames(3);
-        h.app.run("solid.fillet", serde_json::json!({
-            "body": "Plate", "radius": 1, "edges": [[25, 20, 20]]
-        })).unwrap();
+        h.app
+            .run(
+                "solid.fillet",
+                serde_json::json!({
+                    "body": "Plate", "radius": 1, "edges": [[25, 20, 20]]
+                }),
+            )
+            .unwrap();
         h.app.run("drawing.open", serde_json::json!({"drawing": drawing})).unwrap();
         h.frames(10);
         let before = h.app.run("drawing.dimension.inspect", serde_json::json!({"dimension": id})).unwrap();
@@ -1007,12 +1012,14 @@ fn repair_lost_bore_through_visible_buttons_review_confirm_and_undo() {
         let centre = Vec3::from([20.0, 20.0, 19.0]);
         let model = h.app.session.model.state();
         let mesh = model.body("Plate").unwrap().mesh();
-        let index = mesh.edges.iter()
+        let index = mesh
+            .edges
+            .iter()
             .position(|line| line.iter().all(|p| (p.dist(centre) - 5.0).abs() < 1e-6))
             .expect("a surviving circular rim below fillet");
         let pick = serde_json::json!({"edge":{"body":"Plate","index":index}});
-        let candidate_index = candidates.iter().position(|item| item == &pick)
-            .unwrap_or_else(|| panic!("engine lead for lower bore rim not offered: {before}"));
+        let candidate_index =
+            candidates.iter().position(|item| item == &pick).unwrap_or_else(|| panic!("engine lead for lower bore rim not offered: {before}"));
         let undo_before = h.app.session.undo.len();
         let action = format!("Repair {id}");
 
@@ -1035,9 +1042,9 @@ fn repair_lost_bore_through_visible_buttons_review_confirm_and_undo() {
         h.step(&serde_json::json!({"widget":"Confirm repair"})).unwrap();
         h.frames(6);
         let repaired = h.app.run("drawing.dimension.inspect", serde_json::json!({"dimension":id})).unwrap();
-        assert_eq!(repaired["status"],"ok", "{repaired}");
-        assert_eq!(repaired["text"],"Ø10.00");
-        assert_eq!(h.app.session.undo.len(), undo_before+1, "one undo step for confirmed repair");
+        assert_eq!(repaired["status"], "ok", "{repaired}");
+        assert_eq!(repaired["text"], "Ø10.00");
+        assert_eq!(h.app.session.undo.len(), undo_before + 1, "one undo step for confirmed repair");
         assert!(h.widget(&format!("Repair {id}")).is_none(), "fixed dimension must stop asking for repair");
 
         h.app.run("edit.undo", serde_json::json!({})).unwrap();

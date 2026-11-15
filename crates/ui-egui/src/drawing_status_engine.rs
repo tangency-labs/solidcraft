@@ -14,9 +14,7 @@ pub fn refresh(session: &mut Session, controller: &mut DrawingStatusController) 
     }
     let request = controller.pending_inspections();
     for dimension in request.inspect_ids {
-        let result = session
-            .execute("drawing.dimension.inspect", &json!({"dimension": dimension}))
-            .map_err(|error| error.to_string());
+        let result = session.execute("drawing.dimension.inspect", &json!({"dimension": dimension})).map_err(|error| error.to_string());
         controller.accept_inspection(request.generation, &dimension, result);
     }
     Ok(())
