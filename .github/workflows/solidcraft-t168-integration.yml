@@ -1,4 +1,4 @@
-name: SolidCraft T178 duplicate import fix and GUI regression
+name: SolidCraft T179 final review quality gate
 on:
   push:
     branches: [integration/issue-15776-upstream-20261115]
@@ -39,12 +39,18 @@ jobs:
           grep -q 'mod panels;' crates/ui-egui/src/drawing_workspace.rs
           echo "MERGED_WORKSPACE_READY=true"
       - uses: dtolnay/rust-toolchain@stable
+      - name: Check Rust formatting and sorted module lists
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo xtask lists
       - name: Compile drawing workspace regression tests
         shell: bash
         run: |
           set -euo pipefail
           cargo test -p solidcraft-ui-egui drawing_attention_card::tests --lib -- --nocapture
-          cargo test -p solidcraft-ui-egui drawing_attention_card::tests --lib -- --nocapture
           cargo test -p solidcraft-ui-egui drawing_repair_ui::tests --lib -- --nocapture
           cargo test -p solidcraft-ui-egui repair_gui_acceptance_t158 --lib -- --nocapture
           cargo test -p solidcraft-ui-egui drawing_status --lib -- --nocapture
+          cargo test -p solidcraft-ui-egui w23a_deleted_bore_is_reported_by_real_engine_and_ui_adapter --lib -- --nocapture
