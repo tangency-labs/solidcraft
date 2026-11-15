@@ -668,7 +668,20 @@ impl Net {
     /// `E + Δv E_v` at that side (module docs), each with its partials, from the net's
     /// partials at the sides (`Δ` zero along a side the part is on).
     fn part_jet(&self, pu: Part, pv: Part, form: Form, about: Option<Vec3>) -> Result<Option<Jet>> {
-        if let Some(d) = self.offset {
+        self.part_jet_of(pu, pv, form, about, self.offset)
+    }
+
+    /// [`Net::part_jet`] of the net moved by `offset` ([`Net::offset`]; `None` for the net
+    /// itself, whatever its own offset).
+    fn part_jet_of(
+        &self,
+        pu: Part,
+        pv: Part,
+        form: Form,
+        about: Option<Vec3>,
+        offset: Option<f64>,
+    ) -> Result<Option<Jet>> {
+        if let Some(d) = offset {
             return self.offset_jet(pu, pv, form, about, d);
         }
         let at = |p: Part| match p {
@@ -964,6 +977,90 @@ impl Net {
             return Ok(None);
         };
         Ok(self.at(a, b)?.map(|(p, _, _)| [a, b, (p - x0).dot(u)]))
+    }
+
+    /// The net's data as bits, for an edge's bound to be taken again from its other face
+    /// ([`super::EdgeBounds`]): the offset, the degrees and counts, the knots, the
+    /// homogeneous control points, which sides are extended or continued, and the tolerance.
+    /// Two nets with the same bits are the same surface, extended alike.
+    pub(super) fn bits(&self) -> Vec<u64> {
+        let count = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
+        let mut out = vec![3, self.offset.map_or(u64::MAX, f64::to_bits)];
+        out.extend([self.cn.p, self.cn.q, self.cn.nu, self.cn.nv].map(count));
+        for list in [&self.cn.u, &self.cn.v, &self.cn.pw] {
+            out.push(count(list.len()));
+            out.extend(list.iter().map(|x| x.to_bits()));
+        }
+        out.extend(
+            self.extends
+                .iter()
+                .chain(&self.continues)
+                .map(|&b| u64::from(b)),
+        );
+        out.push(self.tolerance.to_bits());
+        out
+    }
+
+    /// The parameters of the point of the net itself (not its offset, [`Net::offset`]) on
+    /// its knots nearest `x`: Gauss–Newton on `(G − x) · G_u = (G − x) · G_v = 0` from
+    /// `start`, kept where it ends within the net's tolerance of `x`, else from the point
+    /// nearest `x` among the net's knots and span middles ([`Net::nearest_on_knots`]).
+    /// Newton's start only, for a point of the edge, which lies on the net: an offset's
+    /// meeting there is the one near those parameters (an offset is parametrised as its
+    /// net), where a start from the knots alone may lie a turn away on a thread's flank.
+    ///
+    /// # Errors
+    ///
+    /// A cancel.
+    fn foot(&self, x: Vec3, start: Option<[f64; 2]>) -> Result<Option<[f64; 2]>> {
+        let [(u0, u1), (v0, v1)] = self.range;
+        let on = |u: f64, v: f64| -> Result<Option<(Vec3, Vec3, Vec3)>> {
+            let (Some(us), Some(vs)) = (self.parts(0, u, u), self.parts(1, v, v)) else {
+                return Ok(None);
+            };
+            let (Some(&pu), Some(&pv)) = (us.first(), vs.first()) else {
+                return Ok(None);
+            };
+            Ok(self
+                .part_jet_of(pu, pv, Form::Lines, None, None)?
+                .map(|j| (middle(j.p), middle(j.su), middle(j.sv))))
+        };
+        let descend = |[mut u, mut v]: [f64; 2]| -> Result<Option<([f64; 2], f64)>> {
+            for _ in 0..NEWTON_STEPS {
+                let Some((g, gu, gv)) = on(u, v)? else {
+                    return Ok(None);
+                };
+                let r = g - x;
+                let (a, b, c) = (gu.dot(gu), gu.dot(gv), gv.dot(gv));
+                let det = a * c - b * b;
+                if !(det.is_finite() && det > 0.0) {
+                    break;
+                }
+                let (e, f) = (r.dot(gu), r.dot(gv));
+                let (nu, nv) = (
+                    (u - (c * e - b * f) / det).max(u0).min(u1),
+                    (v - (a * f - b * e) / det).max(v0).min(v1),
+                );
+                #[allow(clippy::float_cmp)] // a step that changes nothing
+                let still = nu == u && nv == v;
+                (u, v) = (nu, nv);
+                if still {
+                    break;
+                }
+            }
+            Ok(on(u, v)?.map(|(g, _, _)| ([u, v], (g - x).length())))
+        };
+        if let Some(s) = start {
+            if let Some((uv, d)) = descend(s)? {
+                if d <= self.tolerance {
+                    return Ok(Some(uv));
+                }
+            }
+        }
+        let Some((u, v)) = self.nearest_on_knots(x)? else {
+            return Ok(None);
+        };
+        Ok(descend([u, v])?.map(|(uv, _)| uv))
     }
 
     /// The parameters whose point is nearest `x` among the net's knots and the middles of
@@ -1320,16 +1417,26 @@ pub(super) fn line_meets(
             )
         }))
     };
+    // an offset's meeting from the line's foot's own parameters on the net ([`Net::foot`]),
+    // the grid's point nearest the line may lie a turn away on a thread's flank
+    let first = |net: &Net| -> Result<Option<[f64; 3]>> {
+        if net.offset.is_some() {
+            if let Some([u, v]) = net.foot(mx0, None)? {
+                return Ok(net.at(u, v)?.map(|(p, _, _)| [u, v, (p - mx0).dot(mu)]));
+            }
+        }
+        net.nearest_to_line(mx0, mu)
+    };
     let start = match guess.get() {
         Some(g) => g,
-        None => match net.nearest_to_line(mx0, mu)? {
+        None => match first(net)? {
             Some(g) => g,
             None => return Ok(None),
         },
     };
     let mut root = newton(start, &at, &inverse_of_columns3)?;
     if root.is_none() && guess.get().is_some() {
-        if let Some(g) = net.nearest_to_line(mx0, mu)? {
+        if let Some(g) = first(net)? {
             root = newton(g, &at, &inverse_of_columns3)?;
         }
     }
@@ -1473,7 +1580,14 @@ pub(super) fn plane_quadric_and_net_meet(
             [[normal.dot(su), g.dot(su)], [normal.dot(sv), g.dot(sv)]],
         )))
     };
-    let Some(guess) = net.nearest_on_grid(p)? else {
+    // an offset's meeting from the vertex's own parameters on the net (the grid's nearest
+    // point may lie a turn away on a thread's flank, [`Net::foot`])
+    let guess = if net.offset.is_some() {
+        net.foot(p, None)?.map(|[u, v]| (u, v))
+    } else {
+        net.nearest_on_grid(p)?
+    };
+    let Some(guess) = guess else {
         return Ok(None);
     };
     let Some(root) = newton([guess.0, guess.1], &at, &inverse_of_columns2)? else {
@@ -1517,8 +1631,8 @@ pub(super) fn plane_quadric_and_net_meet(
 /// the distance from `p` of a meeting proved by Krawczyk's test on `F_a(N(u, v)) = 0`,
 /// `F_b(N(u, v)) = 0` (each quadric's implicit function, [`quadric_value_and_gradient`];
 /// module docs), on both quadrics' own nappes ([`super::quadric::on_nappe`]) and on the
-/// surface as built, or `None`. Newton starts from the net's point nearest `p` on its knots
-/// ([`Net::nearest_on_knots`]).
+/// surface as built, or `None`. Newton starts from the vertex's parameters on the net
+/// ([`Net::foot`]).
 ///
 /// # Errors
 ///
@@ -1546,10 +1660,10 @@ pub(super) fn quadrics_and_net_meet(
             [[ga.dot(su), gb.dot(su)], [ga.dot(sv), gb.dot(sv)]],
         )))
     };
-    let Some((u, v)) = net.nearest_on_knots(p)? else {
+    let Some(start) = net.foot(p, None)? else {
         return Ok(None);
     };
-    let Some(root) = newton([u, v], &at, &inverse_of_columns2)? else {
+    let Some(root) = newton(start, &at, &inverse_of_columns2)? else {
         return Ok(None);
     };
     let Some((_, j)) = at(root)? else {
@@ -1622,9 +1736,10 @@ pub(super) struct Moving {
 /// hull of `ỹ` and the proved box; the upper bound is that vector's length, the lower its
 /// least length at `t_m` (the value that steers the halving).
 ///
-/// `guess` carries the last root from one piece to the next (Newton's start; else the net's
-/// point nearest `p(t_m)` on its knots, [`Net::nearest_on_knots`]): it only steers Newton,
-/// and what is proved is decided by the box alone.
+/// Newton starts from the parameters of the edge point `p(t_m)` on the net ([`Net::foot`],
+/// `guess` carrying them from one piece to the next): the meeting nearest the edge, where a
+/// start from anywhere else may reach a meeting a turn away on a thread's flank. It only
+/// steers Newton, and what is proved is decided by the box alone.
 ///
 /// # Errors
 ///
@@ -1653,23 +1768,14 @@ pub(super) fn section_quadric_meets(
             [[mt.dot(su), g.dot(su)], [mt.dot(sv), g.dot(sv)]],
         )))
     };
-    let start = match guess.get() {
-        Some(g) => Some(g),
-        None => net.nearest_on_knots(mp)?.map(|(u, v)| [u, v]),
-    };
-    let Some(start) = start else {
+    // Newton from the edge point's own parameters on the net (the meeting nearest it)
+    let Some(start) = net.foot(mp, guess.get())? else {
         return Ok(None);
     };
-    let mut root = newton(start, &at, &inverse_of_columns2)?;
-    if root.is_none() && guess.get().is_some() {
-        if let Some((u, v)) = net.nearest_on_knots(mp)? {
-            root = newton([u, v], &at, &inverse_of_columns2)?;
-        }
-    }
-    let Some(root) = root else {
+    guess.set(Some(start));
+    let Some(root) = newton(start, &at, &inverse_of_columns2)? else {
         return Ok(None);
     };
-    guess.set(Some(root));
     let Some((x, _, _)) = net.at(root[0], root[1])? else {
         return Ok(None);
     };

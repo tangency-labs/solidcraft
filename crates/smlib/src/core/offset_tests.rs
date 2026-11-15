@@ -747,6 +747,7 @@ fn a_thread_flank_moves_beside_its_root_and_crest() {
             Err(e) => {
                 let why = e.to_string();
                 assert!(!why.contains("no certified bound"), "d {d}: {why}");
+                eprintln!("d {d}: refused after the reach: {why}");
                 continue;
             }
         };

@@ -2459,10 +2459,15 @@ pub fn local_extension_reach(
                     let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
                         quadric_net_piece(over, mid, dt, q, n, &guess)
                     };
-                    // a net's bound is not recorded: it carries no bits to key it on
+                    // recorded under the quadric's bits and the net's ([`net::Net::bits`]),
+                    // the same from either face: the second face takes the first's bound
                     let pair =
                         EdgeQuantity::Meeting(own_face.min(other_face), own_face.max(other_face));
-                    pieces(&piece, bounds, pair, None)?
+                    let surfaces = exact_bits(&Exact::Quadric(*q)).map(|mut b| {
+                        b.extend(n.bits());
+                        b
+                    });
+                    pieces(&piece, bounds, pair, surfaces.as_deref())?
                 }
                 (Exact::Quadric(a), Exact::Quadric(c)) => {
                     let pair =
