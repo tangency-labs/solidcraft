@@ -1951,6 +1951,7 @@ impl SolveApp {
                     // The old document is already replaced: discard its editor without
                     // applying cancellation hooks (such as restoring its timeline marker).
                     self.dialog = None;
+                    self.inline_sketch = None;
                     self.applying = None;
                     self.editing_state = None;
                     self.pending_feature_edit = None;
@@ -3088,7 +3089,9 @@ impl SolveApp {
     /// Once Extrude has closed, however it closed, the view goes back to where it was before
     /// Extrude turned it (#9176). Going back keeps the projection, as at the end of a sketch.
     fn return_from_extrude_view(&mut self) {
-        if self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::Extrude { .. })) {
+        // Put aside for its New Sketch, Extrude is still open (#6383).
+        let parked = self.inline_sketch.as_ref().and_then(command_sketch::InlineSketch::parked);
+        if self.dialog.as_ref().or(parked).is_some_and(|d| matches!(d.kind, dialogs::Kind::Extrude { .. })) {
             return;
         }
         if let Some(before) = self.pre_extrude_cam.take() {

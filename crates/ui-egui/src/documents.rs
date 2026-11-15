@@ -73,6 +73,8 @@ struct DocWork {
     /// Shared panel content belongs to the design, independently of its current placement.
     bom: Option<crate::bom_panel::BomPanel>,
     dialog: Option<crate::dialogs::Dialog>,
+    /// A New Sketch of that dialog (#6383): its checkpoint is in this design's session.
+    inline_sketch: Option<crate::command_sketch::InlineSketch>,
     editing_state: Option<crate::dialogs::EditingState>,
     tool: Option<crate::tools::Tool>,
     /// The toolbar tab shown, its contextual tab and the tab a sketch returns to (`None`: the
@@ -88,6 +90,8 @@ fn take_work(app: &mut SolveApp) -> DocWork {
     let bom = app.bom.take();
     if !app.preferences.keep_work_on_tab_switch || app.applying.is_some() {
         crate::dialogs::cancel(app);
+        // A sketch still open for a New Sketch stays, as any open sketch does.
+        crate::command_sketch::forget(app);
         app.tool = None;
         crate::drawing_workspace::close_panel(app);
         let tab = app.preferences.remember_toolbar_tab.then(|| (app.ui.tab.clone(), app.ui.ribbon_context.clone(), app.ui.sketch_return_tab.clone()));
@@ -96,6 +100,7 @@ fn take_work(app: &mut SolveApp) -> DocWork {
     DocWork {
         bom,
         dialog: app.dialog.take(),
+        inline_sketch: app.inline_sketch.take(),
         editing_state: app.editing_state.take(),
         tool: app.tool.take(),
         tab: Some((app.ui.tab.clone(), app.ui.ribbon_context.clone(), app.ui.sketch_return_tab.clone())),
@@ -115,6 +120,7 @@ fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
         state.source.revision = state.source.revision.saturating_add(app.session.revision.saturating_sub(before));
     }
     app.dialog = work.dialog;
+    app.inline_sketch = work.inline_sketch;
     app.editing_state = work.editing_state;
     app.tool = work.tool;
     match work.tab {

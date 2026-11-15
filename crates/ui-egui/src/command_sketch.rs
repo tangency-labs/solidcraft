@@ -37,6 +37,13 @@ pub struct InlineSketch {
     told: bool,
 }
 
+impl InlineSketch {
+    /// The dialog waiting while its sketch is drawn.
+    pub fn parked(&self) -> Option<&Dialog> {
+        self.parked.as_ref()
+    }
+}
+
 /// The command of a dialog that offers New Sketch and the input its profiles go to. Editing a
 /// feature keeps its own sketch.
 pub fn profile_input(d: &Dialog) -> Option<(&'static str, usize)> {
@@ -191,7 +198,7 @@ fn resume(app: &mut SolveApp) {
 }
 
 /// Let go of the flow, keeping the design as it is.
-fn forget(app: &mut SolveApp) {
+pub fn forget(app: &mut SolveApp) {
     if let Some(inline) = app.inline_sketch.take() {
         let _ = app.session.execute("edit.restore_checkpoint", &json!({"checkpoint": inline.checkpoint, "forget": true}));
     }

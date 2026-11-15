@@ -204,3 +204,44 @@ fn a_script_extrude_is_unchanged() {
     assert_eq!((sketches(&h), extrudes(&h)), (1, 1));
     assert!(h.app.inline_sketch.is_none());
 }
+
+/// With Extrude turning the view and turning it back (#9176), the dialog put aside for its
+/// sketch is still open: the view must not go back while the sketch is drawn.
+#[test]
+fn the_extrude_view_waits_while_its_sketch_is_drawn() {
+    let mut h = Harness::new();
+    h.app.preferences.extrude_view_isometric = true;
+    h.app.preferences.extrude_view_return = true;
+    h.app.start("solid.extrude");
+    h.frames(2);
+    assert!(h.app.pre_extrude_cam.is_some());
+    crate::viewport::dialog_pick(&mut h.app, &xy(), Sel::Plane { name: "XY".into() });
+    h.frames(3);
+    assert!(h.app.session.active_sketch.is_some());
+    assert!(h.app.pre_extrude_cam.is_some(), "Extrude still waits to turn the view back");
+}
+
+/// With "Keep dialogs and tools open when switching designs", the waiting Extrude stays with
+/// its design: another design is untouched, and the flow goes on after the switch back.
+#[test]
+fn the_waiting_extrude_stays_with_its_design_across_a_tab_switch() {
+    let mut h = extrude_open();
+    h.app.home.open = false;
+    h.app.preferences.keep_work_on_tab_switch = true;
+    let doc = h.app.session.doc.clone();
+    crate::viewport::dialog_pick(&mut h.app, &xy(), Sel::Plane { name: "XY".into() });
+    h.frames(2);
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
+    crate::documents::new_design(&mut h.app);
+    h.frames(3);
+    assert!(h.app.dialog.is_none() && h.app.inline_sketch.is_none(), "nothing of it in the new design");
+    assert!(h.app.session.doc.features.is_empty());
+    crate::documents::switch(&mut h.app, 0);
+    h.frames(2);
+    h.app.start("sketch.finish");
+    h.frames(3);
+    assert!(in_extrude(&h), "back in Extrude in its own design");
+    h.step(&json!({"widget": "Cancel"})).unwrap();
+    h.frames(2);
+    assert!(Arc::ptr_eq(&h.app.session.doc, &doc), "Cancel still goes back to before New Sketch");
+}
