@@ -2793,4 +2793,45 @@ mod tests {
         assert_eq!(agent_status(&mut app, &id)["status"], "opened");
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn ticket_report_double_click_sends_one_draft_and_a_resend_offers_the_first() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let (mut server, _, requests, _) = ticket_app(true, None);
+        h.app.services.tickets_http = server.services.tickets_http.take();
+        h.app.services.ticket_secrets = server.services.ticket_secrets.take();
+        let drafts = |r: &Requests| r.lock().unwrap().iter().filter(|r| r.url.ends_with("/api/drafts")).count();
+        let open = |h: &mut crate::scenario::Harness| {
+            help::run(&mut h.app, &h.ctx, "report");
+            cancel_capture(&mut h.app);
+            h.frames(4);
+            h.app.issue_report.draft.as_mut().unwrap().ticket.as_mut().unwrap().form.title = "Sent twice by accident".into();
+            h.frames(2);
+        };
+        open(&mut h);
+        let ok = crate::scenario::handle_at("dialog:ok").expect("Send report is drawn");
+        let at = [f64::from(ok.x), f64::from(ok.y)];
+        click_commands_at(&mut h, at);
+        click_commands_at(&mut h, at);
+        for _ in 0..200 {
+            if h.app.tickets.sending.is_none() {
+                break;
+            }
+            h.frame();
+        }
+        assert_eq!(drafts(&requests), 1, "a double click sends one report");
+        assert_eq!(h.app.tickets.outcome, Some(tickets::Outcome::Opened));
+
+        // The same report again within 30 minutes: not sent, its page offered instead.
+        h.app.issue_report.draft = None;
+        h.frames(2);
+        open(&mut h);
+        let ok = crate::scenario::handle_at("dialog:ok").expect("Send report is drawn");
+        click_commands_at(&mut h, [f64::from(ok.x), f64::from(ok.y)]);
+        assert_eq!(drafts(&requests), 1, "the same report is not sent twice");
+        let ticket = h.app.issue_report.draft.as_ref().unwrap().ticket.as_ref().unwrap();
+        assert_eq!(ticket.already.as_deref(), Some(format!("{}/draft/d1#sec", tickets::api::server()).as_str()));
+        assert!(h.widget(solidcraft_ui_text::tr("report.already_sent")).is_some(), "the dialog says so");
+    }
 }

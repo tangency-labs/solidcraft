@@ -225,6 +225,10 @@ pub struct Draft {
     pub id: String,
     pub upload_token: String,
     pub url: String,
+    /// The server already had this report from this computer (in the last 30 minutes) and
+    /// answered with the same draft; `filed`: and it was filed already.
+    pub duplicate: bool,
+    pub filed: bool,
 }
 
 impl std::fmt::Debug for Draft {
@@ -241,7 +245,9 @@ pub fn parse_draft(v: &Value) -> Result<Draft, Failure> {
     let upload_token = text(v, "upload_token").filter(|t| !t.is_empty() && t.len() < 1000).ok_or_else(bad)?;
     // Only the ticket server's own page opens in the browser.
     let url = text(v, "url").filter(|u| u.starts_with(&format!("{}/draft/", server()))).ok_or_else(bad)?;
-    Ok(Draft { id, upload_token, url })
+    let duplicate = v.get("duplicate").and_then(Value::as_bool).unwrap_or(false);
+    let filed = duplicate && v.get("status").and_then(Value::as_str) == Some("claimed");
+    Ok(Draft { id, upload_token, url, duplicate, filed })
 }
 
 /// Whether the draft was filed yet (with the draft's upload token).

@@ -1,0 +1,10 @@
+{
+  "en": { "report.already_sent": "You already sent this report — open it again?", "report.open_again": "Open it again" },
+  "de": { "report.already_sent": "Sie haben diesen Bericht bereits gesendet — erneut öffnen?", "report.open_again": "Erneut öffnen" },
+  "ar": { "report.already_sent": "لقد أرسلت هذا التقرير بالفعل — هل تريد فتحه مرة أخرى؟", "report.open_again": "فتحه مرة أخرى" },
+  "he": { "report.already_sent": "כבר שלחתם את הדוח הזה — לפתוח אותו שוב?", "report.open_again": "פתיחה שוב" },
+  "ja": { "report.already_sent": "このレポートは送信済みです — もう一度開きますか?", "report.open_again": "もう一度開く" },
+  "vi": { "report.already_sent": "Bạn đã gửi báo cáo này rồi — mở lại?", "report.open_again": "Mở lại" },
+  "zh": { "report.already_sent": "你已经发送过此报告——要再次打开吗？", "report.open_again": "再次打开" },
+  "ko": { "report.already_sent": "이미 보낸 보고서입니다. 다시 열까요?", "report.open_again": "다시 열기" }
+}

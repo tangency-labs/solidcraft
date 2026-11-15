@@ -245,6 +245,17 @@ pub fn build_via(form: &Form, ticks: Ticks, evidence: &Evidence, client: &str, v
     Outgoing { ticket, files, filed: None }
 }
 
+/// What makes two reports the same one: the title, the failed operation (command, parameters
+/// and error) and the design (its hash). Sent twice within 30 minutes, it is sent once.
+pub fn same_key(ticket: &Value) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    ticket.get("title").map(Value::to_string).hash(&mut h);
+    ticket.get("repro").and_then(|r| r.get("failing")).map(Value::to_string).hash(&mut h);
+    ticket.get("repro").and_then(|r| r.get("design_sha256")).map(Value::to_string).hash(&mut h);
+    h.finish()
+}
+
 /// A size as people read it.
 pub fn size_text(bytes: usize) -> String {
     let b = bytes as f64;

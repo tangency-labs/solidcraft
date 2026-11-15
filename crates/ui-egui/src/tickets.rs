@@ -131,6 +131,9 @@ pub struct Tickets {
     pub agent_waiting: Vec<solidcraft_engine::report_issue::Request>,
     /// The last draft's page opened in the browser (for an agent's report status).
     pub opened_url: Option<String>,
+    /// Reports sent in this run: what makes a report the same one (`payload::same_key`), its
+    /// draft's page and when (ms), for "You already sent this report".
+    pub sent: Vec<(u64, String, f64)>,
     /// A draft opened in the browser, watched until it is filed: (draft, next poll, give up at,
     /// the poll on its way).
     watch: Option<(api::Draft, f64, f64, Option<Call>)>,
@@ -311,6 +314,16 @@ fn keep_for_later(app: &mut SolveApp, report: payload::Outgoing, folder: Option<
     app.tickets.retry_at = crate::now_ms() + RETRY_MS;
 }
 
+/// A report sent again within this long is the same report (ms).
+pub const SAME_REPORT_MS: f64 = 30.0 * 60_000.0;
+
+/// The draft page of the same report sent in the last 30 minutes, if it was.
+pub fn already_sent(app: &SolveApp, ticket: &serde_json::Value) -> Option<String> {
+    let key = payload::same_key(ticket);
+    let now = crate::now_ms();
+    app.tickets.sent.iter().rev().find(|(k, _, at)| *k == key && now - at < SAME_REPORT_MS).map(|(_, url, _)| url.clone())
+}
+
 /// How long a draft opened in the browser is watched for being filed, in ms.
 const WATCH_MS: f64 = 30.0 * 60_000.0;
 /// Between two looks at it.
@@ -324,6 +337,9 @@ fn finish(app: &mut SolveApp, s: Sending) {
     }
     match s.draft {
         Some(draft) => {
+            let now = crate::now_ms();
+            app.tickets.sent.retain(|(_, _, at)| now - at < SAME_REPORT_MS);
+            app.tickets.sent.push((payload::same_key(&s.report.ticket), draft.url.clone(), now));
             app.tickets.open_url = Some(draft.url.clone());
             app.tickets.opened_url = Some(draft.url.clone());
             app.tickets.outcome = Some(Outcome::Opened);
@@ -527,9 +543,11 @@ fn tick_send(app: &mut SolveApp) {
     let step = match s.step {
         Step::Draft => match api::parse_draft(&value) {
             Ok(d) => {
+                // Already filed (the server knew this report): nothing more to upload.
+                let filed = d.filed;
                 s.draft = Some(d);
                 s.sent += 1;
-                next_file(&s.report, 0)
+                if filed { None } else { next_file(&s.report, 0) }
             }
             Err(e) => {
                 app.tickets.outcome = Some(Outcome::Failed(e.text()));
