@@ -57,6 +57,10 @@ pub(crate) enum Tree<'a> {
     Flat,
     /// A STEP file's products and placements.
     Step(&'a StepImport),
+    /// A STEP file brought in flat (`file.insert_step`'s `flatten`): every solid a body of the
+    /// import's component, each placement of a part a body of its own where the file places it,
+    /// with no components below it and no joints.
+    StepFlat(&'a StepImport),
     /// A mesh file's components (glTF nodes), bodies already in their component's frame
     /// (checked with [`mesh_plan_fits`] first).
     Mesh(&'a solidcraft_io::MeshPlan),
@@ -266,7 +270,13 @@ pub(crate) fn realign_import(f: &mut solidcraft_doc::Feature, imp: &StepImport) 
         return false;
     }
     let old_skip: std::collections::HashSet<u64> = skip.iter().copied().collect();
-    let new_skip: std::collections::HashSet<u64> = Plan::of(imp).skip.into_iter().collect();
+    let mut new_skip: std::collections::HashSet<u64> = Plan::of(imp).skip.into_iter().collect();
+    // A flat import (`flatten`) built the later instances a nested one skips: a body only `imp`
+    // has is then built too.
+    let flat = new_skip.iter().any(|k| matched.get(*k as usize).copied().flatten().is_some_and(|old| !old_skip.contains(&(old as u64))));
+    if flat {
+        new_skip.clear();
+    }
     let skip: Vec<u64> = (0..count as u64)
         .filter(|k| match matched.get(*k as usize).copied().flatten() {
             Some(old) => old_skip.contains(&(old as u64)),
@@ -361,6 +371,9 @@ pub(crate) fn add_in_component(
     let (plan, imp) = match tree {
         Tree::Flat => (Plan::default(), None),
         Tree::Step(imp) => (Plan::of(imp), Some(imp)),
+        // The Import feature builds every body where the file places it, in the import's frame:
+        // with nothing to move and nothing skipped, that is the flat import.
+        Tree::StepFlat(imp) => (Plan::default(), Some(imp)),
         Tree::Mesh(m) => (Plan::of_mesh(m).ok_or_else(|| EngineError::Other("import: the file's node tree can't be placed".into()))?, None),
     };
     // The components, each made at its first placement; the others are further occurrences.
