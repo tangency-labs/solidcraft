@@ -1928,14 +1928,13 @@ mod flat_corner_bits_tests {
             let pts = with.points.unwrap();
             for (bit, (uv, p)) in [1u32, 2, 4, 8].iter().zip(corners.iter().zip(pts)) {
                 if with.flags & bit != 0 {
-                    match s.evaluate_point(&k, *uv) {
-                        Ok(e) => assert_eq!(p, e, "{} corner {bit}", c.name),
-                        // `GetFlatCorners` ignores a failed evaluation: the point stays
-                        // undefined
-                        Err(_) => {
-                            assert_eq!(p, Vec3::UNDEF, "{} corner {bit}", c.name);
-                            failed.push(c.name.clone());
-                        }
+                    // `GetFlatCorners` ignores a failed evaluation: the point stays
+                    // undefined
+                    if let Ok(e) = s.evaluate_point(&k, *uv) {
+                        assert_eq!(p, e, "{} corner {bit}", c.name);
+                    } else {
+                        assert_eq!(p, Vec3::UNDEF, "{} corner {bit}", c.name);
+                        failed.push(c.name.clone());
                     }
                 } else {
                     assert_eq!(p, Vec3::UNDEF, "{} corner {bit}", c.name);
