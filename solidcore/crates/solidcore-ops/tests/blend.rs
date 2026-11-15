@@ -2114,11 +2114,14 @@ fn a_round_split_by_rollover_ends_its_last_piece_at_a_closed_edge_s_seam() {
         .unwrap_or_else(|e| panic!("the boss's foot does not round: {e:?}"));
     let report = b.check(CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{report}");
-    // The round only adds faces: every face it meets is trimmed back, none taken away. Its
-    // edge and vertex counts depend on how many pieces the rollover makes along the hull's
-    // spline joints, which the construction does not fix.
+    // The round adds its faces, one a piece, and cuts one face in two: the hull's top face
+    // between the spline joints on either side of the foot (at |y| < 6.45 there, under the
+    // round's reach of 6 + r) is crossed by the round from joint to joint on both sides of
+    // the boss, leaving a front and a back face. Every other face it meets is trimmed back.
+    // Its edge and vertex counts depend on how many pieces the rollover makes along the
+    // joints, which the construction does not fix.
     assert!(!made.made.is_empty());
-    assert_eq!(b.counts().unwrap()[0], faces + made.made.len());
+    assert_eq!(b.counts().unwrap()[0], faces + made.made.len() + 1);
     // The round fills the concave foot. Its section in a plane through the boss's axis is the
     // region between the two walls and the ball's arc: r^2 (cot(a / 2) - (pi - a) / 2) for
     // walls meeting at a (through the air). The boss is upright, and the hull's top under the
