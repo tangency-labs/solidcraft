@@ -702,12 +702,50 @@ impl ModelState {
     }
 }
 
+/// The frames joint origins on a face, an edge or a round face resolved to, kept so that solving
+/// the joints again (a drive, a drag) does not search the bodies' triangles again for an origin
+/// whose bodies did not change. An entry is keyed by the origin's definition, its component and
+/// the identity ([`ModelBody::geometry_key`]) and offset of every body of the component, so a
+/// body that changed finds none, and copies of a state may share one.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct OriginFrames {
+    found: Arc<std::sync::Mutex<std::collections::HashMap<(String, u64, Vec<u64>), Mat>>>,
+    /// How many origins were resolved from the bodies (not found here).
+    resolved: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl OriginFrames {
+    /// Most frames kept; past it all are dropped, as the contact meshes' cache does.
+    const MAX: usize = 1 << 14;
+
+    pub(crate) fn get(&self, key: &(String, u64, Vec<u64>)) -> Option<Mat> {
+        self.found.lock().ok()?.get(key).copied()
+    }
+
+    pub(crate) fn put(&self, key: (String, u64, Vec<u64>), frame: Mat) {
+        self.resolved.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if let Ok(mut found) = self.found.lock() {
+            if found.len() >= Self::MAX {
+                found.clear();
+            }
+            found.insert(key, frame);
+        }
+    }
+
+    /// How many origins have been resolved from the bodies, not taken from what was kept.
+    pub(crate) fn resolved(&self) -> usize {
+        self.resolved.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 /// Model after some prefix of the timeline.
 #[derive(Clone, Debug, Default)]
 pub struct ModelState {
     /// Frame placements belong to the evaluator. A weak reference avoids a cycle through
     /// cached bodies' naming origins, which retain earlier model states.
     frame_bodies: std::sync::Weak<std::sync::Mutex<FrameBodies>>,
+    /// Joint origins already resolved against bodies of this model (see [`OriginFrames`]).
+    pub(crate) origin_frames: OriginFrames,
     /// Cosmetic threads (from Thread features and threaded holes).
     pub threads: Vec<ThreadInfo>,
     pub bodies: Vec<ModelBody>,
@@ -779,6 +817,12 @@ impl KeptSeparate {
 }
 
 impl ModelState {
+    /// How many joint origins have been resolved from the bodies of this model (and its copies),
+    /// not taken from the frames kept ([`OriginFrames`]).
+    pub fn origin_resolutions(&self) -> usize {
+        self.origin_frames.resolved()
+    }
+
     /// `body` moved by `matrix` into a feature's frame. The evaluator that made this state keeps
     /// the moved body, so an unchanged body under an unchanged placement is moved (and meshed)
     /// once rather than on every evaluation.
