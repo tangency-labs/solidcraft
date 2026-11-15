@@ -2357,28 +2357,49 @@ mod tests {
     /// row is turned by 1e-4 rad (middle section 1.1e-8 inside at r 9) is now refused,
     /// unchanged, because the moved net fails `lies_on`; before, it rebuilt as the
     /// cylinder. Untwisted, the same radii rebuild.
+    /// A cylinder of radius 9 whose top row is scaled to near-equal radius (the
+    /// mean-radius branch) and turned by `turn` rad about the axis.
+    fn twisted_cylinder(k: &Kernel, turn: f64, swap: bool, inside: bool) -> Cone {
+        let (radius, top) = (9.0, 9.0 + 0.5 * EFF_ZERO_SQRT * 10.0);
+        let (sin, cos) = turn.sin_cos();
+        let mut c = edited_cylinder(k, radius, top, swap, inside);
+        // turn the top row about the axis (z), in homogeneous coordinates
+        let s = c.base_mut().get_or_create_gw_nurb().unwrap();
+        let (n, m) = (s.n(), s.m());
+        for i in 0..=n {
+            for j in 0..=m {
+                if if swap { i == n } else { j == m } {
+                    let p = s.cpt_mut(i, j).unwrap();
+                    let (x, y) = (p.x, p.y);
+                    p.x = x * cos - y * sin;
+                    p.y = x * sin + y * cos;
+                }
+            }
+        }
+        c
+    }
+
+    /// The NURB's control points (weights divided out) and weights, row by row.
+    fn net_of(c: &Cone) -> Vec<(Point3, f64)> {
+        use crate::nurbs::b_spline_curve::ControlPointForm::EuclideanRational;
+        let s = c.rev().base();
+        let (nu, nv) = (
+            s.number_control_points(SurfParamType::U),
+            s.number_control_points(SurfParamType::V),
+        );
+        (0..nu)
+            .flat_map(|i| (0..nv).map(move |j| (i, j)))
+            .map(|(i, j)| s.control_point(EuclideanRational, i, j).unwrap())
+            .collect()
+    }
+
     #[test]
     fn rebuild_cylinder_refuses_a_twisted_net() {
         let k = kernel();
-        let (radius, top) = (9.0, 9.0 + 0.5 * EFF_ZERO_SQRT * 10.0);
         for (turn, refused) in [(1e-4_f64, true), (0.0, false)] {
-            let (sin, cos) = turn.sin_cos();
             for swap in [false, true] {
                 for inside in [false, true] {
-                    let mut c = edited_cylinder(&k, radius, top, swap, inside);
-                    // turn the top row about the axis (z), in homogeneous coordinates
-                    let s = c.base_mut().get_or_create_gw_nurb().unwrap();
-                    let (n, m) = (s.n(), s.m());
-                    for i in 0..=n {
-                        for j in 0..=m {
-                            if if swap { i == n } else { j == m } {
-                                let p = s.cpt_mut(i, j).unwrap();
-                                let (x, y) = (p.x, p.y);
-                                p.x = x * cos - y * sin;
-                                p.y = x * sin + y * cos;
-                            }
-                        }
-                    }
+                    let mut c = twisted_cylinder(&k, turn, swap, inside);
                     let before = c.clone();
                     let result = c.rebuild_step_from_nurb_parameters(&k);
                     assert_eq!(result.is_err(), refused, "{turn} {swap} {inside}");
@@ -2386,6 +2407,48 @@ mod tests {
                         assert_eq!(c.base_radius(), before.base_radius());
                         assert_eq!(c.semi_angle_deg(), before.semi_angle_deg());
                         assert_eq!(c.rev().position(), before.rev().position());
+                    }
+                }
+            }
+        }
+    }
+
+    /// #16982 review (CodeRabbit): `Surface::reverse` of a cone reverses the NURB and
+    /// rebuilds; upstream ignores the rebuild's status, so a refused rebuild left the
+    /// reversed NURB under the old analytic data and reported success. Reversing a
+    /// twisted cylinder (a net the rebuild refuses) now fails and leaves the surface as
+    /// it was, NURB and analytic data alike, in either direction; the untwisted
+    /// cylinder still reverses.
+    #[test]
+    fn reverse_of_an_uncertifiable_cylinder_fails_unchanged() {
+        use crate::surface::surface::{Surface, SurfaceKind};
+        let k = kernel();
+        for (turn, refused) in [(1e-4_f64, true), (0.0, false)] {
+            for swap in [false, true] {
+                for inside in [false, true] {
+                    for param in [SurfParamType::U, SurfParamType::V] {
+                        let c = twisted_cylinder(&k, turn, swap, inside);
+                        let (net, radius, angle, position) = (
+                            net_of(&c),
+                            c.base_radius(),
+                            c.semi_angle_deg(),
+                            *c.rev().position(),
+                        );
+                        let mut s = Surface::from(c);
+                        let result = s.reverse(&k, param);
+                        let case = format!("{turn} {swap} {inside} {param:?}");
+                        assert_eq!(result.is_err(), refused, "{case}");
+                        let SurfaceKind::Cone(after) = s.kind() else {
+                            panic!("{case}: not a cone");
+                        };
+                        if refused {
+                            assert_eq!(net_of(after), net, "{case}");
+                            assert_eq!(after.base_radius(), radius, "{case}");
+                            assert_eq!(after.semi_angle_deg(), angle, "{case}");
+                            assert_eq!(*after.rev().position(), position, "{case}");
+                        } else {
+                            assert_ne!(net_of(after), net, "{case}");
+                        }
                     }
                 }
             }
