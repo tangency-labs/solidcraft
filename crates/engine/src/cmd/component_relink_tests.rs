@@ -20,6 +20,196 @@ fn part(path: &Path, height: u32) {
     run(&mut s, "file.save", json!({"path": path}));
 }
 
+fn threaded_part(path: &Path, length: Option<u32>) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 10, "body_name": "Stud"}));
+    if let Some(length) = length {
+        run(&mut s, "solid.thread", json!({"face": [3,0,5], "designation": "M6", "length": length, "from": [3,0,0]}));
+    }
+    run(&mut s, "file.save", json!({"path": path}));
+    s
+}
+
+#[test]
+fn linked_cosmetic_threads_keep_their_bodies_placements_and_saved_records() {
+    let dir = folder("cosmetic-threads-insert");
+    let file = dir.join("part.sc");
+    let mut source = threaded_part(&file, Some(5));
+    run(&mut source, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [20,0,0], "body_name": "Plate"}));
+    run(&mut source, "solid.hole", json!({"position": [30,10,10], "direction": [0,0,-1], "thread": "M6", "depth": 8, "thread_depth": 4}));
+    run(&mut source, "file.save", json!({"path": file}));
+    let expected = source.world_state().unwrap().threads.clone();
+    assert_eq!(expected.len(), 2);
+    let mut s = Session::default();
+    // A name collision must not attach the imported thread to this unrelated body.
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Stud"}));
+    let inserted = run(&mut s, "component.insert_design", json!({"path": file, "translate": [40,0,0]}));
+    let feature = inserted["feature"].as_u64().unwrap();
+    let component = inserted["component"].as_u64().unwrap();
+    assert_eq!(s.model.state().threads.len(), 2, "Insert Design must keep cosmetic threads and threaded holes");
+    run(&mut s, "component.insert_design", json!({"path": file, "reuse": true, "translate": [80,0,0]}));
+    let check = |s: &Session| {
+        let world = s.world_state().unwrap();
+        assert_eq!(world.threads.len(), 4);
+        for x in [40.0, 80.0] {
+            for original in &expected {
+                let placed = world
+                    .threads
+                    .iter()
+                    .find(|t| t.internal == original.internal && (t.axis_point.x - original.axis_point.x - x).abs() < 1e-6)
+                    .unwrap();
+                let body = world.bodies.iter().find(|b| b.name == placed.body).unwrap();
+                assert_eq!(s.doc.model_body_component(body), component);
+                assert_ne!(placed.body, "Stud");
+                let mut wanted = original.clone();
+                wanted.feature = feature;
+                wanted.body.clone_from(&placed.body);
+                wanted.axis_point.x += x;
+                assert_eq!(placed, &wanted);
+                assert!(!crate::cosmetic_threads::segments(body, &body.mesh(), &world.threads).is_empty());
+            }
+        }
+    };
+    check(&s);
+    let assembly = dir.join("assembly.sc");
+    run(&mut s, "file.save", json!({"path": assembly}));
+    std::fs::remove_file(&file).unwrap();
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": assembly}));
+    check(&reopened);
+    // A fresh evaluation must work without either the source or the saved model cache.
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+    // Older STEP readers may have stored these same two bodies in the opposite order.
+    let mut renumbered = (*s.doc).clone();
+    let f = renumbered.feature_mut(feature).unwrap();
+    assert_eq!(f.body_names.len(), 2);
+    f.body_names.reverse();
+    f.link_faces.reverse();
+    f.link_threads.reverse();
+    fn reverse_indices(nodes: &mut [solidcraft_doc::kernel::StepNode]) {
+        for node in nodes {
+            for index in &mut node.bodies {
+                assert!(*index < 2);
+                *index = 1 - *index;
+            }
+            reverse_indices(&mut node.children);
+        }
+    }
+    if let solidcraft_doc::FeatureKind::Import { components, .. } = &mut f.kind {
+        assert!(!components.is_empty());
+        reverse_indices(components);
+    }
+    check(&Session::new(renumbered));
+    run(&mut reopened, "component.break_link", json!({"component": component}));
+    check(&reopened);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_cosmetic_threads_follow_thread_only_updates_cached_reads_and_relink() {
+    let dir = folder("cosmetic-threads-update");
+    let file = dir.join("part.sc");
+    threaded_part(&file, Some(5));
+    let mut s = Session::default();
+    let first = run(&mut s, "component.insert_design", json!({"path": file}));
+    run(&mut s, "component.insert_design", json!({"path": file, "translate": [20,0,0]}));
+    assert_eq!(s.model.state().threads.len(), 2);
+    for length in [Some(8), None] {
+        threaded_part(&file, length);
+        let updated = run(&mut s, "component.update_links", json!({}));
+        assert_eq!(updated["updated"].as_array().unwrap().len(), 2, "{updated}");
+        let threads = s.model.state().threads.clone();
+        assert_eq!(threads.len(), if length.is_some() { 2 } else { 0 });
+        for t in threads {
+            assert!((t.end - t.start - 8.0).abs() < 1e-6);
+        }
+        assert_eq!(run(&mut s, "component.update_links", json!({}))["unchanged"].as_array().unwrap().len(), 2);
+    }
+    let other = dir.join("other.sc");
+    threaded_part(&other, Some(3));
+    run(&mut s, "component.relink", json!({"component": first["component"], "path": other}));
+    assert_eq!(s.model.state().threads.len(), 1);
+    let t = &s.model.state().threads[0];
+    assert!((t.end - t.start - 3.0).abs() < 1e-6);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.state().threads.is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_cosmetic_threads_on_split_bodies_warn_instead_of_duplicating_records() {
+    let dir = folder("cosmetic-threads-split");
+    let file = dir.join("part.sc");
+    let mut source = Session::default();
+    run(&mut source, "solid.cylinder", json!({"radius": 3, "height": 10, "body_name": "A"}));
+    run(&mut source, "solid.cylinder", json!({"radius": 3, "height": 10, "base": [20,0,0], "body_name": "B"}));
+    run(&mut source, "solid.combine", json!({"target": "A", "tools": ["B"], "operation": "join", "touching": "one_body"}));
+    run(&mut source, "solid.thread", json!({"face": [3,0,5], "designation": "M6", "length": 5, "from": [3,0,0]}));
+    run(&mut source, "file.save", json!({"path": file}));
+    assert_eq!(source.model.state().bodies.len(), 1);
+    assert_eq!(source.model.state().threads.len(), 1);
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": file}));
+    assert_eq!(s.model.state().bodies.len(), 2);
+    assert!(s.model.state().threads.is_empty());
+    let warnings = inserted["warnings"].as_array().unwrap();
+    assert!(warnings.iter().any(|w| w.as_str().is_some_and(|w| w.contains("cosmetic threads") && w.contains("split"))), "{inserted}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_cosmetic_threads_preserve_the_source_occurrence_frame() {
+    let dir = folder("cosmetic-threads-source-frame");
+    let file = dir.join("part.sc");
+    let mut source = Session::default();
+    let component = run(&mut source, "component.create", json!({"name": "Stud", "grounded": false}));
+    run(&mut source, "solid.cylinder", json!({"radius": 3, "height": 10}));
+    run(&mut source, "solid.thread", json!({"face": [3,0,5], "designation": "M6", "length": 5, "from": [3,0,0]}));
+    run(&mut source, "occurrence.move", json!({"occurrence": component["occurrence"], "axis": [1,0,0], "angle": "90 deg", "translate": [10,20,30]}));
+    run(&mut source, "file.save", json!({"path": file}));
+    let original = source.world_state().unwrap().threads[0].clone();
+    assert!((original.axis.y + 1.0).abs() < 1e-6);
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": file, "translate": [40,0,0]}));
+    let world = s.world_state().unwrap();
+    assert_eq!(world.threads.len(), 1);
+    let thread = &world.threads[0];
+    assert!((thread.axis_point.x - original.axis_point.x - 40.0).abs() < 1e-6);
+    assert!((thread.axis_point.y - original.axis_point.y).abs() < 1e-6);
+    assert!((thread.axis_point.z - original.axis_point.z).abs() < 1e-6);
+    for (got, wanted) in [(thread.axis.x, original.axis.x), (thread.axis.y, original.axis.y), (thread.axis.z, original.axis.z)] {
+        assert!((got - wanted).abs() < 1e-6);
+    }
+    let body = world.body(&thread.body).unwrap();
+    assert!(!crate::cosmetic_threads::segments(body, &body.mesh(), &world.threads).is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_cosmetic_threads_refuse_invalid_saved_records_without_partial_state() {
+    let dir = folder("cosmetic-threads-invalid");
+    let file = dir.join("part.sc");
+    threaded_part(&file, Some(5));
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": file}));
+    let feature = inserted["feature"].as_u64().unwrap();
+    for case in 0..3 {
+        let mut doc = (*s.doc).clone();
+        let record = &mut doc.feature_mut(feature).unwrap().link_threads[0][0];
+        match case {
+            0 => record.radius = -1.0,
+            1 => record.end = record.start - 1.0,
+            _ => record.starts = 9,
+        }
+        let opened = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+        let error = opened.model.result(feature).unwrap().error.as_deref().unwrap();
+        assert!(error.contains("invalid cosmetic thread record"), "{error}");
+        assert!(opened.model.state().threads.is_empty());
+        assert!(opened.model.state().bodies.is_empty());
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 fn volume(s: &mut Session) -> f64 {
     run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
 }

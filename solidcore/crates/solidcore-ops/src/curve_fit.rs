@@ -4,7 +4,8 @@
 //! interpolation, The NURBS Book's §9.2.1; [`periodic_uniform`]; [`approx_knots`]: least
 //! squares at given parameters, §9.4.1; [`create_trimmed_nurbs_curve`]; [`certified_distance`]
 //! and [`interpolation_bound`]). Ops checks the inputs and converts; every fit comes with the
-//! kernel's certified bound of how far it is from what it fits.
+//! kernel's certified bound of how far it is from what it fits. A fit made elsewhere, as cubic
+//! pieces through its points, gets the same bounds ([`fit_spline_bounds`]).
 
 use solidcore::curve::from_parameters::{from_parameters, record_of as kernel_record, EdgeCurve};
 use solidcore::kernel::Kernel;
@@ -21,7 +22,7 @@ use solidcore_record::brep::{check_curve, Budget, Curve, Invalid, Natural, MAX_S
 use crate::body::Body;
 use crate::curve_knots::{nurb_of, record_of};
 use crate::order::{self, Order};
-use crate::session::{run, with_body};
+use crate::session::{run, with_body, Answer};
 use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
 
@@ -183,6 +184,100 @@ pub fn rebuild(curve: &Curve, degree: usize, spans: usize) -> Result<(Curve, f64
         let bound = certified_distance(&unit, &fit)?;
         Ok(record_of(&fit).map(|c| (c, bound)))
     })?
+}
+
+/// What [`fit_spline_bounds`] certifies, in the points' units.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FitSplineBounds {
+    /// How far, at most, a point given with a fit point is from the curve there
+    /// ([`interpolation_bound`]); 0 without such points.
+    pub deviation: f64,
+    /// How far, at most, the curve is from the polygon through its fit points, each span
+    /// against its chord at the same share of the span ([`certified_distance`]).
+    pub bulge: f64,
+}
+
+impl Answer for FitSplineBounds {}
+
+/// The kernel's bounds for a cubic spline fitted elsewhere through points (a sketch's fit
+/// point spline): `pieces` are its spans in order, each as four Bezier control points, the last
+/// point of one the first of the next, so its fit points are the pieces' ends. `near` lists
+/// points that stand for a fit point without being it (points merged into it), each with the
+/// fit point's index (0 to the number of pieces).
+///
+/// The spline is the clamped cubic B-spline with those control points and every interior
+/// break three times, the polygon the degree 1 spline through the fit points on the same
+/// breaks (even steps on `[0, 1]`: the bounds compare span with span, so they do not depend
+/// on where the breaks are).
+///
+/// # Errors
+/// [`Error::Argument`] without pieces, for more control points than [`CURVE_MAX_POINTS`] (or
+/// than a record holds), a coordinate that is not finite or past the coordinate bound, a piece
+/// that does not start where the one before it ends, or an index past the fit points; the
+/// kernel's status otherwise.
+pub fn fit_spline_bounds(
+    pieces: &[[[f64; 3]; 4]],
+    near: &[(usize, [f64; 3])],
+) -> Result<FitSplineBounds> {
+    let first = pieces.first().ok_or(Error::Argument)?;
+    let fit_points = pieces.len().checked_add(1).ok_or(Error::Argument)?;
+    let count = pieces
+        .len()
+        .checked_mul(3)
+        .and_then(|c| c.checked_add(1))
+        .ok_or(Error::Argument)?;
+    if count > CURVE_MAX_POINTS
+        || !pieces.iter().flatten().all(|p| coord_ok(p))
+        || !near.iter().all(|(i, p)| *i < fit_points && coord_ok(p))
+        || pieces.windows(2).any(|w| match w {
+            [a, b] => a[3] != b[0],
+            _ => true,
+        })
+    {
+        return Err(Error::Argument);
+    }
+    // the fit points' parameters: the distinct knots of the polygon through them
+    let polygon_knots = clamped_uniform(fit_points, 1).map_err(|_| Error::Argument)?;
+    let breaks = polygon_knots.get(1..=fit_points).ok_or(Error::Argument)?;
+    let (start, end) = match (breaks.first(), breaks.last()) {
+        (Some(s), Some(e)) => (*s, *e),
+        _ => return Err(Error::Argument),
+    };
+    let interior = breaks.get(1..pieces.len()).ok_or(Error::Argument)?;
+    let mut spline_knots = vec![start; 4];
+    spline_knots.extend(interior.iter().flat_map(|t| [*t; 3]));
+    spline_knots.extend([end; 4]);
+    let mut spline_points = vec![first[0]];
+    let mut polygon_points = vec![first[0]];
+    for [_, b, c, d] in pieces {
+        spline_points.extend([*b, *c, *d]);
+        polygon_points.push(*d);
+    }
+    let spline = nurb_of(&Curve::Spline {
+        knots: spline_knots,
+        points: spline_points,
+    })?;
+    let polygon = nurb_of(&Curve::Spline {
+        knots: polygon_knots.clone(),
+        points: polygon_points,
+    })?;
+    let params = near
+        .iter()
+        .map(|(i, _)| breaks.get(*i).copied().ok_or(Error::Argument))
+        .collect::<Result<Vec<f64>>>()?;
+    let data: Vec<Vec3> = near
+        .iter()
+        .map(|&(_, [x, y, z])| Vec3::new(x, y, z))
+        .collect();
+    run("curve_fit::fit_spline_bounds", |_| {
+        let bulge = certified_distance(&spline, &polygon)?;
+        let deviation = if data.is_empty() {
+            0.0
+        } else {
+            interpolation_bound(&spline, &params, &data)?
+        };
+        Ok(FitSplineBounds { deviation, bulge })
+    })
 }
 
 /// Record edge `edge` of `body` (through `order`, its record's [`Order`]) as a free curve: the
@@ -596,6 +691,53 @@ mod tests {
             ],
         };
         assert_eq!(rebuild(&arc, 3, 2), Err(Error::Argument));
+    }
+
+    /// One arch over the x axis, y = 3 s (1 - s) at x = 3 s: against its chord the control
+    /// points differ by (0, 1), which bounds the bulge (the arch itself rises 0.75). A point
+    /// standing for a fit point is bounded by its distance from it; without one the deviation
+    /// is 0.
+    #[test]
+    fn a_fit_spline_is_bounded_against_its_polygon_and_its_merged_points() {
+        let arch = [[[0., 0., 0.], [1., 1., 0.], [2., 1., 0.], [3., 0., 0.]]];
+        let b = fit_spline_bounds(&arch, &[]).unwrap();
+        assert_eq!(b.deviation, 0.0);
+        assert!(b.bulge >= 1.0 && b.bulge < 1.0 + 1e-9, "{b:?}");
+        let b = fit_spline_bounds(&arch, &[(1, [3., 0.5, 0.]), (0, [0.25, 0., 0.])]).unwrap();
+        assert!(b.deviation >= 0.5 && b.deviation < 0.5 + 1e-9, "{b:?}");
+        // Two spans: a straight one adds nothing, and the second fit point is the join.
+        let two = [
+            [[0., 0., 0.], [1., 1., 0.], [2., 1., 0.], [3., 0., 0.]],
+            [[3., 0., 0.], [4., 0., 0.], [5., 0., 0.], [6., 0., 0.]],
+        ];
+        let b = fit_spline_bounds(&two, &[(1, [3., 0., 0.125])]).unwrap();
+        assert!(b.bulge >= 1.0 && b.bulge < 1.0 + 1e-9, "{b:?}");
+        assert!(b.deviation >= 0.125 && b.deviation < 0.125 + 1e-9, "{b:?}");
+        let straight = [two[1]];
+        let b = fit_spline_bounds(&straight, &[]).unwrap();
+        assert!(b.bulge < 1e-9, "{b:?}");
+    }
+
+    #[test]
+    fn bad_fit_spline_pieces_are_refused() {
+        let arch = [[0., 0., 0.], [1., 1., 0.], [2., 1., 0.], [3., 0., 0.]];
+        assert_eq!(fit_spline_bounds(&[], &[]), Err(Error::Argument));
+        let apart = [
+            arch,
+            [[3., 1., 0.], [4., 0., 0.], [5., 0., 0.], [6., 0., 0.]],
+        ];
+        assert_eq!(fit_spline_bounds(&apart, &[]), Err(Error::Argument));
+        let mut nan = arch;
+        nan[1][1] = f64::NAN;
+        assert_eq!(fit_spline_bounds(&[nan], &[]), Err(Error::Argument));
+        assert_eq!(
+            fit_spline_bounds(&[arch], &[(2, [0., 0., 0.])]),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            fit_spline_bounds(&[arch], &[(0, [f64::INFINITY, 0., 0.])]),
+            Err(Error::Argument)
+        );
     }
 
     /// Whether `a` and `b` are within `tol` of each other in every coordinate.

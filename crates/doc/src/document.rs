@@ -64,6 +64,9 @@ pub enum PlaneRef {
     /// Another plane rotated about a line (in world coordinates) by an angle expression. With
     /// `line`, an edge or round face of the model ([`crate::construct::model_axis`]), the line is
     /// found there on each evaluation and `axis_origin`/`axis_dir` are where it was when picked.
+    /// `line` can also be a construction axis ([`crate::construct::GeoRef::Axis`], by name),
+    /// found on each evaluation the same way; without `line`, `axis_origin`/`axis_dir` are the
+    /// fixed axis (how designs saved before a construction axis was followed hold one).
     /// With `direction_only`, only the axis direction is used: it is projected onto the base
     /// (nothing of that projection is kept as geometry) and the plane turns about the line
     /// through `pivot`, or through the base origin when `pivot` is absent.
@@ -393,6 +396,20 @@ pub struct Extent {
     /// it set, so they keep the bodies they were built with.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub to_body_apart: bool,
+    /// Where each other component stood, relative to this extrude's own, when To / From Object
+    /// was picked (#16732). The pick is measured against the model as it was then, so a joint
+    /// that slides the drawer does not stretch a body that ends at the frame. Designs saved
+    /// before it carry none and keep measuring against the placements shown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub picked_placements: Vec<PickedPlacement>,
+}
+
+/// A component's placement relative to a feature's own component, as it was when the feature
+/// picked something in it ([`Extent::picked_placements`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PickedPlacement {
+    pub component: u64,
+    pub placement: crate::Mat,
 }
 
 /// Thin Extrude: a wall of constant thickness along sketch curves instead of the profiles.
@@ -1035,6 +1052,11 @@ pub enum FeatureKind {
         /// The tapped thread's hand: right (the default) or left; never both.
         #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
         hand: crate::thread_forms::ThreadHand,
+        /// The tapped thread's tolerance class as written, such as `6H` or `2B`
+        /// ([`crate::TappedThread::check_class`]): what a drawing's callout adds to the thread. It
+        /// changes neither the drill nor a modelled thread. None: no class given.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread_class: Option<String>,
         /// The tapped thread cut into the wall (the groove between its teeth, as a modelled
         /// `solid.thread` cuts it) instead of only listed.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -1457,6 +1479,11 @@ pub enum FeatureKind {
         /// What happens to a cell the field's edge crosses.
         #[serde(default = "default_cell_clip")]
         clip: solidcore_record::cell_grid::Clip,
+        /// The least clearance from a cell to every edge of the field and its keep-outs, with
+        /// `clip: whole` (default 0: a cell may touch an edge).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Margin")]
+        margin: Option<Expr>,
         /// How deep the cells go. Unused with `through_all`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Depth")]
@@ -3289,6 +3316,10 @@ pub struct Feature {
     /// its faces are named after them and references follow them through Update Links (#3330).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link_faces: Vec<Vec<String>>,
+    /// Cosmetic threads carried with a linked Import, by the file's body index. Their
+    /// coordinates are in the imported geometry's frame; evaluation assigns local identities.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub link_threads: Vec<Vec<crate::ThreadInfo>>,
     /// What a join of this feature makes of pieces that share no face: those that touch along an
     /// edge or at a point become separate bodies and those that touch nothing stay one body (the
     /// default), or every piece stays one body.
@@ -4440,6 +4471,7 @@ impl Document {
             pattern_names_in_order: false,
             inserted: false,
             link_faces: Vec::new(),
+            link_threads: Vec::new(),
             touching: Touching::Separate,
             kind,
         };
