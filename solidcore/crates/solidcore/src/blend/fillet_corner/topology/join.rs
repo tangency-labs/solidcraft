@@ -446,6 +446,36 @@ fn largest_ball_on_side_edge(
     Ok(Some(f1.max(f2)))
 }
 
+/// Not the fork's (#17224): whether the edge of `eu` has its end other than `vertex` on the
+/// face `face` (a vertex of one of that face's edges).
+///
+/// # Errors
+/// Those of the topology queries.
+fn far_end_on_face(
+    target: &Brep,
+    eu: EdgeuseId,
+    vertex: Option<crate::topology::VertexId>,
+    face: FaceId,
+) -> Result<bool> {
+    let Some(e) = eu1::edge(target, eu)? else {
+        return Ok(false);
+    };
+    let Some(far) = crate::topology::edge::other_vertex(target, e, vertex)? else {
+        return Ok(false);
+    };
+    if Some(far) == vertex {
+        return Ok(false);
+    }
+    for g in crate::topology::face::p4::edges(target, face, None, false, None)? {
+        if crate::topology::edge::start_vertex(target, g)? == Some(far)
+            || crate::topology::edge::end_vertex(target, g)? == Some(far)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 impl FilletCorner {
     /// `SmBlendCorner::MakeJoinTopology`: the blends end on one shared section, one
     /// `SM_FE_CROSS_SECTION` corner edge with the first blend on its primary edge use and
@@ -514,9 +544,17 @@ impl FilletCorner {
         {
             return Ok(JoinTopology::RefusedUnequalOffsets { blend, builds });
         }
-        // (#17224) a side whose section end is where the rails cross its edge: the first
-        // blend, a constant round, must have a ball of its radius touching that edge
-        if let (Some(&Some(id)), Some(&eu1_)) = (solver_eu_solvers.first(), solver_eus.first()) {
+        // (#17224) a side whose section end is where the rails cross its edge, that edge
+        // running from the corner's vertex to a vertex of the blends' other face: the first
+        // blend, a constant round, must have a ball of its radius touching that edge. There
+        // the ball touching the edge shrinks to nothing at both its ends (on both faces), and
+        // past them the edge's line leaves its face across the other face, so the contact line
+        // crosses the edge between its ends or nowhere. An edge running on to another face (a
+        // rim's seam down a wall) is not judged: its contact line may cross the edge's line past
+        // its far end (`calc_rail_int_edgeuse`'s run-on), as a rim round past its wall does
+        if let (2, Some(&Some(id)), Some(&eu1_)) =
+            (blends, solver_eu_solvers.first(), solver_eus.first())
+        {
             if let Some(SolverObject::ConstantRadius(object)) =
                 solvers.get(id.0 as usize).and_then(Option::as_ref)
             {
@@ -531,6 +569,9 @@ impl FilletCorner {
                     else {
                         continue;
                     };
+                    if !far_end_on_face(target, only, self.vertex, other_face)? {
+                        continue;
+                    }
                     let side_eu = find_side_edgeuse(target, eu1_, only)?
                         .ok_or_else(|| SolidError::blend_missing(OP, "the side edge use"))?;
                     if let Some(builds) =
