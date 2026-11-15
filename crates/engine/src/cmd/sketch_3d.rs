@@ -179,6 +179,9 @@ fn move3d(s: &mut Session, p: &Value) -> Result<Value> {
         if p.get("wire").is_some() {
             return Err(bad(cmd, "give `wire` or `point`, not both"));
         }
+        if p.get("index").is_some() {
+            return Err(bad(cmd, "`index` goes with `wire`"));
+        }
         let point = point.as_str().ok_or_else(|| bad(cmd, "`point` must be a sketch point id"))?.to_string();
         return lift_point(s, p, cmd, &point);
     }

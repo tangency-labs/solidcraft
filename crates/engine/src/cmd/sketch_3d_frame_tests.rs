@@ -665,3 +665,16 @@ fn a_plane_point_lift_to_world_inside_a_moved_component() {
     near(ws.wires[ws.wire_index(&made[0]).unwrap()].fit[1], Vec3::new(20.0, 40.0, 44.0));
     near(ws.wires[ws.wire_index(&made[1]).unwrap()].fit[0], Vec3::new(20.0, 40.0, 44.0));
 }
+
+/// `index` names a fit point of a `wire`; with `point` it would be silently dropped, so it is
+/// refused and the doc is untouched.
+#[test]
+fn a_plane_point_lift_refuses_an_index() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
+    let l = s.doc.sketch(sketch).unwrap().curves[0].id.clone();
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move3d", &json!({"point": format!("{l}.end"), "index": 2, "to": [0, 0, 1]})).unwrap_err().to_string();
+    assert!(e.contains("`index` goes with `wire`"), "{e}");
+    assert_eq!(s.doc.to_json(), before, "a refused lift changes nothing");
+}

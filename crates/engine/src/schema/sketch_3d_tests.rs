@@ -167,6 +167,7 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"wire": 3, "to": [1, 2, 3]}), false),
             (json!({"point": "l1.end", "by": [0, 0, 1]}), true),
             (json!({"point": "p3", "wire": "w1", "to": [1, 2, 3]}), false),
+            (json!({"point": "p3", "index": 2, "to": [1, 2, 3]}), false),
             (json!({"point": 3, "to": [1, 2, 3]}), false),
             (json!({"point": "p3"}), false),
         ],

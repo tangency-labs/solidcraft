@@ -123,6 +123,7 @@ fn move_required(schema: &mut Schema) {
         json!([
             {"anyOf": [{"required": ["wire"]}, {"required": ["point"]}]},
             {"not": {"required": ["wire", "point"]}},
+            {"not": {"required": ["point", "index"]}},
             {"anyOf": [{"required": ["to"]}, {"required": ["by"]}]},
         ]),
     );
