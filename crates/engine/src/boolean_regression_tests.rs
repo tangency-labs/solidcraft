@@ -1941,3 +1941,35 @@ fn fins_meeting_at_the_axis_join_into_their_hub() {
     let v = volume(&s, "Body1");
     assert!((v - 4624.24).abs() < 0.05, "{v}");
 }
+
+/// #17004: a body whose 2 mm round has two pieces swept 0.45 degrees (plane-to-cone rounds kept as
+/// surfaces of revolution) could not be read back into the kernel, so every later operation on it
+/// failed with "an exact net's NURBS form is not a surface of revolution's parametrisation". The
+/// design is #16948's; a 1 mm round on the cylinder's top rim, far from those pieces, now builds.
+#[test]
+fn a_body_with_round_pieces_swept_under_a_degree_takes_a_later_round() {
+    use std::f64::consts::PI;
+    let mut s = replay(include_str!("../../../examples/regressions/round_pieces_swept_under_a_degree.json"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let counts = |s: &Session| {
+        let m = solidcraft_kernel::measure(&s.model.state().body("Body1").unwrap().body).unwrap();
+        (m.merged.faces, m.merged.edges, m.merged.vertices)
+    };
+    assert_eq!(counts(&s), (17, 39, 24));
+    let before = volume(&s, "Body1");
+    s.execute("solid.fillet", &json!({"body": "Body1", "edges": [[0.0, 22.5, 30.0]], "radius": 1})).unwrap();
+    let state = s.model.state();
+    let body = &state.body("Body1").unwrap().body;
+    assert_eq!(body.shell_count(), 1);
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // The rim, one circle with one vertex, becomes the round's face between two circles, with its
+    // seam: one face, two edges (the second circle and the seam) and the second circle's vertex more.
+    assert_eq!(counts(&s), (18, 41, 25));
+    // Pappus: the round takes off the corner between a square and its 1 mm quarter circle,
+    // r^2 (1 - pi/4), whose centroid lies r (10 - 3 pi) / (12 - 3 pi) in from each face, swept
+    // round the rim of radius 22.5.
+    let (r, rim) = (1.0, 22.5);
+    let removed = 2.0 * PI * (rim - r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI)) * r * r * (1.0 - PI / 4.0);
+    let got = before - volume(&s, "Body1");
+    assert!((got - removed).abs() < 1e-5, "removed {got} mm³, the rim's round takes {removed}");
+}

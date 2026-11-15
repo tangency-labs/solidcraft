@@ -13,6 +13,11 @@
 //! tangency-labs/solidcraft#15108 is the same family at r5 on a 40 x 30 x 20 box: its open
 //! shell failed only with the box centred on `y = 0` (the ball extension's farthest-point
 //! angle, `surface::extend::ball`).
+//!
+//! tangency-labs/solidcraft#16983: a rib thinner than twice the wall, its top edges rounded
+//! thinner than the wall, shelled open at the bottom. The offsets of the rib's two sides
+//! cross over each other, so the offset of the rib's top and of the end faces across the
+//! rib turn inside out; the shell was refused ("an edge of its offset closes to nothing").
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -27,6 +32,7 @@ use core::f64::consts::PI;
 
 use offset_fixture::{api_shell, planar_faces_at, report, shell, volume};
 use solidcore::blend::fillet_executive::api::fillet_edges;
+use solidcore::boolean::api_brep::boolean_union;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
@@ -198,6 +204,76 @@ fn issue_15108_open_shell_of_a_rounded_box_is_independent_of_position() {
         assert!(
             (got - shifted).abs() <= 1e-9 * shifted,
             "centre {c:?}: {got} vs {shifted} at [20, 15, 10]"
+        );
+    }
+}
+
+/// #16983: a 40 x 20 x 10 box with a 3 x 10 rib along its back face (y 0..3, z 10..20),
+/// the rib's two top edges rounded r0.75, shelled `t` inward open at the bottom, with
+/// SolidCraft's fix set (as [`shell_15108`]). Returns the shell's volume.
+fn shell_ribbed_box(t: f64) -> f64 {
+    let mut fixes = UpstreamFixes::all();
+    fixes.fillet_refuse_rounds_breaking_through = false;
+    fixes.fillet_round_ends_on_outline = false;
+    let mut k = Kernel {
+        fixes,
+        ..Kernel::default()
+    };
+    let base = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 20.0, 10.0).unwrap();
+    let rib = create_box(&mut k, Point3::new(0.0, 0.0, 10.0), 40.0, 3.0, 10.0).unwrap();
+    let mut b = boolean_union(&mut k, base, rib).unwrap();
+    let top_edges: Vec<_> = b
+        .edges()
+        .iter()
+        .filter(|(_, e)| {
+            let c = e.curve.as_ref().unwrap();
+            let p = c.evaluate_point(&k, e.interval.min()).unwrap();
+            let q = c.evaluate_point(&k, e.interval.max()).unwrap();
+            (p.z - 20.0).abs() < 1e-9 && (q.z - 20.0).abs() < 1e-9 && (p.y - q.y).abs() < 1e-9
+        })
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(top_edges.len(), 2, "the rib's top edges");
+    fillet_edges(&mut k, &mut b, &top_edges, 0.75, 1, 1, 1.0).unwrap();
+    let bottom = planar_faces_at(&k, &b, 2, 0.0);
+    assert_eq!(bottom.len(), 1, "the bottom face");
+    let options = ShellOptions {
+        offset: OffsetOptions {
+            distance: -t,
+            extend_convex_edges: true,
+            merge_results: true,
+        },
+        create_offset_solid: true,
+        merge_sheet_side_walls: true,
+    };
+    let mut r = api_shell(&mut k, &mut b, options, &bottom)
+        .unwrap_or_else(|e| panic!("wall {t}: the shell fails: {e:?}"));
+    solidcore::topology::integrity::check(&r).unwrap();
+    assert!(brep_is_manifold_solid(&r).unwrap(), "wall {t}");
+    // the check SolidCraft runs on every result (`CheckLevel::All`)
+    let check = check_brep(&mut k, &mut r, CheckLevel::Level2).unwrap();
+    assert!(
+        check.is_valid(),
+        "wall {t}: {:?}",
+        check.failures().collect::<Vec<_>>()
+    );
+    volume(&k, &mut r).unwrap()
+}
+
+/// #16983: walls of 1.6 and 2, thicker than half the 3 mm rib, leave the rib solid. The
+/// cavity is the box less its walls, `(40 - 2t) x (20 - 2t) x (10 - t)`: the rib's sides'
+/// offsets cross, and its rounds' offsets collapse (the wall is thicker than r0.75), so
+/// nothing of the cavity reaches into the rib. The shell is the body (the box, the rib, less
+/// the two rounds' `(1 - pi/4) r^2` over the 40 length) less that cavity.
+#[test]
+fn issue_16983_a_rib_thinner_than_two_walls_stays_solid() {
+    let body = 40.0 * 20.0 * 10.0 + 40.0 * 3.0 * 10.0 - 2.0 * (1.0 - PI / 4.0) * 0.75 * 0.75 * 40.0;
+    for t in [1.6, 2.0] {
+        let want = body - (40.0 - 2.0 * t) * (20.0 - 2.0 * t) * (10.0 - t);
+        let got = shell_ribbed_box(t);
+        assert!(
+            (got - want).abs() <= 1e-6 * want,
+            "wall {t}: {got} vs {want}"
         );
     }
 }

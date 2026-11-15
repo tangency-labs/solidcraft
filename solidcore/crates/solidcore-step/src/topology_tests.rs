@@ -751,6 +751,42 @@ fn a_band_whose_vertices_line_up_across_a_hole_gets_its_seam_clear_of_it() {
     assert!(angle.abs() > east, "the seam at {angle} rad crosses the hole");
 }
 
+/// A piece of a thread's edge that comes within its pad of a ruling's angle without crossing it
+/// (a near miss) may meet the ruling anywhere over its hull's heights, not only at the end nearer
+/// in angle (`wound_band_seam` asks `seams::meets` of every piece of every loop): here both ends
+/// are below the ruling's vertex and the middle rises above it, so a seam up the ruling is blocked
+/// from the vertex on. Read at its nearer end, the piece lies behind the vertex and is no matter
+/// (#16930).
+#[test]
+fn a_near_miss_piece_blocks_a_seam_over_its_whole_height_range() {
+    let tol = 1e-3;
+    let frame = seams::Perpendicular::about(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+    // An arch on a cylinder of radius 10, 100 to 400 um short of the ruling at angle 0 (the pad
+    // reaches tol / r = 100 um): its ends at height -2, its middle's control points at 6.
+    let at = |angle: f64, z: f64| [10.0 * angle.cos(), 10.0 * angle.sin(), z];
+    let arch = BCurve::Spline {
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        points: vec![at(-4e-5, -2.0), at(-3e-5, 6.0), at(-2e-5, 6.0), at(-1e-5, -2.0)],
+    };
+    let form = Some(CurveEval::new(&arch).unwrap());
+    let pieces = frame.pieces(&arch, [0.0, 1.0], tol);
+    let [piece] = pieces.as_slice() else { panic!("{} pieces", pieces.len()) };
+    let height = |p: Vec3| p.z;
+    let reach = |along: &dyn Fn(f64) -> f64| match seams::meets(&frame, &form, piece, 0.0, height, along, tol).unwrap() {
+        seams::Meets::Hull(reach) => reach,
+        seams::Meets::Clear => panic!("the ruling passes within the piece's pad"),
+        seams::Meets::Once { d, .. } => panic!("a crossing at {d}: the angle never reaches the ruling's"),
+    };
+    // From a vertex at height 0 up: the hull's lowest point is behind it, so the piece is on the
+    // seam from the vertex.
+    assert_eq!(reach(&|h| h), Some(0.0));
+    // From a vertex at height -3 up: the whole hull is ahead, its lowest point 1 mm along.
+    assert_eq!(reach(&|h| h + 3.0), Some(1.0));
+    // From a vertex at height 7: up, the hull is behind it; down, its lowest point is 1 mm along.
+    assert_eq!(reach(&|h| h - 7.0), None);
+    assert_eq!(reach(&|h| 7.0 - h), Some(1.0));
+}
+
 /// A seam's angle test (`seams::angular_sign`): a ruling's angular speed is 0, and rounding
 /// leaves its one coefficient a few 1e-17 either way; that is not one way. An arc's is.
 #[test]
@@ -2192,6 +2228,30 @@ fn an_edge_to_a_vertex_a_hair_off_a_closed_splines_seam_ends_at_the_seam() {
     let eval = CurveEval::new(&m.curve).unwrap();
     let at = |t: f64, q: [f64; 3]| eval.point(t).unwrap().dist(v3(q)) < 1e-9;
     assert!(at(m.interval[0], mid) && at(m.interval[1], far), "{:?}", m.interval);
+}
+
+/// A closed edge (one vertex at both ends) on a closed spline whose vertex is half way round
+/// the curve, not at its seam (a thread's end loop as some exporters write it): the edge is the
+/// whole curve started at its vertex, so both its ends are the vertex. It was read from the
+/// curve's own seam, its vertex 5 mm off both ends, and the face refused (#16930).
+#[test]
+fn a_closed_edge_whose_vertex_is_off_its_closed_splines_seam_starts_there() {
+    let square = || BCurve::Spline {
+        knots: vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0],
+        points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]],
+    };
+    let mid = [10.0, 5.0, 0.0];
+    let m = open_or_closed(square(), mid, mid, true, true, 1e-3).unwrap();
+    assert!((m.interval[1] - m.interval[0] - 4.0).abs() < 1e-12, "{:?}", m.interval);
+    let eval = CurveEval::new(&m.curve).unwrap();
+    for t in m.interval {
+        assert!(eval.point(t).unwrap().dist(v3(mid)) < 1e-12, "{t}");
+    }
+    // Half way round from the vertex: the opposite side's middle, the curve's shape kept.
+    assert!(eval.point(m.interval[0] + 2.0).unwrap().dist(v3([0.0, 5.0, 0.0])) < 1e-12);
+    // A vertex at the seam keeps the curve as it is.
+    let m = open_or_closed(square(), [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], true, true, 1e-3).unwrap();
+    assert_eq!(m.interval, [0.0, 4.0]);
 }
 
 /// A spline surface whose first and last control columns lie within the tolerance of each other

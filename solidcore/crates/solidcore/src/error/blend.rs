@@ -20,6 +20,7 @@
 //! | [`BlendFailure::StageFailed`], [`BlendFailure::SkinMeasureNotFinite`] | [`ErrorKind::StageFailed`] (127) |
 //! | [`BlendFailure::SkinPastStationCap`]   | [`ErrorKind::NotWithinTolerance`] (9)         |
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
+//! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -39,6 +40,7 @@
 //! | [`BlendFailure::OutsideDomain`]        | `SM_ERR_OUTSIDE_OF_DOMAIN`        |
 //! | [`BlendFailure::NotWithinTolerance`]   | `SM_ERR_NOT_WITHIN_TOLERANCE`     |
 //! | [`BlendFailure::PassedOn`]             | the status of the stage passed on |
+//! | [`BlendFailure::NotCertified`]         | `SM_ERR`                          |
 //!
 //! **The phrase causes** ([`BlendFailure::Failed`] to [`BlendFailure::PassedOn`]) are the
 //! shape the blend sites were converted to before the record, some of them refusals not yet
@@ -177,6 +179,24 @@ pub enum BlendFailure {
         /// The status the routine answers with (a comparison detail).
         status: i32,
     },
+    /// A blend surface not certified within its tolerance in the work its certificate is
+    /// allowed: the G^n section's certificate would halve spans past its budget
+    /// ([`crate::blend::fillet_section::section::GN_HALVING_BUDGET`]), or has more stations
+    /// than the fork's stop (4096), with spans still over its target (a tenth of the
+    /// tolerance). The round is refused (not built), but not as a fact of its geometry: the
+    /// budget, not the geometry, decides it, so its class is [`ErrorKind::NotWithinTolerance`],
+    /// not one of the refusal classes ([`ErrorKind::is_refusal`] is false), and no size is
+    /// named (the budget says nothing about which size would certify). Like a cancellation, no fallback turns it into
+    /// another result ([`crate::SolidError::is_unported_or_cancelled`]). Status `SM_ERR`: it
+    /// stands for the fork's own stop, the status `SM_ERR` with "the blend could not be
+    /// certified within its tolerance", which the port returned as
+    /// [`BlendFailure::Failed`] before it was typed.
+    NotCertified {
+        /// The spans halved when it was refused.
+        halvings: usize,
+        /// The certificate's stations when it was refused.
+        stations: usize,
+    },
 }
 
 /// The class of a blend larger than its faces allow, for `reason`: one of the blend's
@@ -238,6 +258,7 @@ impl BlendFailure {
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
+            | Self::NotCertified { .. }
             | Self::Failed(_) => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
@@ -255,8 +276,9 @@ impl BlendFailure {
     /// [`ErrorKind::StationDidNotConverge`], [`ErrorKind::TrimLeaks`] for an open or leaking
     /// trim loop, [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`] and
     /// [`BlendFailure::SkinMeasureNotFinite`], [`ErrorKind::NotWithinTolerance`] for
-    /// [`BlendFailure::SkinPastStationCap`] and [`ErrorKind::BallsFold`] for
-    /// [`BlendFailure::BallsNest`]. A phrase
+    /// [`BlendFailure::SkinPastStationCap`] and for a surface not certified within its
+    /// tolerance in its work budget ([`BlendFailure::NotCertified`]), and
+    /// [`ErrorKind::BallsFold`] for [`BlendFailure::BallsNest`]. A phrase
     /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
     /// [`ErrorKind::InvalidInput`], ...), as before the record ([`BlendFailure::is_phrase`]).
     #[must_use]
@@ -268,6 +290,7 @@ impl BlendFailure {
             Self::StageFailed | Self::SkinMeasureNotFinite { .. } => ErrorKind::StageFailed,
             Self::SkinPastStationCap { .. } => ErrorKind::NotWithinTolerance,
             Self::BallsNest { .. } => ErrorKind::BallsFold,
+            Self::NotCertified { .. } => ErrorKind::NotWithinTolerance,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -295,7 +318,8 @@ impl BlendFailure {
             | Self::StageFailed
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
-            | Self::BallsNest { .. } => false,
+            | Self::BallsNest { .. }
+            | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -312,7 +336,9 @@ impl BlendFailure {
     /// [`crate::SolidError::Upstream`] before solidcore described it): the decisions that
     /// read an upstream status ([`crate::error::upstream_status`]) treat it as that status,
     /// and the goldens read it. Every cause does: the status stays reachable for the goldens
-    /// while the cause, not the status, decides the type.
+    /// while the cause, not the status, decides the type. [`BlendFailure::NotCertified`]
+    /// stands for the fork's `SM_ERR` at its certificate's stop (and, past the work budget
+    /// solidcore adds, for the same stop reached sooner).
     #[must_use]
     pub const fn replaces_upstream_status(&self) -> bool {
         match self {
@@ -332,7 +358,8 @@ impl BlendFailure {
             | Self::NotConverged(_)
             | Self::OutsideDomain(_)
             | Self::NotWithinTolerance(_)
-            | Self::PassedOn { .. } => true,
+            | Self::PassedOn { .. }
+            | Self::NotCertified { .. } => true,
         }
     }
 }
@@ -393,6 +420,11 @@ impl core::fmt::Display for BlendFailure {
             | Self::PassedOn { what, .. } => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
+            Self::NotCertified { halvings, stations } => write!(
+                f,
+                "the blend could not be certified within its tolerance in the work allowed \
+                 ({halvings} spans halved, {stations} stations)"
+            ),
         }
     }
 }
@@ -1003,7 +1035,8 @@ mod tests {
             | BlendFailure::StageFailed
             | BlendFailure::SkinPastStationCap { .. }
             | BlendFailure::SkinMeasureNotFinite { .. }
-            | BlendFailure::BallsNest { .. } => None,
+            | BlendFailure::BallsNest { .. }
+            | BlendFailure::NotCertified { .. } => None,
             BlendFailure::Failed(_) => Some("BlendFailure::Failed("),
             BlendFailure::Missing(_) => Some("BlendFailure::Missing("),
             BlendFailure::InvalidValue(_) => Some("BlendFailure::InvalidValue("),
@@ -1023,7 +1056,7 @@ mod tests {
     /// sites lowers the pin to the new count, and a new site builds a typed cause.
     #[test]
     fn the_phrase_cause_sites_only_go_down() {
-        const PHRASE_CAUSE_SITES: usize = 1405;
+        const PHRASE_CAUSE_SITES: usize = 1404;
         use crate::blend::fillet_executive::NoRoomReason as R;
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),
@@ -1049,6 +1082,10 @@ mod tests {
             BlendFailure::TrimLoopOpen,
             BlendFailure::TrimLoopDoesNotSeparate,
             BlendFailure::StageFailed,
+            BlendFailure::NotCertified {
+                halvings: 0,
+                stations: 0,
+            },
             BlendFailure::Failed("x"),
             BlendFailure::Missing("x"),
             BlendFailure::InvalidValue("x"),

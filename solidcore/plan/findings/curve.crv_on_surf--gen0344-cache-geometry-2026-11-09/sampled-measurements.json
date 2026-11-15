@@ -1,0 +1,25 @@
+{
+  "method": "Independent direct de Boor evaluation of the supplied nonrational UV curve and tensor-product surface; these samples are measurements, not a global certificate.",
+  "samples": 20001,
+  "approximation_max_errors": {
+    "before": [
+      0.00973290789555951,
+      3.96295
+    ],
+    "after": [
+      0.00973290789555951,
+      3.96295
+    ]
+  },
+  "maximum_before_after_cache_distance": [
+    0.002580603076689684,
+    3.8944
+  ],
+  "returned_parameter_definition_point": [
+    1.1949430271064712,
+    1.0305176070873374,
+    0.10932497021556849
+  ],
+  "returned_parameter_distance": 3.1935980469430203,
+  "returned_parameter_reported_distance": 3.1935980469430203
+}
