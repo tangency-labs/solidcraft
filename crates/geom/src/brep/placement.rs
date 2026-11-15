@@ -183,7 +183,7 @@ impl Rigid {
             SupportRecord::Blend(b) => {
                 let net = self.nurbs_surface(&b.net)?;
                 let mut definition = self.procedural(&b.definition)?;
-                definition.bound = widened(definition.bound, net_points(&net)?);
+                definition.bound = widened(definition.bound, &net_points(&b.net)?, &net_points(&net)?);
                 SupportRecord::Blend(Box::new(ProceduralBlendRecord { definition, net }))
             }
         })
@@ -237,13 +237,16 @@ fn net_points(net: &NurbsSurfaceRecord) -> Option<Vec<([f64; 3], f64)>> {
         .collect()
 }
 
-/// A procedural blend's bound after a rigid motion of its net, as the kernel widens it (its
-/// `transform_rounding`): each homogeneous coordinate is three products, their sum and the
-/// weighted translation (six operations) on coordinates of at most the moved net's size, divided
-/// by the least weight.
-fn widened(bound: f64, net: Vec<([f64; 3], f64)>) -> f64 {
-    let size = net.iter().fold(0.0_f64, |a, (p, _)| a.max(dot(*p, *p).sqrt()));
-    let (lo, hi) = net.iter().fold((f64::INFINITY, 0.0_f64), |(lo, hi), (_, w)| (lo.min(*w), hi.max(*w)));
+/// A procedural blend's bound after a rigid motion of its net, `before` it moved and `after`, as
+/// the kernel widens it (its `transform_rounding`): each homogeneous coordinate is three products,
+/// their sum and the weighted translation (six operations). Their terms are of the point before
+/// (`|x|`) and the translation (`|t| <= |x| + |y|`, `y` the point after), so of at most twice the
+/// net's size before plus its size after: a net moved from far away to near the origin rounds as
+/// where it was. Divided by the least weight.
+fn widened(bound: f64, before: &[([f64; 3], f64)], after: &[([f64; 3], f64)]) -> f64 {
+    let size_of = |net: &[([f64; 3], f64)]| net.iter().fold(0.0_f64, |a, (p, _)| a.max(dot(*p, *p).sqrt()));
+    let size = 2.0 * size_of(before) + size_of(after);
+    let (lo, hi) = after.iter().fold((f64::INFINITY, 0.0_f64), |(lo, hi), (_, w)| (lo.min(*w), hi.max(*w)));
     let nu = 6.0 * (f64::EPSILON / 2.0);
     bound + nu / (1.0 - nu) * (hi / lo) * size
 }
@@ -276,7 +279,7 @@ fn compose(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> [[f64; 4]; 4] {
 /// of a form not known to move.
 pub fn moved(brep: &Brep, motion: &Rigid) -> Option<Brep> {
     let mut out = brep.clone();
-    for f in &mut out.faces {
+    for (f, was) in out.faces.iter_mut().zip(&brep.faces) {
         f.surface = motion.surface(&f.surface)?;
         f.nurbs = match &f.nurbs {
             Some(n) => Some(motion.surface(n)?),
@@ -287,7 +290,7 @@ pub fn moved(brep: &Brep, motion: &Rigid) -> Option<Brep> {
         if let Surface::Blend { definition } = &mut f.surface
             && let BlendDefinition::Procedural(d) = definition.as_mut()
         {
-            d.bound = widened(d.bound, face_net(f.nurbs.as_ref()?)?);
+            d.bound = widened(d.bound, &face_net(was.nurbs.as_ref()?)?, &face_net(f.nurbs.as_ref()?)?);
         }
     }
     for e in &mut out.edges {

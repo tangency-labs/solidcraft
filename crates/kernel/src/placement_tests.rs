@@ -268,3 +268,40 @@ fn a_rounded_body_moves_exactly_as_the_kernel_moves_it() {
     }
     assert!(kinds.contains(&"exact") && kinds.contains(&"procedural"), "{kinds:?}");
 }
+
+/// The procedural rounds' bounds of a record.
+fn procedural_bounds(brep: &solidcore_record::brep::Brep) -> Vec<f64> {
+    use solidcore_record::brep::{Surface, blend::BlendDefinition};
+    brep.faces
+        .iter()
+        .filter_map(|f| match &f.surface {
+            Surface::Blend { definition } => match definition.as_ref() {
+                BlendDefinition::Procedural(d) => Some(d.bound),
+                BlendDefinition::ExactRound(_) => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// A move rounds as where the round was as well as where it lands: a round moved 2⁴⁰ away and
+/// back again lands where it began, but its coordinates were rounded at 2⁴⁰ on the way back, so
+/// the move back widens its bound by at least as much as the move out (by its size before the
+/// move, not the small size after it).
+#[test]
+fn a_round_moved_back_from_far_away_takes_in_the_rounding_where_it_was() {
+    use solidcraft_geom::brep::placement::{Rigid, moved};
+    let far = 1_099_511_627_776.0; // 2⁴⁰
+    let by = |t: f64| Rigid { rotation: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], translation: [t, t, 0.] };
+    let rounded = rounded_bodies();
+    let Some((_, tee)) = rounded.iter().find(|(what, _)| *what == "tee") else { panic!("no tee") };
+    let start = tee.record();
+    let out = moved(start, &by(far)).unwrap();
+    let back = moved(&out, &by(-far)).unwrap();
+    let (b0, b1, b2) = (procedural_bounds(start), procedural_bounds(&out), procedural_bounds(&back));
+    assert!(!b0.is_empty());
+    for ((a, b), c) in b0.iter().zip(&b1).zip(&b2) {
+        // The move back: its terms are of 2⁴⁰, though it lands near the origin.
+        assert!(c - b >= 1.5 * (b - a) && c - b > 1e-3, "{a:e} -> {b:e} -> {c:e}");
+    }
+}

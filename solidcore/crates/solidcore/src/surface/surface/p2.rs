@@ -3645,6 +3645,14 @@ impl Surface {
             }
             None => None,
         };
+        // the net's size before it moves, scaled: its rounding is of where it was too
+        let before = match (self.definition.as_deref(), &self.kind) {
+            (Some(KeptDefinition::Sweep(_)), SurfaceKind::BSpline(net)) => {
+                let factor = scale.map_or(1.0, |s| s.x.abs().max(s.y.abs()).max(s.z.abs()));
+                factor * crate::blend::fillet_section::recertify::net_size(net)?
+            }
+            _ => 0.0,
+        };
         self.transform_kind_at_depth(k, rotate_n_move, scale, depth)?;
         if let Some(moved) = moved {
             self.definition = moved;
@@ -3653,7 +3661,7 @@ impl Surface {
         if let (Some(KeptDefinition::Sweep(sweep)), SurfaceKind::BSpline(net)) =
             (self.definition.as_deref_mut(), &self.kind)
         {
-            sweep.add_motion_rounding(net)?;
+            sweep.add_motion_rounding(net, before)?;
         }
         Ok(())
     }

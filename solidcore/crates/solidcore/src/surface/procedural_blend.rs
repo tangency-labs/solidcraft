@@ -1412,11 +1412,12 @@ impl ProceduralBlend {
         }
         self.def.chamfer = self.def.chamfer.map(|c| c.scaled(factor));
         self.renew();
+        let before = factor * crate::blend::fillet_section::recertify::net_size(&self.net)?;
         self.net.transform_notifying(rotate_n_move, scale, notify)?;
         // (#2388) the bound is taken in the round's own frame, which moves with it: it
         // scales, and takes in the motion's own rounding where the round now lies
         self.def.bound = self.def.bound * factor
-            + crate::blend::fillet_section::recertify::transform_rounding(&self.net)?;
+            + crate::blend::fillet_section::recertify::transform_rounding(&self.net, before)?;
         Ok(())
     }
 }

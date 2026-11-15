@@ -504,6 +504,37 @@ fn a_moved_round_is_certified_again() {
     }
 }
 
+/// A move rounds as where the round was as well as where it lands: the root round moved
+/// 2^40 away and back lands where it began, but its coordinates were rounded at 2^40 on the
+/// way back, so the move back widens its bound by at least as much as the move out (by
+/// its net's size before the move, not the small size after it), and it is certified
+/// within that bound.
+#[test]
+fn a_round_moved_back_from_far_away_takes_in_the_rounding_where_it_was() {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    let k = kernel(true);
+    let far = 1_099_511_627_776.0; // 2^40
+    let (s, _, _) = root_round(&k);
+    let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+        panic!("not a blend")
+    };
+    let out = moved_root_round(&k, Point3::new(far, far, 0.0));
+    let mut back = out.clone();
+    let place = Axis2Placement::new(
+        Point3::new(-far, -far, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+    );
+    back.transform_at_depth(&k, &place, None, 0).unwrap();
+    let (b0, b1, b2) = (pb.bound(), out.bound(), back.bound());
+    assert!(
+        b2 - b1 >= 1.5 * (b1 - b0) && b2 - b1 > 1e-3,
+        "{b0:e} -> {b1:e} -> {b2:e}"
+    );
+    let got = back.recertify(&k).unwrap();
+    assert!(got <= b2, "{got:e} over {b2:e}");
+}
+
 /// #2388: a support keeps its analytic kind through the record. The square corner's
 /// supports are planes: their record labels them planes beside their NURBS forms, the
 /// rebuilt supports are planes again (derived from their forms), the record reads back bit for bit, and a rebuilt

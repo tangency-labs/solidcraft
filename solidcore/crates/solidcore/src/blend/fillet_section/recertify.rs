@@ -349,16 +349,30 @@ pub(crate) fn frame_centre(net: &BSplineSurface) -> Result<Vec3> {
     Ok(net_points(net)?.2)
 }
 
-/// The rounding of a rigid motion with a uniform scale applied to a net: each homogeneous
-/// coordinate is a sum of three products and the weighted translation (six operations),
-/// on coordinates of at most the moved net's size, divided by the least weight.
+/// The size of a net's control points: the largest distance of one from the origin, as
+/// [`transform_rounding`] takes the net before it moves.
 ///
 /// # Errors
 ///
 /// `SM_ERR` without NURB data.
-pub(crate) fn transform_rounding(net: &BSplineSurface) -> Result<f64> {
+pub(crate) fn net_size(net: &BSplineSurface) -> Result<f64> {
+    let (points, _, _) = net_points(net)?;
+    Ok(points.iter().fold(0.0_f64, |a, p| a.max(p.length())))
+}
+
+/// The rounding of a rigid motion with a uniform scale applied to a net (`net`, moved;
+/// `before`, its [`net_size`] before the motion, scaled): each homogeneous coordinate is
+/// a sum of three products and the weighted translation (six operations). Their terms are
+/// of the point before (`|x|`) and the translation (`|t| <= |x| + |y|`, `y` the point
+/// after), so of at most twice the size before plus the moved net's size: a net moved
+/// from far away to near the origin rounds as where it was. Divided by the least weight.
+///
+/// # Errors
+///
+/// `SM_ERR` without NURB data.
+pub(crate) fn transform_rounding(net: &BSplineSurface, before: f64) -> Result<f64> {
     let (points, weights, _) = net_points(net)?;
-    let m = points.iter().fold(0.0_f64, |a, p| a.max(p.length()));
+    let m = 2.0 * before + points.iter().fold(0.0_f64, |a, p| a.max(p.length()));
     let (w_lo, w_hi) = weights
         .iter()
         .fold((f64::INFINITY, 0.0_f64), |(lo, hi), &w| {

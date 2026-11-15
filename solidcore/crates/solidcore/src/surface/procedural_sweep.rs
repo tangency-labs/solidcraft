@@ -953,14 +953,15 @@ impl ProceduralSweep {
         Ok(())
     }
 
-    /// Adds the rounding of moving the net `net` (already moved) to the bound, as a
-    /// moved blend's ([`crate::blend::fillet_section::recertify`]).
+    /// Adds the rounding of moving the net `net` (already moved; `before`, its size
+    /// before, scaled) to the bound, as a moved blend's
+    /// ([`crate::blend::fillet_section::recertify`]).
     ///
     /// # Errors
     ///
     /// Those of reading the net.
-    pub(crate) fn add_motion_rounding(&mut self, net: &BSplineSurface) -> Result<()> {
-        self.bound = round_up(self.bound + transform_rounding(net)?);
+    pub(crate) fn add_motion_rounding(&mut self, net: &BSplineSurface, before: f64) -> Result<()> {
+        self.bound = round_up(self.bound + transform_rounding(net, before)?);
         Ok(())
     }
 
