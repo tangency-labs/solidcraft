@@ -12,4 +12,9 @@ That error comes from `tol_of` in `boolean/topology_intersector/p2.rs`: a vertex
 
 - **Status in the goldens:** 1007, the harness's code for both `InvalidInput` and `PortInvariant`.
 - **What it is:** an internal breach, not a refusal of bad input. The operands are valid, and upstream would dereference a pointer here. So `InvalidInput` is the wrong class. It should be a `PortInvariant`, or better, no error at all once the coincidence path keeps its handles live.
-- **Open:** which `tol_of` call sees the dead handle, and why. Read with a trace of `close_intersection_loop` and the coincidence intersection on the #1036 skins. WR-473 stays open: the correct results are about 14051.84 (A − B), 12084.49 (A ∩ B) and 36398.22 (A ∪ B).
+- **Where (traced):**
+  1. `mark_common` (`boolean/merge/p4.rs`) calls `close_intersection_loop` on a common vertex. The far edge is no longer related, so the call goes on to IntersectInsertRelate of the target edge (`iir_edge_brep`).
+  2. That reaches `merge_curve_classes` and `check_for_squeeze_vertices_into`, whose `brep_combine_coincident_vertices` squeezes an edge. The squeeze deletes primary vertex 19 (and 33), and edges 35 and 36.
+  3. The deletion reaches neither `close_intersection_loop`'s deleted lists nor `topology_deleted()`, so vertex 19 stays in `mark_common`'s `single` list.
+  4. `fix_gaps` then calls `tol_of` on it, in its pair loop (`topology_intersector/p2.rs`). Upstream would read a freed `SmVertex*` there.
+- **Open:** the fix (report the squeeze, or drop dead entries before `FixGaps`) and the correct results, about 14051.84 (A − B), 12084.49 (A ∩ B) and 36398.22 (A ∪ B). WR-473 stays open.
