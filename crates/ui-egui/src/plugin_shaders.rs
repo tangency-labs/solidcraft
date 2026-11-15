@@ -64,6 +64,8 @@ pub(crate) struct State {
     active: Option<Active>,
     /// The key that failed, so it is not tried again every frame; a new choice clears it.
     failed: Option<String>,
+    /// `failed` is only because its plugin is turned off: turning it on again clears it.
+    off: bool,
     choices: Option<(f64, Vec<Choice>)>,
 }
 
@@ -260,15 +262,27 @@ pub(crate) fn paint(app: &mut SolveApp, painter: &egui::Painter, rect: egui::Rec
 /// A plugin turned off after its background was drawn, or while it loads, drops it, saying so once.
 fn allowed(app: &mut SolveApp) -> bool {
     let key = app.preferences.background_shader.clone();
-    if key.is_empty() || app.plugin_shaders.failed.as_deref() == Some(key.as_str()) {
+    if key.is_empty() {
         return true;
     }
     let plugin = key.split_once('/').map_or(key.as_str(), |(id, _)| id);
-    if crate::plugins::enabled(app, plugin) {
+    let enabled = crate::plugins::enabled(app, plugin);
+    let state = &mut app.plugin_shaders;
+    if state.failed.as_deref() == Some(key.as_str()) {
+        if !(state.off && enabled) {
+            return true;
+        }
+        // Its plugin is on again: try the background again.
+        state.failed = None;
+        state.choices = None;
+    }
+    state.off = false;
+    if enabled {
         return true;
     }
     forget(app, plugin);
     missing(app, &key);
+    app.plugin_shaders.off = true;
     false
 }
 
@@ -559,6 +573,18 @@ mod tests {
         assert!(!super::allowed(&mut h.app), "a turned-off plugin's background must not draw");
         assert!(h.app.plugin_shaders.loading.is_none(), "its pending load is dropped");
         assert_eq!(h.app.plugin_shaders.failed.as_deref(), Some("dusk/dusk"));
+    }
+
+    #[test]
+    fn a_background_comes_back_when_its_plugin_is_turned_on_again() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.background_shader = "dusk/dusk".into();
+        h.app.preferences.disabled_plugins.insert("dusk".into());
+        assert!(!super::allowed(&mut h.app));
+        assert_eq!(h.app.plugin_shaders.failed.as_deref(), Some("dusk/dusk"));
+        h.app.preferences.disabled_plugins.remove("dusk");
+        assert!(super::allowed(&mut h.app));
+        assert_eq!(h.app.plugin_shaders.failed, None, "the background is tried again");
     }
 
     #[test]

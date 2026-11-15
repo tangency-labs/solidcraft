@@ -196,7 +196,8 @@ side.
 **When it fails.** A shader that this graphics card will not compile, a picture that does not
 decode, or a plugin that is removed or turned off leaves the theme's background, writes one line in
 the status bar ("Couldn't draw the background effect dusk/dusk: ...") and is not tried again until
-the choice changes or the app restarts. Nothing is drawn halfway.
+the choice changes, the app restarts, or (when it was turned off) its plugin is turned on again.
+Nothing is drawn halfway.
 
 ## Testing a shader
 
