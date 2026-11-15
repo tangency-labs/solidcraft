@@ -107,6 +107,7 @@ const PROFILE_KEYS: &[&str] = &[
     "select_other_hidden",
     "selection_shift_add_only",
     "shortcut_cycles_modes",
+    "show_selected_hidden_edges",
     "sketch_align_points",
     "sketch_auto_dimensions",
     "sketch_auto_locate",

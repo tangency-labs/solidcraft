@@ -1817,6 +1817,68 @@ fn a_face_winding_two_turns_round_its_cylinder_imports_whole() {
     assert_closed_measures(&t, volume, area, &[]);
 }
 
+/// No warning that a face was left out or that the solid came in as surfaces.
+fn no_face_lost(imp: &StepImport) {
+    assert!(!imp.warnings.iter().any(|w| w.contains("left out") || w.contains("as surfaces")), "{:?}", imp.warnings);
+}
+
+/// A cylinder (radius 5, 10 high) whose bottom rim is a closed rational B-spline circle starting
+/// at (5, 0, 0), its one vertex half way round at (−5, 0, 0), on a knot. The rim was read from the
+/// curve's own start, its vertex 10 mm off both ends, and the wall and the bottom were left out
+/// (#16930: a thread's end loop as some writers make it). The edge is the whole curve started at
+/// its vertex now, and the solid closes. V = 250π, A = 150π.
+#[test]
+fn a_closed_edge_whose_vertex_is_half_way_round_its_spline_imports_whole() {
+    use std::f64::consts::PI;
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let mut t = String::from(HEAD);
+    t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
+    t += "#5=CYLINDRICAL_SURFACE('',#4,5.);\n#6=CARTESIAN_POINT('',(0.,0.,10.));\n#7=AXIS2_PLACEMENT_3D('',#6,#2,#3);\n#8=PLANE('',#7);\n";
+    t += "#9=DIRECTION('',(0.,0.,-1.));\n#10=AXIS2_PLACEMENT_3D('',#1,#9,#3);\n#11=PLANE('',#10);\n";
+    let points = [(5., 0.), (5., 5.), (0., 5.), (-5., 5.), (-5., 0.), (-5., -5.), (0., -5.), (5., -5.), (5., 0.)];
+    for (i, (x, y)) in points.iter().enumerate() {
+        t += &format!("#{}=CARTESIAN_POINT('',({x:.1},{y:.1},0.));\n", 101 + i);
+    }
+    t += "#100=(BOUNDED_CURVE()B_SPLINE_CURVE(2,(#101,#102,#103,#104,#105,#106,#107,#108,#109),.UNSPECIFIED.,.T.,.U.)B_SPLINE_CURVE_WITH_KNOTS((3,2,2,2,3),(0.,0.25,0.5,0.75,1.),.UNSPECIFIED.)CURVE()GEOMETRIC_REPRESENTATION_ITEM()";
+    t += &format!("RATIONAL_B_SPLINE_CURVE((1.,{w:.16},1.,{w:.16},1.,{w:.16},1.,{w:.16},1.))REPRESENTATION_ITEM(''));\n");
+    t += "#20=CARTESIAN_POINT('',(5.,0.,10.));\n#21=VERTEX_POINT('',#20);\n#22=VERTEX_POINT('',#105);\n";
+    t += "#23=CIRCLE('',#7,5.);\n#24=EDGE_CURVE('',#21,#21,#23,.T.);\n#25=EDGE_CURVE('',#22,#22,#100,.T.);\n";
+    t += "#30=ORIENTED_EDGE('',*,*,#24,.F.);\n#31=EDGE_LOOP('',(#30));\n#32=FACE_BOUND('',#31,.T.);\n";
+    t += "#33=ORIENTED_EDGE('',*,*,#25,.T.);\n#34=EDGE_LOOP('',(#33));\n#35=FACE_BOUND('',#34,.T.);\n#36=ADVANCED_FACE('',(#32,#35),#5,.T.);\n";
+    t += "#40=ORIENTED_EDGE('',*,*,#24,.T.);\n#41=EDGE_LOOP('',(#40));\n#42=FACE_OUTER_BOUND('',#41,.T.);\n#43=ADVANCED_FACE('',(#42),#8,.T.);\n";
+    t += "#50=ORIENTED_EDGE('',*,*,#25,.F.);\n#51=EDGE_LOOP('',(#50));\n#52=FACE_OUTER_BOUND('',#51,.T.);\n#53=ADVANCED_FACE('',(#52),#11,.T.);\n";
+    t += "#60=CLOSED_SHELL('',(#36,#43,#53));\n#61=MANIFOLD_SOLID_BREP('Rod',#60);\n#62=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#61),#70);\n";
+    t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    let imp = step_import(&t).unwrap();
+    no_face_lost(&imp);
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.bodies[0].closed, "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.volume, 250.0 * PI) < 1e-3, "volume {}", m.volume);
+    assert!(rel(m.area, 150.0 * PI) < 1e-3, "area {}", m.area);
+}
+
+/// `thread_crest_band` (tests/step-regressions): a thread's crest as some writers make it (a cap
+/// screw's major-diameter cylinder, #16930). One cylinder face (radius 3) runs from a circle at
+/// z = 3 down to the thread, whose groove (a quarter turn wide) winds two turns from its open end
+/// at z = 0 up to its cap at z = 2. The face's second loop runs along the bottom rim three
+/// quarters round, up one helix two turns, across the groove's cap and down the other helix: it
+/// reaches every angle more than once, so no angle about the axis was clear for the seam joining
+/// the two loops, and the face was left out ("a band whose other loops leave its seam no angle").
+/// The seam now runs from where the groove's cap starts straight up to the circle, the first loop
+/// that ruling meets. The face is the band less the groove, a parallelogram a quarter turn wide
+/// and two turns high when the cylinder is unrolled: A = 3(2π·3 − (π/2)·2) = 15π.
+#[test]
+fn a_band_whose_loop_winds_round_its_cylinder_more_than_once_gets_its_seam() {
+    let imp = step_import(include_str!("../../../../tests/step-regressions/thread_crest_band.step")).unwrap();
+    no_face_lost(&imp);
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    let want = 15.0 * std::f64::consts::PI;
+    assert!(rel(m.area, want) < 1e-3, "area {} vs {want}", m.area);
+}
+
 /// A solid whose shell the file leaves open (a unit cube written without its top face, as a
 /// MANIFOLD_SOLID_BREP of a CLOSED_SHELL) was refused as a whole when sewing its faces did not
 /// close it. It is now read as one sheet with all five of its faces, which share the edges they

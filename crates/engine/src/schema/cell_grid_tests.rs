@@ -19,6 +19,7 @@ fn schemas_and_the_key_check_agree() {
             "depth",
             "direction",
             "dot_grid",
+            "keepout_clip",
             "margin",
             "mode",
             "name",
