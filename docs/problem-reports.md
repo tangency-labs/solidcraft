@@ -82,6 +82,19 @@ checks a minute after it starts and then at most every 15 minutes, for the dot; 
 never checks. What was last seen (ticket numbers and their change times) is kept in the
 preferences as `tickets_seen`; the token stays in the keyring.
 
+## In the browser
+
+The web app has the same dialog and the same My tickets window. Differences:
+
+- Send report opens the draft in a new tab; a browser may block a tab opened without a click, so
+  the dialog also offers "Open the report in the browser".
+- A remembered token is kept in the browser's local storage (`solidcraft.secret.tickets.solidcraft.io`):
+  a browser has no system keyring. Sign out removes it.
+- The design attachment is the open design as the web app holds it (unsaved changes included).
+- Requests use `fetch` over HTTPS without cookies or redirects; the ticket server allows the web
+  app's origins (CORS).
+- A report made offline waits in memory while the page stays open. It is not kept across a reload.
+
 ## The old behaviour
 
 The dialog's "Or open a public GitHub issue instead" link switches it to the public GitHub issue

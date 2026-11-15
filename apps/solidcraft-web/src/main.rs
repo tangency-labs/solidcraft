@@ -27,6 +27,8 @@ mod linked;
 mod mouse_buttons;
 #[cfg(any(target_arch = "wasm32", test))]
 mod space_mouse;
+#[cfg(target_arch = "wasm32")]
+mod tickets;
 
 /// The browser switches tabs with Ctrl+Tab and Ctrl+Shift+Tab, so the page leaves those keys to
 /// it (#5227); plain Tab and Shift+Tab still move between the app's fields. (Ctrl+PageUp and
@@ -1342,6 +1344,8 @@ mod web {
                             restore_file: Some(Box::new(move |path: &str| disk::restore(&restorer, path, None))),
                             download_design: Some(Box::new(files::download)),
                             easyprint_upload: Some(std::sync::Arc::new(crate::easyprint::upload)),
+                            tickets_http: Some(std::sync::Arc::new(crate::tickets::http)),
+                            ticket_secrets: Some(std::sync::Arc::new(crate::tickets::BrowserSecrets)),
                             browser_files: Some(Box::new(move || shown.panel.set(true))),
                             install_app: Some(crate::install::service(&cc.egui_ctx)),
                             ..Default::default()

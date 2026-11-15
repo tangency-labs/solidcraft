@@ -1,0 +1,26 @@
+{
+  "en": {
+    "report.open_draft": "Open the report in the browser"
+  },
+  "de": {
+    "report.open_draft": "Bericht im Browser öffnen"
+  },
+  "ar": {
+    "report.open_draft": "فتح التقرير في المتصفح"
+  },
+  "he": {
+    "report.open_draft": "פתיחת הדוח בדפדפן"
+  },
+  "ja": {
+    "report.open_draft": "レポートをブラウザーで開く"
+  },
+  "vi": {
+    "report.open_draft": "Mở báo cáo trong trình duyệt"
+  },
+  "zh": {
+    "report.open_draft": "在浏览器中打开报告"
+  },
+  "ko": {
+    "report.open_draft": "브라우저에서 보고서 열기"
+  }
+}
