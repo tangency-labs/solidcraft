@@ -92,6 +92,11 @@ pub enum BallCheck {
     NotEnclosed,
     /// `SM_BS_REGRESSIVE`: a point of the section is not progressive (`f_tt <= 0`).
     Regressive,
+    /// Not the fork's (#16768): no section of the ball is found anywhere along the edge, and
+    /// the ball is as wide as one of its faces along the whole of it, whose offset by the
+    /// ball collapses onto a curve there
+    /// ([`ball_as_wide_as_a_face_along_the_edge`](crate::blend::fillet_exact::ball_as_wide_as_a_face_along_the_edge)).
+    Collapsed,
 }
 
 /// `SmBallStation`: the rolling ball's local regularity at a station of a blend.
@@ -1077,21 +1082,31 @@ pub fn ball_is_regular(
         return Ok(first);
     }
 
-    // no section of the ball at any of the edge's stations (each judged Unjudged, none but a
-    // pole or a section not found judging nothing): a ball of this radius touches both faces
-    // nowhere along the edge, as where its radius is a face's own radius of curvature, the
-    // offset collapsing onto a curve the other offset meets in isolated points. Nothing rolls,
-    // so the round is refused as one that does not fit.
+    // (#16768) no station judged (no section of the ball found, a pole, or contacts that
+    // meet at every one) proves nothing by itself: such an edge goes on to be built, as
+    // before. It is refused only where the geometry proves why no ball rolls there: the ball
+    // is as wide as one of its faces along the whole edge (that face's larger radius of
+    // curvature toward the ball is the ball's, within the body's tolerance, at every one of
+    // `edge_match`'s stations), so the face's offset, the surface the ball's centre rolls
+    // on, collapses onto a curve along the edge
     if rolls && !ts.is_empty() && margins[0].iter().all(|&m| m >= BIG_DOUBLE) {
         let (_, on_edge) = rolls_a_ball(solver);
         if !on_edge {
             let radius = ball_law(k, solver, &TsectPnt::new())?.r[0];
-            if radius > EFF_ZERO {
+            if radius > EFF_ZERO
+                && crate::blend::fillet_exact::ball_as_wide_as_a_face_along_the_edge(
+                    ops_of(solver),
+                    k,
+                    target,
+                    radius,
+                )?
+            {
                 // no radius is named: sections found at radii a hair under it are the offset's
                 // collapsed loop, not a ball that rolls along the edge
                 return Ok(BallStation {
-                    check: BallCheck::NotEnclosed,
+                    check: BallCheck::Collapsed,
                     radius,
+                    fits: radius,
                     ..BallStation::default()
                 });
             }

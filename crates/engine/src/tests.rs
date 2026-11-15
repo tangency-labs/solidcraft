@@ -5196,10 +5196,14 @@ fn a_round_as_large_as_the_round_it_runs_along_is_refused_not_failed_or_endless(
         assert!(e.contains("larger than the faces beside its edges allow"), "chain {chain}: {e}");
     }
     // A hair under it ended only after the stations had doubled to the cap, minutes later: the
-    // certificate now stops where halving has proved no bound. (A hang fails by the test timeout.)
+    // certificate now stops where halving no longer tightens its bound, saying so (not a panic
+    // or the bare status). (A hang fails by the test timeout.)
     let mut s = segment_boss_with_arc_round();
-    let e = s.execute("solid.fillet", &json!({"edges": flat_and_ends, "radius": 0.99, "tangent_chain": false}));
-    assert!(e.is_err());
+    let e = s.execute("solid.fillet", &json!({"edges": flat_and_ends, "radius": 0.99, "tangent_chain": false})).unwrap_err();
+    assert!(!matches!(e, EngineError::Internal(..)), "{e}");
+    let e = e.to_string();
+    assert!(!e.contains("1001"), "{e}");
+    assert!(e.contains("certify: did not converge after"), "{e}");
 }
 
 #[test]

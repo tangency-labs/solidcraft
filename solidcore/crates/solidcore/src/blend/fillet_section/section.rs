@@ -46,19 +46,32 @@ use crate::surface::procedural_blend::chamfer::ChamferDefinition;
 use crate::surface::procedural_blend::{count_area_root, BlendDefinitionInput, ProceduralBlend};
 use crate::surface::surface::{Surface, SurfaceKind};
 use core::sync::atomic::{AtomicU32, Ordering};
-
-/// How many halvings in a row of a span may leave its bound no better than half its parent's
-/// (or still unproved: every piece's enclosure fails, at pieces 64 times finer than the span at
-/// the last). A bound over a smooth span falls with its length to a power, at least halving
-/// with each halving; one that does not, four times running, is not a matter of resolution:
-/// the ball's section is degenerate there (an offset collapsing to a curve, as where a ball's
-/// radius is a face's own radius of curvature), and halving further only multiplies the work,
-/// the stations doubling each round to the cap of 4096.
-const MAX_STALLED_HALVINGS: u32 = 4;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+/// How many halvings in a row of a span may leave its bound no better than half its
+/// parent's (or still unproved) before the certificate stops (#16768). Derived from the
+/// orders of the certificate's two parts on a smooth span of length h:
+///
+/// - Its bound is the Hermite remainder `h^4 / 384` times the jets' fourth s-derivative
+///   bounded over the span's pieces (`gn_certify_span`): order 4 in h. A halving divides
+///   `h^4` by 2^4 = 16, and the half starts from its parent's pieces, whose bounds hold over
+///   it, so its fourth-derivative bound is no larger: a proved smooth span's bound falls at
+///   least 16-fold with each halving. The test asks only 2-fold (order 1), the slack being
+///   the row terms taken again about the half's own first station.
+/// - A piece is proved when Krawczyk's operator contracts its feet's box: the preconditioned
+///   Jacobian's spread over the box, which must fall below one, grows with the box's width,
+///   order 1 in h. A halving divides it by 2 only.
+///
+/// So the halvings allowed are those that shrink the proof's contraction (order 1) as much
+/// as one halving shrinks a proved smooth bound (order 4): 2^4 = 16 is 4 halvings of order
+/// 1. A span over the target after that many halvings in a row, none of which halved its
+/// bound, is not one more resolution fixes: its section is degenerate there (an offset
+/// collapsing to a curve, as where a ball's radius is a face's own radius of curvature),
+/// and halving further only multiplies the work, the stations doubling each round to the
+/// cap of 4096.
+const MAX_STALLED_HALVINGS: u32 = 4;
 const OP: &str = "blend::fillet_section::GnSectionFsg";
 const OP_BUILD: &str = "blend::fillet_section::GnSectionFsg::build";
 const OP_CERTIFY: &str = "blend::fillet_section::GnSectionFsg::certify";
@@ -2002,6 +2015,8 @@ impl GnSectionFsg {
         // half the parent's
         let mut parents: Vec<Option<f64>> = vec![None; bounds.len()];
         let mut stalled: Vec<u32> = vec![0; bounds.len()];
+        // the halving rounds taken so far
+        let mut rounds = 0_u32;
         loop {
             let mut all = true;
             // a span's first level tried, where it inherits none (not the fork's, which
@@ -2048,12 +2063,11 @@ impl GnSectionFsg {
                         };
                         *count = if better { 0 } else { *count + 1 };
                         if *bj > target && *count >= MAX_STALLED_HALVINGS {
-                            return Err(SolidError::blend_failed(
-                                OP,
-                                "the blend cannot be certified: halving the rolling ball's section no longer \
-                                 tightens its bound, where the ball's offsets nearly collapse (the radius is \
-                                 close to a face's own radius of curvature), so no ball rolls there",
-                            ));
+                            // the halving did not converge: a typed failure, the rounds it took
+                            return Err(SolidError::NotConverged {
+                                operation: OP_CERTIFY,
+                                iterations: rounds,
+                            });
                         }
                     }
                     let within = *bj <= target;
@@ -2146,6 +2160,7 @@ impl GnSectionFsg {
             levels = next_levels;
             parents = next_parents;
             stalled = next_stalled;
+            rounds = rounds.saturating_add(1);
         }
         let mut bound = 0.0_f64;
         for &b in &bounds {
