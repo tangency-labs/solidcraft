@@ -2597,7 +2597,7 @@ mod tests {
         );
     }
 
-    /// CodeRabbit on #17008: a spindle torus (R 1, r 2) whose tube runs 120..240 degrees
+    /// From the #17008 review: a spindle torus (R 1, r 2) whose tube runs 120..240 degrees
     /// starts on the axis (`R + r cos 120 = 0`), and its whole tube lies on the far
     /// side of the axis: the mid point (v 180) is at `-X` while the minor circle's centre is
     /// at `+X R`. The midpoint fallback must still put the centre at `+X R`, so the
