@@ -92,9 +92,9 @@ pub enum BallCheck {
     NotEnclosed,
     /// `SM_BS_REGRESSIVE`: a point of the section is not progressive (`f_tt <= 0`).
     Regressive,
-    /// Not the fork's (#16768): no section of the ball is found anywhere along the edge, and
-    /// the ball is as wide as one of its faces along the whole of it, whose offset by the
-    /// ball collapses onto a curve there
+    /// Not the fork's (#16768): no station along the edge is judged, and one of its faces is
+    /// a cylinder, sphere or torus as wide as the ball, whose offset by the ball collapses
+    /// onto its axis, centre or circle
     /// ([`ball_as_wide_as_a_face_along_the_edge`](crate::blend::fillet_exact::ball_as_wide_as_a_face_along_the_edge)).
     Collapsed,
 }
@@ -1082,13 +1082,13 @@ pub fn ball_is_regular(
         return Ok(first);
     }
 
-    // (#16768) no station judged (no section of the ball found, a pole, or contacts that
-    // meet at every one) proves nothing by itself: such an edge goes on to be built, as
-    // before. It is refused only where the geometry proves why no ball rolls there: the ball
-    // is as wide as one of its faces along the whole edge (that face's larger radius of
-    // curvature toward the ball is the ball's, within the body's tolerance, at every one of
-    // `edge_match`'s stations), so the face's offset, the surface the ball's centre rolls
-    // on, collapses onto a curve along the edge
+    // (#16768) no station judged (no section of the ball found, a pole, a singular face jet,
+    // or contacts that meet at every one) proves nothing by itself: such an edge goes on to
+    // be built, as before. It is refused only where the faces prove in closed form why no
+    // ball rolls: one is a cylinder, a sphere or a torus whose radius (or tube's) is the
+    // ball's within the body's tolerance, so its offset, the surface the ball's centre rolls
+    // on, is its axis, centre or circle everywhere along the edge. A face of no natural
+    // quadric is not judged so (its curvature between samples is not known)
     if rolls && !ts.is_empty() && margins[0].iter().all(|&m| m >= BIG_DOUBLE) {
         let (_, on_edge) = rolls_a_ball(solver);
         if !on_edge {

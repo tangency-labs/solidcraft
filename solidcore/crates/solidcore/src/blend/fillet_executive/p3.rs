@@ -182,8 +182,8 @@ pub enum NoRoomReason {
     /// the ball inside): its offset of that face collapses onto the axis or the centre, so
     /// its centre does not move along the edge, and the zone it sweeps has no section of the
     /// ball at an end of the edge, so no round ends there (not the fork's, #2401). Also a
-    /// constant ball as wide as a face (of any surface) along the whole edge, whose
-    /// regularity finds no section of the ball anywhere along it (#16768).
+    /// constant ball as wide as a cylinder, sphere or torus it rolls on, whose regularity
+    /// judges no station along the edge (#16768).
     OffsetCollapses,
     /// A rail of a constant ball's round or chamfer along an arc would have its ends
     /// within the part's resolution of each other (two vertex tolerances) without closing
@@ -3759,7 +3759,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             )
         } else if worst.check == BallCheck::Collapsed {
             (
-                format!("Fillet Error: the rolling ball of radius {} is as wide as a face it rolls on along the whole edge (the face's radius of curvature toward the ball is the ball's), so the offset its centre rolls on collapses onto a curve, and no section of the ball is found anywhere along the edge", g(worst.radius)),
+                format!("Fillet Error: the rolling ball of radius {} is as wide as a face it rolls on (a cylinder, sphere or torus whose radius is the ball's), so the offset its centre rolls on collapses onto its axis, centre or circle, and no section of the ball is found at any station along the edge", g(worst.radius)),
                 NoRoomReason::OffsetCollapses,
             )
         } else if worst.check == BallCheck::NotEnclosed {

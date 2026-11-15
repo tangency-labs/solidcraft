@@ -2091,19 +2091,22 @@ pub fn ball_zone_open_at_an_end(
 }
 
 /// Not the fork's (#16768): whether a constant ball of `radius` is as wide as one of the
-/// solver's two faces along the whole of its edge: that face's larger radius of curvature
-/// toward the ball is the ball's, within the body's tolerance, at every one of
-/// `edge_match`'s stations (`EdgeMatch::Full`), whatever the face's surface (a cylinder,
-/// a sphere, a torus whose minor radius it is, or a face of no natural quadric). There the
-/// face's offset by the ball, the surface the ball's centre rolls on, collapses onto a curve
-/// (its focal curve) or a point, along the edge. The side the ball is on is read from the
-/// solver's offset of the face at the edge's middle, as [`ball_zone_open_at_an_end`] reads
-/// it. `false` where the edge's middle does not drop onto a face.
+/// solver's two faces, proved in closed form: the face is a natural quadric or a torus
+/// ([`BlendQuadric::from_surface`]: a cylinder, a sphere or a torus, analytic or a B-spline
+/// recognised as one), and its offset by the ball ([`BlendQuadric::offset`]) is its axis,
+/// its centre or its tube's circle ([`QuadricKind::Line`], [`QuadricKind::Point`],
+/// [`QuadricKind::Circle`]): the face's radius, or its tube's, is the ball's within the
+/// body's tolerance. Such a face's curvature is the same everywhere on it, so the offset the
+/// ball's centre rolls on collapses along the whole edge, not only where it was sampled. A
+/// face of no natural quadric is never judged collapsed here (`false`): its curvature is
+/// not known between samples. The side the ball is on is read from the solver's offset of
+/// the face at the edge's middle, as [`ball_zone_open_at_an_end`] reads it. `false` where
+/// the edge's middle does not drop onto a face.
 ///
 /// # Errors
 ///
-/// Those of the drops, the evaluations and the topology lookups; `SM_ERR_NULL_POINTER` for
-/// a solver without its edge use, offset surfaces or edge curve.
+/// Those of the drops, the evaluations, the recognisers and the topology lookups;
+/// `SM_ERR_NULL_POINTER` for a solver without its edge use, offset surfaces or edge curve.
 pub fn ball_as_wide_as_a_face_along_the_edge(
     ops: &mut dyn FilletSolverOps,
     k: &Kernel,
@@ -2120,18 +2123,17 @@ pub fn ball_as_wide_as_a_face_along_the_edge(
     let e =
         eu::edge(b, eu0)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     let curve = edge::evaluation_curve(b, e)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's evaluation curve"))?
-        .clone();
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's evaluation curve"))?;
     let ivl = edge::interval(b, e)?;
     let tol = b.tolerance();
     let mid = curve.evaluate_point(k, ivl.evaluate(0.5))?;
     for i in 0..2 {
-        let (base, p, n, uv) = {
+        let (face, p, n, uv) = {
             let off = ops
                 .solver()
                 .surface(i)?
                 .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
-            let base = off.surface.base_surface().clone();
+            let base = off.surface.base_surface();
             let domain = base.natural_uv_domain_with_nurb(k)?;
             let dropped =
                 base.drop_point::<NoObject>(k, mid, &domain, &DropPointOptions::default())?;
@@ -2139,9 +2141,13 @@ pub fn ball_as_wide_as_a_face_along_the_edge(
                 return Ok(false);
             }
             let uv = dropped.result_uv;
-            let (p, n) = point_and_normal(k, &base, uv)?;
-            (base, p, n, uv)
+            let face = BlendQuadric::from_surface(k, base, uv, tol)?;
+            let (p, n) = point_and_normal(k, base, uv)?;
+            (face, p, n, uv)
         };
+        if face.kind == QuadricKind::None {
+            continue;
+        }
         // the ball's side of the face: its centre's signed offset along the face's normal
         let q = crate::blend::fillet_solver::p2::eval_offset(k, ops.solver_mut(), i, uv)?;
         let off = if (q - p).dot(n) < 0.0 {
@@ -2149,7 +2155,10 @@ pub fn ball_as_wide_as_a_face_along_the_edge(
         } else {
             radius
         };
-        if edge_match(k, &base, &curve, ivl, off, tol)? == EdgeMatch::Full {
+        if matches!(
+            face.offset(off, tol).kind,
+            QuadricKind::Line | QuadricKind::Point | QuadricKind::Circle
+        ) {
             return Ok(true);
         }
     }
