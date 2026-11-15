@@ -128,6 +128,9 @@ struct BoxStyle {
     /// on the same two vertices: on the first one's LINE (`Some(0.0)`), or on a LINE of its own
     /// whose origin lies the given distance off.
     twin_edges: Option<f64>,
+    /// The first edge starts at a second VERTEX_POINT at its first corner's point, not at the
+    /// corner's own vertex, moved by the given distance along x (0 for the same point).
+    dup_vertex: Option<f64>,
 }
 
 /// The box from `lo` to `hi`: its faces (outward normals) and its top and bottom faces'
@@ -176,6 +179,10 @@ fn box_faces(w: &mut W, lo: V, hi: V, style: BoxStyle, inner: &mut dyn FnMut(&mu
                             let v = w.add(format!("VECTOR('',#{d},1.)"));
                             let l = w.add(format!("LINE('',#{o},#{v})"));
                             w.add(format!("EDGE_CURVE('',#{va},#{vb},#{l},.F.)"))
+                        } else if let Some(off) = style.dup_vertex.filter(|_| n == 0) {
+                            let at = [vs[key.0].1[0] + off, vs[key.0].1[1], vs[key.0].1[2]];
+                            let twin = (w.vertex(at), at);
+                            w.line_edge(twin, vs[key.1], !flip, 1.0)
                         } else {
                             w.line_edge(vs[key.0], vs[key.1], !flip, if n.is_multiple_of(3) { 1.0 } else { 2.5 })
                         };
@@ -328,6 +335,24 @@ fn a_cube_is_two_regions_six_faces_twelve_edges_eight_vertices() {
             assert_ne!(side(&e.uses[0]), side(&e.uses[1]));
         }
     }
+}
+
+/// A cube whose first edge starts at a second vertex at its corner's point (tangency-labs/solidcraft#17141):
+/// the faces meeting there close by position, and the corner is one vertex.
+#[test]
+fn a_corner_written_as_two_vertices_at_one_point_is_one_vertex() {
+    let s = one_solid(&cube(BoxStyle { dup_vertex: Some(0.0), ..Default::default() }));
+    assert!(!s.sheet);
+    assert_eq!(counts(&s.brep), [2, 1, 6, 12, 8]);
+    faces_away(&s.brep, 0, |_| [5.0, 10.0, 15.0]);
+}
+
+/// Two vertices that really are apart still leave the loop open: the faces there are left out.
+#[test]
+fn a_loop_whose_ends_are_apart_is_still_refused() {
+    let r = read_solids(&cube(BoxStyle { dup_vertex: Some(1.0), ..Default::default() }));
+    assert_eq!(r.solids.len(), 1);
+    assert!(r.solids[0].brep.faces.len() < 6, "{}", r.solids[0].brep.faces.len());
 }
 
 #[test]

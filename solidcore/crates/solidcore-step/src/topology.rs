@@ -886,6 +886,52 @@ impl<'b, 'a> Builder<'b, 'a> {
         Ok((edge, with_step))
     }
 
+    /// Whether vertices `keep` and `drop` are one: the same vertex, or two whose points coincide
+    /// within the sum of their own tolerances (a file may write one corner as two VERTEX_POINTs
+    /// at one point). Coincident ones are merged into `keep` in every edge and vertex loop, so the
+    /// faces and the edges they share meet at one vertex; its tolerance covers `drop`'s edge ends
+    /// at their distance. Two vertices that are the two ends of one edge are never merged: that
+    /// edge's own ends are apart.
+    fn meet(&mut self, keep: u32, drop: u32) -> R<bool> {
+        if keep == drop {
+            return Ok(true);
+        }
+        let (a, b) = (self.vertices.get(keep as usize).ok_or("vertex reference")?, self.vertices.get(drop as usize).ok_or("vertex reference")?);
+        let gap = v3(a.point).dist(v3(b.point));
+        if !(gap <= a.tolerance + b.tolerance) {
+            return Ok(false);
+        }
+        if self.edges.iter().any(|e| e.vertices.contains(&keep) && e.vertices.contains(&drop)) {
+            return Ok(false);
+        }
+        let tolerance = a.tolerance.max(b.tolerance + gap);
+        for e in &mut self.edges {
+            for v in &mut e.vertices {
+                if *v == drop {
+                    *v = keep;
+                }
+            }
+        }
+        for v in self.vertex_ids.values_mut() {
+            if *v == drop {
+                *v = keep;
+            }
+        }
+        for f in &mut self.faces {
+            for l in &mut f.loops {
+                if let LoopB::Vertex(v) = l
+                    && *v == drop
+                {
+                    *v = keep;
+                }
+            }
+        }
+        if let Some(x) = self.vertices.get_mut(keep as usize) {
+            x.tolerance = tolerance;
+        }
+        Ok(true)
+    }
+
     fn ends(&self, (edge, forward): (u32, bool)) -> R<[u32; 2]> {
         let e = self.edges.get(edge as usize).ok_or("edge reference")?;
         let [a, z] = e.vertices;
@@ -920,13 +966,15 @@ impl<'b, 'a> Builder<'b, 'a> {
                 let mut last = None;
                 for u in &uses {
                     let [s, e] = self.ends(*u)?;
-                    if last.is_some_and(|l| l != s) {
+                    if let Some(l) = last
+                        && !self.meet(l, s)?
+                    {
                         return Err(format!("edge loop #{lp_id} is not connected"));
                     }
                     last = Some(e);
                 }
                 if let (Some(first), Some(last)) = (uses.first(), last)
-                    && self.ends(*first)?[0] != last
+                    && !self.meet(last, self.ends(*first)?[0])?
                 {
                     return Err(format!("edge loop #{lp_id} is not closed"));
                 }
