@@ -219,6 +219,10 @@ pub struct OffsetExecutive {
     /// face and by each of its face uses, recorded as the face is offset.
     extension_reaches: BTreeMap<FaceId, f64>,
     faceuse_extension_reaches: BTreeMap<FaceuseId, f64>,
+    /// Not upstream: the edge bounds the local operation's reaches have found, each edge's
+    /// taken again from here for its other face ([`super::reach::EdgeBounds`]); forgotten
+    /// when the local surfaces are set and when the relations are cleared.
+    edge_bounds: super::reach::EdgeBounds,
     /// Not upstream: the faces of a local operation that move to surfaces of their own
     /// (the others keep theirs), for their neighbours' reach
     /// ([`super::reach::local_extension_reach`]).
@@ -228,10 +232,17 @@ pub struct OffsetExecutive {
     /// edge uses ([`Self::keep_unmoved_edges`]).
     pub(super) kept_edges: BTreeSet<EdgeId>,
     pub(super) kept_edgeuses: BTreeSet<EdgeuseId>,
+    /// Not upstream: the uses of the original edges of a local operation where the two new
+    /// surfaces cross ([`super::reach::LocalReach::crossing`]), tangent in the input or not.
+    crossing_edgeuses: BTreeSet<EdgeuseId>,
     /// Not upstream (WR-346): the original faces of an inset whose offset collapses (a
     /// convex round thinner than the wall), mated across instead of offset
     /// (`m_sCollapsedFaces`; only with `Kernel::fixes.offset_collapsed_rounds_mated`).
     pub(super) collapsed_faces: Vec<FaceId>,
+    /// Not upstream (solidcraft#16983): the offset faces with an edge whose offset is
+    /// inverted (its neighbours' offsets crossed over it; `TrimmedEdge`), which
+    /// `resolve_crossing_loops` resolves when they have one loop.
+    pub(super) inverted_faces: BTreeSet<FaceId>,
     /// Not upstream (WR-344 refinement, tangency-labs/solidcore#1795): the original edge
     /// uses whose edge `EdgeuseOffset` could not mate (`MateEdges` failed); the merge
     /// intersects their faces' offsets as upstream does, not taking them as mated (only
@@ -289,10 +300,13 @@ impl OffsetExecutive {
             extended_surfaces: BTreeMap::new(),
             extension_reaches: BTreeMap::new(),
             faceuse_extension_reaches: BTreeMap::new(),
+            edge_bounds: super::reach::EdgeBounds::default(),
             moved_faces: Vec::new(),
             kept_edges: BTreeSet::new(),
             kept_edgeuses: BTreeSet::new(),
+            crossing_edgeuses: BTreeSet::new(),
             collapsed_faces: Vec::new(),
+            inverted_faces: BTreeSet::new(),
             unmated_edgeuses: BTreeSet::new(),
             local_faces: Vec::new(),
             local_surfaces: Vec::new(),
@@ -406,6 +420,7 @@ impl OffsetExecutive {
         self.local_faces = faces.to_vec();
         self.local_surfaces = surfaces;
         self.moved_faces = moved.to_vec();
+        self.edge_bounds.clear();
     }
 
     /// Not upstream: in a local operation, records the edges of `original` that keep their
@@ -451,6 +466,12 @@ impl OffsetExecutive {
     /// own curves ([`Self::keep_unmoved_edges`]).
     pub(super) fn keeps_edgeuse(&self, edgeuse: EdgeuseId) -> bool {
         self.kept_edgeuses.contains(&edgeuse)
+    }
+
+    /// Not upstream: whether the new surfaces of a local operation cross along the edge of
+    /// original edge use `edgeuse` ([`super::reach::LocalReach::crossing`]).
+    pub(super) fn crosses_at_edgeuse(&self, edgeuse: EdgeuseId) -> bool {
+        self.crossing_edgeuses.contains(&edgeuse)
     }
 
     /// Sets `m_eOffsetOperation`.
@@ -608,6 +629,8 @@ impl OffsetExecutive {
         self.blend_to_faces.remove_all();
         self.extension_reaches.clear();
         self.faceuse_extension_reaches.clear();
+        self.edge_bounds.clear();
+        self.crossing_edgeuses.clear();
     }
 
     /// Records how far the surface of original face `face` must be extended for its
@@ -662,21 +685,26 @@ impl OffsetExecutive {
                     kept.push((*f, surface));
                 }
             }
-            super::reach::local_extension_reach(
+            let found = super::reach::local_extension_reach(
                 kernel,
                 original,
                 faceuse,
                 &moved,
                 &kept,
                 self.tangency_tol_radians,
-            )?
+                &mut self.edge_bounds,
+            )?;
+            for &e in found.iter().flat_map(|r| &r.crossing) {
+                self.crossing_edgeuses
+                    .extend(edge::edgeuses(original, e, None, None)?);
+            }
             // A new edge must cross each neighbouring surface's boundary, not sit on it:
             // the mate and the intersection identify points within the body's tolerance,
             // so a crossing shorter than that is indistinguishable from touching the
             // boundary, and the extension reaches at least that far. With nothing moved
             // beside the face (a face given the plane through its own edges), this floor
             // is the only margin (the offset branch's is the offset's size).
-            .map_or(0.0, |r| (r.reach + r.shift).max(original.tolerance()))
+            found.map_or(0.0, |r| (r.reach + r.shift).max(original.tolerance()))
         };
         self.extension_reaches.insert(face, reach);
         let (primary, mate) = crate::topology::face::p2::faceuses(original, face)?;
@@ -2074,26 +2102,17 @@ impl OffsetExecutive {
         let faceuse = original.faceuse(faceuse)?;
         let face_id = required(faceuse.face)?;
         let orientation = faceuse.orientation;
-        // Not upstream (WR-342, tangency-labs/solidcore#974), opt-in
-        // `Kernel::fixes.offset_clip_right_side_out`: a face that does not fit the offset
-        // surface's domain is clipped to it by a 2D boolean of planar faces made from its
-        // UV loops, which need them counterclockwise (the SM_OT_SAME faceuse's sense); an
-        // inset's SM_OT_OPPOSITE loops made that face inside out and the clip empty.
-        let right_side_out = kernel.fixes.offset_clip_right_side_out;
-        let loop_orientation = if right_side_out {
-            let fits = original
-                .face(face_id)?
-                .uv_domain
-                .is_contained_by(&surface.natural_uv_domain_with_nurb(kernel)?, EFF_ZERO)
-                || self.operation == OffsetOperation::LocalOperation;
-            if fits {
-                orientation
-            } else {
-                OrientType::Same
-            }
-        } else {
-            orientation
-        };
+        // Not upstream (WR-342, tangency-labs/solidcore#974): a face that does not fit the
+        // offset surface's domain is clipped to it by a 2D boolean of planar faces made
+        // from its UV loops, which need them counterclockwise (the SM_OT_SAME faceuse's
+        // sense); upstream takes an inset's SM_OT_OPPOSITE loops, which made that face
+        // inside out and the clip empty.
+        let fits = original
+            .face(face_id)?
+            .uv_domain
+            .is_contained_by(&surface.natural_uv_domain_with_nurb(kernel)?, EFF_ZERO)
+            || self.operation == OffsetOperation::LocalOperation;
+        let loop_orientation = if fits { orientation } else { OrientType::Same };
         // The translated-3D-curve plane case (cpp:3560–3600) is `#if 0` upstream.
         let mut curves = face::create_curves_from_face(
             kernel,
@@ -2372,18 +2391,13 @@ impl OffsetExecutive {
         let result_faces = bp1::faces(&result, None)?;
         let mut new_faces = Vec::new();
         for (index, &result_face) in result_faces.iter().enumerate() {
-            // (WR-342 opt-in: the loops in the sense of the faceuse's orientation, which
-            // the offset face is made with)
-            let result_orientation = if kernel.fixes.offset_clip_right_side_out {
-                orientation
-            } else {
-                OrientType::Same
-            };
+            // (not upstream, WR-342: the loops in the sense of the faceuse's orientation,
+            // which the offset face is made with; upstream takes SM_OT_SAME)
             let made = face::create_curves_from_face(
                 kernel,
                 &mut result,
                 result_face,
-                result_orientation,
+                orientation,
                 true,
                 false,
             )?;
@@ -4138,6 +4152,20 @@ mod tests {
         assert_eq!(executive.kept_edgeuses.len(), 16);
     }
 
+    /// The reach's edge bounds ([`super::super::reach::EdgeBounds`]) live for one local
+    /// operation: setting its surfaces forgets them, and so does clearing its relations.
+    #[test]
+    fn a_local_operations_edge_bounds_are_forgotten_with_its_surfaces() {
+        let mut executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 0.125, 1.0e-6);
+        executive.edge_bounds.hold(EdgeId::from_index(3));
+        assert_eq!(executive.edge_bounds.held(), 1);
+        executive.set_local_surfaces(&[], Vec::new(), &[]);
+        assert_eq!(executive.edge_bounds.held(), 0);
+        executive.edge_bounds.hold(EdgeId::from_index(3));
+        executive.clear_relations();
+        assert_eq!(executive.edge_bounds.held(), 0);
+    }
+
     #[test]
     fn a_box_face_margin_is_its_offset_corner_reach() {
         let mut kernel = Kernel::default();
@@ -4713,14 +4741,13 @@ mod tests {
         let mut original = Brep::new();
         let cache = BrepCache::new(crate::geom::a_object::BREP_TYPE).unwrap();
         let keys = OriginalKeys::new(&original).unwrap();
-        assert!(matches!(
-            solve_original_brep_point(&kernel, &mut original, &cache, &keys, Vec3::ZERO),
-            Err(SolidError::Upstream {
-                operation: "intersect::topology_solver::p1::TopologyObjects::brep_trees",
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let e = solve_original_brep_point(&kernel, &mut original, &cache, &keys, Vec3::ZERO)
+            .unwrap_err();
+        assert_eq!(
+            e.operation(),
+            "intersect::topology_solver::p1::TopologyObjects::brep_trees"
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
     #[test]
@@ -5423,17 +5450,16 @@ mod tests {
     /// tangency-labs/solidcore#974: an inset (`SM_OT_OPPOSITE`) face use whose face does
     /// not fit its offset surface's domain is clipped by a 2D boolean of planar faces made
     /// from its UV loops. Taken in the face use's sense the loops run clockwise, the planar
-    /// face is inside out and the clip empty: the face gets no offset. With the opt-in the
-    /// loops are taken counterclockwise and the clipped face is made.
+    /// face is inside out and the clip empty: the face gets no offset (upstream). The loops
+    /// are taken counterclockwise and the clipped face is made.
     #[test]
     #[ignore = "fixture does not reproduce the inside-out clip: on this create_plane sheet \
-                the default path also clips to one offset face; needs the shell/4567 vase's \
+                upstream's path also clipped to one offset face; needs the shell/4567 vase's \
                 inset bottom"]
     fn issue_974_inset_face_clipped_right_side_out() {
         use crate::primitive::api_primitives::create_plane;
-        let offsets = |right_side_out: bool| -> usize {
+        let offsets = || -> usize {
             let mut kernel = Kernel::default();
-            kernel.fixes.offset_clip_right_side_out = right_side_out;
             let mut original = create_plane(&mut kernel, Vec3::ZERO, 10.0, 10.0).unwrap();
             let inset = original
                 .faceuses()
@@ -5485,7 +5511,6 @@ mod tests {
             .unwrap();
             executive.offset_faces(inset).len()
         };
-        assert_eq!(offsets(false), 0);
-        assert!(offsets(true) >= 1);
+        assert!(offsets() >= 1);
     }
 }

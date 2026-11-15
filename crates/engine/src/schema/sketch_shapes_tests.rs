@@ -68,6 +68,8 @@ fn strict_keeps_todays_errors() {
         ("sketch.point", json!({"point": "mid:nope"})),
         ("sketch.point", json!({"point": {"vertex": "x"}})),
         ("sketch.point", json!({"point": "on:l1:x"})),
+        ("sketch.point", json!({"point": "x:l1:1,1"})),
+        ("sketch.point", json!({"point": "x:l1+l1:5,0"})),
         ("sketch.point", json!({"point": "vertex:1,2"})),
         ("sketch.point", json!({"point": [1, 2], "id": "a|b"})),
         ("sketch.circle.center", json!({"center": [0, 0]})),
@@ -179,6 +181,7 @@ fn replies_match_the_output_schema_and_forms_are_accepted() {
         json!({"point": ["10 mm", 40], "connect": false}),
         json!({"point": "mid:l1"}),
         json!({"point": "on:l1:5,0"}),
+        json!({"point": "x:l1+l4:0,0"}),
     ];
     let mut s = session(ParamCheck::Warn);
     for (id, p) in &calls {

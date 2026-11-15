@@ -91,7 +91,8 @@
 //! - **Curve-bounded labels.** Upstream declares a six-entry table but omits this
 //!   class from `SM_GetAssertLabelList`: failed test 0 uses the one-entry default
 //!   table, and a failed test 1..5 with a report list reads past it. The port keeps
-//!   that lookup; the out-of-range report is `InvalidInput`. With no report list,
+//!   that lookup for test 0 and labels tests 1..5 from the class's own table
+//!   (`labels::CURVE_BOUNDED_SURFACE`, UB-273). With no report list,
 //!   failed boundary checks return false normally, as upstream. At levels 0..2,
 //!   the inherited base continuity test reads an unwritten output: this class uses
 //!   the generic failing `GetKnots`. The existing continuity guard returns
@@ -475,9 +476,9 @@ fn curve_bounded_surface_assert_valid(
     );
     walk.depth = depth;
     let basis_ok = basis_result?;
-    rtn &= r.report(CURVE_BOUNDED_SURFACE_TYPE, 0, 0, basis_ok, UNDEF, UNDEF)?;
+    rtn &= curve_bounded_report(r, 0, basis_ok)?;
     // Every owned value is evaluated through the same kernel context.
-    rtn &= r.report(CURVE_BOUNDED_SURFACE_TYPE, 3, 0, true, UNDEF, UNDEF)?;
+    rtn &= curve_bounded_report(r, 3, true)?;
 
     for (curves, test, context_test) in [
         (bounded.boundaries_3d(), 1, 4),
@@ -495,18 +496,35 @@ fn curve_bounded_surface_assert_valid(
                 key,
                 polar_key,
             )?;
-            rtn &= r.report(CURVE_BOUNDED_SURFACE_TYPE, test, 0, ok, UNDEF, UNDEF)?;
-            rtn &= r.report(
-                CURVE_BOUNDED_SURFACE_TYPE,
-                context_test,
-                0,
-                true,
-                UNDEF,
-                UNDEF,
-            )?;
+            rtn &= curve_bounded_report(r, test, ok)?;
+            rtn &= curve_bounded_report(r, context_test, true)?;
         }
     }
     Ok(rtn)
+}
+
+/// `SM_ASSERT_BOOLEAN_REPORT(test, SM_LEVEL_0, passed)` of `SmCurveBoundedSurface`.
+/// Upstream's label lookup gives the class [`DEFAULT`](crate::geom::assert_array::labels::DEFAULT),
+/// one entry long: test 0 is labelled from it, as upstream; a later test, which upstream
+/// reads past its end, takes its label from the class's own
+/// `sAssertCurveBoundedSurface_list` (not upstream).
+fn curve_bounded_report(r: &mut Reporter<'_>, test: u64, passed: bool) -> Result<bool> {
+    let upstream = assert_label_list(CURVE_BOUNDED_SURFACE_TYPE, 0);
+    if usize::try_from(test).is_ok_and(|t| t < upstream.len()) {
+        return r.report(CURVE_BOUNDED_SURFACE_TYPE, test, 0, passed, UNDEF, UNDEF);
+    }
+    let class_string = r.class_string;
+    r.report_from(
+        crate::geom::assert_array::labels::CURVE_BOUNDED_SURFACE,
+        CURVE_BOUNDED_SURFACE_TYPE,
+        CURVE_BOUNDED_SURFACE_TYPE,
+        class_string,
+        test,
+        0,
+        passed,
+        UNDEF,
+        UNDEF,
+    )
 }
 
 // ---- SmSurface ----------------------------------------------------------------------
@@ -1639,14 +1657,9 @@ fn torus_of(s: &Surface) -> Result<&Torus> {
     }
 }
 
-/// `GetInsideOut` of a curve derived from `SmBSplineCurve` (only lines and conics
-/// have the bit).
+/// `GetInsideOut` of a curve derived from `SmBSplineCurve` ([`Curve::inside_out_bit`]).
 fn curve_inside_out(c: &Curve) -> bool {
-    match c.kind() {
-        CurveKind::Line(l) => l.inside_out(),
-        CurveKind::Ellipse(e) => e.inside_out(),
-        _ => false,
-    }
+    c.inside_out_bit()
 }
 
 /// `GetInsideOut` of the surface (cone, sphere and torus have the bit).
@@ -1885,16 +1898,12 @@ fn surf_of_revolution_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>
     }
 
     /* 13 */
-    // Analytic U Direction Domain too large (reported as test 2, as upstream; as 13, its
-    // label, with WR-538's `torus_check_reads_v_interval`)
+    // Analytic U Direction Domain too large (reported as 13, its label; upstream reports
+    // it as test 2, WR-538)
     let ivl_u = anal.u_interval();
     rtn &= r.report(
         CLASS,
-        if k.fixes.torus_check_reads_v_interval {
-            13
-        } else {
-            2
-        },
+        13,
         0,
         ivl_u.length() <= 360.0 + EFF_ZERO_DEG,
         EFF_ZERO_DEG,
@@ -2444,12 +2453,12 @@ fn sphere_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>) -> Result<
     Ok(rtn)
 }
 
-/// `SmTorus::AssertValid` (pinned upstream: test 4 reads the U interval, and the U
-/// and V tests report as 2 and 3; with `Kernel::fixes.torus_check_reads_v_interval`,
-/// WR-538, they read U and V and report as 3 and 4. A spindle torus's self-intersection
-/// test clears the result with no report and tests the U interval against an `acos`
-/// range; with `Kernel::fixes.torus_check_spindle_apex`, WR-539, it reports test 5 for an
-/// apex inside the V interval).
+/// `SmTorus::AssertValid` (the U and V tests read U and V and report as 3 and 4, their
+/// labels, where pinned upstream reads the U interval twice and reports them as 2 and 3,
+/// WR-538. A spindle torus's self-intersection test clears the result with no report and
+/// tests the U interval against an `acos` range; with
+/// `Kernel::fixes.torus_check_spindle_apex`, WR-539, it reports test 5 for an apex inside
+/// the V interval).
 fn torus_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>) -> Result<bool> {
     const CLASS: i64 = TORUS_TYPE;
     let mut rtn = true;
@@ -2509,26 +2518,21 @@ fn torus_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>) -> Result<b
 
     // Not upstream (WR-538, the fork's tangency-labs/smlib@0cd9d08, #482): the U and V
     // tests report as 3 and 4 (their labels), and the V test reads the V interval
-    let fixed_ids = k.fixes.torus_check_reads_v_interval;
+    // (upstream reads the U interval again)
     let ivl_u = anal.u_interval();
     rtn &= r.report(
         CLASS,
-        if fixed_ids { 3 } else { 2 },
+        3,
         0,
         ivl_u.length() <= 360.0 + EFF_ZERO_DEG,
         EFF_ZERO_DEG,
         ivl_u.length() - 360.0,
     )?;
 
-    // (upstream reads the U interval again)
-    let ivl_v = if fixed_ids {
-        anal.v_interval()
-    } else {
-        anal.u_interval()
-    };
+    let ivl_v = anal.v_interval();
     rtn &= r.report(
         CLASS,
-        if fixed_ids { 4 } else { 3 },
+        4,
         0,
         ivl_v.length() <= 360.0 + EFF_ZERO_DEG,
         EFF_ZERO_DEG,
@@ -2790,15 +2794,12 @@ mod tests {
     }
 
     /// WR-538 (the fork's tangency-labs/smlib@0cd9d08, #482): a torus whose V interval
-    /// runs past a turn. Upstream tests the U interval twice and never the V one; with
-    /// `torus_check_reads_v_interval` the V test (4) fails.
+    /// runs past a turn. Upstream tests the U interval twice and never the V one; the V
+    /// test (4) fails.
     #[test]
     fn wr_538_torus_check_reads_its_v_interval() {
         let s = torus_over(0.0, 400.0, 5.0, 1.0);
-        let mut k = Kernel::default();
-        let (_, upstream) = failed_tests(&k, &s);
-        assert!(!upstream.contains(&(TORUS_TYPE, 4)), "{upstream:?}");
-        k.fixes.torus_check_reads_v_interval = true;
+        let k = Kernel::default();
         let (ok, fixed) = failed_tests(&k, &s);
         assert!(!ok);
         assert!(fixed.contains(&(TORUS_TYPE, 4)), "{fixed:?}");
@@ -3544,11 +3545,29 @@ mod curve_bounded_tests {
             {
                 let level = LEVEL_GIVEN;
                 assert!(!surface.assert_valid(&k, None, level, ObjectKey(1)).unwrap());
+                // The failed boundary check (test 1 or 2) is labelled from
+                // `sAssertCurveBoundedSurface_list`; upstream's label lookup has no case
+                // for the class and reads its one-entry default list out of bounds.
                 let mut list = AssertArray::new();
-                assert!(matches!(
-                    surface.assert_valid(&k, Some(&mut list), level, ObjectKey(1)),
-                    Err(SolidError::InvalidInput { .. })
-                ));
+                assert!(!surface
+                    .assert_valid(&k, Some(&mut list), level, ObjectKey(1))
+                    .unwrap());
+                let test = if uv { 2 } else { 1 };
+                let report = list
+                    .reports()
+                    .iter()
+                    .find(|r| r.reporting_type == CURVE_BOUNDED_SURFACE_TYPE)
+                    .unwrap();
+                assert_eq!(report.test_index, test);
+                assert_eq!(report.name, "UNKNOWN");
+                let boundaries = if uv { "UVBoundaries" } else { "3DBoundaries" };
+                assert_eq!(
+                    report.message.as_deref(),
+                    Some(
+                        format!("Contained {boundaries} curve must pass its AssertValid tests")
+                            .as_str()
+                    )
+                );
             }
         }
     }

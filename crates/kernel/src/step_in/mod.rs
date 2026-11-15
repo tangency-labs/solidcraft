@@ -7,7 +7,7 @@
 //! untrusted: every count and nesting depth is capped, and what cannot be read becomes a
 //! warning rather than a failure wherever the rest of the file is still usable.
 
-pub(crate) mod p21;
+pub mod p21;
 mod parallel;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -68,6 +68,8 @@ pub struct ImportedBody {
     /// too, naming each face left out): `body` is an open surface body of the solid's exact faces
     /// but those.
     pub refused: Option<String>,
+    /// The file marks the body invisible (`INVISIBILITY`), so the design starts with it hidden.
+    pub hidden: bool,
 }
 
 /// One product occurrence in the file's assembly tree.
@@ -281,8 +283,17 @@ struct Reader {
     placements: HashMap<u64, u64>,
     /// Styled item → colour.
     colors: HashMap<u64, [f32; 3]>,
+    /// Styled item → its colour's name in the file (`COLOUR_RGB`'s name, or a pre-defined
+    /// colour's), when the file names it.
+    color_names: HashMap<u64, String>,
     /// Opacity of styled items with a transparency (1 = opaque).
     opacity: HashMap<u64, f32>,
+    /// Styled item → the item it styles.
+    styled_items: HashMap<u64, u64>,
+    /// Items, styled items and representations an `INVISIBILITY` record lists.
+    invisible_targets: HashSet<u64>,
+    /// Items whose bodies the file marks invisible, after resolving the targets above.
+    invisible: HashSet<u64>,
     /// Items that gave no part: reported once when the file could not be read, else (the
     /// body could not be made) at every instance, as the message says.
     unreadable: HashMap<u64, Option<String>>,
@@ -337,7 +348,11 @@ impl Reader {
             children: HashMap::new(),
             placements: HashMap::new(),
             colors: HashMap::new(),
+            color_names: HashMap::new(),
             opacity: HashMap::new(),
+            styled_items: HashMap::new(),
+            invisible_targets: HashSet::new(),
+            invisible: HashSet::new(),
             unreadable: HashMap::new(),
             once: HashSet::new(),
             shown: HashMap::new(),
@@ -454,18 +469,52 @@ impl Reader {
                     }
                 }
                 "STYLED_ITEM" | "OVER_RIDING_STYLED_ITEM" => {
+                    if let Some(item) = rf(2) {
+                        self.styled_items.insert(id, item);
+                    }
                     if let Some(item) = rf(2)
-                        && let Some(c) = self.find_colour(p.get(1))
+                        && let Some((c, name)) = self.find_colour(p.get(1))
                     {
+                        if !self.colors.contains_key(&item)
+                            && let Some(name) = name
+                        {
+                            self.color_names.insert(item, name);
+                        }
                         self.colors.entry(item).or_insert(c);
                         if let Some(t) = self.find_transparency(p.get(1)) {
                             self.opacity.entry(item).or_insert((1.0 - t).clamp(0.0, 1.0));
                         }
                     }
                 }
+                "INVISIBILITY" => {
+                    if let Some(items) = p.first().and_then(Param::as_list) {
+                        self.invisible_targets.extend(items.iter().filter_map(Param::as_ref_id));
+                    }
+                }
                 _ => {}
             }
         }
+        // An INVISIBILITY record names styled items or representations; a representation hides
+        // every item it lists, including the representations it is linked to.
+        let mut invisible = HashSet::new();
+        for target in std::mem::take(&mut self.invisible_targets) {
+            let mut queue = vec![self.styled_items.get(&target).copied().unwrap_or(target)];
+            let mut seen = HashSet::new();
+            while let Some(target) = queue.pop() {
+                if !seen.insert(target) {
+                    continue;
+                }
+                if let Some((items, _)) = self.reps.get(&target) {
+                    invisible.extend(items.iter().copied());
+                    if let Some(links) = self.rep_links.get(&target) {
+                        queue.extend(links.iter().copied());
+                    }
+                } else {
+                    invisible.insert(target);
+                }
+            }
+        }
+        self.invisible = invisible;
         for (d, r) in sdrs {
             if let Some(&pd) = pds.get(&d) {
                 self.pd_reps.entry(pd).or_default().push(r);
@@ -558,7 +607,8 @@ impl Reader {
         None
     }
 
-    fn find_colour(&self, styles: Option<&Param>) -> Option<[f32; 3]> {
+    /// The surface colour a style list gives, with its name in the file when it has one.
+    fn find_colour(&self, styles: Option<&Param>) -> Option<([f32; 3], Option<String>)> {
         let mut queue: Vec<u64> = styles?.as_list()?.iter().filter_map(Param::as_ref_id).collect();
         let mut seen = HashSet::new();
         while let Some(id) = queue.pop() {
@@ -588,19 +638,25 @@ impl Reader {
             if e.name() == "COLOUR_RGB" {
                 let p = e.params();
                 let c = |i: usize| p.get(i).and_then(Param::as_f64).map(|x| x.clamp(0.0, 1.0) as f32);
-                return Some([c(1)?, c(2)?, c(3)?]);
+                let name = p.first().and_then(Param::as_str).and_then(crate::body::colour_name);
+                return Some(([c(1)?, c(2)?, c(3)?], name));
             }
             if e.name() == "DRAUGHTING_PRE_DEFINED_COLOUR" {
-                return Some(match e.params().first().and_then(Param::as_str).unwrap_or("") {
-                    "red" => [1.0, 0.0, 0.0],
-                    "green" => [0.0, 1.0, 0.0],
-                    "blue" => [0.0, 0.0, 1.0],
-                    "yellow" => [1.0, 1.0, 0.0],
-                    "magenta" => [1.0, 0.0, 1.0],
-                    "cyan" => [0.0, 1.0, 1.0],
-                    "black" => [0.0, 0.0, 0.0],
-                    _ => [1.0, 1.0, 1.0],
-                });
+                let named = e.params().first().and_then(Param::as_str).unwrap_or("");
+                let name = crate::body::colour_name(named);
+                return Some((
+                    match named {
+                        "red" => [1.0, 0.0, 0.0],
+                        "green" => [0.0, 1.0, 0.0],
+                        "blue" => [0.0, 0.0, 1.0],
+                        "yellow" => [1.0, 1.0, 0.0],
+                        "magenta" => [1.0, 0.0, 1.0],
+                        "cyan" => [0.0, 1.0, 1.0],
+                        "black" => [0.0, 0.0, 0.0],
+                        _ => [1.0, 1.0, 1.0],
+                    },
+                    name,
+                ));
             }
             fn walk(p: &Param, out: &mut Vec<u64>, depth: usize) {
                 match p {
@@ -743,6 +799,11 @@ impl Reader {
                         for piece in solidcore_step::topology::items(&self.ex, item) {
                             if piece != item {
                                 if let Some(c) = self.colors.get(&item).copied() {
+                                    if !self.colors.contains_key(&piece)
+                                        && let Some(name) = self.color_names.get(&item).cloned()
+                                    {
+                                        self.color_names.insert(piece, name);
+                                    }
                                     self.colors.entry(piece).or_insert(c);
                                 }
                                 if let Some(o) = self.opacity.get(&item).copied() {
@@ -899,16 +960,26 @@ impl Reader {
                         *slot = Some(self.bodies.len());
                     }
                     let color = self.colors.get(&item).copied();
-                    // See-through bodies and faces with colours of their own.
+                    // See-through bodies and faces with colours of their own, and the names the
+                    // file gives those colours.
                     let faces = face_origin
                         .iter()
                         .enumerate()
                         .filter_map(|(i, f)| {
                             let c = self.colors.get(f)?;
-                            Some(crate::FacePaint { face: i, color: *c, opacity: self.opacity.get(f).copied().unwrap_or(1.0) })
+                            Some(crate::FacePaint {
+                                face: i,
+                                color: *c,
+                                opacity: self.opacity.get(f).copied().unwrap_or(1.0),
+                                name: self.color_names.get(f).cloned(),
+                            })
                         })
                         .collect();
-                    let paint = crate::Paint { opacity: self.opacity.get(&item).copied().unwrap_or(1.0), faces };
+                    let paint = crate::Paint {
+                        opacity: self.opacity.get(&item).copied().unwrap_or(1.0),
+                        faces,
+                        name: color.and_then(|_| self.color_names.get(&item).cloned()),
+                    };
                     let body = body.with_color(color).with_paint(Some(paint));
                     let identities = face_origin
                         .iter()
@@ -946,6 +1017,7 @@ impl Reader {
                         source_item: item,
                         face_origin,
                         refused: part.refused.clone(),
+                        hidden: self.invisible.contains(&item),
                     });
                 }
                 Err(parallel::Failure { read, msg }) => {

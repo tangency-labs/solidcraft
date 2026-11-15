@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex};
 use egui_wgpu::wgpu;
 pub use solidcraft_viewport_gpu::view::{
     AccessMap, BlockBuilder, BlockBytes, BlockTris, DrawStats, DrawStatsHandle, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook,
-    InstancedMesh, LINE_SIZE, LOD_PX, MAX_PALETTE, Material, MovingLayer, PBR_SIZE, Palette, PaletteIndex, PlannedBody, Renderer, SHARED_SIZE,
-    SceneBlock, SceneSlot, SharedTris, TRI_SIZE, TriClass, UploadError, extend_runs, level_for, lifted_width, placement_scale, runs_within,
-    supersampled_size,
+    InstancedMesh, LINE_SIZE, LOD_PX, LitEdges, MAX_PALETTE, Material, MovingLayer, PBR_SIZE, Palette, PaletteIndex, PlannedBody, Renderer,
+    SHARED_SIZE, SceneBlock, SceneSlot, SharedTris, TRI_SIZE, TriClass, UploadError, extend_runs, level_for, lifted_width, lit_line_style,
+    placement_scale, runs_within, supersampled_size,
 };
 
 /// The part of a picture (as texture coordinates) that `rect` shows in a window `window`: the
@@ -499,6 +499,8 @@ pub(crate) fn render_offscreen(
             ssaa: 1.0,
             ao_radius: 0.0,
             ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            preview: None,
+            moving: None,
         },
     )
 }
@@ -531,6 +533,8 @@ pub(crate) fn render_product_offscreen(
             ssaa: 1.0,
             ao_radius: 0.0,
             ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            preview: None,
+            moving: None,
         },
     )
 }
@@ -548,6 +552,46 @@ struct Offscreen<'a> {
     ssaa: f32,
     ao_radius: f32,
     ao_samples: u32,
+    /// The live preview's scene (`Frame::pv_slot`); `None`: no preview.
+    preview: Option<GpuScene>,
+    /// The frame's moving layer (`Frame::moving`): a scene and where it is drawn, column-major.
+    moving: Option<(GpuScene, [[f32; 4]; 4])>,
+}
+
+/// [`render_offscreen`] of a scene with a live preview over it: `preview` as the preview's
+/// scene, and `moving` as the frame's moving layer (a scene and the motion it is drawn with,
+/// column-major), as a preview that only moves bodies draws them.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn render_offscreen_preview(
+    scene: GpuScene,
+    preview: GpuScene,
+    moving: Option<(GpuScene, [[f32; 4]; 4])>,
+    view_proj: [[f32; 4]; 4],
+    back: [f32; 3],
+    eye: [f32; 4],
+    size: u32,
+) -> Option<Vec<u8>> {
+    offscreen(
+        scene,
+        None,
+        view_proj,
+        back,
+        eye,
+        size,
+        Offscreen {
+            tess: None,
+            product_lights: None,
+            product: false,
+            srgb: false,
+            analysis: [0.0; 8],
+            analysis_colors: [0.0; 36],
+            ssaa: 1.0,
+            ao_radius: 0.0,
+            ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            preview: Some(preview),
+            moving,
+        },
+    )
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -577,6 +621,8 @@ pub(crate) fn render_ao_offscreen(
             ssaa: 1.0,
             ao_radius,
             ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            preview: None,
+            moving: None,
         },
     )
 }
@@ -608,6 +654,8 @@ pub(crate) fn render_offscreen_ssaa(
             ssaa,
             ao_radius: 0.0,
             ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            preview: None,
+            moving: None,
         },
     )
 }
@@ -641,6 +689,8 @@ pub(crate) fn render_offscreen_ao(
             ssaa: 1.0,
             ao_radius,
             ao_samples,
+            preview: None,
+            moving: None,
         },
     )
 }
@@ -655,7 +705,7 @@ fn offscreen(
     size: u32,
     options: Offscreen<'_>,
 ) -> Option<Vec<u8>> {
-    let Offscreen { tess, product_lights, product, srgb, analysis, analysis_colors, ssaa, ao_radius, ao_samples } = options;
+    let Offscreen { tess, product_lights, product, srgb, analysis, analysis_colors, ssaa, ao_radius, ao_samples, preview, moving } = options;
     let (adapter, device, queue) = offscreen_device()?;
     eprintln!("offscreen adapter: {:?}", adapter.get_info().backend);
     let format = if srgb { wgpu::TextureFormat::Rgba8UnormSrgb } else { wgpu::TextureFormat::Rgba8Unorm };
@@ -677,11 +727,12 @@ fn offscreen(
         sketch_slot: none(),
         hl_key: u64::from(highlight.is_some()),
         hl_slot: Arc::new(Mutex::new(highlight)),
-        pv_key: 0,
-        pv_slot: none(),
+        pv_key: u64::from(preview.is_some()),
+        pv_slot: Arc::new(Mutex::new(preview)),
         pv_hide: false,
         preview_bounds: None,
         view_proj,
+        turned_depth: None,
         back,
         size_px: [size as f32; 2],
         clip: [0.0; 4],
@@ -700,7 +751,7 @@ fn offscreen(
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
         hatch: Default::default(),
-        moving: None,
+        moving: moving.map(|(scene, transform)| MovingLayer { key: 1, slot: Arc::new(Mutex::new(Some(scene))), transform }),
     });
     let texture = |format, usage| {
         device.create_texture(&wgpu::TextureDescriptor {
@@ -1080,6 +1131,9 @@ mod tests {
             app.home.open = false;
             app.preferences.ambient_occlusion = false;
             app.cpu_meshing = true;
+            // Refinement uses wall time and can change the scene between fixed-time frames.
+            // These fixtures check blur caching against stable display geometry.
+            app.viewport.suspend_refinement = true;
             app.cam.distance = 110.0;
             app.cam.target = solidcore_record::Vec3::new(20.0, 15.0, 12.5);
             let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
@@ -1394,6 +1448,9 @@ mod tests {
                         "positive rendering fixtures must pass the shared app-aware capability policy"
                     );
                     assert_eq!(f.app.blur.radius(), radius);
+                    let panels = &f.app.universal_panel_frame().unwrap().layout.sections;
+                    assert!(!panels.is_empty());
+                    assert!(panels.iter().all(|panel| panel.paint_alpha == Some(180)), "the shared panels keep the ribbon's blur tint alpha");
                     assert!(f.app.blur.painted_frame().is_some(), "guard evidence comes from actual submitted visible marker work");
                     let source = f.pixels(true);
                     let resting = f.pixels(false);

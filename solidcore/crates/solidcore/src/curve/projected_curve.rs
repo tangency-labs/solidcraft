@@ -39,9 +39,8 @@
 //!   own [`Curve`] (callers that borrowed a curve upstream pass a clone); the
 //!   ownership flag is kept as [`OwnsCurve`] because upstream's edits test it
 //!   (`EditParameterization`, `ReverseParameterization` and `Trim` refuse a
-//!   `FALSE` owner; `Transform` refuses anything below `UNSURE` by default, or only
-//!   `FALSE` under
-//!   [`UpstreamFixes::projected_curve_transform_when_owned`](crate::kernel::UpstreamFixes::projected_curve_transform_when_owned)).
+//!   `FALSE` owner; `Transform` refuses only `FALSE`, where upstream refuses anything
+//!   below `UNSURE`, WR-29).
 //!   The copy constructor
 //!   (`Clone`) copies an owned base curve (`Copy`, whose B-spline copy fixes its
 //!   knots up) and a borrowed one exactly (no knot fix-up, owner kept), the values
@@ -72,13 +71,12 @@
 //!   [`SolidError::InvalidInput`] (upstream reads an uninitialised local).
 //! - `GetRootCurve`, `DrawPolygon`, `GetMemoryUsed`, `WriteToDB`, `AssertValid`
 //!   and `Dump` are not part of this unit.
-//! - Upstream behaviours kept by default (see `plan/findings/` and `plan/upstream-issues/`):
-//!   `Transform` fails unless the ownership flag is `UNSURE` (opt-in WR-29 fix
-//!   [`UpstreamFixes::projected_curve_transform_when_owned`](crate::kernel::UpstreamFixes::projected_curve_transform_when_owned)
-//!   also accepts `TRUE`). `ReadFromDB` does not call `MakeOrthoNormal`.
+//! - Upstream behaviour kept (see `plan/findings/` and `plan/upstream-issues/`):
+//!   `ReadFromDB` does not call `MakeOrthoNormal`.
 
 use crate::curve::curve::p2::{self as curve_base, Curve, PROJECTED_CURVE_TYPE};
-use crate::error::{Result, SolidError, SM_ERR_INVALID_INPUT};
+use crate::error::curve::CurveFailure;
+use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -101,12 +99,10 @@ pub enum OwnsCurve {
     #[default]
     No = 0,
     /// `TRUE`: the base curve is owned (always after `ReadFromDB`). Accepted by
-    /// [`ProjectedCurve::transform`] when
-    /// [`UpstreamFixes::projected_curve_transform_when_owned`](crate::kernel::UpstreamFixes::projected_curve_transform_when_owned)
-    /// is enabled (WR-29).
+    /// [`ProjectedCurve::transform`] (WR-29).
     Yes = 1,
-    /// `UNSURE` (2): the member initialiser; the only value [`ProjectedCurve::transform`]
-    /// accepts by default (pinned C++ tests `m_bOwnsCurve < 2`).
+    /// `UNSURE` (2): the member initialiser; the only value upstream's `Transform`
+    /// accepts (it tests `m_bOwnsCurve < 2`).
     Unsure = 2,
 }
 
@@ -397,7 +393,10 @@ impl ProjectedCurve {
         if proj_init && !proj_zero {
             self.proj_vec = self.proj_vec.unitize_or_z();
         } else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::curve_failed(
+                OP,
+                "the projection vector is unset or zero",
+            ));
         }
 
         // for rotations - make the sAuxData vector orthonormal to the ProjVec
@@ -411,14 +410,16 @@ impl ProjectedCurve {
                 let zero = self.aux_data.length_squared() < EFF_ZERO_SQ;
                 self.aux_data = self.aux_data.unitize_or_z();
                 if zero {
-                    return Err(SolidError::Upstream {
-                        operation: OP,
-                        code: SM_ERR_INVALID_INPUT,
-                        entity: None,
-                    });
+                    return Err(SolidError::curve(
+                        OP,
+                        CurveFailure::ZeroDirection("the auxiliary direction"),
+                    ));
                 }
             } else {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::curve_failed(
+                    OP,
+                    "the auxiliary data is unset or zero",
+                ));
             }
         }
         Ok(())
@@ -486,7 +487,10 @@ impl ProjectedCurve {
     pub fn edit_parameterization(&mut self, k: &Kernel, new_param: &Extent1d) -> Result<()> {
         // Don't own curve can not reverse parameterization
         if self.owns_curve == OwnsCurve::No {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::curve_failed(
+                OP,
+                "a curve that does not own its base curve cannot be reparametrised",
+            ));
         }
 
         // pass the call along to m_cpCurve
@@ -506,7 +510,10 @@ impl ProjectedCurve {
     ) -> Result<Extent1d> {
         // Don't own curve can not reverse parameterization
         if self.owns_curve == OwnsCurve::No {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::curve_failed(
+                OP,
+                "a curve that does not own its base curve cannot be reparametrised",
+            ));
         }
 
         // pass the call along to the cpCurve
@@ -537,7 +544,10 @@ impl ProjectedCurve {
     ) -> Result<()> {
         // Don't own curve can not trim the curve
         if self.owns_curve == OwnsCurve::No {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::curve_failed(
+                OP,
+                "a curve that does not own its base curve cannot be trimmed",
+            ));
         }
 
         // pass the call along to the UVCurve
@@ -550,11 +560,8 @@ impl ProjectedCurve {
     ///
     /// # Errors
     ///
-    /// By default, `SM_ERR` unless the ownership flag is [`OwnsCurve::Unsure`] (upstream
-    /// tests `m_bOwnsCurve < 2`). When
-    /// [`UpstreamFixes::projected_curve_transform_when_owned`](crate::kernel::UpstreamFixes::projected_curve_transform_when_owned)
-    /// is `true` (WR-29), [`OwnsCurve::Yes`] is also accepted and only [`OwnsCurve::No`]
-    /// fails with `SM_ERR`. Also returns any error from [`Curve::transform`].
+    /// `SM_ERR` when the ownership flag is [`OwnsCurve::No`] (WR-29; upstream accepts
+    /// only [`OwnsCurve::Unsure`], testing `m_bOwnsCurve < 2`). Also returns any error from [`Curve::transform`].
     pub fn transform(
         &mut self,
         k: &Kernel,
@@ -580,13 +587,11 @@ impl ProjectedCurve {
         }
 
         // Don't own surface, can not transform the curve
-        let disallowed = if k.fixes.projected_curve_transform_when_owned {
-            self.owns_curve == OwnsCurve::No
-        } else {
-            self.owns_curve != OwnsCurve::Unsure
-        };
-        if disallowed {
-            return Err(SolidError::sm_err(OP));
+        if self.owns_curve == OwnsCurve::No {
+            return Err(SolidError::curve_failed(
+                OP,
+                "a curve that does not own its base curve cannot be transformed",
+            ));
         }
 
         // pass the call along to the curve
@@ -813,8 +818,8 @@ mod tests {
     use crate::curve::curve::p2::CurveKind;
     use crate::curve::hermite_curve::HermiteCurve;
     use crate::curve::line::Line;
-    use crate::error::SM_ERR;
-    use crate::kernel::UpstreamFixes;
+    use crate::error::{SM_ERR, SM_ERR_INVALID_INPUT};
+
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::math::CPoint;
     use crate::topology::database_io::DatabaseWriter;
@@ -924,13 +929,10 @@ mod tests {
         assert!(c.make_ortho_normal().is_ok());
         // an auxiliary vector along the projection vector has no normal part
         c.aux_data = Vec3::new(0.0, 0.0, 4.0);
-        assert!(matches!(
-            c.make_ortho_normal(),
-            Err(SolidError::Upstream {
-                code: SM_ERR_INVALID_INPUT,
-                ..
-            })
-        ));
+        assert_eq!(
+            status_of(c.make_ortho_normal()),
+            Err(upstream_err(SM_ERR_INVALID_INPUT))
+        );
         assert_eq!(c.aux_data(), Vec3::Z);
     }
 
@@ -1019,12 +1021,17 @@ mod tests {
         assert_eq!(c.curve().type_code(), HermiteCurve::TYPE);
     }
 
-    fn upstream_err(code: i32) -> SolidError {
-        SolidError::Upstream {
-            operation: OP,
-            code,
-            entity: None,
-        }
+    /// The operation and upstream status of an error from this module's routines.
+    type Status = (&'static str, Option<i32>);
+
+    /// What [`status_of`] gives for a failure of [`OP`] with `code`.
+    fn upstream_err(code: i32) -> Status {
+        (OP, Some(code))
+    }
+
+    /// `r` with its error as its operation and upstream status.
+    fn status_of<T>(r: Result<T>) -> core::result::Result<T, Status> {
+        r.map_err(|e| (e.operation(), crate::error::upstream_status(&e)))
     }
 
     /// WR-28 (fixed in v1.0.1 `3fd5b95`): `SmProjectedCurve::MakeOrthoNormal` unitizes a
@@ -1117,7 +1124,7 @@ mod tests {
             .unwrap();
             assert_eq!(from_new.proj_vec(), bad_proj);
             let err = from_new.make_ortho_normal();
-            assert_eq!(err, Err(upstream_err(SM_ERR)));
+            assert_eq!(status_of(err), Err(upstream_err(SM_ERR)));
             assert_eq!(from_new.proj_vec(), bad_proj);
 
             let mut from_set = ProjectedCurve::new(
@@ -1137,7 +1144,7 @@ mod tests {
                 ProjectionType::Parallel,
                 OwnsCurve::Yes,
             );
-            assert_eq!(err, Err(upstream_err(SM_ERR)));
+            assert_eq!(status_of(err), Err(upstream_err(SM_ERR)));
             assert_eq!(from_set.proj_vec(), bad_proj);
         }
 
@@ -1152,7 +1159,7 @@ mod tests {
         .unwrap();
         assert_eq!(omitted.proj_vec(), Vec3::UNDEF);
         let err = omitted.make_ortho_normal();
-        assert_eq!(err, Err(upstream_err(SM_ERR)));
+        assert_eq!(status_of(err), Err(upstream_err(SM_ERR)));
     }
 
     /// WR-28 (fixed in v1.0.1 `3fd5b95`): `ProjectionType::Rotation` orthonormalizes non-unit
@@ -1231,7 +1238,7 @@ mod tests {
                 ProjectionType::Rotation,
                 OwnsCurve::No,
             );
-            assert_eq!(err, Err(upstream_err(SM_ERR)));
+            assert_eq!(status_of(err), Err(upstream_err(SM_ERR)));
             assert_eq!(rot_set.proj_vec(), Vec3::Z);
             assert_eq!(rot_set.aux_data(), bad_aux);
         }
@@ -1248,7 +1255,7 @@ mod tests {
         assert_eq!(omitted_aux.proj_vec(), Vec3::Z);
         assert_eq!(omitted_aux.aux_data(), Vec3::UNDEF);
         let err = omitted_aux.make_ortho_normal();
-        assert_eq!(err, Err(upstream_err(SM_ERR)));
+        assert_eq!(status_of(err), Err(upstream_err(SM_ERR)));
 
         for par_aux in [Vec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, -3.0, 0.0)] {
             let err = rot_set.set_canonical(
@@ -1259,7 +1266,7 @@ mod tests {
                 ProjectionType::Rotation,
                 OwnsCurve::No,
             );
-            assert_eq!(err, Err(upstream_err(SM_ERR_INVALID_INPUT)));
+            assert_eq!(status_of(err), Err(upstream_err(SM_ERR_INVALID_INPUT)));
             assert_eq!(rot_set.proj_vec(), Vec3::Y);
             assert_eq!(rot_set.aux_data(), Vec3::Z);
         }
@@ -1364,18 +1371,14 @@ mod tests {
         a
     }
 
-    /// WR-29: `ProjectedCurve` with `OwnsCurve::Yes` fails with `SM_ERR` (`1001`) by default
-    /// without mutating the curve, and succeeds under
-    /// `Kernel::fixes.projected_curve_transform_when_owned` across `Parallel`, `Perspective`
+    /// WR-29: `ProjectedCurve` with `OwnsCurve::Yes` transforms across `Parallel`, `Perspective`
     /// and `Rotation` projections for rigid transforms, isotropic scale + rotation, and
     /// anisotropic scale (both direct `ProjectedCurve::transform` and polymorphic
     /// `Curve::transform`, including nested `ProjectedCurve`).
     #[test]
-    fn wr29_owned_projected_curve_transforms_under_opt_in_all_projection_types() {
+    fn wr29_owned_projected_curve_transforms_all_projection_types() {
         assert_eq!(SM_ERR, 1001);
-        let k_def = Kernel::default();
-        let mut k_fix = Kernel::default();
-        k_fix.fixes.projected_curve_transform_when_owned = true;
+        let k_fix = Kernel::default();
 
         let rigid = wr29_rigid_placement();
         let rot_origin = wr29_origin_rotation_placement();
@@ -1387,29 +1390,13 @@ mod tests {
             // (b) isotropic scale + 3D rotation about the origin.
             for orig in wr29_general_projections(make_base, OwnsCurve::Yes) {
                 for (placement, scale) in [(&rigid, None), (&rot_origin, Some(iso_scale))] {
-                    let mut pc_def = orig.clone();
-                    let snap = format!("{pc_def:?}");
-                    assert_eq!(
-                        pc_def.transform(&k_def, placement, scale),
-                        Err(upstream_err(SM_ERR))
-                    );
-                    assert_eq!(format!("{pc_def:?}"), snap);
-
-                    let mut crv_def = Curve::from(orig.clone());
-                    let crv_snap = format!("{crv_def:?}");
-                    assert_eq!(
-                        crv_def.transform(&k_def, placement, scale),
-                        Err(upstream_err(SM_ERR))
-                    );
-                    assert_eq!(format!("{crv_def:?}"), crv_snap);
-
                     let mut pc_fix = orig.clone();
                     pc_fix.transform(&k_fix, placement, scale).unwrap();
                     let mut crv_fix = Curve::from(orig.clone());
                     crv_fix.transform(&k_fix, placement, scale).unwrap();
 
                     for t in [0.0, 0.35, 0.75, 1.0] {
-                        let pre = orig.evaluate(&k_def, t, 1, true, false).unwrap();
+                        let pre = orig.evaluate(&k_fix, t, 1, true, false).unwrap();
                         let mut exp_p = placement.transform_point(pre[0]);
                         let mut exp_d = placement.transform_vector(pre[1]);
                         if let Some(s) = scale {
@@ -1431,20 +1418,12 @@ mod tests {
 
             // (c) Anisotropic scale `(2.0, 3.0, 0.5)` across all three projection types.
             for orig in wr29_axis_aligned_projections(make_base, OwnsCurve::Yes) {
-                let mut pc_def = orig.clone();
-                let snap = format!("{pc_def:?}");
-                assert_eq!(
-                    pc_def.transform(&k_def, &Axis2Placement::IDENTITY, Some(aniso_scale)),
-                    Err(upstream_err(SM_ERR))
-                );
-                assert_eq!(format!("{pc_def:?}"), snap);
-
                 let mut pc_fix = orig.clone();
                 pc_fix
                     .transform(&k_fix, &Axis2Placement::IDENTITY, Some(aniso_scale))
                     .unwrap();
                 for t in [0.0, 0.25, 0.6, 1.0] {
-                    let pre = orig.evaluate(&k_def, t, 1, true, false).unwrap();
+                    let pre = orig.evaluate(&k_fix, t, 1, true, false).unwrap();
                     let exp_p = pre[0].multiply(aniso_scale);
                     let exp_d = pre[1].multiply(aniso_scale);
                     let post = pc_fix.evaluate(&k_fix, t, 1, true, false).unwrap();
@@ -1473,50 +1452,48 @@ mod tests {
             OwnsCurve::Yes,
         )
         .unwrap();
-        let mut nested_def = Curve::from(outer.clone());
-        let nested_snap = format!("{nested_def:?}");
-        assert_eq!(
-            nested_def.transform(&k_def, &rigid, None),
-            Err(upstream_err(SM_ERR))
-        );
-        assert_eq!(format!("{nested_def:?}"), nested_snap);
 
         let mut nested_fix = Curve::from(outer.clone());
         nested_fix.transform(&k_fix, &rigid, None).unwrap();
         for t in [0.0, 0.5, 1.0] {
-            let pre = outer.evaluate(&k_def, t, 1, true, false).unwrap();
+            let pre = outer.evaluate(&k_fix, t, 1, true, false).unwrap();
             let post = nested_fix.evaluate(&k_fix, t, 1, true, false).unwrap();
             assert!((post[0] - rigid.transform_point(pre[0])).length() < 1e-12);
             assert!((post[1] - rigid.transform_vector(pre[1])).length() < 1e-12);
         }
     }
 
-    /// WR-29: `OwnsCurve::No` still fails with `SM_ERR` under opt-in (except early identity
-    /// return), while `OwnsCurve::Unsure` succeeds identically bit-for-bit in both modes.
+    /// WR-29: `OwnsCurve::No` still fails with `SM_ERR` (except early identity return),
+    /// while `OwnsCurve::Unsure` succeeds.
     #[test]
     fn wr29_borrowed_still_rejected_and_unsure_and_identity_unchanged() {
-        let k_def = Kernel::default();
-        let mut k_fix = Kernel::default();
-        k_fix.fixes.projected_curve_transform_when_owned = true;
+        let k_fix = Kernel::default();
 
         let rigid = wr29_rigid_placement();
         let non_unit_scale = Vec3::new(2.0, 1.5, 0.75);
         let unit_scale = Vec3::new(1.0, 1.0, 1.0);
 
         for orig in wr29_general_projections(wr29_bspline_base, OwnsCurve::No) {
-            for k in [&k_def, &k_fix] {
+            {
+                let k = &k_fix;
                 let mut pc = orig.clone();
                 let snap = format!("{pc:?}");
-                assert_eq!(pc.transform(k, &rigid, None), Err(upstream_err(SM_ERR)));
+                assert_eq!(
+                    status_of(pc.transform(k, &rigid, None)),
+                    Err(upstream_err(SM_ERR))
+                );
                 assert_eq!(format!("{pc:?}"), snap);
                 assert_eq!(
-                    pc.transform(k, &Axis2Placement::IDENTITY, Some(non_unit_scale)),
+                    status_of(pc.transform(k, &Axis2Placement::IDENTITY, Some(non_unit_scale))),
                     Err(upstream_err(SM_ERR))
                 );
                 assert_eq!(format!("{pc:?}"), snap);
 
                 let mut crv = Curve::from(orig.clone());
-                assert_eq!(crv.transform(k, &rigid, None), Err(upstream_err(SM_ERR)));
+                assert_eq!(
+                    status_of(crv.transform(k, &rigid, None)),
+                    Err(upstream_err(SM_ERR))
+                );
 
                 // Identity placement with `None` or unit scale returns `Ok(())` early.
                 assert_eq!(pc.transform(k, &Axis2Placement::IDENTITY, None), Ok(()));
@@ -1530,21 +1507,8 @@ mod tests {
 
         for orig in wr29_general_projections(wr29_bspline_base, OwnsCurve::Unsure) {
             for scale in [None, Some(non_unit_scale)] {
-                let mut pc_def = orig.clone();
                 let mut pc_fix = orig.clone();
-                pc_def.transform(&k_def, &rigid, scale).unwrap();
                 pc_fix.transform(&k_fix, &rigid, scale).unwrap();
-
-                for t in [0.0, 0.3, 0.7, 1.0] {
-                    let d_def = pc_def.evaluate(&k_def, t, 2, true, false).unwrap();
-                    let d_fix = pc_fix.evaluate(&k_fix, t, 2, true, false).unwrap();
-                    assert_eq!(d_def.len(), d_fix.len());
-                    for (&a, &b) in d_def.iter().zip(&d_fix) {
-                        assert_eq!(a.x.to_bits(), b.x.to_bits());
-                        assert_eq!(a.y.to_bits(), b.y.to_bits());
-                        assert_eq!(a.z.to_bits(), b.z.to_bits());
-                    }
-                }
             }
         }
     }
@@ -1573,28 +1537,10 @@ mod tests {
     }
 
     /// WR-29: `ProjectedCurve::read_from_db` sets `OwnsCurve::Yes`, so deserialized projected
-    /// curves fail `Transform` with `SM_ERR` by default and transform cleanly when
-    /// `UpstreamFixes::flag_mut("projected_curve_transform_when_owned")` is enabled.
+    /// curves transform cleanly.
     #[test]
-    fn wr29_read_from_db_projected_curve_transforms_and_flag_lookup() {
-        let k_def = Kernel::default();
-        assert!(!k_def.fixes.projected_curve_transform_when_owned);
-        assert!(UpstreamFixes::NAMES.contains(&"projected_curve_transform_when_owned"));
-        assert!(k_def
-            .fixes
-            .flags()
-            .any(|f| f == ("projected_curve_transform_when_owned", false)));
-
-        let mut k_fix = Kernel::default();
-        *k_fix
-            .fixes
-            .flag_mut("projected_curve_transform_when_owned")
-            .expect("WR-29 flag registered in UpstreamFixes") = true;
-        assert!(k_fix.fixes.projected_curve_transform_when_owned);
-        assert!(k_fix
-            .fixes
-            .flags()
-            .any(|f| f == ("projected_curve_transform_when_owned", true)));
+    fn wr29_read_from_db_projected_curve_transforms() {
+        let k_fix = Kernel::default();
 
         let line = Line::create_line_segment(
             3,
@@ -1622,7 +1568,7 @@ mod tests {
             let mut db = DatabaseReader::new();
             db.open_for_read(bytes.clone(), file_type);
             let crv_orig =
-                Curve::read_from_db(&k_def, PROJECTED_CURVE_TYPE, &mut db, 3, 36).unwrap();
+                Curve::read_from_db(&k_fix, PROJECTED_CURVE_TYPE, &mut db, 3, 36).unwrap();
             let CurveKind::Projected(pc_inner) = crv_orig.kind() else {
                 panic!("expected CurveKind::Projected");
             };
@@ -1631,27 +1577,15 @@ mod tests {
 
             let mut db_direct = DatabaseReader::new();
             db_direct.open_for_read(bytes, file_type);
-            let mut pc_direct = ProjectedCurve::read_from_db(&k_def, &mut db_direct, 36).unwrap();
+            let mut pc_direct = ProjectedCurve::read_from_db(&k_fix, &mut db_direct, 36).unwrap();
             assert_eq!(pc_direct.owns_curve(), OwnsCurve::Yes);
-            assert_eq!(
-                pc_direct.transform(&k_def, &rigid, None),
-                Err(upstream_err(SM_ERR))
-            );
-
-            let mut crv_def = crv_orig.clone();
-            let snap = format!("{crv_def:?}");
-            assert_eq!(
-                crv_def.transform(&k_def, &rigid, None),
-                Err(upstream_err(SM_ERR))
-            );
-            assert_eq!(format!("{crv_def:?}"), snap);
 
             let mut crv_fix = crv_orig.clone();
             crv_fix.transform(&k_fix, &rigid, None).unwrap();
             pc_direct.transform(&k_fix, &rigid, None).unwrap();
 
             for t in [0.0, 0.4, 1.0] {
-                let pre = crv_orig.evaluate(&k_def, t, 1, true, false).unwrap();
+                let pre = crv_orig.evaluate(&k_fix, t, 1, true, false).unwrap();
                 let post_crv = crv_fix.evaluate(&k_fix, t, 1, true, false).unwrap();
                 let post_pc = pc_direct.evaluate(&k_fix, t, 1, true, false).unwrap();
                 let exp_p = rigid.transform_point(pre[0]);

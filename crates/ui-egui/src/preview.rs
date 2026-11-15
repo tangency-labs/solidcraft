@@ -10,6 +10,9 @@
 //! A feature that adds or removes a tool body (join, cut, intersect) shows only its tool. That
 //! is all its preview builds: its boolean, which can take seconds (a text joined onto a part),
 //! runs once, on OK, and an error it finds shows then, the dialog staying open.
+//!
+//! A Mirror of bodies shows its copies as green see-through ghosts, joined or not, and says
+//! whether a copy meets the body it was made from: the dialog sets its operation from that.
 
 use solidcraft_engine::geom::prelude::*;
 use std::hash::{Hash, Hasher};
@@ -38,6 +41,8 @@ pub struct Colors {
     /// A body the preview creates (New Body), so it doesn't look like a join.
     pub new_body: [u8; 4],
     pub removed: [u8; 4],
+    /// A Mirror's copies: the proposed-geometry green, as see-through as removed material.
+    pub mirrored: [u8; 4],
     pub edge: [u8; 4],
     /// Whether a moved component's old place is drawn as a ghost (Drive Joints' Show ghost).
     pub ghost: bool,
@@ -59,6 +64,10 @@ impl Colors {
             added: c(t.preview_add),
             new_body: c(t.preview_new),
             removed: c(t.preview_cut),
+            mirrored: {
+                let ([r, g, b, _], [.., a]) = (c(t.preview_sketch), c(t.preview_cut));
+                [r, g, b, a]
+            },
             edge: c(t.body_edge),
             ghost: true,
             tint_new: true,
@@ -101,9 +110,37 @@ pub struct Built {
     /// The reply of a previewed drive that stopped short of the asked values (the dialog says
     /// where and why, in the UI's language).
     pub stopped: Option<serde_json::Value>,
+    /// For a Mirror of bodies: whether a copy meets the body it was made from, with the key of
+    /// the bodies and plane it was worked out for ([`mirror_key`]).
+    pub mirror_meets: Option<(u64, bool)>,
+    /// Construction points the previewed feature makes or moves: the view marks each one, sized
+    /// to the view like the model's construction points (#17154).
+    pub points: Vec<Vec3>,
+    /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
+    /// how free the part is with the constraint it shows.
+    pub placed: Option<serde_json::Value>,
+    /// Bodies the preview only moves, drawn moved on the GPU instead of built where they land
+    /// (a Move). `scene` is not read then.
+    pub layer: Option<Layer>,
+}
+
+/// What a preview only moves, as a layer of its own ([`crate::gpu::MovingLayer`]): scenes built
+/// once where the bodies stand and one rigid motion, so a change of the motion builds and
+/// uploads nothing.
+pub struct Layer {
+    /// Names the scenes: everything they are built from.
+    pub key: u64,
+    /// What stays where it is (the ghost of where the bodies were), then what moves; `None`
+    /// when the preview already shows the scenes of `key` ([`PreviewState::layer_shown`]).
+    pub scenes: Option<(GpuScene, GpuScene)>,
+    /// From where the moving scene was built to where it is drawn.
+    pub motion: solidcraft_engine::doc::Mat,
 }
 
 type Job = Result<Built, String>;
+
+/// Set in the keys of the scenes a [`Layer`] moves (see [`PreviewState::moving_layer`]).
+const LAYER_KEYS: u64 = 1 << 63;
 
 /// How many obsolete preview jobs may still run, left behind for newer inputs (#7167). Beyond
 /// them, a new job waits for the running one as before, so a quick series of picks keeps at
@@ -153,12 +190,31 @@ pub struct PreviewState {
     pub applied: Option<(f64, f64)>,
     /// The reply of a previewed drive that stopped short (see [`Built::stopped`]).
     pub stopped: Option<serde_json::Value>,
+    /// The reply of a previewed assembly constraint (see [`Built::placed`]).
+    pub placed: Option<serde_json::Value>,
     /// The radius splines the previewed fillet tapered its edges with.
     pub tapered: Vec<(Vec3, solidcraft_engine::kernel::Taper)>,
+    /// Whether the previewed Mirror's copy meets its body (see [`Built::mirror_meets`]).
+    pub mirror_meets: Option<(u64, bool)>,
+    /// The construction points the preview shows (see [`Built::points`]).
+    pub points: Vec<Vec3>,
+    /// The bodies and plane ([`mirror_key`]) the Mirror dialog last set its operation for: an
+    /// operation picked by hand afterwards stays until they change.
+    pub mirror_decided: Option<u64>,
     straight: crate::extrude_preview::StraightPreview,
     moving: crate::move_preview::MovePreview,
     /// PreviewReselect: Primary held - hide the preview and restore replaced bodies for picks.
     pub rolled_back: bool,
+    /// The scene a [`Layer`] moves, for the GPU, and its key (changes whenever the scene does).
+    /// The key counts on through [`PreviewState::reset`]: the renderer keeps the scene of the key
+    /// it last took, so another design's first layer must not come under that key.
+    layer_slot: SceneSlot,
+    layer_serial: u64,
+    /// The [`Layer::key`] of the scenes shown and their motion; `None`: no layer is drawn. It
+    /// holds while the scenes do: `key` names what they are built from (the bodies, the colours,
+    /// the ghost), and the renderer keeps the moving one only as long as every frame draws it
+    /// ([`PreviewState::layer_not_drawn`]).
+    layer: Option<(u64, solidcraft_engine::doc::Mat)>,
 }
 
 impl PreviewState {
@@ -167,8 +223,63 @@ impl PreviewState {
         if self.rolled_back { &[] } else { &self.replaced }
     }
 
+    /// The key of the [`Layer`] scenes shown: a result for the same key leaves them out.
+    pub(crate) fn layer_shown(&self) -> Option<u64> {
+        self.layer.map(|(key, _)| key)
+    }
+
+    /// The bodies the preview draws moved on the GPU, for this frame; none while the preview is
+    /// hidden for a pick (`rolled_back`), as its scene is, and the frame then draws no layer
+    /// ([`PreviewState::layer_not_drawn`]).
+    pub(crate) fn moving_layer(&mut self) -> Option<crate::gpu::MovingLayer> {
+        let Some((_, motion)) = self.layer.filter(|_| self.active && !self.rolled_back) else {
+            self.layer_not_drawn();
+            return None;
+        };
+        let transform = std::array::from_fn(|c| std::array::from_fn(|r| motion[c][r] as f32));
+        Some(crate::gpu::MovingLayer { key: self.layer_serial, slot: self.layer_slot.clone(), transform })
+    }
+
+    /// This frame draws without the preview's layer: the preview is hidden for a pick, or a
+    /// component's drag has the renderer's one layer. The renderer lets go of a moving scene it
+    /// is not handed, and a frame that hands it the same key again would find no scene to take,
+    /// so the moved bodies would stay undrawn. When the renderer has taken the scene, the layer is
+    /// therefore forgotten and its preview computed again, which hands the scenes over anew. A
+    /// scene still waiting in its slot was never taken and stays.
+    pub(crate) fn layer_not_drawn(&mut self) {
+        let taken = self.layer.is_some() && self.layer_slot.lock().is_ok_and(|slot| slot.is_none());
+        if taken {
+            self.layer = None;
+            self.shown_key = None;
+        }
+    }
+
+    /// As if a layer of scenes `key` had been applied and were shown.
+    #[cfg(test)]
+    pub(crate) fn show_layer_for_tests(&mut self, key: u64) {
+        self.active = true;
+        self.layer = Some((key, solidcraft_engine::doc::IDENTITY));
+    }
+
+    /// The renderer takes the scene waiting in the layer's slot, as a frame that draws the layer
+    /// does; whether one was waiting.
+    #[cfg(test)]
+    pub(crate) fn renderer_takes_layer_for_tests(&self) -> bool {
+        self.layer_slot.lock().is_ok_and(|mut slot| slot.take().is_some())
+    }
+
+    /// Stop drawing a [`Layer`]: its scene goes with it.
+    fn drop_layer(&mut self) {
+        if self.layer.take().is_some()
+            && let Ok(mut slot) = self.layer_slot.lock()
+        {
+            *slot = None;
+        }
+    }
+
     /// Stop drawing the preview scene and give the bodies it stood in for back to the model.
     fn hide_scene(&mut self) {
+        self.drop_layer();
         if self.active || !self.replaced.is_empty() {
             self.active = false;
             self.bounds = Aabb3::EMPTY;
@@ -187,7 +298,11 @@ impl PreviewState {
         self.error = None;
         self.applied = None;
         self.stopped = None;
+        self.placed = None;
         self.tapered.clear();
+        self.mirror_meets = None;
+        self.mirror_decided = None;
+        self.points.clear();
         self.sketches.clear();
         self.busy = false;
         self.rolled_back = false;
@@ -200,7 +315,7 @@ impl PreviewState {
     pub fn reset(&mut self) {
         self.detach();
         let (slot, key, detached) = (std::mem::take(&mut self.slot), self.key, std::mem::take(&mut self.detached));
-        *self = PreviewState { slot, key, detached, ..PreviewState::default() };
+        *self = PreviewState { slot, key, detached, layer_serial: self.layer_serial, ..PreviewState::default() };
         self.set_scene(GpuScene::default());
     }
 
@@ -223,8 +338,33 @@ impl PreviewState {
                 self.error = b.error;
                 self.applied = b.applied;
                 self.stopped = b.stopped;
+                self.placed = b.placed;
                 self.tapered = b.tapered;
-                self.set_scene(b.scene);
+                self.mirror_meets = b.mirror_meets;
+                self.points = b.points;
+                match b.layer {
+                    // The scenes of this key are up: only the motion changes, nothing is uploaded.
+                    Some(Layer { key, scenes: None, motion }) if self.layer_shown() == Some(key) => self.layer = Some((key, motion)),
+                    Some(Layer { key, scenes: Some((still, moving)), motion }) => {
+                        self.set_scene(still);
+                        if let Ok(mut slot) = self.layer_slot.lock() {
+                            *slot = Some(moving);
+                        }
+                        // Apart from a drag's layer keys, which are hashes: the renderer has one layer.
+                        self.layer_serial = self.layer_serial.wrapping_add(1) | LAYER_KEYS;
+                        self.layer = Some((key, motion));
+                    }
+                    // Its scenes left out, but they are not the ones shown: there is nothing to
+                    // move, so nothing is drawn rather than another preview's scene moved.
+                    Some(Layer { scenes: None, .. }) => {
+                        self.drop_layer();
+                        self.set_scene(GpuScene::default());
+                    }
+                    None => {
+                        self.drop_layer();
+                        self.set_scene(b.scene);
+                    }
+                }
             }
             // The current inputs make no feature: the last good geometry would contradict
             // them (a 1 mm extrusion still drawn at 0 mm), so nothing is drawn.
@@ -234,7 +374,11 @@ impl PreviewState {
                 self.error = Some(e);
                 self.applied = None;
                 self.stopped = None;
+                self.placed = None;
                 self.tapered.clear();
+                self.mirror_meets = None;
+                self.mirror_decided = None;
+                self.points.clear();
             }
         }
     }
@@ -249,6 +393,9 @@ impl PreviewState {
         if self.shown_key != Some(key) {
             self.sketches.clear();
             self.error = None;
+            // A constraint's reply says how free its part is with the inputs it was for: with other
+            // picks it would describe the wrong rule, so the dialog falls back to the saved design.
+            self.placed = None;
         }
         if let Some((k, rx)) = &self.running {
             let k = *k;
@@ -323,6 +470,8 @@ fn motion_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
                     | "joint.rack_pinion"
                     | "joint.screw"
                     | "joint.cam"
+                    | "assembly.constraint.create"
+                    | "assembly.constraint.edit"
             )
         })
     {
@@ -388,6 +537,16 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
 /// Keep the preview in step with the open dialog: start a computation when its inputs changed,
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
+    // A Mirror's operation follows whether a copy meets the body it was made from: Join when one
+    // overlaps or touches its body, New Body when none does. It is set once for each pick of
+    // bodies and plane, so an operation picked by hand afterwards stays until they change.
+    if let Some((key, meets)) = app.preview.mirror_meets
+        && app.preview.mirror_decided != Some(key)
+        && let Some(d) = app.dialog.as_mut().filter(|d| matches!(d.kind, crate::dialogs::Kind::Mirror))
+    {
+        d.extra.insert("combine".into(), Value::Bool(meets));
+        app.preview.mirror_decided = Some(key);
+    }
     let cmds = match app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).map(|d| crate::dialogs::preview_commands(app, d)) {
         Some(Ok(c)) if !c.is_empty() => c,
         _ if crate::sketch_attachment_ui::commands(app).is_some() => crate::sketch_attachment_ui::commands(app).unwrap_or_default(),
@@ -407,7 +566,14 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     }
     colors.tint_new = app.preferences.preview_tint_new_faces;
     colors.cut_tint = app.preferences.cut_preview_tint;
-    let key = job_key(&cmds, app.session.revision, colors);
+    let mut key = job_key(&cmds, app.session.revision, colors);
+    // A Move is drawn as a layer where the view allows it (`move_preview::layered`), and built
+    // where it lands where not: when the view changes between the two, it is computed again.
+    if crate::move_preview::is_move(&cmds) {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (key, crate::move_preview::layered(app)).hash(&mut h);
+        key = h.finish();
+    }
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();
     let pv = &mut app.preview;
@@ -514,6 +680,9 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
     if let Some(job) = crate::dialogs_assembly::world_preview(s, cmds, colors) {
         return job;
     }
+    if let Some(p) = mirror_of(cmds) {
+        return compute_mirror(s, p, colors);
+    }
     match as_new_body(cmds) {
         Some(_) => {
             let mut b = compute_tool(s, cmds, colors)?;
@@ -603,6 +772,93 @@ pub(crate) fn extrusion_target_error(s: &Session, cmds: &[(String, Value)], befo
     None
 }
 
+/// The parameters of the Mirror of bodies the commands make (not a Mirror of features, whose
+/// copies replay the features' own operations, nor an edit of one).
+fn mirror_of(cmds: &[(String, Value)]) -> Option<&Value> {
+    match cmds {
+        [(command, p)] if command == "solid.mirror" && p.get("bodies").is_some() => Some(p),
+        _ => None,
+    }
+}
+
+/// The bodies and plane of a Mirror's parameters, apart from its operation: what the dialog's
+/// automatic operation is set for once.
+fn mirror_key(p: &Value) -> u64 {
+    let mut picks = p.clone();
+    if let Value::Object(m) = &mut picks {
+        m.remove("combine");
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    picks.to_string().hash(&mut h);
+    h.finish()
+}
+
+/// A Mirror of bodies as its preview shows it, joined or not: each copy a green see-through
+/// ghost where the view shows the bodies, the bodies themselves left as they are (lit as
+/// picked). A join runs once, on OK. Whether a copy meets the body it was made from comes with
+/// it, on the exact geometry ([`Session::mirror_meets`]).
+fn compute_mirror(s: &Session, p: &Value, colors: Colors) -> Job {
+    let mut apart = p.clone();
+    if let Value::Object(m) = &mut apart {
+        m.insert("combine".into(), Value::Bool(false));
+    }
+    let preview = s.preview_world(&[("solid.mirror".to_string(), apart)]).map_err(|e| e.to_string())?;
+    let sources: Vec<String> = solidcraft_engine::params::string_list_or_default(p, "bodies");
+    let mut b = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build_copies(&preview.before, &preview.after, &sources, colors)))
+        .map_err(|_| "the preview failed".to_string())?;
+    b.bounds = state_bounds(&preview.after);
+    b.mirror_meets = s.mirror_meets(p).ok().flatten().map(|meets| (mirror_key(p), meets));
+    Ok(b)
+}
+
+/// The bodies `after` has and `before` hasn't (a Mirror's copies) as green see-through ghosts,
+/// with their outlines. A copy's triangles that lie on one of the `sources` it was made from
+/// are left out: there the copy is the body's own surface (mirrored about one of its faces, or
+/// a symmetric body about its middle), and the two meshes would fight in slivers.
+fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: Colors) -> Built {
+    let mut sc = GpuScene::default();
+    let fill = sc.color(c.mirrored);
+    let edge = sc.color([c.mirrored[0], c.mirrored[1], c.mirrored[2], 255]);
+    let kept: Vec<SurfaceIndex> = sources.iter().filter_map(|n| before.body(n)).filter_map(|b| SurfaceIndex::new(&b.mesh())).collect();
+    for a in after.bodies.iter().filter(|a| before.body(&a.name).is_none()) {
+        let m = a.mesh();
+        for t in &m.triangles {
+            let Some(corners) = m.tri(t) else { continue };
+            if kept.iter().any(|k| on_surface(k, corners)) {
+                continue;
+            }
+            for k in t {
+                let i = *k as usize;
+                if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
+                    sc.ghost_tri(p.to_f32(), n.to_f32(), fill);
+                }
+            }
+        }
+        // Depth-tested, as a body's own edges: the renderer draws no on-top line of a preview.
+        for (ei, e) in m.edges.iter().enumerate() {
+            if m.shaded_edge_visible(ei) {
+                for w in e.windows(2) {
+                    sc.line(w[0].to_f32(), w[1].to_f32(), edge, 1.3, false);
+                }
+            }
+        }
+    }
+    Built {
+        scene: sc,
+        sketches: Vec::new(),
+        replaced: Vec::new(),
+        error: None,
+        bounds: Aabb3::EMPTY,
+        applied: None,
+        tapered: Vec::new(),
+        stopped: None,
+        mirror_meets: None,
+        points: Vec::new(),
+        placed: None,
+        layer: None,
+    }
+}
+
 fn state_bounds(st: &ModelState) -> Aabb3 {
     st.bodies.iter().fold(Aabb3::EMPTY, |b, x| b.union(&x.mesh().bounds()))
 }
@@ -647,6 +903,10 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         applied: None,
         tapered: Vec::new(),
         stopped: None,
+        mirror_meets: None,
+        points: Vec::new(),
+        placed: None,
+        layer: None,
     }
 }
 
@@ -688,9 +948,13 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
     let removed = sc.color(c.removed);
     let edge = sc.color(c.edge);
     let mut replaced = Vec::new();
+    let mut points = Vec::new();
     for construct in &after.construct {
         if before.construct.iter().any(|old| old == construct) {
             continue;
+        }
+        if let solidcraft_engine::doc::construct::ConstructGeom::Point(p) = construct.geom {
+            points.push(p);
         }
         if let solidcraft_engine::doc::construct::ConstructGeom::Plane(plane) = construct.geom {
             let (o, x, y) = (plane.origin, plane.x * 10.0, plane.y * 10.0);
@@ -795,7 +1059,20 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         }
     }
     let sketches = after.sketches.iter().filter_map(|sketch| sketch_changes(before.sketch(sketch.feature), sketch)).collect();
-    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
+    Built {
+        scene: sc,
+        sketches,
+        replaced,
+        error: None,
+        bounds: Aabb3::EMPTY,
+        applied: None,
+        tapered: Vec::new(),
+        stopped: None,
+        mirror_meets: None,
+        points,
+        placed: None,
+        layer: None,
+    }
 }
 
 /// Does the triangle lie on the surface `index` holds: its corners, the middles of its sides
@@ -987,11 +1264,10 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
     if app.preview.rolled_back {
         return;
     }
-    if !app
-        .dialog
-        .as_ref()
-        .is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchModify(_) | crate::dialogs::Kind::InsertDrawing(_)) && d.previews())
-    {
+    if !app.dialog.as_ref().is_some_and(|d| {
+        matches!(d.kind, crate::dialogs::Kind::SketchModify(_) | crate::dialogs::Kind::InsertDrawing(_) | crate::dialogs::Kind::InsertAirfoil(_))
+            && d.previews()
+    }) {
         return;
     }
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
@@ -1057,6 +1333,7 @@ mod tests {
             added: [2, 2, 2, 255],
             new_body: [4, 4, 4, 255],
             removed: [3, 3, 3, 100],
+            mirrored: [6, 6, 6, 100],
             edge: [0, 0, 0, 255],
             ghost: true,
             tint_new: true,
@@ -1111,6 +1388,130 @@ mod tests {
             applied: None,
             tapered: Vec::new(),
             stopped: None,
+            mirror_meets: None,
+            points: Vec::new(),
+            placed: None,
+            layer: None,
+        }
+    }
+
+    /// A result drawn as a layer of scenes `key`, handed over when `scenes`, moved `x` along X.
+    fn layered(key: u64, scenes: bool, x: f64) -> Built {
+        let mut motion = solidcraft_engine::doc::IDENTITY;
+        motion[3][0] = x;
+        Built { layer: Some(Layer { key, scenes: scenes.then(|| (GpuScene::default(), GpuScene::default())), motion }), ..pose() }
+    }
+
+    /// No layer is drawn and none waits for the renderer.
+    fn no_layer(pv: &mut PreviewState) -> bool {
+        pv.moving_layer().is_none() && pv.layer_shown().is_none() && pv.layer_slot.lock().unwrap().is_none()
+    }
+
+    /// A layer's scenes go to the renderer once: a change of its motion keeps both scene keys,
+    /// so nothing is uploaded. The layer goes when its preview does (another preview, a failure,
+    /// the dialog closed, the design gone), is not drawn while the preview is hidden for a pick,
+    /// and a result that left its scenes out for scenes that are not shown draws nothing.
+    #[test]
+    fn a_layer_hands_its_scenes_over_once_and_goes_with_its_preview() {
+        let mut pv = PreviewState::default();
+        assert!(no_layer(&mut pv));
+        pv.apply(1, Ok(layered(7, true, 10.0)));
+        let first = pv.moving_layer().expect("drawn as a layer");
+        let still = pv.key;
+        assert_eq!(pv.layer_shown(), Some(7));
+        assert!(pv.layer_slot.lock().unwrap().is_some(), "the moving scene waits for the renderer");
+        assert_eq!(first.transform[3][0], 10.0);
+        // A step of the drag: the motion alone.
+        pv.apply(2, Ok(layered(7, false, 25.0)));
+        let next = pv.moving_layer().expect("still a layer");
+        assert_eq!((pv.key, next.key), (still, first.key), "a step uploads nothing");
+        assert_eq!(next.transform[3][0], 25.0);
+        // Hidden for a pick, as the preview's scene is.
+        pv.rolled_back = true;
+        assert!(pv.moving_layer().is_none());
+        pv.rolled_back = false;
+        // Other scenes (other bodies or colours): handed over under other keys.
+        pv.apply(3, Ok(layered(8, true, 25.0)));
+        let other = pv.moving_layer().expect("a layer of the new scenes");
+        assert!(other.key != first.key && pv.key != still && pv.layer_shown() == Some(8));
+        // Scenes left out that are not the ones shown: nothing to move, so nothing is drawn.
+        let before = pv.key;
+        pv.apply(4, Ok(layered(9, false, 1.0)));
+        assert!(no_layer(&mut pv) && pv.key != before, "neither the layer nor the old still scene stays");
+        // The layer goes with its preview.
+        for end in 0..4 {
+            pv.apply(5, Ok(layered(7, true, 3.0)));
+            assert!(pv.moving_layer().is_some());
+            match end {
+                0 => pv.apply(6, Ok(pose())),
+                1 => pv.apply(6, Err("the inputs make no feature".into())),
+                2 => pv.clear(),
+                _ => pv.reset(),
+            }
+            assert!(no_layer(&mut pv), "end {end}");
+        }
+    }
+
+    /// A frame that draws no layer makes the renderer let the moving scene go. Left at that, the
+    /// next frame would hand it the same key and no scene, and the moved bodies would stay undrawn
+    /// (hidden in the model, as the preview stands in for them). So a layer whose scene the
+    /// renderer took is forgotten when a frame does not draw it, whether the preview is hidden for
+    /// a pick or a component's drag has the layer, and its preview is computed again: the scenes
+    /// come under a new key. A scene the renderer never took just waits.
+    #[test]
+    fn a_layer_the_renderer_let_go_is_handed_over_again() {
+        for hidden_for_pick in [true, false] {
+            let mut pv = PreviewState::default();
+            pv.apply(1, Ok(layered(7, true, 10.0)));
+            let first = pv.moving_layer().expect("drawn as a layer");
+            let not_drawn = |pv: &mut PreviewState| {
+                if hidden_for_pick {
+                    pv.rolled_back = true;
+                    assert!(pv.moving_layer().is_none());
+                    pv.rolled_back = false;
+                } else {
+                    pv.layer_not_drawn();
+                }
+            };
+            // Not drawn before the renderer took the scene: nothing is lost, it waits.
+            not_drawn(&mut pv);
+            assert_eq!((pv.layer_shown(), pv.shown_key), (Some(7), Some(1)), "kept");
+            assert_eq!(pv.moving_layer().expect("drawn again").key, first.key);
+            // The renderer has it, and a frame draws without it: it lets the scene go.
+            assert!(pv.renderer_takes_layer_for_tests());
+            pv.apply(2, Ok(layered(7, false, 25.0)));
+            assert_eq!(pv.moving_layer().expect("a step of the drag").key, first.key, "drawn at every frame, it is handed over once");
+            not_drawn(&mut pv);
+            assert_eq!((pv.layer_shown(), pv.shown_key), (None, None), "forgotten, and computed again");
+            assert!(pv.moving_layer().is_none(), "not under the key whose scene is gone");
+            // Computed again, the result brings its scenes (`layer_shown` says none are up).
+            pv.apply(2, Ok(layered(7, true, 25.0)));
+            let again = pv.moving_layer().expect("a layer again");
+            assert!(again.key != first.key, "a new key, so the renderer takes the scene");
+            assert_eq!(again.transform[3][0], 25.0);
+            assert!(pv.renderer_takes_layer_for_tests(), "the scene is there to take");
+        }
+    }
+
+    /// The renderer outlives a design: it keeps the moving scene of the key it last took until a
+    /// frame draws without a layer. The first layer of the next design must not come under that
+    /// key, or its scene would never be taken and the last design's bodies drawn in its place.
+    #[test]
+    fn a_reset_keeps_counting_the_layer_keys() {
+        let mut pv = PreviewState::default();
+        pv.apply(1, Ok(layered(7, true, 10.0)));
+        let first = pv.moving_layer().expect("drawn as a layer").key;
+        pv.reset();
+        assert!(no_layer(&mut pv), "the layer goes with its design");
+        pv.apply(1, Ok(layered(7, true, 10.0)));
+        let next = pv.moving_layer().expect("the next design's layer").key;
+        assert!(next != first, "the renderer would keep the scene of key {first:#x}");
+        // And on through any number of designs.
+        let mut seen = std::collections::HashSet::from([first, next]);
+        for _ in 0..50 {
+            pv.reset();
+            pv.apply(1, Ok(layered(7, true, 10.0)));
+            assert!(seen.insert(pv.moving_layer().expect("a layer").key));
         }
     }
 
@@ -1141,6 +1542,17 @@ mod tests {
         pv.poll(4, Some(42));
         assert_eq!(pv.shown_key, Some(4), "release catches up to the exact final pose");
         assert!(pv.running.is_none());
+    }
+
+    /// A constraint's reply belongs to the inputs it was computed for: when they change (other picks
+    /// in the Constrain dialog), it goes with the old error, and is kept while they stand.
+    #[test]
+    fn a_constraint_reply_goes_when_the_inputs_change() {
+        let mut pv = PreviewState { shown_key: Some(1), placed: Some(serde_json::json!({"dof": []})), ..PreviewState::default() };
+        pv.poll_at(1, None, 0.0);
+        assert!(pv.placed.is_some(), "the same inputs keep their reply");
+        pv.poll_at(2, None, 0.0);
+        assert!(pv.placed.is_none(), "other inputs drop the old reply");
     }
 
     /// A pose for a value the slider has left gets 500 ms (#14264): before that it keeps running
@@ -1370,6 +1782,92 @@ mod tests {
                 scene.palette.get(crate::gpu::PaletteIndex(i)) == Some(col)
             })
             .count()
+    }
+
+    /// A Mirror of bodies previews its copy as a green see-through ghost, joined or not, never a
+    /// solid New Body yellow, and says whether the copy meets its body, for the picks of bodies
+    /// and plane apart from the operation.
+    #[test]
+    fn a_mirror_previews_its_copy_as_a_ghost_and_says_whether_it_meets() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+        let c = colors();
+        let mirror = |x: f64, combine: bool| {
+            ("solid.mirror".to_string(), json!({"bodies": ["Block"], "plane": {"origin": [x, 0, 0], "normal": [1, 0, 0]}, "combine": combine}))
+        };
+        for combine in [false, true] {
+            let b = compute(&s, &[mirror(30.0, combine)], c).unwrap();
+            assert!(count(&b.scene, &b.scene.ghost, 28, c.mirrored) > 0, "join {combine}: the copy, green and see-through");
+            // Its outline in the lines the renderer draws for a preview (it draws no on-top ones).
+            let outline = [c.mirrored[0], c.mirrored[1], c.mirrored[2], 255];
+            assert!(count(&b.scene, &b.scene.lines, crate::gpu::LINE_SIZE, outline) > 0, "join {combine}: the copy's outline");
+            assert!(b.scene.overlay.is_empty(), "join {combine}: nothing the renderer leaves out");
+            assert_eq!(count(&b.scene, &b.scene.tris, 28, c.new_body), 0, "join {combine}: no solid new body");
+            assert!(b.replaced.is_empty(), "join {combine}: the body is left as it is");
+            assert_eq!(b.mirror_meets.map(|(_, meets)| meets), Some(false), "join {combine}: apart");
+        }
+        let on_face = compute(&s, &[mirror(10.0, false)], c).unwrap();
+        assert_eq!(on_face.mirror_meets.map(|(_, meets)| meets), Some(true), "mirrored about its own face");
+        let through = compute(&s, &[mirror(7.0, false)], c).unwrap();
+        assert_eq!(through.mirror_meets.map(|(_, meets)| meets), Some(true), "mirrored through itself");
+        assert_eq!(mirror_key(&mirror(30.0, false).1), mirror_key(&mirror(30.0, true).1), "the operation is not a pick");
+        assert_ne!(mirror_key(&mirror(30.0, false).1), mirror_key(&mirror(10.0, false).1));
+    }
+
+    /// The Mirror dialog sets its operation from where the copy lands: Join when it touches or
+    /// overlaps its body, New Body when it is apart. Once for each pick of bodies and plane, so
+    /// an operation picked by hand stays until the picks change.
+    #[test]
+    fn the_mirror_dialog_joins_a_copy_that_meets_its_body() {
+        use crate::scenario::Harness;
+        use solidcraft_engine::Sel;
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base": "YZ", "offset": 30, "name": "Far"})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base": "YZ", "offset": 10, "name": "Face"})).unwrap();
+        h.app.start("solid.mirror");
+        let pick = |h: &mut Harness, plane: &str| {
+            let d = h.app.dialog.as_mut().unwrap();
+            d.inputs[0].items = vec![Sel::Body { name: "Block".into() }];
+            d.inputs[1].items = vec![Sel::Plane { name: plane.into() }];
+        };
+        // The operation once the preview of the current picks is in and has set it.
+        let operation = |h: &mut Harness| {
+            let began = std::time::Instant::now();
+            loop {
+                h.frame();
+                let decided = h.app.preview.mirror_meets.is_some_and(|(key, _)| h.app.preview.mirror_decided == Some(key));
+                if !h.app.preview.busy && decided {
+                    break;
+                }
+                assert!(began.elapsed() < std::time::Duration::from_secs(60), "the preview did not finish");
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            h.frames(2);
+            h.app.dialog.as_ref().and_then(|d| d.extra.get("combine")).and_then(Value::as_bool)
+        };
+        pick(&mut h, "Face");
+        assert_eq!(operation(&mut h), Some(true), "about its own face: Join");
+        h.app.dialog.as_mut().unwrap().extra.insert("combine".into(), json!(false));
+        assert_eq!(operation(&mut h), Some(false), "New Body picked by hand stays");
+        pick(&mut h, "Far");
+        assert_eq!(operation(&mut h), Some(false), "apart: New Body");
+        pick(&mut h, "Face");
+        assert_eq!(operation(&mut h), Some(true), "about its face again: Join");
+    }
+
+    /// #17154: the preview of a point along a path in a moved component marks where the point
+    /// lands in the view, not where it lies in the component's own frame.
+    #[test]
+    fn a_point_along_a_path_in_a_moved_component_previews_where_it_lands() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": "Part:1", "translate": [50, 0, 0]})).unwrap();
+        let cmds = [("construct.point.along_path".to_string(), json!({"path": {"edge": [55, 0, 10]}, "t": 0.5}))];
+        let built = compute(&s, &cmds, colors()).unwrap();
+        assert_eq!(built.points.len(), 1, "{:?}", built.points);
+        assert!(built.points[0].dist(Vec3::new(55.0, 0.0, 10.0)) < 1e-6, "{:?}", built.points);
     }
 
     #[test]

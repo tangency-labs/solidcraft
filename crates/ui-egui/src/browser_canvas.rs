@@ -12,7 +12,6 @@ use solidcore_record::Plane;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
-use crate::browser::panel_pos;
 use crate::ui_kit;
 use crate::viewport::Proj;
 use solidcraft_theme::Tokens;
@@ -33,7 +32,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         "browser.edit_canvas_title"
     };
     let title = solidcraft_ui_text::format(title_id, &[("name", &c.name)]);
-    let at = panel_pos(app);
+    let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx);
     let (picks, straighten, name) = (m.picks_points(), m.straighten, c.id);
     let (ok, cancel) = if straighten {
         (solidcraft_ui_text::tr("ui.straighten"), solidcraft_ui_text::tr("ui.cancel"))
@@ -43,7 +42,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         ("", solidcraft_ui_text::tr("ui.close"))
     };
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_canvas_panel"), "canvas", &title)
-        .placed(egui::Align2::LEFT_TOP, at)
+        .placed(pivot, at)
         .fields()
         .actions(ok, cancel, None)
         .show(ctx, true, |ui| {
@@ -160,8 +159,8 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, screen: Pos2) -> bool {
     let doc = &app.session.doc;
     let Some(c) = doc.canvases.iter().find(|c| c.id == panel.canvas) else { return false };
     let (vals, _) = doc.param_values();
-    let Ok(plane) = doc.canvas_plane(&vals, c) else { return false };
-    if panel.calibrate {
+    let Ok(plane) = doc.canvas_plane(&vals, c, &app.session.model.state()) else { return false };
+    if panel.picks_points() {
         [panel.a, panel.b].into_iter().any(|point| {
             proj.to_screen(plane.to_world(Vec2::new(point[0], point[1])))
                 .is_some_and(|p| p.distance(screen) <= 12.0)
@@ -185,10 +184,10 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
     let doc = &app.session.doc;
     let Some(c) = doc.canvases.iter().find(|c| c.id == panel.canvas).cloned() else { return false };
     let (vals, _) = doc.param_values();
-    let Ok(plane) = doc.canvas_plane(&vals, &c) else { return false };
+    let Ok(plane) = doc.canvas_plane(&vals, &c, &app.session.model.state()) else { return false };
     let Some(screen) = screen else { return panel.dragging.is_some() || panel.edit_drag.is_some() };
 
-    if panel.calibrate {
+    if panel.picks_points() {
         if pressed && panel.dragging.is_none() {
             panel.dragging = [panel.a, panel.b].into_iter().enumerate().filter_map(|(i, point)| {
                 let marker = proj.to_screen(plane.to_world(Vec2::new(point[0], point[1])))?;
@@ -315,7 +314,7 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
         return false;
     };
     let (vals, _) = doc.param_values();
-    let Ok(plane) = doc.canvas_plane(&vals, &c) else {
+    let Ok(plane) = doc.canvas_plane(&vals, &c, &app.session.model.state()) else {
         return false;
     };
     let (origin, direction) = proj.ray(screen);
@@ -348,7 +347,9 @@ pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) 
     let doc = &app.session.doc;
     let Some(c) = doc.canvases.iter().find(|c| c.id == panel.canvas) else { return };
     let (vals, _) = doc.param_values();
-    let Ok(plane) = doc.canvas_plane(&vals, c) else { return };
+    let Ok(plane) = doc.canvas_plane(&vals, c, &app.session.model.state()) else {
+        return;
+    };
     let t = Tokens::get();
     if !panel.picks_points() {
         let screens = c.corners().map(|point| proj.to_screen(plane.to_world(point)));
@@ -504,7 +505,7 @@ mod tests {
         let proj = crate::viewport::projection(&h.app, rect);
         let c = h.app.session.doc.canvases[0].clone();
         let (vals, _) = h.app.session.doc.param_values();
-        let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
         let screen = |x: f64, y: f64| proj.to_screen(plane.to_world(solidcore_record::Vec2::new(x, y))).expect("on screen");
         let status = |h: &crate::scenario::Harness| h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
         assert!(super::click(&mut h.app, &proj, screen(c.center.x - 15.0, c.center.y - 5.0)));
@@ -553,7 +554,7 @@ mod tests {
         let proj = crate::viewport::projection(&h.app, rect);
         let c = h.app.session.doc.canvases[0].clone();
         let (vals, _) = h.app.session.doc.param_values();
-        let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
         let ax = c.center.x - 20.0;
         let bx = c.center.x + 20.0;
         let sa = proj.to_screen(plane.to_world(solidcore_record::Vec2::new(ax, c.center.y))).expect("point A on screen");
@@ -589,7 +590,7 @@ mod tests {
         let proj = crate::viewport::projection(&h.app, rect);
         let c = h.app.session.doc.canvases[0].clone();
         let (vals, _) = h.app.session.doc.param_values();
-        let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
 
         // 1. Verify all edit handles exist (center cross, 4 corners, rotation, opacity, 2 flip buttons, 2 horizontal stretch, 1 vertical stretch)
         let handles = super::edit_handles(&c, &plane, &proj);

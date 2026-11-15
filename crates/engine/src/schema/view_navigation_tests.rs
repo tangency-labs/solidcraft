@@ -1,8 +1,10 @@
 use serde_json::{Value, json};
 
 use super::{
-    AmbientOcclusionParams, AmbientOcclusionResult, AngleReadoutParams, CameraReply, GraphicsPresetParams, GraphicsPresetResult, HistoryLayoutParams,
-    HistoryLayoutResult, LayoutParams, LayoutResult, NavigateParams, NavigateResult, NormalToParams, StandardViewParams, TabStep, TabStepParams,
+    AmbientOcclusionParams, AmbientOcclusionResult, AngleReadoutParams, CameraReply, DisplayToggleParams, GraphicsPresetParams, GraphicsPresetResult,
+    HistoryLayoutParams, HistoryLayoutResult, LayoutParams, LayoutResult, NavigateParams, NavigateResult, NavigationBarParams, NormalToParams,
+    PerspectiveParams, PerspectiveResult, RenderPanelVisibilityParams, RenderPanelVisibilityResult, StandardViewParams, TabStep, TabStepParams,
+    ToolParams, ToolResult, VisualStyleParams, VisualStyleResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -12,12 +14,15 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<AngleReadoutParams>(), &["enabled"]);
+    assert_keys(input_schema_for::<super::OriginAxesAcrossViewParams>(), &["enabled"]);
     assert_keys(input_schema_for::<StandardViewParams>(), &["camera"]);
     assert_keys(input_schema_for::<NormalToParams>(), &["camera"]);
     assert_keys(input_schema_for::<LayoutParams>(), &["mode"]);
     assert_keys(input_schema_for::<HistoryLayoutParams>(), &["collapsed", "dock", "width"]);
     assert_keys(input_schema_for::<GraphicsPresetParams>(), &["preset"]);
     assert_keys(input_schema_for::<AmbientOcclusionParams>(), &["enabled"]);
+    assert_keys(input_schema_for::<DisplayToggleParams>(), &["on"]);
+    assert_keys(input_schema_for::<NavigationBarParams>(), &["visible"]);
     assert_keys(
         input_schema_for::<NavigateParams>(),
         &["action", "anchor", "camera", "degrees", "delta", "direction", "factor", "fit", "free_orbit", "motion", "pivot", "viewport"],
@@ -246,6 +251,12 @@ fn strict_keeps_todays_errors() {
         ("view.angle_readout", json!({"enabled": 1})),
         ("view.angle_readout", json!({"enabled": "true"})),
         ("view.angle_readout", json!({"enabled": null})),
+        ("view.origin_axes_across_view", json!({"enabled": 1})),
+        ("view.origin_axes_across_view", json!({"enabled": "true"})),
+        ("view.origin_axes_across_view", json!({"enabled": null})),
+        ("view.perspective", json!({"enabled": 1})),
+        ("view.perspective", json!({"enabled": "true"})),
+        ("view.perspective", json!({"enabled": null})),
     ]);
 }
 
@@ -262,6 +273,49 @@ fn angle_readout_replies_match_the_output_schema() {
     }
     assert!(!conforms(schema, schema, &json!({"enabled": "yes"})));
     assert!(!conforms(schema, schema, &json!({})));
+}
+
+#[test]
+fn origin_axes_across_view_replies_match_the_output_schema() {
+    let schema = output_schema_for::<super::OriginAxesAcrossViewResult>();
+    let schema = schema.as_value();
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    for enabled in [true, false] {
+        let reply = s.execute("view.origin_axes_across_view", &json!({"enabled": enabled})).unwrap();
+        assert!(conforms(schema, schema, &reply), "{reply} doesn't match {schema}");
+        assert_eq!(reply, json!({"enabled": enabled}));
+    }
+    assert!(!conforms(schema, schema, &json!({"enabled": "yes"})));
+    assert!(!conforms(schema, schema, &json!({})));
+}
+
+/// #16521: `view.perspective` reads its one required flag the way `view.ambient_occlusion` reads
+/// its, so its contract and result type say the same: the flag is a boolean, it is required, and
+/// the reply is the flag it was given.
+#[test]
+fn perspective_replies_match_the_output_schema() {
+    assert_keys(input_schema_for::<PerspectiveParams>(), &["enabled"]);
+    let described = Session::default().execute("engine.describe", &json!({"command": "view.perspective"})).unwrap();
+    assert_eq!(described["input"]["required"], json!(["enabled"]), "the flag has no toggle form");
+    assert_eq!(described["input"]["additionalProperties"], false);
+    assert_eq!(described["input"]["properties"]["enabled"]["type"], "boolean");
+    let spec = crate::find_command("view.perspective").unwrap();
+    assert!(spec.contract.is_some() && spec.output.is_some() && !spec.undoable);
+    let schema = output_schema_for::<PerspectiveResult>();
+    let schema = schema.as_value();
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    for enabled in [true, false] {
+        let r = s.execute("view.perspective", &json!({"enabled": enabled})).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(r, json!({"enabled": enabled}));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert_eq!(r.get("param_warnings"), None, "{r}");
+    }
+    assert!(!conforms(schema, schema, &json!({"enabled": "yes"})));
+    assert!(!conforms(schema, schema, &json!({})));
+    // A key the command doesn't take is a warning, not a refusal, and the reply still matches.
+    let warned = s.execute("view.perspective", &json!({"enabled": true, "enabld": true})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(warned["param_warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("enabld")))), "{warned}");
+    assert!(conforms(schema, schema, &warned), "{warned} doesn't match {schema}");
 }
 
 /// #8565: the next and previous tab take nothing, say which way the window goes, and leave the
@@ -350,6 +404,7 @@ fn the_commands_publish_contracts_and_schemas() {
     assert_eq!(required("view.layout"), json!(["mode"]));
     assert_eq!(required("view.graphics_preset"), json!(["preset"]));
     assert_eq!(required("view.ambient_occlusion"), json!(["enabled"]));
+    assert_eq!(required("view.perspective"), json!(["enabled"]));
     assert_eq!(required("view.navigate"), json!(["camera"]));
     assert_eq!(required("view.history_layout"), Value::Null);
     let d = Session::default().execute("engine.describe", &json!({"command": "view.history_layout"})).unwrap();
@@ -389,6 +444,7 @@ fn replies_are_todays_json() {
         json!({"preset": "performance", "enabled": false, "display_quality": "normal", "supersampling": 1.0, "supersampling_adaptive": true})
     );
     assert_eq!(run("view.ambient_occlusion", json!({"enabled": false})), json!({"enabled": false}));
+    assert_eq!(run("view.perspective", json!({"enabled": true})), json!({"enabled": true}));
     let cam: solidcraft_viewport::Camera = serde_json::from_value(nav_camera()).unwrap();
     let turned = run("view.navigate", json!({"camera": nav_camera(), "action": "fit"}));
     assert_eq!(turned, json!({"camera": cam, "fit": true}));
@@ -528,6 +584,7 @@ fn the_types_read_each_key_as_its_handler_does() {
                 "view.history_layout" => serde_json::from_value::<HistoryLayoutParams>(p.clone()).is_ok(),
                 "view.graphics_preset" => serde_json::from_value::<GraphicsPresetParams>(p.clone()).is_ok(),
                 "view.ambient_occlusion" => serde_json::from_value::<AmbientOcclusionParams>(p.clone()).is_ok(),
+                "view.perspective" => serde_json::from_value::<PerspectiveParams>(p.clone()).is_ok(),
                 _ => serde_json::from_value::<NavigateParams>(p.clone()).is_ok(),
             };
             assert_eq!(typed, ok, "{id} {p}");
@@ -549,6 +606,7 @@ fn the_types_read_each_key_as_its_handler_does() {
     check("view.history_layout", json!({}), "collapsed", with(vec![json!(true), json!(false)]));
     check("view.graphics_preset", json!({}), "preset", with(vec![json!("quality"), json!("performance"), json!("Quality")]));
     check("view.ambient_occlusion", json!({}), "enabled", with(vec![json!(true), json!(false)]));
+    check("view.perspective", json!({}), "enabled", with(vec![json!(true), json!(false)]));
     let base = json!({"camera": nav_camera(), "action": "fit"});
     let all_actions: Vec<Value> =
         ["left", "right", "up", "down", "clockwise", "counterclockwise", "home", "fit", "spin"].iter().map(|a| json!(a)).collect();
@@ -643,4 +701,205 @@ fn navigate_reads_only_the_keys_of_its_form() {
     let p = json!({"camera": nav_camera(), "motion": "pan", "delta": [3, 4], "viewport": [0, 600]});
     let strict = Session { param_check: ParamCheck::Strict, ..Session::default() }.execute("view.navigate", &p);
     assert!(strict.unwrap_err().to_string().contains("viewport dimensions must be in 1..1000000"));
+}
+
+/// A call with exactly these parameters.
+fn call(pairs: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
+    let mut p = serde_json::Map::new();
+    for (key, value) in pairs {
+        p.insert(key.to_string(), value);
+    }
+    Value::Object(p)
+}
+
+/// The four viewport display toggles read their one optional flag the same way
+/// (`cmd/view_navigation.rs`'s `view_toggle`), so one contract and one result type describe each
+/// of their calls: the flag is a boolean or absent, and the reply is the flag it was given. A
+/// `null` flag is not an omitted one, which is what these handlers have always refused.
+#[test]
+fn the_display_toggles_answer_with_their_own_schemas() {
+    let mut s = Session::default();
+    for (id, key) in [("view.grid", "on"), ("view.ground_shadow", "on"), ("view.spin", "on"), ("view.navigation_bar", "visible")] {
+        let spec = crate::find_command(id).unwrap();
+        assert!(spec.contract.is_some() && spec.output.is_some() && !spec.undoable, "{id}");
+        let described = s.execute("engine.describe", &json!({"command": id})).unwrap();
+        let (input, out) = (&described["input"], &described["output"]);
+        assert_eq!(input["properties"][key]["type"], "boolean", "{id}: a null flag is not an omitted one");
+        assert!(input.get("required").is_none(), "{id}: the flag may be omitted");
+        for value in [json!(true), json!(false)] {
+            let p = call([(key, value)]);
+            let reply = s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+            assert!(conforms(out, out, &reply), "{id} {p}: {reply} doesn't match {out}");
+        }
+        // With no flag the command asks the UI to toggle the setting and answers with nothing.
+        let reply = s.execute(id, &json!({})).unwrap_or_else(|e| panic!("{id} with no flag: {e}"));
+        assert_eq!(reply, json!({}), "{id}");
+        assert!(conforms(out, out, &reply), "{id}: {reply} doesn't match {out}");
+        // A `null` flag is not an omitted one, and no level lets it through: with the check off and
+        // in warn the handler's own message answers, in strict the contract speaks first, and the
+        // published schema has no null branch for either.
+        let null = call([(key, Value::Null)]);
+        let handler = format!("invalid parameters for `{id}`: {key} must be a boolean");
+        let contract = format!("invalid parameters for `{id}`: `{key}` must be true or false");
+        for (level, expected) in [(ParamCheck::Off, &handler), (ParamCheck::Warn, &handler), (ParamCheck::Strict, &contract)] {
+            let mut checked = Session { param_check: level, ..Session::default() };
+            let e = checked.execute(id, &null).err().unwrap_or_else(|| panic!("{id} {null} runs with the check {level:?}"));
+            assert_eq!(e.to_string(), *expected, "{id}");
+        }
+        // A key the command doesn't take is refused as it has always been: the handler names the
+        // key it doesn't read, and in strict the contract names it before the handler runs.
+        let hostile = call([(key, json!(true)), ("off", json!(true))]);
+        for level in [ParamCheck::Off, ParamCheck::Warn] {
+            let mut checked = Session { param_check: level, ..Session::default() };
+            let e = checked.execute(id, &hostile).err().unwrap_or_else(|| panic!("{id} {hostile} runs with the check {level:?}"));
+            assert_eq!(e.to_string(), format!("invalid parameters for `{id}`: unknown parameter: off"), "{id}");
+        }
+        let strict = Session { param_check: ParamCheck::Strict, ..Session::default() }.execute(id, &hostile);
+        let e = strict.err().unwrap_or_else(|| panic!("{id} {hostile} runs in strict"));
+        assert!(e.to_string().contains("unknown key `off`"), "{id}: {e}");
+    }
+}
+
+/// The two latched display settings: each publishes a contract and an output schema, its only key
+/// is required, and the schema names are exactly the names the handler takes.
+#[test]
+fn the_mode_commands_publish_contracts_and_schemas() {
+    assert_keys(input_schema_for::<ToolParams>(), &["tool"]);
+    assert_keys(input_schema_for::<VisualStyleParams>(), &["style"]);
+    let mut s = Session::default();
+    let mut described = |id: &str| s.execute("engine.describe", &json!({"command": id})).unwrap();
+    for id in ["view.tool", "view.visual_style"] {
+        let spec = crate::find_command(id).unwrap();
+        assert!(spec.contract.is_some() && spec.output.is_some() && !spec.undoable, "{id}");
+        let d = described(id);
+        assert_eq!(d["input"]["additionalProperties"], false, "{id}");
+        assert_eq!(d["output"]["type"], "object", "{id}");
+    }
+    assert_eq!(described("view.tool")["input"]["required"], json!(["tool"]));
+    assert_eq!(described("view.visual_style")["input"]["required"], json!(["style"]));
+    // The window's names are the published names, so a caller reads them off the description.
+    let tools = serde_json::to_string(&described("view.tool")["input"]).unwrap();
+    for name in ["orbit", "pan", "zoom", "none"] {
+        assert!(tools.contains(&format!("\"{name}\"")), "tool {name}: {tools}");
+    }
+    let styles = serde_json::to_string(&described("view.visual_style")["input"]).unwrap();
+    for name in ["shaded_with_edges", "shaded", "wireframe", "shaded_with_hidden_edges"] {
+        assert!(styles.contains(&format!("\"{name}\"")), "style {name}: {styles}");
+    }
+}
+
+/// The replies are the JSON the handlers returned before the types, and in the warn mode they
+/// match the published output schemas.
+#[test]
+fn mode_replies_are_todays_json() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let tool_schema = output_schema_for::<ToolResult>();
+    let style_schema = output_schema_for::<VisualStyleResult>();
+    let (tool, style) = (tool_schema.as_value(), style_schema.as_value());
+    for name in ["orbit", "pan", "zoom", "none"] {
+        let p = json!({"tool": name});
+        let reply = s.execute("view.tool", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert_eq!(reply, json!({"tool": name}), "{p}");
+        assert!(conforms(tool, tool, &reply), "{reply} doesn't match {tool}");
+        assert!(reply.get("param_warnings").is_none(), "{p}: {reply}");
+    }
+    for (name, index) in [("shaded_with_edges", 0), ("shaded", 1), ("wireframe", 2), ("shaded_with_hidden_edges", 3)] {
+        let p = json!({"style": name});
+        let reply = s.execute("view.visual_style", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert_eq!(reply, json!({"style": name, "index": index}), "{p}");
+        assert!(conforms(style, style, &reply), "{reply} doesn't match {style}");
+        assert!(reply.get("param_warnings").is_none(), "{p}: {reply}");
+    }
+    // Both commands check their own keys first, so a key they don't know stays today's refusal.
+    for (id, key) in [("view.tool", "tools"), ("view.visual_style", "styles")] {
+        let e = s.execute(id, &json!({key: "orbit"})).err().unwrap_or_else(|| panic!("{id} {key} runs"));
+        assert_eq!(e.to_string(), format!("invalid parameters for `{id}`: unknown parameter: {key}"), "{id} {key}");
+    }
+}
+
+/// Strict refuses with the handler's own message whatever the handler refuses today.
+#[test]
+fn mode_commands_keep_todays_errors() {
+    assert_strict_keeps_todays_errors(&[
+        ("view.tool", json!({})),
+        ("view.tool", json!({"tool": "spin"})),
+        ("view.tool", json!({"tool": 1})),
+        ("view.tool", json!({"tool": true})),
+        ("view.tool", json!({"tool": null})),
+        ("view.visual_style", json!({})),
+        ("view.visual_style", json!({"style": "hidden"})),
+        ("view.visual_style", json!({"style": "Shaded"})),
+        ("view.visual_style", json!({"style": 1})),
+        ("view.visual_style", json!({"style": null})),
+    ]);
+}
+
+/// The Render window's two panels take the same required flag and answer with it, so one contract
+/// and one result type describe both calls. Neither has a toggle form: `visible` is required, and
+/// the reply is the flag, which is the object both handlers have always returned.
+#[test]
+fn the_render_panels_answer_with_their_own_schemas() {
+    assert_keys(input_schema_for::<RenderPanelVisibilityParams>(), &["visible"]);
+    let mut s = Session::default();
+    for id in ["view.render_inspector", "view.shots_strip"] {
+        let spec = crate::find_command(id).unwrap();
+        assert!(spec.contract.is_some() && spec.output.is_some() && !spec.undoable, "{id}");
+        let described = s.execute("engine.describe", &json!({"command": id})).unwrap();
+        let (input, out) = (&described["input"], &described["output"]);
+        assert_eq!(input["required"], json!(["visible"]), "{id}: the flag has no toggle form");
+        assert_eq!(input["additionalProperties"], false, "{id}");
+        assert_eq!(input["properties"]["visible"]["type"], "boolean", "{id}: a null flag is not an omitted one");
+        for value in [true, false] {
+            let p = call([("visible", json!(value))]);
+            let reply = s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+            assert_eq!(reply, json!({"visible": value}), "{id} {p}");
+            assert!(conforms(out, out, &reply), "{id} {p}: {reply} doesn't match {out}");
+            assert!(reply.get("param_warnings").is_none(), "{id} {p}: {reply}");
+        }
+    }
+    // The published output type is that object, plus the warnings only the warn mode adds.
+    let out = output_schema_for::<RenderPanelVisibilityResult>();
+    let out = out.as_value();
+    assert!(conforms(out, out, &json!({"visible": true, "param_warnings": ["a key the command doesn't take"]})), "{out}");
+}
+
+/// A flag that isn't a boolean and a key the command doesn't take keep the messages the handler has
+/// always used with the check off and in warn; in strict the contract speaks first and names them
+/// the way the published schema does.
+#[test]
+fn render_panel_refusals_stay_the_handlers_below_strict() {
+    for id in ["view.render_inspector", "view.shots_strip"] {
+        // The flag is required: no level lets a call without one through. The message is the one the
+        // handler's private struct gave before these types, because the parameters are read the same
+        // way; in strict the contract speaks first and names the key the way the schema does.
+        for level in [ParamCheck::Off, ParamCheck::Warn] {
+            let mut s = Session { param_check: level, ..Session::default() };
+            let e = s.execute(id, &json!({})).err().unwrap_or_else(|| panic!("{id} with no flag runs with the check {level:?}"));
+            assert_eq!(e.to_string(), format!("invalid parameters for `{id}`: missing field `visible`"), "{id}");
+        }
+        let strict = Session { param_check: ParamCheck::Strict, ..Session::default() }.execute(id, &json!({}));
+        let e = strict.err().unwrap_or_else(|| panic!("{id} with no flag runs in strict"));
+        assert!(e.to_string().contains("`visible`"), "{id}: {e}");
+        let bad_flag = call([("visible", json!("false"))]);
+        let handler = format!(r#"invalid parameters for `{id}`: invalid type: string "false", expected a boolean"#);
+        for level in [ParamCheck::Off, ParamCheck::Warn] {
+            let mut s = Session { param_check: level, ..Session::default() };
+            let e = s.execute(id, &bad_flag).err().unwrap_or_else(|| panic!("{id} {bad_flag} runs with the check {level:?}"));
+            assert_eq!(e.to_string(), handler, "{id}");
+        }
+        let strict = Session { param_check: ParamCheck::Strict, ..Session::default() }.execute(id, &bad_flag);
+        let e = strict.err().unwrap_or_else(|| panic!("{id} {bad_flag} runs in strict"));
+        assert!(e.to_string().contains("`visible` must be true or false"), "{id}: {e}");
+        // A key the command doesn't take: the handler has always refused it, and strict names it
+        // from the schema instead.
+        let hostile = call([("visible", json!(true)), ("off", json!(true))]);
+        for level in [ParamCheck::Off, ParamCheck::Warn] {
+            let mut s = Session { param_check: level, ..Session::default() };
+            let e = s.execute(id, &hostile).err().unwrap_or_else(|| panic!("{id} {hostile} runs with the check {level:?}"));
+            assert_eq!(e.to_string(), format!("invalid parameters for `{id}`: unknown field `off`, expected `visible`"), "{id}");
+        }
+        let strict = Session { param_check: ParamCheck::Strict, ..Session::default() }.execute(id, &hostile);
+        let e = strict.err().unwrap_or_else(|| panic!("{id} {hostile} runs in strict"));
+        assert!(e.to_string().contains("unknown key `off`"), "{id}: {e}");
+    }
 }

@@ -1,8 +1,9 @@
 //! WR-655: `SmDatabaseIO` writes ASCII doubles as fixed `%.16f`, which keeps fewer than
 //! 17 significant digits below 1, so an ASCII write and read moves such values (`0.3`
-//! plus 1 ULP reads back as `0.3`). `Kernel::fixes.ascii_doubles_round_trip` (off by
-//! default: the C++ writer's bytes) writes each double in the shortest form that reads
-//! back as the same double, so an ASCII save and reload keeps every value.
+//! plus 1 ULP reads back as `0.3`). The B-rep file writer (`write_brep_to_file`) writes
+//! each double in the shortest form that reads back as the same double, so an ASCII save
+//! and reload keeps every value. A `DatabaseWriter` still writes upstream's `%.16f` unless
+//! made `with_round_trip_doubles`.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::float_cmp)] // test helpers
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -54,7 +55,7 @@ fn the_records_example() {
 }
 
 #[test]
-fn ascii_doubles_read_back_unchanged_only_with_the_fix() {
+fn ascii_doubles_read_back_unchanged_only_with_round_trip_doubles() {
     let back = write_read(&VALUES, true);
     for (a, b) in VALUES.iter().zip(&back) {
         assert_eq!(a.to_bits(), b.to_bits(), "{a:e} read back as {b:e}");
@@ -121,22 +122,11 @@ fn read(k: &mut Kernel, file: Vec<u8>) -> Brep {
 }
 
 #[test]
-fn an_ascii_b_rep_reloads_exactly_with_the_fix() {
+fn an_ascii_b_rep_reloads_exactly() {
     let mut k = Kernel::default();
-    k.fixes.ascii_doubles_round_trip = true;
     let (b, file) = box_file(&mut k);
     let text = String::from_utf8(file.clone()).unwrap();
     assert!(text.contains("e-1"), "exponent notation");
     let back = read(&mut k, file);
     assert_eq!(corners(&back), corners(&b));
-}
-
-#[test]
-fn by_default_the_file_is_upstreams_and_moves_the_corners() {
-    let mut k = Kernel::default();
-    let (b, file) = box_file(&mut k);
-    let text = String::from_utf8(file.clone()).unwrap();
-    assert!(text.contains("0.3000000000000000"), "fixed %.16f");
-    let back = read(&mut k, file);
-    assert_ne!(corners(&back), corners(&b));
 }

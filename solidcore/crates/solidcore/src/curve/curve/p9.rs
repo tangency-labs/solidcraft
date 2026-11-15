@@ -77,9 +77,9 @@
 //!   repeated here with the kind's own `EvaluatePoint` (upstream's virtual call) and
 //!   `IsKindOf(SmLine_TYPE)` test, the control polygon coming from the B-spline
 //!   part.
-//! - **Opt-in fix.** `CalculateTightBoundingBox` adds only the knots strictly inside
-//!   the interval with `Kernel::fixes.curve_tight_box_interval_knots` (WR-474, #1054);
-//!   off by default, as upstream.
+//! - **Interval knots.** `CalculateTightBoundingBox` adds only the tangent
+//!   discontinuous knots strictly inside the interval (WR-474, #1054); upstream adds
+//!   them all, and the last knot.
 //! - **Coordinate bound.** `GlobalCurveSolve` of a curve whose natural box reaches past
 //!   [`crate::limits::MAX_COORDINATE_MAGNITUDE`] (`1e150`, below `sqrt(f64::MAX)`)
 //!   fails with `InvalidInput` before any cache is built (the curve cache is built over
@@ -330,7 +330,10 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
         let curve_node1 = self.base.branch_node(branch, 0)?;
         let curve_node2 = self.base.branch_node(branch, 1)?;
         if !has_data(curve_node1) || !has_data(curve_node2) {
-            return Err(SolidError::null_pointer(OP_LOCAL));
+            return Err(SolidError::curve_missing(
+                OP_LOCAL,
+                "the branch's curve node data",
+            ));
         }
         let tree1: &Tree<O> = self.base.tree(0)?;
         let tree2: &Tree<O> = self.base.tree(1)?;
@@ -928,7 +931,10 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                         guesses2.push(s.start.parameters[0]);
                     }
                     if guesses1.len() == NUM_PARAM_GUESS {
-                        return Err(SolidError::sm_err(OP_LOCAL));
+                        return Err(SolidError::curve_failed(
+                            OP_LOCAL,
+                            "the parameter guesses are full",
+                        ));
                     }
                 }
             }
@@ -1210,13 +1216,15 @@ fn build_cache<O: SolutionObject>(
     match make_curve_cache::<O>(k, curve, handle) {
         Ok(c) => Ok(c),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Err(SolidError::null_pointer(OP_GCS)),
+        Err(_) => Err(SolidError::curve_missing(OP_GCS, "the curve's cache")),
     }
 }
 
 /// The cache tree (`GetTree`, `NER`).
 fn cache_tree<O: SolutionObject>(cache: &CurveCache<O>) -> Result<&Tree<O>> {
-    cache.tree().ok_or(SolidError::null_pointer(OP_GCS))
+    cache
+        .tree()
+        .ok_or_else(|| SolidError::curve_missing(OP_GCS, "the curve cache's tree"))
 }
 
 /// The axis aligned box of `CalculateBoundingBox` of `curve` over its natural
@@ -1557,7 +1565,7 @@ impl Curve {
             Op::AtDistance => {
                 let target = opts
                     .target_distance
-                    .ok_or(SolidError::null_pointer(OP_GCS))?;
+                    .ok_or_else(|| SolidError::curve_missing(OP_GCS, "the target distance"))?;
                 gs.base.set_at_distance(target);
             }
             Op::SignedDirectedMinimize | Op::Signed3dDirectedMinimize => {
@@ -1662,8 +1670,8 @@ impl Curve {
     /// from its end points, (for B-splines) its tangent discontinuous knots and last
     /// knot, and the points where its tangent is perpendicular to x, y and z. The
     /// line override is [`crate::curve::line::Line::calculate_tight_bounding_box`].
-    /// With [`crate::kernel::UpstreamFixes::curve_tight_box_interval_knots`] only the
-    /// tangent discontinuous knots strictly inside `interval` are added (WR-474, #1054).
+    /// Only the tangent discontinuous knots strictly inside `interval` are added
+    /// (WR-474, #1054).
     ///
     /// # Errors
     ///
@@ -1693,19 +1701,14 @@ impl Curve {
             let (knots, _) = self.knots(k, None)?;
             let (_, continuities) = self.calculate_continuities(k, 2.0)?;
 
-            let n = knots.len();
             for (i, &knot) in knots.iter().enumerate().skip(1) {
                 let low = continuities
                     .get(i)
                     .is_some_and(|&c| ord(c) <= ord(ContinuityType::C1));
-                let add = if k.fixes.curve_tight_box_interval_knots {
-                    // WR-474 (#1054): only the tangent discontinuous knots strictly inside
-                    // the interval; its ends are in the box already, and a knot outside it
-                    // is a point the curve never reaches over `interval`.
-                    low && knot > interval.min() && knot < interval.max()
-                } else {
-                    i == n - 1 || low
-                };
+                // WR-474 (#1054): only the tangent discontinuous knots strictly inside the
+                // interval; its ends are in the box already, and a knot outside it is a
+                // point the curve never reaches over `interval`.
+                let add = low && knot > interval.min() && knot < interval.max();
                 if add {
                     eval_keep(k, self, knot, &mut pt)?;
                     tight_box.add_point(pt);
@@ -2041,8 +2044,7 @@ mod tests {
         use crate::nurbs::b_spline_curve::BSplineCurve;
         use crate::nurbs::math::{CPoint, NOW};
         // Existing native gen0415: the reference culls this entire sub-domain.
-        let mut k = Kernel::default();
-        k.fixes.perspective_sphere_offsets = true;
+        let k = Kernel::default();
         let end = 3.066334533625111;
         let a = Curve::from(
             BSplineCurve::from_data(
@@ -2802,8 +2804,7 @@ mod tests {
         use crate::geom::axis2_placement::Axis2Placement;
         use crate::nurbs::b_spline_curve::NurbCircleParam;
 
-        let mut k = Kernel::default();
-        k.fixes.curve_tight_box_interval_knots = true;
+        let k = Kernel::default();
         let frame = Axis2Placement::new(
             Vec3::from_array([0.0, 0.0, 0.0]),
             Vec3::from_array([1.0, 0.0, 0.0]),
@@ -2823,11 +2824,6 @@ mod tests {
         let ivl = arc.natural_interval();
         // Half the arc: from its start to the midpoint of its interval (0 deg to 45 deg).
         let half = Extent1d::from_min_max(ivl.min(), 0.5 * (ivl.max() - ivl.min()) + ivl.min());
-        let pinned = arc
-            .calculate_tight_bounding_box(&Kernel::default(), &half)
-            .expect("upstream tight box over a sub-interval");
-        assert!(pinned.u_min().abs() < 1e-6);
-        assert!((pinned.v_max() - 50.0).abs() < 1e-6);
         let bx = arc
             .calculate_tight_bounding_box(&k, &half)
             .expect("tight box over a sub-interval");

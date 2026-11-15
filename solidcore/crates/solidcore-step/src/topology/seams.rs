@@ -4,8 +4,10 @@
 //! apex); schema 4 keeps every loop closed in the surface's (u, v), so such a face gets a seam:
 //! a ruling line on a cylinder or cone, a meridian arc on a sphere, from a vertex of one loop to
 //! the other loop (split there when it has no vertex at that angle) or to the pole the face
-//! covers; on a surface of revolution, its profile turned to the vertex's angle. The loops merge into one: the first, the seam out, the second (or nothing at a pole),
-//! the seam back. A face on a B-spline surface that closes on itself around u (its first and
+//! covers; on a surface of revolution, its profile turned to a quarter line (a multiple of a
+//! quarter turn from the profile), where the revolution's form starts, the loops split there.
+//! The loops merge into one: the first, the seam out, the second (or nothing at a pole), the seam
+//! back. A face on a B-spline surface that closes on itself around u (its first and
 //! last control columns the same) gets a seam the same way, along the surface's own boundary
 //! column (u at the start of its knots), the loops split there where they have no vertex on it;
 //! the period is the width of its knots. One closed around v only gets it along its boundary row
@@ -21,9 +23,10 @@
 //! of the face ([`Builder::drop_inner_slits`]).
 
 use crate::vec::Vec3Geom as _;
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-use crate::kernel::{CurveEval, SurfaceEval};
+use crate::kernel::{CurveEval, Starts, SurfaceEval};
+use solidcore::nurbs::math::gamma;
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Frame, Surface as BSurface, Vertex};
 
@@ -31,6 +34,9 @@ use super::{Builder, EdgeB, LoopB, R, index, unsupported};
 
 /// Samples per edge when following a loop around the axis.
 const SAMPLES: usize = 16;
+/// How often a Bézier piece that reaches half a turn about an axis is halved for its parts'
+/// arcs before its edge is taken to reach every angle.
+const MAX_HALVINGS: u32 = 4;
 /// Edges split to place seams, per solid.
 const MAX_SPLITS: usize = 10_000;
 
@@ -45,6 +51,81 @@ fn wrap(x: f64) -> f64 {
 /// `x` wrapped into (−period/2, period/2].
 fn wrap_by(x: f64, period: f64) -> f64 {
     x - (x / period).round() * period
+}
+
+/// The turns a loop makes round a surface periodic in u, v or both, counted sample by sample.
+pub(super) struct Turns {
+    periods: [Option<f64>; 2],
+    /// The first and the last sample's parameters.
+    first: Option<[f64; 2]>,
+    last: Option<[f64; 2]>,
+    /// Turns so far in each direction, a fraction of a period per step.
+    total: [f64; 2],
+}
+
+impl Turns {
+    pub(super) fn new(periods: [Option<f64>; 2]) -> Self {
+        Self { periods, first: None, last: None, total: [0.0; 2] }
+    }
+
+    /// The step from `l` to `q` as a fraction of each period, wrapped to the nearer way round.
+    fn steps(&self, l: [f64; 2], q: [f64; 2]) -> [f64; 2] {
+        let mut out = [0.0; 2];
+        for (((o, period), q), l) in out.iter_mut().zip(self.periods).zip(q).zip(l) {
+            if let Some(p) = period {
+                *o = wrap_by(q - l, p) / p;
+            }
+        }
+        out
+    }
+
+    /// Takes the next sample on the surface from `candidates`, each its parameters and its
+    /// distance from the sample. Of those within `reach` (the edge's tolerance) of it, the loop
+    /// continues on the one whose parameters step least round the surface from the last sample's,
+    /// so a point within the tolerance of two parts of the surface (a profile folding back
+    /// within the tolerance of itself) stays on the part the loop is on and the count cannot
+    /// change by a period where the nearer of the two changes. Only where none is within reach,
+    /// the loop having left the part it was on, does it take the nearest. A sample with no
+    /// candidate is passed over (returns whether the sample was taken).
+    pub(super) fn step(&mut self, candidates: &[([f64; 2], f64)], reach: f64) -> bool {
+        let size = |d: [f64; 2]| d[0].abs().max(d[1].abs());
+        let within = candidates.iter().filter(|c| c.1 <= reach);
+        let pick = match self.last {
+            Some(l) => within.min_by(|a, b| size(self.steps(l, a.0)).total_cmp(&size(self.steps(l, b.0)))),
+            None => within.min_by(|a, b| a.1.total_cmp(&b.1)),
+        }
+        .or_else(|| candidates.iter().min_by(|a, b| a.1.total_cmp(&b.1)));
+        let Some(&(q, _)) = pick else { return false };
+        self.add(q);
+        self.first.get_or_insert(q);
+        self.last = Some(q);
+        true
+    }
+
+    fn add(&mut self, q: [f64; 2]) {
+        if let Some(l) = self.last {
+            let steps = self.steps(l, q);
+            for (t, s) in self.total.iter_mut().zip(steps) {
+                *t += s;
+            }
+        }
+    }
+
+    /// Closes a loop whose first and last samples are the same point (its start): steps from
+    /// the last sample's parameters back to the first's. Round a closed path of parameters the
+    /// steps add to whole turns, so a loop that started on one part of the surface within the
+    /// tolerance of its point and ended on another is not left a fraction of a turn short.
+    pub(super) fn close(&mut self) {
+        if let Some(f) = self.first {
+            self.add(f);
+            self.last = Some(f);
+        }
+    }
+
+    /// Whole turns in u and in v.
+    pub(super) fn count(&self) -> [i64; 2] {
+        self.total.map(|x| x.round() as i64)
+    }
 }
 
 /// The path a slit runs out along: a loop that runs out along a chain of edges and straight back
@@ -292,6 +373,7 @@ impl Builder<'_, '_> {
             let eval = SurfaceEval::new(&face.surface).map_err(|e| e.to_string())?;
             let dom = eval.domain();
             let (Some(period), None, Some((u0, _))) = (dom.period[0], dom.period[1], dom.range[0]) else { continue };
+            let poles: Vec<Vec3> = spline_axis(&face.surface, &eval).iter().flat_map(|ax| ax.poles.iter().flatten().copied()).collect();
             // How far along u each loop of the face reaches, followed round from its first point
             // (unwrapped across the start); a face winding round is the seams' to handle. The
             // widest loop bounds the face.
@@ -299,7 +381,7 @@ impl Builder<'_, '_> {
             let mut winds = false;
             for l in &face.loops {
                 let LoopB::Edges(es) = l else { continue };
-                winds |= self.winding(&eval, es, [Some(period), None])?[0] != 0;
+                winds |= self.winding(&eval, es, [Some(period), None], &poles)?[0] != 0;
                 let mut last: Option<f64> = None;
                 let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
                 for &(e, _) in es {
@@ -357,6 +439,7 @@ impl Builder<'_, '_> {
                 continue;
             }
             let found = axis(&surface).or_else(|| spline_axis(&surface, &eval));
+            let poles: Vec<Vec3> = found.iter().flat_map(|ax| ax.poles.iter().flatten().copied()).collect();
             let mut up = Vec::new();
             let mut down = Vec::new();
             // On a torus a face may wind round its tube instead, and on a spline closed in v it
@@ -365,7 +448,7 @@ impl Builder<'_, '_> {
             let mut tube = false;
             for (li, l) in face.loops.iter().enumerate() {
                 let LoopB::Edges(es) = l else { continue };
-                let mut w = self.winding(&eval, es, periods)?;
+                let mut w = self.winding(&eval, es, periods, &poles)?;
                 if v_turns && w[0] == 0 && w[1].abs() == 1 {
                     tube = true;
                     w = [w[1], 0];
@@ -473,30 +556,47 @@ impl Builder<'_, '_> {
         Ok((d(t) <= reach && ends.iter().all(|x| *x > reach) && t > lo && t < hi).then_some(t))
     }
 
-    /// Turns (in u, in v) a loop makes around a periodic surface.
-    fn winding(&self, eval: &SurfaceEval, es: &[(u32, bool)], periods: [Option<f64>; 2]) -> R<[i64; 2]> {
-        let mut last: Option<[f64; 2]> = None;
-        let mut total = [0.0; 2];
-        for &(e, forward) in es {
+    /// Turns (in u, in v) a loop makes around a periodic surface. Points on one of the surface's
+    /// `poles` are passed over: every angle round the axis is the pole, so the parameter found
+    /// there is any, and a loop running in to the pole and out again turned as the points either
+    /// side of it say (a cap split along a meridian, one half's loop from the rim to the pole and
+    /// back, does not wind round the axis).
+    ///
+    /// Each point is taken on the surface by [`Turns::step`], from two candidates: the point found
+    /// from the last point's parameters and the one found by searching the whole surface. A
+    /// search from the last point alone can settle on another part of the surface, near the
+    /// point but not under it (a fit-point spline's wiggles millimetres away), and a loop with its
+    /// seam would count a turn it does not make.
+    fn winding(&self, eval: &SurfaceEval, es: &[(u32, bool)], periods: [Option<f64>; 2], poles: &[Vec3]) -> R<[i64; 2]> {
+        let mut turns = Turns::new(periods);
+        let starts = Starts::default();
+        // Whether the loop's start was taken both as its first sample and as its last.
+        let mut closed = true;
+        for (i, &(e, forward)) in es.iter().enumerate() {
             let edge = self.edges.get(e as usize).ok_or("edge reference")?;
             let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
             let [lo, hi] = edge.interval;
+            let reach = self.tol.max(edge.tolerance);
             for k in 0..=SAMPLES {
+                let end = (i == 0 && k == 0) || (i + 1 == es.len() && k == SAMPLES);
                 let s = k as f64 / SAMPLES as f64;
                 let t = if forward { lo + (hi - lo) * s } else { hi - (hi - lo) * s };
                 let p = c.point(t).ok_or("edge point")?;
-                let Some(q) = eval.project(p, last, f64::INFINITY) else { continue };
-                if let Some(l) = last {
-                    for (((t, period), q), l) in total.iter_mut().zip(periods).zip(q).zip(l) {
-                        if let Some(p) = period {
-                            *t += wrap_by(q - l, p) / p;
-                        }
-                    }
+                if poles.iter().any(|q| p.dist(*q) <= reach) {
+                    closed &= !end;
+                    continue;
                 }
-                last = Some(q);
+                let off = |q: Option<[f64; 2]>| q.and_then(|q| eval.point(q).map(|s| (q, s.dist(p))));
+                let from_last = off(eval.project(p, turns.last, f64::INFINITY));
+                let searched = off(eval.project_with(&starts, p, None, f64::INFINITY));
+                let taken = turns.step(&[from_last, searched].into_iter().flatten().collect::<Vec<_>>(), reach);
+                closed &= taken || !end;
             }
         }
-        Ok(total.map(|x| x.round() as i64))
+        if closed {
+            turns.close();
+        }
+        Ok(turns.count())
     }
 
     /// A vertex of the loop is on one of the axis's poles (within its tolerance).
@@ -632,8 +732,14 @@ impl Builder<'_, '_> {
         let c = CurveEval::new(&curve).map_err(|m| m.to_string())?;
         if check {
             let m = c.point(0.5 * (interval[0] + interval[1])).ok_or("seam point")?;
-            let off = eval.project(m, None, f64::INFINITY).and_then(|q| eval.point(q)).map_or(f64::INFINITY, |s| s.dist(m));
-            if !(off <= self.tol) {
+            let gap = |p: Vec3| eval.project(p, None, f64::INFINITY).and_then(|q| eval.point(q)).map_or(f64::INFINITY, |s| s.dist(p));
+            // As far off as its ends are, at most: a vertex on an edge the file has a little off
+            // the surface (a spline rim 0.3 um off its cone, in a file stating 0.01 um) puts the
+            // seam's middle off by no more, and the seam's tolerance covers it as any edge's does
+            // (`measure_edges`). Vertices at different angles leave the chord between them far
+            // more than that inside the surface.
+            let allowed = self.tol.max(gap(pa).max(gap(pb)).min(super::MAX_TOLERANCE));
+            if !(gap(m) <= allowed) {
                 return Err(unsupported("a seam off its surface: loops with no vertices at one angle"));
             }
         }
@@ -951,6 +1057,10 @@ impl Builder<'_, '_> {
         let k = k.ok_or_else(|| format!("face #{step}: a loop around the axis on its pole"))?;
         let k = match ax.kind {
             Kind::Iso { start, .. } => self.seam_start(fi, li, start, ax, eval)?,
+            Kind::Ruled | Kind::Sphere(_) => self.once_start(fi, li, ax, eval)?,
+            // A revolution's seam lies on a quarter line, where its form starts ([`Self::band_seam`]):
+            // the one at its profile.
+            Kind::Revolved(_) => self.seam_start(fi, li, 0.0, ax, eval)?,
             _ => k,
         };
         let ring = self.rotated(fi, li, k)?;
@@ -983,6 +1093,50 @@ impl Builder<'_, '_> {
         Ok(())
     }
 
+    /// The use of loop `li` of face `fi` (a cap round a cone's or a sphere's pole) where its seam
+    /// to the pole starts: at an angle about the axis the loop passes only once
+    /// ([`Builder::blocked_angles`]: every piece's angle runs one way there and no other piece
+    /// reaches it), so the loop followed from the seam covers exactly one turn. A loop that turns
+    /// back partway round (an edge across a drill point cut by another) covers the angles it
+    /// turns back over three times; a seam among them left it more than a turn wide, which reads
+    /// as a face winding round its axis. The first vertex at such an angle, else the loop split
+    /// in the middle of the widest range of them. Where the pieces leave no angle known to be
+    /// passed once (a piece whose hull reaches round the axis), the first vertex off the pole, as
+    /// every cap had it before.
+    fn once_start(&mut self, fi: usize, li: usize, ax: &Axis, eval: &SurfaceEval) -> R<usize> {
+        let Some(LoopB::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else { return Err("loop reference".into()) };
+        let es = es.clone();
+        let blocked = self.blocked_angles(fi, li, li, ax)?.ok_or("a cap's loop winds round its axis")?;
+        let frame = Perpendicular::new(ax);
+        let off_pole = |s: &Self, v: u32| -> R<bool> {
+            let x = s.vertices.get(v as usize).ok_or("vertex reference")?;
+            Ok(!ax.poles.iter().flatten().any(|p| Vec3::from(x.point).dist(*p) <= s.tol.max(x.tolerance)))
+        };
+        let mut first = None;
+        for (k, u) in es.iter().enumerate() {
+            let v = self.start(*u)?;
+            if !off_pole(self, v)? {
+                continue;
+            }
+            if first.is_none() {
+                first = Some((k, v));
+            }
+            if blocked.clear(frame.angle(self.vpoint(v)?)) {
+                return Ok(k);
+            }
+        }
+        let (k, first) = first.ok_or("a loop around the axis on its pole")?;
+        let Some(middle) = blocked.widest_clear() else { return Ok(k) };
+        // The surface's angle parameter at that angle about the axis: offset from the frame's by
+        // that of a vertex of the loop (both right-handed about the axis).
+        let u_of = eval.project(self.vpoint(first)?, None, f64::INFINITY).ok_or("a vertex off its surface")?;
+        let target = middle + (u_of[0] - frame.angle(self.vpoint(first)?));
+        let (e, t, _) =
+            self.meets(&es, 0, target, ax.period, eval)?.ok_or_else(|| unsupported("a loop round a pole that misses its seam's angle"))?;
+        let v = self.split_edge(e, t)?;
+        self.use_at(fi, li, v)
+    }
+
     /// Join loops `la` (running +u) and `lb` (running −u) of face `fi` by a seam.
     fn band_seam(&mut self, fi: usize, la: usize, lb: usize, ax: &Axis, eval: &SurfaceEval, splits: &mut usize) -> R<()> {
         // The parameter the loops wind in: u, or v round a torus's tube.
@@ -1013,6 +1167,19 @@ impl Builder<'_, '_> {
             };
             Ok(wrap(ua - ub).abs() * r <= s.tol)
         };
+        // A face that winds round its axis more than a turn (a thread's crest between its two
+        // helices, run on into the plain cylinder past the thread's end): one of its loops,
+        // followed from its start, goes round more than once, so it reaches every angle more than
+        // once and no angle is clear of it; its seam is found along the ruling instead.
+        let mut wound = false;
+        if ax.kind == Kind::Ruled {
+            for li in [la, lb] {
+                wound |= self.loops_extent(fi, Some(li))?.is_some_and(crate::kernel::form::winds);
+            }
+        }
+        if wound {
+            return self.wound_band_seam(fi, la, lb, ax, eval, splits);
+        }
         if let Kind::Iso { start, .. } = ax.kind {
             // Both loops start on the spline's boundary column, split there where they don't.
             let i = self.seam_start(fi, la, start, ax, eval)?;
@@ -1023,45 +1190,258 @@ impl Builder<'_, '_> {
             }
             return self.join_by_seam(fi, la, lb, i, j, ax, eval);
         }
+        // The seam must be an edge of the face as it stands: longer than its tolerance (an edge
+        // no smaller than its tube, Edge 7), and meeting no other loop of the face (one it crossed
+        // was cut in two, and the face lost). The angles about the axis those loops can reach
+        // are blocked; the seam runs from the first vertex of the two loops (pairs at one angle
+        // first, then loop A's, then loop B's) at a clear angle where the band is wide enough,
+        // else from the middle of the widest clear range, both loops split there.
+        let blocked = self.blocked_angles(fi, la, lb, ax)?;
+        let frame = Perpendicular::new(ax);
+        let first = self.start(*a_es.first().ok_or("empty loop")?)?;
+        // The surface's parameter `d` at an angle about the axis: offset from the frame's angle
+        // by that of A's first vertex (both measured right-handed about the axis).
+        let offset = angle(self, first)? - frame.angle(self.vpoint(first)?);
+        if let Kind::Revolved(_) = ax.kind {
+            // A revolution's form starts on the quarter line its seam lies in (`brep::form`: a
+            // whole turn is the four quarters from the one it starts in), and its frame cannot
+            // be turned to start at a seam elsewhere (`frames`): a seam off a quarter line leaves
+            // its second use past the form's end. Its seam is the meridian on the first quarter
+            // line no other loop reaches, both loops starting there, split where they don't.
+            let start = (0..4u8)
+                .map(|q| f64::from(q) * FRAC_PI_2)
+                .find(|u| blocked.as_ref().is_none_or(|b| b.clear(u - offset)))
+                .ok_or_else(|| unsupported("a band round a revolved surface whose other loops reach each of its quarter lines"))?;
+            let i = self.seam_start(fi, la, start, ax, eval)?;
+            let j = self.seam_start(fi, lb, start, ax, eval)?;
+            *splits += 2;
+            if *splits > MAX_SPLITS {
+                return Err(format!("more than {MAX_SPLITS} edges split for seams"));
+            }
+            return self.join_by_seam(fi, la, lb, i, j, ax, eval);
+        }
+        let clear = |s: &Self, v: u32| -> R<bool> {
+            let a = frame.angle(s.vpoint(v)?);
+            Ok(blocked.as_ref().is_none_or(|b| b.clear(a)))
+        };
+        let long = |s: &Self, va: u32, pb: Vec3| -> R<bool> { Ok(s.vpoint(va)?.dist(pb) > s.tol) };
         let mut pair = None;
         'search: for (i, ua) in a_es.iter().enumerate().take(100) {
+            let va = self.start(*ua)?;
             for (j, ub) in b_es.iter().enumerate().take(100) {
-                if close(self, self.start(*ua)?, self.start(*ub)?)? {
+                let vb = self.start(*ub)?;
+                if close(self, va, vb)? && clear(self, va)? && long(self, va, self.vpoint(vb)?)? {
                     pair = Some((i, j));
                     break 'search;
                 }
             }
         }
-        let (i, j) = match pair {
-            Some(p) => p,
-            None => {
-                // Split loop B where the ruling (or meridian) through A's first vertex meets it.
-                *splits += 1;
-                if *splits > MAX_SPLITS {
-                    return Err(format!("more than {MAX_SPLITS} edges split for seams"));
+        if let Some((i, j)) = pair {
+            return self.join_by_seam(fi, la, lb, i, j, ax, eval);
+        }
+        // A vertex of one loop and where the ruling (or meridian) through it meets the other.
+        let mut from_vertex = None;
+        'vertex: for (from, onto) in [(la, lb), (lb, la)] {
+            let (mine, theirs) = if from == la { (&a_es, &b_es) } else { (&b_es, &a_es) };
+            for (k, u) in mine.iter().enumerate().take(100) {
+                let v = self.start(*u)?;
+                if !clear(self, v)? {
+                    continue;
                 }
-                let target = angle(self, self.start(*a_es.first().ok_or("empty loop")?)?)?;
-                let mut found = None;
-                for &(e, _) in &b_es {
-                    if let Some(t) = self.crossing(e, d, target, ax.period, eval)? {
-                        found = Some((e, t));
-                        break;
-                    }
+                let target = angle(self, v)?;
+                if let Some((e, t, p)) = self.meets(theirs, d, target, ax.period, eval)?
+                    && long(self, v, p)?
+                {
+                    from_vertex = Some((from, onto, k, e, t));
+                    break 'vertex;
                 }
-                let (e, t) = found.ok_or_else(|| unsupported("a band whose bounds share no angle"))?;
+            }
+        }
+        *splits += 1;
+        if *splits > MAX_SPLITS {
+            return Err(format!("more than {MAX_SPLITS} edges split for seams"));
+        }
+        let (i, j) = match from_vertex {
+            Some((from, onto, k, e, t)) => {
                 let v = self.split_edge(e, t)?;
-                let Some(LoopB::Edges(b_now)) = self.faces.get(fi).and_then(|f| f.loops.get(lb)) else { return Err("loop reference".into()) };
-                let mut j = None;
-                for (k, u) in b_now.iter().enumerate() {
-                    if self.start(*u)? == v {
-                        j = Some(k);
-                        break;
-                    }
+                let at = self.use_at(fi, onto, v)?;
+                if from == la { (k, at) } else { (at, k) }
+            }
+            None => {
+                let middle = blocked
+                    .as_ref()
+                    .and_then(Blocked::widest_clear)
+                    .ok_or_else(|| unsupported("a band whose other loops leave its seam no angle"))?;
+                let target = middle + offset;
+                let (ea, ta, pa) = self.meets(&a_es, d, target, ax.period, eval)?.ok_or_else(|| unsupported("a band whose bounds share no angle"))?;
+                let (eb, tb, pb) = self.meets(&b_es, d, target, ax.period, eval)?.ok_or_else(|| unsupported("a band whose bounds share no angle"))?;
+                // Both points at the clear angle chosen: the surface's parameter runs the way
+                // the angle does.
+                if !(blocked.as_ref().is_none_or(|b| b.clear(frame.angle(pa)) && b.clear(frame.angle(pb)))) {
+                    return Err(unsupported("a band whose seam's angle meets its other loops"));
                 }
-                (0, j.ok_or("the split vertex is not on its loop")?)
+                if !(pa.dist(pb) > self.tol) {
+                    return Err("a seam of no length".into());
+                }
+                *splits += 1;
+                let va = self.split_edge(ea, ta)?;
+                let vb = self.split_edge(eb, tb)?;
+                (self.use_at(fi, la, va)?, self.use_at(fi, lb, vb)?)
             }
         };
         self.join_by_seam(fi, la, lb, i, j, ax, eval)
+    }
+
+    /// The seam of band face `fi` on a cylinder or cone when the face winds round its axis more
+    /// than a turn, between its loops `la` (running +u, the face above it along the axis) and `lb`
+    /// (running −u, the face below it). Every angle meets the loops more than once, so the seam is
+    /// placed on the ruling itself: from a vertex of one loop where the loop runs its own way on
+    /// both sides (so the face lies along the ruling towards the other loop), the ruling's
+    /// crossings with every loop of the face are found on the Bézier pieces of their edges' NURBS
+    /// forms, and the seam runs to the nearest, which must be on the other loop. The open segment
+    /// between then meets no loop, so it lies in the face: the regions off the face beyond a loop
+    /// are bounded by that loop alone. A piece whose angle is not monotone, or one that comes within
+    /// its pad of the ruling's angle without crossing it between its ends, may meet the ruling
+    /// anywhere over its hull's heights, none of which may be on the seam. Vertices are tried in
+    /// loop order, `la`'s first.
+    fn wound_band_seam(&mut self, fi: usize, la: usize, lb: usize, ax: &Axis, eval: &SurfaceEval, splits: &mut usize) -> R<()> {
+        let frame = Perpendicular::new(ax);
+        let height = |p: Vec3| (p - ax.origin).dot(ax.z);
+        // Each loop's uses in order: the use, its edge's NURBS form, and the form's pieces along
+        // the loop (reversed, their angle's way with them, on a use against its edge).
+        let face = self.faces.get(fi).ok_or("face reference")?;
+        let mut loops: Vec<(usize, Vec<WoundUse>)> = Vec::new();
+        let mut points: Vec<Vec3> = Vec::new();
+        for (li, l) in face.loops.iter().enumerate() {
+            let es = match l {
+                LoopB::Edges(es) => es,
+                LoopB::Vertex(v) => {
+                    points.push(self.vpoint(*v)?);
+                    continue;
+                }
+            };
+            let mut uses = Vec::new();
+            for &(e, forward) in es {
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let form = nurbs_form(&edge.curve, edge.interval).map(|(c, _)| c);
+                let mut pieces = frame.pieces(&edge.curve, edge.interval, self.tol);
+                if !forward {
+                    pieces.reverse();
+                    for p in &mut pieces {
+                        p.runs = p.runs.map(|r| -r);
+                    }
+                }
+                let form = match form {
+                    Some(c) => Some(CurveEval::new(&c).map_err(|m| m.to_string())?),
+                    None => None,
+                };
+                uses.push(WoundUse { edge: e, forward, form, pieces });
+            }
+            loops.push((li, uses));
+        }
+        // Candidate starts: (loop, use) whose start vertex has the loop's way on both sides.
+        let mut starts = Vec::new();
+        for (from, way) in [(la, 1i8), (lb, -1i8)] {
+            let Some((_, uses)) = loops.iter().find(|(li, _)| *li == from) else { return Err("loop reference".into()) };
+            for k in 0..uses.len().min(100) {
+                let before = uses.get(k.checked_sub(1).unwrap_or(uses.len().saturating_sub(1))).and_then(|u| u.pieces.last());
+                let after = uses.get(k).and_then(|u| u.pieces.first());
+                if before.is_some_and(|p| p.runs == Some(way)) && after.is_some_and(|p| p.runs == Some(way)) {
+                    starts.push((from, k));
+                }
+            }
+        }
+        for (from, k) in starts {
+            let (onto, up) = if from == la { (lb, 1.0) } else { (la, -1.0) };
+            let Some((_, uses)) = loops.iter().find(|(li, _)| *li == from) else { continue };
+            let Some(u) = uses.get(k) else { continue };
+            let v = self.start((u.edge, u.forward))?;
+            let pv = self.vpoint(v)?;
+            let theta = frame.angle(pv);
+            // Signed distance along the ruling from the vertex, towards the other loop.
+            let along = |h: f64| up * (h - height(pv));
+            let before = k.checked_sub(1).unwrap_or(uses.len().saturating_sub(1));
+            // The nearest crossing on the other loop (distance, edge, its point), and the nearest
+            // reach of anything else along the ruling (from the vertex on, or straddling it).
+            let mut nearest: Option<(f64, u32, Vec3, f64)> = None;
+            let mut other = f64::INFINITY;
+            for &p in &points {
+                let d = along(height(p));
+                if !(Blocked { arcs: vec![frame.point_arc(p, self.tol)] }).clear(theta) && d > -self.tol {
+                    other = other.min(d.max(0.0));
+                }
+            }
+            for (li, luses) in &loops {
+                for (ui, w) in luses.iter().enumerate() {
+                    let last = w.pieces.len().saturating_sub(1);
+                    for (pi, piece) in w.pieces.iter().enumerate() {
+                        // The vertex's own pieces meet the ruling there only (monotone, under half
+                        // a turn).
+                        if *li == from && ((ui == k && pi == 0) || (ui == before && pi == last)) {
+                            continue;
+                        }
+                        match meets(&frame, &w.form, piece, theta, height, along, self.tol)? {
+                            Meets::Clear => {}
+                            Meets::Once { d, p, x } if *li == onto => {
+                                // Behind the vertex it is no matter, unless it touches it.
+                                if d > 0.0 {
+                                    if nearest.is_none_or(|(n, ..)| d < n) {
+                                        nearest = Some((d, w.edge, p, x));
+                                    }
+                                } else if d > -self.tol {
+                                    other = 0.0;
+                                }
+                            }
+                            // Another loop's crossing, at its one point.
+                            Meets::Once { d, .. } => {
+                                other = other.min(if d > -self.tol { d.max(0.0) } else { f64::INFINITY });
+                            }
+                            Meets::Hull(reach) => other = other.min(reach.unwrap_or(f64::INFINITY)),
+                        }
+                    }
+                }
+            }
+            let Some((d, e, p, x)) = nearest else { continue };
+            // Anything else at the crossing or before it: another loop, a doubtful piece, or a
+            // crossing of the other loop's own short of where the seam would end.
+            if !(d > self.tol) || other <= d + self.tol {
+                continue;
+            }
+            let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+            let [e0, e1] = edge.vertices;
+            let at_vertex = [e0, e1].into_iter().find(|&x| self.vpoint(x).is_ok_and(|q| q.dist(p) <= self.tol));
+            let vb = match at_vertex {
+                Some(x) => x,
+                None => {
+                    // A spline is its own form; a line's, circle's or ellipse's point is found on
+                    // the edge's own curve, where it is the one nearest.
+                    let t = match &edge.curve {
+                        BCurve::Spline { .. } | BCurve::RationalSpline { .. } => x,
+                        curve => {
+                            let c = CurveEval::new(curve).map_err(|m| m.to_string())?;
+                            let [lo, hi] = edge.interval;
+                            let Some(t) = super::project(&c, lo, hi, &[], p) else { continue };
+                            if !c.point(t).is_some_and(|q| q.dist(p) <= self.tol) {
+                                continue;
+                            }
+                            t
+                        }
+                    };
+                    if !(edge.interval[0] < t && t < edge.interval[1]) {
+                        continue;
+                    }
+                    *splits += 1;
+                    if *splits > MAX_SPLITS {
+                        return Err(format!("more than {MAX_SPLITS} edges split for seams"));
+                    }
+                    self.split_edge(e, t)?
+                }
+            };
+            let (i, j) =
+                if from == la { (self.use_at(fi, la, v)?, self.use_at(fi, lb, vb)?) } else { (self.use_at(fi, la, vb)?, self.use_at(fi, lb, v)?) };
+            return self.join_by_seam(fi, la, lb, i, j, ax, eval);
+        }
+        Err(unsupported("a band winding round its axis whose rulings from its vertices meet another loop first"))
     }
 
     /// Join loops `la` and `lb` of face `fi`, from their uses `i` and `j`, by a seam between
@@ -1086,7 +1466,8 @@ impl Builder<'_, '_> {
     }
 
     /// The parameter inside edge `e`'s interval where its curve reaches the value `target` of
-    /// the surface's parameter `d` (0: u, an angle about the axis; 1: v), if it does.
+    /// the surface's parameter `d` (0: u, an angle about the axis; 1: v), if it does, further
+    /// than the tolerance from both of its ends.
     fn crossing(&self, e: u32, d: usize, target: f64, period: f64, eval: &SurfaceEval) -> R<Option<f64>> {
         let edge = self.edges.get(e as usize).ok_or("edge reference")?;
         let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
@@ -1119,17 +1500,108 @@ impl Builder<'_, '_> {
                     }
                 }
                 let t = 0.5 * (a + b);
-                let eps = 1e-9 * (hi - lo);
-                return Ok((t > lo + eps && t < hi - eps).then_some(t));
+                // Inside the edge by more than the tolerance along it, measured in length: a split
+                // nearer an end would leave an edge no longer than its tolerance (the end vertex
+                // is then the one on the line, within the tolerance).
+                let clear = |end: f64| c.point(t).zip(c.point(end)).is_some_and(|(p, q)| p.dist(q) > self.tol);
+                return Ok((t > lo && t < hi && clear(lo) && clear(hi)).then_some(t));
             }
             prev = Some((t, x));
         }
         Ok(None)
     }
 
+    /// The first edge of `es` that crosses the value `target` of the surface's parameter `d`
+    /// inside its interval: the edge, the crossing's parameter on it and its point.
+    fn meets(&self, es: &[(u32, bool)], d: usize, target: f64, period: f64, eval: &SurfaceEval) -> R<Option<(u32, f64, Vec3)>> {
+        for &(e, _) in es {
+            if let Some(t) = self.crossing(e, d, target, period, eval)? {
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let p = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?.point(t).ok_or("edge point")?;
+                return Ok(Some((e, t, p)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The index of the use of loop `li` of face `fi` that starts at vertex `v`.
+    fn use_at(&self, fi: usize, li: usize, v: u32) -> R<usize> {
+        let Some(LoopB::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else { return Err("loop reference".into()) };
+        for (k, u) in es.iter().enumerate() {
+            if self.start(*u)? == v {
+                return Ok(k);
+            }
+        }
+        Err("the split vertex is not on its loop".into())
+    }
+
+    /// The angles about the axis a seam of face `fi` between its loops `la` and `lb` must not
+    /// take. A seam is an edge of the face only where it meets each of the two loops once and no
+    /// other loop at all, and that is decided on the Bézier pieces of the edges' NURBS forms:
+    /// each piece lies within the angles of its control points (the convex hull; a hull clear of
+    /// the axis spans less than half a turn about it), and its angle runs one way where the
+    /// Bernstein coefficients of its angular speed all have one sign. Blocked: every piece of the
+    /// other loops; of the two loops, a piece whose angle is not monotone, and where two pieces
+    /// reach the same angles (save two pieces one after the other running the same way, which
+    /// meet at their shared end only). Each blocked arc is widened by its rounding and by the
+    /// tolerance at the piece's smallest radius (`tol / r`), so a vertex that lies off its curve's
+    /// end by a rounding, or a loop within the tolerance of the seam, is not clear. `None` round a
+    /// torus's tube, where the loops wind in v and the angle about the axis does not part them.
+    fn blocked_angles(&self, fi: usize, la: usize, lb: usize, ax: &Axis) -> R<Option<Blocked>> {
+        if ax.kind.winds_in() != 0 {
+            return Ok(None);
+        }
+        let frame = Perpendicular::new(ax);
+        let face = self.faces.get(fi).ok_or("face reference")?;
+        let mut arcs = Vec::new();
+        for (li, l) in face.loops.iter().enumerate() {
+            let es = match l {
+                LoopB::Vertex(v) => {
+                    // A vertex loop at a pole (a cone's tip) is every angle at once: a seam to the
+                    // pole ends there and crosses nothing.
+                    let x = self.vertices.get(*v as usize).ok_or("vertex reference")?;
+                    if !ax.poles.iter().flatten().any(|p| Vec3::from(x.point).dist(*p) <= self.tol.max(x.tolerance)) {
+                        arcs.push(frame.point_arc(self.vpoint(*v)?, self.tol));
+                    }
+                    continue;
+                }
+                LoopB::Edges(es) => es,
+            };
+            // The loop's pieces in its order, each with the way its angle runs along the loop.
+            let mut pieces: Vec<Piece> = Vec::new();
+            for &(e, forward) in es {
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let mut own = frame.pieces(&edge.curve, edge.interval, self.tol);
+                if !forward {
+                    own.reverse();
+                    for p in &mut own {
+                        p.runs = p.runs.map(|r| -r);
+                    }
+                }
+                pieces.extend(own);
+            }
+            if li != la && li != lb {
+                arcs.extend(pieces.iter().map(Piece::blocked));
+                continue;
+            }
+            let n = pieces.len();
+            arcs.extend(pieces.iter().filter(|p| p.runs.is_none()).map(Piece::blocked));
+            for (i, j) in overlapping_pairs(&pieces) {
+                let (Some(p), Some(q)) = (pieces.get(i), pieces.get(j)) else { continue };
+                let next = j == i + 1 || (i == 0 && j + 1 == n);
+                if next && p.runs.is_some() && p.runs == q.runs {
+                    continue;
+                }
+                arcs.extend(overlap(p.arc, q.arc).into_iter().map(|a| padded(a, p.pad.max(q.pad))));
+            }
+        }
+        Ok(Some(Blocked { arcs }))
+    }
+
     /// The use of loop `li` of face `fi` that starts on the closed spline's boundary line at
-    /// `start` (the column at u = `start`, or the row at v = `start` for one closed in v): a vertex there
-    /// within the tolerance, else one made by splitting the loop's edge that crosses it.
+    /// `start` (the column at u = `start`, or the row at v = `start` for one closed in v), or on a
+    /// revolution's meridian at angle `start`: a vertex there within the tolerance, else one made
+    /// by splitting the loop's edge that crosses it.
     fn seam_start(&mut self, fi: usize, li: usize, start: f64, ax: &Axis, eval: &SurfaceEval) -> R<usize> {
         let Some(LoopB::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else { return Err("loop reference".into()) };
         let es = es.clone();
@@ -1157,12 +1629,12 @@ impl Builder<'_, '_> {
                 return Err("the split vertex is not on its loop".into());
             }
         }
-        Err(unsupported("a loop around a closed spline that never reaches its boundary line"))
+        Err(unsupported("a loop around a closed surface that never reaches the line its seam runs on"))
     }
 
     /// Split edge `e` at `t` inside its interval: it keeps [min, t], a new edge takes
     /// [t, max], and every loop using it uses both. Returns the new vertex.
-    fn split_edge(&mut self, e: u32, t: f64) -> R<u32> {
+    pub(super) fn split_edge(&mut self, e: u32, t: f64) -> R<u32> {
         let edge = self.edges.get(e as usize).ok_or("edge reference")?;
         let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
         let p = c.point(t).ok_or("split point")?;
@@ -1212,4 +1684,387 @@ fn remove_loop(face: &mut super::FaceB, gone: usize, kept: usize) {
         Some(o) if o > gone => Some(o - 1),
         o => o,
     };
+}
+
+/// A curve's NURBS form over `interval`, and the interval on it: a spline is its own, a line,
+/// circle or ellipse its form ([`crate::kernel::form::curve`]).
+fn nurbs_form(curve: &BCurve, interval: [f64; 2]) -> Option<(BCurve, [f64; 2])> {
+    match curve {
+        BCurve::Spline { .. } | BCurve::RationalSpline { .. } => Some((curve.clone(), interval)),
+        other => crate::kernel::form::curve(other, interval),
+    }
+}
+
+/// Directions square to an axis, to measure angles about it.
+pub(super) struct Perpendicular {
+    origin: Vec3,
+    x: Vec3,
+    y: Vec3,
+}
+
+impl Perpendicular {
+    fn new(ax: &Axis) -> Self {
+        Self::about(ax.origin, ax.z)
+    }
+
+    /// Directions square to the axis through `origin` along unit `z`.
+    pub(super) fn about(origin: Vec3, z: Vec3) -> Self {
+        let pick = if z.x.abs() <= z.y.abs() && z.x.abs() <= z.z.abs() {
+            Vec3::new(1.0, 0.0, 0.0)
+        } else if z.y.abs() <= z.z.abs() {
+            Vec3::new(0.0, 1.0, 0.0)
+        } else {
+            Vec3::new(0.0, 0.0, 1.0)
+        };
+        let x = (pick - z * pick.dot(z)).normalized().unwrap_or(Vec3::new(1.0, 0.0, 0.0));
+        Perpendicular { origin, x, y: z.cross(x) }
+    }
+
+    /// `p`'s angle about the axis, right-handed.
+    fn angle(&self, p: Vec3) -> f64 {
+        let d = p - self.origin;
+        d.dot(self.y).atan2(d.dot(self.x))
+    }
+
+    /// The Bézier pieces of a curve's NURBS form on `interval` (a line, circle or ellipse on its
+    /// form, [`crate::kernel::form::curve`]): each piece's arc of angles and the way its angle
+    /// runs, a piece that reaches half a turn in halves ([`MAX_HALVINGS`]); the whole turn where a
+    /// hull is still not clear of the axis.
+    pub(super) fn pieces(&self, curve: &BCurve, interval: [f64; 2], tol: f64) -> Vec<Piece> {
+        let whole = || vec![Piece { arc: [0.0, TAU], pad: 0.0, runs: None, on: interval, heights: [f64::NEG_INFINITY, f64::INFINITY] }];
+        let Some((form, [a, b])) = nurbs_form(curve, interval) else { return whole() };
+        let (knots, homogeneous): (&Vec<f64>, Vec<[f64; 4]>) = match &form {
+            BCurve::Spline { knots, points } => (knots, points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()),
+            BCurve::RationalSpline { knots, homogeneous } => (knots, homogeneous.clone()),
+            _ => return whole(),
+        };
+        let Some(degree) = knots.len().checked_sub(homogeneous.len() + 1) else { return whole() };
+        let (Some(&k0), Some(&k1)) = (knots.get(degree), knots.get(homogeneous.len())) else { return whole() };
+        // The interval within the knots (a file's end parameter a rounding past them).
+        let (a, b) = (a.min(b).max(k0), a.max(b).min(k1));
+        if !(a < b) || degree == 0 {
+            return whole();
+        }
+        // The knot spans inside the interval: one Bézier piece each.
+        let mut cuts = vec![a];
+        cuts.extend(knots.iter().copied().filter(|k| *k > a && *k < b));
+        cuts.push(b);
+        cuts.dedup();
+        // A piece that reaches half a turn about the axis (a closed spline of two pieces, each
+        // half way round: a cylinder's end as some exporters write it) has no arc of its own:
+        // halved, exactly, until each part has.
+        let mut todo: Vec<(f64, f64, u32)> = cuts.windows(2).rev().filter_map(|w| if let &[s, t] = w { Some((s, t, 0)) } else { None }).collect();
+        let mut out = Vec::new();
+        while let Some((s, t, halvings)) = todo.pop() {
+            let Ok((_, piece)) = solidcore::eval::pcurve::segment(degree, knots, &homogeneous, s, t) else { return whole() };
+            if piece.len() != degree + 1 || piece.iter().any(|h| !(h[3] > 0.0)) {
+                return whole();
+            }
+            let points: Vec<Vec3> = piece.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect();
+            let Some((arc, pad)) = self.span(&points, tol) else {
+                let middle = 0.5 * (s + t);
+                if halvings >= MAX_HALVINGS || !(s < middle && middle < t) {
+                    return whole();
+                }
+                todo.push((middle, t, halvings + 1));
+                todo.push((s, middle, halvings + 1));
+                continue;
+            };
+            // The homogeneous coordinates square to the axis: the angle of the piece's points.
+            let flat: Vec<[f64; 2]> = piece
+                .iter()
+                .map(|h| {
+                    let d = Vec3::new(h[0], h[1], h[2]) - self.origin * h[3];
+                    [d.dot(self.x), d.dot(self.y)]
+                })
+                .collect();
+            let z = self.x.cross(self.y);
+            let height = |p: &Vec3| (*p - self.origin).dot(z);
+            let heights = points.iter().fold([f64::INFINITY, f64::NEG_INFINITY], |[lo, hi], p| [lo.min(height(p)), hi.max(height(p))]);
+            out.push(Piece { arc, pad, runs: angular_sign(&flat), on: [s, t], heights });
+        }
+        out
+    }
+
+    /// The arc of angles `[from, to]` (to − from under π) that points spanning less than half a
+    /// turn reach, measured from the first, and how far to widen it where it blocks a seam: its
+    /// rounding (each angle's `atan2` and coordinates, `γ` of the operations at the points'
+    /// distance over their radius) and `tol` at the smallest radius the points' hull reaches (the
+    /// least radius times the cosine of half the arc, as their convex hull lies within the wedge).
+    /// `None` when a point is not finite or on the axis, or they reach half a turn.
+    pub(super) fn span(&self, points: &[Vec3], tol: f64) -> Option<([f64; 2], f64)> {
+        let first = *points.first()?;
+        let a0 = self.angle(first);
+        let (mut lo, mut hi, mut least, mut far) = (0.0f64, 0.0f64, f64::INFINITY, 0.0f64);
+        for p in points {
+            if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
+                return None;
+            }
+            let d = *p - self.origin;
+            let r = d.dot(self.x).hypot(d.dot(self.y));
+            if !(r > 0.0) {
+                return None;
+            }
+            let t = wrap(self.angle(*p) - a0);
+            if !t.is_finite() {
+                return None;
+            }
+            (lo, hi, least, far) = (lo.min(t), hi.max(t), least.min(r), far.max(d.len() / r));
+        }
+        if !(hi - lo < PI) {
+            return None;
+        }
+        let r = least * (0.5 * (hi - lo)).cos();
+        let pad = gamma(16) * (PI + far) + if tol > 0.0 { tol / r } else { 0.0 };
+        (pad.is_finite() && r > 0.0).then_some(([a0 + lo, a0 + hi], pad))
+    }
+
+    /// A vertex loop's point as a blocked arc: its angle, widened as [`Self::span`] widens one.
+    fn point_arc(&self, p: Vec3, tol: f64) -> [f64; 2] {
+        match self.span(&[p], tol) {
+            Some((arc, pad)) => padded(arc, pad),
+            None => [0.0, TAU],
+        }
+    }
+}
+
+/// How a Bézier piece of a loop meets the ruling at angle `theta` that a seam would run along
+/// ([`Builder::wound_band_seam`]).
+pub(super) enum Meets {
+    /// Not at all: the ruling's angle is clear of the piece's, padded.
+    Clear,
+    /// At one point, `d` along the ruling from the vertex: `p`, at parameter `x` of the edge's form.
+    Once { d: f64, p: Vec3, x: f64 },
+    /// Anywhere over the piece's hull's heights, from this far along the ruling (none where the
+    /// whole hull lies behind the vertex by more than the tolerance).
+    Hull(Option<f64>),
+}
+
+/// How `piece`, with its use's NURBS `form`, meets the ruling at angle `theta`, `height` giving a
+/// point's height along the axis and `along` a height's distance along the ruling. A monotone
+/// piece under half a turn meets it once where its angle reaches `theta` between its ends. One
+/// within its pad of the ruling's angle without crossing it between its ends (a near miss), and
+/// one whose angle is not monotone, may meet it anywhere over the heights of their hull: the
+/// angle of the nearer end says nothing of where in between the piece comes near.
+pub(super) fn meets(
+    frame: &Perpendicular,
+    form: &Option<CurveEval>,
+    piece: &Piece,
+    theta: f64,
+    height: impl Fn(Vec3) -> f64,
+    along: impl Fn(f64) -> f64,
+    tol: f64,
+) -> R<Meets> {
+    if (Blocked { arcs: vec![piece.blocked()] }).clear(theta) {
+        return Ok(Meets::Clear);
+    }
+    let crossing = match (piece.runs, form) {
+        (Some(_), Some(c)) => ruling_crossing(frame, c, piece.on, theta)?,
+        _ => None,
+    };
+    Ok(match crossing {
+        Some((true, p, x)) => Meets::Once { d: along(height(p)), p, x },
+        Some((false, ..)) | None => {
+            let [lo, hi] = piece.heights.map(along);
+            let (lo, hi) = (lo.min(hi), lo.max(hi));
+            Meets::Hull((hi > -tol).then_some(lo.max(0.0)))
+        }
+    })
+}
+
+/// A use of a loop round a wound band ([`Builder::wound_band_seam`]): its edge and way, its
+/// edge's NURBS form ready to evaluate, and the form's pieces along the loop.
+struct WoundUse {
+    edge: u32,
+    forward: bool,
+    form: Option<CurveEval>,
+    pieces: Vec<Piece>,
+}
+
+/// Where the ruling at angle `theta` meets a Bézier piece (parameters `on` of the NURBS form `c`)
+/// whose angle is monotone and spans under half a turn: `(true, point, parameter)` where the
+/// angle reaches `theta` between the piece's ends, else `(false, end, parameter)` with the end
+/// whose angle is nearer: the ruling passes within the piece's pad of it, somewhere over its
+/// hull's heights. The geometry is the kernel's ([`crate::kernel::angle_crossing`]).
+fn ruling_crossing(frame: &Perpendicular, c: &CurveEval, on: [f64; 2], theta: f64) -> R<Option<(bool, Vec3, f64)>> {
+    Ok(crate::kernel::angle_crossing(c, frame.origin, frame.x, frame.y, on, theta))
+}
+
+/// A Bézier piece of a loop's edge: the arc of angles about the axis it lies within, and the
+/// way its angle runs along the loop (1 up, -1 down; `None` where it is not certainly one way).
+pub(super) struct Piece {
+    arc: [f64; 2],
+    /// How far its arc is widened where it blocks a seam ([`Perpendicular::span`]).
+    pad: f64,
+    runs: Option<i8>,
+    /// Its parameters on the curve's NURBS form ([`Perpendicular::pieces`]), lowest first.
+    on: [f64; 2],
+    /// The heights along the axis its control points reach (its hull's), lowest first.
+    heights: [f64; 2],
+}
+
+impl Piece {
+    /// The arc the piece blocks: its own, widened by its pad.
+    pub(super) fn blocked(&self) -> [f64; 2] {
+        padded(self.arc, self.pad)
+    }
+}
+
+/// `arc` widened by `pad` at both ends; the whole turn where that reaches round.
+fn padded([a, b]: [f64; 2], pad: f64) -> [f64; 2] {
+    if !(b - a + 2.0 * pad < TAU) {
+        return [0.0, TAU];
+    }
+    [a - pad, b + pad]
+}
+
+/// The sign of the angular speed of the planar Bézier curve with homogeneous control points
+/// `a` (x·w, y·w about the axis; the angle of the point is the angle of these): `A × A'`, a
+/// polynomial of degree 2n − 1 whose Bernstein coefficients are
+/// `Σ_{i+j=k} C(n,i) C(n−1,j) / C(2n−1,k) · n (a_i × (a_{j+1} − a_j))`. All of one strict sign:
+/// the angle runs that way over the whole piece. A coefficient's sign counts only where it
+/// exceeds its rounding, `γ_K` of the sum of its terms' magnitudes (a ruling's coefficients
+/// are 0, computed as a rounding either way): otherwise `None`.
+pub(super) fn angular_sign(a: &[[f64; 2]]) -> Option<i8> {
+    let n = a.len().checked_sub(1).filter(|n| *n > 0)?;
+    let binomial = |n: usize, k: usize| -> f64 { (0..k).fold(1.0, |acc, i| acc * (n - i) as f64 / (i + 1) as f64) };
+    // Each coefficient: n + 1 terms of a binomial ratio (3n operations at most), a difference, a
+    // cross product and the sum.
+    let bound = gamma(6 * n + 8);
+    let mut sign = 0i8;
+    for k in 0..2 * n {
+        let (mut c, mut size) = (0.0, 0.0);
+        for i in 0..=n.min(k) {
+            let j = k - i;
+            if j > n - 1 {
+                continue;
+            }
+            let (Some(&ai), Some(&aj), Some(&aj1)) = (a.get(i), a.get(j), a.get(j + 1)) else { return None };
+            let f = binomial(n, i) * binomial(n - 1, j) / binomial(2 * n - 1, k) * n as f64;
+            let (d0, d1) = (aj1[0] - aj[0], aj1[1] - aj[1]);
+            c += f * (ai[0] * d1 - ai[1] * d0);
+            size += f * (ai[0].abs() * (aj1[1].abs() + aj[1].abs()) + ai[1].abs() * (aj1[0].abs() + aj[0].abs()));
+        }
+        if !(c.is_finite() && size.is_finite()) {
+            return None;
+        }
+        let s = if c > bound * size {
+            1
+        } else if c < -bound * size {
+            -1
+        } else {
+            return None;
+        };
+        if sign != 0 && s != sign {
+            return None;
+        }
+        sign = s;
+    }
+    Some(sign)
+}
+
+/// The pairs `(i, j)`, `i < j`, of pieces whose arcs may share an angle ([`overlap`]), found by a
+/// sweep over the arcs' starts instead of every pair: each arc (under half a turn) is laid on the
+/// line from its start taken in `[0, 2π)`, and once more a turn before and after, so two arcs
+/// that meet across a whole turn meet there too; sorted by start, an arc meets those still open
+/// when it starts (an end at its start included). Every pair [`overlap`] finds is among them; the
+/// work is the sort and the pairs, not the square of the pieces.
+fn overlapping_pairs(pieces: &[Piece]) -> Vec<(usize, usize)> {
+    let mut laid: Vec<(f64, f64, usize)> = Vec::new();
+    for (i, p) in pieces.iter().enumerate() {
+        let [a, b] = p.arc;
+        let start = a.rem_euclid(TAU);
+        if !(start.is_finite() && (b - a).is_finite()) {
+            continue;
+        }
+        for shift in [-TAU, 0.0, TAU] {
+            laid.push((start + shift, start + shift + (b - a), i));
+        }
+    }
+    laid.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let mut open: Vec<(f64, usize)> = Vec::new();
+    let mut pairs = std::collections::BTreeSet::new();
+    for (start, end, i) in laid {
+        open.retain(|(e, _)| *e >= start);
+        for &(_, j) in &open {
+            if i != j {
+                pairs.insert((i.min(j), i.max(j)));
+            }
+        }
+        open.push((end, i));
+    }
+    pairs.into_iter().collect()
+}
+
+/// The angles two arcs both reach (none, one arc, or two where they meet round both ends).
+fn overlap(p: [f64; 2], q: [f64; 2]) -> Vec<[f64; 2]> {
+    let w1 = p[1] - p[0];
+    let s = (q[0] - p[0]).rem_euclid(TAU);
+    let e = s + (q[1] - q[0]);
+    let mut out = Vec::new();
+    for shift in [0.0, -TAU] {
+        let (lo, hi) = ((s + shift).max(0.0), (e + shift).min(w1));
+        if lo <= hi {
+            out.push([p[0] + lo, p[0] + hi]);
+        }
+    }
+    out
+}
+
+/// Arcs of angle about an axis that a face's other loops can reach ([`Builder::blocked_angles`]).
+pub(super) struct Blocked {
+    pub(super) arcs: Vec<[f64; 2]>,
+}
+
+impl Blocked {
+    /// `angle` is outside every arc.
+    pub(super) fn clear(&self, angle: f64) -> bool {
+        self.arcs.iter().all(|[a, b]| (angle - a).rem_euclid(TAU) > b - a)
+    }
+
+    /// The middle of the widest range of angles no arc reaches, if any is left (with no arcs,
+    /// the frame's angle 0).
+    fn widest_clear(&self) -> Option<f64> {
+        if self.arcs.is_empty() {
+            return Some(0.0);
+        }
+        // The arcs from 0 up, merged where they overlap; the gaps between them round the turn.
+        let mut arcs: Vec<[f64; 2]> = self
+            .arcs
+            .iter()
+            .map(|[a, b]| {
+                let s = a.rem_euclid(TAU);
+                [s, s + (b - a)]
+            })
+            .collect();
+        arcs.sort_by(|x, y| x[0].total_cmp(&y[0]));
+        let mut merged: Vec<[f64; 2]> = Vec::new();
+        for [a, b] in arcs {
+            match merged.last_mut() {
+                Some(last) if a <= last[1] => last[1] = last[1].max(b),
+                _ => merged.push([a, b]),
+            }
+        }
+        // The last arc may run past a turn over the first ones.
+        while merged.len() > 1 {
+            let (Some(last), Some(head)) = (merged.last().copied(), merged.first().copied()) else { break };
+            if last[1] - TAU < head[0] {
+                break;
+            }
+            merged.pop();
+            if let Some(h) = merged.first_mut() {
+                *h = [last[0] - TAU, h[1].max(last[1] - TAU)];
+            }
+        }
+        let first = *merged.first()?;
+        let mut best: Option<(f64, f64)> = None;
+        for (k, m) in merged.iter().enumerate() {
+            let next = merged.get(k + 1).map_or(first[0] + TAU, |n| n[0]);
+            let width = next - m[1];
+            if width > 0.0 && best.is_none_or(|(w, _)| width > w) {
+                best = Some((width, m[1] + 0.5 * width));
+            }
+        }
+        best.map(|(_, middle)| middle)
+    }
 }

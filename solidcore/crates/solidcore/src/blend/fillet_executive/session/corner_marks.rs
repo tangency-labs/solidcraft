@@ -135,7 +135,7 @@ impl FilletSession<'_> {
                 .get(index)
                 .copied()
                 .filter(|&face| body.face(face).is_ok())
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the face of a recorded surface"))?;
             faces.push(face);
         }
         Ok(faces)

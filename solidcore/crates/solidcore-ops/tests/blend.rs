@@ -32,10 +32,11 @@ use solidcore::topology::{edge, loopuse};
 use solidcore::{EdgeId, FaceId, Point2, Vec3};
 use solidcore_record::brep::Brep as Record;
 
+use solidcore_ops::sweep::{extrude, Curve, DraftCorner};
 use solidcore_ops::{
     blend, blend_ordered, chamfer_sides, edge_faces_along, fillet_variable, make_box, make_cone,
-    make_cylinder, tangent_chain, Blend, Body, ChamferSecond, CheckLevel, Corners, Error, FitKind,
-    Order, SetBack, Turn, Unblendable,
+    make_cylinder, tangent_chain, Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners,
+    Error, FitKind, Order, SetBack, Turn, Unblendable,
 };
 
 /// The block's top front edge, 30 long, between the top (z = 10) and the front (y = 0).
@@ -156,6 +157,326 @@ fn loop_edges(b: &Body, corners: [[f64; 2]; 4], z: f64) -> (Order, Vec<usize>) {
     (order, edges)
 }
 
+/// The plate of [`blends_turn_round_a_shallow_sharp_corner`]: 2 thick, its top outline 50
+/// along x and then 40 turning `kink` degrees (towards the plate for `convex`, away from it
+/// else), with the record indices of those two top edges.
+fn shallow_corner_plate(kink: f64, convex: bool) -> (Body, [usize; 2]) {
+    let t = if convex { -kink } else { kink }.to_radians();
+    let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+    let p = [
+        [0.0, 0.0],
+        [50.0, 0.0],
+        [50.0 + 40.0 * u[0], 40.0 * u[1]],
+        [50.0 + 40.0 * u[0] + 30.0 * n[0], 40.0 * u[1] + 30.0 * n[1]],
+        [0.0, -30.0],
+    ];
+    let profile: Vec<Curve> = (0..p.len())
+        .map(|i| {
+            let (a, b) = (p[i], p[(i + 1) % p.len()]);
+            Curve::Line {
+                start: [a[0], a[1], 0.0],
+                end: [b[0], b[1], 0.0],
+            }
+        })
+        .collect();
+    let b = extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        2.0,
+        0.0,
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap();
+    let edges = [
+        edge_at(&b, [25.0, 0.0, 2.0]),
+        edge_at(&b, [50.0 + 20.0 * u[0], 20.0 * u[1], 2.0]),
+    ];
+    (b, edges)
+}
+
+/// A plate 2 thick whose top outline runs 50 along x and then 40 at a shallow angle off it,
+/// turning `kink` degrees (towards the plate for `convex`, away from it else), its other sides
+/// square to those two: the two top edges rounded r 1 or chamfered 1 turn round the sharp
+/// upright edge between them, mitred. Each edge loses its section's area A along its length
+/// (90 in all), and the mitre on the bisector takes the corner's part off one side and adds it
+/// on the other: the section's first moment M about the upright edge times tan(kink / 2), twice,
+/// off at the convex corner and on at the concave one. A round's A = (1 - pi/4) r^2 and
+/// M = (5/6 - pi/4) r^3; a chamfer's A = d^2 / 2 and M = d^3 / 6. Edges a few degrees off
+/// tangent used to be read as continuing each other (within the solvers' 10 degree tangency
+/// tolerance) and given one shared section: the two balls stand the radius times the angle
+/// apart there, the trim leaked and the blend failed with status 1001.
+#[test]
+fn blends_turn_round_a_shallow_sharp_corner() {
+    all_fixes();
+    let round = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
+    let chamfer = (0.5, 1.0 / 6.0);
+    for kink in [0.5, 1.5, 3.0, 6.0] {
+        for convex in [true, false] {
+            for (kind, (a, m)) in [(Blend::Round, round), (Blend::Chamfer, chamfer)] {
+                let (b, edges) = shallow_corner_plate(kink, convex);
+                let before = volume(&b);
+                blend(&b, kind, &edges, &[1.0], &[], Corners::Filled).unwrap_or_else(|e| {
+                    panic!("{kind:?} at a {kink} degree corner (convex {convex}): {e:?}")
+                });
+                let corner = 2.0 * m * (kink.to_radians() / 2.0).tan();
+                let want = 90.0 * a + if convex { -corner } else { corner };
+                let off = before - volume(&b);
+                assert!(
+                    rel(off, want) < 1e-6,
+                    "{kind:?} at a {kink} degree corner (convex {convex}): {off} off, want {want}"
+                );
+            }
+        }
+    }
+}
+
+/// Asserts that the faces of [`shallow_corner_plate`]`(kink, convex)` rounded r 1 that are not
+/// planes are two cylinders, one per round, read from their definitions: radius 1, semi-angle
+/// 0, the axis parallel to the round's edge and its origin on the line through the points 1 in
+/// from both of the edge's faces (the edge moved 1 into the plate and 1 down), each within
+/// 1e-12 (rounding of coordinates up to 90 and unit vectors). One round's surface extended over
+/// both, as the cleanup used to make it, stands 1.7e-7 rad off the other axis at 1e-5 degrees.
+fn rounds_on_their_cylinders(b: &Body, kink: f64, convex: bool) {
+    use solidcore::topology::face::p2 as face;
+    let t = if convex { -kink } else { kink }.to_radians();
+    let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+    // (a point, the direction) of each round's axis
+    let axes = [
+        (Vec3::new(0.0, -1.0, 1.0), Vec3::new(1.0, 0.0, 0.0)),
+        (
+            Vec3::new(50.0 + n[0], n[1], 1.0),
+            Vec3::new(u[0], u[1], 0.0),
+        ),
+    ];
+    let (_k, brep) = kernel_copy(b);
+    let mut on = Vec::new();
+    for &f in brep.face_list() {
+        let s = face::surface(&brep, f).unwrap().unwrap();
+        let cone = match s.kind() {
+            SurfaceKind::Plane(_) => continue,
+            SurfaceKind::Cone(c) => c.canonical(),
+            other => panic!("kink {kink} (convex {convex}): a round on {other:?}"),
+        };
+        assert!(
+            (cone.radius - 1.0).abs() <= 1e-12 && cone.semi_angle_deg == 0.0,
+            "kink {kink} (convex {convex}): radius {} semi-angle {}",
+            cone.radius,
+            cone.semi_angle_deg
+        );
+        let (origin, axis) = (cone.origin.origin(), cone.origin.z_axis());
+        let off: Vec<(f64, f64)> = axes
+            .iter()
+            .map(|(a, d)| (axis.cross(*d).length(), (origin - *a).cross(*d).length()))
+            .collect();
+        let which = (0..2)
+            .find(|&i| off[i].0 <= 1e-12 && off[i].1 <= 1e-12)
+            .unwrap_or_else(|| {
+                panic!("kink {kink} (convex {convex}): a round {off:?} off both axes")
+            });
+        on.push(which);
+    }
+    on.sort_unstable();
+    assert_eq!(
+        on,
+        [0, 1],
+        "kink {kink} (convex {convex}): rounds on cylinders {on:?}"
+    );
+}
+
+/// #15418: the plate of [`blends_turn_round_a_shallow_sharp_corner`] with corners a hundred
+/// thousandth to a few ten thousandths of a degree off straight. The two top edges rounded r 1
+/// or chamfered 1 build and pass every check. Each round stays its own face on its own
+/// closed-form cylinder: radius 1 about the line 1 in from the edge's two faces. The volume
+/// taken off is the mitred corner's closed form (the section's area A along the 90 of edge,
+/// the corner's first moment M times tan(kink / 2) twice, off at the convex corner and on at
+/// the concave one) within the 1e-6 of the sibling test: these corners join on one section,
+/// whose volume differs from the mitre's by a multiple of the kink. Rounds at a concave corner
+/// 3e-5 to 2e-4 degrees off straight used to come out as one cylinder face, the boolean's
+/// cleanup merging the second round into the first's extended surface: its far end stood the
+/// first edge's length times the kink off it and failed the check (`SmVertex`'s gap test).
+#[test]
+fn blends_turn_round_a_corner_a_ten_thousandth_of_a_degree_off_straight() {
+    all_fixes();
+    let round = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
+    let chamfer = (0.5, 1.0 / 6.0);
+    for kink in [1e-5, 5e-5, 1e-4, 2e-4, 3e-4] {
+        for convex in [false, true] {
+            for (kind, (a, m)) in [(Blend::Round, round), (Blend::Chamfer, chamfer)] {
+                let (b, edges) = shallow_corner_plate(kink, convex);
+                let before = volume(&b);
+                blend(&b, kind, &edges, &[1.0], &[], Corners::Filled).unwrap_or_else(|e| {
+                    panic!("{kind:?} at a {kink} degree corner (convex {convex}): {e:?}")
+                });
+                assert!(
+                    b.check(CheckLevel::All).unwrap().is_valid(),
+                    "{kind:?} at a {kink} degree corner (convex {convex})"
+                );
+                if kind == Blend::Round {
+                    rounds_on_their_cylinders(&b, kink, convex);
+                }
+                let corner = 2.0 * m * (kink.to_radians() / 2.0).tan();
+                let want = 90.0 * a + if convex { -corner } else { corner };
+                let off = before - volume(&b);
+                assert!(
+                    rel(off, want) < 1e-6,
+                    "{kind:?} at a {kink} degree corner (convex {convex}): {off} off, want {want}"
+                );
+            }
+        }
+    }
+}
+
+/// #16627: the plate of [`blends_turn_round_a_shallow_sharp_corner`] with corners a thousandth
+/// to a hundredth of a degree off straight, both top edges rounded r 1 or chamfered 1. Each
+/// result passes every check, each round lies on its own closed-form cylinder, and the volume
+/// taken off is the mitred corner's closed form within the sibling tests' 1e-6. Where the two
+/// blends' sections at the corner stand 1 x kink apart, a Join puts one vertex there for both,
+/// which the check holds within the B-rep's intersection tolerance (2e-5): concave corners
+/// 1.5e-3 and 2e-3 degrees off straight (2.6e-5 and 3.5e-5 apart) used to be joined and failed
+/// `SmVertex`'s gap test; now they are mitred. The bound is 2e-5 rad, 1.146e-3 degrees:
+/// 1.14e-3 still joins, 1.15e-3 is mitred (`wr697_end_and_join.rs` asserts which). Asymmetric
+/// chamfers (setbacks 1 and 0.5 either way round) stand at most their larger setback times the
+/// kink apart and pass the check on both sides of the bound too.
+#[test]
+fn blends_join_at_a_near_straight_corner_only_within_the_vertex_check() {
+    all_fixes();
+    let round = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
+    let chamfer = (0.5, 1.0 / 6.0);
+    for kink in [1e-3, 1.14e-3, 1.15e-3, 1.5e-3, 2e-3] {
+        for convex in [false, true] {
+            for (top, side) in [(1.0, 0.5), (0.5, 1.0)] {
+                let (b, edges) = shallow_corner_plate(kink, convex);
+                let along: Vec<usize> = edges
+                    .iter()
+                    .map(|&e| {
+                        let faces = edge_faces_along(&b, e, [0.0, 0.0, 1.0]).unwrap();
+                        if faces[0].1 > faces[1].1 {
+                            faces[0].0
+                        } else {
+                            faces[1].0
+                        }
+                    })
+                    .collect();
+                chamfer_sides(&b, &edges, &along, top, ChamferSecond::Distance(side))
+                    .unwrap_or_else(|e| {
+                        panic!("chamfer {top} x {side} at {kink} degrees (convex {convex}): {e:?}")
+                    });
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(
+                    report.is_valid(),
+                    "chamfer {top} x {side} at {kink} degrees (convex {convex}): {report}"
+                );
+            }
+        }
+    }
+    for kink in [1e-3, 1.14e-3, 1.15e-3, 1.5e-3, 2e-3, 3e-3, 5e-3, 1e-2] {
+        for convex in [false, true] {
+            for (kind, (a, m)) in [(Blend::Round, round), (Blend::Chamfer, chamfer)] {
+                let (b, edges) = shallow_corner_plate(kink, convex);
+                let before = volume(&b);
+                blend(&b, kind, &edges, &[1.0], &[], Corners::Filled).unwrap_or_else(|e| {
+                    panic!("{kind:?} at a {kink} degree corner (convex {convex}): {e:?}")
+                });
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(
+                    report.is_valid(),
+                    "{kind:?} at a {kink} degree corner (convex {convex}): {report}"
+                );
+                if kind == Blend::Round {
+                    rounds_on_their_cylinders(&b, kink, convex);
+                }
+                let corner = 2.0 * m * (kink.to_radians() / 2.0).tan();
+                let want = 90.0 * a + if convex { -corner } else { corner };
+                let off = before - volume(&b);
+                assert!(
+                    rel(off, want) < 1e-6,
+                    "{kind:?} at a {kink} degree corner (convex {convex}): {off} off, want {want}"
+                );
+            }
+        }
+    }
+}
+
+/// A sketch outline with a near-tangent corner, the whole top rim rounded: a four-sided plate 5
+/// thick, its top outline 40 along x, then 40 on at 3.8 degrees off it (two lines meeting at
+/// 176.2 degrees), then back to (0, -30) and up to the start. All four top edges rounded r 1.5
+/// and r 3, one closed chain through the 3.8 degree corner and the three sharp ones. Every corner
+/// is convex and mitred: as in [`blends_turn_round_a_shallow_sharp_corner`], the rim loses
+/// A = (1 - pi/4) r^2 along its perimeter P, less 2 M tan(theta / 2) at each corner turning
+/// theta, M = (5/6 - pi/4) r^3. The rounds become 4 faces on the plate's 6. Before the shallow
+/// corner was mitred, the two rounds meeting at it were given one shared section and the blend
+/// failed with status 1001.
+#[test]
+fn a_rim_round_runs_through_a_near_tangent_corner() {
+    all_fixes();
+    let t = (-3.8_f64).to_radians();
+    let p = [
+        [0.0, 0.0],
+        [40.0, 0.0],
+        [40.0 + 40.0 * t.cos(), 40.0 * t.sin()],
+        [0.0, -30.0],
+    ];
+    let side = |i: usize| {
+        let (a, b) = (p[i], p[(i + 1) % 4]);
+        [b[0] - a[0], b[1] - a[1]]
+    };
+    let len = |v: [f64; 2]| (v[0] * v[0] + v[1] * v[1]).sqrt();
+    let perimeter: f64 = (0..4).map(|i| len(side(i))).sum();
+    // tan of half the turn at each corner, from the sides into and out of it
+    let half_turns: f64 = (0..4)
+        .map(|i| {
+            let (a, b) = (side((i + 3) % 4), side(i));
+            let cos = (a[0] * b[0] + a[1] * b[1]) / (len(a) * len(b));
+            (cos.acos() / 2.0).tan()
+        })
+        .sum();
+    let area = 0.5
+        * (0..4)
+            .map(|i| {
+                let (a, b) = (p[i], p[(i + 1) % 4]);
+                a[0] * b[1] - b[0] * a[1]
+            })
+            .sum::<f64>()
+            .abs();
+    for r in [1.5, 3.0] {
+        let profile: Vec<Curve> = (0..4)
+            .map(|i| {
+                let (a, b) = (p[i], p[(i + 1) % 4]);
+                Curve::Line {
+                    start: [a[0], a[1], 0.0],
+                    end: [b[0], b[1], 0.0],
+                }
+            })
+            .collect();
+        let b = extrude(
+            &profile,
+            [0.0, 0.0, 1.0],
+            5.0,
+            0.0,
+            DraftCorner::default(),
+            true,
+        )
+        .unwrap();
+        let before = b.volume(1e-10).unwrap();
+        assert!(rel(before, 5.0 * area) < 1e-12, "r {r}: plate {before}");
+        let edges: Vec<usize> = (0..4)
+            .map(|i| {
+                let (a, c) = (p[i], p[(i + 1) % 4]);
+                edge_at(&b, [(a[0] + c[0]) / 2.0, (a[1] + c[1]) / 2.0, 5.0])
+            })
+            .collect();
+        blend(&b, Blend::Round, &edges, &[r], &[], Corners::Filled)
+            .unwrap_or_else(|e| panic!("r {r}: {e:?}"));
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
+        assert_eq!(b.counts().unwrap()[0], 10, "r {r}");
+        let want = (1.0 - PI / 4.0) * r * r * perimeter
+            - 2.0 * (5.0 / 6.0 - PI / 4.0) * r.powi(3) * half_turns;
+        let off = before - b.volume(1e-10).unwrap();
+        assert!(rel(off, want) < 1e-9, "r {r}: {off} off, want {want}");
+    }
+}
+
 /// A 40 x 30 x 10 plate with a 10 x 10 x 5 boss on it (x 15..25, y 10..20), the boss's four
 /// base edges rounded r 1: at each upright boss edge two concave rounds turn round the sharp
 /// convex edge. Each base edge gains the spandrel A = (1 - pi/4) r^2 along its 10, and each
@@ -199,7 +520,10 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
             &[1.0],
             &[],
             Corners::Filled,
-            turn,
+            BlendOptions {
+                turn,
+                ..BlendOptions::default()
+            },
         )
         .unwrap();
         assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{turn:?}");
@@ -233,7 +557,10 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
             sizes,
             &[],
             Corners::Filled,
-            Turn::Swept,
+            BlendOptions {
+                turn: Turn::Swept,
+                ..BlendOptions::default()
+            },
         )
         .err()
     };
@@ -258,11 +585,55 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
         &[1.0],
         &[],
         Corners::Filled,
-        Turn::Mitre,
+        BlendOptions {
+            turn: Turn::Mitre,
+            ..BlendOptions::default()
+        },
     )
     .unwrap();
     let v = p.volume(1e-10).unwrap();
     assert!(rel(v, 11000.0 + 60.0 * a - 8.0 * m) < 1e-9, "{v}");
+}
+
+/// tangency-labs/solidcraft#16897: an 80 x 60 x 10.5 plate with a 30 x 3 x 65 tab on it
+/// (x -15..15, y -1.5..1.5), the tab's four base edges rounded. Past r 1.5 the rounds of the
+/// tab's 3 long ends run on past their end face's own extent to meet the long sides' rounds in
+/// their mitres (0.41 built them only up to r 1.5).
+///
+/// The closed form: the plate and tab hold 80 * 60 * 10.5 + 30 * 3 * 65 = 56250. Each base
+/// edge gains the spandrel A = (1 - pi/4) r^2 (the square of side r less its quarter disc)
+/// along its length, 2 * 30 + 2 * 3 = 66 in all. At each of the four upright tab edges the two
+/// mitred rounds add their parts past both walls, 2 M with M = (5/6 - pi/4) r^3, as in
+/// [`rounds_turn_round_a_boss_edge_mitred_or_swept`]. The corners at either end of a 3 long
+/// edge lie on opposite sides of it (y > 1.5 and y < -1.5), so they never overlap however
+/// large r is: V = 56250 + 66 A + 8 M.
+#[test]
+fn rounds_turn_round_a_thin_tab_wider_than_its_end() {
+    all_fixes();
+    let base = [[-15.0, -1.5], [15.0, -1.5], [15.0, 1.5], [-15.0, 1.5]];
+    for r in [1.5, 2.0, 3.0] {
+        let b = built(|k| {
+            let plate = create_box(k, Vec3::new(-40.0, -30.0, 0.0), 80.0, 60.0, 10.5)?;
+            let tab = create_box(k, Vec3::new(-15.0, -1.5, 10.5), 30.0, 3.0, 65.0)?;
+            boolean_union(k, plate, tab)
+        });
+        let (order, edges) = loop_edges(&b, base, 10.5);
+        blend_ordered(
+            &b,
+            &order,
+            Blend::Round,
+            &edges,
+            &[r],
+            &[],
+            Corners::Filled,
+            BlendOptions::default(),
+        )
+        .unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
+        let (a, m) = ((1.0 - PI / 4.0) * r * r, (5.0 / 6.0 - PI / 4.0) * r * r * r);
+        let v = b.volume(1e-10).unwrap();
+        assert!(rel(v, 56250.0 + 66.0 * a + 8.0 * m) < 1e-9, "r {r}: {v}");
+    }
 }
 
 #[test]
@@ -1018,11 +1389,13 @@ fn slot() -> Body {
 /// The slot's top outline is one tangent chain: from its front straight, all four top edges;
 /// a box edge runs on into nothing. Indices are checked before the kernel.
 #[test]
-fn the_tangent_chain_is_the_kernels() {
+fn the_tangent_chain_runs_round_the_slot() {
     all_fixes();
     let b = slot();
     let front = edge_at(&b, [5.0, 0.0, 2.0]);
-    let chain = tangent_chain(&b, &[front], HALF_DEGREE).unwrap();
+    let chain = tangent_chain(&b, None, &[front], &[], HALF_DEGREE).unwrap();
+    assert!(chain.undecided.is_empty(), "{chain:?}");
+    let chain = chain.members;
     assert_eq!(chain.len(), 4, "{chain:?}");
     assert_eq!(chain[0], front);
     for p in [[5.0, 4.0, 2.0], [12.0, 2.0, 2.0], [-2.0, 2.0, 2.0]] {
@@ -1030,10 +1403,11 @@ fn the_tangent_chain_is_the_kernels() {
     }
     let bx = block();
     let e = top_front(&bx);
-    assert_eq!(tangent_chain(&bx, &[e], HALF_DEGREE).unwrap(), vec![e]);
-    assert_eq!(tangent_chain(&bx, &[99], 0.01), Err(Error::Argument));
-    assert_eq!(tangent_chain(&bx, &[e], 0.0), Err(Error::Argument));
-    assert_eq!(tangent_chain(&bx, &[], 0.01), Err(Error::Argument));
+    let chain = |edges: &[usize], angle: f64| tangent_chain(&bx, None, edges, &[], angle);
+    assert_eq!(chain(&[e], HALF_DEGREE).unwrap().members, vec![e]);
+    assert_eq!(chain(&[99], 0.01), Err(Error::Argument));
+    assert_eq!(chain(&[e], 0.0), Err(Error::Argument));
+    assert_eq!(chain(&[], 0.01), Err(Error::Argument));
 }
 
 /// The slot's seam, where its straight side runs into its round end, has no blend: its faces
@@ -1226,15 +1600,19 @@ fn a_setback_too_long_at_a_corner_is_refused_by_the_kernel() {
 }
 
 /// Cancel stops a long fillet promptly (solidcore#3247): a 2 mm round along one helical edge of
-/// a 20-turn square coil, with its tangent chain (the whole edge), runs for minutes. Cancelled
-/// from another thread a second in, the call returns `Cancelled` within 500 ms (about 5 ms
-/// measured on a desktop; the bound leaves room for shared CI runners). nextest runs each test
-/// in a process of its own, so no other test's call holds the session's kernel meanwhile.
+/// a 20-turn square coil, with its tangent chain (the whole edge), runs for minutes. Measured in
+/// the token's polls, not in time: a token cancelled from its `m`-th poll
+/// (`CancelToken::after_polls`) stops the fillet there. It returns `Cancelled`, which also shows
+/// the fillet was still running at poll `m`, and the token is polled exactly once after the poll
+/// that cancelled it: by the session as the call returns, asking whether it was cancelled
+/// (`session::run_with`, or `with_body` deciding whether to keep its edit). Any further poll
+/// would be work done after the cancel. `m` is a quarter of the 15,473 polls the fillet made in
+/// its first second, measured on SolidCraft 9a342278 (cancel-timing round 1). Should the fillet
+/// get fast enough to finish before `m`, this fails with `Ok`: then pick a longer case.
 #[test]
 fn a_cancelled_long_fillet_stops_promptly() {
     use solidcore_ops::cancel::{within, CancelToken};
     use solidcore_ops::sweep::{screw_sweep, Curve};
-    use std::time::{Duration, Instant};
     all_fixes();
     let corners = [
         [19.0, 0.0, 0.0],
@@ -1272,24 +1650,650 @@ fn a_cancelled_long_fillet_stops_promptly() {
             d(a).total_cmp(&d(b))
         })
         .unwrap();
-    let chain = tangent_chain(&coil, &[edge], 0.1).unwrap();
-    let token = CancelToken::new();
-    let watched = token.clone();
-    let worker = std::thread::spawn(move || {
-        let r = within(&watched, || {
-            blend(&coil, Blend::Round, &chain, &[2.0], &[], Corners::Filled)
-        });
-        (r.map(|_| ()), Instant::now())
+    let chain = tangent_chain(&coil, None, &[edge], &[], 0.1)
+        .unwrap()
+        .members;
+    let m: u64 = 15_473 / 4;
+    let token = CancelToken::after_polls(m);
+    let r = within(&token, || {
+        blend(&coil, Blend::Round, &chain, &[2.0], &[], Corners::Filled)
     });
-    std::thread::sleep(Duration::from_secs(1));
-    let cancelled = Instant::now();
-    token.cancel();
-    let (r, returned) = worker.join().unwrap();
-    let took = returned.saturating_duration_since(cancelled);
-    eprintln!("the fillet returned {took:?} after Cancel");
-    assert_eq!(r, Err(Error::Cancelled));
-    assert!(
-        took < Duration::from_millis(500),
-        "returned {took:?} after Cancel"
+    eprintln!("the fillet cancelled at {m}, polled {:?}", token.polls());
+    assert_eq!(r.map(|_| ()), Err(Error::Cancelled));
+    assert_eq!(token.polls(), Some(m + 1));
+}
+
+/// A failure the kernel types as not supported, after the session noted no room with a fit
+/// (or an unsupported vertex), is its own cause: [`solidcore_ops::blend::session_refusal`]
+/// gives it back rather than sizing it from the earlier note (SolidCraft's own mapping made it
+/// `TooLarge` before it took ops'). The note is real: a 20 cube's three corner edges rounded
+/// 20, refused naming 19.99 (the case of SolidCraft's `a_cliff_overflow_the_fork_refuses_has_no_room`).
+#[test]
+fn a_kernel_unsupported_after_a_no_room_note_is_its_own_cause() {
+    use solidcore::blend::fillet_executive::session::FilletSession;
+    use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+    use solidcore::kernel::UpstreamFixes;
+    use solidcore::SolidError;
+    use solidcore_ops::blend::{session_refusal, Refusal, SessionCall};
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let mut b = create_box(&mut k, Vec3::ZERO, 20.0, 20.0, 20.0).unwrap();
+    let at = [
+        Vec3::new(10.0, 0.0, 0.0),
+        Vec3::new(0.0, 10.0, 0.0),
+        Vec3::new(0.0, 0.0, 10.0),
+    ];
+    let edges: Vec<EdgeId> = at
+        .iter()
+        .map(|&q| {
+            b.edges()
+                .ids()
+                .min_by(|&x, &y| {
+                    let d = |e| edge_closest_point(&k, &b, e, q).unwrap().closest.distance;
+                    d(x).total_cmp(&d(y))
+                })
+                .unwrap()
+        })
+        .collect();
+    let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+    let circular = [FilletSurfaceGeneratorType::Circular];
+    s.prepare_per_edge_constant_radius(&mut k, &edges, &[20.0; 3], &circular, 1, 1.0)
+        .unwrap();
+    s.create_corners(&k, None).unwrap();
+    let refused = s.do_filleting(&mut k, None).unwrap_err();
+    // the note: no room, with the fit
+    let sized = session_refusal(&s, refused, SessionCall::default()).unwrap();
+    let Refusal::TooLarge { size, .. } = sized.on(&k, s.target()).unwrap() else {
+        panic!("not sized")
+    };
+    assert!((size - 19.99).abs() < 1e-9, "{size}");
+    let unsupported = SolidError::Unsupported {
+        operation: "test",
+        reason: "a construction the kernel does not build",
+    };
+    for corner in [false, true] {
+        let call = SessionCall {
+            corner,
+            ..SessionCall::default()
+        };
+        assert_eq!(
+            session_refusal(&s, unsupported.clone(), call).map(|_| ()),
+            Err(unsupported.clone()),
+            "corner {corner}"
+        );
+    }
+}
+
+/// An L of legs 40 and width 20, 10 high: its inner upright edge at (20, 20) is concave between
+/// two flat faces and ends on the flat top and bottom, so a round can be carried on past
+/// either face: each is named by its index, with the slab's frame at the edge's start, the
+/// edge's 10 along it, and `along` × `across` the face's outward normal (+x or +y). A convex
+/// edge has none; an index past the edges and a radius that is not positive are refused before
+/// the kernel.
+#[test]
+fn the_faces_a_round_is_carried_on_past_are_the_kernels() {
+    all_fixes();
+    let l = [
+        (0.0, 0.0),
+        (40.0, 0.0),
+        (40.0, 20.0),
+        (20.0, 20.0),
+        (20.0, 40.0),
+        (0.0, 40.0),
+    ];
+    let profile: Vec<_> = (0..l.len())
+        .map(|i| segment(l[i], l[(i + 1) % l.len()]))
+        .collect();
+    let b = swept(&profile, 10.0);
+    let inner = nearest_edge(&b, [20.0, 20.0, 5.0]);
+    let found = solidcore_ops::carried_faces(&b, inner, 6.0).unwrap();
+    assert_eq!(found.len(), 2);
+    assert_ne!(found[0].face, found[1].face);
+    let mut normals = Vec::new();
+    for c in &found {
+        assert!(c.face < b.to_record().unwrap().0.faces.len());
+        assert!((c.origin[0] - 20.0).abs() < 1e-9 && (c.origin[1] - 20.0).abs() < 1e-9);
+        assert_eq!(
+            c.outline,
+            [
+                [0.0, -c.reach],
+                [10.0, -c.reach],
+                [10.0, c.reach],
+                [0.0, c.reach]
+            ]
+        );
+        assert_eq!(c.depth, [-c.reach, 0.0]);
+        let (a, x) = (
+            Vec3::new(c.along[0], c.along[1], c.along[2]),
+            Vec3::new(c.across[0], c.across[1], c.across[2]),
+        );
+        normals.push(a.cross(x));
+    }
+    let is = |n: Vec3, x: f64, y: f64| (n - Vec3::new(x, y, 0.0)).length() < 1e-9;
+    assert!(normals.iter().any(|&n| is(n, 1.0, 0.0)) && normals.iter().any(|&n| is(n, 0.0, 1.0)));
+    let convex = nearest_edge(&b, [40.0, 0.0, 5.0]);
+    assert!(solidcore_ops::carried_faces(&b, convex, 6.0)
+        .unwrap()
+        .is_empty());
+    assert!(matches!(
+        solidcore_ops::carried_faces(&b, 999, 6.0),
+        Err(Error::Argument)
+    ));
+    assert!(matches!(
+        solidcore_ops::carried_faces(&b, inner, 0.0),
+        Err(Error::Argument)
+    ));
+}
+
+/// A session's failure says what the session noted of the step that failed
+/// ([`solidcore_ops::blend::session_failure`]). The session here is asked to fillet with no
+/// edge set up: it makes no fillet face, and what it noted says so after the kernel's statement.
+#[test]
+fn a_session_failure_says_what_its_session_noted() {
+    use solidcore::blend::fillet_executive::session::FilletSession;
+    let (mut k, mut brep) = kernel_copy(&block());
+    let mut s = FilletSession::new(&mut k, &mut brep).unwrap();
+    let e = s.do_filleting(&mut k, None).unwrap_err();
+    assert_eq!(
+        blend::failure(&e).unwrap().to_string(),
+        "the blend failed (status 1001): the fillet body has no faces"
     );
+    assert_eq!(
+        blend::session_failure(&s, &e).unwrap().to_string(),
+        "the blend failed (status 1001): the fillet body has no faces: Fillet Surface \
+         Computation Failure: no fillet faces were made"
+    );
+}
+
+/// A revolved r8 corner, clipped on x = +/-10. Its torus support must survive the
+/// round's definition record and reload, including the partial generator's parameters.
+#[test]
+fn a_round_on_a_revolved_torus_end_edge_survives_reload() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::revolve;
+    use solidcore_ops::BooleanOp;
+
+    all_fixes();
+    let radial = [-3.0_f64.sqrt() / 2.0, 0.5, 0.0];
+    let at = |rho: f64, z: f64| [radial[0] * rho, radial[1] * rho, z];
+    let profile = [
+        Curve::Line {
+            start: at(39.4, 8.8),
+            end: at(20.0, 8.8),
+        },
+        Curve::Line {
+            start: at(20.0, 8.8),
+            end: at(20.0, 4.0),
+        },
+        Curve::Line {
+            start: at(20.0, 4.0),
+            end: at(41.0, 4.0),
+        },
+        Curve::Arc {
+            center: at(33.0, 4.0),
+            axis: [radial[1], -radial[0], 0.0],
+            reference: radial,
+            radius: 8.0,
+            start: 0.0,
+            end: 0.6_f64.asin(),
+        },
+    ];
+    // Independent torus/plane/canal flux integration with div(x+10,0,0)=1.
+    // The ball centres are (-10+r, sqrt((33+(8-r)cos(t))^2-(-10+r)^2),
+    // 4+(8-r)sin(t)); the canal is trimmed on z=4 and z=8.8. Integrating
+    // its circular sections analytically and the remaining t integral numerically
+    // gives these values, stable to 1e-10 mm^3 from 8192 to 32768 panels.
+    for (radius, expected) in [(1.0, 2009.800477555554), (0.5, 2010.294917895084)] {
+        let ring = revolve(&profile, [0.0; 3], [0.0, 0.0, -1.0], 2.0 * PI / 3.0, true).unwrap();
+        let clip = make_box([-10.0, 0.0, -10.0], [20.0, 50.0, 30.0]).unwrap();
+        let body = boolean(ring, clip, BooleanOp::Intersect).unwrap().unwrap();
+        let rho = 33.0 + (64.0_f64 - 2.5 * 2.5).sqrt();
+        // This point is on the exact torus/plane intersection. The boolean's edge
+        // is its fitted intersection curve, so select it by distance rather than
+        // requiring the point to lie on that approximation to 1e-9 mm.
+        let point = [-10.0, (rho * rho - 100.0).sqrt(), 6.5];
+        let selected = nearest_edge(&body, point);
+        blend(
+            &body,
+            Blend::Round,
+            &[selected],
+            &[radius],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap();
+        // Reopen the saved definition, rather than measuring only the live result.
+        let (record, _) = body.to_record().unwrap();
+        let (reopened, _) = Body::from_record(&record, true).unwrap();
+        assert!(reopened.is_manifold_solid().unwrap());
+        let report = reopened.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "r{radius}: {}", report.text);
+        let actual = volume(&reopened);
+        assert!(
+            (actual - expected).abs() < 1e-4,
+            "r{radius}: {actual} vs {expected}"
+        );
+    }
+}
+
+/// The plate of [`shallow_corner_plate`] drafted `draft` degrees in (its walls meet the cap at
+/// z = 0, its outline, at 90 - `draft` degrees), with the record indices of the two edges of
+/// that cap at the kink.
+fn drafted_corner_plate(kink: f64, draft: f64) -> (Body, [usize; 2]) {
+    let t = kink.to_radians();
+    let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+    let p = [
+        [0.0, 0.0],
+        [50.0, 0.0],
+        [50.0 + 40.0 * u[0], 40.0 * u[1]],
+        [50.0 + 40.0 * u[0] + 30.0 * n[0], 40.0 * u[1] + 30.0 * n[1]],
+        [0.0, -30.0],
+    ];
+    let profile: Vec<Curve> = (0..p.len())
+        .map(|i| {
+            let (a, b) = (p[i], p[(i + 1) % p.len()]);
+            Curve::Line {
+                start: [a[0], a[1], 0.0],
+                end: [b[0], b[1], 0.0],
+            }
+        })
+        .collect();
+    let b = extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        2.0,
+        draft.to_radians(),
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap();
+    let edges = [
+        edge_at(&b, [25.0, 0.0, 0.0]),
+        edge_at(&b, [50.0 + 20.0 * u[0], 20.0 * u[1], 0.0]),
+    ];
+    (b, edges)
+}
+
+/// #16627: chamfers joined at a near-straight corner leave the shared section `2 o tan(a / 2)`
+/// off, `o` their offset from the side faces and `a` the angle between those faces (the corner
+/// of each chamfer's offset planes lies on its side face's offset at `o`; the shared one where
+/// the two offsets cross), not their setbacks. A chamfer of setbacks `d` on one face and `d'`
+/// on the other of a wedge of angle `w` stands `(d' - d cos w) / sin w` off the first: on a 120
+/// degree wedge setbacks 1 stand sqrt 3 off. The Join is bounded by the largest offset, so
+/// chamfers of setbacks 1, 1 x 0.5 and 0.5 x 1 on wedges of 60 and 120 degrees (walls drafted
+/// 30 degrees either way) pass the check at 0.97, 1.03 and 1.5 of the kink where that offset
+/// reaches the intersection tolerance 2e-5. Bounded by the setbacks, the setbacks 1 on the 120
+/// degree wedge would be joined at 1.5 (`a` 1.73e-5 rad), leaving the vertex sqrt 3 * a =
+/// 3.0e-5 off: forced to the Join at 2e-3 degrees, the check finds it 5.2359878e-5 off,
+/// sqrt 3 * a to eight digits.
+#[test]
+fn chamfers_join_at_a_near_straight_corner_within_their_offsets() {
+    all_fixes();
+    for draft in [30.0_f64, -30.0] {
+        // the walls meet the cap at w: cos w = -n_cap . n_wall
+        let w = (90.0 - draft).to_radians();
+        let (cw, sw) = (w.cos(), w.sin());
+        let d = draft.to_radians();
+        for (top, side) in [(1.0, 1.0), (1.0, 0.5), (0.5, 1.0)] {
+            let offsets = [(side - cw * top) / sw, (top - cw * side) / sw];
+            let size = offsets[0].max(offsets[1]);
+            let a_max = 2.0 * (2e-5 / (2.0 * size)).atan();
+            let k_max = ((a_max.cos() - d.sin().powi(2)) / d.cos().powi(2))
+                .acos()
+                .to_degrees();
+            for f in [0.97, 1.03, 1.5] {
+                let kink = f * k_max;
+                let (b, edges) = drafted_corner_plate(kink, draft);
+                let what = format!("chamfer {top} x {side}, draft {draft}, {kink} degrees");
+                if top == side {
+                    blend(&b, Blend::Chamfer, &edges, &[top], &[], Corners::Filled)
+                        .unwrap_or_else(|e| panic!("{what}: {e:?}"));
+                } else {
+                    let along: Vec<usize> = edges
+                        .iter()
+                        .map(|&e| {
+                            let faces = edge_faces_along(&b, e, [0.0, 0.0, -1.0]).unwrap();
+                            if faces[0].1 > faces[1].1 {
+                                faces[0].0
+                            } else {
+                                faces[1].0
+                            }
+                        })
+                        .collect();
+                    chamfer_sides(&b, &edges, &along, top, ChamferSecond::Distance(side))
+                        .unwrap_or_else(|e| panic!("{what}: {e:?}"));
+                }
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(report.is_valid(), "{what}: {report}");
+            }
+        }
+    }
+}
+
+/// #13911: the inner top outline of the issue's phone case, as SolidCraft passes it to the
+/// chamfer: lines, splines and arcs of radius 1.6 only 0.013 long, 17 edges in one closed loop
+/// on the plane z = 9.41 between vertical walls, the case's material outside the loop. At the 8
+/// arc-to-spline vertices the walls meet 3.4e-3 degrees off straight. The record is the body
+/// SolidCraft's trace gives the blend (`tests/data/issue_13911_inner_top_outline.bodies.json.gz`), and the edges are its picks, in
+/// its order (record indices, through the record's order).
+const ISSUE_13911_EDGES: [usize; 17] = [
+    170, 169, 171, 168, 172, 167, 173, 166, 174, 165, 175, 164, 176, 163, 177, 162, 178,
+];
+
+/// The issue's body and its record order.
+fn issue_13911_body() -> (Body, Order) {
+    let case = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../solidcore/tests/data/issue_13911_inner_top_outline.bodies.json.gz"
+    );
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(case).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let record: Record = serde_json::from_value(records["b1"].clone()).unwrap();
+    Body::from_record(&record, true).unwrap()
+}
+
+/// The length of edge `e` of `brep`: `|r'|` integrated by 8-point Gauss-Legendre on 256 spans
+/// (exact to rounding for lines and arcs, and far below the tests' tolerances for the cubic
+/// splines and the rails). Kept independent of the kernel's own edge length on purpose: it
+/// is the test's oracle, a cross-check on the kernel rather than a call into it.
+fn edge_length(k: &Kernel, brep: &solidcore::Brep, e: EdgeId) -> f64 {
+    const X: [f64; 4] = [
+        0.183_434_642_495_649_8,
+        0.525_532_409_916_329,
+        0.796_666_477_413_626_7,
+        0.960_289_856_497_536_3,
+    ];
+    const W: [f64; 4] = [
+        0.362_683_783_378_362,
+        0.313_706_645_877_887_3,
+        0.222_381_034_453_374_5,
+        0.101_228_536_290_376_3,
+    ];
+    let c = edge::curve(brep, e).unwrap().unwrap().clone();
+    let ivl = edge::interval(brep, e).unwrap();
+    let (t0, t1) = (ivl.min(), ivl.max());
+    let n = 256;
+    let h = (t1 - t0) / f64::from(n);
+    let mut length = 0.0;
+    for j in 0..n {
+        let mid = t0 + (f64::from(j) + 0.5) * h;
+        for (x, w) in X.iter().zip(W) {
+            for t in [mid - x * h / 2.0, mid + x * h / 2.0] {
+                let d = c.evaluate(k, t, 1, false, true).unwrap();
+                length += w * h / 2.0 * d[1].length();
+            }
+        }
+    }
+    length
+}
+
+/// The loop's length and the angles its edges meet at in the plane (the kinks), from the
+/// input body.
+fn issue_13911_loop(b: &Body, edges: &[usize]) -> (f64, Vec<f64>) {
+    let (k, brep) = kernel_copy(b);
+    let mut length = 0.0;
+    // each end: its point and the edge's unit direction leaving it
+    let mut ends: Vec<(Vec3, Vec3)> = Vec::new();
+    for &i in edges {
+        let e = brep.edge_list()[i];
+        length += edge_length(&k, &brep, e);
+        let c = edge::curve(&brep, e).unwrap().unwrap().clone();
+        let ivl = edge::interval(&brep, e).unwrap();
+        for (t, sign, left) in [(ivl.min(), 1.0, false), (ivl.max(), -1.0, true)] {
+            let d = c.evaluate(&k, t, 1, left, true).unwrap();
+            ends.push((d[0], d[1] * (sign / d[1].length())));
+        }
+    }
+    // the kink at each vertex: pi less the angle between the two edges leaving it
+    let mut kinks = Vec::new();
+    for (i, &(p, t)) in ends.iter().enumerate() {
+        for &(q, u) in &ends[i + 1..] {
+            if p.distance(q) < 1e-4 {
+                kinks.push(t.cross(u).length().atan2(-t.dot(u)));
+            }
+        }
+    }
+    (length, kinks)
+}
+
+/// The lengths of the blend's two rails round the loop, on the top (z = 9.41) and on the walls
+/// (`depth` below it): the result's edges whose middles stand `reach` off the input's loop.
+fn issue_13911_rails(
+    input: &Body,
+    loop_edges: &[usize],
+    made: &Body,
+    reach: f64,
+    depth: f64,
+) -> [f64; 2] {
+    let (k0, b0) = kernel_copy(input);
+    let (k, b) = kernel_copy(made);
+    let mut rails = [0.0; 2];
+    for &e in b.edge_list() {
+        let c = edge::curve(&b, e).unwrap().unwrap().clone();
+        let ivl = edge::interval(&b, e).unwrap();
+        let mid = c.evaluate(&k, ivl.evaluate(0.5), 0, false, true).unwrap()[0];
+        let off = loop_edges
+            .iter()
+            .map(|&i| {
+                edge_closest_point(&k0, &b0, b0.edge_list()[i], mid)
+                    .unwrap()
+                    .closest
+                    .distance
+            })
+            .fold(f64::INFINITY, f64::min);
+        if (off - reach).abs() > 1e-4 {
+            continue;
+        }
+        if (mid.z - 9.41).abs() < 1e-7 {
+            rails[0] += edge_length(&k, &b, e);
+        } else if (mid.z - (9.41 - depth)).abs() < 1e-7 {
+            rails[1] += edge_length(&k, &b, e);
+        }
+    }
+    rails
+}
+
+/// #13911: chamfers and rounds of the inner top outline of the issue's phone case build at
+/// every size from 0.05 to 1, and each result passes `CheckLevel::All` but for the one failure
+/// the input body already has (a cylinder's generator-line scale off by 4.1e-11 against
+/// 2e-12, untouched by the blend). From 0.34 they failed with status 1001: the near-straight
+/// arc-to-spline corners were mitred (#16627's bound), and two rails crossing 3.4e-3 degrees
+/// apart do not meet. There the Join's section lies over the second blend, 1.8e-9 times the
+/// size off it (`blend_corner::join_gap`), so the corners join.
+///
+/// The rails are the loop's offsets, closed forms of a closed planar loop with the material
+/// outside it: on the plane the top rail is `L + 2 pi d` long (`L` the loop's length, `2 pi`
+/// its total turning, `d` the section's reach along the plane: a chamfer's setback, a round's
+/// radius on these upright walls), and on the walls, `d` down, the wall rail is `L` long. The
+/// kinks put the top rail off by at most `d` times their angles, and each of the 17 rail pieces
+/// may end within twice the B-rep's intersection tolerance of an exact offset's end (that
+/// slack is ARGUED, not derived; so is the rails' selection, the result's edges whose middles
+/// stand `reach` off the loop at the two heights).
+#[test]
+fn the_inner_top_outline_of_13911_chamfers_and_rounds_at_every_size() {
+    let mut fixes: Vec<String> = serde_json::from_str(include_str!(
+        "../../solidcore/tests/kernel_cases/fixes.json"
+    ))
+    .unwrap();
+    // SolidCraft's fix set when it traced the case (the corpus list lags it by these)
+    for f in [
+        "brep_ray_classifies_current_trims",
+        "closed_smooth_pole_tangent_limit",
+        "face_swap_uv_transposes_trims",
+        "fillet_chamfer_corner",
+    ] {
+        if !fixes.iter().any(|x| x == f) {
+            fixes.push(f.to_owned());
+        }
+    }
+    solidcore_ops::session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    let (input, _) = issue_13911_body();
+    let before = input.check(CheckLevel::All).unwrap();
+    let known = before.to_string();
+    assert!(
+        !before.is_valid()
+            && known.contains("SmCone::Test #5")
+            && known.contains("[owner SmCylinder]"),
+        "{known}"
+    );
+    // the loop, picked natively at the issue's points (the record's edges, independently)
+    let picks: Vec<usize> = [
+        [34.215, 7.4e-12, 9.41],
+        [34.215_026_705_948_8, 56.426_536_712_559_21, 9.41],
+        [34.215_026_706_015_58, -56.426_536_712_536_844, 9.41],
+        [31.057_880_880_291_407, 69.062_880_880_112_03, 9.41],
+        [34.218_953_400_137_07, -57.469_543_122_343_22, 9.41],
+        [18.421_536_712_748_598, 72.220_026_705_722_15, 9.41],
+        [30.278_812_353_690_66, -69.759_579_427_087_83, 9.41],
+        [9.86e-11, 72.219_999_999_896_37, 9.41],
+        [18.421_536_712_791_8, -72.220_026_705_723_14, 9.41],
+        [-18.421_536_712_551_635, 72.220_026_705_730_56, 9.41],
+        [1.41e-10, -72.219_999_999_979_59, 9.41],
+        [-31.057_880_880_071_046, 69.062_880_880_150_05, 9.41],
+        [-18.421_536_712_469_653, -72.220_026_705_895_69, 9.41],
+        [-34.215_026_705_628_176, 56.426_536_712_606_68, 9.41],
+        [-31.057_880_880_000_702, -69.062_880_880_201_66, 9.41],
+        [-34.214_999_999_792_27, -1.66e-11, 9.41],
+        [-34.215_026_705_616_495, -56.426_536_712_632_67, 9.41],
+    ]
+    .iter()
+    .map(|&p| nearest_edge(&input, p))
+    .collect();
+    let (length, kinks) = issue_13911_loop(&input, &picks);
+    assert_eq!(kinks.len(), 17, "{kinks:?}");
+    let turned: f64 = kinks.iter().map(|a| a.abs()).sum();
+    assert!(turned < 1e-3, "{kinks:?}");
+    let xsect = {
+        let (k, brep) = kernel_copy(&input);
+        solidcore::topology::vertex::corner::xsect_tol_3d_of_brep(&k, &brep)
+    };
+    assert_eq!(xsect, 2e-5);
+    for kind in [Blend::Chamfer, Blend::Round] {
+        for size in [0.05, 0.33, 0.34, 0.4, 0.6, 1.0] {
+            let what = format!("{kind:?} {size}");
+            let (b, order) = issue_13911_body();
+            blend_ordered(
+                &b,
+                &order,
+                kind,
+                &ISSUE_13911_EDGES,
+                &[size],
+                &[],
+                Corners::Filled,
+                BlendOptions::default(),
+            )
+            .unwrap_or_else(|e| panic!("{what}: {e:?}"));
+            let report = b.check(CheckLevel::All).unwrap();
+            assert_eq!(report.to_string(), known, "{what}");
+            // on the vertical walls under the plane, the section reaches `size` along each face
+            let [top, wall] = issue_13911_rails(&input, &picks, &b, size, size);
+            let slack = 2.0 * 17.0 * xsect;
+            let want_top = length + 2.0 * PI * size;
+            assert!(
+                (top - want_top).abs() <= size * turned + slack,
+                "{what}: top rail {top}, closed form {want_top}"
+            );
+            assert!(
+                (wall - length).abs() <= slack,
+                "{what}: wall rail {wall}, closed form {length}"
+            );
+        }
+    }
+}
+
+/// One closed section of [`a_rim_round_across_a_loft_s_creases_is_certified_or_refused`]: the
+/// cubic Bezier pieces through 12 points at 30 degree steps round an ellipse in the plane
+/// x = `x` (half-axes `a` along y and `b` along z, centre (x, 0, 20)), as a fit-point spline
+/// gives them, each piece on [0, 1]: the tangent at a point is the chord-length one, so two
+/// pieces meet in one direction at speeds in the ratio of their chords. On a circle the chords
+/// are equal and the pieces join smoothly; on an ellipse they are not, and a ruled loft to it
+/// creases its side along those joints.
+fn fit_point_ellipse(x: f64, a: f64, b: f64) -> Vec<Curve> {
+    let p: Vec<[f64; 3]> = (0..12)
+        .map(|i| {
+            let t = f64::from(i) * PI / 6.0;
+            [x, a * t.sin(), 20.0 - b * t.cos()]
+        })
+        .collect();
+    let at = |i: usize| p[i % 12];
+    let chord = |i: usize| {
+        let (q, r) = (at(i), at(i + 1));
+        ((r[1] - q[1]).powi(2) + (r[2] - q[2]).powi(2)).sqrt()
+    };
+    // the tangent at point i over the chord-length parameter
+    let tangent = |i: usize| {
+        let (q, r) = (at(i + 11), at(i + 1));
+        let h = chord(i + 11) + chord(i);
+        [(r[1] - q[1]) / h, (r[2] - q[2]) / h]
+    };
+    (0..12)
+        .map(|i| {
+            let (q, r, h) = (at(i), at(i + 1), chord(i));
+            let (m0, m1) = (tangent(i), tangent(i + 1));
+            Curve::Nurbs {
+                degree: 3,
+                points: vec![
+                    [x, q[1], q[2], 1.0],
+                    [x, q[1] + h * m0[0] / 3.0, q[2] + h * m0[1] / 3.0, 1.0],
+                    [x, r[1] - h * m1[0] / 3.0, r[2] - h * m1[1] / 3.0, 1.0],
+                    [x, r[1], r[2], 1.0],
+                ],
+                knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            }
+        })
+        .collect()
+}
+
+/// #17015: a ruled loft from a circle (radius 15, x = -30) to an ellipse (half-axes 20 and
+/// 18, x = 30), both through 12 fit points, its larger rim rounded r 2. The ellipse's pieces
+/// meet at unequal speeds, so the loft's side is several faces meeting in creases a few
+/// ten thousandths of a radian deep, and the rounds on two of them stand about the radius
+/// times that angle apart where they meet on the rim. Joining them set one round's end row to
+/// the other's and kept its old bound: the fillet reported success and the body then failed
+/// to read back, its blend face's definition not certifying its net (0.016 off, against a
+/// bound of 3.9e-6). A round by its definition is now either proved within the tolerance of
+/// its definition after the join, its bound the proved one, or the join is refused and the
+/// fillet with it: the body reopens from its record, or the fillet fails.
+#[test]
+fn a_rim_round_across_a_loft_s_creases_is_certified_or_refused() {
+    all_fixes();
+    let sections = [
+        fit_point_ellipse(-30.0, 15.0, 15.0),
+        fit_point_ellipse(30.0, 20.0, 18.0),
+    ];
+    let b = solidcore_ops::sweep::loft(&sections, 1, true).unwrap();
+    assert!(
+        b.counts().unwrap()[0] > 3,
+        "the loft's side is one face: no crease to round across"
+    );
+    let rim = edge_at(&b, [30.0, 0.0, 2.0]);
+    let chain = tangent_chain(&b, None, &[rim], &[], HALF_DEGREE)
+        .unwrap()
+        .members;
+    assert!(chain.len() > 1, "the rim is one edge: {chain:?}");
+    match blend(&b, Blend::Round, &chain, &[2.0], &[], Corners::Filled) {
+        Ok(_) => {
+            // reopened from its record, as a design is: each blend face certified again
+            let (record, _) = b.to_record().unwrap();
+            let (reopened, _) = Body::from_record(&record, true)
+                .unwrap_or_else(|e| panic!("the rounded loft does not reopen: {e:?}"));
+            let report = reopened.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{}", report.text);
+        }
+        // refused by the kernel: the join's own refusal, or the corner's failure it ends in
+        Err(e) => assert!(
+            matches!(
+                e,
+                Error::Unsupported(_)
+                    | Error::BlendFailed { .. }
+                    | Error::Status(solidcore::error::SM_ERR)
+            ),
+            "{e:?}"
+        ),
+    }
 }

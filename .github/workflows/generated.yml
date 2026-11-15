@@ -23,7 +23,7 @@ concurrency:
 jobs:
   regenerate:
     name: Regenerate and commit
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 60
     steps:
       # Always main itself, never pull request code, since this job can push.
@@ -32,7 +32,7 @@ jobs:
           ref: main
           # main goes through the merge queue; this deploy key may push past it.
           ssh-key: ${{ secrets.GENERATED_FILES_DEPLOY_KEY }}
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: generated-files

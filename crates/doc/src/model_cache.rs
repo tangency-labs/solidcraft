@@ -234,6 +234,17 @@ impl Writer {
         if let Some(look) = &b.imported {
             let faces: Vec<Json> = look.faces.iter().map(|(name, (color, opacity))| json!([name, color, opacity])).collect();
             r["imported"] = json!({"color": look.color, "opacity": look.opacity, "faces": faces});
+            if look.name.is_some() || !look.face_names.is_empty() {
+                r["imported"]["name"] = json!(look.name);
+                r["imported"]["face_names"] = json!(look.face_names);
+            }
+        }
+        // The kernel body's own encoding keeps no colour names: the file's names for its paint.
+        if let Some(paint) = b.body.paint() {
+            let faces: Vec<Json> = paint.faces.iter().filter_map(|f| Some(json!([f.face, f.name.as_ref()?]))).collect();
+            if paint.name.is_some() || !faces.is_empty() {
+                r["paint_names"] = json!({"body": paint.name, "faces": faces});
+            }
         }
         r["body"] = json!(self.body(&b.body));
         self.model_bodies.push(r);
@@ -447,11 +458,33 @@ impl SavedModel {
             b.bytes = b.body.retained_bytes();
             if let Some(look) = r.get("imported") {
                 let faces: Vec<(String, [f32; 3], f32)> = serde_json::from_value(parse(look.get("faces"))?).map_err(|_| bad("saved model: look"))?;
+                let colour_name = |v: Option<&Json>| -> Result<Option<String>> {
+                    let name: Option<String> = serde_json::from_value(v.cloned().unwrap_or(Json::Null)).map_err(|_| bad("saved model: look"))?;
+                    Ok(name.as_deref().and_then(solidcraft_kernel::colour_name))
+                };
+                let face_names: BTreeMap<String, String> =
+                    serde_json::from_value(look.get("face_names").cloned().unwrap_or_else(|| json!({}))).map_err(|_| bad("saved model: look"))?;
                 b.imported = Some(Arc::new(crate::appearance::ImportedLook {
                     color: serde_json::from_value(parse(look.get("color"))?).map_err(|_| bad("saved model: look"))?,
                     opacity: serde_json::from_value(parse(look.get("opacity"))?).map_err(|_| bad("saved model: look"))?,
                     faces: faces.into_iter().map(|(name, color, opacity)| (name, (color, opacity))).collect(),
+                    name: colour_name(look.get("name"))?,
+                    face_names: face_names.into_iter().filter_map(|(face, name)| Some((face, solidcraft_kernel::colour_name(&name)?))).collect(),
                 }));
+            }
+            if let Some(names) = r.get("paint_names")
+                && let Some(paint) = b.body.paint()
+            {
+                let body: Option<String> =
+                    serde_json::from_value(names.get("body").cloned().unwrap_or(Json::Null)).map_err(|_| bad("saved model: paint"))?;
+                let faces: Vec<(usize, String)> =
+                    serde_json::from_value(names.get("faces").cloned().unwrap_or_else(|| json!([]))).map_err(|_| bad("saved model: paint"))?;
+                let mut paint = paint.clone();
+                paint.name = body.as_deref().and_then(solidcraft_kernel::colour_name);
+                for f in &mut paint.faces {
+                    f.name = faces.iter().rfind(|(face, _)| *face == f.face).and_then(|(_, name)| solidcraft_kernel::colour_name(name));
+                }
+                b.body = b.body.clone().with_paint(Some(paint));
             }
             model_bodies.push(b);
         }
@@ -538,6 +571,7 @@ impl SavedModel {
             let sketch_keys = key_sets.get(index(s.get("sketch_key_set"), key_sets.len())?).cloned().ok_or_else(|| bad("saved model: state"))?;
             Ok(ModelState {
                 frame_bodies: Default::default(),
+                origin_frames: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
                 sketches: ids("sketches", sketches.len())?.into_iter().filter_map(|i| sketches.get(i).cloned()).collect(),
                 body_counter: index(s.get("body_counter"), usize::MAX)?,
@@ -559,6 +593,9 @@ impl SavedModel {
                 blend_edges: serde_json::from_value(field("blend_edges")?).map_err(invalid)?,
                 fitted: serde_json::from_value(field("fitted")?).map_err(invalid)?,
                 tapered: serde_json::from_value(field("tapered")?).map_err(invalid)?,
+                // Not kept either: every state would list those of all the features before it.
+                // A pattern's copies then find their sources' faces by name.
+                named_faces: BTreeMap::new(),
                 // A join's notice is for the evaluation that made it, not kept with the cache.
                 kept_separate: BTreeMap::new(),
                 // Not kept either: a saved model's states carry no lineage, so the check of a
@@ -904,6 +941,7 @@ impl Model {
                     .map(|v| serde_json::from_value::<kernel::ImportReport>(v.clone()).map(Arc::new).map_err(|_| bad("saved model: import report")))
                     .transpose()?,
                 repair: None,
+                lost_projections: None,
                 ms,
                 skipped: r.get("skipped").and_then(Json::as_bool).ok_or_else(|| bad("saved model: skipped"))?,
                 stale: false,
@@ -944,18 +982,22 @@ impl Model {
                     before = r.state.clone();
                     continue;
                 }
-                let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests) ^ placement_digest(doc, f, Some(&before));
-                cache.put(
+                let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests)
+                    ^ placement_digest(doc, f, Some(&before))
+                    ^ construct_digest(doc, &vals, f, Some(&before));
+                cache.states.put(
                     cache_key(f, r.fingerprint, local, ctx, &before),
                     CachedEval {
                         error: None,
                         warning: r.warning.clone(),
                         import_report: r.import_report.clone(),
                         repair: r.repair.clone(),
+                        lost_projections: None,
                         ms: r.ms,
-                        bytes: r.state.retained_bytes(),
                         state: r.state.clone(),
                     },
+                    r.state.retained_bytes(),
+                    r.ms,
                 );
                 before = r.state.clone();
             }

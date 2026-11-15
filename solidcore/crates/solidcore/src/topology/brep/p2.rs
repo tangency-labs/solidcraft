@@ -59,11 +59,11 @@
 //!   exists, so upstream's `SmObjDelete` guards have nothing to undo. The merged end
 //!   shell is deleted ([`shell::destroy`]), and a vertex shell's vertex use is deleted
 //!   with its record (`delete pVU`).
-//! - Opt-in (WR-585, fork tangency-labs/smlib@be8ac73):
-//!   [`UpstreamFixes::boolean_wire_edge_keeps_faceuse_shell`](crate::kernel::UpstreamFixes::boolean_wire_edge_keeps_faceuse_shell)
-//!   makes `MakeEdgeTopology`, joining a wire start shell to a faceuse end shell, move
-//!   the wires into the faceuse shell, put it in the wire shell's place in the region
-//!   and delete the wire shell, instead of moving every face use into the wire shell.
+//! - `MakeEdgeTopology`, joining a wire start shell to a faceuse end shell, moves the
+//!   wires into the faceuse shell, puts it in the wire shell's place in the region and
+//!   deletes the wire shell, where upstream moves every face use into the wire shell, the
+//!   size of the body for each such edge a boolean makes (WR-585, fork
+//!   tangency-labs/smlib@be8ac73).
 //! - `MateLaminaEdgeToSurface` checks for the face's surface before the neighbour
 //!   (lamina / seam) checks; upstream binds the surface only for `IsSeam`, so a face
 //!   without surface there ends in the distance loop instead of
@@ -587,6 +587,26 @@ pub enum NotifyArg {
     Object(ObjectRef),
 }
 
+/// What [`ArenaNotifyState::seed`] has visited, for the tests of the callers that must not
+/// seed a whole B-rep for each edit they make (solidcraft#15786). Compiled only for tests.
+#[cfg(test)]
+pub(crate) mod seeded {
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+
+    static CALLS: AtomicU64 = AtomicU64::new(0);
+    static ENTITIES: AtomicU64 = AtomicU64::new(0);
+
+    pub(crate) fn note(entities: usize) {
+        CALLS.fetch_add(1, Relaxed);
+        ENTITIES.fetch_add(entities as u64, Relaxed);
+    }
+
+    /// The calls and the entities they visited since the last [`take`].
+    pub(crate) fn take() -> (u64, u64) {
+        (CALLS.swap(0, Relaxed), ENTITIES.swap(0, Relaxed))
+    }
+}
+
 impl NotifyArg {
     fn object_ref(self, env: &NotifyEnv<'_>) -> ObjectRef {
         match self {
@@ -837,6 +857,8 @@ impl ArenaNotifyState {
         all.extend(b.edges().iter().map(|(x, _)| EntityRef::Edge(x)));
         all.extend(b.vertexuses().iter().map(|(x, _)| EntityRef::Vertexuse(x)));
         all.extend(b.vertices().iter().map(|(x, _)| EntityRef::Vertex(x)));
+        #[cfg(test)]
+        seeded::note(all.len());
         if self.records.is_empty() {
             // Bulk build (sorted input is O(n)); the same map as entry-by-entry.
             self.records = all
@@ -1670,7 +1692,9 @@ pub fn local_curve_sector(
                 orientation,
                 true,
             )?;
-            let found = sector.radial_edgeuse.ok_or(SolidError::sm_err(OP))?;
+            let found = sector.radial_edgeuse.ok_or_else(|| {
+                SolidError::topology_failed(OP, "the curve's radial sector has no edge use")
+            })?;
 
             // region of point is region of classification sector
             edgeuse_region(b, found)
@@ -1737,15 +1761,110 @@ pub fn local_curve_sector(
                             p1::find_sector_of_face(k, b, f, None, test_pnt, test_dir)?;
                         p1::vote_for_region(&mut regions, &mut votes, found);
                     } else {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::topology_failed(
+                            OP,
+                            "the vertex use is neither on an edge nor in a loop",
+                        ));
                     }
                 }
             }
 
             p1::find_highest_vote(&regions, &votes)
         }
-        _ => Err(SolidError::sm_err(OP)),
+        _ => Err(SolidError::topology_failed(
+            OP,
+            "the curve does not hit a face, an edge or a vertex",
+        )),
     }
+}
+
+/// Where a point on faces' common boundary lies: an edge of the faces or a vertex of it.
+struct SharedBoundary {
+    class: PointClassType,
+    object: EntityRef,
+    /// The edge's curve parameter of the point (of the edge the point is on, or ends in).
+    parameter: f64,
+}
+
+/// The edge, or the vertex at an end of it, that `point` lies on and that `face` shares with
+/// one of `others`: the edge of `face` that borders another of those faces and is nearest
+/// `point`, when `point` is within `tolerance` of its curve. `None` when `face` shares no
+/// edge with them or the point is not on one.
+///
+/// A ray aimed at an edge can meet both faces ending there, each in a point of its boundary,
+/// and report no hit on the edge itself: the faces are then at one distance. Which side of
+/// either face alone the ray start is on says nothing about the region it is in (it can be
+/// the far side of the one and the near side of the other), but the radial sectors of the edge
+/// do.
+///
+/// # Errors
+///
+/// Those of the topology reads and the point drops.
+fn shared_boundary_of_faces(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    others: &[FaceId],
+    point: Point3,
+) -> Result<Option<SharedBoundary>> {
+    // The point is on an edge only within the edge's own tolerance (the body's linear tolerance
+    // at least), not within the distance by which two face hits count as tied.
+    let mut nearest: Option<(f64, EdgeId, f64)> = None;
+    for e in crate::topology::topology_traverser::face_edges(b, face)? {
+        let faces = edge::faces(b, e, None)?;
+        if !faces.iter().any(|f| others.contains(f)) {
+            continue;
+        }
+        let record = b.edge(e)?;
+        let Some(curve) = record.curve.as_ref() else {
+            continue;
+        };
+        let tolerance = record.tolerance.max(b.tolerance());
+        let dropped = curve.drop_point(
+            k,
+            &record.interval,
+            point,
+            None,
+            tolerance,
+            None,
+            SolverOperation::Minimize,
+        )?;
+        if dropped.success
+            && dropped.distance <= tolerance
+            && nearest.is_none_or(|(d, ..)| dropped.distance < d)
+        {
+            nearest = Some((dropped.distance, e, dropped.parameter));
+        }
+    }
+    let Some((_, e, parameter)) = nearest else {
+        return Ok(None);
+    };
+    // At an end of the edge the point is at its vertex, which the faces around it classify.
+    let record = b.edge(e)?;
+    let tolerance = record.tolerance.max(b.tolerance());
+    let curve = record
+        .curve
+        .as_ref()
+        .ok_or_else(|| null_deref("edge without curve"))?;
+    for (end, vertex) in [
+        (record.interval.min(), edge::start_vertex(b, e)?),
+        (record.interval.max(), edge::end_vertex(b, e)?),
+    ] {
+        if let Some(vertex) = vertex {
+            if curve.evaluate_point(k, end)?.distance(point) <= tolerance {
+                return Ok(Some(SharedBoundary {
+                    class: PointClassType::Vertex,
+                    object: EntityRef::Vertex(vertex),
+                    parameter,
+                }));
+            }
+        }
+    }
+    Ok(Some(SharedBoundary {
+        class: PointClassType::Edge,
+        object: EntityRef::Edge(e),
+        parameter,
+    }))
 }
 
 /// What [`ray_fire`] found.
@@ -1925,7 +2044,10 @@ pub(crate) fn ray_fire_with_bbox_and_solver(
     // check solution tolerance for an error
     let tol = EFF_ZERO * (1.0 + start.max_dimension());
     if best.start.solution_value < tol {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the nearest hit is at the ray's start",
+        ));
     }
     let _ = region;
 
@@ -1938,6 +2060,31 @@ pub(crate) fn ray_fire_with_bbox_and_solver(
         0,
         best.start.solution_value,
     )?;
+
+    // Not upstream: a ray that meets the B-rep on a boundary shared by faces is classified
+    // against that boundary, not against one of the faces it ends.
+    if let EntityRef::Face(face) = hit {
+        let scaled_zero = EFF_ZERO_SQRT * 100.0 * (1.0 + radius);
+        let others: Vec<FaceId> = (0..solutions.len())
+            .filter_map(|ii| solutions.get(ii))
+            .filter(|this| {
+                (this.start.solution_value - best.start.solution_value).abs() < scaled_zero
+            })
+            .filter(|this| this.num_variables == best.num_variables)
+            .filter_map(|this| match this.objects[0].map(cache_entity) {
+                Some(Ok(EntityRef::Face(f))) if f != face => Some(f),
+                _ => None,
+            })
+            .collect();
+        if !others.is_empty() {
+            let point = start + best.start.solution_value * ray;
+            if let Some(found) = shared_boundary_of_faces(k, b, face, &others, point)? {
+                intersection.set_class_object(found.class, Some(found.object));
+                intersection.set_gap_3d(best.start.solution_value);
+                intersection.set_t_param(found.parameter, false);
+            }
+        }
+    }
 
     // make temporary [StartPoint,IntersectionPoint] line segement
     let end = start + best.start.solution_value * ray;
@@ -2277,7 +2424,9 @@ pub fn make_edge_vertex_topology(
     let region = region_or_infinite(b, region)?;
 
     // Find the shell corresponding to the region from the Start vertex.
-    let s = vertex::shell_in_region(b, start, Some(region))?.ok_or(SolidError::sm_err(OP))?;
+    let s = vertex::shell_in_region(b, start, Some(region))?.ok_or_else(|| {
+        SolidError::topology_failed(OP, "the start vertex has no shell in the region")
+    })?;
 
     // Put Vertex into Brep's vertex list and edge into edge list
     let new_v = b.add_vertex_record(Vertex::default())?;
@@ -2315,10 +2464,12 @@ pub fn make_edge_topology(
     let region = region_or_infinite(b, region)?;
 
     // Find the shells corresponding to the region from the Start vertex and end vertex.
-    let mut start_shell =
-        vertex::shell_in_region(b, start, Some(region))?.ok_or(SolidError::sm_err(OP))?;
-    let mut end_shell =
-        vertex::shell_in_region(b, end, Some(region))?.ok_or(SolidError::sm_err(OP))?;
+    let mut start_shell = vertex::shell_in_region(b, start, Some(region))?.ok_or_else(|| {
+        SolidError::topology_failed(OP, "the start vertex has no shell in the region")
+    })?;
+    let mut end_shell = vertex::shell_in_region(b, end, Some(region))?.ok_or_else(|| {
+        SolidError::topology_failed(OP, "the end vertex has no shell in the region")
+    })?;
 
     // Transfer stuff from end shell to start shell if they are different.
     if shell_is_vertex_shell(b, start_shell)? && !shell_is_vertex_shell(b, end_shell)? {
@@ -2332,13 +2483,10 @@ pub fn make_edge_topology(
             let vu = shell_vertexuse(b, end_shell)?;
             delete_vertexuse(b, vu)?;
             shell_clear_members(b, end_shell)?;
-        } else if k.fixes.boolean_wire_edge_keeps_faceuse_shell
-            && b.shell(start_shell)?.is_wire_shell()
-            && b.shell(end_shell)?.is_faceuse_shell()
-        {
-            // WR-585 (opt-in, fork tangency-labs/smlib@be8ac73): the faceuse shell takes
-            // the wire shell's wires and its place in the region, and the wire shell
-            // goes, instead of moving every face use into the wire shell.
+        } else if b.shell(start_shell)?.is_wire_shell() && b.shell(end_shell)?.is_faceuse_shell() {
+            // WR-585 (fork tangency-labs/smlib@be8ac73): the faceuse shell takes the wire
+            // shell's wires and its place in the region, and the wire shell goes, instead
+            // of moving every face use into the wire shell.
             let reg = shell_region(b, start_shell)?.ok_or(null_deref("shell without region"))?;
             shell_transfer_children(k, b, start_shell, end_shell)?;
             shell::region_remove_shell(b, reg, end_shell)?;
@@ -2563,7 +2711,7 @@ pub fn merge_curves_on_surface<O: ClassObject + Copy>(
 ) -> Result<MergedCurves> {
     // check state - m_bEditingEnabled must be on
     if !objects.brep().editing_enabled() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(OP, "editing is not enabled"));
     }
 
     let saved = k.context.doing_boolean();
@@ -2637,7 +2785,10 @@ fn merge_curves_body<O: ClassObject + Copy>(
                 let (coin, pos) = cc.are_coincident_maybe(k, &*objects, &cc, kk, false)?;
                 if coin == CoincidentMaybe::Unsure {
                     // This signals an unrecoverable error.
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::topology_failed(
+                        OP,
+                        "a coincident interval could not be resolved",
+                    ));
                 }
                 if coin == CoincidentMaybe::Fixable {
                     connect_intervals(&mut cc, kk, pos)?;
@@ -2751,7 +2902,10 @@ fn merge_intervals<O: ClassObject + Copy>(
 fn into_bspline(c: Curve) -> Result<BSplineCurve> {
     match c.into_kind() {
         CurveKind::BSpline(b) => Ok(b),
-        _ => Err(SolidError::null_pointer(OP)),
+        _ => Err(SolidError::topology_missing(
+            OP,
+            "the B-spline form of the curve",
+        )),
     }
 }
 
@@ -2840,16 +2994,20 @@ pub fn mate_lamina_edge_to_surface(
     let _ = uv_curve_extension_factor;
     // check state - m_bEditingEnabled must be on
     if !b.editing_enabled() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(OP, "editing is not enabled"));
     }
 
     // no work - not lamina edge
     if !eu1::edge_is_lamina(b, lamina)? {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the edge is not a lamina edge",
+        ));
     }
 
     let eu = eu1::primary_edgeuse(b, lamina)?.ok_or(null_deref("edge without edge use"))?;
-    let face = eu1::face(b, eu)?.ok_or(SolidError::null_pointer(OP))?;
+    let face = eu1::face(b, eu)?
+        .ok_or_else(|| SolidError::topology_missing(OP, "the lamina edge use's face"))?;
     let face_ref = (env.key_of)(EntityRef::Face(face));
     face_notify(b, env, face, face_ref, NotifyOperation::PreEdit)?;
 
@@ -2866,7 +3024,10 @@ pub fn mate_lamina_edge_to_surface(
         .edge
         .ok_or(null_deref("edge use without edge"))?;
     if !eu1::edge_is_lamina(b, e_ccw)? && !edge::is_seam_of_surface(k, b, e_ccw, face)? {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the edge's CCW neighbour is neither lamina nor a seam",
+        ));
     }
     let eu_cw = b.edgeuse(eu)?.cw.ok_or(null_deref("edge use without CW"))?;
     let e_cw = b
@@ -2874,7 +3035,10 @@ pub fn mate_lamina_edge_to_surface(
         .edge
         .ok_or(null_deref("edge use without edge"))?;
     if !eu1::edge_is_lamina(b, e_cw)? && !edge::is_seam_of_surface(k, b, e_cw, face)? {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the edge's CW neighbour is neither lamina nor a seam",
+        ));
     }
 
     // Create an extended mating surface if it is a plane
@@ -3032,7 +3196,10 @@ pub fn mate_lamina_edge_to_surface(
 
     // If we did not find the solutions we are done with an error
     let Some((sol_ccw, sol_cw, mut found_3d, mut found_uv)) = found else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "no intersection curve meets both neighbouring edges",
+        ));
     };
 
     // Here we found solutions to things - do some trimming and to get the proper
@@ -3400,6 +3567,26 @@ mod tests {
     /// `MakeEdgeTopology` between two shell vertices deletes the end vertex shell
     /// (`delete pEndShell`) and both shell vertex uses (`delete pVU`): the region keeps
     /// one wire shell and the arenas no orphan (the edge's two vertex uses remain).
+    /// Mating a lamina edge with editing off is an `SM_ERR` that says so.
+    #[test]
+    fn mating_without_editing_is_a_typed_failure() {
+        let k = Kernel::default();
+        let (mut b, _, e, f) = brep();
+        let mating = b.face(f).unwrap().surface.clone().unwrap();
+        let mut state = ArenaNotifyState::new(&b);
+        let mut env = state.env(None);
+        let err =
+            mate_lamina_edge_to_surface(&k, &mut b, &mut env, e, &mating, 1.0, 1.0).unwrap_err();
+        assert_eq!(err.upstream_status(), Some(SM_ERR));
+        assert_eq!(err.operation(), OP);
+        assert_eq!(
+            err.topology_failure(),
+            Some(&crate::error::topology::TopologyFailure::Failed(
+                "editing is not enabled"
+            ))
+        );
+    }
+
     #[test]
     fn edge_between_shell_vertices_deletes_the_merged_shell() {
         let mut k = Kernel::default();

@@ -33,10 +33,7 @@ use solidcore::{Brep, Kernel};
 /// creases on (`trim`) or off (the subtraction).
 fn kernel(trim: bool) -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_overflow_trim_at_creases = trim;
     k
 }
@@ -47,7 +44,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
-    brep_volume(k, b, 1e-7, &attrs).unwrap()
+    brep_volume(k, b, 1e-10, &attrs).unwrap()
 }
 
 /// The area of the section a round of radius `r` removes between faces `w` and `h` wide
@@ -203,9 +200,9 @@ fn cube_20(k: &mut Kernel) -> Brep {
     create_box(k, Point3::ZERO, 20.0, 20.0, 20.0).unwrap()
 }
 
-/// The relative volume tolerance against the closed form. [`volume`] integrates at 1e-7 and
-/// reaches 1.8e-10 relative at worst over these six bodies (the bar's round, measured on
-/// 2026-11-04); this leaves that a factor of five.
+/// The relative volume tolerance against the closed form. [`volume`] integrates at 1e-10,
+/// whose error (WR-472's scale: the accuracy times the body's own size) is below it; the
+/// six bodies reached 1.8e-10 relative at worst (the bar's round, measured on 2026-11-04).
 const CLOSED_REL: f64 = 1e-9;
 
 /// The relative tolerance of the one case with no closed form here, the round trimmed at a
