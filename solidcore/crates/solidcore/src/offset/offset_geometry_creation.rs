@@ -171,6 +171,7 @@
 //! existing meaning.
 //!
 
+use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_standard_solver::p1::CircularCrossSectionFsg;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{Curve, CurveKind, ELLIPSE_TYPE, LINE_TYPE};
@@ -209,7 +210,8 @@ use crate::surface::implicit::{AnalyticSupport, Implicit};
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN as OFFSET_SS_UNKNOWN};
 use crate::surface::surface::p1::{SurfaceIntersectContext, SurfaceSolveContext};
 use crate::surface::surface::p2::{
-    SurfaceKind, TsectCurveType, CONE_TYPE, CYLINDER_TYPE, PLANE_TYPE, SPHERE_TYPE, TORUS_TYPE,
+    SurfaceIntersection, SurfaceKind, TsectCurveType, CONE_TYPE, CYLINDER_TYPE, PLANE_TYPE,
+    SPHERE_TYPE, TORUS_TYPE,
 };
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
@@ -1439,6 +1441,274 @@ fn create_analytic_extension(k: &Kernel, surface: &Surface, dist: f64) -> Result
     let mut copy = surface.copy(k)?;
     copy.adjust_step_uv_domain(k, &Extent2d::from_points(new_min, new_max))?;
     Ok(Some(copy))
+}
+
+/// One end of a piece of a surface/surface intersection ([`join_through_tangent_points`]):
+/// the piece, which end (`true` its last), the point, the outward unit tangent and the UV
+/// points on both surfaces.
+#[derive(Clone, Copy)]
+struct PieceEnd {
+    piece: usize,
+    last: bool,
+    point: Point3,
+    outward: Vec3,
+    uv: [Point2; 2],
+}
+
+/// Whether the B-spline `c` is clamped at both ends (each end knot of multiplicity
+/// `p + 1`): its end points are its end control points.
+fn clamped(c: &BSplineCurve) -> Result<bool> {
+    let order = c.degree()? + 1;
+    let (_, multiplicities) = c.knots(None)?;
+    Ok(multiplicities.first() == Some(&order) && multiplicities.last() == Some(&order))
+}
+
+/// The ends of piece `piece` of `ssi` whose three curves are B-splines clamped at both
+/// ends ([`clamped`]; `None` for any other piece, which is left as it is).
+fn piece_ends(
+    k: &Kernel,
+    ssi: &SurfaceIntersection,
+    piece: usize,
+) -> Result<Option<[PieceEnd; 2]>> {
+    let (Some(c3), Some(Some(uv1)), Some(Some(uv2))) = (
+        ssi.curves_3d.get(piece),
+        ssi.surface1_uv_curves.get(piece),
+        ssi.surface2_uv_curves.get(piece),
+    ) else {
+        return Ok(None);
+    };
+    for c in [c3, uv1, uv2] {
+        match c.kind() {
+            CurveKind::BSpline(b) if clamped(b)? => {}
+            _ => return Ok(None),
+        }
+    }
+    if c3.is_degenerate(k, EFF_ZERO, None)? {
+        return Ok(None);
+    }
+    let ivl = c3.natural_interval();
+    let mut ends = Vec::new();
+    for last in [false, true] {
+        let t = if last { ivl.max() } else { ivl.min() };
+        let d = c3.evaluate(k, t, 1, last, true)?;
+        let (Some(&point), Some(&tangent)) = (d.first(), d.get(1)) else {
+            return Ok(None);
+        };
+        let Ok(unit) = tangent.unitize() else {
+            return Ok(None);
+        };
+        let uv = |c: &Curve| -> Result<Point2> {
+            let p = c.evaluate_point(k, t)?;
+            Ok(Point2::new(p.x, p.y))
+        };
+        ends.push(PieceEnd {
+            piece,
+            last,
+            point,
+            outward: if last { unit } else { -unit },
+            uv: [uv(uv1)?, uv(uv2)?],
+        });
+    }
+    Ok(ends.try_into().ok())
+}
+
+/// Whether the ends `a` and `b` of two intersection pieces are one point of both surfaces
+/// where the surfaces are tangent and the pieces continue each other: the points within
+/// the intersection's tolerance `tol`, each surface's UV points within it at first order
+/// (`|Δu| |S_u| + |Δv| |S_v|`, so a piece across a seam is not taken), the normals and the
+/// pieces' outward tangents opposite, each within `sine` (the tangency tolerance's).
+/// These decide the join only; the joined curve's deviation is proved where it is made
+/// ([`join_through_tangent_points`]).
+fn continues_through_tangent_point(
+    k: &Kernel,
+    surfaces: [&Surface; 2],
+    a: &PieceEnd,
+    b: &PieceEnd,
+    tol: f64,
+    sine: f64,
+) -> Result<bool> {
+    let gap = a.point.distance(b.point);
+    if gap > tol || gap.is_nan() || a.outward.cross(-b.outward).length() > sine {
+        return Ok(false);
+    }
+    if a.outward.dot(b.outward) >= 0.0 {
+        return Ok(false);
+    }
+    let mut normals = [Vec3::ZERO; 2];
+    for ((surface, normal), (ua, ub)) in surfaces
+        .iter()
+        .zip(normals.iter_mut())
+        .zip(a.uv.iter().zip(b.uv.iter()))
+    {
+        let d = surface.evaluate(k, *ua, 1, 1, EvaluateFlags::default())?;
+        let (Some(su), Some(sv)) = (
+            d.get(1).and_then(|r| r.first()),
+            d.first().and_then(|r| r.get(1)),
+        ) else {
+            return Ok(false);
+        };
+        let moved = (ua.x - ub.x).abs() * su.length() + (ua.y - ub.y).abs() * sv.length();
+        if moved > tol || moved.is_nan() {
+            return Ok(false);
+        }
+        *normal = surface.evaluate_normal(k, *ua, Side::Right, Side::Right)?;
+    }
+    let [n1, n2] = normals;
+    Ok(n1.cross(n2).length() <= sine)
+}
+
+/// Not upstream (#17210): the pieces of the intersection of two surfaces that meet end to
+/// end at a point where the surfaces are tangent, and continue each other there, joined
+/// into one curve, with their UV curves. Marching stops at a tangent point of the
+/// surfaces, where two branches of their intersection cross (two oblique cylinders
+/// offset from one circle meet on that circle's offset and on a curve through it), so
+/// one curve comes out as two pieces; an edge whose end lies past the tangent point
+/// (its offset vertex on the far piece) found no trim on either. An end is joined only
+/// to the one other end that continues it ([`continues_through_tangent_point`]); an
+/// end with none, or more than one, is left. The three curves of the two pieces are
+/// joined alike ([`BSplineCurve::create_by_joining`]: the first keeps its parameters,
+/// the second follows on), so the joined 3D and UV curves keep one parameter. Before the
+/// join, each of the second piece's three curves has its end control point at the joint
+/// set to the first piece's there (both clamped, [`clamped`]: those are their end points),
+/// so the two ends are one point, in 3D and in both UV domains, and the join drops nothing.
+/// Moving one control point by `δ` (its weight kept) moves a curve by at most `δ`, its
+/// basis being a partition of unity, so the joined 3D curve's deviation is the first
+/// piece's, or the second's raised by that distance (enclosed in rounded interval
+/// arithmetic), whichever is larger: a proved bound, with nothing estimated.
+///
+/// # Errors
+///
+/// Those of the evaluations and of the joins.
+fn join_through_tangent_points(
+    k: &Kernel,
+    ssi: &mut SurfaceIntersection,
+    surfaces: [&Surface; 2],
+    tol: f64,
+    tangency_tol_radians: f64,
+) -> Result<()> {
+    let sine = tangency_tol_radians.abs().min(PI / 2.0).sin();
+    // each join removes a piece: at most one fewer than the pieces
+    for _ in 1..ssi.curves_3d.len() {
+        let mut ends = Vec::new();
+        for piece in 0..ssi.curves_3d.len() {
+            if let Some(both) = piece_ends(k, ssi, piece)? {
+                ends.extend(both);
+            }
+        }
+        let mut join = None;
+        'ends: for a in &ends {
+            let mut found = None;
+            for b in ends.iter().filter(|b| b.piece != a.piece) {
+                if continues_through_tangent_point(k, surfaces, a, b, tol, sine)? {
+                    if found.is_some() {
+                        continue 'ends;
+                    }
+                    found = Some(*b);
+                }
+            }
+            let Some(b) = found else {
+                continue;
+            };
+            // and `a` is the only end that continues `b`
+            for c in ends
+                .iter()
+                .filter(|c| c.piece != b.piece && (c.piece, c.last) != (a.piece, a.last))
+            {
+                if continues_through_tangent_point(k, surfaces, &b, c, tol, sine)? {
+                    continue 'ends;
+                }
+            }
+            join = Some((*a, b));
+            break;
+        }
+        let Some((a, b)) = join else {
+            return Ok(());
+        };
+        // the piece whose last end joins goes first; the other runs on from its joined end
+        let (first, second) = if a.last { (a, b) } else { (b, a) };
+        let senses = [true, !second.last];
+        let mut joined: Vec<Curve> = Vec::new();
+        // how far the second piece's 3D curve moves, proved
+        let mut moved = 0.0_f64;
+        for (kind, curves) in [
+            &ssi.curves_3d.iter().map(Some).collect::<Vec<_>>(),
+            &ssi.surface1_uv_curves.iter().map(Option::as_ref).collect(),
+            &ssi.surface2_uv_curves.iter().map(Option::as_ref).collect(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let b_spline = |i: usize| match curves.get(i).copied().flatten().map(Curve::kind) {
+                Some(CurveKind::BSpline(c)) => Ok(c.clone()),
+                _ => Err(SolidError::port_invariant(
+                    OP_MATE,
+                    "a piece of the intersection to join is not a B-spline",
+                )),
+            };
+            let mut segments = [b_spline(first.piece)?, b_spline(second.piece)?];
+            let [head, tail] = &mut segments;
+            let end_of = |c: &BSplineCurve, last: bool| -> Result<usize> {
+                Ok(if last {
+                    c.number_control_points()?.saturating_sub(1)
+                } else {
+                    0
+                })
+            };
+            let at = (end_of(&*head, first.last)?, end_of(&*tail, second.last)?);
+            let (joint, _) = head.control_point(ControlPointForm::EuclideanRational, at.0)?;
+            let (old, weight) = tail.control_point(ControlPointForm::EuclideanRational, at.1)?;
+            if tail.is_rational()? {
+                tail.set_control_point(ControlPointForm::EuclideanRational, at.1, joint, weight)?;
+            } else {
+                tail.set_control_point(ControlPointForm::NonRational, at.1, joint, 1.0)?;
+            }
+            if kind == 0 {
+                let d = |x: f64, y: f64| Ivl::from(x) - Ivl::from(y);
+                let (dx, dy, dz) = (d(joint.x, old.x), d(joint.y, old.y), d(joint.z, old.z));
+                moved = (dx * dx + dy * dy + dz * dz).sqrt().hi;
+            }
+            // with no last end at the joint, both first ends: the first runs reversed
+            let senses = if first.last { senses } else { [false, true] };
+            joined.push(Curve::from(BSplineCurve::create_by_joining(
+                &mut segments,
+                Some(&senses),
+            )?));
+        }
+        let [c3, uv1, uv2]: [Curve; 3] = joined
+            .try_into()
+            .map_err(|_| SolidError::port_invariant(OP_MATE, "three joined curves"))?;
+        let (keep, drop) = (first.piece.min(second.piece), first.piece.max(second.piece));
+        if let Some(c) = ssi.curves_3d.get_mut(keep) {
+            *c = c3;
+        }
+        if let Some(c) = ssi.surface1_uv_curves.get_mut(keep) {
+            *c = Some(uv1);
+        }
+        if let Some(c) = ssi.surface2_uv_curves.get_mut(keep) {
+            *c = Some(uv2);
+        }
+        let deviation = |i: usize| ssi.deviations.get(i).copied().unwrap_or(0.0);
+        let worst = max2(deviation(first.piece), deviation(second.piece) + moved);
+        if let Some(d) = ssi.deviations.get_mut(keep) {
+            *d = worst;
+        }
+        drop_index(&mut ssi.surface1_uv_curves, drop);
+        drop_index(&mut ssi.surface2_uv_curves, drop);
+        drop_index(&mut ssi.curves_3d, drop);
+        drop_index(&mut ssi.curve_types, drop);
+        drop_index(&mut ssi.deviations, drop);
+    }
+    Ok(())
+}
+
+/// Removes the element at `index` when it exists; an out-of-range index leaves the list as is.
+fn drop_index<T>(list: &mut Vec<T>, index: usize) {
+    let mut at = 0usize;
+    list.retain(|_| {
+        let keep = at != index;
+        at += 1;
+        keep
+    });
 }
 
 /// The fork's `sm_ExactPiece` (tangency-labs/smlib@fddc366, behind
@@ -4610,6 +4880,15 @@ impl OffsetGeometryCreation {
             }
         }
 
+        // (not upstream, #17210) one curve through a tangent point of the surfaces
+        join_through_tangent_points(
+            k,
+            &mut ssi,
+            [&s1, other],
+            brep.brep_tolerance(edge)?,
+            self.tangency_tol_radians(),
+        )?;
+
         let mut curves_3d: Vec<O> = Vec::new();
         let mut surface1_uv_curves: Vec<Option<O>> = Vec::new();
         let mut surface2_uv_curves: Vec<Option<O>> = Vec::new();
@@ -6285,7 +6564,6 @@ pub(crate) struct RebuiltPartnerEdge<O> {
 /// arithmetic via NURBS convex-hull containment and convexity of Euclidean point-to-line
 /// distance. Curved conics and non-collinear B-splines return `None`.
 fn exact_collinear_line(cv: &Curve) -> Option<(Point3, Vec3, f64)> {
-    use crate::blend::fillet_section::interval::Ivl;
     use crate::blend::fillet_section::series::{v_sub, V3};
 
     if cv.dim() != 3 {
@@ -6592,6 +6870,120 @@ mod tests {
         assert_eq!(smallest_tolerance(&[f64::NAN, 1e-5]), None);
         assert_eq!(smallest_tolerance(&[1e-5, f64::NAN]), None);
         assert_eq!(smallest_tolerance(&[]), None);
+    }
+
+    /// #17210: a saddle `z = x y` and the plane `z = 0` are tangent at the origin, where the
+    /// two lines of their intersection, `x = 0` and `y = 0`, cross. Marched, each line comes
+    /// out as two pieces that end there. The pieces of each line are joined into one curve
+    /// (one of them given backwards), whose 3D and UV curves keep one parameter, and the two
+    /// lines, which cross there, are not joined to each other. Pieces that meet where the
+    /// surfaces cross are not joined.
+    #[test]
+    fn intersection_pieces_through_a_tangent_point_are_one_curve() {
+        let k = Kernel::default();
+        let p = Point3::new;
+        // u, v over [0, 1]: x = 2u − 1, y = 2v − 1
+        let saddle = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                p(-1.0, -1.0, 1.0),
+                p(1.0, -1.0, -1.0),
+                p(-1.0, 1.0, -1.0),
+                p(1.0, 1.0, 1.0),
+            )
+            .unwrap(),
+        );
+        let plane = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                p(-1.0, -1.0, 0.0),
+                p(1.0, -1.0, 0.0),
+                p(-1.0, 1.0, 0.0),
+                p(1.0, 1.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let line = |dim: u64, a: Point3, b: Point3| {
+            Curve::from(BSplineCurve::create_line_segment(dim, a, b).unwrap())
+        };
+        let uv = |x: f64, y: f64| p(0.5 * (x + 1.0), 0.5 * (y + 1.0), 0.0);
+        let mut ssi = SurfaceIntersection::default();
+        // y = 0 from x = −1 in, from x = 1 in (backwards), x = 0 from y = −1 in and out to 1
+        for (a, b) in [
+            ((-1.0, 0.0), (0.0, 0.0)),
+            ((1.0, 0.0), (0.0, 0.0)),
+            ((0.0, -1.0), (0.0, 0.0)),
+            ((0.0, 0.0), (0.0, 1.0)),
+        ] {
+            ssi.curves_3d
+                .push(line(3, p(a.0, a.1, 0.0), p(b.0, b.1, 0.0)));
+            for list in [&mut ssi.surface1_uv_curves, &mut ssi.surface2_uv_curves] {
+                list.push(Some(line(2, uv(a.0, a.1), uv(b.0, b.1))));
+            }
+            ssi.curve_types.push(TsectCurveType::default());
+            ssi.deviations.push(0.0);
+        }
+        let tol = 1e-6;
+        join_through_tangent_points(&k, &mut ssi, [&saddle, &plane], tol, 0.5_f64.to_radians())
+            .unwrap();
+        assert_eq!(ssi.curves_3d.len(), 2);
+        let mut lines = Vec::new();
+        for (i, c3) in ssi.curves_3d.iter().enumerate() {
+            let ivl = c3.natural_interval();
+            let ends = [ivl.min(), ivl.max()].map(|t| c3.evaluate_point(&k, t).unwrap());
+            for j in 0..=8 {
+                let t = ivl.evaluate(f64::from(j) / 8.0);
+                let at = c3.evaluate_point(&k, t).unwrap();
+                // on both surfaces, through each UV curve at the same parameter
+                for (surface, uvs) in [
+                    (&saddle, &ssi.surface1_uv_curves),
+                    (&plane, &ssi.surface2_uv_curves),
+                ] {
+                    let w = uvs[i].as_ref().unwrap().evaluate_point(&k, t).unwrap();
+                    let lifted = surface.evaluate_point(&k, Point2::new(w.x, w.y)).unwrap();
+                    assert!(lifted.distance(at) < tol, "{lifted:?} {at:?}");
+                }
+            }
+            lines.push(ends);
+            assert!(ssi.deviations[i] < 2.0 * tol);
+        }
+        // each a whole line through the origin: y = 0 from end to end, and x = 0
+        for ends in &lines {
+            let [a, b] = ends;
+            assert!((a.distance(*b) - 2.0).abs() < tol, "{ends:?}");
+            assert!((*a + *b).length() < tol, "{ends:?}");
+        }
+        // the same pieces where the surfaces cross (the plane z = 0 against z = x): left
+        let tilted = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                p(-1.0, -1.0, -1.0),
+                p(1.0, -1.0, 1.0),
+                p(-1.0, 1.0, -1.0),
+                p(1.0, 1.0, 1.0),
+            )
+            .unwrap(),
+        );
+        let mut crossing = SurfaceIntersection::default();
+        for (a, b) in [((0.0, -1.0), (0.0, 0.0)), ((0.0, 0.0), (0.0, 1.0))] {
+            crossing
+                .curves_3d
+                .push(line(3, p(a.0, a.1, 0.0), p(b.0, b.1, 0.0)));
+            for list in [
+                &mut crossing.surface1_uv_curves,
+                &mut crossing.surface2_uv_curves,
+            ] {
+                list.push(Some(line(2, uv(a.0, a.1), uv(b.0, b.1))));
+            }
+            crossing.curve_types.push(TsectCurveType::default());
+            crossing.deviations.push(0.0);
+        }
+        join_through_tangent_points(
+            &k,
+            &mut crossing,
+            [&tilted, &plane],
+            tol,
+            0.5_f64.to_radians(),
+        )
+        .unwrap();
+        assert_eq!(crossing.curves_3d.len(), 2);
     }
 
     #[test]
