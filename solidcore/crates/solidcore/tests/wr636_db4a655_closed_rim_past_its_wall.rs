@@ -33,7 +33,6 @@ fn kernel(cliff: bool) -> Kernel {
     k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_run_on_bspline_trims = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.fillet_cliff_overflow = cliff;

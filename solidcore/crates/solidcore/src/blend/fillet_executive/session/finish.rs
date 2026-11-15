@@ -536,8 +536,7 @@ impl FilletSession<'_> {
     ///
     /// # Errors
     /// The first stage error, with the executive's error info recorded as upstream.
-    /// With `fixes.fillet_vertex_error_diagnostics`, a missing-corner note from the
-    /// corner stage is kept in [`FilletSession::error_info`] across the later failure;
+    /// Not upstream (WR-513, #1469): a missing-corner note from the corner stage is kept in [`FilletSession::error_info`] across the later failure;
     /// the returned error is still the later stage's own status.
     ///
     /// Not upstream (#2510): the fillet is built to the target's approximation tolerance
@@ -560,11 +559,11 @@ impl FilletSession<'_> {
             return Err(invalid("fillet parameters not set up"));
         }
         self.create_corners(k, None)?;
-        // The opt-in missing-corner note is the reason the later stage fails; keep it
-        // through that later error so `error_info()` reports the unsupported vertex,
-        // while the returned failure stays the later stage's own status.
-        let missing_corner_note = (k.fixes.fillet_vertex_error_diagnostics
-            && self.executive.error.code == FilletErrorType::CornerUnsupported as i32)
+        // The missing-corner note is the reason the later stage fails; keep it through
+        // that later error so `error_info()` reports the unsupported vertex, while the
+        // returned failure stays the later stage's own status.
+        let missing_corner_note = (self.executive.error.code
+            == FilletErrorType::CornerUnsupported as i32)
             .then(|| self.executive.error.clone());
         let (result, split_and_logged) = self.filleting_split_and_logged(k, None);
         if result.is_err() {

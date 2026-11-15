@@ -87,8 +87,8 @@
 //!   a character boundary (upstream may cut inside a UTF-8 sequence; that case is not
 //!   compared). The vertex overload of `NoteError` (cpp:131) reads the vertex's number
 //!   but stores nothing in the pin; [`ErrorInfo::note_vertex_error`] ports the fork's
-//!   recording behaviour, and the executive consults it only under
-//!   [`crate::kernel::UpstreamFixes::fillet_vertex_error_diagnostics`] (WR-513, #1469).
+//!   recording behaviour, which the executive uses for an unsupported corner (WR-513,
+//!   #1469).
 //!   The caller supplies the vertex's point (the C++ overload reads it from the vertex).
 //!   The codes are typed
 //!   ([`FilletErrorType`], [`FilStatus`], [`FilletEdgeType`]) and stored as their
@@ -566,8 +566,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
     ///
     /// The pinned overload reads the vertex number and records nothing (the issue #1469
     /// defect). This stores the vertex, its point, the status, the code and the comment;
-    /// the executive calls it only when
-    /// [`crate::kernel::UpstreamFixes::fillet_vertex_error_diagnostics`] is on.
+    /// the executive calls it for a corner no corner type handles (WR-513, #1469).
     /// `location` is the vertex point the caller resolved (the fork's corrected overload
     /// reads it from `pBadVert->GetPoint()`); a null comment keeps the old one, as its
     /// `if (cComment != NULL)` guard does.
@@ -1267,13 +1266,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     }
 
     /// [`Self::create_fillet_corners`] with the vertex's point supplied on an
-    /// unsupported corner, so the opt-in `fixes.fillet_vertex_error_diagnostics` can
-    /// retain the fields written by the fork's corrected vertex `NoteError` overload.
+    /// unsupported corner, so the executive can retain the fields written by the fork's
+    /// corrected vertex `NoteError` overload (WR-513, #1469).
     ///
-    /// With the fix off (the default), an unsupported corner records nothing and keeps
-    /// its pending entry, exactly as [`Self::create_fillet_corners`] and the pinned
-    /// `CreateFilletCorners` do. With it on, the executive records the vertex, its
-    /// location, `SM_FIL_FAILURE`, `FilletErrorType::CornerUnsupported` and
+    /// The pinned `CreateFilletCorners` records nothing for an unsupported corner. Here
+    /// the executive records the vertex, its location, `SM_FIL_FAILURE`, `FilletErrorType::CornerUnsupported` and
     /// `"Corner case not implemented"` (the fork's note) and still keeps the pending
     /// entry: retaining the note does not change the operation's result or topology.
     ///
@@ -1334,7 +1331,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     refused = true;
                 }
                 CornerCreation::Unsupported { location } => {
-                    if k.fixes.fillet_vertex_error_diagnostics && !refused {
+                    if !refused {
                         self.error.note_vertex_error(
                             vertex,
                             location,

@@ -76,7 +76,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
-    f.fillet_vertex_error_diagnostics = true;
     f.fillet_chamfer_cone_on_arc = true;
     f.offset_excess_faces_after_merge = true;
     f.offset_clip_right_side_out = true;
@@ -158,7 +157,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_rail_end_on_continued_surface = true;
     f.fillet_removal_takes_ring_fillets = true;
     // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
-    f.fillet_trim_inside_by_best_dot = true;
     f.fillet_half_degree_crease = true;
     f.curve_loop_normal_from_area = true;
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
@@ -175,7 +173,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.planar_path_profile_placement_statuses = true;
     f.fillet_trim_status = true;
     f.brep_edit_statuses_pass_on = true;
-    f.fillet_run_on_bspline_trims = true;
     f.query_statuses_pass_on = true;
     f.sweep_statuses_pass_on = true;
     f.ssi_proto_topology_statuses_pass_on = true;

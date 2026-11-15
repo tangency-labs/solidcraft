@@ -7,7 +7,7 @@
 //! status 1001, the fork's report); with it the corner is computed and the blend goes on to
 //! the cliff overflow's construction (which db4a655 completes). The out-of-bounds
 //! evaluation of the UV trim along its line (the commit's second half) is
-//! `fillet_run_on_bspline_trims` (WR-654), on in both runs.
+//! WR-654's, on every kernel.
 
 #![allow(
     clippy::unwrap_used,
@@ -30,7 +30,6 @@ fn kernel(cliff: bool, cone_run_on: bool) -> Kernel {
     k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = cone_run_on;
     k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_run_on_bspline_trims = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.fillet_cliff_overflow = cliff;
