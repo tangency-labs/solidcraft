@@ -1450,7 +1450,7 @@ mod tests {
         .unwrap()
     }
 
-    /// CodeRabbit on #17100: a closed path whose parameter dwells near its start. The
+    /// A review case on #17100: a closed path whose parameter dwells near its start. The
     /// square loop of side `10 s` spends 90% of its parameter on its first `1e-9 s`, so
     /// the quarter, half and three-quarter points all lie within the tolerance of the
     /// start. The Greville points (the polyline's corners) still certify that it leaves.
