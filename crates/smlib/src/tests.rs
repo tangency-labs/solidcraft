@@ -386,17 +386,86 @@ fn a_pcurve_smlib_ends_within_the_edges_tolerance_is_mapped_onto_our_interval() 
     let edge = TrimEdge { curve: &line, nurbs: None, interval: [0.0, 1.0], vertices: [0, 1], tolerance: 1e-5 };
     let theirs = [0.0, 1.0 - 2e-8];
     let pc = Curve2::Spline { knots: vec![0.0, 0.0, theirs[1], theirs[1]], points: vec![[0.0, 0.0], [1.0, 0.0]] };
-    let mapped = crate::pcurves::on_our_interval(pc.clone(), &edge, theirs, edge.tolerance).unwrap();
+    let mapped = crate::pcurves::on_our_interval(pc.clone(), &edge, theirs, edge.tolerance, [0.0; 2]).unwrap();
     assert_eq!(mapped.interval(), Some([0.0, 1.0]));
     assert_eq!(solidcore_ops::pcurve::eval(&mapped, 1.0), Some([1.0, 0.0]));
     // 0.02 mm along the edge is past its 1e-5 mm.
-    let err = crate::pcurves::on_our_interval(pc, &edge, [0.0, 0.99], edge.tolerance).unwrap_err();
+    let err = crate::pcurves::on_our_interval(pc, &edge, [0.0, 0.99], edge.tolerance, [0.0; 2]).unwrap_err();
     assert!(err.contains("SMLib moved an edge's interval") && err.contains("tolerance"), "{err}");
     // Held at 0.03 mm, as an edge 0.01 mm off its surface is, the same end is within it.
     let short = Curve2::Spline { knots: vec![0.0, 0.0, 0.99, 0.99], points: vec![[0.0, 0.0], [1.0, 0.0]] };
-    let held = crate::pcurves::on_our_interval(short, &edge, [0.0, 0.99], 0.03).unwrap();
+    let held = crate::pcurves::on_our_interval(short.clone(), &edge, [0.0, 0.99], 0.03, [0.0; 2]).unwrap();
     assert_eq!(held.interval(), Some([0.0, 1.0]));
     assert_eq!(solidcore_ops::pcurve::eval(&held, 1.0), Some([1.0, 0.0]));
+    // Within the tolerance of the vertex at that end (the caller covering the gap), the move is
+    // mapped too; that of the vertex at the other end does not reach it.
+    let reached = crate::pcurves::on_our_interval(short.clone(), &edge, [0.0, 0.99], edge.tolerance, [0.0, 0.03]).unwrap();
+    assert_eq!(reached.interval(), Some([0.0, 1.0]));
+    let err = crate::pcurves::on_our_interval(short, &edge, [0.0, 0.99], edge.tolerance, [0.03, 0.0]).unwrap_err();
+    assert!(err.contains("SMLib moved an edge's interval"), "{err}");
+}
+
+/// A closed tube (a square of side 10 round z, degree 1, its seam at the middle of the side
+/// y = 0) whose face below a cut runs up the seam to a vertex there and back along two edges: a
+/// line on the side y = 0 leaving the vertex into the face, and a polyline round the tube back
+/// to it. The line starts 15 nm across the seam (a RailCore V6 hotend's spline tube has an edge
+/// whose first 25 nm lie across its seam), so SMLib drops that piece of it and starts the edge
+/// on the seam, about 15 nm along. Past the edge's 1e-5 mm the move was refused and the face
+/// left out; within its vertex's tolerance, whose gap the reader covers, the pcurve is mapped
+/// onto the edge's own interval.
+#[test]
+fn an_edge_starting_a_hair_across_a_closed_patchs_seam_keeps_its_interval() {
+    use solidcore_ops::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
+    use solidcore_record::brep::{Curve, Curve2, Surface};
+    let ring = [[5.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0], [5.0, 0.0]];
+    let u_knots = vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 5.0];
+    let surface = Surface::Spline {
+        u_knots: u_knots.clone(),
+        v_knots: vec![0.0, 0.0, 5.0, 5.0],
+        points: ring.iter().map(|&[x, y]| vec![[x, y, 0.0], [x, y, 5.0]]).collect(),
+    };
+    let (h, across) = (2.5, 1.5e-5);
+    let (bottom, cut, far) = ([5.0, 0.0, 0.0], [5.0, 0.0, h], [9.0, 0.0, 3.5]);
+    let curves = [
+        // The bottom rim, from the seam round.
+        Curve::Spline { knots: u_knots.clone(), points: ring.iter().map(|&[x, y]| [x, y, 0.0]).collect() },
+        // The seam, up to the vertex.
+        Curve::Line { start: bottom, end: cut },
+        // Into the face from just across the seam.
+        Curve::Line { start: [5.0 - across, 0.0, h], end: far },
+        // Round the tube and back to the vertex from the seam's other side.
+        Curve::Spline {
+            knots: vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 5.0],
+            points: vec![far, [10.0, 0.0, 3.5], [10.0, 10.0, 3.5], [0.0, 10.0, 3.5], [0.0, 0.0, 3.5], cut],
+        },
+    ];
+    let intervals = [[0.0, 5.0], [0.0, 1.0], [0.0, 1.0], [0.0, 5.0]];
+    let ends = [[0, 0], [0, 1], [1, 2], [2, 1]];
+    let line = |a: [f64; 2], b: [f64; 2], t: [f64; 2]| Some(Curve2::Spline { knots: vec![t[0], t[0], t[1], t[1]], points: vec![a, b] });
+    let face = |reach: Vec<f64>| TrimFace {
+        surface: &surface,
+        nurbs: None,
+        domain: [[0.0, 5.0], [0.0, 5.0]],
+        edges: (0..4).map(|k| TrimEdge { curve: &curves[k], nurbs: None, interval: intervals[k], vertices: ends[k], tolerance: 1e-5 }).collect(),
+        vertices: vec![bottom, cut, far],
+        vertex_tolerances: reach,
+        loops: vec![vec![
+            TrimUse { edge: 0, forward: true, pcurve: line([0.0, 0.0], [5.0, 0.0], [0.0, 5.0]) },
+            TrimUse { edge: 1, forward: true, pcurve: line([5.0, 0.0], [5.0, h], [0.0, 1.0]) },
+            TrimUse { edge: 3, forward: false, pcurve: None },
+            TrimUse { edge: 2, forward: false, pcurve: None },
+            TrimUse { edge: 1, forward: false, pcurve: line([0.0, 0.0], [0.0, h], [0.0, 1.0]) },
+        ]],
+        tolerance: 1e-5,
+    };
+    let err = crate::pcurves::SmlibTrims.trims(&face(Vec::new())).unwrap_err();
+    assert!(err.contains("SMLib moved an edge's interval"), "{err}");
+    let pcs = crate::pcurves::SmlibTrims.trims(&face(vec![1e-5, 1e-4, 1e-5])).unwrap();
+    let pc = &pcs[0][3];
+    assert_eq!(pc.interval(), Some([0.0, 1.0]));
+    // It starts on the seam, at the vertex's height.
+    let [u, v] = solidcore_ops::pcurve::eval(pc, 0.0).unwrap();
+    assert!(u.abs() < 1e-9 && (v - h).abs() < 1e-4, "{u} {v}");
 }
 
 /// An edge whose curve runs 2.5 um past its vertex and its face's patch (as Poppy Humanoid's
@@ -432,6 +501,7 @@ fn an_edge_a_few_um_past_its_patch_keeps_its_interval() {
         domain: [[0.0, 1.0], [0.0, 1.0]],
         edges,
         vertices: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 2.0], [0.0, 10.0, 2.0]],
+        vertex_tolerances: vec![1e-5; 4],
         loops: vec![(0..4).map(|k| TrimUse { edge: k, forward: true, pcurve: None }).collect()],
         tolerance: 1e-5,
     };

@@ -1805,6 +1805,19 @@ impl<'b, 'a> Builder<'b, 'a> {
         if let (Some(f), Some(e)) = (&form, extent) {
             onto_form(f, &label, e, tol, &mut pcs);
         }
+        // A spline face's pcurve may end a little past the patch's knot range (a closed form
+        // whose ends are where the edge's own lie, up to its tolerance past the corner): put on
+        // the range, as the face's domain is, where that moves the surface within the edge's
+        // tolerance ([`onto_knots`]).
+        if form.is_none() {
+            let tolerances = edge_loops
+                .iter()
+                .map(|l| {
+                    l.iter().map(|&(e, _)| self.edges.get(e as usize).map(|x| x.tolerance).ok_or("edge reference")).collect::<Result<Vec<_>, _>>()
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            onto_knots(&surface, &tolerances, &mut pcs);
+        }
         self.raise_edges(&surface, &edge_loops, &pcs)?;
         // Signed areas of the loops that close in (u, v).
         let periods = natural_periods(&surface);
@@ -2017,7 +2030,7 @@ impl Builder<'_, '_> {
         exact: Vec<Vec<Option<Curve2>>>,
     ) -> R<TrimFace<'s>> {
         let (mut edge_at, mut vertex_at) = (HashMap::new(), HashMap::new());
-        let (mut edges, mut vertices) = (Vec::new(), Vec::new());
+        let (mut edges, mut vertices, mut vertex_tolerances) = (Vec::new(), Vec::new(), Vec::new());
         let mut loops = Vec::with_capacity(edge_loops.len());
         for (l, pcs) in edge_loops.iter().zip(exact) {
             let mut uses = Vec::with_capacity(l.len());
@@ -2033,6 +2046,7 @@ impl Builder<'_, '_> {
                                 None => {
                                     let i = index(vertices.len())?;
                                     vertices.push(self.point(v)?);
+                                    vertex_tolerances.push(self.vertices.get(v as usize).ok_or("vertex reference")?.tolerance);
                                     vertex_at.insert(v, i);
                                     i
                                 }
@@ -2052,7 +2066,7 @@ impl Builder<'_, '_> {
             }
             loops.push(uses);
         }
-        Ok(TrimFace { surface, nurbs, domain, edges, vertices, loops, tolerance: self.tol })
+        Ok(TrimFace { surface, nurbs, domain, edges, vertices, vertex_tolerances, loops, tolerance: self.tol })
     }
 }
 
@@ -2198,6 +2212,26 @@ fn onto_form(form: &BSurface, label: &BSurface, domain: [[f64; 2]; 2], tolerance
                         (h[0], h[1]) = (p[0] * h[2], p[1] * h[2]);
                     }
                 }
+            }
+        }
+    }
+    moved
+}
+
+/// A spline face's pcurves put on the surface's knot range where they run a little past it, when
+/// that moves the surface within their edge's tolerance (`tolerances`, as `pcs`): the parameter
+/// tolerance that edge has on this patch. The kernel moves the control points and proves the
+/// bound, along u and v at once ([`SurfaceEval::pcurve_onto_knots`]); the gap to the edge is then
+/// measured and covered (`raise_edges`). A pcurve it refuses (farther past, on a rational or
+/// closed patch) is left as it is, for the record check to refuse. The number of moves made.
+fn onto_knots(surface: &BSurface, tolerances: &[Vec<f64>], pcs: &mut [Vec<Curve2>]) -> usize {
+    let Ok(on) = SurfaceEval::new(surface) else { return 0 };
+    let mut moved = 0;
+    for (tl, pc) in tolerances.iter().zip(pcs.iter_mut()) {
+        for (&tolerance, c) in tl.iter().zip(pc.iter_mut()) {
+            if let Ok(Some((onto, _))) = on.pcurve_onto_knots(c, tolerance) {
+                *c = onto;
+                moved += 1;
             }
         }
     }
