@@ -30,7 +30,7 @@
 {"case":"gen0024","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0025","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,1.0,1.0,1.0,1.0,1.0]}}
 {"case":"gen0026","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,1.0,1.0]}}
-{"case":"gen0027","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"gen0027","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0028","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
 {"case":"gen0029","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0030","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
@@ -49,7 +49,7 @@
 {"case":"gen0043","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0044","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,1.0,1.0,1.0,1.0,1.0]}}
 {"case":"gen0045","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"gen0046","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"gen0046","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0047","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0048","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1025.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0049","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
@@ -85,7 +85,7 @@
 {"case":"gen0079","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0080","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0081","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"gen0082","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"gen0082","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0083","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0084","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0085","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
@@ -108,14 +108,14 @@
 {"case":"gen0102","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.0]}}
 {"case":"gen0103","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0104","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"gen0105","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"gen0105","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0106","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0107","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0108","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0109","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0110","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0111","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"gen0112","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-1.0]}}
+{"case":"gen0112","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"gen0113","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.0]}}
 {"case":"gen0114","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.0]}}
 {"case":"gen0115","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
@@ -126,7 +126,7 @@
 {"case":"gen0120","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0121","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0122","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"gen0123","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"gen0123","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0124","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0125","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.0,1.0,1.0]}}
 {"case":"gen0126","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,1.0,1.0,1.0,1.0,1.0]}}
@@ -138,7 +138,7 @@
 {"case":"gen0132","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0133","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0134","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
-{"case":"gen0135","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"gen0135","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0136","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0137","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0138","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
@@ -178,7 +178,7 @@
 {"case":"gen0172","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0173","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0174","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"gen0175","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"gen0175","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0176","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1025.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0177","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.0,1.0,1.0]}}
 {"case":"gen0178","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
@@ -233,7 +233,7 @@
 {"case":"gen0227","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.0]}}
 {"case":"gen0228","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0229","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"gen0230","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"gen0230","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0231","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0232","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0233","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.0,1.0,1.0]}}
@@ -366,10 +366,10 @@
 {"case":"ub247_taper_start_cap_two_squares_at_a_corner","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
 {"case":"ub50_taper_end_cap_offsets_of_a_loop_enclosing_nothing","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"ub50_taper_end_cap_sliver_down","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-1.0]}}
-{"case":"ub50_taper_line_and_its_reverse","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
+{"case":"ub50_taper_line_and_its_reverse","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
 {"case":"ub50_taper_line_back_through_the_last_mid","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"ub50_taper_second_pass_half_circle_both_chords_down","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"ub50_taper_second_pass_line_and_reverse_apart_down","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"ub50_taper_second_pass_short_link_up","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
 {"case":"ub50_taper_two_identical_arcs","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
-{"case":"ub50_taper_two_identical_lines","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
+{"case":"ub50_taper_two_identical_lines","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}

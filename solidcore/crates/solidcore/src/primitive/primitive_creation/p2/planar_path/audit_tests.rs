@@ -491,9 +491,8 @@ fn square() -> Vec<Curve> {
         .collect()
 }
 
-fn taper_with(pass_on: bool, fail: (&'static str, usize)) -> (Result<()>, Vec<&'static str>) {
+fn taper_with(fail: (&'static str, usize)) -> (Result<()>, Vec<&'static str>) {
     let mut k = Kernel::default();
-    k.fixes.sweep_statuses_pass_on = pass_on;
     let mut a = FaultAccess::new(&mut k, fail);
     let region = a.infinite_region(PrimitiveModel::MAIN).unwrap();
     a.calls.clear();
@@ -513,38 +512,32 @@ fn taper_with(pass_on: bool, fail: (&'static str, usize)) -> (Result<()>, Vec<&'
 }
 
 /// fork c8f6a31 (`CreateTaperExtrude`, `SER(pBrep->StitchFaces(dBrepTol, ..))`, #2009):
-/// the scratch B-rep's failed stitch is returned with `sweep_statuses_pass_on`;
-/// upstream goes on with the unstitched faces.
+/// the scratch B-rep's failed stitch is returned (upstream goes on with the
+/// unstitched faces).
 #[test]
 fn issue_2009_taper_passes_on_a_failed_scratch_stitch() {
-    let (off, calls) = taper_with(false, ("stitch_faces", 1));
+    let (r, calls) = taper_with(("stitch_faces", 1));
     assert!(calls.contains(&"stitch_faces"), "{calls:?}");
-    assert_ne!(off.err(), Some(injected()));
-    let (on, _) = taper_with(true, ("stitch_faces", 1));
-    assert_eq!(on.unwrap_err(), injected());
+    assert_eq!(r.unwrap_err(), injected());
 }
 
 /// fork c8f6a31 (`CreateTaperExtrude`, `SER(pBrep->StitchAndOrient())`, #2009): the
-/// final stitch-and-orient's failure is returned with `sweep_statuses_pass_on`;
-/// upstream reports success.
+/// final stitch-and-orient's failure is returned (upstream reports success).
 #[test]
 fn issue_2009_taper_passes_on_a_failed_stitch_and_orient() {
-    let (off, calls) = taper_with(false, ("stitch_and_orient", 1));
+    let (r, calls) = taper_with(("stitch_and_orient", 1));
     assert!(calls.contains(&"stitch_and_orient"), "{calls:?}");
-    assert!(off.is_ok(), "{off:?}");
-    let (on, _) = taper_with(true, ("stitch_and_orient", 1));
-    assert_eq!(on.unwrap_err(), injected());
+    assert_eq!(r.unwrap_err(), injected());
 }
 
 /// fork c8f6a31 (`CreatePipeSweep`, `SER(SmCircle::CreateCanonical(..))`, #2009): a pipe
-/// radius the circle refuses (zero) is that circle's error with
-/// `sweep_statuses_pass_on`; upstream sweeps the null profile it leaves.
+/// radius the circle refuses (zero) is that circle's error (upstream sweeps the null
+/// profile it leaves).
 #[test]
 fn issue_2009_pipe_sweep_passes_on_a_failed_circle() {
     let path = BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::Z * 5.0).unwrap();
-    let circle_error = |pass_on: bool| {
+    let circle_error = || {
         let mut k = Kernel::default();
-        k.fixes.sweep_statuses_pass_on = pass_on;
         let mut a = FaultAccess::new(&mut k, ("", 0));
         let region = a.infinite_region(PrimitiveModel::MAIN).unwrap();
         let mut primitive = PrimitiveCreation::new(Some(region), 0, false);
@@ -566,6 +559,5 @@ fn issue_2009_pipe_sweep_passes_on_a_failed_circle() {
             Err(SolidError::Upstream { operation, .. }) if operation.contains("ellipse")
         )
     };
-    assert!(!circle_error(false));
-    assert!(circle_error(true));
+    assert!(circle_error());
 }
