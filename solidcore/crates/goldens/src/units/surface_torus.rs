@@ -1303,17 +1303,171 @@ mod tests {
         (a - b).abs() <= tol
     }
 
-    /// The analytic data of `t` against the torus it must be: radii `major` and `minor`,
-    /// STEP interval lengths `lengths` (degrees), the axis through `origin` along `axis`
-    /// (either sense), and the analytic surface passing through `nurb` at the NURB
-    /// domain's four corners and its centre. `slack` is a certified bound on how far
-    /// `nurb` lies off that torus (a perturbed control point; 0 otherwise).
+    /// The largest residual seen per check, as a fraction of its allowance.
+    #[derive(Default)]
+    struct Residuals(BTreeMap<&'static str, f64>);
+
+    impl Residuals {
+        /// Asserts `residual <= allowance` (NaN fails) and records the fraction used.
+        fn check(&mut self, key: &'static str, name: &str, residual: f64, allowance: f64) {
+            assert!(residual <= allowance, "{name}: {key}: residual {residual:e} over {allowance:e}");
+            let used = residual / allowance;
+            let e = self.0.entry(key).or_insert(0.0);
+            if used > *e {
+                *e = used;
+            }
+        }
+    }
+
+    type NurbSurf = solidcore::nurbs::srf_basic::Surface;
+
+    /// Control point `(s, g)` of `net` (Euclidean, weight), `s` along the sweep and `g`
+    /// along the tube: the NURB's u is the sweep unless `swap`.
+    fn net_point(net: &NurbSurf, swap: bool, s: usize, g: usize) -> (Vec3, f64) {
+        let c = if swap { net.cpt(g, s) } else { net.cpt(s, g) }.expect("control point");
+        (c.to_euclid(), c.w)
+    }
+
+    /// `knots` are degree-2 Bezier knots for `ncp` control points: three end copies and
+    /// every interior knot twice, so each `(P2k, P2k+1, P2k+2)` is its own rational Bezier
+    /// arc joined C0 at `P2k`.
+    fn bezier_knots(knots: &[f64], ncp: usize) -> bool {
+        let n = knots.len();
+        ncp % 2 == 1
+            && n == ncp + 3
+            && knots[0] == knots[1]
+            && knots[1] == knots[2]
+            && knots[n - 1] == knots[n - 2]
+            && knots[n - 2] == knots[n - 3]
+            && (3..n - 3).step_by(2).all(|t| knots[t] == knots[t + 1])
+    }
+
+    /// Asserts that the rational quadratic Bezier arcs `pts` (Euclidean, weight) are
+    /// exactly arcs of the circle of centre `c`, unit plane normal `nrm` and radius `rho`:
+    /// each end on the circle, every point in its plane, the middle point at
+    /// `rho / cos(theta / 2)` on the bisector of the ends, and `w1^2 = w0 w2 cos^2(theta / 2)`
+    /// (the conditions for a rational quadratic Bezier to be that circular arc). Returns the
+    /// arcs' total angle in degrees.
+    #[allow(clippy::too_many_arguments)]
+    fn assert_arcs(
+        res: &mut Residuals,
+        name: &str,
+        pts: &[(Vec3, f64)],
+        c: Vec3,
+        nrm: Vec3,
+        rho: f64,
+        tol: f64,
+    ) -> f64 {
+        assert!(rho > 0.0, "{name}: arc radius {rho}");
+        let mut total = 0.0;
+        for seg in pts.windows(3).step_by(2) {
+            let ((p0, w0), (p1, w1), (p2, w2)) = (seg[0], seg[1], seg[2]);
+            let (a, m, b) = (p0 - c, p1 - c, p2 - c);
+            res.check("net: arc end on its circle", name, (a.length() - rho).abs(), tol);
+            res.check("net: arc end on its circle", name, (b.length() - rho).abs(), tol);
+            for v in [a, m, b] {
+                res.check("net: control point in the arc's plane", name, v.dot(nrm).abs(), tol);
+            }
+            let theta = a.cross(b).length().atan2(a.dot(b));
+            let half = (theta / 2.0).cos();
+            assert!(half > 0.0, "{name}: arc of {theta} rad");
+            res.check("net: middle point at rho / cos(theta / 2)", name, (m.length() - rho / half).abs(), tol / half);
+            let bis = a + b;
+            res.check("net: middle point on the bisector", name, m.cross(bis / bis.length()).length(), tol / half);
+            res.check("net: arc weights w1^2 = w0 w2 cos^2", name, (w1 * w1 - w0 * w2 * half * half).abs() / (w0 * w2), 1e-12);
+            total += theta.to_degrees();
+        }
+        total
+    }
+
+    /// Asserts that `net` is exactly the torus of radii `major` and `minor` about the axis
+    /// through `origin` along `axis`, over STEP lengths `lengths`: degree-2 Bezier knots
+    /// both ways; the tube column at the sweep start is exactly an arc of the minor circle
+    /// (centre `R` out from the axis in its meridian plane, radius `r`) over `lengths.1`;
+    /// every sweep row is exactly the arc about the axis of its tube-column point, over
+    /// `lengths.0`, rotated as the first row, with tensor-product weights. That is the
+    /// NURB surface of revolution of the minor circle (Piegl & Tiller, The NURBS Book,
+    /// section 8.5), so every point of the patch lies on the torus, not only the points
+    /// checked.
+    #[allow(clippy::too_many_arguments)]
+    fn assert_net_is_torus(
+        res: &mut Residuals,
+        name: &str,
+        net: &NurbSurf,
+        swap: bool,
+        major: f64,
+        minor: f64,
+        lengths: (f64, f64),
+        origin: Vec3,
+        axis: Vec3,
+        tol: f64,
+        ang: f64,
+    ) {
+        let a = axis / axis.length();
+        let ix = net.indices();
+        let (nu, nv) = (ix.n + 1, ix.m + 1);
+        assert!(bezier_knots(net.u_knots(), nu) && bezier_knots(net.v_knots(), nv), "{name}: knots");
+        let (ns, ng) = if swap { (nv, nu) } else { (nu, nv) };
+        let p = |s: usize, g: usize| net_point(net, swap, s, g);
+        let radial = |x: Vec3| {
+            let d = x - origin;
+            d - d.dot(a) * a
+        };
+        // the generator: the tube column at the sweep start
+        // its meridian line, from its control point farthest from the axis; a tube that
+        // crosses the axis has points on both sides, so the side of the tube's centre is
+        // the one that puts the first point at distance r (every point is then checked)
+        let r0 = (0..ng)
+            .map(|g| radial(p(0, g).0))
+            .fold(Vec3::new(0.0, 0.0, 0.0), |m, d| if d.length() > m.length() { d } else { m });
+        let line = r0 / r0.length();
+        let off_circle = |dir: Vec3| ((p(0, 0).0 - (origin + major * dir)).length() - minor).abs();
+        let dir0 = if off_circle(-line) < off_circle(line) { -line } else { line };
+        let column: Vec<_> = (0..ng).map(|g| p(0, g)).collect();
+        let tube = assert_arcs(res, name, &column, origin + major * dir0, a.cross(dir0), minor, tol);
+        res.check("net: tube angle = STEP v length", name, (tube - lengths.1).abs(), ang);
+        // every sweep row: the arc about the axis of its column point
+        let w00 = p(0, 0).1;
+        for g in 0..ng {
+            let (q, wq) = p(0, g);
+            let rho = radial(q).length();
+            let row: Vec<_> = (0..ns).map(|s| p(s, g)).collect();
+            let sweep = assert_arcs(res, name, &row, origin + (q - origin).dot(a) * a, a, rho, tol);
+            res.check("net: sweep angle = STEP u length", name, (sweep - lengths.0).abs(), ang);
+            for s in 0..ns {
+                let (ps, w) = p(s, g);
+                let ws0 = p(s, 0).1;
+                res.check("net: tensor-product weights", name, (w * w00 - ws0 * wq).abs() / (w * w00), 1e-12);
+                if s % 2 == 0 {
+                    // the row's start lies on the meridian, on the side of `dir0` or across
+                    // the axis; each arc end is turned as the generator's is
+                    let side = if radial(q).dot(dir0) < 0.0 { -1.0 } else { 1.0 };
+                    let d = radial(ps);
+                    let rot = radial(p(s, 0).0);
+                    let side0 = if radial(p(0, 0).0).dot(dir0) < 0.0 { -1.0 } else { 1.0 };
+                    res.check("net: rows turned alike", name, (side * d / d.length() - side0 * rot / rot.length()).length(), 1e-9);
+                }
+            }
+        }
+    }
+
+    /// The analytic data of `t` against the torus it must be. `exact` (NURB u the sweep
+    /// unless `swap`) is first proven to be exactly that torus ([`assert_net_is_torus`]);
+    /// `t` must then have radii `major` and `minor`, STEP interval lengths `lengths`
+    /// (degrees), the axis through `origin` along `axis` (either sense), and pass through
+    /// `test` at the NURB domain's four corners and its centre, each at a STEP parameter
+    /// inside its domain; the corners fix the patch's placement on the torus (its u0 and
+    /// v0). `slack` is a certified bound on how far `test` lies off `exact` (a perturbed
+    /// control point; 0 otherwise): it certifies the point checks only.
     #[allow(clippy::too_many_arguments)]
     fn assert_is_torus(
+        res: &mut Residuals,
         name: &str,
         k: &Kernel,
         t: &Torus,
-        nurb: &BSplineSurface,
+        test: &BSplineSurface,
+        exact: &NurbSurf,
+        swap: bool,
         major: f64,
         minor: f64,
         lengths: (f64, f64),
@@ -1321,42 +1475,41 @@ mod tests {
         axis: Vec3,
         slack: f64,
     ) {
-        // rounding allowance: 1e-9 relative to the model size, plus the slack; every move
-        // this test pins is at least 1e-3 of the model size or 1e-3 degrees (the PR lists
-        // each)
-        let size = 1.0 + origin.length() + major + minor;
-        let tol = 1e-9 * size + slack;
-        // a point moved by `slack` turns the tube or the sweep by at most
-        // slack / (the smaller circle radius) radians
-        let ang = 1e-9 + (slack / minor.min((major - minor).abs())).to_degrees();
-        assert!(near(t.major_radius(), major, 1e-9 * major + slack), "{name}: major {} vs {major}", t.major_radius());
-        assert!(near(t.minor_radius(), minor, 1e-9 * minor + slack), "{name}: minor {} vs {minor}", t.minor_radius());
+        // chosen allowances (not derived): 1e-9 of the model size for points, 1e-9 relative
+        // for radii, 1e-9 degrees for angles; the test prints the largest fraction of each
+        // that the 92 rows use, and every move it pins is far larger (the PR lists each)
+        let size = origin.length() + major + minor;
+        let tol = 1e-9 * size;
+        assert_net_is_torus(res, name, exact, swap, major, minor, lengths, origin, axis, tol, 1e-9);
+        // a point moved by `slack` turns the tube or the sweep by at most slack over the
+        // smaller circle radius; the parameter checks of a perturbed row use these widened
+        // allowances as measured, not derived, bounds
+        let ang = if slack > 0.0 {
+            let den = minor.min((major - minor).abs());
+            assert!(den > 0.0, "{name}: no angle bound for R = r");
+            1e-9 + (slack / den).to_degrees()
+        } else {
+            1e-9
+        };
+        res.check("torus: major radius", name, (t.major_radius() - major).abs(), 1e-9 * major + slack);
+        res.check("torus: minor radius", name, (t.minor_radius() - minor).abs(), 1e-9 * minor + slack);
         let d = t.base().step_uv_domain();
-        assert!(near(d.u_interval().length(), lengths.0, ang), "{name}: u length {:?} vs {}", d.u_interval(), lengths.0);
-        assert!(near(d.v_interval().length(), lengths.1, ang), "{name}: v length {:?} vs {}", d.v_interval(), lengths.1);
+        let (du, dv) = (d.u_interval(), d.v_interval());
+        res.check("torus: STEP u length", name, (du.length() - lengths.0).abs(), ang);
+        res.check("torus: STEP v length", name, (dv.length() - lengths.1).abs(), ang);
         let pos = t.base().position();
-        assert!((pos.origin() - origin).length() <= tol, "{name}: origin {:?} vs {origin:?}", pos.origin());
-        let z = pos.z_axis();
-        assert!(z.cross(axis).length() <= 1e-9, "{name}: axis {z:?} vs {axis:?}");
-        let nd = nurb.natural_uv_domain();
+        res.check("torus: origin", name, (pos.origin() - origin).length(), tol + slack);
+        res.check("torus: axis", name, pos.z_axis().cross(axis / axis.length()).length(), 1e-9);
+        let nd = test.natural_uv_domain();
         for (a, b) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0), (0.5, 0.5)] {
             let uv = nd.evaluate(a, b);
-            let p = nurb.evaluate_point(uv).expect("nurb point");
+            let p = test.evaluate_point(uv).expect("nurb point");
             let step = t.convert_uv_from_nurbs_to_step(k, uv).expect("to step");
-            assert!(
-                step.x >= d.u_interval().min() - 1e-9 && step.x <= d.u_interval().max() + 1e-9,
-                "{name}: step u {} outside {:?}",
-                step.x,
-                d.u_interval()
-            );
-            assert!(
-                step.y >= d.v_interval().min() - 1e-9 && step.y <= d.v_interval().max() + 1e-9,
-                "{name}: step v {} outside {:?}",
-                step.y,
-                d.v_interval()
-            );
+            let outside = |x: f64, lo: f64, hi: f64| (lo - x).max(x - hi).max(0.0);
+            res.check("torus: STEP parameter in the domain", name, outside(step.x, du.min(), du.max()), ang);
+            res.check("torus: STEP parameter in the domain", name, outside(step.y, dv.min(), dv.max()), ang);
             let q = t.evaluate_step_point(step).expect("step point");
-            assert!((p - q).length() <= tol, "{name}: at ({a}, {b}) nurb {p:?} analytic {q:?}");
+            res.check("torus: through the NURB", name, (p - q).length(), tol + slack);
         }
     }
 
@@ -1370,6 +1523,7 @@ mod tests {
         };
         let cases = Runner.cases(&ctx).expect("cases");
         let k = Kernel::default();
+        let mut res = Residuals::default();
         let mut seen = 0;
         for case in &cases {
             if !WR408_501_504_MOVED.contains(&case.name.as_str()) {
@@ -1382,6 +1536,7 @@ mod tests {
             let (major, minor) = (i.torus.major, i.torus.minor);
             let origin = v3(i.torus.origin);
             let axis = v3(i.torus.x).cross(v3(i.torus.y));
+            let lengths = input_lengths(&i.torus);
             match &i.op {
                 OpIn::IsNurb { scale, net_scale, perturb } => {
                     // the moved is_nurb rows are unscaled or mirrored nets (an isometry
@@ -1392,16 +1547,17 @@ mod tests {
                     let m = Vec3::new(net_scale[0], net_scale[1], net_scale[2]);
                     let mo = Vec3::new(origin.x * m.x, origin.y * m.y, origin.z * m.z);
                     let ma = Vec3::new(axis.x * m.x, axis.y * m.y, axis.z * m.z);
-                    let mut nurb = t.base().base().gw_nurb().cloned().expect("nurb");
-                    let ix = nurb.indices();
+                    let mut exact = t.base().base().gw_nurb().cloned().expect("nurb");
+                    let ix = exact.indices();
                     for a in 0..=ix.n {
                         for b in 0..=ix.m {
-                            let p = nurb.cpt_mut(a, b).expect("cpt");
+                            let p = exact.cpt_mut(a, b).expect("cpt");
                             p.x *= m.x;
                             p.y *= m.y;
                             p.z *= m.z;
                         }
                     }
+                    let mut nurb = exact.clone();
                     for pt in perturb {
                         if let Ok(p) = nurb.cpt_mut(pt.i, pt.j) {
                             p.x += pt.d[0];
@@ -1422,13 +1578,14 @@ mod tests {
                         .expect("no error")
                         .unwrap_or_else(|| panic!("{name}: not found"));
                     assert_eq!(found.inside_out(), i.torus.inside_out != (m.x * m.y * m.z < 0.0), "{name}: inside out");
-                    assert_is_torus(name, &k, &found, &test, major, minor, input_lengths(&i.torus), mo, ma, slack);
+                    assert_is_torus(&mut res, name, &k, &found, &test, &exact, i.torus.swap, major, minor, lengths, mo, ma, slack);
                 }
                 OpIn::Rebuild {} => {
                     let mut r = t.clone();
                     r.rebuild_step_from_nurb_parameters(&k).unwrap_or_else(|e| panic!("{name}: {e}"));
                     assert_eq!(r.inside_out(), i.torus.inside_out, "{name}: inside out");
-                    assert_is_torus(name, &k, &r, t.base().base(), major, minor, input_lengths(&i.torus), origin, axis, 0.0);
+                    let net = t.base().base().gw_nurb().expect("nurb");
+                    assert_is_torus(&mut res, name, &k, &r, t.base().base(), net, i.torus.swap, major, minor, lengths, origin, axis, 0.0);
                 }
                 OpIn::Offset { dist, tol, rebuild } => {
                     assert!(*rebuild, "{name}: only rebuilt offsets move");
@@ -1436,31 +1593,25 @@ mod tests {
                         .create_offset_surface(&k, *dist, *tol)
                         .expect("offset")
                         .unwrap_or_else(|| panic!("{name}: no offset"));
-                    // the offset torus as constructed: the rebuild must give its analytic data back
+                    // the offset torus in closed form: the minor radius grows by the signed
+                    // distance along the surface normal, which points into the tube when the
+                    // NURB's u and v are swapped (`CreateOffsetSurface`); the major radius,
+                    // frame and STEP domain are the source's
+                    let off_minor = minor + if i.torus.swap { -dist } else { *dist };
+                    res.check("offset: minor radius", name, (off.minor_radius() - off_minor).abs(), 1e-9 * off_minor);
+                    res.check("offset: major radius", name, (off.major_radius() - major).abs(), 1e-9 * major);
+                    let od = off.base().step_uv_domain();
+                    res.check("offset: STEP u length", name, (od.u_interval().length() - lengths.0).abs(), 1e-9);
+                    res.check("offset: STEP v length", name, (od.v_interval().length() - lengths.1).abs(), 1e-9);
+                    let opos = off.base().position();
+                    res.check("offset: origin", name, (opos.origin() - origin).length(), 1e-9 * (origin.length() + major + off_minor));
+                    res.check("offset: axis", name, opos.z_axis().cross(axis / axis.length()).length(), 1e-9);
+                    // and the rebuild gives that torus back
                     let mut r = off.clone();
                     r.rebuild_step_from_nurb_parameters(&k).unwrap_or_else(|e| panic!("{name}: {e}"));
                     assert_eq!(r.inside_out(), off.inside_out(), "{name}: inside out");
-                    let od = off.base().step_uv_domain();
-                    assert_is_torus(
-                        name,
-                        &k,
-                        &r,
-                        off.base().base(),
-                        off.major_radius(),
-                        off.minor_radius(),
-                        (od.u_interval().length(), od.v_interval().length()),
-                        off.base().position().origin(),
-                        off.base().position().z_axis(),
-                        0.0,
-                    );
-                    // and the offset is the closed form: same major radius, minor r -+ d
-                    assert!(near(off.major_radius(), major, 1e-12 * major), "{name}: offset major");
-                    assert!(
-                        near(off.minor_radius(), minor + dist, 1e-12 * minor)
-                            || near(off.minor_radius(), minor - dist, 1e-12 * minor),
-                        "{name}: offset minor {}",
-                        off.minor_radius()
-                    );
+                    let net = off.base().base().gw_nurb().expect("nurb");
+                    assert_is_torus(&mut res, name, &k, &r, off.base().base(), net, off.base().swap_uv(), major, off_minor, lengths, origin, axis, 0.0);
                 }
                 OpIn::Iso { param, iso, dom } => {
                     assert!(dom.is_none(), "{name}: only whole-domain iso curves move");
@@ -1471,35 +1622,36 @@ mod tests {
                         panic!("{name}: not a circle");
                     };
                     let x = e.position().x_axis();
+                    let ptol = 1e-9 * (origin.length() + major + minor);
                     // the minor circle: unit x axis in the torus's xy plane, centre R along
                     // it from the origin, radius r, over the torus's v interval
-                    assert!(near(x.length(), 1.0, 1e-12), "{name}: x {x:?}");
-                    assert!(x.dot(axis).abs() <= 1e-12, "{name}: x {x:?} off the xy plane");
+                    res.check("iso: unit x axis", name, (x.length() - 1.0).abs(), 1e-12);
+                    res.check("iso: x axis in the torus's xy plane", name, x.dot(axis).abs(), 1e-12);
                     let centre = origin + major * x;
-                    assert!((e.position().origin() - centre).length() <= 1e-12 * (1.0 + major), "{name}: centre");
-                    assert!(near(e.x_radius(), minor, 1e-12 * minor), "{name}: radius {}", e.x_radius());
+                    res.check("iso: centre", name, (e.position().origin() - centre).length(), ptol);
+                    res.check("iso: radius", name, (e.x_radius() - minor).abs(), 1e-9 * minor);
                     let ivl = e.step_interval();
-                    assert!(near(ivl.length(), input_lengths(&i.torus).1, 1e-9), "{name}: interval {ivl:?}");
+                    res.check("iso: interval length", name, (ivl.length() - lengths.1).abs(), 1e-9);
                     // its analytic ends are the iso curve's NURB ends, and the NURB's middle
                     // lies on the circle
-                    let ptol = 1e-9 * (1.0 + major + minor);
                     let nurb = e.base();
                     let ni = nurb.natural_interval();
                     let ends = [ni.min(), ni.max()].map(|s| nurb.evaluate_point(s).expect("nurb point"));
                     let step_ends = [ivl.min(), ivl.max()].map(|s| e.evaluate_step_point(s).expect("circle point"));
-                    let same = |a: [Vec3; 2], b: [Vec3; 2]| (a[0] - b[0]).length() <= ptol && (a[1] - b[1]).length() <= ptol;
-                    assert!(
-                        same(ends, step_ends) || same(ends, [step_ends[1], step_ends[0]]),
-                        "{name}: ends {ends:?} vs {step_ends:?}"
-                    );
+                    let gap = |a: [Vec3; 2], b: [Vec3; 2]| (a[0] - b[0]).length().max((a[1] - b[1]).length());
+                    let ends_gap = gap(ends, step_ends).min(gap(ends, [step_ends[1], step_ends[0]]));
+                    res.check("iso: NURB ends are the circle's", name, ends_gap, ptol);
                     let mid = nurb.evaluate_point(ni.evaluate(0.5)).expect("nurb point");
                     let normal = x.cross(e.position().y_axis());
-                    assert!(near((mid - centre).length(), minor, ptol), "{name}: mid {mid:?}");
-                    assert!((mid - centre).dot(normal).abs() <= ptol, "{name}: mid off the plane");
+                    res.check("iso: NURB middle on the circle", name, ((mid - centre).length() - minor).abs(), ptol);
+                    res.check("iso: NURB middle in the circle's plane", name, (mid - centre).dot(normal).abs(), ptol);
                 }
                 other => panic!("{name}: unexpected op {}", op_name(other)),
             }
         }
         assert_eq!(seen, WR408_501_504_MOVED.len(), "every moved case is checked");
+        for (key, used) in &res.0 {
+            eprintln!("largest residual / allowance: {used:.3e}  {key}");
+        }
     }
 }
