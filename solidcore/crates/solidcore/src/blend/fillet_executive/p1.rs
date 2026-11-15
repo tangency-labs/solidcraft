@@ -1271,8 +1271,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ///
     /// The pinned `CreateFilletCorners` records nothing for an unsupported corner. Here
     /// the executive records the vertex, its location, `SM_FIL_FAILURE`,
-    /// `FilletErrorType::CornerUnsupported` and `"Corner case not implemented"` (the fork's note) and still keeps the pending
-    /// entry: retaining the note does not change the operation's result or topology.
+    /// `FilletErrorType::CornerUnsupported` and `"Corner case not implemented"` (the
+    /// fork's note) and still keeps the pending entry: retaining the note does not change
+    /// the operation's result or topology.
     ///
     /// A [`CornerCreation::Refused`] corner (the fork's) is noted at its vertex with its own error and
     /// reason, no later unsupported corner's note replaces it, and the operation fails

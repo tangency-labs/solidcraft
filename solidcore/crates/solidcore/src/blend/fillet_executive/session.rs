@@ -7771,29 +7771,13 @@ mod tests {
     fn do_fillet_does_not_keep_a_stale_missing_corner_note() {
         let run = |stale: bool| {
             let mut k = Kernel::default();
-            let mut body = pentagonal_pyramid(&mut k);
-            let base_edges = crate::topology::brep::p1::edges(&body, None)
-                .unwrap()
-                .into_iter()
-                .filter(|edge| {
-                    crate::topology::edge::vertices(&body, *edge, None)
-                        .unwrap()
-                        .iter()
-                        .flatten()
-                        .all(|v| crate::topology::vertex::point(&body, *v).unwrap().z < 0.5)
-                })
-                .collect::<Vec<_>>();
-            assert_eq!(base_edges.len(), 5);
+            let mut body =
+                crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                    .unwrap();
+            let edge = crate::topology::brep::p1::edges(&body, None).unwrap()[0];
             let mut session = FilletSession::new(&mut k, &mut body).unwrap();
             session
-                .prepare_constant_radius_edges(
-                    &mut k,
-                    &base_edges[..1],
-                    STALE_CASE_RADIUS,
-                    1,
-                    1,
-                    1.0,
-                )
+                .prepare_constant_radius_edges(&mut k, &[edge], STALE_CASE_RADIUS, 1, 1, 1.0)
                 .unwrap();
             if stale {
                 session.executive.error.code = FilletErrorType::CornerUnsupported as i32;
@@ -7816,8 +7800,9 @@ mod tests {
     }
 
     /// The radius of [`do_fillet_does_not_keep_a_stale_missing_corner_note`]'s round on one
-    /// base edge of the pyramid: larger than the base face allows, so the fillet fails.
-    const STALE_CASE_RADIUS: f64 = 3.0;
+    /// edge of the unit cube: five times the faces, so the fillet surface fails (code 4,
+    /// not a no-room refusal) and the edge has no corner to note.
+    const STALE_CASE_RADIUS: f64 = 5.0;
 
     #[test]
     fn a_no_room_refusal_after_an_unsupported_corner_names_no_stale_site() {
