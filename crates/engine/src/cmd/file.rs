@@ -162,7 +162,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("INSERT", "FILES")
         .icon("mesh_export")
         .noundo()
-        .params("slicer: id or name from file.slicers, or a program the user added under Custom…; bodies?: [names] (default: the selected bodies); wait?: block|return|no (default block: a slicer that drops a file at a cold start is started alone and the call waits up to 10 s for it to be ready, then sends; return: start it and answer {starting}; no: send now); single_instance?: bool (default true: PrusaSlicer, SuperSlicer and Cura load the file in the window that is open); format?: 3mf|stl|3mf-tagged (default 3mf, in millimetres; STL if that can't be written) → saves the bodies in this user's slicer folder and opens the file in the slicer. The file name stays the same for the same design and bodies, so sending again replaces it (use the slicer's Reload from disk)"),
+        .params("slicer: id or name from file.slicers, or a program the user added under Custom…; bodies?: [names] (default: the selected bodies); wait?: block|return|no (default block: a slicer that drops a file at a cold start is started alone and the call waits up to 10 s for it to be ready, then sends; return: start it and answer {starting}; no: send now); single_instance?: bool (default true: PrusaSlicer, SuperSlicer and Cura load the file in the window that is open); format?: 3mf|stl|3mf-tagged (default 3mf, in millimetres; STL if that can't be written); name?: the file's name without extension, as the slicer shows it (default: the design's name and a code that tells designs and body selections apart; a given name is used as it is, so two sends under one name share one file; refused when it is blank, over 240 bytes, starts or ends with a space or a dot, or holds / \\ : * ? \" < > | or a control character) → saves the bodies in this user's slicer folder and opens the file in the slicer. The file name stays the same for the same design and bodies, so sending again replaces it (use the slicer's Reload from disk)"),
     CommandSpec::new("file.open_in_easyprint", "Open with EasyPrint", easyprint::open_in_easyprint)
         .icon("mesh_export")
         .noundo()
@@ -2463,6 +2463,7 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
                 format,
                 quality,
                 dest: send::Dest::Path(path),
+                name: None,
                 single_instance: bool_(p, "single_instance").unwrap_or(true),
                 wait: send::Wait::Block,
             },
@@ -2499,6 +2500,15 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let spec = str_(p, "slicer").ok_or_else(|| bad(cmd, "give `slicer` (see file.slicers)"))?;
         let wait = send::Wait::parse(str_(p, "wait")).ok_or_else(|| bad(cmd, "`wait` is block, return or no"))?;
+        // Anything but text is refused, not read as "no name": the caller asked for a name.
+        let name = match p.get("name") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(name)) => {
+                crate::slicer_files::check_name(name).map_err(|why| bad(cmd, format!("`name` can't be the file's name: {why}")))?;
+                Some(name.as_str())
+            }
+            Some(other) => return Err(bad(cmd, format!("`name` must be text, not {other}"))),
+        };
         send::send(
             s,
             send::Send {
@@ -2510,6 +2520,7 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
                 format,
                 quality: Default::default(),
                 dest: send::Dest::Folder,
+                name,
                 single_instance: bool_(p, "single_instance").unwrap_or(true),
                 wait,
             },

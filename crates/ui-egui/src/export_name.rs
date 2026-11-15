@@ -2,6 +2,7 @@
 //! template where `{design}` stands for the design's name, `{body}` for the exported body's, and
 //! `{project}`, `{part_number}`, `{revision}` and the other Design Properties for their values.
 //! An empty template keeps the name each export offered before the preference existed.
+//! The Send to Slicer file name preference names the file a slicer is sent the same way ([`sent`]).
 
 use solidcraft_engine::doc::Metadata;
 use solidcraft_engine::doc::metadata::{Owner, keys};
@@ -82,6 +83,16 @@ fn is_windows_device(name: &str) -> bool {
 pub(crate) fn offered(app: &crate::SolveApp, body: Option<&str>, legacy: &str) -> String {
     let names = Names { design: &app.session.doc.name, body, metadata: &app.session.doc.metadata };
     stem(&app.preferences.export_name, &names, legacy)
+}
+
+/// The name, without extension, of the file Send to Slicer writes for a send whose first body is
+/// `body`, from the Send to Slicer file name preference. `None` when the preference is empty or
+/// leaves nothing usable as a file name: the file then keeps the name `file.send_to_slicer` gives
+/// it (the design's name followed by a code).
+pub(crate) fn sent(app: &crate::SolveApp, body: Option<&str>) -> Option<String> {
+    let names = Names { design: &app.session.doc.name, body, metadata: &app.session.doc.metadata };
+    let name = stem(&app.preferences.slicer_file_name, &names, "");
+    (!name.is_empty()).then_some(name)
 }
 
 /// `template` with each `{placeholder}` replaced, in one pass: a value that holds braces itself

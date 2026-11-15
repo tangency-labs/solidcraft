@@ -1626,6 +1626,10 @@ preference_settings! {
     /// design's and the exported body's names (`export_name`). Empty: each export offers the name
     /// it did before (the design's, or the first body's for a mesh).
     export_name: String = String::new(), PAGE_DESIGN;
+    /// The name of the file Send to Slicer writes, which the slicer and the printer show
+    /// (`slicer_file_name`, #16440): a template with the placeholders of `export_name`. Empty: the
+    /// design's name followed by a code, as before.
+    slicer_file_name: String = String::new(), PAGE_DESIGN;
     /// Save as mesh: the last format (`stl` or `3mf`). Older versions also kept a "send to slicer"
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
     /// and they are ignored.

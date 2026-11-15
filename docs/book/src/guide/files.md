@@ -302,6 +302,16 @@ cut to 200 characters and 240 bytes, so it fits with its extension. Left empty, 
 offers the design's name, and Save As Mesh and a body's Export… offer the body's name. The control
 channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
 
+**Preferences → Design → Send to Slicer file name** names the file that **Send to Slicer** writes,
+which is the name the slicer and the printer show. It takes the same placeholders and makes the
+name safe in the same way; `{body}` is the first body sent. With `{design}-{body}`, sending the
+body Base of the design Bracket writes `Bracket-Base.3mf`. Sending again replaces that file.
+Designs that get the same name share one file, so a later send replaces the earlier one. Left
+empty, the file is named after the design, followed by a code that keeps designs and body
+selections apart, such as `Bracket-71b989e9a18bb966.3mf`. The control channel sets it with
+`ui.prefs {"slicer_file_name": "{design}-{body}"}`. A script names the file itself, with the
+`name` of `file.send_to_slicer`; the preference does not apply to it.
+
 ## Design properties
 
 **File → Design Properties…** (also under **Document Settings** in the Browser, and on the

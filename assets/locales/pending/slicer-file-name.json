@@ -1,0 +1,47 @@
+{
+  "en": {
+    "prefs.slicer_file_name": "Send to Slicer file name",
+    "prefs.slicer_file_name_sample": "Sending this design to a slicer writes: {name}",
+    "prefs.slicer_file_name_tip": "The name of the file Send to Slicer writes, as the slicer and the printer show it. These placeholders are replaced:\n{placeholders}\nA design property that is not set is left out. Designs that get the same name share one file: a later send replaces it. Leave the field empty for the design's name followed by a code."
+  },
+  "ar": {
+    "prefs.slicer_file_name": "اسم ملف الإرسال إلى برنامج التقطيع",
+    "prefs.slicer_file_name_sample": "إرسال هذا التصميم إلى برنامج التقطيع يكتب: {name}",
+    "prefs.slicer_file_name_tip": "اسم الملف الذي يكتبه «إرسال إلى برنامج التقطيع»، كما يعرضه برنامج التقطيع والطابعة. تُستبدل هذه العناصر النائبة:\n{placeholders}\nتُحذف خاصية التصميم غير المعيّنة. التصاميم التي تحصل على الاسم نفسه تتشارك ملفًا واحدًا: الإرسال اللاحق يستبدله. اترك الحقل فارغًا لاستخدام اسم التصميم متبوعًا برمز."
+  },
+  "de": {
+    "prefs.slicer_file_name": "Dateiname für An Slicer senden",
+    "prefs.slicer_file_name_sample": "Beim Senden dieses Designs an einen Slicer wird geschrieben: {name}",
+    "prefs.slicer_file_name_tip": "Der Name der Datei, die An Slicer senden schreibt, so wie ihn der Slicer und der Drucker anzeigen. Diese Platzhalter werden ersetzt:\n{placeholders}\nEine nicht gesetzte Konstruktionseigenschaft entfällt. Designs mit demselben Namen teilen sich eine Datei: ein späteres Senden ersetzt sie. Leer lassen für den Namen des Designs, gefolgt von einem Code."
+  },
+  "fr": {
+    "prefs.slicer_file_name": "Nom du fichier envoyé au slicer",
+    "prefs.slicer_file_name_sample": "L'envoi de ce design à un slicer écrit : {name}",
+    "prefs.slicer_file_name_tip": "Le nom du fichier qu'écrit Envoyer au slicer, tel que le slicer et l'imprimante l'affichent. Ces espaces réservés sont remplacés :\n{placeholders}\nUne propriété du design non renseignée est omise. Les designs qui obtiennent le même nom partagent un seul fichier : un envoi ultérieur le remplace. Laissez le champ vide pour le nom du design suivi d'un code."
+  },
+  "he": {
+    "prefs.slicer_file_name": "שם הקובץ בשליחה לסלייסר",
+    "prefs.slicer_file_name_sample": "שליחת התכן הזה לסלייסר כותבת: {name}",
+    "prefs.slicer_file_name_tip": "שם הקובץ ששליחה לסלייסר כותבת, כפי שהסלייסר והמדפסת מציגים אותו. מצייני המיקום האלה מוחלפים:\n{placeholders}\nמאפיין תכן שלא הוגדר מושמט. תכנים שמקבלים אותו שם חולקים קובץ אחד: שליחה מאוחרת יותר מחליפה אותו. השאירו את השדה ריק כדי לקבל את שם התכן ואחריו קוד."
+  },
+  "ja": {
+    "prefs.slicer_file_name": "スライサーに送るファイル名",
+    "prefs.slicer_file_name_sample": "このデザインをスライサーに送ると書き出されるファイル: {name}",
+    "prefs.slicer_file_name_tip": "スライサーに送るが書き出すファイルの名前です。スライサーやプリンターにはこの名前が表示されます。次のプレースホルダーが置き換えられます:\n{placeholders}\n設定されていないデザインのプロパティは省かれます。同じ名前になるデザインは 1 つのファイルを共有し、後から送るとそのファイルが置き換えられます。空のままにすると、デザイン名の後にコードが付いた名前になります。"
+  },
+  "ko": {
+    "prefs.slicer_file_name": "슬라이서로 보내는 파일 이름",
+    "prefs.slicer_file_name_sample": "이 디자인을 슬라이서로 보내면 기록되는 파일: {name}",
+    "prefs.slicer_file_name_tip": "슬라이서로 보내기가 기록하는 파일의 이름으로, 슬라이서와 프린터에 그대로 표시됩니다. 다음 자리 표시자가 바뀝니다:\n{placeholders}\n설정되지 않은 설계 속성은 빠집니다. 같은 이름을 받는 디자인은 파일 하나를 함께 쓰며, 나중에 보내면 그 파일이 바뀝니다. 비워 두면 디자인 이름 뒤에 코드가 붙습니다."
+  },
+  "vi": {
+    "prefs.slicer_file_name": "Tên tệp khi gửi sang phần mềm cắt lớp",
+    "prefs.slicer_file_name_sample": "Gửi thiết kế này sang phần mềm cắt lớp sẽ ghi: {name}",
+    "prefs.slicer_file_name_tip": "Tên của tệp mà Gửi sang phần mềm cắt lớp (Slicer) ghi ra, đúng như phần mềm cắt lớp và máy in hiển thị. Các phần giữ chỗ này được thay thế:\n{placeholders}\nThuộc tính thiết kế chưa đặt sẽ bị bỏ qua. Các thiết kế có cùng tên dùng chung một tệp: lần gửi sau sẽ thay thế tệp đó. Để trống để dùng tên thiết kế kèm theo một mã."
+  },
+  "zh": {
+    "prefs.slicer_file_name": "发送到切片软件的文件名",
+    "prefs.slicer_file_name_sample": "将此设计发送到切片软件时写入：{name}",
+    "prefs.slicer_file_name_tip": "“发送到切片软件”写入的文件的名称，切片软件和打印机会显示该名称。以下占位符会被替换：\n{placeholders}\n未设置的设计属性会被省略。名称相同的设计共用一个文件：之后的发送会替换它。留空则使用设计名称加一段代码。"
+  }
+}

@@ -54,6 +54,31 @@ pub fn stem(design: &str, path: Option<&str>, uid: u64, bodies: &[String]) -> St
     format!("{}-{:016x}", if name.is_empty() { "design" } else { name }, h)
 }
 
+/// Longest file name (no extension) a caller may give, in UTF-8 bytes: common file systems allow
+/// 255 bytes for a file name, and this leaves room for the extension and a `-9` copy number.
+pub const MAX_NAME_BYTES: usize = 240;
+
+/// Whether `name` can be the file name (no extension) of a sent file, as the caller gave it; else
+/// what is wrong with it. The name goes into the slicer folder as it is, so anything that could
+/// leave that folder (a separator, `..`) or that a common file system refuses is turned down
+/// rather than changed: the caller knows which file the slicer then shows.
+pub fn check_name(name: &str) -> std::result::Result<(), &'static str> {
+    if name.trim().is_empty() {
+        return Err("it is empty");
+    }
+    if name.len() > MAX_NAME_BYTES {
+        return Err("it is longer than 240 bytes");
+    }
+    if name.chars().any(|c| c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')) {
+        return Err("it has a character a file name can't hold (/ \\ : * ? \" < > | or a control character)");
+    }
+    let edge = |c: char| c.is_whitespace() || c == '.';
+    if name.starts_with(edge) || name.ends_with(edge) {
+        return Err("it starts or ends with a space or a dot");
+    }
+    Ok(())
+}
+
 /// Write `bytes` as `<stem>.<ext>` in `dir`: to a temporary name first, then renamed over the
 /// file, so the slicer never reads half a file. When the name can't be replaced (Windows keeps a
 /// file the slicer has open locked) the next free `<stem>-2.<ext>`, … is used; the flag says so.
@@ -126,6 +151,18 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(a, stem("Untitled", None, 1, &bodies), "one document keeps one file");
         assert_eq!(a.len(), "Untitled-".len() + 16);
+    }
+
+    #[test]
+    fn a_given_name_must_be_a_plain_file_name() {
+        for fine in ["Bracket", "Bracket-Base rev C", "RV-102_revC", "v1.2", "設計", "{design}"] {
+            assert_eq!(check_name(fine), Ok(()), "{fine}");
+        }
+        assert_eq!(check_name(&"a".repeat(MAX_NAME_BYTES)), Ok(()));
+        let refused = ["", "   ", "a/b", "..\\up", "C:part", "what?", "a\nb", "..", ".hidden", "part.", " part", "part "];
+        for bad in refused.into_iter().chain([&*"a".repeat(MAX_NAME_BYTES + 1)]) {
+            assert!(check_name(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
