@@ -26,26 +26,26 @@ pub fn rows_with_names(snapshot: &DrawingAttention, dimensions: &BTreeMap<String
         state: state(d),
         reason: reason(d),
         location: match (&d.sheet, &d.view) {
-            (Some(sheet), Some(view)) => fmt("ui.drawing_attention.sheet_view", &[("sheet", sheets.get(sheet).map(String::as_str).unwrap_or(sheet)), ("view", views.get(view).map(String::as_str).unwrap_or(view))]),
-            (None, Some(view)) => fmt("ui.drawing_attention.view_only", &[("view", views.get(view).map(String::as_str).unwrap_or(view))]),
-            _ => tr("ui.drawing_attention.unknown"),
+            (Some(sheet), Some(view)) => fmt("ui.issue15776_attention.sheet_view", &[("sheet", sheets.get(sheet).map(String::as_str).unwrap_or(sheet)), ("view", views.get(view).map(String::as_str).unwrap_or(view))]),
+            (None, Some(view)) => fmt("ui.issue15776_attention.view_only", &[("view", views.get(view).map(String::as_str).unwrap_or(view))]),
+            _ => tr("ui.issue15776_attention.unknown"),
         },
     }).collect()
 }
 
 fn state(d: &DimensionItem) -> String {
     match d.status.as_str() {
-        "lost" => tr("ui.drawing_attention.lost"),
-        "ambiguous" => tr("ui.drawing_attention.ambiguous"),
-        "ok" | "overridden" if d.out_of_date => tr("ui.drawing_attention.stale"),
-        "ok" | "overridden" => tr("ui.drawing_attention.inspect"),
-        _ => tr("ui.drawing_attention.other"),
+        "lost" => tr("ui.issue15776_attention.lost"),
+        "ambiguous" => tr("ui.issue15776_attention.ambiguous"),
+        "ok" | "overridden" if d.out_of_date => tr("ui.issue15776_attention.stale"),
+        "ok" | "overridden" => tr("ui.issue15776_attention.inspect"),
+        _ => tr("ui.issue15776_attention.other"),
     }
 }
 
 fn reason(d: &DimensionItem) -> String {
     if let Some(error) = &d.inspect_error {
-        return fmt("ui.drawing_attention.inspection_failed", &[("error", error)]);
+        return fmt("ui.issue15776_attention.inspection_failed", &[("error", error)]);
     }
     if let Some(why) = &d.why {
         if !why.trim().is_empty() {
@@ -53,9 +53,9 @@ fn reason(d: &DimensionItem) -> String {
         }
     }
     if d.out_of_date {
-        return tr("ui.drawing_attention.changed");
+        return tr("ui.issue15776_attention.changed");
     }
-    tr("ui.drawing_attention.reference")
+    tr("ui.issue15776_attention.reference")
 }
 
 /// Draw a status card only; callers decide its position and refresh cadence.
@@ -63,26 +63,26 @@ fn reason(d: &DimensionItem) -> String {
 pub fn show(ui: &mut egui::Ui, snapshot: &DrawingAttention, dimensions: &BTreeMap<String, String>, views: &BTreeMap<String, String>, sheets: &BTreeMap<String, String>) {
     let items = rows_with_names(snapshot, dimensions, views, sheets);
     ui.group(|ui| {
-        ui_kit::section_heading(ui, solidcraft_ui_text::tr("ui.drawing_attention.title"));
+        ui_kit::section_heading(ui, solidcraft_ui_text::tr("ui.issue15776_attention.title"));
         if items.is_empty() {
-            ui.label(format!("✓ {}", solidcraft_ui_text::tr("ui.drawing_attention.clear")));
+            ui.label(format!("✓ {}", solidcraft_ui_text::tr("ui.issue15776_attention.clear")));
         } else {
-            ui.label(format!("◇ {} {}", items.len(), solidcraft_ui_text::tr("ui.drawing_attention.count")));
+            ui.label(format!("◇ {} {}", items.len(), solidcraft_ui_text::tr("ui.issue15776_attention.count")));
             for item in items {
                 ui.separator();
                 ui.horizontal_wrapped(|ui| {
                     ui.label("◇");
-                    ui.strong(format!("{} {} · {}", solidcraft_ui_text::tr("ui.drawing_attention.dimension"), item.id, item.state));
+                    ui.strong(format!("{} {} · {}", solidcraft_ui_text::tr("ui.issue15776_attention.dimension"), item.id, item.state));
                 });
                 ui.label(&item.reason);
                 ui.small(&item.location);
             }
         }
         if snapshot.held {
-            ui.label(format!("◇ {}", solidcraft_ui_text::tr("ui.drawing_attention.held")));
+            ui.label(format!("◇ {}", solidcraft_ui_text::tr("ui.issue15776_attention.held")));
         }
         if snapshot.waiting_views > 0 {
-            ui.label(format!("◇ {} {}", snapshot.waiting_views, solidcraft_ui_text::tr("ui.drawing_attention.waiting")));
+            ui.label(format!("◇ {} {}", snapshot.waiting_views, solidcraft_ui_text::tr("ui.issue15776_attention.waiting")));
         }
         for warning in &snapshot.warnings {
             ui.label(format!("◇ {warning}"));
@@ -105,10 +105,10 @@ mod tests {
         ]}));
         let list = rows(&snapshot);
         assert_eq!(list.len(), 2);
-        assert_eq!(list[0].state, tr("ui.drawing_attention.lost"));
+        assert_eq!(list[0].state, tr("ui.issue15776_attention.lost"));
         assert_eq!(list[0].reason, "Edge deleted");
-        assert_eq!(list[0].location, tr("ui.drawing_attention.unknown"));
-        assert_eq!(list[1].state, tr("ui.drawing_attention.stale"));
+        assert_eq!(list[0].location, tr("ui.issue15776_attention.unknown"));
+        assert_eq!(list[1].state, tr("ui.issue15776_attention.stale"));
     }
 
     #[test]
@@ -116,7 +116,7 @@ mod tests {
         let mut snapshot = from_status(&json!({"dimensions":[{"dimension":"d","status":"ambiguous"}]}));
         snapshot.dimensions[0].inspect_error = Some("not available".to_owned());
         let list = rows(&snapshot);
-        assert_eq!(list[0].reason, fmt("ui.drawing_attention.inspection_failed", &[("error", "not available")]));
-        assert_eq!(list[0].state, tr("ui.drawing_attention.ambiguous"));
+        assert_eq!(list[0].reason, fmt("ui.issue15776_attention.inspection_failed", &[("error", "not available")]));
+        assert_eq!(list[0].state, tr("ui.issue15776_attention.ambiguous"));
     }
 }
