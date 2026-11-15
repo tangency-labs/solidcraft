@@ -539,8 +539,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     choice_row(ui, "ui.direction", "sm_contour_direction", &mut direction, &CONTOUR_DIRECTIONS);
                     *symmetric = direction == 1;
                     enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
+                    crate::ui_kit::checkbox_grid(ui, &mut [("Flip", flip), ("Other side", reverse)], 2);
                 });
-                crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip), ("Other side", reverse)]);
             } else {
                 crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
             }
