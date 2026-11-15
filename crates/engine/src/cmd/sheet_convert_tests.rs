@@ -626,6 +626,34 @@ fn a_bend_modelled_with_another_radius_takes_the_rules() {
     }
 }
 
+/// Convert takes a modelled bend picked on either of its cylinders (#6748): a pick on the one
+/// across the thickness from the face picked (the outside, the face picked inside, or the other
+/// way round) is a pick of the bend on the face's side, whose faces are the sheet's. Otherwise
+/// that cylinder and the faces it runs into would be panels too, the rule's thickness behind each
+/// meeting the face's. `main`'s Convert took it so (its
+/// `a_bend_modelled_with_its_radius_is_one_bend_of_the_rules_radius`). The L of
+/// `a_bend_modelled_with_another_radius_takes_the_rules` under its rule: Convert takes the rule's
+/// thickness behind the face, which is the L's own, so the sheet is the one Recognize reads, the
+/// same blank and metal from either face with either pick.
+#[test]
+fn a_bend_picked_on_the_cylinder_across_from_the_face_converts_as_the_face_sides() {
+    let (t, k, r) = (2.0, 0.5, 3.0);
+    let across = 60.0 + 40.0 - deduction(FRAC_PI_2, r, t, k);
+    for (face, inner_pick) in [([30.0, 0.0, 50.0], false), ([30.0, 0.0, 50.0], true), ([30.0, 2.0, 50.0], false), ([30.0, 2.0, 50.0], true)] {
+        let mut s = Session::default();
+        rule(&mut s, "Test", t, k, r, 0.5);
+        let (outer, inner) = bent_section(&mut s, &[(0.0, 40.0), (0.0, 0.0), (60.0, 0.0)], t, 2.0, 100.0)[0];
+        let bend = if inner_pick { inner } else { outer };
+        run(&mut s, "sheet.convert", json!({"body": "Section", "face": face, "bends": [bend]}));
+        let f = flat(&mut s);
+        let radii: Vec<f64> = f["bends"].as_array().into_iter().flatten().filter_map(|b| b["radius"].as_f64()).collect();
+        assert!(f["rolls"] == 0 && radii.len() == 1 && (radii[0] - r).abs() < 1e-9, "{face:?} {bend:?}: {f}");
+        assert!(same_size(flat_size(&mut s), (across, 100.0), 1e-6), "{face:?} {bend:?}: {:?} vs {across}", flat_size(&mut s));
+        let metal = across * 100.0 * t;
+        assert!((volume(&mut s) - metal).abs() < 1e-6 * metal, "{face:?} {bend:?}: {} vs {metal}", volume(&mut s));
+    }
+}
+
 /// Whether a cylinder modelled between two planes is a bend or a roll is its inside radius in the
 /// rule's thicknesses (Convert reads no thickness of the body's): short of 10^0.7 (about 5), where
 /// DIN 6935's correction of the neutral fiber reaches 1, a bend, bent with the rule's radius; from

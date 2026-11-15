@@ -1745,13 +1745,17 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
         let tol = 1e-7;
         let mut out = sk.clone();
         for &&(base, axis, radius, height, reach) in &reaching {
-            let mut found: Option<(usize, bool, Vec3, Vec3, (f64, f64))> = None;
+            let mut found: Option<(usize, bool, Vec3, Vec3, (f64, f64), (f64, f64))> = None;
             for (p, frame, own) in &panels {
                 let inv = frame.inverse();
                 let (b, a) = (inv.point(base), inv.vector(axis));
                 let Some(a) = a.normalized() else { return Ok(Vec::new()) };
                 let across = a.z.abs() >= 1.0 - 1e-9;
                 let mut span = (height.min(0.0), height.max(0.0));
+                // How far a bore along the panel runs on past each end of `span`: a hair where the
+                // panel's material ends there, so its end is no face of the panel's rim; none where
+                // the drill ends inside the material (a blind hole's floor), which is as deep as drilled.
+                let mut past = (0.0, 0.0);
                 let meets = if across {
                     let (z0, z1) = (b.z.min(b.z + a.z * height), b.z.max(b.z + a.z * height));
                     let circle = Region2 { outer: Loop2::circle(Vec2::new(b.x, b.y), radius), holes: Vec::new() };
@@ -1765,9 +1769,12 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
                     // the base, beside a flange standing on it, runs along the flange's plane.
                     let (b2, a2) = (Vec2::new(b.x, b.y), Vec2::new(a.x, a.y));
                     let clear = b.z - radius > t + tol || b.z + radius < -tol;
-                    let inside = crate::sheet_surface_convert::extent_across(own, (b2, a2)).map(|(s0, s1)| (s0.max(span.0), s1.min(span.1)));
+                    let material = crate::sheet_surface_convert::extent_across(own, (b2, a2));
+                    let inside = material.map(|(s0, s1)| (s0.max(span.0), s1.min(span.1)));
                     let through = !clear && inside.is_some_and(|(u0, u1)| u0 < u1);
-                    if let Some(inside) = inside.filter(|_| through) {
+                    if let (Some(inside), Some((s0, s1))) = (inside.filter(|_| through), material) {
+                        let hair = t * 1e-2;
+                        past = (if inside.0 <= s0 + tol { hair } else { 0.0 }, if inside.1 >= s1 - tol { hair } else { 0.0 });
                         span = inside;
                     }
                     if through && !(b.z - radius > tol && b.z + radius < t - tol) {
@@ -1781,25 +1788,24 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
                     if found.is_some() {
                         return Ok(Vec::new());
                     }
-                    found = Some((*p, across, b, a, span));
+                    found = Some((*p, across, b, a, span, past));
                 }
             }
-            let Some((p, across, b, a, (u0, u1))) = found else { return Ok(Vec::new()) };
+            let Some((p, across, b, a, (u0, u1), (p0, p1))) = found else { return Ok(Vec::new()) };
             if boxes.iter().any(|(k, bx)| *k != Some(p) && !boxes_apart(&reach, &Some(*bx))) {
                 return Ok(Vec::new());
             }
             // What the hole takes from its panel, in the panel's chart: its circle across it, or
-            // the band its bore runs along inside it (as far as the bore runs, a hair past either
-            // end). It goes the general way where that meets a pocket on the panel or a cut
-            // through the sheet, read exactly; clear of them, it is cut here.
+            // the band its bore runs along inside it (as far as the bore runs, a hair past an end
+            // where the material ends). It goes the general way where that meets a pocket on the
+            // panel or a cut through the sheet, read exactly; clear of them, it is cut here.
             let footprint = if across {
                 Loop2::circle(Vec2::new(b.x, b.y), radius)
             } else {
-                let past = t * 1e-2;
                 let (o, d) = (Vec2::new(b.x, b.y), Vec2::new(a.x, a.y));
                 let Some(d) = d.normalized() else { return Ok(Vec::new()) };
                 let side = Vec2::new(-d.y, d.x) * radius;
-                let (s, e) = (o + d * (u0 - past), o + d * (u1 + past));
+                let (s, e) = (o + d * (u0 - p0), o + d * (u1 + p1));
                 Loop2::polygon(&[s - side, e - side, e + side, s + side])
             };
             if out.recesses.iter().any(|r| r.panel == p && !crate::sheet_surface::loop_clear_of(&footprint, &r.region)) {
@@ -1826,9 +1832,8 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
                 }
                 panel.region.holes.push(circle.outer.ccw().reversed());
             } else {
-                // Through the panel's material only, a hair past it at either end.
-                let past = t * 1e-2;
-                out.bores.push(crate::sheet::SheetBore { panel: Some(p), base: b + a * (u0 - past), axis: a, radius, height: u1 - u0 + 2.0 * past });
+                // Through the panel's material only, a hair past it where it runs out of it.
+                out.bores.push(crate::sheet::SheetBore { panel: Some(p), base: b + a * (u0 - p0), axis: a, radius, height: u1 - u0 + p0 + p1 });
             }
         }
         plans.push((i, out));

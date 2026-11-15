@@ -1554,6 +1554,73 @@ fn read_surfaces(
         let coaxial = a1.cross(a2).len() <= 1e-9 && off.len() <= tol * 10.0;
         coaxial && (r1 - r2).abs() <= tol * 10.0 && i1 == i2 && planes.len() == 2 && planes == planes_beside(h)
     };
+    // The faces that run on smoothly from face `g` at its edges.
+    let joined = |g: usize| -> BTreeSet<usize> {
+        let Ok(sg) = shape(g) else { return BTreeSet::new() };
+        (0..edge_count)
+            .filter_map(|e| {
+                let (x, y) = pair(e)?;
+                let h = if x == g && y != g {
+                    y
+                } else if y == g && x != g {
+                    x
+                } else {
+                    return None;
+                };
+                (side.contains(&h) && shape(h).is_ok_and(|sh| smooth(e, &sg, &sh))).then_some(h)
+            })
+            .collect()
+    };
+    // A modelled bend picked on its roll across the thickness from the faces picked: its outside
+    // where they are its inside, or the other way round. Converting, every face taken is a panel
+    // (see `behinds`), so that roll and the faces it runs into would be panels of the other side,
+    // their material meeting the faces picked. The bend is the roll of the same axis, of another
+    // radius, that runs smoothly into what the faces picked reach through the bends and rolls
+    // picked; the pick is its (`twins`). A roll with no such one, or with two that are not pieces
+    // of one bend, is left as picked.
+    let mut twins: BTreeMap<usize, usize> = BTreeMap::new();
+    if let Some(set) = &chosen {
+        let across = |g: usize, h: usize| -> bool {
+            let Ok(Shape::Cylinder { origin: o1, axis: a1, radius: r1, .. }) = shape(g) else { return false };
+            let Ok(Shape::Cylinder { origin: o2, axis: a2, radius: r2, .. }) = shape(h) else { return false };
+            let off = (o2 - o1) - a1 * (o2 - o1).dot(a1);
+            a1.cross(a2).len() <= 1e-9 && off.len() <= tol * 10.0 && (r1 - r2).abs() > tol * 10.0
+        };
+        let mut reached: BTreeSet<usize> = set.iter().filter_map(|g| on_side(*g)).collect();
+        loop {
+            loop {
+                let before = reached.len();
+                for &g in &rolled {
+                    let on = joined(g);
+                    if reached.contains(&g) || on.iter().any(|h| reached.contains(h)) {
+                        reached.insert(g);
+                        reached.extend(on);
+                    }
+                }
+                for (x, y) in bent.iter().filter_map(|e| pair(*e)) {
+                    if reached.contains(&x) || reached.contains(&y) {
+                        reached.extend([x, y]);
+                    }
+                }
+                if reached.len() == before {
+                    break;
+                }
+            }
+            let swap = rolled.iter().filter(|g| !reached.contains(g)).find_map(|&g| {
+                let found: Vec<usize> =
+                    side.iter().copied().filter(|h| !rolled.contains(h) && across(g, *h) && joined(*h).iter().any(|k| reached.contains(k))).collect();
+                match found.as_slice() {
+                    [h, rest @ ..] if rest.iter().all(|k| one_bend(*h, *k)) => Some((g, *h)),
+                    _ => None,
+                }
+            });
+            let Some((g, h)) = swap else { break };
+            rolled.remove(&g);
+            rolled.insert(h);
+            twins.insert(g, h);
+        }
+    }
+    let as_picked = |g: usize| twins.get(&g).copied().unwrap_or(g);
     // A pick on one piece of a bend that cut-outs across it split bends every piece.
     let more: Vec<usize> = side.iter().copied().filter(|h| is_roll(*h) && !rolled.contains(h) && rolled.iter().any(|g| one_bend(*g, *h))).collect();
     rolled.extend(more);
@@ -1813,8 +1880,8 @@ fn read_surfaces(
             .filter(|e| on_edge(*p, *e))
             .filter_map(on_side_edge)
             .filter_map(pair)
-            .any(|(x, y)| modelled.iter().any(|m| m.rolls.contains(&x) || m.rolls.contains(&y)));
-        edge || modelled_at || q.faces_at(*p, near).first().and_then(|(_, g)| on_side(*g)).is_some_and(|g| rolled.contains(&g))
+            .any(|(x, y)| modelled.iter().any(|m| m.rolls.contains(&as_picked(x)) || m.rolls.contains(&as_picked(y))));
+        edge || modelled_at || q.faces_at(*p, near).first().and_then(|(_, g)| on_side(*g)).is_some_and(|g| rolled.contains(&as_picked(g)))
     };
     if let Some(p) = bends.iter().find(|p| !between(p)) {
         // A shell's or a plate's bend onto a wall of another thickness: no sheet of one thickness.

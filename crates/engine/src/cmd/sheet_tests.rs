@@ -6999,6 +6999,25 @@ fn a_hole_drilled_into_a_rim_is_a_bore_the_sheet_keeps_when_it_unfolds() {
     assert!(rel(unfolded_volume(&mut reopened), flat_after) < 1e-6);
 }
 
+/// A blind hole drilled into a rim is as deep as drilled (#6748, as
+/// `kc/955-hole-drilled-into-a-sheet-metal-rim`): the bore the sheet keeps runs a hair past the
+/// rim, where the material ends, and stops at the drill's floor inside it. 10 deep into the base's
+/// front rim (y = 0) mid-thickness, 0.6 T across: π (0.3 T)² · 10, folded and flat.
+#[test]
+fn a_blind_hole_into_a_rim_is_as_deep_as_drilled() {
+    let mut s = Session::default();
+    let t = l_bracket(&mut s);
+    let before = volume(&mut s);
+    let flat_before = unfolded_volume(&mut s);
+    let d = t * 0.6;
+    run(&mut s, "solid.hole", json!({"position": [30, 0, t / 2.0], "direction": [0, 1, 0], "diameter": d, "depth": 10}));
+    let removed = PI * (d / 2.0).powi(2) * 10.0;
+    assert!(rel(before - volume(&mut s), removed) < 1e-6, "removed {} of {removed}", before - volume(&mut s));
+    assert_eq!(flat(&mut s)["bores"].as_array().map(Vec::len), Some(1));
+    let flat_after = unfolded_volume(&mut s);
+    assert!(rel(flat_before - flat_after, removed) < 1e-6, "flat: removed {} of {removed}", flat_before - flat_after);
+}
+
 /// The volume of the sheet unfolded; it is folded back after.
 fn unfolded_volume(s: &mut Session) -> f64 {
     run(s, "sheet.unfold", json!({}));

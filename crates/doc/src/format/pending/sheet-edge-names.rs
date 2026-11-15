@@ -17,9 +17,10 @@
 //!   the left seen from the top, and `side0` was at its start; a bend's anchor runs the edge the
 //!   other way, and `end0` is at the anchor's start.
 //! - The sheet a feature's names are on is its `body`, where a base flange alone keeps that name
-//!   (`body_names`) and nothing converts it; else the design's one sheet, where one base flange
-//!   makes every sheet in it (no other flange, conversion or recognition makes one, and no pattern,
-//!   mirror or copying move copies a body).
+//!   (`body_names`) and nothing converts it; else the one sheet before it, where one base flange
+//!   makes every sheet before it (no other flange, conversion or recognition makes one, and no
+//!   pattern, mirror or copying move copies a body before it). A copy made after it, as of a part
+//!   mirrored once its flanges are on, made no sheet it picked an edge on.
 //!
 //! Every other name is left, and what picked it fails as it did: a name on a sheet the design does
 //! not say; a converted sheet's flange (`F<c>.<k>`, numbered in the order the conversion reached
@@ -58,10 +59,12 @@ fn copies(f: &Value) -> bool {
     matches!(kind(f), Some("pattern" | "mirror")) || (kind(f) == Some("move") && f.get("copy").and_then(Value::as_bool) == Some(true))
 }
 
-/// The base flange whose sheet the edges feature `f` picked lie on, as the saved design says: the
-/// base flange that alone keeps the name of `f`'s `body`, where nothing converts that body; else
-/// the design's base flange, where it makes every sheet of the design and no body is copied.
-fn base_of<'a>(features: &'a [Value], f: &Value) -> Option<&'a Value> {
+/// The base flange whose sheet the edges feature `at` picked lie on, as the saved design says: the
+/// base flange that alone keeps the name of its `body`, where nothing converts that body; else the
+/// base flange before it, where that makes every sheet before it and no body is copied before it
+/// (what comes after it made no sheet it picked an edge on).
+fn base_of(features: &[Value], at: usize) -> Option<&Value> {
+    let f = features.get(at)?;
     let base = |x: &Value| kind(x) == Some("sheet_base");
     if let Some(body) = f.get("body").and_then(Value::as_str).filter(|b| !b.is_empty()) {
         let keeps = |x: &&Value| x.get("body_names").and_then(Value::as_array).is_some_and(|n| n.iter().any(|n| n.as_str() == Some(body)));
@@ -74,9 +77,10 @@ fn base_of<'a>(features: &'a [Value], f: &Value) -> Option<&'a Value> {
             return Some(*one);
         }
     }
-    let makers: Vec<&Value> = features.iter().filter(|x| kind(x).is_some_and(|k| MAKERS.contains(&k))).collect();
+    let before = features.get(..at)?;
+    let makers: Vec<&Value> = before.iter().filter(|x| kind(x).is_some_and(|k| MAKERS.contains(&k))).collect();
     match makers.as_slice() {
-        [one] if base(one) && !features.iter().any(copies) => Some(*one),
+        [one] if base(one) && !before.iter().any(copies) => Some(*one),
         _ => None,
     }
 }
@@ -154,7 +158,7 @@ impl Sheet<'_> {
         // The feature that made the flange, before the one that picked its edge, on the same sheet.
         let made = self.features.get(..at)?.iter().position(|x| id(x) == Some(f))?;
         let feature = self.features.get(made)?;
-        if base_of(self.features, feature).is_some_and(|x| id(x) != Some(b)) {
+        if base_of(self.features, made).is_some_and(|x| id(x) != Some(b)) {
             return None;
         }
         // Its `k`th flange is the one made on its own `k`th edge where each edge up to it makes one.
@@ -195,7 +199,7 @@ pub fn step(v: &mut Value) -> Result<()> {
             continue;
         }
         let Some(names) = f.get("edge_names").and_then(Value::as_array) else { continue };
-        let Some(base) = base_of(features, f) else { continue };
+        let Some(base) = base_of(features, at) else { continue };
         let (Some(b), Some(sketch)) = (id(base), base.get("sketch").and_then(Value::as_u64)) else { continue };
         let sheet = Sheet { features, base: b, lines: lines(features, sketch) };
         for (k, name) in names.iter().enumerate() {
@@ -332,6 +336,19 @@ mod tests {
             flange(5, Some("Plate"), "base:l1:top"),
         ]));
         assert_eq!((&names[3], &names[4]), (&json!(["base:l1:top"]), &json!(["F2:side:l1|F2:top"])));
+        // A part mirrored once a flange is on (`kc/3353-mirrored-sheet-body-keeps-its-flat-pattern`):
+        // the flange before the mirror was picked on the one sheet there was; one after it, on
+        // either copy.
+        let names = upgraded(json!([
+            sketch(1, &RECTANGLE),
+            base(2, 1, Some("Plate")),
+            flange(3, None, "base:l1:top"),
+            {"id": 4, "name": "Mirror1", "type": "mirror", "bodies": ["Plate"], "body_names": ["Plate (2)"]},
+            flange(5, None, "base:l3:top"),
+            flange(6, None, "F3.0:far:top"),
+        ]));
+        assert_eq!((&names[2], &names[4]), (&json!(["F2:side:l1|F2:top"]), &json!(["base:l3:top"])));
+        assert_eq!(names[5], json!(["F3.0:far:top"]));
         // A front edge notched between x = 40 and 60: l1 and l5 lie in line, and the sheet named
         // the edges along both after l1. The notch's own sides and the others are each alone.
         let notched = [
