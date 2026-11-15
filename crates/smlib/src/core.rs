@@ -180,7 +180,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_statuses_pass_on = true;
     f.fillet_corner_per_vertex_fan = true;
     f.fillet_rail_trim_at_near_knot = true;
-    f.offset_keep_cavity_regions = true;
     f.ellipse_step_interval_checks = true;
     f.corner_patch_face_side_twist = true;
     f.boolean_union_refuses_solid_leak = true;
