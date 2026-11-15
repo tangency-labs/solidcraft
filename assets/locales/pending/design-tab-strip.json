@@ -1,0 +1,82 @@
+{
+  "en": {
+    "Open another view": "Open another view",
+    "Show views as tabs": "Show views as tabs",
+    "tab_strip.more": "{n} more",
+    "tab_strip.switch_view": "Switch view",
+    "tab_strip.workspace_animation": "Animation workspace",
+    "tab_strip.workspace_design": "Design workspace",
+    "tab_strip.workspace_drawing": "Drawing workspace",
+    "tab_strip.workspace_render": "Render workspace"
+  },
+  "de": {
+    "Open another view": "Weitere Ansicht öffnen",
+    "Show views as tabs": "Ansichten als Tabs anzeigen",
+    "tab_strip.more": "{n} weitere",
+    "tab_strip.switch_view": "Ansicht wechseln",
+    "tab_strip.workspace_animation": "Animations-Arbeitsbereich",
+    "tab_strip.workspace_design": "Design-Arbeitsbereich",
+    "tab_strip.workspace_drawing": "Zeichnungs-Arbeitsbereich",
+    "tab_strip.workspace_render": "Render-Arbeitsbereich"
+  },
+  "ko": {
+    "Open another view": "다른 뷰 열기",
+    "Show views as tabs": "뷰를 탭으로 표시",
+    "tab_strip.more": "{n}개 더",
+    "tab_strip.switch_view": "뷰 전환",
+    "tab_strip.workspace_animation": "애니메이션 작업 공간",
+    "tab_strip.workspace_design": "디자인 작업 공간",
+    "tab_strip.workspace_drawing": "도면 작업 공간",
+    "tab_strip.workspace_render": "렌더링 작업 공간"
+  },
+  "ar": {
+    "Open another view": "فتح عرض آخر",
+    "Show views as tabs": "عرض المشاهد كألسنة",
+    "tab_strip.more": "{n} إضافية",
+    "tab_strip.switch_view": "تبديل العرض",
+    "tab_strip.workspace_animation": "مساحة عمل التحريك",
+    "tab_strip.workspace_design": "مساحة عمل التصميم",
+    "tab_strip.workspace_drawing": "مساحة عمل الرسم",
+    "tab_strip.workspace_render": "مساحة عمل التصيير"
+  },
+  "he": {
+    "Open another view": "פתיחת תצוגה נוספת",
+    "Show views as tabs": "הצגת תצוגות כלשוניות",
+    "tab_strip.more": "עוד {n}",
+    "tab_strip.switch_view": "החלפת תצוגה",
+    "tab_strip.workspace_animation": "סביבת עבודה להנפשה",
+    "tab_strip.workspace_design": "סביבת עבודה לתכנון",
+    "tab_strip.workspace_drawing": "סביבת עבודה לשרטוט",
+    "tab_strip.workspace_render": "סביבת עבודה לרינדור"
+  },
+  "ja": {
+    "Open another view": "別のビューを開く",
+    "Show views as tabs": "ビューをタブで表示",
+    "tab_strip.more": "他{n}件",
+    "tab_strip.switch_view": "ビューを切り替え",
+    "tab_strip.workspace_animation": "アニメーションワークスペース",
+    "tab_strip.workspace_design": "設計ワークスペース",
+    "tab_strip.workspace_drawing": "図面ワークスペース",
+    "tab_strip.workspace_render": "レンダリングワークスペース"
+  },
+  "vi": {
+    "Open another view": "Mở góc nhìn khác",
+    "Show views as tabs": "Hiển thị góc nhìn dạng tab",
+    "tab_strip.more": "Thêm {n}",
+    "tab_strip.switch_view": "Chuyển góc nhìn",
+    "tab_strip.workspace_animation": "Không gian làm việc hoạt ảnh",
+    "tab_strip.workspace_design": "Không gian làm việc thiết kế",
+    "tab_strip.workspace_drawing": "Không gian làm việc bản vẽ",
+    "tab_strip.workspace_render": "Không gian làm việc kết xuất"
+  },
+  "zh": {
+    "Open another view": "打开其他视图",
+    "Show views as tabs": "以标签页显示视图",
+    "tab_strip.more": "另外 {n} 个",
+    "tab_strip.switch_view": "切换视图",
+    "tab_strip.workspace_animation": "动画工作区",
+    "tab_strip.workspace_design": "设计工作区",
+    "tab_strip.workspace_drawing": "工程图工作区",
+    "tab_strip.workspace_render": "渲染工作区"
+  }
+}

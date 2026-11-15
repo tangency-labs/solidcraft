@@ -117,6 +117,9 @@ pub struct ViewportState {
     lod_view: u64,
     /// Refinement waits for the camera to stop ([`REFINE_STILL_MS`]).
     lod_rest: CameraRest,
+    /// GPU composition fixtures hold display geometry fixed while checking cached frames.
+    #[cfg(test)]
+    pub(crate) suspend_refinement: bool,
     /// Each body mesh's box (the mesh held, so its address stays its own), from the last state.
     mesh_bounds: std::sync::Mutex<MeshBounds>,
     /// Each shown body mesh's section index (the mesh held, so its address stays its own): a
@@ -1052,6 +1055,10 @@ impl CameraRest {
 /// each shown body's screen-space error from its box on screen, refinements planned off the UI
 /// thread and swapped in when ready. Keeps repainting while refinements are being planned.
 fn update_refinement(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
+    #[cfg(test)]
+    if app.viewport.suspend_refinement {
+        return;
+    }
     if app.viewport.gpu.is_none() || !crate::display_lod::enabled() {
         return; // The CPU picture draws the reference mesh.
     }
@@ -4519,6 +4526,11 @@ fn face_tris(sc: &mut GpuScene, m: &solidcraft_engine::geom::Mesh, face: usize, 
 /// again for each face of a detailed imported part.
 fn mesh_tris(sc: &mut GpuScene, m: &solidcraft_engine::geom::Mesh, col: [u8; 4], lit: bool, takes: impl Fn(u32) -> bool) {
     let col = sc.color(col);
+    mesh_faces(m, takes, |p, n| sc.tri(p, if lit { n } else { [0.0; 3] }, col));
+}
+
+/// Each vertex (position, normal) of the triangles of `m` whose face `takes` accepts.
+fn mesh_faces(m: &solidcraft_engine::geom::Mesh, takes: impl Fn(u32) -> bool, mut vertex: impl FnMut([f32; 3], [f32; 3])) {
     for (t, f) in m.triangles.iter().zip(&m.tri_face) {
         if !takes(*f) {
             continue;
@@ -4526,7 +4538,7 @@ fn mesh_tris(sc: &mut GpuScene, m: &solidcraft_engine::geom::Mesh, col: [u8; 4],
         for k in t {
             let i = *k as usize;
             if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
-                sc.tri(p.to_f32(), if lit { n.to_f32() } else { [0.0; 3] }, col);
+                vertex(p.to_f32(), n.to_f32());
             }
         }
     }
@@ -4815,6 +4827,8 @@ struct HoverBlock {
     /// CPU-built bodies: their triangles in the model scene's blocks, reused the same way.
     hover_blocks: Vec<crate::gpu::BlockTris>,
     selected_blocks: Vec<crate::gpu::BlockTris>,
+    /// Hovered faces of opaque bodies, in their own slots.
+    hover_faces: Vec<u8>,
     /// Bodies the model draws as placements of shared triangles: the same placements with the
     /// highlight colour.
     hover_instanced: Vec<crate::gpu::InstancedMesh>,
@@ -5291,6 +5305,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         sc.selected_planned = cached.selected_planned;
         sc.hover_blocks = cached.hover_blocks;
         sc.selected_blocks = cached.selected_blocks;
+        sc.hover_faces = cached.hover_faces;
         sc.recoloured = cached.recoloured;
         sc.lit_edges = cached.lit_edges;
         sc.planned = cached.planned;
@@ -5563,10 +5578,30 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 let selected = face_selected(*index);
                 if !(outlines && has_pickable_outline(&m)) {
                     let lit = shown(b);
-                    for &f in &patch {
-                        if !face_selected(f) {
-                            let c = body_rgb(app, body);
-                            face_tris(&mut feedback, &lit, f, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
+                    // A face of an opaque body is drawn in the model's own slot for it: it keeps its
+                    // colour and finish (a machined bore in a painted body), tinted like a whole
+                    // hovered body.
+                    let own = highlight_opaque(app, b, &active_bodies).then(|| body_slots.slots(&b.name)).flatten();
+                    // Otherwise it is lit in the colour the model draws it in: its own look, else the
+                    // component's colour when colouring by component, else the body's.
+                    let resolved = resolve_appearance(app, b);
+                    let base = resolved.component.or(resolved.body).unwrap_or(Tokens::get().body);
+                    for &f in patch.iter().filter(|f| !face_selected(**f)) {
+                        match own {
+                            Some(slots) => {
+                                let slot = slots.face(f);
+                                mesh_faces(&lit, |t| t as usize == f, |p, n| feedback.hover_face_tri(p, n, slot));
+                            }
+                            None => {
+                                let c = resolved.face_looks.get(&f).map_or(base, |l| Color32::from_rgb(l.color[0], l.color[1], l.color[2]));
+                                face_tris(
+                                    &mut feedback,
+                                    &lit,
+                                    f,
+                                    [c.r().saturating_add(k), c.g().saturating_add(k), c.b().saturating_add(k), 255],
+                                    true,
+                                );
+                            }
                         }
                     }
                 }
@@ -5624,6 +5659,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         sc.selected_planned.append(&mut feedback.selected_planned);
         sc.hover_blocks.append(&mut feedback.hover_blocks);
         sc.selected_blocks.append(&mut feedback.selected_blocks);
+        sc.hover_faces.append(&mut feedback.hover_faces);
         sc.recoloured.append(&mut feedback.recoloured);
         sc.lit_edges.append(&mut feedback.lit_edges);
         sc.planned.append(&mut feedback.planned);
@@ -5646,6 +5682,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         let palette = feedback.palette.clone();
         let (hover_planned, selected_planned) = (feedback.hover_planned, feedback.selected_planned);
         let (hover_blocks, selected_blocks) = (feedback.hover_blocks, feedback.selected_blocks);
+        let hover_faces = feedback.hover_faces;
         let (hover_instanced, selected_instanced) = (feedback.hover_instanced, feedback.selected_instanced);
         let recoloured = feedback.recoloured;
         let lit_edges = feedback.lit_edges;
@@ -5661,6 +5698,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 selected_planned: selected_planned.clone(),
                 hover_blocks: hover_blocks.clone(),
                 selected_blocks: selected_blocks.clone(),
+                hover_faces: hover_faces.clone(),
                 hover_instanced: hover_instanced.clone(),
                 selected_instanced: selected_instanced.clone(),
                 recoloured: recoloured.clone(),
@@ -5673,6 +5711,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         sc.selected_planned = selected_planned;
         sc.hover_blocks = hover_blocks;
         sc.selected_blocks = selected_blocks;
+        sc.hover_faces = hover_faces;
         sc.hover_instanced = hover_instanced;
         sc.selected_instanced = selected_instanced;
         sc.recoloured = recoloured;
@@ -8275,7 +8314,7 @@ fn axis_hit(tips: &[crate::view_compass::Tip], p: Pos2) -> Option<usize> {
     crate::view_compass::hit(tips, p)
 }
 
-/// Dragging anywhere on the view navigator orbits about the view centre. A stationary press
+/// Dragging anywhere on the view navigator orbits about the selected origin or the camera target. A stationary press
 /// on a tip chooses its view. Floating windows own their input over the gizmo.
 fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
     let pos = ui.input(|i| i.pointer.interact_pos());
@@ -8294,7 +8333,9 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
     }
     if let Some(crate::view_compass::OrbitStep { dx, dy, snap }) = orbit.step {
         app.cancel_view_animation();
-        orbit_drag(app, rect, dx, dy, None, snap, false);
+        // The widget has no model point under the cursor, but an explicit origin pivot still applies.
+        let around_origin = app.preferences.orbit_around == crate::prefs::OrbitAround::Origin;
+        orbit_drag(app, rect, dx, dy, None, snap, around_origin);
     }
     orbit.orbiting
 }
@@ -9392,6 +9433,61 @@ mod tests {
         assert!(differ * 100 < shown, "{differ} of {shown} px differ between the plan and CPU pictures");
     }
 
+    /// A hovered face with an appearance of its own (a machined metal bore in a painted body) is
+    /// lit in the model's slot for that face, its own colour and finish, not in the body's paint.
+    #[test]
+    fn a_hovered_face_keeps_its_own_appearance() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20, "corner": [0, 0, 0], "body_name": "Block"})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.run(
+            "appearance.assign",
+            json!({"bodies": ["Block"], "color": "#0e9aa0", "pbr": {"metallic": 0.0, "roughness": 0.5, "dielectric_ior": 1.5}}),
+        )
+        .unwrap();
+        let metal = json!({"metallic": 1.0, "roughness": 0.3, "dielectric_ior": 1.5});
+        app.run("appearance.assign", json!({"body": "Block", "faces": [[10, 10, 20]], "color": "#c3c8cd", "pbr": metal})).unwrap();
+        build_scene(&app);
+        let (face, look) = app.session.doc.face_colors(&app_body(&app, "Block")).into_iter().next().expect("the top face has its own look");
+        app.viewport.hover = Some(Hit::Face { body: "Block".into(), index: face, point: Vec3::ZERO });
+        let highlight = build_highlight(&app);
+        let slot = app.viewport.palette.lock().unwrap().slots("Block").expect("the block has slots").face(face);
+        let at = solidcraft_viewport_gpu::view::TRI_COLOR_AT;
+        let colours: Vec<u32> =
+            highlight.hover_faces.chunks(crate::gpu::TRI_SIZE).map(|v| u32::from_le_bytes(v[at..at + 4].try_into().unwrap())).collect();
+        assert!(!colours.is_empty() && colours.iter().all(|c| *c == slot.0), "the face is lit in its own slot: {colours:?}");
+        assert_eq!(highlight.palette.get(slot).map(|c| [c[0], c[1], c[2]]), Some(look.color), "the face's colour, not the body's paint");
+        let finish = highlight.palette.materials().get(slot.0 as usize).copied().unwrap_or_default();
+        assert!(finish.pbr && finish.metallic == 1.0, "the face's metal finish: {finish:?}");
+    }
+
+    /// A hovered face of a see-through body is lit in the colour the model draws it in: when
+    /// colouring by component, the component's colour, not the face's own look.
+    #[test]
+    fn a_hovered_see_through_face_follows_component_colouring() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20, "corner": [0, 0, 0], "body_name": "Block"})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.run("appearance.assign", json!({"bodies": ["Block"], "color": "#0e9aa0", "opacity": 0.4})).unwrap();
+        app.run("appearance.assign", json!({"body": "Block", "faces": [[10, 10, 20]], "color": "#c3c8cd", "opacity": 0.4})).unwrap();
+        app.session.colored_components = Some(());
+        build_scene(&app);
+        let b = app_body(&app, "Block");
+        let face = app.session.doc.face_colors(&b).into_iter().next().expect("the top face has its own look").0;
+        let [r, g, bl] = solidcraft_engine::view::component_color(&app.session, b.component).expect("colouring by component");
+        app.viewport.hover = Some(Hit::Face { body: "Block".into(), index: face, point: Vec3::ZERO });
+        let highlight = build_highlight(&app).merged();
+        let k = Tokens::get().hover_face_lift;
+        let expected = [r.saturating_add(k), g.saturating_add(k), bl.saturating_add(k), 255];
+        let at = solidcraft_viewport_gpu::view::TRI_COLOR_AT;
+        let colours: Vec<_> = highlight
+            .tris
+            .chunks(crate::gpu::TRI_SIZE)
+            .map(|v| highlight.palette.get(crate::gpu::PaletteIndex(u32::from_le_bytes(v[at..at + 4].try_into().unwrap()))))
+            .collect();
+        assert!(!colours.is_empty() && colours.iter().all(|c| *c == Some(expected)), "the component's colour: {colours:?}");
+    }
+
     /// A hovered face lights solidly over a body drawn from its display plan on the GPU: the
     /// highlight uses the plan's triangles, not the reference mesh's other triangulation of the
     /// same face, which fought the model at equal depth and shimmered in wedges. Every face of a
@@ -9503,6 +9599,9 @@ mod tests {
         const SIZE: u32 = 128;
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(SIZE as f32, SIZE as f32));
         let body = app.session.world_state().unwrap().bodies[0].clone();
+        // See-through: its hovered face is copied into the block (an opaque body's face is drawn
+        // in the model's own slot, `hover_faces`).
+        app.run("appearance.assign", json!({"bodies": [body.name], "color": "#88aacc", "opacity": 0.4})).unwrap();
         let proj = projection(&app, rect);
         let e = proj.cam.eye().to_f32();
         let eye = [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }];
@@ -11951,7 +12050,7 @@ mod tests {
             let mut lit_faces = 0;
             for index in 0..body.body.face_count() {
                 app.viewport.hover = Some(Hit::Face { body: body.name.clone(), index, point: Vec3::ZERO });
-                let lit = tris_of(&build_highlight(&app).merged().tris);
+                let lit = tris_of(&build_highlight(&app).hover_faces);
                 assert!(!lit.is_empty(), "face {index} lights");
                 assert!(lit.iter().all(|t| drawn.contains(t)), "face {index}: every lit triangle is a drawn one");
                 lit_faces += 1;
@@ -14527,6 +14626,63 @@ mod tests {
                 assert!(h.app.viewport.axis_drag.is_none(), "release clears the axis gesture");
                 assert!(h.app.viewport.boxsel.is_none());
             }
+        }
+    }
+
+    /// #17245: the navigator must use the selected world origin even after the view is panned.
+    #[test]
+    fn view_axis_drag_keeps_the_origin_with_free_and_snapped_orbits() {
+        for free in [false, true] {
+            for snap in [false, true] {
+                let mut h = crate::scenario::Harness::new();
+                h.call("ui.prefs", json!({"navigator_style":"axes", "look_at_anim":false}));
+                h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
+                h.app.preferences.free_orbit = free;
+                h.app.cam = Camera { target: Vec3::new(40.0, -25.0, 15.0), yaw: 0.3, pitch: 0.2, distance: 200.0, fov: 0.6, ..Default::default() };
+                h.frames(2);
+                let initial = h.app.cam;
+                let origin = initial.frame_coords(Vec3::ZERO);
+                let undo = h.app.session.undo.len();
+                // Both gestures cross a snap boundary; the second starts from the first's view.
+                for (dx, dy) in [(-90.0, 30.0), (-120.0, -20.0)] {
+                    let before = h.app.cam;
+                    let p = crate::scenario::handle_at("axis_view:-y").unwrap();
+                    h.call("ui.drag", json!({"x0":p.x, "y0":p.y, "x1":p.x + dx, "y1":p.y + dy, "shift":snap, "steps":12}));
+                    assert!(h.app.cam.back().dist(before.back()) > 1e-3, "free={free}, snap={snap}, dx={dx}: the widget must turn the view");
+                    assert!(
+                        h.app.cam.frame_coords(Vec3::ZERO).dist(origin) < 1e-8,
+                        "free={free}, snap={snap}: the origin must stay in the same camera-frame position"
+                    );
+                    assert_eq!(h.app.cam.distance, initial.distance);
+                    assert_eq!(h.app.cam.fov, initial.fov);
+                    assert!(h.app.viewport.axis_drag.is_none(), "release ends each widget gesture");
+                    assert!(h.app.viewport.boxsel.is_none());
+                }
+                assert_eq!(h.app.session.undo.len(), undo, "navigation does not edit the design");
+            }
+        }
+    }
+
+    #[test]
+    fn view_axis_drag_keeps_the_camera_target_for_view_centre_and_cursor() {
+        for around in [crate::prefs::OrbitAround::ViewCentre, crate::prefs::OrbitAround::Cursor] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.prefs", json!({"navigator_style":"axes", "look_at_anim":false}));
+            h.app.run("solid.box", json!({"length":10, "width":10, "height":10})).unwrap();
+            h.settle();
+            h.call("ui.view", json!({"view":"front"}));
+            h.app.preferences.orbit_around = around;
+            // The model and the camera's target differ, so choosing a model pivot would move it.
+            h.app.cam.target = Vec3::new(40.0, -25.0, 15.0);
+            h.frames(2);
+            let before = h.app.cam;
+            let undo = h.app.session.undo.len();
+            let p = crate::scenario::handle_at("axis_view:-y").unwrap();
+            h.call("ui.drag", json!({"x0":p.x, "y0":p.y, "x1":p.x - 48.0, "y1":p.y, "steps":8}));
+            assert!(h.app.cam.back().dist(before.back()) > 1e-3, "{around:?}: the widget must turn the view");
+            assert_eq!(h.app.cam.target, before.target, "{around:?}: the widget keeps its existing camera-target pivot");
+            assert_eq!(h.app.cam.distance, before.distance);
+            assert_eq!(h.app.session.undo.len(), undo);
         }
     }
 
