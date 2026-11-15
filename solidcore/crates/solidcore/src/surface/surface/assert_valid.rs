@@ -979,10 +979,14 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
             let mut test = true;
 
             // for every UDir neighbor ControlPoint - check for coincidence
+            // Not upstream (#17056 review): every row's first point (ll == 0) is compared
+            // too, except the reference point itself; upstream stops at ll == 1 in each row,
+            // so a row whose first point differs still passed
             let mut kk = row_cnt_u - 1;
             while kk >= 0 && test {
                 let mut ll = degree_v;
-                while ll > 0 && test {
+                let last = i64::from(kk == 0);
+                while ll >= last && test {
                     // check neighbor ControlPoint for Coincidence
                     let next = pt(cp_index_u + kk, cp_index_v + ll)?;
                     test &= p.closer_than(tolerance, next);
@@ -1062,10 +1066,12 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
             let mut test = true;
 
             // for every VDir neighbor ControlPoint - check for coincidence
+            // Not upstream (#17056 review): as the U walk, every column's first point too
             let mut kk = row_cnt_v - 1;
             while kk >= 0 && test {
                 let mut ll = degree_u;
-                while ll > 0 && test {
+                let last = i64::from(kk == 0);
+                while ll >= last && test {
                     // check neighbor ControlPoint for Coincidence
                     let next = pt(cp_index_u + ll, cp_index_v + kk)?;
                     test &= p.closer_than(tolerance, next);
@@ -3153,6 +3159,53 @@ mod tests {
     #[test]
     fn a_collapsed_span_at_a_simple_v_knot_is_a_pole() {
         assert!(simple_knot(false, collapse_simple_knot_rows));
+    }
+
+    /// The #17056 review case: degree 2 by 4, one clamped span by the double knot 0.5
+    /// (3 x 7 net). The columns nonzero at 0.5 are 2 to 4; all are `P` except row 0's
+    /// columns 3 and 4, `Q` and `R`, not collinear with `P`. Row 0's point on the iso line
+    /// at the knot is `N_2 P + N_3 Q + N_4 R != P`, so the iso line
+    /// `N_0(u) C + (N_1 + N_2)(u) P` is no point and there is no pole. The patch loop used
+    /// to skip each column's first point, `(0, 3)` and `(0, 4)`, and reported one.
+    /// `u_break` transposes the net, so the knot is in U.
+    fn first_points_differ(u_break: bool) -> bool {
+        const DOUBLE4: [f64; 12] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0];
+        let mut across: Vec<[f64; 3]> = Vec::new();
+        for i in 0..3 {
+            for j in 0..7 {
+                across.push([f64::from(i), f64::from(j), 0.0]);
+            }
+        }
+        for i in 0..3 {
+            for j in 2..5 {
+                across[i * 7 + j] = [1.0, 3.0, 0.0];
+            }
+        }
+        across[3] = [0.0, 3.0, 1.0];
+        across[4] = [0.0, 4.0, 2.0];
+        let s = if u_break {
+            let mut pts = vec![[0.0; 3]; 21];
+            for i in 0..3 {
+                for j in 0..7 {
+                    let p = across[i * 7 + j];
+                    pts[j * 3 + i] = [p[1], p[0], p[2]];
+                }
+            }
+            bspline(4, 2, &DOUBLE4, &BEZ2, &pts)
+        } else {
+            bspline(2, 4, &BEZ2, &DOUBLE4, &across)
+        };
+        let k = Kernel::default();
+        let part = make_nurb(&k, &s).unwrap().unwrap();
+        has_internal_pole(&k, &s, &part, ZONE_TOL_3D / 10.0).unwrap()
+    }
+
+    /// #17056 review: a span whose rows agree except at their first points
+    /// is no pole, along V or U.
+    #[test]
+    fn a_patch_whose_first_points_differ_is_not_a_pole() {
+        assert!(!first_points_differ(false));
+        assert!(!first_points_differ(true));
     }
 
     #[test]
