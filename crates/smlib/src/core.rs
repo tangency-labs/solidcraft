@@ -74,18 +74,14 @@ impl Body {
 /// solidcore pin to a rev with a new flag fails until it is added here.
 pub(crate) fn fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
-    f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_vertex_error_diagnostics = true;
     f.fillet_chamfer_cone_on_arc = true;
-    f.offset_excess_faces_after_merge = true;
-    f.offset_clip_right_side_out = true;
     f.offset_extended_edges_mated = true;
     f.keep_operand_uv_trims = true;
     f.proto_vertex_miss_is_false = true;
     f.check_loop_vertex_tolerance = true;
     f.check_loop_projected_seam_ends = true;
-    f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
     f.taper_tangent_corner_planes = true;
@@ -106,11 +102,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
     f.proto_edge_self_loop_on_vertex_degenerate = true;
-    f.slice_coincident_faces_sheet_side = true;
-    f.boolean_outer_shell_first = true;
     f.cover_refuses_folded_continuation = true;
     f.boolean_vertex_by_best_crossing = true;
-    f.boolean_cleanup_removes_slits = true;
     f.classify_edge_interval = true;
     f.ellipse_trim_seam_lines_span_cone_height = true;
     f.degenerate_proto_edge_in_one_vertex = true;
@@ -125,10 +118,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_nx1_tangent_side_edge = true;
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
-    f.shell_empty_cavity_fails = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
-    f.ssi_singular_start_inside_direction = true;
     f.found_torus_sphere_keep_tested_nurb = true;
     f.local_operation_box_holds_new_surfaces = true;
     f.shell_edges_on_analytics_exact = true;
@@ -143,26 +134,20 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.thicken_planar_side_walls = true;
     f.fillet_knife_edge_rounds = true;
     f.revolution_round_offset_collapses = true;
-    f.offset_point_vertex_caps = true;
     f.proto_edge_splits_at_captured_vertices = true;
-    f.local_operation_closes_walls_to_nothing = true;
     f.imprint_reuses_coincident_face_edge = true;
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.loops_go_on_round_the_vertex = true;
     f.revolve_splits_curves_on_axis = true;
-    f.cover_wraps_across_closed_seam = true;
     f.fillet_trace_reaches_rails = true;
     f.delete_vertex_joins_seam_iso_curve = true;
     f.box_face_failures_propagate = true;
-    f.fillet_rail_end_on_continued_surface = true;
     f.fillet_removal_takes_ring_fillets = true;
     // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
     f.fillet_trim_inside_by_best_dot = true;
-    f.fillet_half_degree_crease = true;
     f.curve_loop_normal_from_area = true;
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
-    f.fillet_cliff_overflow = true;
     f.offset_extension_as_itself = true;
     f.fillet_mitre_concave_face_corners = true;
     f.fillet_mitre_gap_patch = true;
@@ -189,25 +174,18 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_union_refuses_solid_leak = true;
     f.curve_loop_start_after_previous_end = true;
     f.loop_use_reports_open_gaps = true;
-    f.face_points_span_domain = true;
-    f.drop_curve_v_domain_degeneracy = true;
     f.mirror_curve_keeps_euclidean_control_points = true;
-    f.dupin_bottom_hyperbola_axis = true;
     f.offset_swap_uv_extended_distance = true;
     f.validation_does_not_make_uv_trims = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
     f.point_on_start_point_squared_tolerance = true;
     f.bspline_trim_keeps_rational_end_spans = true;
     f.fillet_exact_round_classes = true;
-    f.check_seam_crossing_unclosed = true;
-    f.ascii_doubles_round_trip = true;
     f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.volume_lift_third_derivative_terms = true;
-    f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
     f.volume_representational_end_continuities = true;
     f.offset_open_edge_second_trim_point = true;
-    f.close_loop_relates_only_coincident_edges = true;
     f.ssi_split_curves_at_singular_points = true;
     f.surface_parallel_to_vector_checks = true;
     f.geometric_g2_continuity = true;
