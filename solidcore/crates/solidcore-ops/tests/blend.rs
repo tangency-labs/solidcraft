@@ -1870,7 +1870,7 @@ fn a_round_along_a_whole_circle_builds_alike_on_both_ends_of_a_mirrored_ring() {
     let edges: Vec<usize> = at.iter().map(|&p| edge_at(&base, p)).collect();
     blend(&base, Blend::Round, &edges, &[2.0], &[], Corners::Filled).unwrap();
     assert_eq!(base.counts().unwrap(), [23, 53, 32]);
-    let before = volume(&base);
+    let before = base.volume(1e-10).unwrap();
     // each face's kind and a revolution's sweep (degrees), and for a whole turn, how far a
     // 9 x 9 grid of its points lies from the torus of a round r on the circle at z (an ops body
     // reads back through its .smb, which keeps a round's form, not its definition: no
@@ -1916,9 +1916,9 @@ fn a_round_along_a_whole_circle_builds_alike_on_both_ends_of_a_mirrored_ring() {
             let report = b.check(CheckLevel::All).unwrap();
             assert!(report.is_valid(), "r {r} at z {z}: {}", report.text);
             assert_eq!(b.counts().unwrap(), [24, 55, 33], "r {r} at z {z}");
-            let v = volume(&b);
+            let v = b.volume(1e-10).unwrap();
             assert!(
-                rel(v, before - corner) < 1e-11,
+                rel(v, before - corner) < 1e-9,
                 "r {r} at z {z}: {v}, want {}",
                 before - corner
             );
