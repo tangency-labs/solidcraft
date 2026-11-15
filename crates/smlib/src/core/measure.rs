@@ -198,6 +198,30 @@ pub(crate) fn edge_face_distance(body: &Body, edge: usize, face: usize) -> Resul
     found.ok_or(Error::Argument)
 }
 
+/// A proved upper bound on the distance from the record curve `curve` (a spline or rational
+/// spline) over its parameters `interval` to the surface of face `face` (the body's face
+/// order): [`solidcore_ops::curve_gap::curve_face_gap_bound`]. `None` when the
+/// kernel does not enclose the gap or there is no such face.
+pub(crate) fn curve_face_gap_bound(
+    body: &Body,
+    curve: &solidcore_record::brep::Curve,
+    interval: [f64; 2],
+    face: usize,
+    floor: f64,
+) -> Result<Option<f64>> {
+    // a circle or ellipse is the kernel's exact rational spline, over its interval there
+    let (curve, interval) = match solidcore_ops::curve_gap::GapCurve::of_conic(curve, interval).map_err(|e| Error::Solidcore(e.to_string()))? {
+        Some(found) => found,
+        None => (solidcore_ops::curve_gap::GapCurve::new(curve).ok_or(Error::Argument)?, interval),
+    };
+    with_body("curve_face_gap_bound", body, |k, b| {
+        let Some(&f) = bl::faces(b, None)?.get(face) else {
+            return Ok(None);
+        };
+        solidcore_ops::curve_gap::curve_face_gap_bound(k, b, f, &curve, interval, floor)
+    })
+}
+
 /// `smlib_brep_classify_point`: `SmBrep::Point3DClassify` at the body's own zone tolerance
 /// (`SmTol::GetZoneTol3d` of the body), with boundary intersections, so a point within that
 /// tolerance of a vertex, an edge or a face is on the boundary and never decided by a ray; else

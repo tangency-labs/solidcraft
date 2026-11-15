@@ -24,7 +24,7 @@ use solidcraft_theme::Tokens;
 pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
     let st = crate::open_meshing::session_world(&app.session);
     let item = anchor_item(app, d);
-    let Some(first) = &item else { return section_plane(d) };
+    let Some(first) = &item else { return stored_plane(d) };
     let (at, normal) = match first {
         Sel::Profile { sketch, index } => {
             let ss = st.sketch(*sketch)?;
@@ -81,9 +81,16 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         // made, as a body sits at the middle of its box.
         Sel::Feature { id } => (crate::viewport::feature_bounds(app, *id)?.center(), None),
         Sel::Plane { name } => {
-            let pl = solidcore_record::Plane::named(name).or_else(|| {
-                solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == name).map(|(_, _, pl)| pl)
-            })?;
+            let pl = solidcore_record::Plane::named(name)
+                .or_else(|| solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == name).map(|(_, _, pl)| pl))
+                .or_else(|| {
+                    // A component origin remains a valid Offset Plane input when its folder is hidden.
+                    if matches!(d.kind, Kind::OffsetPlane { .. }) && app.session.doc.find_feature(name).is_none() {
+                        app.session.origin_plane(name)
+                    } else {
+                        None
+                    }
+                })?;
             (pl.origin, Some(pl.normal()))
         }
         _ => return None,
@@ -256,16 +263,18 @@ pub(crate) fn blend_grow_dir(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     Some(if edge_concave(m, index, p).unwrap_or(false) { n } else { -n })
 }
 
-/// A Section Analysis dialog reopened from its section's own geometry (Show viewport section
-/// status): the plane it keeps as numbers when nothing is picked, so its arrow stands there as on
-/// a picked plane (#11423).
-fn section_plane(d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
-    if !matches!(d.kind, Kind::Section { .. }) {
-        return None;
-    }
-    let plane = d.extra.get("plane")?;
+/// A reopened section or Offset Plane can keep a fixed plane without a selection item. Its
+/// arrow uses that saved world plane, just as it would a picked plane.
+fn stored_plane(d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
+    let key = match d.kind {
+        Kind::Section { .. } => "plane",
+        Kind::OffsetPlane { .. } => "base",
+        _ => return None,
+    };
+    let plane = d.extra.get(key)?;
     let point = |key: &str| serde_json::from_value::<[f64; 3]>(plane.get(key)?.clone()).ok().map(|[x, y, z]| Vec3::new(x, y, z));
-    Some((point("origin")?, Some(point("normal")?.normalized()?)))
+    let normal = point("normal").or_else(|| Some(point("x_dir")?.cross(point("y_dir")?)))?.normalized()?;
+    Some((point("origin")?, Some(normal)))
 }
 
 /// The pick the dialog's arrow sits on: the first, or for a fillet or chamfer reopened from a

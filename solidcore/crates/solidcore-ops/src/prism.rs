@@ -15,7 +15,7 @@
 
 use solidcore::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
 use solidcore::eval::Frame;
-use solidcore::kernel::Kernel;
+use solidcore::kernel::{Kernel, Tolerances};
 use solidcore::primitive::api_trim_ops::create_planar_faces;
 use solidcore::primitive::primitive_creation::Boolean2d;
 use solidcore::prism::{extrude, measure, profile as kp, read, sheet};
@@ -24,6 +24,7 @@ use solidcore_convert as convert;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
 
 pub use solidcore::prism::measure::Interval;
+pub use solidcore::prism::placement::LoopPlacement;
 pub use solidcore::prism::profile::{tapered_flange_ends, ProfileRefusal};
 
 use crate::body::{finish, Body, Expect};
@@ -146,12 +147,14 @@ fn sheet_of(
     })
 }
 
-/// The profile check's refusal as the call's.
+/// The profile check's refusal as the call's, at the zone tolerance of the session's kernel,
+/// which builds the profile: the kernel's default, since ops offers no way to change its
+/// tolerances ([`crate::session`]), so the check accepts exactly the arcs the build makes.
 fn checked<'a>(
     regions: impl Iterator<Item = &'a kp::Region2>,
     tol: f64,
 ) -> std::result::Result<(), Error> {
-    kp::check_regions(regions, tol).map_err(Error::Profile)
+    kp::check_regions(regions, tol, Tolerances::default().zone_tol_3d).map_err(Error::Profile)
 }
 
 /// The boolean of planar regions bounded by lines, circular arcs and free-form segments, exact:
@@ -393,4 +396,13 @@ pub fn region_area(region: &Region2) -> Result<kp::Area> {
 #[must_use]
 pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
+}
+
+/// Where `lp` lies against `other` (both in one plane's coordinates), loops within `tol` of each
+/// other counting as meeting ([`kp::Loop2::placement`]): clear inside,
+/// clear outside, along it everywhere, or meeting it in places only. `None` for loops of other
+/// than lines and arcs, or a placement the kernel cannot decide.
+#[must_use]
+pub fn loop_placement(lp: &Loop2, other: &Loop2, tol: f64) -> Option<LoopPlacement> {
+    convert::loop2(lp).placement(&convert::loop2(other), tol)
 }

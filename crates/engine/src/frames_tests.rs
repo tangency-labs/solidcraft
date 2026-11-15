@@ -198,7 +198,7 @@ fn canvases_move_with_their_component() {
     let centre = p.to_world(lid.center);
     assert!(near(centre, Vec3::new(65.0, 10.0, 10.0)), "{centre:?}");
     assert_eq!(world(&s, "Root").0, 0);
-    // Moving the occurrence carries its canvases, not the root's.
+    // Moving the occurrence carries its canvases and the root canvas attached to its face.
     run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 40, 0]}));
     let (vals, _) = s.doc.param_values();
     let plan = s.doc.canvases.iter().find(|c| c.name == "Plan").unwrap();
@@ -206,7 +206,7 @@ fn canvases_move_with_their_component() {
     assert!(near(world(&s, "OnPoints").1.origin, Vec3::new(50.0, 40.0, 5.0)));
     let lid = s.doc.canvases.iter().find(|c| c.name == "Lid").unwrap();
     let centre = s.doc.canvas_plane(&vals, lid, &s.model.state()).unwrap().to_world(lid.center);
-    assert!(near(centre, Vec3::new(65.0, 10.0, 10.0)), "{centre:?}");
+    assert!(near(centre, Vec3::new(65.0, 50.0, 10.0)), "{centre:?}");
     let root = s.doc.canvases.iter().find(|c| c.name == "Root").unwrap();
     assert!(near(s.doc.canvas_plane(&vals, root, &s.model.state()).unwrap().origin, Vec3::ZERO));
     // The component survives a save and reopen.

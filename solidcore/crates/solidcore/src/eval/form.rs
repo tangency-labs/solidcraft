@@ -975,6 +975,9 @@ fn extent_in(
     let eval = SurfaceEval::new(label).ok()?;
     let period = eval.domain().period;
     let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    // The most any loop's angle goes back and forth round the axis: its box's width less its net
+    // turns.
+    let mut back = 0.0_f64;
     for l in loops {
         // A loop is unwrapped from its own first point, so it can come out whole periods away
         // from the loops before it (a hole beside the seam projects to the seam's other side),
@@ -1171,6 +1174,7 @@ fn extent_in(
         // rim and its seam, down the seam to the pole and up it on the other side). Past the
         // first pole, the loop is moved the whole periods that close it.
         let last = prev;
+        let mut turned = 0.0;
         for d in 0..2 {
             let shift = match (period.get(d), first, last) {
                 (Some(Some(per)), Some(f), Some(e)) if crossings > 0 => {
@@ -1178,6 +1182,13 @@ fn extent_in(
                 }
                 _ => 0.0,
             };
+            if d == 0 {
+                // The loop's net angle, from its first point to its last (a whole number of turns
+                // where it closes).
+                if let (Some(f), Some(e)) = (first, last) {
+                    turned = ix(&e, 0) - ix(&f, 0) + shift;
+                }
+            }
             for &(passed, dd, x) in &bounds {
                 if dd == d {
                     let x = if passed > 0 { x + shift } else { x };
@@ -1185,6 +1196,16 @@ fn extent_in(
                     *ixm(&mut l_hi, d) = ix(&l_hi, d).max(x);
                 }
             }
+        }
+        if ix(&l_lo, 0) <= ix(&l_hi, 0) {
+            // A turn of net winding is the face's own (a screw's cylinder goes round once, and
+            // down its thread many times); more is not backing up.
+            let own = period
+                .first()
+                .copied()
+                .flatten()
+                .map_or(0.0, |per| turned.abs().min(per));
+            back = back.max(ix(&l_hi, 0) - ix(&l_lo, 0) - own);
         }
         for d in 0..2 {
             if !(ix(&l_lo, d) <= ix(&l_hi, d)) {
@@ -1216,6 +1237,9 @@ fn extent_in(
     // it (a face bounded by its seam alone) covers the whole turn from there. On a cylinder or
     // cone, a boundary that goes round the axis more than a turn keeps its box (a thread's flank
     // winds several): clamped to a turn, the face's edges would lie off any form made over it.
+    // That is a loop that goes back and forth round the axis by more than a turn (`back`: its
+    // box's width less its net turns): a loop that goes round once and backs up a little (along
+    // a notch) has a box a little wider than a turn and is clamped to the turn it goes round.
     // "More than a turn" allows what a turn's box can come to: rounding, and twice the angle
     // `reach` makes at the face's widest circle (its edges lie off the surface by up to `reach`,
     // so each end of the box may be that far out). No other constant is chosen.
@@ -1227,7 +1251,7 @@ fn extent_in(
             let room = per * TURN_ROUNDING + 2.0 * reach_angle;
             *ixm(&mut hi, d) = if span <= 1e-9 * per {
                 ix(&lo, d) + per
-            } else if !may_wind || d != 0 || span <= per + room {
+            } else if !may_wind || d != 0 || span <= per + room || back <= per + room {
                 ix(&hi, d).min(ix(&lo, d) + per)
             } else {
                 ix(&hi, d)
