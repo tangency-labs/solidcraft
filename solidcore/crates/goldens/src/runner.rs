@@ -118,11 +118,17 @@ pub fn each_rust_output(
         cases.reverse();
     }
     for case in &cases {
-        if let Some(dir) = &opts.dump_smb {
+        // stop only a dump this iteration started: a caller's own `dump::capture` stays
+        let started = if let Some(dir) = &opts.dump_smb {
             crate::dump::start(dir, unit.id(), &case.name);
-        }
+            true
+        } else {
+            false
+        };
         let out = guarded(|| unit.run_rust(case));
-        crate::dump::stop();
+        if started {
+            crate::dump::stop();
+        }
         f(case, out);
     }
     Ok(())

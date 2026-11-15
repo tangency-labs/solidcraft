@@ -438,8 +438,9 @@ fn retry_rail_search_holds_the_radius_as_the_first_does() {
         forward.0
     );
     // the laws that do not reach the retry, against main's volumes (`was`: before
-    // `brep_volume` closed tolerant edges' gaps, #16735; each move checked within the old
-    // integrator's leak bound)
+    // `brep_volume` closed tolerant edges' gaps, #16735). The new values are MEASURED: no
+    // closed form; each move is checked within the old integrator's leak bound, itself a
+    // sampled estimate (the gaps at the closure's grid), not an enclosure
     for (r0, r1, main, was) in [
         (5.0, 1.0, 47_770.705_655_919_395, 47_770.705_747_225_77),
         (5.0, 2.0, 47_737.958_709_705_846, 47_737.958_806_965_48),

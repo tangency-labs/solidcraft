@@ -147,19 +147,17 @@ fn nearest_on_edge(
     t1: f64,
     p: Point3,
     guess: f64,
-) -> f64 {
+) -> Option<f64> {
     let mut t = guess.max(t0).min(t1);
     for _ in 0..64 {
-        let Ok(e) = curve.evaluate(k, t, 1, true, false) else {
-            break;
-        };
+        let e = curve.evaluate(k, t, 1, true, false).unwrap();
         let (Some(&ep), Some(&d1)) = (e.first(), e.get(1)) else {
-            break;
+            panic!("the edge curve's evaluation returned no derivative");
         };
         let df = d1.dot(d1);
         let f = (ep - p).dot(d1);
-        if df.is_nan() || df <= 0.0 || !f.is_finite() {
-            break;
+        if !(df > 0.0 && df.is_finite() && f.is_finite()) {
+            return None;
         }
         let next = (t - f / df).max(t0).min(t1);
         let step = (next - t).abs();
@@ -168,7 +166,7 @@ fn nearest_on_edge(
             break;
         }
     }
-    t
+    Some(t)
 }
 
 /// The checks' quantities for `b` at `accuracy`, each strip's width sampled at `samples`
@@ -251,7 +249,11 @@ pub fn leak(k: &Kernel, b: &mut Brep, accuracy: f64, samples: u32) -> Leak {
                 let mut last = e0;
                 for i in 1..GRID {
                     let tau = c0 + (c1 - c0) * f64::from(i) / f64::from(GRID);
-                    last = nearest_on_edge(k, c, e0, e1, img(trim, tau), last);
+                    let p = img(trim, tau);
+                    let share = e0 + (e1 - e0) * f64::from(i) / f64::from(GRID);
+                    last = nearest_on_edge(k, c, e0, e1, p, last)
+                        .or_else(|| nearest_on_edge(k, c, e0, e1, p, share))
+                        .expect("the closure refuses a strip singular from both seeds");
                     table.push((tau, last));
                 }
                 table.push((c1, e1));
@@ -328,8 +330,8 @@ pub fn moved_by_the_old_leak(
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
-    let at_accuracy =
-        solidcore::mass::integrator::properties::brep_volume(k, b, accuracy, &attrs).unwrap();
+    let at_accuracy = solidcore::mass::integrator::properties::brep_volume(k, b, accuracy, &attrs)
+        .map_err(|e| format!("volume {new} (was {old}): brep_volume at {accuracy:e}: {e}"))?;
     let l = leak(k, b, 1e-10, 8);
     let quadrature = 2.0 * (at_accuracy - l.volume).abs();
     let moved = (new - old).abs();
@@ -386,7 +388,8 @@ pub fn difference_moved_by_the_old_leak(
     let mut figures = Vec::new();
     for (i, b) in [before, after].into_iter().enumerate() {
         let at_accuracy =
-            solidcore::mass::integrator::properties::brep_volume(k, b, accuracy, &attrs).unwrap();
+            solidcore::mass::integrator::properties::brep_volume(k, b, accuracy, &attrs)
+                .map_err(|e| format!("body {i}: brep_volume at {accuracy:e}: {e}"))?;
         let l = leak(k, b, 1e-10, 8);
         let quadrature = 2.0 * (at_accuracy - l.volume).abs();
         bound += l.old_bound + quadrature;

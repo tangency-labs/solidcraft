@@ -450,6 +450,17 @@ impl<'a> Unclamped<'a> {
     /// rational one whose weights are proved positive over that box
     /// ([`continuation_certified`]). Otherwise nothing is toggled: the face stays clamped,
     /// as upstream integrates it.
+    ///
+    /// Both flags are captured and restored on their own: an out-of-bounds flag already on
+    /// does not continue the face integration's evaluation, which clamps unless
+    /// `continues_past_domain` is on too.
+    ///
+    /// Known limit: a face left clamped (a rational surface whose weights are not proved
+    /// positive over the trims' box, a polynomial-form B-spline, or a kind with no
+    /// B-spline part) whose trims leave its domain keeps the clamped integration's first-order,
+    /// origin-dependent error, as on upstream: its trims' clamped images and the domain
+    /// edge's partials describe different curves, and the strips built on the same images
+    /// do not remove it. No bound for it is computed or reported.
     fn where_trims_may_leave(k: &Kernel, surface: &'a Surface, trims: &[Curve]) -> Result<Self> {
         use crate::surface::surface::SurfaceKind;
         let none = Self { base: None };
@@ -465,9 +476,6 @@ impl<'a> Unclamped<'a> {
             | SurfaceKind::Torus(_) => (surface.analytic_base_with_nurb(k)?, None),
             _ => return Ok(none),
         };
-        if base.is_out_of_bounds_enabled() {
-            return Ok(none);
-        }
         let domain = domain.unwrap_or_else(|| base.natural_uv_domain());
         let (u, v) = (
             (domain.u_min(), domain.u_max()),
@@ -1390,20 +1398,39 @@ fn polygon_closure(points: &[Vec3], out: &mut [f64; 13]) {
 /// on `(E - p) . E'` from `guess` (each step `(p - E) . E' / |E'|^2`, along the tangent:
 /// Newton's own denominator `|E'|^2 + (E - p) . E''` can vanish or turn negative on a
 /// short, sharply curved knot span, where Gauss-Newton still moves toward `p`).
-fn nearest_on_edge(k: &Kernel, curve: &Curve, t0: f64, t1: f64, p: Vec3, guess: f64) -> f64 {
+///
+/// `Ok(None)` where the solve cannot move from an iterate: the derivative there is zero or
+/// not finite (a parametric singularity, as at the end of an edge parametrised by `sqrt s`).
+/// The caller then solves again from another seed, or refuses; the guess is never returned
+/// as if it were the nearest point.
+///
+/// # Errors
+///
+/// The curve's evaluation errors, and [`SolidError::Mass`] when the evaluation returns no
+/// derivative.
+fn nearest_on_edge(
+    k: &Kernel,
+    curve: &Curve,
+    t0: f64,
+    t1: f64,
+    p: Vec3,
+    guess: f64,
+) -> Result<Option<f64>> {
     // (max then min: no panic on an inverted or NaN range)
     let mut t = guess.max(t0).min(t1);
     for _ in 0..64 {
-        let Ok(e) = curve.evaluate(k, t, 1, true, false) else {
-            break;
-        };
+        let e = curve.evaluate(k, t, 1, true, false)?;
         let (Some(&ep), Some(&d1)) = (e.first(), e.get(1)) else {
-            break;
+            return Err(SolidError::mass_failed(
+                OP,
+                "the edge curve's evaluation returned no derivative for the nearest point",
+            ));
         };
         let df = d1.dot(d1);
         let f = (ep - p).dot(d1);
-        if df.is_nan() || df <= 0.0 || !f.is_finite() {
-            break;
+        // written so a NaN stops the solve
+        if !(df > 0.0 && df.is_finite() && f.is_finite()) {
+            return Ok(None);
         }
         let next = (t - f / df).max(t0).min(t1);
         let step = (next - t).abs();
@@ -1412,7 +1439,7 @@ fn nearest_on_edge(k: &Kernel, curve: &Curve, t0: f64, t1: f64, p: Vec3, guess: 
             break;
         }
     }
-    t
+    Ok(Some(t))
 }
 
 /// The grid of nearest points along each strip (see [`gap_closure`]).
@@ -1669,7 +1696,20 @@ fn gap_closure(
             for i in 1..grid {
                 let tau = c0 + (c1 - c0) * f64::from(i) / f64::from(grid);
                 let p = at(side.trim.evaluate_point(k, tau)?)?.0;
-                last = nearest_on_edge(k, curve, e0, e1, p, last);
+                // marched from the last point; where that seed is singular (the edge's
+                // end, for the first), from the grid point's share of the edge's interval;
+                // singular from both, the strip is refused
+                let share = e0 + (e1 - e0) * f64::from(i) / f64::from(grid);
+                last = match nearest_on_edge(k, curve, e0, e1, p, last)? {
+                    Some(t) => t,
+                    None => nearest_on_edge(k, curve, e0, e1, p, share)?.ok_or_else(|| {
+                        SolidError::mass_failed(
+                            OP,
+                            "the edge curve's derivative is zero or not finite at the nearest \
+                             point's step from both seeds",
+                        )
+                    })?,
+                };
                 table.push((tau, last));
             }
             table.push((c1, e1));
@@ -1750,6 +1790,13 @@ fn gap_closure(
 }
 /// `SmBrep::ComputePreciseProperties`, including density attributes and wire/point solids.
 /// Missing UV trim curves of the integrated faces are made on `b`.
+///
+/// Not upstream (#16735): each volume-bounding face is closed onto its edges' curves and
+/// vertices, and integrated on its surface continued past its domain where its trims leave
+/// it and the continuation is certified. Known limit: a face whose trims leave its domain
+/// but whose continuation is not certified is integrated clamped, as upstream does, and
+/// keeps that integration's first-order, origin-dependent volume error; no bound for it is
+/// reported (see `Unclamped::where_trims_may_leave`).
 pub fn brep_properties(
     k: &Kernel,
     b: &mut Brep,

@@ -9,7 +9,8 @@
 //!
 //! The files are `<dir>/<unit>/<case>.<label>.<n>.smb`, `n` counting the case's bodies of
 //! that label from 0 in the order the runner hands them over; the case name's characters
-//! other than ASCII letters, digits, `-`, `_` and `.` become `_`. A failed write is printed
+//! other than ASCII letters, digits, `-`, `_` and `.` become `_`, and a name changed that way
+//! gets its hash appended ([`case_stem`]) so no two cases share a file. A failed write is printed
 //! and does not change the case's output.
 //!
 //! An `.smb` file is not always the measured body exactly: a body whose UV trims the measure
@@ -68,17 +69,34 @@ pub fn file_stem(name: &str) -> String {
         .collect()
 }
 
+/// A case's file stem: [`file_stem`] of its name, and where that replaced a character, `-`
+/// and the 64-bit FNV-1a hash of the name's bytes in hex, so two names that differ only in
+/// replaced characters (`c/1`, `c 1`) get different files. A name [`file_stem`] keeps as it
+/// is keeps its plain stem.
+pub fn case_stem(case: &str) -> String {
+    let stem = file_stem(case);
+    if stem == case {
+        return stem;
+    }
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in case.bytes() {
+        h ^= u64::from(byte);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{stem}-{h:016x}")
+}
+
 /// The file of body `n` of `label` of `case` of `unit` under `dir`.
 pub fn path(dir: &Path, unit: &str, case: &str, label: &str, n: usize) -> PathBuf {
     dir.join(file_stem(unit))
-        .join(format!("{}.{label}.{n}.smb", file_stem(case)))
+        .join(format!("{}.{label}.{n}.smb", case_stem(case)))
 }
 
 /// Starts dumping case `case` of `unit` under `dir` on this thread.
 pub fn start(dir: &Path, unit: &str, case: &str) {
     TARGET.with(|t| {
         *t.borrow_mut() = Some(Target {
-            files: Some((dir.join(file_stem(unit)), file_stem(case))),
+            files: Some((dir.join(file_stem(unit)), case_stem(case))),
             ..Target::default()
         });
     });
@@ -162,4 +180,24 @@ pub fn smb_bytes(k: &Kernel, b: &Brep) -> Result<Vec<u8>, String> {
         surface_key: &|_: FaceId| ObjectKey(0),
     };
     write_brep_to_file(k, Some(b), &env, true).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn case_names_differing_in_replaced_characters_get_different_files() {
+        assert_eq!(case_stem("c_1"), "c_1");
+        let (a, b) = (case_stem("c/1"), case_stem("c 1"));
+        assert!(a.starts_with("c_1-") && b.starts_with("c_1-"), "{a} {b}");
+        assert_ne!(a, b);
+        assert_ne!(a, case_stem("c_1"));
+        assert_eq!(a, case_stem("c/1"), "stable");
+        let dir = Path::new("d");
+        assert_ne!(
+            path(dir, "u", "c/1", "mass", 0),
+            path(dir, "u", "c_1", "mass", 0)
+        );
+    }
 }

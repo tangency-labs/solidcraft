@@ -272,6 +272,20 @@ fn a_plane_trimmed_past_its_domain_is_integrated_unclamped() {
 /// `eps cut^2 / 2 * 50`, 0.25 here.
 #[test]
 fn a_nurb_trimmed_past_its_knots_is_integrated_unclamped() {
+    nurb_trimmed_past_its_knots(false);
+}
+
+/// The same with the patch's out-of-bounds flag already on: that flag alone does not
+/// continue the face integration's evaluation (it clamps unless the integration's own
+/// continuation is on), so the continuation is still turned on, and the flag is left on.
+#[test]
+fn a_nurb_trimmed_past_its_knots_with_out_of_bounds_on_is_integrated_unclamped() {
+    nurb_trimmed_past_its_knots(true);
+}
+
+/// [`a_nurb_trimmed_past_its_knots_is_integrated_unclamped`], the patch's out-of-bounds
+/// flag set to `out_of_bounds` first.
+fn nurb_trimmed_past_its_knots(out_of_bounds: bool) {
     use solidcore::nurbs::b_spline_curve::KnotType;
     use solidcore::nurbs::b_spline_surface::{
         BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
@@ -298,7 +312,7 @@ fn a_nurb_trimmed_past_its_knots_is_integrated_unclamped() {
         raised(u1, v0),
         raised(u1, v1),
     ];
-    let patch = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+    let mut patch = BSplineSurface::create_canonical(&CanonicalSurfaceData {
         u_degree: 1,
         v_degree: 1,
         control_points: &corners,
@@ -312,6 +326,7 @@ fn a_nurb_trimmed_past_its_knots_is_integrated_unclamped() {
         uv_domain: None,
     })
     .unwrap();
+    *patch.out_of_bounds_enabled_mut() = out_of_bounds;
     b.face_mut(top).unwrap().surface = Some(Surface::from(patch));
     let want = 1000.0 + eps * 2500.0;
     for origin in [
@@ -326,6 +341,14 @@ fn a_nurb_trimmed_past_its_knots_is_integrated_unclamped() {
             want - eps * cut * cut / 2.0 * 50.0
         );
     }
+    let SurfaceKind::BSpline(s) = b.face(top).unwrap().surface.as_ref().unwrap().kind() else {
+        panic!("the top is not the patch")
+    };
+    assert_eq!(
+        s.is_out_of_bounds_enabled(),
+        out_of_bounds,
+        "the flag is restored"
+    );
 }
 
 /// The 2907c hull (#14170: gaps up to 4.7e-6, its faces' flux alone 1.77e-2 apart between

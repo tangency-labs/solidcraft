@@ -87,7 +87,7 @@
 #[path = "../../solidcore/tests/support/volume_leak.rs"]
 mod volume_leak;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -833,6 +833,7 @@ fn moved_golden_mass_rows_are_the_old_leak() {
     };
     let filter = std::env::var("ISSUE_16735_FILTER").ok();
     let inventory = inventory();
+    let mut gated: BTreeSet<RowKey> = BTreeSet::new();
     let reg = registry();
     let mut failures = Vec::new();
     let mut notes = Vec::new();
@@ -869,7 +870,17 @@ fn moved_golden_mass_rows_are_the_old_leak() {
                         let copy = || b0.clone_standing_for_self().unwrap();
                         let mut b = copy();
                         let Some(new) = new_record(&k, &mut b, kind) else {
-                            continue; // the measure failed: the golden row checks its status
+                            // the copy's measure failed: if the run's failed too, the golden
+                            // row checks its status; if the run's succeeded, this body's
+                            // checks cannot run, which is a failure (the status entry alone
+                            // decides, so one component's target is enough)
+                            if run_measured(&out, kind, &targets(unit_id, kind, n, 1)) {
+                                failures.push(format!(
+                                    "{unit_id} {case} {label}.{n}: the run measured this body \
+                                     but its copy does not"
+                                ));
+                            }
+                            continue;
                         };
                         let tg = targets(unit_id, kind, n, new.len());
                         let tag = format!("{unit_id} {case} {label}.{n}");
@@ -1038,6 +1049,7 @@ fn moved_golden_mass_rows_are_the_old_leak() {
                                 );
                                 if let Some(&(io, inew)) = inv.get(&key) {
                                     sum.inventory_gated += 1;
+                                    gated.insert(key.clone());
                                     // from a stale golden (above): from today's old value
                                     let io = if (io - old[j]).abs() <= floor(j) {
                                         io
@@ -1137,6 +1149,20 @@ fn moved_golden_mass_rows_are_the_old_leak() {
             }
         }
         let _ = writeln!(report, "{unit_id}: {sum:?}");
+    }
+    // every inventory row of these units (and the filter) must have been gated: a row of no
+    // measured body, field or component would otherwise pass unchecked
+    if let Some(inv) = &inventory {
+        for key in inv.keys() {
+            let (unit_id, case, field) = key;
+            let applies = UNITS.contains(&unit_id.as_str())
+                && filter.as_ref().is_none_or(|f| case.contains(f.as_str()));
+            if applies && !gated.contains(key) {
+                failures.push(format!(
+                    "{unit_id} {case}: inventory row {field} was never checked"
+                ));
+            }
+        }
     }
     println!("reported only:\n{}", notes.join("\n"));
     println!("{report}");

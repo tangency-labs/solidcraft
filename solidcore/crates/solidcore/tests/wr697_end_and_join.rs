@@ -122,9 +122,16 @@ fn at(cs: &[Corner], p: [f64; 3]) -> (FilletCornerKind, Option<Event>) {
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
-    volume_at(k, b, 1e-12)
-        .or_else(|_| volume_at(k, b, 1e-9))
-        .unwrap()
+    volume_and_accuracy(k, b).0
+}
+
+/// [`volume`] and the accuracy it was integrated to (1e-12, or 1e-9 where that fails), for
+/// checks that must measure at the same accuracy.
+fn volume_and_accuracy(k: &Kernel, b: &mut Brep) -> (f64, f64) {
+    match volume_at(k, b, 1e-12) {
+        Ok(v) => (v, 1e-12),
+        Err(_) => (volume_at(k, b, 1e-9).unwrap(), 1e-9),
+    }
 }
 
 /// `SmApiBrepComputeVolume` at `accuracy`.
@@ -234,7 +241,7 @@ fn a_mixed_convexity_end_s_rail_ends_on_the_end_face_s_surface() {
     assert_eq!(kind, FilletCornerKind::NByOne);
     assert_eq!(event, Some((BlendCornerEvent::End, BlendEnd::OnEndFace)));
     round(&mut k, &mut b, &[[30.0, 0.0, 10.0]], 2.0);
-    let v = volume(&k, &mut b);
+    let (v, accuracy) = volume_and_accuracy(&k, &mut b);
     let off = nearest_vertex(&b, Point3::new(396.0_f64.sqrt(), 0.0, 8.0));
     eprintln!("volume {v:.15} want {want:.15}; rail end off {off:.3e}");
     clean(&mut k, &mut b);
@@ -244,7 +251,7 @@ fn a_mixed_convexity_end_s_rail_ends_on_the_end_face_s_surface() {
     // tolerant edges' gaps (#16735): it leaks through them as this integrator did
     let fork = 21407.602511807886913;
     assert!((v - 21_407.602_507_916_15).abs() <= 1e-10, "{v} vs {fork}");
-    volume_leak::assert_moved_by_the_old_leak(&k, &mut b, fork, v, 1e-12);
+    volume_leak::assert_moved_by_the_old_leak(&k, &mut b, fork, v, accuracy);
 }
 
 /// The step with its upper block's profile (0, 10), (20, 10), (17, 20), (0, 20) swept
@@ -561,12 +568,12 @@ fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_turn() {
             )
         );
         round(&mut k, &mut b, &foot, r);
-        let v = volume(&k, &mut b);
+        let (v, accuracy) = volume_and_accuracy(&k, &mut b);
         eprintln!("r {r}: volume {v:.15}, {} faces", faces(&b));
         clean(&mut k, &mut b);
         assert_eq!(faces(&b), 10);
         assert!((v - want).abs() <= 1e-12 * want, "{v} vs {want}");
-        volume_leak::assert_moved_by_the_old_leak(&k, &mut b, was, v, 1e-12);
+        volume_leak::assert_moved_by_the_old_leak(&k, &mut b, was, v, accuracy);
     }
 }
 
