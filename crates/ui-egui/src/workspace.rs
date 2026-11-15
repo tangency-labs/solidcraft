@@ -382,7 +382,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "ASSEMBLE",
         panel: "COMPONENTS",
         promoted: 4,
-        ids: &["component.create", "component.from_bodies", "component.insert_design", "parts.library"],
+        ids: &["component.create", "component.from_bodies", "component.insert_design", "parts.library", "component.create_skeleton"],
     },
     Section {
         tab: "ASSEMBLE",
