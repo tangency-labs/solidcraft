@@ -27,6 +27,56 @@ fn open(h: &mut Harness) {
 }
 
 #[test]
+fn clearing_edited_extrude_offset_keeps_the_field_available_for_replacement() {
+    for params in [json!({"start_offset":"5 mm"}), json!({"start_offset":"0 mm"}), json!({"from":[0,0,5],"start_offset":"5 mm"})] {
+        let mut h = make(params);
+        let original = extent(&h);
+        let undo = h.app.session.undo.len();
+        open(&mut h);
+        h.step(&json!({"click":{"handle":"dialog:Offset"}})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"key":"Backspace"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("dialog:Offset").is_some(), "clearing a value must keep its field visible");
+        h.step(&json!({"text":"7 mm"})).unwrap();
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        assert_eq!(extent(&h).start_offset.as_deref(), Some("7 mm"));
+        assert_eq!(extent(&h).from, original.from);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(extent(&h), original);
+    }
+}
+
+#[test]
+fn new_extrude_keeps_empty_offset_until_profile_plane_is_selected() {
+    let mut h = make(json!({}));
+    h.app.run("timeline.delete", json!({"feature":"Depth"})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Base").unwrap().id;
+    h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+    h.app.start("solid.extrude");
+    h.frames(8);
+    h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Start"}})).unwrap();
+    h.step(&json!({"widget":"Offset"})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Offset"}})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"key":"Backspace"})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::handle_at("dialog:Offset").is_some());
+    h.step(&json!({"text":"3 mm"})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Start"}})).unwrap();
+    h.step(&json!({"widget":"Profile Plane"})).unwrap();
+    assert!(crate::scenario::handle_at("dialog:Offset").is_none());
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    let FeatureKind::Extrude { extent, .. } = &h.app.session.doc.features.last().unwrap().kind else { panic!("extrude") };
+    assert!(extent.start_offset.is_none());
+    assert!(extent.from.is_none());
+}
+
+#[test]
 fn undoing_the_edited_feature_closes_its_editor_and_preserves_redo() {
     let mut h = make(json!({}));
     let feature = h.app.session.doc.find_feature("Depth").unwrap().id;
@@ -921,5 +971,31 @@ fn double_clicking_a_face_of_a_moved_component_edits_its_feature() {
         h.step(&json!({"click":{"world":[42,2,4]},"double":true})).unwrap();
         h.frames(8);
         assert_eq!(editing_feature(&h), Some(feature_id(&h, "Inner")), "capture: {capture}");
+    }
+}
+
+#[test]
+fn surface_extrude_dialog_has_the_drag_arrow_on_every_side() {
+    for (direction, tip_z) in [("positive", 10.0), ("negative", -10.0), ("symmetric", 5.0)] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("surface.extrude", json!({"sketch":"Base","distance":"10 mm","direction":direction,"name":"Wall","body_name":"Sheet"})).unwrap();
+        h.frames(4);
+        h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+        h.frames(8);
+        let tip = h.at(&json!({"world":[5,5,tip_z]})).unwrap();
+        let handle = h.at(&json!({"handle":"arrow"})).unwrap_or_else(|_| panic!("{direction}: a surface extrude shows the drag arrow"));
+        assert!((handle[0] - tip[0]).hypot(handle[1] - tip[1]) < 1.0, "{direction}: {handle:?} expected {tip:?}");
+        h.step(&json!({"drag":[{"handle":"arrow"},{"world":[5,5,if direction == "negative" { -30.0 } else { 30.0 }]}]})).unwrap();
+        let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Surface(crate::dialogs_surface::Surf::Extrude { distance, .. }), .. }) =
+            &h.app.dialog
+        else {
+            panic!("surface extrude dialog")
+        };
+        let total = h.app.session.doc.eval(distance, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+        let expected = if direction == "symmetric" { 60.0 } else { 30.0 };
+        assert!((total - expected).abs() < 1.0, "{direction}: dragging the arrow sets the distance, got {distance}");
     }
 }

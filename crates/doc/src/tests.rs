@@ -74,6 +74,7 @@ fn plate_doc() -> (Document, u64) {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                picked_placements: Vec::new(),
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -180,6 +181,7 @@ fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                picked_placements: Vec::new(),
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -884,6 +886,7 @@ fn box_fillet_cut_timeline() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                picked_placements: Vec::new(),
             },
             operation: Operation::Cut,
             targets: vec![],
@@ -1587,6 +1590,7 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                picked_placements: Vec::new(),
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -1778,7 +1782,15 @@ fn browser_pruning_cuts_bad_parents_and_drops_stale_and_repeated_entries() {
     let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, None).unwrap();
     let key = sketch.to_string();
     doc.components.push(Component { id: 7, name: "Part".into(), ..Default::default() });
-    doc.occurrences.push(Occurrence { id: 20, component: 7, parent: 0, name: "Part".into(), transform: IDENTITY, grounded: false });
+    doc.occurrences.push(Occurrence {
+        id: 20,
+        component: 7,
+        parent: 0,
+        name: "Part".into(),
+        transform: IDENTITY,
+        grounded: false,
+        expressed_moves: Vec::new(),
+    });
     let deep = MAX_GROUP_NESTING as u64 + 2;
     doc.browser_groups = vec![
         browser_group(1, 0, "bodies", Some(2), &[]),
@@ -1844,7 +1856,15 @@ fn browser_data_survives_a_save_and_old_designs_read_unchanged() {
     let mut doc = Document::new("nested");
     doc.components.push(Component { id: 7, name: "Part".into(), ..Default::default() });
     for id in [20, 21] {
-        doc.occurrences.push(Occurrence { id, component: 7, parent: 0, name: format!("P{id}"), transform: IDENTITY, grounded: false });
+        doc.occurrences.push(Occurrence {
+            id,
+            component: 7,
+            parent: 0,
+            name: format!("P{id}"),
+            transform: IDENTITY,
+            grounded: false,
+            expressed_moves: Vec::new(),
+        });
     }
     doc.browser_groups = vec![browser_group(2, 0, "bodies", None, &[item("Lid"), group(3)]), browser_group(3, 0, "bodies", Some(2), &[item("Base")])];
     doc.browser_order.insert("0/bodies".into(), vec![item("Cap"), group(2)]);
@@ -1914,6 +1934,7 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             to_offset: None,
             from: None,
             to_body_apart: false,
+            picked_placements: Vec::new(),
         },
         operation: Operation::NewBody,
         targets: vec![],

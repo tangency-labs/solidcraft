@@ -15,7 +15,6 @@ use std::sync::{Arc, Mutex};
 use solidcore_record::Vec3;
 use solidcraft_viewport::hatch::Hatch;
 use solidcraft_viewport::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene, SceneMesh};
-use wgpu::util::DeviceExt;
 
 use crate::view::{AccessMap, DrawStats, Frame, GpuScene, GpuTarget, Palette, PaletteIndex, Renderer, analysis_colors, analysis_uniform};
 use crate::{GpuError, Result, caught, error_scopes};
@@ -252,7 +251,13 @@ impl Capturer {
         let depth = texture("sc_capture_depth", self.depth, self.samples, wgpu::TextureUsages::RENDER_ATTACHMENT);
         let (resolved_view, depth_view) = (resolved.create_view(&Default::default()), depth.create_view(&Default::default()));
         let multisampled_view = multisampled.as_ref().map(|t| t.create_view(&Default::default()));
-        let background = background_vertices(device, top, bottom);
+        let background = match background_vertices(device, top, bottom) {
+            Ok(b) => b,
+            Err(e) => {
+                let _ = caught(scopes);
+                return Err(e);
+            }
+        };
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_capture") });
         // Multisampled, the picture's texture is written only by the resolve: cleared first, or
         // some AMD Radeon Direct3D 12 drivers read it back black or as garbage (#10140), as the
@@ -263,6 +268,10 @@ impl Capturer {
             state.resolve_clears += _cleared;
         }
         state.renderer.prepare(device, queue, &mut encoder, frame);
+        if let Some(reason) = state.renderer.take_refused_upload() {
+            let _ = caught(scopes);
+            return Err(GpuError::Render(reason));
+        }
         {
             let (view, resolve_target, store) = match &multisampled_view {
                 Some(ms) => (ms, Some(&resolved_view), wgpu::StoreOp::Discard),
@@ -504,12 +513,14 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
             let flat = (b - a).cross(c - a).normalized().unwrap_or(Vec3::Z);
             for (k, p) in t.iter().zip([a, b, c]) {
                 let n = mesh.normals.get(*k as usize).copied().filter(|n| n.is_finite() && n.len() > 0.5).unwrap_or(flat);
-                if m.glass() {
-                    sc.glass_tri(p.to_f32(), n.to_f32(), col);
-                } else if m.closed {
-                    sc.tri(p.to_f32(), n.to_f32(), col);
-                } else {
-                    sc.open_tri(p.to_f32(), n.to_f32(), col);
+                // A mesh with values gives each vertex its own ([`SceneMesh::values`]).
+                match m.values.as_ref().and_then(|v| v.get(*k as usize)).copied() {
+                    Some(value) if m.glass() => sc.glass_tri_value(p.to_f32(), n.to_f32(), col, value),
+                    Some(value) if m.closed => sc.tri_value(p.to_f32(), n.to_f32(), col, value),
+                    Some(value) => sc.open_tri_value(p.to_f32(), n.to_f32(), col, value),
+                    None if m.glass() => sc.glass_tri(p.to_f32(), n.to_f32(), col),
+                    None if m.closed => sc.tri(p.to_f32(), n.to_f32(), col),
+                    None => sc.open_tri(p.to_f32(), n.to_f32(), col),
                 }
             }
         }
@@ -576,7 +587,7 @@ fn fs(i: O) -> @location(0) vec4<f32> {
 /// Background vertex: NDC position (2 × f32) and sRGB colour (4 × u8).
 const BACKGROUND_VERTEX: u64 = 12;
 
-fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> wgpu::Buffer {
+fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> Result<wgpu::Buffer> {
     let mut bytes = Vec::with_capacity(6 * BACKGROUND_VERTEX as usize);
     let corner = |x: f32, y: f32| (x, y, if y > 0.0 { top } else { bottom });
     for (x, y, c) in [corner(-1.0, 1.0), corner(1.0, 1.0), corner(1.0, -1.0), corner(-1.0, 1.0), corner(1.0, -1.0), corner(-1.0, -1.0)] {
@@ -584,11 +595,7 @@ fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> wgpu::Bu
         bytes.extend_from_slice(&y.to_le_bytes());
         bytes.extend_from_slice(&[c.0, c.1, c.2, 255]);
     }
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("sc_capture_background"),
-        contents: &bytes,
-        usage: wgpu::BufferUsages::VERTEX,
-    })
+    crate::buffer_init(device, "sc_capture_background", &bytes, wgpu::BufferUsages::VERTEX)
 }
 
 fn background_pipeline(device: &wgpu::Device, samples: u32, depth: wgpu::TextureFormat) -> wgpu::RenderPipeline {
@@ -634,7 +641,7 @@ fn background_pipeline(device: &wgpu::Device, samples: u32, depth: wgpu::Texture
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::TRI_SIZE;
+    use crate::view::{TRI_COLOR_AT, TRI_SIZE};
     use solidcore_tess::Mesh;
     use std::sync::Arc;
 
@@ -651,7 +658,7 @@ mod tests {
 
     /// The colour of a triangle `scene_geometry` wrote (its first vertex's palette entry).
     fn color(scene: &GpuScene, bytes: &[u8]) -> Option<[u8; 4]> {
-        let index = bytes.get(TRI_SIZE - 4..TRI_SIZE)?.try_into().ok().map(u32::from_le_bytes)?;
+        let index = bytes.get(TRI_COLOR_AT..TRI_COLOR_AT + 4)?.try_into().ok().map(u32::from_le_bytes)?;
         scene.palette.get(crate::view::PaletteIndex(index))
     }
 
@@ -667,6 +674,7 @@ mod tests {
             opacity,
             closed: true,
             hatch: Default::default(),
+            values: None,
         };
         let geometry = |opacity: f32| scene_geometry(&Scene { meshes: vec![mesh(opacity)], ..Default::default() });
 
@@ -817,6 +825,7 @@ mod tests {
             opacity: 0.5,
             closed: true,
             hatch: Default::default(),
+            values: None,
         };
         let sc = scene_geometry(&Scene { meshes: vec![mesh], ..Default::default() });
         assert_eq!(sc.tris.len(), 0);

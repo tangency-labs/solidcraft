@@ -1900,6 +1900,61 @@ pub fn is_topological(
     e: EdgeId,
     approx_tol_3d_gain: f64,
 ) -> Result<Topological> {
+    is_topological_with(k, b, e, CoverTolerance::Gain(approx_tol_3d_gain))
+}
+
+/// Not upstream (#15418): [`is_topological`] where two faces on different surfaces merge only
+/// where neither face's tolerance has to grow: one surface covers the other face within a
+/// tenth of the smaller face tolerance `t`, the distance under which `boolean_post_process`
+/// raises no tolerance upstream. A plane covers within upstream's own plane tolerance (gain
+/// 10, `5 t / 10000`), already below `t / 10`; anything else within `t / 10` (gain 0.2), which
+/// also scales the planarity test of a non-analytic face. Upstream's gain of 10 lets a curved
+/// face cover within `5 t` and the caller raises only the kept face's tolerance, leaving the
+/// other face's vertices and edges off the merged face.
+///
+/// # Errors
+///
+/// Those of [`is_topological`].
+pub fn is_topological_without_growth(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<Topological> {
+    is_topological_with(k, b, e, CoverTolerance::NoGrowth)
+}
+
+/// How [`is_topological_with`] sizes its cover tolerance from half the smaller face tolerance.
+#[derive(Debug, Clone, Copy)]
+enum CoverTolerance {
+    /// Upstream's `approx_tol_3d_gain`: that gain times half the smaller face tolerance, a
+    /// ten-thousandth of it for a plane.
+    Gain(f64),
+    /// [`is_topological_without_growth`]: a tenth of the smaller face tolerance (gain 0.2), and
+    /// for a plane upstream's gain of 10 over 10000.
+    NoGrowth,
+}
+
+impl CoverTolerance {
+    /// The tolerance of the cover and of the planarity test, from half the smaller face
+    /// tolerance.
+    fn approx(self, half_min: f64) -> f64 {
+        match self {
+            Self::Gain(g) => g * half_min,
+            Self::NoGrowth => 0.2 * half_min,
+        }
+    }
+
+    /// The cover tolerance where the first face's surface is a plane.
+    fn plane(self, half_min: f64) -> f64 {
+        match self {
+            Self::Gain(g) => g * half_min / 10000.0,
+            Self::NoGrowth => 10.0 * half_min / 10000.0,
+        }
+    }
+}
+
+fn is_topological_with(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    gain: CoverTolerance,
+) -> Result<Topological> {
     let mut out = Topological {
         is_topological: false,
         surf_to_keep: None,
@@ -2102,8 +2157,8 @@ pub fn is_topological(
             Some(face2::uv_domain(b, face1)?.union(&face2::uv_domain(b, face2_)?));
     } else {
         // Get tolerance.
-        let mut approx_tol = approx_tol_3d_gain
-            * (0.5 * face2::tolerance(b, face1)?).min(0.5 * face2::tolerance(b, face2_)?);
+        let half_min = (0.5 * face2::tolerance(b, face1)?).min(0.5 * face2::tolerance(b, face2_)?);
+        let mut approx_tol = gain.approx(half_min);
 
         // Do this only for Analytic surfaces, because they are extendable.
         if !(surf1.is_analytic()? || surf1.is_planar(k, approx_tol)?.is_planar) {
@@ -2115,7 +2170,7 @@ pub fn is_topological(
 
         // If we have planes use a much tighter coincidence check tolerance
         if surf1.is_kind_of(PLANE_TYPE)? {
-            approx_tol /= 10000.0;
+            approx_tol = gain.plane(half_min);
         }
 
         // See if this surface can 'cover' the part of the other surface that its face uses

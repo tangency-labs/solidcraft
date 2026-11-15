@@ -30,6 +30,9 @@
 //! parallel planes at their planes' distances (`SectionPlanes`) where the chord-length
 //! skin's control points leave the slab between the first and last planes, so the skin
 //! stays between them; every other skin keeps the chord-length parameters.
+//! Not upstream (#15263): turning planar sections carry their winding along the
+//! centroid travel and align their cyclic seams by exact curve evaluations before
+//! joining. Parallel sections with coherent winding retain their correspondence.
 //! **Statuses pass on** (opt-in `Kernel::fixes.sweep_statuses_pass_on`, WR-662;
 //! SolidCraft change, tangency-labs/smlib c8f6a31): the statuses upstream drops here
 //! are returned instead (`SER`).
@@ -41,12 +44,11 @@ use super::{
 use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::curve::p2::CurvePropertyType;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
-use crate::curve::curve::{Curve, CurveKind};
+use crate::curve::curve::Curve;
 use crate::error::{ignore_status, passed_on, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::ZONE_TOL_3D;
-use crate::geom::vector2d::Point2;
-use crate::math::{Vec3, EFF_ZERO_SQRT};
+use crate::math::{Point3, Vec3, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::SkinnedSurfaceOptions;
@@ -63,6 +65,186 @@ use crate::topology::{BrepId, EdgeuseId, FaceId};
 use super::skin_sources::{layer_sources, LoopSpans, NotTraced, Segment, SkinSources, SkinTrace};
 
 const OP: &str = "primitive::primitive_creation::p3";
+
+/// Exact polygon area moments for degree-one profile curves. A whole polygon may
+/// be one B-spline edge: its control points are exact corners, not display vertices.
+fn linear_section_centroid(
+    loops: &[(CompositeCurve, Vec<crate::topology::EdgeId>)],
+    normal: Vec3,
+) -> Result<Option<Point3>> {
+    let mut origin = None;
+    let mut twice_area = 0.0;
+    let mut moment = Vec3::ZERO;
+    for (composite, _) in loops {
+        let curve = composite.clone().make_composite_nurb()?;
+        if curve.degree()? != 1 {
+            return Ok(None);
+        }
+        let points = curve.control_points()?;
+        let Some((first, last)) = points.first().zip(points.last()) else {
+            return Ok(None);
+        };
+        let first = first.to_euclid();
+        if first != last.to_euclid() {
+            return Ok(None);
+        }
+        let reference = *origin.get_or_insert(first);
+        for pair in points.windows(2) {
+            let Some((p, q)) = pair.first().zip(pair.get(1)) else {
+                continue;
+            };
+            let p = p.to_euclid() - reference;
+            let q = q.to_euclid() - reference;
+            let area = p.cross(q).dot(normal);
+            twice_area += area;
+            moment += (p + q) * area;
+        }
+    }
+    let Some(origin) = origin else {
+        return Ok(None);
+    };
+    if !twice_area.is_finite() || twice_area == 0.0 {
+        return Ok(None);
+    }
+    let centroid = origin + moment / (3.0 * twice_area);
+    if ![centroid.x, centroid.y, centroid.z]
+        .iter()
+        .all(|v| v.is_finite())
+    {
+        return Err(SolidError::primitive_failed(
+            OP,
+            "a section centroid is non-finite",
+        ));
+    }
+    Ok(Some(centroid))
+}
+
+/// Carry the winding through a turn before joining the section's constituent curves.
+/// Reorder the edge provenance with the curves, so skin history follows the new seam.
+fn align_section_loop(
+    k: &crate::kernel::Kernel,
+    composite: &mut CompositeCurve,
+    edges: &mut Vec<crate::topology::EdgeId>,
+    previous: &BSplineCurve,
+    reverse: bool,
+) -> Result<()> {
+    // A closed B-spline can hold an entire loop in one edge. Its knot parameters
+    // are seam candidates too; every piece retains that edge's source.
+    if composite.num_segments() == 1 {
+        let joined = composite.make_composite_nurb()?;
+        let domain = joined.natural_interval();
+        let (knots, _) = joined.knots(None)?;
+        let mut remainder = Curve::from(joined);
+        let mut pieces = Vec::new();
+        for t in knots {
+            if t > domain.min() && t < domain.max() {
+                let interval = remainder.natural_interval();
+                let mut head = remainder.copy(k)?;
+                // These are existing exact knots. Trim directly rather than using
+                // SplitCurve's proximity rejection for arbitrary split parameters.
+                head.trim(
+                    k,
+                    &mut crate::geom::extent1d::Extent1d::from_min_max(interval.min(), t),
+                    crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+                )?;
+                remainder.trim(
+                    k,
+                    &mut crate::geom::extent1d::Extent1d::from_min_max(t, interval.max()),
+                    crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+                )?;
+                pieces.push(head);
+            }
+        }
+        if !pieces.is_empty() {
+            pieces.push(remainder);
+            for piece in &mut pieces {
+                let interval = piece.natural_interval();
+                piece.edit_parameterization(
+                    k,
+                    &crate::geom::extent1d::Extent1d::from_min_max(
+                        domain.min(),
+                        domain.min() + interval.max() - interval.min(),
+                    ),
+                )?;
+            }
+            if let Some(&edge) = edges.first() {
+                edges.resize(pieces.len(), edge);
+            }
+            *composite = CompositeCurve::with_curves(3, pieces, true, None, None)?;
+        }
+    }
+    let mut segments = composite.segments().to_vec();
+    if reverse {
+        segments.reverse();
+        edges.reverse();
+        for segment in &mut segments {
+            segment.same_sense = !segment.same_sense;
+            std::mem::swap(&mut segment.gap_start, &mut segment.gap_end);
+        }
+    }
+    let make = |segments: &[crate::curve::composite_curve::CompositeCurveSegment]| {
+        let mut candidate = composite.clone();
+        for (i, segment) in segments.iter().enumerate() {
+            candidate.set_segment(i, segment.clone())?;
+        }
+        Ok::<_, SolidError>(candidate)
+    };
+    let mut best = make(&segments)?;
+    let mut best_score = f64::INFINITY;
+    let mut best_shift = 0;
+    let previous_domain = previous.natural_interval();
+    // Compare exact curve evaluations at the joined curves' knot-span ends and
+    // midpoints. This uses neither a tessellation nor a nearest display vertex.
+    for shift in 0..segments.len() {
+        let mut candidate = make(&segments)?;
+        let joined = candidate.make_composite_nurb()?;
+        let domain = joined.natural_interval();
+        let range = domain.max() - domain.min();
+        if !range.is_finite() || range <= 0.0 {
+            return Err(SolidError::primitive_failed(
+                OP,
+                "a section loop has no finite parameter interval",
+            ));
+        }
+        let (knots, _) = joined.knots(None)?;
+        let mut score = 0.0;
+        for span in knots.windows(2) {
+            let Some((&start, &end)) = span.first().zip(span.get(1)) else {
+                continue;
+            };
+            for t in [start, (start + end) * 0.5] {
+                let fraction = (t - domain.min()) / range;
+                let p = previous.evaluate_point(previous_domain.evaluate(fraction))?;
+                score += (joined.evaluate_point(t)? - p).length();
+            }
+        }
+        if !score.is_finite() {
+            return Err(SolidError::primitive_failed(
+                OP,
+                "section correspondence has a non-finite distance",
+            ));
+        }
+        if score < best_score {
+            best_score = score;
+            best_shift = shift;
+            best = candidate;
+        }
+        // Move the first segment to the end, without a call that can panic.
+        let mut rest = std::mem::take(&mut segments).into_iter();
+        let first = rest.next();
+        segments = rest.chain(first).collect();
+    }
+    if edges.len() == segments.len() {
+        let mut rest = std::mem::take(edges).into_iter();
+        let head: Vec<_> = rest.by_ref().take(best_shift).collect();
+        *edges = rest.chain(head).collect();
+    } else {
+        // Missing provenance must only disable the trace, never the geometry.
+        edges.clear();
+    }
+    *composite = best;
+    Ok(())
+}
 
 pub(super) fn target(primitive: &PrimitiveCreation, brep: BrepId) -> Result<RegionRef> {
     Ok((
@@ -88,7 +270,7 @@ fn face_surface(a: &impl PrimitiveAccess, face: FaceRef) -> Result<&Surface> {
 /// with that cap fails. [`SectionPlanes::leaves`] finds that on the chord-length skin's
 /// control points; only then is the skin built again at [`SectionPlanes::params`].
 struct SectionPlanes {
-    origin: crate::math::Point3,
+    origin: Point3,
     unit: Vec3,
     /// The last plane's height above the first along `unit` (non-zero).
     last: f64,
@@ -235,40 +417,8 @@ fn swung_curve_scale(
 // CreateSwungSurface queries GetOrCreateGwNurbPointer on each original
 // derived curve. Copying a lazy SmLine's empty base would lose its MakeNurb.
 fn swung_nurb(kernel: &crate::kernel::Kernel, curve: &Curve) -> Result<BSplineCurve> {
-    let base = super::geometry::bspline(curve)
-        .ok_or_else(|| SolidError::invalid_input(OP, "non B-spline swung input"))?;
-    if base.gw_nurb().is_some() {
-        return Ok(base);
-    }
-    // GetOrCreateGwNurbPointer ignores MakeNurb's ordinary status. Keep the
-    // caller's owner/context for analytic generation and propagate Unported.
-    match curve.kind() {
-        CurveKind::Line(line) => {
-            let mut line = line.clone();
-            ignore_status(line.make_nurb_owned(curve.owner()))?;
-            Ok(line.base().clone())
-        }
-        CurveKind::Ellipse(ellipse) => {
-            let mut ellipse = ellipse.clone();
-            ignore_status(ellipse.make_nurb_owned_with_edge_tol(
-                kernel,
-                curve.owner(),
-                curve.owner_zone_tol_3d(),
-            ))?;
-            Ok(ellipse.base().clone())
-        }
-        CurveKind::Parabola(parabola) => {
-            let mut parabola = parabola.clone();
-            ignore_status(parabola.make_nurb(curve.owner()))?;
-            Ok(parabola.base().clone())
-        }
-        CurveKind::Hyperbola(hyperbola) => {
-            let mut hyperbola = hyperbola.clone();
-            ignore_status(hyperbola.make_nurb(curve.owner()))?;
-            Ok(hyperbola.base().clone())
-        }
-        _ => Ok(base),
-    }
+    super::geometry::bspline_with_nurb(kernel, curve)?
+        .ok_or_else(|| SolidError::invalid_input(OP, "non B-spline swung input"))
 }
 
 fn swung_surface(
@@ -372,15 +522,54 @@ impl PrimitiveCreation {
         // (the trace: each section loop's spans, by layer, and the first reason it fails)
         let mut loop_spans: Vec<(usize, LoopSpans)> = Vec::new();
         let mut untraced: Option<NotTraced> = None;
+        let mut previous_section: Option<(Point3, Vec3)> = None;
+        let mut previous_loops: Vec<BSplineCurve> = Vec::new();
         for (i, &face) in faces.iter().enumerate() {
             let domain = crate::topology::face::p2::uv_domain(a.brep(face.0)?, face.1)?;
-            face_surface(a, face)?.evaluate_normal(
+            let normal = face_surface(a, face)?.evaluate_normal(
                 a.kernel(brep)?,
                 domain.evaluate(0.5, 0.5),
                 Side::Left,
                 Side::Left,
             )?;
+            let planar = matches!(
+                face_surface(a, face)?.kind(),
+                crate::surface::surface::SurfaceKind::Plane(_)
+            );
             let composites = a.face_composites_with_edges(face)?;
+            let mut section = if planar {
+                let centroid = match linear_section_centroid(&composites, normal)? {
+                    Some(centroid) => centroid,
+                    None => {
+                        a.with_primitive_brep(face.0, |k, b| {
+                            // Integration accuracy is independent of the skin's zero
+                            // approximation tolerance for exact section interpolation.
+                            crate::mass::integrator::properties::face_centroid(k, b, face.1, 1e-9)
+                        })?
+                        .1
+                    }
+                };
+                Some((centroid, normal))
+            } else {
+                None
+            };
+            let mut reverse = false;
+            let mut align = false;
+            if let (Some((point, previous_normal)), Some((centroid, normal))) =
+                (previous_section, section)
+            {
+                let direction = centroid - point;
+                let before = previous_normal.dot(direction);
+                let after = normal.dot(direction);
+                reverse = (before < 0.0 && after > 0.0) || (before > 0.0 && after < 0.0);
+                // Preserve the caller's correspondence byte for byte on ordinary
+                // parallel sections. Turns need a new seam as well as winding.
+                align =
+                    reverse || !previous_normal.is_parallel_to(normal, crate::math::EFF_ZERO_DEG);
+                if reverse {
+                    section = Some((centroid, -normal));
+                }
+            }
             if i == 0 {
                 layer_count = composites.len();
             } else if layer_count != composites.len() {
@@ -389,15 +578,30 @@ impl PrimitiveCreation {
                     "the faces have different numbers of layers",
                 ));
             }
-            for (j, (mut composite, edges)) in composites.into_iter().enumerate() {
+            let mut current_loops = Vec::new();
+            for (j, (mut composite, mut edges)) in composites.into_iter().enumerate() {
+                if align {
+                    if let Some(previous) = previous_loops.get(j) {
+                        align_section_loop(
+                            a.kernel(brep)?,
+                            &mut composite,
+                            &mut edges,
+                            previous,
+                            reverse,
+                        )?;
+                    }
+                }
                 let (joined, breaks) = composite.make_composite_nurb_with_breaks()?;
                 if trace.is_some() && untraced.is_none() {
                     let segments = edges.into_iter().map(Segment::Edge).collect();
                     loop_spans.push((j, LoopSpans { breaks, segments }));
                 }
+                current_loops.push(joined.clone());
                 skin_curves.push(joined);
                 layers.push(j);
             }
+            previous_section = section;
+            previous_loops = current_loops;
         }
         if faces.is_empty() {
             skin_curves.extend_from_slice(profiles);
@@ -693,9 +897,15 @@ impl PrimitiveCreation {
             let mut placed = [Axis2Placement::IDENTITY; 3];
             // each composite's side faces (WR-404's caps)
             let mut groups = Vec::new();
+            let mut closed_sections = options.cap_ends
+                && a.kernel(brep)?.fixes.curve_sweep_closed_path_joins_ends
+                && !composites.composites.is_empty();
             for (index, mut composite) in composites.composites.into_iter().enumerate() {
                 let profile = composite.make_composite_nurb()?;
                 let want_placements = index == 0 && opt_placements.is_some();
+                // (not upstream) an upright sweep's up direction, turned into the space the
+                // path was turned into
+                let up = options.up.map(|u| prepared.rotation.transform_vector(u));
                 let (net, trace) = BSplineSurface::create_sweep_surface_traced(
                     &profile,
                     &prepared.path,
@@ -703,6 +913,7 @@ impl PrimitiveCreation {
                     options.translational_sweep,
                     approx_tol,
                     want_placements.then_some(&mut placed),
+                    up,
                 )?;
                 // not upstream (#2572): a path sweep without a scale keeps its definition. A path of
                 // lines and circular arcs has its net built from the definition itself (exact to
@@ -730,6 +941,16 @@ impl PrimitiveCreation {
                     };
                     (net, fitted)
                 };
+                // Compare complete sections before the surface is split into faces.
+                // A closed sweep's individual path pieces need not close on themselves.
+                if closed_sections {
+                    closed_sections = sweep_ends_coincide(
+                        a.kernel(brep)?,
+                        &net,
+                        options.translational_sweep,
+                        a.brep(brep)?.tolerance(),
+                    )?;
+                }
                 let mut surface = Surface::from(net);
                 if let Some(definition) = definition {
                     surface.set_sweep_definition(definition);
@@ -764,9 +985,7 @@ impl PrimitiveCreation {
             }
             // not upstream (#2192, opt-in): a closed path whose end sections lie on its
             // start sections gets no caps; the stitch joins the ends instead
-            let cap_ends = options.cap_ends
-                && !(a.kernel(brep)?.fixes.curve_sweep_closed_path_joins_ends
-                    && sweep_ends_coincide(&*a, brep, side_faces, options.translational_sweep)?);
+            let cap_ends = options.cap_ends && !closed_sections;
             if cap_ends {
                 // not upstream (WR-404, #411)
                 let (mut starts, mut ends) = sweep_end_curves(
@@ -894,66 +1113,91 @@ fn sweep_end_curves(
     Ok((starts, ends))
 }
 
-/// Whether every side face of a curve sweep spans the whole sweep and its section at the
-/// sweep's end lies on its section at the start, within the B-rep's tolerance: the path
-/// closes on itself and the profile comes back where it started (tangency-labs/solidcore#2192).
-/// The sweep runs along v for a translational sweep, else along u.
+/// Whether a complete swept surface's terminal sections coincide within the B-rep's
+/// tolerance. Run before partitioning the surface into faces: a split face may span only
+/// one path piece even when the complete sweep closes (WR-675).
 fn sweep_ends_coincide(
-    a: &impl PrimitiveAccess,
-    brep: BrepId,
-    side_faces: &[FaceId],
+    k: &crate::kernel::Kernel,
+    surface: &BSplineSurface,
     translational: bool,
+    tol: f64,
 ) -> Result<bool> {
-    // sections compared at this many intervals across each face
-    const SAMPLES: u32 = 16;
-    let k = a.kernel(brep)?;
-    let tol = a.brep(brep)?.tolerance();
-    let mut faces = Vec::new();
-    for &face in side_faces {
-        let surface = face_surface(a, (brep, face))?;
-        let domain = surface.natural_uv_domain_with_nurb(k)?;
-        let (along, across) = if translational {
-            (
-                (domain.min().y, domain.max().y),
-                (domain.min().x, domain.max().x),
-            )
-        } else {
-            (
-                (domain.min().x, domain.max().x),
-                (domain.min().y, domain.max().y),
-            )
-        };
-        faces.push((surface, along, across));
-    }
-    if faces.is_empty() {
+    use crate::nurbs::b_spline_surface::p2::IsoCurveOptions;
+    use crate::nurbs::math::gamma;
+
+    let domain = surface.natural_uv_domain();
+    let (direction, interval) = if translational {
+        (SurfParamType::V, domain.v_interval())
+    } else {
+        (SurfParamType::U, domain.u_interval())
+    };
+    let start = surface
+        .create_iso_parametric_curve(k, direction, interval.min(), IsoCurveOptions::default())?
+        .curve
+        .canonical()?;
+    let end = surface
+        .create_iso_parametric_curve(k, direction, interval.max(), IsoCurveOptions::default())?
+        .curve
+        .canonical()?;
+    // With the same rational basis, the largest control-point gap bounds the
+    // section gap. Proportional weights describe that same basis; bound any
+    // rounding difference in their ratios as well.
+    if start.degree != end.degree
+        || start.knots != end.knots
+        || start.knot_multiplicities != end.knot_multiplicities
+        || start.weights.len() != end.weights.len()
+        || start
+            .weights
+            .iter()
+            .chain(&end.weights)
+            .any(|w| !w.is_finite() || *w <= 0.0)
+        || start.control_points.is_empty()
+        || start.control_points.len() != end.control_points.len()
+    {
         return Ok(false);
     }
-    let first = faces.iter().map(|f| f.1 .0).fold(f64::INFINITY, f64::min);
-    let last = faces
-        .iter()
-        .map(|f| f.1 .1)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let span_tol = EFF_ZERO_SQRT * (1.0 + first.abs().max(last.abs()));
-    for (surface, (low, high), (from, to)) in faces {
-        if low - first > span_tol || last - high > span_tol {
+    let Some(anchor) = end.control_points.first() else {
+        return Ok(false);
+    };
+    let mut gap_bound = 0.0_f64;
+    let mut radius = 0.0_f64;
+    for (a, b) in start.control_points.iter().zip(&end.control_points) {
+        let gap = a.distance(*b);
+        let reach = anchor.distance(*b);
+        if !gap.is_finite() || !reach.is_finite() {
             return Ok(false);
         }
-        for i in 0..=SAMPLES {
-            let s = from + (to - from) * (f64::from(i) / f64::from(SAMPLES));
-            let (start, end) = if translational {
-                (Point2::new(s, low), Point2::new(s, high))
-            } else {
-                (Point2::new(low, s), Point2::new(high, s))
-            };
-            let gap = surface
-                .evaluate_point(k, start)?
-                .distance(surface.evaluate_point(k, end)?);
-            if gap.is_nan() || gap > tol {
+        gap_bound = gap_bound.max(gap);
+        radius = radius.max(reach);
+    }
+    let mut ratio_min = 1.0_f64;
+    let mut ratio_max = 1.0_f64;
+    if !start.weights.is_empty() {
+        ratio_min = f64::INFINITY;
+        ratio_max = 0.0;
+        for (a, b) in start.weights.iter().zip(&end.weights) {
+            let ratio = b / a;
+            if !ratio.is_finite() || ratio <= 0.0 {
                 return Ok(false);
             }
+            ratio_min = ratio_min.min(ratio);
+            ratio_max = ratio_max.max(ratio);
         }
     }
-    Ok(true)
+    // R_end[i] = R_start[i] * ratio[i] / sum(R_start * ratio).
+    // Thus sum |R_end - R_start| <= (ratio_max - ratio_min) / ratio_min.
+    // Subtracting an anchor makes the bound independent of world coordinates.
+    // Every bound includes its rounding: each computed ratio is within a factor
+    // (1 +- gamma(1)) of the exact one, so the exact ratios lie in [lo, hi] below,
+    // and two ratios that round to the same value still leave a weight gap. Each
+    // distance carries at most gamma(4) relative error, and the subtraction,
+    // division, product and sum here at most gamma(4) more: the computed bound
+    // times (1 + gamma(8)) encloses the exact one.
+    let lo = ratio_min * (1.0 - gamma(1));
+    let hi = ratio_max * (1.0 + gamma(1));
+    let weight_gap = (hi - lo) / lo;
+    let bound = (gap_bound + radius * weight_gap) * (1.0 + gamma(8));
+    Ok(bound.is_finite() && bound <= tol)
 }
 
 /// Each of `faces`' V interval: its surface's natural domain across the sections
@@ -980,6 +1224,57 @@ mod tests {
     use crate::curve::line::Line;
     use crate::geom::extent1d::Extent1d;
     use crate::kernel::Kernel;
+
+    #[test]
+    fn closed_sections_allow_proportional_rational_weights() {
+        use crate::nurbs::b_spline_curve::p1::KnotType;
+        use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceData};
+
+        let k = Kernel::default();
+        let mut points = [Vec3::ZERO, Vec3::Y, Vec3::Z, Vec3::ZERO, Vec3::Y, Vec3::Z];
+        for expected in [true, false] {
+            if !expected {
+                points[4] += 0.1 * Vec3::X;
+            }
+            let surface = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+                u_degree: 1,
+                v_degree: 2,
+                control_points: &points,
+                form: BSplineSurfaceForm::Unspecified,
+                u_multiplicities: &[2, 2],
+                v_multiplicities: &[3, 3],
+                u_knots: &[0.0, 1.0],
+                v_knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: Some(&[1.0, 0.5, 1.0, 2.0, 1.0, 2.0]),
+                uv_domain: None,
+            })
+            .unwrap();
+            assert_eq!(
+                sweep_ends_coincide(&k, &surface, false, 1e-6).unwrap(),
+                expected
+            );
+        }
+        // Equal control points far from the anchor whose weight ratios both round to 3:
+        // the exact bases differ, and the sections lie about 1.85e-7 apart midway.
+        let far = 1e10 * Vec3::X;
+        let points = [Vec3::ZERO, far, Vec3::ZERO, far];
+        let surface = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &points,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0, 1.0 + f64::EPSILON, 3.0, 3.0 + 2.0 * f64::EPSILON]),
+            uv_domain: None,
+        })
+        .unwrap();
+        assert!(!sweep_ends_coincide(&k, &surface, false, 1e-8).unwrap());
+    }
 
     // An imported line may have last-bit differences between its analytic data
     // and cached NURB. Virtual evaluations must continue to use the analytic data.

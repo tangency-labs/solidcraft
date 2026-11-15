@@ -34,7 +34,7 @@ use serde_json::{Value, json};
 use super::check::{located, whole};
 use super::component::{MatrixParam, MatrixTolerance};
 use super::diagnostics::ProfileReport;
-use super::file::{NamesParam, UpParam};
+use super::file::{HistoryParam, NamesParam, UpParam};
 use super::types::not_blank_pattern;
 
 /// What `folder` says when it is neither true nor false, as `step_options` has it.
@@ -98,6 +98,10 @@ pub struct InsertStepKeys {
     #[serde(default, deserialize_with = "folder_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
     pub folder: Option<bool>,
+    /// For a FreeCAD file: its sketches and features rebuilt as SolidCraft features (the
+    /// default), or only its solids as one Import feature.
+    #[serde(default)]
+    pub history: Option<HistoryParam>,
     /// Where the import goes in the active component, as a rigid move applied after `up`: a
     /// row-major 3×4 (12 numbers) or 4×4 (16 numbers) matrix, flat or as rows, as
     /// `occurrence.move` takes it. The reply gives the placement it made as `transform`.
@@ -118,7 +122,7 @@ fn leave_unread(value: &mut Value) {
     };
     if !solidcraft_io::is_step_path(path) {
         // A file of another kind is refused before any other key is read.
-        for key in ["name", "up", "names", "folder", "matrix", "tolerance"] {
+        for key in ["name", "up", "names", "folder", "history", "matrix", "tolerance"] {
             keys.remove(key);
         }
         return;
@@ -199,8 +203,17 @@ pub struct StepInserted {
     pub created_bodies: Vec<String>,
     /// What the file reader noticed and put right.
     pub warnings: Vec<String>,
+    /// A FreeCAD file only: `"features"` when its sketches and features were rebuilt; absent
+    /// when its solids came in as one Import feature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<String>,
+    /// FreeCAD only, with `history: features`: the ids of the features the rebuild added.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub features_added: Option<Vec<u64>>,
     /// The program the file's header names as writing it.
     pub system: String,
+    /// The SHA-256 of the file's exact bytes, as lower-case hex.
+    pub content_sha256: String,
     /// The exporter the file names, and which way up its files are known to be (`y` or `z`). Only
     /// for a program whose files are known to need standing up.
     #[serde(default, skip_serializing_if = "Option::is_none")]

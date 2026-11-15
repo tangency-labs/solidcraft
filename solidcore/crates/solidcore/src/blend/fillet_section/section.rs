@@ -41,13 +41,33 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData
 use crate::nurbs::b_spline_surface::p1::CanonicalSurfaceData;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm};
 use crate::nurbs::knots::Side;
+use crate::surface::offset_surface::OffsetSurface;
 use crate::surface::procedural_blend::chamfer::ChamferDefinition;
 use crate::surface::procedural_blend::{count_area_root, BlendDefinitionInput, ProceduralBlend};
 use crate::surface::surface::{Surface, SurfaceKind};
 use core::sync::atomic::{AtomicU32, Ordering};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+/// How many halvings in a row of a span may leave its proved bound no better than half its
+/// parent's proved bound before the certificate stops (#16768). Only halvings between two
+/// finite bounds count; a span still unproved (its feet's enclosure failing on every piece)
+/// is left to the cap of 4096 stations, since how many halvings Krawczyk's proof needs
+/// depends on how far its contraction starts from one, which no order bounds. Derived from
+/// the order of the bound on a smooth span of length h: it is the Hermite remainder
+/// `h^4 / 384` times the jets' fourth s-derivative bounded over the span's pieces
+/// (`gn_certify_span`), order 4 in h. A halving divides `h^4` by 2^4 = 16, and the half
+/// starts from its parent's pieces, whose bounds hold over it, so its fourth-derivative
+/// bound is no larger: a proved smooth span's bound falls about 16-fold with each halving.
+/// The test asks only 2-fold (order 1), the slack being the row terms taken again about the
+/// half's own first station. Four halvings in a row that each fall short of order 1 have
+/// together gained less than 2^4 = 16, what one halving of the order-4 bound gains: the
+/// bound is then not following its order, so the section is degenerate there (an offset
+/// nearly collapsing to a curve, as where a ball's radius is close to a face's own radius
+/// of curvature), and halving further only multiplies the work, the stations doubling
+/// each round to the cap.
+const MAX_STALLED_HALVINGS: u32 = 4;
 const OP: &str = "blend::fillet_section::GnSectionFsg";
 const OP_BUILD: &str = "blend::fillet_section::GnSectionFsg::build";
 const OP_CERTIFY: &str = "blend::fillet_section::GnSectionFsg::certify";
@@ -151,11 +171,43 @@ pub struct GnLawRound<'a> {
 /// sets (the balls' centres at the stations, over t; 0d43b4c).
 type Built = (Surface, Option<BSplineCurve>);
 
-/// The surface under an offset surface (`GetBaseSurface`), else the surface itself.
-fn base_of(s: &Surface) -> &Surface {
+/// Not the fork's: the face a ball rolls on, for a section by its definition (the round's
+/// circle, [`crate::blend::fillet_standard_solver::p2`], and a section of any order, the
+/// curvature-continuous round's): the surface the trace rolled the ball on. Past its domain
+/// the offset of a B-spline, surface of revolution or surface of extrusion is evaluated on
+/// its extended base (`m_pExtendedSurface`: the base's tangent extension, or a surface of
+/// revolution of a circle's arc carried on as its circle), while the base itself continues
+/// otherwise (a B-spline's end spans carried on, a revolved generator's extrapolation). A
+/// section whose rails run on past the face (an edge's round run on past the edge's ends,
+/// or out to an End round a tube) had no foot on the plain base there: its first station
+/// missed the rails (by more than 1 on a twisted wall; by 93 at the open end of a long
+/// shoulder between two lofted sheets, where the curvature-continuous round was refused).
+/// So where the offset holds an extension (the one it holds now, pending or stored, which
+/// contains every point the trace evaluated), the section rolls on it. A plane, cylinder,
+/// cone, sphere or torus continues as itself and keeps its analytic kind, and a blend by its
+/// definition keeps its definition.
+pub(crate) fn rolled_on(offset: &OffsetSurface) -> Cow<'_, Surface> {
+    let base = offset.base_surface();
+    let extends = matches!(
+        base.kind(),
+        SurfaceKind::BSpline(_)
+            | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_)
+    );
+    let extended = if extends {
+        offset.with_extended_base_surface(|e| e.map(Surface::clone_keeping_owner))
+    } else {
+        None
+    };
+    extended.map_or(Cow::Borrowed(base), Cow::Owned)
+}
+
+/// The face `s` stands for: under an offset surface, the surface its ball rolls on
+/// ([`rolled_on`]); any other surface, itself.
+fn face_of(s: &Surface) -> Cow<'_, Surface> {
     match s.kind() {
-        SurfaceKind::OffsetSurface(o) => o.base_surface(),
-        _ => s,
+        SurfaceKind::OffsetSurface(o) => rolled_on(o),
+        _ => Cow::Borrowed(s),
     }
 }
 
@@ -1061,7 +1113,8 @@ impl GnSectionFsg {
         uvs: [&mut BSplineCurve; 2],
     ) -> Result<Surface> {
         let [s1, s2] = surfaces;
-        let faces = [base_of(s1), base_of(s2)];
+        let (f1, f2) = (face_of(s1), face_of(s2));
+        let faces = [f1.as_ref(), f2.as_ref()];
         self.build(
             k,
             center_line,
@@ -1953,6 +2006,13 @@ impl GnSectionFsg {
         // a span's finest proved level, kept while it is over the target: its halves start
         // from its pieces (not the fork's, which certifies each half afresh)
         let mut levels: Vec<Option<Arc<CertifiedLevel>>> = vec![None; bounds.len()];
+        // for each span: its parent's bound (none for a span not halved from another) and how
+        // many halvings in a row, itself included once certified, left a bound no better than
+        // half the parent's
+        let mut parents: Vec<Option<f64>> = vec![None; bounds.len()];
+        let mut stalled: Vec<u32> = vec![0; bounds.len()];
+        // the halving rounds taken so far
+        let mut rounds = 0_u32;
         loop {
             let mut all = true;
             // a span's first level tried, where it inherits none (not the fork's, which
@@ -1991,6 +2051,23 @@ impl GnSectionFsg {
                     )?;
                     // the next span's first level: one coarser than this one's first proved
                     hint = reuse.first.map_or(0, |f| f.saturating_sub(1));
+                    if let (Some(&parent), Some(count)) = (parents.get(j), stalled.get_mut(j)) {
+                        // only a halving between proved (finite) bounds counts: an unproved span
+                        // is left to the cap on the stations, since how many halvings its proof
+                        // takes is not bounded by the bound's order
+                        let stalled_here = match parent {
+                            Some(p) if p.is_finite() && bj.is_finite() => *bj > 0.5 * p,
+                            _ => false,
+                        };
+                        *count = if stalled_here { *count + 1 } else { 0 };
+                        if *bj > target && *count >= MAX_STALLED_HALVINGS {
+                            // the halving did not converge: a typed failure, the rounds it took
+                            return Err(SolidError::NotConverged {
+                                operation: OP_CERTIFY,
+                                iterations: rounds,
+                            });
+                        }
+                    }
                     let within = *bj <= target;
                     *lj = if within {
                         None
@@ -2016,13 +2093,19 @@ impl GnSectionFsg {
             let mut next: Vec<GnStation> = Vec::new();
             let mut next_bounds: Vec<f64> = Vec::new();
             let mut next_levels: Vec<Option<Arc<CertifiedLevel>>> = Vec::new();
-            for ((pair, &bj), lj) in stations.windows(2).zip(&bounds).zip(&levels) {
+            let mut next_parents: Vec<Option<f64>> = Vec::new();
+            let mut next_stalled: Vec<u32> = Vec::new();
+            for (((pair, &bj), lj), &uj) in
+                stations.windows(2).zip(&bounds).zip(&levels).zip(&stalled)
+            {
                 k.check_cancelled(OP_CERTIFY)?;
                 let [a, b] = pair else { continue };
                 next.push(*a);
                 if bj <= target {
                     next_bounds.push(bj);
                     next_levels.push(None);
+                    next_parents.push(None);
+                    next_stalled.push(0);
                     continue;
                 }
                 let mid = 0.5 * (a.s + b.s);
@@ -2062,6 +2145,10 @@ impl GnSectionFsg {
                 next_bounds.push(-1.0);
                 next_levels.push(lj.clone());
                 next_levels.push(lj.clone());
+                next_parents.push(Some(bj));
+                next_parents.push(Some(bj));
+                next_stalled.push(uj);
+                next_stalled.push(uj);
             }
             if let Some(last) = stations.last() {
                 next.push(*last);
@@ -2069,6 +2156,9 @@ impl GnSectionFsg {
             stations = next;
             bounds = next_bounds;
             levels = next_levels;
+            parents = next_parents;
+            stalled = next_stalled;
+            rounds = rounds.saturating_add(1);
         }
         let mut bound = 0.0_f64;
         for &b in &bounds {
@@ -2189,6 +2279,58 @@ mod tests {
     use crate::geom::extent2d::Extent2d;
     use crate::math::Vec2;
     use crate::surface::plane::Plane;
+
+    /// A curved patch: one bicubic span over [0, 1] x [0, 1].
+    fn dome() -> Surface {
+        use crate::nurbs::math::{CPoint, NOW};
+        let net: Vec<Vec<CPoint>> = (0..4_u32)
+            .map(|i| {
+                (0..4_u32)
+                    .map(|j| {
+                        let (x, y) = (f64::from(i) / 3.0, f64::from(j) / 3.0);
+                        let z = 0.5 * ((x - 0.5).powi(2) + (y - 0.5).powi(2)) + 0.3 * x * y;
+                        CPoint::new(x, y, z, NOW)
+                    })
+                    .collect()
+            })
+            .collect();
+        let knots = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        Surface::from(BSplineSurface::from_data(3, 3, 3, 3, 7, 7, &net, &knots, &knots).unwrap())
+    }
+
+    /// Past its face's domain a section's station is solved on the surface the trace rolled
+    /// the ball on: the offset's extension of its base. There the face's point with the
+    /// offset distance along its normal is the ball's centre the offset gives; the base's
+    /// own end span carried on is another surface, whose foot misses that centre (a
+    /// curvature-continuous round run on past the open ends of two lofted sheets was refused
+    /// for it).
+    #[test]
+    fn past_its_face_a_section_rolls_on_the_offset_s_extension() {
+        let k = Kernel::default();
+        let d = 0.25;
+        let mut offset =
+            OffsetSurface::new(&k, d, dome(), true, crate::geom::extent2d::SS_NONE).unwrap();
+        offset.set_allow_extension(true);
+        let past = Point2::new(1.6, 0.4);
+        // the trace's ball centre there, on the offset, which extends its base to reach it
+        let centre = offset.evaluate_point(&k, past).unwrap();
+        let miss = |s: &Surface| -> f64 {
+            let p = surface_partials(&k, s, past, 1).unwrap();
+            let foot = vec3(p.at(0, 0));
+            let n = vec3(p.at(1, 0)).cross(vec3(p.at(0, 1))).unitize().unwrap();
+            (foot + n * d)
+                .distance(centre)
+                .min((foot - n * d).distance(centre))
+        };
+        let faced = Surface::from(offset.clone());
+        let face = face_of(&faced);
+        assert!(miss(&face) < 1e-9, "the extension's foot: {}", miss(&face));
+        assert!(
+            miss(&dome()) > 1e-2,
+            "the base carried on: {}",
+            miss(&dome())
+        );
+    }
 
     fn plane(x_axis: Vec3, y_axis: Vec3) -> Surface {
         Surface::from(Plane::new(

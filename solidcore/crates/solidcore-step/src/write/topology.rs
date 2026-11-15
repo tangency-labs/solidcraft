@@ -23,7 +23,11 @@
 //! side's normal); a later use of the other side refers to it through an ORIENTED_FACE.
 
 use crate::vec::Vec3Geom as _;
+use std::borrow::Cow;
 use std::sync::Arc;
+
+use solidcore::surface::face_surface::analytic_label;
+use solidcore_record::brep::blend::BlendDefinition;
 
 use solidcore_record::brep::{Brep, Curve as BCurve, Curve2, Edge, Face, Frame, Loop, Shell, Surface as BSurface};
 
@@ -291,6 +295,9 @@ pub fn surface(s: &BSurface) -> R<(Surface, Map)> {
         }
         BSurface::Sphere { frame, radius } => (Surface::Sphere { position: placement(frame), radius: *radius }, Map::IDENTITY),
         BSurface::Torus { frame, major_radius, minor_radius, .. } => {
+            if singular_torus(s, 0.0) {
+                return Err(unsupported("a singular torus without its NURBS form"));
+            }
             (Surface::Torus { position: placement(frame), major_radius: *major_radius, minor_radius: *minor_radius }, Map::IDENTITY)
         }
         BSurface::Spline { u_knots, v_knots, points } => (bspline_surface(u_knots, v_knots, points.clone(), None)?, Map::IDENTITY),
@@ -310,10 +317,17 @@ pub fn surface(s: &BSurface) -> R<(Surface, Map)> {
     })
 }
 
-/// Whether a face is written as its NURBS form, pcurves and all: a ball patch or a blend by its
-/// definition, which STEP has no entity for, is the B-spline surface it is parameterised on.
-fn as_form(face: &Face) -> bool {
-    face.nurbs.is_some() && matches!(face.surface, BSurface::BallPatch { .. } | BSurface::Blend { .. })
+/// A ring torus needs a positive clearance between its tube and axis resolved at the
+/// record's intersection tolerance. Use the same classification for stored and newly
+/// proved labels; keeping the NURBS changes no geometry when the clearance is unresolved.
+fn singular_torus(surface: &BSurface, tolerance: f64) -> bool {
+    matches!(surface, BSurface::Torus { major_radius, minor_radius, .. } if major_radius - minor_radius <= tolerance)
+}
+
+/// Whether a face keeps its NURBS parameters and pcurves: a procedural definition or a
+/// singular torus cannot be written as an ordinary analytic STEP surface.
+fn as_form(face: &Face, tolerance: f64) -> bool {
+    face.nurbs.is_some() && (matches!(face.surface, BSurface::BallPatch { .. } | BSurface::Blend { .. }) || singular_torus(&face.surface, tolerance))
 }
 
 /// A record pcurve in the STEP surface's parameters: its control points through `map` (a linear
@@ -402,8 +416,53 @@ pub fn layout(b: &Brep) -> R<Layout> {
     Ok(out)
 }
 
+/// `b` with each face that is a rational NURBS, or a round of an exact class held as a blend by
+/// its definition, labelled as the cylinder, cone, sphere or torus its NURBS form proves, holding
+/// that form: a cylinder's rim rounded is a torus, and STEP has the surface where the record has
+/// its rational net, which a reader measures a little off (volume, bounding box). The proof is
+/// the kernel's ([`analytic_label`]: the form lies on the surface and the surface evaluates as
+/// the form). A form with no proved kind, or a horn or spindle torus whose pole topology must
+/// remain a spline, keeps its NURBS. The record itself is not changed, `b` borrowed where no
+/// face is such a form.
+fn analytic_rounds(b: &Brep) -> R<Cow<'_, Brep>> {
+    let candidate = |f: &Face| match (&f.surface, &f.nurbs) {
+        (BSurface::RationalSpline { .. }, None) => true,
+        (BSurface::Blend { definition }, Some(_)) => matches!(**definition, BlendDefinition::ExactRound(_)),
+        _ => false,
+    };
+    if !b.faces.iter().any(candidate) {
+        return Ok(Cow::Borrowed(b));
+    }
+    // the kernel the application's solids were built with: its fixes decide what is proved on a form
+    let mut k = solidcore::kernel::Kernel::new(&solidcore::kernel::KernelOptions::default());
+    for name in solidcore_ops::session::fixes() {
+        if let Some(on) = k.fixes.flag_mut(name) {
+            *on = true;
+        }
+    }
+    let mut out = b.clone();
+    for face in out.faces.iter_mut().filter(|f| candidate(f)) {
+        let invalid = |e: solidcore_record::brep::Invalid| format!("a round's analytic surface: {}", e.0);
+        let form = face.nurbs.as_ref().unwrap_or(&face.surface);
+        let net = solidcore_convert::surface(form).map_err(invalid)?;
+        if let Some(label) = analytic_label(&k, &net, face.domain).map_err(|e| format!("a round's analytic surface: {e}"))? {
+            let label = solidcore_convert::record_surface(label).map_err(invalid)?;
+            // A horn or spindle has a singular circle parametrisation on the axis.
+            // Keep its NURBS and pole topology instead of promoting it to a ring torus.
+            if singular_torus(&label, b.tolerance) {
+                continue;
+            }
+            let form = face.nurbs.take().unwrap_or_else(|| face.surface.clone());
+            face.surface = label;
+            face.nurbs = Some(form);
+        }
+    }
+    Ok(Cow::Owned(out))
+}
+
 /// Write `b`'s solids and sheets, each item named `name`.
 pub fn brep(g: &mut GeomWriter<'_>, b: &Brep, name: &str) -> R<Written> {
+    let b = &*analytic_rounds(b)?;
     let layout = layout(b)?;
     let mut w = BrepWriter {
         g,
@@ -489,7 +548,7 @@ impl BrepWriter<'_, '_, '_> {
             return Ok(s.clone());
         }
         let face = face_of(self.b, f)?;
-        if as_form(face) {
+        if as_form(face, self.b.tolerance) {
             let s = (Arc::new(surface(face.parameters()).map_err(|m| format!("face {f}: {m}"))?.0), Map::IDENTITY);
             if let Some(slot) = self.surfaces.get_mut(f as usize) {
                 *slot = Some(s.clone());
@@ -552,7 +611,7 @@ impl BrepWriter<'_, '_, '_> {
         let mut associated = Vec::with_capacity(edge.uses.len());
         for u in &edge.uses {
             let face = face_of(b, u.face)?;
-            if face.nurbs.is_some() && !as_form(face) {
+            if face.nurbs.is_some() && !as_form(face, b.tolerance) {
                 continue;
             }
             let Some(Loop::Edges { edges }) = face.loops.get(u.r#loop as usize) else {

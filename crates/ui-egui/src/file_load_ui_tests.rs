@@ -691,6 +691,44 @@ fn a_control_import_passes_up_and_names_on() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The normal off-thread opening path uses the original file digest and the same remembered
+/// answer as synchronous opening, without adding a second offer.
+#[test]
+fn stand_up_memory_applies_after_an_off_thread_open() {
+    let dir = scratch("stand-up-memory");
+    let path = dir.join("plate.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    src.execute("solid.box", &json!({"length": 10, "width": 40, "height": 5})).unwrap();
+    src.execute("file.export", &json!({"path": path})).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap().replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'");
+    std::fs::write(&path, text).unwrap();
+    let mut w = Win::new();
+    w.app.preferences.stand_up_unknown = crate::prefs::StandUpUnknown::Ask;
+    let (tx, rx) = std::sync::mpsc::channel();
+    w.app.control_rx = Some(rx);
+    let open = |w: &mut Win| {
+        let (req, reply) = crate::control::ControlRequest::new("engine.execute", json!({"command":"doc.open", "params":{"path":path}}));
+        tx.send(req).unwrap();
+        for _ in 0..100_000 {
+            w.frame(vec![]);
+            if let Ok(reply) = reply.try_recv() {
+                assert_eq!(reply["ok"], true, "{reply}");
+                assert!(reply["result"]["content_sha256"].is_string());
+                return;
+            }
+        }
+        panic!("the import was not answered");
+    };
+    open(&mut w);
+    assert!(w.app.stand_up.is_some());
+    crate::prefs::control(&mut w.app, &json!({"stand_up":true})).unwrap();
+    let stood = solidcraft_engine::view::bounds(&w.app.session).unwrap();
+    open(&mut w);
+    assert!(w.app.stand_up.is_none());
+    assert_eq!(solidcraft_engine::view::bounds(&w.app.session).unwrap(), stood);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// #4676: a control-channel import's `matrix` and `name` reach the command, as they do when it
 /// runs in a session: the part lands where the matrix puts it, under the name given.
 #[test]
@@ -1076,6 +1114,43 @@ fn a_newer_design_opens_with_a_notice_and_no_dialog() {
     assert!(app.dialog.is_none() && !app.ui.palette_open);
 }
 
+/// Imported STEP bodies have no editor. Both edit entry points explain this without opening
+/// the palette, changing its text, or leaving the timeline rolled back.
+#[test]
+fn editing_an_imported_body_reports_nothing_to_edit() {
+    let dir = scratch("import-edit");
+    let path = step_box(&dir);
+    for double_click in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.open_path(&path);
+        h.app.home.open = false;
+        let feature = h.app.session.doc.features.iter().find(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Import { .. })).unwrap();
+        let (id, name) = (feature.id, feature.name.clone());
+        h.app.run("solid.box", json!({"length": 2, "width": 3, "height": 4, "corner": [40,0,0]})).unwrap();
+        h.settle();
+        let before = h.app.session.doc.to_json();
+        h.app.sbox.text = "kept search".into();
+        if double_click {
+            h.frames(4);
+            h.step(&json!({"click": {"handle": format!("timeline:{name}")}, "double": true})).unwrap();
+        } else {
+            let reply = h.call("ui.editFeature", json!({"feature": id}));
+            assert_eq!(reply["ok"], true, "{reply}");
+            assert_eq!(reply["result"]["dialog"], serde_json::Value::Null, "{reply}");
+            assert_eq!(reply["result"]["marker"], serde_json::Value::Null, "{reply}");
+        }
+        h.settle();
+        assert!(!h.app.ui.palette_open, "no raw command palette");
+        assert!(h.app.dialog.is_none() && h.app.editing_state.is_none());
+        assert_eq!(h.app.sbox.text, "kept search");
+        assert_eq!(h.app.session.doc.to_json(), before, "the timeline is restored");
+        let (text, _, error) = h.app.status.as_ref().expect("a status explains the missing editor");
+        assert_eq!(text, "Imported body: nothing to edit");
+        assert!(!error, "an informational notice");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A STEP file of a 10 x 20 x 30 box in `dir`.
 fn step_box(dir: &std::path::Path) -> String {
     let path = dir.join("box.step").to_string_lossy().to_string();
@@ -1105,6 +1180,70 @@ fn hold_next(w: &mut Win) -> (std::sync::mpsc::Receiver<std::thread::ThreadId>, 
 
 fn bodies(app: &SolveApp) -> usize {
     app.session.world_state().map_or(0, |state| state.bodies.len())
+}
+
+#[test]
+fn opening_a_file_from_home_shows_progress_and_cancel_until_the_design_lands() {
+    let dir = scratch("home-open");
+    let path = large_design(&dir, 0);
+    for size in [vec2(1280.0, 720.0), vec2(640.0, 480.0)] {
+        let mut w = Win::new();
+        w.size = size;
+        w.app.home.open = true;
+        let (started, release) = hold_next(&mut w);
+        crate::file_load::begin(&mut w.app, &path, false);
+        started.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+        for _ in 0..3 {
+            w.frame(vec![]);
+        }
+        assert!(w.app.home.open && w.app.file_load.busy(), "Home stays open while the worker waits");
+        let cancel = crate::scenario::handle_at("file_loading:cancel").expect("Home shows the loading card's Cancel button");
+        assert!(Rect::from_min_size(Pos2::ZERO, size).contains(cancel), "Cancel is inside the window at {size:?}");
+        assert!(crate::scenario::rect_of("operations:panel").is_none(), "Home has no operations panel");
+        release.send(()).unwrap();
+        frames_until(&mut w, "the file opened from Home lands", |app| app.file_load.idle());
+        w.frame(vec![]);
+        assert!(!w.app.home.open, "the loaded design replaces Home");
+        assert_eq!(bodies(&w.app), 1);
+        assert!(w.app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, &path)));
+        assert!(crate::scenario::handle_at("file_loading:cancel").is_none(), "the completed load's card disappears");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn returning_home_during_a_file_open_shows_cancel_and_preserves_the_current_design() {
+    let dir = scratch("home-cancel");
+    let path = large_design(&dir, 0);
+    let mut w = Win::new();
+    w.size = vec2(1280.0, 720.0);
+    w.app.home.open = false;
+    w.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+    let original = w.app.session.doc.clone();
+    let (started, release) = hold_next(&mut w);
+    crate::file_load::begin(&mut w.app, &path, false);
+    started.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+    for _ in 0..3 {
+        w.frame(vec![]);
+    }
+    assert!(crate::scenario::rect_of("operations:panel").is_some(), "the workspace shows the operation");
+    assert!(crate::scenario::handle_at("file_loading:cancel").is_none());
+    w.app.home.open = true;
+    for _ in 0..3 {
+        w.frame(vec![]);
+    }
+    assert!(w.app.home.open && w.app.file_load.busy());
+    assert!(crate::scenario::rect_of("operations:panel").is_none());
+    let cancel = crate::scenario::handle_at("file_loading:cancel").expect("Cancel stays available after returning Home");
+    w.gesture(&[cancel]);
+    assert!(!w.app.file_load.busy(), "Home's Cancel button cancels the open");
+    drop(release);
+    w.frame(vec![]);
+    assert!(w.app.home.open);
+    assert!(std::sync::Arc::ptr_eq(&original, &w.app.session.doc));
+    assert_eq!((w.app.docs.count(), bodies(&w.app)), (1, 1));
+    assert!(crate::scenario::handle_at("file_loading:cancel").is_none());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// With the design usable (the default), a file opening is a row of the operations panel, not a
@@ -1262,5 +1401,84 @@ fn an_insert_waits_for_its_designs_tab() {
     assert_eq!(bodies(&w.app), 2, "{:?}", w.app.status);
     crate::documents::switch(&mut w.app, 1);
     assert_eq!(bodies(&w.app), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The offer to stand a just-opened part up weighs how its bodies rest, which meshes them. While
+/// an open meshes the bodies beside the window, meshing them for the offer waited for that work:
+/// the window stood still for over a second on a large assembly. The offer is now worked out
+/// beside the window and made on a later frame, and a design changed meanwhile gets none.
+#[test]
+fn the_stand_up_offer_waits_beside_the_window_for_the_bodies_meshed_on_open() {
+    let dir = scratch("stand-up-later");
+    let path = dir.join("on_its_back.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    // Tall in Z, thin in Y: it rests on faces across Y, a Y-up part lying on its back here.
+    src.execute("solid.box", &json!({"length": 10, "width": 5, "height": 40})).unwrap();
+    src.execute("file.export", &json!({"path": path})).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'")).unwrap();
+    let opened = |w: &mut Win| {
+        let result = w.app.session.execute("file.insert_step", &json!({"path": path})).unwrap();
+        crate::open_meshing::start(&mut w.app, None);
+        assert!(crate::open_meshing::active(&w.app), "the bodies are being meshed");
+        crate::stand_up::offer(&mut w.app, &path, &[], Some(&result));
+        assert!(w.app.stand_up.is_none() && w.app.stand_up_later.is_some(), "not made on the window thread while the bodies are meshed");
+    };
+    let mut w = Win::new();
+    assert_eq!(w.app.preferences.stand_up_unknown, crate::prefs::StandUpUnknown::Note);
+    opened(&mut w);
+    for _ in 0..10_000 {
+        w.frame(vec![]);
+        if w.app.stand_up.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(w.app.stand_up.is_some() && w.app.stand_up_note, "the note is offered once the estimate is made");
+    assert!(w.app.stand_up_later.is_none());
+    // Changed before the estimate is made: no offer.
+    let mut w = Win::new();
+    opened(&mut w);
+    w.app.session.execute("solid.box", &json!({"length": 4, "width": 4, "height": 4, "corner": [40, 0, 0]})).unwrap();
+    w.frame(vec![]);
+    assert!(w.app.stand_up.is_none() && w.app.stand_up_later.is_none(), "a changed design is not offered");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An offer waiting for its estimate is not made when the offer was turned off meanwhile, and a
+/// file from another program gets no estimate at all when such files get no offer.
+#[test]
+fn a_waiting_stand_up_offer_follows_the_preferences_when_it_is_made() {
+    let dir = scratch("stand-up-later-prefs");
+    let path = dir.join("on_its_back.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    src.execute("solid.box", &json!({"length": 10, "width": 5, "height": 40})).unwrap();
+    src.execute("file.export", &json!({"path": path})).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'")).unwrap();
+    let opened = |w: &mut Win| {
+        let result = w.app.session.execute("file.insert_step", &json!({"path": path})).unwrap();
+        crate::open_meshing::start(&mut w.app, None);
+        crate::stand_up::offer(&mut w.app, &path, &[], Some(&result));
+    };
+    // Turned off while the estimate is made: no offer.
+    let mut w = Win::new();
+    opened(&mut w);
+    assert!(w.app.stand_up_later.is_some());
+    w.app.preferences.offer_stand_up = false;
+    for _ in 0..10_000 {
+        w.frame(vec![]);
+        if w.app.stand_up_later.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(w.app.stand_up_later.is_none() && w.app.stand_up.is_none(), "an offer turned off meanwhile is not made");
+    // Another program's files get no offer: nothing waits for an estimate.
+    let mut w = Win::new();
+    w.app.preferences.stand_up_unknown = crate::prefs::StandUpUnknown::Off;
+    opened(&mut w);
+    assert!(w.app.stand_up_later.is_none() && w.app.stand_up.is_none(), "no estimate for an offer that won't be made");
     let _ = std::fs::remove_dir_all(&dir);
 }

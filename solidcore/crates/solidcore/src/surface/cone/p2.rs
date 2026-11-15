@@ -55,6 +55,12 @@
 //!   `CreateCanonical` without checking its status (a `NULL` cone crashes, a
 //!   non-finite height recurses without bound); here that construction's error is
 //!   returned.
+//! - **Offset truncation height.** Where one offset radius falls below the tolerance,
+//!   upstream takes the kept cone's height as `new_top_radius * height / old_top_radius`
+//!   (and the mirror), which holds only for a full apex cone. Here the slope comes from
+//!   the radius's span, `height / (old_top_radius - old_bot_radius)`, so a truncated
+//!   cone's offset keeps its slope and stays `S + d n` at the same parameters; full apex
+//!   cones give the same value.
 //! - **NURB.** As in `surface::cone::p1`, the cone is expected to have its NURB
 //!   ([`Cone::make_nurb`]); upstream makes a missing one inside `const` queries, which
 //!   the port does (and keeps) at the `Surface` level (`Surface::kind_with_nurb`).
@@ -615,7 +621,7 @@ impl Cone {
             // zero) and the surviving end, at the original's slope: the radius spans
             // `old_top_radius - old_bot_radius` over `height`.
             let (new_height, bot_origin, collapsed_at_base) = if new_bot_radius < approx_tol_3d {
-                let new_height = new_top_radius * height / old_top_radius;
+                let new_height = new_top_radius * height / (old_top_radius - old_bot_radius);
                 new_bot_radius = 0.0;
                 (
                     new_height,
@@ -623,7 +629,7 @@ impl Cone {
                     true,
                 )
             } else {
-                let new_height = new_bot_radius * height / old_bot_radius;
+                let new_height = new_bot_radius * height / (old_bot_radius - old_top_radius);
                 new_top_radius = 0.0;
                 (new_height, origin + off_z_dist * z_axis, false)
             };
@@ -1100,16 +1106,44 @@ impl Cone {
         }
 
         let center_bot = bot.frame.origin();
-        let mut z_axis = center_top - center_bot;
-        let height = z_axis.length();
 
-        // If you don't do this, Unitize will fail
-        if height < EFF_ZERO {
+        // Not upstream (#16488): the form's own ruling, the difference of the start corners
+        // of the top and bottom arcs, which are control points a fixed extrusion apart. The
+        // arcs' centres each carry the rounding of a normal found from the legs of a short
+        // arc, amplified by its radius over its sweep (1.6e-10 rad on a 0.046 degree arc of
+        // radius 201 mm), which tilts the centres' line and the generator it starts, so that
+        // it ran 3.3e-8 mm off the form. The ruling is required: a form with none (a
+        // degenerate one, or one whose rows are not translates of each other) is no cylinder.
+        // The arcs start at angle 0 by `iso_arc_exact`'s construction.
+        let top_start = if swap_uv {
+            Point2::new(uv_domain.max().x, uv_domain.min().y)
+        } else {
+            Point2::new(uv_domain.min().x, uv_domain.max().y)
+        };
+        let top_corner = test_surface.evaluate_point(top_start)?;
+        let min_corner = test_surface.evaluate_point(uv_domain.min())?;
+        let ruling = top_corner - min_corner;
+        let height = ruling.length();
+        if !height.is_finite() || height < EFF_ZERO || top.start_ang != 0.0 || bot.start_ang != 0.0
+        {
             return Ok(None);
         }
+        let z_axis = ruling.unitize_or_z();
 
-        z_axis = z_axis.unitize_or_z();
-        if !z_axis.is_parallel_to(bot.frame.z_axis(), ang_tol) {
+        // The form must still be a cylinder, as before: the arcs' centres lie along their
+        // planes' normal (the rounding the ruling avoids is far under `ang_tol`, which is
+        // what a form past it is refused by).
+        let centre_line = center_top - center_bot;
+        if centre_line.length() < EFF_ZERO
+            || !centre_line.is_parallel_to(bot.frame.z_axis(), ang_tol)
+        {
+            return Ok(None);
+        }
+        // A top row turned about the axis by up to `ang_tol` (the arcs' X axes are held to it
+        // above, in radians) tilts the ruling by that angle times radius over height, so the
+        // ruling is held to the normal within that.
+        let tilt = z_axis.angle_between(bot.frame.z_axis()).unwrap_or(PI);
+        if tilt.min(PI - tilt) > EFF_ZERO_SQRT * (1.0 + bot.radius / height) {
             return Ok(None);
         }
 
@@ -1120,10 +1154,40 @@ impl Cone {
         // IsNurbSurfaceCone builds it; upstream ("Do some correction here") keeps the
         // bottom-knot circle and the NURB's direction, reversing the cylinder's Z
         let flip = inside_out && k.fixes.nurb_cylinder_inside_out_frame;
-        let (origin, z_axis) = if flip {
-            (center_top, -z_axis)
+        let (centre, corner, z_axis) = if flip {
+            (center_top, top_corner, -z_axis)
         } else {
-            (center_bot, z_axis)
+            (center_bot, min_corner, z_axis)
+        };
+
+        // The frame the arcs' circles give, as upstream makes it (the centres' line, the
+        // bottom or top centre, the top arc's X axis), is kept where the generator it starts
+        // runs from the form's start corner to its far corner to within the rounding of the
+        // points' size: it is then the form's own frame, to the last bits, and the recovery
+        // changes nothing for the cylinders it already placed well. Where it does not (a
+        // short arc's normal rounded by its radius over its sweep), the frame is the ruling's:
+        // the origin the point of the axis level with the start corner, since the centre's
+        // error is along the axis, and X the unit vector from it to the corner, not the first
+        // segment's tangent, which a very short first segment rounds.
+        let (far, circle_z) = if flip {
+            (min_corner, -centre_line.unitize_or_z())
+        } else {
+            (top_corner, centre_line.unitize_or_z())
+        };
+        let circles_x = top.frame.x_axis();
+        let circles_start = centre + bot.radius * circles_x;
+        let circles_far = circles_start + centre_line.length() * circle_z;
+        let rounding = f64::EPSILON * 16.0 * (1.0 + corner.max_dimension() + far.max_dimension());
+        let (origin, x_axis, z_axis, height) = if (circles_start - corner).length() <= rounding
+            && (circles_far - far).length() <= rounding
+        {
+            (centre, circles_x, circle_z, centre_line.length())
+        } else {
+            let origin = centre + (corner - centre).dot(z_axis) * z_axis;
+            let Ok(x_axis) = (corner - origin).unitize() else {
+                return Ok(None);
+            };
+            (origin, x_axis, z_axis, height)
         };
 
         let y_axis = z_axis.cross(x_axis);
@@ -1784,6 +1848,133 @@ mod tests {
         }
     }
 
+    /// #16488: a wall of radius 201 mm over a 0.046 degree arc, extruded 100 mm along x from
+    /// x = -95 (a body moved 95 mm along its cylinder's axis), its NURBS form exact to
+    /// rounding. The recogniser's frame is made from the form's ruling, so the generator it
+    /// starts lies on the form at its start corner: the kernel's check compares the two to
+    /// 2.8e-8 mm, and a normal found from the legs of so short an arc is tilted by about
+    /// 1.6e-10 rad, 3.3e-8 mm at that radius. The second form has a very short first
+    /// segment followed by a wide one: its frame does not depend on the first segment's leg.
+    #[test]
+    fn an_extruded_very_short_arc_has_its_generator_on_the_form() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as Nurb;
+        use crate::surface::implicit::{lies_on, AnalyticSupport};
+        let k = kernel();
+        let (radius, start) = (201.0_f64, 1.234_f64);
+        let (cy, cz) = (-107.916_728_995_484_4, 248.198_661_548_332_04);
+        let on = |a: f64, r: f64| (cy + r * a.cos(), cz + r * a.sin());
+        let short = 0.046_f64.to_radians();
+        for sweeps in [vec![short], vec![short, 0.7]] {
+            // the arc's points (y, z) and weights: each segment's ends then its middle
+            let mut arc = vec![(on(start, radius), 1.0)];
+            let mut knots = vec![0.0; 3];
+            let mut at = start;
+            for sweep in &sweeps {
+                let w = (0.5 * sweep).cos();
+                arc.push((on(at + 0.5 * sweep, radius / w), w));
+                at += sweep;
+                arc.push((on(at, radius), 1.0));
+                knots.extend([(at - start) * radius; 2]);
+            }
+            knots.truncate(knots.len() - 2);
+            knots.extend([(at - start) * radius; 3]);
+            let net = arc
+                .into_iter()
+                .map(|((y, z), w)| {
+                    vec![
+                        CPoint::new(-95.0 * w, y * w, z * w, w),
+                        CPoint::new(5.0 * w, y * w, z * w, w),
+                    ]
+                })
+                .collect();
+            let nurb = Nurb::new(net, 2, 1, knots, vec![0.0, 0.0, 100.0, 100.0]).unwrap();
+            let form = BSplineSurface::from_nurb(nurb, false);
+            let cone = Cone::is_nurb_surface_cylinder(&k, &form, 1.0)
+                .unwrap()
+                .expect("a cylinder");
+            let surface = crate::surface::surface::Surface::from(cone);
+            let support = AnalyticSupport::of(&surface).expect("an analytic surface");
+            assert!(lies_on(&form, &support.implicit()).unwrap(), "{support:?}");
+            let (AnalyticSupport::Cylinder {
+                placement,
+                radius: r,
+            }
+            | AnalyticSupport::Cone {
+                placement,
+                base_radius: r,
+                ..
+            }) = support
+            else {
+                panic!("{support:?}");
+            };
+            let axis = placement.z_axis();
+            assert!(axis.y.abs() < 1e-15 && axis.z.abs() < 1e-15, "{axis:?}");
+            // the start corner at x = -95 is on the generator the cylinder starts
+            let (y, z) = on(start, radius);
+            let from_axis = placement.origin() + r * placement.x_axis() - Vec3::new(-95.0, y, z);
+            assert!(from_axis.cross(axis).length() < 1e-11, "{from_axis:?}");
+        }
+    }
+
+    /// #16488: a form whose rows are not exact translates. A unit-radius arc of 1 rad about
+    /// the x axis, extruded 1 mm along x, whose top row is turned about the axis by `turn`.
+    /// The recogniser holds the arcs' X axes to `EFF_ZERO_SQRT` radians, so a turn of half
+    /// that is a cylinder whose axis is the ruling's direction (tilted from x by about the
+    /// turn), and a turn of four times it is not a cylinder.
+    #[test]
+    fn a_top_row_turned_about_the_axis_is_a_cylinder_within_the_angle_tolerance_only() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as Nurb;
+        use crate::surface::implicit::AnalyticSupport;
+        let k = kernel();
+        let sweep = 1.0_f64;
+        let w = (0.5 * sweep).cos();
+        let row = |turn: f64, x: f64| -> Vec<CPoint> {
+            [
+                (0.0, 1.0, 1.0),
+                (0.5 * sweep, 1.0 / w, w),
+                (sweep, 1.0, 1.0),
+            ]
+            .iter()
+            .map(|&(a, r, weight): &(f64, f64, f64)| {
+                let (y, z) = (r * (a + turn).cos(), r * (a + turn).sin());
+                CPoint::new(x * weight, y * weight, z * weight, weight)
+            })
+            .collect()
+        };
+        let form = |turn: f64| {
+            let (bot, top) = (row(0.0, 0.0), row(turn, 1.0));
+            let net = (0..3).map(|i| vec![bot[i], top[i]]).collect();
+            let nurb = Nurb::new(
+                net,
+                2,
+                1,
+                vec![0.0, 0.0, 0.0, sweep, sweep, sweep],
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap();
+            BSplineSurface::from_nurb(nurb, false)
+        };
+        let near = Cone::is_nurb_surface_cylinder(&k, &form(0.5 * EFF_ZERO_SQRT), 1.0)
+            .unwrap()
+            .expect("a cylinder within the angle tolerance");
+        let surface = crate::surface::surface::Surface::from(near);
+        let support = AnalyticSupport::of(&surface).expect("an analytic surface");
+        let (AnalyticSupport::Cylinder { placement, .. } | AnalyticSupport::Cone { placement, .. }) =
+            support
+        else {
+            panic!("{support:?}");
+        };
+        let tilt = (placement.z_axis() - Vec3::new(1.0, 0.0, 0.0)).length();
+        assert!(tilt > 0.0 && tilt < 2.0 * EFF_ZERO_SQRT, "{tilt:e}");
+        assert!(
+            Cone::is_nurb_surface_cylinder(&k, &form(4.0 * EFF_ZERO_SQRT), 1.0)
+                .unwrap()
+                .is_none()
+        );
+    }
+
     /// A canonical cylinder of radius 2.94 (the goldens' gen0196), its net reaching ±1.2e6
     /// along its axis, recognised at a thousandth of the default tolerance. Its control points
     /// are known to the rounding of coordinates that large (about 2.3e-10), which turns its
@@ -2125,8 +2316,10 @@ mod tests {
             // negated inside out: the shrinking offset is -1.2 there and 1.2 here
             let d = if inside { 1.2 } else { -1.2 };
             // full apex cones: (bot, top) = (0, 2) collapses at the bot end under the
-            // offset, (2, 0) at the top
-            for (bot, top) in [(0.0, 2.0), (2.0, 0.0)] {
+            // offset, (2, 0) at the top; truncated cones (1, 2) and (2, 1) likewise,
+            // where the kept height follows the radius's span top - bot, not the
+            // surviving radius alone
+            for (bot, top) in [(0.0, 2.0), (2.0, 0.0), (1.0, 2.0), (2.0, 1.0)] {
                 let cone = canonical(&k, bot, top, 3.0, false, inside);
                 let off = cone.create_offset_surface(&k, d, 1e-6).unwrap().unwrap();
                 // the radii move by cos(semi) * d along the NURB normal (negated
@@ -2188,6 +2381,70 @@ mod tests {
                         s.distance(o)
                     );
                 }
+            }
+        }
+    }
+
+    /// tangency-labs/solidcraft#15165: a truncated cone (bot 1, top 2, height 3) offset
+    /// inward by 1.2 collapses at its bot end. Its radii move by `cos(semi) d` with
+    /// `tan(semi) = 1 / 3`, so the offset top radius is `2 - 1.2 * 3 / sqrt(10)` =
+    /// 0.86158 and, at the original's slope (the radius grows 1 over 3 of height), the
+    /// kept cone is `3 * 0.86158 / 1` = 2.58474 high (2.5848 in the issue, from 0.8616).
+    /// The old height `0.86158 * 3 / 2` = 1.29237 took the slope from the top radius
+    /// alone, as for a full apex cone. The
+    /// offset is `S + d n` at the same parameters, with the closed-form unit normal
+    /// `(cos(semi) cos(t), cos(semi) sin(t), -sin(semi))` of the identity-placed cone.
+    /// The mirror cone (bot 2, top 1) collapses at its top by the same amount.
+    #[test]
+    fn offset_truncation_of_a_truncated_cone_keeps_its_slope() {
+        let k = kernel();
+        let (cos_semi, sin_semi) = (3.0 / 10f64.sqrt(), 1.0 / 10f64.sqrt());
+        let d = -1.2;
+        let kept_radius = 2.0 + d * cos_semi;
+        let want_height = 3.0 * kept_radius / 1.0;
+        // the issue's figures: 0.8616 to four places, and 3 * 0.8616 = 2.5848 (the
+        // unrounded height is 2.58474)
+        assert!((kept_radius - 0.8616).abs() < 5e-5, "{kept_radius}");
+        assert!((want_height - 2.5848).abs() < 3.0 * 5e-5, "{want_height}");
+        for (bot, top) in [(1.0, 2.0), (2.0, 1.0)] {
+            let cone = canonical(&k, bot, top, 3.0, false, false);
+            let off = cone.create_offset_surface(&k, d, 1e-6).unwrap().unwrap();
+            let height = off.height(&k).unwrap();
+            assert!(
+                (height - want_height).abs() < 1e-12,
+                "bot {bot} top {top}: height {height}, the radius's span gives {want_height}"
+            );
+            let (want_bot, want_top) = if bot < top {
+                (0.0, kept_radius)
+            } else {
+                (kept_radius, 0.0)
+            };
+            assert!(
+                (off.bot_radius() - want_bot).abs() < 1e-12
+                    && (off.top_radius() - want_top).abs() < 1e-12,
+                "bot {bot} top {top}: radii {} {}",
+                off.bot_radius(),
+                off.top_radius()
+            );
+
+            // S + d n at the same parameters, n the outward unit normal of the cone
+            // whose radius grows with z (bot < top) or shrinks (bot > top)
+            let tilt = if bot < top { sin_semi } else { -sin_semi };
+            let dom = off.rev().base().natural_uv_domain();
+            for (su, sv) in [(0.1, 0.2), (0.37, 0.5), (0.8, 0.9), (0.5, 1.0)] {
+                let uv = Point2::new(
+                    dom.min().x + su * (dom.max().x - dom.min().x),
+                    dom.min().y + sv * (dom.max().y - dom.min().y),
+                );
+                let s = cone.evaluate_point(&k, uv).unwrap();
+                let o = off.evaluate_point(&k, uv).unwrap();
+                let t = s.y.atan2(s.x);
+                let n = Vec3::new(cos_semi * t.cos(), cos_semi * t.sin(), -tilt);
+                let want = s + d * n;
+                assert!(
+                    o.distance(want) < 1e-12,
+                    "bot {bot} top {top} at {uv:?}: offset {o:?}, S + d n {want:?}"
+                );
             }
         }
     }

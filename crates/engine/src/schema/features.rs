@@ -1012,6 +1012,84 @@ pub enum PatternCircularResult {
     },
 }
 
+/// A rigid matrix, in row-major order, with translation in its last column.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum MoveMatrix {
+    Flat3([f64; 12]),
+    Flat4([f64; 16]),
+    Rows3([[f64; 4]; 3]),
+    Rows4([[f64; 4]; 4]),
+}
+
+/// Move or copy bodies, rotating about an origin before translating, in world coordinates.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MoveParams {
+    /// Bodies to move or copy. May be omitted when copying only components.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "StringList")]
+    pub bodies: Option<StringList>,
+    /// Component occurrence paths, root first, to copy independently. Requires `copy: true`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Vec<Vec<u64>>")]
+    pub occurrences: Option<Vec<Vec<u64>>>,
+    /// Translation after rotation; default zero. Coordinates are lengths.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PointExpr3")]
+    pub translate: Option<PointExpr3>,
+    /// Rotation pivot in world coordinates. Default: the moved body's component's origin, which
+    /// is the world origin for bodies at the root. Coordinates are lengths.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PointExpr3")]
+    pub origin: Option<PointExpr3>,
+    /// Non-zero rotation direction in world coordinates. Default: world Z when `origin` is given,
+    /// else the moved body's component's Z, which is world Z for bodies at the root.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Point3")]
+    pub axis: Option<Point3>,
+    /// Angle expression; default zero.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "AngleExpr")]
+    pub angle: Option<AngleExpr>,
+    /// Rigid matrix instead of translate, origin, axis and angle. Scales, shears and mirrors are refused.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "MoveMatrix")]
+    pub matrix: Option<MoveMatrix>,
+    /// With matrix: positive rotation tolerance, at most 1e-3; default 1e-9.
+    #[serde(default)]
+    #[schemars(with = "Option<super::component::MatrixTolerance>")]
+    pub tolerance: Option<f64>,
+    /// Keep the source bodies and transform new copies; default false.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub copy: Option<bool>,
+    #[serde(flatten, deserialize_with = "super::feature_common")]
+    pub common: super::FeatureCommon,
+}
+
+/// Body features, component copies, or repeated placements moved together.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum MoveResult {
+    Feature {
+        #[serde(flatten)]
+        feature: FeatureResult,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        features: Option<Vec<u64>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        occurrences: Option<Vec<u64>>,
+    },
+    Copies {
+        occurrences: Vec<u64>,
+    },
+    Placements {
+        placements: Vec<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bodies: Option<FeatureResult>,
+    },
+}
+
 /// What a feature command returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct FeatureResult {

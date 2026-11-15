@@ -448,6 +448,29 @@ fn rib_to_the_next_face_fills_the_corner() {
 }
 
 #[test]
+fn rib_finds_a_tray_floor_whatever_the_tray_length() {
+    // An open tray L x 30 x 12 with 2 mm walls and floor, a rib line across it at z = 8 on the
+    // mid plane x = L / 2: the rib runs down to the floor. Finding the material side and the
+    // floor by samples spaced by the tray's size passed over the 2 mm floor at some lengths
+    // and refused the rib (#16874).
+    for (l, t) in [(40.0, 0.1), (80.0, 0.1), (100.0, 0.1), (150.0, 0.1), (160.0, 0.1), (200.0, 0.1), (400.0, 0.1), (400.0, 4.0)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": l, "width": 30, "height": 12, "corner": [0, 0, 0], "operation": "new", "body_name": "T"}));
+        run(&mut s, "solid.box", json!({"length": l - 4.0, "width": 26, "height": 12, "corner": [2, 2, 2], "operation": "cut", "targets": ["T"]}));
+        let tray = l * 30.0 * 12.0 - (l - 4.0) * 26.0 * 10.0;
+        assert!(rel(volume(&mut s), tray) < 1e-9, "L = {l}");
+        run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": l / 2.0, "name": "R"}));
+        run(&mut s, "sketch.line", json!({"points": [[5, 8], [25, 8]], "closed": false}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.rib", json!({"sketch": "R", "curves": ["l1"], "thickness": t}));
+        // 20 long, 6 from the line down to the floor; it goes into the 2 mm floor to merge
+        // but not out below it, however thick the rib.
+        assert!(rel(volume(&mut s), tray + 20.0 * 6.0 * t) < 1e-6, "L = {l}, t = {t}: {}", volume(&mut s));
+        assert_eq!(measure(&mut s)["body_count"], 1, "L = {l}, t = {t}");
+    }
+}
+
+#[test]
 fn rib_with_a_depth_and_web() {
     let mut s = bracket();
     run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "depth": 2}));
@@ -486,6 +509,26 @@ fn rib_along_the_sketch_normal_reaches_the_body() {
     assert!(rel(volume(&mut s), 4000.0 + 128.0) < 1e-6, "{}", volume(&mut s));
     let e = s.execute("solid.rib", &json!({"sketch": "Front", "curves": ["l1"], "thickness": 2, "direction": "sideways"}));
     assert!(e.is_err_and(|e| e.to_string().contains("unknown direction")));
+}
+
+#[test]
+fn rib_along_the_sketch_normal_stops_at_a_thin_plate() {
+    // A 0.5 thick plate 3.8 behind the sketch (y = -6.2..-5.7) and a 300 long block far
+    // beyond it. Steps of the block's size (about 1.5) passed over the plate and ran the rib
+    // on to the block, 310 away (#16874); it stops at the plate, going into it but not out
+    // beyond it.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 0.5, "height": 10, "corner": [0, -6.2, 0], "operation": "new", "body_name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 300, "height": 10, "corner": [0, 300, 0], "operation": "new", "body_name": "Block"}));
+    let before = volume(&mut s);
+    assert!(rel(before, 100.0 + 60000.0) < 1e-9, "{before}");
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -10, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Front"}));
+    run(&mut s, "sketch.line", json!({"points": [[2, 5], [18, 5]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "Front", "curves": ["l1"], "thickness": 2, "direction": "normal"}));
+    // 16 long, 2 thick, the 3.8 to the plate; what goes into the plate adds nothing.
+    let added = volume(&mut s) - before;
+    assert!(rel(added, 32.0 * 3.8) < 1e-6, "{added}");
 }
 
 #[test]
@@ -580,6 +623,26 @@ fn cylinder_deboss_is_connected_and_unsupported_profile_failure_is_atomic() {
     assert!(bad.execute("solid.emboss", &json!({"sketch":"Circle Badge","face":[0,10,7.5],"depth":1,"targets":["Sleeve"]})).is_err());
     assert_eq!(bad.doc.to_json(), saved);
     assert_eq!(exact_cylinder_volume(&bad), v);
+}
+
+#[test]
+fn cylinder_emboss_accepts_a_pick_on_either_half_of_the_wall() {
+    // #3425: the kernel splits a full cylinder wall into two half-faces; a pick on the half the
+    // sketch is not tangent to was refused with "saved selection no longer identifies ...".
+    for mode in ["emboss", "deboss"] {
+        let mut volumes = Vec::new();
+        for pick in [[0., 10., 7.5], [0., -10., 7.5]] {
+            let mut s = cylinder_badge();
+            let params = json!({"sketch":"Badge","face":pick,"depth":1,"mode":mode,"targets":["Sleeve"],"name":"Badge Wrap"});
+            run(&mut s, "solid.emboss", params);
+            assert_eq!(s.model.state().body("Sleeve").unwrap().body.shell_count(), 1);
+            let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Default::default() };
+            loaded.refresh();
+            assert!(loaded.model.results.iter().all(|f| f.error.is_none()), "{:?}", loaded.model.results);
+            volumes.push(exact_cylinder_volume(&loaded));
+        }
+        assert!((volumes[0] - volumes[1]).abs() < 1e-6, "{mode}: {volumes:?}");
+    }
 }
 
 #[test]
@@ -2942,4 +3005,172 @@ fn a_sketch_coil_cut_follows_its_profile_and_target() {
     run(&mut s, "timeline.edit", json!({"feature": "ShaftFeature", "set": {"radius": "18"}}));
     let removed = PI * 18.0 * 18.0 * 40.0 - volume(&mut s);
     assert!(rel(removed, 2.0 * PI * 3.0 * 17.5) < 1e-3, "the groove kept the old shaft: {removed}");
+}
+
+/// On a body in a placed component, an origin (as a list or as x/y/z keys) and a matrix are read
+/// in world coordinates and land the plate in the same place.
+#[test]
+fn move_origin_and_matrix_use_world_coordinates_for_placed_bodies() {
+    use solidcore_record::Vec3;
+    for transform in [
+        json!({"origin": ["110 mm", "15 mm", 0], "angle": "90 deg", "translate": ["0 mm", "0 mm", "7 mm"]}),
+        json!({"matrix": [0,-1,0,125, 1,0,0,-95, 0,0,1,7]}),
+        json!({"origin": {"x": "110 mm", "y": 15, "z": 0}, "angle": "90 deg", "translate": {"x": 0, "y": 0, "z": "7 mm"}}),
+    ] {
+        let mut s = Session::default();
+        placed_plate(&mut s, "Plate", 100.0, 90.0);
+        let mut p = transform;
+        p["bodies"] = json!(["Plate"]);
+        run(&mut s, "solid.move", p);
+        let b = world_bounds(&s, "Plate");
+        assert!(b.min.dist(Vec3::new(95.0, 5.0, 7.0)) < 1e-6 && b.max.dist(Vec3::new(125.0, 25.0, 15.0)) < 1e-6, "{b:?}");
+    }
+}
+
+/// A matrix turn of bodies in two differently placed components turns each about the world
+/// origin, in one undo step.
+#[test]
+fn a_matrix_turn_maps_each_translated_component_about_the_world_origin() {
+    use solidcore_record::Vec3;
+    let mut s = Session::default();
+    for (name, x) in [("A", 100), ("B", 200)] {
+        let component = run(&mut s, "component.create", json!({"name": name, "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": name}));
+        run(&mut s, "occurrence.move", json!({"occurrence": component["occurrence"], "translate": [x, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+    }
+    let undo = s.undo.len();
+    run(&mut s, "solid.move", json!({"bodies": ["A", "B"], "matrix": [0,-1,0,0, 1,0,0,0, 0,0,1,0]}));
+    for (name, y) in [("A", 100.0), ("B", 200.0)] {
+        let bounds = world_bounds(&s, name);
+        assert!(bounds.min.dist(Vec3::new(-10.0, y, 0.0)) < 1e-6 && bounds.max.dist(Vec3::new(0.0, y + 10.0, 10.0)) < 1e-6, "{name}: {bounds:?}");
+    }
+    assert_eq!(s.undo.len(), undo + 1);
+}
+
+/// A turn with no `origin` on a body in a placed component keeps its old default, the
+/// component's own origin, with or without an axis; `origin: [0, 0, 0]` asks for the world
+/// origin instead. The component here is only shifted 100 mm along X.
+#[test]
+fn a_turn_with_no_pivot_keeps_the_components_origin_in_a_placed_component() {
+    use solidcore_record::Vec3;
+    let about_component = (Vec3::new(90.0, 0.0, 0.0), Vec3::new(100.0, 10.0, 10.0));
+    let about_world = (Vec3::new(-10.0, 100.0, 0.0), Vec3::new(0.0, 110.0, 10.0));
+    for (extra, (min, max)) in [
+        (json!({}), about_component),
+        (json!({"axis": [0, 0, 1]}), about_component),
+        (json!({"origin": [0, 0, 0]}), about_world),
+        (json!({"origin": [0, 0, 0], "axis": [0, 0, 1]}), about_world),
+    ] {
+        let mut s = Session::default();
+        let component = run(&mut s, "component.create", json!({"name": "Offset", "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+        run(&mut s, "occurrence.move", json!({"occurrence": component["occurrence"], "translate": [100, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        let mut turn = extra.clone();
+        turn["bodies"] = json!(["Cube"]);
+        turn["angle"] = json!("90 deg");
+        run(&mut s, "solid.move", turn);
+        let bounds = world_bounds(&s, "Cube");
+        assert!(bounds.min.dist(min) < 1e-6 && bounds.max.dist(max) < 1e-6, "{extra}: {bounds:?}");
+    }
+}
+
+/// A turn with no `axis` on a body in a turned component keeps its old default, the
+/// component's own Z: the plate stood up by +90° about X has its Z along world −Y.
+#[test]
+fn a_turn_with_no_axis_keeps_the_components_z_in_a_turned_component() {
+    use solidcore_record::Vec3;
+    let mut s = Session::default();
+    placed_plate(&mut s, "Plate", 0.0, 90.0);
+    run(&mut s, "solid.move", json!({"bodies": ["Plate"], "angle": "90 deg"}));
+    // A quarter turn about −Y through the origin: (x, z) → (−z, x). About world Z it would
+    // lie at x −30..0, y 0..20 instead.
+    let b = world_bounds(&s, "Plate");
+    assert!(b.min.dist(Vec3::new(-8.0, 0.0, 0.0)) < 1e-6 && b.max.dist(Vec3::new(0.0, 30.0, 20.0)) < 1e-6, "{b:?}");
+}
+
+/// An origin or a matrix moves each repeated placement of one part alike, in one undo step.
+#[test]
+fn move_origin_and_matrix_apply_to_each_repeated_placement() {
+    use solidcore_record::Vec3;
+    for transform in [json!({"origin": ["50 mm", 0, 0], "angle": "90 deg"}), json!({"matrix": [0,-1,0,50, 1,0,0,-50, 0,0,1,0]})] {
+        let mut s = Session::default();
+        let (a, b) = twice_placed_blade(&mut s);
+        let mut p = transform;
+        p["bodies"] = json!([a, b]);
+        let undo = s.undo.len();
+        let result = run(&mut s, "solid.move", p);
+        assert_eq!(result["placements"].as_array().unwrap().len(), 2);
+        let a = placed_bounds(&s, &a);
+        let b = placed_bounds(&s, &b);
+        assert!(a.min.dist(Vec3::new(42.0, -50.0, 0.0)) < 1e-6 && a.max.dist(Vec3::new(50.0, -30.0, 30.0)) < 1e-6, "{a:?}");
+        assert!(b.min.dist(Vec3::new(50.0, 50.0, 0.0)) < 1e-6 && b.max.dist(Vec3::new(80.0, 70.0, 8.0)) < 1e-6, "{b:?}");
+        assert_eq!(s.undo.len(), undo + 1);
+    }
+}
+
+/// A ball of radius 12.5 resting on the origin, revolved from a half disc sketched upright on
+/// the XZ plane, with a 10 wide slot cut from its top down to z = 15 right through it (walls at
+/// x = ±5). The ball's seam ends on the top of the x = +5 wall's arc, so that arc is two edges in
+/// the record and its mirror one (#16122).
+fn slotted_ball() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"name": "Sketch1", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 25]]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0, 0], "through": [12.5, 12.5], "end": [0, 25]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "Sketch1", "axis": "Z", "angle": "360 deg", "operation": "new", "body_name": "Ball"}));
+    run(&mut s, "sketch.create", json!({"name": "Sketch2", "plane": {"origin": [0, 0, 15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [5, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Sketch2", "distance": 15, "operation": "cut"}));
+    s
+}
+
+/// The record edge passing nearest `p`, sampled along its exact curve.
+fn record_edge_near(body: &solidcraft_kernel::Body, p: solidcore_record::Vec3) -> usize {
+    let off = |e: &solidcore_record::brep::Edge| {
+        let c = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).unwrap();
+        let [t0, t1] = e.interval;
+        (0..=256).filter_map(|k| c.point(t0 + (t1 - t0) * k as f64 / 256.0)).map(|q| q.dist(p)).fold(f64::INFINITY, f64::min)
+    };
+    let (i, d) = body.record().edges.iter().map(off).enumerate().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+    assert!(d < 0.05, "no edge passes near {p:?} (nearest {i} at {d})");
+    i
+}
+
+/// The reporter's two picks on the slotted ball: one half of the seam-split x = +5 arc and the
+/// middle of the whole x = -5 arc. The half is one edge with its other half, the mirror arc
+/// alone; rounding either arc from one pick removes the same material.
+#[test]
+fn a_slot_arc_split_by_a_balls_seam_selects_and_rounds_like_its_mirror() {
+    use solidcore_record::Vec3;
+    let half_pick = Vec3::new(5.0, -7.16004021723299, 21.435908825062725);
+    let mirror_pick = Vec3::new(-5.0, 0.0, 23.956439237387144);
+    let s = slotted_ball();
+    let state = s.model.state();
+    let ball = state.body("Ball").unwrap();
+    let half = record_edge_near(&ball.body, half_pick);
+    let other_half = record_edge_near(&ball.body, Vec3::new(5.0, 7.16004021723299, 21.435908825062725));
+    assert_ne!(half, other_half, "the seam splits the x = +5 arc in the record");
+    let mut both = vec![half, other_half];
+    both.sort_unstable();
+    assert_eq!(ball.whole_edge(half), both);
+    assert_eq!(ball.whole_edge(other_half), both);
+    let mirror = record_edge_near(&ball.body, mirror_pick);
+    assert_eq!(ball.whole_edge(mirror), vec![mirror]);
+    // The rounds guard the leaving direction `whole_edge` now shares with the blend chain walk
+    // and the round running on across the seam vertex (#13752), not the grouping above.
+    let before = body_volume(&s, "Ball");
+    let removed = |pick: Vec3| {
+        let mut s = slotted_ball();
+        run(&mut s, "solid.fillet", json!({"edges": [[pick.x, pick.y, pick.z]], "radius": 2}));
+        let body = s.model.state().body("Ball").unwrap().body.clone();
+        assert!(body.validity().is_empty(), "{:?}", body.validity());
+        before - body_volume(&s, "Ball")
+    };
+    let (plus, minus) = (removed(half_pick), removed(mirror_pick));
+    assert!((plus - 89.8218).abs() < 1e-2, "rounding the split arc removes {plus}");
+    assert!((plus - minus).abs() < 1e-3, "the split arc's round removes {plus}, its mirror's {minus}");
 }

@@ -15,7 +15,7 @@ use std::process::Command;
 /// The workspace crates a design's model is computed from: `doc` and every workspace crate it
 /// depends on (a test checks the list against their manifests).
 pub(crate) const EVALUATION_CRATES: &[&str] =
-    &["color", "geom", "profile", "smlib", "sketch", "kernel", "render", "derive", "doc", "format", "viewport"];
+    &["color", "display-units", "geom", "profile", "smlib", "sketch", "kernel", "render", "derive", "doc", "format", "viewport"];
 /// The other files the saved model depends on, relative to the workspace root.
 pub(crate) const EVALUATION_FILES: &[&str] = &["crates/io/build.rs", "crates/io/src/design/native_cache.rs", ".cargo/config.toml"];
 /// The committed trees whose every file computes models, hashed as one tree id each: the vendored

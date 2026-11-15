@@ -161,10 +161,14 @@ fn shell_of_a_body_in_two_pieces() {
     ]));
 }
 
-/// A shell thicker than a step under a notch would turn the cavity inside out: a clear "not
-/// supported yet" error instead of a failed boolean.
+/// A shell thicker than half the step under a notch: a 30 x 35 x 7.5 plate notched 22.5 x 5
+/// down to 2.5 at its back, shelled 1.5 open at the back face. The 2.5 mm step under the notch
+/// is thinner than two walls, so the offsets of its top and bottom cross; that step stays
+/// solid. The cavity is the plate's walls' box `27 x 33.5 x 4.5` less the notch grown by the
+/// wall (x below 24, y past 28.5): every point under the notch is within 1.25 of its top or
+/// bottom, so none of it is cavity.
 #[test]
-fn shell_thicker_than_a_step_says_so() {
+fn shell_thicker_than_half_a_step_keeps_the_step_solid() {
     let mut s = Session::default();
     for (c, p) in [
         ("solid.box", json!({"height": 7.5, "length": 30.0, "width": 35.0})),
@@ -172,8 +176,14 @@ fn shell_thicker_than_a_step_says_so() {
     ] {
         s.execute(c, &p).unwrap();
     }
-    let e = s.execute("solid.shell", &json!({"faces": [[18.75, 35.0, 2.5]], "thickness": 1.5})).unwrap_err();
-    assert!(e.to_string().contains("not supported yet"), "{e}");
+    s.execute("solid.shell", &json!({"faces": [[18.75, 35.0, 2.5]], "thickness": 1.5})).unwrap();
+    let body = 30.0 * 35.0 * 7.5 - 22.5 * 5.0 * 5.0;
+    let cavity = 4.5 * (27.0 * 33.5 - 22.5 * 6.5);
+    assert!((total_volume(&s) - (body - cavity)).abs() < 1e-6, "{}", total_volume(&s));
+    let bodies = &s.model.state().bodies;
+    assert_eq!(bodies.len(), 1);
+    let v = solidcraft_kernel::validity(&bodies[0].body);
+    assert!(v.ok() && matches!(v.smlib, Some(solidcraft_kernel::SmlibCheck::Valid)), "{v:?}");
 }
 
 fn total_volume(s: &Session) -> f64 {

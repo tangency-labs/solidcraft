@@ -22,6 +22,7 @@ macro_rules! planned {
 
 mod bom;
 pub(crate) mod browser;
+mod cell_grid;
 pub(crate) mod clearance;
 mod clipboard;
 mod clipboard_foreign;
@@ -41,19 +42,22 @@ mod face;
 mod features;
 mod features_more;
 mod join_pieces;
+pub(crate) use component::follow_expressed_moves;
 pub use construct::picked_plane_refs;
 pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, picked_plane};
 pub use construct_auto::{construct_method, construct_methods, is_construct_tool};
 pub use design_link::{LinkProblem, LinkState};
 pub(crate) use face::{FaceRefForm, face_ref_form};
+pub(crate) use features::move_matrix_params;
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
-pub use features::{auto_operation, extrude_reach, shown_scope};
+pub use features::{auto_operation, clearance_diameter, clearance_sizes, extrude_reach, head_counterbore, shown_scope};
 pub(crate) use features::{rail_fit_form, sweep_orientation};
 pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mask, side_point, sketch_frame_id};
 pub(crate) use file::import::realign_imports;
 pub(crate) use file::mesh_crease_angle;
 pub use file::open_steps::OpenSteps;
+pub use file::use_import_cache_dir;
 pub(crate) use file::{NAMES_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
@@ -92,6 +96,7 @@ mod metadata;
 pub(crate) mod motion;
 mod notes;
 mod parts;
+mod plugin;
 mod point_cloud;
 mod script;
 mod section;
@@ -102,6 +107,7 @@ pub(crate) use component::matrix::{rigid as rigid_matrix, tolerance as matrix_to
 pub(crate) use component::{base_transform, move_vector};
 pub(crate) use measure_sel::{measure_items, shape_of};
 pub(crate) use measure_shape::Shape;
+pub(crate) use point_cloud::filters as point_cloud_filters;
 pub(crate) use script::step_params;
 #[cfg(test)]
 mod kernel_heal_tests;
@@ -121,8 +127,8 @@ mod render_ui;
 mod script_tests;
 mod sheet;
 pub(crate) use sheet::{
-    FlangeType, ThenStep, bend_table_format, flange_edge, flange_edge_list, flange_position, flange_type, fold_points, fold_position,
-    perforation_pattern, sheet_points, sheet_rule_name, then_list,
+    DxfCurves, DxfText, FlangeType, ThenStep, bend_table_format, dxf_curves, dxf_layers, dxf_note_height, dxf_text, flange_edge, flange_edge_list,
+    flange_position, flange_type, fold_points, fold_position, perforation_pattern, sheet_points, sheet_rule_name, then_list,
 };
 mod silhouette;
 mod sketch;
@@ -183,6 +189,8 @@ pub struct CommandSpec {
     pub enabled: Enabled,
     pub run: Run,
     pub undoable: bool,
+    /// Command authority, independent of undo history. New commands require edit authority.
+    pub effect: craft_plugin::Effect,
     /// What runs instead of `run` when the command is given `live: true` (a frame of an
     /// interactive gesture, see [`Session::execute`]).
     pub live: Option<LiveRun>,
@@ -211,6 +219,7 @@ impl CommandSpec {
             enabled: always,
             run,
             undoable: true,
+            effect: craft_plugin::Effect::Edit,
             live: None,
             reads_model: true,
             planned: None,
@@ -262,6 +271,11 @@ impl CommandSpec {
     }
     pub const fn enabled(mut self, e: Enabled) -> Self {
         self.enabled = e;
+        self
+    }
+    /// Explicitly reviewed to leave the design and authoring state unchanged.
+    pub const fn read_only(mut self) -> Self {
+        self.effect = craft_plugin::Effect::Read;
         self
     }
     pub const fn noundo(mut self) -> Self {
@@ -355,8 +369,10 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_project::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
+    v.extend(cell_grid::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
     v.extend(construct_auto::COMMANDS.iter());
+    v.extend(plugin::COMMANDS.iter());
     v.extend(construct::COMMANDS.iter());
     v.extend(sheet::COMMANDS.iter());
     v.extend(plastic::COMMANDS.iter());

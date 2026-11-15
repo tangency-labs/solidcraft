@@ -172,6 +172,19 @@ pub fn dim_frame(sk: &Sketch, k: &ConstraintKind) -> Option<DimFrame> {
     })
 }
 
+/// The frame of a dimension constraint drawn with its stored text `text` (frame-relative, as
+/// in [`encode_text`]). An angle between two lines measures the same value in two vertically
+/// opposite sectors around their crossing; its arc goes in the one the text sits in (#11800),
+/// otherwise in the one whose rays point at the lines, as [`dim_frame`] has it.
+pub fn dim_frame_at(sk: &Sketch, k: &ConstraintKind, text: Option<Vec2>) -> Option<DimFrame> {
+    let frame = dim_frame(sk, k)?;
+    let (ConstraintKind::Angle { .. }, DimFrame::Angular { vertex, d0, sweep }, Some(t)) = (k, frame, text) else {
+        return Some(frame);
+    };
+    let inside = |d0: Vec2| t.len() > 1e-12 && t.is_finite() && (t.angle() - d0.angle()).rem_euclid(std::f64::consts::TAU) <= sweep;
+    Some(if !inside(d0) && inside(-d0) { DimFrame::Angular { vertex, d0: -d0, sweep } } else { frame })
+}
+
 /// The stored text position for text centred at `at`.
 pub fn encode_text(f: &DimFrame, at: Vec2) -> Vec2 {
     match *f {
@@ -273,16 +286,18 @@ fn arc_extension(c: Vec2, r: f64, start: f64, sweep: f64, at: f64, over: f64) ->
     Some(if after_end <= before_start { arc_pts(c, r, start + sweep, after_end + past) } else { arc_pts(c, r, at - past, before_start + past) })
 }
 
-/// The lines a linear dimension's two extension lines may start from (#1361), for its `p0` and
-/// `p1` sides: a dimension to a line reaches the nearest part of that line, not the foot of the
+/// The lines a dimension's two extension lines may start from (#1361), for its `p0` and `p1`
+/// sides: a dimension to a line reaches the nearest part of that line, not the foot of the
 /// measured point, and a dimension between two parallel lines reaches the nearest part of the
-/// line whose end it measures from. `None` for a side that measures a point.
+/// line whose end it measures from. An angle dimension's two rays reach the lines it measures
+/// (#15610). `None` for a side that measures a point.
 pub fn dim_reach(sk: &Sketch, k: &ConstraintKind) -> [Option<(Vec2, Vec2)>; 2] {
     use ConstraintKind::*;
     let (p, l, to_line) = match *k {
         PointLineDistance { p, l, .. } => (p, l, true),
         LinearDiameter { p, l, .. } => (p, l, false),
         LineCircleDistance { l, .. } => return [line_ends(sk, l), None],
+        Angle { a, b, .. } => return [line_ends(sk, a), line_ends(sk, b)],
         _ => return [None, None],
     };
     let Some((a, b)) = line_ends(sk, l) else { return [None, None] };
@@ -309,6 +324,19 @@ fn nearest_on(s: (Vec2, Vec2), q: Vec2) -> Vec2 {
     s.0 + d * ((q - s.0).dot(d) / l2).clamp(0.0, 1.0)
 }
 
+/// How far the ray from `vertex` along `u` reaches the segment `s`: the distance to the point
+/// of `s` on the ray's line, negative when that point lies behind the vertex. Zero when the
+/// segment does not lie on the ray's line, as when the two lines are parallel and have no
+/// vertex to meet at.
+fn ray_reach(vertex: Vec2, u: Vec2, s: (Vec2, Vec2)) -> f64 {
+    let d = nearest_on(s, vertex) - vertex;
+    let along = d.dot(u);
+    if (d - u * along).len() > 1e-6 * (1.0 + along.abs()) {
+        return 0.0;
+    }
+    along
+}
+
 /// How far a line from the centre of an upright text box of half size `half` runs along the
 /// unit `u` before it leaves the box. An axis `u` doesn't move along gives `h / 0` (infinite,
 /// or NaN for an empty box), which `min` passes over.
@@ -324,7 +352,8 @@ pub fn dim_layout(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2) -> DimL
 }
 
 /// [`dim_layout`] with the extension lines of a linear dimension starting from the nearest
-/// point of the geometry in `reach` ([`dim_reach`]) instead of the measured points.
+/// point of the geometry in `reach` ([`dim_reach`]) instead of the measured points, and an
+/// angle dimension's rays reaching the lines they measure.
 pub fn dim_layout_reaching(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2, reach: [Option<(Vec2, Vec2)>; 2]) -> DimLayout {
     let px = if px.is_finite() && px > 0.0 { px } else { 1.0 };
     // A text box is no larger than a sketch can be.
@@ -433,10 +462,15 @@ pub fn dim_layout_reaching(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2
             let t = text.unwrap_or_else(|| default_text_offset(&DimFrame::Angular { vertex, d0, sweep }, px, half));
             let r = t.len().max(arrow);
             out.text = vertex + t;
-            // Extension rays from the vertex out past the arc.
-            for a in [a0, a0 + sweep] {
+            // Extension rays from the vertex out past the arc, reaching the lines they measure
+            // (#15610): two lines that do not meet have their vertex where their extensions
+            // cross, far from them, and the rays are what keeps the dimension attached.
+            for (a, seg) in [a0, a0 + sweep].into_iter().zip(reach) {
                 let u = Vec2::from_angle(a);
-                out.lines.push(vec![vertex + u * (r * 0.15).min(gap * 3.0), vertex + u * (r + over)]);
+                let along = seg.map_or(0.0, |s| ray_reach(vertex, u, s));
+                let from = if along < 0.0 { along } else { (r * 0.15).min(gap * 3.0) };
+                let to = if along > r + over { along } else { r + over };
+                out.lines.push(vec![vertex + u * from, vertex + u * to]);
             }
             let arc_len = r * sweep;
             if arc_len > 2.5 * arrow {
@@ -639,6 +673,62 @@ mod tests {
         let l = dim_layout(&DimFrame::Angular { vertex, d0, sweep }, None, 0.1, Vec2::ZERO);
         assert_eq!(l.arrows.len(), 2);
         assert!(l.text.x > 0.0 && l.text.y > 0.0);
+    }
+
+    #[test]
+    fn an_angle_dimension_reaches_the_lines_it_measures() {
+        // #15610: two lines joined by an arc do not meet, so the angle's vertex is where their
+        // extensions cross, far from the geometry; its rays have to reach the lines it measures.
+        let mut sk = Sketch::new();
+        let a = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), None, None, None).unwrap_or(0);
+        let b = sk.add_line(Vec2::new(0.0, 10.0), Vec2::new(100.0, 20.0), None, None, None).unwrap_or(0);
+        let k = ConstraintKind::Angle { a, b, value: 0.1, flip: false };
+        let f = dim_frame(&sk, &k).unwrap_or(DimFrame::Radial { center: Vec2::ZERO, radius: 1.0, diameter: false, arc: None });
+        let DimFrame::Angular { vertex, .. } = f else { panic!("an angle is drawn as an angle: {f:?}") };
+        assert!(vertex.dist(Vec2::new(-100.0, 0.0)) < 1e-6, "the vertex is where the extensions cross: {vertex:?}");
+        let reach = dim_reach(&sk, &k);
+        assert!(reach[0].is_some() && reach[1].is_some(), "{reach:?}");
+        let ray_ends = |lay: &DimLayout| -> Vec<Vec2> { lay.lines.iter().filter(|l| l.len() == 2).map(|l| l[l.len() - 1]).collect() };
+        let lay = dim_layout_reaching(&f, None, 0.1, Vec2::new(2.0, 1.0), reach);
+        let ends = ray_ends(&lay);
+        assert!(ends.iter().any(|p| p.dist(Vec2::new(0.0, 0.0)) < 1e-6), "the first ray reaches the lower line: {ends:?}");
+        assert!(ends.iter().any(|p| p.dist(Vec2::new(0.0, 10.0)) < 1e-6), "the second ray reaches the upper line: {ends:?}");
+        // Without the lines the rays stop at the arc, short of the lines.
+        let plain = ray_ends(&dim_layout(&f, None, 0.1, Vec2::new(2.0, 1.0)));
+        assert!(plain.iter().all(|p| p.dist(vertex) < 20.0), "{plain:?}");
+        // Two lines that meet keep their rays at the arc: there is nothing to reach.
+        let mut sk = Sketch::new();
+        let a = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), None, None, None).unwrap_or(0);
+        let b = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(0.0, 10.0), Some(1), None, None).unwrap_or(0);
+        let k = ConstraintKind::Angle { a, b, value: std::f64::consts::FRAC_PI_2, flip: false };
+        let f = dim_frame(&sk, &k).unwrap_or(DimFrame::Radial { center: Vec2::ZERO, radius: 1.0, diameter: false, arc: None });
+        let ends = ray_ends(&dim_layout_reaching(&f, None, 0.1, Vec2::new(2.0, 1.0), dim_reach(&sk, &k)));
+        assert!(ends.iter().all(|p| p.dist(Vec2::ZERO) < 20.0), "{ends:?}");
+    }
+
+    #[test]
+    fn angle_frame_follows_its_text_into_the_opposite_sector() {
+        // #11800: a long base running left to the corner, a short line up and right from it.
+        // The 45° between the base's direction and the slanted one is drawn below left, past
+        // the slanted line, unless the text sits above right, past the base.
+        let mut sk = Sketch::new();
+        let a = sk.add_line(Vec2::new(-100.0, 0.0), Vec2::new(0.0, 0.0), None, None, None).unwrap_or(0);
+        let b = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(30.0, 30.0), Some(2), None, None).unwrap_or(0);
+        let k = ConstraintKind::Angle { a, b, value: std::f64::consts::FRAC_PI_4, flip: false };
+        let d0 = |text: Option<Vec2>| match dim_frame_at(&sk, &k, text) {
+            Some(DimFrame::Angular { d0, sweep, .. }) if (sweep - std::f64::consts::FRAC_PI_4).abs() < 1e-12 => d0,
+            other => panic!("{other:?}"),
+        };
+        assert!(close(d0(None), -Vec2::X));
+        assert!(close(d0(Some(Vec2::new(20.0, 5.0))), Vec2::X));
+        assert!(close(d0(Some(Vec2::new(-20.0, -5.0))), -Vec2::X));
+        // Text in a sector of the other angle, at the vertex or not finite: as without text.
+        for t in [Vec2::new(-5.0, 20.0), Vec2::ZERO, Vec2::new(f64::NAN, 1.0)] {
+            assert!(close(d0(Some(t)), -Vec2::X), "{t:?}");
+        }
+        // Other dimensions do not change with their text.
+        let len = ConstraintKind::Length { l: a, value: 100.0 };
+        assert_eq!(dim_frame_at(&sk, &len, Some(Vec2::new(0.0, -30.0))), dim_frame(&sk, &len));
     }
 
     #[test]

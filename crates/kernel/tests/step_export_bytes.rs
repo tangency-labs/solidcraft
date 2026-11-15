@@ -4,7 +4,8 @@
 //! `tests/step-regressions`, the import kernel cases and solidcore-step's fixtures) is read
 //! and written back through `step_export_bodies`. The written text's digest must be the one in
 //! [`DIGESTS`]. These digests were taken from the export as it was before the AP242 product layer
-//! moved into solidcore-step, so a passing run shows the move kept every byte. A small assembly
+//! moved into solidcore-step, except the torus-ring spline whose exact torus support is now
+//! proved and written analytically (#16297). A small assembly
 //! with names and a colour goes through `step_export_products` the same way.
 //!
 //! The written file is then read again: the same bodies, each with the same face count and its
@@ -48,9 +49,11 @@ fn fixtures(root: &std::path::Path) -> Vec<String> {
     out
 }
 
-/// (fixture, digest of its export) as written before the move.
+/// (fixture, digest of its export) as written before the move, plus new fixtures; the torus-ring spline
+/// is now an exact torus (#16297).
 #[rustfmt::skip]
 const DIGESTS: &[(&str, &str)] = &[
+    ("solidcore/crates/solidcore-step/tests/fixtures/closed-spline-cylinder.step", "197c80fea864545e"),
     ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "5545d4ee93431803"),
     ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "8432fa140e74c146"),
     ("tests/kernel-cases/import/1721-closed-bspline-tube-face/input.step", "c5176ac4d067ab52"),
@@ -63,7 +66,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/kernel-cases/import/3352-vertex-off-its-edge-curve/input.step", "5e6454bed8d85bc3"),
     ("tests/kernel-cases/import/3730-void-oriented-shell-false/input.step", "e461e3732a479928"),
     ("tests/kernel-cases/import/3880-cylinder-seam-edge/input.step", "183935caa3bdda17"),
-    ("tests/kernel-cases/import/3880-nurbs-hemisphere-dome/input.step", "874235ee0a9f882f"),
+    ("tests/kernel-cases/import/3880-nurbs-hemisphere-dome/input.step", "c072f4d08cfefb04"),
     ("tests/kernel-cases/import/3963-closed-spline-edge-vertex-past-start/input.step", "c0e524535a1b5a62"),
     ("tests/kernel-cases/import/4005-cylinder-written-as-near-zero-cone/input.step", "6f13fdd4ff99c151"),
     ("tests/kernel-cases/import/4006-plane-written-as-cone-of-nearly-right-angle/input.step", "05c07f99a56d82c1"),
@@ -76,15 +79,18 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-conformance/cylinder_seam.step", "fba8ee481853a674"),
     ("tests/step-conformance/cylinder_twice.step", "0d40e99e9e7e5d6d"),
     ("tests/step-conformance/dome.step", "054949758cf68925"),
-    ("tests/step-conformance/dome_nurbs.step", "35948db68cd0ef63"),
+    ("tests/step-conformance/dome_nurbs.step", "9fdf321f816644ca"),
     ("tests/step-conformance/far_cylinder.step", "dcaaaadcc9f0ef04"),
     ("tests/step-conformance/grooved_shaft.step", "83cb26c7776bcf55"),
     ("tests/step-conformance/plate_100_holes.step", "414bd143a34716e6"),
     ("tests/step-conformance/sheet_disc.step", "a88c4d5661255edc"),
     ("tests/step-conformance/tiny_pin.step", "e86130e9cc19deff"),
-    ("tests/step-conformance/torus_ring_nurbs.step", "c8a6072ee96edbe9"),
+    ("tests/step-conformance/torus_ring_nurbs.step", "fb58a511c48a933c"),
     ("tests/step-conformance/washer.step", "490ba83889e1002f"),
+    ("tests/step-regressions/cylinder_rim_off_its_wall.step", "e07c2fdbef7cc0c6"),
+    ("tests/step-regressions/cylinder_spline_rims.step", "609aa9a609b95308"),
     ("tests/step-regressions/rod_doubled_edge.step", "8432fa140e74c146"),
+    ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "d2c476d6163c1863"),
     ("(assembly)", "45b6ef6cf64529e2"),
 ];
 

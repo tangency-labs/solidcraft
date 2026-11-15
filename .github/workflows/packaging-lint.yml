@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     env:
       ACTIONLINT_VERSION: 1.7.12
     steps:
@@ -55,6 +55,13 @@ jobs:
       - name: XML, desktop entry, AppStream, Flatpak manifest
         run: |
           xmllint --noout assets/platforms/windows/solidcraft.wxs assets/platforms/windows/solidcraft.en-us.wxl assets/platforms/macos/*.plist* assets/platforms/linux/*.xml*
+          # An MSI update installs before it removes the old version, so Start menu pins survive (#9366).
+          grep -q 'Schedule="afterInstallExecute"' assets/platforms/windows/solidcraft.wxs
+          grep -q 'Id="REINSTALLMODE" Value="amus"' assets/platforms/windows/solidcraft.wxs
+          # No advertised shortcuts: their Start menu app ID follows the ProductCode, which changes every build, so pins are dropped on update (#9366).
+          ! grep -q 'Advertise="yes"' assets/platforms/windows/solidcraft.wxs || { echo '::error file=assets/platforms/windows/solidcraft.wxs::Advertise="yes": an advertised shortcut loses its Start menu pin on every update; use Advertise="no" (#9366)'; exit 1; }
+          # The Start menu shortcut is not called "SolidCraft": removing an earlier release (advertised shortcut) deletes that file by name after the new one is written (#9366).
+          grep -q 'Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="SolidCraft CAD"' assets/platforms/windows/solidcraft.wxs || { echo '::error file=assets/platforms/windows/solidcraft.wxs::the Start menu shortcut must stay Name="SolidCraft CAD" (#9366)'; exit 1; }
           desktop-file-validate assets/platforms/linux/io.tangencylabs.solidcraft.desktop
           # The window's X11 class is its app id; the old ids stay only as the rename shims.
           grep -qx 'StartupWMClass=io.tangencylabs.solidcraft' assets/platforms/linux/io.tangencylabs.solidcraft.desktop
