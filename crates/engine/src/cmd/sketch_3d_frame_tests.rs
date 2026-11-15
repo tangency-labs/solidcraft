@@ -743,3 +743,53 @@ fn move3d_point_lift_takes_lines_joined_by_coincident() {
     assert!(fits.iter().any(|f| has(f, Vec3::new(10.0, 5.0, 0.0))), "{fits:?}");
     assert!(!sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_sketch::ConstraintKind::Coincident { .. })), "the coincident constraint goes");
 }
+
+/// A joined lift leaves unrelated points where they were: a separate point and a line drawn
+/// after the joined lines keep their places.
+#[test]
+fn move3d_joined_lift_keeps_unrelated_points() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[10,5]]}));
+    let (end_pt, start_pt) = {
+        let sk = s.doc.sketch(sketch).unwrap();
+        let end = match &sk.curves[0].kind {
+            solidcraft_sketch::CurveKind::Line { b, .. } => sk.points[*b].id.clone(),
+            _ => panic!("first curve is not a line"),
+        };
+        let start = match &sk.curves[1].kind {
+            solidcraft_sketch::CurveKind::Line { a, .. } => sk.points[*a].id.clone(),
+            _ => panic!("second curve is not a line"),
+        };
+        (end, start)
+    };
+    run(&mut s, "sketch.constraint.coincident", json!({"a": end_pt, "b": start_pt}));
+    run(&mut s, "sketch.line", json!({"points":[[20,0],[25,0]]}));
+    run(&mut s, "sketch.point", json!({"point":[30,30]}));
+    let first = s.doc.sketch(sketch).unwrap().curves[0].id.clone();
+    run(&mut s, "sketch.move3d", json!({"point": format!("{first}.end"), "by":[0,0,4]}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    let at = |x: f64, y: f64| sk.points.iter().any(|q| (q.pos.x - x).abs() < 1e-7 && (q.pos.y - y).abs() < 1e-7);
+    assert!(at(30.0, 30.0), "the separate point is gone");
+    assert!(at(20.0, 0.0) && at(25.0, 0.0), "the third line lost an end");
+}
+
+/// A point joined to the origin does not lift: the lift is refused and nothing changes.
+#[test]
+fn move3d_point_joined_to_the_origin_is_refused() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[2,3],[10,0]]}));
+    let (line, start_pt) = {
+        let sk = s.doc.sketch(sketch).unwrap();
+        let start = match &sk.curves[0].kind {
+            solidcraft_sketch::CurveKind::Line { a, .. } => sk.points[*a].id.clone(),
+            _ => panic!("curve is not a line"),
+        };
+        (sk.curves[0].id.clone(), start)
+    };
+    run(&mut s, "sketch.constraint.coincident", json!({"a": start_pt, "b": "origin"}));
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move3d", &json!({"point": format!("{line}.start"), "by":[0,0,4]})).unwrap_err().to_string();
+    assert!(e.contains("joined to the origin"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
