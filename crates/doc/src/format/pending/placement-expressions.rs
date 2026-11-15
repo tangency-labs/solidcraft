@@ -1,3 +1,5 @@
+//! An expressed move made with `move_grounded` on a grounded occurrence is kept with
+//! `grounded_ok`, so it follows parameter changes while the occurrence is grounded.
 //! A move kept as expressions (`expressed_moves`) can also hold the expressions typed for the
 //! point the move turns about (`origin`, what they last worked out to as `origin_at`, and the turn
 //! as `rotation`), and `file.insert_step` and `occurrence.move` keep the expressions of a

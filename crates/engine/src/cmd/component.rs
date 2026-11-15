@@ -388,7 +388,7 @@ fn kept_move(
     origin_at: [f64; 3],
     rotation: Mat,
 ) -> solidcraft_doc::ExpressedMove {
-    solidcraft_doc::ExpressedMove { translate, at, frame: solidcraft_doc::IDENTITY, world: false, origin, origin_at, rotation }
+    solidcraft_doc::ExpressedMove { translate, at, frame: solidcraft_doc::IDENTITY, world: false, origin, origin_at, rotation, grounded_ok: false }
 }
 
 /// Move the occurrences whose expressed moves a parameter change moved (#8192), pending moves of
@@ -965,7 +965,12 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         s.uncaptured_moves().get(&id).copied().unwrap_or(o.transform)
     };
     let next = solidcraft_doc::mat_mul(&delta, &cur);
-    let kept = expressed.map(|m| solidcraft_doc::ExpressedMove { frame, world: space == "world", ..m });
+    let kept = expressed.map(|m| solidcraft_doc::ExpressedMove {
+        frame,
+        world: space == "world",
+        grounded_ok: o.grounded && bool_(p, "move_grounded") == Some(true),
+        ..m
+    });
     place_occurrence(s, p, id, next, kept, cmd)
 }
 

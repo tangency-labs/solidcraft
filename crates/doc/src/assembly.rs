@@ -240,6 +240,10 @@ pub struct ExpressedMove {
     /// it turns about move the occurrence by the part of it the turn leaves behind.
     #[serde(default = "identity", skip_serializing_if = "is_identity")]
     pub rotation: Mat,
+    /// Made with `move_grounded`: it moves the occurrence on a parameter change even while the
+    /// occurrence is grounded. Without it a grounded occurrence stays put.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub grounded_ok: bool,
 }
 
 fn origin_is_numbers(o: &[Option<String>; 3]) -> bool {
@@ -597,12 +601,15 @@ impl Document {
             let mut at = Vec::with_capacity(o.expressed_moves.len());
             for m in &o.expressed_moves {
                 let now = m.eval(&params).unwrap_or_else(|_| m.applied());
-                shift += m.shift(&now);
+                // A grounded occurrence stays put, except for the moves made with `move_grounded`.
+                // The others keep up with the parameters all the same, so that ungrounding it
+                // later doesn't jump by everything that changed meanwhile.
+                if !o.grounded || m.grounded_ok {
+                    shift += m.shift(&now);
+                }
                 at.push(now);
             }
-            if o.grounded {
-                // A grounded occurrence stays put, but its moves keep up with the parameters so
-                // that ungrounding it later doesn't jump by everything that changed meanwhile.
+            if o.grounded && shift == Vec3::ZERO {
                 if o.expressed_moves.iter().zip(&at).any(|(m, now)| m.applied() != *now) {
                     out.push(ExpressedShift { occurrence: o.id, shift: Vec3::ZERO, at });
                 }

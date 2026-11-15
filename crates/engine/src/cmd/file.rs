@@ -799,6 +799,7 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
                     origin: Default::default(),
                     origin_at: [0.0; 3],
                     rotation: solidcraft_doc::IDENTITY,
+                    grounded_ok: false,
                 });
             }
             out["transform"] = json!(o.transform);

@@ -2702,3 +2702,19 @@ fn a_turn_about_an_origin_given_as_expressions_follows_its_parameters() {
         assert_eq!(s.doc, doc);
     }
 }
+
+/// #8192 (CaliLuke's report): a grounded part moved by an expression with `move_grounded` keeps
+/// following its parameter, and stays grounded.
+#[test]
+fn a_grounded_part_moved_by_an_expression_with_move_grounded_follows_parameter_changes() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Block", "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let occ = s.doc.occurrences.iter().find(|o| o.grounded).unwrap().id;
+    run(&mut s, "parameters.add", json!({"name": "offset_x", "expression": "0 mm"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "space": "world", "translate": ["offset_x", 0, 0], "move_grounded": true}));
+    run(&mut s, "parameters.change", json!({"name": "offset_x", "expression": "100 mm"}));
+    at(centre(&mut s, occ), [105.0, 5.0, 5.0]);
+    assert!(s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().grounded);
+}
