@@ -318,3 +318,42 @@ fn a_boundary_surface_and_a_loft_surface_on_one_curve_stitch() {
     let edges = run(&mut s, "model.edges", json!({"body": body}));
     assert_eq!(edges["edges"].as_array().map(Vec::len), Some(7), "{edges}");
 }
+
+/// #17053: a boundary surface through two curves that meet at one end (a quarter arc on the
+/// ground and a straight side rising from one of its ends) is a loft whose side between them
+/// collapses to that point. Each side's distance from the surface is proved; a side starting at
+/// the collapsed corner was refused ("gap is not enclosed") when its first nearest point fell
+/// elsewhere along the collapsed side, which rounding decided: before the fix 7 of these 32
+/// cases were refused. Every placement and direction builds the one face.
+#[test]
+fn two_curves_meeting_at_a_corner_bound_their_distance_from_the_surface() {
+    let q = std::f64::consts::FRAC_PI_2;
+    for r in [15.0, 7.3] {
+        for t0 in [0.1f64, 0.37, 1.0, 5.5] {
+            let at = |t: f64| [r * t.cos(), r * t.sin()];
+            let corner = [r * t0.cos(), r * t0.sin(), 0.0];
+            let far = [2.0 * r * (t0 - 0.4).cos(), 2.0 * r * (t0 - 0.4).sin(), 3.3 * r];
+            for (start, end) in [(at(t0), at(t0 + q)), (at(t0 + q), at(t0))] {
+                for (a, b) in [(corner, far), (far, corner)] {
+                    let mut s = Session::default();
+                    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Ground"}));
+                    let arc = run(&mut s, "sketch.arc.three_point", json!({"start": start, "end": end, "through": at(t0 + 0.5 * q)}));
+                    let arc = first(&arc["created"]["curves"]);
+                    run(&mut s, "sketch.finish", json!({}));
+                    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Side"}));
+                    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+                    let side = line3d(&mut s, a, b);
+                    run(&mut s, "sketch.finish", json!({}));
+                    let made =
+                        s.execute("surface.boundary", &json!({"u": [{"sketch": "Ground", "curves": [arc]}, {"sketch": "Side", "curves": [side]}]}));
+                    let made = match made {
+                        Ok(v) => v,
+                        Err(e) => panic!("r {r}, arc from {start:?}, side from {a:?}: {e}"),
+                    };
+                    let faces = run(&mut s, "model.faces", json!({"body": first(&made["created_bodies"])}));
+                    assert_eq!(faces["faces"].as_array().map(Vec::len), Some(1), "r {r}, arc from {start:?}, side from {a:?}: {faces}");
+                }
+            }
+        }
+    }
+}
