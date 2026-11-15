@@ -1649,6 +1649,10 @@ fn adopt_solution(stored: &mut solidcraft_sketch::Sketch, solved: &solidcraft_sk
         *stored = updated;
         return true;
     }
+    // A text that follows parameters has other words, place or outlines than were stored.
+    if !stored.adopt_texts(solved) {
+        return false;
+    }
     if stored.points.len() != solved.points.len()
         || stored.curves.len() != solved.curves.len()
         || stored.constraints.len() != solved.constraints.len()
@@ -3074,6 +3078,7 @@ impl Model {
                 && doc.sketch(s.feature).is_ok_and(|stored| {
                     stored.driving_values() != s.sketch.driving_values()
                         || stored.patterns != s.sketch.patterns
+                        || s.sketch.texts_follow_other_values(stored)
                         || s.sketch.points.iter().zip(&stored.points).any(|(p, q)| p.link.is_some() && p.id == q.id && p.pos != q.pos)
                 })
         })
