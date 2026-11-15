@@ -3091,8 +3091,6 @@ fn the_spline_ray_test_finds_every_crossing_of_a_wavy_patch() {
     }
     assert!(rays > 500 && crossings > 500, "{rays} rays, {crossings} crossings checked");
 }
-||||||| parent of ff7df5f3f7 (Exact edges: a plane face hides a straight stretch at once, overlapping hiders skip the gap search, basis arrays sized to the degree)
-
 
 #[test]
 fn a_plane_face_hides_a_straight_edge_whole_at_once_but_not_across_its_hole() {
