@@ -50,27 +50,23 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-/// How many halvings in a row of a span may leave its bound no better than half its
-/// parent's (or still unproved) before the certificate stops (#16768). Derived from the
-/// orders of the certificate's two parts on a smooth span of length h:
-///
-/// - Its bound is the Hermite remainder `h^4 / 384` times the jets' fourth s-derivative
-///   bounded over the span's pieces (`gn_certify_span`): order 4 in h. A halving divides
-///   `h^4` by 2^4 = 16, and the half starts from its parent's pieces, whose bounds hold over
-///   it, so its fourth-derivative bound is no larger: a proved smooth span's bound falls at
-///   least 16-fold with each halving. The test asks only 2-fold (order 1), the slack being
-///   the row terms taken again about the half's own first station.
-/// - A piece is proved when Krawczyk's operator contracts its feet's box: the preconditioned
-///   Jacobian's spread over the box, which must fall below one, grows with the box's width,
-///   order 1 in h. A halving divides it by 2 only.
-///
-/// So the halvings allowed are those that shrink the proof's contraction (order 1) as much
-/// as one halving shrinks a proved smooth bound (order 4): 2^4 = 16 is 4 halvings of order 1.
-/// A span over the target after that many halvings in a row, none of which halved its
-/// bound, is not one more resolution fixes: its section is degenerate there (an offset
-/// collapsing to a curve, as where a ball's radius is a face's own radius of curvature),
-/// and halving further only multiplies the work, the stations doubling each round to the
-/// cap of 4096.
+/// How many halvings in a row of a span may leave its proved bound no better than half its
+/// parent's proved bound before the certificate stops (#16768). Only halvings between two
+/// finite bounds count; a span still unproved (its feet's enclosure failing on every piece)
+/// is left to the cap of 4096 stations, since how many halvings Krawczyk's proof needs
+/// depends on how far its contraction starts from one, which no order bounds. Derived from
+/// the order of the bound on a smooth span of length h: it is the Hermite remainder
+/// `h^4 / 384` times the jets' fourth s-derivative bounded over the span's pieces
+/// (`gn_certify_span`), order 4 in h. A halving divides `h^4` by 2^4 = 16, and the half
+/// starts from its parent's pieces, whose bounds hold over it, so its fourth-derivative
+/// bound is no larger: a proved smooth span's bound falls about 16-fold with each halving.
+/// The test asks only 2-fold (order 1), the slack being the row terms taken again about the
+/// half's own first station. Four halvings in a row that each fall short of order 1 have
+/// together gained less than 2^4 = 16, what one halving of the order-4 bound gains: the
+/// bound is then not following its order, so the section is degenerate there (an offset
+/// nearly collapsing to a curve, as where a ball's radius is close to a face's own radius
+/// of curvature), and halving further only multiplies the work, the stations doubling
+/// each round to the cap.
 const MAX_STALLED_HALVINGS: u32 = 4;
 const OP: &str = "blend::fillet_section::GnSectionFsg";
 const OP_BUILD: &str = "blend::fillet_section::GnSectionFsg::build";
@@ -2056,12 +2052,14 @@ impl GnSectionFsg {
                     // the next span's first level: one coarser than this one's first proved
                     hint = reuse.first.map_or(0, |f| f.saturating_sub(1));
                     if let (Some(&parent), Some(count)) = (parents.get(j), stalled.get_mut(j)) {
-                        let better = match parent {
-                            Some(p) if p.is_finite() => *bj <= 0.5 * p,
-                            Some(_) => bj.is_finite(),
-                            None => true,
+                        // only a halving between proved (finite) bounds counts: an unproved span
+                        // is left to the cap on the stations, since how many halvings its proof
+                        // takes is not bounded by the bound's order
+                        let stalled_here = match parent {
+                            Some(p) if p.is_finite() && bj.is_finite() => *bj > 0.5 * p,
+                            _ => false,
                         };
-                        *count = if better { 0 } else { *count + 1 };
+                        *count = if stalled_here { *count + 1 } else { 0 };
                         if *bj > target && *count >= MAX_STALLED_HALVINGS {
                             // the halving did not converge: a typed failure, the rounds it took
                             return Err(SolidError::NotConverged {
