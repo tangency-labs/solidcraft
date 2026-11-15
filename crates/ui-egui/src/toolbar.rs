@@ -2373,7 +2373,7 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui.label(egui::RichText::new(solidcraft_ui_text::tr_label("Selection filter")).color(t.text_dim).size(t.font_small));
     for (mode, label) in [("body", app.tr_label("Select bodies (a face picks its body)")), ("component", app.tr("ui.select_components_by_face"))] {
-        let mut on = app.ui.pick_mode() == mode;
+        let mut on = app.pick_mode() == mode;
         if ui_kit::checkbox(ui, label, &mut on).changed() {
             // The Faces checkbox below is independent. The standalone command enables faces.
             let filters = std::mem::take(&mut app.ui.pick_off);
