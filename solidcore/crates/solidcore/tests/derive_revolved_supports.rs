@@ -12,7 +12,7 @@
 //! (`data/short_swept_revolution_nets.jsonl`), and one of the same round swept 286 degrees in
 //! four spans (`data/long_swept_revolution_net.jsonl`), derived with `derive_revolution`.
 
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)] // test helpers
+#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
@@ -453,6 +453,7 @@ fn a_revolution_net_swept_past_half_a_turn_derives_about_its_own_axis() {
 /// `form`, and `form` with u and v swapped, derives as a surface of revolution about the
 /// world z axis over `sweep` degrees and evaluates as `form` within 64 ulps of its size at
 /// points between the control points.
+#[allow(clippy::panic)] // a test helper
 fn derives_about_the_z_axis(form: &Form, sweep: f64) {
     use solidcore::surface::surface::SurfaceKind;
     let k = Kernel::default();
