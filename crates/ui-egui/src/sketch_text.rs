@@ -176,6 +176,23 @@ pub(crate) fn text_profiles(s: &solidcraft_engine::Session, sketch: u64, index: 
     (!letters.is_empty()).then_some(letters)
 }
 
+/// The outlines of the one text a curve belongs to: a letter's outline of a text, when it is
+/// picked, brings the whole text with it, the way a picked profile brings the text's letters
+/// ([`text_profiles`]). None when the curve is not a text's outline: an exploded text's outlines
+/// are ordinary curves with no link, and a curve of plain geometry has no text either.
+pub(crate) fn text_outlines(s: &solidcraft_engine::Session, sketch: u64, curve: &str) -> Option<Vec<String>> {
+    let state = crate::open_meshing::session_world(s);
+    let ss = state.sketch(sketch)?;
+    let link = ss.sketch.curves.iter().find(|c| c.id == curve)?.link.as_deref()?;
+    let source = ss.sketch.link(link)?;
+    if source.kind != LinkKind::Text {
+        return None;
+    }
+    let mut ids: Vec<String> = ss.sketch.curves.iter().filter(|c| c.link.as_deref() == Some(link)).map(|c| c.id.clone()).collect();
+    ids.sort();
+    Some(ids)
+}
+
 /// Only a complete selection belonging to one text source can seed the editor.
 pub(crate) fn selected_entity(app: &SolveApp) -> Option<String> {
     let sk = app.session.doc.sketch(app.session.active_sketch?).ok()?;
@@ -1503,6 +1520,36 @@ mod tests {
         // Inside the O's counter, the text is picked too (its letters).
         assert_eq!(text_profiles(&h.app.session, sid, counter).map(|v| v.len()), Some(2));
         assert!(text_profiles(&h.app.session, sid, 99).is_none());
+    }
+
+    /// A text is one unit: picking any of its outlines picks the whole text, not one piece of
+    /// one letter (#16738). Shift takes one outline out again.
+    #[test]
+    fn a_text_is_picked_whole_from_any_of_its_outlines() {
+        let (mut h, link, _) = setup();
+        h.app.run("sketch.edit_text", json!({"link":link,"text":"IO"})).unwrap();
+        h.app.session.selection.clear();
+        let sid = h.app.session.active_sketch.unwrap();
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        let outlines: Vec<String> = sk.curves.iter().filter(|c| c.link.as_deref() == Some(&link)).map(|c| c.id.clone()).collect();
+        assert!(outlines.len() >= 3, "the text has an outline per letter: {outlines:?}");
+        let pick = |h: &Harness| crate::viewport::picked_selection(&h.app.session, &Sel::SketchCurve { id: outlines[1].clone(), sketch: None });
+        let mut ids: Vec<String> = pick(&h)
+            .iter()
+            .map(|s| match s {
+                Sel::SketchCurve { id, .. } => id.clone(),
+                _ => String::new(),
+            })
+            .collect();
+        ids.sort();
+        let mut want = outlines.clone();
+        want.sort();
+        assert_eq!(ids, want, "the whole text is picked");
+        // Shift takes one outline out again.
+        set_one_letter(true);
+        let one = pick(&h);
+        set_one_letter(false);
+        assert_eq!(one, vec![Sel::SketchCurve { id: outlines[1].clone(), sketch: None }]);
     }
 
     /// The text runs over the edge of what it is drawn on (a face's projected edge, here a drawn

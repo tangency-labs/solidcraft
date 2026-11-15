@@ -7944,6 +7944,13 @@ pub(crate) fn picked_selection(s: &solidcraft_engine::Session, sel: &Sel) -> Vec
     {
         return letters.into_iter().map(|index| Sel::Profile { sketch: *sketch, index }).collect();
     }
+    if let Sel::SketchCurve { id, sketch } = sel
+        && !crate::sketch_text::one_letter()
+        && let Some(sketch_id) = (*sketch).or(s.active_sketch)
+        && let Some(outlines) = crate::sketch_text::text_outlines(s, sketch_id, id)
+    {
+        return outlines.into_iter().map(|id| Sel::SketchCurve { id, sketch: *sketch }).collect();
+    }
     grouped_selection(s, sel)
 }
 
