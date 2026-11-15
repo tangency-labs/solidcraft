@@ -115,7 +115,8 @@ use crate::blend::fillet_geom::p1::{
 };
 use crate::blend::fillet_intersector::FilletIntersector;
 use crate::blend::fillet_solver::p1::{
-    FilletSolver, FilletSolverOps, FilletSphereSolveEnfo, OffsetSurfaceSlot,
+    seam_periods, wrap_closed_directions, FilletSolver, FilletSolverOps, FilletSphereSolveEnfo,
+    OffsetSurfaceSlot, SeamDomain,
 };
 use crate::blend::fillet_solver::p3::StepSolveOutcome;
 use crate::blend::fillet_solver::p4::IntersectorSolver;
@@ -768,6 +769,19 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
             }
         }
     }
+    // Not upstream (#15767): the ball's section solve wraps a closed base across its seam
+    if fs.solver.seam_domain == SeamDomain::Wrapped {
+        for ((ivl, p), period) in ivls
+            .iter_mut()
+            .zip(periodic.iter_mut())
+            .zip(seam_periods(k, base2)?)
+        {
+            if let Some(period) = period {
+                *ivl = period;
+                *p = true;
+            }
+        }
+    }
 
     let surface2_index = guess_t.len();
     let [ivl_u, ivl_v] = ivls;
@@ -1147,6 +1161,12 @@ pub fn point_on_plane_solve(
     let jacobian_size = solver.jacobian_size()?;
     let mut intervals = plane_intervals(jacobian_size, uv_domain1, uv_domain2)?;
     let mut periodicities = vec![false; 2];
+    // Not upstream (#15767): the ball's section solve wraps a closed base across its seam (the
+    // second surface's in `LoadInitialValues`)
+    if solver.solver().seam_domain == SeamDomain::Wrapped {
+        let base = rail_offset(solver.solver(), 0)?.base_surface().clone();
+        wrap_closed_directions(k, &base, &mut intervals, &mut periodicities, 0)?;
+    }
     let mut guess_t = vec![uv1.x, uv1.y];
 
     let mut surface1 = rail_offset(solver.solver(), 0)?.clone();

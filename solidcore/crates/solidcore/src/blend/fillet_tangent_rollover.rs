@@ -15,13 +15,17 @@
 //! ("Unimplemented Tangent Rollover Case", [`FilletSolver::process_full_roll_over`]). Here the
 //! full tangent rollover is decided before the trace, in the round's section, where it is exact
 //! ([`tangent_rollover_supports`]), and the solver rolls the ball on the face beyond from the
-//! start, as [`crate::blend::fillet_outline`] gives the solver its rim supports. A round that is
-//! not a lone one between planes along a straight edge (one of a chain, #15767) is decided from
-//! its ball's sections along its edge (the session's `roll_over_tangent_edges`).
+//! start, as [`crate::blend::fillet_outline`] gives the solver its rim supports. The same
+//! section decides a lone round along a straight edge between faces each a plane or a circular
+//! cylinder parallel to the edge (#15767: two joined cylinders, the ball rolling over one's
+//! seam), whose section is the same all along the edge (`cylinder_rollover_supports`). A round
+//! that is not a lone one (one of a chain, #15767) is decided from its ball's sections along its
+//! edge (the session's `roll_over_tangent_edges`).
 //!
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`tangent_rollover_supports`] | none (solidcore-native) |
+//! | `cylinder_rollover_supports`, `cylinder_section`, `CylinderSection`, `prismatic_profile`, `Profile`, `offset_meet`, `full_span_line` (private) | none (solidcore-native) |
 //! | [`rolled_edge_point`] | none (solidcore-native) |
 //! | `section_seeds`, `SectionSeed` (crate) | none (solidcore-native) |
 //! | `planar_section`, `PlanarSection` (crate) | none (solidcore-native) |
@@ -71,8 +75,11 @@ pub struct Rollover {
 /// contact on a face is that centre's foot on the face's line. A side rolls over when the face's
 /// other edge that runs the filleted edge's whole length (a straight edge parallel to it whose
 /// span covers it) is tangent to the face beyond (`sm_TestManifoldTangentRollover` within
-/// `tangency_tol_rad`) and the contact lies past it, by more than the body's tolerance. Any
-/// other round, and a round with no such side, gives `[None, None]`.
+/// `tangency_tol_rad`) and the contact lies past it, by more than the body's tolerance. A
+/// straight edge where a face is a circular cylinder whose axis is parallel to the edge (the
+/// other a plane or such a cylinder) is decided in the same section by
+/// `cylinder_rollover_supports`. Any other round, and a round with no such side, gives
+/// `[None, None]`.
 ///
 /// # Errors
 ///
@@ -98,7 +105,7 @@ pub fn tangent_rollover_supports(
         centre,
     }) = planar_section(k, target, filleted, faces, offsets)?
     else {
-        return Ok(none);
+        return cylinder_rollover_supports(k, target, filleted, faces, offsets, tangency_tol_rad);
     };
     let to2 = |p: Point3| {
         let v = p - m;
@@ -276,6 +283,477 @@ pub(crate) fn planar_section(
         n2,
         centre,
     }))
+}
+
+/// A face's section square to a straight edge along `d`, in the section's frame (its origin the
+/// edge's middle): the line of a plane that contains the edge's direction, or the circle of a
+/// circular cylinder whose axis is parallel to the edge ([`prismatic_profile`]). Either surface
+/// is the same in every such section, so a round between two of them has the same section at
+/// every point of its edge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Profile {
+    /// A plane: the points `q` with `n . q = h`.
+    Line {
+        /// The surface's unit normal.
+        n: (f64, f64),
+        /// The line's signed distance from the origin along `n`.
+        h: f64,
+    },
+    /// A circular cylinder.
+    Circle {
+        /// Its axis.
+        c: (f64, f64),
+        /// Its radius.
+        radius: f64,
+        /// `+1` where the surface's normal points away from the axis, `-1` where toward it.
+        side: f64,
+    },
+}
+
+impl Profile {
+    /// Whether `q` lies on the profile within `tol`.
+    fn holds(self, q: (f64, f64), tol: f64) -> bool {
+        let miss = match self {
+            Self::Line { n, h } => n.0 * q.0 + n.1 * q.1 - h,
+            Self::Circle { c, radius, .. } => {
+                let v = (q.0 - c.0, q.1 - c.1);
+                (v.0 * v.0 + v.1 * v.1).sqrt() - radius
+            }
+        };
+        miss.abs() <= tol
+    }
+
+    /// The point of the profile the ball of centre `centre` touches, the profile's surface
+    /// offset by `offset` passing through `centre`: the centre's foot on a line, its radial
+    /// point on a circle. `None` for a centre on a circle's axis.
+    fn contact(self, offset: f64, centre: (f64, f64)) -> Option<(f64, f64)> {
+        match self {
+            Self::Line { n, .. } => Some((centre.0 - n.0 * offset, centre.1 - n.1 * offset)),
+            Self::Circle { c, radius, .. } => {
+                let v = (centre.0 - c.0, centre.1 - c.1);
+                let l = (v.0 * v.0 + v.1 * v.1).sqrt();
+                (l > 0.0).then(|| (c.0 + v.0 * (radius / l), c.1 + v.1 * (radius / l)))
+            }
+        }
+    }
+
+    /// How far along the profile from the origin (the edge's point, which the profile holds)
+    /// the point `q` of it lies, in the sense the point `towards` of it lies from the origin:
+    /// along a line the signed distance, round a circle the arc in that sense, in `[0, 2 pi
+    /// radius)`. `None` where `towards` names no sense: within `tol` of the origin across the
+    /// profile's direction there, or (on a circle) of the point opposite it.
+    fn travel(self, towards: (f64, f64), q: (f64, f64), tol: f64) -> Option<f64> {
+        match self {
+            Self::Line { n, .. } => {
+                let u = (-n.1, n.0);
+                let s = towards.0 * u.0 + towards.1 * u.1;
+                (s.abs() > tol).then(|| s.signum() * (q.0 * u.0 + q.1 * u.1))
+            }
+            Self::Circle { c, radius, .. } => {
+                let angle = |p: (f64, f64)| (p.1 - c.1).atan2(p.0 - c.0);
+                let origin = angle((0.0, 0.0));
+                let s = (angle(towards) - origin).sin();
+                (s.abs() * radius > tol).then(|| {
+                    radius
+                        * (s.signum() * (angle(q) - origin)).rem_euclid(2.0 * std::f64::consts::PI)
+                })
+            }
+        }
+    }
+
+    /// The profile's surface offset by `offset` along its normal (where the ball's centre lies):
+    /// a line moved along its normal, a circle of radius `radius + side offset`.
+    fn offset(self, offset: f64) -> Self {
+        match self {
+            Self::Line { n, h } => Self::Line { n, h: h + offset },
+            Self::Circle { c, radius, side } => Self::Circle {
+                c,
+                radius: radius + side * offset,
+                side,
+            },
+        }
+    }
+}
+
+/// The ball's centre in a section of the round between the profiles `profiles`, of offsets
+/// `offsets`: of the two points where the offset profiles meet (each pair of a line and a
+/// circle, or of two circles, meets in two points, mirror images across the line through the
+/// circles' centres, or square to the line through the circle's centre), the one on the
+/// origin's side of that mirror, which is the one nearer the origin (the edge's point, which
+/// both profiles hold: the branch that starts there at radius 0). `None` for two lines (the
+/// planes' closed form, [`planar_section`]), an offset circle of no radius above `tol`, offset
+/// profiles that do not meet, and where the two points lie within `tol` of the same distance
+/// from the origin (the edge's point on the mirror: faces tangent there).
+fn offset_meet(profiles: [Profile; 2], offsets: [f64; 2], tol: f64) -> Option<(f64, f64)> {
+    let [p0, p1] = profiles;
+    let [o0, o1] = offsets;
+    let points = match (p0.offset(o0), p1.offset(o1)) {
+        (Profile::Line { .. }, Profile::Line { .. }) => return None,
+        (Profile::Line { n, h }, Profile::Circle { c, radius, .. })
+        | (Profile::Circle { c, radius, .. }, Profile::Line { n, h }) => {
+            if radius.is_nan() || radius <= tol {
+                return None;
+            }
+            // the line's signed distance from the centre, and its foot there
+            let along = h - (n.0 * c.0 + n.1 * c.1);
+            if along.is_nan() || along.abs() > radius {
+                return None;
+            }
+            let half = (radius * radius - along * along).sqrt();
+            let foot = (c.0 + n.0 * along, c.1 + n.1 * along);
+            let t = (-n.1, n.0);
+            [
+                (foot.0 + t.0 * half, foot.1 + t.1 * half),
+                (foot.0 - t.0 * half, foot.1 - t.1 * half),
+            ]
+        }
+        (
+            Profile::Circle {
+                c: c0, radius: r0, ..
+            },
+            Profile::Circle {
+                c: c1, radius: r1, ..
+            },
+        ) => {
+            if !(r0 > tol && r1 > tol) {
+                return None;
+            }
+            let v = (c1.0 - c0.0, c1.1 - c0.1);
+            let dist = (v.0 * v.0 + v.1 * v.1).sqrt();
+            if dist.is_nan() || dist <= tol {
+                return None;
+            }
+            let along = (dist * dist + r0 * r0 - r1 * r1) / (2.0 * dist);
+            let across = r0 * r0 - along * along;
+            if across.is_nan() || across < 0.0 {
+                return None;
+            }
+            let half = across.sqrt();
+            let u = (v.0 / dist, v.1 / dist);
+            let foot = (c0.0 + u.0 * along, c0.1 + u.1 * along);
+            [
+                (foot.0 - u.1 * half, foot.1 + u.0 * half),
+                (foot.0 + u.1 * half, foot.1 - u.0 * half),
+            ]
+        }
+    };
+    let [a, b] = points.map(|p| (p.0 * p.0 + p.1 * p.1).sqrt());
+    let apart = (a - b).abs();
+    if apart.is_nan() || apart <= tol {
+        return None;
+    }
+    let [pa, pb] = points;
+    Some(if a < b { pa } else { pb })
+}
+
+/// The profile of `face` in the section through `m` square to the unit `d`, with axes `x` and
+/// `y` ([`Profile`]), read at the point of its surface nearest `at`: its surface a circular
+/// cylinder (a cone of the kernel's cylinder kind, read as its quadric) whose axis is parallel
+/// to `d` within [`DIR_TOL`], or planar within `tol` with its normal square to `d` within
+/// [`DIR_TOL`]. `None` for any other surface, or where `at` does not drop on it.
+///
+/// # Errors
+///
+/// Those of the evaluations, the drop and the planarity test; [`SolidError::Unported`] and a
+/// cancellation from reading the quadric; `SM_ERR` for a face without a surface.
+fn prismatic_profile(
+    k: &Kernel,
+    target: &Brep,
+    face: FaceId,
+    at: Point3,
+    m: Point3,
+    [d, x, y]: [Vec3; 3],
+    tol: f64,
+) -> Result<Option<Profile>> {
+    use crate::blend::fillet_exact::{BlendQuadric, QuadricKind};
+    use crate::surface::surface::SurfaceKind;
+    let surface = crate::topology::face::p2::surface(target, face)?
+        .ok_or_else(|| SolidError::blend_failed(OP, "a face of the edge has no surface"))?
+        .clone_for_evaluation()?;
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let dropped = surface.drop_point::<NoObject>(k, at, &domain, &DropPointOptions::default())?;
+    if !dropped.success {
+        return Ok(None);
+    }
+    let to2 = |v: Vec3| (v.dot(x), v.dot(y));
+    if let SurfaceKind::Cone(cone) = surface.kind() {
+        if !cone.is_cylinder() {
+            return Ok(None);
+        }
+        let q = match BlendQuadric::from_surface(k, &surface, dropped.result_uv, tol) {
+            Ok(q) => q,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(None),
+        };
+        let skew = q.dir.cross(d).length();
+        if q.kind != QuadricKind::Cylinder
+            || q.radius.is_nan()
+            || q.radius <= tol
+            || skew.is_nan()
+            || skew > DIR_TOL
+        {
+            return Ok(None);
+        }
+        return Ok(Some(Profile::Circle {
+            c: to2(q.point - m),
+            radius: q.radius,
+            side: q.side,
+        }));
+    }
+    if !surface.is_planar(k, tol)?.is_planar {
+        return Ok(None);
+    }
+    let n = surface.evaluate_normal(k, dropped.result_uv, KnotSide::Left, KnotSide::Left)?;
+    let Ok(n) = n.unitize() else {
+        return Ok(None);
+    };
+    let along_edge = n.dot(d).abs();
+    if along_edge.is_nan() || along_edge > DIR_TOL {
+        return Ok(None);
+    }
+    let Ok(n) = (n - d * n.dot(d)).unitize() else {
+        return Ok(None);
+    };
+    let n = to2(n);
+    let foot = to2(surface.evaluate_point(k, dropped.result_uv)? - m);
+    Ok(Some(Profile::Line {
+        n,
+        h: n.0 * foot.0 + n.1 * foot.1,
+    }))
+}
+
+/// A section of a round along a straight edge between faces each a plane or a circular
+/// cylinder parallel to it, at least one a cylinder ([`cylinder_section`]).
+struct CylinderSection {
+    /// The edge's unit direction.
+    d: Vec3,
+    /// The edge's ends.
+    ends: [Point3; 2],
+    /// The edge's middle, the section's origin.
+    m: Point3,
+    /// The section's axes, square to the edge and to each other.
+    x: Vec3,
+    /// See `x`.
+    y: Vec3,
+    /// Each face's profile ([`Profile`]), through the origin.
+    profiles: [Profile; 2],
+}
+
+/// The section across the middle of the straight edge `filleted` whose faces are each a plane
+/// containing its direction or a circular cylinder whose axis is parallel to it, at least one a
+/// cylinder ([`prismatic_profile`]), each holding the edge's middle within `tol`. Its x axis is
+/// the unit vector square to the edge nearest the coordinate axis least along it. `None` for
+/// any other edge.
+///
+/// # Errors
+///
+/// Those of the curve's recogniser, the evaluations and [`prismatic_profile`].
+fn cylinder_section(
+    k: &Kernel,
+    target: &Brep,
+    filleted: EdgeId,
+    faces: [FaceId; 2],
+    tol: f64,
+) -> Result<Option<CylinderSection>> {
+    let Some(curve) = edge::curve(target, filleted)?.cloned() else {
+        return Ok(None);
+    };
+    let Some((_, vector)) = curve.is_line(k, 3, CURVE_TOL)? else {
+        return Ok(None);
+    };
+    let Ok(d) = vector.unitize() else {
+        return Ok(None);
+    };
+    let ivl = edge::interval(target, filleted)?;
+    let ends = [
+        curve.evaluate_point(k, ivl.min())?,
+        curve.evaluate_point(k, ivl.max())?,
+    ];
+    let m = curve.evaluate_point(k, ivl.evaluate(0.5))?;
+    let axis = if d.x.abs() <= d.y.abs() && d.x.abs() <= d.z.abs() {
+        Vec3::new(1.0, 0.0, 0.0)
+    } else if d.y.abs() <= d.z.abs() {
+        Vec3::new(0.0, 1.0, 0.0)
+    } else {
+        Vec3::new(0.0, 0.0, 1.0)
+    };
+    let Ok(x) = (axis - d * axis.dot(d)).unitize() else {
+        return Ok(None);
+    };
+    let y = d.cross(x);
+    let mut profiles = Vec::with_capacity(2);
+    for &face in &faces {
+        let Some(profile) = prismatic_profile(k, target, face, m, m, [d, x, y], tol)? else {
+            return Ok(None);
+        };
+        if !profile.holds((0.0, 0.0), tol) {
+            return Ok(None);
+        }
+        profiles.push(profile);
+    }
+    let Ok(profiles) = <[Profile; 2]>::try_from(profiles) else {
+        return Ok(None);
+    };
+    if profiles.iter().all(|p| matches!(p, Profile::Line { .. })) {
+        return Ok(None);
+    }
+    Ok(Some(CylinderSection {
+        d,
+        ends,
+        m,
+        x,
+        y,
+        profiles,
+    }))
+}
+
+/// [`tangent_rollover_supports`] for a straight edge between faces each a plane or a circular
+/// cylinder parallel to it, at least one a cylinder ([`cylinder_section`]). Both surfaces are
+/// the same in every section square to the edge, so the round's section at the edge's middle
+/// is its section everywhere along it: the ball's centre is where the faces' offset profiles
+/// meet ([`offset_meet`]), and its contact on a face the centre's foot on its profile. A side
+/// rolls over when, of the face's other edges that run the filleted edge's whole length (a
+/// straight edge parallel to it whose span covers it) and lie on its profile, the one nearest
+/// the filleted edge along the profile in the sense the contact lies in ([`Profile::travel`])
+/// is tangent to the face beyond (`sm_TestManifoldTangentRollover` within `tangency_tol_rad`),
+/// the contact lies past it by more than the body's tolerance, and the face beyond is a plane
+/// or a circular cylinder parallel to the edge too whose offset by the ball (signed by the
+/// normals across the edge) does not fold across the edge there, which then holds all along
+/// it. Any other round, and a round with no such side, gives `[None, None]`.
+///
+/// # Errors
+///
+/// Those of the topology queries, the curves' recognisers, the evaluations and the tangency
+/// test; `SM_ERR` for a face without a surface.
+fn cylinder_rollover_supports(
+    k: &Kernel,
+    target: &mut Brep,
+    filleted: EdgeId,
+    faces: [FaceId; 2],
+    offsets: [f64; 2],
+    tangency_tol_rad: f64,
+) -> Result<[Option<Rollover>; 2]> {
+    let none = [None, None];
+    let tol = target.tolerance();
+    let Some(CylinderSection {
+        d,
+        ends,
+        m,
+        x,
+        y,
+        profiles,
+    }) = cylinder_section(k, target, filleted, faces, tol)?
+    else {
+        return Ok(none);
+    };
+    let Some(centre) = offset_meet(profiles, offsets, tol) else {
+        return Ok(none);
+    };
+    let to2 = |p: Point3| {
+        let v = p - m;
+        (v.dot(x), v.dot(y))
+    };
+    let mut out = none;
+    for (((slot, &profile), &offset), &face) in
+        out.iter_mut().zip(&profiles).zip(&offsets).zip(&faces)
+    {
+        let Some(contact) = profile.contact(offset, centre) else {
+            continue;
+        };
+        let Some(reach) = profile.travel(contact, contact, tol) else {
+            continue;
+        };
+        // the face's nearest other edge along its profile, in the contact's sense, of those that
+        // run the filleted edge's whole length
+        let mut nearest: Option<(EdgeId, f64, (f64, f64))> = None;
+        for e in face_p4::edges(target, face, None, false, None)? {
+            if e == filleted {
+                continue;
+            }
+            let Some(point) = full_span_line(k, target, e, d, ends, tol)? else {
+                continue;
+            };
+            let t = to2(point);
+            if !profile.holds(t, tol) {
+                continue;
+            }
+            let Some(along) = profile.travel(contact, t, tol) else {
+                continue;
+            };
+            if along > tol && nearest.is_none_or(|(_, a, _)| along < a) {
+                nearest = Some((e, along, t));
+            }
+        }
+        let Some((e, along, t)) = nearest else {
+            continue;
+        };
+        if reach.is_nan() || reach <= along + tol {
+            continue;
+        }
+        let (tangent, opposite_normals) =
+            test_manifold_tangent_rollover(k, target, e, tangency_tol_rad)?;
+        if !tangent {
+            continue;
+        }
+        let Some(&beyond) = edge::faces(target, e, None)?.iter().find(|&&f| f != face) else {
+            continue;
+        };
+        // the face beyond carries the ball all along the edge: a plane or a circular cylinder
+        // parallel to it (the same in every section), whose offset by the ball's offset (signed
+        // by the normals across the edge) does not fold across the edge
+        let far_point = m + x * t.0 + y * t.1;
+        if prismatic_profile(k, target, beyond, far_point, m, [d, x, y], tol)?.is_none() {
+            continue;
+        }
+        let offset_beyond = if opposite_normals { -offset } else { offset };
+        if offset_folds(k, target, beyond, far_point, d, offset_beyond)? {
+            continue;
+        }
+        *slot = Some(Rollover {
+            edge: e,
+            face: beyond,
+            opposite_normals,
+        });
+    }
+    Ok(out)
+}
+
+/// A point of edge `e` when it is a line parallel to the unit `d` (within [`DIR_TOL`]) whose
+/// span along `d` covers that of the points `ends` (within `tol`), else `None`.
+///
+/// # Errors
+///
+/// Those of the curve's recogniser and the evaluations.
+fn full_span_line(
+    k: &Kernel,
+    target: &Brep,
+    e: EdgeId,
+    d: Vec3,
+    ends: [Point3; 2],
+    tol: f64,
+) -> Result<Option<Point3>> {
+    let Some(curve) = edge::curve(target, e)?.cloned() else {
+        return Ok(None);
+    };
+    let Some((point, vector)) = curve.is_line(k, 3, CURVE_TOL)? else {
+        return Ok(None);
+    };
+    let Ok(fd) = vector.unitize() else {
+        return Ok(None);
+    };
+    let skew = d.cross(fd).length();
+    if skew.is_nan() || skew > DIR_TOL {
+        return Ok(None);
+    }
+    let ivl = edge::interval(target, e)?;
+    let along = |p: Point3| (p - point).dot(d);
+    let r0 = along(curve.evaluate_point(k, ivl.min())?);
+    let r1 = along(curve.evaluate_point(k, ivl.max())?);
+    let [a, b] = ends.map(along);
+    if !(r0.min(r1) <= a.min(b) + tol && r0.max(r1) >= a.max(b) - tol) {
+        return Ok(None);
+    }
+    Ok(Some(point))
 }
 
 /// The nearest point to `point` on the smooth edge a rail rolled over: where a ball of radius 0

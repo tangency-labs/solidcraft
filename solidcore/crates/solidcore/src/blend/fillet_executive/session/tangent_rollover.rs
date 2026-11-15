@@ -1,8 +1,9 @@
 //! A round rolls over a smooth far edge of its face, the whole length (not upstream;
 //! solidcore-native): before its trace, a round's solver rolls its ball on the face beyond on
 //! each side where the ball's contact lies past the face's smooth far edge all along the
-//! round's edge. A lone round is decided in closed form, between planes along a straight edge
-//! only ([`crate::blend::fillet_tangent_rollover::tangent_rollover_supports`]); a round of a
+//! round's edge. A lone round is decided in closed form, along a straight edge between faces
+//! each a plane or a circular cylinder parallel to it only
+//! ([`crate::blend::fillet_tangent_rollover::tangent_rollover_supports`]); a round of a
 //! blend of several, such as one of a chain, from its ball's sections along its edge
 //! (`rails_wholly_past`, upstream's unimplemented tangent case of
 //! `SmFilletSolver::ProcessFullRollOver`).
@@ -76,8 +77,9 @@ impl FilletSession<'_> {
     /// offset surface is replaced by one of the same offset (its sign following the faces'
     /// normals across the edge) on the face beyond's surface, owned by that face, in the solver
     /// and in its fillet geometries, so the rail is traced, classified and trimmed on the face it
-    /// lies on. A lone round is decided in closed form, between planes along a straight edge
-    /// only ([`tangent_rollover_supports`]); each round of a blend of several, such as one of a
+    /// lies on. A lone round is decided in closed form, along a straight edge between faces each
+    /// a plane or a circular cylinder parallel to it only ([`tangent_rollover_supports`]); each
+    /// round of a blend of several, such as one of a
     /// chain, from its ball's sections ([`rails_wholly_past`]). A rail that lies past the edge
     /// only partway is left to the rollover recovery after the trace (`ProcessRollOver`).
     ///
