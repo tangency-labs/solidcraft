@@ -404,8 +404,9 @@ fn classify_one_loop(kernel: &Kernel, stretches: &mut [LoopStretch], uvs: &[Curv
     // each stretch's successor: past a vertex of the loop the stretch after it, at a
     // crossing the stretch leaving it on the other pass
     let mut next = Vec::new();
-    for (ss, stretch) in stretches.iter().enumerate() {
-        let follower = (ss + 1) % n;
+    // the stretch after each in the loop's order: the next one, the first after the last
+    let followers = (1..n).chain(core::iter::once(0));
+    for (stretch, follower) in stretches.iter().zip(followers) {
         if stretch.end < 0 {
             next.push(follower);
             continue;
