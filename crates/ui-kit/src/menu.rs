@@ -109,12 +109,7 @@ const KEY_ROOM: f32 = 0.5;
 
 /// Lays out the note on the right of a menu row, elided to `room` points.
 fn laid_out_key(painter: &egui::Painter, text: &str, room: f32, t: &Tokens) -> Arc<egui::Galley> {
-    let mut job = egui::text::LayoutJob::simple(
-        solidcraft_ui_text::tr_label(text).to_string(),
-        FontId::monospace(t.font_small),
-        t.text_dim,
-        room,
-    );
+    let mut job = egui::text::LayoutJob::simple(solidcraft_ui_text::tr_label(text).to_string(), FontId::monospace(t.font_small), t.text_dim, room);
     job.wrap.max_rows = 1;
     job.wrap.break_anywhere = true;
     job.wrap.overflow_character = Some('\u{2026}');
@@ -955,10 +950,8 @@ mod tests {
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let t = Tokens::get();
             let painter = ui.painter().clone();
-            medidas = Some((
-                laid_out_key(&painter, "Topcraft_Messschieber_Unterteil_final_v3.sc", ROOM, &t),
-                laid_out_key(&painter, "plate.sc", ROOM, &t),
-            ));
+            medidas =
+                Some((laid_out_key(&painter, "Topcraft_Messschieber_Unterteil_final_v3.sc", ROOM, &t), laid_out_key(&painter, "plate.sc", ROOM, &t)));
         });
         output.textures_delta.clear();
         let (key, short) = medidas.expect("the row laid the note out");
