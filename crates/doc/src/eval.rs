@@ -455,11 +455,12 @@ impl ModelBody {
     /// The display edges a path, rail or boundary pick of display edge `edge` stands for with
     /// its curve chain: `edge` first, then each other edge that continues it smoothly (within
     /// [`solidcraft_geom::TANGENT_CHAIN`]) as curves alone, whatever faces they bound
-    /// ([`kernel::curve_chain_edges`], exact: it stops at a branch). `at` is the picked point on
-    /// `edge`. Just `edge` when the kernel cannot walk the chain.
-    pub fn curve_chain(&self, edge: usize, at: Vec3) -> Vec<usize> {
+    /// ([`kernel::curve_chain_of_edges`], exact: it stops at a branch). The chain is walked from
+    /// `edge` itself, not from a point that might lie nearer another edge at a shared vertex.
+    /// Just `edge` when the kernel cannot walk the chain.
+    pub fn curve_chain(&self, edge: usize) -> Vec<usize> {
         let mut out = vec![edge];
-        if let Ok(chain) = kernel::curve_chain_edges(&self.body, &[at], solidcraft_geom::TANGENT_CHAIN) {
+        if let Ok(chain) = kernel::curve_chain_of_edges(&self.body, &[edge], solidcraft_geom::TANGENT_CHAIN) {
             for i in chain {
                 if !out.contains(&i) {
                     out.push(i);

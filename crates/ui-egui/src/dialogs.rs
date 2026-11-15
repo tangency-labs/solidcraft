@@ -2269,6 +2269,10 @@ impl Dialog {
         }
         if !add {
             inp.items.clear();
+            // A replacing marquee starts the chains afresh: each item it takes is a new pick,
+            // even one the chains held before.
+            inp.chain_seeds.clear();
+            inp.chain_written.clear();
         }
         let mut accepted = false;
         for x in sels {
@@ -2347,20 +2351,20 @@ impl Dialog {
 
     /// Keep each input with Tangent Chain on ([`SelInput::chain`]) holding its picks' curve
     /// chains, whichever way its items changed (a click, a marquee, the selection the dialog
-    /// opened with, a listed row's remove button): a new item is a pick, and brings its chain
-    /// unless an earlier pick's chain already holds it; an item gone takes out the picks whose
-    /// chain held it, with their chains, as picking a chain's edge again does.
+    /// opened with, a listed row's remove button): a new item is a pick and brings its chain,
+    /// and stays a pick (to go back to when the switch is unticked) even when an earlier pick's
+    /// chain already holds it; an item gone takes out the picks whose chain held it, with their
+    /// chains, as picking a chain's edge again does.
     pub fn sync_input_chains(&mut self, s: &Session) {
         for inp in &mut self.inputs {
             if inp.chain != Some(true) || inp.items == inp.chain_written {
                 continue;
             }
-            let held = |seeds: &[(Sel, Vec<Sel>)], x: &Sel| seeds.iter().any(|(_, chain)| chain.iter().any(|y| selection::same_item(x, y)));
             let gone: Vec<Sel> = inp.chain_written.iter().filter(|x| !inp.items.iter().any(|y| selection::same_item(x, y))).cloned().collect();
             inp.chain_seeds.retain(|(_, chain)| !gone.iter().any(|g| chain.iter().any(|y| selection::same_item(g, y))));
             let new: Vec<Sel> = inp.items.iter().filter(|x| !inp.chain_written.iter().any(|y| selection::same_item(x, y))).cloned().collect();
             for x in new {
-                if !held(&inp.chain_seeds, &x) {
+                if !inp.chain_seeds.iter().any(|(y, _)| selection::same_item(&x, y)) {
                     let chain = curve_edges(s, &x);
                     inp.chain_seeds.push((x, chain));
                 }
@@ -2525,11 +2529,11 @@ fn fillet_edges(s: &Session, sel: &Sel, chain: bool) -> Vec<Sel> {
 /// ([`solidcraft_engine::doc::ModelBody::curve_chain`]), the pick first; anything else alone.
 fn curve_edges(s: &Session, sel: &Sel) -> Vec<Sel> {
     let mut out = vec![sel.clone()];
-    if let Sel::Edge { body, index, point } = sel
+    if let Sel::Edge { body, index, .. } = sel
         && let Some(b) = crate::open_meshing::session_world(s).body(body)
     {
         let m = b.mesh();
-        for i in b.curve_chain(*index, *point) {
+        for i in b.curve_chain(*index) {
             if i != *index
                 && let Some(e) = m.edges.get(i)
             {

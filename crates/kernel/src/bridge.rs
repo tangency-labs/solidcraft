@@ -103,8 +103,22 @@ pub fn curve_chain_edges(body: &Body, at: &[Vec3], angle: f64) -> Result<Vec<usi
             picked.push(e);
         }
     }
-    let (ops, order) = body.ops_body().ok_or_else(|| KernelError::Failed("an edge chain: the body is no SMLib body".into()))?;
-    solidcore_ops::tangent::curve_chain_ordered(ops, order, &picked, angle)
+    curve_chain_of_edges(body, &picked, angle)
+}
+
+/// The edges of `body` a path, rail or boundary pick of edges `edges` (the record's edge indices,
+/// which are the display's) stands for with its curve chain, as [`curve_chain_edges`] for edges
+/// already known: the picked edges themselves, never one a point near a shared vertex might
+/// resolve to instead.
+pub fn curve_chain_of_edges(body: &Body, edges: &[usize], angle: f64) -> Result<Vec<usize>> {
+    body.require_brep("an edge chain")?;
+    let count = body.record().edges.len();
+    if edges.is_empty() || edges.len() > 10_000 || edges.iter().any(|&e| e >= count) {
+        return Err(KernelError::Invalid("pick 1 to 10000 edges of the body".into()));
+    }
+    let form = body.ops_body().ok_or_else(|| KernelError::Failed("an edge chain: the body is no SMLib body".into()))?;
+    let (ops, order) = &*form;
+    solidcore_ops::tangent::curve_chain_ordered(ops, order, edges, angle)
         .map(|chain| chain.members)
         .map_err(|e| KernelError::Failed(format!("an edge chain: {e}")))
 }
