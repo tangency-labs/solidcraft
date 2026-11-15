@@ -7789,12 +7789,9 @@ mod tests {
             (e.code, e.comment.clone(), e.no_room, e.vertex)
         };
         let baseline = run(false);
-        assert_ne!(baseline.0, FilletErrorType::NoRoom as i32, "{baseline:?}");
-        assert_ne!(
-            baseline.0,
-            FilletErrorType::CornerUnsupported as i32,
-            "{baseline:?}"
-        );
+        // the fillet surface computation failure (code 4): neither a no-room refusal nor
+        // an unsupported corner
+        assert_eq!(baseline.0, 4, "{baseline:?}");
         assert_eq!(baseline.2, None, "{baseline:?}");
         assert_eq!(run(true), baseline);
     }
