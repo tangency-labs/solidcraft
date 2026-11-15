@@ -2642,11 +2642,15 @@ mod tests {
         let ivl = circle.step_interval();
         for v_deg in [120.0_f64, 180.0, 240.0] {
             let v = v_deg.to_radians();
-            let want = (big + small * v.cos()) * radial + small * v.sin() * Vec3::new(0.0, 0.0, 1.0);
+            let want =
+                (big + small * v.cos()) * radial + small * v.sin() * Vec3::new(0.0, 0.0, 1.0);
             let got = circle
                 .evaluate_step_point(ivl.min() + (v_deg - 120.0))
                 .expect("analytic point");
-            assert!((got - want).length() < 1e-12, "v {v_deg}: {got:?}, want {want:?}");
+            assert!(
+                (got - want).length() < 1e-12,
+                "v {v_deg}: {got:?}, want {want:?}"
+            );
         }
         // the circle's own NURB agrees at its mid parameter (the tube's v 180)
         let mid = iso
@@ -2654,6 +2658,9 @@ mod tests {
             .evaluate_point(&k, iso.curve.natural_interval().evaluate(0.5))
             .expect("nurb mid");
         let want = (big - small) * radial;
-        assert!((mid - want).length() < 1e-12, "nurb mid {mid:?}, want {want:?}");
+        assert!(
+            (mid - want).length() < 1e-12,
+            "nurb mid {mid:?}, want {want:?}"
+        );
     }
 }
