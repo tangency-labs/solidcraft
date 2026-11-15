@@ -1,0 +1,43 @@
+name: SolidCraft T168 integrated workspace build
+on:
+  push:
+    branches: [integration/issue-15776-upstream-20261115]
+    paths: ['.github/workflows/solidcraft-t168-integration.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fresh upstream merge and integrity checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "SolidCraft CI"
+          git config user.email "ci@users.noreply.github.com"
+          git remote add upstream https://github.com/tangency-labs/solidcraft.git
+          git fetch --no-tags upstream drawings
+          echo "UPSTREAM_SHA=$(git rev-parse FETCH_HEAD)"
+          echo "INTEGRATION_SHA=$(git rev-parse HEAD)"
+          set +e
+          git merge --no-commit --no-ff FETCH_HEAD
+          result=$?
+          set -e
+          if [ "$result" -ne 0 ]; then
+            test "$(git diff --name-only --diff-filter=U)" = "crates/ui-egui/src/drawing_workspace.rs"
+            git checkout --ours -- crates/ui-egui/src/drawing_workspace.rs
+            git add crates/ui-egui/src/drawing_workspace.rs
+          fi
+          test -z "$(git diff --name-only --diff-filter=U)"
+          test -f crates/ui-egui/src/drawing_workspace/panels.rs
+          grep -q 'status_controller' crates/ui-egui/src/drawing_workspace.rs
+          grep -q 'mod panels;' crates/ui-egui/src/drawing_workspace.rs
+          echo "MERGED_WORKSPACE_READY=true"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile drawing workspace regression tests
+        run: cargo test -p solidcraft-ui-egui drawing_workspace:: --lib -- --nocapture
