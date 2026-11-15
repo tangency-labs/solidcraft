@@ -61,7 +61,9 @@ fn an_entry_serializes_with_null_for_what_is_missing() {
     let bare = SlicerInfo { id: "x".into(), name: "X".into(), program: None, icon: None };
     assert_eq!(serde_json::to_value(bare).unwrap_or_default(), json!({"id": "x", "name": "X", "program": null, "icon": null}));
     let none = SlicersResult { slicers: Vec::new(), param_warnings: Vec::new() };
-    assert_eq!(serde_json::to_value(none).unwrap_or_default(), json!({"slicers": []}));
+    let reply = serde_json::to_value(none).unwrap_or_default();
+    assert_eq!(reply, json!({"slicers": []}));
+    matches(&reply);
 }
 
 /// The real command in Warn, on this machine's own list, then on made-up ones (one with an icon

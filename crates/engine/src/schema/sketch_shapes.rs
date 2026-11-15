@@ -26,7 +26,7 @@ fn point_arg_schema(generator: &mut SchemaGenerator, snaps: bool) -> Schema {
     let mut forms = vec![
         json!(point),
         json!({
-            "description": "[x, y] where a coordinate may be an expression over the design's parameters, such as [\"w / 2\", 5]: a point that follows the parameters.",
+            "description": "[x, y] where a coordinate may be an expression over the design's parameters, such as [\"w / 2\", 5]: a point that follows the parameters and is fixed; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point.",
             "type": "array", "items": coordinate, "minItems": 2, "maxItems": 2
         }),
         json!({"description": "An existing point's id such as \"l1.end\" or \"p3\", or a snap such as \"mid:l1\".", "type": "string"}),
@@ -146,8 +146,9 @@ impl JsonSchema for LinePoints {
 /// (what the design makes of it, such as a line that is not there, stays the handler's).
 fn snap_form(v: &Value) -> Option<bool> {
     let text = v.as_str();
-    let snapped =
-        text.is_some_and(|t| ["mid:", "on:", "vertex:"].iter().any(|k| t.starts_with(k))) || v.get("vertex").is_some() || v.get("on_edge").is_some();
+    let snapped = text.is_some_and(|t| ["mid:", "on:", "vertex:", "x:"].iter().any(|k| t.starts_with(k)))
+        || v.get("vertex").is_some()
+        || v.get("on_edge").is_some();
     if !snapped {
         return None;
     }
@@ -156,7 +157,7 @@ fn snap_form(v: &Value) -> Option<bool> {
     let vertex =
         v.get("vertex").and_then(params::vec3).is_some() || text.and_then(|t| t.strip_prefix("vertex:")).is_some_and(|t| finite3(&numbers(t)));
     let edge = v.get("on_edge").and_then(params::vec3).is_some();
-    let mid = text.is_some_and(|t| t.starts_with("mid:"));
+    let mid = text.is_some_and(|t| t.starts_with("mid:") || t.starts_with("x:"));
     let on = text
         .and_then(|t| t.strip_prefix("on:"))
         .and_then(|t| t.rsplit_once(':'))
@@ -164,7 +165,8 @@ fn snap_form(v: &Value) -> Option<bool> {
     Some(vertex || edge || mid || on)
 }
 
-/// `sketch.point`'s `point`: `[x, y]` (numbers, or text expressions over the design's parameters),
+/// `sketch.point`'s `point`: `[x, y]` (numbers, or text expressions over the design's parameters;
+/// text naming no parameter is just that number, in the design's length unit, and does not itself fix the point),
 /// `{x, y}`, or a snap that makes the point. An existing point's id is not taken.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PointOrSnap(pub Value);
@@ -176,7 +178,7 @@ impl<'de> Deserialize<'de> for PointOrSnap {
             Some(true) => return Ok(PointOrSnap(v)),
             Some(false) => {
                 return Err(D::Error::custom(whole(format!(
-                    "`point` {v} is not a snap it takes: \"mid:<line>\", \"on:<curve>:x,y\", \"vertex:x,y,z\", {{vertex: [x,y,z]}} or {{on_edge: [x,y,z]}}"
+                    "`point` {v} is not a snap it takes: \"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\", {{vertex: [x,y,z]}} or {{on_edge: [x,y,z]}}"
                 ))));
             }
             None => {}
@@ -205,11 +207,11 @@ impl JsonSchema for PointOrSnap {
         let coordinate = generator.subschema_for::<LengthExpr>();
         let model = generator.subschema_for::<Point3>();
         json_schema!({
-            "description": "A point to make: [x, y] in mm (a coordinate may be an expression over the design's parameters: the point then follows them), or a snap that makes it and holds it: \"mid:<line>\" (the line's midpoint), \"on:<curve>:x,y\" (on the curve, near x,y), \"vertex:x,y,z\" or {vertex: [x,y,z]} (a model vertex, projected) or {on_edge: [x,y,z]} (a point on a model edge, projected). An existing point's id is not taken.",
+            "description": "A point to make: [x, y] in mm (a coordinate may be an expression over the design's parameters: the point is then fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point), or a snap that makes it and holds it: \"mid:<line>\" (the line's midpoint), \"on:<curve>:x,y\" (on the curve, near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves, near x,y), \"vertex:x,y,z\" or {vertex: [x,y,z]} (a model vertex, projected) or {on_edge: [x,y,z]} (a point on a model edge, projected). An existing point's id is not taken.",
             "anyOf": [
                 point,
                 {"type": "array", "items": coordinate, "minItems": 2, "maxItems": 2},
-                {"type": "string", "pattern": "^(mid:|on:|vertex:)"},
+                {"type": "string", "pattern": "^(mid:|on:|x:|vertex:)"},
                 {"type": "object", "properties": {"vertex": model}, "required": ["vertex"]},
                 {"type": "object", "properties": {"on_edge": model}, "required": ["on_edge"]}
             ]
@@ -225,7 +227,7 @@ pub struct DrawId(pub String);
 /// `id`, or an entry of `ids`, as `named_id` refuses it (the entry's position is not named).
 fn id_problem(id: &str) -> Option<String> {
     (!solidcraft_doc::persistent_name::text_fits_name(id))
-        .then(|| format!("the id `{id}` cannot be written into a name whole; give an id without `|`, `,`, `~`, `#` or `]`"))
+        .then(|| format!("the id `{id}` cannot be written into a name whole; give an id without `|`, `,`, `~`, `#`, `]`, `(` or `)`"))
 }
 
 impl<'de> Deserialize<'de> for DrawId {
@@ -655,6 +657,15 @@ pub struct DrawResult {
     pub param_warnings: Vec<String>,
 }
 
+/// What a straight slot returns, including its construction centre and middle point.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SlotResult {
+    #[serde(flatten)]
+    pub drawn: DrawResult,
+    pub centre_line: Option<String>,
+    pub middle: Option<String>,
+}
+
 /// What `sketch.point` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct PointResult {
@@ -702,7 +713,7 @@ impl JsonSchema for CornerPoint {
         let point = generator.subschema_for::<Point2>();
         let coordinate = generator.subschema_for::<LengthExpr>();
         json_schema!({
-            "description": "A corner: [x, y] or {x, y} in mm, or [x, y] where a coordinate is an expression over the design's parameters, such as [\"w / 2\", 5]: the corner then follows the parameters. Not a point's id or a snap.",
+            "description": "A corner: [x, y] or {x, y} in mm, or [x, y] where a coordinate is an expression over the design's parameters, such as [\"w / 2\", 5]: the corner is then fixed and follows the parameters; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner. Not a point's id or a snap.",
             "anyOf": [
                 point,
                 {"type": "array", "items": coordinate, "minItems": 2, "maxItems": 2}
@@ -956,6 +967,10 @@ pub struct RectResult {
 /// What `sketch.rectangle.rounded` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RoundedRectResult {
+    /// The construction diagonal between opposite corner-arc centres.
+    pub diagonal: Option<String>,
+    /// The point held at the midpoint of the construction diagonal.
+    pub centre: Option<String>,
     /// The ids of the four sides, then the four corner arcs.
     pub curves: Vec<String>,
     /// The ids of the constraints added: the rectangle's, then the fillet's (tangencies and the

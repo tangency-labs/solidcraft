@@ -26,6 +26,7 @@ static ITALIAN: Catalog = Catalog::new("it", "Italiano", include_str!(concat!(en
 static JAPANESE: Catalog = Catalog::new("ja", "日本語", include_str!(concat!(env!("OUT_DIR"), "/locales/ja.json")));
 static GEORGIAN: Catalog = Catalog::new("ka", "ქართული", include_str!(concat!(env!("OUT_DIR"), "/locales/ka.json")));
 static KOREAN: Catalog = Catalog::new("ko", "한국어", include_str!(concat!(env!("OUT_DIR"), "/locales/ko.json")));
+static LATVIAN: Catalog = Catalog::new("lv", "Latviešu", include_str!(concat!(env!("OUT_DIR"), "/locales/lv.json")));
 static MALAY: Catalog = Catalog::new("ms", "Bahasa Melayu", include_str!(concat!(env!("OUT_DIR"), "/locales/ms.json")));
 static NORWEGIAN: Catalog = Catalog::new("nb", "Norsk bokmål", include_str!(concat!(env!("OUT_DIR"), "/locales/nb.json")));
 static DUTCH: Catalog = Catalog::new("nl", "Nederlands", include_str!(concat!(env!("OUT_DIR"), "/locales/nl.json")));
@@ -65,6 +66,7 @@ pub const LOCALES: &[&Catalog] = &[
     &JAPANESE,
     &GEORGIAN,
     &KOREAN,
+    &LATVIAN,
     &MALAY,
     &NORWEGIAN,
     &DUTCH,
@@ -81,8 +83,8 @@ pub const LOCALES: &[&Catalog] = &[
     &CHINESE_TRADITIONAL,
 ];
 
-/// Install SolidCraft's catalogs for every lookup: once, at startup, before the first message is
-/// read. Calling it again does nothing.
+/// Install SolidCraft's catalogs for every lookup, and how the kit's tree rows show labels: once,
+/// at startup, before the first message is read. Calling it again does nothing.
 pub fn install() {
     // This crate's own tests read English whatever the PC's language (#10297): the shared crate
     // only sees `cfg!(test)` in its own tests. Pinned before installing, so no test thread reads
@@ -90,6 +92,12 @@ pub fn install() {
     #[cfg(test)]
     solidcraft_ui_text::pin_system_language();
     solidcraft_ui_text::install(LOCALES);
+    crate::ui_kit::install_row_names(row_name);
+}
+
+/// How the kit's tree rows show a label: a given name with [`tr_name`], any other with [`tr_dyn`].
+fn row_name(label: &str, name: bool) -> String {
+    if name { tr_name(label) } else { tr_dyn(label) }
 }
 
 /// The names SolidCraft gives and the engine messages it shows, translated with a [`Locale`].
@@ -132,6 +140,16 @@ impl LocaleNames for Locale {
     fn diagnostic(self, text: &str) -> String {
         if let Some((feature, reference)) = solidcraft_engine::doc::reselect_parts(text) {
             return self.format("diagnostic.reselect_reference", &[("feature", &self.given_name(feature)), ("reference", reference)]);
+        }
+        if let Some(lost) = solidcraft_engine::doc::lost_projection_parts(text) {
+            let feature = self.given_name(lost.feature);
+            let (count, more) = (lost.count.to_string(), lost.more.to_string());
+            let args = [("feature", feature.as_str()), ("count", &count), ("projections", lost.listed), ("projection", lost.listed), ("more", &more)];
+            return match (lost.count, lost.more) {
+                (1, _) => self.format("diagnostic.lost_projection", &args),
+                (_, 0) => self.format("diagnostic.lost_projections", &args),
+                _ => self.format("diagnostic.lost_projections_more", &args),
+            };
         }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
@@ -185,12 +203,44 @@ fn offset_error_id<'a>(text: &'a str, middle: &str, end: &str) -> Option<&'a str
     (rest.contains(middle) && rest.ends_with(end)).then_some(id)
 }
 
+/// The id of the sketch point an engine error names: ``point `{id}` `` at the start, then the
+/// reason it cannot move.
+fn point_error_id<'a>(text: &'a str, reason: &str) -> Option<&'a str> {
+    let rest = text.strip_prefix("point `")?;
+    let (id, rest) = rest.split_once('`')?;
+    let rest = rest.strip_prefix(" is ")?;
+    let rest = rest.strip_suffix(" and cannot move")?;
+    (rest == reason).then_some(id)
+}
+
 /// Translate known engine error messages using i18n keys.
 /// If the error message is not recognized, returns it unchanged.
 pub fn tr_engine_error(error: &str) -> String {
     use solidcraft_ui_text::{format, tr};
     // `EngineError::BadParams` carries `invalid parameters for `<command>`: ` in front.
     let text = error.strip_prefix("invalid parameters for `").and_then(|rest| rest.split_once("`: ")).map_or(error, |(_, text)| text);
+    if let Some((name, ids)) = text
+        .strip_prefix("ambiguous component `")
+        .and_then(|rest| rest.strip_suffix("; use a numeric component ID"))
+        .and_then(|rest| rest.rsplit_once("`; matching IDs: "))
+    {
+        return format("component.error.ambiguous_name", &[("name", name), ("ids", ids)]);
+    }
+    for (prefix, suffix, id) in [
+        ("ambiguous contact set `", "; use a numeric contact set ID", "contact.error.ambiguous_name"),
+        ("ambiguous exploded view `", "; use a numeric exploded view ID", "explode.error.ambiguous_name"),
+        ("ambiguous joint `", "; use a numeric joint ID", "joint.error.ambiguous_name"),
+        ("ambiguous motion study `", "; use a numeric motion study ID", "motion.error.ambiguous_name"),
+    ] {
+        if let Some((name, ids)) =
+            text.strip_prefix(prefix).and_then(|rest| rest.strip_suffix(suffix)).and_then(|rest| rest.rsplit_once("`; matching IDs: "))
+        {
+            return format(id, &[("name", name), ("ids", ids)]);
+        }
+    }
+    if text == "joint limit minimum must not exceed maximum" {
+        return tr("joint.error.limit_order").to_string();
+    }
     if text == "nothing to break at there" {
         return tr("sketch.error.nothing_to_break").to_string();
     }
@@ -210,6 +260,12 @@ pub fn tr_engine_error(error: &str) -> String {
     }
     if text == "a closed curve needs two crossings to trim" {
         return tr("sketch.error.closed_curve_two_crossings").to_string();
+    }
+    if let Some(id) = point_error_id(text, "projected") {
+        return format("sketch.error.point_is_projected", &[("id", id)]);
+    }
+    if let Some(id) = point_error_id(text, "fixed") {
+        return format("sketch.error.point_is_fixed", &[("id", id)]);
     }
     error.to_string()
 }
@@ -243,6 +299,52 @@ mod tests {
         for language in ["en", "de", "ja", "unknown"] {
             assert_eq!(super::panel_direction(language), Direction::Ltr);
         }
+    }
+
+    #[test]
+    fn component_ambiguity_is_translated_without_truncating_names() {
+        install();
+        let _scope = scope("de");
+        let name = "A`; matching IDs: 99";
+        let message = format!("ambiguous component `{name}`; matching IDs: 1, 3; use a numeric component ID");
+        let expected = format!("Mehrere Komponenten heißen `{name}`. Verwende eine numerische Komponenten-ID: 1, 3.");
+        assert_eq!(super::tr_engine_error(&message), expected);
+        assert_eq!(super::tr_engine_error(&format!("invalid parameters for `component.delete`: {message}")), expected);
+        assert_eq!(super::tr_engine_error("another error"), "another error");
+    }
+
+    #[test]
+    fn assembly_ambiguity_is_translated_without_truncating_names() {
+        install();
+        let _scope = scope("de");
+        let name = "A`; matching IDs: 99; use a numeric joint ID {ids}";
+        for (kind, command, plural, id_name) in [
+            ("contact set", "contact.edit", "Kontaktsätze", "Kontaktsatz-ID"),
+            ("exploded view", "explode.delete", "Explosionsdarstellungen", "ID der Explosionsdarstellung"),
+            ("joint", "joint.delete", "Gelenke", "Gelenk-ID"),
+            ("motion study", "motion.delete", "Bewegungsuntersuchungen", "ID der Bewegungsuntersuchung"),
+        ] {
+            let message = format!("ambiguous {kind} `{name}`; matching IDs: 1, 3; use a numeric {kind} ID");
+            let expected = format!("Mehrere {plural} heißen `{name}`. Verwende eine numerische {id_name}: 1, 3.");
+            assert_eq!(super::tr_engine_error(&message), expected, "{kind}");
+            assert_eq!(super::tr_engine_error(&format!("invalid parameters for `{command}`: {message}")), expected, "{kind}");
+            let unknown = format!("ambiguous {kind} `{name}`; matching IDs: 1, 3; another reason");
+            assert_eq!(super::tr_engine_error(&unknown), unknown);
+        }
+    }
+
+    /// #16164: the refusal to move a point the sketch holds fixed, or projects from a body, says
+    /// which of the two it is; the translation names the point as well.
+    #[test]
+    fn the_refusal_to_move_a_fixed_or_projected_point_is_translated() {
+        install();
+        let _scope = scope("de");
+        assert_eq!(
+            super::tr_engine_error("invalid parameters for `sketch.move`: point `p8` is projected and cannot move"),
+            "Der Punkt `p8` ist projiziert und kann nicht verschoben werden"
+        );
+        assert_eq!(super::tr_engine_error("point `origin` is fixed and cannot move"), "Der Punkt `origin` ist fest und kann nicht verschoben werden");
+        assert_eq!(super::tr_engine_error("another error"), "another error");
     }
 
     #[test]
@@ -434,6 +536,44 @@ mod tests {
             assert_ne!(translated, message, "{language}");
             // Right-to-left text comes back in display order, so only what it holds is checked.
             assert!(translated.contains("Fillet {2}") && translated.contains("`F4:side:c1#1|F4:top`"), "{language}: {translated}");
+        }
+    }
+
+    #[test]
+    fn lost_projections_diagnostic_translates_with_the_sketch_and_projections_as_given() {
+        install();
+        let lost = |link: &str, body: &str, curve: &str| solidcraft_engine::doc::LostProjection {
+            link: link.into(),
+            what: format!("projected face of {body}"),
+            curves: vec![curve.into()],
+            points: Vec::new(),
+            name: "F2:side:l1".into(),
+        };
+        let lost_error = |n: usize| {
+            let links = [("j1", "Tray", "l1"), ("j2", "Cover", "l2"), ("j3", "Tray", "l3"), ("j4", "Tray", "l4")];
+            let links = links.into_iter().take(n).map(|(link, body, curve)| lost(link, body, curve)).collect();
+            solidcraft_engine::doc::DocError::LostProjections { feature: String::new(), links }
+        };
+        // One, three named, four with the last counted; under a plain name, one holding ": ", and in
+        // the error of a feature built from the sketch.
+        let wrapped = |n: usize| format!("sketch `A: b` failed: {}", lost_error(n).in_feature("A: b"));
+        let cases = [
+            (lost_error(1).in_feature("Outline {1}").to_string(), "Outline {1}", "projected face of Tray (curve l1)"),
+            (lost_error(3).in_feature("Outline {1}").to_string(), "Outline {1}", "projected face of Cover (curve l2)"),
+            (lost_error(4).in_feature("Outline {1}").to_string(), "Outline {1}", "projected face of Cover (curve l2)"),
+            (lost_error(4).in_feature("A: b").to_string(), "A: b", "projected face of Tray (curve l3)"),
+            (wrapped(1), "sketch `A: b` failed: A: b", "projected face of Tray (curve l1)"),
+            (wrapped(4), "sketch `A: b` failed: A: b", "projected face of Tray (curve l3)"),
+        ];
+        for (message, feature, shown) in cases {
+            assert!(!message.contains("F2:side:l1"), "{message}");
+            assert_eq!(Locale::for_language("en").diagnostic(&message), message);
+            for language in ["ar", "de", "he", "ja", "ko", "vi", "zh"] {
+                let translated = Locale::for_language(language).diagnostic(&message);
+                assert_ne!(translated, message, "{language}");
+                assert!(translated.contains(feature) && translated.contains(shown), "{language}: {translated}");
+                assert!(!translated.contains(" more"), "the count of the rest is translated too: {language}: {translated}");
+            }
         }
     }
 
@@ -692,6 +832,8 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut files = Vec::new();
         source_files(&root, &mut files);
+        // The UI kit and its components, which SolidCraft mounts as `crate::ui_kit`.
+        source_files(&crate::test_support::kit_src(), &mut files);
         files.sort();
         let sources: Vec<(std::path::PathBuf, String)> =
             files.into_iter().map(|path| (path.clone(), std::fs::read_to_string(&path).unwrap())).collect();
@@ -1280,6 +1422,7 @@ mod tests {
             ("hr", "Hrvatski", "Postavke", "Ekstrudiraj", "Skica1", "Spremiti promjene u My {design}?"),
             ("sr", "Српски", "Подешавања", "Екструдирај", "Скица1", "Сачувати промене у My {design}?"),
             ("ka", "ქართული", "პარამეტრები", "ამოწევა", "ესკიზი1", "შევინახოთ ცვლილებები My {design}-ში?"),
+            ("lv", "Latviešu", "Iestatījumi", "Izspiešana", "Skice1", "Saglabāt izmaiņas failā My {design}?"),
             ("hu", "Magyar", "Beállítások", "Kihúzás", "Vázlat1", "Menti a(z) My {design} módosításait?"),
             ("id", "Bahasa Indonesia", "Preferensi", "Ekstrusi", "Sketsa1", "Simpan perubahan ke My {design}?"),
             ("nl", "Nederlands", "Voorkeuren", "Extruderen", "Schets1", "Wijzigingen in My {design} opslaan?"),
@@ -1358,6 +1501,7 @@ mod tests {
         KitCall { name: "hint_row", args: &[1], id: false, trim: &[1] },
         KitCall { name: "text_row", args: &[1], id: false, trim: &[1] },
         KitCall { name: "choice_row", args: &[1, 4], id: false, trim: &[1] },
+        KitCall { name: "action_row", args: &[2], id: false, trim: &[] },
         KitCall { name: "section", args: &[2], id: false, trim: &[] },
         KitCall { name: "section_count", args: &[2], id: false, trim: &[] },
         // fields.rs
@@ -1395,6 +1539,7 @@ mod tests {
         // menu.rs and search.rs; `CommandSearch::heading` passes its label to `tr`, an id.
         KitCall { name: "Menu::heading", args: &[1], id: false, trim: &[] },
         KitCall { name: "MenuItem::new", args: &[1], id: false, trim: &[] },
+        KitCall { name: "button_enabled", args: &[1], id: false, trim: &[] },
         KitCall { name: "CommandSearch::heading", args: &[1], id: true, trim: &[] },
     ];
 
@@ -1412,21 +1557,6 @@ mod tests {
         KitField { owner: "PairButton", field: "label", id: false },
         KitField { owner: "PopupOption", field: "kind", id: false },
         KitField { owner: "WindowPage", field: "label", id: true },
-    ];
-
-    /// A text carrier outside `ui_kit/` that hands its label to the kit: `context_menu::button`
-    /// and `button_enabled` build a `MenuItem`, which draws `tr_label(label)` (menu.rs:210).
-    /// Resolved by the same origin rules as the kit: a `context_menu::…`/`crate::context_menu::…`
-    /// path, a `use` import, or a call inside `context_menu.rs` itself.
-    struct ModuleCall {
-        module: &'static str,
-        name: &'static str,
-        args: &'static [usize],
-    }
-
-    const MODULE_CALLS: &[ModuleCall] = &[
-        ModuleCall { module: "context_menu", name: "button", args: &[1] },
-        ModuleCall { module: "context_menu", name: "button_enabled", args: &[1] },
     ];
 
     /// The kit's modules: only these may sit between `ui_kit` and a translated function in a path.
@@ -1449,11 +1579,10 @@ mod tests {
         globs: Vec<Vec<String>>,
     }
 
-    /// What a name or path resolves to: a kit function, or a text carrier in another module.
+    /// What a name or path resolves to: a kit function.
     #[derive(Clone, Copy)]
     enum Target {
         Kit(&'static str),
-        Module(&'static ModuleCall),
     }
 
     /// What the crate's files say about the kit: the names each file imports from it, and the
@@ -1500,7 +1629,9 @@ mod tests {
         }
 
         fn inside_kit(&self, path: &std::path::Path) -> bool {
-            module_path(path).get(1).is_some_and(|module| module == "ui_kit")
+            let module = module_path(path);
+            module.get(1).is_some_and(|module| module == "ui_kit")
+                && !module.get(2).is_some_and(|name| crate::test_support::KIT_COMPONENTS.contains(&format!("{name}.rs").as_str()))
         }
     }
 
@@ -1508,10 +1639,15 @@ mod tests {
     fn module_path(path: &std::path::Path) -> Vec<String> {
         let mut parts: Vec<String> = path.components().filter_map(|part| part.as_os_str().to_str().map(str::to_string)).collect();
         let start = parts.iter().rposition(|part| part == "src").map_or(0, |at| at + 1);
+        // The kit crate's files sit under `crate::ui_kit`, where SolidCraft mounts the crate.
+        let kit = start >= 2 && parts.get(start - 2).is_some_and(|dir| dir == "ui-kit");
         let mut relative: Vec<String> = parts.split_off(start);
         let file = relative.pop().unwrap_or_default();
         let stem = file.strip_suffix(".rs").unwrap_or(&file).to_string();
         let mut out = vec!["crate".to_string()];
+        if kit {
+            out.push("ui_kit".to_string());
+        }
         out.extend(relative);
         if !matches!(stem.as_str(), "lib" | "main" | "mod") {
             out.push(stem);
@@ -1533,17 +1669,9 @@ mod tests {
             {
                 return Some(Target::Kit(kit));
             }
-            if let Some(call) = module_call(name, module) {
-                return Some(Target::Module(call));
-            }
             path = reexports.get(module)?.get(name)?.clone();
         }
         None
-    }
-
-    /// The module text carrier `name` names, when the last segment of `module` is its module.
-    fn module_call(name: &str, module: &[String]) -> Option<&'static ModuleCall> {
-        MODULE_CALLS.iter().find(|call| call.name == name && module.last().is_some_and(|segment| segment == call.module))
     }
 
     /// Make a `use`/call path absolute against the module of the file it appears in:
@@ -1551,7 +1679,18 @@ mod tests {
     /// module, `crate::…` unchanged.
     fn normalize(module: &[String], path: &[String]) -> Vec<String> {
         match path.first().map(String::as_str) {
+            // In the kit crate (`crate::ui_kit` here), `crate::` is the kit.
+            Some("crate") if module.get(1).is_some_and(|m| m == "ui_kit") && path.get(1).is_none_or(|p| p != "ui_kit") => {
+                let mut out = vec!["crate".to_string(), "ui_kit".to_string()];
+                out.extend_from_slice(&path[1..]);
+                out
+            }
             Some("crate") => path.to_vec(),
+            Some("solidcraft_ui_kit") => {
+                let mut out = vec!["crate".to_string(), "ui_kit".to_string()];
+                out.extend_from_slice(&path[1..]);
+                out
+            }
             Some("self") => {
                 let mut out = module.to_vec();
                 out.extend_from_slice(&path[1..]);
@@ -1584,12 +1723,6 @@ mod tests {
         let mut path = normalize(module, qualifier);
         path.push(name.to_string());
         resolve_target(&path, &context.reexports)
-    }
-
-    /// A module text carrier called inside its own module (`button` in `context_menu.rs`).
-    fn module_inside(path: &std::path::Path, name: &str) -> Option<&'static ModuleCall> {
-        let module = module_path(path);
-        MODULE_CALLS.iter().find(|call| call.name == name && module.last().is_some_and(|segment| segment == call.module))
     }
 
     fn free_kit(name: &str) -> Option<&'static str> {
@@ -1693,13 +1826,11 @@ mod tests {
                                             })
                                         })
                                         .or_else(|| inside_kit.then(|| free_kit(&written)).flatten().map(Target::Kit))
-                                        .or_else(|| module_inside(path, &written).map(Target::Module))
                                 } else {
                                     resolve_qualified(context, names, &module, &qualifier, &written)
                                 };
                                 match resolved {
                                     Some(Target::Kit(kit)) => kit_free(kit, &tokens, i, out),
-                                    Some(Target::Module(call)) => push(&tokens, i + 1, call.args, false, &[], out),
                                     None => {}
                                 }
                             }
@@ -2049,7 +2180,7 @@ mod tests {
         "multiline_text_field, dropdown, cell_editor, bounded_cell_editor, search_field, menu_filter, placement_field, ",
         "library_cell, icon_button_at, icon_button_colored, footer, button, primary_button, ",
         "wide_primary_button, action_menu, compact_button, icon_label_button, command_menu_button, ",
-        "checkbox_grid, options, checkbox_row, toggle_icon, removable_header, bin_button, ",
+        "checkbox_grid, options, checkbox_row, action_row, toggle_icon, removable_header, bin_button, ",
         "Column, Menu, MenuItem, CommandSearch};"
     );
 
@@ -2101,6 +2232,7 @@ mod tests {
             ("checkbox_grid(ui, &mut [(\"checkbox_grid\", value)], 1)", &["checkbox_grid"]),
             ("options(ui, id, &mut [(\"options\", value)])", &["options"]),
             ("checkbox_row(ui, key, \"checkbox_row\", true)", &["checkbox_row"]),
+            ("action_row(ui, key, \"action_row\")", &["action_row"]),
             ("toggle_icon(ui, row, \"toggle_icon\", selected, icon)", &["toggle_icon"]),
             ("Column::new(\"Column::new\", 1.0)", &["Column::new"]),
             ("table.add_prompt(ui, \"add_prompt\", \"add_prompt tooltip\")", &["add_prompt", "add_prompt tooltip"]),
@@ -2367,32 +2499,31 @@ mod tests {
         );
     }
 
-    /// `context_menu::button` hands its label to `MenuItem::new` → `tr_label` (menu.rs:210); all
-    /// three origins count: the `crate::context_menu::…` path, a `use` import and a call inside
-    /// `context_menu.rs` itself.
+    /// The kit's `menu::button` hands its label to `MenuItem::new` → `tr_label`; all three
+    /// origins count: the `crate::ui_kit::menu::…` path, a `use` import and a call inside the kit.
     #[test]
-    fn a_context_menu_button_label_is_found() {
+    fn a_menu_button_label_is_found() {
         install();
         assert_eq!(
-            literals("fn live() { crate::context_menu::button(ui, \"Add to New Folder\", \"folder\"); }"),
+            literals("fn live() { crate::ui_kit::menu::button(ui, \"Add to New Folder\", \"folder\"); }"),
             [("Add to New Folder".to_string(), false)]
         );
         assert_eq!(
-            literals("use crate::context_menu::button; fn live() { button(ui, \"Remove from Folder\", \"folder\"); }"),
+            literals("use crate::ui_kit::menu::button; fn live() { button(ui, \"Remove from Folder\", \"folder\"); }"),
             [("Remove from Folder".to_string(), false)]
         );
         assert_eq!(
-            literals_at("src/context_menu.rs", "fn f() { button(ui, \"Roll Back Here\", \"history\"); }"),
+            literals_at("src/ui_kit/menu.rs", "fn f() { button(ui, \"Roll Back Here\", \"history\"); }"),
             [("Roll Back Here".to_string(), false)]
         );
     }
 
-    /// `context_menu::button_enabled` takes the same label at the same position.
+    /// `menu::button_enabled` takes the same label at the same position.
     #[test]
-    fn a_context_menu_button_enabled_label_is_found() {
+    fn a_menu_button_enabled_label_is_found() {
         install();
         assert_eq!(
-            literals("fn live() { context_menu::button_enabled(ui, \"Rename Feature\", \"rename\", enabled); }"),
+            literals("fn live() { crate::ui_kit::menu::button_enabled(ui, \"Rename Feature\", \"rename\", enabled); }"),
             [("Rename Feature".to_string(), false)]
         );
     }

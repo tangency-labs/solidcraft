@@ -139,7 +139,7 @@ recorded once. Face names are kept as worked out (saving works out any not asked
 for yet), so a body taken from the file is named exactly as when it was saved.
 A design whose stored names predate format 14 (marked `?`) saves without a model:
 those names find no face or edge, and the features holding them ask for their
-references to be picked again.
+references to be picked again (a sketch names the projections it lost instead).
 
 Both entries are Deflate-compressed (level one) under either compression policy: the
 encoded bodies shrink about fourfold (an imported assembly) to tenfold (modelled parts),
@@ -162,7 +162,7 @@ Before #9170 one mesh body left the cache out for the whole model. As for a B-re
 mesh body is kept only when its slice reads back as the same vertices, bit for bit, the
 same triangles, colour and paint; the picture shown while opening draws its triangles.
 
-`cache/model.json` records `solidcraft-model-cache/9`, the producer revision
+`cache/model.json` records `solidcraft-model-cache/10`, the producer revision
 `solidcraft-truck-adapter/4`, the application version, the build (source commit,
 CPU architecture and OS), the evaluation source (below, with the CPU architecture
 and OS), the geometry kernel that computed it (`solidcore`; earlier builds could write `smlib`, a cache this build evaluates again), the SHA-256 of the exact `document.json` (whose blob references pin every

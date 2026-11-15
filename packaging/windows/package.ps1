@@ -71,7 +71,10 @@ if (-not $SkipBuild -and $Phase -ne 'package') {
   # proc-macros are unaffected.
   $flagVar = 'CARGO_TARGET_' + ($Target.ToUpper() -replace '-', '_') + '_RUSTFLAGS'
   [Environment]::SetEnvironmentVariable($flagVar, '-C target-feature=+crt-static')
-  Invoke-Native "cargo build ($Target)" { cargo build --release --locked -p solidcraft -p solidcraft-cli --target $Target }
+  # Two invocations: cargo unifies features per invocation, and the app's eframe turns on wgpu's
+  # GL backend, which would link opengl32.dll into the CLI too (see the import check below).
+  Invoke-Native "cargo build app ($Target)" { cargo build --release --locked -p solidcraft --target $Target }
+  Invoke-Native "cargo build CLI ($Target)" { cargo build --release --locked -p solidcraft-cli --target $Target }
 }
 $Bin = Join-Path $TargetDir "$Target\release"
 $Stage = Join-Path $TargetDir "windows-package\$Arch"
@@ -95,6 +98,29 @@ foreach ($check in @(@('solidcraft.exe', 2), @('solidcraft-cli.exe', 3), @('solv
   Write-Output "ok $($check[0]): $Arch, PE subsystem $($h.Subsystem)"
 }
 & (Join-Path $PSScriptRoot 'check-icon.ps1') -Path (Join-Path $CheckDir 'solidcraft.exe')
+
+# The CLI must not import opengl32.dll: Windows Server Core has none, and the loader then refuses
+# to start the CLI at all (0xC0000135, no output; #14971). The app keeps GL and may import it.
+function Get-DllImports([string] $Path) {
+  $objdump = Get-Command llvm-objdump -ErrorAction SilentlyContinue
+  if ($objdump) {
+    return & $objdump.Source -p $Path | Select-String '^\s*DLL Name:\s*(\S+)' | ForEach-Object { $_.Matches[0].Groups[1].Value }
+  }
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+  $vs = if (Test-Path $vswhere) { & $vswhere -latest -products * -property installationPath }
+  $dumpbin = if ($vs) { Get-ChildItem (Join-Path $vs 'VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe') -ErrorAction SilentlyContinue | Select-Object -Last 1 }
+  if (-not $dumpbin) { throw 'cannot check the CLI imports: neither llvm-objdump nor dumpbin was found' }
+  return & $dumpbin.FullName /nologo /dependents $Path | Select-String '^\s+(\S+\.dll)\s*$' | ForEach-Object { $_.Matches[0].Groups[1].Value }
+}
+foreach ($exe in 'solidcraft-cli.exe', 'solvecraft-cli.exe') {
+  $imports = @(Get-DllImports (Join-Path $CheckDir $exe))
+  if ($imports.Count -eq 0) { throw "could not read the DLL imports of $exe" }
+  if ($imports -contains 'opengl32.dll') {
+    throw "$exe imports opengl32.dll, so it will not start on Windows Server Core (0xC0000135). wgpu's GL backend (feature `"gles`") reached the CLI: build it in its own cargo invocation, without the app."
+  }
+  Write-Output "ok ${exe}: no opengl32.dll import ($($imports.Count) DLLs)"
+}
+& (Join-Path $PSScriptRoot 'check-shortcuts.ps1') -Path (Join-Path $Root 'assets/platforms/windows/solidcraft.wxs')
 if ($Phase -ne 'package') {
   Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force -Path $Stage | Out-Null

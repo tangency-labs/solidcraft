@@ -85,3 +85,25 @@ fn the_thin_rows_are_translated() {
         assert!(h.widget("Wall Location").is_none(), "{lang}: must not fall back to English");
     }
 }
+
+/// An extrude of the whole sketch, edited and turned thin, takes the outline as its curves: the
+/// editor no longer sends `profiles: all` with them, which the command refused until the sketch
+/// was picked again.
+#[test]
+fn an_extrude_of_the_whole_sketch_turned_thin_in_its_editor_follows_the_outline() {
+    let mut h = Harness::new();
+    rectangle(&mut h);
+    h.app.run("solid.extrude", json!({"sketch":"Base","distance":"10 mm","name":"Block"})).unwrap();
+    h.frames(4);
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Block"}})).unwrap();
+    h.frames(8);
+    h.step(&json!({"widget":"Thin Extrude"})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.as_ref().is_some_and(|d| !d.inputs[0].items.is_empty()), "the pick stays");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    let f = h.app.session.doc.find_feature("Block").unwrap();
+    let FeatureKind::Extrude { thin: Some(thin), .. } = &f.kind else { panic!("a thin extrude: {:?}", f.kind) };
+    assert_eq!(thin.curves.len(), 4);
+    assert!((volume(&h) - (42.0 * 22.0 - 38.0 * 18.0) * 10.0).abs() < 1e-6, "{}", volume(&h));
+}

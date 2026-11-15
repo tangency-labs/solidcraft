@@ -558,4 +558,115 @@ mod tests {
             [6, 12, 8]
         );
     }
+
+    /// #16866, #15715, #15661: a rod of radius 6 threaded M12 x 1.75 (cut by the screw sweep of
+    /// a 60-degree groove: root flat P/4 wide at radius 6 - 5H/8, H = sqrt(3)/2 P, flanks out
+    /// past the crest), then merged as SolidCraft cleans a body up before Offset Faces. The
+    /// sweep's root wall is a cylinder in half-turn faces, each on its own cylinder turned half
+    /// a turn from the last: merged, a face takes in the next one across its surface's seam.
+    /// The merged face keeps a seam, as a face on a periodic surface has it (WR-599): without
+    /// it, its loop's UV trims jumped by the period and the check found the loop's orientation
+    /// wrong. The merge leaves a valid solid of the same volume.
+    #[test]
+    fn a_thread_s_root_merged_across_its_seam_stays_valid() {
+        use crate::CheckLevel;
+        all_fixes();
+        let pitch = 1.75;
+        // H = sqrt(3)/2 P = 1.5155444566227676; the root at 6 - 5H/8, the profile out at
+        // 6 + P/20; a flank's rise across them (out - root) tan 30 degrees.
+        let (root, out) = (5.0527847146107705, 6.0875);
+        let flank = 0.5973931485540923;
+        let (low, high) = (-pitch - pitch / 8.0, -pitch + pitch / 8.0);
+        let corners = [
+            [0.0, root, low],
+            [0.0, out, low - flank],
+            [0.0, out, high + flank],
+            [0.0, root, high],
+        ];
+        let groove: Vec<crate::sweep::Curve> = (0..4)
+            .map(|i| crate::sweep::Curve::Line {
+                start: corners[i],
+                end: corners[(i + 1) % 4],
+            })
+            .collect();
+        // two pitches of rod (z 0 to 3.5); the groove from z -2.6 to 5.2, past both ends
+        let tool = crate::sweep::screw_sweep(
+            &groove,
+            [0.0, 0.0, -pitch],
+            [0.0, 0.0, 1.0],
+            pitch,
+            3.5,
+            None,
+            pitch / 1e4,
+        )
+        .unwrap();
+        let rod = crate::make_cylinder([0.0; 3], 6.0, 2.0 * pitch).unwrap();
+        let cut = boolean(rod, tool, BooleanOp::Subtract).unwrap().unwrap();
+        assert!(cut.check(CheckLevel::All).unwrap().is_valid());
+        // each volume within its relative accuracy: the two agree within twice it
+        let accuracy = 1e-8;
+        let volume = cut.volume(accuracy).unwrap();
+        let order = kernel_order(&cut);
+        let merged = merge_faces(cut, &order, &[]).unwrap();
+        let report = merged.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{report}");
+        // Faces: the two caps; the crest (the rod's own cylinder) in its 3 turn pieces, apart
+        // at the rod's seam; the flanks in the 10 pieces the sweep made, cut to the rod; the
+        // root's 6 half-turn faces merged in pairs, each pair kept apart from the next at the
+        // kept surface's seam: 3. 2 + 3 + 10 + 3 = 18. Edges, by the faces they join: flank
+        // and flank 8, flank and crest 14, flank and root 14, flank and cap 4, crest and cap
+        // 2, root and cap 4, and the seams, 2 on the crest and 2 completed on the root: 50.
+        // One shell of faces with one loop each: V = 2 - F + E = 34.
+        assert_eq!(merged.counts().unwrap(), [18, 50, 34]);
+        // The completed seams: the axial edges between two root faces (their ends on the
+        // root's radius within the edge's tolerance) lie on both faces' surfaces within that
+        // tolerance, every sample's distance with its proved rounding bound.
+        let order = kernel_order(&merged);
+        let seams: Vec<(usize, Vec<usize>, f64)> = {
+            let g = merged.lock();
+            order
+                .edges
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &e)| {
+                    let tol = g.edge(e).unwrap().tolerance;
+                    let ends: Vec<_> = edge::vertices(&g, e, None)
+                        .unwrap()
+                        .into_iter()
+                        .flatten()
+                        .map(|v| g.vertex(v).unwrap().point)
+                        .collect();
+                    let [a, b] = ends.as_slice() else { return None };
+                    let (dx, dy) = (a.x - b.x, a.y - b.y);
+                    let axial = dx * dx + dy * dy <= tol * tol;
+                    // |r - root| <= tol, squared
+                    let on_root = [a, b].iter().all(|p| {
+                        let r2 = p.x * p.x + p.y * p.y;
+                        (root - tol) * (root - tol) <= r2 && r2 <= (root + tol) * (root + tol)
+                    });
+                    let faces: Vec<usize> = edge::faces(&g, e, None)
+                        .unwrap()
+                        .iter()
+                        .map(|f| order.faces.iter().position(|x| x == f).unwrap())
+                        .collect();
+                    (axial && on_root).then_some((i, faces, tol))
+                })
+                .collect()
+        };
+        assert_eq!(seams.len(), 2, "the root's two completed seams");
+        for (e, faces, tol) in seams {
+            assert_eq!(faces.len(), 2);
+            for f in faces {
+                for s in merged.edge_face_gap_samples(&order, e, f).unwrap() {
+                    let gap = s.distance.value + s.distance.bound;
+                    assert!(gap <= tol, "seam {e} is {gap} off face {f}");
+                }
+            }
+        }
+        let merged_volume = merged.volume(accuracy).unwrap();
+        assert!(
+            (merged_volume - volume).abs() <= 2.0 * accuracy * volume,
+            "{merged_volume} != {volume}"
+        );
+    }
 }

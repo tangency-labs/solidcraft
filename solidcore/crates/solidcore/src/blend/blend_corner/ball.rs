@@ -53,10 +53,12 @@ use crate::blend::fillet_corner::p3::{CornerPatchEnv, FilletCorner};
 use crate::blend::fillet_custom_solver::{offset_local_point_solve, offset_natural_uv_domain};
 use crate::blend::fillet_exact::{BlendQuadric, QuadricKind};
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletEdgeType, FilletSolverId};
+use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverType, FilletSurfaceGeneratorType};
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
+use crate::geom::krawczyk::{contraction, k_operator};
 use crate::intersect::surface_intersector::p1::SrfIndex;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
@@ -183,7 +185,10 @@ fn planes_meet(on: &[Point3; 3], normal: &[Vec3; 3]) -> Result<Point3> {
     let [n0, n1, n2] = *normal;
     let det = n0.dot(n1.cross(n2));
     if det.abs() <= EFF_ZERO {
-        return Err(SolidError::sm_err(OP_CLASSIFY));
+        return Err(SolidError::blend_failed(
+            OP_CLASSIFY,
+            "the three faces' planes do not meet in one point",
+        ));
     }
     let mut rhs = [0.0; 3];
     for ((r, n), p) in rhs.iter_mut().zip(normal.iter()).zip(on.iter()) {
@@ -207,7 +212,8 @@ fn max(a: f64, b: f64) -> f64 {
 /// `sm_BallFaceQuadric` (the fork's 7048946): the quadric (a plane or a natural quadric) a
 /// ring face lies on, [`QuadricKind::None`] where it lies on none.
 fn ball_face_quadric(k: &Kernel, b: &Brep, face: FaceId, tol: f64) -> Result<BlendQuadric> {
-    let surface = face2::surface(b, face)?.ok_or_else(|| SolidError::null_pointer(OP_QUADRIC))?;
+    let surface = face2::surface(b, face)?
+        .ok_or_else(|| SolidError::blend_missing(OP_QUADRIC, "the ring face's surface"))?;
     let q = BlendQuadric::from_surface(k, surface, face2::uv_domain(b, face)?.mid(), tol)?;
     if !matches!(
         q.kind,
@@ -262,6 +268,32 @@ impl BallImplicit {
         (d, abs)
     }
 
+    /// `Value` over a box, in rounded intervals: `c + Σ_i (2 b_i x_i + Σ_j x_i a_ij x_j)`,
+    /// the terms in [`Self::value`]'s order.
+    fn value_over(&self, x: &[Ivl; 3]) -> Ivl {
+        let mut d = Ivl::from(self.c);
+        for ((bi, row), xi) in self.b.iter().zip(self.a.iter()).zip(x.iter()) {
+            d = d + Ivl::from(2.0 * bi) * *xi;
+            for (aij, xj) in row.iter().zip(x.iter()) {
+                d = d + *xi * Ivl::from(*aij) * *xj;
+            }
+        }
+        d
+    }
+
+    /// `Gradient` over a box, in rounded intervals: `2 (A x + b)`, exact as an enclosure for
+    /// the affine gradient (component `j`: `2 (Σ_l a_jl x_l + b_j)`).
+    fn gradient_over(&self, x: &[Ivl; 3]) -> [Ivl; 3] {
+        core::array::from_fn(|j| {
+            let row = self.a.get(j).copied().unwrap_or([f64::NAN; 3]);
+            let mut g = Ivl::from(self.b.get(j).copied().unwrap_or(f64::NAN));
+            for (ajl, xl) in row.iter().zip(x.iter()) {
+                g = g + Ivl::from(*ajl) * *xl;
+            }
+            Ivl::from(2.0) * g
+        })
+    }
+
     /// `Gradient`: `2 (A x + b)`.
     fn gradient(&self, x: &[f64; 3]) -> [f64; 3] {
         let [x0, x1, x2] = *x;
@@ -309,9 +341,11 @@ fn ball_inverse(m: &[[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
 /// quadrics' implicit equations vanish: Newton's method from the origin, then Krawczyk's
 /// test on the box of half-width `half` about the iterate, which proves it holds exactly
 /// one root (the gradients are affine, so the Jacobian over the box is the iterate's plus
-/// `2 A` times the box, exactly). Rounding is bounded by the sum of the terms' magnitudes.
-/// The iterate, and whether it is proved (`false` where Newton fails or the test does not
-/// prove the box). Bounded: at most 50 Newton steps.
+/// `2 A` times the box, exactly), through the crate's one Krawczyk operator in rounded
+/// intervals (`geom::krawczyk`, tangency-labs/solidcraft#15140; the fork bounds the rounding
+/// by the terms' magnitudes in floating point instead). The iterate, and whether it is
+/// proved (`false` where Newton fails or the test does not prove the box). Bounded: at most
+/// 50 Newton steps.
 fn ball_certified_root(f: &[BallImplicit; 3], half: f64) -> ([f64; 3], bool) {
     let mut x = [0.0; 3];
     let mut fx = [0.0; 3];
@@ -336,61 +370,37 @@ fn ball_certified_root(f: &[BallImplicit; 3], half: f64) -> ([f64; 3], bool) {
             break;
         }
     }
-    // Krawczyk: K = x - Y f(x) + (I - Y J(X)) (X - x) inside X proves exactly one root in X.
-    // With J(X) = J(x) + dJ, |dJ_mk| <= 2 half sum_l |A_m,kl|, component i of K - x is within
-    // |(Y f)_i| + half sum_k ( |(I - Y J(x))_ik| + sum_m |Y_im| |dJ_mk| ), each term padded for
-    // rounding (f by its terms' magnitudes).
-    let mut bound = [0.0; 3];
-    for (((fi, bi), ji), fq) in fx
-        .iter_mut()
-        .zip(bound.iter_mut())
-        .zip(jac.iter_mut())
-        .zip(f.iter())
-    {
-        (*fi, *bi) = fq.value(&x);
+    // Krawczyk's test on ball's own box X = x ± half, through the crate's one operator
+    // (#15140): Y the inverse of F′ at the iterate, F(x) and F′(X) in rounded intervals
+    // (the gradients are affine, so F′(X) = 2 (A_i X + b_i) exactly as intervals), and
+    // K = x − Y F(x) + (I − Y F′(X)) (X − x) strictly inside X proves exactly one root in X
+    for (ji, fq) in jac.iter_mut().zip(f.iter()) {
         *ji = fq.gradient(&x);
     }
     let Some(y) = ball_inverse(&jac) else {
         return (x, false);
     };
-    let eps = 16.0 * f64::EPSILON;
-    let mut spread = [[0.0; 3]; 3];
-    for (sm, fq) in spread.iter_mut().zip(f.iter()) {
-        for (smk, ak) in sm.iter_mut().zip(fq.a.iter()) {
-            let [a0, a1, a2] = *ak;
-            *smk = 2.0 * half * (a0.abs() + a1.abs() + a2.abs());
-        }
-    }
-    for i in 0..3 {
-        let mut rad = 0.0;
-        for k in 0..3 {
-            let (fk, bk) = (
-                fx.get(k).copied().unwrap_or(0.0),
-                bound.get(k).copied().unwrap_or(0.0),
-            );
-            rad += at3(&y, i, k).abs() * (fk.abs() + eps * bk);
-            let mut iyj = if i == k { 1.0 } else { 0.0 };
-            let mut scale = 1.0;
-            for m in 0..3 {
-                iyj -= at3(&y, i, m) * at3(&jac, m, k);
-                scale += (at3(&y, i, m) * at3(&jac, m, k)).abs();
-                rad += at3(&y, i, m).abs() * at3(&spread, m, k) * half;
-            }
-            rad += (iyj.abs() + eps * scale) * half;
-        }
-        // !(rad < half), NaN included
-        if rad.partial_cmp(&half) != Some(std::cmp::Ordering::Less) {
-            return (x, false);
-        }
-    }
-    (x, true)
+    let xi = x.map(Ivl::from);
+    let xb = x.map(|m| Ivl::new(m - half, m + half));
+    let at_x: [Ivl; 3] = core::array::from_fn(|i| {
+        f.get(i)
+            .map_or_else(|| Ivl::from(f64::NAN), |q| q.value_over(&xi))
+    });
+    let over: [[Ivl; 3]; 3] = core::array::from_fn(|i| {
+        f.get(i)
+            .map_or_else(|| [Ivl::from(f64::NAN); 3], |q| q.gradient_over(&xb))
+    });
+    let (c, _) = contraction(&y, &over);
+    let k = k_operator(&x, &y, &at_x, &c, &xb);
+    let inside = k.iter().zip(&xb).all(|(a, b)| a.lo > b.lo && a.hi < b.hi);
+    (x, inside)
 }
 
 /// `GetSurface(rail)->GetOffsetDistance()` of a solver, absolute (`NER` on none).
 fn offset_radius(solver: &FilletSolver, rail: usize, op: &'static str) -> Result<f64> {
     let slot = solver
         .surface(rail)?
-        .ok_or_else(|| SolidError::null_pointer(op))?;
+        .ok_or_else(|| SolidError::blend_missing(op, "the rail's offset surface"))?;
     Ok(slot.surface.offset_distance().abs())
 }
 
@@ -419,7 +429,12 @@ pub fn classify_ball(
     set_back: bool,
     solvers: &dyn BallSolvers,
 ) -> Result<BlendCornerEvent> {
-    let nul = || SolidError::null_pointer(OP_CLASSIFY);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_CLASSIFY,
+            "topology or a solver the ball corner's classification reads",
+        )
+    };
     let none = Ok(BlendCornerEvent::None);
     let n = all_eus.len();
     if n < 3 || solver_eus.len() != n || set_back {
@@ -553,8 +568,13 @@ fn ball_centre(
     corner: &FilletCorner,
     solvers: &dyn BallSolvers,
 ) -> Result<(Point3, f64, Vec<Point3>)> {
-    let nul = || SolidError::null_pointer(OP_CENTRE);
-    let err = || SolidError::sm_err(OP_CENTRE);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_CENTRE,
+            "topology or a solver the ball's centre is found from",
+        )
+    };
+    let err = || SolidError::blend_failed(OP_CENTRE, "the ball's centre could not be found");
     let all_eus = corner.all_eus.as_deref().ok_or_else(nul)?;
     let n = all_eus.len();
     if n < 3 || corner.vertices.len() != n || corner.edges.len() != n {
@@ -741,6 +761,7 @@ fn ball_centre(
             let bx = crate::query::face::p1::calculate_bounding_box(k, target, face, false)?;
             size = max(size, (bx.max - bx.min).length());
         }
+        k.work_counters.add_ball_certified_root();
         let (root, proved) = ball_certified_root(&f, 1e-12 * max(size, 1.0));
         if !proved {
             return Err(err());
@@ -800,8 +821,13 @@ pub fn place_ball_contacts(
     corner: &FilletCorner,
     solvers: &dyn BallSolvers,
 ) -> Result<()> {
-    let nul = || SolidError::null_pointer(OP_PLACE);
-    let err = || SolidError::sm_err(OP_PLACE);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_PLACE,
+            "topology or a solver the ball's contacts are placed from",
+        )
+    };
+    let err = || SolidError::blend_failed(OP_PLACE, "the ball's contacts could not be placed");
     let (centre, _radius, contacts) = ball_centre(k, target, pseudo, corner, solvers)?;
     let tol = corner.approx_tol_3d;
     for (&fv, &contact) in corner.vertices.iter().zip(contacts.iter()) {
@@ -869,7 +895,9 @@ impl BallPoly {
             .c
             .get_mut(i)
             .and_then(|row| row.get_mut(j))
-            .ok_or_else(|| SolidError::sm_err(OP_PATCH_NET))?;
+            .ok_or_else(|| {
+                SolidError::blend_failed(OP_PATCH_NET, "a control point past the patch's net")
+            })?;
         *slot = v;
         Ok(())
     }
@@ -939,7 +967,12 @@ pub(crate) fn ball_triangle_patch(
     pole: usize,
     reverse_s: bool,
 ) -> Result<(BSplineSurface, usize, usize)> {
-    let err = || SolidError::sm_err(OP_PATCH_NET);
+    let err = || {
+        SolidError::blend_failed(
+            OP_PATCH_NET,
+            "the ball's triangular patch could not be built",
+        )
+    };
     let mut from = (pole + 1) % 3;
     let mut to = (pole + 2) % 3;
     let (Some(&d_pole), Some(&d_from), Some(&d_to)) =
@@ -1073,8 +1106,13 @@ pub fn ball_corner_edge_geom(
     corner: &mut FilletCorner,
     solvers: &dyn BallSolvers,
 ) -> Result<()> {
-    let nul = || SolidError::null_pointer(OP_BUILD);
-    let err = || SolidError::sm_err(OP_BUILD);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_BUILD,
+            "topology or geometry the ball corner's edges are built from",
+        )
+    };
+    let err = || SolidError::blend_failed(OP_BUILD, "the ball corner's edges could not be built");
     corner.ball.as_mut().ok_or_else(nul)?.delete_surface();
     let (centre, radius, contacts) = ball_centre(k, target, pseudo, corner, solvers)?;
     let tol = corner.approx_tol_3d;
@@ -1193,10 +1231,13 @@ pub fn create_ball_patch(
     corner: &mut FilletCorner,
     env: &mut CornerPatchEnv<'_, '_>,
 ) -> Result<()> {
-    let nul = || SolidError::null_pointer(OP_PATCH);
+    let nul = || SolidError::blend_missing(OP_PATCH, "the ball corner's event or topology");
     let ball = corner.ball.as_mut().ok_or_else(nul)?;
     if ball.surfaces.is_empty() || ball.loops.len() != ball.surfaces.len() {
-        return Err(SolidError::sm_err(OP_PATCH));
+        return Err(SolidError::blend_failed(
+            OP_PATCH,
+            "the ball's surfaces and loops do not pair up",
+        ));
     }
     let surfaces = std::mem::take(&mut ball.surfaces);
     let loops = std::mem::take(&mut ball.loops);
@@ -1211,7 +1252,10 @@ pub fn create_ball_patch(
         for _ in 0..count {
             let (Some(c), Some(u), Some(o)) = (curves_3d.next(), uv_curves.next(), orients.next())
             else {
-                return Err(SolidError::sm_err(OP_PATCH));
+                return Err(SolidError::blend_failed(
+                    OP_PATCH,
+                    "a ball loop lacks a curve, its uv curve or its orientation",
+                ));
             };
             c3.push(Some(c));
             uv.push(u);
@@ -1255,6 +1299,68 @@ pub fn create_ball_patch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sphere of centre `c` and radius `r`, as `x . x + 2 b . x + c` ([`BallImplicit`]).
+    fn sphere(c: [f64; 3], r: f64) -> BallImplicit {
+        BallImplicit {
+            a: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            b: [-c[0], -c[1], -c[2]],
+            c: c[0] * c[0] + c[1] * c[1] + c[2] * c[2] - r * r,
+        }
+    }
+
+    /// #15140: three spheres of radius 1 centred at `p + e_i`, which meet at `p` (near the
+    /// origin, where Newton starts) and at `p + (2/3)(1, 1, 1)`: the ball's centre is proved
+    /// through the crate's Krawczyk operator on the box `x ± half`, and that box holds the
+    /// exact meeting point `p`.
+    #[test]
+    fn three_spheres_meeting_near_the_origin_are_proved_at_their_point() {
+        let p = [1e-4, -2e-4, 3e-4];
+        let f = [
+            sphere([p[0] + 1.0, p[1], p[2]], 1.0),
+            sphere([p[0], p[1] + 1.0, p[2]], 1.0),
+            sphere([p[0], p[1], p[2] + 1.0], 1.0),
+        ];
+        let half = 1e-12;
+        let (x, proved) = ball_certified_root(&f, half);
+        assert!(proved, "not proved at {x:?}");
+        for (xi, pi) in x.iter().zip(&p) {
+            assert!((xi - pi).abs() <= half, "{x:?} against {p:?}");
+        }
+    }
+
+    /// #15140: two of the spheres tangent at `p` (one inside the other, both normal to z
+    /// there), so the three gradients at the meeting are dependent: no ball centre is proved.
+    #[test]
+    fn spheres_tangent_at_their_meeting_are_refused() {
+        let p = [1e-4, -2e-4, 3e-4];
+        let f = [
+            sphere([p[0], p[1], p[2] + 1.0], 1.0),
+            sphere([p[0], p[1], p[2] + 2.0], 2.0),
+            sphere([p[0] + 1.0, p[1], p[2]], 1.0),
+        ];
+        let (x, proved) = ball_certified_root(&f, 1e-12);
+        assert!(!proved, "proved at {x:?}");
+    }
+
+    /// Three planes through one line meet in no single point: a typed `Failed`, with the
+    /// `SM_ERR` status the bare status had.
+    #[test]
+    fn planes_through_one_line_are_a_typed_failure() {
+        let on = [Point3::ZERO; 3];
+        let normal = [Vec3::X, Vec3::Y, (Vec3::X + Vec3::Y).unitize().unwrap()];
+        let err = planes_meet(&on, &normal).unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Failed(
+                "the three faces' planes do not meet in one point"
+            ))
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+    }
 
     #[test]
     fn choose_is_binomial() {

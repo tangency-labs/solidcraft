@@ -381,9 +381,11 @@ pub fn closed(app: &mut SolveApp, d: &mut Dialog, applied: bool) {
     }
 }
 
-/// The occurrence placements of `after` that differ from `before` (as pending moves).
-fn moved(before: &Session, after: &Session) -> BTreeMap<u64, Mat> {
-    let mut out = before.pending_moves.clone();
+/// The occurrence placements of `after` that differ from `before`, as pending moves over `base`:
+/// the moves shown before the dialog showed a pose of its own. Not over the pose it showed last:
+/// a part this pose puts back where the design has it would stay where that pose left it (#13511).
+fn moved(base: &BTreeMap<u64, Mat>, before: &Session, after: &Session) -> BTreeMap<u64, Mat> {
+    let mut out = base.clone();
     for o in &after.doc.occurrences {
         let was = before.doc.occurrences.iter().find(|b| b.id == o.id).map(|b| b.transform);
         if was != Some(o.transform) {
@@ -393,12 +395,12 @@ fn moved(before: &Session, after: &Session) -> BTreeMap<u64, Mat> {
     out
 }
 
-/// The study's pose at `step`, computed on a scratch copy.
-fn study_pose(app: &SolveApp, params: &Value, step: u32) -> Result<BTreeMap<u64, Mat>, String> {
+/// The study's pose at `step`, computed on a scratch copy, over `base` ([`moved`]).
+fn study_pose(app: &SolveApp, params: &Value, step: u32, base: &BTreeMap<u64, Mat>) -> Result<BTreeMap<u64, Mat>, String> {
     let mut sc = app.session.scratch();
     let id = scratch_study(&mut sc, params)?;
     sc.execute("motion.play", &json!({"study": id, "step": step})).map_err(|e| e.to_string())?;
-    Ok(moved(&app.session, &sc))
+    Ok(moved(base, &app.session, &sc))
 }
 
 /// Save the study being edited as an animated GIF, seen from the viewport's camera. Drawn on a
@@ -464,28 +466,29 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                 }
             });
             for s in list.get("sets").and_then(Value::as_array).cloned().unwrap_or_default() {
+                let Some(id) = s.get("id").and_then(Value::as_u64) else { continue };
                 let n = s.get("name").and_then(Value::as_str).unwrap_or("").to_string();
                 let off = s.get("suppressed").and_then(Value::as_bool).unwrap_or(false);
-                crate::ui_kit::section(ui, format!("contact:{n}"), &n, true, |ui| {
+                crate::ui_kit::section(ui, format!("contact:{id}"), &n, true, |ui| {
                     ui.horizontal(|ui| {
                         let count = s.get("occurrences").and_then(Value::as_array).map_or(0, Vec::len);
                         ui.label(
                             RichText::new(solidcraft_ui_text::format("contact.components_count", &[("count", &count.to_string())])).color(t.text_dim),
                         );
-                        if crate::ui_kit::button(
+                        let suppress = crate::ui_kit::button(
                             ui,
                             solidcraft_ui_text::tr_label(if off { "Unsuppress" } else { "Suppress" }),
                             crate::ui_kit::Button::Small,
-                        )
-                        .clicked()
-                        {
-                            let _ = app.run("contact.edit", json!({"set": n, "suppressed": !off}));
+                        );
+                        crate::scenario::publish_target(&format!("contact:{id}:suppress"), suppress.rect);
+                        if suppress.clicked() {
+                            let _ = app.run("contact.edit", json!({"set": id, "suppressed": !off}));
                         }
-                        if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("×"), crate::ui_kit::Button::Small)
-                            .backing_on_hover_text(solidcraft_ui_text::tr_label("Delete the set"))
-                            .clicked()
-                        {
-                            let _ = app.run("contact.edit", json!({"set": n, "delete": true}));
+                        let delete = crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("×"), crate::ui_kit::Button::Small)
+                            .backing_on_hover_text(solidcraft_ui_text::tr_label("Delete the set"));
+                        crate::scenario::publish_target(&format!("contact:{id}:delete"), delete.rect);
+                        if delete.clicked() {
+                            let _ = app.run("contact.edit", json!({"set": id, "delete": true}));
                         }
                     });
                 });
@@ -740,7 +743,9 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
         h.finish()
     };
     if *shown != Some((u64::from(now), key)) {
-        match params.and_then(|p| study_pose(app, &p, now)) {
+        // The moves from before the dialog showed anything (it keeps them in `saved`).
+        let base = saved.as_ref().unwrap_or(&app.session.pending_moves);
+        match params.and_then(|p| study_pose(app, &p, now, base)) {
             Ok(m) => {
                 display(app, saved, m);
                 *error = None;
@@ -821,6 +826,33 @@ pub fn commands(app: &SolveApp, k: &Mo, inputs: &[SelInput]) -> Result<Vec<(Stri
 mod tests {
     use super::*;
 
+    #[test]
+    fn contact_set_rows_edit_the_selected_id_when_names_repeat() {
+        let mut h = crate::scenario::Harness::new();
+        for name in ["A", "B"] {
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("component.create", json!({"name": name})).unwrap();
+        }
+        for _ in 0..2 {
+            h.app.run("contact.create", json!({"name": "Shared", "occurrences": ["A", "B"]})).unwrap();
+        }
+        let before = h.app.session.doc.assembly.contact_sets.clone();
+        let second = before[1].id;
+        h.app.start("contact.create");
+        h.frames(3);
+        for suppressed in [true, false] {
+            h.step(&json!({"click": {"handle": format!("contact:{second}:suppress")}})).unwrap();
+            let sets = &h.app.session.doc.assembly.contact_sets;
+            assert_eq!(sets.len(), 2);
+            assert_eq!(sets[0], before[0], "the first same-name set stays unchanged");
+            let mut expected = before[1].clone();
+            expected.suppressed = suppressed;
+            assert_eq!(sets[1], expected, "the clicked second row changes");
+        }
+        h.step(&json!({"click": {"handle": format!("contact:{second}:delete")}})).unwrap();
+        assert_eq!(h.app.session.doc.assembly.contact_sets, vec![before[0].clone()]);
+    }
+
     /// Playback runs on, starts over at the end when looping, else stops on the last step.
     #[test]
     fn playback_advances_loops_and_stops() {
@@ -877,6 +909,55 @@ mod tests {
             }
         }
         assert_eq!(seen.len(), 11, "every step 0..=10 is shown: {seen:?}");
+    }
+
+    /// How many parts the dialog shows away from where the design has them.
+    fn displaced(h: &crate::scenario::Harness) -> usize {
+        let off = |a: &Mat, b: &Mat| a.iter().flatten().zip(b.iter().flatten()).any(|(x, y)| (x - y).abs() > 1e-9);
+        let doc = &h.app.session.doc;
+        h.app
+            .session
+            .pending_moves
+            .iter()
+            .filter(|(id, m)| doc.occurrences.iter().find(|o| o.id == **id).is_some_and(|o| off(&o.transform, m)))
+            .count()
+    }
+
+    /// Show step `to` of a 10-step study that turns the hinge from 90° back to 0°.
+    fn show_step(h: &mut crate::scenario::Harness, to: f64) {
+        if let Some(Kind::Motion(Mo::MotionStudy { steps, tracks, step, playing, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *steps = "10".into();
+            *tracks = vec![Track { joint: 0, index: 0, points: vec![(0, "90 deg".into()), (10, "0 deg".into())] }];
+            (*step, *playing) = (to, false);
+        }
+        h.frames(3);
+    }
+
+    /// A step that puts a part back where the design has it shows the part there, after Go to
+    /// Start and after the step before it: the pose is shown over the moves from before the
+    /// dialog, not over the pose it showed last (#13511).
+    #[test]
+    fn a_step_that_puts_a_part_back_shows_it_there() {
+        let mut h = crate::scenario::Harness::new();
+        for (name, x) in [("A", 0), ("B", 30)] {
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("component.create", json!({ "name": name })).unwrap();
+            h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+        }
+        let a = json!({"occurrence": "A:1", "face": [10, 10, 10]});
+        h.app.run("joint.create", json!({"type": "revolute", "name": "Hinge", "a": a, "b": {"occurrence": "B:1", "face": [40, 10, 0]}})).unwrap();
+        // The design has the hinge at 0°, where the study's last step puts it.
+        h.app.run("joint.drive", json!({"joint": "Hinge", "value": 0})).unwrap();
+        h.app.start("motion.study");
+        h.frames(3);
+        show_step(&mut h, 0.0);
+        assert_ne!(displaced(&h), 0, "step 0 turns the hinge to 90°");
+        show_step(&mut h, 10.0);
+        assert_eq!(displaced(&h), 0, "Go to End puts it back where the design has it");
+        show_step(&mut h, 9.0);
+        assert_ne!(displaced(&h), 0, "the step before turns it again");
+        show_step(&mut h, 10.0);
+        assert_eq!(displaced(&h), 0, "and the last step puts it back again");
     }
 
     /// What a dialog shows goes away when it closes; an exploded view applied with OK stays.
@@ -1270,7 +1351,7 @@ mod tests {
         #[cfg(not(target_arch = "wasm32"))]
         if solidcraft_engine::capture::installed().is_none() {
             solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
-                let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+                let (rgba, renderer) = solidcraft_gpu::env::headless_rgba(scene, cam, w, h)?;
                 Ok(solidcraft_engine::capture::Picture { rgba, renderer })
             }));
         }

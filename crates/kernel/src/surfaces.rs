@@ -701,11 +701,18 @@ const SAMPLES: usize = 64;
 
 /// The parameter of the curve's point nearest `p` inside `interval`, and the distance: the
 /// nearest of evenly spaced samples, then a golden-section search between its neighbours.
-pub(crate) fn nearest_parameter(c: &CurveEval, [a, b]: [f64; 2], p: Vec3) -> Option<(f64, f64)> {
+pub(crate) fn nearest_parameter(c: &CurveEval, interval: [f64; 2], p: Vec3) -> Option<(f64, f64)> {
+    nearest_parameter_in(c, interval, p, SAMPLES)
+}
+
+/// [`nearest_parameter`] from `samples` evenly spaced samples: a curve of many spans needs
+/// several in each, or the search can settle beside the point on the wrong span.
+pub(crate) fn nearest_parameter_in(c: &CurveEval, [a, b]: [f64; 2], p: Vec3, samples: usize) -> Option<(f64, f64)> {
+    let samples = samples.max(1);
     let dist = |t: f64| c.point(t).map_or(f64::INFINITY, |q| q.dist(p));
-    let at = |k: usize| a + (b - a) * k as f64 / SAMPLES as f64;
-    let best = (0..=SAMPLES).min_by(|&i, &j| dist(at(i)).total_cmp(&dist(at(j))))?;
-    let (mut lo, mut hi) = (at(best.saturating_sub(1)), at((best + 1).min(SAMPLES)));
+    let at = |k: usize| a + (b - a) * k as f64 / samples as f64;
+    let best = (0..=samples).min_by(|&i, &j| dist(at(i)).total_cmp(&dist(at(j))))?;
+    let (mut lo, mut hi) = (at(best.saturating_sub(1)), at((best + 1).min(samples)));
     let ratio = 0.5 * (5f64.sqrt() - 1.0);
     for _ in 0..80 {
         let (x, y) = (hi - ratio * (hi - lo), lo + ratio * (hi - lo));
@@ -858,7 +865,7 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            Ok(solidcraft_geom::brep::pcurve::EdgeUse {
+            Ok(solidcore_ops::pcurve::EdgeUse {
                 edge: index(i)?,
                 curve: e.parameters(),
                 interval: e.interval,
@@ -869,7 +876,7 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         })
         .collect::<Result<Vec<_>>>()?;
     let surface = b::Surface::Plane { origin: a3(origin), u_axis: a3(du), v_axis: a3(dv) };
-    let pcurves = solidcraft_geom::brep::pcurve::pcurves(&surface, &[uses], r.tolerance).map_err(|e| failed(format!("extend: {e}")))?;
+    let pcurves = solidcore_ops::pcurve::pcurves(&surface, &[uses], r.tolerance).map_err(|e| failed(format!("extend: {e}")))?;
     let edges = pcurves
         .into_iter()
         .flatten()
@@ -1254,6 +1261,16 @@ mod imp {
         r.to_native().map_err(|e| failed(format!("SMLib {what}: {e}")))
     }
 
+    /// [`checked`] for a body a stitch produced: its gaps are held to the sums of the zones they
+    /// span, each proven to reach no topology it does not bound (`Brep::check_stitched`).
+    fn checked_stitched(r: &SmBrep, what: &'static str) -> Result<Brep> {
+        let check = r.check_stitched(CheckLevel::All).map_err(sm(what))?;
+        if !check.is_valid() {
+            return Err(failed(format!("SMLib {what}: SMLib's check refuses the result: {check}")));
+        }
+        r.to_native().map_err(|e| failed(format!("SMLib {what}: {e}")))
+    }
+
     /// Whether two records of one body number its faces, edges and vertices alike: the same
     /// loops of the same edges, run the same ways, and each edge between the same vertices.
     fn same_numbering(a: &Brep, b: &Brep) -> bool {
@@ -1277,7 +1294,7 @@ mod imp {
     /// and edges by their index in `r`); none where SMLib's import of `r` does not number it as
     /// `r` does.
     pub(super) fn stitched(r: &Brep, tol: f64) -> Result<(Body, Option<History>)> {
-        stitched_with(r, tol, |_, sewn| checked(sewn, "stitch").map(|_| ()))
+        stitched_with(r, tol, |_, sewn| checked_stitched(sewn, "stitch").map(|_| ()))
     }
 
     /// [`stitched`], taking a result whose check fails no more tests outside `exempt` than the

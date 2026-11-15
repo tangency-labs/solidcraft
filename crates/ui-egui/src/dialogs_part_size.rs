@@ -224,6 +224,7 @@ mod tests {
     use crate::context_menu::{self, Target};
     use solidcore_record::Vec3;
     use solidcraft_engine::Session;
+    use solidcraft_engine::geom::MeshGeom;
 
     fn part(family: &str, size: &str, length: Option<f64>) -> (SolveApp, u64) {
         let mut app = SolveApp::new(Session::default(), crate::Services::default());

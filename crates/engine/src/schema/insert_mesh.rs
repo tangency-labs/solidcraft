@@ -102,6 +102,11 @@ fn origin_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error>
     flag_key(d, ORIGIN_MESSAGE)
 }
 
+fn crease_angle_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    let value = Value::deserialize(d)?;
+    crate::cmd::mesh_crease_angle(Some(&value)).map_err(|message| D::Error::custom(whole(message)))
+}
+
 /// The unit names, as the handler lists them in its messages.
 fn unit_names() -> String {
     solidcraft_doc::point_cloud::UNITS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")
@@ -152,6 +157,13 @@ pub struct InsertMeshKeys {
     #[serde(default, deserialize_with = "origin_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
     pub origin: Option<bool>,
+    /// Shading crease angle in degrees, from 0 through 180. Zero clears imported normals for
+    /// the previous flat-shading behavior; positive angles regenerate angle-weighted normals
+    /// across manifold edges below this angle. Omitted or null keeps authored OBJ normals and
+    /// smoothing groups, or flat shading when absent. Geometry stays unchanged.
+    #[serde(default, deserialize_with = "crease_angle_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 0.0, max = 180.0))]
+    pub crease_angle_degrees: Option<f64>,
 }
 
 /// Leaves out the keys the handler does not read for this call, in the order it looks at them.
@@ -162,7 +174,7 @@ fn leave_unread(value: &mut Value) {
     };
     if !solidcraft_io::is_mesh_path(&path) && !solidcraft_io::is_ply_path(&path) {
         // Refused for its kind before anything else is read.
-        for key in ["name", "up", "names", "folder", "units", "origin"] {
+        for key in ["name", "up", "names", "folder", "units", "origin", "crease_angle_degrees"] {
             keys.remove(key);
         }
         return;

@@ -1,4 +1,4 @@
-//! Opt-in regularization of whole-body translational sweep results.
+//! Regularization of whole-body translational sweep results.
 //!
 //! Upstream: `source/SMLib/src/SmBrep.cpp`, `source/SMLib/src/SmFace.cpp`.
 //!
@@ -6,8 +6,7 @@
 //! |------|----------|
 //! | `regularize_body` | composition of `IsDegenerate`, `SqueezeFace`, `DeleteEdge` |
 //!
-//! Deviations: not an upstream sweep step; enabled only by
-//! `Kernel::fixes.translation_sweep_regularize`. No new recursion. Only faces
+//! Deviations: not an upstream sweep step. No new recursion. Only faces
 //! recorded as swept higher are squeezed, using one quarter of the body tolerance.
 //! Isolated open-edge inner slit loops have no area and are deleted by Euler edits.
 

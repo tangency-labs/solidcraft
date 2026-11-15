@@ -18,4 +18,3 @@ crates/kernel/src/loft_blend.rs
 crates/kernel/src/loft_rails.rs
 crates/kernel/src/step.rs
 crates/kernel/src/step_out.rs
-crates/step/**

@@ -64,11 +64,11 @@
 //!   `Option<Curve>`; partly NULL curves cannot be expressed. Storage that upstream
 //!   allocates uninitialised (`malloc`) is zero-filled.
 //! - [`size_arrays`] rejects index overflow, failed reservations and arrays above
-//!   [`crate::limits::MAX_ALLOC_BYTES`] with [`NlibCode::Memory`], leaving a `None`
+//!   [`crate::limits::MAX_ALLOC_BYTES`] with [`NurbsFailure::Memory`], leaving a `None`
 //!   slot unchanged even where upstream's allocator might accept the request.
 //! - The `NL_STACKS` arguments have no counterpart and allocation cannot fail, so
 //!   [`Curve::compress`] and [`Curve::epolygon`] have no memory error path.
-//! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
+//! - Out-params become return values; errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the
 //!   upstream `NL_*_ERR` number instead of a flag plus the global `NL_ERROR` record.
 //!   The routine-name argument (`rname`) is dropped.
 //! - `N_CrvIsClosed` and `N_CrvIsDegen` read the global `NL_MTOL`:
@@ -102,7 +102,7 @@
 
 use std::sync::Arc;
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::limits;
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::PTOL;
@@ -119,10 +119,6 @@ use crate::nurbs::srf_basic::{Surface, WEIGHT_MAX, WEIGHT_MIN, WEIGHT_TOL};
 /// Most turns of 360 degrees [`conic_data`] adds or removes while normalising the end
 /// angle before giving up.
 pub const CONIC_MAX_TURNS: usize = 1 << 20;
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
 
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
@@ -203,7 +199,7 @@ impl Curve {
 
     /// A zero-filled curve with indices `(n, m)` and degree `p`.
     fn zeroed(n: usize, p: usize, m: usize) -> Result<Self> {
-        let mem = || nlib("nurbs::crv_basic::size_arrays", NlibCode::Memory);
+        let mem = || SolidError::nurbs("nurbs::crv_basic::size_arrays", NurbsFailure::Memory);
         let np = n.checked_add(1).ok_or_else(mem)?;
         let nk = m.checked_add(1).ok_or_else(mem)?;
         Ok(Self {
@@ -349,7 +345,7 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// [`NlibCode::Storage`] (leaving `dst` unchanged) when an existing
+    /// [`NurbsFailure::Storage`] (leaving `dst` unchanged) when an existing
     /// destination is smaller than this curve.
     pub fn copy_into(&self, dst: &mut Option<Curve>) -> Result<()> {
         let cur = size_arrays(dst, self.n, self.p, self.m)?;
@@ -370,15 +366,21 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// [`NlibCode::Curve`] (`NL_CUR_ERR`) or [`NlibCode::Degree`] (`NL_DEG_ERR`,
+    /// [`NurbsFailure::CurveDefinition`] (`NL_CUR_ERR`) or [`NurbsFailure::DegreeTooHigh`] (`NL_DEG_ERR`,
     /// degree above [`MAX_DEGREE`]).
     pub fn counts_are_valid(&self) -> Result<()> {
         const OP: &str = "nurbs::crv_basic::Curve::counts_are_valid";
         if self.n.checked_add(self.p).and_then(|k| k.checked_add(1)) != Some(self.m) {
-            return Err(nlib(OP, NlibCode::Curve));
+            return Err(SolidError::nurbs(OP, NurbsFailure::CurveDefinition));
         }
         if self.p > MAX_DEGREE {
-            return Err(nlib(OP, NlibCode::Degree));
+            return Err(SolidError::nurbs(
+                OP,
+                NurbsFailure::DegreeTooHigh {
+                    given: self.p,
+                    max: MAX_DEGREE,
+                },
+            ));
         }
         let first = self.first();
         let (dim, rat) = (first.z != NOZ, first.w != NOW);
@@ -387,7 +389,7 @@ impl Curve {
             .iter()
             .any(|pw| (pw.z != NOZ) != dim || (pw.w != NOW) != rat)
         {
-            return Err(nlib(OP, NlibCode::Curve));
+            return Err(SolidError::nurbs(OP, NurbsFailure::CurveDefinition));
         }
         Ok(())
     }
@@ -397,15 +399,20 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// [`NlibCode::Weight`] (`NL_WEI_ERR`).
+    /// [`NurbsFailure::WeightOutOfRange`] (`NL_WEI_ERR`).
     pub fn weights_are_valid(&self) -> Result<()> {
         if self.is_rational() {
-            for pw in self.cpts() {
+            for (index, pw) in self.cpts().iter().enumerate() {
                 let w = pw.w;
                 if w < WEIGHT_MIN || w > WEIGHT_MAX {
-                    return Err(nlib(
+                    return Err(SolidError::nurbs(
                         "nurbs::crv_basic::Curve::weights_are_valid",
-                        NlibCode::Weight,
+                        NurbsFailure::WeightOutOfRange {
+                            index,
+                            weight: w,
+                            min: WEIGHT_MIN,
+                            max: WEIGHT_MAX,
+                        },
                     ));
                 }
             }
@@ -417,10 +424,13 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// [`NlibCode::Storage`] (`NL_STO_ERR`).
+    /// [`NurbsFailure::Storage`] (`NL_STO_ERR`).
     pub fn is_sized(&self, np: usize, mk: usize) -> Result<()> {
         if self.n < np || self.m < mk {
-            return Err(nlib("nurbs::crv_basic::Curve::is_sized", NlibCode::Storage));
+            return Err(SolidError::nurbs(
+                "nurbs::crv_basic::Curve::is_sized",
+                NurbsFailure::Storage,
+            ));
         }
         Ok(())
     }
@@ -623,7 +633,7 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// [`NlibCode::Geometry`] when the averaged normal (or the plane)
+    /// [`NurbsFailure::Geometry`] when the averaged normal (or the plane)
     /// cannot be normalised.
     pub fn is_planar(&self, tol: f64) -> Result<Planarity> {
         let not_planar = Planarity {
@@ -694,12 +704,14 @@ impl Curve {
         } else {
             scale(nn2, 1.0 / count2 as f64)
         };
-        let (nn, _) = normalize(nn)
-            .map_err(|_| nlib("nurbs::crv_basic::Curve::is_planar", NlibCode::Geometry))?;
+        let (nn, _) = normalize(nn).map_err(|_| {
+            SolidError::nurbs("nurbs::crv_basic::Curve::is_planar", NurbsFailure::Geometry)
+        })?;
 
         // Check flatness.
-        let [a, b, c, d] = plane_pt_normal_to_implicit(pp, nn)
-            .map_err(|_| nlib("nurbs::crv_basic::Curve::is_planar", NlibCode::Geometry))?;
+        let [a, b, c, d] = plane_pt_normal_to_implicit(pp, nn).map_err(|_| {
+            SolidError::nurbs("nurbs::crv_basic::Curve::is_planar", NurbsFailure::Geometry)
+        })?;
         let plane = Some((pp, nn));
         for pi in &p {
             let fac = dist_signed_pt_plane(a, b, c, d, *pi);
@@ -720,7 +732,7 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// [`NlibCode::Storage`] when an existing `num` or `den` is too small
+    /// [`NurbsFailure::Storage`] when an existing `num` or `den` is too small
     /// (`num` is already resized when `den` fails, as upstream).
     pub fn num_and_denom(
         &self,
@@ -762,7 +774,7 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// [`NlibCode::Storage`] when an existing `cfn` is too small.
+    /// [`NurbsFailure::Storage`] when an existing `cfn` is too small.
     pub fn denom_func(&self, cfn: &mut Option<CurveFunction>) -> Result<()> {
         let f = CurveFunction::size_arrays(cfn, self.n, self.p, self.m)?;
         for (fu, pw) in f.values_mut().iter_mut().zip(self.cpts()) {
@@ -778,7 +790,7 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// [`NlibCode::Index`] (`NL_IND_ERR`) when `k > l` or `l > n`.
+    /// [`NurbsFailure::Index`] (`NL_IND_ERR`) when `k > l` or `l > n`.
     pub fn epolygon(&self, k: usize, l: usize) -> Result<Vec<Vec3>> {
         Ok(self.epolygon_iter(k, l)?.collect())
     }
@@ -791,12 +803,14 @@ impl Curve {
     /// As [`Curve::epolygon`].
     pub fn epolygon_iter(&self, k: usize, l: usize) -> Result<impl Iterator<Item = Vec3> + '_> {
         if k > l || l > self.n {
-            return Err(nlib("nurbs::crv_basic::Curve::epolygon", NlibCode::Index));
+            return Err(SolidError::nurbs(
+                "nurbs::crv_basic::Curve::epolygon",
+                NurbsFailure::Index,
+            ));
         }
-        let part = self
-            .cpts()
-            .get(k..=l)
-            .ok_or_else(|| nlib("nurbs::crv_basic::Curve::epolygon", NlibCode::Index))?;
+        let part = self.cpts().get(k..=l).ok_or_else(|| {
+            SolidError::nurbs("nurbs::crv_basic::Curve::epolygon", NurbsFailure::Index)
+        })?;
         Ok(part.iter().map(|pw| pw.to_euclid()))
     }
 
@@ -922,8 +936,8 @@ pub struct Planarity {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Storage`] (leaving the slot unchanged) when the existing
-/// curve is too small. [`NlibCode::Memory`] (also leaving the slot unchanged)
+/// [`NurbsFailure::Storage`] (leaving the slot unchanged) when the existing
+/// curve is too small. [`NurbsFailure::Memory`] (also leaving the slot unchanged)
 /// when new storage overflows, exceeds [`limits::MAX_ALLOC_BYTES`] per array,
 /// or cannot be allocated.
 pub fn size_arrays(slot: &mut Option<Curve>, n: usize, p: usize, m: usize) -> Result<&mut Curve> {
@@ -944,8 +958,8 @@ pub fn size_arrays(slot: &mut Option<Curve>, n: usize, p: usize, m: usize) -> Re
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when the denominator's indices or degree differ
-/// from the numerator's, and [`NlibCode::Storage`] when an existing `cur` is too
+/// [`NurbsFailure::Input`] when the denominator's indices or degree differ
+/// from the numerator's, and [`NurbsFailure::Storage`] when an existing `cur` is too
 /// small.
 pub fn curve_from_num_and_denom(
     num: &Curve,
@@ -956,9 +970,9 @@ pub fn curve_from_num_and_denom(
     if let Some(d) = den {
         let (nd, md) = d.array_sizes();
         if nn != nd || mn != md || pn != d.degree() {
-            return Err(nlib(
+            return Err(SolidError::nurbs(
                 "nurbs::crv_basic::curve_from_num_and_denom",
-                NlibCode::Input,
+                NurbsFailure::Input,
             ));
         }
     }
@@ -1061,7 +1075,7 @@ pub fn curves_are_coincident(p: &mut Curve, q: &mut Curve, tol: f64) -> Result<b
     *q = cq;
     match res {
         Ok(()) => {}
-        Err(SolidError::Nlib { .. }) => return Ok(false),
+        Err(e) if e.is_nurbs_failure() => return Ok(false),
         Err(e) => return Err(e),
     }
 
@@ -1255,7 +1269,7 @@ impl Boundary {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Storage`] when an existing `cur` is too small, and
+/// [`NurbsFailure::Storage`] when an existing `cur` is too small, and
 /// `InvalidInput` (before touching `cur`) when the surface has fewer than two rows
 /// (`Left` / `Right`) or columns (`Bottom` / `Top`), or its knots in use do not
 /// reach the indices read.
@@ -1332,6 +1346,7 @@ pub fn cross_bound_deriv_crv_non_rat_srf(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ErrorKind;
 
     #[test]
     fn clones_share_storage_until_written() {
@@ -1400,13 +1415,13 @@ mod tests {
             (0, oversized_m),
         ] {
             let mut slot = None;
-            assert!(matches!(
+            assert_eq!(
                 size_arrays(&mut slot, n, 2, m),
-                Err(SolidError::Nlib {
-                    operation: "nurbs::crv_basic::size_arrays",
-                    code: NlibCode::Memory,
-                })
-            ));
+                Err(SolidError::nurbs(
+                    "nurbs::crv_basic::size_arrays",
+                    NurbsFailure::Memory
+                ))
+            );
             assert!(slot.is_none());
         }
     }
@@ -1430,10 +1445,7 @@ mod tests {
         for (n, m) in [(2, 3), (1, 4), (usize::MAX, 3), (1, usize::MAX)] {
             assert!(matches!(
                 size_arrays(&mut slot, n, 0, m),
-                Err(SolidError::Nlib {
-                    code: NlibCode::Storage,
-                    ..
-                })
+                Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Storage))
             ));
             assert_eq!(slot, unchanged);
         }
@@ -1458,8 +1470,10 @@ mod tests {
     fn counts_are_valid_refuses_mixed_points_and_counts() {
         let code = |c: &Curve| match c.counts_are_valid() {
             Ok(()) => None,
-            Err(SolidError::Nlib { code, .. }) => Some(code),
-            Err(e) => panic!("{e:?}"),
+            Err(e) => match e.nurbs_failure() {
+                Some(failure) => Some(*failure),
+                None => panic!("{e:?}"),
+            },
         };
         assert_eq!(code(&line2()), None);
         assert_eq!(code(&arc()), None);
@@ -1472,11 +1486,57 @@ mod tests {
         {
             let mut c = line2();
             c.cpts_mut()[1 + i] = pw;
-            assert_eq!(code(&c), Some(NlibCode::Curve), "{pw:?}");
+            assert_eq!(code(&c), Some(NurbsFailure::CurveDefinition), "{pw:?}");
         }
         let short =
             Curve::new(line2().cpts().to_vec(), 2, vec![0.0, 0.0, 0.0, 1.0, 1.0]).expect("curve");
-        assert_eq!(code(&short), Some(NlibCode::Curve));
+        assert_eq!(code(&short), Some(NurbsFailure::CurveDefinition));
+    }
+
+    /// The degree and weight checks name the value and the limit.
+    #[test]
+    fn degree_and_weight_failures_carry_the_values() {
+        // a degree above the largest the routines handle
+        let p = MAX_DEGREE + 1;
+        let pts = vec![CPoint::new(0.0, 0.0, 0.0, 1.0); p + 1];
+        let mut u = vec![0.0; p + 1];
+        u.extend(vec![1.0; p + 1]);
+        let high = Curve::new(pts, p, u).expect("curve");
+        let e = high.counts_are_valid().unwrap_err();
+        assert_eq!(
+            e,
+            SolidError::nurbs(
+                "nurbs::crv_basic::Curve::counts_are_valid",
+                NurbsFailure::DegreeTooHigh {
+                    given: p,
+                    max: MAX_DEGREE
+                }
+            )
+        );
+        assert_eq!(
+            e.to_string(),
+            format!(
+                "nurbs::crv_basic::Curve::counts_are_valid: degree {p} is above the largest degree, {MAX_DEGREE}"
+            )
+        );
+        assert_eq!(e.kind(), ErrorKind::Failed);
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+
+        // a rational curve with a weight outside [WEIGHT_MIN, WEIGHT_MAX]
+        let mut a = arc();
+        a.cpts_mut()[1] = CPoint::new(1.0, 1.0, 0.0, -2.0);
+        assert_eq!(
+            a.weights_are_valid().unwrap_err(),
+            SolidError::nurbs(
+                "nurbs::crv_basic::Curve::weights_are_valid",
+                NurbsFailure::WeightOutOfRange {
+                    index: 1,
+                    weight: -2.0,
+                    min: WEIGHT_MIN,
+                    max: WEIGHT_MAX
+                }
+            )
+        );
     }
 
     #[test]

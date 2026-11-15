@@ -7,6 +7,9 @@
 pub mod api_queries;
 pub mod brep;
 pub mod contact;
+pub mod continuity;
+pub mod curve_surface_gap;
+pub mod deviation;
 pub mod distance_bound;
 pub mod edge;
 pub mod edge_turn;

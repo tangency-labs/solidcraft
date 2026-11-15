@@ -94,7 +94,7 @@
 //!   an unspecified, address-dependent order. [`Relation`] keeps keys in `BTreeMap`s /
 //!   `BTreeSet`s and returns them sorted (see `plan/findings.md`). `RelatePair`'s null
 //!   checks have no Rust counterpart; its `SM_ERR` status is
-//!   [`SolidError::Upstream`] with code 1001. `GetSecond`'s `SE(SM_ERR)` for an
+//!   [`GeomFailure`](crate::error::geom::GeomFailure) with code 1001. `GetSecond`'s `SE(SM_ERR)` for an
 //!   ambiguous key is a no-op in the release build; [`Relation::second`] returns
 //!   `None` there as upstream returns `NULL`. `GetType`, `GetTypeString`, `IsKindOf`
 //!   (the `SmObject` run-time type system) are replaced by Rust's static types.
@@ -109,7 +109,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError, SM_ERR_INVALID_INPUT};
+use crate::error::geom::GeomFailure;
+use crate::error::{Result, SolidError};
 use crate::geom::context::Context;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -202,9 +203,6 @@ pub const TOL_GAP_GAIN: f64 = 1.1;
 pub const ANG_TOL_DEG: f64 = 0.5;
 /// `SM_ANG_TOL_RAD` = `SM_ANG_TOL_DEG * SM_PI / 180.0`.
 pub const ANG_TOL_RAD: f64 = ANG_TOL_DEG * PI / 180.0;
-
-// Upstream status `SM_ERR`.
-use crate::error::SM_ERR;
 
 // ---- tolerance values ------------------------------------------------------------
 
@@ -1131,7 +1129,7 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Upstream`] with code 1001 (`SM_ERR`) when the pair would violate
+    /// [`GeomFailure`](crate::error::geom::GeomFailure) with code 1001 (`SM_ERR`) when the pair would violate
     /// the cardinality; nothing is changed then.
     pub fn relate_pair(&mut self, first: A, second: B) -> Result<()> {
         let has_second = self.first_to_second.contains_key(&first);
@@ -1143,11 +1141,10 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
             Cardinality::ManyToMany => false,
         };
         if violates {
-            return Err(SolidError::Upstream {
-                operation: "geom::tol::Relation::relate_pair",
-                code: SM_ERR,
-                entity: None,
-            });
+            return Err(SolidError::geom_failed(
+                "geom::tol::Relation::relate_pair",
+                "the pair would break the relation's cardinality",
+            ));
         }
         self.first_to_second
             .entry(first)
@@ -1188,7 +1185,10 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
     pub fn remove_pair(&mut self, first: A, second: B) -> Result<()> {
         if !self.first_to_second.contains_key(&first) || !self.second_to_first.contains_key(&second)
         {
-            return Err(SolidError::sm_err("geom::tol::Relation::remove_pair"));
+            return Err(SolidError::geom_failed(
+                "geom::tol::Relation::remove_pair",
+                "the pair is not related",
+            ));
         }
         if let Some(seconds) = self.first_to_second.get_mut(&first) {
             seconds.remove(&second);
@@ -1651,11 +1651,12 @@ pub fn update_object_tolerance(
 
     // If both input gap and tol are zero, there's nothing to do.
     if tol_to_use < EFF_ZERO {
-        return Err(SolidError::Upstream {
-            operation: OP_UPDATE,
-            code: SM_ERR_INVALID_INPUT,
-            entity: None,
-        });
+        return Err(SolidError::geom(
+            OP_UPDATE,
+            GeomFailure::ToleranceTooSmall {
+                tolerance: tol_to_use,
+            },
+        ));
     }
 
     match topo {

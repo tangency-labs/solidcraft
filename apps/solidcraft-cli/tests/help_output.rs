@@ -152,7 +152,17 @@ fn render_help_keeps_the_registered_gpu_request_controls() {
         assert!(output.status.success(), "{args:?}: {}", String::from_utf8_lossy(&output.stderr));
         assert!(output.stderr.is_empty());
         let stdout = String::from_utf8_lossy(&output.stdout);
-        for flag in ["--progressive", "--samples", "--max-depth", "--seed", "--exposure", "--lighting", "--environment", "--tone-map"] {
+        for flag in [
+            "--progressive",
+            "--samples",
+            "--max-depth",
+            "--seed",
+            "--exposure",
+            "--lighting",
+            "--environment",
+            "--tone-map",
+            "--legacy-memory-admission",
+        ] {
             assert!(stdout.contains(flag), "{args:?} lost {flag}: {stdout}");
         }
     }

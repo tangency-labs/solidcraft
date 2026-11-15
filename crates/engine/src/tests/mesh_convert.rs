@@ -16,6 +16,7 @@ pub(crate) fn imported_box() -> Session {
                 positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
                 triangles: mesh.triangles.iter().flatten().copied().collect(),
                 color: Some([0.2, 0.5, 0.8]),
+                corner_normals: Default::default(),
             }],
         },
         Some("Imported mesh"),
@@ -41,9 +42,14 @@ fn edits_share_an_imported_meshs_triangles_with_undo() {
     run(&mut s, "edit.undo", json!({}));
     let (p, t) = arrays(&s);
     assert!(std::sync::Arc::ptr_eq(&p, &positions) && std::sync::Arc::ptr_eq(&t, &triangles), "shared after undo");
-    let saved =
-        serde_json::to_value(MeshData { name: "M".into(), positions: vec![1.5, 2.0, 3.0].into(), triangles: vec![0, 0, 0].into(), color: None })
-            .unwrap();
+    let saved = serde_json::to_value(MeshData {
+        name: "M".into(),
+        positions: vec![1.5, 2.0, 3.0].into(),
+        triangles: vec![0, 0, 0].into(),
+        color: None,
+        corner_normals: Default::default(),
+    })
+    .unwrap();
     assert_eq!(saved, json!({"name":"M","positions":[1.5,2.0,3.0],"triangles":[0,0,0]}));
     let back: MeshData = serde_json::from_value(saved).unwrap();
     assert_eq!(&back.positions[..], &[1.5, 2.0, 3.0]);
@@ -233,8 +239,8 @@ fn send_to_slicer_needs_a_slicer_and_bodies() {
     assert!(s.execute("file.send_to_slicer", &json!({"slicer":"no such slicer anywhere"})).is_err());
 }
 
-/// The chosen-programs list is process-wide: tests that set it take turns.
-#[cfg(unix)]
+/// The chosen-programs list and the made-up slicers are process-wide: tests that set them take
+/// turns.
 pub(crate) static CHOSEN_PROGRAMS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// `file.save_mesh` with a `slicer` writes where the caller said and hands that file over, by the
@@ -269,11 +275,9 @@ fn save_mesh_with_a_chosen_program_writes_the_file_where_asked_and_sends_it_ther
     std::fs::remove_dir_all(dir).unwrap();
 }
 
-/// Puts back what the tests of the send commands make up, even when one fails.
-#[cfg(unix)]
+/// Puts back what the tests of the slicer commands make up, even when one fails.
 pub(crate) struct MadeUp;
 
-#[cfg(unix)]
 impl Drop for MadeUp {
     fn drop(&mut self) {
         *crate::slicers::TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
@@ -563,6 +567,7 @@ fn open_in_easyprint_reports_a_host_that_cannot_start_and_a_model_over_the_limit
                 positions: vec![0., 0., 0., 1., 0., 0., 0., 1., 0.].into(),
                 triangles: [0u32, 1, 2].repeat(2_100_000).into(),
                 color: None,
+                corner_normals: Default::default(),
             }],
         },
         Some("Imported mesh"),
@@ -632,4 +637,41 @@ fn conversion_from_another_branch_names_the_component_to_activate() {
     assert!(error.contains("activate component 'Mesh 1' first"), "{error}");
     assert_eq!(s.doc.to_json(), before);
     assert_eq!((s.active_component, s.active_occurrence_path.clone()), context);
+}
+
+/// A mesh body of a component placed twice converts under its second placement's name, the one
+/// the selection and the Browser hold: the conversion edits the component, so both placements
+/// then show the solid. Given as `body` and taken from the selection.
+#[test]
+fn a_second_placements_mesh_body_converts_by_the_name_the_world_shows() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mesh-convert-placed-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("cube.stl").to_string_lossy().to_string();
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "file.save_mesh", json!({"path": stl}));
+    for by_selection in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "file.insert_mesh", json!({"path": stl}));
+        run(&mut s, "occurrence.copy", json!({"component": "cube", "translate": [0, 40, 0]}));
+        let definition = s.model.state().bodies[0].name.clone();
+        let world = s.world_state().unwrap();
+        let second = world.bodies.iter().map(|b| b.name.clone()).find(|n| *n != definition).expect("a second placement");
+        assert!(world.bodies.len() == 2 && world.bodies.iter().all(|b| b.body.is_mesh()), "two placed mesh bodies");
+        if by_selection {
+            s.selection = vec![Sel::Body { name: second.clone() }];
+            run(&mut s, "mesh.convert", json!({"tolerance": "0.05 mm"}));
+        } else {
+            run(&mut s, "mesh.convert", json!({"body": second, "tolerance": "0.05 mm"}));
+        }
+        let world = s.world_state().unwrap();
+        assert_eq!(world.bodies.len(), 2);
+        assert!(world.bodies.iter().all(|b| !b.body.is_mesh()), "by selection {by_selection}: both placements show the solid");
+        match &s.doc.features.last().unwrap().kind {
+            FeatureKind::MeshConvert { body, .. } => assert_eq!(body.to_string(), definition, "the feature names the component's body"),
+            other => panic!("{other:?}"),
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }

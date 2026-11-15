@@ -76,6 +76,18 @@ fn thread_split(limit: Option<usize>, cpus: usize) -> Option<usize> {
     limit.map(|jobs| (cpus.max(1) / jobs.max(1)).max(1))
 }
 
+/// The thread stack for the test binaries: 8 MiB, as a Linux main thread has, against the 2 MiB
+/// std gives a thread by default. `RUST_MIN_STACK` sets it for every thread std starts without a
+/// stack size of its own, libtest's test threads among them, and child processes inherit it. On
+/// Windows a ui-egui test that keeps several app states on its stack outgrew 2 MiB, and its stack
+/// overflow ended the binary before more than 960 of its tests had reported.
+const TEST_STACK: &str = "8388608";
+
+/// `RUST_MIN_STACK` for the test binaries: [`TEST_STACK`], or `None` when the caller set it.
+pub fn stack_env(inherited: Option<&OsStr>) -> Option<&'static str> {
+    inherited.is_none().then_some(TEST_STACK)
+}
+
 /// The value to hand a binary for `name`, or `None` when the caller set it explicitly: an
 /// inherited `RUST_TEST_THREADS` or `ACTION_MATRIX_JOBS` always outranks the budget.
 fn budget_env(name: &str, split: Option<usize>) -> Option<String> {
@@ -117,6 +129,9 @@ fn binary_command(b: &TestBin, test_args: &[&str], split: Option<usize>) -> Comm
         if let Some(threads) = budget_env(name, split) {
             c.env(name, threads);
         }
+    }
+    if let Some(stack) = stack_env(std::env::var_os("RUST_MIN_STACK").as_deref()) {
+        c.env("RUST_MIN_STACK", stack);
     }
     c
 }
@@ -172,7 +187,7 @@ pub fn doc_tests(cargo_args: &[&str], test_args: &[&str]) -> (String, Command) {
 
 #[cfg(test)]
 mod tests {
-    use super::{TestBin, binary_command, budget_env, job_limit, run_bounded, thread_split};
+    use super::{TEST_STACK, TestBin, binary_command, budget_env, job_limit, run_bounded, stack_env, thread_split};
     use std::ffi::OsStr;
     use std::path::Path;
     use std::sync::Barrier;
@@ -270,6 +285,18 @@ mod tests {
         assert_eq!(thread_split(Some(4), 1), Some(1));
         assert_eq!(thread_split(Some(4), 0), Some(1));
         assert_eq!(thread_split(Some(0), 8), Some(8));
+    }
+
+    #[test]
+    fn test_threads_get_a_larger_stack_unless_the_caller_chose_one() {
+        assert_eq!(stack_env(None), Some(TEST_STACK));
+        assert_eq!(stack_env(Some(OsStr::new("65536"))), None);
+        if std::env::var_os("RUST_MIN_STACK").is_none() {
+            let bin = TestBin { label: "pkg test t".into(), exe: "true".into(), dir: ".".into() };
+            let c = binary_command(&bin, &[], None);
+            let stack = c.get_envs().find(|(k, _)| *k == OsStr::new("RUST_MIN_STACK")).and_then(|(_, v)| v);
+            assert_eq!(stack, Some(OsStr::new(TEST_STACK)));
+        }
     }
 
     #[test]

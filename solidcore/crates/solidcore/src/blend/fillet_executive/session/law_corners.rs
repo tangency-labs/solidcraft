@@ -85,7 +85,7 @@ impl FilletSession<'_> {
             // `GetRadiusCornerParameters` (virtual): the variable radius solver's
             let geoms = match self.objects.solvers.get(index).and_then(Option::as_ref) {
                 Some(SolverObject::VariableRadius(vr)) => {
-                    if vr.radius_corner_parameters(k)?.is_empty() {
+                    if vr.radius_corner_parameters()?.is_empty() {
                         continue;
                     }
                     vr.curve_based.solver.fillet_geoms()
@@ -109,7 +109,7 @@ impl FilletSession<'_> {
                     .solvers
                     .get_mut(index)
                     .and_then(Option::as_mut)
-                    .ok_or_else(|| SolidError::null_pointer(OP))?
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the solver"))?
                     .base_mut();
                 let pieces = find_law_corner_pieces(k, &mut base.law_corner_pieces, &copy)?
                     .and_then(|i| base.law_corner_pieces.get(i))
@@ -207,7 +207,7 @@ impl FilletSession<'_> {
                         .domain;
                 let mid = bx.mid();
                 let surface = crate::topology::face::p2::surface(target, piece)?
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
                 let domain = surface.natural_uv_domain_with_nurb(k)?;
                 let (mut lo, mut hi) = (domain.min(), domain.max());
                 let (u, v) = surface.find_knots_by_max_continuity(k, ContinuityType::C0, false)?;
@@ -237,7 +237,7 @@ impl FilletSession<'_> {
                         .face_mut(piece)?
                         .surface
                         .as_mut()
-                        .ok_or_else(|| SolidError::null_pointer(OP))?
+                        .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
                         .trim_with_domain(k, &mut side)?;
                 }
                 shrink_geometry(k, target, piece, &key_of)?;
@@ -294,7 +294,7 @@ impl FilletSession<'_> {
     ///
     /// `SM_ERR` for pieces, corners and joined ends that do not match, for a face that is
     /// no piece's or a piece with two faces, and for lamina edges left by the stitch;
-    /// [`SolidError::null_pointer`] (the fork's `NER`) for a piece without a face, a corner
+    /// `BlendFailure::Missing` (the fork's `NER`) for a piece without a face, a corner
     /// whose faces share no edge or have no edge between its rail points, or a peak whose
     /// pieces have no crossing between them; those of the steps. After the unstitch, an
     /// error leaves the round's faces unstitched, as the fork's does.
@@ -306,12 +306,20 @@ impl FilletSession<'_> {
     ) -> Result<()> {
         let count = kept.pieces.len();
         if count < 2 || kept.corners.len() + 1 != count || kept.joined_ends.len() != count {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the law corner pieces do not match their corners",
+            ));
         }
         if !kept.has_dip_or_peak() {
             return Ok(());
         }
-        let null = || SolidError::null_pointer(OP);
+        let null = || {
+            SolidError::blend_missing(
+                OP,
+                "a face, surface, edge or vertex of the law corner pieces",
+            )
+        };
         let serial = self.objects.target_serial;
         let key_of = move |entity| p3::topology_ref(serial, entity);
 
@@ -570,7 +578,10 @@ impl FilletSession<'_> {
         let list: Vec<Option<FaceId>> = stitch.iter().copied().map(Some).collect();
         let stitched = stitch_faces(k, self.objects.target, tol, Some(&list), false)?;
         if stitched.lamina_edges != 0 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the law corner pieces do not stitch back into the solid",
+            ));
         }
         with_target_env_of(&mut self.objects, k, |k, b, env, _| {
             orient_trimmed_surfaces(k, b, env, &mut Marks::default(), true, false, None)
@@ -604,7 +615,7 @@ impl FilletSession<'_> {
 /// # Errors
 ///
 /// `SM_ERR` for a face past every piece or a piece with two faces;
-/// [`SolidError::null_pointer`] for a piece without a face; those of the uv box.
+/// `BlendFailure::Missing` for a piece without a face; those of the uv box.
 fn faces_of_pieces(
     k: &Kernel,
     b: &mut Brep,
@@ -618,12 +629,17 @@ fn faces_of_pieces(
         let piece = kept.joined_ends.iter().position(|&end| mid < end);
         match piece.and_then(|piece| of.get_mut(piece)) {
             Some(slot @ None) => *slot = Some(f),
-            _ => return Err(SolidError::sm_err(OP)),
+            _ => {
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "a face lies on no free law corner piece",
+                ))
+            }
         }
     }
     of.into_iter()
         .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| SolidError::null_pointer(OP))
+        .ok_or_else(|| SolidError::blend_missing(OP, "a face of each law corner piece"))
 }
 
 /// The edges of face `f`, in the face's order (`SmFace::GetEdges`).
@@ -635,9 +651,9 @@ fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] for an edge without both (the fork's `NER`).
+/// `BlendFailure::Missing` for an edge without both (the fork's `NER`).
 fn edge_ends(b: &Brep, e: EdgeId) -> Result<(Point3, Point3)> {
-    let null = || SolidError::null_pointer(OP);
+    let null = || SolidError::blend_missing(OP, "an end vertex of the edge");
     let start = edge::start_vertex(b, e)?.ok_or_else(null)?;
     let end = edge::end_vertex(b, e)?.ok_or_else(null)?;
     Ok((vertex::point(b, start)?, vertex::point(b, end)?))

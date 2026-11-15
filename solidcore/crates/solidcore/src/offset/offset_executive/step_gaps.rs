@@ -1,5 +1,5 @@
-//! The loop gaps an extended offset leaves and their closing edges (opt-in, fork
-//! tangency-labs/smlib 5d428ae, 7ff0a94, 34318f4, ccbf77a).
+//! The loop gaps an extended offset leaves and their closing edges (fork
+//! tangency-labs/smlib 5d428ae, 7ff0a94, 34318f4, ccbf77a; the only path since #2981).
 //!
 //! Upstream: the SolidCraft fork's `source/SMLib/src/SmOffsetExecutive.cpp` (not in the
 //! pinned SMLib).
@@ -19,9 +19,8 @@
 //! the same `CloseLoopGaps`, are one local list of pairs. Bounds: each face's gap search stops with `SM_ERR`
 //! after 64 passes (the fork's guard); the other loops run over finite lists.
 //!
-//! Not in the fork: `split_corner_vertices` (private, opt-in
-//! `Kernel::fixes.offset_splits_corner_vertices`, WR-657), run by `close_loop_gaps`
-//! before it closes any gap.
+//! Not in the fork: `split_corner_vertices` (private, WR-657; the only path since
+//! #2981), run by `close_loop_gaps` before it closes any gap.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -58,8 +57,11 @@ fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
+/// `SM_ERR`: a stage of the gap search failed with no reason the kernel names
+/// ([`OffsetFailure::StageFailed`], a defect).
+#[track_caller]
 fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
+    SolidError::offset_stage_failed(OP, crate::error::SM_ERR)
 }
 
 /// The mate of an edge use.
@@ -268,9 +270,8 @@ impl OffsetExecutive {
         Ok(true)
     }
 
-    /// `CloseLoopGaps` (fork, opt-in `Kernel::fixes.local_operation_step_walls` for a
-    /// local operation, `Kernel::fixes.offset_closes_loop_gaps` for every extended
-    /// offset): where consecutive edge uses of an offset face no longer meet at their
+    /// `CloseLoopGaps` (fork; run for every extended offset since #2981): where
+    /// consecutive edge uses of an offset face no longer meet at their
     /// shared vertex (a local operation's step left an edge behind; a solid offset's two
     /// consecutive edges whose offsets run parallel), the edge whose end lies away from the
     /// vertex gets the straight segment to it (which must lie on the face's extended
@@ -279,8 +280,10 @@ impl OffsetExecutive {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for a gap neither end of which is at the vertex, a segment off the
-    /// surface, or more than [`MAX_GAP_PASSES`] gaps on one face;
+    /// `SM_ERR` for a gap neither end of which is at the vertex, or more than
+    /// [`MAX_GAP_PASSES`] gaps on one face;
+    /// [`crate::error::offset::OffsetFailure::LoopGapUncertified`] where the straight
+    /// segment to the gap could not be established within tolerance;
     /// [`crate::error::offset::OffsetFailure::EdgeVanishes`] where the vertex moved to or past the edge's other
     /// end; those of the evaluations, solves, curve edits
     /// and the split; [`SolidError::InvalidInput`] for missing topology.
@@ -310,10 +313,8 @@ impl OffsetExecutive {
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<()> {
         let approx_tol = self.approximation_tol_3d();
-        // (WR-657, opt-in) the corners whose offset planes no longer meet in one point
-        if kernel.fixes.offset_splits_corner_vertices {
-            self.split_corner_vertices(kernel, original, b, approx_tol, notifications)?;
-        }
+        // (WR-657) the corners whose offset planes no longer meet in one point
+        self.split_corner_vertices(kernel, original, b, approx_tol, notifications)?;
         // (fork ccbf77a) each edge that closed to a point: its offset face and the original
         // face across it
         let mut closed_edges: Vec<(FaceId, Option<FaceId>)> = Vec::new();
@@ -587,7 +588,9 @@ impl OffsetExecutive {
             )?;
             let on = sols.first().is_some_and(|s| s.solution_value <= tol);
             if !on {
-                return Err(sm_err());
+                // The bridge could not be established within tolerance. Refuse here,
+                // before the result is judged.
+                return Err(self.loop_gap_uncertified(original, f));
             }
         }
 
@@ -953,8 +956,8 @@ struct CornerEdits {
 }
 
 impl OffsetExecutive {
-    /// Not in the fork (opt-in `Kernel::fixes.offset_splits_corner_vertices`, with
-    /// `offset_closes_loop_gaps`, before the gaps are closed): a convex corner of the
+    /// Not in the fork (the only path since #2981; WR-657, before the gaps are
+    /// closed): a convex corner of the
     /// original where four plane faces meet, whose four offset planes no longer meet in
     /// one point, becomes an edge between the two faces across the corner from each
     /// other (`a` and `c`; the other two are `b` and `d`). Its ends are where `a`, `b`
@@ -1146,6 +1149,18 @@ impl OffsetExecutive {
         Failure::new(OP, OffsetFailure::EdgeVanishes { edge, face }).into_error()
     }
 
+    /// The refusal of a gap in the loops of offset face `f` that the straight bridge does
+    /// not close ([`crate::error::offset::OffsetFailure::LoopGapUncertified`]), naming the
+    /// face of `original` that `f` comes from (error context only: a lookup that fails or
+    /// gives no single face names nothing).
+    fn loop_gap_uncertified(&self, original: &Brep, f: FaceId) -> SolidError {
+        let face = match self.faceuse_to_faces.firsts(f).as_slice() {
+            [fu] => eu::faceuse_face(original, *fu).ok().flatten(),
+            _ => None,
+        };
+        Failure::new(OP, OffsetFailure::LoopGapUncertified { face }).into_error()
+    }
+
     /// The original edge offset edge use `u` (or its mate) was made from, where it maps
     /// to one.
     fn original_edge(&self, original: &Brep, b: &Brep, u: EdgeuseId) -> Result<Option<EdgeId>> {
@@ -1189,4 +1204,19 @@ fn set_edge_curve(
         b.set_geometry_owner_key(EntityRef::Edge(e), Some(owner));
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_gap_search_that_cannot_continue_is_a_stage_failure() {
+        let e = sm_err();
+        assert_eq!(e.offset_failure(), Some(&OffsetFailure::StageFailed));
+        assert!(e.is_defect());
+        assert_eq!(e.operation(), OP);
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert!(e.is_status_answer());
+    }
 }

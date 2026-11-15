@@ -35,7 +35,8 @@ is fully constrained and its curves turn white.
 **4. Finish.** Click **Finish Sketch** to go back to the model; the shaded region is a profile
 that Extrude can use ([Solid features](features.md)).
 
-![The finished sketch, numbered 1 to 5](../media/sketching/parts.png)
+<img class="dark-ui" src="../media/sketching/parts.png" alt="The finished sketch, numbered 1 to 5">
+<img class="light-ui" src="../media/sketching/parts.light.png" alt="The finished sketch, numbered 1 to 5">
 
 **1** Sketch tools · **2** A constraint (this side is vertical) · **3** A dimension ·
 **4** The sketch's state · **5** Finish Sketch
@@ -259,12 +260,24 @@ design unchanged. Projected geometry remains protected from ordinary dragging.
 **Project** (P) and **Intersect** bring model edges into the sketch as linked geometry that
 follows later changes. Sketching on a face projects its edges automatically.
 A projected edge stays the edge that was picked, wherever a later change moves it; when that
-edge no longer exists, the projection keeps its last shape and the sketch says it was lost.
+edge no longer exists, the sketch fails and names the projection it lost (see below).
 For Project, select visible source curves or points from another sketch, model edges,
 faces, vertices or bodies, or axes and planes, then press P. The entire supported selection
 is projected in one undo step. A rejected projection keeps the selection for correction;
 an empty or mixed selection starts the ordinary picking tool. External sketch selections
 retain their source sketch, even when the active sketch uses the same point or curve names.
+
+A projection kept by the name of a face or edge that no longer has that name (a change before
+the sketch removed it or made it again) fails the sketch, and the features built on it fail too.
+The sketch's message names each such projection by its source and its curves: `Outline:
+projected face of Block (curves l5, l6, l7, l8) is lost; delete the projection or project it
+again`. When several are lost it gives their number and lists the first three. In its editor
+the sketch shows its last geometry, the lost projections in the lost colour; deleting a lost
+projection's curves there removes it. **Redefine Sketch Plane** still moves the sketch to
+another plane, where it fails for the same projections, and so it does when the sketch's own
+plane was lost as well: it then names the projections it lost. Shown in the browser or at the
+timeline marker, the sketch draws its last geometry too; its profiles and edges can't be picked
+or used by a new feature until it builds again.
 
 A sketch on a construction plane built from the model (through a sketch line, through three
 points, midway between two faces…) projects, intersects, includes and holds text like a sketch
@@ -339,7 +352,8 @@ argument, the same way `"mid:<line>"` and `"on:<curve>:x,y"` work.
 
 With Preferences › Sketch › **Line up with other sketch points while drawing** turned on (it's
 off by default), the pointer also **lines up** while drawing with the sketch's points on screen:
-line ends, centres, standalone points and the origin, and the shape's own earlier points. It
+line ends, centres, standalone points and the origin, and the shape's own earlier points. It also
+lines up with the midpoint of a line you just hovered, whose dotted guide is showing. It
 lines up on both axes at once, level with one point and plumb with another, so a rectangle drawn
 beside another can take its height from one and its width from a point below. A line kept
 horizontal or vertical from its start can still end under or beside another point. A dotted guide
@@ -349,6 +363,13 @@ point it lined up with, in the shape's undo step, unless the sketch already sets
 preference off, drawing lines up only with the previous point, one axis at a time.
 
 Enable **3D Sketch** in the Sketch Palette to draw lines, fit splines and points off the plane.
+
+Enable **Select 3D sketch curve points** in **Preferences > Sketch** to show and select drawn
+3D curve points as construction references after finishing the sketch. This option is off by default.
+For example, choose **Offset Plane**, select its base plane, then select a spline point in
+the **Through point** field. The plane follows that point when the curve is edited. Interior
+points work as well as endpoints, and references use their full 3D positions. Hole placement
+continues to use planar sketch points; drawn 3D curve points are not Hole targets.
 While placing these points, you can snap to points on other visible sketches. For a bridge
 line, start Line and click an endpoint on each source sketch; each endpoint uses its source
 plane, even when that plane differs from the active sketch. These snaps capture positions;
@@ -567,8 +588,9 @@ Choose a circle's centre point to keep a circular pattern centred on that circle
 placed in empty space becomes a sketch point that can be dimensioned or made coincident.
 Double-click the pattern badge (at the circular centre or beside the rectangular seed), or
 right-click a seed or copy and choose **Edit Sketch Pattern**, to change quantity, spacing,
-direction or total angle. Confirmed edits preserve surviving instance ids; Cancel discards
-the preview. Pattern settings survive save/reopen and undo/redo. Deleting a seed, copy or
+direction, total angle or the entities it copies. Confirmed edits preserve surviving instance
+ids, except that changing the entities rebuilds every copy, so dimensions and relations on the
+old copies are lost; Cancel discards the preview. Pattern settings survive save/reopen and undo/redo. Deleting a seed, copy or
 pattern relation breaks that association and leaves the remaining geometry independent.
 Patterns saved by older versions remain independent copies; recreate them to add associations.
 
