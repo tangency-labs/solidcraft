@@ -1748,6 +1748,51 @@ fn an_open_hole_rim_on_a_round_wall_projects_along_the_hole_as_an_arc_of_its_cir
     assert!(sweep.abs() < std::f64::consts::TAU - 1e-6, "sweep {sweep}");
 }
 
+/// #12920, a full turn: a modelled thread's helical edges each wind once round the shaft's axis
+/// (the kernel splits them at the cylinder's seam), from a vertex to one a pitch along the axis
+/// at the same angle. An edge that comes in as one arc must be as long as that arc and wind no
+/// more than once: an arc of the remainder between the end vertices (none, or a sliver) would
+/// be short of the edge by a whole turn.
+#[test]
+fn an_edge_winding_a_full_turn_projects_as_no_arc_of_its_remainder() {
+    use solidcore_record::{Seg2, Vec3};
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 20, "body_name": "Shaft"}));
+    run(&mut s, "solid.thread", json!({"face": [4, 0, 10], "designation": "M8", "modeled": true}));
+    let state = s.model.state();
+    let body = &state.body("Shaft").unwrap().body;
+    let plane = solidcore_record::Plane { origin: Vec3::new(0., 0., -5.), x: Vec3::X, y: Vec3::Y };
+    // how far round the z axis an edge's polyline winds
+    let winding = |e: &solidcraft_kernel::EdgeInfo| {
+        e.points
+            .windows(2)
+            .map(|w| {
+                let (a, b) = (w[0].y.atan2(w[0].x), w[1].y.atan2(w[1].x));
+                (b - a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+            })
+            .sum::<f64>()
+    };
+    let edges = body.edges(1e-3).unwrap();
+    let mut helices = 0;
+    for e in &edges {
+        let pieces = body.planar_edges(&plane, &[e.index]).remove(0);
+        let turns = winding(e).abs() / std::f64::consts::TAU;
+        if let Some([solidcraft_kernel::PlanarPiece::Seg(Seg2::Arc { radius, sweep, .. })]) = pieces.as_deref() {
+            assert!(turns < 1.01, "edge {} winds {turns} turns and projects as an arc of sweep {sweep}", e.index);
+            assert!(
+                (sweep.abs() * radius - e.length).abs() < 0.05 * e.length.max(1.0),
+                "edge {} of length {} projects as an arc of sweep {sweep}, radius {radius}",
+                e.index,
+                e.length
+            );
+        }
+        if turns > 0.99 {
+            helices += 1;
+        }
+    }
+    assert!(helices > 0, "no edge of the thread winds a full turn");
+}
+
 /// A hook: a J of lines and two arcs about (-15, 0), of radii 7.5 and 15, extruded 20 with its
 /// top edges chamfered. Seen along the extrusion its outline is the J again. The walls are seen
 /// edge-on, but the triangles of a round wall join its two rims at slightly different angles
