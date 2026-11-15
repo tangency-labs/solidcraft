@@ -773,12 +773,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         id: "home",
         name: app.tr("ui.start_page").into(),
         interactive,
-        back: start_page::Back {
+        back: Some(start_page::Back {
             template: app.tr("home.back").into(),
             document: app.session.doc.name.as_str().into(),
             shortcut: "Esc".into(),
             chosen: FileAction::Back,
-        },
+        }),
         rail: rail(app),
         title: match app.home.section {
             Section::Start => app.tr_label("Start").into(),
