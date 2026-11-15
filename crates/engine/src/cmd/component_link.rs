@@ -134,6 +134,13 @@ fn link_refused(design: Option<&str>, link: &str) -> Result<()> {
     solidcraft_io::vfs::check_design_path(&file.to_string_lossy(), design).map_err(|e| EngineError::Other(e.to_string()))
 }
 
+/// Compare an old link with an allowed replacement without probing a refused old source.
+/// Repairing a blocked network link to a local file must not contact the old server.
+fn same_link_source(s: &Session, link: &DesignLink, file: &Path) -> bool {
+    let old = resolve(s.path.as_deref(), &link.path);
+    absolute(&old) == file || (link_refused(s.path.as_deref(), &link.path).is_ok() && same_file(&old, file))
+}
+
 /// Resolve a design's component links against its original file, before opening it from a
 /// different location (for example a recovery file) or keeping it in session history.
 pub fn resolve_design_links(doc: &mut Document, from: Option<&str>) {
@@ -162,9 +169,19 @@ struct SourceProperties {
 static READS: Mutex<Vec<LinkRead>> = Mutex::new(Vec::new());
 const READS_SIZE: usize = 256;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct SelectedConfiguration {
+    row: u64,
+    identity: Option<u64>,
+}
+
+fn selected_configuration(link: &DesignLink) -> Option<SelectedConfiguration> {
+    link.configuration.map(|row| SelectedConfiguration { row, identity: link.configuration_identity })
+}
+
 struct LinkRead {
     file: PathBuf,
-    configuration: Option<u64>,
+    configuration: Option<SelectedConfiguration>,
     bytes: u64,
     step: u64,
     faces: u64,
@@ -186,7 +203,13 @@ fn digest<T: Hash + ?Sized>(value: &T) -> u64 {
 
 /// Warnings and source properties of the last read of `file`, when it had these bytes and gave the STEP text
 /// `step` and the face names `faces`: the bodies it gives are the ones the link holds.
-fn unchanged_read(file: &Path, configuration: Option<u64>, bytes: u64, step: u64, faces: u64) -> Option<(Vec<String>, Vec<SourceProperties>)> {
+fn unchanged_read(
+    file: &Path,
+    configuration: Option<SelectedConfiguration>,
+    bytes: u64,
+    step: u64,
+    faces: u64,
+) -> Option<(Vec<String>, Vec<SourceProperties>)> {
     let file = absolute(file);
     let reads = READS.lock().ok()?;
     reads
@@ -197,7 +220,7 @@ fn unchanged_read(file: &Path, configuration: Option<u64>, bytes: u64, step: u64
 
 fn remember_read(
     file: &Path,
-    configuration: Option<u64>,
+    configuration: Option<SelectedConfiguration>,
     bytes: u64,
     feature: &solidcraft_io::StepFeature,
     faces: &[Vec<String>],
@@ -242,12 +265,12 @@ fn configuration_key<'a>(p: &'a Value, default: Option<u64>, cmd: &str) -> Resul
 }
 
 /// Resolve a name once. Links keep the row's stable id through source row renames.
-fn configuration_id(bytes: &[u8], key: Option<RowKey<'_>>) -> Result<Option<u64>> {
+fn configuration_id(bytes: &[u8], key: Option<RowKey<'_>>) -> Result<Option<SelectedConfiguration>> {
     let Some(key) = key else { return Ok(None) };
     let doc = solidcraft_io::read_design(bytes).map_err(|e| EngineError::Other(e.to_string()))?;
     doc.configs
         .row(key)
-        .map(|row| Some(row.id))
+        .map(|row| Some(SelectedConfiguration { row: row.id, identity: doc.configs.row_identity(row.id) }))
         .ok_or_else(|| EngineError::Other(format!("configuration `{key}` does not exist in the source design")))
 }
 
@@ -280,7 +303,12 @@ pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
 
 /// The solid bodies of `bytes`, the design at `file`, as an Import feature. The model the file
 /// keeps is its evaluation when this build saved it for exactly that design, as when it is opened.
-fn design_bodies(file: &Path, bytes: &[u8], configuration: Option<u64>, validation: solidcraft_kernel::Validation) -> Result<Linked> {
+fn design_bodies(
+    file: &Path,
+    bytes: &[u8],
+    configuration: Option<SelectedConfiguration>,
+    validation: solidcraft_kernel::Validation,
+) -> Result<Linked> {
     #[cfg(test)]
     EVALUATED.with(|n| n.set(n.get() + 1));
     let shown = file.display().to_string();
@@ -292,11 +320,16 @@ fn design_bodies(file: &Path, bytes: &[u8], configuration: Option<u64>, validati
     } else {
         (solidcraft_io::read_design(bytes).map_err(fail)?, None)
     };
+    if let Some(selected) = configuration
+        && doc.configs.row_identity(selected.row) != selected.identity
+    {
+        return Err(EngineError::Other(format!("{shown}: configuration `{}` was replaced; select a configuration again", selected.row)));
+    }
     let mut part = Session::opened_at_validating(doc, saved.as_ref(), Some(&shown), validation);
-    if let Some(row) = configuration {
+    if let Some(selected) = configuration {
         // Use the same rule, rebuild and style validation as an interactive activation.
         // Its scratch evaluation cannot use the saved geometry of another row.
-        part.execute("config.activate", &json!({"row": row})).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
+        part.execute("config.activate", &json!({"row": selected.row})).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
     }
     let (name, feature, faces, metadata, properties) = session_bodies(&part, &shown)?;
     remember_read(file, configuration, digest(bytes), &feature, &faces, &properties);
@@ -632,7 +665,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             .doc
             .links
             .iter()
-            .find(|(_, link)| link.configuration == configuration && absolute(&resolve(s.path.as_deref(), &link.path)) == file)
+            .find(|(_, link)| selected_configuration(link) == configuration && absolute(&resolve(s.path.as_deref(), &link.path)) == file)
             .map(|(id, _)| *id);
         if let Some(component) = existing {
             let parent = if p.get("parent").is_some() { component_key(s, p, "parent", cmd)? } else { s.active_component };
@@ -678,7 +711,14 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     let path = stored(s.path.as_deref(), &file);
     s.doc_mut().links.insert(
         comp,
-        DesignLink { path: file.to_string_lossy().into_owned(), feature: id, configuration, inherited: Vec::new(), file_sha256: Some(read) },
+        DesignLink {
+            path: file.to_string_lossy().into_owned(),
+            feature: id,
+            configuration: configuration.map(|c| c.row),
+            configuration_identity: configuration.and_then(|c| c.identity),
+            inherited: Vec::new(),
+            file_sha256: Some(read),
+        },
     );
     s.refresh();
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
@@ -757,7 +797,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             .filter(|_| !link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some()))
             .map(|f| digest(f.link_faces.as_slice()));
         if let Some((known, properties)) =
-            kept_faces.and_then(|faces| unchanged_read(&file, link.configuration, digest(bytes.as_slice()), digest(old.as_bytes()), faces))
+            kept_faces.and_then(|faces| unchanged_read(&file, selected_configuration(&link), digest(bytes.as_slice()), digest(old.as_bytes()), faces))
         {
             warnings.extend(known);
             // Another component or session may have evaluated this source first. Its
@@ -769,7 +809,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             }
             continue;
         }
-        let (_, sf, faces, _, properties) = match design_bodies(&file, &bytes, link.configuration, s.validation()) {
+        let (_, sf, faces, _, properties) = match design_bodies(&file, &bytes, selected_configuration(&link), s.validation()) {
             Ok(read) => read,
             Err(e) if go_on => {
                 // It keeps its bodies, so it has not taken this file in yet.
@@ -883,10 +923,13 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     if s.path.as_deref().is_some_and(|own| same_file(Path::new(own), &file)) {
         return Err(bad(cmd, "a design can't be linked into itself"));
     }
-    let same_source = absolute(&resolve(s.path.as_deref(), &link.path)) == file;
+    let same_source = same_link_source(s, &link, &file);
     let selection = configuration_key(p, if same_source { link.configuration } else { None }, cmd)?;
     let bytes = read_link(&file, s.path.as_deref()).map_err(|e| bad(cmd, e.to_string()))?;
     let configuration = configuration_id(&bytes, selection).map_err(|e| bad(cmd, e.to_string()))?;
+    if same_source && p.get("configuration").is_none() && configuration != selected_configuration(&link) {
+        return Err(bad(cmd, "the selected configuration was replaced; select a configuration again"));
+    }
     if let Some(occurrence) = lone_placement(s, p, comp, cmd)? {
         return relink_placement(s, comp, &link, occurrence, given, &file, configuration);
     }
@@ -916,7 +959,16 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
         f.kind = sf.kind;
         f.link_faces = faces;
     }
-    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), file_sha256: Some(read), configuration, ..link.clone() });
+    s.doc_mut().links.insert(
+        comp,
+        DesignLink {
+            path: file.to_string_lossy().into_owned(),
+            file_sha256: Some(read),
+            configuration: configuration.map(|c| c.row),
+            configuration_identity: configuration.and_then(|c| c.identity),
+            ..link.clone()
+        },
+    );
     s.refresh();
     if let Some(error) = s.model.result(link.feature).and_then(|r| r.error.clone()) {
         return Err(bad(cmd, error));
@@ -978,16 +1030,19 @@ fn relink_placement(
     occurrence: u64,
     given: &str,
     file: &Path,
-    configuration: Option<u64>,
+    configuration: Option<SelectedConfiguration>,
 ) -> Result<Value> {
     let cmd = "component.relink";
-    if absolute(&resolve(s.path.as_deref(), &link.path)) == file && link.configuration == configuration {
+    if same_link_source(s, link, file) && selected_configuration(link) == configuration {
         return Err(bad(cmd, "that placement already shows this design"));
     }
     let parent = s.doc.occurrences.iter().find(|o| o.id == occurrence).map_or(0, |o| o.parent);
     let old = s.model.state();
-    let made = insert_design(s, &json!({"path": given, "parent": parent, "reuse": true, "configuration": configuration}))?;
+    let made = insert_design(s, &json!({"path": given, "parent": parent, "reuse": true, "configuration": configuration.map(|c| c.row)}))?;
     let linked = made["component"].as_u64().ok_or_else(|| bad(cmd, "the linked component was not created"))?;
+    if s.doc.links.get(&linked).and_then(selected_configuration) != configuration {
+        return Err(bad(cmd, "the selected configuration changed while relinking; try again"));
+    }
     let feature = s.doc.links.get(&linked).map(|l| l.feature).ok_or_else(|| bad(cmd, "the design was not linked"))?;
     let geometry_changed = match (s.doc.feature(link.feature).map(|f| &f.kind), s.doc.feature(feature).map(|f| &f.kind)) {
         (Some(FeatureKind::Import { step: was, .. }), Some(FeatureKind::Import { step, .. })) => was != step,

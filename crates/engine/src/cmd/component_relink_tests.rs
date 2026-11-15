@@ -1066,6 +1066,67 @@ fn linked_configurations_reject_invalid_or_deleted_rows_without_retargeting() {
 }
 
 #[test]
+fn linked_configurations_reject_row_ids_recycled_after_source_undo() {
+    for legacy in [false, true] {
+        let dir = folder(if legacy { "configuration-undo-legacy" } else { "configuration-undo" });
+        let file = dir.join("family.sc");
+        let assembly = dir.join("assembly.sc");
+        let (mut source, _, _) = configured_part(&file);
+        run(&mut source, "config.row", json!({"name": "Victim", "values": {"L": "35 mm"}}));
+        let row = source.doc.configs.rows.iter().find(|r| r.name == "Victim").unwrap().id;
+        if legacy {
+            source.doc_mut().configs.row_identities.remove(&row);
+        }
+        run(&mut source, "file.save", json!({"path": file}));
+        let mut s = Session::default();
+        let inserted = run(&mut s, "component.insert_design", json!({"path": file, "configuration": row, "reuse": true}));
+        let component = inserted["component"].as_u64().unwrap();
+        let occurrence = inserted["occurrence"].as_u64().unwrap();
+        let identity = s.doc.links[&component].configuration_identity;
+        assert_eq!(identity.is_none(), legacy);
+        run(&mut s, "file.save", json!({"path": assembly}));
+        let mut reopened = Session::default();
+        run(&mut reopened, "doc.open", json!({"path": assembly}));
+        assert_eq!(reopened.doc.links[&component].configuration_identity, identity);
+        s = reopened;
+
+        run(&mut source, "edit.undo", json!({}));
+        // The replacement deliberately has identical geometry: another link can warm the
+        // shared read cache, but neither that cache nor reuse may bypass the identity check.
+        run(&mut source, "config.row", json!({"name": "Replacement", "values": {"L": "35 mm"}}));
+        let replacement = source.doc.configs.rows.iter().find(|r| r.name == "Replacement").unwrap().id;
+        assert_eq!(replacement, row, "the source counter rewound with undo");
+        assert_ne!(source.doc.configs.row_identity(row), identity);
+        run(&mut source, "file.save", json!({"path": file}));
+        let fresh = run(&mut s, "component.insert_design", json!({"path": file, "configuration": row, "reuse": true}));
+        let fresh_component = fresh["component"].as_u64().unwrap();
+        assert_ne!(fresh_component, component, "a replacement row must not reuse the stale definition");
+        let before = s.doc.clone();
+        let undo = s.undo.len();
+        for (command, params) in
+            [("component.update_links", json!({"component": component})), ("component.relink", json!({"component": component, "path": file}))]
+        {
+            let error = s.execute(command, &params).unwrap_err().to_string();
+            assert!(error.contains("replaced"), "{error}");
+            assert_eq!(s.doc, before);
+            assert_eq!(s.undo.len(), undo);
+            assert_variant_length(&mut s, occurrence, 35.0);
+        }
+        let result = run(&mut s, "component.update_links", json!({"components": [component, fresh_component]}));
+        assert_eq!(result["failed"][0]["component"], component);
+        assert_eq!(s.doc.links[&component], before.links[&component]);
+        // An explicit selection intentionally accepts the replacement and records its identity.
+        run(&mut s, "component.relink", json!({"component": component, "path": file, "configuration": row}));
+        assert_eq!(s.doc.links[&component].configuration_identity, source.doc.configs.row_identity(row));
+        run(&mut source, "config.row", json!({"name": row, "rename": "Renamed", "values": {"L": "80 mm"}}));
+        run(&mut source, "file.save", json!({"path": file}));
+        run(&mut s, "component.update_links", json!({"component": component}));
+        assert_variant_length(&mut s, occurrence, 80.0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
 fn relinking_one_occurrence_selects_a_configuration_and_keeps_other_placements() {
     let dir = folder("configuration-placement");
     let file = dir.join("family.sc");
@@ -1104,6 +1165,37 @@ fn relinking_one_occurrence_selects_a_configuration_and_keeps_other_placements()
     run(&mut s, "component.relink", json!({"component": linked, "path": other}));
     assert_eq!(s.doc.links[&linked].configuration, None, "a different file does not inherit source-local row ids");
     assert!((volume(&mut s) - (2500.0 + 9000.0)).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn relinking_through_a_source_alias_preserves_the_selected_configuration() {
+    let dir = folder("configuration-alias");
+    let file = dir.join("family.sc");
+    let alias = dir.join("alias.sc");
+    let (mut source, short, long) = configured_part(&file);
+    run(&mut source, "config.activate", json!({"row": long}));
+    run(&mut source, "file.save", json!({"path": file}));
+    std::os::unix::fs::symlink(&file, &alias).unwrap();
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": file, "configuration": short}));
+    let component = inserted["component"].as_u64().unwrap();
+    let occurrence = inserted["occurrence"].as_u64().unwrap();
+    for path in [&alias, &file] {
+        let result = run(&mut s, "component.relink", json!({"component": component, "path": path}));
+        assert_eq!(result["geometry_changed"], false);
+        assert_eq!(s.doc.links[&component].configuration, Some(short));
+        assert_variant_length(&mut s, occurrence, 25.0);
+    }
+    // Repairing a refused old source must still work, without treating it as an alias.
+    s.doc_mut().links.get_mut(&component).unwrap().path = r"\\blocked-link-server\parts\family.sc".into();
+    run(&mut s, "component.relink", json!({"component": component, "path": file}));
+    assert_eq!(s.doc.links[&component].configuration, None);
+    run(&mut s, "component.relink", json!({"component": component, "path": file, "configuration": short}));
+    run(&mut s, "component.relink", json!({"component": component, "path": alias, "configuration": null}));
+    assert_eq!(s.doc.links[&component].configuration, None);
+    assert_variant_length(&mut s, occurrence, 30.0);
     let _ = std::fs::remove_dir_all(dir);
 }
 

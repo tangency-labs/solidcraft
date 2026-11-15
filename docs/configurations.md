@@ -35,8 +35,8 @@ face appearances keep their existing priority. Physical material changes affect 
 `delete` to remove it. Names must be unique. To remove a style column, use
 `config.column` with `material` or `appearance` set to the target body and `delete: true`.
 
-Each row also has a fixed id, which `config.table` lists with the row. A rename keeps the id, and a
-deleted row's id is never given to another row. `config.activate` and `config.preview` take `row`
+Each row also has a fixed id, which `config.table` lists with the row. A rename keeps the id.
+Deleting a row does not recycle its id, but undoing its creation can. `config.activate` and `config.preview` take `row`
 as a name or an id. `config.row` takes `name` and `from` the same way. A row picked by its id
 must exist. A name it doesn't find adds a new row. A number is always an id and text is always a
 name, so a row named `"17"` is not row `17`. The table still saves the active row by its name.
@@ -60,8 +60,11 @@ with rows `M6x20` and `M6x30` can supply both sizes in one assembly:
 {"command":"component.insert_design","params":{"path":"bolt.sc","name":"Long bolt","configuration":"M6x30","translate":[20,0,0]}}
 ```
 
-The source file stays unchanged. The assembly stores the selected row's stable id, so
-renaming the row preserves the link. `component.update_links` reapplies that row even when
+The source file stays unchanged. The assembly stores the selected row's id and creation
+identity, so renaming the row preserves the link. Undoing row creation and adding another
+row cannot retarget the link, even if the numeric id is reused. Older rows without a creation
+identity keep that absence; a newly created row has a different identity.
+`component.update_links` reapplies the selected row even when
 the source has another row active. Deleting the selected row reports an error and keeps the
 last linked bodies; creating a new row with the old name does not retarget the link.
 `component.links` includes `configuration` with the stored row id for selected links.
@@ -79,8 +82,9 @@ occurrence ids returned by insertion; for example, if they are 7 and 12:
 {"command":"component.relink","params":{"component":7,"occurrence":12,"path":"bolt.sc","configuration":"M6x30"}}
 ```
 
-Relinking the same source without `configuration` preserves the selected row. Relinking a
-different source without it follows that file's saved state. Explicit `null` clears the
+Relinking the same source, including a symlink alias, without `configuration` preserves the
+selected row. If the row was replaced, select the replacement explicitly to accept it.
+Relinking a different source without `configuration` follows that file's saved state. Explicit `null` clears the
 selection in either case. Save, reopen, undo and redo preserve the selection. The assembly
 can still open with its last linked bodies when the source file is unavailable.
 
