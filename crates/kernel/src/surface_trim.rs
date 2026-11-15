@@ -65,25 +65,36 @@ pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> 
     trim_split(body, tool, keep, None)
 }
 
-/// A surface body trimmed by face `face` of `tool` itself, keeping what `keep` says: the face
-/// must cut the body through on its own. Refused when part of the cut lies off the face (past
-/// its edges, where only its surface extended meets the body): the face's own cut then ends
-/// inside the body and separates nothing, and the face's surface continued past its edges is
-/// not what was picked. The test is exact: every edge the cut made lies on the face's surface
-/// and inside its trim ([`solidcore_ops::cap::edges_lie_on_face`]), within the larger of the
-/// two bodies' tolerances. Each kept face is the face it is a piece of (its history is over
-/// `[body]`).
+/// A surface body trimmed by face `face` of `tool` itself, keeping what `keep` says. The body
+/// is cut where the face's surface meets it, and every edge of that cut between a piece kept and
+/// a piece taken away must lie on the face: on its surface and inside its trim, by the exact test
+/// ([`solidcore_ops::cap::edges_lie_on_face`]) within the larger of the two bodies' tolerances.
+/// Otherwise the trim is refused: the face does not cut the body through on its own, and what
+/// would separate the pieces is only its surface continued past its edges. A cut off the face
+/// with kept pieces on both sides of it changes nothing that is kept, and is allowed. Each kept
+/// face is the face it is a piece of (its history is over `[body]`).
 pub fn trim_by_face(body: &Body, tool: &Body, face: usize, keep: TrimKeep) -> Result<Body> {
     trim_split(body, &SplitTool::Face { body: tool, face }, keep, Some((tool, face)))
 }
 
-/// The cut of `split` (the edges the split made) on face `face` of `tool`, or the refusal.
-fn cut_lies_on_face(split: &Body, tool: &Body, face: usize) -> Result<()> {
-    let cut = crate::splitface::cut_edges(split);
+/// Whether every edge of the cut of `split` between a kept piece and one taken away (`kept`, in
+/// `split`'s face order) lies on face `face` of `tool`; the refusal when one does not.
+fn cut_held_to_face(split: &Body, kept: &[bool], tool: &Body, face: usize) -> Result<()> {
+    let parting: Vec<usize> = crate::splitface::cut_edges(split)
+        .into_iter()
+        .filter(|(_, faces)| {
+            let sides: Vec<bool> = faces.iter().filter_map(|f| kept.get(*f).copied()).collect();
+            sides.iter().any(|k| *k) && sides.iter().any(|k| !*k)
+        })
+        .map(|(e, _)| e)
+        .collect();
+    if parting.is_empty() {
+        return Ok(());
+    }
     let (ops_tool, tool_order) = tool.ops_body().ok_or_else(|| KernelError::Failed("trim: the tool body can't be read exactly".into()))?;
     let (ops_split, split_order) = split.ops_body().ok_or_else(|| KernelError::Failed("trim: the cut surface can't be read exactly".into()))?;
     let tolerance = split.record().tolerance.max(tool.record().tolerance);
-    let on = solidcore_ops::cap::edges_lie_on_face(ops_tool, tool_order, face, ops_split, split_order, &cut, tolerance)
+    let on = solidcore_ops::cap::edges_lie_on_face(ops_tool, tool_order, face, ops_split, split_order, &parting, tolerance)
         .map_err(|e| KernelError::Failed(format!("trim: where the cut lies: {e}")))?;
     if on {
         return Ok(());
@@ -99,9 +110,6 @@ fn trim_split(body: &Body, tool: &SplitTool, keep: TrimKeep, on_face: Option<(&B
     keep.check()?;
     let all: Vec<usize> = (0..body.face_count()).collect();
     let (split, _) = crate::splitface::split_any(body, &all, tool)?;
-    if let Some((tool_body, face)) = on_face {
-        cut_lies_on_face(&split, tool_body, face)?;
-    }
     let kept: Vec<bool> = match keep {
         TrimKeep::Side(p) if crate::splitface::field_count(tool)? == 1 => {
             let side = ToolSide::of(tool, body)?;
@@ -125,6 +133,9 @@ fn trim_split(body: &Body, tool: &SplitTool, keep: TrimKeep, on_face: Option<(&B
     };
     if !kept.iter().any(|k| *k) {
         return Err(KernelError::Invalid("nothing is left on that side of the tool".into()));
+    }
+    if let Some((tool_body, face)) = on_face {
+        cut_held_to_face(&split, &kept, tool_body, face)?;
     }
     let dropped: Vec<usize> = kept.iter().enumerate().filter(|(_, k)| !**k).map(|(i, _)| i).collect();
     let trimmed = if dropped.is_empty() { split.clone() } else { crate::remove_faces(&split, &dropped)? };
@@ -416,7 +427,7 @@ mod tests {
     /// crosses the sheet from edge to edge (y = −5…25) cuts it: the side of x = 0 keeps 5 × 20.
     /// A face that stops inside it (y = 5…15) cuts nothing through on its own (only its plane,
     /// extended past its edges, would), so the trim is refused instead of cutting along the
-    /// extension.
+    /// extension, unless pieces on both sides of that cut are kept.
     #[test]
     fn a_tool_face_must_cut_the_surface_through() {
         let sq = rect(&Plane::XY, 0.0, 0.0, 20.0, 20.0);
@@ -427,6 +438,11 @@ mod tests {
         let short = rect(&at5, 5.0, -5.0, 15.0, 5.0);
         let e = trim_by_face(&sq, &short, 0, TrimKeep::Side(Vec3::new(1.0, 10.0, 0.0))).unwrap_err().to_string();
         assert!(e.contains("does not cut the surface through"), "{e}");
+        // Kept on both sides, the cut along the extension parts nothing kept from anything taken
+        // away, so it is allowed: the whole sheet stays.
+        let both = TrimKeep::Regions(&[Vec3::new(1.0, 10.0, 0.0), Vec3::new(19.0, 10.0, 0.0)]);
+        let whole = trim_by_face(&sq, &short, 0, both).unwrap();
+        assert!(rel(area(&whole), 400.0) < 1e-9, "{}", area(&whole));
     }
 
     #[test]
