@@ -3514,3 +3514,19 @@ fn whole_edge_keeps_corners_tangent_arcs_and_authored_splits_apart() {
         assert_eq!(whole_edge(&capped, e), ring, "ring {ring:?}");
     }
 }
+
+/// A curve chain picked by edge index walks from that edge, even where a picked point would be
+/// ambiguous: every edge of a box (each a chain of its own) at the corner all three share, and an
+/// index the body does not have is refused.
+#[test]
+fn a_curve_chain_by_edge_index_starts_from_that_edge() {
+    let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    let at_corner: Vec<usize> = [Vec3::new(5.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 15.0)].map(|p| edge_near(&b, p)).to_vec();
+    for &e in &at_corner {
+        let chain = crate::curve_chain_of_edges(&b, &[e], solidcraft_geom::TANGENT_CHAIN).unwrap();
+        assert_eq!(chain, vec![e], "edge {e}");
+    }
+    let count = b.record().edges.len();
+    assert!(crate::curve_chain_of_edges(&b, &[count], solidcraft_geom::TANGENT_CHAIN).is_err());
+    assert!(crate::curve_chain_of_edges(&b, &[], solidcraft_geom::TANGENT_CHAIN).is_err());
+}

@@ -255,6 +255,53 @@ fn sweep_path_tangent_chain_brings_the_smooth_outline() {
     assert_eq!(top(&h), vec![pick]);
 }
 
+/// Tangent Chain keeps every edge picked by hand: two edges of one chain picked before it is
+/// ticked both come back when it is unticked, and a marquee that replaces an expanded chain with
+/// one of its edges brings that edge's chain (not nothing) and that edge alone when unticked.
+#[test]
+fn tangent_chain_keeps_each_hand_picked_edge() {
+    let mut h = Harness::new();
+    let (index, at) = rounded_block(&mut h);
+    let world = crate::open_meshing::session_world(&h.app.session);
+    // The straight top back edge: every point of it at y = 20, z = 10.
+    let back = world
+        .body("B")
+        .unwrap()
+        .mesh()
+        .edges
+        .iter()
+        .position(|e| e.len() > 1 && e.iter().all(|p| (p.y - 20.0).abs() < 1e-6 && (p.z - 10.0).abs() < 1e-6))
+        .unwrap();
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.sweep"}})).unwrap();
+    h.frames(3);
+    let top = |h: &Harness| -> Vec<Sel> { h.app.dialog.as_ref().unwrap().inputs[1].items.clone() };
+    h.app.dialog.as_mut().unwrap().active = 1;
+    let front = Sel::Edge { body: "B".into(), index, point: at };
+    let back = Sel::Edge { body: "B".into(), index: back, point: Vec3::new(20.0, 20.0, 10.0) };
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, front.clone());
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, back.clone());
+    h.frames(2);
+    assert_eq!(top(&h), vec![front.clone(), back.clone()]);
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert_eq!(top(&h).len(), 8, "{:?}", top(&h));
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert_eq!(top(&h), vec![front.clone(), back.clone()], "both hand-picked edges come back");
+    // Ticked again (8 edges), a marquee taking only the back edge replaces the chain with its own.
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert_eq!(top(&h).len(), 8);
+    h.app.dialog.as_mut().unwrap().take_box(&h.app.session, vec![back.clone()], false);
+    h.frames(2);
+    let chain = top(&h);
+    assert_eq!(chain.len(), 8, "{chain:?}");
+    assert_eq!(chain[0], back, "{chain:?}");
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert_eq!(top(&h), vec![back]);
+}
+
 /// Every input that takes a chain of edges offers Tangent Chain, off: both Sweeps' Path, the
 /// Surface Loft's sections, Blend's two edge sets, Boundary's curves, Patch's boundary and
 /// Ruled's edges.
