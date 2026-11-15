@@ -1698,8 +1698,9 @@ fn scale_about_another_base_point_keeps_the_profile() {
     let ids: Vec<String> = curves.iter().map(|c| c.to_string()).collect();
     assert!(box_is(&sk, &ids, [-20.0, -10.0], [60.0, 30.0]), "{:?}", bounds(&sk, &ids));
     let (p, q) = (sk.point(sk.resolve_point("l1.start").unwrap()).unwrap(), sk.point(sk.resolve_point("l1.end").unwrap()).unwrap());
-    assert!(p.dist(Vec2::new(-10.0, -10.0)) < 1e-6 && q.dist(Vec2::new(50.0, -10.0)) < 1e-6, "l1: {p:?} {q:?}");
-    let area = 80.0 * 40.0 - (4.0 - std::f64::consts::PI) * 100.0;
+    assert!((p.x + 10.0).abs() < 1e-6 && (p.y + 10.0).abs() < 1e-6 && (q.x - 50.0).abs() < 1e-6 && (q.y + 10.0).abs() < 1e-6, "l1: {p:?} {q:?}");
+    // 80 × 40 − (4 − π) × 10² = 3114.159265358979, the issue's expected volume at height 1.
+    let area = 3114.159265358979;
     assert!((profiles(&s)[0] - area).abs() < 1e-6, "{:?}", profiles(&s));
 }
 
