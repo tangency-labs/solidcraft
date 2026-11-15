@@ -1,6 +1,7 @@
 //! A left-button drag on a free part repositions it (#2804).
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
@@ -184,6 +185,143 @@ fn either_member_of_a_floating_hinge_drags_the_whole_chain() {
         run(&mut h, "edit.undo", json!({}));
         assert_eq!(h.app.session.doc.to_json(), before);
     }
+}
+
+/// Where the drags on the two copies grab their top face: off the origin, whose axes a press on
+/// the centre picks first.
+const GRAB: Vec3 = Vec3::new(3.0, -3.0, 10.0);
+
+/// One part placed twice on the same spot, as inserting it twice does, and a free 10 mm cube
+/// beside them, seen from the top, with nothing selected. The copy whose face a press at
+/// [`GRAB`] finds first is grounded and the copy behind it is free: (harness, front copy, copy
+/// behind, cube).
+fn two_copies() -> (Harness, u64, u64, u64) {
+    let (mut h, block, cube) = two_parts();
+    let copy = run(&mut h, "occurrence.copy", json!({"occurrence": block, "translate": [0, 0, 0]}))["occurrence"].as_u64().expect("occurrence");
+    h.frames(2);
+    let at = screen(&mut h, GRAB);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.expect("a viewport"));
+    let hits = crate::viewport::pick(&h.app, &proj, at);
+    let Some(crate::viewport::Hit::Face { body, .. }) = hits.first() else { panic!("the first pick is not a face: {hits:?}") };
+    let holds = |o: u64| h.app.session.occurrence_bodies(&[o], true).is_ok_and(|b| b.contains(body));
+    let (front, behind) = if holds(copy) { (copy, block) } else { (block, copy) };
+    assert!(holds(front) && !holds(behind), "the face in front is one copy's");
+    run(&mut h, "occurrence.ground", json!({"occurrence": front, "grounded": true}));
+    run(&mut h, "occurrence.ground", json!({"occurrence": behind, "grounded": false}));
+    run(&mut h, "select.set", json!({"items": []}));
+    h.frames(2);
+    (h, front, behind, cube)
+}
+
+/// #15648: with the copy behind selected in the Browser (its row, or its body), a drag over the
+/// two copies moves that copy, though the grounded copy's face is in front, in one undo step.
+#[test]
+fn a_drag_moves_the_selected_copy_where_a_grounded_copy_is_in_front() {
+    let (mut h, front, behind, _) = two_copies();
+    let body = h.app.session.occurrence_bodies(&[behind], true).expect("bodies").first().cloned().expect("a body");
+    for selected in [Sel::Occurrence { path: vec![behind] }, Sel::Body { name: body }] {
+        run(&mut h, "select.set", json!({"items": [selected.clone()]}));
+        let undo = h.app.session.undo.len();
+        let (a, b) = (screen(&mut h, GRAB), screen(&mut h, GRAB + Vec3::new(0.0, 30.0, 0.0)));
+        press_and_move(&mut h, a, b, Default::default());
+        assert!(h.app.viewport.occurrence_drag.is_some() && h.app.viewport.boxsel.is_none(), "{selected:?}: the drag moves the selected copy");
+        release(&mut h, b);
+        assert!(origin(&h, &[behind]).dist(Vec3::new(0.0, 30.0, 0.0)) < 0.5, "{selected:?}: {:?}", origin(&h, &[behind]));
+        assert!(origin(&h, &[front]).dist(Vec3::ZERO) < 1e-9, "{selected:?}: the grounded copy stays");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "{selected:?}: one undo step for the drag");
+        run(&mut h, "edit.undo", json!({}));
+        assert!(origin(&h, &[behind]).dist(Vec3::ZERO) < 1e-9, "{selected:?}: {:?}", origin(&h, &[behind]));
+    }
+}
+
+/// With nothing selected, or with the grounded copy in front selected, a drag over the two copies
+/// draws a selection box and moves nothing.
+#[test]
+fn with_nothing_or_the_grounded_copy_selected_a_drag_on_the_copies_draws_a_selection_box() {
+    let (mut h, front, behind, _) = two_copies();
+    for selection in [vec![], vec![Sel::Occurrence { path: vec![front] }]] {
+        run(&mut h, "select.set", json!({"items": selection.clone()}));
+        let undo = h.app.session.undo.len();
+        let a = screen(&mut h, GRAB);
+        let b = a + egui::vec2(60.0, 40.0);
+        press_and_move(&mut h, a, b, Default::default());
+        assert!(h.app.viewport.occurrence_drag.is_none() && h.app.viewport.boxsel.is_some(), "{selection:?}: a selection box");
+        release(&mut h, b);
+        assert!(origin(&h, &[front]).dist(Vec3::ZERO) < 1e-9 && origin(&h, &[behind]).dist(Vec3::ZERO) < 1e-9, "{selection:?}");
+        assert_eq!(h.app.session.undo.len(), undo, "{selection:?}");
+    }
+}
+
+/// With the copy behind selected, a drag that starts on another free part moves that part: the
+/// selection decides only where the pointer is over a selected part.
+#[test]
+fn with_a_copy_selected_a_drag_on_another_free_part_moves_that_part() {
+    let (mut h, _, behind, cube) = two_copies();
+    run(&mut h, "select.set", json!({"items": [Sel::Occurrence { path: vec![behind] }]}));
+    let (a, b) = (screen(&mut h, Vec3::new(25.0, 5.0, 10.0)), screen(&mut h, Vec3::new(25.0, 35.0, 10.0)));
+    press_and_move(&mut h, a, b, Default::default());
+    release(&mut h, b);
+    assert!(origin(&h, &[cube]).dist(Vec3::new(0.0, 30.0, 0.0)) < 0.5, "{:?}", origin(&h, &[cube]));
+    assert!(origin(&h, &[behind]).dist(Vec3::ZERO) < 1e-9, "the selected copy stays: {:?}", origin(&h, &[behind]));
+}
+
+/// With the free cube selected under a grounded lid, a drag over the lid moves the cube; with a
+/// construction plane between the lid's top and the cube, the plane stops the drag reaching the
+/// cube, as a plane in front of a part stops a drag on it.
+#[test]
+fn a_selected_part_is_not_grabbed_through_a_plane_in_front_of_it() {
+    let (mut h, _, cube) = two_parts();
+    let lid = run(&mut h, "component.create", json!({"name": "Lid"}))["occurrence"].as_u64().expect("occurrence");
+    // From z = 12 to 30: the plane at z = 15 crosses it, so it is drawn over the lid.
+    run(&mut h, "solid.box", json!({"length": 10, "width": 10, "height": 18, "corner": [20, 0, 12]}));
+    run(&mut h, "component.activate", json!({"component": "root"}));
+    run(&mut h, "occurrence.ground", json!({"occurrence": lid, "grounded": true}));
+    run(&mut h, "select.set", json!({"items": [Sel::Occurrence { path: vec![cube] }]}));
+    h.frames(2);
+    let (a, b) = (screen(&mut h, Vec3::new(25.0, 5.0, 10.0)), screen(&mut h, Vec3::new(25.0, 35.0, 10.0)));
+    press_and_move(&mut h, a, b, Default::default());
+    assert!(h.app.viewport.occurrence_drag.is_some(), "the selected cube under the lid is dragged");
+    release(&mut h, b);
+    assert!(origin(&h, &[cube]).dist(Vec3::new(0.0, 30.0, 0.0)) < 0.5, "{:?}", origin(&h, &[cube]));
+    run(&mut h, "edit.undo", json!({}));
+    run(&mut h, "construct.plane.offset", json!({"base": "XY", "offset": 15}));
+    run(&mut h, "select.set", json!({"items": [Sel::Occurrence { path: vec![cube] }]}));
+    h.frames(2);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.expect("a viewport"));
+    let hits = crate::viewport::pick_all(&h.app, &proj, a);
+    let cube_bodies = h.app.session.occurrence_bodies(&[cube], true).expect("bodies");
+    let plane = hits.iter().position(|hit| matches!(hit, crate::viewport::Hit::Plane { .. }));
+    let face = hits.iter().position(|hit| matches!(hit, crate::viewport::Hit::Face { body, .. } if cube_bodies.contains(body)));
+    assert!(plane.is_some_and(|p| face.is_some_and(|f| p < f)), "the plane lies in front of the cube: {hits:?}");
+    press_and_move(&mut h, a, b, Default::default());
+    assert!(h.app.viewport.occurrence_drag.is_none() && h.app.viewport.boxsel.is_some(), "the plane in front stops the drag");
+    release(&mut h, b);
+    assert!(origin(&h, &[cube]).dist(Vec3::ZERO) < 1e-9, "{:?}", origin(&h, &[cube]));
+}
+
+/// A selected subassembly holds the parts inside it: with the Free assembly selected, a drag over
+/// a grounded lid on its part Leaf moves the whole assembly, as a drag on Leaf in the open does.
+#[test]
+fn a_selected_assembly_is_dragged_by_its_part_behind_another_part() {
+    let (mut h, _, free) = two_parts();
+    let asm = h.app.session.doc.occurrences.iter().find(|o| o.id == free).map_or(0, |o| o.component);
+    run(&mut h, "component.activate", json!({"component": asm}));
+    let leaf = run(&mut h, "component.create", json!({"name": "Leaf"}))["occurrence"].as_u64().expect("occurrence");
+    run(&mut h, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [40, 0, 0]}));
+    run(&mut h, "component.activate", json!({"component": "root"}));
+    let lid = run(&mut h, "component.create", json!({"name": "Lid"}))["occurrence"].as_u64().expect("occurrence");
+    run(&mut h, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [38, -2, 0]}));
+    run(&mut h, "component.activate", json!({"component": "root"}));
+    run(&mut h, "occurrence.ground", json!({"occurrence": lid, "grounded": true}));
+    run(&mut h, "select.set", json!({"items": [Sel::Occurrence { path: vec![free] }]}));
+    h.frames(2);
+    let (a, b) = (screen(&mut h, Vec3::new(42.0, 2.0, 4.0)), screen(&mut h, Vec3::new(42.0, 22.0, 4.0)));
+    press_and_move(&mut h, a, b, Default::default());
+    assert!(h.app.viewport.occurrence_drag.is_some() && h.app.viewport.boxsel.is_none(), "the drag moves the selected assembly");
+    release(&mut h, b);
+    assert!(origin(&h, &[free]).dist(Vec3::new(0.0, 20.0, 0.0)) < 0.5, "the assembly moves: {:?}", origin(&h, &[free]));
+    assert!(origin(&h, &[free, leaf]).dist(Vec3::new(0.0, 20.0, 0.0)) < 0.5, "with its part: {:?}", origin(&h, &[free, leaf]));
+    assert!(origin(&h, &[lid]).dist(Vec3::ZERO) < 1e-9, "the grounded lid stays");
 }
 
 fn key(h: &mut Harness, key: egui::Key, pressed: bool) {

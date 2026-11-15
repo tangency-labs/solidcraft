@@ -11,6 +11,7 @@
 //! | [`closure_traversal_from_both_sides`] | `ClosureTraversalFromBothSides` (fork tangency-labs/smlib@69c5198, WR-584) |
 //! | [`remove_shell`], [`faceuse_shell_replacement`] | `RemoveShell`, `FaceuseShellReplacement` |
 //! | [`shell_traversal`], `shell_connectivity` (private) | `ShellTraversal`, `sm_ShellConnectivity` |
+//! | `shell_traversal_to_vertices` (crate) | not upstream: `ShellTraversal` ended when the vertices it is asked about are marked |
 //! | [`is_inner_shell`] | `IsInnerShell`, `IsOdd` |
 //! | [`has_lamina_edge`] | `SmFace::HasLaminaEdge` (CO-PORTED, `topology.face_p3`; re-exported there) |
 //! | [`face_edges`] | `SmFace::GetEdges` (CO-PORTED, `topology.face_p4`, default arguments) |
@@ -38,7 +39,7 @@
 //! (WR-584). Its `std::unordered_map` side table becomes a vector indexed by face-use
 //! arena slot (lookups only, as the fork; no iteration).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{Result, SolidError};
 use crate::geom::context::{MarkLock, MarkType};
@@ -491,6 +492,10 @@ pub fn faceuse_shell_replacement(
     Ok(())
 }
 
+/// `sm_ShellConnectivity`: marks, depth first, every vertex use, vertex, face use and
+/// face that `shell` joins to `start`. Not upstream: each vertex of `asked` is taken
+/// out as it is marked, and the walk ends when that takes out the last of them. With
+/// none asked it covers everything joined to `start`.
 fn shell_connectivity(
     k: &Kernel,
     b: &Brep,
@@ -500,6 +505,7 @@ fn shell_connectivity(
     mark: MarkType,
     edgeuses: &mut Option<&mut Vec<EdgeuseId>>,
     faceuses: &mut Option<&mut Vec<FaceuseId>>,
+    asked: &mut BTreeSet<VertexId>,
 ) -> Result<()> {
     marks.mark(k, Entity::Vertexuse(start), mark);
     let mut stack = vec![start];
@@ -538,12 +544,16 @@ fn shell_connectivity(
             let f = required(b.faceuse(fu)?.face)?;
             if !marks.is_marked(k, Entity::Face(f), mark) {
                 marks.mark(k, Entity::Face(f), mark);
+                k.work_counters.add_shell_traversal_face();
                 propagate.push(fu);
             }
         }
         let v = required(b.vertexuse(vu)?.vertex)?;
         if !marks.is_marked(k, Entity::Vertex(v), mark) {
             marks.mark(k, Entity::Vertex(v), mark);
+            if asked.remove(&v) && asked.is_empty() {
+                return Ok(());
+            }
             for next in vertex::vertexuses(b, v)? {
                 if !marks.is_marked(k, Entity::Vertexuse(next), mark)
                     && vertexuse::shell(b, next)? == Some(shell)
@@ -597,9 +607,48 @@ pub fn shell_traversal_with_marks(
     marks: &mut (impl FaceTraversalMarks + ?Sized),
     start: VertexId,
     shell: ShellId,
+    edgeuses: Option<&mut Vec<EdgeuseId>>,
+    faceuses: Option<&mut Vec<FaceuseId>>,
+    lock: &MarkLock,
+) -> Result<()> {
+    let mut all = BTreeSet::new();
+    shell_walk(
+        k, b, marks, start, shell, edgeuses, faceuses, lock, &mut all,
+    )
+}
+
+/// [`shell_traversal_with_marks`] for a caller that asks only which of the vertices
+/// `asked` the shell still joins to `start` (not upstream). The mark advances once and
+/// the walk marks in the same order, but it ends as it marks the last vertex of `asked`.
+/// Each of them is taken out of `asked` as it is marked: those left were not reached,
+/// and the walk then covered everything joined to `start`, as it does with none asked.
+/// The marks of a walk cut short answer for `asked` and nothing else.
+///
+/// # Errors
+/// Those of [`shell_traversal`], as far as the walk goes.
+pub(crate) fn shell_traversal_to_vertices(
+    k: &mut Kernel,
+    b: &Brep,
+    marks: &mut (impl FaceTraversalMarks + ?Sized),
+    start: VertexId,
+    shell: ShellId,
+    asked: &mut BTreeSet<VertexId>,
+    lock: &MarkLock,
+) -> Result<()> {
+    shell_walk(k, b, marks, start, shell, None, None, lock, asked)
+}
+
+/// `ShellTraversal`, ending early for `asked` as [`shell_connectivity`] does.
+fn shell_walk(
+    k: &mut Kernel,
+    b: &Brep,
+    marks: &mut (impl FaceTraversalMarks + ?Sized),
+    start: VertexId,
+    shell: ShellId,
     mut edgeuses: Option<&mut Vec<EdgeuseId>>,
     mut faceuses: Option<&mut Vec<FaceuseId>>,
     lock: &MarkLock,
+    asked: &mut BTreeSet<VertexId>,
 ) -> Result<()> {
     if let Some(out) = &mut edgeuses {
         out.clear();
@@ -620,6 +669,7 @@ pub fn shell_traversal_with_marks(
                 lock.mark_type(),
                 &mut edgeuses,
                 &mut faceuses,
+                asked,
             )?;
             break;
         }
@@ -867,6 +917,49 @@ mod tests {
             .iter()
             .enumerate()
             .all(|(i, v)| v.index() as usize == i));
+    }
+
+    #[test]
+    fn a_shell_walk_asked_about_vertices_ends_at_the_last_of_them() {
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 10.0, 20.0, 30.0)
+            .unwrap();
+        let vertices = b.vertex_list().to_vec();
+        assert_eq!(vertices.len(), 8);
+        let start = vertices[0];
+        let shell = vertexuse::shell(&b, vertex::vertexuses(&b, start).unwrap()[0])
+            .unwrap()
+            .unwrap();
+        let lock = MarkLock::new(
+            std::slice::from_mut(&mut k.context),
+            0,
+            crate::geom::context::ALL_MARKS,
+        )
+        .unwrap();
+        // the faces a walk asked about `asked` marks, the vertices it marks, those it leaves
+        let mut walk = |asked: &[VertexId]| {
+            let mut marks = Marks::default();
+            let mut left: BTreeSet<VertexId> = asked.iter().copied().collect();
+            let before = k.work_counters.shell_traversal_faces();
+            shell_traversal_to_vertices(&mut k, &b, &mut marks, start, shell, &mut left, &lock)
+                .unwrap();
+            let faces = k.work_counters.shell_traversal_faces() - before;
+            let marked = vertices
+                .iter()
+                .filter(|&&v| marks.is_marked(&k, Entity::Vertex(v), lock.mark_type()))
+                .count();
+            (faces, marked, left)
+        };
+        // nothing asked: everything the shell joins to the start, as `shell_traversal`
+        assert_eq!(walk(&[]), (6, 8, BTreeSet::new()));
+        // the start alone: the face of its first use, and no further
+        assert_eq!(walk(&[start]), (1, 1, BTreeSet::new()));
+        // every vertex: each one marked, as the whole walk marks them
+        let (_, marked, left) = walk(&vertices);
+        assert_eq!((marked, left), (8, BTreeSet::new()));
+        // a vertex the shell does not join is left, after the whole walk
+        let stray = VertexId::from_index(u32::MAX);
+        assert_eq!(walk(&[start, stray]), (6, 8, BTreeSet::from([stray])));
     }
 
     #[test]

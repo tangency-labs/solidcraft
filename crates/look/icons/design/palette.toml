@@ -186,7 +186,7 @@ surface = [
   "ruled", "stitch", "thicken", "unstitch", "untrim",
 ]
 sketch = [
-  "arc3", "arc_center", "arc_slot", "arc_slot_center", "arc_tangent",
+  "airfoil", "arc3", "arc_center", "arc_slot", "arc_slot_center", "arc_tangent",
   "blend", "circle", "circle2", "circle3", "circle_tt",
   "circle_ttt", "conic", "constrainer", "dimension", "ellipse", "equation_curve",
   "extend", "finish", "fit_section", "include",

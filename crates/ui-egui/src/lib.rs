@@ -35,6 +35,7 @@ pub mod crash_ui;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
+pub mod design_tab_prefs;
 mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
@@ -44,6 +45,7 @@ pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 mod dialogs_hole;
+pub mod dialogs_insert_airfoil;
 pub mod dialogs_insert_drawing;
 pub mod dialogs_library;
 pub mod dialogs_motion;
@@ -215,6 +217,7 @@ pub use solidcraft_ui_kit::navigation_bar;
 mod navigation_bar_tests;
 mod navigation_bar_view;
 pub mod navigation_slots;
+pub mod new_window;
 pub use navigation::WebWheelGestures;
 pub mod network_prompt;
 pub mod op_auto;
@@ -228,6 +231,7 @@ pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
+mod plugin_slots;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod prefs;
@@ -856,6 +860,7 @@ pub struct SolveApp {
     control_answering: Vec<control_job::ControlJob>,
     /// Most recent completed inspection per session and package, ordered by request.
     plugin_inspection_versions: std::collections::BTreeMap<(u64, String), usize>,
+    plugin_slots: plugin_slots::State,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -1071,6 +1076,7 @@ impl SolveApp {
             agent_replies: Vec::new(),
             control_answering: Vec::new(),
             plugin_inspection_versions: Default::default(),
+            plugin_slots: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
@@ -1416,6 +1422,9 @@ impl SolveApp {
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, mut params: Value) -> Result<Value, String> {
         crate::plugins::sync_policy(self);
+        if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
+            return Err(self.tr("prefs.plugin_busy").into());
+        }
         if id.eq_ignore_ascii_case("plugin.run")
             || solidcraft_engine::plugin::resolve_call(&self.session, id, &params).map_err(|e| e.to_string())?.is_some()
         {
@@ -1534,6 +1543,10 @@ impl SolveApp {
             _ => r,
         };
         if let Ok(v) = &r {
+            if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
+                plugins::persist_grants(self);
+                plugin_slots::invalidate(self);
+            }
             if id.eq_ignore_ascii_case("plugin.inspect")
                 && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
             {
@@ -1995,7 +2008,7 @@ impl SolveApp {
             }
             return;
         }
-        // Front … Isometric (Ctrl+1…7 by default) turn the view as the view cube's faces do. The
+        // Front … Isometric (Ctrl+1…7 by default) turn the view as the navigator's faces do. The
         // flat pattern is a 2D page: it has no other side to turn to.
         if solidcraft_engine::standard_view(id).is_some() {
             if !dialogs_sheet::flat_active(self) {
@@ -2062,7 +2075,7 @@ impl SolveApp {
             return;
         }
         // A display toggle leaves the current modelling tool and camera in place, and the ribbon
-        // where it is: F6, the navigation bar and the view cube never went through `start`, so
+        // where it is: F6, the navigation bar and the navigator never went through `start`, so
         // command search and the VIEW tab's menus must not move the tab either (#10540).
         if matches!(
             id,
@@ -2198,6 +2211,15 @@ impl SolveApp {
         }
         if id == "component.finish_edit" {
             edit_in_place::finish(self);
+            return;
+        }
+        // The picked section is placed (chord, pivot, position, angle, previewed) before OK adds it.
+        if id == "sketch.insert_airfoil" {
+            self.pick_file(solidcraft_ui_text::tr("insert_airfoil.filter"), &["dat"], |app, path| {
+                if let Some(path) = path {
+                    dialogs_insert_airfoil::open(app, path);
+                }
+            });
             return;
         }
         // The picked drawing is placed (position and scale, previewed) before OK adds it.
@@ -3386,7 +3408,7 @@ impl SolveApp {
         self.pending_fit = Some((to, bounds, true, shared));
     }
 
-    /// A view chosen on a navigator (a cube face, corner or arrow, an axis tip): the view turns
+    /// A view chosen on a navigator (a face, corner or arrow, an axis tip): the view turns
     /// in place, or frames the whole model from the new direction when Preferences › Navigation
     /// asks for it (`navigator_fit`, #10091).
     pub fn animate_turn(&mut self, to: Camera) {
@@ -3736,6 +3758,7 @@ impl SolveApp {
 
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        plugins::tick(self, ui.ctx(), false);
         params_dialog::install_expressions(ui.ctx());
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
         prefs::prepare_blur(self, ui.ctx());
@@ -3835,6 +3858,8 @@ impl SolveApp {
                 browser::editors(self, ui);
                 // File › Install plugin… is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
+                // Entry dialogs from every plugin slot are available on Home too.
+                plugin_menu::show(self, ui.ctx());
                 // The unit of an imported mesh is asked on the screen the import starts: the
                 // start page asks it too, or the file would wait for an answer nobody sees (#15598).
                 mesh_units::show(self, ui.ctx());
@@ -3890,6 +3915,8 @@ impl SolveApp {
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
         if render_workspace::active(self) {
+            // The model view is not drawn, so no shown dimension can be double-clicked.
+            dim_view::set_model_drawn(Vec::new());
             render_workspace::show(self, ui);
         } else {
             viewport::show(self, ui);
@@ -3993,6 +4020,10 @@ impl SolveApp {
         let reply = req.reply.clone();
         match control::handle(self, ctx, &req) {
             control::Outcome::Done(v) => {
+                if self.preferences.plugin_grants != self.session.plugin_state.grants {
+                    plugins::persist_grants(self);
+                    plugin_slots::invalidate(self);
+                }
                 let _ = reply.send(v);
             }
             control::Outcome::Screenshot { path } => self.shots.request(ctx, path, reply, req.chat_turn, now_ms()),

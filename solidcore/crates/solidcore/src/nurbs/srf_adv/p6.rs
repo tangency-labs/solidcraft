@@ -11,6 +11,22 @@
 //! | [`fill_n_sided_hole`], [`NSidedFill`]        | `N_FillNSidedHole`     |
 //!
 //! Deviations:
+//! - A piece of a sweep without rails along which the profile's first or last control
+//!   point stays within `MODEL_TOL` (a horn bend: the profile's end on the arc's centre)
+//!   is skinned at the trajectory parameters with C1 derivative constraints. G1
+//!   rescaling by that end's chord length would collapse its cross derivatives. Every
+//!   other piece is skinned as upstream.
+//! - Without `curZ` or an up direction, upstream takes the frame's rate at a piece's end
+//!   sections from a finite difference of the neighbouring z samples. Where a neighbour
+//!   lies past the piece's parameter range, on the next piece, the rate is instead the
+//!   projection normal method's own, `z' = -(z . x') x` from the piece's trajectory
+//!   derivatives ([`ZSource::RotationMinimizing`], #16959): along an arc whose z turns
+//!   (its plane is not square to z) next to a long line, the difference across the joint
+//!   is a fraction of the rate, the cross derivatives of the arc's skin miss the frame's
+//!   turn, and the inner rows of its net run backwards there. A difference within the
+//!   piece is upstream's, and so is one of a closed trajectory whose z vectors were
+//!   corrected to close: they also turn by the spread closing gap, which the method's
+//!   rate omits.
 //! - Out-params become return values (the swept surface; the patches with the center
 //!   point and normal); the `NL_STACKS` arguments have no counterpart. The optional
 //!   arguments of `N_CreateSweepScale` (`curZ`, `curS`, `tflg`, `tc`, `deg`, `dir`,
@@ -23,8 +39,8 @@
 //! - Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the upstream `NL_*_ERR` number.
 //! - `N_CreateSweepScale` ignores the status of `ST_GetRotationRateOfChange`; it can
 //!   only fail where upstream's inputs make it unreachable (a `curZ` that cannot be
-//!   differentiated where it was just evaluated, or a single frame sample), and the
-//!   Rust function returns that error. `N_FillNSidedHole` ignores the status of
+//!   differentiated where it was just evaluated, or a single frame sample of a closed
+//!   trajectory's corrected z vectors), and the Rust function returns that error. `N_FillNSidedHole` ignores the status of
 //!   `N_CrvRefine` on the computed derivative curve, as does the Rust function (the
 //!   curve stays unrefined; the refinement fails before modifying it).
 //! - Every array access is bounds checked; where upstream would index outside its
@@ -49,7 +65,8 @@ use crate::nurbs::crv_nurb::LinearSeg;
 use crate::nurbs::crv_tool::p2::make_compatible_adj_knots;
 use crate::nurbs::funcs_basic::CurveFunction;
 use crate::nurbs::geom::{
-    normalize, project_pt_plane, pt_along_vector, transform_matrix_from_axes, Frame, Plane,
+    dist_cpolygon, normalize, project_pt_plane, pt_along_vector, transform_matrix_from_axes, Frame,
+    Plane,
 };
 use crate::nurbs::index::{at, oob, put};
 use crate::nurbs::knots::Side;
@@ -61,7 +78,7 @@ use crate::nurbs::srf_tool::p3::join;
 
 use super::p1::cross_boundary_derivs_vector_field;
 use super::p4::{
-    approx_cross_boundary_derivs, create_b_vectors, create_coons_boundary_crvs,
+    approx_cross_boundary_derivs, create_b_vectors_closing, create_coons_boundary_crvs,
     create_cross_boundary_deriv_crv, rotation_rate_of_change, sweep_cross_tangent_crv,
     CoonsBoundary, Mat3, ZSource,
 };
@@ -254,6 +271,24 @@ pub struct SweepTrace {
     pub chain: Vec<f64>,
     /// The unit normal the chain began from.
     pub start_normal: Vec3,
+    /// Per piece of a sweep without rails: whether its skin is interpolated at the
+    /// trajectory parameters (a piece along which an end of the profile stays put),
+    /// rather than at the chord-length parameters of G1 skinning.
+    pub path_parameters: Vec<bool>,
+}
+
+/// Whether the first or the last control point of the placed sections stays within
+/// `MODEL_TOL` along the piece: the chord length G1 skinning rescales by is then no
+/// magnitude (`create_skin_srf_boundary_continuity` measures the same polygons).
+fn profile_end_is_fixed(sections: &[Curve]) -> Result<bool> {
+    let mut first = Vec::new();
+    let mut last = Vec::new();
+    for section in sections {
+        let points = section.cpts();
+        first.push(at(points, 0, OP_SWEEP)?);
+        last.push(at(points, section.n(), OP_SWEEP)?);
+    }
+    Ok(dist_cpolygon(&first) <= MODEL_TOL || dist_cpolygon(&last) <= MODEL_TOL)
 }
 
 /// [`create_sweep_scale`] that also reports its [`SweepTrace`] (and, as
@@ -423,6 +458,8 @@ fn sweep_scale(
     // Frame z vectors at (sub-sampled) parameters when curZ is not given.
     let mut tt: Vec<f64> = Vec::new();
     let mut zl_vecs: Vec<Vec3> = Vec::new();
+    // (not upstream, #16959) whether a closed trajectory's z vectors were corrected to close
+    let mut closing = false;
     if cur_z.is_none() && up.is_none() {
         tt.push(at(rf(&seg_pars, 0, OP)?, 0, OP)?);
         for (ii, sp) in seg_pars.iter().enumerate() {
@@ -444,14 +481,15 @@ fn sweep_scale(
                 }
             }
         }
-        zl_vecs = create_b_vectors(cur_t, z0, &tt)?;
+        let (vecs, corrected) = create_b_vectors_closing(cur_t, z0, &tt)?;
+        zl_vecs = vecs;
+        closing = corrected;
         if let Some(trace) = trace.as_mut() {
             trace.pieces.clone_from(&seg_pars);
             trace.chain.clone_from(&tt);
             trace.start_normal = normalize(z0)?.0;
         }
     }
-    let zl_count = zl_vecs.len();
 
     // Handle trajectory interpolation (rail) and split curC if necessary.
     let mut us = 0.0;
@@ -597,22 +635,31 @@ fn sweep_scale(
             placed_at += 1;
 
             if jj == 0 || jj == np {
+                // The finite difference's neighbours in the frame chain.
+                let prev = match k1.checked_sub(1) {
+                    Some(k0) => Some((at(&zl_vecs, k0, OP)?, at(&tt, k0, OP)?)),
+                    None => None,
+                };
+                let next = if k1 + 1 < zl_vecs.len() {
+                    Some((at(&zl_vecs, k1 + 1, OP)?, at(&tt, k1 + 1, OP)?))
+                } else {
+                    None
+                };
+                // (not upstream, #16959) a neighbour past this piece's parameter range
+                // lies on the next piece, whose frame can turn at another rate: there the
+                // rate is the projection normal method's own, unless the chain was
+                // corrected to close (it then also turns by the spread gap, which only
+                // the difference of the samples sees)
+                let piece = rf(&seg_pbnds, ii, OP)?;
+                let outside = |n: Option<(Vec3, f64)>| {
+                    n.is_some_and(|(_, t)| t < piece.start || t > piece.end)
+                };
+                let across = !closing && (outside(prev) || outside(next));
                 let zsrc = match (up, cur_z) {
                     (Some(up), _) => ZSource::Up(up),
                     (None, Some(cz)) => ZSource::Curve(cz),
-                    (None, None) => ZSource::Samples {
-                        z: zl,
-                        prev: if k1 > 0 {
-                            Some((at(&zl_vecs, k1 - 1, OP)?, at(&tt, k1 - 1, OP)?))
-                        } else {
-                            None
-                        },
-                        next: if k1 + 1 < zl_count {
-                            Some((at(&zl_vecs, k1 + 1, OP)?, at(&tt, k1 + 1, OP)?))
-                        } else {
-                            None
-                        },
-                    },
+                    (None, None) if across => ZSource::RotationMinimizing(zl),
+                    (None, None) => ZSource::Samples { z: zl, prev, next },
                 };
                 if jj == 0 {
                     rma1 = frame_matrix(xl, yl, zl);
@@ -708,15 +755,28 @@ fn sweep_scale(
             let de0 =
                 cross_boundary_derivs_vector_field(rf(&sects1, np, OP)?, &ct11, Boundary::Bottom)?;
 
-            let (ts, rail) = if tflg {
+            // Without rails, G1 skinning rescales the cross derivatives by the chord
+            // length of the sections' first and last control points. Where either end
+            // stays within MODEL_TOL (the skinner's coincidence tolerance) over the
+            // piece, as at a horn bend where the profile's end sits on the arc's
+            // centre, that length is no magnitude and the rescaled derivatives collapse.
+            // Such a piece keeps the derivatives as computed, in the trajectory
+            // parameter, and is interpolated at those same parameters (C1).
+            let fixed_end = !tflg && !ruled && profile_end_is_fixed(&sects1)?;
+            if let Some(trace) = trace.as_mut() {
+                trace.path_parameters.push(fixed_end);
+            }
+            let (ts, rail, cnt) = if tflg {
                 let r = if tc == us {
                     [Some(seg.clone()), None]
                 } else {
                     [None, Some(seg.clone())]
                 };
-                (Some(sp.clone()), Some(r))
+                (Some(sp.clone()), Some(r), cnt)
+            } else if fixed_end {
+                (Some(sp.clone()), None, [BoundaryContinuity::C1; 2])
             } else {
-                (None, None)
+                (None, None, cnt)
             };
             // If ruled ignore end derivatives.
             let der = if ruled {
@@ -1610,6 +1670,106 @@ mod tests {
         assert_eq!(p, 2);
         let p0 = s.cpt(0, 0).unwrap().to_euclid();
         assert!(p0.length().is_finite());
+    }
+
+    /// A piece along which the profile's end stays put (a horn bend: profile radius equal
+    /// to the bend's, its seam on the bend's centre) is skinned at the path's parameters,
+    /// including a nonzero origin and a nonunit range; any other piece keeps the chord-length
+    /// parameters of G1 skinning. Either way the certificate compares the right points.
+    #[test]
+    fn only_a_fixed_profile_end_skins_at_the_path_parameter() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::geom::extent1d::Extent1d;
+        use crate::math::Point2;
+        use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::surface::procedural_sweep::ProceduralSweep;
+
+        let mut path = BSplineCurve::create_circle_segment(
+            3,
+            &Axis2Placement::IDENTITY,
+            10.0,
+            0.0,
+            90.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        path.edit_parameterization(&Extent1d::from_min_max(3.0, 11.0))
+            .unwrap();
+        // A circle of the bend's radius passes through the bend's centre (the origin);
+        // only a seam there leaves the profile's end in place. Which seam that is follows
+        // from the sweep's start frame, so read it from the net's own corners.
+        let mut horns = 0;
+        for (radius, start) in [
+            (0.75, 0.0),
+            (10.0, 0.0),
+            (10.0, -90.0),
+            (10.0, -180.0),
+            (10.0, -270.0),
+        ] {
+            let profile = BSplineCurve::create_circle_segment(
+                3,
+                &Axis2Placement::new(Vec3::ZERO, Vec3::Y, Vec3::Z),
+                radius,
+                start,
+                start + 360.0,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap();
+            let (net, trace) = BSplineSurface::create_sweep_surface_traced(
+                &profile, &path, None, false, 1e-6, None, None,
+            )
+            .unwrap();
+            let trace = trace.unwrap();
+            let domain = net.natural_uv_domain();
+            let horn = [domain.min().x, domain.max().x].iter().all(|&u| {
+                net.evaluate_point(Point2::new(u, domain.min().y))
+                    .unwrap()
+                    .length()
+                    <= 1e-9
+            });
+            assert_eq!(trace.path_parameters, vec![horn]);
+            if radius > 1.0 && !horn {
+                // the profile's interior meets the centre: a pole the face builder splits at
+                continue;
+            }
+            horns += usize::from(horn);
+            let definition = ProceduralSweep::create_path(&profile, &path, &trace, &net).unwrap();
+            let motion = definition.path().unwrap();
+            if horn {
+                assert_eq!(domain.u_interval(), path.natural_interval());
+                assert!(motion.nodes().iter().all(|&(v, t)| v == t));
+            } else {
+                assert_eq!(domain.u_interval(), Extent1d::from_min_max(0.0, 1.0));
+            }
+            let mut radial_error = 0.0_f64;
+            let mut definition_error = 0.0_f64;
+            for i in 0..32 {
+                let fraction = (f64::from(i) + 0.31) / 32.0;
+                let t = path.natural_interval().evaluate(fraction);
+                let u = domain.u_interval().evaluate(fraction);
+                for j in 0..16 {
+                    let v = profile
+                        .natural_interval()
+                        .evaluate((f64::from(j) + 0.27) / 16.0);
+                    let point = net.evaluate_point(Point2::new(u, v)).unwrap();
+                    if horn {
+                        let center = path.evaluate_point(t).unwrap();
+                        radial_error = radial_error.max((point.distance(center) - radius).abs());
+                    }
+                    definition_error = definition_error.max(
+                        point.distance(
+                            definition
+                                .evaluate_definition_point(Point2::new(u, v))
+                                .unwrap(),
+                        ),
+                    );
+                }
+            }
+            assert!(radial_error < 2e-5 * radius, "{radial_error}");
+            assert!(definition_error <= definition.bound(), "{definition_error}");
+        }
+        assert_eq!(horns, 1);
     }
 
     #[test]

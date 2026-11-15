@@ -1153,6 +1153,7 @@ fn hostile_params_never_panic() {
         "size",
         "web",
         "clip",
+        "margin",
         "through_all",
         "depth",
         "dot_grid",
@@ -1176,6 +1177,12 @@ fn hostile_params_never_panic() {
                         // call behind one lock, so building the box for each of the ~3000 calls
                         // ran one after another on every thread (over half an hour in CI).
                         let mut start = Session::default();
+                        // Hostile plugin ids must never name packages in the user's real install folder.
+                        start.plugin_state.plugins_dir = Some(solidcraft_io::vfs::temp_dir().join(format!(
+                            "solidcraft-hostile-plugins-{}-{}",
+                            std::process::id(),
+                            id.replace('.', "-")
+                        )));
                         let _ = start.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10}));
                         let _ = start.execute("sketch.create", &json!({"plane": "XY"}));
                         let _ = start.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [5, 5]}));
@@ -1983,6 +1990,33 @@ fn measure_origin_planes_axes_and_points() {
     // The XY plane and the Z axis meet: nothing between them.
     let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "plane", "name": "XY"}, {"type": "axis", "name": "Z"}]}));
     assert!(r["distance_mm"].as_f64().unwrap().abs() < 1e-9, "{r}");
+    // An axis runs on for ever: it meets a plane past the ends of the segment it is drawn as.
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 2e6, "name": "Far"}));
+    let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "axis", "name": "Z"}, {"type": "plane", "name": "Far"}]}));
+    assert!(r["distance_mm"].as_f64().unwrap().abs() < 1e-9, "{r}");
+    // An axis parallel to a tilted plane, 5 off it: its ends' heights differ only by rounding,
+    // which is no crossing.
+    for (i, (a, b)) in [(0.3, 0.7), (1.1, -0.45), (0.123, 2.5), (-0.77, 0.31)].into_iter().enumerate() {
+        let k = (1.0f64 + a * a + b * b).sqrt();
+        let n = [-a / k, -b / k, 1.0 / k];
+        let o = [7.0 + 5.0 * n[0], -3.0 + 5.0 * n[1], 10.0 + 7.0 * a - 3.0 * b + 5.0 * n[2]];
+        run(
+            &mut s,
+            "construct.plane.three_points",
+            json!({"a": {"point": [0, 0, 10]}, "b": {"point": [1, 0, 10.0 + a]}, "c": {"point": [0, 1, 10.0 + b]}, "name": format!("Tilt{i}")}),
+        );
+        run(
+            &mut s,
+            "construct.axis.two_points",
+            json!({"a": {"point": o}, "b": {"point": [o[0] + 1.0, o[1] + 2.0, o[2] + a + 2.0 * b]}, "name": format!("Along{i}")}),
+        );
+        let r = run(
+            &mut s,
+            "inspect.measure",
+            json!({"items": [{"type": "axis", "name": format!("Along{i}")}, {"type": "plane", "name": format!("Tilt{i}")}]}),
+        );
+        assert!((r["distance_mm"].as_f64().unwrap() - 5.0).abs() < 1e-6, "tilt {a} {b}: {r}");
+    }
 }
 
 #[test]
