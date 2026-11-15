@@ -1112,23 +1112,36 @@ fn sweep_end_curves(
     Ok((starts, ends))
 }
 
-/// Not upstream (WR-675): whether the path certainly leaves the ball of radius `tol`
-/// about its start, so that end sections lying on the start sections mean a path that
-/// closes, not one shorter than the tolerance. A point of the path at a quarter, half or
-/// three quarters of its interval farther from the start than `tol` plus the rounding of
-/// the two evaluations and the distance (`gamma(64)` of their size, generous for a
-/// B-spline evaluation of any degree this kernel builds) proves it. Without such a point
-/// the answer is `false` and the sweep is capped, as upstream caps it.
+/// Not upstream (WR-675): whether the path leaves the ball of radius `tol` about its
+/// start, so that end sections lying on the start sections mean a path that goes
+/// somewhere and comes back, not one shorter than the tolerance. A point of the path at a
+/// quarter, half or three quarters of its interval farther from the start than `tol`
+/// plus a rounding margin answers yes. Without such a point the answer is `false` and the
+/// sweep is capped, as upstream caps it.
+///
+/// The margin is a heuristic, not a derived bound: `gamma(64)` times twice the largest
+/// Euclidean control point. A B-spline point is a convex combination of its control
+/// points, so its evaluation rounds in proportion to their size, not the point's.
+/// `gamma(64)` is far above the few dozen operations of a de Boor evaluation at the
+/// degrees this kernel builds, but it does not count the rational division. It only
+/// makes a yes harder: an underestimate could join a path within about `tol` of its
+/// start, and an overestimate caps it as upstream does.
+///
+/// A path that goes out and comes back the same way (out-and-back) also passes, as it
+/// did under the retired flag: its end sections lie on its start sections and it leaves
+/// its start.
 fn path_leaves_its_start(path: &BSplineCurve, tol: f64) -> Result<bool> {
     use crate::nurbs::math::gamma;
 
+    let (points, _) = path.control_polygon()?;
+    let size = points.iter().fold(0.0_f64, |m, p| m.max(p.length()));
+    let rounding = gamma(64) * 2.0 * size;
     let interval = path.natural_interval();
     let start = path.evaluate_point(interval.min())?;
     for fraction in [0.25, 0.5, 0.75] {
         let point = path.evaluate_point(interval.evaluate(fraction))?;
-        let rounding = gamma(64) * (start.length() + point.length());
         let distance = start.distance(point);
-        if distance.is_finite() && distance > tol + rounding {
+        if distance.is_finite() && rounding.is_finite() && distance > tol + rounding {
             return Ok(true);
         }
     }

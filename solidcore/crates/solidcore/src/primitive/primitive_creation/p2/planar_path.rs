@@ -528,7 +528,19 @@ impl PrimitiveCreation {
                     // point lies past the end of the line, where the trim finds it on
                     // neither side. The step stays within the reach of the line (not
                     // upstream, #13687, WR-780).
-                    let step = 0.1_f64.min(extend * 0.5);
+                    //
+                    // The step also grows with the tolerance (not upstream, WR-780). The
+                    // side test calls a point within `tol` of its foot on the cutting
+                    // line undecided, and the trim fails. The cutting line runs through
+                    // the corner along the bisector of the legs, so a point `step` along
+                    // a leg lies `step * sin(beta / 2)` from it, where beta is the angle
+                    // between the legs. A fixed 0.1 is inside the tolerance of a large
+                    // part (tolerance 1e-5 of a part 1e4 across is 0.1). With
+                    // `step >= 100 tol` the point lies farther than `tol` from the line
+                    // whenever sin(beta / 2) > 0.01, which is every corner but a hairpin
+                    // tighter than 1.15 degrees. The floor 0.1 keeps upstream's step
+                    // wherever 100 tol is smaller, and the reach cap still wins.
+                    let step = 0.1_f64.max(100.0 * tol).min(extend * 0.5);
                     let reference1 = before[0] + (-before[1] * step);
                     let reference2 = after[0] + (after[1] * step);
                     let before_id = before_brep.ok_or_else(|| {
@@ -731,6 +743,70 @@ mod tests {
         .unwrap();
         assert_eq!(sheet.face_list().len(), 2);
         assert!(!crate::topology::brep::p2::is_manifold_solid(&sheet).unwrap());
+    }
+
+    /// Goldens `primitive.primitive_creation_p2` `gen0003`-style elbows (WR-780): a
+    /// circle of radius `0.1 s` swept along two perpendicular legs of length `s`, capped,
+    /// with tolerance `1e-5 s`. The mitre's reference points must lie farther than the
+    /// tolerance from the cutting line. At a fixed 0.1 they did not (0.1 is the tolerance
+    /// at `s = 1e4`), so the trims failed and the sweep was refused (main, ignoring the
+    /// trims, returned an invalid body of zero volume). Each leg's tube is cut by the
+    /// bisector plane through the corner, so the elbow's volume is the tube's along the
+    /// centre line: `pi r^2 * 2 s`. Four faces: the two walls and the two caps, one
+    /// manifold solid. Level 2 is not asserted: the sweep's tolerance `1e-5 s` is far above
+    /// the zone tolerance the new pieces get (`PrimitiveCreationAccess::new_brep` makes
+    /// them at the default), and checks #59 and #82 report edge and vertex offsets of
+    /// the sweep's tolerance (0.1 at s = 1e4) as too wide for that B-rep tolerance: a
+    /// mismatch of the inputs, not of the elbow's geometry.
+    #[test]
+    fn a_mitred_elbow_builds_at_any_size() {
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        use crate::primitive::primitive_creation::model::PrimitiveModel;
+
+        for s in [1e4, 1e5, 1e6] {
+            let r = 0.1 * s;
+            let mut k = Kernel::default();
+            let profile = Curve::from(
+                api_curves::create_arc(Point3::new(0.0, 0.0, 0.0), r, 0.0, 360.0).unwrap(),
+            );
+            let paths = [
+                segment([0.0, 0.0, 0.0], [s, 0.0, 0.0]),
+                segment([s, 0.0, 0.0], [s, s, 0.0]),
+            ];
+            let (_, mut elbow) = PrimitiveModel::build_new(&mut k, |_, model| {
+                let id = PrimitiveCreation::create_sweep_along_planar_path(
+                    model,
+                    PrimitiveModel::MAIN,
+                    std::slice::from_ref(&profile),
+                    &paths,
+                    1e-5 * s,
+                    true,
+                    true,
+                    true,
+                )?;
+                model.take_brep(id)
+            })
+            .unwrap_or_else(|e| panic!("s {s}: {e}"));
+            elbow.refresh_cached_topology();
+            assert_eq!(elbow.face_list().len(), 4, "s {s}");
+            assert!(
+                crate::topology::brep::p2::is_manifold_solid(&elbow).unwrap(),
+                "s {s}"
+            );
+            let store = AttributeStore::default();
+            let key_of = |_| ObjectKey(0);
+            let attributes = PropertyAttributes {
+                store: &store,
+                key_of: &key_of,
+            };
+            let volume = brep_volume(&k, &mut elbow, 1e-8, &attributes).unwrap();
+            let want = std::f64::consts::PI * r * r * 2.0 * s;
+            assert!(
+                (volume - want).abs() <= 1e-6 * want,
+                "s {s}: volume {volume}, want {want}"
+            );
+        }
     }
 }
 
