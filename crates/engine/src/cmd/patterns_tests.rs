@@ -1,5 +1,6 @@
-use solidcraft_geom::MeshGeom;
+use solidcraft_geom::{MeshGeom, Vec3Geom};
 use std::f64::consts::PI;
+use std::sync::Arc;
 
 use serde_json::{Value, json};
 
@@ -1085,6 +1086,49 @@ fn mirror_of_a_boss_and_a_cut_from_its_face_makes_both_copies() {
     assert!(rel(both, want) < 1e-6, "ring {ring} mm³, lid {lid} mm³, mirrored {both} mm³ (expected {want})");
 }
 
+/// #15054: a boss (`Boss`) joined to a bar, and a cut (`Slot`) up to the boss's top that splits
+/// the boss in two. Mirrored or patterned together, each copy of the cut ends at the copy of that
+/// top, as the cut did: the top the cut was made up to is in two pieces once the cut has run, so
+/// it was "no longer exists as it was picked" for the copies.
+#[test]
+fn copies_of_a_boss_and_a_cut_up_to_its_top_make_both_copies() {
+    for (command, params) in [
+        ("solid.mirror", json!({"features": ["Boss", "Slot"], "plane": "YZ"})),
+        ("solid.pattern.rectangular", json!({"features": ["Boss", "Slot"], "dir1": [-1, 0, 0], "count1": 2, "spacing1": 40})),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 80, "width": 10, "height": 10, "corner": [-40, 0, -10], "body_name": "Bar"}));
+        let bar = run(&mut s, "inspect.measure", json!({}))["bodies"][0].clone();
+        for (name, sketch, p0, p1) in [("Boss", "B", [5, 0], [35, 10]), ("Slot", "C", [15, 0], [25, 10])] {
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": sketch}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": p0, "p1": p1}));
+            run(&mut s, "sketch.finish", json!({}));
+            let extent = if name == "Boss" { json!({"distance": 5, "operation": "join"}) } else { json!({"to": [20, 5, 5], "operation": "cut"}) };
+            let mut p = json!({"sketch": sketch, "profiles": [0], "name": name});
+            if let (Some(p), Some(e)) = (p.as_object_mut(), extent.as_object()) {
+                p.extend(e.clone());
+            }
+            run(&mut s, "solid.extrude", p);
+        }
+        let one = run(&mut s, "inspect.measure", json!({}))["bodies"][0].clone();
+        let r = run(&mut s, command, params);
+        assert!(r["error"].is_null(), "{command}: {r}");
+        let both = run(&mut s, "inspect.measure", json!({}))["bodies"][0].clone();
+        // The bar 80 × 10 × 10 and two bosses 30 × 10 × 5, each with a 10 mm slot through it.
+        let v = |m: &Value| m["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+        let want = 80.0 * 10.0 * 10.0 + 2.0 * (30.0 - 10.0) * 10.0 * 5.0;
+        assert!(rel(v(&one), 80.0 * 10.0 * 10.0 + (30.0 - 10.0) * 10.0 * 5.0) < 1e-9, "{command}: one boss {one}");
+        assert!(rel(v(&both), want) < 1e-9, "{command}: {} mm³, expected {want} mm³ (bar {bar})", v(&both));
+        // The copy adds the faces, edges and vertices the boss and its slot added, apart from it.
+        let count = |m: &Value, what: &str| m[what].as_i64().unwrap_or(-1);
+        assert_eq!(both["kernel"]["shells"].as_i64(), Some(1), "{command}: {both}");
+        for what in ["faces", "edges", "vertices"] {
+            let want = count(&bar, what) + 2 * (count(&one, what) - count(&bar, what));
+            assert_eq!(count(&both, what), want, "{command}: {what}: bar {bar}, one boss {one}, both {both}");
+        }
+    }
+}
+
 /// #14305: in a component, a pattern or mirror of two cuts makes the copies of both. The first
 /// cut's copies used to hand the plate back outside its component, so the second cut's copies
 /// found no body there ("there is no body to cut or intersect").
@@ -1630,4 +1674,44 @@ fn circular_pattern_of_a_groove_and_its_fillet_rounds_every_copy_alike() {
     let v = |m: &Value| m["volume_mm3"].as_f64().unwrap_or(f64::NAN);
     let want = v(&plain) - 10.0 * (v(&plain) - v(&one));
     assert!(rel(v(&all), want) < 1e-6, "ten rounded grooves: {} mm³, expected {want} mm³", v(&all));
+}
+
+/// Copies of a body made by a pattern are drawn from the body's own triangles and display plan,
+/// moved, and keep doing so when they are moved into a component: a 30 by 30 pattern of a
+/// filleted cylinder meshed and planned every copy, twice, and took over a minute to show.
+#[test]
+fn pattern_copies_share_their_bodys_meshes_through_a_move_to_a_component() {
+    use solidcraft_doc::display_quality::DisplayQuality;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 6}));
+    run(&mut s, "solid.fillet", json!({"edges": [[3, 0, 6]], "radius": 1}));
+    let r = run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Body1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 10, "dir2": [0, 1, 0], "count2": 2, "spacing2": 10}),
+    );
+    let copies: Vec<String> = r["bodies"].as_array().unwrap().iter().filter_map(Value::as_str).filter(|b| *b != "Body1").map(String::from).collect();
+    assert_eq!(copies.len(), 5, "{r}");
+    let q = DisplayQuality::parse("normal").unwrap();
+    let check = |s: &Session, when: &str| {
+        let st = s.model.state();
+        let source = st.body("Body1").unwrap();
+        let (own, at) = source.mesh_in_place();
+        assert_eq!(at, solidcraft_doc::IDENTITY);
+        let own_plan = source.plan_mesh_at(q).unwrap();
+        for name in &copies {
+            let copy = st.body(name).unwrap();
+            let (mesh, m) = copy.mesh_in_place();
+            assert!(Arc::ptr_eq(&mesh, &own), "{when}: `{name}` is drawn from its own triangles");
+            assert!(Arc::ptr_eq(&copy.plan_mesh_in_place_at(q).unwrap().0, &own_plan), "{when}: `{name}` is planned again");
+            // The moved triangles lie where the copy is.
+            let (bounds, shown) = (copy.body.exact_bounds().unwrap(), copy.mesh().bounds());
+            assert!(bounds.min.dist(shown.min) < 0.05 && bounds.max.dist(shown.max) < 0.05, "{when}: `{name}` {bounds:?} vs {shown:?}");
+            assert_ne!(m, solidcraft_doc::IDENTITY);
+        }
+    };
+    check(&s, "patterned");
+    run(&mut s, "component.create", json!({"name": "Grid", "parent": "root", "activate": false}));
+    run(&mut s, "component.move_bodies", json!({"bodies": copies, "component": "Grid"}));
+    check(&s, "moved into a component");
 }

@@ -57,9 +57,8 @@
 //!   samples of a 21 x 21 grid over the domain the merge uses; otherwise the cover fails
 //!   (the faces keep the edge between them) instead of merging onto a continuation that
 //!   is not one sheet. tangency-labs/solidcore#434.
-//! - **A face across a wrapped seam is covered** (opt-in
-//!   `Kernel::fixes.cover_wraps_across_closed_seam`, WR-599; the fork's
-//!   tangency-labs/smlib@16bf1cb). A boundary step across this surface's seam in a
+//! - **A face across a wrapped seam is covered** (WR-599; the fork's
+//!   tangency-labs/smlib@16bf1cb; upstream refuses every crossing). A boundary step across this surface's seam in a
 //!   direction it is closed in over its natural domain is no failure, and the domain
 //!   keeps its period there; an open direction or a pole still refuses. The fork's
 //!   `bAcrossWrappedSeams` (default `TRUE`, tangency-labs/smlib@b518bbe) is the
@@ -1063,7 +1062,7 @@ impl Surface {
     ///
     /// `across_wrapped_seams` is the fork's `bAcrossWrappedSeams` (upstream default
     /// `TRUE`; tangency-labs/smlib@b518bbe): `false` asks for the cover within one period
-    /// of this surface even with `Kernel::fixes.cover_wraps_across_closed_seam`.
+    /// of this surface.
     ///
     /// # Errors
     ///
@@ -1357,12 +1356,10 @@ impl Surface {
         // piece of the seam, `SmFace::SplitAtSeam`). A step of the boundary walk across the
         // seam in such a direction is no failure; the domain in it stays the period it
         // already spans. In any other direction, or across a pole, a crossing still means
-        // the other face does not fit inside this one. Opt-in
-        // (`Kernel::fixes.cover_wraps_across_closed_seam`); upstream refuses every crossing.
+        // the other face does not fit inside this one. Upstream refuses every crossing.
         // `bAcrossWrappedSeams` FALSE asks for the cover only within one period, as
         // without the fork (tangency-labs/smlib@b518bbe).
-        let wraps_across_seam = k.fixes.cover_wraps_across_closed_seam && across_wrapped_seams;
-        let (wraps_u, wraps_v) = if wraps_across_seam {
+        let (wraps_u, wraps_v) = if across_wrapped_seams {
             let this_domain = self.natural_uv_domain_with_nurb(k)?;
             // The steps are in STEP parameters (u round a surface of revolution's axis), the
             // closure is the NURBS's: a surface whose NURBS swaps them (the B-spline part's
@@ -1456,7 +1453,7 @@ impl Surface {
 
                 // Here we check seams/poles.
                 if crossed_seam_or_pole(k, self, guess_uv, drop_uv, &big_domain)? {
-                    if !wraps_across_seam {
+                    if !across_wrapped_seams {
                         return Ok(failure);
                     }
                     // WR-599: across which seam: a step longer than the helper allows
@@ -1676,7 +1673,6 @@ impl Surface {
             sq_node_tol,
         );
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(&periodicities));
-        solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
 
         solver.set_desired_accuracy(EFF_ZERO_SQ);
         solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 3);
@@ -1747,7 +1743,6 @@ impl Surface {
         let mut equations =
             SsNormalizeEnfo::new(k, self, other, operation, Some(opt_vectors), EFF_ZERO_SQ);
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(periodicities));
-        solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
         solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
 
         // Solve it
@@ -1836,7 +1831,6 @@ impl Surface {
         // Construct the Newton-Raphson Solver class with the surf/surf/surf equation set
         let mut equations = SssIntersectEnfo::new(k, s1, s2, s3, EFF_ZERO_SQ);
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(&periodicities));
-        solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
 
         // set the solver's exit behavior for solutions that run outside the boundary
         solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
