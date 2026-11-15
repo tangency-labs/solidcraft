@@ -8362,7 +8362,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         FeatureKind::DeleteFace { faces, body, heal } => {
             let mut d = start("face.delete")?;
             if let Some(inp) = d.inputs.first_mut() {
-                inp.items = body_face_sels(s, body.as_deref(), faces);
+                inp.items = faces.iter().filter_map(|p| face_sel(s, p.0)).collect();
             }
             if let Some(b) = body {
                 d.extra.insert("body".into(), json!(b));

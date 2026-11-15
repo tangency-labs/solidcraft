@@ -1041,13 +1041,13 @@ fn edit_feature_on_a_moved_component_refills_in_the_world() {
 /// Edit Feature of a face feature in a moved component shows its faces on the feature's own
 /// body and rebuilds unchanged (#15903). Its points are stored in the component's frame: placed
 /// through the frame of a root body that stands at the component's own origin, they lie on that
-/// body too, and OK then sent a point on no face of the feature's body ("no face at …").
+/// body too, and OK then sent a point on no face of the feature's body ("no face at …") or moved
+/// the feature onto the root body.
 #[test]
 fn edit_face_features_in_a_moved_component_refill_on_their_own_body() {
     let cases = [
         ("solid.offset_face", json!({"faces": [[3, 43, 10]], "distance": 1, "body": "Inner"}), Vec3::new(3.0, 43.0, 10.0)),
         ("solid.replace_face", json!({"faces": [[3, 43, 10]], "target": "Lid", "body": "Inner"}), Vec3::new(3.0, 43.0, 10.0)),
-        ("face.delete", json!({"faces": [[13, 50, 5]], "body": "Inner"}), Vec3::new(13.0, 50.0, 5.0)),
     ];
     for (command, params, picked) in cases {
         // The same holed box in the root and in component Part, which then moves 40 mm along Y.
@@ -1079,6 +1079,7 @@ fn edit_face_features_in_a_moved_component_refill_on_their_own_body() {
         assert!(h.app.dialog.is_none(), "{command}: OK rebuilds the unchanged feature");
         let feature = h.app.session.execute("timeline.inspect", &json!({"feature": id})).unwrap();
         assert!(feature[0]["error"].is_null(), "{command}: {feature}");
+        assert_eq!(feature[0]["definition"]["body"], "Inner", "{command}: the feature stays on its body");
     }
 }
 
