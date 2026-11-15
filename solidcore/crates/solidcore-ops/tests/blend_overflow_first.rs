@@ -9,6 +9,12 @@
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // test helpers
 
+/// #16735's leak checks on a body read into the kernel: test code measuring geometry, which
+/// this crate itself does not (docs/layers.md §4).
+#[path = "../../solidcore/tests/support/volume_leak.rs"]
+#[allow(clippy::disallowed_methods)]
+mod volume_leak;
+
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::kernel::Kernel;
 use solidcore::query::api_queries::edge_closest_point;
@@ -144,7 +150,15 @@ fn the_fuzz_round_near_a_focal_distance_builds_within_its_budget() {
         serde_json::from_value(records["b27"].take()).unwrap();
     let (input, order) = Body::from_record(&record, true).unwrap();
     let v0 = input.volume(1e-8).unwrap();
-    assert!((v0 - 5_577.325_354_466).abs() <= 1e-9 * v0, "{v0}");
+    // 5,577.325354466 with the integrator before #16735, which leaked through the tolerant
+    // edges' gaps; with them closed it reads 1.3e-5 lower (MEASURED: no closed form). The move
+    // is checked on the body: within its old leak bound, and origin-free.
+    assert!((v0 - 5_577.325_341_277_863).abs() <= 1e-9 * v0, "{v0}");
+    {
+        let mut k = Kernel::default();
+        let mut b = volume_leak::read_smb(&mut k, &input.to_smb(false).unwrap(), false);
+        volume_leak::assert_moved_by_the_old_leak(&k, &mut b, 5_577.325_354_466, v0, 1e-8);
+    }
     let (body, order) = input.copy_with_order(&order).unwrap();
     // a guard: a certificate that is not held to its budget is cancelled after five minutes
     // (and the test fails, Cancelled), instead of running on for hours. Held to it, the round
