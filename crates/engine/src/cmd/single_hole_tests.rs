@@ -179,8 +179,30 @@ fn a_hole_over_an_opening_in_its_body_cuts_that_body_not_one_under_it() {
         assert_eq!(warning, None, "single {single}");
         let cut = plate - body_volume(&mut s, "Plate");
         assert!((cut - ring).abs() < 1e-3, "single {single}: the Plate loses the countersink's ring, {cut} of {ring} mm³");
+        // The ring is cut at the Plate's top (r 3 is open 0.1 mm under it), not at its bottom.
+        assert!(!solid_at(&s, Vec3::new(23.0, 20.0, 15.9)) && solid_at(&s, Vec3::new(23.0, 20.0, 12.1)), "single {single}: the ring is at the top");
         assert!((body_volume(&mut s, "Block") - 16_000.0).abs() < 1e-6, "single {single}: the Block is not drilled");
     }
+}
+
+/// #17358: a Single hole of the root, at a point of a sketch on the top of the Lid's Plate (a face
+/// of a body it doesn't cut), still starts on that face: 8 mm down from z 16 reaches 2 mm into
+/// the Block (top at z 10) under the 2 mm gap, not 8 mm from the Block's top.
+#[test]
+fn a_single_hole_on_another_components_face_starts_on_that_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s, "component.create", json!({"name": "Lid"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 4, "corner": [0, 0, 12], "operation": "new", "body_name": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 16]}, "name": "S", "project_edges": false}));
+    run(&mut s, "sketch.point", json!({"point": [10, 10], "id": "m"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "S", "points": ["m"], "single": true, "diameter": 3, "depth": 8, "name": "H"}));
+    let cut = 16_000.0 - body_volume(&mut s, "Block");
+    let bore = PI * 1.5 * 1.5 * 2.0;
+    assert!((cut - bore).abs() < 1e-3, "the Block loses a 2 mm deep bore: {cut} of {bore} mm³");
+    assert!((body_volume(&mut s, "Plate") - 6400.0).abs() < 1e-6, "the Plate is not drilled");
 }
 
 /// #5041: a countersunk Ø6.4 hole (Ø13.7, 90°) 0.15 mm from a wall standing on the plate cuts
