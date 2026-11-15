@@ -12,8 +12,7 @@ tests.
 
 - **Defaults:** SolidCraft's preset had the flag on; local operations on bodies with a one-edge vertex no longer
   fail there. `Kernel::default()` changes.
-- **Goldens:** no row of any unit moves through this change (`topology.brep_local_operation` fc0006 moves through
-  WR-671's tolerances only; see that addendum).
+- **Goldens:** no row of any unit moves.
 - **Tests:** `wr_531_drilled_hole_shells_with_a_sphere_cap` runs on the default kernel. The flag-off test (the
   shell refused and the input retained) is removed. `a_flat_face_given_its_own_plane_leaves_the_body_unchanged`
   (`issue_2978_local_reach_beside_nets.rs`) is new: fc0006's operation succeeds and leaves the body's counts and

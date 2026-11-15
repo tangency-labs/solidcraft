@@ -16,17 +16,25 @@ that closed to nothing, and the face move's end without the join), and the flag 
   `SM_ERR_OFFSET_EDGE_VANISHES` (1043). With the flag on, it came back as a body of 4 shells that fails Level 2
   (`#18 Region Count`, `#19 Region Connectivity`). The squeeze now runs for `OffsetOperation::LocalOperation` only,
   so that shell keeps main's refusal.
-- **Defaults:** SolidCraft's preset had the flag on. Its local operations don't change; a shell or offset that
-  closes an edge to a point is now refused (1043) instead of returning a body that fails Level 2.
-  `Kernel::default()` changes for local operations.
-- **Goldens:** 1 row moves: `topology.brep_local_operation` gen0012. It is refused before and after. Main refused it
-  with `SM_ERR_OFFSET_EDGE_VANISHES` (1043). Now the closed edge is squeezed out and the gap that remains is refused
-  as uncertified (`LoopGapUncertified`, `SM_ERR` 1001). No body is returned on either side.
+- **Without `local_operation_step_walls`.** The flag's documentation made it a companion of
+  `local_operation_step_walls`. The squeeze now runs in every local operation on the default kernel, step
+  walls or not: wherever `CloseLoopGap` finds a vertex moved onto its edge's other end.
+- **A later failure keeps the refusal by name.** If a gap fails to close (`SM_ERR`, `LoopGapUncertified`)
+  after edges have closed to points, `close_loop_gaps` first runs `remove_closed_faces`' check on those edges
+  (`closed_faces`). It returns `SM_ERR_OFFSET_EDGE_VANISHES` (1043) for an edge closed on a face that did not
+  close to nothing and is not across from one that did, as it would once every gap was closed.
+  `topology.brep_local_operation` gen0012 (`revolution_built_sound_or_refused_unchanged` in
+  `issue_2978_local_reach_beside_nets.rs`) is such a case. Without this check the squeeze turned its 1043 into
+  `LoopGapUncertified` (1001); with it, gen0012 keeps main's 1043.
+- **Defaults:** SolidCraft's preset had the flag on. Its local operations don't change, except that a later
+  gap failure after a squeeze now reports 1043, as above. A shell or offset that closes an edge to a point is
+  refused (1043) instead of returning a body that fails Level 2. `Kernel::default()` changes for local
+  operations.
+- **Goldens:** no row of any unit moves.
 - **Tests:** `wr_566_local_operation_closes_a_wall.rs` and `wr_648_offset_faces_closed_wall_join.rs` keep their
   closed-form cases (24000 and 12000) on the default kernel with `local_operation_step_walls`. Their flag-off tests
   (the 1043 refusal) are removed; the 1043 refusal of an edge moved past its end is still covered by
-  `issue_2978_local_reach_beside_nets.rs` and `issue_2012_public_status_codes.rs`. In
-  `issue_2978_local_reach_beside_nets.rs`, the refusal of gen0012's case
-  (`revolution_built_sound_or_refused_unchanged`) now expects `LoopGapUncertified` for face 0 instead of
-  `SM_ERR_OFFSET_EDGE_VANISHES`. `wr_657_fully_chamfered_box_inset_open_at_a_chamfer_is_refused` is unchanged
-  and passes.
+  `issue_2978_local_reach_beside_nets.rs` and `issue_2012_public_status_codes.rs`.
+  `revolution_built_sound_or_refused_unchanged` (gen0012's 1043) and
+  `wr_657_fully_chamfered_box_inset_open_at_a_chamfer_is_refused` are unchanged. Each fails if its part of
+  this change is removed (the check on a later failure; the local-operation restriction).
