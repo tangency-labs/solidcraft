@@ -937,21 +937,35 @@ fn loft_blend(
     // Each section leaves towards the one after it; the last one leaves back into the blend.
     let stations = BLEND_STATIONS;
     let last = pieces.len().saturating_sub(1);
-    let mut frames = Vec::with_capacity(pieces.len());
+    // A 3D sketch chain runs the way its first listed curve does, so in a loft through one each
+    // open sketch section is turned to run the way the section before it does, as the plain
+    // loft turns its open sections.
+    let turn = pieces.iter().any(|p| matches!(p, Piece::Space(_)));
+    let mut frames: Vec<Vec<kernel::Frame>> = Vec::with_capacity(pieces.len());
     for (i, piece) in pieces.iter().enumerate() {
         let (from, to) = if i < last { (i, i + 1) } else { (last, last.saturating_sub(1)) };
         let leave = match (centres.get(from), centres.get(to)) {
             (Some(a), Some(b)) => *b - *a,
             _ => solidcore_record::Vec3::ZERO,
         };
-        match piece {
+        let mut these = match piece {
             Piece::Body(name, edges) => {
                 let b = st.body(name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?.body.clone();
                 frames.push(kernel::loft_blend::section_frames(&b, edges, leave, stations)?);
+                continue;
             }
-            Piece::Sketch(plane, chain) => frames.push(chain_frames(plane, chain, leave, stations)),
-            Piece::Space(pts) => frames.push(point_frames(pts, leave, stations)),
+            Piece::Sketch(plane, chain) => chain_frames(plane, chain, leave, stations),
+            Piece::Space(pts) => point_frames(pts, leave, stations),
+        };
+        let ends = |f: &[kernel::Frame]| f.first().zip(f.last()).map(|(s, e)| (s.p, e.p));
+        if turn
+            && let (Some((ps, pe)), Some((s, e))) = (frames.last().and_then(|f| ends(f)), ends(&these))
+            && s.dist(e) > 1e-9
+            && s.dist(ps) + e.dist(pe) > s.dist(pe) + e.dist(ps)
+        {
+            these.reverse();
         }
+        frames.push(these);
     }
     let body = kernel::loft_blend(&frames, continuity, crown, stations)?;
     let name = new_name(st, f, 0);
