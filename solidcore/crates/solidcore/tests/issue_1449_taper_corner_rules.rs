@@ -184,7 +184,10 @@ fn a_ridge_on_the_far_end_is_still_refused() {
     assert_eq!(refusal.reason, TaperCornerRefusal::WallCloses);
     // at a corner of a short wall, the walls that close
     let corners = [p(0.0, 0.0), p(20.0, 0.0), p(20.0, 2.0), p(0.0, 2.0)];
-    assert!(corners.contains(&refusal.corner), "{refusal:?}");
+    assert!(
+        corners.iter().any(|c| c.distance(refusal.corner) <= 1e-12),
+        "{refusal:?}"
+    );
 }
 
 /// A 3-4-5 triangle drafted 45 degrees in: every wall's section shrinks to the incentre
@@ -236,6 +239,34 @@ fn a_ridge_closes_as_a_ridge_and_a_point_as_an_apex() {
         );
         assert_rel(volume(&k, &mut b), 4.0 * (3.0 * a - 2.0) / 12.0, 1e-9);
     }
+}
+
+/// Between the two: a ridge shorter than the B-rep's tolerance but longer than the closure
+/// bound (`tol s / (s + H)`, half the tolerance at 45 degrees over a height of 10 with an
+/// offset of 10) is neither one apex nor two vertices, so it is refused where its first
+/// short wall closes rather than built with a sub-tolerance ridge.
+#[test]
+fn a_ridge_shorter_than_the_tolerance_is_refused() {
+    let mut k = kernel();
+    // the B-rep's tolerance, from the 1e-3 case that builds
+    let curves = polygon(&[p(0.0, 0.0), p(2.001, 0.0), p(2.001, 2.0), p(0.0, 2.0)]);
+    let TaperExtrude::Solid(b) = taper(&mut k, &curves, 45.0, OffsetCornerType::LinearExtension)
+    else {
+        panic!("refused");
+    };
+    let tol = b.tolerance();
+    let a = 2.0 + 0.75 * tol;
+    let curves = polygon(&[p(0.0, 0.0), p(a, 0.0), p(a, 2.0), p(0.0, 2.0)]);
+    let result = taper(&mut k, &curves, 45.0, OffsetCornerType::LinearExtension);
+    let TaperExtrude::Refused(refusal) = result else {
+        panic!("built: {result:?}");
+    };
+    assert_eq!(refusal.reason, TaperCornerRefusal::WallCloses);
+    let corners = [p(0.0, 0.0), p(a, 0.0), p(a, 2.0), p(0.0, 2.0)];
+    assert!(
+        corners.iter().any(|c| c.distance(refusal.corner) <= 1e-12),
+        "{refusal:?}"
+    );
 }
 
 /// A quarter disc of radius 10 (its two radii and an `SmCircle` arc) drafted 45 degrees in:

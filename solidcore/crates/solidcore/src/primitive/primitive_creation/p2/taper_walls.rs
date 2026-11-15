@@ -1376,7 +1376,20 @@ impl Sections<'_> {
     /// is over `reach` (an arc of radius at most `reach` lies within `2 reach` of `q` either
     /// way, and `read_walls` refuses one whose radius falls to `tol`). A crossing that is
     /// missing, or a value that is NaN, is not closed.
-    fn closed_at(&self, live: &[bool], f_from: f64, f: f64, q: Point3, tol: f64) -> Result<bool> {
+    ///
+    /// Crossings all within `tol` of `q` but not all within `reach` are within the
+    /// tolerance of one vertex without the closure being bounded: neither one apex nor
+    /// separate vertices (a ridge shorter than the tolerance) is right, so that is
+    /// [`Closure::Ambiguous`], which the caller refuses. With no live wall left, nothing has
+    /// closed here ([`Closure::Open`]).
+    fn closed_at(
+        &self,
+        live: &[bool],
+        f_from: f64,
+        f: f64,
+        q: Point3,
+        tol: f64,
+    ) -> Result<Closure> {
         let mut s = f64::INFINITY;
         for (w, &alive) in live.iter().enumerate() {
             if !alive {
@@ -1391,20 +1404,25 @@ impl Sections<'_> {
             s = min2(s, speed);
         }
         let height = self.h.length();
-        if !(s > 0.0) || !(height.is_finite()) {
-            return Ok(false);
+        if !(s > 0.0 && s.is_finite() && height.is_finite()) {
+            return Ok(Closure::Open);
         }
         let reach = tol * s / (s + height);
+        let mut within_reach = true;
         for (w, &alive) in live.iter().enumerate() {
             if !alive {
                 continue;
             }
             for p in [at(&self.ins, w)?, at(&self.outs, w)?] {
                 let Some(x) = self.at(p, f)? else {
-                    return Ok(false);
+                    return Ok(Closure::Open);
                 };
-                if !(x.distance(q) <= reach) {
-                    return Ok(false);
+                let d = x.distance(q);
+                if !(d <= tol) {
+                    return Ok(Closure::Open);
+                }
+                if !(d <= reach) {
+                    within_reach = false;
                 }
             }
             let wall = at_ref(self.walls, w)?;
@@ -1419,20 +1437,28 @@ impl Sections<'_> {
             let Some(mut len) =
                 self.length(w, f_from, &mut start, wall.end_ang - wall.start_ang)?
             else {
-                return Ok(false);
+                return Ok(Closure::Open);
             };
             for k in 1..=SECTION_STEPS {
                 let fk = f_from + (f - f_from) * f64::from(k) / f64::from(SECTION_STEPS);
                 let Some(l) = self.length(w, fk, &mut start, len)? else {
-                    return Ok(false);
+                    return Ok(Closure::Open);
                 };
                 len = l;
             }
-            if !(radius * len.abs() <= PI * reach) {
-                return Ok(false);
+            let arc = radius * len.abs();
+            if !(arc <= PI * tol) {
+                return Ok(Closure::Open);
+            }
+            if !(arc <= PI * reach) {
+                within_reach = false;
             }
         }
-        Ok(true)
+        Ok(if within_reach {
+            Closure::Closed
+        } else {
+            Closure::Ambiguous
+        })
     }
 
     /// Every live wall closes at `q` at height `f`: its pieces end there (#17265).
@@ -1453,6 +1479,17 @@ impl Sections<'_> {
         let seam = at_ref(&self.pieces, p)?.seam;
         Ok(refuse(reason, seam.p - seam.f0 * self.h))
     }
+}
+
+/// Whether the whole section has closed at one point ([`Sections::closed_at`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Closure {
+    /// Every live wall's section is within the closure bound of the point.
+    Closed,
+    /// Within the tolerance of it, but not within the bound: refused.
+    Ambiguous,
+    /// Not closed there.
+    Open,
 }
 
 /// Steps in which each live wall's section is followed up the height.
@@ -1700,9 +1737,15 @@ fn walls_closing_at_apexes(
         };
         let mut apex = 0.5 * (xa + xb);
         // every live wall closes there with it: the section shrinks to the apex (#17265)
-        if sections.closed_at(&live, f_cur, f, apex, tol)? {
-            sections.close_all_at(&mut live, f, apex)?;
-            break;
+        match sections.closed_at(&live, f_cur, f, apex, tol)? {
+            Closure::Closed => {
+                sections.close_all_at(&mut live, f, apex)?;
+                break;
+            }
+            Closure::Ambiguous => {
+                return sections.refuse(TaperCornerRefusal::WallCloses, w_in);
+            }
+            Closure::Open => {}
         }
         sections.end(w_in, f, apex)?;
         sections.end(at(&sections.outs, w)?, f, apex)?;
@@ -1764,11 +1807,17 @@ fn walls_closing_at_apexes(
                 live_count -= 2;
                 // the walls left close at its far end with them: the section shrinks
                 // along the ridge to that end (#17265)
-                if live_count > 0 && sections.closed_at(&live, f_cur, f, end, tol)? {
-                    sections.close_all_at(&mut live, f, end)?;
-                    collapsed = true;
-                    met = true;
-                    break;
+                match sections.closed_at(&live, f_cur, f, end, tol)? {
+                    Closure::Closed => {
+                        sections.close_all_at(&mut live, f, end)?;
+                        collapsed = true;
+                        met = true;
+                        break;
+                    }
+                    Closure::Ambiguous => {
+                        return sections.refuse(TaperCornerRefusal::WallCloses, w_in);
+                    }
+                    Closure::Open => {}
                 }
                 if live_count < 3 || c == wb || d == wa {
                     return sections.refuse(TaperCornerRefusal::WallCloses, w_in);

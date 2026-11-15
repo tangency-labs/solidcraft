@@ -191,8 +191,9 @@ impl PrimitiveCreation {
     /// is the fork's `SM_ERR_INVALID_INPUT` with `pOptRefusal` and
     /// `pOptRefusedCorner` set (SolidCraft change, tangency-labs/smlib 54148db): with
     /// [`OffsetCornerType::CurveExtension`], or linear-extension corners (WR-521), a
-    /// profile of lines and circular arcs with a sharp corner gets walls that continue as themselves (or as their
-    /// tangent planes) to meet along their exact seams, and a corner they cannot
+    /// profile of lines and circular arcs with a sharp corner gets walls that continue
+    /// as themselves (or as their tangent planes) to meet along their exact seams, and
+    /// a corner they cannot
     /// close is refused, the target left as it was. `CurveExtension` on a profile
     /// without a sharp corner is `LinearExtension`.
     ///
@@ -408,11 +409,12 @@ fn taper(
     let mut empty_offsets = false;
     let mut trim_curves: Vec<Curve> = Vec::new();
 
-    if (keep_curvature || tangent_planes) && (height.is_nan() || height.abs() <= brep_tol) {
-        // the far end lies on the profile within the tolerance: there are no walls to build
+    if (keep_curvature || tangent_planes) && (!height.is_finite() || height.abs() <= brep_tol) {
+        // the far end lies on the profile within the tolerance (no walls to build), or
+        // nowhere
         return Err(SolidError::invalid_input(
             OP,
-            "the draft height is within the B-rep's tolerance",
+            "the draft height must be finite and its size over the B-rep's tolerance",
         ));
     }
     if keep_curvature || tangent_planes {
