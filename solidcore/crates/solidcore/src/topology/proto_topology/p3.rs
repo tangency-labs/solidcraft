@@ -601,43 +601,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         mid_pv: Option<ProtoVertexId>,
         top_pe: Option<ProtoEdgeId>,
     ) -> Result<(Option<VertexDefId>, Option<EdgeDefId>)> {
-        /// `cbiFudge`.
-        const CBI_FUDGE: f64 = 10.0;
-
-        let d = self
+        let Some(crv_pt) = self.edge_definition_split_point(k, &*geometry, ed, param_pe)? else {
+            return Ok((None, None));
+        };
+        let tol = self
             .edge_def(ed)
-            .ok_or(dangling("edge definition is deleted"))?;
-
-        // Check that parameter is interior to this EdgeDef.
-        if !d.xsect_interval().contains_value(param_pe, -EFF_ZERO) {
-            return Ok((None, None));
-        }
-        let tol = d.raw_tolerance();
-
-        // Takes reversal into account; status ignored.
-        let crv_pt = ignore_soft(passed_on(
-            d.evaluate(k, &*geometry, param_pe, true, false),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?)?
-        .and_then(|r| r.0)
-        .unwrap_or(Vec3::UNDEF);
-
-        // Use distance to end of this EdgeDef, not distance to our VertexDefs.
-        let pe = d
-            .proto_edge()
-            .and_then(|pe| self.proto_edge(pe))
-            .ok_or(dangling("edge definition has no proto edge"))?;
-        let start_pv = pe.start_proto_vertex();
-        let end_pv = pe.end_proto_vertex();
-
-        let pt = self.edge_def_end_position_at(k, &*geometry, ed, start_pv)?;
-        if crv_pt.distance(pt) < tol * CBI_FUDGE {
-            return Ok((None, None));
-        }
-        let pt = self.edge_def_end_position_at(k, &*geometry, ed, end_pv)?;
-        if crv_pt.distance(pt) < tol * CBI_FUDGE {
-            return Ok((None, None));
-        }
+            .ok_or(dangling("edge definition is deleted"))?
+            .raw_tolerance();
 
         // Ok, go ahead and split. Need to classify point.
         let brep1 = self.which_brep(1);
@@ -730,6 +700,58 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         Ok((Some(new_vd), Some(new_ed)))
     }
 
+    /// Where [`ProtoTopologyManager::edge_definition_split`] splits `ed` at `param_pe`:
+    /// the definition's point there, or `None` when the parameter is not interior to the
+    /// definition or the point is within ten times its tolerance (`cbiFudge`) of either of
+    /// its ends, measured to the definition's own ends rather than to the vertex
+    /// definitions.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a deleted definition, a missing proto edge or
+    /// curve; those of the end positions.
+    fn edge_definition_split_point(
+        &self,
+        k: &Kernel,
+        geometry: &impl ProtoBrep<O>,
+        ed: EdgeDefId,
+        param_pe: f64,
+    ) -> Result<Option<Vec3>> {
+        /// `cbiFudge`.
+        const CBI_FUDGE: f64 = 10.0;
+
+        let d = self
+            .edge_def(ed)
+            .ok_or(dangling("edge definition is deleted"))?;
+
+        // Check that parameter is interior to this EdgeDef.
+        if !d.xsect_interval().contains_value(param_pe, -EFF_ZERO) {
+            return Ok(None);
+        }
+        let tol = d.raw_tolerance();
+
+        // Takes reversal into account; status ignored.
+        let crv_pt = ignore_soft(passed_on(
+            d.evaluate(k, geometry, param_pe, true, false),
+            k.fixes.ssi_proto_topology_statuses_pass_on,
+        )?)?
+        .and_then(|r| r.0)
+        .unwrap_or(Vec3::UNDEF);
+
+        // Use distance to end of this EdgeDef, not distance to our VertexDefs.
+        let pe = d
+            .proto_edge()
+            .and_then(|pe| self.proto_edge(pe))
+            .ok_or(dangling("edge definition has no proto edge"))?;
+        for end_pv in [pe.start_proto_vertex(), pe.end_proto_vertex()] {
+            let pt = self.edge_def_end_position_at(k, geometry, ed, end_pv)?;
+            if crv_pt.distance(pt) < tol * CBI_FUDGE {
+                return Ok(None);
+            }
+        }
+        Ok(Some(crv_pt))
+    }
+
     /// Sets an edge definition's interval.
     fn set_ed_interval(&mut self, ed: EdgeDefId, ivl: Extent1d) -> Result<()> {
         self.edge_def_mut(ed)
@@ -815,10 +837,77 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.set_ed_interval(ed, ivl)
     }
 
+    /// Where [`Self::proto_edge_split`] splits `pe` at `dt`: the point, or `None` when it
+    /// does no work there (`dt` is not interior, is within the proto edge's tolerance of
+    /// an end, or (not upstream) no edge definition of `pe` splits there).
+    fn proto_edge_split_point(
+        &self,
+        k: &Kernel,
+        geometry: &impl ProtoBrep<O>,
+        pe: ProtoEdgeId,
+        dt: f64,
+    ) -> Result<Option<Vec3>> {
+        let e = self
+            .proto_edge(pe)
+            .ok_or(dangling("proto edge is deleted"))?;
+
+        // no work - dT is not interior to this ProtoEdge.
+        if !e.xsect_interval().contains_value(dt, -EFF_ZERO) {
+            return Ok(None);
+        }
+        let tol = e.raw_tolerance();
+
+        let crv_pt = ignore_soft(passed_on(
+            self.proto_edge_evaluate(k, geometry, pe, dt, true, false),
+            k.fixes.ssi_proto_topology_statuses_pass_on,
+        )?)?
+        .and_then(|r| r.0)
+        .unwrap_or(Vec3::UNDEF);
+        let start_pt = self.proto_edge_end_position(k, geometry, pe, true)?;
+        let end_pt = self.proto_edge_end_position(k, geometry, pe, false)?;
+
+        // no work - Split Pt is within tol of ProtoEdge end point
+        if crv_pt.distance(start_pt) < tol {
+            return Ok(None);
+        }
+        if crv_pt.distance(end_pt) < tol {
+            return Ok(None);
+        }
+
+        // Not upstream: no work either when none of our EdgeDefs splits at dT. A definition
+        // refuses a point within ten times its tolerance of its ends, while the test above
+        // allows one; a point between the two used to split this ProtoEdge but none of its
+        // definitions, leaving an upper child without definitions that the boolean's
+        // pairwise split then stops on ("a proto edge has no edge definitions"). Two
+        // near-tangent arcs, such as a sketch's tangent corner arcs a few round-offs
+        // apart, give such points.
+        let eds: Vec<EdgeDefId> = self
+            .proto_edge(pe)
+            .ok_or(dangling("proto edge is deleted"))?
+            .edge_definitions()
+            .to_vec();
+        let mut any_splits = false;
+        for &ed in &eds {
+            if self
+                .edge_definition_split_point(k, geometry, ed, dt)?
+                .is_some()
+            {
+                any_splits = true;
+                break;
+            }
+        }
+        if !any_splits {
+            return Ok(None);
+        }
+        Ok(Some(crv_pt))
+    }
+
     /// `SmProtoEdge::Split(dT, rpNewPV, rpNewPE)`: splits the proto edge at `dt` into
     /// a lower part (this proto edge) and a new upper part, with a proto vertex at the
     /// split point, splitting every edge definition as well. Returns the new vertex
-    /// and edge; `(None, None)` when `dt` is not interior.
+    /// and edge; `(None, None)` when `dt` is not interior, and (not upstream) when no
+    /// edge definition splits there, so a split never leaves a proto edge without
+    /// definitions.
     ///
     /// With `Kernel::fixes.proto_edge_split_upper_keeps_the_old_max` the upper child keeps
     /// this edge's old interval maximum (`[dt, old_max]`); without it (default, pinned
@@ -837,32 +926,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         pe: ProtoEdgeId,
         dt: f64,
     ) -> Result<(Option<ProtoVertexId>, Option<ProtoEdgeId>)> {
-        let e = self
-            .proto_edge(pe)
-            .ok_or(dangling("proto edge is deleted"))?;
-
-        // no work - dT is not interior to this ProtoEdge.
-        if !e.xsect_interval().contains_value(dt, -EFF_ZERO) {
+        let Some(crv_pt) = self.proto_edge_split_point(k, &*geometry, pe, dt)? else {
             return Ok((None, None));
-        }
-        let tol = e.raw_tolerance();
-
-        let crv_pt = ignore_soft(passed_on(
-            self.proto_edge_evaluate(k, &*geometry, pe, dt, true, false),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?)?
-        .and_then(|r| r.0)
-        .unwrap_or(Vec3::UNDEF);
-        let start_pt = self.proto_edge_end_position(k, &*geometry, pe, true)?;
-        let end_pt = self.proto_edge_end_position(k, &*geometry, pe, false)?;
-
-        // no work - Split Pt is within tol of ProtoEdge end point
-        if crv_pt.distance(start_pt) < tol {
-            return Ok((None, None));
-        }
-        if crv_pt.distance(end_pt) < tol {
-            return Ok((None, None));
-        }
+        };
 
         // Split ourself first, then all of our EdgeDefs. The status is ignored.
         let (new_pv, created) = self.find_or_create_proto_vertex(crv_pt)?;
@@ -1110,14 +1176,28 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 // Check whether the two PEs run in the same direction or opposite.
                 let same_dir = sol.start.param(1)? < sol.end.param(1)?;
 
+                // Not upstream: an overlap whose two ends both fall where one end of either
+                // proto edge refuses to split (shorter than ten times the definitions'
+                // tolerance there) has no piece of that edge to combine. Combining the
+                // whole edge would map the other edge's definition onto it; refuse before
+                // anything is split or combined.
+                let (t11, t12) = (sol.start.param(0)?, sol.end.param(0)?);
+                let (t21, t22) = (sol.start.param(1)?, sol.end.param(1)?);
+                if self.overlap_collapses_to_an_end(k, &*geometry, pe1, t11, t12)?
+                    || self.overlap_collapses_to_an_end(k, &*geometry, pe2, t21, t22)?
+                {
+                    return Err(SolidError::topology_failed(
+                        OP_SPLIT_INT,
+                        "two proto edges overlap along less than their definitions can split",
+                    ));
+                }
+
                 // T1:
-                let t11 = sol.start.param(0)?;
                 let (npv11, npe11) = ignore_soft(passed_on(
                     self.proto_edge_split(k, geometry, pe1, t11),
                     pass,
                 )?)?
                 .unwrap_or((None, None));
-                let t21 = sol.start.param(1)?;
                 let (npv21, npe21) = ignore_soft(passed_on(
                     self.proto_edge_split(k, geometry, pe2, t21),
                     pass,
@@ -1133,13 +1213,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 let pe1_to_split = npe11.unwrap_or(pe1);
                 let pe2_to_split = if same_dir { npe21.unwrap_or(pe2) } else { pe2 };
 
-                let t12 = sol.end.param(0)?;
                 let (npv12, npe12) = ignore_soft(passed_on(
                     self.proto_edge_split(k, geometry, pe1_to_split, t12),
                     pass,
                 )?)?
                 .unwrap_or((None, None));
-                let t22 = sol.end.param(1)?;
                 let (npv22, npe22) = ignore_soft(passed_on(
                     self.proto_edge_split(k, geometry, pe2_to_split, t22),
                     pass,
@@ -1170,6 +1248,29 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             }
         }
         Ok(deleted)
+    }
+
+    /// Whether an overlap from `ta` to `tb` along `pe` has both its ends at one end of
+    /// `pe`: neither is a point [`Self::proto_edge_split`] splits at, and both lie nearer
+    /// the same end of the proto edge's interval.
+    fn overlap_collapses_to_an_end(
+        &self,
+        k: &Kernel,
+        geometry: &impl ProtoBrep<O>,
+        pe: ProtoEdgeId,
+        ta: f64,
+        tb: f64,
+    ) -> Result<bool> {
+        let iv = self
+            .proto_edge(pe)
+            .ok_or(dangling("proto edge is deleted"))?
+            .xsect_interval();
+        let nearer_start = |t: f64| (t - iv.min()).abs() <= (iv.max() - t).abs();
+        if nearer_start(ta) != nearer_start(tb) {
+            return Ok(false);
+        }
+        Ok(self.proto_edge_split_point(k, geometry, pe, ta)?.is_none()
+            && self.proto_edge_split_point(k, geometry, pe, tb)?.is_none())
     }
 
     /// The combine-and-delete step of `SplitIntersectingProtoEdges`: when both proto
@@ -2085,7 +2186,7 @@ fn crossing_sine<O: ClassObject>(
 
 #[cfg(test)]
 mod tests {
-    use super::super::p1::proto::{ProtoGeometry, ProtoTopology, VertexDefinition};
+    use super::super::p1::proto::{EdgeDefinition, ProtoGeometry, ProtoTopology, VertexDefinition};
     use super::*;
     use crate::curve::line::Line;
     use crate::geom::extent2d::Extent2d;
@@ -2516,6 +2617,109 @@ mod tests {
             .find_or_create_proto_vertex_pcs(&k, &pool, &mut on(4, false), &mut on(5, true))
             .unwrap();
         assert!(pv.is_some() && created);
+    }
+
+    /// A proto edge is not split at a point its definition refuses to split at: one
+    /// 5e-5 from its end, farther than the proto edge's tolerance (1e-5) but within ten
+    /// times the definition's. The split once went ahead without the definition, leaving
+    /// an upper child with no definitions, on which the boolean stopped ("a proto edge
+    /// has no edge definitions"); a join onto a wall whose sketch had two corner arcs
+    /// tangent up to round-off met it.
+    #[test]
+    fn a_split_its_definition_refuses_leaves_the_proto_edge_whole() {
+        let k = Kernel::default();
+        let mut pool = Pool::new();
+        let b = H(100, ClassObjectKind::Other);
+        let e = Brep::new();
+        let mut m = ProtoTopologyManager::new(&k, (b, &e), (b, &e), b, 1e-5, 1e-3, -1.0).unwrap();
+        let ivl = pool.curves[0].natural_interval();
+        let start = m
+            .new_proto_vertex(Point3::new(0.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let end = m
+            .new_proto_vertex(Point3::new(10.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        m.add_proto_vertex(start);
+        m.add_proto_vertex(end);
+        let pe = m.new_proto_edge(&k, Some(start), Some(end), ivl).unwrap();
+        m.add_proto_edge(pe);
+        for pv in [start, end] {
+            m.proto_vertex_mut(pv).unwrap().add_proto_edge(pe);
+        }
+        let curve = H(0, ClassObjectKind::Curve);
+        let ed = EdgeDefinition::new(Some(curve), ivl, edg(0), edg(1), 1e-5, None, None, None);
+        let ed = m.insert_edge_definition(ed).unwrap();
+        m.add_edge_definition(&k, &mut pool, pe, ed).unwrap();
+
+        // 5e-5 short of the end of the 10-long line
+        let dt = ivl.min() + (ivl.max() - ivl.min()) * (1.0 - 5e-6);
+        let split = m.proto_edge_split(&k, &mut pool, pe, dt).unwrap();
+        assert_eq!(split, (None, None));
+        assert_eq!(m.proto_edges(), [pe]);
+        assert_eq!(m.proto_edge(pe).unwrap().edge_definitions(), [ed]);
+        assert_eq!(m.proto_edge(pe).unwrap().xsect_interval(), ivl);
+    }
+
+    /// Two coincident lines overlapping along 5e-5 (`x = 0..10` and `x = 9.99995..20`)
+    /// overlap within one end of each, where their definitions refuse to split. There is
+    /// no piece of either to combine: combining the whole edges would put the second's
+    /// definition on the first's vertices. The pairwise split refuses before changing
+    /// anything, and each proto edge keeps its definition on its own vertices.
+    #[test]
+    fn an_overlap_within_the_no_split_zone_of_an_end_is_refused_unchanged() {
+        let k = Kernel::default();
+        let mut pool = Pool::new();
+        let b0 = 9.99995;
+        pool.curves.push(Curve::from(
+            Line::create_line_segment(3, Vec3::new(b0, 0.0, 0.0), Vec3::new(20.0, 0.0, 0.0), None)
+                .unwrap(),
+        ));
+        let b = H(100, ClassObjectKind::Other);
+        let e = Brep::new();
+        let mut m = ProtoTopologyManager::new(&k, (b, &e), (b, &e), b, 1e-5, 1e-3, -1.0).unwrap();
+        let mut edge = |m: &mut ProtoTopologyManager<H>, ci: usize, from: f64, to: f64| {
+            let ivl = pool.curves[ci].natural_interval();
+            let s = m
+                .new_proto_vertex(Point3::new(from, 0.0, 0.0), 1e-5)
+                .unwrap();
+            let t = m.new_proto_vertex(Point3::new(to, 0.0, 0.0), 1e-5).unwrap();
+            m.add_proto_vertex(s);
+            m.add_proto_vertex(t);
+            let pe = m.new_proto_edge(&k, Some(s), Some(t), ivl).unwrap();
+            m.add_proto_edge(pe);
+            for pv in [s, t] {
+                m.proto_vertex_mut(pv).unwrap().add_proto_edge(pe);
+            }
+            let curve = H(ci, ClassObjectKind::Curve);
+            let ed = EdgeDefinition::new(
+                Some(curve),
+                ivl,
+                edg(2 * ci),
+                edg(2 * ci + 1),
+                1e-5,
+                None,
+                None,
+                None,
+            );
+            let ed = m.insert_edge_definition(ed).unwrap();
+            m.add_edge_definition(&k, &mut pool, pe, ed).unwrap();
+            (pe, ed, ivl)
+        };
+        let (pe1, ed1, ivl1) = edge(&mut m, 0, 0.0, 10.0);
+        let (pe2, ed2, ivl2) = edge(&mut m, 1, b0, 20.0);
+
+        assert!(m
+            .split_intersecting_proto_edges(&k, &mut pool, pe1, pe2)
+            .is_err());
+        assert_eq!(m.proto_edges(), [pe1, pe2]);
+        for (pe, ed, ivl, from, to) in [(pe1, ed1, ivl1, 0.0, 10.0), (pe2, ed2, ivl2, b0, 20.0)] {
+            let p = m.proto_edge(pe).unwrap();
+            assert_eq!(p.edge_definitions(), [ed]);
+            assert_eq!(p.xsect_interval(), ivl);
+            let at = |v: Option<ProtoVertexId>| m.proto_vertex(v.unwrap()).unwrap().position();
+            assert_eq!(at(p.start_proto_vertex()), Point3::new(from, 0.0, 0.0));
+            assert_eq!(at(p.end_proto_vertex()), Point3::new(to, 0.0, 0.0));
+        }
     }
 
     /// An `n`-sided prism of circumradius 30 from `z0` up `h`.
