@@ -6,7 +6,6 @@ use std::collections::BTreeMap;
 
 fn tr(id: &str) -> String { solidcraft_ui_text::format(id, &[]) }
 fn fmt(id: &str, values: &[(&str, &str)]) -> String { solidcraft_ui_text::format(id, values) }
-use crate::ui_kit;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AttentionRow {
