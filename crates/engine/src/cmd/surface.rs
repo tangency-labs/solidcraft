@@ -1132,6 +1132,84 @@ mod tests {
         );
     }
 
+    /// Surface Loft through sections drawn in a 3D sketch (#15367): two 3D lines 30 apart make a
+    /// 30 × √1700 strip; a section of two 3D lines meeting end to end, lofted to a line of a
+    /// planar sketch 30 away, a 40 × 30 strip; the two splines of the issue the same sheet
+    /// Boundary Surface builds on them; undo, redo and reopening. Refused: guide rails with a
+    /// 3D section, and a 3D section of two curves that do not meet.
+    #[test]
+    fn surface_loft_through_3d_sketch_curves() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Space"}));
+        run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+        let line3d = |s: &mut Session, a: [f64; 3], b: [f64; 3]| -> String {
+            run(s, "sketch.line3d", json!({"points": [a, b]}))["curves"][0].as_str().unwrap().to_string()
+        };
+        let a = line3d(&mut s, [0.0, 0.0, 0.0], [40.0, 0.0, 10.0]);
+        let b = line3d(&mut s, [0.0, 30.0, 0.0], [40.0, 30.0, 10.0]);
+        let near = line3d(&mut s, [0.0, 120.0, 0.0], [20.0, 120.0, 0.0]);
+        let far = line3d(&mut s, [20.0, 120.0, 0.0], [40.0, 120.0, 0.0]);
+        let apart = line3d(&mut s, [0.0, 150.0, 0.0], [10.0, 150.0, 0.0]);
+        let w1 = run(&mut s, "sketch.spline3d", json!({"points": [[-40, 0, -4], [-20, 0, -1], [0, 0, 0], [20, 0, -1], [40, 0, -4]]}))["curves"]
+            [0]
+        .as_str()
+        .unwrap()
+        .to_string();
+        let w2 =
+            run(&mut s, "sketch.spline3d", json!({"points": [[-40, 40, -4], [-20, 40, -1], [0, 40, 0], [20, 40, -1], [40, 40, -4]]}))["curves"]
+                [0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Flat"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 90], [40, 90]], "ids": ["f"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let topology = |s: &Session, name: &str| {
+            let st = s.world_state().unwrap();
+            let r = st.body(name).unwrap().body.record();
+            (r.faces.len(), r.edges.len(), r.vertices.len(), r.shells.len())
+        };
+        let close = |got: f64, want: f64| assert!((got - want).abs() < want * 1e-6, "{got} vs {want}");
+
+        run(&mut s, "surface.loft", json!({"sections": [{"sketch": "Space", "curves": [a]}, {"sketch": "Space", "curves": [b]}], "body_name": "Strip"}));
+        assert!(s.world_state().unwrap().body("Strip").unwrap().body.is_surface());
+        close(area(&s, "Strip"), 30.0 * 1700f64.sqrt());
+        assert_eq!(topology(&s, "Strip"), (1, 4, 4, 1));
+        // A chain of two 3D lines (listed far one first) to a line of a planar sketch.
+        run(
+            &mut s,
+            "surface.loft",
+            json!({"sections": [{"sketch": "Space", "curves": [far, near]}, {"sketch": "Flat", "curves": ["f"]}], "body_name": "Joined"}),
+        );
+        assert!(s.world_state().unwrap().body("Joined").unwrap().body.is_surface());
+        close(area(&s, "Joined"), 40.0 * 30.0);
+        assert_eq!(topology(&s, "Joined"), (1, 4, 4, 1));
+        // The issue's two splines: the sheet Boundary Surface builds through the same curves.
+        let sections = json!([{"sketch": "Space", "curves": [w1]}, {"sketch": "Space", "curves": [w2]}]);
+        run(&mut s, "surface.loft", json!({"sections": sections, "body_name": "Loft"}));
+        run(&mut s, "surface.boundary", json!({"u": sections, "body_name": "Boundary"}));
+        assert_eq!(topology(&s, "Loft"), (1, 4, 4, 1));
+        assert!((area(&s, "Loft") - area(&s, "Boundary")).abs() < area(&s, "Boundary") * 1e-3, "{} vs {}", area(&s, "Loft"), area(&s, "Boundary"));
+
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.world_state().unwrap().body("Loft").is_none());
+        run(&mut s, "edit.redo", json!({}));
+        let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!((area(&cold, "Loft") - area(&s, "Loft")).abs() < 1e-9);
+        assert!((area(&cold, "Strip") - area(&s, "Strip")).abs() < 1e-9);
+
+        let err = |s: &mut Session, p: Value| s.execute("surface.loft", &p).unwrap_err().to_string();
+        let railed = err(
+            &mut s,
+            json!({"sections": [{"sketch": "Space", "curves": [a]}, {"sketch": "Space", "curves": [b]}], "rails": [{"sketch": "Space", "curves": [near]}]}),
+        );
+        assert!(railed.contains("not supported yet") && railed.contains("3D sketch"), "{railed}");
+        let gap = err(&mut s, json!({"sections": [{"sketch": "Space", "curves": [a, apart]}, {"sketch": "Space", "curves": [b]}]}));
+        assert!(gap.contains("not connected"), "{gap}");
+    }
+
     /// Each wall of a surface built from sketch curves is named after the curve it comes from,
     /// exactly (not from geometry): extrude, revolve, sweep and loft.
     #[test]
