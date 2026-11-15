@@ -1,0 +1,125 @@
+{
+  "base_revision": "b0fba036bdc4d34335ed72b2b32d617f838094c4",
+  "measured_production_head": "b1153884028b8168d43af6411c1fb9bc5c1cacca",
+  "typed_geometry": {
+    "historical_comparison": {
+      "numeric_fields": 36,
+      "different_numeric_fields": [],
+      "all_floats_finite": true,
+      "entire_json_equal": true
+    },
+    "domains": [
+      {
+        "curve": "uv1",
+        "uv": [
+          0.0,
+          0.0007553266208439213
+        ],
+        "domain": [
+          0.0,
+          -1234567.0,
+          1.0,
+          1234567.0
+        ],
+        "inside": true
+      },
+      {
+        "curve": "uv2",
+        "uv": [
+          1.0,
+          0.8252226756415861
+        ],
+        "domain": [
+          0.0,
+          -1234567.0,
+          1.0,
+          1234567.0
+        ],
+        "inside": true
+      }
+    ],
+    "point": [
+      0.13108241094191694,
+      -0.08920738291450833,
+      0.7767906510271132
+    ],
+    "type": "Touching",
+    "independent_support1": [
+      0.1515496571916875,
+      0.13355002222430418,
+      0.7283587064043187
+    ],
+    "independent_support2": [
+      0.11061516966501522,
+      -0.31196478390114496,
+      0.8252226756415861
+    ],
+    "independent_support_gap": 0.45775725366450076,
+    "distance_to_independent_support1": 0.22887862061182393,
+    "distance_to_independent_support2": 0.22887863305268372,
+    "reported_deviation": 0.45775726612524936,
+    "deviation_bounds_both_support_distances": true,
+    "deviation_minus_independent_support_gap": 1.2460748599618654e-08,
+    "typed_net_support_gap": 0.45775726612524936,
+    "deviation_minus_typed_net_gap": 0.0,
+    "typed_net_midpoint": [
+      0.13108241094191694,
+      -0.08920738291450833,
+      0.7767906510271132
+    ],
+    "point_minus_net_midpoint_distance": 0.0,
+    "independent_midpoint": [
+      0.13108241342835136,
+      -0.08920738083842039,
+      0.7767906910229524
+    ],
+    "point_minus_independent_midpoint_distance": 4.012679466715975e-08,
+    "definition1_step_conversion_vs_direct_endpoint": 3.1274471767619076e-08,
+    "definition2_step_conversion_vs_direct_endpoint": 4.697864319806602e-11,
+    "tolerance_check": {
+      "source_sweep_length": 999.9999999999999,
+      "natural_v_span": 2469134.0,
+      "independent_default_from_source_extent": 2469133.9999999995,
+      "difference_from_typed_default": -4.656612873077393e-10,
+      "documented_gamma32_rounding_allowance": 8.772126136591426e-09,
+      "typed_default": 2469134.0,
+      "kernel_default_not_used": 5e-06,
+      "deviation_below_effective_default": true,
+      "support_distances_exceed_kernel_default": true
+    },
+    "limits": [
+      "The supplied typed JSON omits raw build/operation status, needs_more_work and the full 32-value runner representation; those require the new normal-goldens replay.",
+      "No new clean-main b0fba before-control was supplied.",
+      "No full source control net is present in the typed JSON, so this check does not recompute the exact gamma(128) control-net allowance; the independent residual is recorded and unchanged.",
+      "Coarse approximate contact under the inherited effective tolerance; no exact contact, default 5e-6 accuracy, completeness or body validity certificate."
+    ]
+  },
+  "fresh_full_raw": {
+    "path": "rebased-after-raw.json",
+    "sha256": "d3dda3d275089eef4f7090f1473080d36349c7eb00cae1ad4a2ce0a658d2ec00",
+    "build_output_bits_checked": 1,
+    "raw_out_bits_checked": 32,
+    "all_33_output_bits_equal_historical_after": true,
+    "all_input_and_metadata_leaves_bit_identical": true,
+    "all_output_values_finite": true,
+    "source_build_status": 0.0,
+    "target_build_status": 0.0,
+    "operation_status": 0.0,
+    "needs_more_work": false,
+    "curve_count": 1,
+    "point": [
+      0.13108241094191694,
+      -0.08920738291450833,
+      0.7767906510271132
+    ],
+    "deviation": 0.45775726612524936,
+    "point_and_deviation_match_fresh_typed_probe_bitwise": true,
+    "constant_curve_control_points_equal": true,
+    "finite_NOW_weights_present": true,
+    "interpretation": "The fresh complete runner output and typed probe agree. The result remains a coarse approximation under the inherited implicit tolerance."
+  },
+  "limits": [
+    "No new clean-main before control on b0fba was executed.",
+    "No exact-contact, high-accuracy, or completeness claim."
+  ]
+}

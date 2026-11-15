@@ -73,7 +73,7 @@ fn rows_find_what_the_session_finds(h: &mut crate::scenario::Harness) {
                 .map(|f| f.id)
                 .collect();
             let worst = model.folder_status(app, component, history);
-            let mark = (worst.map(|(status, _)| status), worst.and_then(|(_, id)| crate::timeline::feature_message(app, id)));
+            let mark = (worst.map(|(status, _)| status), worst.and_then(|(_, id)| crate::timeline::feature_tip(app, id)));
             assert_eq!(mark, crate::timeline::worst_status(app, &ids), "component {component}, history {history}");
         }
     }

@@ -1275,9 +1275,7 @@ impl Volume {
             )),
             VolumeKind::Transform(t) => t.evaluate_simple(param_point, n),
             VolumeKind::BSpline(b) => b.evaluate_simple(param_point, n, opts),
-            VolumeKind::Twist(t) => {
-                t.evaluate_simple_impl(param_point, n, opts.fixes.twist_simple_duw_sign)
-            }
+            VolumeKind::Twist(t) => t.evaluate_simple(param_point, n),
             VolumeKind::Unbend(u) => u.evaluate_simple(param_point, n),
             VolumeKind::Bend(b) => b.evaluate_simple(param_point, n),
         }

@@ -103,7 +103,6 @@ fn front_top(b: &Brep) -> EdgeId {
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.fillet_nx1_tangent_side_edge = true;
-    k.fixes.fillet_nx1_opposite_continuation_side_edge = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.fillet_run_on_bspline_trims = true;

@@ -2659,8 +2659,16 @@ fn open_or_closed(curve: BCurve, ps: P3, pe: P3, same_sense: bool, closed: bool,
         let eps = 1e-9 * (b - a);
         // A vertex at a knot (where the file's curve joins its pieces) starts the curve at that
         // knot, not a rounding beside it: a span a rounding long beside a knot run makes a run
-        // longer than the degree allows once the two are taken for one.
-        let t = knots.iter().copied().filter(|k| (k - t).abs() <= eps).min_by(|x, y| (x - t).abs().total_cmp(&(y - t).abs())).unwrap_or(t);
+        // longer than the degree allows once the two are taken for one. Only a knot whose point
+        // is the vertex, within the tolerance: a rounding in parameter can be far in length on a
+        // large curve.
+        let at_vertex = |k: f64| eval.point(k).is_some_and(|q| q.dist(v3(ps)) <= tol);
+        let t = knots
+            .iter()
+            .copied()
+            .filter(|k| (k - t).abs() <= eps && at_vertex(*k))
+            .min_by(|x, y| (x - t).abs().total_cmp(&(y - t).abs()))
+            .unwrap_or(t);
         if t - a <= eps || b - t <= eps || v3(ps).dist(pa).min(v3(ps).dist(pb)) <= tol {
             return Ok(Mapped { curve, interval: [a, b], with_step: true, sense_mismatch: false });
         }
