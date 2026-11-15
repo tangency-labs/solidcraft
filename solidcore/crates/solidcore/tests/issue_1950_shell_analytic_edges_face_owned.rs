@@ -99,7 +99,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.offset_collapsed_rounds_mated = true;
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
-    f.proto_edge_self_loop_on_vertex_degenerate = true;
     f.slice_coincident_faces_sheet_side = true;
     f.boolean_outer_shell_first = true;
     f.cover_refuses_folded_continuation = true;

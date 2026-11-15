@@ -2188,11 +2188,6 @@ pub struct ProtoTopologyManager<O> {
     pe_store: Vec<Option<ProtoEdge>>,
     /// Every proto face made.
     pf_store: Vec<Option<ProtoFace<O>>>,
-    /// Not upstream: `SmProtoEdge::Resolve` splits a self-loop proto edge even when
-    /// its vertex definition is on a vertex (`true`, the default and upstream's
-    /// behaviour); `false` drops such a proto edge instead (tangency-labs/solidcore#480,
-    /// see `topology::proto_topology::p2`).
-    split_self_loops_on_vertices: bool,
     /// Not upstream (WR-619): final vertices `(vertex, max_gap, speck_start, speck_end)`
     /// whose collapsed speck definition `SmEdgeDefinition::Imprint` skipped, so
     /// `ImprintIntersections` grows each vertex's tolerance to cover the speck's span.
@@ -2259,26 +2254,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             pv_store: Vec::new(),
             pe_store: Vec::new(),
             pf_store: Vec::new(),
-            split_self_loops_on_vertices: true,
             skipped_speck_vertices: Vec::new(),
             coincident_edges: Vec::new(),
         })
-    }
-
-    /// Whether resolving a proto edge from a proto vertex back to itself splits it
-    /// even when its vertex definition is on a vertex in either B-rep (`true`, the
-    /// default, as upstream). Not upstream.
-    #[must_use]
-    pub const fn split_self_loops_on_vertices(&self) -> bool {
-        self.split_self_loops_on_vertices
-    }
-
-    /// Sets [`ProtoTopologyManager::split_self_loops_on_vertices`]; the Boolean's
-    /// topology intersector sets it to `false` when
-    /// `Kernel::fixes.proto_edge_self_loop_on_vertex_degenerate` is on
-    /// (tangency-labs/solidcore#480, WR-214). Not upstream.
-    pub fn set_split_self_loops_on_vertices(&mut self, split: bool) {
-        self.split_self_loops_on_vertices = split;
     }
 
     /// Sets the coincident line edge pairs (B-rep 1's edge, B-rep 2's edge): two straight
