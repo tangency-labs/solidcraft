@@ -590,7 +590,7 @@ fn lattice_loops(
             return Err(wrong("has no segments"));
         }
         let mut prims: Vec<Prim> = Vec::new();
-        let mut curved = false;
+        let mut loop_flattened = false;
         for seg in &lp.segs {
             check_seg(seg, MAX_COORD).map_err(wrong)?;
             edges.push(
@@ -606,11 +606,10 @@ fn lattice_loops(
                     start,
                     sweep,
                 } => {
-                    curved = true;
                     prims.push(Prim::arc(center, radius, start, sweep));
                 }
                 _ => {
-                    curved = true;
+                    loop_flattened = true;
                     flattened = true;
                     let pts = flatten(seg, FLATTEN_TOL)
                         .ok_or_else(|| wrong("has a curve too complex to follow"))?;
@@ -632,7 +631,7 @@ fn lattice_loops(
         }
         let moved: Vec<Prim> = prims.iter().map(|p| p.moved(turn, shift)).collect();
         loops.push(
-            Loop::new(moved, Some(curved))
+            Loop::new(moved, Some(loop_flattened))
                 .ok_or_else(|| wrong("has a coordinate that is not finite"))?,
         );
     }
@@ -802,7 +801,11 @@ fn flatten(seg: &Seg2, tol: f64) -> Option<Vec<Vec2>> {
 ///   `gamma_4 (|f.x d.y| + |f.y d.x|) <= sqrt(2) gamma_4 |f| |d|`, and the division and root add
 ///   `gamma_2`'s worth of `h`, so the error is at most `sqrt(2) gamma_4 |f| + 4 u h <= 5.7 u *
 ///   2.83 M + 4 u * 2.83 M <= 28 u M`; at an end it is the length of `f` (`gamma_5 |f| <= 15 u
-///   M`). Taken as `E = 32 u M`.
+///   M`). Taken as `E = 32 u M`. When `|d|^2 < MIN_POSITIVE / EPSILON` (below that, `gamma_3`
+///   no longer bounds its rounding, for it may underflow) `h` is instead the smaller of the
+///   distances of the apex from the two ends, never less than its distance from the segment;
+///   each is a `hypot` of one-subtraction differences (no underflow, within `gamma_5 |f|`), so
+///   the same `E` covers it.
 /// - (d) the decision. Accepted, the computed `h_c <= tol - 2 slack`, so the computed triangle's
 ///   true height is at most `tol - 2 slack + E`. The computed piece lies in that triangle, so is
 ///   within that of its chord, and the true curve within `D` more of it (and the other way for
@@ -839,7 +842,17 @@ fn flatten_conic(a: Vec2, apex: Vec2, b: Vec2, w: f64, tol: f64) -> Option<Vec<V
             return None;
         }
         let [p0, p1, p2] = p;
-        let h = exact::to_segment(p1, p0, p2);
+        let d = p2 - p0;
+        let h = if d.x * d.x + d.y * d.y < f64::MIN_POSITIVE / f64::EPSILON {
+            // The chord's squared length is too small to be a normal number, so `to_segment`'s
+            // division is not within the bound of (c): the nearer end's distance stands in.
+            (p1 - p0)
+                .x
+                .hypot((p1 - p0).y)
+                .min((p1 - p2).x.hypot((p1 - p2).y))
+        } else {
+            exact::to_segment(p1, p0, p2)
+        };
         if !h.is_finite() {
             return None;
         }

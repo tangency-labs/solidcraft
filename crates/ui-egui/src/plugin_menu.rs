@@ -17,7 +17,6 @@
 //! one undo step. Nothing here runs plugin code in any other way, and programmatic calls never
 //! open this dialog.
 
-use std::collections::BTreeSet;
 use std::path::Path;
 
 use serde_json::{Map, Value, json};
@@ -54,20 +53,7 @@ pub(crate) struct State {
     pending: Option<(u64, u64)>,
 }
 
-/// An installed plugin, as its package read when the menu opened.
-#[derive(Clone, Debug)]
-pub(crate) struct Listed {
-    pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) version: String,
-    pub(crate) description: String,
-    pub(crate) path: String,
-    /// The package's content hash, which `plugin.run` checks.
-    pub(crate) approval: String,
-    /// The sensitive command groups the manifest asks for.
-    pub(crate) groups: BTreeSet<String>,
-    pub(crate) entries: Vec<solidcraft_engine::plugin::Entry>,
-}
+pub(crate) use crate::plugins::Plugin as Listed;
 
 /// One property of an entry's input schema, as a field of the dialog.
 #[derive(Clone, Debug, PartialEq)]
@@ -96,8 +82,12 @@ pub(crate) enum Kind {
         unit: Option<String>,
     },
     Boolean,
-    /// A string from a fixed list.
-    Choice(Vec<String>),
+    /// A string from a fixed list: the values sent, and the titles shown for them (a value's own
+    /// text when the schema gives it no title).
+    Choice {
+        values: Vec<String>,
+        titles: Vec<String>,
+    },
     Text {
         min_length: Option<usize>,
         max_length: Option<usize>,
@@ -160,11 +150,13 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
     // Only keywords the dialog draws or checks before Run turns on; any other constraint
     // (`pattern`, `const`, `items`, `oneOf`, ...) would let an invalid value through.
     let kind = p.get("type")?.as_str()?;
-    let allowed: &[&str] = match (kind, p.contains_key("enum")) {
+    let choice = p.contains_key("enum") || p.contains_key("oneOf");
+    let allowed: &[&str] = match (kind, choice) {
         ("number", false) => &["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"],
         ("integer", false) => &["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"],
         ("boolean", false) => &[],
-        ("string", true) => &["enum"],
+        // A list of values, or of `{"const": value, "title": shown}` options; not both.
+        ("string", true) if p.contains_key("enum") != p.contains_key("oneOf") => &["enum", "oneOf"],
         ("string", false) => &["minLength", "maxLength", "format"],
         _ => return None,
     };
@@ -188,7 +180,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
     let unit = text("unit").or_else(|| text("x-unit")).or_else(|| text("units"));
     let default = p.get("default");
     let (kind, input) = match kind {
-        "number" if !p.contains_key("enum") => {
+        "number" if !choice => {
             // `exclusiveMinimum` as a number (draft 6+); a boolean beside `minimum` (draft 4).
             let (min, exclusive_min) = match (number("exclusiveMinimum"), number("minimum")) {
                 (Some(e), Some(m)) if m > e => (Some(m), false),
@@ -215,7 +207,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             };
             (Kind::Number { min, max, exclusive_min, exclusive_max, step, unit }, input)
         }
-        "integer" if !p.contains_key("enum") => {
+        "integer" if !choice => {
             let (min, max) = (integer_bound(p, true)?, integer_bound(p, false)?);
             if let (Some(lo), Some(hi)) = (min, max)
                 && lo > hi
@@ -229,25 +221,51 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             (Kind::Integer { min, max, unit }, input)
         }
         "boolean" => (Kind::Boolean, Input::Boolean(default.and_then(Value::as_bool).unwrap_or(false))),
-        "string" => match p.get("enum") {
-            Some(options) => {
-                let options: Vec<String> = options.as_array()?.iter().map(|o| o.as_str().map(str::to_owned)).collect::<Option<_>>()?;
-                if options.is_empty() {
-                    return None;
-                }
-                let chosen = default.and_then(Value::as_str).and_then(|d| options.iter().position(|o| o == d));
-                (Kind::Choice(options), Input::Choice(chosen))
-            }
-            None => {
-                let length = |k: &str| p.get(k).and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok());
-                let input = Input::Text(default.and_then(Value::as_str).unwrap_or_default().to_owned());
-                (Kind::Text { min_length: length("minLength"), max_length: length("maxLength") }, input)
-            }
-        },
+        "string" if choice => {
+            let (values, titles) = choices(p)?;
+            let chosen = default.and_then(Value::as_str).and_then(|d| values.iter().position(|o| o == d));
+            (Kind::Choice { values, titles }, Input::Choice(chosen))
+        }
+        "string" => {
+            let length = |k: &str| p.get(k).and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok());
+            let input = Input::Text(default.and_then(Value::as_str).unwrap_or_default().to_owned());
+            (Kind::Text { min_length: length("minLength"), max_length: length("maxLength") }, input)
+        }
         _ => return None,
     };
     let label = text("title").unwrap_or_else(|| key.to_owned());
     Some((Field { key: key.to_owned(), label, tip: text("description"), required, kind }, input))
+}
+
+/// A choice's values and the titles shown for them, from `enum` (each value shown as it is) or
+/// `oneOf` (each option exactly `{"const": value}` plus an optional `title` and `description`).
+/// `None` for an empty list, a value that is not a string, a repeated value, or an option with
+/// any other keyword, which this dialog could not check.
+fn choices(p: &Map<String, Value>) -> Option<(Vec<String>, Vec<String>)> {
+    let (values, titles): (Vec<String>, Vec<String>) = match (p.get("enum"), p.get("oneOf")) {
+        (Some(values), None) => values.as_array()?.iter().map(|v| v.as_str().map(|v| (v.to_owned(), v.to_owned()))).collect::<Option<Vec<_>>>()?,
+        (None, Some(options)) => options
+            .as_array()?
+            .iter()
+            .map(|option| {
+                let option = option.as_object()?;
+                if option.keys().any(|k| !matches!(k.as_str(), "const" | "title" | "description")) {
+                    return None;
+                }
+                let value = option.get("const")?.as_str()?.to_owned();
+                let title = match option.get("title") {
+                    None => value.clone(),
+                    Some(title) => Some(title.as_str()?.trim()).filter(|t| !t.is_empty()).map_or_else(|| value.clone(), str::to_owned),
+                };
+                Some((value, title))
+            })
+            .collect::<Option<Vec<_>>>()?,
+        _ => return None,
+    }
+    .into_iter()
+    .unzip();
+    let distinct: std::collections::BTreeSet<&String> = values.iter().collect();
+    (!values.is_empty() && distinct.len() == values.len()).then_some((values, titles))
 }
 
 /// The parameters the fields make, or why Run stays off. An optional field left empty is left out,
@@ -269,8 +287,8 @@ pub(crate) fn params(fields: &[(Field, Input)]) -> Result<Value, Problem> {
                 t => Some(json!(t.parse::<i64>().map_err(|_| invalid())?)),
             },
             (Kind::Boolean, Input::Boolean(b)) => Some(json!(b)),
-            (Kind::Choice(_), Input::Choice(None)) => None,
-            (Kind::Choice(options), Input::Choice(Some(index))) => Some(json!(options.get(*index).ok_or_else(invalid)?)),
+            (Kind::Choice { .. }, Input::Choice(None)) => None,
+            (Kind::Choice { values, .. }, Input::Choice(Some(index))) => Some(json!(values.get(*index).ok_or_else(invalid)?)),
             (Kind::Text { .. }, Input::Text(text)) if text.is_empty() => None,
             (Kind::Text { .. }, Input::Text(text)) => Some(json!(text)),
             _ => return Err(invalid()),
@@ -323,7 +341,7 @@ fn within(kind: &Kind, value: &Value) -> bool {
             let n = s.chars().count();
             min_length.is_none_or(|m| n >= m) && max_length.is_none_or(|m| n <= m)
         }),
-        Kind::Boolean | Kind::Choice(_) => true,
+        Kind::Boolean | Kind::Choice { .. } => true,
     }
 }
 
@@ -412,47 +430,17 @@ pub(crate) fn choose_ribbon(app: &mut SolveApp, id: &str) -> bool {
 
 /// The command groups `plugin` asks for that the user has not granted.
 pub(crate) fn missing_groups(app: &SolveApp, plugin: &Listed) -> Vec<String> {
-    plugin.groups.iter().filter(|g| !app.session.plugin_state.command_groups.contains(*g)).cloned().collect()
+    let granted = app.session.plugin_state.grants.get(&plugin.id);
+    plugin.groups.iter().filter(|g| granted.is_none_or(|grants| !grants.command_groups.contains(*g))).cloned().collect()
 }
 
 /// The plugins installed in `dir` and those inspected this session, by name. Reading a package
 /// runs none of its code.
 pub(crate) fn list(app: &SolveApp, dir: Option<&Path>) -> Vec<Listed> {
-    // A package the session inspected explicitly comes first: when an installed folder has the
-    // same id, the inspected one is what `plugin.run` was pointed at, as the engine keeps it.
-    let mut paths: Vec<String> = app.session.plugin_state.packages.values().cloned().collect();
-    if let Some(dir) = dir
-        && let Ok(folders) = std::fs::read_dir(dir)
-    {
-        let mut found: Vec<String> = folders
-            .flatten()
-            .filter(|f| f.file_type().is_ok_and(|t| t.is_dir()) && !f.file_name().to_string_lossy().starts_with('.'))
-            .take(1024)
-            .map(|f| f.path().to_string_lossy().into_owned())
-            .collect();
-        found.sort();
-        paths.extend(found);
+    let (mut listed, _) = crate::plugins::inventory(dir, app.session.plugin_state.packages.values());
+    for plugin in &mut listed {
+        plugin.disabled = !crate::plugins::enabled(app, &plugin.id);
     }
-    let mut seen = BTreeSet::new();
-    let mut listed: Vec<Listed> = paths
-        .iter()
-        .filter_map(|path| solidcraft_engine::plugin::read_package(path).ok().map(|p| (path, p)))
-        .filter_map(|(path, package)| {
-            let runtime = package.manifest.runtime?;
-            let id = package.manifest.id;
-            seen.insert(id.clone()).then(|| Listed {
-                id,
-                name: package.manifest.name,
-                version: package.manifest.version,
-                description: package.manifest.description,
-                path: path.clone(),
-                approval: package.approval,
-                groups: runtime.permissions.command_groups,
-                entries: runtime.entries,
-            })
-        })
-        .collect();
-    listed.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
     listed
 }
 
@@ -461,13 +449,13 @@ pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
     use crate::app_bar::{FileItem, FileRow};
     let item = |id: String, label: String, enabled: bool| FileRow::Item(FileItem { id, label, key: String::new(), icon: String::new(), enabled });
     let mut rows = vec![item(INSTALL.into(), app.tr("ui.plugin_menu_install").into(), true), FileRow::Separator];
-    if app.plugin_menu.listed.is_empty() {
+    if app.plugin_menu.listed.iter().all(|plugin| plugin.entries.is_empty()) {
         rows.push(item("empty".into(), app.tr("ui.plugin_menu_empty").into(), false));
     } else if !app.plugin_menu.listed.iter().any(|p| shown(app, p)) {
         rows.push(item("empty".into(), app.tr("ui.plugin_menu_all_off").into(), false));
     }
     // A plugin turned off in Preferences › Plugins is left out; the others keep their index.
-    for (p, plugin) in app.plugin_menu.listed.iter().enumerate().filter(|(_, p)| shown(app, p)) {
+    for (p, plugin) in app.plugin_menu.listed.iter().enumerate().filter(|(_, p)| shown(app, p) && !p.entries.is_empty()) {
         let entries: Vec<FileRow> = plugin
             .entries
             .iter()
@@ -506,8 +494,7 @@ pub(crate) fn toggle_below(app: &mut SolveApp, ctx: &egui::Context, rect: egui::
 
 /// Read the installed plugins again, as the menu shows them when it opens.
 pub(crate) fn refresh(app: &mut SolveApp) {
-    app.plugin_menu.listed = list(app, crate::plugins::plugins_dir().as_deref());
-    app.plugin_menu.loaded = true;
+    app.plugin_menu.listed = list(app, app.session.plugin_state.plugins_dir().as_deref());
 }
 
 /// Where the File menu holds the Plugins menu (a narrow app bar): a submenu of the same rows,
@@ -808,11 +795,11 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, field: &Field, input: &mut Input
             ui_kit::row(ui, &label, |ui| ui_kit::text_field_reserving(ui, text, &hint, 0.0).1)
         }
         (Kind::Boolean, Input::Boolean(value)) => ui_kit::checkbox(ui, &label, value),
-        (Kind::Choice(options), Input::Choice(chosen)) => {
+        (Kind::Choice { titles, .. }, Input::Choice(chosen)) => {
             // Until something is chosen the dropdown leads with "Choose…", which is not a value.
             let choose = app.tr("ui.plugin_dialog_choose").to_owned();
             let lead = chosen.is_none();
-            let shown: Vec<&str> = lead.then_some(choose.as_str()).into_iter().chain(options.iter().map(String::as_str)).collect();
+            let shown: Vec<&str> = lead.then_some(choose.as_str()).into_iter().chain(titles.iter().map(String::as_str)).collect();
             let mut index = chosen.unwrap_or(0);
             let response = ui_kit::row(ui, &label, |ui| ui_kit::dropdown(ui, &format!("plugin_field_{}", field.key), &mut index, &shown));
             *chosen = if lead { index.checked_sub(1) } else { Some(index) };

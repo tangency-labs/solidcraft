@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.remember_toolbar_tab": "Remember each design's toolbar tab",
+    "prefs.remember_toolbar_tab_note": "Each design comes back on the toolbar tab it was last using, such as Surface or Inspect, when you switch back to it. Off: switching designs shows the Model tab."
+  },
+  "ar": {
+    "prefs.remember_toolbar_tab": "تذكّر تبويب شريط الأدوات لكل تصميم",
+    "prefs.remember_toolbar_tab_note": "يعود كل تصميم إلى آخر تبويب في شريط الأدوات كان يستخدمه، مثل السطح أو الفحص، عند الرجوع إليه. عند الإيقاف: يؤدي التبديل بين التصاميم إلى عرض تبويب النموذج."
+  },
+  "de": {
+    "prefs.remember_toolbar_tab": "Registerkarte der Symbolleiste je Entwurf merken",
+    "prefs.remember_toolbar_tab_note": "Jeder Entwurf kehrt zu der Registerkarte der Symbolleiste zurück, die er zuletzt verwendet hat, etwa Fläche oder Prüfen, wenn Sie zu ihm zurückwechseln. Aus: Beim Wechsel des Entwurfs wird die Registerkarte Modell gezeigt."
+  },
+  "he": {
+    "prefs.remember_toolbar_tab": "זכירת לשונית סרגל הכלים של כל עיצוב",
+    "prefs.remember_toolbar_tab_note": "כל עיצוב חוזר ללשונית סרגל הכלים שבה השתמש לאחרונה, כמו משטח או בדיקה, כשחוזרים אליו. כבוי: מעבר בין עיצובים מציג את לשונית המודל."
+  },
+  "ja": {
+    "prefs.remember_toolbar_tab": "デザインごとにツールバーのタブを記憶",
+    "prefs.remember_toolbar_tab_note": "デザインに戻ると、サーフェスや検査など、最後に使っていたツールバーのタブで表示されます。オフ: デザインを切り替えるとモデル タブが表示されます。"
+  },
+  "ko": {
+    "prefs.remember_toolbar_tab": "디자인마다 도구 모음 탭 기억",
+    "prefs.remember_toolbar_tab_note": "디자인으로 돌아오면 표면이나 검사처럼 마지막으로 사용하던 도구 모음 탭이 다시 표시됩니다. 끄면: 디자인을 전환할 때 모델 탭이 표시됩니다."
+  },
+  "vi": {
+    "prefs.remember_toolbar_tab": "Nhớ thẻ thanh công cụ của từng thiết kế",
+    "prefs.remember_toolbar_tab_note": "Khi bạn quay lại một thiết kế, nó trở về thẻ thanh công cụ đã dùng gần nhất, chẳng hạn Bề mặt hoặc Kiểm tra. Khi tắt: đổi thiết kế sẽ hiện thẻ Mô hình."
+  },
+  "zh": {
+    "prefs.remember_toolbar_tab": "记住每个设计的工具栏选项卡",
+    "prefs.remember_toolbar_tab_note": "切换回某个设计时，它会回到上次使用的工具栏选项卡，例如曲面或检查。关闭时：切换设计会显示模型选项卡。"
+  }
+}

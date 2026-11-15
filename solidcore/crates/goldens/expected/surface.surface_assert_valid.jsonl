@@ -6,13 +6,13 @@
 {"case":"cbd0004","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0005","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0006","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0007","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0008","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0007","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109946.86242883245,109949.13757116755,10518719.074003655],[73544.0,73544.0,4923921.0]],"n":451}}}
+{"case":"cbd0008","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"cbd0009","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0010","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"cbd0011","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0011","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109944.93909585594,109951.06090414406,10518692.147341983],[73544.0,73544.0,4923921.0]],"n":451}}}
 {"case":"cbd0012","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0013","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0013","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[104717.0,104717.0,9937387.0]],"n":245}}}
 {"case":"cbd0014","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0015","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0016","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
@@ -23,7 +23,7 @@
 {"case":"cbd0021","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0022","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0023","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
-{"case":"cbd0024","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0024","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
 {"case":"cbd0025","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0026","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0027","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
@@ -43,7 +43,7 @@
 {"case":"cbd0041","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0042","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0043","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[73192.45342422371,73197.54657577629,3726304.347939132]],"n":173}}}
-{"case":"cbd0044","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0044","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"cbd0045","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0046","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0047","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
@@ -53,20 +53,20 @@
 {"case":"cbd0051","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0052","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0053","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"cbd0054","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0054","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"cbd0055","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0056","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0057","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0058","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0058","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
 {"case":"cbd0059","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[73194.42728201392,73195.57271798608,3726331.981948195]],"n":173}}}
 {"case":"cbd0060","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
-{"case":"cbd0061","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0061","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[104664.0,104664.0,9932046.0]],"n":245}}}
 {"case":"cbd0062","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0063","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0064","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0064","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
 {"case":"cbd0065","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0066","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0067","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0067","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"cbd0068","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0069","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0070","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
@@ -83,17 +83,17 @@
 {"case":"cbd0081","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0082","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0083","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"cbd0084","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0085","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0086","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0084","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[108948.0,110948.0,10504735.0],[73544.0,73544.0,4923921.0]],"n":451}}}
+{"case":"cbd0085","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
+{"case":"cbd0086","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
 {"case":"cbd0087","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0088","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0088","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[134789.0,134789.0,17432893.0],[8908.0,8908.0,449766.0]],"n":355}}}
 {"case":"cbd0089","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0090","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[99946.0,119946.0,10378731.0],[1671.0,1671.0,14557.0]],"n":275}}}
 {"case":"cbd0091","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[73194.03952218007,73195.96047781993,3726326.553310521]],"n":173}}}
 {"case":"cbd0092","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0093","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0094","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0094","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
 {"case":"cbd0095","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0096","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0097","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
@@ -104,22 +104,22 @@
 {"case":"cbd0102","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0103","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0104","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"cbd0105","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0105","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109948.11355378343,109949.88644621657,10518724.589752968],[106070.0,106070.0,11545942.0],[315.0,315.0,780.0]],"n":517}}}
 {"case":"cbd0106","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0107","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109943.6615438776,109948.3384561224,10518698.261614285],[1671.0,1671.0,14557.0]],"n":275}}}
 {"case":"cbd0108","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0109","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0110","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0111","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0112","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0109","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[104717.0,104717.0,9937387.0]],"n":245}}}
+{"case":"cbd0110","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
+{"case":"cbd0111","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
+{"case":"cbd0112","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109946.01053903674,109949.98946096326,10518707.147546515],[73544.0,73544.0,4923921.0]],"n":451}}}
 {"case":"cbd0113","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0114","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0115","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0116","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0117","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0118","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0119","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0120","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0119","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109964.99999,109965.00001,10521592.99986],[108275.0,108275.0,12559602.0],[3674.0,3674.0,73949.0]],"n":553}}}
+{"case":"cbd0120","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"cbd0121","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0122","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0123","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109959.1475550769,109966.8524449231,10521535.065771077],[40076.0,40076.0,1333685.0]],"n":377}}}
@@ -131,9 +131,9 @@
 {"case":"cbd0129","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0130","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0131","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109962.07728302806,109963.92271697194,10521576.081962392],[40076.0,40076.0,1333685.0]],"n":377}}}
-{"case":"cbd0132","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0132","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
 {"case":"cbd0133","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109962.99,109963.01,10521588.86],[40076.0,40076.0,1333685.0]],"n":377}}}
-{"case":"cbd0134","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0134","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
 {"case":"cbd0135","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0136","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0137","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
@@ -141,13 +141,13 @@
 {"case":"cbd0139","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0140","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0141","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0142","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0142","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
 {"case":"cbd0143","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0144","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109945.41692436143,109946.58307563857,10518722.83694106],[1671.0,1671.0,14557.0]],"n":275}}}
-{"case":"cbd0145","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0145","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[104664.0,104664.0,9932046.0]],"n":245}}}
 {"case":"cbd0146","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0147","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0148","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0148","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"cbd0149","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0150","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0151","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
@@ -161,13 +161,13 @@
 {"case":"cbd0159","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109945.999,109946.001,10518730.986],[1671.0,1671.0,14557.0]],"n":275}}}
 {"case":"cbd0160","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0161","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0162","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0163","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0162","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
+{"case":"cbd0163","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
 {"case":"cbd0164","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0165","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0166","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0167","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0168","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0168","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[134789.0,134789.0,17432893.0],[8908.0,8908.0,449766.0]],"n":355}}}
 {"case":"cbd0169","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[73194.9999,73195.0001,3726339.9986]],"n":173}}}
 {"case":"cbd0170","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0171","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
@@ -175,15 +175,15 @@
 {"case":"cbd0173","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0174","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0175","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
-{"case":"cbd0176","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0176","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"cbd0177","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"cbd0178","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0178","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"cbd0179","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0180","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0181","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109945.999,109946.001,10518730.986],[1671.0,1671.0,14557.0]],"n":275}}}
 {"case":"cbd0182","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0183","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0184","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0184","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[136483.9999,136484.0001,17109316.9986],[8533.0,8533.0,396034.0]],"n":349}}}
 {"case":"cbd0185","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0186","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0187","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
@@ -192,16 +192,16 @@
 {"case":"cbd0190","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[73194.99,73195.01,3726339.86]],"n":173}}}
 {"case":"cbd0191","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109961.44548246227,109964.55451753773,10521567.236754471],[40076.0,40076.0,1333685.0]],"n":377}}}
 {"case":"cbd0192","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
-{"case":"cbd0193","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0193","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"cbd0194","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109943.61250250324,109948.38749749676,10518697.575035045],[1671.0,1671.0,14557.0]],"n":275}}}
 {"case":"cbd0195","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"cbd0196","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0196","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[136483.8658461401,136490.1341538599,17109518.12184596],[74267.0,74267.0,9271656.0]],"n":481}}}
 {"case":"cbd0197","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0198","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0199","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0200","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0201","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0202","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0201","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
+{"case":"cbd0202","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109965.9922081734,109970.0077918266,10521570.890914427],[108222.0,108222.0,12548007.0],[106063.0,106063.0,13364073.0],[2325.0,2325.0,31189.0]],"n":795}}}
 {"case":"cbd0203","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0204","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0205","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
@@ -215,11 +215,11 @@
 {"case":"cbd0213","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0214","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0215","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"cbd0216","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0216","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"cbd0217","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109959.06758367221,109966.93241632779,10521533.94617141],[40076.0,40076.0,1333685.0]],"n":377}}}
 {"case":"cbd0218","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0219","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0220","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0219","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
+{"case":"cbd0220","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[136482.22534536914,136487.77465463086,17109519.15483517],[8585.0,8585.0,396832.0]],"n":349}}}
 {"case":"cbd0221","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0222","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0223","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
@@ -228,7 +228,7 @@
 {"case":"cbd0226","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0227","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0228","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0229","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0229","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
 {"case":"cbd0230","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109959.9253067442,109966.0746932558,10521545.954294419],[40076.0,40076.0,1333685.0]],"n":377}}}
 {"case":"cbd0231","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0232","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
@@ -256,8 +256,8 @@
 {"case":"cbd0254","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[73191.5313939058,73198.4686060942,3726291.439514681]],"n":173}}}
 {"case":"cbd0255","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0256","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
-{"case":"cbd0257","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0258","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0257","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109944.64277475461,109951.35722524539,10518687.998846564],[73544.0,73544.0,4923921.0]],"n":451}}}
+{"case":"cbd0258","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"cbd0259","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0260","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0261","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[73191.27772442679,73198.72227557321,3726287.888141975]],"n":173}}}
@@ -265,14 +265,14 @@
 {"case":"cbd0263","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0264","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109943.4240089176,109948.5759910824,10518694.936124846],[1671.0,1671.0,14557.0]],"n":275}}}
 {"case":"cbd0265","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
-{"case":"cbd0266","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0266","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109961.65880628889,109968.34119371111,10521546.223288044],[108275.0,108275.0,12559602.0],[3674.0,3674.0,73949.0]],"n":553}}}
 {"case":"cbd0267","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0268","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0269","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0270","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0271","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0272","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
-{"case":"cbd0273","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0273","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109945.18272758849,109950.81727241151,10518695.558186239],[73544.0,73544.0,4923921.0]],"n":451}}}
 {"case":"cbd0274","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109944.02321824143,109947.97678175857,10518703.32505538],[1671.0,1671.0,14557.0]],"n":275}}}
 {"case":"cbd0275","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0276","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
@@ -283,27 +283,27 @@
 {"case":"cbd0281","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0282","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0283","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0284","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0284","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"cbd0285","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0286","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0287","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0288","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0288","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[108948.0,110948.0,10504735.0],[73491.0,73491.0,4917732.0]],"n":451}}}
 {"case":"cbd0289","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0290","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0291","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0292","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
-{"case":"cbd0293","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0293","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"cbd0294","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[73194.999,73195.001,3726339.986]],"n":173}}}
 {"case":"cbd0295","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0296","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0297","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"cbd0298","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0298","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
 {"case":"cbd0299","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0300","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0301","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0302","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0303","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0304","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0302","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[134789.0,134789.0,17432893.0],[8908.0,8908.0,449766.0]],"n":355}}}
+{"case":"cbd0303","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
+{"case":"cbd0304","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
 {"case":"cbd0305","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0306","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0307","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
@@ -323,14 +323,14 @@
 {"case":"cbd0321","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0322","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0323","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"cbd0324","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0324","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[104717.0,104717.0,9937387.0]],"n":245}}}
 {"case":"cbd0325","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[73191.39271624589,73198.60728375411,3726289.4980274425]],"n":173}}}
 {"case":"cbd0326","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0327","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0328","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cbd0329","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0330","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0331","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0330","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109947.999,109948.001,10518734.986],[73544.0,73544.0,4923921.0]],"n":451}}}
+{"case":"cbd0331","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[136485.99998999998,136486.00001000002,17109320.99986],[79374.0,79374.0,10353623.0],[1032.0,1032.0,6185.0]],"n":525}}}
 {"case":"cbd0332","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0333","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0334","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
@@ -338,8 +338,8 @@
 {"case":"cbd0336","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0337","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0338","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
-{"case":"cbd0339","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0340","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0339","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109944.62332271949,109951.37667728051,10518687.726518072],[73491.0,73491.0,4917732.0]],"n":451}}}
+{"case":"cbd0340","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109963.99309498681,109966.00690501319,10521578.903329816],[108222.0,108222.0,12548007.0],[3674.0,3674.0,73949.0]],"n":553}}}
 {"case":"cbd0341","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0342","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0343","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109959.94078891423,109966.05921108577,10521546.1710448],[40076.0,40076.0,1333685.0]],"n":377}}}
@@ -350,7 +350,7 @@
 {"case":"cbd0348","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0349","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0350","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0351","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0351","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[134789.0,134789.0,17432893.0],[8908.0,8908.0,449766.0]],"n":355}}}
 {"case":"cbd0352","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0353","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0354","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
@@ -379,19 +379,19 @@
 {"case":"cbd0377","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0378","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0379","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0380","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
-{"case":"cbd0381","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0380","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109961.0729145945,109968.9270854055,10521538.020804323],[108222.0,108222.0,12548007.0],[3674.0,3674.0,73949.0]],"n":553}}}
+{"case":"cbd0381","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[104717.0,104717.0,9937387.0]],"n":245}}}
 {"case":"cbd0382","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0383","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0384","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0384","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"cbd0385","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
 {"case":"cbd0386","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"cbd0387","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0387","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[134789.0,134789.0,17432893.0],[8908.0,8908.0,449766.0]],"n":355}}}
 {"case":"cbd0388","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0389","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0389","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
 {"case":"cbd0390","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0391","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,0.0,0.0]}}
-{"case":"cbd0392","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"cbd0392","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"cbd0393","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[73191.95228056387,73198.04771943613,3726297.331927894]],"n":173}}}
 {"case":"cbd0394","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"cbd0395","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109962.99,109963.01,10521588.86],[40076.0,40076.0,1333685.0]],"n":377}}}
@@ -424,13 +424,13 @@
 {"case":"curve_bounded_bad3d_l2_depth3_negative1_reports0","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"curve_bounded_bad3d_l2_depth3_negative1_reports1","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"curve_bounded_bad3d_l4_depth1_negative0_reports0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"curve_bounded_bad3d_l4_depth1_negative0_reports1","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"curve_bounded_bad3d_l4_depth1_negative0_reports1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"curve_bounded_bad3d_l4_depth1_negative1_reports0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"curve_bounded_bad3d_l4_depth1_negative1_reports1","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"curve_bounded_bad3d_l4_depth1_negative1_reports1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[136483.0,136485.0,17109303.0],[8533.0,8533.0,396034.0]],"n":349}}}
 {"case":"curve_bounded_bad3d_l4_depth3_negative0_reports0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"curve_bounded_bad3d_l4_depth3_negative0_reports1","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"curve_bounded_bad3d_l4_depth3_negative0_reports1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71822.0,71822.0,3754059.0]],"n":179}}}
 {"case":"curve_bounded_bad3d_l4_depth3_negative1_reports0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"curve_bounded_bad3d_l4_depth3_negative1_reports1","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"curve_bounded_bad3d_l4_depth3_negative1_reports1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109964.0,109966.0,10521579.0],[108222.0,108222.0,12548007.0],[3674.0,3674.0,73949.0]],"n":553}}}
 {"case":"curve_bounded_baduv_l0_depth1_negative0_reports0","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"curve_bounded_baduv_l0_depth1_negative0_reports1","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"curve_bounded_baduv_l0_depth1_negative1_reports0","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
@@ -456,13 +456,13 @@
 {"case":"curve_bounded_baduv_l2_depth3_negative1_reports0","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"curve_bounded_baduv_l2_depth3_negative1_reports1","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"curve_bounded_baduv_l4_depth1_negative0_reports0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"curve_bounded_baduv_l4_depth1_negative0_reports1","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"curve_bounded_baduv_l4_depth1_negative0_reports1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
 {"case":"curve_bounded_baduv_l4_depth1_negative1_reports0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"curve_bounded_baduv_l4_depth1_negative1_reports1","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"curve_bounded_baduv_l4_depth1_negative1_reports1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[136484.0,136486.0,17109544.0],[8585.0,8585.0,396832.0]],"n":349}}}
 {"case":"curve_bounded_baduv_l4_depth3_negative0_reports0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"curve_bounded_baduv_l4_depth3_negative0_reports1","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"curve_bounded_baduv_l4_depth3_negative0_reports1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[71875.0,71875.0,3759400.0]],"n":179}}}
 {"case":"curve_bounded_baduv_l4_depth3_negative1_reports0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
-{"case":"curve_bounded_baduv_l4_depth3_negative1_reports1","deferred":null,"error":"geom::assert_array::AssertReport::new: invalid input: test index is past the end of the assert label list","ints":{},"topology":null,"values":{}}
+{"case":"curve_bounded_baduv_l4_depth3_negative1_reports1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[109964.0,109966.0,10521579.0],[108275.0,108275.0,12559602.0],[3674.0,3674.0,73949.0]],"n":553}}}
 {"case":"curve_bounded_empty_l0_depth1_negative0_reports0","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"curve_bounded_empty_l0_depth1_negative0_reports1","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}
 {"case":"curve_bounded_empty_l0_depth1_negative1_reports0","deferred":null,"error":"surface::surface::assert_valid: invalid input: continuity output never written (upstream reads it uninitialised)","ints":{},"topology":null,"values":{}}

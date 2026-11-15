@@ -1,0 +1,39 @@
+{
+  "method": "Temporary external Rust test harness includes the existing runner source and a public-API copy of its canonical-case reconstruction helper. It links the existing raw-main/current libraries, without Cargo builds or changing any classification.",
+  "toolchain": "rustc1.98.0",
+  "test": "curve_curve_p3::tests::review_projected_minimum_requires_stationarity_or_a_known_failure",
+  "before": {
+    "exit_code": 0,
+    "passed": 1,
+    "failed": 0,
+    "interpretation": "Raw main reports no accepted pair, so the geometric guard passes."
+  },
+  "current_unclassified": {
+    "exit_code": 101,
+    "passed": 0,
+    "failed": 1,
+    "interpretation": "The newly accepted nonstationary pair is not yet listed as known failing; the guard rejects it."
+  },
+  "checks": {
+    "exact_rational_bernstein_certificate": true,
+    "current_and_baseline_inputs_identical": true,
+    "raw_current_and_baseline_runner_replayed": true,
+    "raw_ND_termination_replayed": true,
+    "before_after_renderings_inspected": true,
+    "cargo_build_or_test_run": false,
+    "golden_or_tolerance_changed": false,
+    "historical_opt_in_replayed": true,
+    "parent_removed_wrong_golden_and_added_known_failure": true,
+    "final_owned_source_rustfmt_check": true,
+    "regression_uses_only_a_necessary_condition": true,
+    "known_removal_not_inferred_from_stationarity": true
+  },
+  "limits": "The parent will run authoritative compiled crate tests after parallel edits settle and tracking/classification is resolved. The final source omits the tentative stale-known assertion: first-order stationarity alone cannot prove that a candidate is a minimum.",
+  "current_after_known_failure_classification": {
+    "exit_code": 0,
+    "passed": 1,
+    "failed": 0,
+    "interpretation": "The mathematical counterexample is now explicitly classified as known failing, with no golden line; the guard passes without blessing the wrong result."
+  },
+  "classification": "FOLLOWUP_PENDING_PUBLICATION"
+}
