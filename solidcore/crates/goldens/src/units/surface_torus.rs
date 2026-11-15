@@ -1387,7 +1387,7 @@ mod tests {
     /// through `origin` along `axis`, and spans `lengths` of it. That it lies on the torus is
     /// certified by the kernel's [`lies_on`](solidcore::surface::implicit::lies_on): every
     /// Bernstein coefficient of the torus's implicit equation on every Bezier patch is within
-    /// its gamma_K rounding, nothing sampled. The extent is pinned by the net (NURB u the
+    /// its `gamma_K` rounding, nothing sampled. The extent is pinned by the net (NURB u the
     /// sweep unless `swap`): degree-2 Bezier knots both ways; the tube column at the sweep
     /// start is arcs of the minor circle (centre `R` out from the axis in its meridian
     /// plane, radius `r`) turning one way over `lengths.1`; every sweep row is arcs about
