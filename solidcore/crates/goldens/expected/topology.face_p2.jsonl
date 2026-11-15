@@ -2486,7 +2486,7 @@
 {"case":"points_plane_2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,2.0,-0.33333333333333337,0.33333333333333326,0.0,0.0]}}
 {"case":"points_plane_30","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[29.999999999999986,44.516129032258064,204.99999999999974]],"n":62}}}
 {"case":"points_plane_31","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[15.516129032258064,58.54838709677419,-200.70967741935507]],"n":64}}}
-{"case":"points_plane_5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,5.0,-0.6666666666666667,-0.3333333333333334,-1.1102230246251565e-16,0.3333333333333332,0.6666666666666665,0.0,0.0,-0.0,0.0,0.0]}}
+{"case":"points_plane_5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,5.0,-0.6666666666666667,-0.33333333333333337,0.0,0.33333333333333326,0.6666666666666665,0.0,0.0,-0.0,0.0,0.0]}}
 {"case":"points_plane_box_side_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,0.0]}}
 {"case":"points_plane_box_side_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,1.0,5.0,5.0,15.0,5.0,10.0,0.0,0.0,1.0]}}
 {"case":"points_plane_box_side_100","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[769.3548387096778,769.3548387096778,67175.80645161291]],"n":202}}}
