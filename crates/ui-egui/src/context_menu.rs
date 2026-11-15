@@ -628,7 +628,7 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let sketch = feature.and_then(|f| crate::timeline::TimelineKind::of(&f.kind).profile_sketch());
     let suppressed = feature.is_some_and(|f| f.suppressed);
     let targets = crate::timeline::menu_targets(app, id);
-    vec![
+    let mut items = vec![
         act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists),
         act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some()),
         act("ui.rename", "Rename", "rename").key("F2").with(json!({"feature":id})).on(exists),
@@ -646,7 +646,18 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
             .on(exists),
         Item::sep(),
         act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({"feature":id})).on(exists),
-    ]
+    ];
+    // With the history in the browser its rows put features in timeline folders, as the
+    // History's feature menu does (#7221).
+    if app.preferences.history_in_browser {
+        let parent = crate::timeline_folders::group_parent(&app.session.doc.timeline_groups, &targets);
+        items.push(
+            act("ui.groupFeatures", "Group Features", "feature_group")
+                .with(json!({ "features": targets, "parent": parent }))
+                .on(exists && app.session.group_refusal(&targets, parent).is_none()),
+        );
+    }
+    items
 }
 
 /// The canvas menus put Repeat on
