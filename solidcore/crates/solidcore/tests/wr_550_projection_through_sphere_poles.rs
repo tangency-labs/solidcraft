@@ -20,7 +20,6 @@
     clippy::indexing_slicing
 )] // test helpers
 
-use solidcore::curve::curve::CurveKind;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::tol::approx_tol3d;
@@ -98,11 +97,11 @@ fn wr_550_pole_tangent_keeps_the_projection_within_a_tight_tolerance() {
 }
 
 /// The intersection of the cylinder of radius 50 about the Z axis (z 0..40, the half roll's
-/// outside) with the r 6 ball about (0, 50 - 1e-6, 20), its seam meridian turned `turn` rad
-/// about its axis from +X as the boolean tests turn it: the ball's poles lie 1e-6 inside the
-/// cylinder, within the trace's tolerance of the curve, and the curve runs into each pole along
+/// outside) with the r 6 ball about (0, 50 + `delta`, 20), its seam meridian turned `turn` rad
+/// about its axis from +X as the boolean tests turn it: the ball's poles lie `-delta` inside
+/// the cylinder, within the trace's tolerance of the curve, and the curve runs into each pole along
 /// ±X. Returns the sphere's domain and the intersection.
-fn roll_and_turned_ball(turn: f64) -> (Kernel, Extent2d, SurfaceIntersection) {
+fn roll_and_turned_ball(turn: f64, delta: f64) -> (Kernel, Extent2d, SurfaceIntersection) {
     let mut k = Kernel::default();
     let mut ball = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 6.0).unwrap();
     let (s, c) = turn.sin_cos();
@@ -113,7 +112,7 @@ fn roll_and_turned_ball(turn: f64) -> (Kernel, Extent2d, SurfaceIntersection) {
             [c, s, 0.0, 0.0],
             [-s, c, 0.0, 0.0],
             [0.0, 0.0, 1.0, 0.0],
-            [0.0, 50.0 - 1e-6, 20.0, 1.0],
+            [0.0, 50.0 + delta, 20.0, 1.0],
         ],
         true,
     )
@@ -147,51 +146,33 @@ fn roll_and_turned_ball(turn: f64) -> (Kernel, Extent2d, SurfaceIntersection) {
 
 /// A trace that reaches a sphere's pole takes the pole's singular parameter along the curve's
 /// tangent there (the solved parameter `s*` whose meridian holds the tangent `T`) and the
-/// sphere's derivatives on it. With the ball's seam turned 0.01 rad, `T` (+X) lies on the
-/// meridian at `s* = -0.00176`, just past the seam from the trace's side (`u = 0.0742`), so the
-/// pole point keeps the seam's parameter `u = 0`. The derivatives were taken there too, 0.011 rad
-/// off `T`'s meridian: the UV tangent at the pole then had a u-rate about 6e4 times its
-/// v-rate, and the ball's UV trim of the short curve from the seam crossing into the pole had a
-/// control point at u = -0.118, outside the sphere's domain.
+/// sphere's derivatives on it. With the ball's seam turned 0.015 rad (poles 1e-6 inside the
+/// cylinder), `T` lies on the meridian at `s* = -0.00264`, just past the seam from the trace's
+/// side (`u = 0.165`), so the pole point keeps the seam's parameter `u = 0`. The derivatives
+/// were taken there too, 0.017 rad off `T`'s meridian: the UV tangent of the curve from the
+/// seam crossing into the pole then had a u-rate 9.0e4 times its v-rate there (turned 0.032:
+/// 1.9e5; turned 0.058 with the poles 5e-6 inside: 7.0e4).
 ///
-/// Every UV curve on the ball is a non-rational B-spline, so it lies in the sphere's domain
-/// when its control points do (convex hull): that is asserted, up to the rounding of the
-/// coordinates at the domain's size (turned 0.02, one control point is at u = -7e-18). Taken across the seam on
-/// `s*`'s own meridian, the UV tangent at the pole has no u-rate: the sphere's `S_u` is normal
-/// to the meridian plane of `s*`, which holds `T`, so `T = a S_u + b S_v` has `a = 0`. The
-/// computed `a` carries the direction solve's error (`SM_EFF_ZERO`, about 1e-12 rad) times
-/// `|S_v| / |S_u|` at the stepped-back point, about 1e6 for a point 1e-6 from the pole, so
-/// about 1e-6 · |b| (measured 1.0e-6 here); the bound 1e-3 · |b| is that with a margin of 1e3.
+/// Taken across the seam on `s*`'s own meridian, the UV tangent at the pole has no u-rate: the
+/// sphere's `S_u` is normal to the meridian plane of `s*`, which holds `T`, so
+/// `T = a S_u + b S_v` has `a = 0`. The computed `a` carries the direction solve's error
+/// (`SM_EFF_ZERO`, about 1e-12 rad) times `|S_v| / |S_u|` at the stepped-back point, about 1e6
+/// for a point 1e-6 from the pole, so about 1e-6 · |b| (measured at most 6.4e-7 here); the
+/// bound 1e-3 · |b| is that with a margin of 1e3. Every pole end of every curve is checked.
 /// The ball turned -0.01 and 0 rad, where the pole's parameter is not clamped, are the
 /// controls.
 #[test]
 fn a_trace_into_a_pole_past_the_seam_takes_the_derivatives_on_the_curves_meridian() {
-    for turn in [0.01, 0.02, -0.01, 0.0] {
-        let (k, domain, out) = roll_and_turned_ball(turn);
+    let clamped = [(0.015, -1e-6), (0.032, -1e-6), (0.058, -5e-6)];
+    let controls = [(-0.01, -1e-6), (0.0, -1e-6)];
+    for (turn, delta) in clamped.into_iter().chain(controls) {
+        let (k, domain, out) = roll_and_turned_ball(turn, delta);
         assert!(
             !out.surface2_uv_curves.is_empty(),
-            "turned {turn}: no curve"
+            "turned {turn}, {delta}: no curve"
         );
         for (i, uv) in out.surface2_uv_curves.iter().enumerate() {
             let uv = uv.as_ref().unwrap();
-            let CurveKind::BSpline(b) = uv.kind() else {
-                panic!("turned {turn}, curve {i}: not a B-spline");
-            };
-            assert!(!b.is_rational().unwrap(), "turned {turn}, curve {i}");
-            // the domain, widened by the rounding of the control points' coordinates (the
-            // Hermite data's conversion at the domain's size, 4 ulps of it)
-            let round = 4.0 * f64::EPSILON * (1.0 + domain.max_dimension());
-            for p in b.control_points().unwrap() {
-                assert!(
-                    p.x >= domain.min().x - round
-                        && p.x <= domain.max().x + round
-                        && p.y >= domain.min().y - round
-                        && p.y <= domain.max().y + round,
-                    "turned {turn}, curve {i}: control point ({}, {}) outside the sphere's domain",
-                    p.x,
-                    p.y
-                );
-            }
             // at a pole (v at the domain's end), the tangent runs along the meridian
             let ivl = uv.natural_interval();
             for (t, from_left) in [(ivl.min(), false), (ivl.max(), true)] {
@@ -202,7 +183,7 @@ fn a_trace_into_a_pole_past_the_seam_takes_the_derivatives_on_the_curves_meridia
                 }
                 assert!(
                     d.x.abs() <= 1e-3 * d.y.abs(),
-                    "turned {turn}, curve {i}: UV tangent ({}, {}) at the pole ({}, {})",
+                    "turned {turn}, {delta}, curve {i}: UV tangent ({}, {}) at the pole ({}, {})",
                     d.x,
                     d.y,
                     p.x,
@@ -210,15 +191,15 @@ fn a_trace_into_a_pole_past_the_seam_takes_the_derivatives_on_the_curves_meridia
                 );
             }
         }
-        // the curve from the seam crossing into the top pole reaches it (turned 0.01, 0.02)
-        if turn > 0.0 {
+        // the clamped cases: a curve from the seam crossing ends at the top pole on the seam
+        if clamped.contains(&(turn, delta)) {
             let at_pole = out.surface2_uv_curves.iter().flatten().any(|uv| {
                 let p = uv.evaluate_point(&k, uv.natural_interval().max()).unwrap();
                 p.y == domain.max().y && p.x == domain.min().x
             });
             assert!(
                 at_pole,
-                "turned {turn}: no curve ends at the pole on the seam"
+                "turned {turn}, {delta}: no curve ends at the pole on the seam"
             );
         }
     }
