@@ -1656,6 +1656,29 @@ fn transform_scales_dimension_formulas_once_and_keeps_unselected_dimensions() {
     assert!(close(s.doc.eval(height["param"].as_str().unwrap(), length).unwrap(), 60.0), "dependent dimensions scale only once");
 }
 
+/// #17315: Transform turns, scales and moves a text as a unit, the way Move turns it, instead of
+/// refusing its outline points as projected. The text stays one editable text.
+#[test]
+fn transform_turns_scales_and_moves_a_text_as_a_unit() {
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.text", json!({"text": "I", "at": [10, 0], "height": 10}));
+    let link = r["link"].as_str().unwrap().to_string();
+    let curves = ids(&r["curves"]);
+    let before = s.doc.to_json();
+    // Twice as big and a quarter turn about the origin, then 5 along x: (10, 0) goes to (5, 20).
+    let out = run(&mut s, "sketch.transform", json!({"entities": curves, "factor": 2, "angle": 90, "center": [0, 0], "translate": [5, 0]}));
+    assert!(!ids(&out["curves"]).is_empty(), "{out}");
+    let sk = sketch(&s);
+    let Some(LinkSource::Text { at, height, angle, .. }) = sk.link(&link).map(|l| l.source.clone()) else {
+        panic!("the text keeps its link: {:?}", sk.links);
+    };
+    assert!(at.dist(Vec2::new(5.0, 20.0)) < 1e-9, "{at:?}");
+    assert!(close(height, 20.0), "{height}");
+    assert!(close(angle, std::f64::consts::FRAC_PI_2), "{angle}");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before, "one undo restores the text");
+}
+
 /// #14411: Scale takes the driving dimensions of what it scales with it, as Transform does: a
 /// 40 × 20 rectangle filleted r5, scaled 2× about the origin, is 80 × 40 with r10 corners, not a
 /// skewed shape the solver bent to keep the old radius.
