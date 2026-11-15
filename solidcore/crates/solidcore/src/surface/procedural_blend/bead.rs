@@ -22,6 +22,11 @@
 //! Both bounds are open: a sagitta at the bound touches the face. [`BeadDefinition::new`] refuses
 //! a sagitta past its bound and names the bound ([`SagittaRefused`]).
 //!
+//! A bead need not run the whole edge: its spans ([`BeadSpan`]) say where along the edge it
+//! runs, each from one fraction of the edge's length to another, closed at both ends by the
+//! plane square to the edge (a planar cap). Several spans on one edge break the bead into
+//! pieces, as an intermittent weld is.
+//!
 //! Not upstream (solidcore's, #15129). Deviations: none. No recursion.
 
 use crate::error::{Result, SolidError};
@@ -99,13 +104,18 @@ impl BeadDefinition {
     /// `(c / 2) tan(min(beta_i) / 2)`, convex below `(c / 2) tan((pi - max(beta_i)) / 2)`.
     #[must_use]
     pub fn bound(&self, sagitta: f64) -> f64 {
-        let [b1, b2] = self.toe_angles();
-        let half = self.chord() / 2.0;
-        if sagitta < 0.0 {
-            half * (b1.min(b2) / 2.0).tan()
-        } else {
-            half * ((PI - b1.max(b2)) / 2.0).tan()
-        }
+        sagitta_bound(self.chord(), self.toe_angles(), sagitta)
+    }
+
+    /// The open bound below which a convex bead does not overhang its toes: the arc leaves the
+    /// chord at `phi` and the chord meets support i at `beta_i`, so it leans back over the face
+    /// past the toe where `beta_i + phi > pi / 2`, `h > (c / 2) tan((pi / 2 - max(beta_i)) / 2)`
+    /// (0 where a toe is already obtuse). The geometry allows such a bead up to [`Self::bound`];
+    /// the blend's trimming does not build it yet (it fails or builds a wrong body), so
+    /// [`crate::blend::fillet_executive::session::FilletSession::prepare_beads_along`] refuses it.
+    #[must_use]
+    pub fn overhang_bound(&self) -> f64 {
+        overhang_bound(self.chord(), self.toe_angles())
     }
 
     /// Whether the sagitta is inside its bound.
@@ -207,5 +217,127 @@ impl BeadArc {
     pub fn point(&self, t: f64) -> Point3 {
         let (s, c) = t.sin_cos();
         self.centre + self.x * (self.radius * c) + self.y * (self.radius * s)
+    }
+
+    /// The unit tangent at angle `t`, the way the arc runs (from the first foot to the second).
+    #[must_use]
+    pub fn tangent(&self, t: f64) -> Vec3 {
+        let (s, c) = t.sin_cos();
+        self.y * c - self.x * s
+    }
+
+    /// The arc as two rational quadratic Bezier pieces, first foot to apex to second foot:
+    /// control points `[foot, corner, apex, corner, foot]` and weights `[1, w, 1, w, 1]`, `w =
+    /// cos(turn / 4)`, each corner where the arc's tangents at its piece's ends meet (at
+    /// `radius / w` from the centre). Exact: a rational quadratic piece is a circular arc of
+    /// any turn under `pi`, and each piece turns half the arc's (under `pi`, as the whole arc
+    /// turns under `2 pi`).
+    #[must_use]
+    pub fn rows(&self) -> ([Point3; 5], [f64; 5]) {
+        let half = self.turn / 2.0;
+        let w = (half / 2.0).cos();
+        let corner = |t: f64| {
+            let (s, c) = t.sin_cos();
+            self.centre + (self.x * c + self.y * s) * (self.radius / w)
+        };
+        (
+            [
+                self.point(0.0),
+                corner(half / 2.0),
+                self.point(half),
+                corner(1.5 * half),
+                self.point(self.turn),
+            ],
+            [1.0, w, 1.0, w, 1.0],
+        )
+    }
+}
+
+/// The sagitta's open bound over `chord` with the toe angles `toes` ([`BeadDefinition::bound`]
+/// for the sign of `sagitta`): concave `(c / 2) tan(min(beta_i) / 2)`, convex `(c / 2)
+/// tan((pi - max(beta_i)) / 2)`.
+#[must_use]
+pub fn sagitta_bound(chord: f64, toes: [f64; 2], sagitta: f64) -> f64 {
+    let [b1, b2] = toes;
+    let half = chord / 2.0;
+    if sagitta < 0.0 {
+        half * (b1.min(b2) / 2.0).tan()
+    } else {
+        half * ((PI - b1.max(b2)) / 2.0).tan()
+    }
+}
+
+/// The convex sagitta at which the arc over `chord` leaves its steeper toe square to the face
+/// ([`BeadDefinition::overhang_bound`]): `(c / 2) tan((pi / 2 - max(beta_i)) / 2)`, 0 where a
+/// toe angle is already square or past it.
+#[must_use]
+pub fn overhang_bound(chord: f64, toes: [f64; 2]) -> f64 {
+    let [b1, b2] = toes;
+    let lean = (PI / 2.0 - b1.max(b2)).max(0.0);
+    chord / 2.0 * (lean / 2.0).tan()
+}
+
+/// Where along its edge a bead runs: from `from` to `to`, fractions of the edge's length from
+/// its start (`0 <= from < to <= 1`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BeadSpan {
+    /// Where the bead starts.
+    pub from: f64,
+    /// Where it stops.
+    pub to: f64,
+}
+
+impl BeadSpan {
+    /// The whole edge.
+    pub const WHOLE: Self = Self { from: 0.0, to: 1.0 };
+
+    /// The span from `from` to `to`, checked.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an end that is not finite, outside `[0, 1]`, or a span of no length
+    /// (`from >= to`).
+    pub fn new(from: f64, to: f64) -> Result<Self> {
+        if !(from.is_finite() && to.is_finite() && 0.0 <= from && from < to && to <= 1.0) {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a bead's span runs from 0 to 1 along its edge, its start before its end",
+            ));
+        }
+        Ok(Self { from, to })
+    }
+
+    /// The span's share of the edge.
+    #[must_use]
+    pub fn share(&self) -> f64 {
+        self.to - self.from
+    }
+
+    /// Spans along one edge, checked: each valid, in order along the edge, none overlapping
+    /// the next (two may meet end to start).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::new`]; `InvalidInput` for no span, or spans out of order or
+    /// overlapping.
+    pub fn along(spans: &[(f64, f64)]) -> Result<Vec<Self>> {
+        if spans.is_empty() {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a bead has at least one span",
+            ));
+        }
+        let mut out: Vec<Self> = Vec::with_capacity(spans.len());
+        for &(from, to) in spans {
+            let span = Self::new(from, to)?;
+            if out.last().is_some_and(|last| span.from < last.to) {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "a bead's spans are in order along the edge and do not overlap",
+                ));
+            }
+            out.push(span);
+        }
+        Ok(out)
     }
 }
