@@ -6569,7 +6569,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-views"
-version = "0.41.0"
+version = "0.45.0"
 dependencies = [
  "serde_json",
 ]
