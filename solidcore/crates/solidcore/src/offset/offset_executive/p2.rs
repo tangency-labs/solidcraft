@@ -4397,10 +4397,10 @@ mod tests {
         };
         // the empty offset merges into an empty result
         assert!(result.unwrap().faces().is_empty());
-        // RemoveFaces ran with the temporary's real editing flag before the
-        // piecewise merge, and again in RemoveExcessFaces on the merged result
-        // (cpp:1772), releasing its nested mark each time.
-        assert_eq!(kernel.context.current_mark(MarkType::Mark2), 5);
+        // RemoveFaces ran in RemoveExcessFaces on the merged result (cpp:1772),
+        // releasing its nested mark; the pass before the piecewise merge is gone
+        // (WR-341), so the counter is two below upstream's 5.
+        assert_eq!(kernel.context.current_mark(MarkType::Mark2), 3);
         assert!(!kernel.context.is_mark_locked(MarkType::Mark2));
         assert_eq!(kernel.context.current_mark(MarkType::Mark), 3);
         assert!(!kernel.context.is_mark_locked(MarkType::Mark));
