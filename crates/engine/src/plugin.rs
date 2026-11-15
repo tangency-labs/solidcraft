@@ -185,6 +185,9 @@ pub fn host_limits_for(session: &Session, id: &str, approval: &str) -> HostLimit
     limits
 }
 
+/// The most files and folders one plugin folder holds; install and removal both stop there.
+pub(super) const MAX_FILES: usize = 1024;
+
 pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
     let mut digest = Sha256::new();
     digest.update(b"solidcraft-plugin-approval-v1\0");

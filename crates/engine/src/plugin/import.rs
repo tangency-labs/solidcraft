@@ -29,6 +29,7 @@ fn read_manifest(folder: &str) -> Result<Manifest> {
 
 /// The installed plugins' folders, by id: the plugins folder, plus packages inspected this session.
 fn package_folders(session: &Session) -> BTreeMap<String, String> {
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let mut folders = session.plugin_state.packages.clone();
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(root) = session.plugin_state.plugins_dir()

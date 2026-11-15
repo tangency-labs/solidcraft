@@ -1726,6 +1726,27 @@ fn euclidean_net(form: &BSplineSurface) -> Result<(Vec<Vec<Vec3>>, usize, usize)
     ))
 }
 
+/// The circle of a rational quadratic arc from its control triangle `p0`, `p1`, `p2` (its
+/// ends and its tangents' intersection): its centre and radius together from the endpoint
+/// tangent and the chord, its plane's normal, and the triangle's doubled area, which says how
+/// well the triangle fixes that plane (The NURBS Book, section 7.3). `None` for a degenerate
+/// triangle.
+fn control_circle(p0: Vec3, p1: Vec3, p2: Vec3) -> Option<(Vec3, f64, Vec3, f64)> {
+    let leg = p1 - p0;
+    let chord = p2 - p0;
+    let tangent = leg.unitize().ok()?;
+    let across = chord.unitize().ok()?;
+    let normal = leg.cross(chord).unitize().ok()?;
+    let radius = leg.length() * tangent.dot(across) / tangent.cross(across).length();
+    let centre = p0 + normal.cross(tangent) * radius;
+    (radius.is_finite() && radius > 0.0).then_some((
+        centre,
+        radius,
+        normal,
+        leg.cross(chord).length(),
+    ))
+}
+
 /// The Greville abscissae of a NURBS surface along u (`along_u`) or v: each control
 /// point's average of its `degree` inner knots.
 fn greville(form: &BSplineSurface, along_u: bool) -> Result<Vec<f64>> {
@@ -1878,21 +1899,7 @@ impl AnalyticSupport {
     /// fixes the tube centre and radius together (The NURBS Book, sections 7.3 and 7.5).
     fn torus_from_net(placement: Axis2Placement, net: &[Vec<Vec3>]) -> Option<Self> {
         let at = |i: usize, j: usize| net.get(i).and_then(|r| r.get(j)).copied();
-        let circle = |p0: Vec3, p1: Vec3, p2: Vec3| -> Option<(Vec3, f64, Vec3, f64)> {
-            let leg = p1 - p0;
-            let chord = p2 - p0;
-            let tangent = leg.unitize().ok()?;
-            let across = chord.unitize().ok()?;
-            let normal = leg.cross(chord).unitize().ok()?;
-            let radius = leg.length() * tangent.dot(across) / tangent.cross(across).length();
-            let centre = p0 + normal.cross(tangent) * radius;
-            (radius.is_finite() && radius > 0.0).then_some((
-                centre,
-                radius,
-                normal,
-                leg.cross(chord).length(),
-            ))
-        };
+        let circle = control_circle;
         let boundary = |along_u: bool, fixed: usize| {
             if along_u {
                 circle(at(0, fixed)?, at(1, fixed)?, at(2, fixed)?)
@@ -2093,16 +2100,18 @@ impl AnalyticSupport {
         })
     }
 
-    /// Not a support's kind (#2485): the surface of revolution a NURBS form is, as the
-    /// kernel recognises it in the form (`IsNurbSurfaceSurfOfRevolution`, which
-    /// `CopyAndAddAnalytics` runs), on the form's own frame, sweep, generator and swap;
-    /// it takes `form` as its NURB and must evaluate as the form at the form's own
-    /// parameters, as [`AnalyticSupport::build`] requires of a support.
+    /// Not a support's kind (#2485): the surface of revolution a NURBS form is, its numbers
+    /// read off the form's control structure ([`Self::revolution_from_rows`]) on the
+    /// conventions the kernel recognises in the form (`IsNurbSurfaceSurfOfRevolution`, which
+    /// `CopyAndAddAnalytics` runs: its generator, generator range, swap and axis sense); it
+    /// takes `form` as its NURB and must evaluate as the form at the form's own parameters,
+    /// as [`AnalyticSupport::build`] requires of a support.
     ///
     /// # Errors
     ///
-    /// `InvalidInput` where the form is no surface of revolution or is not the recognised
-    /// one's parametrisation; those of the recogniser and the evaluations.
+    /// `InvalidInput` where the form is no surface of revolution, has no circular control
+    /// row, or is not the derived one's parametrisation; those of the recogniser, the
+    /// derivation and the evaluations.
     pub fn derive_revolution(k: &Kernel, form: &BSplineSurface) -> Result<Surface> {
         use crate::surface::surf_of_revolution::SurfOfRevolution;
         let not_kind = || {
@@ -2112,17 +2121,202 @@ impl AnalyticSupport {
             )
         };
         let test = Surface::from(form.copy());
-        let mut rev = match SurfOfRevolution::is_nurb_surface_surf_of_revolution(k, &test, 1.0) {
+        let recognised = match SurfOfRevolution::is_nurb_surface_surf_of_revolution(k, &test, 1.0) {
             Ok(Some(rev)) => rev,
             Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             Ok(None) | Err(_) => return Err(not_kind()),
         };
-        rev.base = form.copy();
-        let surface = Surface::from(rev);
+        let surface = Self::revolution_from_rows(k, &recognised, form)?.ok_or_else(not_kind)?;
         if !evaluates_as(k, &surface, form)? {
             return Err(not_kind());
         }
         Ok(surface)
+    }
+
+    /// The surface of revolution `recognised` in `form`, its numbers read off the form's
+    /// control structure rather than the recogniser's fit, as a cylinder's, cone's and torus's
+    /// are ([`Self::revolved_from_rows`], [`Self::torus_from_net`]). The recogniser's axis is
+    /// the circle's through three evaluated points of the first sweep (`is_arc`); on a sweep of
+    /// a fraction of a degree, 0.45 degrees at a radius of 15.6 mm in
+    /// tangency-labs/solidcraft#17004, that centre lies 4e-11 off sideways and turns the swept
+    /// points past the rounding [`evaluates_as`] forgives.
+    ///
+    /// Every control row across the sweep is a circle, a generator control point turned about
+    /// the axis. Of the rows of the form's Bezier patches, the one whose first sweep span has
+    /// the largest control triangle gives the numbers ([`control_circle`]; a row on the axis has
+    /// none): the axis is the triangle's normal, in the recogniser's sense; the centre is the
+    /// triangle's, moved onto the chord's perpendicular bisector. A short arc's control points
+    /// fix the centre's distance along the bisector only to their rounding over the arc's angle
+    /// squared, but the bisector itself to that over the angle; a centre off along the bisector
+    /// moves the swept points by the square of the sweep, one off across it turns them by the
+    /// sweep. The x axis points to the start of the sweep circle on which the surface's polar
+    /// converter measures the NURB's angles (`RebuildPolarConverter`: the sweep iso at the
+    /// generator's start, or at 0.45 of its range where that one lies on the axis), and the
+    /// sweep ends at the angle of that circle's end. Another row's start is turned from it by
+    /// the net's rounding, and every converted angle with it: 5e-14 radians between the
+    /// generator's ends on a 286 degree sweep in #17004's body. The recogniser's generator,
+    /// generator range and swap are kept, and its origin's height on the axis: they are
+    /// conventions, not numbers. `None` where no row has a triangle or both sweep isos lie on
+    /// the axis.
+    ///
+    /// # Errors
+    ///
+    /// Those of the form's control net and Bezier decomposition, its sweep iso and that one's
+    /// evaluation, the generator's copy,
+    /// [`SurfOfRevolution::new`](crate::surface::surf_of_revolution::SurfOfRevolution::new)
+    /// and its reparameterisation.
+    fn revolution_from_rows(
+        k: &Kernel,
+        recognised: &crate::surface::surf_of_revolution::SurfOfRevolution,
+        form: &BSplineSurface,
+    ) -> Result<Option<Surface>> {
+        use crate::math::EFF_ZERO;
+        use crate::nurbs::b_spline_surface::{IsoCurveOptions, SurfParamType};
+        use crate::surface::surf_of_revolution::SurfOfRevolution;
+        let Some(nurb) = form.gw_nurb() else {
+            return Ok(None);
+        };
+        let euclid = |c: &crate::nurbs::math::CPoint| {
+            let w = if c.w == NOW { 1.0 } else { c.w };
+            Vec3::new(c.x, c.y, c.z) * (1.0 / w)
+        };
+        let patches: Vec<Vec<Vec<Vec<Vec3>>>> = decompose_to_bez(nurb)?
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|patch| {
+                        patch
+                            .rows()
+                            .map(|r| r.iter().map(euclid).collect())
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect();
+        // the sweep runs along u unless the recogniser swapped it
+        let sweep_along_u = !recognised.swap_uv;
+        // the patch of the first span along the sweep and span `g` along the generator
+        let patch = |g: usize| -> Option<&Vec<Vec<Vec3>>> {
+            if sweep_along_u {
+                patches.first()?.get(g)
+            } else {
+                patches.get(g)?.first()
+            }
+        };
+        // a patch's control point `j` along the sweep of its generator row `r`
+        let at = |net: &Vec<Vec<Vec3>>, r: usize, j: usize| -> Option<Vec3> {
+            if sweep_along_u {
+                net.get(j)?.get(r).copied()
+            } else {
+                net.get(r)?.get(j).copied()
+            }
+        };
+        let generator_spans = if sweep_along_u {
+            patches.first().map_or(0, Vec::len)
+        } else {
+            patches.len()
+        };
+        let mut best: Option<(f64, Vec3, Vec3, Vec3, Vec3)> = None;
+        for g in 0..generator_spans {
+            let Some(first) = patch(g) else {
+                return Ok(None);
+            };
+            let rows = if sweep_along_u {
+                first.first().map_or(0, Vec::len)
+            } else {
+                first.len()
+            };
+            for r in 0..rows {
+                let (Some(p0), Some(p1), Some(p2)) =
+                    (at(first, r, 0), at(first, r, 1), at(first, r, 2))
+                else {
+                    return Ok(None);
+                };
+                let Some((centre, _, normal, area)) = control_circle(p0, p1, p2) else {
+                    continue;
+                };
+                if best.as_ref().is_none_or(|b| area > b.0) {
+                    best = Some((area, centre, normal, p0, p2));
+                }
+            }
+        }
+        let Some((_, centre, normal, p0, p2)) = best else {
+            return Ok(None);
+        };
+        // the sweep circle the polar converter measures the NURB's angles on
+        // (`RebuildPolarConverter`): the sweep iso at the generator's start, or at 0.45 of
+        // its range where that one lies on the axis
+        let uv = form.natural_uv_domain();
+        let sweep_iso = |fraction: f64| -> Result<BSplineCurve> {
+            let at = uv.evaluate(fraction, fraction);
+            let (param, value) = if sweep_along_u {
+                (SurfParamType::V, at.y)
+            } else {
+                (SurfParamType::U, at.x)
+            };
+            Ok(form
+                .create_iso_parametric_curve(k, param, value, IsoCurveOptions::default())?
+                .curve)
+        };
+        let mut circle = sweep_iso(0.0)?;
+        if circle.is_degenerate(k, EFF_ZERO, None)? {
+            circle = sweep_iso(0.45)?;
+            if circle.is_degenerate(k, EFF_ZERO, None)? {
+                return Ok(None);
+            }
+        }
+        let ends = circle.natural_interval();
+        let (start, stop) = (
+            circle.evaluate_point(ends.min())?,
+            circle.evaluate_point(ends.max())?,
+        );
+        let position = recognised.position;
+        let axis = if normal.dot(position.z_axis()) < 0.0 {
+            -normal
+        } else {
+            normal
+        };
+        let mid = (p0 + p2) * 0.5;
+        let Ok(bisector) = axis.cross(p2 - p0).unitize() else {
+            return Ok(None);
+        };
+        let centre = mid + bisector * (centre - mid).dot(bisector);
+        let radial = |p: Vec3| {
+            let d = p - centre;
+            d - axis * d.dot(axis)
+        };
+        let Ok(x) = radial(start).unitize() else {
+            return Ok(None);
+        };
+        let y = axis.cross(x);
+        let end = radial(stop);
+        let domain = recognised.anal_uv_domain;
+        // the turn nearest the recognised sweep's: a sweep past 180 degrees
+        let mut sweep = end.dot(y).atan2(end.dot(x)).to_degrees();
+        sweep += 360.0 * ((domain.max().x - domain.min().x - sweep) / 360.0).round();
+        let origin = centre + axis * (position.origin() - centre).dot(axis);
+        let finite = [origin, x, y]
+            .iter()
+            .all(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite());
+        if !finite || !sweep.is_finite() || sweep <= 0.0 {
+            return Ok(None);
+        }
+        let Some(generator) = recognised.gen_curve.as_ref() else {
+            return Ok(None);
+        };
+        let mut rev = SurfOfRevolution::new(
+            k,
+            generator.copy(k)?,
+            origin,
+            x,
+            y,
+            Extent2d::from_bounds(0.0, domain.min().y, sweep, domain.max().y),
+            recognised.swap_uv,
+        )?;
+        // (as the recogniser: the NURB's domain the form's, status ignored)
+        crate::error::ignore_status(rev.reparameterize(k, &form.natural_uv_domain()))?;
+        rev.base = form.copy();
+        Ok(Some(Surface::from(rev)))
     }
 
     /// Its kind, without its parameters.

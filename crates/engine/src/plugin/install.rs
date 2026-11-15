@@ -107,7 +107,7 @@ pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
             path = parent;
         }
     }
-    if files.len() + folders.len() > super::package::MAX_FILES {
+    if files.len() + folders.len() > super::MAX_FILES {
         return Err(InstallError::Manifest(HostError::LimitExceeded { limit: "a plugin folder holds at most 1024 files and folders".into() }));
     }
     // Every file but the plugin's component stays within a command component's budget.

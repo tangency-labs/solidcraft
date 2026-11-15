@@ -2,8 +2,6 @@
 use super::*;
 use crate::schema::plugin::RemoveResult;
 
-pub(super) const MAX_FILES: usize = 1024;
-
 fn invalid(reason: impl Into<String>) -> EngineError {
     HostError::InvalidInput { field: "package".into(), reason: reason.into() }.into()
 }
