@@ -111,7 +111,10 @@ fn round_faces(b: &Brep) -> Vec<(Surface, bool)> {
         .ids()
         .filter_map(|f| {
             let s = face::surface(b, f).unwrap()?;
-            if let SurfaceKind::BSpline(bs) = s.kind() {
+            // a traced round is a procedural blend: its net is the traced fit
+            if let Some(BlendNet::Approx(bs)) = s.procedural_blend().map(|d| d.net()) {
+                Some((Surface::from(bs.clone()), bs.is_rational()))
+            } else if let SurfaceKind::BSpline(bs) = s.kind() {
                 Some((s.clone(), bs.is_rational()))
             } else {
                 None
@@ -326,9 +329,9 @@ fn an_oblique_plane_and_cylinder_round_is_the_exact_rational_ball_sweep() {
     );
 }
 
-/// Without the fix the round is traced: a skin through its stations' sections (the ball's
-/// exact circles, so rational too), off the ball between them where the exact sweep is on it
-/// to 1e-12.
+/// Without the fix the round is traced: a procedural blend whose net is a skin through its
+/// stations' sections (the ball's exact circles, so rational too), off the ball between them
+/// where the exact sweep is on it to 1e-12.
 #[test]
 fn upstream_traces_the_oblique_plane_and_cylinder_round() {
     let (spine, _, _) = plate_and_peg_round(30f64.to_radians());
@@ -431,7 +434,8 @@ fn two_quadrics_touching_one_ball_round_exactly_on_their_conic() {
     );
 }
 
-/// Without the fix the round is traced, off the ball between its stations (as for the peg).
+/// Without the fix the round is traced, its net off the ball between its stations (as for
+/// the peg).
 #[test]
 fn upstream_traces_the_round_between_two_quadrics_touching_one_ball() {
     let (spine, _, _) = pole_and_cone_round();
