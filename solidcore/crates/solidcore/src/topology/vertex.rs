@@ -1868,7 +1868,9 @@ mod tests {
     /// WR-256: a composite curve cannot be evaluated (`SmCompositeCurve` keeps
     /// `SmCurve::Evaluate`, which returns `SM_ERR`), so `GetEndTangent` fails at the end
     /// of edge 0 and the tangent stays the `SmVector3d` default; `AngleBetween` of that
-    /// zero-length vector reports `0`.
+    /// zero-length vector reports `0` in `AreEdgesTangent`. `IsTopologicalVertex` does
+    /// not take that angle as G1 evidence (tangency-labs/smlib 7a35f33, WR-663): the
+    /// vertex is kept.
     #[test]
     fn failed_end_tangent_reads_the_default_vector() {
         use crate::curve::composite_curve::CompositeCurve;
@@ -1884,8 +1886,9 @@ mod tests {
         assert!(are_edges_tangent(&k, &b, v[1], e[0], e[1], 0.5).unwrap());
         assert!(are_edges_tangent(&k, &b, v[1], e[1], e[0], 0.5).unwrap());
         assert!(!are_edges_tangent(&k, &b, v[1], e[0], e[1], 0.0).unwrap());
-        // the parameters agree (0 and 0) and the angle test passes
-        assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
+        // the parameters agree (0 and 0), but the failed tangent gives no angle: the
+        // curves are not shown to meet G1 and the vertex is kept (fork 7a35f33)
+        assert!(!is_topological_vertex(&k, &mut b, v[1]).unwrap());
     }
 
     // tangency-labs/smlib 7a35f33 (SmVertex::IsTopologicalVertex): without the angle

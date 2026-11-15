@@ -3233,14 +3233,21 @@ mod tests {
         expect(&cone(-1.0), 2, &[radius, pole]);
         // SM_LEVEL_GIVEN skips the base classes' checks
         expect(&cone(-1.0), LEVEL_GIVEN, &[radius, pole]);
-        // with the NURB form, the net through the apex also folds back
-        let fold = (
-            B_SPLINE_SURFACE_TYPE,
-            5,
-            "Bad NonMonotonic CPts",
-            "SmBSplineSurface Control Net doubles back on itself probably making a self intersecting surface",
+        // With the NURB form, `IsClosed` samples an iso line through the apex (radius -1
+        // to 1 over height 3: the middle sample row), where the directional derivatives
+        // cannot be evaluated. Upstream drops that status and finds the cone closed in U,
+        // so the net's fold back through the apex is reported (B-spline test 5). The fork
+        // does not show a surface closed from what it could not evaluate
+        // (tangency-labs/smlib 21dcf69, WR-663): the cone is taken as open in U, its seam
+        // boundaries then coincide (surface test 6), and the B-spline net is checked as
+        // an open grid, which does not fold back.
+        let seam = (
+            SURFACE_TYPE,
+            6,
+            "Bad Surf Coincidence at Seam",
+            "Open surface has partially coincident boundaries",
         );
-        expect(&with_nurb(cone(-1.0)), 2, &[fold, radius, pole]);
+        expect(&with_nurb(cone(-1.0)), 2, &[seam, radius, pole]);
     }
 
     /// A ring of radial width 2.65 a hair off flat (heights 1.3e-5 and 2.1e-5, a revolved
@@ -3445,7 +3452,7 @@ mod curve_bounded_tests {
     }
 
     #[test]
-    fn curve_bounded_given_is_defined_and_base_continuity_is_guarded() {
+    fn curve_bounded_given_is_defined_and_base_continuity_fails_test_4() {
         let k = Kernel::default();
         let surface = wrap(wrap(plane(1.0), vec![], vec![]), vec![], vec![]);
         let mut list = AssertArray::new();
@@ -3454,14 +3461,15 @@ mod curve_bounded_tests {
             .unwrap());
         assert!(list.is_empty());
         assert!(!list.last_add());
+        // The inherited base check reaches `sm_AssertTestSurface4`, whose
+        // `CalculateContinuities` fails here (a curve-bounded surface's generic `GetKnots`
+        // fails) without writing its output. Upstream reads that output uninitialised;
+        // the fork fails test 4 instead (tangency-labs/smlib 21dcf69, WR-663), so the
+        // surface is reported invalid.
         for level in [0, 1, 2] {
-            assert!(matches!(
-                surface.assert_valid(&k, None, level, ObjectKey(1)),
-                Err(SolidError::InvalidInput {
-                    reason: "continuity output never written (upstream reads it uninitialised)",
-                    ..
-                })
-            ));
+            assert!(!surface
+                .assert_valid(&k, None, level, ObjectKey(1))
+                .unwrap());
         }
     }
 

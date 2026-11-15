@@ -45,7 +45,7 @@
 {"case":"gcs_at_distance_zero_target","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
 {"case":"gcs_ellipse_max_ellipse","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
 {"case":"gcs_ellipse_min_line","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":{"blocks":[[21.0,29.0,168.0]],"n":17}}}
-{"case":"gcs_ellipse_projected_intersect","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
+{"case":"gcs_ellipse_projected_intersect","deferred":null,"error":null,"ints":{"status":[1007]},"topology":null,"values":{"out":[]}}
 {"case":"gcs_ellipse_self_min","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
 {"case":"gcs_pivot_minimize_zero_side","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
 {"case":"gcs_projected_short_view_vector","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
@@ -3056,7 +3056,7 @@
 {"case":"hexagon_tight_box","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[-5.0,6.123233995736766e-16,0.0,-2.499999999999999,4.330127018922194,0.0]}}
 {"case":"on_plane_hermite_tilted","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[1.0,0.22499999999999998]}}
 {"case":"on_plane_hermite_z","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[1.0,0.0]}}
-{"case":"on_plane_hermite_zero_normal","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0,1.23456e-61]}}
+{"case":"on_plane_hermite_zero_normal","deferred":null,"error":null,"ints":{"status":[1007]},"topology":null,"values":{"out":[]}}
 {"case":"on_plane_ivl_ellipse_full","deferred":null,"error":null,"ints":{"status":[1007]},"topology":null,"values":{"out":[]}}
 {"case":"on_plane_ivl_ellipse_partial","deferred":null,"error":null,"ints":{"status":[1007]},"topology":null,"values":{"out":[]}}
 {"case":"on_plane_ivl_ellipse_tilted","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0,1.23456e-61]}}

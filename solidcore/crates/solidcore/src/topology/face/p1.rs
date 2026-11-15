@@ -3472,8 +3472,14 @@ mod tests {
         b.face_mut(f).unwrap().surface =
             Some(Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z)));
         shrink_geometry(&k, &mut b, f, &key_of).unwrap();
+        // A face with its own surface is shrunk. This one has no face use, so removing
+        // its UV trim curves fails, and the fork passes that status on
+        // (`SER( this->RemoveUVTrimCurves() )`, tangency-labs/smlib 6997962) where
+        // upstream drops it and reports success.
         let (mut b, f) = plane_face();
-        shrink_geometry(&k, &mut b, f, &key_of).unwrap();
+        let e = shrink_geometry(&k, &mut b, f, &key_of).unwrap_err();
+        assert_eq!(e.operation(), OP, "{e}");
+        assert!(e.to_string().contains("the face's upward face use"), "{e}");
     }
 
     #[test]

@@ -1710,7 +1710,7 @@
 {"case":"review_corner_out_tolneg_bilin_g1e-06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[1e+20,1e+20,2e+20]],"n":17}}}
 {"case":"review_corner_out_tolneg_plane_g0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[5.653628815275241,5.657628815275243,29.733718583342547]],"n":17}}}
 {"case":"review_corner_out_tolneg_plane_g1e-06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[1e+20,1e+20,2e+20]],"n":17}}}
-{"case":"review_corner_perp_both","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[5.217919681452387,5.217919681452387,28.903341946257182]],"n":17}}}
+{"case":"review_corner_perp_both","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[1001.0,1e+20,1.23456e-61,1.23456e-61,1.23456e-61,1.23456e-61,1.0,1.0,0.3490658503988659,0.0014142135623730952,0.0014142135623730952,2.0,0.0,0.0,0.0,0.0]}}
 {"case":"review_corner_sector_edge_-0.0001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":87}}}
 {"case":"review_corner_sector_edge_0.0001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":87}}}
 {"case":"review_corner_sector_edge_1e-08","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":87}}}

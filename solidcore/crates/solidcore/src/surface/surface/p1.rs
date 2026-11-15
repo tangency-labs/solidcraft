@@ -5010,11 +5010,13 @@ mod tests {
         }
     }
 
-    /// `IsPeriodic` ignores its evaluation statuses: on a bicubic surface collapsed to
-    /// one point the zero-tangent repair fails, the raw derivatives are compared and
-    /// both directions are periodic; the offset constructor that asks then succeeds.
+    /// `IsPeriodic` answers only from what it evaluated: on a bicubic surface collapsed
+    /// to one point the zero-tangent repair fails, so neither direction is shown
+    /// periodic, as the fork has it (`Evaluate(..) != SM_SUCCESS` returns `FALSE`,
+    /// tangency-labs/smlib 21dcf69; upstream ignored the status and compared the raw
+    /// derivatives); the offset constructor that asks then succeeds.
     #[test]
-    fn is_periodic_ignores_failed_tangent_repairs() {
+    fn is_periodic_is_false_after_failed_tangent_repairs() {
         use crate::nurbs::math::{CPoint, NOW};
         use crate::nurbs::srf_basic::Surface as NlSurface;
         let k = &Kernel::default();
@@ -5027,11 +5029,11 @@ mod tests {
         assert!(s
             .evaluate(k, Point2::new(0.5, 0.5), 1, 1, upper_flags(true))
             .is_err());
-        assert!(s.is_periodic(k, &dom, SurfParamType::U).unwrap());
-        assert!(s.is_periodic(k, &dom, SurfParamType::V).unwrap());
+        assert!(!s.is_periodic(k, &dom, SurfParamType::U).unwrap());
+        assert!(!s.is_periodic(k, &dom, SurfParamType::V).unwrap());
         let k = Kernel::default();
         let off = OffsetSurface::new(&k, 1.0, s, true, 0).unwrap();
-        assert_eq!(off.is_periodic(), [1, 1]);
+        assert_eq!(off.is_periodic(), [0, 0]);
     }
 
     /// A B-spline surface runs the base body: an owning `SmOffsetSurface`.
