@@ -6,7 +6,7 @@
 //!
 //! | Rust                                   | Upstream                         |
 //! |----------------------------------------|----------------------------------|
-//! | [`create_b_vectors`]                   | `N_CreateBVectors`               |
+//! | [`create_b_vectors`], [`create_b_vectors_closing`] | `N_CreateBVectors` |
 //! | [`create_coons_srf`]                   | `N_CreateCoonsSrf`               |
 //! | [`create_skin_srf_boundary_derivs`]    | `N_CreateSkinSrfBoundaryDerivs`  |
 //! | [`merge_knot_vectors`]                 | `N_MergeKnotVectors`             |
@@ -34,7 +34,10 @@
 //!   a vector with its optional neighbours (both missing is the bare error). The rate
 //!   matrix `RM[i][j]` is a `[[f64; 3]; 3]` (rows `i`). Not upstream (the SolidCraft
 //!   fork's upright sweep): [`ZSource::Up`], z the up direction made square to the
-//!   trajectory's tangent, its derivative in closed form.
+//!   trajectory's tangent, its derivative in closed form. Not upstream (#16959):
+//!   [`ZSource::RotationMinimizing`], a projection normal sample with that method's own
+//!   rate in closed form, and [`create_b_vectors_closing`], which also says whether a
+//!   closed curve's vectors were corrected to close.
 //! - `N_SweepCrossTangentCrv` ignores failures of `N_CrvEval` on the cross section
 //!   (the accumulated sample parameter can round past the last knot) and keeps the
 //!   previous sample, as does the Rust function; only a failure on the very first
@@ -127,6 +130,18 @@ fn ends(k: &[f64], op: &'static str) -> Result<(f64, f64)> {
 /// [`NurbsFailure::Geometry`] when a vector cannot be normalised; errors of
 /// [`Curve::eval_tangent`]; `InvalidInput` for an empty `t`.
 pub fn create_b_vectors(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<Vec<Vec3>> {
+    create_b_vectors_closing(cur, b0, t).map(|(b, _)| b)
+}
+
+/// [`create_b_vectors`] that also says whether the closed curve's correction was made
+/// (not upstream, #16959): the vectors are then no longer the projection normal method's
+/// alone, they also turn by the spread closing gap, so their rate is not
+/// [`ZSource::RotationMinimizing`]'s.
+///
+/// # Errors
+///
+/// Those of [`create_b_vectors`].
+pub fn create_b_vectors_closing(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<(Vec<Vec3>, bool)> {
     const OP: &str = OP_BVEC;
     let k = t.len().checked_sub(1).ok_or_else(|| oob(OP))?;
     let mut b = vec![Vec3::ZERO; k + 1];
@@ -148,9 +163,11 @@ pub fn create_b_vectors(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<Vec<Vec3>> {
     }
 
     // Correct for closed curves.
+    let mut closing = false;
     if cur.is_closed() {
         let dis = dist_pt_pt(at(&b, 0, OP)?, at(&b, k, OP)?);
         if dis > MODEL_TOL {
+            closing = true;
             let first = at(&b, 0, OP)?;
             put(&mut b, k, first, OP)?;
             for i in (2..=k).rev() {
@@ -164,7 +181,7 @@ pub fn create_b_vectors(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<Vec<Vec3>> {
             }
         }
     }
-    Ok(b)
+    Ok((b, closing))
 }
 
 // ---- N_CreateCoonsSrf ---------------------------------------------------------------
@@ -464,6 +481,14 @@ pub enum ZSource<'a> {
     /// square to the trajectory's unit tangent `x`, `w = up - (up . x) x`, made unit, and
     /// `z'` from `w' = -(up . x') x - (up . x) x'`.
     Up(Vec3),
+    /// Not upstream (#16959): `z`, a sample of the projection normal method
+    /// ([`create_b_vectors`]), and `z'` that method's own rate, `z' = -(z . x') x`. Each
+    /// step of the method takes away only the new tangent's component, so in the limit z
+    /// turns only toward the tangent, and staying square to it gives
+    /// `z' . x = -z . x'`. The rate is the trajectory's at `u`: at a piece's end it is
+    /// that piece's, where [`ZSource::Samples`] reaches the neighbouring sample, which
+    /// can lie on the next piece of a path that turns in another plane there.
+    RotationMinimizing(Vec3),
 }
 
 /// Rate of change `[x' | y' | z']` of the sweep frame `M = [x | y | z]` at `u`
@@ -530,6 +555,7 @@ pub fn rotation_rate_of_change(traj: &Curve, u: f64, zsrc: ZSource<'_>) -> Resul
             );
             (z, dm_z)
         }
+        ZSource::RotationMinimizing(z) => (z, x * -z.dot(dx)),
         ZSource::Up(up) => {
             // w = up - (up . x) x and w' = -(up . x') x - (up . x) x'
             let (ux, udx) = (up.dot(x), up.dot(dx));
