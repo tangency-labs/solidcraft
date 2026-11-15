@@ -1809,6 +1809,7 @@ mod tests {
                         to_offset: Some("offset + 1 mm".into()),
                         from: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 5.0))),
                         to_body_apart: false,
+                        picked_placements: Vec::new(),
                     },
                     operation: Operation::NewBody,
                     targets: vec![],

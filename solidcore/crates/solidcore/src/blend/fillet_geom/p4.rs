@@ -203,6 +203,46 @@ pub(crate) fn set_edge_curve(brep: &mut Brep, e: EdgeId, curve: Option<Curve>) -
     Ok(())
 }
 
+/// The crossing of the rail curve `rail` with `surface` nearest `near`, its parameter and
+/// point, as an End's second pass places the rail's end
+/// ([`FilletBrep::calc_rail_int_end_surface`]); `None` where they do not cross.
+///
+/// # Errors
+///
+/// Those of the intersection and evaluations.
+pub(crate) fn rail_crossing_nearest(
+    k: &Kernel,
+    rail: &Curve,
+    surface: &Surface,
+    near: Point3,
+    tol: f64,
+) -> Result<Option<(f64, Point3)>> {
+    let interval = rail.natural_interval();
+    let solutions = surface.global_curve_intersect(
+        k,
+        [
+            super::p1::CliffHandle::Curve(rail),
+            super::p1::CliffHandle::Surface(surface),
+        ],
+        &surface.natural_uv_domain_with_nurb(k)?,
+        rail,
+        &interval,
+        tol,
+    )?;
+    let mut best = None;
+    let mut best_dist = BIG_DOUBLE;
+    for sol in solutions.as_slice() {
+        let t = sol.start.param(0)?;
+        let pnt = rail.evaluate_point(k, t)?;
+        let dist = pnt.distance(near);
+        if dist < best_dist {
+            best_dist = dist;
+            best = Some((t, pnt));
+        }
+    }
+    Ok(best)
+}
+
 /// `SmPoint3d(SmPoint2d)`: `z = 0`.
 const fn p3(uv: Point2) -> Point3 {
     Point3::new(uv.x, uv.y, 0.0)
@@ -1949,35 +1989,14 @@ impl FilletBrep {
             .ok_or_else(|| nul("the geometry's fillet solver"))?;
         let tol = context.solver(sid)?.this_approx_tol_3d();
 
-        let interval = rail_curve.natural_interval();
-        let solutions = end_surface.global_curve_intersect(
-            k,
-            [
-                super::p1::CliffHandle::Curve(&rail_curve),
-                super::p1::CliffHandle::Surface(&end_surface),
-            ],
-            &end_surface.natural_uv_domain_with_nurb(k)?,
-            &rail_curve,
-            &interval,
-            tol,
-        )?;
         let vert_pnt = vertex::point(
             target,
             corner
                 .filleted_vertex()
                 .ok_or_else(|| nul("the corner's filleted vertex"))?,
         )?;
-        let mut best: Option<Point3> = None;
-        let mut best_dist = BIG_DOUBLE;
-        for sol in solutions.as_slice() {
-            let pnt = rail_curve.evaluate_point(k, sol.start.param(0)?)?;
-            let dist = pnt.distance(vert_pnt);
-            if dist < best_dist {
-                best_dist = dist;
-                best = Some(pnt);
-            }
-        }
-        let Some(best) = best else {
+        let best = rail_crossing_nearest(k, &rail_curve, &end_surface, vert_pnt, tol)?;
+        let Some((_, best)) = best else {
             self.fillet_vertex_mut(v)?
                 .set_status(FilStatus::SurfIntFailure);
             // SER_MSG: the rail does not meet the end face's surface

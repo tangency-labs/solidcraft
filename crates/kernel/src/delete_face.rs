@@ -8,7 +8,7 @@
 //! gap moves to where its planes meet the neighbours across the gap (a fillet's tangent points
 //! go to the sharp corner), and the stretch of loop that bordered deleted faces closes with a
 //! straight edge between the moved corners. Anything else (curved neighbours, a gap the
-//! neighbours cannot close) is refused, naming the face.
+//! neighbours cannot close) is refused, naming the faces and the way out.
 
 use solidcraft_geom::prelude::*;
 use std::collections::{BTreeSet, HashMap};
@@ -28,6 +28,19 @@ fn fail(m: impl Into<String>) -> KernelError {
 }
 
 type Key = (i64, i64, i64);
+
+/// A short name for the kind of surface face `f` lies on, for refusal messages that tell the
+/// user what a face is and how to get past the refusal.
+fn surface_kind(rec: &solidcore_record::brep::Brep, f: usize) -> &'static str {
+    match surf_of(rec, f) {
+        Some(Surf::Plane { .. }) => "a plane",
+        Some(Surf::Cylinder { .. }) => "a cylinder",
+        Some(Surf::Sphere { .. }) => "a sphere",
+        Some(Surf::Cone { .. }) => "a cone",
+        Some(Surf::Torus { .. }) => "a torus (as a fillet or round often is)",
+        None => "a free-form (spline) face",
+    }
+}
 
 /// Key of a point for sharing vertices and edges between rebuilt faces.
 fn key(p: Vec3, q: f64) -> Key {
@@ -160,7 +173,11 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                         .find(|fs| fs.contains(&f) && fs.iter().any(|x| del.contains(x)))
                         .and_then(|fs| fs.iter().find(|x| del.contains(x)).copied())
                         .unwrap_or(0);
-                    return Err(fail(format!("face {by} borders face {f}, which is curved; only planar neighbours can extend to close the gap yet")));
+                    return Err(fail(format!(
+                        "face {by} ({}), borders face {f}, {}: include face {f} in the selection if it should go too, or take off the feature that made face {f} in the timeline instead; only planar neighbours can extend to close the gap",
+                        surface_kind(&rec, by),
+                        surface_kind(&rec, f),
+                    )));
                 }
             }
         }
@@ -401,6 +418,15 @@ mod tests {
         let bf = faces_where(&bossed, |p| p.z > 10.0 - 1e-9 && (p.x - 10.0).hypot(p.y - 10.0) < 3.0 + 1e-6);
         let off = delete_faces(&bossed, &bf).unwrap();
         assert!((volume(&off) - 12000.0).abs() < 1e-9 * 12000.0, "{}", volume(&off));
+        // A curved neighbour is refused, naming both faces' kinds and the way out.
+        let rounded = fillet(&b, &[Vec3::new(20.0, 30.0, 20.0)], 5.0).unwrap();
+        let round = faces_where(&rounded, |p| p.y > 25.0 - 1e-6 && p.z > 15.0 - 1e-6 && (p.y < 30.0 - 1e-9 || p.z < 20.0 - 1e-9));
+        let top = faces_where(&rounded, |p| (p.z - 20.0).abs() < 1e-9 && (p.y - 30.0).hypot(p.x - 20.0) > 5.0 + 1e-6);
+        let top = top.first().copied().unwrap();
+        let why = delete_faces(&rounded, &[top]).unwrap_err().to_string();
+        assert!(why.contains(&format!("face {top} (a plane), borders face {}, a cylinder", round[0])), "{why}");
+        assert!(why.contains("the timeline"), "{why}");
+
         // Errors name what is wrong.
         assert!(delete_faces(&plate, &[99]).is_err());
         assert!(delete_faces(&plate, &[0, 1, 2, 3, 4, 5]).is_err());

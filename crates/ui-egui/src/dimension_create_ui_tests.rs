@@ -1949,6 +1949,28 @@ fn plate_max(h: &Harness) -> [f64; 2] {
     [((b.max.x - b.min.x) * 1000.0).round() / 1000.0, ((b.max.y - b.min.y) * 1000.0).round() / 1000.0]
 }
 
+/// A shown dimension is painted with the model view, before the panels laid over the view, so
+/// a panel covers it instead of the dimension's lines and value drawing over the panel (#16846).
+#[test]
+fn shown_dimensions_are_painted_under_the_panels() {
+    fn has_text(shape: &egui::Shape, text: &str) -> bool {
+        match shape {
+            egui::Shape::Text(t) => t.galley.text() == text,
+            egui::Shape::Vec(shapes) => shapes.iter().any(|s| has_text(s, text)),
+            _ => false,
+        }
+    }
+    let (h, _) = shown_dimensions();
+    let (_, _, centre) = crate::dim_view::model_drawn().into_iter().next().expect("a dimension is shown in the model view");
+    let dimension = h
+        .shapes
+        .iter()
+        .position(|s| matches!(&s.shape, egui::Shape::Text(t) if (t.visual_bounding_rect().center() - centre).length() < 2.0))
+        .expect("the dimension's value is painted");
+    let panel = h.shapes.iter().position(|s| has_text(&s.shape, "Browser")).expect("the Browser panel is painted");
+    assert!(dimension < panel, "the dimension (shape {dimension}) is painted before the Browser panel (shape {panel})");
+}
+
 #[test]
 fn double_clicking_a_shown_dimension_edits_it_without_editing_the_sketch() {
     let (mut h, _) = shown_dimensions();
