@@ -1785,3 +1785,144 @@ mod tests {
         assert!(output(&invalid).is_err());
     }
 }
+
+/// WR-457's tangent side-edge skip, now the only path, builds the 30 box-union rounds of
+/// `stubs_round3.json` and `corner_3x2.json` that upstream refused with status 1001. Each
+/// built body is certified: `check_brep` Level 2 reports no failure, it is one closed
+/// manifold solid, and its volume is enclosed by [`enclose_volume`] to an asserted width.
+#[cfg(test)]
+mod wr457_certificates {
+    use super::{apply, build, RealSolid};
+    use solidcore::kernel::Kernel;
+    use solidcore::mass::enclosure::enclose_volume;
+    use solidcore::topology::brep::p1;
+    use solidcore::topology::brep::p2::is_manifold_solid;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+
+    /// The moved rows: (fixture file, case name).
+    const CASES: &[(&str, &str)] = &[
+        ("corner_3x2.json", "corner3x2-union-overhang-corner-edges6-12-r1"),
+        ("corner_3x2.json", "corner3x2-union-overhang-corner-edges6-13-r1"),
+        ("stubs_round3.json", "stubs3-union-overhang-corner-edges12-13-r1"),
+        ("stubs_round3.json", "stubs3-union-overhang-corner-edges14-15-r1"),
+        ("stubs_round3.json", "stubs3-union-overhang-corner-edges14-22-r1"),
+        ("stubs_round3.json", "stubs3-union-overhang-corner-edges15-22-r1"),
+        ("stubs_round3.json", "stubs3-union-overhang-front-edges14-15-r1"),
+        ("stubs_round3.json", "stubs3-union-overhang-front-edges14-22-r1"),
+        ("stubs_round3.json", "stubs3-union-overhang-front-edges15-16-r1"),
+    ];
+
+    /// The edges of the `nx1-multi-neighbour-end-face` cases (the box 20 x 10 x 10 and the
+    /// box [5, 15] x [-2, 4] x [10, 20] standing on it, overhanging its front face y = 0),
+    /// each rounded 0.5, 1 and 2, with the sign of the round's volume change: -1 for a
+    /// convex edge, whose round takes material off, +1 for a concave one, whose round adds
+    /// it. Convex: 9 and 12, the lower box's top front edge either side of the upper box;
+    /// 17 and 19, the overhang's underside meeting the upper box's side faces. Concave: 13,
+    /// the lower box's front face meeting the overhang's underside; 14 and 16, the lower
+    /// box's top meeting the upper box's side faces.
+    const NX1_EDGES: [(usize, f64); 7] = [
+        (9, -1.0),
+        (12, -1.0),
+        (13, 1.0),
+        (14, 1.0),
+        (16, 1.0),
+        (17, -1.0),
+        (19, -1.0),
+    ];
+
+    /// The union's volume, 20 x 10 x 10 + 10 x 6 x 10.
+    const UNION_VOLUME: f64 = 2600.0;
+
+    /// Each case with the sign of its single round's volume change (`None` for the
+    /// two-edge cases, which are enclosed only).
+    fn case_names() -> Vec<(&'static str, String, Option<f64>)> {
+        let mut out: Vec<_> = CASES
+            .iter()
+            .map(|&(f, n)| (f, n.to_string(), None))
+            .collect();
+        for (e, sign) in NX1_EDGES {
+            for r in ["0.5", "1.0", "2.0"] {
+                out.push((
+                    "stubs_round3.json",
+                    format!("stubs3-overhang-union-nx1-multi-neighbour-end-face-edge{e}-r{r}"),
+                    Some(sign),
+                ));
+            }
+        }
+        out
+    }
+
+    fn load(file: &str, name: &str) -> RealSolid {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/blend.fillet_executive_p3")
+            .join(file);
+        let text = std::fs::read_to_string(&path).expect("fixture");
+        let json: serde_json::Value = serde_json::from_str(&text).expect("fixture json");
+        let case = json["cases"]
+            .as_array()
+            .expect("cases")
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap_or_else(|| panic!("no case {name}"));
+        serde_json::from_value(case["inputs"]["real_solid"].clone()).expect("real_solid")
+    }
+
+    /// Every built body is valid at Level 2, one closed manifold solid, and its volume is
+    /// enclosed to within 1e-7 of the union's volume. A single round's ends lie in the end
+    /// faces' planes, which are square to its straight edge (every face is axis-aligned), so
+    /// its volume is in closed form: the union's, changed by its section `r^2 (1 - pi/4)`
+    /// along the edge's length `L`. The enclosure must hold that value.
+    #[test]
+    fn the_rounds_upstream_refused_build_valid_closed_solids() {
+        let names = case_names();
+        assert_eq!(names.len(), 30);
+        let width = 1e-7 * UNION_VOLUME;
+        for (file, name, sign) in &names {
+            let input = load(file, name);
+            let mut k = Kernel::default();
+            let mut body = build(&mut k, &input)
+                .expect("fixture")
+                .expect("the box union");
+            let edges = p1::edges(&body, None).expect("edges");
+            let picked = input.edge_indices().expect("edge indices");
+            let selected: Vec<_> = picked
+                .iter()
+                .map(|&i| *edges.get(i).expect("selected edge"))
+                .collect();
+            let mut length = 0.0;
+            for &e in &selected {
+                let ivl = solidcore::topology::edge::interval(&body, e).expect("interval");
+                let c = solidcore::topology::edge::curve(&body, e)
+                    .expect("curve")
+                    .expect("a curve");
+                let a = c.evaluate_point(&k, ivl.min()).expect("start");
+                let b = c.evaluate_point(&k, ivl.max()).expect("end");
+                length += a.distance(b);
+            }
+            apply(&mut k, &mut body, &selected, &input)
+                .unwrap_or_else(|e| panic!("{name}: the round failed: {e:?}"));
+            let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+                .expect("check")
+                .lines();
+            assert!(lines.is_empty(), "{name}: Level 2: {lines:?}");
+            assert!(
+                is_manifold_solid(&body).expect("manifold check"),
+                "{name}: not one closed manifold solid"
+            );
+            let e = enclose_volume(&k, &mut body, width).expect("enclosure");
+            assert!(e.width() <= width, "{name}: enclosure {e:?} wider than {width}");
+            eprintln!("{name}: volume in [{}, {}]", e.lo, e.hi);
+            if let Some(sign) = sign {
+                assert_eq!(selected.len(), 1, "{name}");
+                let r = input.radius;
+                let exact = UNION_VOLUME + sign * length * r * r * (1.0 - core::f64::consts::FRAC_PI_4);
+                assert!(
+                    e.lo <= exact && exact <= e.hi,
+                    "{name}: closed form {exact} outside [{}, {}]",
+                    e.lo,
+                    e.hi
+                );
+            }
+        }
+    }
+}
