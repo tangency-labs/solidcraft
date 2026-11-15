@@ -49,6 +49,8 @@
 //!
 //! Deviations: none (no upstream counterpart).
 
+use core::cmp::Ordering;
+
 use crate::error::Result;
 use crate::kernel::Kernel;
 use crate::math::{Vec3, EFF_ZERO};
@@ -117,7 +119,7 @@ pub fn overlap_gap(
     let k2 = rail_curvature(bends[1], r2)?;
     let run = reach * sin_beta.abs();
     let kr = k1.max(k2);
-    if !(kr * run < 0.5) {
+    if (kr * run).partial_cmp(&0.5) != Some(Ordering::Less) {
         return None;
     }
     let apart = (r1 - r2 / cos_beta).abs().max((r2 - r1 / cos_beta).abs());
@@ -149,7 +151,7 @@ fn at_vertex(
         return Ok(None);
     };
     let speed_sq = d1.length_squared();
-    if !(speed_sq > EFF_ZERO * EFF_ZERO) {
+    if speed_sq.partial_cmp(&(EFF_ZERO * EFF_ZERO)) != Some(Ordering::Greater) {
         return Ok(None);
     }
     let Ok(tangent) = d1.unitize() else {
@@ -180,7 +182,7 @@ fn at_vertex(
     };
     let cos_phi = n_shared.dot(n_other);
     let sin_phi = n_shared.cross(n_other).length();
-    if !(sin_phi > EFF_ZERO) {
+    if sin_phi.partial_cmp(&EFF_ZERO) != Some(Ordering::Greater) {
         return Ok(None);
     }
     let other_face = eu1::face(b, on_other)?;
