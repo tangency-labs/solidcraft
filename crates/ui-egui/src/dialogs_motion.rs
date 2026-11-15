@@ -466,28 +466,29 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                 }
             });
             for s in list.get("sets").and_then(Value::as_array).cloned().unwrap_or_default() {
+                let Some(id) = s.get("id").and_then(Value::as_u64) else { continue };
                 let n = s.get("name").and_then(Value::as_str).unwrap_or("").to_string();
                 let off = s.get("suppressed").and_then(Value::as_bool).unwrap_or(false);
-                crate::ui_kit::section(ui, format!("contact:{n}"), &n, true, |ui| {
+                crate::ui_kit::section(ui, format!("contact:{id}"), &n, true, |ui| {
                     ui.horizontal(|ui| {
                         let count = s.get("occurrences").and_then(Value::as_array).map_or(0, Vec::len);
                         ui.label(
                             RichText::new(solidcraft_ui_text::format("contact.components_count", &[("count", &count.to_string())])).color(t.text_dim),
                         );
-                        if crate::ui_kit::button(
+                        let suppress = crate::ui_kit::button(
                             ui,
                             solidcraft_ui_text::tr_label(if off { "Unsuppress" } else { "Suppress" }),
                             crate::ui_kit::Button::Small,
-                        )
-                        .clicked()
-                        {
-                            let _ = app.run("contact.edit", json!({"set": n, "suppressed": !off}));
+                        );
+                        crate::scenario::publish_target(&format!("contact:{id}:suppress"), suppress.rect);
+                        if suppress.clicked() {
+                            let _ = app.run("contact.edit", json!({"set": id, "suppressed": !off}));
                         }
-                        if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("×"), crate::ui_kit::Button::Small)
-                            .backing_on_hover_text(solidcraft_ui_text::tr_label("Delete the set"))
-                            .clicked()
-                        {
-                            let _ = app.run("contact.edit", json!({"set": n, "delete": true}));
+                        let delete = crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("×"), crate::ui_kit::Button::Small)
+                            .backing_on_hover_text(solidcraft_ui_text::tr_label("Delete the set"));
+                        crate::scenario::publish_target(&format!("contact:{id}:delete"), delete.rect);
+                        if delete.clicked() {
+                            let _ = app.run("contact.edit", json!({"set": id, "delete": true}));
                         }
                     });
                 });
@@ -824,6 +825,33 @@ pub fn commands(app: &SolveApp, k: &Mo, inputs: &[SelInput]) -> Result<Vec<(Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contact_set_rows_edit_the_selected_id_when_names_repeat() {
+        let mut h = crate::scenario::Harness::new();
+        for name in ["A", "B"] {
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("component.create", json!({"name": name})).unwrap();
+        }
+        for _ in 0..2 {
+            h.app.run("contact.create", json!({"name": "Shared", "occurrences": ["A", "B"]})).unwrap();
+        }
+        let before = h.app.session.doc.assembly.contact_sets.clone();
+        let second = before[1].id;
+        h.app.start("contact.create");
+        h.frames(3);
+        for suppressed in [true, false] {
+            h.step(&json!({"click": {"handle": format!("contact:{second}:suppress")}})).unwrap();
+            let sets = &h.app.session.doc.assembly.contact_sets;
+            assert_eq!(sets.len(), 2);
+            assert_eq!(sets[0], before[0], "the first same-name set stays unchanged");
+            let mut expected = before[1].clone();
+            expected.suppressed = suppressed;
+            assert_eq!(sets[1], expected, "the clicked second row changes");
+        }
+        h.step(&json!({"click": {"handle": format!("contact:{second}:delete")}})).unwrap();
+        assert_eq!(h.app.session.doc.assembly.contact_sets, vec![before[0].clone()]);
+    }
 
     /// Playback runs on, starts over at the end when looping, else stops on the last step.
     #[test]

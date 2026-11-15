@@ -29,6 +29,18 @@ impl CurveEval {
     }
 }
 
+/// Where a piece `on` of `curve`, its angle about the axis through `origin` (from unit `x`
+/// towards unit `y`) monotone and under half a turn, reaches angle `theta`
+/// ([`k::ruling::angle_crossing`]): `(true, point, parameter)` where it does, else `(false, the
+/// end nearer in angle, its parameter)`. `None` where the curve can't be evaluated.
+pub(crate) fn angle_crossing(curve: &CurveEval, origin: Vec3, x: Vec3, y: Vec3, on: [f64; 2], theta: f64) -> Option<(bool, Vec3, f64)> {
+    use k::ruling::AngleCrossing as A;
+    Some(match k::ruling::angle_crossing(&curve.0, c::vec3(origin), c::vec3(x), c::vec3(y), on, theta)? {
+        A::At { point, t } => (true, c::record_vec3(point), t),
+        A::Nearer { point, t } => (false, c::record_vec3(point), t),
+    })
+}
+
 /// A closed spline or polyline with its seam moved to `start`, exactly.
 pub(crate) fn restart_curve(curve: &Curve, start: f64) -> Result<Curve, Error> {
     let curve = c::curve(curve).map_err(|e| e.to_string())?;

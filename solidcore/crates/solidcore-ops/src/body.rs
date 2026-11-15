@@ -388,11 +388,25 @@ impl Body {
     /// [`Error::Unsupported`] for what the record cannot carry (yet); [`Error::Record`] for
     /// kernel data that does not make a valid record; the kernel's error by its type.
     pub fn to_record(&self) -> Result<(Record, Order)> {
+        self.with_record("brep::to_record", |_, record, order| Ok((record, order)))
+    }
+
+    /// `f` on this body's kernel B-rep with its record and [`Order`] ([`Body::to_record`]), in
+    /// one call under the body's lock, so the order is the one of the B-rep `f` reads. The body
+    /// is edited as [`Body::to_record`] edits it.
+    ///
+    /// # Errors
+    /// Those of [`Body::to_record`]; `f`'s, by its type.
+    pub(crate) fn with_record<T>(
+        &self,
+        call: &'static str,
+        f: impl FnOnce(&Brep, Record, Order) -> solidcore::Result<T>,
+    ) -> Result<T> {
         let mut out = None;
         let mut refusal = None;
-        with_body("brep::to_record", self, |k, b| {
+        with_body(call, self, |k, b| {
             match to_record(k, b) {
-                Ok(made) => out = Some(made),
+                Ok((record, order)) => out = Some(f(b, record, order)?),
                 Err(Unsupported::Kernel(e)) => return Err(e),
                 Err(e) => refusal = Some(refused(e)),
             }

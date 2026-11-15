@@ -181,7 +181,10 @@ pub enum NoRoomReason {
     /// A constant ball as wide as a face it rolls on (a cylinder or sphere of its radius,
     /// the ball inside): its offset of that face collapses onto the axis or the centre, so
     /// its centre does not move along the edge, and the zone it sweeps has no section of the
-    /// ball at an end of the edge, so no round ends there (not the fork's, #2401).
+    /// ball at an end of the edge, so no round ends there (not the fork's, #2401). Also a
+    /// constant ball as wide as a face it rolls on by the face's definition (a cylinder,
+    /// sphere, torus or round of its radius), whose regularity judges no station along the
+    /// edge (#16768).
     OffsetCollapses,
     /// A rail of a constant ball's round or chamfer along an arc would have its ends
     /// within the part's resolution of each other (two vertex tolerances) without closing
@@ -3722,7 +3725,17 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut worst_solver: Option<(O, bool)> = None;
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
-            let (first, const_radius) = access.creation_ball_is_regular(k, solver)?;
+            let (mut first, const_radius) = access.creation_ball_is_regular(k, solver)?;
+            // (#16768) a collapsed offset whose ball zone is open at an end of the edge is the
+            // collapsed-offset refusal's (#2401, `refuse_collapsed_offsets`), which names the
+            // size that builds: left to it
+            if matches!(
+                first.check,
+                BallCheck::Collapsed | BallCheck::CollapsedUnjudged
+            ) && access.creation_ball_zone_open(k, solver, None)?.is_some()
+            {
+                first.check = BallCheck::Regular;
+            }
             if first.check != BallCheck::Regular
                 && (worst.check == BallCheck::Regular || first.works < worst.works)
             {
@@ -3754,6 +3767,16 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             (
                 format!("Fillet Error: a face curves tighter than the round's ball where its radius reaches {}: the ball does not fit the face past there", g(worst.works)),
                 NoRoomReason::BallDoesNotFit,
+            )
+        } else if worst.check == BallCheck::Collapsed {
+            (
+                format!("Fillet Error: the rolling ball of radius {} is as wide as a face it rolls on (a cylinder, sphere, torus or round of that radius), so the offset its centre rolls on collapses, and no section of the ball is found at any station along the edge", g(worst.radius)),
+                NoRoomReason::OffsetCollapses,
+            )
+        } else if worst.check == BallCheck::CollapsedUnjudged {
+            (
+                format!("Fillet Error: the rolling ball of radius {} is as wide as a face it rolls on (a cylinder, sphere, torus or round of that radius), so the offset its centre rolls on collapses; sections of the ball were found along the edge but none could be judged", g(worst.radius)),
+                NoRoomReason::OffsetCollapses,
             )
         } else if worst.check == BallCheck::NotEnclosed {
             (

@@ -595,6 +595,47 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
     assert!(rel(v, 11000.0 + 60.0 * a - 8.0 * m) < 1e-9, "{v}");
 }
 
+/// tangency-labs/solidcraft#16897: an 80 x 60 x 10.5 plate with a 30 x 3 x 65 tab on it
+/// (x -15..15, y -1.5..1.5), the tab's four base edges rounded. Past r 1.5 the rounds of the
+/// tab's 3 long ends run on past their end face's own extent to meet the long sides' rounds in
+/// their mitres (0.41 built them only up to r 1.5).
+///
+/// The closed form: the plate and tab hold 80 * 60 * 10.5 + 30 * 3 * 65 = 56250. Each base
+/// edge gains the spandrel A = (1 - pi/4) r^2 (the square of side r less its quarter disc)
+/// along its length, 2 * 30 + 2 * 3 = 66 in all. At each of the four upright tab edges the two
+/// mitred rounds add their parts past both walls, 2 M with M = (5/6 - pi/4) r^3, as in
+/// [`rounds_turn_round_a_boss_edge_mitred_or_swept`]. The corners at either end of a 3 long
+/// edge lie on opposite sides of it (y > 1.5 and y < -1.5), so they never overlap however
+/// large r is: V = 56250 + 66 A + 8 M.
+#[test]
+fn rounds_turn_round_a_thin_tab_wider_than_its_end() {
+    all_fixes();
+    let base = [[-15.0, -1.5], [15.0, -1.5], [15.0, 1.5], [-15.0, 1.5]];
+    for r in [1.5, 2.0, 3.0] {
+        let b = built(|k| {
+            let plate = create_box(k, Vec3::new(-40.0, -30.0, 0.0), 80.0, 60.0, 10.5)?;
+            let tab = create_box(k, Vec3::new(-15.0, -1.5, 10.5), 30.0, 3.0, 65.0)?;
+            boolean_union(k, plate, tab)
+        });
+        let (order, edges) = loop_edges(&b, base, 10.5);
+        blend_ordered(
+            &b,
+            &order,
+            Blend::Round,
+            &edges,
+            &[r],
+            &[],
+            Corners::Filled,
+            BlendOptions::default(),
+        )
+        .unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
+        let (a, m) = ((1.0 - PI / 4.0) * r * r, (5.0 / 6.0 - PI / 4.0) * r * r * r);
+        let v = b.volume(1e-10).unwrap();
+        assert!(rel(v, 56250.0 + 66.0 * a + 8.0 * m) < 1e-9, "r {r}: {v}");
+    }
+}
+
 #[test]
 fn chamfers_by_sides_take_the_face_asked() {
     all_fixes();
@@ -1928,5 +1969,97 @@ fn chamfers_join_at_a_near_straight_corner_within_their_offsets() {
                 assert!(report.is_valid(), "{what}: {report}");
             }
         }
+    }
+}
+
+/// One closed section of [`a_rim_round_across_a_loft_s_creases_is_certified_or_refused`]: the
+/// cubic Bezier pieces through 12 points at 30 degree steps round an ellipse in the plane
+/// x = `x` (half-axes `a` along y and `b` along z, centre (x, 0, 20)), as a fit-point spline
+/// gives them, each piece on [0, 1]: the tangent at a point is the chord-length one, so two
+/// pieces meet in one direction at speeds in the ratio of their chords. On a circle the chords
+/// are equal and the pieces join smoothly; on an ellipse they are not, and a ruled loft to it
+/// creases its side along those joints.
+fn fit_point_ellipse(x: f64, a: f64, b: f64) -> Vec<Curve> {
+    let p: Vec<[f64; 3]> = (0..12)
+        .map(|i| {
+            let t = f64::from(i) * PI / 6.0;
+            [x, a * t.sin(), 20.0 - b * t.cos()]
+        })
+        .collect();
+    let at = |i: usize| p[i % 12];
+    let chord = |i: usize| {
+        let (q, r) = (at(i), at(i + 1));
+        ((r[1] - q[1]).powi(2) + (r[2] - q[2]).powi(2)).sqrt()
+    };
+    // the tangent at point i over the chord-length parameter
+    let tangent = |i: usize| {
+        let (q, r) = (at(i + 11), at(i + 1));
+        let h = chord(i + 11) + chord(i);
+        [(r[1] - q[1]) / h, (r[2] - q[2]) / h]
+    };
+    (0..12)
+        .map(|i| {
+            let (q, r, h) = (at(i), at(i + 1), chord(i));
+            let (m0, m1) = (tangent(i), tangent(i + 1));
+            Curve::Nurbs {
+                degree: 3,
+                points: vec![
+                    [x, q[1], q[2], 1.0],
+                    [x, q[1] + h * m0[0] / 3.0, q[2] + h * m0[1] / 3.0, 1.0],
+                    [x, r[1] - h * m1[0] / 3.0, r[2] - h * m1[1] / 3.0, 1.0],
+                    [x, r[1], r[2], 1.0],
+                ],
+                knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            }
+        })
+        .collect()
+}
+
+/// #17015: a ruled loft from a circle (radius 15, x = -30) to an ellipse (half-axes 20 and
+/// 18, x = 30), both through 12 fit points, its larger rim rounded r 2. The ellipse's pieces
+/// meet at unequal speeds, so the loft's side is several faces meeting in creases a few
+/// ten thousandths of a radian deep, and the rounds on two of them stand about the radius
+/// times that angle apart where they meet on the rim. Joining them set one round's end row to
+/// the other's and kept its old bound: the fillet reported success and the body then failed
+/// to read back, its blend face's definition not certifying its net (0.016 off, against a
+/// bound of 3.9e-6). A round by its definition is now either proved within the tolerance of
+/// its definition after the join, its bound the proved one, or the join is refused and the
+/// fillet with it: the body reopens from its record, or the fillet fails.
+#[test]
+fn a_rim_round_across_a_loft_s_creases_is_certified_or_refused() {
+    all_fixes();
+    let sections = [
+        fit_point_ellipse(-30.0, 15.0, 15.0),
+        fit_point_ellipse(30.0, 20.0, 18.0),
+    ];
+    let b = solidcore_ops::sweep::loft(&sections, 1, true).unwrap();
+    assert!(
+        b.counts().unwrap()[0] > 3,
+        "the loft's side is one face: no crease to round across"
+    );
+    let rim = edge_at(&b, [30.0, 0.0, 2.0]);
+    let chain = tangent_chain(&b, None, &[rim], &[], HALF_DEGREE)
+        .unwrap()
+        .members;
+    assert!(chain.len() > 1, "the rim is one edge: {chain:?}");
+    match blend(&b, Blend::Round, &chain, &[2.0], &[], Corners::Filled) {
+        Ok(_) => {
+            // reopened from its record, as a design is: each blend face certified again
+            let (record, _) = b.to_record().unwrap();
+            let (reopened, _) = Body::from_record(&record, true)
+                .unwrap_or_else(|e| panic!("the rounded loft does not reopen: {e:?}"));
+            let report = reopened.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{}", report.text);
+        }
+        // refused by the kernel: the join's own refusal, or the corner's failure it ends in
+        Err(e) => assert!(
+            matches!(
+                e,
+                Error::Unsupported(_)
+                    | Error::BlendFailed { .. }
+                    | Error::Status(solidcore::error::SM_ERR)
+            ),
+            "{e:?}"
+        ),
     }
 }

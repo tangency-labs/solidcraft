@@ -1132,6 +1132,12 @@ pub enum FeatureKind {
         /// was left to the tap drill: a 12 mm hole stays M14 there. New threads leave it off.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         old_auto_size: bool,
+        /// Other cylindrical faces threaded with the same options, in selection order.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        additional_faces: Vec<FacePick>,
+        /// The definition body for each selected face, primary first. Empty keeps legacy selection.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        target_bodies: Vec<BodyName>,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {
@@ -1479,6 +1485,11 @@ pub enum FeatureKind {
         /// What happens to a cell the field's edge crosses.
         #[serde(default = "default_cell_clip")]
         clip: solidcore_record::cell_grid::Clip,
+        /// The least clearance from a cell to every edge of the field and its keep-outs, with
+        /// `clip: whole` (default 0: a cell may touch an edge).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Margin")]
+        margin: Option<Expr>,
         /// How deep the cells go. Unused with `through_all`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Depth")]
