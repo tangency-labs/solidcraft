@@ -1946,7 +1946,7 @@ mod prefs_writer_tests {
         let now = Instant::now();
         assert_eq!(writer.store(&mut disk, app.prefs(), now), None);
         assert_eq!(disk.flushes, 0, "the settings read at start are not written again");
-        app.preferences.navigator_style = NavigatorStyle::Cube;
+        app.preferences.navigator_style = NavigatorStyle::Custom;
         app.preferences.display_quality = "fine".into();
         assert!(writer.due(true, now), "a frame with input is checked");
         assert_eq!(writer.store(&mut disk, app.prefs(), now), None);
@@ -1958,7 +1958,7 @@ mod prefs_writer_tests {
         let mut next = new_app();
         let stored = solidcraft_ui_egui::prefs::stored(|k| disk.flushed.get(k).cloned()).expect("settings on disk");
         next.load_prefs(&stored);
-        assert_eq!(next.preferences.navigator_style, NavigatorStyle::Cube);
+        assert_eq!(next.preferences.navigator_style, NavigatorStyle::Custom);
         assert_eq!(next.preferences.display_quality, "fine");
         assert!(disk.flushed.contains_key(STORAGE_KEY));
     }
@@ -2093,6 +2093,7 @@ mod viewport_tests {
             ctx.set_zoom_factor(zoom);
             let mut app = super::SolveApp::new(super::Session::default(), Default::default());
             app.integrated_titlebar = true;
+            app.preferences.language = "en".into();
             for (command, params) in [
                 ("sketch.create", json!({"plane":"XY"})),
                 ("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})),
