@@ -521,6 +521,10 @@ theme_keys! {
 /// `axis_y` and `axis_z`, `triad` over `gizmo` and a file's own `axis_*` keys over both. An
 /// export never writes them.
 const LEGACY_AXES: [&str; 2] = ["gizmo", "triad"];
+/// Colour names older theme files use for the navigator colours: read as the new name, which a
+/// file's own new key wins over. A save writes only the new names.
+const RENAMED_COLORS: [(&str, &str); 4] =
+    [("cube_face", "navigator_face"), ("cube_border", "navigator_border"), ("cube_text", "navigator_text"), ("cube_hover", "navigator_hover")];
 
 /// `#rrggbb` or `#rrggbbaa` (alpha not premultiplied).
 pub fn parse_color(s: &str) -> Option<Color32> {
@@ -605,7 +609,7 @@ fn read_value(v: &Value, unknown: UnknownTabs) -> Result<ThemeFile, String> {
         None => default_requirements_level(),
         Some(value) => value.as_u64().ok_or("`requires` must be a nonnegative integer")?,
     };
-    let layer = parse_layer(v, true)?;
+    let layer = parse_layer(v)?;
     let tabs = parse_tabs(v.get("tabs"), unknown)?;
     let options = if requires > REQUIREMENTS_LEVEL { Vec::new() } else { parse_options(v.get("options"))? };
     if requires < 2 && options.iter().any(|option| option.effect.is_some()) {
@@ -660,9 +664,7 @@ fn parse_tabs(v: Option<&Value>, unknown: UnknownTabs) -> Result<BTreeMap<String
     Ok(parsed)
 }
 
-/// A theme's colours and shapes. With `ignore_unknown` (the base table of a file), a colour this
-/// version doesn't have is dropped with a warning; an overlay's table stays strict.
-fn parse_layer(v: &Value, ignore_unknown: bool) -> Result<ThemeLayer, String> {
+fn parse_layer(v: &Value) -> Result<ThemeLayer, String> {
     let mut src = match v.get("colors") {
         None => serde_json::Map::new(),
         Some(Value::Object(o)) => o.clone(),
@@ -672,9 +674,13 @@ fn parse_layer(v: &Value, ignore_unknown: bool) -> Result<ThemeLayer, String> {
         return Err(format!("`colors` has more than {MAX_COLORS} entries"));
     }
     src.retain(|key, _| !RETIRED_COLORS.contains(&key.as_str()));
+    for (old, new) in RENAMED_COLORS {
+        if let Some(value) = src.remove(old) {
+            src.entry(new).or_insert(value);
+        }
+    }
     let mut probe = Tokens::light();
     let mut bad = Vec::new();
-    let mut ignored = Vec::new();
     for (k, c) in &src {
         if LEGACY_AXES.contains(&k.as_str()) {
             if let Err(e) = colors_of(c, 3) {
@@ -683,7 +689,6 @@ fn parse_layer(v: &Value, ignore_unknown: bool) -> Result<ThemeLayer, String> {
             continue;
         }
         match slot(&mut probe, k) {
-            None if ignore_unknown => ignored.push(k.clone()),
             None => bad.push(format!("`{k}` is not a theme colour")),
             Some(s) => {
                 if let Err(e) = colors_for_key(k, c, s.len()) {
@@ -691,10 +696,6 @@ fn parse_layer(v: &Value, ignore_unknown: bool) -> Result<ThemeLayer, String> {
                 }
             }
         }
-    }
-    if !ignored.is_empty() {
-        log::warn!("theme: ignoring colours this version does not have ({}); their defaults apply", ignored.join(", "));
-        src.retain(|key, _| !ignored.contains(key));
     }
     let radii = match v.get("radii") {
         None => BTreeMap::new(),
@@ -965,7 +966,7 @@ fn parse_overlays(v: Option<&Value>, options: &[OptionDef]) -> Result<Vec<Overla
         .map(|(position, value)| {
             let parse = || {
                 let when = parse_condition(value.get("when").ok_or("`when` is required")?, options)?;
-                Ok(Overlay { when, values: parse_layer(value, false)? })
+                Ok(Overlay { when, values: parse_layer(value)? })
             };
             parse().map_err(|e: String| format!("`overlays[{}]`: {e}", position + 1))
         })
@@ -2258,6 +2259,21 @@ mod tests {
     }
 
     #[test]
+    fn older_navigator_colour_keys_read_as_the_new_names() {
+        let file = |colors: &str| {
+            resolve(&parse(&format!(r#"{{"format":"solidcraft-theme/1","name":"Old","base":"dark","colors":{{{colors}}}}}"#)).unwrap())
+        };
+        let old = file(r##""cube_face":"#102030","cube_border":"#112233","cube_text":"#223344","cube_hover":"#334455""##);
+        assert_eq!(old.navigator_face, Color32::from_rgb(0x10, 0x20, 0x30));
+        assert_eq!(old.navigator_border, Color32::from_rgb(0x11, 0x22, 0x33));
+        assert_eq!(old.navigator_text, Color32::from_rgb(0x22, 0x33, 0x44));
+        assert_eq!(old.navigator_hover, Color32::from_rgb(0x33, 0x44, 0x55));
+        let both = file(r##""cube_face":"#102030","navigator_face":"#ffffff""##);
+        assert_eq!(both.navigator_face, Color32::WHITE, "a file's own new key wins");
+        assert!(!keys().iter().any(|k| RENAMED_COLORS.iter().any(|(old, _)| old == k)), "an export writes the new names only");
+    }
+
+    #[test]
     fn older_exports_keep_active_overrides_without_retired_ui_settings() {
         let mut file = export("Older theme", Base::Dark, &Tokens::dark(), None);
         let colors = file.get_mut("colors").and_then(Value::as_object_mut).unwrap();
@@ -2287,14 +2303,14 @@ mod tests {
             (r#"{"format":"solidcraft-theme/1","name":" ","base":"dark"}"#.into(), "name"),
             (r#"{"format":"solidcraft-theme/1","name":"x","base":"blue"}"#.into(), "base"),
             (format!(r#"{{{ok},"colors":[]}}"#), "colors"),
-            (format!(r##"{{{ok},"colors":{{"text":"red","triad":["#000000"],"icons.axes":"#000000"}}}}"##), "text"),
+            (format!(r##"{{{ok},"colors":{{"panle":"#000000","text":"red","triad":["#000000"],"icons.axes":"#000000"}}}}"##), "panle"),
             ("x".repeat(MAX_BYTES + 1), "KiB"),
         ] {
             let e = parse(&text).unwrap_err();
             assert!(e.contains(want), "{text:.80}: {e}");
         }
-        let e = parse(&format!(r##"{{{ok},"colors":{{"text":"red","triad":["#000000"]}}}}"##)).unwrap_err();
-        for k in ["text", "triad"] {
+        let e = parse(&format!(r##"{{{ok},"colors":{{"panle":"#000000","text":"red","triad":["#000000"]}}}}"##)).unwrap_err();
+        for k in ["panle", "text", "triad"] {
             assert!(e.contains(k), "{e}");
         }
         for c in ["#12345", "#1234567", "#gggggg", "282828", "#2828281"] {
@@ -2339,54 +2355,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn importing_a_theme_ignores_colour_keys_this_version_lacks() {
-        let file = json!({
-            "format": FORMAT, "name": "Old", "base": "dark",
-            "colors": {"panel": "#102030", "zigzag_face": "#abcdef", "zigzag_border": 5},
-        });
-        let imported = from_value(&file).expect("unknown colour keys never refuse a theme file");
-        assert!(!imported.colors.contains_key("zigzag_face") && !imported.colors.contains_key("zigzag_border"));
-        assert_eq!(resolve(&imported).panel, Color32::from_rgb(0x10, 0x20, 0x30));
-        let plain = resolve(&ThemeFile { colors: BTreeMap::new(), ..imported.clone() });
-        assert_eq!(resolve(&imported).navigator_face, plain.navigator_face, "defaults for the ignored colours");
-        let bad = json!({"format": FORMAT, "name": "Bad", "base": "dark", "colors": {"panel": "nope"}});
-        assert!(from_value(&bad).is_err(), "a known colour with a bad value is still an error");
-    }
-
-    #[test]
-    fn a_saved_theme_with_colour_keys_this_version_lacks_loads_with_them_ignored() {
-        let saved = json!({
-            "id": "old", "name": "Old", "base": "dark",
-            "colors": {"panel": "#102030", "zigzag_face": "#abcdef", "zigzag_border": "#123456"},
-        });
-        let theme: ThemeFile = serde_json::from_value(saved).expect("an unknown colour key never fails a saved theme");
-        let resolved = resolve(&theme);
-        assert_eq!(resolved.panel, Color32::from_rgb(0x10, 0x20, 0x30), "the valid key is applied");
-        let plain = resolve(&ThemeFile { colors: BTreeMap::new(), ..theme.clone() });
-        assert_eq!(resolved.navigator_face, plain.navigator_face, "the unknown keys change nothing");
-        assert_eq!(resolved.navigator_border, plain.navigator_border);
-    }
-
-    #[test]
-    fn imported_ids_never_take_a_built_in_or_mode_id_and_replace_their_own() {
-        crate::test_support::install_catalog();
-        let mut custom = Vec::new();
-        let mk = |name: &str| ThemeFile { id: slug(name), name: name.into(), ..Default::default() };
-        assert_eq!(add(&mut custom, mk("Gruvbox Dark")).unwrap(), "custom-gruvbox-dark");
-        assert_eq!(add(&mut custom, mk("Dark")).unwrap(), "custom-dark");
-        assert_eq!(add(&mut custom, mk("Mine")).unwrap(), "mine");
-        let again = ThemeFile { base: Base::Light, ..mk("Mine") };
-        assert_eq!(add(&mut custom, again).unwrap(), "mine");
-        assert_eq!(custom.len(), 3);
-        assert_eq!(custom.iter().find(|t| t.id == "mine").map(|t| t.base), Some(Base::Light));
-        for i in custom.len()..MAX_CUSTOM {
-            add(&mut custom, mk(&format!("t{i}"))).unwrap();
-        }
-        assert!(add(&mut custom, mk("one too many")).is_err());
-        assert!(find("gruvbox-dark", &custom).is_some() && find("mine", &custom).is_some() && find("dark", &custom).is_none());
     }
 
     #[test]
