@@ -9287,7 +9287,7 @@ fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, plane: &Pla
 /// Tools run through `target`, cut back to the surface of its face `face` offset by `offset`
 /// along `travel`, the direction the extent runs (a negative offset: that far short of the face):
 /// each tool split by the face's offset sheet (`offset_sheet`), extended, keeping the piece(s)
-/// that touch the start (`dist_to_start` 0 there). The kernel refuses the offset for some
+/// that touch the start (a plane face of the piece at `dist_to_start` 0). The kernel refuses the offset for some
 /// surfaces (#8137): the feature then fails with that reason rather than ending somewhere else.
 /// `near` is a point on the face (the To pick). With no offset, see [`trim_to_face`].
 fn trim_to_offset_face(
@@ -9311,10 +9311,12 @@ fn trim_to_offset_face(
     for (t, parts) in tools.iter().zip(split) {
         for part in parts {
             let tol = (part.size() * 1e-4).max(1e-6);
-            let touches = part
-                .mesh(&solidcraft_kernel::MeshTolerance::chord((part.size() * 1e-2).max(1e-2)))
-                .map(|m| m.positions.iter().any(|q| dist_to_start(*q) < tol))
-                .unwrap_or(false);
+            // Touching the start: a plane face square to the travel at the start's level (a piece
+            // of the tool's start cap), read from the B-rep.
+            let touches = (0..part.face_count()).any(|fi| {
+                matches!(kernel::face_surface(&part, fi), Some(kernel::FaceSurface::Plane { normal, point })
+                    if normal.vec().cross(travel).len() <= 1e-6 * travel.len() && dist_to_start(point) < tol)
+            });
             if touches {
                 out.push(Traced::step(part, &[t, &target_traced]));
             }
@@ -9328,9 +9330,10 @@ fn trim_to_offset_face(
 
 /// The surface of `target`'s face `face` as a sheet body `offset` past the face along `travel`
 /// (short of it when negative): the kernel's offset of that face, whose sign follows the face's
-/// surface normal, so the sheet is built on the side the face's normal at `near` suggests and
-/// rebuilt on the other side when it lands on the wrong one (measured on the sheet itself, as
-/// the normal of a face whose surface is reversed points the other way).
+/// surface normal, which for a reversed face (the bore of a tube) points the other way than the
+/// travel past it. The sheet is built with the offset's own sign and rebuilt on the other side
+/// when it lands on the wrong one, measured on the sheet's exact surface at its point nearest
+/// `near`.
 fn offset_sheet(target: &ModelBody, face: usize, near: Vec3, travel: Vec3, offset: f64) -> Result<Body> {
     let refused = |e: &dyn std::fmt::Display| {
         DocError::Invalid(format!(
@@ -9338,33 +9341,15 @@ fn offset_sheet(target: &ModelBody, face: usize, near: Vec3, travel: Vec3, offse
         ))
     };
     let dir = travel.normalized().ok_or_else(|| DocError::Invalid("the extent has no direction".into()))?;
-    let outward = face_normal_near(target, face, near).unwrap_or(dir);
     let tol = (target.body.size() * 1e-4).clamp(1e-4, 1.0);
-    let along = if outward.dot(dir) >= 0.0 { offset } else { -offset };
-    let sheet = kernel::offset_surface(&target.body, &[face], along, tol).map_err(|e| refused(&e))?;
-    // Where the sheet landed, along the travel from the pick (its point nearest the pick): past
-    // the face when positive.
-    let side = sheet
-        .mesh(&solidcraft_kernel::MeshTolerance::chord((offset.abs() * 0.1).clamp(1e-3, 1.0)))
-        .ok()
-        .and_then(|m| m.positions.iter().min_by(|a, b| a.dist(near).total_cmp(&b.dist(near))).map(|q| (*q - near).dot(dir)));
+    let sheet = kernel::offset_surface(&target.body, &[face], offset, tol).map_err(|e| refused(&e))?;
+    // Where the sheet landed, along the travel from the pick (the point of its exact surface
+    // nearest the pick): past the face when positive.
+    let side = kernel::face_surface(&sheet, 0).and_then(|s| s.nearest(near)).map(|q| (q - near).dot(dir));
     match side {
-        Some(side) if side * offset < 0.0 => kernel::offset_surface(&target.body, &[face], -along, tol).map_err(|e| refused(&e)),
+        Some(side) if side * offset < 0.0 => kernel::offset_surface(&target.body, &[face], -offset, tol).map_err(|e| refused(&e)),
         _ => Ok(sheet),
     }
-}
-
-/// The normal of `b`'s face `face` at its mesh vertex nearest `q`.
-fn face_normal_near(b: &ModelBody, face: usize, q: Vec3) -> Option<Vec3> {
-    let m = b.mesh();
-    m.triangles
-        .iter()
-        .zip(&m.tri_face)
-        .filter(|(_, f)| **f as usize == face)
-        .flat_map(|(t, _)| t.iter().copied())
-        .filter_map(|i| Some((m.positions.get(i as usize)?.dist(q), *m.normals.get(i as usize)?)))
-        .min_by(|a, b| a.0.total_cmp(&b.0))
-        .and_then(|(_, n)| n.normalized())
 }
 
 /// One point on each face of a body (a triangle centre, so it lies on the face).
