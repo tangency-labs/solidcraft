@@ -3442,11 +3442,11 @@ fn render_preview_navigates_like_the_modelling_viewport_in_every_preset() {
     }
 }
 
-/// #1454: Fit (F6), a middle double-click, and the axis view's and navigation cube's Home and
+/// #1454: Fit (F6), a middle double-click, and the axis view's and navigator's Home and
 /// view controls all work in the Render workspace, framing the product scene.
 #[test]
 fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
-    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Custom] {
         let mut h = Harness::new();
         h.app.preferences.navigator_style = style;
         h.app.preferences.look_at_anim = false;
@@ -3489,9 +3489,8 @@ fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
         // The navigator's Home control.
         off(&mut h);
         let handle = match style {
-            crate::prefs::NavigatorStyle::Axes => "axis_view:home",
-            // Custom draws the cube until a body is chosen.
-            crate::prefs::NavigatorStyle::Cube | crate::prefs::NavigatorStyle::Custom => "navigation_cube:control:home",
+            // Custom draws the signed axes until a body is chosen.
+            crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => "axis_view:home",
         };
         h.step(&json!({"click":{"handle":handle}})).unwrap();
         h.settle();
@@ -5882,31 +5881,70 @@ fn render_workspace_pick_stage_tools_filter_sample_clicks_with_shots_shown_and_h
 }
 
 #[test]
-fn modelling_select_panel_shows_and_clears_renders_component_pick() {
+fn render_pick_choice_stays_in_render_and_modelling_keeps_picking_faces() {
+    // Render's Body / Face / Component switches used to write Modelling's pick mode: a Body or
+    // Component chosen in Render left Modelling lighting and picking whole bodies, and the
+    // preferences file kept it. Render's choice is its own; only Click selects and the
+    // Modelling SELECT panel set Modelling's.
     use egui::accesskit::{Role, Toggled};
+    use solidcraft_engine::Sel;
     const BODY: &str = "Select bodies (a face picks its body)";
     const COMPONENT: &str = "Select components (a face picks its component)";
-    let (mut h, _) = render_pick_sample();
-    h.step(&json!({"click":{"handle":"render:pick:component"}})).unwrap();
-    enter(&mut h.app, false).unwrap();
-    h.settle();
-    h.step(&json!({"click":{"handle":"tab:VIEW"}})).unwrap();
-    h.step(&json!({"click":{"handle":"panel:VIEW:SELECT"}})).unwrap();
+    for render_choice in ["body", "component"] {
+        let (mut h, _) = render_pick_sample();
+        h.step(&json!({"click":{"handle":format!("render:pick:{render_choice}")}})).unwrap();
+        assert_eq!(h.app.pick_mode(), render_choice, "Render takes its own choice");
+        enter(&mut h.app, false).unwrap();
+        h.settle();
+        assert_eq!(h.app.pick_mode(), "face", "Modelling keeps picking faces after Render {render_choice}");
+        assert!(!h.app.ui.pick_bodies && !h.app.ui.pick_components);
+        let prefs: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
+        assert_eq!(prefs["pick_bodies"], false, "Render's choice must not reach the preferences file");
 
-    let check = |h: &Harness, body: bool, component: bool| {
-        assert_eq!((h.app.ui.pick_bodies, h.app.ui.pick_components), (body, component));
-        let tree = h.output.accesskit_update.as_ref().unwrap();
-        for (label, on) in [(BODY, body), (COMPONENT, component)] {
-            let node = tree.nodes.iter().find(|(_, n)| n.role() == Role::CheckBox && n.label() == Some(label));
-            assert_eq!(node.and_then(|(_, n)| n.toggled()), Some(if on { Toggled::True } else { Toggled::False }), "{label}");
+        // With no command running, hovering a face lights that face and a click picks it.
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let rect = h.app.viewport.rect.unwrap();
+        let at = (2..18)
+            .flat_map(|y| (2..18).map(move |x| (x, y)))
+            .map(|(x, y)| rect.min + egui::vec2(rect.width() * x as f32 / 20.0, rect.height() * y as f32 / 20.0))
+            .find(|&p| {
+                !crate::shell::covered(&h.app, p)
+                    && crate::viewport::pick(&h.app, &proj, p).first().is_some_and(|hit| matches!(hit, crate::viewport::Hit::Face { .. }))
+            })
+            .expect("a face of the sample in view");
+        h.step(&json!({"move":[at.x,at.y]})).unwrap();
+        assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })), "hover is the face: {:?}", h.app.viewport.hover);
+        let hover = h.app.viewport.hover.clone().unwrap();
+        assert!(crate::viewport::candidate(&h.app, std::slice::from_ref(&hover)).is_some_and(|(_, sel)| matches!(sel, Sel::Face { .. })));
+        h.step(&json!({"click":[at.x,at.y]})).unwrap();
+        assert!(
+            matches!(h.app.session.selection.as_slice(), [Sel::Face { .. }]),
+            "a click picks the face, not the body: {:?}",
+            h.app.session.selection
+        );
+
+        // The Modelling SELECT panel shows faces and still sets Modelling's mode, keeping its Faces filter.
+        h.step(&json!({"click":{"handle":"tab:VIEW"}})).unwrap();
+        h.step(&json!({"click":{"handle":"panel:VIEW:SELECT"}})).unwrap();
+        let check = |h: &Harness, body: bool, component: bool| {
+            assert_eq!((h.app.ui.pick_bodies, h.app.ui.pick_components), (body, component));
+            let tree = h.output.accesskit_update.as_ref().unwrap();
+            for (label, on) in [(BODY, body), (COMPONENT, component)] {
+                let node = tree.nodes.iter().find(|(_, n)| n.role() == Role::CheckBox && n.label() == Some(label));
+                assert_eq!(node.and_then(|(_, n)| n.toggled()), Some(if on { Toggled::True } else { Toggled::False }), "{label}");
+            }
+        };
+        check(&h, false, false);
+        h.step(&json!({"widget":"Faces"})).unwrap();
+        for (label, body, component) in [(COMPONENT, false, true), (BODY, true, false), (BODY, false, false)] {
+            h.step(&json!({"widget":label})).unwrap();
+            check(&h, body, component);
+            assert!(h.app.ui.pick_off.iter().any(|kind| kind == "faces"), "changing pick mode must preserve the panel's Faces filter");
         }
-    };
-    check(&h, false, true);
-    h.step(&json!({"widget":"Faces"})).unwrap();
-    for (label, body, component) in [(COMPONENT, false, false), (BODY, true, false), (COMPONENT, false, true), (BODY, true, false)] {
-        h.step(&json!({"widget":label})).unwrap();
-        check(&h, body, component);
-        assert!(h.app.ui.pick_off.iter().any(|kind| kind == "faces"), "changing pick mode must preserve the panel's Faces filter");
+        // Back in Render, Render's own choice is still there.
+        enter(&mut h.app, true).unwrap();
+        h.settle();
+        assert_eq!(h.app.pick_mode(), render_choice);
     }
 }
 
@@ -5971,7 +6009,7 @@ fn render_workspace_selection_overlay_never_changes_started_frames_png_or_retain
     h.frames(3);
     h.app.run("select.filter", json!({"mode":"face"})).unwrap();
     h.step(&json!({"click":{"handle":"render:pick:body"}})).unwrap();
-    assert!(!h.app.ui.pick_bodies && !h.app.ui.pick_components, "result canvas must disable the stage's Pick control");
+    assert!(!h.app.picks_bodies() && !h.app.picks_components(), "result canvas must disable the stage's Pick control");
     let path = h.dir.join("overlay-free.png");
     h.app.run("render.export", json!({"job":second,"path":path})).unwrap();
     assert_eq!(std::fs::read(path).unwrap(), clean.png());
@@ -9035,7 +9073,7 @@ fn live_image_imported_mesh_keeps_selected_and_hovered_face_and_body_feedback() 
         app.session.selection.clear();
         app.viewport.hover = None;
         app.viewport.hover_bodies.clear();
-        app.ui.pick_bodies = case == 3;
+        app.ui.render_pick = if case == 3 { "body" } else { "face" }.into();
         let point = Vec3::ZERO;
         match case {
             0 => app.session.selection = vec![Sel::Face { body: body.into(), index: face, point }],

@@ -1052,6 +1052,11 @@ pub enum FeatureKind {
         /// The tapped thread's hand: right (the default) or left; never both.
         #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
         hand: crate::thread_forms::ThreadHand,
+        /// The tapped thread's tolerance class as written, such as `6H` or `2B`
+        /// ([`crate::TappedThread::check_class`]): what a drawing's callout adds to the thread. It
+        /// changes neither the drill nor a modelled thread. None: no class given.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread_class: Option<String>,
         /// The tapped thread cut into the wall (the groove between its teeth, as a modelled
         /// `solid.thread` cuts it) instead of only listed.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -1127,6 +1132,12 @@ pub enum FeatureKind {
         /// was left to the tap drill: a 12 mm hole stays M14 there. New threads leave it off.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         old_auto_size: bool,
+        /// Other cylindrical faces threaded with the same options, in selection order.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        additional_faces: Vec<FacePick>,
+        /// The definition body for each selected face, primary first. Empty keeps legacy selection.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        target_bodies: Vec<BodyName>,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {
@@ -1474,6 +1485,11 @@ pub enum FeatureKind {
         /// What happens to a cell the field's edge crosses.
         #[serde(default = "default_cell_clip")]
         clip: solidcore_record::cell_grid::Clip,
+        /// The least clearance from a cell to every edge of the field and its keep-outs, with
+        /// `clip: whole` (default 0: a cell may touch an edge).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Margin")]
+        margin: Option<Expr>,
         /// How deep the cells go. Unused with `through_all`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Depth")]
@@ -3422,6 +3438,14 @@ pub struct DesignLink {
     pub path: String,
     /// The Import feature holding the linked design's bodies.
     pub feature: u64,
+    /// The source configuration row's stable id. Without one, the link follows the source's
+    /// saved state. A renamed row keeps its id; a deleted row must not select another row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configuration: Option<u64>,
+    /// The selected row's creation identity, so undo and replacement cannot reuse its numeric id.
+    /// Legacy rows without a creation identity keep `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configuration_identity: Option<u64>,
     /// Last inherited values, by Import body slot. Differing assembly assignments are
     /// local overrides and survive a source update. Older links start with no baseline.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

@@ -45,6 +45,7 @@ pub mod contact;
 pub mod continuity;
 pub mod curve;
 pub mod curve_fit;
+pub mod curve_gap;
 pub mod curve_knots;
 pub mod curve_plane;
 pub mod cylinder_wall;
@@ -52,11 +53,13 @@ pub mod error;
 pub mod extend;
 pub mod face_surface;
 pub mod file;
+pub mod joint_turn;
 pub mod label;
 pub mod measure;
 pub mod network;
 pub mod offset;
 pub mod order;
+pub mod path_export;
 pub mod pcurve;
 pub mod prism;
 pub mod provenance;
@@ -87,7 +90,7 @@ pub use error::{
     Unsoundness,
 };
 pub use measure::{
-    point_distance, Distance, EdgePoint, EdgeRayPoint, FaceCentroid, GapSample,
+    point_distance, points_meet, Distance, EdgePoint, EdgeRayPoint, FaceCentroid, GapSample,
     MassPropertiesEstimate, Normal, PointClass, SquareFaceLevel,
 };
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};

@@ -14,7 +14,7 @@ use solidcraft_doc::joints::{self, Coupling, Joint, JointExprs, JointKind, Joint
 use solidcraft_geom::Aabb3;
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, num, str_, vec3};
+use crate::params::{bad, bool_, num, str_, unique_reference, vec3};
 use crate::schema::joints::{
     AsBuiltJointParams, BudgetStop, CamLift, CamParams, CamResult, ContactStop, CouplingResult, CreateJointParams, DeleteJointParams,
     DeleteJointResult, DriveJointParams, DriveJointResult, EditJointResult, FloatingChain, GearParams, HeldValue, InspectJointParams,
@@ -1041,7 +1041,12 @@ pub(crate) fn joint_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64>
     let joint = if let Some(Value::Number(number)) = v {
         number.as_u64().and_then(|id| s.doc.assembly.joints.iter().find(|joint| joint.id == id))
     } else {
-        s.doc.assembly.joints.iter().find(|joint| joint.id.to_string() == key || joint.name == key)
+        unique_reference(
+            cmd,
+            "joint",
+            &key,
+            s.doc.assembly.joints.iter().filter(|joint| joint.id.to_string() == key || joint.name == key).map(|joint| (joint.id, joint)),
+        )?
     };
     joint.map(|joint| joint.id).ok_or_else(|| bad(cmd, format!("no joint `{key}`")))
 }
@@ -1100,6 +1105,15 @@ fn values_param(s: &Session, p: &Value, kind: JointKind, cmd: &str) -> Result<Ve
     Ok(out)
 }
 
+fn limit_pair(s: &Session, lo: &Value, hi: &Value, angle: bool, cmd: &str) -> Result<(f64, f64)> {
+    let lo = value(s, lo, angle, cmd)?;
+    let hi = value(s, hi, angle, cmd)?;
+    if lo > hi {
+        return Err(bad(cmd, "joint limit minimum must not exceed maximum"));
+    }
+    Ok((lo, hi))
+}
+
 fn limits_param(s: &Session, p: &Value, kind: JointKind, cmd: &str) -> Result<Vec<Option<(f64, f64)>>> {
     let n = kind.dofs().len();
     let mut out = vec![None; n];
@@ -1111,7 +1125,7 @@ fn limits_param(s: &Session, p: &Value, kind: JointKind, cmd: &str) -> Result<Ve
             if let (Some(lo), Some(hi)) = (l.get(0), l.get(1))
                 && let Some(slot) = out.get_mut(i)
             {
-                *slot = Some((value(s, lo, kind.is_angle(i), cmd)?, value(s, hi, kind.is_angle(i), cmd)?));
+                *slot = Some(limit_pair(s, lo, hi, kind.is_angle(i), cmd)?);
             }
         }
     }
@@ -2146,7 +2160,7 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "no such value"));
     }
     let lim = match (p.get("min"), p.get("max")) {
-        (Some(lo), Some(hi)) => Some((value(s, lo, kind.is_angle(i), cmd)?, value(s, hi, kind.is_angle(i), cmd)?)),
+        (Some(lo), Some(hi)) => Some(limit_pair(s, lo, hi, kind.is_angle(i), cmd)?),
         (None, None) => None,
         _ => return Err(bad(cmd, "give both `min` and `max`, or neither to clear")),
     };

@@ -946,3 +946,134 @@ fn a_slab_a_hair_past_a_fillets_tangent_line_joins_valid() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+/// A through bore whose cap is almost coincident with a cylinder's cap. The two
+/// cylinder seams differ, and the bore axis tilts by 1e-5 radians. Both bore caps
+/// lie outside the stock, so every slice normal to the stock axis loses the same
+/// ellipse: area pi * r^2 / cos(theta).
+#[test]
+fn a_nearly_axial_bore_through_a_cylinder_with_step_tolerances() {
+    use solidcore::curve::ellipse::Ellipse;
+    use solidcore::topology::brep::{p1, p2, p5};
+
+    let mut k = rig_kernel();
+    let stock_frame = Axis2Placement::new(
+        Point3::new(-22.0005005683, 27.3286637536, -43.3425576331),
+        Vec3::new(
+            0.33541020646821096,
+            -0.4447535182170257,
+            -0.8304783569910354,
+        ),
+        Vec3::new(
+            0.7984072189295407,
+            0.6021178562052287,
+            -1.2617029737649332e-7,
+        ),
+    );
+    let bore_frame = Axis2Placement::new(
+        Point3::new(-22.000499999972, 27.328699999997, -43.342599999983),
+        Vec3::new(0.459987304432186, 0.748373023696032, 0.4778592859464696),
+        Vec3::new(-0.7337328686846232, 0.01728700041769954, 0.6792181071116936),
+    );
+    let mut stock = api::create_cylinder(&mut k, Point3::ZERO, 3.75, 11.0).unwrap();
+    p5::transform(&mut k, &mut stock, &stock_frame, None, false).unwrap();
+    // STEP's 0.005 mm intersection tolerance is a 0.0025 mm kernel zone.
+    p2::set_tolerance(&k, &mut stock, 0.0025, true, true).unwrap();
+    let circle =
+        Curve::from(Ellipse::create_canonical_circle(&k, &bore_frame, 2.4, None, None).unwrap());
+    let mut bore = create_linear_sweep(
+        &mut k,
+        &[Some(&circle)],
+        Vec3::new(0.5000477548925153, -0.6630527709169285, 0.5570576862465307),
+        12.9998,
+        true,
+    )
+    .unwrap();
+    p2::set_tolerance(&k, &mut bore, 1e-5, true, true).unwrap();
+    for operand in [&mut stock, &mut bore] {
+        solidcore::topology::integrity::check(operand).unwrap();
+        let check = check_brep(&mut k, operand, CheckLevel::Level2).unwrap();
+        assert!(check.is_valid(), "input: {:?}", check.lines());
+    }
+
+    let mut result = boolean_difference(&mut k, stock, bore).unwrap();
+    solidcore::topology::integrity::check(&result).unwrap();
+    let check = check_brep(&mut k, &mut result, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "{:?}", check.lines());
+    assert_eq!(p1::faces(&result, None).unwrap().len(), 4);
+    // Edges: the stock seam and its two cap circles (each closed at the seam), the bore
+    // seam, and each bore circle as two arcs: the circle is a closed curve that starts
+    // 0.82 mm from where the bore seam meets the cap, so it is cut there and at the
+    // seam crossing. Vertices: two on the stock seam, two per bore circle.
+    assert_eq!(p1::edges(&result, None).unwrap().len(), 8);
+    assert_eq!(p1::vertices(&result, None).unwrap().len(), 6);
+
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    let volume = brep_volume(&k, &mut result, 1e-9, &attrs).unwrap();
+    let expected = PI * 11.0 * (3.75_f64.powi(2) - 2.4_f64.powi(2) / 1e-5_f64.cos());
+    assert!(
+        (volume - expected).abs() / expected < VOLUME_REL_TOL,
+        "volume {volume} vs {expected}"
+    );
+}
+
+// ---- a slot cut across a hole tangent to the face it starts on -------------------------
+
+/// The block of #16937: the 40 x 20 rectangle `x` in `[-40, 0]`, `y` in `[-10, 10]` less
+/// the circle of radius 8 about `(-20, -2)`, which touches the side `y = -10` at
+/// `(-20, -10)`, swept 60 along z. Its profile is one loop that runs along that side to the
+/// tangent point, round the circle and on along the side, as a sketch's region is, so the
+/// block pinches to no thickness along the line `x = -20`, `y = -10`, where it has two
+/// edges between the same two vertices: the edge between the side's two parts and the seam
+/// of the hole's wall. The block checks clean at Level2.
+fn block_with_a_tangent_hole(k: &mut Kernel) -> solidcore::Result<Brep> {
+    use solidcore::primitive::api_curves as curves;
+    let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+    let line = |a: Point3, b: Point3| Curve::from(curves::create_line_segment(a, b).unwrap());
+    let profile = [
+        line(p(-40.0, -10.0), p(-20.0, -10.0)),
+        Curve::from(curves::create_arc(p(-20.0, -2.0), 8.0, -90.0, 270.0)?),
+        line(p(-20.0, -10.0), p(0.0, -10.0)),
+        line(p(0.0, -10.0), p(0.0, 10.0)),
+        line(p(0.0, 10.0), p(-40.0, 10.0)),
+        line(p(-40.0, 10.0), p(-40.0, -10.0)),
+    ];
+    let refs: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+    create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 60.0, true)
+}
+
+/// #16937: a slot cut from the block's side `y = -10`, 18 deep, 8 high (`z` in `[24, 32]`)
+/// and past both of its ends. The cutter's face on that side is coplanar with the side on
+/// both sides of the pinch line and tangent to the wall along it, so its one edge along the
+/// line was defined against both of the block's edges there and related to both: "another entity is already
+/// related to the other one". The hole lies within the slot's depth, so the cut takes the
+/// slot's whole box out of the block, hole and all; the block keeps the pinch above and
+/// below the slot.
+#[test]
+fn a_slot_across_a_hole_tangent_to_its_face_cuts() {
+    let mut k = rig_kernel();
+    let mut block = block_with_a_tangent_hole(&mut k).unwrap();
+    let block_volume = volume_of(&k, &mut block);
+    let want_block = 40.0 * 20.0 * 60.0 - PI * 64.0 * 60.0;
+    assert!(
+        (block_volume - want_block).abs() <= VOLUME_REL_TOL * want_block,
+        "block volume {block_volume} vs {want_block}"
+    );
+
+    let slot = api::create_box(&mut k, Point3::new(-50.0, -10.0, 24.0), 60.0, 18.0, 8.0).unwrap();
+    let mut result = boolean_difference(&mut k, block, slot).unwrap();
+    // the slot's box within the block, less the hole's part of it, is gone
+    let want = want_block - 8.0 * (40.0 * 18.0 - PI * 64.0);
+    let check = check_brep(&mut k, &mut result, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "Level2 {:?}", check.lines());
+    let got = volume_of(&k, &mut result);
+    assert!(
+        (got - want).abs() <= VOLUME_REL_TOL * want,
+        "volume {got} vs {want}"
+    );
+}
