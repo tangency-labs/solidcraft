@@ -87,8 +87,8 @@ const CUT_GAP: f64 = 1e-9;
 
 /// How far a point of a section may move in space for its plane's axes being off (not quite
 /// perpendicular or not quite of unit length): the kernel's zone tolerance, as [`MIN_EDGE`]. A
-/// section is placed through its axes, so axes off by `skew` move its points by up to about
-/// `skew` times its extent ([`axes_fit`]).
+/// section is placed through its axes, so axes off by `skew` move its points by up to a small
+/// multiple of `skew` times its extent ([`axes_fit`]).
 const AXES_ZONE: f64 = MIN_EDGE;
 
 const OP: &str = "sweep::loft_sections";
@@ -271,9 +271,33 @@ fn derivative(s: &Seg2, t: f64) -> Vec2 {
     }
 }
 
-/// The unit tangent at the parameter `t` (0 or 1), else along the chord, else +x.
+/// A curve's control points in the plane (a line's ends; none for an arc).
+fn controls(s: &Seg2) -> Vec<Point2> {
+    match *s {
+        Seg2::Line { a, b } => vec![a, b],
+        Seg2::Arc { .. } => Vec::new(),
+        Seg2::Cubic { p0, p1, p2, p3 } => vec![p0, p1, p2, p3],
+        Seg2::Conic { a, apex, b, .. } => vec![a, apex, b],
+        Seg2::Bezier { n, p } => p.get(..usize::from(n)).unwrap_or(p.as_slice()).to_vec(),
+    }
+}
+
+/// The unit tangent at the parameter `t` (0 or 1). Where the derivative there is zero (control
+/// points repeated at that end), the limit of the tangent: towards the first control point apart
+/// from the start at 0, from the last apart from the end at 1 (the first derivative of the curve
+/// that is not zero there points that way, for positive weights). Else along the chord, else +x.
 fn tangent(s: &Seg2, t: f64) -> Vec2 {
     unit(derivative(s, t))
+        .or_else(|| {
+            let c = controls(s);
+            if t <= 0.0 {
+                let first = *c.first()?;
+                c.iter().skip(1).find_map(|q| unit(*q - first))
+            } else {
+                let last = *c.last()?;
+                c.iter().rev().skip(1).find_map(|q| unit(last - *q))
+            }
+        })
         .or_else(|| unit(s.end() - s.start()))
         .unwrap_or(Vec2::new(1.0, 0.0))
 }
@@ -1846,6 +1870,28 @@ fn to_world(origin: Vec3, x: Vec3, y: Vec3, p: Point2) -> Vec3 {
     origin + x * p.x + y * p.y
 }
 
+/// `cuts` (parameters of the segments `from`) carried to the segments `to` that run beside them
+/// (the same number, cut alike so far): each cut at the same share of its segment's length.
+/// Between a line or an arc and a line or an arc the parameter is that share, kept as it is.
+fn carried_cuts(cuts: &[Vec<f64>], from: &[Seg2], to: &[Seg2]) -> Vec<Vec<f64>> {
+    let plain = |s: &Seg2| matches!(s, Seg2::Line { .. } | Seg2::Arc { .. });
+    cuts.iter()
+        .enumerate()
+        .map(|(i, ts)| match (from.get(i), to.get(i)) {
+            (Some(f), Some(g)) if !(plain(f) && plain(g)) => {
+                let (lf, lg) = (length(f), length(g));
+                ts.iter()
+                    .map(|&t| {
+                        let share = if lf > 0.0 { length_to(f, t) / lf } else { t };
+                        param_at(g, share * lg, lg)
+                    })
+                    .collect()
+            }
+            _ => ts.clone(),
+        })
+        .collect()
+}
+
 /// Whether `e` is one of [`match_loft_sections`]'s size refusals
 /// ([`SweepFailure::LoftMatchTooLarge`], [`SweepFailure::LoftSectionsTooLarge`]): the sections are
 /// valid but their match is past the caller's bound or the pairing's.
@@ -1871,8 +1917,11 @@ fn axes_skew(x: Vec3, y: Vec3) -> f64 {
 }
 
 /// The farthest a section's curve reaches from its plane's origin, in the plane's coordinates
-/// (bounded through its control points, an arc's centre and radius): a point at `p` moves by at
-/// most about `|p|` times the axes' skew when the axes are off.
+/// (bounded through its control points, an arc's centre and radius). Axes off by a skew ε (in
+/// either length, in their cosine, or in all three at once) move a point at `p` from where a
+/// frame of perpendicular unit axes puts it by at most about 1.5·ε·`|p|` to first order (the
+/// stretch of the axes' Gram matrix, I plus an error of norm at most 3ε): the bound below is
+/// ε·`|p|`, so a point can move up to 1.5 times the zone tolerance before the axes are refused.
 fn extent(segs: &[Seg2]) -> f64 {
     // The larger, or NaN when either is: a point that is not finite has no extent.
     let most = |m: f64, e: f64| {
@@ -1882,14 +1931,10 @@ fn extent(segs: &[Seg2]) -> f64 {
             m.max(e)
         }
     };
-    let far = |pts: &[Point2]| pts.iter().map(|q| len(*q)).fold(0.0, most);
     segs.iter()
         .map(|s| match *s {
-            Seg2::Line { a, b } => far(&[a, b]),
             Seg2::Arc { center, radius, .. } => len(center) + radius.abs(),
-            Seg2::Cubic { p0, p1, p2, p3 } => far(&[p0, p1, p2, p3]),
-            Seg2::Conic { a, apex, b, .. } => far(&[a, apex, b]),
-            Seg2::Bezier { n, p } => far(p.get(..usize::from(n)).unwrap_or(p.as_slice())),
+            _ => controls(s).iter().map(|q| len(*q)).fold(0.0, most),
         })
         .fold(0.0, most)
 }
@@ -2031,9 +2076,17 @@ pub fn match_loft_sections(
             return Err(unpaired());
         };
         let c = correspond(&prev.segs, fa, &l.segs, w.frame)?;
+        let prev_segs = prev.segs.clone();
         for &q in &paired {
             if let Some(r) = done.get_mut(q).and_then(Option::as_mut) {
-                *r = r.cut(&c.a_cuts).ok_or_else(unpaired)?;
+                // The cuts are the previous section's parameters: each earlier section is cut at
+                // the same shares of its own segments' lengths.
+                let cuts = if q == last {
+                    c.a_cuts.clone()
+                } else {
+                    carried_cuts(&c.a_cuts, &prev_segs, &r.segs)
+                };
+                *r = r.cut(&cuts).ok_or_else(unpaired)?;
             }
         }
         let mut next = l.cut(&c.b_cuts).ok_or_else(unpaired)?;
@@ -3117,6 +3170,82 @@ mod tests {
             q.y.abs() < 1e-12 && (q.x - 20.0).abs() < 1e-9,
             "(20, 0) runs to {q:?}"
         );
+    }
+
+    /// A cut carried to an earlier section lands at the same share of its segment's length, not
+    /// at the same parameter (CodeRabbit). Three 40 x 20 rectangles: the first's bottom the cubic
+    /// above (its length from the start to a point is the point's x), the second's a line, the
+    /// third's bottom in two halves. The first pairing needs no cuts; the second cuts the line at
+    /// 0.5, which before cut the cubic at its parameter 0.5, x = 5. Every section's vertex is now
+    /// at (20, 0).
+    #[test]
+    fn a_cut_carried_to_an_earlier_section_lands_at_its_share_of_the_length() {
+        let cubic = vec![
+            Seg2::Cubic {
+                p0: p(0.0, 0.0),
+                p1: p(0.0, 0.0),
+                p2: p(0.0, 0.0),
+                p3: p(40.0, 0.0),
+            },
+            line((40.0, 0.0), (40.0, 20.0)),
+            line((40.0, 20.0), (0.0, 20.0)),
+            line((0.0, 20.0), (0.0, 0.0)),
+        ];
+        let plain = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)]);
+        let halves = poly(&[
+            (0.0, 0.0),
+            (20.0, 0.0),
+            (40.0, 0.0),
+            (40.0, 20.0),
+            (0.0, 20.0),
+        ]);
+        let m =
+            match_loft_sections(&[at(0.0, cubic), at(10.0, plain), at(20.0, halves)], 100).unwrap();
+        sound(&m);
+        let k = starts(&m[2])
+            .iter()
+            .position(|q| dist(*q, p(20.0, 0.0)) < 1e-12)
+            .unwrap();
+        for (i, s) in m.iter().enumerate() {
+            assert_eq!(s.segs.len(), 5, "section {i}");
+            let q = starts(s)[k];
+            assert!(
+                q.y.abs() < 1e-12 && (q.x - 20.0).abs() < 1e-9,
+                "section {i}: (20, 0) runs to {q:?}"
+            );
+        }
+    }
+
+    /// Where a curve's derivative is zero at an end (control points repeated there), its tangent
+    /// there is the limit, towards the first control point apart (CodeRabbit), not the chord: the
+    /// cubic (0, 0), (0, 0), (0, 10), (10, 10) leaves along +y (the chord is the diagonal), and
+    /// (0, 0), (10, 0), (10, 10), (10, 10) arrives along +y.
+    #[test]
+    fn a_curve_with_repeated_end_control_points_has_its_limiting_tangent() {
+        let leaving = Seg2::Cubic {
+            p0: p(0.0, 0.0),
+            p1: p(0.0, 0.0),
+            p2: p(0.0, 10.0),
+            p3: p(10.0, 10.0),
+        };
+        let t = tangent(&leaving, 0.0);
+        assert!(dist(t, p(0.0, 1.0)) < 1e-12, "{t:?}");
+        let arriving = Seg2::Cubic {
+            p0: p(0.0, 0.0),
+            p1: p(10.0, 0.0),
+            p2: p(10.0, 10.0),
+            p3: p(10.0, 10.0),
+        };
+        let t = tangent(&arriving, 1.0);
+        assert!(dist(t, p(0.0, 1.0)) < 1e-12, "{t:?}");
+        // All four together: no direction but the chord's, none, so +x.
+        let point = Seg2::Cubic {
+            p0: p(1.0, 1.0),
+            p1: p(1.0, 1.0),
+            p2: p(1.0, 1.0),
+            p3: p(1.0, 1.0),
+        };
+        assert_eq!(tangent(&point, 0.0), p(1.0, 0.0));
     }
 
     /// Two cuts of one conic land on the conic at their own parameters: the conic from (0, 0)
