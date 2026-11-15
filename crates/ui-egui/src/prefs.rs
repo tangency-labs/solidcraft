@@ -1373,6 +1373,9 @@ preference_settings! {
     /// shown, and has them back when it is shown again (#9360). Off by default: a switch cancels
     /// them and shows the MODEL tab.
     keep_work_on_tab_switch: bool = false, PAGE_LAYOUT;
+    /// Each design tab keeps its toolbar tab (MODEL, SURFACE, ...) while another design is shown,
+    /// with or without `keep_work_on_tab_switch`. Off: a switch shows the MODEL tab, as before.
+    remember_toolbar_tab: bool = true, PAGE_LAYOUT;
     /// Hovering a result in Search commands shows the command's place in the ribbon: its tab,
     /// its button or its row in a section's drop-down (#7287). A command started from the search
     /// blinks there, and a running command that sits in a drop-down marks its section label. Off
@@ -1699,6 +1702,9 @@ preference_settings! {
     /// negative or past the main screen when the window sits on another one).
     agent_chat_popped: bool = false, PAGE_ASSISTANT;
     agent_chat_window: Option<[f32; 4]> = None, PAGE_ASSISTANT;
+    /// Each reply's thinking (the dimmed text a model streams while it works) starts folded, with
+    /// a control to open it (#17072). Off: it is shown open, as before.
+    agent_thinking_folded: bool = true, PAGE_ASSISTANT;
     /// Changes the agent may make for one message; 0 is no limit.
     agent_chat_turn_limit: u32 = crate::agent_chat::gate::DEFAULT_TURN_LIMIT, PAGE_ASSISTANT;
     /// Custom instructions (#8220): text the agent chat adds to its system note when a session
@@ -6851,6 +6857,7 @@ mod tests {
             ("viewport_status_summary", json!(false), PAGE_GRAPHICS),
             ("sketch_tab_always", json!(true), PAGE_LAYOUT),
             ("keep_work_on_tab_switch", json!(true), PAGE_LAYOUT),
+            ("remember_toolbar_tab", json!(false), PAGE_LAYOUT),
             ("ribbon_reveal", json!(true), PAGE_LAYOUT),
             ("pinned_constraints_in_grid", json!(false), PAGE_LAYOUT),
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
