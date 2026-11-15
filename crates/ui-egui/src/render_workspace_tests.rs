@@ -1951,7 +1951,7 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     assert!(class_vertices(&gpu, crate::gpu::TriClass::Opaque).is_empty());
     assert!(!class_vertices(&gpu, crate::gpu::TriClass::Glass).is_empty());
     let color = |v: &[u8]| {
-        let i = v.get(crate::gpu::TRI_SIZE - 4..).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
+        let i = v.get(24..28).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
         gpu.palette.get(crate::gpu::PaletteIndex(i))
     };
     assert!(
@@ -1987,7 +1987,7 @@ fn product_appearance_edits_keep_the_blocks_vertices() {
     let vertices = plain.blocks[0].bytes.vertices.clone();
     let first_colour = |gpu: &GpuScene, class| {
         let v = class_vertices(gpu, class);
-        let i = v.get(crate::gpu::TRI_SIZE - 4..crate::gpu::TRI_SIZE).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
+        let i = v.get(24..28).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
         gpu.palette.get(crate::gpu::PaletteIndex(i))
     };
     s.execute("appearance.assign", &json!({"bodies":["Part"],"color":"#336699"})).unwrap();
@@ -2041,7 +2041,7 @@ fn reordered_face_looks_rebuild_the_block() {
 }
 
 /// A PBR material edit (metallic, roughness, IOR) rewrites the palette's material table and
-/// keeps every vertex; the PBR triangles are the block's PBR runs, 28 bytes a vertex.
+/// keeps every vertex; the PBR triangles are the block's PBR runs, `TRI_SIZE` bytes a vertex.
 #[test]
 fn product_material_edits_keep_the_blocks_vertices() {
     let mut s = Session::default();
@@ -3442,11 +3442,11 @@ fn render_preview_navigates_like_the_modelling_viewport_in_every_preset() {
     }
 }
 
-/// #1454: Fit (F6), a middle double-click, and the axis view's and navigation cube's Home and
+/// #1454: Fit (F6), a middle double-click, and the axis view's and navigator's Home and
 /// view controls all work in the Render workspace, framing the product scene.
 #[test]
 fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
-    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Custom] {
         let mut h = Harness::new();
         h.app.preferences.navigator_style = style;
         h.app.preferences.look_at_anim = false;
@@ -3489,9 +3489,8 @@ fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
         // The navigator's Home control.
         off(&mut h);
         let handle = match style {
-            crate::prefs::NavigatorStyle::Axes => "axis_view:home",
-            // Custom draws the cube until a body is chosen.
-            crate::prefs::NavigatorStyle::Cube | crate::prefs::NavigatorStyle::Custom => "navigation_cube:control:home",
+            // Custom draws the signed axes until a body is chosen.
+            crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => "axis_view:home",
         };
         h.step(&json!({"click":{"handle":handle}})).unwrap();
         h.settle();
@@ -8200,7 +8199,7 @@ fn geometry_refusal_reports_scene_size_limit_and_recovery() {
     let scene = ProductScene {
         meshes: vec![ProductMesh {
             name: "Synthetic assembly".into(),
-            // 2^21 PBR triangles in the blocks, 28 bytes a vertex: 168 MiB.
+            // 2^21 PBR triangles in the blocks, `TRI_SIZE` (32) bytes a vertex: 192 MiB.
             mesh: Arc::new(Mesh { triangles: vec![[0; 3]; 1 << 21], ..Default::default() }),
             color: [128; 3],
             opacity: 1.0,
@@ -8211,7 +8210,8 @@ fn geometry_refusal_reports_scene_size_limit_and_recovery() {
         bounds: Aabb3::EMPTY,
     };
     let error = gpu_scene_cached(&scene, &[], WEB_GEOMETRY_BYTES, &mut ProductCache::default()).err().unwrap();
-    assert!(error.contains("168.0 MiB"), "{error}");
+    let needed = ((1usize << 21) * 3 * crate::gpu::TRI_SIZE) >> 20;
+    assert!(error.contains(&format!("{needed}.0 MiB")), "{error}");
     assert!(error.contains("128.0 MiB"), "{error}");
     assert!(error.contains("Hide bodies in Design"), "{error}");
     let refused = upload_refusal(144 << 20, "Out of Memory");
@@ -15375,8 +15375,12 @@ fn host_result_controls_shield_wheel_and_comparison_divider_keeps_capture() {
     assert_eq!(h.app.cam, product);
     assert_eq!(h.app.render_workspace.view.result_camera, image);
     let canvas = h.app.viewport.rect.unwrap();
-    let start = crate::scenario::rect_of("render:compare:handle").unwrap().center();
-    assert!(!controls.contains(start));
+    let handle = crate::scenario::rect_of("render:compare:divider").unwrap();
+    let start = [0.5, 0.25, 0.75]
+        .into_iter()
+        .map(|y| egui::pos2(handle.center().x, handle.top() + handle.height() * y))
+        .find(|&point| !controls.contains(point) && !crate::shell::covered(&h.app, point))
+        .expect("an exposed comparison handle");
     h.frame_with(vec![
         Event::ModifiersChanged(Modifiers::ALT),
         Event::PointerMoved(start),
@@ -15431,7 +15435,11 @@ fn host_panel_capture_blocks_result_navigation_through_release() {
                 .center();
             let canvas = h.app.viewport.rect.unwrap();
             // Below this content-sized side card and away from the comparison divider.
-            let end = egui::pos2(canvas.center().x + 80.0, canvas.center().y + 80.0);
+            let end = [0.55, 0.65, 0.75]
+                .into_iter()
+                .map(|x| egui::pos2(canvas.left() + canvas.width() * x, canvas.center().y + 80.0))
+                .find(|&point| !crate::shell::covered(&h.app, point) && !h.app.viewport.layout.as_ref().unwrap().navigation.contains(point))
+                .expect("exposed canvas beside the comparison divider");
             assert!(!crate::shell::covered(&h.app, end));
             assert!(!h.app.viewport.layout.as_ref().unwrap().navigation.contains(end));
             h.frame_with(vec![Event::PointerMoved(start)]);

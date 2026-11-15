@@ -1130,6 +1130,55 @@ pub struct UnlockResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Keep a component's features in the design but out of the History bar (`component.hide_history`),
+/// or put them back (`component.show_history`). A component inside one that is hidden is left out of
+/// the bar too; the design itself never is, and its features always show.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct HistoryVisibilityParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+}
+
+/// Give a component the next colour of the Component Colors palette (`component.cycle_color`). The
+/// colour is shared by every instance of the component and is separate from its appearances.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct CycleColorParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+}
+
+/// What both commands return: the component they changed and how its history sits now.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct HistoryVisibilityResult {
+    /// The component, by id.
+    pub component: u64,
+    /// Whether its features are left out of the History bar now.
+    pub history_hidden: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `component.cycle_color` returns: the component it changed and the colour it has now.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CycleColorResult {
+    /// The component, by id.
+    pub component: u64,
+    /// Its identification colour now, as red, green and blue.
+    pub color: [u8; 3],
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 // ---------------------------------------------------------------------------------------------
 // The occurrence commands, Capture and Revert Position, Move Bodies and Sketches to Component and
 // Paste New (#13186).
@@ -1144,7 +1193,7 @@ pub struct UnlockResult {
 // ---------------------------------------------------------------------------------------------
 
 /// The message of a handler's refusal, to give whole.
-fn refusal(e: crate::EngineError) -> String {
+pub(crate) fn refusal(e: crate::EngineError) -> String {
     match e {
         crate::EngineError::BadParams { msg, .. } => msg,
         e => e.to_string(),

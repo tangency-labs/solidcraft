@@ -408,6 +408,13 @@ and a fresh CI run:
    passes the review gates: CodeRabbit's threads are resolved, and a change to CI or workflow files
    has the owner's approval. The merge queue tests each group of queued PRs together before it
    lands on `main`.
+   You don't have to wait for the label to see the full CI: run it on your fork, on GitHub's free
+   runners. On the fork, set two repository variables (Settings, Secrets and variables, Actions,
+   Variables): `CI_RUNNER` to `ubuntu-24.04` and `CI_RUNNER_WINDOWS` to `windows-latest`. Then
+   open Actions, CI, Run workflow, pick your branch and tick "Also check WebAssembly and RISC-V"
+   (or `gh workflow run ci.yml --ref <branch> -f cross_compile=true -R <you>/solidcraft`). That
+   runs the jobs the merge queue runs, plus the RISC-V build, more slowly than the project's
+   runners, so each job's time limit is three times the usual one while `CI_RUNNER` is set.
 4. Reference the issue (`Fixes #12`). In the PR, say what you tested and how. For geometry work, include the measured numbers (and
    the expected ones).
 5. Write the PR title and first sentence for someone who hasn't seen your chat, the issue or the

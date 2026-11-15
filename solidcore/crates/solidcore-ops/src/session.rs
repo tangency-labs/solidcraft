@@ -160,6 +160,14 @@ pub fn set_failure_hook(hook: Option<Hook>) {
     *HOOK.lock().unwrap_or_else(PoisonError::into_inner) = hook;
 }
 
+/// `f` of the session kernel's work counters (tests: what the kernel did inside the ops calls
+/// made so far, every thread's).
+#[cfg(test)]
+pub(crate) fn work_counters<T>(f: impl FnOnce(&solidcore::kernel::WorkCounters) -> T) -> T {
+    let mut guard = KERNEL.lock().unwrap_or_else(PoisonError::into_inner);
+    f(&guard.get_or_insert_with(fresh).work_counters)
+}
+
 /// A kernel of the session's configuration: the kernel's default options and the fixes the
 /// application named. The first kernel and every kernel after a panic are made here, so they
 /// are configured alike.
@@ -301,7 +309,7 @@ impl<T> Answer for Result<T> {
 macro_rules! plain {
     ($($t:ty),* $(,)?) => { $(impl Answer for $t {})* };
 }
-plain!((), bool, f64, usize, [usize; 3], Vec<u8>, Brep);
+plain!((), bool, f64, usize, [usize; 3], Vec<u8>, Vec<usize>, Brep);
 
 impl<T> Answer for Option<T> {}
 
@@ -493,16 +501,24 @@ fn written(
 /// error (unported code, invalid input to an adapter, a missing record...) fails the call
 /// instead of hiding as a skipped entity. So does a status error whose cause chain
 /// ([`SolidError::cause`]) holds a solidcore-side failure ([`SolidError::is_port_failure`]) or a
-/// cancellation: a stage that failed because a call was unported, or because the caller cancelled,
-/// is no answer of the operation on its input.
+/// cancellation, or a blend certificate that spent its work budget
+/// ([`SolidError::is_not_certified`]): a stage that failed because a call was unported, because
+/// the caller cancelled or because the work was given up, is no answer of the operation on its
+/// input.
 ///
 /// # Errors
 /// The kernel's error when it stands for no status, or when its cause chain holds a port
-/// failure or a cancellation.
+/// failure, a cancellation or a certificate past its budget.
 pub(crate) fn answer<T>(r: solidcore::Result<T>) -> solidcore::Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_status_answer() => Ok(None),
+        Err(e)
+            if e.is_status_answer()
+                && !std::iter::successors(Some(&e), |e| e.cause())
+                    .any(SolidError::is_not_certified) =>
+        {
+            Ok(None)
+        }
         Err(e) => Err(e),
     }
 }
