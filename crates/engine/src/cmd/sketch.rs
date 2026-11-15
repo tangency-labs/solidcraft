@@ -3749,7 +3749,17 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
         }
         // How far the value is from what the geometry measures now: zero for a dimension that
         // only restates what the sketch already has.
-        let want = vals.get(&pname).and_then(|v| v.to_kind(if is_angle { Kind::Angle } else { Kind::Length }).ok());
+        let mut want = vals.get(&pname).and_then(|v| v.to_kind(if is_angle { Kind::Angle } else { Kind::Length }).ok());
+        // A negative linear offset flips to the opposite side of the reference and keeps its magnitude.
+        if !is_angle
+            && let Some(w) = want
+            && w < 0.0
+            && flip_for_negative_dimension(sk, &k, -w)
+        {
+            let flipped_expr = if solidcraft_doc::expr::references(&e).is_empty() { doc.design_length(-w).1 } else { format!("-({e})") };
+            doc.change_param(&pname, &flipped_expr, None, None)?;
+            want = Some(-w);
+        }
         residual = want.map(|w| (w - cur).abs()).filter(|r| r.is_finite());
         // The first length dimension of a sketch with nothing sized yet scales it (#1365).
         // A sketch axis can also be measured by its fixed endpoints. In that case, only use
@@ -3903,6 +3913,103 @@ fn direction_fixed(sk: &Sketch, l: usize) -> bool {
         }
     }
     false
+}
+
+/// Move the free side of a sided distance dimension to the opposite side of its reference at `mag`
+/// so a negative typed distance flips the sketch instead of failing validation. Returns false for
+/// intrinsic sizes (length, radius, diameter) or when neither side can move.
+fn flip_for_negative_dimension(sk: &mut Sketch, k: &ConstraintKind, mag: f64) -> bool {
+    let movable = |sk: &Sketch, i: usize| sk.points.get(i).is_some_and(|pt| !pt.fixed && pt.link.is_none());
+    match *k {
+        ConstraintKind::DistanceX { p, q, .. } => {
+            let (Some(pp), Some(pq)) = (sk.point(p), sk.point(q)) else { return false };
+            if movable(sk, q) {
+                let dx = pq.x - pp.x;
+                let side = if dx.abs() > 1e-9 { -dx.signum() } else { -1.0 };
+                if let Some(pt) = sk.points.get_mut(q) {
+                    pt.pos.x = pp.x + side * mag;
+                }
+                true
+            } else if movable(sk, p) {
+                let dx = pp.x - pq.x;
+                let side = if dx.abs() > 1e-9 { -dx.signum() } else { 1.0 };
+                if let Some(pt) = sk.points.get_mut(p) {
+                    pt.pos.x = pq.x + side * mag;
+                }
+                true
+            } else {
+                false
+            }
+        }
+        ConstraintKind::DistanceY { p, q, .. } => {
+            let (Some(pp), Some(pq)) = (sk.point(p), sk.point(q)) else { return false };
+            if movable(sk, q) {
+                let dy = pq.y - pp.y;
+                let side = if dy.abs() > 1e-9 { -dy.signum() } else { -1.0 };
+                if let Some(pt) = sk.points.get_mut(q) {
+                    pt.pos.y = pp.y + side * mag;
+                }
+                true
+            } else if movable(sk, p) {
+                let dy = pp.y - pq.y;
+                let side = if dy.abs() > 1e-9 { -dy.signum() } else { 1.0 };
+                if let Some(pt) = sk.points.get_mut(p) {
+                    pt.pos.y = pq.y + side * mag;
+                }
+                true
+            } else {
+                false
+            }
+        }
+        ConstraintKind::Distance { p, q, .. } => {
+            let (Some(pp), Some(pq)) = (sk.point(p), sk.point(q)) else { return false };
+            let dir = (pq - pp).normalized().unwrap_or(Vec2::X);
+            if movable(sk, q) {
+                if let Some(pt) = sk.points.get_mut(q) {
+                    pt.pos = pp - dir * mag;
+                }
+                true
+            } else if movable(sk, p) {
+                if let Some(pt) = sk.points.get_mut(p) {
+                    pt.pos = pq + dir * mag;
+                }
+                true
+            } else {
+                false
+            }
+        }
+        ConstraintKind::PointLineDistance { p, l, .. } | ConstraintKind::LinearDiameter { p, l, .. } => {
+            let d = if matches!(k, ConstraintKind::LinearDiameter { .. }) { mag * 0.5 } else { mag };
+            let Some((la, lb)) = line_pts(sk, l) else { return false };
+            let Some(u) = (lb - la).normalized() else { return false };
+            let n = Vec2::new(-u.y, u.x);
+            let Some(pp) = sk.point(p) else { return false };
+            let signed = n.dot(pp - la);
+            let side = if signed.abs() > 1e-9 { -signed.signum() } else { -1.0 };
+            if movable(sk, p) {
+                let proj = pp - n * signed;
+                if let Some(pt) = sk.points.get_mut(p) {
+                    pt.pos = proj + n * (side * d);
+                }
+                true
+            } else {
+                let (ia, ib) = line_ends(sk, l);
+                if movable(sk, ia) && movable(sk, ib) {
+                    let delta = n * (signed - side * d);
+                    if let Some(pt) = sk.points.get_mut(ia) {
+                        pt.pos += delta;
+                    }
+                    if let Some(pt) = sk.points.get_mut(ib) {
+                        pt.pos += delta;
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+        _ => false,
+    }
 }
 
 /// What the dimension just added (the sketch's last constraint) measures on the solved sketch.
