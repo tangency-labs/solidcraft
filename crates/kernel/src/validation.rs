@@ -143,19 +143,19 @@ pub(crate) struct Unchecked {
     /// The step, as its own refusal names it (`SMLib fillet`).
     what: String,
     how: Checked,
-    result: std::sync::Mutex<Option<solidcraft_smlib::Brep>>,
-    /// The records of the bodies the step combined, to name one that already fails the check.
-    operands: Vec<Arc<Record>>,
+    /// The result, with the records of the bodies the step combined (to name one that already
+    /// fails the check): let go together once the check takes them.
+    result: std::sync::Mutex<Option<(solidcraft_smlib::Brep, Vec<Arc<Record>>)>>,
 }
 
 impl Unchecked {
     pub(crate) fn new(record: &Arc<Record>, what: &str, how: Checked, result: solidcraft_smlib::Brep, operands: &[&Body]) -> Unchecked {
         let operands = operands.iter().map(|b| b.record.arc().clone()).collect();
-        Unchecked { record: Arc::downgrade(record), what: what.to_string(), how, result: std::sync::Mutex::new(Some(result)), operands }
+        Unchecked { record: Arc::downgrade(record), what: what.to_string(), how, result: std::sync::Mutex::new(Some((result, operands))) }
     }
 
-    /// The step's result, taken (once), when this is `record`'s.
-    fn take(&self, record: &Arc<solidcore_record::brep::Brep>) -> Option<solidcraft_smlib::Brep> {
+    /// The step's result and its operands, taken (once), when this is `record`'s.
+    fn take(&self, record: &Arc<solidcore_record::brep::Brep>) -> Option<(solidcraft_smlib::Brep, Vec<Arc<Record>>)> {
         if !std::ptr::eq(self.record.as_ptr(), Arc::as_ptr(record)) {
             return None;
         }
@@ -203,7 +203,7 @@ pub fn check_kept(body: &Body) -> Result<()> {
         return Ok(());
     }
     match body.unchecked.as_deref().and_then(|u| u.take(body.record.arc()).map(|r| (u, r))) {
-        Some((u, r)) => verdict(&u.what, check_result_owned(r, u.how), &u.operands),
+        Some((u, (r, operands))) => verdict(&u.what, check_result_owned(r, u.how), &operands),
         None => verdict("SMLib", body.smlib()?.check(CheckLevel::All).map_err(|e| format!("check: {e}")), &[]),
     }
 }
@@ -254,8 +254,8 @@ pub fn detach_kept(body: &Body) -> KeptCheck {
     if body.is_mesh() {
         return KeptCheck(Kept::Nothing, stop);
     }
-    if let Some((u, result)) = body.unchecked.as_deref().and_then(|u| u.take(body.record.arc()).map(|r| (u, r))) {
-        return KeptCheck(Kept::Step { what: u.what.clone(), how: u.how, result, operands: u.operands.clone() }, stop);
+    if let Some((u, (result, operands))) = body.unchecked.as_deref().and_then(|u| u.take(body.record.arc()).map(|r| (u, r))) {
+        return KeptCheck(Kept::Step { what: u.what.clone(), how: u.how, result, operands }, stop);
     }
     KeptCheck(Kept::Copy(body.smlib().and_then(|b| b.try_clone().map_err(|e| KernelError::smlib("SMLib copy", e)))), stop)
 }
@@ -348,6 +348,8 @@ mod tests {
         let (joined, _) = validating(Validation::EachFeature, || crate::boolean(&tool, &bad, crate::BoolOp::Union));
         let e = check_kept(&joined.unwrap().unwrap()).unwrap_err().to_string();
         assert!(e.contains("(the second operand already fails it)"), "{e}");
+        // The checks took the operands' records with the results: the bodies kept don't hold them.
+        assert_eq!(Arc::strong_count(bad.record.arc()), 1);
         // A round on an edge away from the moved corner: the blend names its input the same way.
         let edge = [Vec3::new(10.0, 5.0, 10.0)];
         let (step, _) = validating(Validation::EachStep, || crate::fillet(&bad, &edge, 1.0));
