@@ -451,17 +451,17 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let placed = crate::drawing_view::on_sheet_from(&mut sessions, d, view.id, INSPECT)?;
     let pose = pose_result(s, &mut sessions, &resolved, view.settings.pose.clone());
     let configuration = configuration_result(&mut sessions, &resolved, view.settings.configuration);
-    let (parent, side) = match view.kind {
-        ViewKind::Base { .. } => (None, None),
-        ViewKind::Projected { parent, side } => (Some(ids::encode(parent)), Some(snake_name(side))),
+    let side = match &view.kind {
+        ViewKind::Projected { side, .. } => Some(snake_name(*side)),
+        ViewKind::Base { .. } | ViewKind::Section { .. } => None,
     };
     let own = &view.settings;
     let reply = InspectResult {
         view: ids::encode(view.id),
         sheet: ids::encode(view.sheet),
-        kind: if parent.is_some() { "projected" } else { "base" },
+        kind: view.kind.name(),
         source: ids::encode(resolved.source),
-        parent,
+        parent: view.kind.parent().map(ids::encode),
         side,
         direction: direction(&resolved.basis),
         place: view.place.into(),
@@ -481,7 +481,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         reference_shown_percent: view.reference_shown_percent,
         boundary_mm: BoxResult { min: placed.boundary.min.into(), max: placed.boundary.max.into() },
         extents: extents_result(&placed.extents, placed.unmeasured),
-        linked: matches!(view.kind, ViewKind::Projected { .. }).then(|| match display_set(own) {
+        linked: view.kind.parent().is_some().then(|| match display_set(own) {
             0 => Value::Bool(true),
             DISPLAY_GROUP => Value::Bool(false),
             _ => Value::String("partly".into()),
@@ -574,8 +574,8 @@ fn find<'a>(d: &'a Drawing, id: u64, cmd: &str) -> Result<&'a View> {
     d.view(id).ok_or_else(|| bad(cmd, format!("the drawing has no view {}", ids::encode(id))))
 }
 
-/// The views projected from view `id`, directly or through others, in the drawing's order: each
-/// one `follows` takes, whose parent is `id` or one of them.
+/// The views projected or cut from view `id`, directly or through others, in the drawing's order:
+/// each one `follows` takes, whose parent is `id` or one of them.
 fn descendants(d: &Drawing, id: u64, follows: impl Fn(&View) -> bool) -> Vec<u64> {
     let mut found = vec![id];
     // Each pass adds the views whose parent is found; a chain is at most MAX_VIEW_DEPTH views.
@@ -583,7 +583,7 @@ fn descendants(d: &Drawing, id: u64, follows: impl Fn(&View) -> bool) -> Vec<u64
         let more: Vec<u64> = d
             .views
             .iter()
-            .filter(|v| !found.contains(&v.id) && matches!(v.kind, ViewKind::Projected { parent, .. } if found.contains(&parent)) && follows(v))
+            .filter(|v| !found.contains(&v.id) && v.kind.parent().is_some_and(|parent| found.contains(&parent)) && follows(v))
             .map(|v| v.id)
             .collect();
         if more.is_empty() {
@@ -618,7 +618,7 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet, found: &Found) -> Result<Vec<
     }
     let Some(view) = d.views.get_mut(at).map(std::sync::Arc::make_mut) else { return Ok(Vec::new()) };
     let before = view.clone();
-    let base = matches!(view.kind, ViewKind::Base { .. });
+    let base = view.kind.parent().is_none();
     let own = &mut view.settings;
     if let Some(linked) = set.linked {
         if base {
@@ -941,10 +941,10 @@ fn lined_up(d: &Drawing, id: u64) -> Vec<u64> {
 /// `view`'s place moved by `by`: a point moves, and a place lined up with a parent moves along
 /// its free axis, so the views lined up with a moved view stay where they were beside it.
 fn shifted(view: &View, by: Vec2) -> ViewPlace {
-    match (view.place, view.kind) {
+    match (view.place, &view.kind) {
         (ViewPlace::At([x, y]), _) => ViewPlace::At([x + by.x, y + by.y]),
         (ViewPlace::Aligned(along), ViewKind::Projected { side, .. }) => ViewPlace::Aligned(along + side.along(by)),
-        (ViewPlace::Aligned(along), ViewKind::Base { .. }) => ViewPlace::Aligned(along + by.y),
+        (ViewPlace::Aligned(along), ViewKind::Base { .. } | ViewKind::Section { .. }) => ViewPlace::Aligned(along + by.y),
     }
 }
 
@@ -1059,11 +1059,12 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
             let original = find(d, *old, COPY)?;
             let mut view = View { id: *new, sheet, ..original.clone() };
             view.place = shifted(original, to - from);
-            match original.kind {
+            match &original.kind {
                 // The copy follows none of the views it came from: a projected view copied alone is
                 // a base view, looking the way it did, with the settings it had as its own. Its line
                 // group is its own only when its chain gave it: else it follows its new sheet, as a
-                // base view copied does.
+                // base view copied does. A section view copied alone stays a section of its parent:
+                // its cut is what it shows.
                 ViewKind::Projected { .. } if *old == id => {
                     view.kind = ViewKind::Base { source: resolved.source, view: looking(&resolved.basis) };
                     view.settings = ViewOverrides {
@@ -1081,7 +1082,10 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
                     };
                     view.place = ViewPlace::At([to.x, to.y]);
                 }
-                ViewKind::Projected { parent, side } => view.kind = ViewKind::Projected { parent: copy_of(parent).unwrap_or(parent), side },
+                ViewKind::Projected { parent, side } => view.kind = ViewKind::Projected { parent: copy_of(*parent).unwrap_or(*parent), side: *side },
+                ViewKind::Section { parent, line } => {
+                    view.kind = ViewKind::Section { parent: copy_of(*parent).unwrap_or(*parent), line: line.clone() }
+                }
                 ViewKind::Base { .. } => {}
             }
             // A copy never shares its original's letter: one that needs a letter is given its own below.

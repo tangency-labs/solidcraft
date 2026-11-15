@@ -98,7 +98,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "drawing: id → deleted: its id; closed when it was open (one undo step of the model)",
     ),
     CommandSpec::new("drawing.inspect", "Inspect Drawing", inspect).in_drawing().icon("inspect").noundo().doc_only().params(
-        "→ {id, name, units, projection, updates: automatic or deferred, language, font, line_group, view_letters: {reuse, given} (whether a deleted view's letter is given again, and how many letters have been given), font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, font_fallbacks: which font set each script of its title blocks' text that the drawing's font lacks, as lines such as \"Kana set in BIZ UDPGothic\", properties, sources: [{id, path?: another design's file, as this design's file keeps it; none for the design itself}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?, notes?}] (each text cell as the sheet shows it, a cell that shows a logo, its `image` in `title_block`, left out: its fields' values, nothing for one with none, or the text typed over it with the value it hides as `value`; `notes` are what doesn't fit on paper, each {fit: chars (with count and max), height or width}, shown whole, or {refused: why} for a label or value the drawing's font can't set, left off the sheet), title_block_overrides, dpi, line_group (its own, or null for the drawing's), documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids], notes: [ids]}], base views by id, each followed by those projected from it, notes: [ids] (on the sheet itself), tables, images, revision_tags: [ids], each list by id: what the sheet shows, as the Browser lists it}], symbols: [{id, name, prompts: [keys]}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
+        "→ {id, name, units, projection, updates: automatic or deferred, language, font, line_group, view_letters: {reuse, given} (whether a deleted view's letter is given again, and how many letters have been given), font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, font_fallbacks: which font set each script of its title blocks' text that the drawing's font lacks, as lines such as \"Kana set in BIZ UDPGothic\", properties, sources: [{id, path?: another design's file, as this design's file keeps it; none for the design itself}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?, notes?}] (each text cell as the sheet shows it, a cell that shows a logo, its `image` in `title_block`, left out: its fields' values, nothing for one with none, or the text typed over it with the value it hides as `value`; `notes` are what doesn't fit on paper, each {fit: chars (with count and max), height or width}, shown whole, or {refused: why} for a label or value the drawing's font can't set, left off the sheet), title_block_overrides, dpi, line_group (its own, or null for the drawing's), documents, excluded, views: [{id, kind: base|projected|section, parent?, side?, label, dimensions: [ids], balloons: [ids], notes: [ids]}], base views by id, each followed by those projected or cut from it, notes: [ids] (on the sheet itself), tables, images, revision_tags: [ids], each list by id: what the sheet shows, as the Browser lists it}], symbols: [{id, name, prompts: [keys]}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
     ),
     CommandSpec::new("drawing.set", "Drawing Settings", crate::checked!("drawing.set", set))
         .in_drawing()
@@ -322,15 +322,16 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"deleted": ids::encode(id)}))
 }
 
-/// What view `view` is called until views have saved names: which way it looks, or where it sits of
-/// the view it is projected from (`Front`, `Right of Front`, `Above Right of Front`).
+/// What view `view` is called until views have saved names: which way it looks, where it sits of
+/// the view it is projected from, or what it is a section of (`Front`, `Right of Front`, `Above Right
+/// of Front`, `Section of Front`).
 fn view_label(d: &Drawing, view: &View) -> String {
     let mut label = String::new();
     let mut at = view;
     for _ in 0..MAX_VIEW_DEPTH {
-        match at.kind {
+        match &at.kind {
             ViewKind::Base { view: ViewDirection::Named(named), .. } => {
-                let name = super::drawing_view::snake_name(named).replace('_', " ");
+                let name = super::drawing_view::snake_name(*named).replace('_', " ");
                 let mut letters = name.chars();
                 label.extend(letters.next().map(|first| first.to_ascii_uppercase()));
                 label.push_str(letters.as_str());
@@ -347,7 +348,12 @@ fn view_label(d: &Drawing, view: &View) -> String {
                     ProjectedSide::Above => "Above ",
                     ProjectedSide::Below => "Below ",
                 });
-                let Some(next) = d.view(parent) else { break };
+                let Some(next) = d.view(*parent) else { break };
+                at = next;
+            }
+            ViewKind::Section { parent, .. } => {
+                label.push_str("Section of ");
+                let Some(next) = d.view(*parent) else { break };
                 at = next;
             }
         }
@@ -394,8 +400,8 @@ fn sheet_views(d: &Drawing, on: &[u64], [dimensions, balloons, notes]: &[BTreeMa
     let mut first = Vec::new();
     let mut projected: BTreeMap<u64, Vec<&View>> = BTreeMap::new();
     for view in on.iter().filter_map(|id| d.view(*id)) {
-        match view.kind {
-            ViewKind::Projected { parent, .. } if on.binary_search(&parent).is_ok() => projected.entry(parent).or_default().push(view),
+        match view.kind.parent() {
+            Some(parent) if on.binary_search(&parent).is_ok() => projected.entry(parent).or_default().push(view),
             _ => first.push(view),
         }
     }
@@ -404,14 +410,16 @@ fn sheet_views(d: &Drawing, on: &[u64], [dimensions, balloons, notes]: &[BTreeMa
     while let Some(view) = stack.pop() {
         let mut entry = json!({
             "id": ids::encode(view.id),
-            "kind": if matches!(view.kind, ViewKind::Base { .. }) { "base" } else { "projected" },
+            "kind": view.kind.name(),
             "label": view_label(d, view),
             "dimensions": dimensions.get(&view.id).map_or(&[][..], Vec::as_slice),
             "balloons": balloons.get(&view.id).map_or(&[][..], Vec::as_slice),
             "notes": notes.get(&view.id).map_or(&[][..], Vec::as_slice),
         });
-        if let ViewKind::Projected { parent, side } = view.kind {
+        if let Some(parent) = view.kind.parent() {
             entry["parent"] = json!(ids::encode(parent));
+        }
+        if let ViewKind::Projected { side, .. } = view.kind {
             entry["side"] = json!(side);
         }
         listed.push(entry);

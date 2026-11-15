@@ -10,6 +10,7 @@ use solidcraft_geom::drawing_view::NamedView;
 use solidcraft_geom::paper::line::LineGroup;
 
 use super::*;
+use crate::drawing::cutting_line::{ArrowSide, CuttingLine, SectionKind};
 use crate::drawing::{Excluded, Sheet, Source};
 use crate::drawing_view::{Exploded, JointPose, OccurrencePaths, Pose, StudyStep, ViewConfiguration};
 use crate::format::DRAWING;
@@ -819,4 +820,82 @@ fn a_label_keeps_the_records_rules_and_a_doubled_letter_opens() {
     assert_eq!(letter(&reopened, twin).as_deref(), Some("A"), "a doubled letter opens");
     d.give_letter(twin).unwrap();
     assert_eq!((letter(&d, top).as_deref(), letter(&d, twin).as_deref()), (Some("A"), Some("B")), "the copy takes the next");
+}
+
+/// A full cutting line, horizontal at height 5, its arrows to its right.
+fn cutting() -> CuttingLine {
+    CuttingLine::new(SectionKind::Full, vec![Vec2::new(-30.0, 5.0), Vec2::new(30.0, 5.0)], ArrowSide::Right).unwrap()
+}
+
+/// A section view of `parent`, cut along [`cutting`].
+fn section(parent: u64) -> ViewKind {
+    ViewKind::Section { parent, line: cutting() }
+}
+
+/// A section view of a projected view resolves through its chain: its basis is its line's turn of its
+/// parent's, its cut is that line in its parent's plane, its settings follow its parents; a view
+/// projected from it isn't cut. It saves its line in its kind and reads back the same bytes; it is
+/// taken with its parent, needs and gets its letter.
+#[test]
+fn a_section_view_resolves_saves_and_goes_with_its_parent() {
+    let (mut d, mut id_source, [front, right, top]) = three();
+    let cut = add(&mut d, &mut id_source, section(right), ViewPlace::At([320.0, 60.0]), ViewOverrides::default());
+    let beyond = add(&mut d, &mut id_source, projected(cut, ProjectedSide::Right), ViewPlace::At([400.0, 60.0]), ViewOverrides::default());
+    d.validate().unwrap();
+    let line = cutting();
+    let right_basis = d.resolve_view(right).unwrap().basis;
+    let resolved = d.resolve_view(cut).unwrap();
+    assert_eq!(resolved.basis, line.basis(&right_basis).unwrap());
+    assert_eq!(resolved.cut, Some(Cut { line: line.clone(), parent: right_basis }));
+    assert_eq!(resolved.scale, Setting { value: "1:2".parse().unwrap(), set_by: SetBy::Parent(front) });
+    assert_eq!(resolved.visual_style, Setting { value: VisualStyle::VisibleHidden, set_by: SetBy::Parent(right) });
+    let after = d.resolve_view(beyond).unwrap();
+    assert_eq!((after.cut, after.basis), (None, projected_basis(&resolved.basis, ProjectedSide::Right, Projection::Third).unwrap()));
+    assert_eq!(d.resolve_view(top).unwrap().cut, None);
+    // Saved in its kind, the same bytes again.
+    let v = file(&d);
+    let saved = v["views"].as_array().unwrap().iter().find(|view| view["id"] == json!(ids::encode(cut))).unwrap();
+    assert_eq!(saved["kind"]["section"]["parent"], json!(ids::encode(right)));
+    assert_eq!(saved["kind"]["section"]["line"], serde_json::to_value(&line).unwrap());
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+    // Taken with its parent and its parent's parents; it takes what is projected from it.
+    let set = |ids: &[u64]| ids.iter().copied().collect::<BTreeSet<u64>>();
+    assert_eq!(d.with_projected(&set(&[front])), set(&[front, right, top, cut, beyond]));
+    assert_eq!(d.with_projected(&set(&[cut])), set(&[cut, beyond]));
+    assert_eq!(d.view(cut).unwrap().kind.parent(), Some(right));
+    assert_eq!(d.view(front).unwrap().kind.parent(), None);
+    // It needs its letter wherever it is, and gets the next one.
+    d.give_letter(top).unwrap();
+    d.give_letter(cut).unwrap();
+    assert!(d.view(cut).unwrap().needs_letter());
+    assert_eq!((letter(&d, top).as_deref(), letter(&d, cut).as_deref()), (Some("A"), Some("B")));
+    d.validate().unwrap();
+}
+
+/// A section view keeps its rules on reading: placed at a point, a line that keeps the cutting line's
+/// rules, a parent the drawing has, no unknown field.
+#[test]
+fn a_section_views_rules_are_kept_on_reading() {
+    let (mut d, mut id_source, [front, ..]) = three();
+    let cut = add(&mut d, &mut id_source, section(front), ViewPlace::At([150.0, 60.0]), ViewOverrides::default());
+    d.validate().unwrap();
+    let at = file(&d)["views"].as_array().unwrap().iter().position(|view| view["id"] == json!(ids::encode(cut))).unwrap();
+    let named = |why: &str| format!("damaged drawing: view {}: {why}", ids::encode(cut));
+    assert_eq!(
+        refused(&d, |v| v["views"][at]["place"] = json!({"aligned": 40.0})),
+        named("a section view is placed at a point: it has no side to line up on")
+    );
+    let why = refused(&d, |v| v["views"][at]["kind"]["section"]["line"]["points"] = json!([[0.0, 0.0], [0.0, 0.0]]));
+    assert!(why.contains("a cutting line's points are at least 0.000001 mm apart"), "{why}");
+    let why = refused(&d, |v| v["views"][at]["kind"]["section"]["line"]["kind"] = json!("half"));
+    assert!(why.contains("a half section's cutting line has 3 points"), "{why}");
+    let gone = ids::encode(99);
+    assert_eq!(
+        refused(&d, |v| v["views"][at]["kind"]["section"]["parent"] = json!(gone)),
+        named(&format!("its parent {gone} isn't one of the drawing's views"))
+    );
+    assert_ne!(refused(&d, |v| v["views"][at]["kind"]["section"]["side"] = json!("right")), "read");
+    assert_eq!(refused(&d, |_| {}), "read");
 }

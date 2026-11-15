@@ -12,7 +12,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde_json::Value;
-use solidcraft_doc::drawing::view::ViewKind;
 use solidcraft_doc::drawing::{Drawing, Excluded, OnSheet, Sheet, SheetComponent};
 use solidcraft_doc::ids;
 use solidcraft_geom::drawing_sheet::{Orientation, SheetSize};
@@ -296,19 +295,19 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             let what = listed(&on);
             return Err(bad(cmd, format!("sheet `{}` has {what} on it: give `\"contents\": \"delete\"` to delete them with it", sheet.name)));
         }
-        // Nothing on another sheet goes with it: a view there projected from one of its views would
+        // Nothing on another sheet goes with it: a view there projected or cut from one of its views would
         // be left without its parent.
         let elsewhere: Vec<u64> = d
             .views
             .iter()
-            .filter(|v| v.sheet != sheet.id && matches!(v.kind, ViewKind::Projected { parent, .. } if on.views.binary_search(&parent).is_ok()))
+            .filter(|v| v.sheet != sheet.id && v.kind.parent().is_some_and(|parent| on.views.binary_search(&parent).is_ok()))
             .map(|v| v.id)
             .collect();
         if !elsewhere.is_empty() {
             let views = named(&elsewhere);
             return Err(bad(
                 cmd,
-                format!("sheet `{}`'s views have views projected from them on other sheets ({views}): move or delete those first", sheet.name),
+                format!("sheet `{}`'s views have views projected or cut from them on other sheets ({views}): move or delete those first", sheet.name),
             ));
         }
         d.remove_sheet(sheet.id);

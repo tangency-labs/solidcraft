@@ -499,6 +499,13 @@ pub fn not_drawable(display: VisualStyle, reference: VisualStyle) -> Option<&'st
     (lined(display) || lined(reference)).then_some("not supported yet: shaded views with lines need the view's exact lines (W06)")
 }
 
+/// Why saved view `view` can't be drawn yet, if it is a section view (#13046): nothing cuts its
+/// bodies yet. The sheet scene, its pictures and its dimensions refuse it alike; its settings stay
+/// editable.
+pub fn not_cut_yet(view: &ResolvedView) -> Option<&'static str> {
+    view.cut.is_some().then_some("not supported yet: cutting a section view's bodies")
+}
+
 /// Why saved view `view` can't be drawn yet, if it can't, as it draws its parts apart (#13048): its
 /// shaded parts' pictures are rendered from the design as it builds and places its parts. Its lines
 /// alone draw. Exploded comes first, as an exploded view of a position is still exploded, then posed,
