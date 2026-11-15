@@ -1091,7 +1091,7 @@ mod tests {
             20,
             &[
                 ("offset/offset_executive/p1.rs", 9),
-                ("offset/offset_executive/p2.rs", 9),
+                ("offset/offset_executive/p2.rs", 8),
                 ("offset/offset_faces.rs", 4),
                 ("offset/offset_geometry_creation.rs", 1),
             ],
