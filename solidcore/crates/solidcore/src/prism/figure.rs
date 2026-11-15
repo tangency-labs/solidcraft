@@ -87,48 +87,50 @@ pub fn place_figure_2d(
         Point3::new(origin.x, origin.y, 0.0),
     );
     let at = |p: Point2| Vec2::from_xy(map.transform_point(Point3::new(p.x, p.y, 0.0)));
-    let mut placed = Vec::with_capacity(figure.len());
-    for seg in figure {
-        let moved = match *seg {
-            Seg2::Line { a, b } => Seg2::Line { a: at(a), b: at(b) },
-            Seg2::Arc {
-                center,
-                radius,
-                start,
-                sweep,
-            } => Seg2::Arc {
-                center: at(center),
-                radius: radius * scale,
-                start: start + angle,
-                sweep,
-            },
-            Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic {
-                p0: at(p0),
-                p1: at(p1),
-                p2: at(p2),
-                p3: at(p3),
-            },
-            Seg2::Conic { a, apex, b, w } => Seg2::Conic {
-                a: at(a),
-                apex: at(apex),
-                b: at(b),
-                w,
-            },
-            Seg2::Bezier { n, mut p } => {
-                let used = bezier_points(n, &p)
-                    .ok_or_else(|| bad("a Bézier degree out of range"))?
-                    .len();
-                for q in p.iter_mut().take(used) {
-                    *q = at(*q);
+    let placed = figure
+        .iter()
+        .map(|seg| -> Result<Seg2> {
+            let moved = match *seg {
+                Seg2::Line { a, b } => Seg2::Line { a: at(a), b: at(b) },
+                Seg2::Arc {
+                    center,
+                    radius,
+                    start,
+                    sweep,
+                } => Seg2::Arc {
+                    center: at(center),
+                    radius: radius * scale,
+                    start: start + angle,
+                    sweep,
+                },
+                Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic {
+                    p0: at(p0),
+                    p1: at(p1),
+                    p2: at(p2),
+                    p3: at(p3),
+                },
+                Seg2::Conic { a, apex, b, w } => Seg2::Conic {
+                    a: at(a),
+                    apex: at(apex),
+                    b: at(b),
+                    w,
+                },
+                Seg2::Bezier { n, mut p } => {
+                    let used = bezier_points(n, &p)
+                        .ok_or_else(|| bad("a Bézier degree out of range"))?
+                        .len();
+                    for q in p.iter_mut().take(used) {
+                        *q = at(*q);
+                    }
+                    Seg2::Bezier { n, p }
                 }
-                Seg2::Bezier { n, p }
+            };
+            if !seg_finite(&moved) {
+                return Err(bad("a segment not finite"));
             }
-        };
-        if !seg_finite(&moved) {
-            return Err(bad("a segment not finite"));
-        }
-        placed.push(moved);
-    }
+            Ok(moved)
+        })
+        .collect::<Result<Vec<_>>>()?;
     let points = points.iter().map(|&p| at(p)).collect::<Vec<_>>();
     if !points.iter().copied().all(finite2) {
         return Err(bad("a point not finite"));
@@ -249,13 +251,16 @@ pub fn box_fit_in_convex_polygon(
         return Err(bad("a negative aspect, margin or height"));
     }
     // Each edge's start and unit direction.
-    let mut edges = Vec::with_capacity(polygon.len());
-    for (p, q) in polygon.iter().zip(polygon.iter().cycle().skip(1)) {
-        let d = (*q - *p)
-            .unitize()
-            .map_err(|_| bad("an edge of no length"))?;
-        edges.push((*p, d));
-    }
+    let edges = polygon
+        .iter()
+        .zip(polygon.iter().cycle().skip(1))
+        .map(|(p, q)| -> Result<(Point2, Vec2)> {
+            let d = (*q - *p)
+                .unitize()
+                .map_err(|_| bad("an edge of no length"))?;
+            Ok((*p, d))
+        })
+        .collect::<Result<Vec<_>>>()?;
     // Convex and counter-clockwise: no turn to the right, and one turn in all.
     let mut turned = 0.0;
     for ((_, d), (_, e)) in edges.iter().zip(edges.iter().cycle().skip(1)) {
