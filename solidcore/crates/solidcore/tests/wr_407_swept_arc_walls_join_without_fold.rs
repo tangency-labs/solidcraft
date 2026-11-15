@@ -8,9 +8,9 @@
 //! off its plane, so it was not planar and its search domain reached past the fold of its
 //! continuation; upstream's `CoverCoincidentSurface` merged wall B's top onto that folded
 //! continuation and the join lost 5573 mm3. WR-407's frame on the path plane's normal is
-//! the default now, and without `cover_refuses_folded_continuation` the join is still
-//! wrong: with the drop pieces of the walls' trims joined (WR-543) it is 7744 mm3 too
-//! large. With `cover_refuses_folded_continuation` the cover across the
+//! the default now, and without WR-407's fold rule (`CoverCoincidentSurface` refuses a
+//! folded continuation) the join was still wrong: with the drop pieces of the walls' trims
+//! joined (WR-543) it was 7744 mm3 too large. With the fold rule the cover across the
 //! fold is refused and the join has the closed-form volume
 //! `V_A + V_B - overlap = 60 (pi/2)(56^2 - 44^2) + 60 (pi/2)(64^2 - 52^2) - 60 (pi/4)(56^2 - 52^2)`.
 //! The walls' radial faces are the sweep's approximation of the arcs, so the volume is
@@ -83,10 +83,9 @@ fn wall(k: &mut Kernel, turn: (Vec3, f64), radius: f64, start: f64, end: f64) ->
         .brep
 }
 
-/// The two walls joined, with `cover_refuses_folded_continuation` (WR-407's cover half) `fixed`.
-fn joined(fixed: bool) -> (Kernel, Brep) {
+/// The two walls joined.
+fn joined() -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.cover_refuses_folded_continuation = fixed;
     // XZ is XY turned 90 degrees about X; YZ is XY turned 120 degrees about (1, 1, 1).
     let a = wall(&mut k, (Vec3::X, 90.0), 50.0, 0.0, 180.0);
     let b = wall(&mut k, (Vec3::new(1.0, 1.0, 1.0), 120.0), 58.0, 90.0, 270.0);
@@ -112,7 +111,7 @@ fn closed_form() -> f64 {
 
 #[test]
 fn wr_407_walls_join_to_the_closed_form_with_the_fix() {
-    let (k, mut b) = joined(true);
+    let (k, mut b) = joined();
     assert!(brep_is_manifold_solid(&b).unwrap());
     let v = volume(&k, &mut b);
     assert!(
@@ -120,14 +119,4 @@ fn wr_407_walls_join_to_the_closed_form_with_the_fix() {
         "{v} against {}",
         closed_form()
     );
-}
-
-/// Without the fold rule the cover merges onto the folded continuation: the join is too
-/// large by more than 1000 mm3 (7744 mm3; it was short by 5573 mm3 with upstream's sweep
-/// frame, and by 14596 mm3 with a drop piece stretched onto each trim's edge).
-#[test]
-fn wr_407_default_join_loses_the_folded_cover() {
-    let (k, mut b) = joined(false);
-    let v = volume(&k, &mut b);
-    assert!(v - closed_form() > 1000.0, "{v} against {}", closed_form());
 }

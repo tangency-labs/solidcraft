@@ -108,7 +108,7 @@
 //! - **Recursion.** `sm_CoverOtherCoincidentFace` recurses once (its second call has
 //!   `bRefineDomains` set); no other recursion.
 //! - **Not upstream: a stored-domain cover stays within one period** (the fork's
-//!   tangency-labs/smlib@b518bbe, under `Kernel::fixes.cover_wraps_across_closed_seam`):
+//!   tangency-labs/smlib@b518bbe, with WR-599's cover across a wrapped seam):
 //!   `sm_CoverOtherCoincidentFace` passes `bRefineDomains` as the cover's
 //!   `bAcrossWrappedSeams`, so only its trim-derived attempt crosses a wrapped seam.
 //! - **Unported callees** return [`SolidError::Unported`]: `SmBrep::GetInfiniteRegion`
@@ -1848,8 +1848,8 @@ fn cover_other_coincident_face(
         }
     }
 
-    // SolidCraft fork (tangency-labs/smlib@b518bbe), under
-    // `Kernel::fixes.cover_wraps_across_closed_seam`: across a seam the covering surface
+    // SolidCraft fork (tangency-labs/smlib@b518bbe), with WR-599's cover across a
+    // wrapped seam: across a seam the covering surface
     // wraps only on the trim-derived bounds. The stored domains are conservative and may
     // be the faces' whole surfaces: across the seam they cover too, and the merged face
     // took them as its domain (360 x 208 for half-turn faces whose trims span 180 x 3).
