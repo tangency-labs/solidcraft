@@ -22,7 +22,7 @@ const TABS_KEPT: f32 = 124.0;
 /// The least width of a document tab before the tabs scroll behind the » list.
 const MIN_TAB: f32 = 90.0;
 /// The expanded design tab (option A): its height and corner radius.
-const PILL_HEIGHT: f32 = 34.0;
+const DESIGN_PILL_HEIGHT: f32 = 34.0;
 const PILL_RADIUS: u8 = 8;
 /// The room a pill keeps right of its views: the +, a separator, the close button and its padding.
 const PILL_AFTER: f32 = 63.0;
@@ -1515,7 +1515,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         let plain = kind == SelectedLayout::Plain;
         let height = match kind {
             SelectedLayout::Plain => r.height() - 8.0,
-            SelectedLayout::Pill => PILL_HEIGHT.min(r.height() - 2.0),
+            SelectedLayout::Pill => DESIGN_PILL_HEIGHT.min(r.height() - 2.0),
             SelectedLayout::Switcher => 30.0_f32.min(r.height() - 4.0),
         };
         let tr = Rect::from_center_size(pos2(left + (w - 2.0) / 2.0, r.center().y), vec2(w - 2.0, height));
