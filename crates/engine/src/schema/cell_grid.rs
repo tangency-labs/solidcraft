@@ -97,6 +97,10 @@ pub struct CellGridParams {
     /// What happens to cells the field's edge crosses. Default: snap.
     #[serde(default)]
     pub clip: Option<CellClipParam>,
+    /// The least clearance from a cell to every edge of the field and its keep-outs, with
+    /// `clip: whole`. Default 0: a cell may touch an edge.
+    #[serde(default)]
+    pub margin: Option<LengthExpr>,
     /// How deep the cells are cut along the sketch normal. Required unless `through_all`.
     #[serde(default)]
     pub depth: Option<LengthExpr>,
