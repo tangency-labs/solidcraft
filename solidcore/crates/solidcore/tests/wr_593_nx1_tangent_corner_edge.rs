@@ -118,19 +118,11 @@ fn residue_round_with_the_fix() {
 
 #[test]
 fn exact_round_builds() {
-    // main's volume, bit-identical with the flag on and off there; the closed form holds
+    // main's volume, bit-identical with and without the fix; the closed form holds
     // to the round's approximation, as for the residue round
     let v = fillet(0.0).unwrap();
     let pinned = 3_581.983_727_673_527_5_f64;
     assert_eq!(v.to_bits(), pinned.to_bits(), "{v} vs {pinned}");
     let want = expected_volume();
     assert!((v - want).abs() < 1e-3 * want, "{v} vs {want}");
-}
-
-#[test]
-fn residue_round_fails_by_default() {
-    let mut k = Kernel::default();
-    let mut body = peg(&mut k, RESIDUE);
-    let e = concave_arc(&body);
-    assert!(fillet_edges(&mut k, &mut body, &[e], RADIUS, 1, 1, 1.0).is_err());
 }
