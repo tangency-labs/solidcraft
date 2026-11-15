@@ -763,13 +763,75 @@ fn along(k: &Kernel, curve: &Curve, panels: usize, integrand: &dyn Fn(Point3, Ve
     sum
 }
 
+/// [`trims_flux`]'s precondition, asserted on its face's `surface`: its 4-point rule in v
+/// is exact only where `g = F . (S_u x S_v)` is, on each line of constant u, one polynomial
+/// of degree 7 or less in v (no knot of v inside). F is affine in the point, so it holds
+/// for:
+/// - a plane (S affine or bilinear: g of degree 2 or less);
+/// - a surface of extrusion along the axis a, the wall: S along its generator is parallel
+///   to F, so g = 0;
+/// - a B-spline, or a blend evaluated by its net, not rational, of degree q in v with
+///   3q - 1 <= 7 and no interior knot of v (g of degree 3q - 1);
+/// - a blend evaluated by its definition whose section is the chord (order 0, linear in
+///   t) and whose v moves t only (S affine in v on each line: g of degree 2 or less).
+///
+/// Anything else fails the test.
+fn assert_v_exact(k: &Kernel, surface: &Surface) {
+    let polynomial = |s: &BSplineSurface| {
+        let d = s.natural_uv_domain();
+        let (knots, _) = s.knots(SurfParamType::V, None).unwrap();
+        let q = s.degree(SurfParamType::V);
+        assert!(!s.is_rational(), "trims_flux: a rational surface");
+        assert!(3 * q <= 8, "trims_flux: degree {q} in v");
+        assert!(
+            knots.iter().all(|&t| t <= d.min().y || t >= d.max().y),
+            "trims_flux: knots of v inside the domain: {knots:?}"
+        );
+    };
+    match surface.kind() {
+        SurfaceKind::Plane(_) => {}
+        SurfaceKind::SurfOfExtrusion(e) => {
+            use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+            // (the generator curve runs along this parameter; the extrusion along the other)
+            let (_, along_curve) = e.gen_dir_param_extent();
+            let mid = surface.natural_uv_domain_with_nurb(k).unwrap().mid();
+            let d = surface
+                .evaluate(k, mid, 1, 1, EvaluateFlags::default())
+                .unwrap();
+            let extrusion = if along_curve == SurfParamType::U {
+                d[0][1]
+            } else {
+                d[1][0]
+            };
+            assert!(
+                extrusion.cross(axis()).length() <= 1e-12 * extrusion.length(),
+                "trims_flux: an extrusion along {extrusion:?}, not the axis"
+            );
+        }
+        SurfaceKind::BSpline(s) => polynomial(s),
+        SurfaceKind::ProceduralBlend(pb) if pb.net_answers(k) => polynomial(pb.net()),
+        SurfaceKind::ProceduralBlend(pb) => {
+            let order = surface.procedural_blend().unwrap().order();
+            assert_eq!(order, 0, "trims_flux: a blend's section of order {order}");
+            let st = pb.definition_parameters(Point2::new(0.0, 0.0));
+            let sv = pb.definition_parameters(Point2::new(0.0, 1.0)) - st;
+            assert!(
+                sv.x == 0.0 && sv.y != 0.0,
+                "trims_flux: v moves the definition's s: {sv:?}"
+            );
+        }
+        _ => panic!("trims_flux: a surface its rule is not known to be exact on"),
+    }
+}
+
 /// The flux of [`axial_field`] out of face `f` over its trims, by Green's theorem in its
 /// (u, v): minus the loop integral of H du, H(u, v) the integral of
 /// `g = F . (S_u x S_v)` in v from 0, exact by a 4-point rule where g is a polynomial of
-/// degree 7 or less in v (the chords, the planes; 0 on the wall and the cut plane).
+/// degree 7 or less in v ([`assert_v_exact`] asserts it of the face's surface).
 fn trims_flux(k: &Kernel, b: &mut Brep, f: FaceId, panels: usize) -> f64 {
     use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
     let surface = b.face(f).unwrap().surface.clone().unwrap();
+    assert_v_exact(k, &surface);
     let trims = trim_curves(k, b, f, true);
     let g = |u: f64, v: f64| -> f64 {
         let d = surface
@@ -885,7 +947,10 @@ fn clip_line(clip: &Clip, p0: Point3, p1: Point3) -> Option<(f64, f64, Bound, Bo
 /// `us` x `vs` that lies in `clip`: u split at `knots` (where the patch is only as smooth
 /// as its rails) and wherever a bound of v changes the constraint holding it (found on a
 /// 400-cell grid in u and bisected; a constraint taking a bound and handing it back
-/// within one cell is not seen, which the caller's convergence in `n` guards); v exact by
+/// within one cell is not seen). The grid does not change with `n`, so a missed switch
+/// is not found by refining it; ARGUED only: a missed switch leaves a kink inside a span,
+/// where a Gauss rule converges slowly in `n`, so it would show as a gap between the
+/// caller's n = 16, 24 and 32 well above the rule's error elsewhere. v exact by
 /// a 4-point rule (`g` must be a polynomial of degree 7 or less in v); u by an `n`-point
 /// Gauss rule per span.
 fn ruled_flux(
@@ -1114,12 +1179,13 @@ fn trims_volume(k: &Kernel, b: &mut Brep, originals: &[FaceId], panels: usize) -
 ///
 /// The method uses the divergence theorem with F = (z - 10) a (see above).
 /// - The original part's volume over its faces' trims equals its closed form,
-///   250 sqrt(5) pi, to 1e-12.
+///   250 sqrt(5) pi, to 1e-12, with the bottom cap by `plane_flux` and again by
+///   `trims_flux` (the only face with flux: F is 0 on the cut plane, tangent to the wall).
 /// - The chamfered part's volume is the closed form plus two fluxes: out of the chamfer's
 ///   definitions over their exact regions (each chord inside the cylinder and on the
-///   part's side of the bevel cap, with Gauss rules split at the spine's knots, converged
-///   to 1e-7 at n = 16, 24 and 32), and out of the bevel cap (Green's theorem on its
-///   B-rep face's edges).
+///   part's side of the bevel cap, with Gauss rules split at the spine's knots; n = 16
+///   and 24 within 1e-7 and 2.5e-8 of n = 32, MEASURED), and out of the bevel cap
+///   (Green's theorem on its B-rep face's edges).
 ///
 /// Both B-reps bound that volume to within their faces' fit: the trims of either build
 /// are within 1e-4 of it (MEASURED, a 1.47x margin). `brep_volume` reads both low, by
@@ -1151,6 +1217,17 @@ fn issue_880_one_half_chamfer_volume_by_its_definitions() {
             (all - exact).abs() <= 1e-12 * exact,
             "{offsets:?}: the original over its trims {all} against {exact}"
         );
+        // and with trims_flux on every face, the planes too: g = 0 on the wall and the cut
+        // plane, so this checks trims_flux's Green's theorem in (u, v) and its outward
+        // sign on the bottom cap against the closed form (3.9e-16 relative measured)
+        let mut by_trims = 0.0;
+        for f in p1::faces(&b, None).unwrap() {
+            by_trims += trims_flux(&k, &mut b, f, 8);
+        }
+        assert!(
+            (by_trims - exact).abs() <= 1e-12 * exact,
+            "{offsets:?}: the original by trims_flux {by_trims} against {exact}"
+        );
         let original_by_integrator = volume(&k, &mut b);
         let e = rims(&k, &b)[0];
         let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
@@ -1162,9 +1239,13 @@ fn issue_880_one_half_chamfer_volume_by_its_definitions() {
             definition_volume(&k, &mut b, &originals, 24),
             definition_volume(&k, &mut b, &originals, 32),
         );
-        for v in [v16, v24] {
-            assert!((v - v32).abs() <= 1e-7, "{offsets:?}: {v} against {v32}");
-        }
+        let (d16, d24) = ((v16 - v32).abs(), (v24 - v32).abs());
+        eprintln!("{offsets:?}: |v16 - v32| = {d16:e}, |v24 - v32| = {d24:e}");
+        // MEASURED: |v16 - v32| is 4.06e-8 and 2.14e-8 at the two setbacks, |v24 - v32|
+        // 1.07e-8 and 5.66e-9; each limit is about 2.4x the larger of its two (1e-7 is
+        // 2.46x, 2.5e-8 is 2.33x), the n = 24 one tighter as the rule converges
+        assert!(d16 <= 1e-7, "{offsets:?}: n = 16 {v16} against {v32}");
+        assert!(d24 <= 2.5e-8, "{offsets:?}: n = 24 {v24} against {v32}");
         // the definition build's B-rep bounds it to within its trims' fit. MEASURED: the
         // largest of the four differences here is 6.8e-5, so 1e-4 has a 1.47x margin; it is
         // the faces' fit to their definitions and the trims' to the edges, which nothing
