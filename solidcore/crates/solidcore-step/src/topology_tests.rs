@@ -2199,12 +2199,12 @@ fn a_pcurve_a_little_past_a_spline_patchs_knot_range_is_put_on_it() {
     let mut pcs = vec![vec![row(after, before)]];
     assert_eq!(onto_knots(&patch, &[vec![2e-4]], &mut pcs), 0);
     assert_eq!(pcs[0][0], row(after, before));
-    // A bound over the whole patch (the row v = 1 moves 0.9 mm per unit of u) is past it.
-    let whole = SurfaceEval::new(&patch).unwrap().partial_bound(0, [0.0, 1.0], 9.7e-4).unwrap();
-    assert!(whole * 9.7e-4 > tolerance, "{whole}");
-    let own = SurfaceEval::new(&patch).unwrap().partial_bound(0, [0.0, 0.0], 9.7e-4).unwrap();
-    assert!((0.3..0.302).contains(&own), "{own}");
-    // A pcurve whose row leaves the range across is left as it is.
+    // Measured along its own row the move is 0.3 x 9.7e-4 mm, within the tolerance (bounded
+    // over the whole patch, where the row v = 1 moves 0.9 mm per unit of u, it would not be).
+    let (_, moved) = SurfaceEval::new(&patch).unwrap().pcurve_onto_knots(&row(after, before), tolerance).unwrap().unwrap();
+    assert!((0.3 * 9.7e-4..0.302 * 9.7e-4).contains(&moved), "{moved}");
+    // A pcurve whose row also leaves the range across, where the surface moves 10 mm per unit of
+    // v, is left as it is.
     let off = Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[before, -1e-3], [0.5, -1e-3]] };
     let mut pcs = vec![vec![off.clone()]];
     assert_eq!(onto_knots(&patch, &[vec![tolerance]], &mut pcs), 0);

@@ -69,10 +69,12 @@ impl SurfaceEval {
     pub(crate) fn pole_within(&self, uv: [f64; 2], reach: f64) -> Result<[bool; 2], String> {
         self.0.pole_within(uv, reach).map_err(|e| e.to_string())
     }
-    /// A certified bound on how far the surface moves per unit of parameter `d` over the strip
-    /// `across` of the other, up to `beyond` past the knot range ([`k::SurfaceEval::partial_bound`]).
-    pub(crate) fn partial_bound(&self, d: usize, across: [f64; 2], beyond: f64) -> Result<f64, String> {
-        self.0.partial_bound(d, across, beyond).map_err(|e| e.to_string())
+    /// `pc` with its control points put on the knot range and a certified bound on how far that
+    /// moves the surface under it; `None` when it is on the range, refused where the move is past
+    /// `tolerance` or not bounded ([`k::SurfaceEval::pcurve_onto_knots`]).
+    pub(crate) fn pcurve_onto_knots(&self, pc: &Curve2, tolerance: f64) -> Result<Option<(Curve2, f64)>, String> {
+        let moved = self.0.pcurve_onto_knots(&c::curve2(pc), tolerance).map_err(|e| e.to_string())?;
+        Ok(moved.map(|m| (c::record_curve2(m.pcurve), m.displacement)))
     }
 }
 
