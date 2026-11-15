@@ -97,7 +97,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "drawing: id → deleted: its id; closed when it was open (one undo step of the model)",
     ),
     CommandSpec::new("drawing.inspect", "Inspect Drawing", inspect).in_drawing().icon("inspect").noundo().doc_only().params(
-        "→ {id, name, units, projection, updates: automatic or deferred, language, font, line_group, view_letters: {reuse, given} (whether a deleted view's letter is given again, and how many letters have been given), font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, font_fallbacks: which font set each script of its title blocks' text that the drawing's font lacks, as lines such as \"Kana set in BIZ UDPGothic\", properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?, notes?}] (each text cell as the sheet shows it, a cell that shows a logo, its `image` in `title_block`, left out: its fields' values, nothing for one with none, or the text typed over it with the value it hides as `value`; `notes` are what doesn't fit on paper, each {fit: chars (with count and max), height or width}, shown whole, or {refused: why} for a label or value the drawing's font can't set, left off the sheet), title_block_overrides, dpi, line_group (its own, or null for the drawing's), documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids]}], base views by id, each followed by those projected from it}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
+        "→ {id, name, units, projection, updates: automatic or deferred, language, font, line_group, view_letters: {reuse, given} (whether a deleted view's letter is given again, and how many letters have been given), font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, font_fallbacks: which font set each script of its title blocks' text that the drawing's font lacks, as lines such as \"Kana set in BIZ UDPGothic\", properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?, notes?}] (each text cell as the sheet shows it, a cell that shows a logo, its `image` in `title_block`, left out: its fields' values, nothing for one with none, or the text typed over it with the value it hides as `value`; `notes` are what doesn't fit on paper, each {fit: chars (with count and max), height or width}, shown whole, or {refused: why} for a label or value the drawing's font can't set, left off the sheet), title_block_overrides, dpi, line_group (its own, or null for the drawing's), documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids], notes: [ids]}], base views by id, each followed by those projected from it, notes: [ids] (on the sheet itself), tables, images, revision_tags: [ids], each list by id: what the sheet shows, as the Browser lists it}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
     ),
     CommandSpec::new("drawing.set", "Drawing Settings", crate::checked!("drawing.set", set))
         .in_drawing()
@@ -325,16 +325,48 @@ fn view_label(d: &Drawing, view: &View) -> String {
     label
 }
 
-/// Sheet `sheet`'s views as `drawing.inspect` lists them: those with no parent on it by id, each
-/// followed by the views projected from it. `dimensions` and `balloons` hold each view's, by its id.
-fn sheet_views(d: &Drawing, sheet: u64, dimensions: &BTreeMap<u64, Vec<String>>, balloons: &BTreeMap<u64, Vec<String>>) -> Vec<Value> {
-    let on: BTreeSet<u64> = d.views.iter().filter(|v| v.sheet == sheet).map(|v| v.id).collect();
+/// `objects`, each under the view `view_of` gives it, by view id; one with no view is left out.
+fn by_view(objects: &[u64], view_of: impl Fn(u64) -> Option<u64>) -> BTreeMap<u64, Vec<String>> {
+    let mut by_view: BTreeMap<u64, Vec<String>> = BTreeMap::new();
+    for &object in objects {
+        if let Some(view) = view_of(object) {
+            by_view.entry(view).or_default().push(ids::encode(object));
+        }
+    }
+    by_view
+}
+
+/// What sheet `id` shows as `drawing.inspect` lists it, from the one rule the Browser and a sheet's delete
+/// read ([`Drawing::on_sheet`]): its views ([`sheet_views`]), each with the dimensions, balloons and notes in
+/// it, and the notes on the sheet itself, its tables, images and revision tags, each list by id.
+fn sheet_contents(d: &Drawing, id: u64) -> [(&'static str, Value); 5] {
+    let on = d.on_sheet(id);
+    let in_views = [
+        by_view(&on.dimensions, |object| d.dimension(object).map(|dimension| dimension.view)),
+        by_view(&on.balloons, |object| d.balloons.by_id(object).map(|balloon| balloon.view)),
+        by_view(&on.notes, |object| d.notes.by_id(object).and_then(|note| note.anchor.view())),
+    ];
+    let encoded = |objects: &[u64]| objects.iter().map(|object| ids::encode(*object)).collect::<Vec<_>>();
+    let on_sheet: Vec<u64> = on.notes.iter().copied().filter(|note| d.notes.by_id(*note).is_some_and(|note| note.anchor.view().is_none())).collect();
+    [
+        ("views", json!(sheet_views(d, &on.views, &in_views))),
+        ("notes", json!(encoded(&on_sheet))),
+        ("tables", json!(encoded(&on.tables))),
+        ("images", json!(encoded(&on.images))),
+        ("revision_tags", json!(encoded(&on.tags))),
+    ]
+}
+
+/// A sheet's views `on` (by id, as [`Drawing::on_sheet`] lists them) as `drawing.inspect` lists them:
+/// those with no parent on it by id, each followed by the views projected from it. `[dimensions,
+/// balloons, notes]` hold each view's, by its id.
+fn sheet_views(d: &Drawing, on: &[u64], [dimensions, balloons, notes]: &[BTreeMap<u64, Vec<String>>; 3]) -> Vec<Value> {
     let mut first = Vec::new();
     let mut projected: BTreeMap<u64, Vec<&View>> = BTreeMap::new();
-    for view in d.views.iter().filter(|v| on.contains(&v.id)) {
+    for view in on.iter().filter_map(|id| d.view(*id)) {
         match view.kind {
-            ViewKind::Projected { parent, .. } if on.contains(&parent) => projected.entry(parent).or_default().push(view),
-            _ => first.push(&**view),
+            ViewKind::Projected { parent, .. } if on.binary_search(&parent).is_ok() => projected.entry(parent).or_default().push(view),
+            _ => first.push(view),
         }
     }
     let mut stack: Vec<&View> = first.into_iter().rev().collect();
@@ -346,6 +378,7 @@ fn sheet_views(d: &Drawing, sheet: u64, dimensions: &BTreeMap<u64, Vec<String>>,
             "label": view_label(d, view),
             "dimensions": dimensions.get(&view.id).map_or(&[][..], Vec::as_slice),
             "balloons": balloons.get(&view.id).map_or(&[][..], Vec::as_slice),
+            "notes": notes.get(&view.id).map_or(&[][..], Vec::as_slice),
         });
         if let ViewKind::Projected { parent, side } = view.kind {
             entry["parent"] = json!(ids::encode(parent));
@@ -363,15 +396,6 @@ fn sheet_views(d: &Drawing, sheet: u64, dimensions: &BTreeMap<u64, Vec<String>>,
 fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
     let cmd = "drawing.inspect";
     let d = s.drawing(cmd)?;
-    // One pass over each list for the whole drawing, however many sheets and views it has.
-    let mut dimensions: BTreeMap<u64, Vec<String>> = BTreeMap::new();
-    for dimension in &d.dimensions {
-        dimensions.entry(dimension.view).or_default().push(ids::encode(dimension.id));
-    }
-    let mut balloons: BTreeMap<u64, Vec<String>> = BTreeMap::new();
-    for balloon in &d.balloons {
-        balloons.entry(balloon.view).or_default().push(ids::encode(balloon.id));
-    }
     let state = s.model.state();
     // One tree for the drawing: each component it documents is weighed once.
     let mut tree = Tree::new(&s.doc, &state);
@@ -383,7 +407,7 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
         let cells = title_block_cells(&s.doc, &mut tree, d, at)?;
         texts.extend(cells.iter().filter_map(|cell| cell["text"].as_str()).map(str::to_string));
         texts.extend(sheet.title_block.iter().flat_map(|block| &block.cells).filter_map(|cell| cell.label.as_ref()).map(|label| label.text.clone()));
-        sheets.push(json!({
+        let mut listed = json!({
             "id": ids::encode(sheet.id),
             "name": sheet.name,
             "size_mm": [size.x, size.y],
@@ -395,9 +419,11 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
             "line_group": sheet.line_group,
             "documents": sheet.documents.map(|c| json!({"source": ids::encode(c.source), "component": c.component})),
             "excluded": sheet.excluded,
-            "views": sheet_views(d, sheet.id, &dimensions, &balloons),
-            "tables": d.tables.iter().filter(|t| t.sheet == sheet.id).map(|t| ids::encode(t.id)).collect::<Vec<_>>(),
-        }));
+        });
+        for (key, list) in sheet_contents(d, sheet.id) {
+            listed[key] = list;
+        }
+        sheets.push(listed);
     }
     let parts_lists = parts_lists(d, &mut tree);
     Ok(json!({
