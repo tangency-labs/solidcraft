@@ -16,6 +16,7 @@
     "ui.cell_grid.whole": "Whole",
     "ui.cell_grid.free": "Free",
     "error.cell_grid_profiles": "Pick the sketch profiles to fill with cells",
+    "error.cell_grid_one_sketch": "Pick profiles of one sketch: a cell grid fills one sketch",
     "help.solid.cell_grid": "Cuts a grid of hexagon, square, triangle, circle or polygon cells out of a part, inside a sketch's profiles. Use it for vents, speaker grilles and lighter plates."
   },
   "ar": {
@@ -35,6 +36,7 @@
     "ui.cell_grid.whole": "كاملة",
     "ui.cell_grid.free": "حرّ",
     "error.cell_grid_profiles": "اختر مقاطع الرسم التي تُملأ بالخلايا",
+    "error.cell_grid_one_sketch": "اختر مقاطع رسم واحد: شبكة الخلايا تملأ رسمًا واحدًا",
     "help.solid.cell_grid": "يقطع شبكة من الخلايا السداسية أو المربعة أو المثلثة أو الدائرية أو المضلعة من قطعة، داخل مقاطع رسم. استخدمه لفتحات التهوية وشبكات مكبرات الصوت والألواح الأخف."
   },
   "de": {
@@ -54,6 +56,7 @@
     "ui.cell_grid.whole": "Ganz",
     "ui.cell_grid.free": "Frei",
     "error.cell_grid_profiles": "Wählen Sie die Skizzenprofile, die mit Zellen gefüllt werden",
+    "error.cell_grid_one_sketch": "Wählen Sie Profile einer einzigen Skizze: ein Zellraster füllt eine Skizze",
     "help.solid.cell_grid": "Schneidet ein Raster aus Sechseck-, Quadrat-, Dreieck-, Kreis- oder Vieleckzellen aus einem Teil, innerhalb der Profile einer Skizze. Für Lüftungsschlitze, Lautsprechergitter und leichtere Platten."
   },
   "he": {
@@ -73,6 +76,7 @@
     "ui.cell_grid.whole": "שלמים",
     "ui.cell_grid.free": "חופשי",
     "error.cell_grid_profiles": "בחרו את פרופילי השרטוט שימולאו בתאים",
+    "error.cell_grid_one_sketch": "בחרו פרופילים של שרטוט אחד: רשת תאים ממלאת שרטוט אחד",
     "help.solid.cell_grid": "חותך מחלק רשת של תאים משושים, ריבועיים, משולשים, עגולים או מצולעים, בתוך הפרופילים של שרטוט. שימושי לפתחי אוורור, רשתות רמקול ולוחות קלים יותר."
   },
   "ja": {
@@ -92,6 +96,7 @@
     "ui.cell_grid.whole": "完全なセルのみ",
     "ui.cell_grid.free": "自由",
     "error.cell_grid_profiles": "セルで埋めるスケッチのプロファイルを選択してください",
+    "error.cell_grid_one_sketch": "1つのスケッチのプロファイルを選択してください: セルグリッドは1つのスケッチを埋めます",
     "help.solid.cell_grid": "スケッチのプロファイルの内側に、六角形・正方形・三角形・円・多角形のセルのグリッドを部品から切り抜きます。通気口、スピーカーグリル、軽量化したプレートに使います。"
   },
   "ko": {
@@ -111,6 +116,7 @@
     "ui.cell_grid.whole": "온전한 셀만",
     "ui.cell_grid.free": "자유",
     "error.cell_grid_profiles": "셀로 채울 스케치 프로파일을 선택하세요",
+    "error.cell_grid_one_sketch": "한 스케치의 프로파일을 선택하세요: 셀 그리드는 스케치 하나를 채웁니다",
     "help.solid.cell_grid": "스케치 프로파일 안에서 육각형, 정사각형, 삼각형, 원 또는 다각형 셀의 그리드를 부품에서 잘라냅니다. 통풍구, 스피커 그릴, 더 가벼운 판에 사용합니다."
   },
   "nb": {
@@ -130,6 +136,7 @@
     "ui.cell_grid.whole": "Hele",
     "ui.cell_grid.free": "Fri",
     "error.cell_grid_profiles": "Velg skisseprofilene som skal fylles med celler",
+    "error.cell_grid_one_sketch": "Velg profiler fra én skisse: et cellerutenett fyller én skisse",
     "help.solid.cell_grid": "Skjærer et rutenett av sekskant-, kvadrat-, trekant-, sirkel- eller mangekantceller ut av en del, innenfor profilene i en skisse. Bruk det til lufteåpninger, høyttalergitter og lettere plater."
   },
   "vi": {
@@ -149,6 +156,7 @@
     "ui.cell_grid.whole": "Chỉ ô nguyên",
     "ui.cell_grid.free": "Tự do",
     "error.cell_grid_profiles": "Chọn các biên dạng phác thảo cần lấp đầy bằng ô",
+    "error.cell_grid_one_sketch": "Chọn các biên dạng của một phác thảo: lưới ô lấp đầy một phác thảo",
     "help.solid.cell_grid": "Cắt một lưới ô lục giác, vuông, tam giác, tròn hoặc đa giác khỏi chi tiết, bên trong các biên dạng của bản phác. Dùng cho lỗ thông gió, lưới loa và tấm nhẹ hơn."
   },
   "zh": {
@@ -168,6 +176,7 @@
     "ui.cell_grid.whole": "仅完整单元",
     "ui.cell_grid.free": "自由",
     "error.cell_grid_profiles": "请选择要填充单元的草图轮廓",
+    "error.cell_grid_one_sketch": "请选择同一草图的轮廓：单元格栅只填充一个草图",
     "help.solid.cell_grid": "在草图轮廓内，从零件上切出六边形、正方形、三角形、圆形或多边形单元组成的格栅。用于通风口、扬声器网罩和减重板。"
   }
 }

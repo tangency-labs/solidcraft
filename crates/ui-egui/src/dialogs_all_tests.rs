@@ -864,6 +864,22 @@ fn cell_grid_form_shows_the_rows_of_the_chosen_shape_and_clip() {
     check_form_with("solid.cell_grid", &[&always[..], &["Dot grid"]].concat(), &["Sides", "Margin"], cell(3, 1));
     check_form_with("solid.cell_grid", &always, &["Sides", "Dot grid", "Margin"], cell(0, 2));
 }
+
+/// Cell Grid fills one sketch: a box over two sketches keeps the last sketch's profiles, as
+/// Extrude does, and profiles of two sketches in the input are refused, not dropped.
+#[test]
+fn cell_grid_takes_the_profiles_of_one_sketch() {
+    let (mut h, first, _) = repeated_profile_fixture();
+    let second = h.app.run("sketch.create", json!({"plane":"XY","offset":20})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[2,2]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let picks = vec![Sel::Profile { sketch: first, index: 0 }, Sel::Profile { sketch: second, index: 0 }];
+    let mut d = Dialog::for_command(&h.app, "solid.cell_grid").unwrap();
+    d.take_box(&h.app.session, picks.clone(), false);
+    assert_eq!(d.inputs[0].items, [Sel::Profile { sketch: second, index: 0 }]);
+    d.inputs[0].items = picks;
+    assert_eq!(apply_commands(&h.app, &d).unwrap_err(), String::from(h.app.tr("error.cell_grid_one_sketch")));
+}
 form_case!(replace_face, "solid.replace_face", []);
 form_case!(boundary_fill, "solid.boundary_fill", ["Cells", "Operation"]);
 form_case!(align, "solid.align", ["Object Type", "From Snap", "To Snap"]);

@@ -2287,7 +2287,14 @@ pub(crate) fn fillet_least_setback(ctx: &egui::Context, s: &Session, items: &[Se
 fn retain_profile_list_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
     if matches!(
         kind,
-        Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. } | Kind::Sweep { .. } | Kind::Surface(_) | Kind::Frame(_) | Kind::Sheet(_)
+        Kind::Extrude { .. }
+            | Kind::Revolve { .. }
+            | Kind::Emboss { .. }
+            | Kind::Sweep { .. }
+            | Kind::Surface(_)
+            | Kind::Frame(_)
+            | Kind::Sheet(_)
+            | Kind::CellGrid(_)
     ) {
         retain_profile_sketch(kind, input, sel);
     }

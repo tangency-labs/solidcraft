@@ -138,7 +138,11 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, _: &[SelInput])
 pub fn commands(app: &SolveApp, c: &CellGrid, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let picked = crate::selection::items(inputs, PROFILES_INPUT).profiles();
     let Some(sketch) = picked.first().map(|(sketch, _)| *sketch) else { return Err(app.tr("error.cell_grid_profiles").into()) };
-    let profiles: Vec<usize> = picked.iter().filter(|(s, _)| *s == sketch).map(|(_, index)| *index).collect();
+    // The command fills one sketch: profiles of a second sketch are refused, not dropped.
+    if picked.iter().any(|(s, _)| *s != sketch) {
+        return Err(app.tr("error.cell_grid_one_sketch").into());
+    }
+    let profiles: Vec<usize> = picked.iter().map(|(_, index)| *index).collect();
     let mut p = json!({
         "sketch": sketch,
         "profiles": profiles,
