@@ -40,6 +40,12 @@
 //! one-sided limit from inside the piece (WR-670, #2091): upstream takes the span above.
 //! An edge's tube area, volume and moments each have an error scale of their own size
 //! (#2887): upstream's are `BIG_DOUBLE`, so only the edge's length was under error control.
+//! [`brep_mass_properties_estimated`] with [`MassPropertyRequest::exact_box`] integrates
+//! about the middle of the body's exact box and scales its errors by that box's size
+//! (#17361): the loose box upstream takes holds the control points of every span of an
+//! edge's curve that the edge touches, so a short arc of a circle of large radius puts it
+//! a quarter of that circle away, and the body's first moments became large terms that
+//! cancel, under an error scale as large.
 use super::{OdeIntegrator, OdeOptions};
 use crate::curve::curve::Curve;
 use crate::error::mass::MassFailure;
@@ -945,6 +951,19 @@ pub fn brep_properties(
     attributes: &PropertyAttributes<'_>,
 ) -> Result<PreciseProperties> {
     let bbox = qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
+    properties_in_box(k, b, accuracy, origin, behavior, attributes, &bbox)
+}
+/// [`brep_properties`] with the body's box given: its largest side sets every face's
+/// error scale.
+fn properties_in_box(
+    k: &Kernel,
+    b: &mut Brep,
+    accuracy: f64,
+    origin: Point3,
+    behavior: MassPropertyBehavior,
+    attributes: &PropertyAttributes<'_>,
+    bbox: &Extent3d,
+) -> Result<PreciseProperties> {
     let size = bbox.size();
     let estimated = size.z.max(size.x.max(size.y));
     let estimated = estimated * estimated / 100.0;
@@ -1361,6 +1380,12 @@ pub struct MassPropertyRequest {
     /// For a body with no material region: its faces' area, volume and mass 0, the
     /// centroid of the area, no moments (otherwise refused as no mass).
     pub area_centroid_without_material: bool,
+    /// Integrate about the middle of the body's exact box
+    /// ([`qbrep::calculate_tight_bounding_box`]) and scale the errors by its size, not the
+    /// loose box's (`SmApiBrepComputeMassProperties`, whose box holds the whole spans of
+    /// the edges' curves: a short arc of a large circle takes it a quarter of the circle
+    /// away, #17361).
+    pub exact_box: bool,
 }
 
 impl MassPropertyRequest {
@@ -1374,12 +1399,13 @@ impl MassPropertyRequest {
             manifold_solid_only: true,
             sheet_faces_area: false,
             area_centroid_without_material: false,
+            exact_box: false,
         }
     }
 
     /// Every body at unit density: moments about the centroid, the sum over material
-    /// regions, sheet faces' area counted, and a body with no material measured by its
-    /// area and the area's centroid.
+    /// regions, sheet faces' area counted, a body with no material measured by its
+    /// area and the area's centroid, all about the middle of the exact box.
     #[must_use]
     pub const fn centroidal() -> Self {
         Self {
@@ -1388,6 +1414,7 @@ impl MassPropertyRequest {
             manifold_solid_only: false,
             sheet_faces_area: true,
             area_centroid_without_material: true,
+            exact_box: true,
         }
     }
 }
@@ -1528,11 +1555,16 @@ fn estimate(
     if request.manifold_solid_only && !manifold_solid(b)? {
         return Err(SolidError::invalid_input(OP, "not a manifold solid"));
     }
-    let mid = qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?.mid();
+    let bbox = if request.exact_box {
+        qbrep::calculate_tight_bounding_box(k, &mut *b)?
+    } else {
+        qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?
+    };
+    let mid = bbox.mid();
     if request.area_centroid_without_material && !has_material(b)? {
         return area_centroid(k, b, accuracy, mid);
     }
-    let properties = brep_properties(
+    let properties = properties_in_box(
         k,
         b,
         accuracy,
@@ -1542,6 +1574,7 @@ fn estimate(
             ..MassPropertyBehavior::default()
         },
         attributes,
+        &bbox,
     )?;
     valid_api_number(properties.mass)?;
     valid_api_number(properties.volume)?;
