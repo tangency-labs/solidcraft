@@ -319,6 +319,20 @@ impl NetCurve for SketchChain {
         let p = self.plane.to_world(seg.point_at(local));
         p.is_finite().then_some(p)
     }
+
+    /// The joint whose two segments' tangents there differ most: the angle between the end
+    /// tangent of one and the start tangent of the next (a rigid map to the model keeps it).
+    fn sharpest_joint(&self) -> Option<(Vec3, f64)> {
+        let mut sharpest: Option<(Vec3, f64)> = None;
+        for w in self.segs.windows(2) {
+            let (a, b) = (w[0].end_tangent(), w[1].start_tangent());
+            let Ok(angle) = solidcore_ops::joint_turn::joint_turn([a.x, a.y], [b.x, b.y]) else { continue };
+            if sharpest.is_none_or(|(_, most)| angle > most) {
+                sharpest = Some((self.plane.to_world(w[0].end()), angle));
+            }
+        }
+        sharpest
+    }
 }
 
 /// A 3D polyline followed smoothly: a cubic through its points by chord length (fewer points, a
