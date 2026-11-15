@@ -1078,8 +1078,12 @@ impl<'b, 'a> Builder<'b, 'a> {
                     }
                     last = Some(e);
                 }
-                if let (Some(&first), Some(last)) = (uses.first(), last)
-                    && !self.meet(last, self.ends(first)?[0])?
+                let first_start = match uses.first() {
+                    Some(&first) => Some(self.ends(first)?[0]),
+                    None => None,
+                };
+                if let (Some(start), Some(last)) = (first_start, last)
+                    && !self.meet(last, start)?
                 {
                     return Err(format!("edge loop #{lp_id} is not closed"));
                 }
