@@ -7330,7 +7330,8 @@ fn feature_tools_with_constructor(
             }
             // A Join tool's faces outlive the boolean where they stay on the result, so they are
             // certified as a new body's are (see `Body::with_preserved_union_planar_sources`).
-            if matches!(operation, Operation::NewBody | Operation::Join) && extent.taper.is_none() {
+            // A taper of 0 is straight, so it is certified as no taper is (#15413).
+            if matches!(operation, Operation::NewBody | Operation::Join) && crate::config::untapered(extent) {
                 let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
                 let cap_bindings = match thin {
                     Some(thin) => Some(crate::config::thin_extrude_cap_bindings(&thin.curves, regions.len(), &bodies)),

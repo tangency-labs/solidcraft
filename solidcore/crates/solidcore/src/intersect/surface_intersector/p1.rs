@@ -684,10 +684,6 @@ pub struct SurfaceIntersector<'s> {
     pub(crate) start_points: Vec<TsectId>,
     /// `m_vThroughPoints`.
     pub(crate) through_points: Vec<TsectId>,
-    /// `Kernel::fixes.ssi_singular_start_inside_direction` as it was when this
-    /// intersector was built (see [`SurfaceIntersector::new`]): a point computed later
-    /// uses the value from construction, not a later change to the kernel.
-    pub(crate) singular_start_inside_direction: bool,
     /// `Kernel::fixes.brep_edit_statuses_pass_on` captured from the constructing kernel
     /// (WR-658; fork e7ebc8d's `SmAdvSurfaceIntersector` statuses).
     pub(crate) edit_statuses: bool,
@@ -799,7 +795,6 @@ impl<'s> SurfaceIntersector<'s> {
             curve_points: Vec::new(),
             start_points: Vec::new(),
             through_points: Vec::new(),
-            singular_start_inside_direction: k.fixes.ssi_singular_start_inside_direction,
             edit_statuses: k.fixes.brep_edit_statuses_pass_on,
             advanced: false,
         })

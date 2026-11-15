@@ -9,29 +9,37 @@
 //!
 //! The slit here is the one of #1120 (WR-304): a disc extruded from two half arcs joined
 //! to a cylinder of the same radius leaves the line between the halves' walls inside the
-//! merged wall. The clean-up then runs as after a fillet whose target is that body: every
-//! edge and face is kept.
+//! merged wall, as SMLib's union does. The union's own clean-up removes such a slit now
+//! (WR-304), so the body is the union without its clean-up, then SMLib's clean-up of it
+//! (the intersection edges only), which leaves the slit. The clean-up then runs as
+//! after a fillet whose target is that body: every edge and face is kept.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
-use solidcore::boolean::api_brep::boolean_union;
+use solidcore::boolean::api_brep::boolean_with_options;
 use solidcore::boolean::merge::p1::{boolean_post_process, CleanupRelations};
+use solidcore::boolean::merge::MergeOptions;
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::Ellipse;
+use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
+use solidcore::geom::object::ObjectRef;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::create_cylinder;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p2::is_manifold_solid;
-use solidcore::topology::{edge, EdgeId};
-use solidcore::{Brep, Kernel};
+use solidcore::topology::brep::p4::{delete_edge, DeleteEnv};
+use solidcore::topology::face::p2::set_uv_domain;
+use solidcore::topology::topology::NotifyRecords;
+use solidcore::topology::{edge, vertex, EdgeId};
+use solidcore::{Brep, EntityRef, Kernel};
 
 const R: f64 = 30.0;
 
@@ -50,7 +58,7 @@ fn half_arc(k: &Kernel, start: f64, end: f64) -> Curve {
 }
 
 /// A cylinder r 30, z -6..0, joined to a disc r 30, z 0..5 extruded from two half arcs,
-/// with the slit between the halves left (`boolean_cleanup_removes_slits` off).
+/// with the slit between the halves left, as SMLib's union leaves it.
 fn joined(k: &mut Kernel) -> Brep {
     let flange = create_cylinder(k, Point3::new(0.0, 0.0, -6.0), R, 6.0).unwrap();
     let a = half_arc(k, 0.0, 180.0);
@@ -63,7 +71,69 @@ fn joined(k: &mut Kernel) -> Brep {
         true,
     )
     .unwrap();
-    boolean_union(k, flange, disc).unwrap()
+    let options = MergeOptions::new(false, false, false, false, false);
+    let mut b = boolean_with_options(k, flange, disc, BooleanOperation::Union, options)
+        .unwrap()
+        .result;
+    // SMLib's clean-up of the union removes only the intersection edges (the rims at z = 0
+    // between the disc's two wall halves and the flange's wall); the line between the
+    // halves is left with the merged wall on both sides. (Their end vertices stay.)
+    let at_zero = |b: &Brep, e: EdgeId| {
+        let (s, t) = edge::start_end_vertices(b, e).unwrap();
+        [s, t]
+            .iter()
+            .all(|v| vertex::point(b, v.unwrap()).unwrap().z.abs() < 1e-9)
+    };
+    let rims: Vec<EdgeId> = p1::edges(&b, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&e| at_zero(&b, e))
+        .collect();
+    assert_eq!(rims.len(), 2, "the two rim arcs at z = 0");
+    let mut records = NotifyRecords::new();
+    let mut attributes = AttributeStore::default();
+    let key = |_: EntityRef| ObjectRef {
+        key: ObjectKey(0),
+        type_code: 0,
+    };
+    let mut env = DeleteEnv {
+        records: &mut records,
+        attributes: &mut attributes,
+        key_of: &key,
+        context: None,
+    };
+    // each rim as `boolean_post_process` removes it (`IsTopological`, then `DeleteEdge`
+    // keeping that surface, then the merged face's domain)
+    b.set_editing_enabled(true);
+    for e in rims {
+        let topological = edge::is_topological_without_growth(k, &mut b, e).unwrap();
+        assert!(topological.is_topological, "the rim is topological");
+        let keep = topological.surf_to_keep.unwrap();
+        let faces = edge::faces(&b, e, None).unwrap();
+        let domain = b
+            .face(keep)
+            .unwrap()
+            .surface
+            .as_ref()
+            .unwrap()
+            .natural_uv_domain_with_nurb(k)
+            .unwrap();
+        set_uv_domain(&mut b, keep, &domain).unwrap();
+        delete_edge(k, &mut b, &mut env, e, Some(keep)).unwrap();
+        let keep = if b.face(keep).is_ok() {
+            keep
+        } else {
+            *faces.iter().find(|&&f| f != keep).unwrap()
+        };
+        set_uv_domain(
+            &mut b,
+            keep,
+            &topological.merged_face_domain.unwrap_or_default(),
+        )
+        .unwrap();
+    }
+    b.set_editing_enabled(false);
+    b
 }
 
 /// The edges with the same face on both sides (seams and slits).
