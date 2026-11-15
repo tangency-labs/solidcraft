@@ -257,14 +257,14 @@ pub fn plane_of_net(form: &BSplineSurface) -> Result<Option<Implicit>> {
     Ok(lies_on(form, &plane)?.then_some(plane))
 }
 
-/// Whether the Bézier patch of degrees `(p, q)` with homogeneous points `points` (row by
-/// row) lies on `a` ([`lies_on`]).
-fn bezier_on<'a>(
+/// The [`Residual`] of `a`'s equation over the Bézier patch of degrees `(p, q)` with
+/// homogeneous points `points` (row by row).
+fn bezier_residual<'a>(
     p: usize,
     q: usize,
     points: impl Iterator<Item = &'a crate::nurbs::math::CPoint>,
     a: &Implicit,
-) -> bool {
+) -> Residual {
     let origin = match *a {
         Implicit::Plane { origin, .. } | Implicit::Cone { origin, .. } => origin,
         Implicit::Sphere { centre, .. } | Implicit::Torus { centre, .. } => centre,
@@ -339,13 +339,121 @@ fn bezier_on<'a>(
         }
     };
     let tol = gamma(4 * degree * (p + 1) * (q + 1) + 16) * scale;
-    let within = |v: &f64| {
-        matches!(
-            v.abs().partial_cmp(&tol),
-            Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
-        )
-    };
-    f.c.iter().all(within)
+    let least_weight = ws.c.iter().copied().fold(f64::INFINITY, f64::min);
+    Residual {
+        coefficients: f.c,
+        tol,
+        degree,
+        absolute,
+        wmax,
+        least_weight,
+    }
+}
+
+/// Whether the Bézier patch of degrees `(p, q)` with homogeneous points `points` (row by
+/// row) lies on `a` ([`lies_on`]): every coefficient of its [`Residual`] within the
+/// rounding of computing it.
+fn bezier_on<'a>(
+    p: usize,
+    q: usize,
+    points: impl Iterator<Item = &'a crate::nurbs::math::CPoint>,
+    a: &Implicit,
+) -> bool {
+    bezier_residual(p, q, points, a).within()
+}
+
+/// [`lies_on`]'s acceptance turned into a distance, ARGUED (not checked by a certificate):
+/// how far a point of the surface `form` describes can lie from `a`'s surface, where
+/// [`lies_on`] accepts `form`; `None` where it does not, for a torus, for a weight that is
+/// not positive, or for a bound that is not finite.
+///
+/// On a Bézier patch with least weight `W₀ > 0` (a rational patch's weight is a convex
+/// combination of its points' weights, so at least `W₀` everywhere), every coefficient of
+/// `a`'s equation of degree `d` in `(X W, W)` is computed within `τ` ([`lies_on`]'s
+/// rounding) and accepted within `τ`, so the exact coefficient is within `2τ`, and by the
+/// convex hull property of the Bernstein basis `|W^d F(X)| ≤ 2τ` over the whole patch:
+/// `|F(X)| ≤ 2τ / W₀^d`. For a plane `F` is the signed distance (over the normal's
+/// length, a few roundings from 1). For a cone `F = ρ² − R²` (`ρ` the distance from the
+/// axis, `R` the radius at that height): with `ρ, |R| ≥ 0`, `|ρ − |R|| ≤ ρ + |R|`, so the
+/// point is within `|ρ − |R|| ≤ √|F|` of the cone, radially at its height; a sphere the
+/// same with `|X|` for `ρ`. The square root is the bound near a cone's apex, where `R` is
+/// small; elsewhere `|F| / (ρ + |R|)` is far smaller, but the bound does not need it.
+///
+/// [`lies_on`] does not cover the rounding of the Bézier decomposition (knot insertion,
+/// a chain of at most `p + q` convex combinations per point, each a few roundings of the
+/// homogeneous terms' size): a patch point is moved by at most `γ · 2 absolute` in `H`
+/// and `γ · W_max` in `W` (`γ = γ_{4(p+q)+4}`, `absolute` the largest coordinate of
+/// `|H| + |O| W`), so the Euclidean point `X = H / W` by at most
+/// `(|δH| + |X| |δW|) / W₀ ≤ 2 γ absolute (1 + W_max / W₀) / W₀`. That slack is added to
+/// each patch's bound. The whole is the largest over the patches, grown by a few roundings.
+///
+/// # Errors
+///
+/// `SM_ERR` without NURB data; those of the Bézier decomposition.
+pub fn distance_bound(form: &BSplineSurface, a: &Implicit) -> Result<Option<f64>> {
+    if matches!(a, Implicit::Torus { .. }) {
+        return Ok(None);
+    }
+    let nurb = form
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let mut bound = 0.0_f64;
+    for row in decompose_to_bez(nurb)? {
+        for patch in row {
+            let (p, q) = patch.degrees();
+            let r = bezier_residual(p, q, patch.rows().flatten(), a);
+            let w0 = r.least_weight;
+            if !(r.within() && w0 > 0.0 && w0.is_finite()) {
+                return Ok(None);
+            }
+            let exact = 2.0 * r.tol;
+            let residual = match r.degree {
+                1 => exact / w0,
+                _ => exact / (w0 * w0),
+            };
+            let off = match *a {
+                // the normal's length, a few roundings from 1
+                Implicit::Plane { normal, .. } => {
+                    residual / (normal.length() * (1.0 - 4.0 * f64::EPSILON))
+                }
+                _ => residual.sqrt(),
+            };
+            let g = gamma(4 * (p + q) + 4);
+            // (`absolute` is a largest coordinate: a Euclidean length is under twice it)
+            let slack = 2.0 * g * r.absolute * (1.0 + r.wmax / w0) / w0;
+            bound = bound.max(off + slack);
+        }
+    }
+    let bound = bound * (1.0 + 8.0 * f64::EPSILON);
+    Ok(bound.is_finite().then_some(bound))
+}
+
+/// `a`'s equation over a Bézier patch in its homogeneous coordinates ([`lies_on`]).
+struct Residual {
+    /// Its Bernstein coefficients.
+    coefficients: Vec<f64>,
+    /// The rounding each is computed within.
+    tol: f64,
+    /// The equation's degree.
+    degree: usize,
+    /// The largest absolute homogeneous term, `|H| + |O| W`.
+    absolute: f64,
+    /// The largest weight.
+    wmax: f64,
+    /// The least weight.
+    least_weight: f64,
+}
+
+impl Residual {
+    /// Every coefficient within its rounding (not a number is not).
+    fn within(&self) -> bool {
+        self.coefficients.iter().all(|v| {
+            matches!(
+                v.abs().partial_cmp(&self.tol),
+                Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
+            )
+        })
+    }
 }
 
 pub(crate) const OP_EXACT: &str = "surface::implicit::check_exact_net";

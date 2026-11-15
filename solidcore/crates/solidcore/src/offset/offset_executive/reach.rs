@@ -2683,7 +2683,7 @@ pub fn local_extension_reach(
     }
     if !horizons.is_empty() {
         let face = own_face.ok_or_else(uncertified)?;
-        let within = extension_within(k, b, face, &found, tolerance)?;
+        let within = extension_within(k, b, face, moved, &found, tolerance)?;
         // a decision taken where the extension could leave its ball has no bound here
         if !horizons
             .iter()
@@ -2696,19 +2696,34 @@ pub fn local_extension_reach(
 }
 
 /// The farthest a point of `face`'s extended surface can lie from a point, as a function
-/// of the point, rounded up: the farthest corner of the box of `face`'s surface over its
-/// UV domain (a NURBS form's control points hold it), past which the surface is extended
-/// by the margin the executive gives it (its reach and its move,
+/// of the point, rounded up: the farthest corner of the box of `face`'s surface (its NURBS
+/// form's control net, the whole net, which holds the face), past which the surface is
+/// extended by the margin the executive gives it (its reach and its move,
 /// `record_extension_reach`), at most that far again for the move of a moved face's new
-/// surface off the old face. `None` for a box not made or not finite.
+/// surface off the old face, and the gap between each stored form and the surface its
+/// exact class names ([`form_gap`]). `None` for a box not made or not finite, or a gap not
+/// bounded.
+///
+/// ARGUED, not checked by a certificate: the box holds the stored NURBS form by the
+/// convex hull property (its corners are the net's Euclidean points, each a rounding of
+/// `H / W`: within an ulp of their size, counted below). The decisions are on the exact
+/// classes' implicit surfaces ([`Implicit`]), which the stored forms lie within
+/// [`form_gap`] of; the margin is the extension's own size and absorbs none of that gap,
+/// so the gap is added: the old surface's (where the face and its moves are measured) and,
+/// for a moved face, its new surface's (the one extended). For the kernel's cylinder r 50,
+/// z 0 to 100 the bound is `2.53·10⁻⁵` (MEASURED by a unit test): the square root of
+/// [`lies_on`](implicit::lies_on)'s rounding, the bound near a cone's apex, taken
+/// everywhere. That is above the tolerance, so the margin's floor does not absorb it, but
+/// it is far below a near-parallel ball's radius (about `tolerance × 10¹⁴`).
 ///
 /// # Errors
 ///
-/// Those of the face's surface and of its box.
+/// Those of the face's surface, of its box and of [`form_gap`].
 fn extension_within(
     k: &Kernel,
     b: &Brep,
     face: FaceId,
+    moved: &[(FaceId, &Surface)],
     found: &LocalReach,
     tolerance: f64,
 ) -> Result<Option<impl Fn(Vec3) -> f64>> {
@@ -2722,8 +2737,22 @@ fn extension_within(
     else {
         return Ok(None);
     };
+    // the stored forms' gaps from their classes' surfaces: the old surface's, and a
+    // moved face's new one's
+    let Some(mut gap) = form_gap(k, surface)? else {
+        return Ok(None);
+    };
+    if let Some((_, new)) = moved.iter().find(|(f, _)| *f == face) {
+        let Some(more) = form_gap(k, new)? else {
+            return Ok(None);
+        };
+        gap = round_up(gap + more);
+    }
     let ends = [bx.min.x, bx.min.y, bx.min.z, bx.max.x, bx.max.y, bx.max.z];
+    // the corners' own rounding (each `H / W`, rounded once): an ulp of the largest
+    let rounded = ends.iter().fold(0.0_f64, |m, x| m.max(x.abs())) * 2.0 * f64::EPSILON;
     let margin = round_up(round_up(found.reach + found.shift).max(tolerance) + found.shift);
+    let margin = round_up(round_up(margin + gap) + rounded);
     let ordered = bx.min.x <= bx.max.x && bx.min.y <= bx.max.y && bx.min.z <= bx.max.z;
     if !(ordered && margin.is_finite() && ends.iter().all(|x| x.is_finite())) {
         return Ok(None);
@@ -2745,6 +2774,25 @@ fn extension_within(
             far
         }
     }))
+}
+
+/// How far the surface `surface`'s stored NURBS form can lie from the surface its exact
+/// class names ([`exact_class`]), ARGUED as [`implicit::distance_bound`] derives it from
+/// [`implicit::lies_on`]'s acceptance: `0` for a surface with no analytic label (a bare
+/// net is its own form); `None` for a torus, a surface with no NURBS form, or a form the
+/// bound does not take.
+///
+/// # Errors
+///
+/// Those of making the NURBS form and of the Bézier decomposition.
+fn form_gap(k: &Kernel, surface: &Surface) -> Result<Option<f64>> {
+    let Some(support) = AnalyticSupport::of(surface) else {
+        return Ok(Some(0.0));
+    };
+    let Some(form) = crate::blend::fillet_section::station::as_b_spline(k, surface)? else {
+        return Ok(None);
+    };
+    implicit::distance_bound(&form, &support.implicit())
 }
 
 /// Whether every two of `quadrics` are parallel ([`parallel_quadrics`], either way round):
@@ -4845,5 +4893,45 @@ mod tests {
         assert_eq!(near.len(), 4, "{near:?}");
         let crossing = [r50, r54, cone(Vec3::ZERO, turned, 54.0, 0.0)];
         assert_eq!(every_two_parallel(&crossing, tol, at), None);
+    }
+
+    /// The offset test's real angle (`solidcore-ops`, the upper band of a cylinder r 50 given
+    /// its offset r 54 turned 0.3 degrees about the axis along (1, 2, 0) through the origin):
+    /// the near-parallel path declines it both ways round, at the band's vertex on the split
+    /// circle and anywhere along its height. What becomes of the pair after that is
+    /// [`quadric::meet`]'s; this checks only the near-parallel path's boundary.
+    #[test]
+    fn a_band_turned_a_third_of_a_degree_is_not_near_parallel() {
+        let tol = 1e-6;
+        let (s, c) = 0.3_f64.to_radians().sin_cos();
+        let root5 = sqrt(5.0);
+        // Z turned about (1, 2, 0) / √5: (k × Z) sin θ + Z cos θ, k × Z = (2, −1, 0) / √5
+        let turned = Vec3::new(2.0 * s / root5, -s / root5, c);
+        let cylinder = |axis: Vec3, radius: f64| Implicit::Cone {
+            origin: Vec3::ZERO,
+            axis,
+            radius,
+            tan_angle: 0.0,
+        };
+        let (kept, moved) = (cylinder(Vec3::Z, 50.0), cylinder(turned, 54.0));
+        for z in [0.0, 50.0, 100.0] {
+            let at = Vec3::new(50.0, 0.0, z);
+            assert_eq!(near_parallel_cones(&kept, &moved, tol, at), None, "{z}");
+            assert_eq!(near_parallel_cones(&moved, &kept, tol, at), None, "{z}");
+        }
+    }
+
+    /// [`form_gap`] of a cylinder r 50 from z 0 to 100 as the kernel stores it (a rational
+    /// form): positive and finite, the amount [`extension_within`] adds to the margin; far
+    /// below a near-parallel ball's radius. The figure (MEASURED) is quoted there.
+    #[test]
+    fn a_cylinders_stored_form_lies_within_its_gap_of_its_implicit_surface() {
+        use crate::primitive::api_primitives as ap;
+        let mut k = Kernel::default();
+        let cylinder =
+            Surface::from(ap::create_cylinder_surface(&mut k, Point3::ZERO, 50.0, 100.0).unwrap());
+        let gap = form_gap(&k, &cylinder).unwrap().unwrap();
+        eprintln!("form_gap(cylinder r50 h100) = {gap:e}");
+        assert!(gap > 0.0 && gap < 1e-4, "{gap}");
     }
 }
