@@ -4087,20 +4087,18 @@ fn pattern_name_slot(stored: usize, sources: usize, copies: usize, s: usize, k: 
 /// `source`. Once `body.rename` has stored this feature's names, a copy beyond them (the count
 /// was raised) is numbered after the highest stored `source (n)`, so it never takes a number
 /// freed by a rename (#372). Features without stored names keep the first free `source (n)`.
-fn pattern_copy_name(state: &ModelState, f: &Feature, slot: Option<usize>, source: &str) -> String {
+fn pattern_copy_name(names: &mut BodyNames, f: &Feature, slot: Option<usize>, source: &str) -> String {
     if let Some(k) = slot
-        && f.body_names.get(k).is_some_and(|name| !name.trim().is_empty())
+        && let Some(name) = f.body_names.get(k).filter(|name| !name.trim().is_empty())
     {
-        return copy_body_name(state, f, k, source);
+        return names.unique(name);
     }
     let base = if source.trim().is_empty() { "Body" } else { source.trim() };
     let prefix = format!("{base} (");
     let highest = f.body_names.iter().filter_map(|n| n.trim().strip_prefix(prefix.as_str())?.strip_suffix(')')?.parse::<u32>().ok()).max();
     match highest {
-        Some(h) => {
-            (u64::from(h) + 1..).map(|i| format!("{base} ({i})")).find(|n| state.body(n).is_none()).unwrap_or_else(|| unique_body_name(state, base))
-        }
-        None => unique_body_name(state, base),
+        Some(h) => names.first_free(base, u64::from(h) + 1),
+        None => names.unique(base),
     }
 }
 
@@ -10063,6 +10061,9 @@ fn eval_feature(
                     Ok::<_, DocError>((frame, crate::mat_inverse(&frame).ok_or_else(singular)?, crate::mat_inverse(&here).ok_or_else(singular)?))
                 });
                 let owner = owner.transpose()?;
+                // Named against an index of the names in use: searching every body for every
+                // name tried took time cubic in the copies.
+                let mut names = BodyNames::new(st);
                 for (k, m) in mats.iter().enumerate() {
                     let local = match &owner {
                         Some((frame, frame_inv, here_inv)) => {
@@ -10072,7 +10073,7 @@ fn eval_feature(
                     };
                     let copy = moved_copy(&mb, kernel::transform_matrix(&mb.body, local)?, k + 1);
                     let slot = pattern_name_slot(f.body_names.len(), bodies.len(), mats.len(), s, k, f.pattern_names_in_order);
-                    let name = pattern_copy_name(st, f, slot, &mb.name);
+                    let name = pattern_copy_name(&mut names, f, slot, &mb.name);
                     copy_sheet(st, &mb.name, &name, &local);
                     let mut body = ModelBody::traced_new(name, copy, f.id);
                     if owner.is_some() {
@@ -10684,6 +10685,18 @@ impl BodyNames {
         };
         self.next.insert(base.to_string(), i);
         name
+    }
+
+    /// The first free `base (i)` from `from` on, taken now.
+    fn first_free(&mut self, base: &str, from: u64) -> String {
+        let mut i = from.max(self.next.get(base).map_or(0, |n| *n as u64));
+        loop {
+            let candidate = format!("{base} ({i})");
+            i += 1;
+            if self.taken.insert(candidate.clone()) {
+                return candidate;
+            }
+        }
     }
 }
 
@@ -11831,6 +11844,23 @@ mod body_name_tests {
         let last = (0..50_000).map(|_| names.unique("R_0603")).last().unwrap();
         assert_eq!(last, "R_0603 (50000)");
         assert!(began.elapsed() < std::time::Duration::from_secs(5), "{:?}", began.elapsed());
+    }
+
+    /// Copies of a renamed pattern numbered after its highest stored name (#372) take the first
+    /// free number from there, as searching the bodies one name at a time gave them.
+    #[test]
+    fn pattern_copies_past_the_stored_names_take_the_first_free_numbers() {
+        let mut st = ModelState::default();
+        let body = kernel::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        for name in ["Pin", "Pin (5)", "Pin (7)"] {
+            st.bodies.push(ModelBody::new(name.into(), body.clone(), 1));
+        }
+        let mut names = BodyNames::new(&st);
+        let got: Vec<String> = (0..4).map(|_| names.first_free("Pin", 5)).collect();
+        assert_eq!(got, ["Pin (6)", "Pin (8)", "Pin (9)", "Pin (10)"]);
+        // After first-free naming from 2, a later start never hands out a name twice.
+        assert_eq!(names.unique("Pin"), "Pin (2)");
+        assert_eq!(names.first_free("Pin", 2), "Pin (3)");
     }
 }
 
