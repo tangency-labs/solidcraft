@@ -1,4 +1,4 @@
-name: SolidCraft T182 persist formatting and verify saved code
+name: SolidCraft T183 correct rustfmt edition and verify saved code
 on:
   push:
     branches: [integration/issue-15776-upstream-20261115]
@@ -33,7 +33,7 @@ jobs:
           )
           sed -i 's/repair_gui_acceptance_t158/repair_through_the_browser/g' crates/ui-egui/src/drawing_workspace.rs
           for file in "${files[@]}"; do
-            rustfmt --edition 2021 --config skip_children=true "$file"
+            rustfmt --edition 2024 --config skip_children=true "$file"
           done
           git add -- "${files[@]}"
           if ! git diff --cached --quiet; then
