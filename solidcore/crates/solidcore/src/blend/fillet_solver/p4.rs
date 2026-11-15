@@ -1973,11 +1973,8 @@ fn c3_try_analytic(
         Err(_) => {}
     }
 
-    // WR-420 (fork addition, opt-in): where the centre line collapses to a point, the
-    // corner ball's patch
-    if !cx.k.fixes.fillet_corner_ball_patch {
-        return Ok(false);
-    }
+    // WR-420 (fork addition): where the centre line collapses to a point, the corner
+    // ball's patch
     let tsects = st.store.snapshot(cx.fillets, &st.tsect_pnts)?;
     match FilletSolver::calc_sphere_fillet_geom(ops, cx.k, cx.target, cx.fillets, &tsects, None) {
         Ok(()) => Ok(true),
@@ -4808,7 +4805,10 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         points: &[TsectPnt],
         uv1: &mut BSplineCurve,
         uv2: &mut BSplineCurve,
-    ) -> Result<Option<Surface>> {
+    ) -> Result<(
+        Option<Surface>,
+        Option<crate::blend::law_corners::LawCornerPieces>,
+    )> {
         // the virtual m_pFSG->CreateSurface(*this, pCenterLine, pCurve1, pCurve2,
         // sPnts, pSur[0], pUV1, pSur[1], pUV2, ..) with pSur[i] = GetSurface(i)
         let solver_type = self.ops.solver_type()?;
@@ -4872,11 +4872,27 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
             [uv1, uv2],
             Some(&ball),
         )?;
+        // (the fork's `rFilletSolver.AddLawCornerPieces`, 7babe17, is `FlushCurve`'s, once
+        // its stations are final: `keep_law_corner_pieces`)
+        Ok((Some(surface), kept))
+    }
+
+    fn keep_law_corner_pieces(
+        &mut self,
+        pieces: crate::blend::law_corners::LawCornerPieces,
+    ) -> Result<()> {
         // the fork's `rFilletSolver.AddLawCornerPieces` (7babe17)
-        if let Some(kept) = kept {
-            self.ops.solver_mut().law_corner_pieces.push(kept);
-        }
-        Ok(Some(surface))
+        self.ops.solver_mut().law_corner_pieces.push(pieces);
+        Ok(())
+    }
+
+    fn skins_varying_balls(&self) -> Result<bool> {
+        let exact_circles = matches!(
+            self.ops.solver().fillet_surface_generator(),
+            Some(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::Circular(g))
+                if !g.approximate_arcs && !g.mirror
+        );
+        Ok(exact_circles && self.ops.solver_type()?.ball_radius_varies())
     }
 
     fn set_fillet_surface(

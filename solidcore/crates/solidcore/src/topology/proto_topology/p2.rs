@@ -1046,6 +1046,42 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         Ok(None)
     }
 
+    /// Not upstream (#16640): whether the definition `ed` is an edge-to-edge one whose ends
+    /// are one vertex in each B-rep (`vertices`: start and end in B-rep 1, then B-rep 2)
+    /// although its curve ends farther apart than a valid closed edge's can ([`ends_are_a_stretch`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of the curve evaluations; [`SolidError::InvalidInput`] for a non-finite
+    /// tolerance.
+    fn is_unbounded_edge_stretch(
+        &self,
+        k: &Kernel,
+        brep: &impl ProtoBrep<O>,
+        ed: EdgeDefId,
+        vertices: [(O, O); 2],
+    ) -> Result<bool> {
+        let [(start1, end1), (start2, end2)] = vertices;
+        if start1 != end1 || start2 != end2 {
+            return Ok(false);
+        }
+        let d = self.ed_ref(ed)?;
+        if d.src_topo_type(1) != PointClassType::Edge || d.src_topo_type(2) != PointClassType::Edge
+        {
+            return Ok(false);
+        }
+        let (Some(tol1), Some(tol2)) = (
+            brep.topology_tolerance(start1),
+            brep.topology_tolerance(start2),
+        ) else {
+            return Ok(false);
+        };
+        let gap = d
+            .end_position(k, brep, true)?
+            .distance(d.end_position(k, brep, false)?);
+        ends_are_a_stretch(gap, d.raw_tolerance(), [tol1, tol2])
+    }
+
     /// The body of [`ProtoTopologyManager::imprint_edge_definition`]; `edited` is set
     /// before the first B-rep edit.
     fn imprint_edge_definition_inner(
@@ -1091,6 +1127,24 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         )? {
             self.note_skipped_speck_vertex(start_vtx1, gap1, p0, p1);
             self.note_skipped_speck_vertex(start_vtx2, gap2, p0, p1);
+            return Ok(());
+        }
+
+        // Not upstream (#16640): an edge-to-edge definition whose curve runs from one point
+        // to another farther apart than every tolerance involved, yet whose two ends are one
+        // vertex in each B-rep, is a stretch of coincidence that no vertex bounds at its far
+        // end. Two edges that cross at a shallow angle (a tangent arc that grazes a line)
+        // stay within tolerance of each other on both sides of the crossing; the crossing is
+        // split, but the stretch past it ends in the middle of both edges, which would
+        // otherwise be related whole to each other and to the edges the crossing already
+        // related. Such a definition is not imprinted: its edges keep the mates their own
+        // definitions give them, so one relation holds per entity.
+        if self.is_unbounded_edge_stretch(
+            k,
+            &*brep,
+            ed,
+            [(start_vtx1, end_vtx1), (start_vtx2, end_vtx2)],
+        )? {
             return Ok(());
         }
 
@@ -3153,6 +3207,27 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     }
 }
 
+/// Not upstream (#16640): whether a definition's two curve ends, `gap` apart, both mapped to
+/// one vertex of each B-rep (tolerances `vertex_tols`), are a stretch no vertex bounds rather than the
+/// ends of a closed edge. The validity contract (`validity-and-tolerances.md`, Edge 16 and
+/// 17) lets an edge end up to `edge_tol + vertex_tol` from its vertex, so a closed edge's
+/// ends may lie twice that far apart; only a gap beyond it is a stretch.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a non-finite or negative tolerance, or a NaN gap.
+fn ends_are_a_stretch(gap: f64, edge_tol: f64, vertex_tols: [f64; 2]) -> Result<bool> {
+    let usable = |t: f64| t.is_finite() && t >= 0.0;
+    if !gap.is_finite() || !usable(edge_tol) || !vertex_tols.into_iter().all(usable) {
+        return Err(SolidError::invalid_input(
+            OP_IMPRINT_ED,
+            "a definition's end gap and tolerances must be finite and not negative",
+        ));
+    }
+    let vertex_tol = vertex_tols[0].max(vertex_tols[1]);
+    Ok(gap > 2.0 * (edge_tol + vertex_tol))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3161,6 +3236,34 @@ mod tests {
     use crate::surface::surface::Surface;
     use crate::surface::volume::Volume;
     use crate::topology::Brep;
+
+    /// #16640: the contract's `edge_tol + vertex_tol` at each end makes a closed edge's ends
+    /// up to twice that apart; only a gap beyond it is a stretch.
+    #[test]
+    fn end_gap_is_a_stretch_only_beyond_the_validity_contract() {
+        let (edge, vertex) = (1e-6, 4e-6);
+        let bound = 2.0 * (edge + vertex);
+        assert!(!ends_are_a_stretch(0.0, edge, [vertex, 1e-7]).unwrap());
+        assert!(!ends_are_a_stretch(bound * (1.0 - 1e-9), edge, [vertex, 1e-7]).unwrap());
+        assert!(ends_are_a_stretch(bound * (1.0 + 1e-9), edge, [1e-7, vertex]).unwrap());
+        assert!(ends_are_a_stretch(1.6e-3, edge, [vertex, vertex]).unwrap());
+    }
+
+    /// A non-finite tolerance or gap is an error, never ignored.
+    #[test]
+    fn end_gap_with_non_finite_data_is_an_error() {
+        for (gap, edge, vertex) in [
+            (1.0, f64::NAN, [1e-6, 1e-6]),
+            (1.0, 1e-6, [f64::NAN, 1e-6]),
+            (1.0, 1e-6, [1e-6, f64::NAN]),
+            (1.0, f64::INFINITY, [1e-6, 1e-6]),
+            (1.0, 1e-6, [1e-6, -1.0]),
+            (f64::NAN, 1e-6, [1e-6, 1e-6]),
+            (f64::INFINITY, 1e-6, [1e-6, 1e-6]),
+        ] {
+            assert!(ends_are_a_stretch(gap, edge, vertex).is_err());
+        }
+    }
 
     /// Pool handles: an index and a kind.
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -4025,10 +4128,14 @@ mod tests {
         assert!(near(ends(new_ed), [0.5, 2.0]), "{:?}", ends(new_ed));
     }
 
-    /// WR-101: the upper split child's interval. Pinned (default) it is `[dT, dT]`;
-    /// with `Kernel::fixes.proto_edge_split_upper_keeps_the_old_max` it is
-    /// `[dT, old_max]`. The lower child is `[old_min, dT]` either way, and a split at or
-    /// within the tolerance of an end is still refused.
+    /// WR-101: the upper split child's interval. A split goes ahead only where an edge
+    /// definition splits too, and that definition gives the upper child `[dT, old_max]`,
+    /// with `Kernel::fixes.proto_edge_split_upper_keeps_the_old_max` or without it: the
+    /// pinned `[dT, dT]` was only left on a child no definition split onto, a split now
+    /// refused, so the flag changes no result. With two definitions, one splitting and
+    /// one refusing (too near its end for its larger tolerance), the upper child gets
+    /// the one that splits and still `[dT, old_max]`; the lower child is `[old_min, dT]`
+    /// and keeps both. A split at or within the tolerance of an end is refused.
     #[test]
     fn proto_edge_split_upper_interval_keeps_the_old_max() {
         for fixed in [false, true] {
@@ -4070,31 +4177,52 @@ mod tests {
                 ));
             }
 
-            // Split near the end: the proto edge splits, but its edge definition is within
-            // 10*tol of its end and refuses to split (upstream's `cbiFudge`), so nothing
-            // overwrites the interval `proto_edge_split` assigned to the upper child.
-            let dt = old_max - 2.0 * tol;
+            // Near the end, within 10*tol, the edge definition refuses to split (upstream's
+            // `cbiFudge`), so the proto edge does not split either: it would leave an upper
+            // child with no definitions.
+            let near_end = old_max - 2.0 * tol;
+            assert!(matches!(
+                m.proto_edge_split(&k, &mut geo, pe, near_end),
+                Ok((None, None))
+            ));
+            assert_eq!(m.proto_edges(), [pe]);
+            let whole = m.proto_edge(pe).unwrap().xsect_interval();
+            assert_eq!((whole.min(), whole.max()), (old_min, old_max));
+
+            // A second definition, of ten times the tolerance, refuses within 1e-3 of the end.
+            geo.curves.push(line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]));
+            let c1 = H(geo.curves.len() - 1, ClassObjectKind::Curve);
+            let wide = m
+                .insert_edge_definition(EdgeDefinition::new(
+                    Some(c1),
+                    ivl,
+                    R0,
+                    R1,
+                    10.0 * tol,
+                    None,
+                    None,
+                    None,
+                ))
+                .unwrap();
+            m.add_edge_definition(&k, &mut geo, pe, wide).unwrap();
+
+            // 2e-4 from the end the first definition splits and the wide one refuses.
+            let dt = old_max - 20.0 * tol;
             let (new_pv, new_pe) = m.proto_edge_split(&k, &mut geo, pe, dt).unwrap();
             let new_pe = new_pe.expect("proto edge was split");
             assert!(new_pv.is_some());
-            assert_eq!(m.proto_edge(new_pe).unwrap().num_edge_definitions(), 0);
-            // premise: the store-edge-definition branch that would overwrite the interval
-            // was refused by `cbiFudge`, so the upper child's interval is the one the split
-            // assigned, not one later overwritten by an edge definition.
-            assert!(
-                (old_max - dt).abs() < 10.0 * tol,
-                "the split must be within the proto edge's tolerance of its end"
-            );
+            assert_eq!(m.proto_edge(new_pe).unwrap().num_edge_definitions(), 1);
+            assert!(!m
+                .proto_edge(new_pe)
+                .unwrap()
+                .edge_definitions()
+                .contains(&wide));
+            assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 2);
 
             let lower = m.proto_edge(pe).unwrap().xsect_interval();
             assert_eq!((lower.min(), lower.max()), (old_min, dt));
             let upper = m.proto_edge(new_pe).unwrap().xsect_interval();
-            if fixed {
-                assert_eq!((upper.min(), upper.max()), (dt, old_max));
-            } else {
-                // pinned C++ parity: the documented wrong interval
-                assert_eq!((upper.min(), upper.max()), (dt, dt));
-            }
+            assert_eq!((upper.min(), upper.max()), (dt, old_max), "fixed: {fixed}");
         }
     }
 

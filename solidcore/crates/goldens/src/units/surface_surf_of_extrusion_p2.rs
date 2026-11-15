@@ -1635,6 +1635,145 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    /// The default SSI tolerance comes from the unbounded surface's size, not the
+    /// kernel's approximation tolerance. This case returns a coarse touching point;
+    /// its finite status and coordinates must remain observable despite NOW weights.
+    #[test]
+    fn review_global_touching_point_is_checked_outside_infinite_sums() {
+        use crate::units::surface_surf_of_extrusion_p1::GenIn;
+        use solidcore::intersect::surface_intersector::SurfaceIntersector;
+        use solidcore::nurbs::math::gamma;
+        use solidcore::surface::surface::p2::TsectCurveType;
+
+        fn circle_end(s: &SrcIn, end: bool, height: f64) -> Vec3 {
+            let SrcIn::Built { surf } = s else {
+                panic!("expected the generated canonical extrusion");
+            };
+            let GenIn::Circle { c, x, y, d, r } = &surf.gen else {
+                panic!("expected its circular generator");
+            };
+            let BuildIn::Canonical { vec } = &surf.build else {
+                panic!("expected the canonical sweep vector");
+            };
+            let (sin, cos) = d[usize::from(end)].to_radians().sin_cos();
+            v3(*c) + v3(*x) * (*r * cos) + v3(*y) * (*r * sin) + v3(*vec) * height
+        }
+
+        let case = crate::case::regression_case(&Runner, "gen1140");
+        let inputs: Inputs = case.parse().unwrap();
+        let Inputs::Op { src, op } = &inputs else {
+            panic!("expected GlobalSurfaceIntersect");
+        };
+        let OpIn::Global {
+            target: TargetIn::Extrusion { other },
+            dom: None,
+            other_dom: None,
+            tol: None,
+            ang,
+        } = &**op
+        else {
+            panic!("expected the generated default-tolerance extrusion pair");
+        };
+
+        let k = Kernel::default();
+        let first = rust_src(&k, src)
+            .unwrap()
+            .unwrap_or_else(|_| panic!("first generated extrusion must build"));
+        let second = rust_src(&k, other)
+            .unwrap()
+            .unwrap_or_else(|_| panic!("second generated extrusion must build"));
+        let d1 = first.base().natural_uv_domain();
+        let d2 = second.base().natural_uv_domain();
+        let s1 = Surface::from(first.clone());
+        let s2 = Surface::from(second.clone());
+        let default_tol = SurfaceIntersector::new(&k, &s1, &d1, &s2, &d2, false)
+            .unwrap()
+            .this_approx_tol_3d;
+        let expected_tol = first.extrusion_vector().length() * d1.v_interval().length() / 1000.0;
+        assert!((default_tol - expected_tol).abs() <= gamma(32) * expected_tol);
+
+        let result = s1
+            .global_surface_intersect(&k, &d1, &s2, &d2, [true, true], None, *ang)
+            .unwrap();
+        assert_eq!(result.curves_3d.len(), 1);
+        assert_eq!(result.curve_types, [TsectCurveType::Touching]);
+        assert_eq!(result.surface1_uv_curves.len(), 1);
+        assert_eq!(result.surface2_uv_curves.len(), 1);
+        assert_eq!(result.deviations.len(), 1);
+        let uv1 = result.surface1_uv_curves[0]
+            .as_ref()
+            .unwrap()
+            .evaluate_point(&k, 0.5)
+            .unwrap();
+        let uv2 = result.surface2_uv_curves[0]
+            .as_ref()
+            .unwrap()
+            .evaluate_point(&k, 0.5)
+            .unwrap();
+        assert_eq!(uv1.x, d1.min().x);
+        assert_eq!(uv2.x, d2.max().x);
+        assert!(d1.contains_point(Point2::new(uv1.x, uv1.y), 0.0));
+        assert!(d2.contains_point(Point2::new(uv2.x, uv2.y), 0.0));
+
+        // At these generator endpoints the exact definitions are the circle ends
+        // plus the sweep vector times v. No spline fit supplies these reference points.
+        let p1 = circle_end(src, false, uv1.y);
+        let p2 = circle_end(other, true, uv2.y);
+        let midpoint = (p1 + p2) * 0.5;
+        let mut scale = 1.0_f64;
+        for source in [&first, &second] {
+            let net = source.base().gw_nurb().unwrap();
+            assert_eq!(net.degrees(), (2, 1));
+            for p in net.rows().flatten() {
+                let weight = if p.w == NOW { 1.0 } else { p.w };
+                assert!(weight > 0.0);
+                scale = scale.max((p.x.abs() + p.y.abs() + p.z.abs()) / weight);
+            }
+        }
+        // Two degree-(2,1) tensor de Boor evaluations, their rational divisions,
+        // the closed-form endpoint evaluations and midpoint use fewer than 128
+        // rounded operations per coordinate. Huge sweep endpoints set the floor.
+        let rounding = gamma(128) * scale;
+        let deviation = result.deviations[0];
+        assert!(deviation.is_finite() && deviation > k.tolerances.approx_tol_3d);
+        assert!(deviation < default_tol);
+        assert!((deviation - p1.distance(p2)).abs() <= rounding);
+
+        let out = Runner.run_rust(&case).unwrap();
+        assert!(out.error.is_none() && out.deferred.is_none() && out.rejected.is_none());
+        assert_eq!(out.values["build"], [0.0]);
+        let geometry_is_valid = |output: &Output| {
+            let raw = &output.values["out"];
+            raw.len() == 32
+                && raw.iter().all(|v| v.is_finite())
+                && raw[..4] == [0.0, 0.0, 0.0, 1.0]
+                && raw[4] == 1.0
+                && raw[5] == result.curves_3d[0].type_code() as f64
+                && raw[6..8] == [0.0, 1.0]
+                && raw[8..11] == [1.0, 1.0, 2.0]
+                && raw[14] == NOW
+                && raw[18] == NOW
+                && raw[19..31]
+                    == [4.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+                && Vec3::new(raw[11], raw[12], raw[13]).distance(midpoint) <= rounding
+                && raw[11..14] == raw[15..18]
+                && (raw[31] - p1.distance(p2)).abs() <= rounding
+                && Vec3::new(raw[11], raw[12], raw[13]).distance(p1) <= raw[31] + rounding
+                && Vec3::new(raw[11], raw[12], raw[13]).distance(p2) <= raw[31] + rounding
+        };
+        assert!(geometry_is_valid(&out));
+
+        // Mutation controls: the existing infinite block sums hide both changes,
+        // while the independent status/definition checks reject them.
+        let encoded = crate::golden::encode(&case.name, &out);
+        for (index, wrong) in [(1, 1001.0), (11, midpoint.x + 1.0)] {
+            let mut corrupted = out.clone();
+            corrupted.values.get_mut("out").unwrap()[index] = wrong;
+            assert_eq!(crate::golden::encode(&case.name, &corrupted), encoded);
+            assert!(!geometry_is_valid(&corrupted));
+        }
+    }
+
     fn op_name(i: &Inputs) -> String {
         match i {
             Inputs::IsNurb { .. } => "is_nurb".into(),

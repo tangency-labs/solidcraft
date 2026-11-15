@@ -62,8 +62,10 @@ pub struct Row<'a> {
     /// Lit by the selection or the 3D view's pointer: the item's own row, or a row leading to it.
     pub mark: Mark,
     /// A feature that failed or built with a warning, or a folded row holding one: its mark at
-    /// the row's end, the message in [`Row::tip`].
+    /// the row's end, the message in [`Row::status_tip`].
     pub status: Option<Status>,
+    /// What [`Row::status`] says: the row's tooltip, in place of [`Row::tip`] (#8834).
+    pub status_tip: Option<&'a crate::StatusTip>,
     /// Optional document appearance and shared trailing text slots.
     pub swatch: Option<Color32>,
     pub secondary: &'a str,
@@ -458,6 +460,8 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
             resp
         }
         (Some(t), _) => resp.backing_on_hover_text(t),
+        // It names the feature itself, so a name cut short is said there.
+        (None, _) if let Some(status) = row.status_tip => resp.backing_on_hover_status(status),
         (None, Some(state)) if elided => resp.backing_on_hover_text(format!("{label_display}\n{state}")),
         (None, Some(state)) => resp.backing_on_hover_text(state),
         (None, None) if !row.secondary.is_empty() || !row.count.is_empty() => {

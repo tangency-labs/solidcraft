@@ -59,10 +59,9 @@
 //!   [`OffsetFacesRefusal::NotPutBack`] (the fork returns the status untyped), keeping
 //!   the fillet's status; so does a put-back whose stitched result leaves a closed solid
 //!   open (WR-212, as the public edge-fillet wrappers refuse it).
-//! - **Closed walls (opt-in).** 9504880's removal of the edges between a moved face and
-//!   one that stayed on one surface runs only with
-//!   `Kernel::fixes.local_operation_closes_walls_to_nothing` (WR-566 addendum); a face is
-//!   on a new surface there when it is a moved face ([`MARK_MOVED`]) lying on one.
+//! - **Closed walls.** 9504880's removal of the edges between a moved face and one that
+//!   stayed on one surface (WR-566 addendum): a face is on a new surface there when it is
+//!   a moved face ([`MARK_MOVED`]) lying on one.
 //! - No recursion.
 
 use crate::blend::feature_executive::{is_open_base_refusal, FeatureExecutive, RebuildBrepType};
@@ -904,30 +903,10 @@ impl OffsetFacesExecutive {
         // The local operation takes the surfaces over, also when it fails.
         local_operation_simple(k, b, &faces, surfaces)?;
 
-        if k.fixes.local_operation_closes_walls_to_nothing {
-            return self.join_across_closed_walls(k, b, &targets, tol);
-        }
-
-        // Some face must lie on one of the surfaces, or the operation moved none.
-        let mut moved_any = false;
-        for f in crate::topology::brep::p1::faces(b, None)? {
-            if on_target(k, b, f, &targets, tol)? {
-                moved_any = true;
-                break;
-            }
-        }
-        if !moved_any {
-            return Err(self.refuse(
-                OffsetFacesRefusal::NoEffect,
-                "the local operation reported success but moved no face onto its new surface",
-                None,
-            ));
-        }
-        Ok(())
+        self.join_across_closed_walls(k, b, &targets, tol)
     }
 
-    /// The end of step 4 with `Kernel::fixes.local_operation_closes_walls_to_nothing`
-    /// (fork 9504880, WR-566 addendum): the faces on the new surfaces collected, and the
+    /// The end of step 4 (fork 9504880, WR-566 addendum): the faces on the new surfaces collected, and the
     /// edges between such a face and one that stayed, which `SmEdge::IsTopological`
     /// finds removable, removed (`RemoveTopologicalEdgesAndVertices`), with the vertices
     /// at their ends where those join two edges on one curve. A face the move closed to

@@ -13,12 +13,11 @@
 //! Deviations: the solvers of the corner's two filleted edge uses are resolved by the
 //! caller (`GetFilletSolverOfEdgeuse`, which has no effects) and swapped with them.
 //! Edge uses, faces and edges that upstream dereferences are input errors when
-//! missing. There is no recursion. With `Kernel::fixes.fillet_3x2_mixed_concave_side_edge`
-//! (WR-524, off by default) the roles of the two fillets follow the unfilleted edge's
-//! convexity, as tangency-labs/smlib@1255993: where that edge is concave, the convex
-//! fillet's rail crosses it and the concave one's crosses its continuation. With
-//! `Kernel::fixes.fillet_3x2_tangent_side_edge_roles` too (WR-597), an unfilleted edge
-//! tangential at the vertex takes its roles from the convex fillet's face corner, as
+//! missing. There is no recursion. The roles of the two fillets follow the unfilleted
+//! edge's convexity (WR-524), as tangency-labs/smlib@1255993: where that edge is concave,
+//! the convex fillet's rail crosses it and the concave one's crosses its continuation;
+//! upstream always gives them as in an L-shaped box. An
+//! unfilleted edge tangential at the vertex (WR-597) takes its roles from the convex fillet's face corner, as
 //! tangency-labs/smlib@c17b745.
 
 use std::collections::BTreeMap;
@@ -79,10 +78,9 @@ fn live(solvers: &[Option<SolverObject>], id: FilletSolverId) -> Result<&FilletS
 }
 
 /// Whether the convex fillet's rail crosses the unfilleted edge use `curr_eu` (upstream's
-/// `pCrossEU`) at a 3x2 mixed-convexity corner, with
-/// `Kernel::fixes.fillet_3x2_mixed_concave_side_edge` (WR-524): by default when
-/// `IsConvexRadialSector(5)` holds for it. With `fillet_3x2_tangent_side_edge_roles`
-/// (WR-597, tangency-labs/smlib@c17b745), an edge whose faces meet tangentially at
+/// `pCrossEU`) at a 3x2 mixed-convexity corner (WR-524): by default when
+/// `IsConvexRadialSector(5)` holds for it. As tangency-labs/smlib@c17b745 (WR-597), an
+/// edge whose faces meet tangentially at
 /// `vertex` has no convexity and the convex fillet's rail crosses it unless the convex
 /// fillet's face shared with it turns more than half a turn there
 /// (`sm_CheckFaceComplimentaryCornerConcavity`).
@@ -98,15 +96,13 @@ fn cross_uses_convex_fillet(
     // An unfilleted edge whose faces meet tangentially at the vertex (a block's side
     // running tangent into a cylinder whose wall the block's top meets above it) has no
     // convexity: the roles follow the faces' corners (WR-597).
-    if k.fixes.fillet_3x2_tangent_side_edge_roles
-        && check_tangential_edgeuse_at_vertex(
-            k,
-            target,
-            curr_eu,
-            vertex,
-            crate::math::rad_to_deg(tangency_tol_radians),
-        )?
-    {
+    if check_tangential_edgeuse_at_vertex(
+        k,
+        target,
+        curr_eu,
+        vertex,
+        crate::math::rad_to_deg(tangency_tol_radians),
+    )? {
         curr = !check_face_complimentary_corner_concavity(
             k, target, vertex, convex_eu, curr_eu, None,
         )?;
@@ -177,26 +173,22 @@ impl FilletCorner {
             .iter()
             .copied()
             .find(|&eu| eu != convex_eu && eu != concave_eu);
-        // By default the concave fillet's rail crosses the unfilleted edge (pCrossEU) and
-        // the convex one's its continuation (pExtEU), as in an L-shaped box. With
-        // `fillet_3x2_mixed_concave_side_edge` (WR-524) the roles follow the unfilleted
-        // edge's convexity, as tangency-labs/smlib@1255993: that fork resolves the
-        // in-between edge use and its convexity before the solvers.
-        let (cross_eu, ext_eu, cross_id, ext_id) = if k.fixes.fillet_3x2_mixed_concave_side_edge {
-            let curr_eu = curr_eu_found
-                .ok_or_else(|| SolidError::blend_missing(OP, "the corner's unfilleted edge use"))?;
-            if cross_uses_convex_fillet(
-                k,
-                target,
-                curr_eu,
-                convex_eu,
-                vertex,
-                self.tangency_tol_radians,
-            )? {
-                (convex_eu, concave_eu, convex_id, concave_id)
-            } else {
-                (concave_eu, convex_eu, concave_id, convex_id)
-            }
+        // Upstream always lets the concave fillet's rail cross the unfilleted edge
+        // (pCrossEU) and the convex one's its continuation (pExtEU), as in an L-shaped
+        // box. Here the roles follow the unfilleted edge's convexity (WR-524), as
+        // tangency-labs/smlib@1255993: that fork resolves the in-between edge use and its
+        // convexity before the solvers.
+        let curr_eu = curr_eu_found
+            .ok_or_else(|| SolidError::blend_missing(OP, "the corner's unfilleted edge use"))?;
+        let (cross_eu, ext_eu, cross_id, ext_id) = if cross_uses_convex_fillet(
+            k,
+            target,
+            curr_eu,
+            convex_eu,
+            vertex,
+            self.tangency_tol_radians,
+        )? {
+            (convex_eu, concave_eu, convex_id, concave_id)
         } else {
             (concave_eu, convex_eu, concave_id, convex_id)
         };
@@ -207,9 +199,6 @@ impl FilletCorner {
             let cross_solver = live(solvers, cross_id)?;
             let ext_fg = ext_solver.first_fillet_geom()?;
             let cross_fg = cross_solver.first_fillet_geom()?;
-
-            let curr_eu = curr_eu_found
-                .ok_or_else(|| SolidError::blend_missing(OP, "the corner's unfilleted edge use"))?;
 
             // This edgeuse is 'in-between' two filletted edgeuses
             let fv0 = new_corner_vertex(k, pseudo, corner)?;
@@ -423,10 +412,8 @@ mod tests {
             .collect()
     }
 
-    fn roles(fix: bool) -> Vec<bool> {
+    fn roles() -> Vec<bool> {
         let mut k = Kernel::default();
-        k.fixes.fillet_3x2_mixed_concave_side_edge = true;
-        k.fixes.fillet_3x2_tangent_side_edge_roles = fix;
         let mut b = block_and_cylinder(&mut k);
         let at = Point3::new(40.0, -10.0, 15.0);
         let vertex = crate::topology::brep::p1::vertices(&b, None)
@@ -472,11 +459,9 @@ mod tests {
 
     #[test]
     fn wr_597_tangent_side_edge_takes_roles_from_the_face_corner() {
-        // IsConvexRadialSector on the G1 side edge reads "concave": the concave
-        // fillet's rail is sent across it
-        assert!(roles(false).iter().all(|&r| !r), "{:?}", roles(false));
-        // with the fix the convex fillet's top face turns less than half a turn at the
-        // vertex, so its rail crosses the side edge
-        assert!(roles(true).iter().all(|&r| r), "{:?}", roles(true));
+        // IsConvexRadialSector on the G1 side edge reads "concave", but the convex
+        // fillet's top face turns less than half a turn at the vertex, so its rail
+        // crosses the side edge
+        assert!(roles().iter().all(|&r| r), "{:?}", roles());
     }
 }

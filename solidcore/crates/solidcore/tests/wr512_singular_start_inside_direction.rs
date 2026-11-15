@@ -1,12 +1,12 @@
-//! WR-512 (`UpstreamFixes::ssi_singular_start_inside_direction`, #1522, #1576) at operation
+//! WR-512 (the singular start's inside direction, #1522, #1576; now the only path) at operation
 //! level: #1522's knife-edge part. A 41 1/6 x 21 plate is joined with the corner a circle of
 //! radius 21 leaves, 10 high, whose arc wall runs out into the back face in a knife edge; its
 //! top front edge is rounded R2, then the arc wall's top edge R2, both picked at the points of
 //! the fork's capi test (tangency-labs/smlib@d37ca80, `capi/tests/ops_kernel.cpp`). The arc
 //! round ends on the front round where both are tangent to the top face, a start point of
 //! their intersection with four directions out of it. Upstream starts the curve along the
-//! first of them, which need not point into either face, and the round fails with 1001; with
-//! the flag it starts along the inside direction nearest the given one and the round builds.
+//! first of them, which need not point into either face, and the round fails with 1001; the
+//! port starts along the inside direction nearest the given one and the round builds.
 //!
 //! The pinned C++ (v1.0.1) fails the arc round with 1001 too. With only the fork's line added
 //! to `SmAdvSurfaceIntersector::ComputeSingularityPoint` (`SmAdvSurfaceIntersector.cpp`
@@ -15,8 +15,8 @@
 //! WR-568's span as well, which the default kernel takes, 9531.3100486849. There is
 //! no closed form: the round's ends, on the front round and into the knife edge, are traced.
 //! #1522's second case (a 20 cube, its top back edge rounded r3, then the end face's top
-//! edge r1) builds to the same volume with and without the flag, in the pinned C++ and with
-//! the fix, so it does not reach this guard and is not tested here.
+//! edge r1) builds to the same volume with and without the fix, in the pinned C++ and in
+//! the port, so it does not reach this guard and is not tested here.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -103,14 +103,6 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     brep_volume(k, b, 1e-8, &attrs).unwrap()
 }
 
-/// The arc round fails as upstream does: `SmFilletExecutive` status 1001.
-fn assert_refused(r: solidcore::Result<()>) {
-    match r {
-        Err(e) if solidcore::error::upstream_status(&e) == Some(1001) => {}
-        other => panic!("expected status 1001, got {other:?}"),
-    }
-}
-
 /// The arc round built one manifold solid that checks clean, of the C++ volume `want` within
 /// `tol` relative.
 fn assert_built_to(k: &mut Kernel, b: &mut Brep, r: solidcore::Result<()>, tol: f64, want: f64) {
@@ -133,21 +125,12 @@ fn assert_built_to(k: &mut Kernel, b: &mut Brep, r: solidcore::Result<()>, tol: 
     );
 }
 
-#[test]
-fn default_kernel_refuses_the_arc_round() {
-    let mut k = Kernel::default();
-    assert!(!k.fixes.ssi_singular_start_inside_direction);
-    let (_, r) = both_rounds(&mut k);
-    assert_refused(r);
-}
-
-/// The default kernel with the flag: the C++ body with the fork's line and WR-568's span,
+/// The default kernel: the C++ body with the fork's line and WR-568's span,
 /// [`BOTH_ROUNDS_SPAN`], to 1e-9 (the gate's tolerance; the same construction and integration
 /// on both sides).
 #[test]
-fn the_flag_builds_the_arc_round() {
+fn the_default_kernel_builds_the_arc_round() {
     let mut k = Kernel::default();
-    k.fixes.ssi_singular_start_inside_direction = true;
     let (mut b, r) = both_rounds(&mut k);
     assert_built_to(&mut k, &mut b, r, 1e-9, BOTH_ROUNDS_SPAN);
 }
@@ -156,24 +139,15 @@ fn the_flag_builds_the_arc_round() {
 /// arc wall's top edge runs on tangentially into the front round's end arc on the wall, is
 /// no End at a smooth vertex (tangency-labs/solidcore#2656: the end arc turns into the wall
 /// away from the top edge continued, so the round run on leaves the part). It runs on as
-/// before smlib#124: without the WR-512 line it is refused as the pinned C++ refuses it,
-/// with it it builds the pinned C++'s body with that line, [`BOTH_ROUNDS`], to 1e-8 (the
+/// before smlib#124: with the WR-512 line it builds the pinned C++'s body with that line, [`BOTH_ROUNDS`], to 1e-8 (the
 /// fork's End, tangency-labs/smlib@18e96f1, caps it there instead: 9532.2987121741 with
 /// `SmApiFilletEdges` and `SmApiBrepComputeVolume` at 1e-8, 0.99 more).
 #[test]
 fn the_blend_corner_runs_the_arc_round_on_as_the_pinned_with_wr512() {
-    for wr512 in [false, true] {
-        let mut fixes = UpstreamFixes::all();
-        fixes.ssi_singular_start_inside_direction = wr512;
-        let mut k = Kernel {
-            fixes,
-            ..Kernel::default()
-        };
-        let (mut b, r) = both_rounds(&mut k);
-        if wr512 {
-            assert_built_to(&mut k, &mut b, r, 1e-8, BOTH_ROUNDS);
-        } else {
-            assert_refused(r);
-        }
-    }
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let (mut b, r) = both_rounds(&mut k);
+    assert_built_to(&mut k, &mut b, r, 1e-8, BOTH_ROUNDS);
 }

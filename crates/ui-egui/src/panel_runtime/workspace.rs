@@ -103,6 +103,7 @@ pub enum HostSharedAction {
     Focus,
     Close,
     Collapse,
+    ResetHeight,
     Move(Zone),
     Join(SectionId),
     Popout,
@@ -2538,7 +2539,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                 drag: matches!(target, HostPointerTarget::Header { .. } | HostPointerTarget::Tab { .. }),
                                 title: matches!(target, HostPointerTarget::Header { .. }),
                                 grip_only: matches!(target, HostPointerTarget::Header { .. })
-                                    && (tab_drop.is_some() || section.tabs.len() + section.hidden_tabs.len() > 1),
+                                    && (paint_section.side_strip || tab_drop.is_some() || section.tabs.len() + section.hidden_tabs.len() > 1),
                                 rtl: self.layout.direction == Direction::Rtl,
                             },
                             if matches!(target, HostPointerTarget::Header { instance } | HostPointerTarget::Tab { instance }
@@ -2649,7 +2650,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                 let t = solidcraft_theme::Tokens::get();
                 // The title and its controls share the card background. One
                 // kit separator spans the header, rather than per-control tiles.
-                if !section.inline {
+                if !section.inline && !paint_section.side_strip {
                     let header = egui_rect(paint_section.header);
                     if !section.collapsed {
                         t.secondary_hline(ui.painter(), header.x_range(), header.bottom(), t.dialog_rule);
@@ -2981,6 +2982,9 @@ fn paint_drop_tabs(
 }
 
 fn content_header_bounds(section: &HostSection) -> Option<LogicalRect> {
+    if section.side_strip {
+        return None;
+    }
     let body = section.body?;
     let y = super::layout::bottom(section.action_bar.unwrap_or(section.header));
     let height = body.origin.y - y;
@@ -3085,8 +3089,15 @@ impl WorkspacePanelHost {
                 if runtime.layout().interaction().focused.as_ref() != Some(instance) || section.collapsed {
                     presentation.push(HostSharedAction::Focus);
                 }
-                if section_collapsible(layout, runtime.layout().registry(), section).unwrap_or(false) {
+                if !frame.layout.sections.iter().any(|card| card.section == section.id && card.side_strip)
+                    && section_collapsible(layout, runtime.layout().registry(), section).unwrap_or(false)
+                {
                     presentation.push(HostSharedAction::Collapse);
+                }
+                if section.preferred_extent.is_some()
+                    && super::layout::sole_side_section(layout, section, &frame.layout.allocation_environment.available)
+                {
+                    presentation.push(HostSharedAction::ResetHeight);
                 }
                 let mut placement: Vec<_> = [Zone::Left, Zone::Right, Zone::Bottom, Zone::Floating]
                     .into_iter()
@@ -3380,6 +3391,7 @@ fn shared_menu_icon(action: &HostSharedAction, collapsed: bool, direction: Direc
     match action {
         HostSharedAction::Focus => "fit",
         HostSharedAction::Close => "close",
+        HostSharedAction::ResetHeight => "panel_reset_height",
         HostSharedAction::Collapse if collapsed => return ui_kit::Icon::Paint(&ui_kit::panel_expand_menu_icon),
         HostSharedAction::Collapse => return ui_kit::Icon::Paint(&ui_kit::panel_collapse_menu_icon),
         HostSharedAction::Move(zone @ (Zone::Left | Zone::Right)) if matches!(direction.edge(*zone), Ok(PhysicalEdge::Left)) => "panel_dock_left",
@@ -3428,6 +3440,7 @@ fn shared_label(
             HostSharedAction::Focus => "ui.panel_host.focus",
             HostSharedAction::Close => "ui.panel_host.close",
             HostSharedAction::Collapse => "ui.panel_host.collapse",
+            HostSharedAction::ResetHeight => "ui.panel_host.reset_height",
             HostSharedAction::Move(zone @ (Zone::Left | Zone::Right)) => {
                 if matches!(runtime.environment().direction.edge(*zone), Ok(PhysicalEdge::Left)) {
                     "ui.panel_host.left"
@@ -3459,6 +3472,7 @@ fn shared_action(
         HostSharedAction::Focus => vec![Mutation::Focus { instance: instance.clone() }],
         HostSharedAction::Close => vec![Mutation::Close { instance: instance.clone() }],
         HostSharedAction::Collapse => vec![Mutation::Collapse { section: section.id.clone(), collapsed: !section.collapsed }],
+        HostSharedAction::ResetHeight => vec![Mutation::ResetSideHeight { section: section.id.clone() }],
         HostSharedAction::Join(target) => {
             let target_section = service.layout().section(target)?;
             vec![Mutation::Move {

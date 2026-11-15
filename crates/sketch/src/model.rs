@@ -129,6 +129,11 @@ impl PointExprs {
         [("Point X", &self.x), ("Point Y", &self.y)].into_iter().filter_map(|(what, e)| e.as_ref().map(|e| (what, e))).collect()
     }
 
+    /// The expressions as text, such as `x = "w", y = "h / 2"`.
+    pub fn describe(&self) -> String {
+        [("x", &self.x), ("y", &self.y)].into_iter().filter_map(|(c, e)| e.as_ref().map(|e| format!("{c} = \"{e}\""))).collect::<Vec<_>>().join(", ")
+    }
+
     /// Mutable view of [`PointExprs::list`], for renaming the parameters they refer to.
     pub fn list_mut(&mut self) -> Vec<&mut String> {
         [&mut self.x, &mut self.y].into_iter().filter_map(Option::as_mut).collect()

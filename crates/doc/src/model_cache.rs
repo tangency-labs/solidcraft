@@ -571,6 +571,7 @@ impl SavedModel {
             let sketch_keys = key_sets.get(index(s.get("sketch_key_set"), key_sets.len())?).cloned().ok_or_else(|| bad("saved model: state"))?;
             Ok(ModelState {
                 frame_bodies: Default::default(),
+                origin_frames: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
                 sketches: ids("sketches", sketches.len())?.into_iter().filter_map(|i| sketches.get(i).cloned()).collect(),
                 body_counter: index(s.get("body_counter"), usize::MAX)?,
@@ -592,6 +593,9 @@ impl SavedModel {
                 blend_edges: serde_json::from_value(field("blend_edges")?).map_err(invalid)?,
                 fitted: serde_json::from_value(field("fitted")?).map_err(invalid)?,
                 tapered: serde_json::from_value(field("tapered")?).map_err(invalid)?,
+                // Not kept either: every state would list those of all the features before it.
+                // A pattern's copies then find their sources' faces by name.
+                named_faces: BTreeMap::new(),
                 // A join's notice is for the evaluation that made it, not kept with the cache.
                 kept_separate: BTreeMap::new(),
                 // Not kept either: a saved model's states carry no lineage, so the check of a
@@ -937,6 +941,7 @@ impl Model {
                     .map(|v| serde_json::from_value::<kernel::ImportReport>(v.clone()).map(Arc::new).map_err(|_| bad("saved model: import report")))
                     .transpose()?,
                 repair: None,
+                lost_projections: None,
                 ms,
                 skipped: r.get("skipped").and_then(Json::as_bool).ok_or_else(|| bad("saved model: skipped"))?,
                 stale: false,
@@ -987,6 +992,7 @@ impl Model {
                         warning: r.warning.clone(),
                         import_report: r.import_report.clone(),
                         repair: r.repair.clone(),
+                        lost_projections: None,
                         ms: r.ms,
                         state: r.state.clone(),
                     },

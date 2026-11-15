@@ -255,6 +255,20 @@ fn step_export_of_a_flanged_enclosure_finishes_and_reads_back() {
     assert_eq!(file_faces, 29);
 }
 
+/// #15418 (solidcore, PR #16594): the flanged enclosure's flange walls lie on planes 1.2e-10 to
+/// 9.8e-10 off the walls they continue (the booleans' rounding). The cleanup merges each pair,
+/// two planes covering each other within upstream's plane tolerance with no tolerance raised:
+/// 29 faces, and the body is valid.
+#[test]
+fn a_flanged_enclosure_s_near_coplanar_walls_merge_and_the_body_is_valid() {
+    let s = replay(include_str!("../../../examples/regressions/step_export_flanged_enclosure.json"));
+    let state = s.model.state();
+    let body = &state.body("Unterteil").unwrap().body;
+    assert_eq!(body.face_count(), 29);
+    let v = solidcraft_kernel::validity(body);
+    assert!(v.ok(), "{v:?}");
+}
+
 /// The body's STEP text, which reads back without warnings as one closed solid of the same
 /// volume and area, and the number of faces the file holds.
 fn read_back(s: &Session, body: &solidcraft_kernel::Body) -> (String, usize) {
@@ -1886,4 +1900,107 @@ fn cut_removes_a_target_inside_its_tools() {
             assert!((volume(&s, tool) - kept).abs() < 1e-6, "{tool} is kept as it was: {cut}");
         }
     }
+}
+
+/// A long thin ellipse extruded off a flipped plane is a solid with positive volume. Its sketch
+/// loop is one closed spline; the kernel took the region outside the body from a ray aimed at one
+/// of its edges, which met the wall and the cap there but no edge, and classified the ray start
+/// by the wall alone: the body came out inside out ("no mass"), and an intersect or a pattern
+/// of it with this tool cut where it should have kept.
+#[test]
+fn a_long_thin_ellipse_extruded_from_a_flipped_plane_has_its_volume() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "XZ", "flip": true})),
+        ("sketch.ellipse", json!({"center": [0, 67.5], "major": [0, 135], "minor_radius": 5})),
+        ("solid.extrude", json!({"distance": "-4 mm"})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let want = std::f64::consts::PI * 67.5 * 5.0 * 4.0;
+    let got = volume(&s, "Body1");
+    assert!((got - want).abs() < 1e-3 * want, "volume {got}, an ellipse of semi-axes 67.5 and 5 over 4 mm is {want}");
+}
+
+/// #15913: eight fins thickened from a lofted blade surface and patterned round a hub's axis,
+/// joined into the hub in one Combine. The fins' tips overlap in slivers at the axis, inside the
+/// hub. The kernel's union paired fins with each other first and refused ("the union would delete
+/// face 20"); the join now takes them into the hub one at a time, where each overlap lies inside.
+#[test]
+fn fins_meeting_at_the_axis_join_into_their_hub() {
+    let s = replay(include_str!("../../../examples/regressions/fins_joined_into_their_hub.json"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    let names: Vec<&str> = state.bodies.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, ["Body1", "Body2"], "the fins went into the hub; the blade surface stays");
+    let hub = &state.body("Body1").unwrap().body;
+    assert_eq!(hub.shell_count(), 1);
+    assert!(hub.validity().is_empty(), "{:?}", hub.validity());
+    // R10 x 10 hub (3141.59) and eight 278.10 fins, less what lies inside the hub and the tips'
+    // overlaps.
+    let v = volume(&s, "Body1");
+    assert!((v - 4624.24).abs() < 0.05, "{v}");
+}
+
+/// #17004: a body whose 2 mm round has two pieces swept 0.45 degrees (plane-to-cone rounds kept as
+/// surfaces of revolution) could not be read back into the kernel, so every later operation on it
+/// failed with "an exact net's NURBS form is not a surface of revolution's parametrisation". The
+/// design is #16948's; a 1 mm round on the cylinder's top rim, far from those pieces, now builds.
+#[test]
+fn a_body_with_round_pieces_swept_under_a_degree_takes_a_later_round() {
+    use std::f64::consts::PI;
+    let mut s = replay(include_str!("../../../examples/regressions/round_pieces_swept_under_a_degree.json"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let counts = |s: &Session| {
+        let m = solidcraft_kernel::measure(&s.model.state().body("Body1").unwrap().body).unwrap();
+        (m.merged.faces, m.merged.edges, m.merged.vertices)
+    };
+    assert_eq!(counts(&s), (17, 39, 24));
+    let before = volume(&s, "Body1");
+    s.execute("solid.fillet", &json!({"body": "Body1", "edges": [[0.0, 22.5, 30.0]], "radius": 1})).unwrap();
+    let state = s.model.state();
+    let body = &state.body("Body1").unwrap().body;
+    assert_eq!(body.shell_count(), 1);
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // The rim, one circle with one vertex, becomes the round's face between two circles, with its
+    // seam: one face, two edges (the second circle and the seam) and the second circle's vertex more.
+    assert_eq!(counts(&s), (18, 41, 25));
+    // Pappus: the round takes off the corner between a square and its 1 mm quarter circle,
+    // r^2 (1 - pi/4), whose centroid lies r (10 - 3 pi) / (12 - 3 pi) in from each face, swept
+    // round the rim of radius 22.5.
+    let (r, rim) = (1.0, 22.5);
+    let removed = 2.0 * PI * (rim - r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI)) * r * r * (1.0 - PI / 4.0);
+    let got = before - volume(&s, "Body1");
+    assert!((got - removed).abs() < 1e-5, "removed {got} mm³, the rim's round takes {removed}");
+}
+
+/// #15603: a circle (R 55) with a handle, extruded 16 mm. The concave arc (R 49) from the handle's
+/// top meets the circle at a 6° bend, not tangentially, and the two circles cross again 5.5 mm on.
+/// The 2 mm fillet of the arc and the handle's top was refused (status 1001): the kernel ran the
+/// round on past the bend to end it on the circle's wall, where the sliver of the disc between
+/// the two crossings stands across it. The round now ends at the bend, on a face square to the
+/// arc. It takes its section, (1 - pi/4) r^2, along exactly the two edges: straight along the
+/// handle and, by Pappus, round the arc's centre at the section's centroid (outside the arc).
+#[test]
+fn a_fillet_of_a_tangent_chain_ends_at_a_slight_bend() {
+    let script = include_str!("../../../examples/regressions/fillet_ending_at_a_slight_bend.json");
+    let s = replay(script);
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    let body = &state.body("Body2").unwrap().body;
+    assert_eq!(body.shell_count(), 1);
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    let mut before: Value = serde_json::from_str(script).unwrap();
+    before["commands"].as_array_mut().unwrap().pop();
+    let removed = volume(&replay(&before.to_string()), "Body2") - volume(&s, "Body2");
+    // the sketch's points: the arc's centre and its ends (the bend last), the handle's far end
+    let centre = [63.456_646_255_239_15_f64, 82.214_682_667_011_74];
+    let (arc_start, bend) = ([74.971_633_941_353_83_f64, 34.586_906_542_268_86], [35.728_226_336_305_426_f64, 41.814_995_430_607_56]);
+    let handle_end = [156.619_250_155_198_76_f64, 54.326_885_432_751_18];
+    let about = |p: [f64; 2]| (p[1] - centre[1]).atan2(p[0] - centre[0]);
+    let (sweep, handle) = (about(arc_start) - about(bend), (handle_end[0] - arc_start[0]).hypot(handle_end[1] - arc_start[1]));
+    let r = 2.0_f64;
+    let (area, c) = ((1.0 - std::f64::consts::FRAC_PI_4) * r * r, r * (10.0 - 3.0 * std::f64::consts::PI) / (3.0 * (4.0 - std::f64::consts::PI)));
+    let want = area * (sweep * (49.0 + c) + handle);
+    assert!((removed - want).abs() < 1e-4, "removed {removed}, expected {want}");
 }
