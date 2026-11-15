@@ -160,7 +160,7 @@ fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui.heading("Drawing status");
                 ui.label(format!("Status unavailable: {error}"));
             });
-        } else if let Some(snapshot) = app.drawing_workspace.status_controller.snapshot() {
+        } else if let Some(snapshot) = app.drawing_workspace.status_controller.snapshot().cloned() {
             crate::drawing_attention_card::show(ui, &snapshot);
             let selection = app.session.selection.clone();
             let mut repair_state = std::mem::take(&mut app.drawing_workspace.repair_ui);
