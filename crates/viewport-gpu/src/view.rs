@@ -6597,6 +6597,16 @@ mod glass_tests {
         assert_eq!(count(&drawn, &is_red), 0, "the red body's block lines give way to the layer's");
         assert!(count(&drawn, &is_green) > 40, "the other body's lines stay");
         assert!(count(&drawn, &is_blue) > 20, "the layer's lines are drawn");
+        // Halfway through its fade-in both are drawn, each half see-through.
+        frame.edge_layer_fade = 0.5;
+        let fading = render_frame(&mut renderer, &device, &queue, &frame, true);
+        let (reddish, bluish) = (
+            |p: &[u8; 4]| p[0] > p[1].saturating_add(60) && p[0] > p[2].saturating_add(60),
+            |p: &[u8; 4]| p[2] > p[0].saturating_add(60) && p[2] > p[1].saturating_add(60),
+        );
+        assert!(count(&fading, &reddish) > 20 && count(&fading, &bluish) > 20, "both lines while it fades");
+        assert_eq!(count(&fading, &is_red), 0, "the replaced lines are faded, not whole");
+        frame.edge_layer_fade = 1.0;
         // A layer made for another scene (the model changed since) is not drawn.
         frame.edge_layer = Some(Arc::new(EdgeLayer {
             scene_key: frame.key + 1,
