@@ -748,7 +748,8 @@ mod representational_continuity_tests {
     /// is the closed form of `check_dir`, and the volume has discontinuities exactly
     /// when a direction's lowest interior class is below `G1` (WR-49: upstream left the
     /// last knot `Undefined` and took knot `0` as `C0`). The retired flag guarded only
-    /// this branch, so every moved row of this unit is one of these cases.
+    /// this branch; the test asserts that each of the 721 moved rows (listed in
+    /// `fixtures/surface_b_spline_volume_n_lib_wr49_moved.txt`) is one of these cases.
     #[test]
     fn representational_continuities_are_the_closed_form() {
         let ctx = CaseContext {
@@ -757,6 +758,7 @@ mod representational_continuity_tests {
         };
         let k = Kernel::default();
         let (mut conts, mut has) = (0, 0);
+        let mut checked: Vec<String> = Vec::new();
         for c in Runner.cases(&ctx).unwrap() {
             match c.parse::<Inputs>().unwrap() {
                 Inputs::Conts {
@@ -787,6 +789,7 @@ mod representational_continuity_tests {
                     } else {
                         assert!(d.params.len() < 2, "{}: refused with knots", c.name);
                     }
+                    checked.push(c.name.clone());
                 }
                 Inputs::HasDisc {
                     vol,
@@ -810,10 +813,19 @@ mod representational_continuity_tests {
                     }
                     assert_eq!(r, below, "{}", c.name);
                     has += 1;
+                    checked.push(c.name.clone());
                 }
                 _ => {}
             }
         }
         assert!(conts > 0 && has > 0, "{conts} {has}");
+        // every row the retirement moves is one of the cases replayed above
+        let moved = include_str!("fixtures/surface_b_spline_volume_n_lib_wr49_moved.txt");
+        let mut n = 0;
+        for m in moved.lines().filter(|l| !l.is_empty()) {
+            assert!(checked.iter().any(|c| c == m), "moved row {m} not replayed");
+            n += 1;
+        }
+        assert_eq!(n, 721);
     }
 }

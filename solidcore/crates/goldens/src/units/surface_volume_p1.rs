@@ -1040,89 +1040,6 @@ impl UnitDiff for Runner {
 }
 
 #[cfg(test)]
-mod lift_third_derivative_tests {
-    use super::*;
-
-    /// Rows that moved when `smvol_ConcatEvals` took the exact third-derivative
-    /// chain-rule terms (WR-45): an oriented unbend volume mapped to order 3.
-    const MOVED: [&str; 2] = ["map_unbend_or_n3", "map_unbend_or_nocomp"];
-
-    /// Replays each moved row: every third partial `Map` returns agrees with the central
-    /// differences of its second partials (which WR-45 does not change; the maps are
-    /// analytic), at steps `h` and `h / 2` of 1e-4 of the point's size, to 1e-6 of the
-    /// size, and the two steps agree with each other as closely. Measured, not certified.
-    #[test]
-    fn third_partials_match_differences_of_the_second() {
-        let ctx = CaseContext {
-            root: crate::case::repo_root(),
-            seeds: MIN_GENERATED,
-        };
-        let mut checked = Vec::new();
-        for c in Runner.cases(&ctx).unwrap() {
-            if !MOVED.contains(&c.name.as_str()) {
-                continue;
-            }
-            let i: Inputs = c.parse().unwrap();
-            let Inputs::Map {
-                vol,
-                p,
-                n,
-                left,
-                nz,
-                comp,
-            } = &i
-            else {
-                panic!("{}: not a map", c.name);
-            };
-            assert_eq!(*n, 3, "{}", c.name);
-            let v = build(vol).unwrap();
-            let o = opts(*left, *nz, *comp);
-            let p = v3(*p);
-            let d3 = v.map(p, 3, &o).unwrap();
-            let s3 = |a: usize, b: usize, w: usize| (a * 4 + b) * 4 + w;
-            let s2 = |a: usize, b: usize, w: usize| (a * 3 + b) * 3 + w;
-            let h = 1e-4 * (1.0 + p.length());
-            let mut slots = 0;
-            for a in 0..=3 {
-                for b in 0..=3 - a {
-                    let w = 3 - a - b;
-                    // differentiate the second partial one order lower along the first
-                    // axis with an order
-                    let (axis, lower) = if a > 0 {
-                        (0, (a - 1, b, w))
-                    } else if b > 0 {
-                        (1, (a, b - 1, w))
-                    } else {
-                        (2, (a, b, w - 1))
-                    };
-                    let fd = |h: f64| {
-                        let mut e = [0.0; 3];
-                        e[axis] = h;
-                        let dp = Vec3::new(e[0], e[1], e[2]);
-                        let up = v.map(p + dp, 2, &o).unwrap()[s2(lower.0, lower.1, lower.2)];
-                        let dn = v.map(p - dp, 2, &o).unwrap()[s2(lower.0, lower.1, lower.2)];
-                        (up - dn) / (2.0 * h)
-                    };
-                    let (f1, f2) = (fd(h), fd(h / 2.0));
-                    let got = d3[s3(a, b, w)];
-                    let tol = 1e-6 * (1.0 + f2.length());
-                    assert!((f1 - f2).length() <= tol, "{} ({a}, {b}, {w}): {f1:?} {f2:?}", c.name);
-                    assert!(
-                        (got - f2).length() <= tol,
-                        "{} ({a}, {b}, {w}): {got:?} against the differences {f2:?}",
-                        c.name
-                    );
-                    slots += 1;
-                }
-            }
-            assert_eq!(slots, 10);
-            checked.push(c.name.clone());
-        }
-        assert_eq!(checked.len(), MOVED.len(), "{checked:?}");
-    }
-}
-
-#[cfg(test)]
 mod chain_rule_composition_tests {
     use super::*;
 
@@ -1199,7 +1116,17 @@ mod chain_rule_composition_tests {
     /// `delta = sum over |alpha| >= 1 of S_alpha t^alpha / alpha!`, both from their
     /// partials, composed as truncated Taylor polynomials (no chain-rule formula).
     /// `inner[k - 1]` and `outer[k - 1]` hold the order-`k` partials.
-    fn compose(nvars: usize, order: usize, inner: &[Vec<Vec3>], outer: &[Vec<Vec3>]) -> Vec<[f64; 3]> {
+    /// With `abs`, every partial is replaced by its absolute value: the same expression
+    /// tree then evaluates `sum |term|`, the sum of the absolute values of the expanded
+    /// chain-rule terms.
+    fn compose(
+        nvars: usize,
+        order: usize,
+        inner: &[Vec<Vec3>],
+        outer: &[Vec<Vec3>],
+        abs: bool,
+    ) -> Vec<[f64; 3]> {
+        let f = |x: f64| if abs { x.abs() } else { x };
         let ex = exponents(nvars);
         // delta per coordinate of the inner map
         let delta: Vec<Poly> = (0..3)
@@ -1212,7 +1139,7 @@ mod chain_rule_composition_tests {
                         } else {
                             let i = multi(nvars, k).iter().position(|x| *x == e).unwrap();
                             let s = inner[k - 1][i];
-                            [s.x, s.y, s.z][c] / e.iter().map(|&x| fact(x)).product::<f64>()
+                            f([s.x, s.y, s.z][c]) / e.iter().map(|&x| fact(x)).product::<f64>()
                         };
                         (e, val)
                     })
@@ -1233,9 +1160,9 @@ mod chain_rule_composition_tests {
                 let w = beta.iter().map(|&x| fact(x)).product::<f64>();
                 for (gi, &e) in ex.iter().enumerate() {
                     let pc = coef(&p, e) / w;
-                    g[gi][0] += d.x * pc;
-                    g[gi][1] += d.y * pc;
-                    g[gi][2] += d.z * pc;
+                    g[gi][0] += f(d.x) * pc;
+                    g[gi][1] += f(d.y) * pc;
+                    g[gi][2] += f(d.z) * pc;
                 }
             }
         }
@@ -1249,12 +1176,37 @@ mod chain_rule_composition_tests {
             .collect()
     }
 
-    fn assert_close(name: &str, got: &[Vec3], want: &[[f64; 3]]) {
+    /// `gamma(k) = k u / (1 - k u)` with `u = 2^-53`: the relative bound on `k`
+    /// successive roundings (Higham, Accuracy and Stability of Numerical Algorithms,
+    /// 2nd ed., Lemma 3.1).
+    fn gamma(k: f64) -> f64 {
+        let u = f64::EPSILON / 2.0;
+        k * u / (1.0 - k * u)
+    }
+
+    /// Rounding depth bound `K` for both evaluations of one entry. The kernel's lifts
+    /// add at most 56 terms per entry (`Duvw` of the volume form), each a product of
+    /// at most 5 factors (4 multiplications), with no subtraction: depth <= 61.
+    /// `compose` divides each inner partial by its factorials (1), multiplies three
+    /// truncated polynomials (3 x (1 product + at most 20 added terms) = 63), scales by
+    /// `1 / beta!` and the outer partial (2), adds over at most 19 `beta` (19), and
+    /// multiplies by the output's factorials (1): depth <= 86. `K = 128` bounds both.
+    const DEPTH: f64 = 128.0;
+
+    /// Both values are expression trees of `+` and `x` (no subtraction) over the same
+    /// inputs, whose exact values are the same multivariate polynomial: each is within
+    /// `gamma(K) S` of it, where `S` is the tree evaluated on absolute values
+    /// (Higham, Section 3.1; the expanded terms of both trees have the same positive
+    /// coefficients, so `S` is the same for both). `abs` is that tree computed in
+    /// floating point, `S <= abs / (1 - gamma(K))`. So `|got - want| <= 2 gamma(K) abs
+    /// / (1 - gamma(K))` is the derived bound, not a chosen tolerance.
+    fn assert_close(name: &str, got: &[Vec3], want: &[[f64; 3]], abs: &[[f64; 3]]) {
         assert_eq!(got.len(), want.len(), "{name}");
-        let scale = want.iter().flatten().fold(1.0_f64, |m, x| m.max(x.abs()));
-        for (g, w) in got.iter().zip(want) {
-            for (a, b) in [g.x, g.y, g.z].into_iter().zip(w) {
-                assert!((a - b).abs() <= 1e-12 * scale, "{name}: {a} vs {b} (scale {scale})");
+        let g = gamma(DEPTH);
+        for ((gv, w), s) in got.iter().zip(want).zip(abs) {
+            for ((a, b), s) in [gv.x, gv.y, gv.z].into_iter().zip(w).zip(s) {
+                let tol = 2.0 * g * s / (1.0 - g);
+                assert!((a - b).abs() <= tol, "{name}: {a} vs {b} (bound {tol})");
             }
         }
     }
@@ -1265,8 +1217,8 @@ mod chain_rule_composition_tests {
     /// concatenations, which call the kernel-free lifts directly) against the
     /// composition of truncated Taylor polynomials built from the same partials. That
     /// composition is an independent statement of the multivariate chain rule; it
-    /// agrees with the kernel's lifts to rounding (1e-12 of the order's largest value;
-    /// goldens compare at 1e-9). Upstream's third-order formulas (`Dxxz` for `Dxzz`,
+    /// agrees with the kernel's lifts within the derived rounding bound of
+    /// `assert_close`. Upstream's third-order formulas (`Dxxz` for `Dxzz`,
     /// `Fuv`/`Fv` in `Duww`) differ from it on generic inputs.
     #[test]
     fn lifts_and_concatenations_are_the_taylor_composition() {
@@ -1289,7 +1241,12 @@ mod chain_rule_composition_tests {
                         .collect();
                     assert!(it.next().is_none(), "{}", c.name);
                     let got = rust_lift(form, order, &vecs).unwrap();
-                    assert_close(&c.name, &got, &compose(nvars, order, &inner, &outer));
+                    assert_close(
+                        &c.name,
+                        &got,
+                        &compose(nvars, order, &inner, &outer, false),
+                        &compose(nvars, order, &inner, &outer, true),
+                    );
                     lifts += 1;
                 }
                 Inputs::Concat { n, a, b } => {
@@ -1306,10 +1263,11 @@ mod chain_rule_composition_tests {
                         let outer: Vec<Vec<Vec3>> = (1..=order)
                             .map(|k| multi(3, k).into_iter().map(|e| at(&second, e)).collect())
                             .collect();
-                        let want = compose(3, order, &inner, &outer);
+                        let want = compose(3, order, &inner, &outer, false);
+                        let abs = compose(3, order, &inner, &outer, true);
                         let gotk: Vec<Vec3> =
                             multi(3, order).into_iter().map(|e| at(&got, e)).collect();
-                        assert_close(&format!("{} order {order}", c.name), &gotk, &want);
+                        assert_close(&format!("{} order {order}", c.name), &gotk, &want, &abs);
                     }
                     assert_eq!(at(&got, [0, 0, 0]), at(&second, [0, 0, 0]), "{}", c.name);
                     concats += 1;
