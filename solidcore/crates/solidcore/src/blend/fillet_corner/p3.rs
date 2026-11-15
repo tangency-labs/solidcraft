@@ -784,9 +784,9 @@ impl FilletCorner {
     /// base. Lookups occur in `solver_eus` order after the topology walk, where the
     /// native factory reads tolerances and the surface generator. No solver is copied.
     /// `constant_offsets` tells whether an edge use's solver keeps its offsets constant
-    /// along the edge (a variable-radius law only where `OffsetRadiiCanChange` is false):
-    /// only such blends may take the second-order Join bound (`blend_corner::join_gap`,
-    /// #13911).
+    /// along the edge (`OffsetRadiiCanChange` false: rounds and the two-offset chamfers, by
+    /// construction): only such blends may take the second-order Join bound
+    /// (`blend_corner::join_gap`, #13911).
     ///
     /// # Errors
     ///
@@ -1161,8 +1161,14 @@ impl FilletCorner {
                                             Some(rail_eu) => eu1::face(b, rail_eu)?,
                                             None => None,
                                         };
-                                        // a variable-radius law's offset is not a
-                                        // constant reach: no offset, so the over-side
+                                        // only offsets fixed along the edge are a
+                                        // constant reach: rounds, and two-distance and
+                                        // distance-angle chamfers (constant-radius
+                                        // solvers whose two offsets are fixed once at
+                                        // preparation, `session::two_offsets`), by
+                                        // construction. A variable-radius law, or a
+                                        // constant-distance section (its offsets solved
+                                        // per section), gets no offset, so the over-side
                                         // bound refuses it
                                         let offset = if constant_offsets(eu) {
                                             solver.surface(rail)?.map_or(f64::NAN, |s| {

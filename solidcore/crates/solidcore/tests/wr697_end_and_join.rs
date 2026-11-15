@@ -761,7 +761,9 @@ fn joint_gap(k: &Kernel, b: &mut Brep, near: [f64; 3]) -> f64 {
 /// own section in its plane stands `sec(kink) - 1` off (#13911, `blend_corner::join_gap`): the
 /// Join up to 0.35 degrees (1.87e-5), the Turn at 0.375 (2.14e-5). Each builds and passes the
 /// check, and at each Join the check's vertex gap is that closed form (`kink` concave,
-/// `sec(kink) - 1` convex) to 1e-4 relative.
+/// `sec(kink) - 1` convex) to 1e-4 relative. That tolerance is MEASURED, not derived: the
+/// largest observed error is 3.7e-5 relative (convex, 0.35 degrees), 1.7e-6 at 1.14e-3
+/// degrees convex and 2.5e-6 concave, the solvers' and the check's own error included.
 #[test]
 fn a_near_straight_corner_joins_only_below_the_intersection_tolerance() {
     use BlendCornerEvent::{Join, Turn};

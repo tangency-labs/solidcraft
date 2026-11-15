@@ -83,9 +83,14 @@
 //! constant `R = oB`. A tilted wall stands within `h tan(delta)` of the upright one at
 //! depth `h`; the distance to a surface is 1-Lipschitz in the surface (Hausdorff), and the
 //! distance to the upright wall grows at unit rate along `b`, so each section's foot moves
-//! by at most that much: taken over `h <= 2 (oA + oB)` (ARGUED: the contacts lie within
-//! `oA + oB` of the plane), the shift `e = 2 (oA + oB) tan(delta)`, with `tan delta <=
-//! sin delta / (1 - sin delta)`. On #13911 `delta` is about `2.4e-18`.
+//! by at most that much. The depth is bounded (PROVEN, any `delta` below a quarter turn):
+//! the section's centre (a round's ball centre, the corner of a chamfer's two offset
+//! planes) stands `oA` below the plane; its foot on the plane is at depth 0, and its foot
+//! on the wall is the centre moved `oB` along the wall's normal, which is within `delta` of
+//! square to `n`, so at depth `oA + oB sin delta <= oA + oB`; a round's arc between its feet
+//! stays within its ball, at depth at most `oA + oB`. So `h <= oA + oB`, and the shift is
+//! taken as `e = 2 (oA + oB) tan(delta)` (twice that), with `tan delta <= sin delta / (1 -
+//! sin delta)`. On #13911 `delta` is about `2.4e-18`.
 //!
 //! **The second joint vertex** (PROVEN under the model). The Join's section ends on the
 //! first wall too. With both walls upright through `v`, the line `v + t n` lies in both:
@@ -93,10 +98,11 @@
 //! so its foot on the first wall is `v - oA1 n`, on that line. The second blend's rail on
 //! its wall is the second edge moved `oA2` down `n` and passes through `v - oA2 n`, on the
 //! same line. So the vertex there lies on the second wall and within `|oA1 - oA2|` of the
-//! second blend. For walls tilted by a nonzero `delta` up to [`MAX_TILT`], each wall's shift
-//! is added twice (ARGUED: it rests on the depth `h <= 2 (oA + oB)` above). Walls tilted
-//! past [`MAX_TILT`] (drafted walls) are refused, as no bound is derived for their common
-//! edge, and fall back to #16627's bound.
+//! second blend. For tilted walls each lies within its shift `e` of its upright wall over
+//! that depth (above), so the vertex moves by at most `e1` off the common line and the second
+//! blend's foot by at most `e2`, and each wall's shift is added twice. [`MAX_TILT`] is a
+//! conservative refusal cap, not a limit of this argument: walls tilted past it (drafted
+//! walls) fall back to #16627's bound.
 //!
 //! That the check's vertex gap is the larger of these two distances is ARGUED as the
 //! over/behind split above. MEASURED on `kinked_plate` (wr697): `sec(kink) - 1` to `1e-4`.
@@ -228,7 +234,7 @@ pub fn sagitta(curvature: f64, x: f64) -> Option<f64> {
 /// [`rail_curvature`], certified for its own rounding. Each reach's bound is how far the
 /// rail may stand off the edge's offset by it (a wall's shift, module docs), carried into
 /// the gap. `None` where `cos beta` is not proved positive, `tan beta > 1/2`, a reach is
-/// negative, a rail's curvature or sagitta is refused, the band (sagitta and shift) exceeds
+/// not proved positive, a rail's curvature or sagitta is refused, the band (sagitta and shift) exceeds
 /// the larger reach, or an edge's bound holds over less than the `1.05 X / (1 - R K)` of
 /// edge the rail runs over.
 #[must_use]
@@ -246,7 +252,8 @@ pub fn overlap_gap(
         return None;
     }
     let [r1, r2] = reaches;
-    if !(r1.value >= 0.0 && r2.value >= 0.0 && sin_beta.value >= 0.0) {
+    // the crossing argument needs each reach proved positive (`y = R2 > 0` at `x = 0`)
+    if !(r1.value - r1.bound > 0.0 && r2.value - r2.bound > 0.0 && sin_beta.value >= 0.0) {
         return None;
     }
     let cos_lo = cos_beta.value - cos_beta.bound;
@@ -564,9 +571,10 @@ fn rungs_tilt(
     (seen > 0 && seen == count && tilt <= MAX_TILT).then_some(tilt)
 }
 
-/// The largest ruling tilt (a sine) [`ruling_tilt`] takes: walls tilted further (drafted
-/// walls) are refused, as the second joint vertex is bounded only for walls this close to
-/// upright (module docs).
+/// The largest ruling tilt (a sine) [`ruling_tilt`] takes: a conservative refusal cap,
+/// chosen, not derived (the shift argument holds for any tilt below a quarter turn, module
+/// docs). It keeps the over-side Join to walls upright to rounding, as #13911's are (about
+/// `2.4e-18`); walls tilted further (drafted walls) fall back to #16627's bound.
 pub const MAX_TILT: f64 = 1e-9;
 
 /// The blend's [`AtVertex`] on `shared`, the plane of unit normal `normal`, or `None` where
@@ -873,6 +881,19 @@ mod tests {
         );
         assert_eq!(
             overlap_gap([exact(1.0), exact(-1.0)], exact(1.0), exact(0.0), flat),
+            None
+        );
+        // a zero reach, or one not proved positive: the crossing argument needs `R2 > 0`
+        assert_eq!(
+            overlap_gap([exact(1.0), exact(0.0)], exact(1.0), exact(0.0), flat),
+            None
+        );
+        let unsure_reach = Bounded {
+            value: 1e-12,
+            bound: 2e-12,
+        };
+        assert_eq!(
+            overlap_gap([exact(1.0), unsure_reach], exact(1.0), exact(0.0), flat),
             None
         );
         assert_eq!(overlap_gap(one, exact(f64::NAN), exact(0.0), flat), None);

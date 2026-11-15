@@ -2176,12 +2176,25 @@ impl<'target> FilletSession<'target> {
                         solvers
                             .get(id.0 as usize)
                             .and_then(Option::as_ref)
-                            .is_some_and(|s| match s {
-                                // a law whose radii can change has no constant reach
-                                SolverObject::VariableRadius(vr) => {
-                                    matches!(vr.offset_radii_can_change(), Ok(false))
-                                }
-                                _ => true,
+                            .is_some_and(|s| {
+                                // only offsets fixed along the edge are a constant reach
+                                // (`OffsetRadiiCanChange`, as the swept corners read it): a
+                                // constant-distance solver's offsets are solved per section
+                                let can_change = match s {
+                                    SolverObject::ConstantRadius(s) => {
+                                        FilletSolverOps::offset_radii_can_change(&**s)
+                                    }
+                                    SolverObject::VariableRadius(s) => {
+                                        FilletSolverOps::offset_radii_can_change(&**s)
+                                    }
+                                    SolverObject::ConstantDistance(s) => {
+                                        FilletSolverOps::offset_radii_can_change(&**s)
+                                    }
+                                    SolverObject::SurfaceSurface(s) => {
+                                        FilletSolverOps::offset_radii_can_change(&**s)
+                                    }
+                                };
+                                matches!(can_change, Ok(false))
                             })
                     },
                     |edgeuse| {
