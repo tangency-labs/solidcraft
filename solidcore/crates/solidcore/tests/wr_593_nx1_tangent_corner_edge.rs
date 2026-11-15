@@ -1,15 +1,15 @@
 //! WR-593 (tangency-labs/smlib@1ff7353): a stadium bar 10 high whose top meets a
 //! cylinder of the bar's end radius standing on its round end, the bar's flat sides
 //! running tangent into the cylinder (SolidCraft's test-peg part). Rounding the concave
-//! arc where the top meets the cylinder's wall with r 2 needs WR-457's
-//! `fillet_nx1_tangent_side_edge`: at each end of the arc
-//! `SmFilletNx1Corner::MakeCornerTopology` skips the tangent side edge (the cylinder's
-//! seam, here where its two half-circle walls meet) and takes the edge reached, the
-//! bar's flat side meeting its round end, as the corner's edge when it has the arc's
-//! convexity. That edge is G1, so its convexity is only the sign of rounding residues:
-//! with a sketch residue of 1e-10 in the bar's outline one end reads "opposite" and the
-//! round failed with status 1001. A tangential edge there is now taken as the corner's
-//! edge, as the exact geometry already has it.
+//! arc where the top meets the cylinder's wall with r 2 needs WR-457's tangent
+//! side-edge skip (once `fillet_nx1_tangent_side_edge`, now unconditional): at each end
+//! of the arc `SmFilletNx1Corner::MakeCornerTopology` skips the tangent side edge (the
+//! cylinder's seam, here where its two half-circle walls meet) and takes the edge
+//! reached, the bar's flat side meeting its round end, as the corner's edge when it has
+//! the arc's convexity. That edge is G1, so its convexity is only the sign of rounding
+//! residues: with a sketch residue of 1e-10 in the bar's outline one end reads
+//! "opposite" and the round failed with status 1001. A tangential edge there is now
+//! taken as the corner's edge, as the exact geometry already has it.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

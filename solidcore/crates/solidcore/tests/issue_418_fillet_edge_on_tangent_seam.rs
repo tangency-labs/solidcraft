@@ -79,22 +79,27 @@ fn fillet(slot_floor: f64) -> solidcore::Result<(f64, Brep)> {
     Ok((v, body))
 }
 
-/// The bar less the slot, less the round's section (4 - pi) over the slot's 6 mm.
-fn expected_volume() -> f64 {
+/// The bar less the slot (its half disc of the round end, and the strip of `slot_floor`
+/// x 19 beyond the seam), less the round's section `4 - pi` (r 2, convex) over the slot's
+/// 6 mm: the round's ends lie in the slot walls Z = 3.5 and 9.5, square to the edge.
+fn expected_volume(slot_floor: f64) -> f64 {
     let pi = core::f64::consts::PI;
-    14.0 * (25.0 * 19.0 + pi * R * R) - 6.0 * pi * R * R / 2.0 - 6.0 * (4.0 - pi)
+    14.0 * (25.0 * 19.0 + pi * R * R)
+        - 6.0 * (pi * R * R / 2.0 + slot_floor * 2.0 * R)
+        - 6.0 * (4.0 - pi)
 }
 
 #[test]
 fn seam_edge_round_with_the_fix() {
     let (v, _) = fillet(0.0).unwrap();
-    assert!(
-        (v - expected_volume()).abs() < 1e-3 * expected_volume(),
-        "{v}"
-    );
+    let want = expected_volume(0.0);
+    assert!((v - want).abs() < 1e-3 * want, "{v}");
 }
 
 #[test]
 fn off_seam_round_builds_a_manifold_solid() {
-    fillet(0.5).unwrap();
+    let (v, _) = fillet(0.5).unwrap();
+    let want = expected_volume(0.5);
+    assert!((want - 9706.665662772806).abs() < 1e-9);
+    assert!((v - want).abs() < 1e-3 * want, "{v}");
 }

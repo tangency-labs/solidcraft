@@ -1833,23 +1833,66 @@ mod wr457_certificates {
     /// The union's volume, 20 x 10 x 10 + 10 x 6 x 10.
     const UNION_VOLUME: f64 = 2600.0;
 
-    /// Each case with the sign of its single round's volume change (`None` for the
-    /// two-edge cases, which are enclosed only).
-    fn case_names() -> Vec<(&'static str, String, Option<f64>)> {
+    /// The two-edge cases whose edges are both concave and meet at a corner where the
+    /// rounds' ends are square to their edges: their volume has a closed form (see
+    /// [`two_concave_rounds`]).
+    const CONCAVE_PAIRS: [&str; 4] = [
+        "stubs3-union-overhang-corner-edges12-13-r1",
+        "stubs3-union-overhang-corner-edges14-15-r1",
+        "stubs3-union-overhang-front-edges14-15-r1",
+        "stubs3-union-overhang-front-edges15-16-r1",
+    ];
+
+    /// What closed form, if any, a case's volume must match.
+    #[derive(Clone, Copy, Debug)]
+    enum Form {
+        /// One round, with the sign of its volume change.
+        Single(f64),
+        /// Two concave rounds meeting at a corner.
+        ConcavePair,
+        /// No closed form: certified by the enclosure only.
+        None,
+    }
+
+    /// Each case with the closed form its volume must hold.
+    fn case_names() -> Vec<(&'static str, String, Form)> {
         let mut out: Vec<_> = CASES
             .iter()
-            .map(|&(f, n)| (f, n.to_string(), None))
+            .map(|&(f, n)| {
+                let form = if CONCAVE_PAIRS.contains(&n) {
+                    Form::ConcavePair
+                } else {
+                    Form::None
+                };
+                (f, n.to_string(), form)
+            })
             .collect();
         for (e, sign) in NX1_EDGES {
             for r in ["0.5", "1.0", "2.0"] {
                 out.push((
                     "stubs_round3.json",
                     format!("stubs3-overhang-union-nx1-multi-neighbour-end-face-edge{e}-r{r}"),
-                    Some(sign),
+                    Form::Single(sign),
                 ));
             }
         }
         out
+    }
+
+    /// The volume of the union with two concave rounds of radius `r` whose edges, of
+    /// summed length `length`, meet at a vertex whose third edge is convex. Each round
+    /// adds its section, the square of side `r` less its quarter disc, of area
+    /// `A = r^2 (1 - pi/4)`, along its edge up to the plane through the convex edge square
+    /// to it. Between those two planes the round turns the corner: the section, whose
+    /// square corner lies on the convex edge, revolves a quarter turn about it, adding
+    /// `(pi/2) A d` (Pappus), where `d = r (10 - 3 pi) / (12 - 3 pi)` is the section's
+    /// centroid distance from its square corner along either leg. So the volume is
+    /// `2600 + A L + (pi/2) A d`.
+    fn two_concave_rounds(r: f64, length: f64) -> f64 {
+        use core::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+        let a = r * r * (1.0 - FRAC_PI_4);
+        let d = r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
+        UNION_VOLUME + a * length + FRAC_PI_2 * a * d
     }
 
     fn load(file: &str, name: &str) -> RealSolid {
@@ -1867,17 +1910,23 @@ mod wr457_certificates {
         serde_json::from_value(case["inputs"]["real_solid"].clone()).expect("real_solid")
     }
 
-    /// Every built body is valid at Level 2, one closed manifold solid, and its volume is
-    /// enclosed to within 1e-7 of the union's volume. A single round's ends lie in the end
-    /// faces' planes, which are square to its straight edge (every face is axis-aligned), so
-    /// its volume is in closed form: the union's, changed by its section `r^2 (1 - pi/4)`
-    /// along the edge's length `L`. The enclosure must hold that value.
+    /// Every built body is valid at Level 2 and one closed manifold solid, and its volume
+    /// is enclosed in an interval no wider than `1e-7 * 2600`. A single round's ends lie in
+    /// the end faces' planes, square to its straight edge (every face is axis-aligned;
+    /// ARGUED from the fixture geometry, not checked here), so its volume is the union's,
+    /// changed by its section `r^2 (1 - pi/4)` along the edge's length `L`. Two concave
+    /// rounds meeting at a convex corner hold [`two_concave_rounds`]. The enclosure must
+    /// hold the closed form, up to its f64 rounding. The harness row for the case (the
+    /// golden) must record the same body: status 0, the body's vertex, edge and face
+    /// counts, and a mass-properties volume within `1e-4` of the enclosure (MEASURED: the
+    /// mass integrator's accuracy is an estimate, not a bound).
     #[test]
     fn the_rounds_upstream_refused_build_valid_closed_solids() {
+        use core::f64::consts::FRAC_PI_4;
         let names = case_names();
         assert_eq!(names.len(), 30);
         let width = 1e-7 * UNION_VOLUME;
-        for (file, name, sign) in &names {
+        for (file, name, form) in &names {
             let input = load(file, name);
             let mut k = Kernel::default();
             let mut body = build(&mut k, &input)
@@ -1911,18 +1960,49 @@ mod wr457_certificates {
             );
             let e = enclose_volume(&k, &mut body, width).expect("enclosure");
             assert!(e.width() <= width, "{name}: enclosure {e:?} wider than {width}");
-            eprintln!("{name}: volume in [{}, {}]", e.lo, e.hi);
-            if let Some(sign) = sign {
-                assert_eq!(selected.len(), 1, "{name}");
-                let r = input.radius;
-                let exact = UNION_VOLUME + sign * length * r * r * (1.0 - core::f64::consts::FRAC_PI_4);
+            eprintln!("{name}: volume in [{}, {}] ({:?})", e.lo, e.hi, e.stop);
+            let r = input.radius;
+            let exact = match *form {
+                Form::Single(sign) => {
+                    assert_eq!(selected.len(), 1, "{name}");
+                    Some(UNION_VOLUME + sign * length * r * r * (1.0 - FRAC_PI_4))
+                }
+                Form::ConcavePair => {
+                    assert_eq!(selected.len(), 2, "{name}");
+                    Some(two_concave_rounds(r, length))
+                }
+                Form::None => None,
+            };
+            if let Some(exact) = exact {
+                // A handful of f64 operations on values below 4e3, each rounding by at
+                // most half an ulp: 16 ulps of the result bounds their error.
+                let slack = 16.0 * f64::EPSILON * exact.abs();
                 assert!(
-                    e.lo <= exact && exact <= e.hi,
+                    e.lo - slack <= exact && exact <= e.hi + slack,
                     "{name}: closed form {exact} outside [{}, {}]",
                     e.lo,
                     e.hi
                 );
             }
+            let row = super::rust(&input).unwrap_or_else(|e| panic!("{name}: harness: {e:?}"));
+            let counts = [
+                0,
+                p1::vertices(&body, None).expect("vertices").len() as i64,
+                p1::edges(&body, None).expect("edges").len() as i64,
+                p1::faces(&body, None).expect("faces").len() as i64,
+            ];
+            assert_eq!(
+                row.ints["api_status_vertex_edge_face_counts"], counts,
+                "{name}: row status and counts"
+            );
+            assert_eq!(row.ints["mass_status"], [0], "{name}: mass status");
+            let volume = *row.values["mass_properties"].get(1).expect("volume");
+            assert!(
+                e.lo - 1e-4 <= volume && volume <= e.hi + 1e-4,
+                "{name}: row volume {volume} not within 1e-4 of [{}, {}]",
+                e.lo,
+                e.hi
+            );
         }
     }
 }
