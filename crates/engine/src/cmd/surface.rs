@@ -1134,9 +1134,11 @@ mod tests {
 
     /// Surface Loft through sections drawn in a 3D sketch (#15367): two 3D lines 30 apart make a
     /// 30 × √1700 strip; a section of two 3D lines meeting end to end, lofted to a line of a
-    /// planar sketch 30 away, a 40 × 30 strip; the two splines of the issue the same sheet
-    /// Boundary Surface builds on them; undo, redo and reopening. Refused: guide rails with a
-    /// 3D section, and a 3D section of two curves that do not meet.
+    /// planar sketch 30 away, a 40 × 30 strip; a 3D line lofted to a box edge 30 and 40 away, drawn
+    /// either way, a flat 10 × 30 and 10 × 40 strip (the edge chain turned to run as the line
+    /// does); the two splines of the issue the same sheet Boundary Surface builds on them; undo,
+    /// redo and reopening. Refused: guide rails with a 3D section, and a 3D section of two curves
+    /// that do not meet.
     #[test]
     fn surface_loft_through_3d_sketch_curves() {
         let mut s = Session::default();
@@ -1150,6 +1152,8 @@ mod tests {
         let near = line3d(&mut s, [0.0, 120.0, 0.0], [20.0, 120.0, 0.0]);
         let far = line3d(&mut s, [20.0, 120.0, 0.0], [40.0, 120.0, 0.0]);
         let apart = line3d(&mut s, [0.0, 150.0, 0.0], [10.0, 150.0, 0.0]);
+        let to_box = line3d(&mut s, [0.0, -30.0, 10.0], [10.0, -30.0, 10.0]);
+        let to_box_back = line3d(&mut s, [10.0, -40.0, 10.0], [0.0, -40.0, 10.0]);
         let ring = [
             line3d(&mut s, [0.0, 200.0, 0.0], [10.0, 200.0, 0.0]),
             line3d(&mut s, [10.0, 200.0, 0.0], [5.0, 200.0, 8.0]),
@@ -1194,6 +1198,16 @@ mod tests {
         assert!(s.world_state().unwrap().body("Joined").unwrap().body.is_surface());
         close(area(&s, "Joined"), 40.0 * 30.0);
         assert_eq!(topology(&s, "Joined"), (1, 4, 4, 1));
+        // A 3D line to the top front edge of a box, drawn one way and the other.
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"}));
+        for (line, gap, name) in [(&to_box, 30.0, "ToBox"), (&to_box_back, 40.0, "ToBoxBack")] {
+            run(
+                &mut s,
+                "surface.loft",
+                json!({"sections": [{"sketch": "Space", "curves": [line]}, {"body": "Box", "edges": [[5, 0, 10]]}], "body_name": name}),
+            );
+            close(area(&s, name), 10.0 * gap);
+        }
         // The issue's two splines: the sheet Boundary Surface builds through the same curves.
         let sections = json!([{"sketch": "Space", "curves": [w1]}, {"sketch": "Space", "curves": [w2]}]);
         run(&mut s, "surface.loft", json!({"sections": sections, "body_name": "Loft"}));
