@@ -36,6 +36,7 @@ One card per agent, with an "Add agent..." and a "Refresh" button at the end.
 | Label | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
 | Dock the chat: Left / Right / Own window | Segmented | `Prefs.agent_chat_side` (`"left"`, `"right"`) and `Prefs.agent_chat_popped` (Own window) | Right | none | none | Two fields behind one control. |
+| New chat: Full introduction at the top | Checkbox | `Prefs.assistant_intro_at_top` | `false` | "A new chat shows the full introduction at the top of the panel, as before. Off: a short introduction and a hint sit just above the message box." | none | #11256 |
 | Changes per message | Unlimited / Limited dropdown; number field when Limited | `Prefs.agent_chat_turn_limit` (aria "Limit") | `DEFAULT_TURN_LIMIT` = 0 (Unlimited) | none | none | Every value 1–200 remains reachable. Switching from Unlimited to Limited seeds 24; rendering never changes a value. The existing saved-value migration remains unchanged. |
 
 ## Connecting

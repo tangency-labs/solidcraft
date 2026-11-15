@@ -1039,6 +1039,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 
 - `angle_decimals`
 - `assembly_move_handles` (default true): explicit Assembly Move uses the permitted joint-motion handles; false keeps the previous Move panel.
+- `assistant_intro_at_top` (default false: a new chat in the Assistant shows a short introduction and the hint to type in the message box just above that box, #11256; true: the full introduction at the top of the panel, as before)
 - `auto_operation` (default true: feature windows choose Join, New Body or Cut from what their material touches until one is picked; false: each keeps the operation it opens with, Extrude its own Join or Cut)
 - `background_image` (string, default empty: a picture's file, shown behind the model and covering the window from its centre; a photo stored turned by its EXIF orientation is shown upright, #19138).
 - `browser_arrow_keys` (default true: while the Browser has the keyboard, which a click on one of its rows gives it and a click elsewhere takes back, Up/Down move the selection through its rows, Left/Right fold or unfold the row, Enter opens it and F2 renames it, and the plain arrows do not turn the view; false: the arrows always turn the view, as before #17931; the Browser also lets them go while its name editor is open)

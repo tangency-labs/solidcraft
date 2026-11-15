@@ -639,7 +639,7 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = solidcraft_theme::Tokens::get();
     ui_kit::settings_section(ui, "panel", tr("ui.ai_panel"), |ui| {
-        let label_width = [tr("ui.assistant"), tr("ui.agent_chat_thinking"), tr("ui.agent_chat_turn_limit")]
+        let label_width = [tr("ui.assistant"), tr("ui.agent_chat_thinking"), tr("ai.prefs.new_chat"), tr("ui.agent_chat_turn_limit")]
             .iter()
             .map(|label| ui_kit::ContentWidth::label(ui, label) + t.space_4)
             .fold(0.0, f32::max);
@@ -651,6 +651,12 @@ fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let response = ui_kit::checkbox(ui, tr("ui.agent_thinking_folded"), &mut app.preferences.agent_thinking_folded)
                     .backing_on_hover_text(tr("ui.agent_thinking_folded_note"));
                 solidcraft_ui_registry::publish_handle("prefs:agent_thinking_folded", response.rect.center());
+            });
+            // Before #11256 a new chat showed its full introduction at the top of the panel.
+            ui_kit::row(ui, tr("ai.prefs.new_chat"), |ui| {
+                let response = ui_kit::checkbox(ui, tr("ai.prefs.intro_at_top"), &mut app.preferences.assistant_intro_at_top)
+                    .backing_on_hover_text(tr("ai.prefs.intro_at_top_note"));
+                solidcraft_ui_registry::publish_handle("prefs:assistant_intro_at_top", response.rect.center());
             });
             ui_kit::row(ui, tr("ui.agent_chat_turn_limit"), |ui| {
                 let p = &mut app.preferences;

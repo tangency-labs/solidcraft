@@ -54,6 +54,10 @@ The Assistant’s own native window keeps its existing layout.
 Assistant fills the available side height. The compass and navigation bar use the
 remaining viewport space. Clicks and scrolling over the panel stay in the chat.
 
+A new chat shows a short introduction at the bottom of the conversation, just above the message
+box, ending with the hint to type a request there (#11256). **Full introduction at the top**
+(Preferences > AI > Panel) brings back the longer introduction at the top of the panel instead.
+
 After clicking in Assistant, keyboard input stays in the chat, including when selecting text
 in an answer. Copy, Cut and Paste do not also operate on selected CAD geometry. Moving the
 pointer back over the model does not change this: click outside Assistant to return the

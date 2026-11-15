@@ -1845,6 +1845,9 @@ preference_settings! {
     agent_thinking_folded: bool = true, PAGE_ASSISTANT;
     /// Changes the agent may make for one message; 0 is no limit.
     agent_chat_turn_limit: u32 = crate::agent_chat::gate::DEFAULT_TURN_LIMIT, PAGE_ASSISTANT;
+    /// A new chat shows the full introduction at the top of the Assistant, as before #11256. Off
+    /// by default: a short introduction and a hint sit just above the message box.
+    assistant_intro_at_top: bool = false, PAGE_ASSISTANT;
     /// Custom instructions (#8220): text the agent chat adds to its system note when a session
     /// starts (`agent_chat::acp::system_note`). No page reset discards this user-authored text.
     agent_instructions: String = String::new();
