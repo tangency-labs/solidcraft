@@ -123,6 +123,7 @@ impl AppPanelRuntime {
             catalogue: self.catalogue.state().export()?,
             rejected: state.rejected.clone(),
             legacy: state.legacy.clone(),
+            unread: state.unread.clone(),
         })
     }
     pub(super) fn preference_preset_names(&self) -> Vec<String> {
@@ -137,6 +138,73 @@ impl AppPanelRuntime {
     pub(super) fn preference_user_preset_names(&self) -> Vec<String> {
         self.catalogue.state().user_presets().map(|(name, _)| name.to_string()).collect()
     }
+    /// First paint restore that keeps what it can. Without native windows, Window
+    /// placements fall back to their portable ones; if the selected layout still
+    /// cannot be placed it is reset to its default. Other saved layouts are kept.
+    fn restore_preference_record_resilient(&mut self, session: &Session, record: super::preferences::PreferenceRecord) -> PanelResult<()> {
+        let first = match self.restore_preference_record(session, record.clone()) {
+            Ok(()) => return Ok(()),
+            Err(reason) => reason,
+        };
+        let mut reset = self.preferences.as_ref().map(|state| state.reset.clone()).unwrap_or_default();
+        let saved = record.value();
+        let mut current = record;
+        let mut changed = Vec::new();
+        let mut originals = Vec::new();
+        let mut keep_saved = false;
+        if !self.native.capabilities().native_windows
+            && let Ok((redocked, names, kept)) = super::preferences::redock_native_record(&current, self.runtime.layout().registry())
+            && !names.is_empty()
+        {
+            let (rejected, mut unread) = (current.rejected.clone(), current.unread.clone());
+            if super::preferences::merge_unread(&mut unread, kept.clone()).is_none() {
+                keep_saved = true;
+            }
+            current = redocked;
+            current.rejected = rejected;
+            current.unread = unread;
+            changed = names;
+            originals = kept;
+        }
+        if !changed.is_empty() {
+            if self.restore_preference_record(session, current.clone()).is_ok() {
+                reset.extend(changed);
+                if let Some(state) = &mut self.preferences {
+                    state.reset = reset;
+                    if keep_saved && state.preserve.is_none() {
+                        state.preserve = Some(saved);
+                    }
+                }
+                return Ok(());
+            }
+            reset.extend(changed);
+        }
+        // The selected layout still cannot be placed: its default stands in and its
+        // saved bytes are kept as an unread entry. The recovery copy is left as it was.
+        let selected = current.selected.clone();
+        if let Ok(state) = current.catalogue(self.runtime.layout().registry())
+            && let Some(stored) = state.remembered(&selected)
+        {
+            let raw = commands::RawRecord { bytes: stored.bytes().to_vec(), rejected: stored.rejected().map(<[u8]>::to_vec) };
+            originals.push(super::preferences::UnreadEntry::from_raw("remembered", &selected.0, &raw));
+        }
+        if super::preferences::merge_unread(&mut current.unread, originals).is_none() {
+            keep_saved = true;
+        }
+        let prior_rejected = current.rejected.clone();
+        if self.reset_pending_preferences(session, current).is_err() {
+            return Err(first);
+        }
+        reset.push(selected.0);
+        if let Some(state) = &mut self.preferences {
+            state.rejected = prior_rejected;
+            state.reset = reset;
+            if keep_saved && state.preserve.is_none() {
+                state.preserve = Some(saved);
+            }
+        }
+        Ok(())
+    }
     pub(super) fn restore_preference_record(&mut self, session: &Session, record: super::preferences::PreferenceRecord) -> PanelResult<()> {
         let next = record.catalogue(self.runtime.layout().registry())?;
         let stored = next.remembered(&record.selected).ok_or_else(|| error(Rule::MissingTarget, "saved selected workspace has no layout"))?;
@@ -149,6 +217,7 @@ impl AppPanelRuntime {
             state.failed_environment = None;
             state.rejected = record.rejected;
             state.legacy = record.legacy;
+            state.unread = record.unread;
         }
         Ok(())
     }
@@ -216,6 +285,7 @@ impl AppPanelRuntime {
             let original = record.value();
             state.rejected = record.rejected.or(Some(original));
             state.legacy = record.legacy;
+            state.unread = record.unread;
             state.pending = None;
             state.failed = false;
             state.failed_environment = None;
@@ -676,7 +746,7 @@ impl AppPanelRuntime {
         if result.is_ok()
             && let Some(record) = self.preferences.as_ref().filter(|state| !state.failed).and_then(|state| state.pending.clone())
         {
-            match self.restore_preference_record(session, record) {
+            match self.restore_preference_record_resilient(session, record) {
                 Ok(()) => {
                     self.refresh_metrics()?;
                     self.refresh_reservations()?;
@@ -1173,7 +1243,7 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
         .panel_runtime
         .as_ref()
         .and_then(|integration| integration.preferences.as_ref())
-        .is_some_and(|state| state.failed || state.rejected.is_some())
+        .is_some_and(|state| state.failed || state.rejected.is_some() || !state.reset.is_empty())
     {
         super::preferences::report_notice(app);
     }

@@ -5,11 +5,14 @@
 //! and a conic arc of weight below 1 an elliptical ELLIPSE arc; Béziers (TrueType glyph
 //! outlines, spline pieces) and the other conics are SPLINEs of their own degree. The file holds
 //! what the entities refer to and what release 2000 needs to read them: the version, code page,
-//! handle seed, units and extents; the (empty) CLASSES section; all nine symbol tables, with the
-//! active viewport, the linetypes, layers, text style, the ACAD application id, the dimension
-//! style and the block records; the model and paper space blocks; handles, owners and the
-//! subclass markers of each entity; the root dictionary and its group dictionary. Layers can be dashed and a drawing can carry TEXT (for annotations). Group
-//! codes follow Autodesk's public DXF reference.
+//! handle seed, units and extents; the CLASSES section, naming the class-based objects; all nine
+//! symbol tables, with the active viewport, the linetypes, layers (with their lineweight and plot
+//! style), text style, the ACAD application id, the dimension style and the block records, each
+//! naming its layout; the model and paper space blocks; handles, owners and the subclass markers
+//! of each entity; the root dictionary with its group, layout and plot style name dictionaries,
+//! the Normal plot style and the Model and Layout1 layouts (#16899: AutoCAD refuses a release
+//! 2000 file without them). Layers can be dashed and a drawing can carry TEXT (for annotations).
+//! Group codes follow Autodesk's public DXF reference.
 
 use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
@@ -377,6 +380,64 @@ impl Out {
         self.code(100, "AcDbSymbolTableRecord");
         self.code(100, subclass);
     }
+    /// An object's owner `owner`, which also has it among its reactors: what an object a
+    /// dictionary holds carries.
+    fn owned(&mut self, owner: &str) {
+        self.code(102, "{ACAD_REACTORS");
+        self.code(330, owner);
+        self.code(102, "}");
+        self.code(330, owner);
+    }
+    /// The LAYOUT object `l`: its plot settings (no plotter, ISO A3 landscape in millimetres at
+    /// 1:1) and its layout settings. `extents` are the drawing's, which the model layout holds.
+    fn layout(&mut self, l: &LayoutObject, extents: (Vec2, Vec2)) {
+        // ISO 216 A3, landscape.
+        const SHEET: Vec2 = Vec2::new(420.0, 297.0);
+        self.code(0, "LAYOUT");
+        self.code(5, l.handle);
+        self.owned(l.owner);
+        self.code(100, "AcDbPlotSettings");
+        self.code(1, "");
+        self.code(2, "none_device");
+        self.code(4, "");
+        self.code(6, "");
+        for code in [40, 41, 42, 43] {
+            self.num(code, 0.0);
+        }
+        self.num(44, SHEET.x);
+        self.num(45, SHEET.y);
+        for code in [46, 47, 48, 49, 140, 141] {
+            self.num(code, 0.0);
+        }
+        self.num(142, 1.0);
+        self.num(143, 1.0);
+        // Plot layout flags: 16 standard scale, 32 plot styles, 128 print lineweights, 512 draw
+        // viewports first, and 1024 for the model layout.
+        self.code(70, 16 + 32 + 128 + 512 + if l.paper { 0 } else { 1024 });
+        // Millimetres, no rotation, plot the layout, at the standard scale 1:1 (16).
+        self.code(72, 1);
+        self.code(73, 0);
+        self.code(74, 5);
+        self.code(7, "");
+        self.code(75, 16);
+        self.code(100, "AcDbLayout");
+        self.code(1, l.name);
+        // PSLTSCALE on.
+        self.code(70, 1);
+        self.code(71, l.tab);
+        self.point2(10, Vec2::ZERO);
+        self.point2(11, SHEET);
+        self.point(12, Vec2::ZERO);
+        let (lo, hi) = if l.paper { (Vec2::ZERO, Vec2::ZERO) } else { extents };
+        self.point(14, lo);
+        self.point(15, hi);
+        self.num(146, 0.0);
+        self.point(13, Vec2::ZERO);
+        self.point(16, Vec2::X);
+        self.point(17, Vec2::Y);
+        self.code(76, 0);
+        self.code(330, l.block_record);
+    }
     /// A BLOCK and its ENDBLK, empty, owned by the block record `owner`.
     fn block(&mut self, owner: &str, name: &str, paper: bool) {
         for (kind, sub) in [("BLOCK", "AcDbBlockBegin"), ("ENDBLK", "AcDbBlockEnd")] {
@@ -399,6 +460,17 @@ impl Out {
             }
         }
     }
+}
+
+/// One LAYOUT object: its handle, the layout dictionary that holds it, its name and tab, the
+/// block record it shows and whether that is paper space.
+struct LayoutObject<'a> {
+    handle: &'a str,
+    owner: &'a str,
+    name: &'a str,
+    tab: i32,
+    block_record: &'a str,
+    paper: bool,
 }
 
 /// A text on one line, as a TEXT entity holds it: at most 250 characters, control characters as
@@ -455,10 +527,25 @@ pub fn write_dxf_drawing_units(layers: &[DxfLayer], entities: &[DxfEntity], insu
     let mut o = Out { s: String::new(), next: 0x20 };
     let (model, paper) = (o.handle(), o.handle());
     let root = o.handle();
+    // The objects the tables point at: the layout dictionary and the layout of each space, the
+    // plot style name dictionary and its Normal plot style, which every layer names.
+    let (layouts, model_layout, paper_layout) = (o.handle(), o.handle(), o.handle());
+    let (plot_styles, normal) = (o.handle(), o.handle());
 
-    // Release 2000 readers expect the CLASSES section, even empty, between HEADER and TABLES.
+    // Release 2000 readers expect the CLASSES section between HEADER and TABLES; it names the
+    // object types the OBJECTS section holds that are not built in: record name, C++ class,
+    // application, proxy flags, was-a-proxy, is-an-entity.
     o.code(0, "SECTION");
     o.code(2, "CLASSES");
+    for (record, class) in [("ACDBDICTIONARYWDFLT", "AcDbDictionaryWithDefault"), ("ACDBPLACEHOLDER", "AcDbPlaceHolder"), ("LAYOUT", "AcDbLayout")] {
+        o.code(0, "CLASS");
+        o.code(1, record);
+        o.code(2, class);
+        o.code(3, "ObjectDBX Classes");
+        o.code(90, 0);
+        o.code(280, 0);
+        o.code(281, 0);
+    }
     o.code(0, "ENDSEC");
 
     // All nine symbol tables, in the reference's order, even those with nothing to hold: a
@@ -529,6 +616,9 @@ pub fn write_dxf_drawing_units(layers: &[DxfLayer], entities: &[DxfEntity], insu
         o.code(70, 0);
         o.code(62, l.color);
         o.code(6, l.linetype.name());
+        // Lineweight -3: the default; and the Normal plot style.
+        o.code(370, -3);
+        o.code(390, &normal);
     }
     o.code(0, "ENDTAB");
     // The one text style, which a TEXT entity uses when it names none.
@@ -568,13 +658,14 @@ pub fn write_dxf_drawing_units(layers: &[DxfLayer], entities: &[DxfEntity], insu
     o.code(70, 0);
     o.code(0, "ENDTAB");
     let t = o.table("BLOCK_RECORD", 2);
-    for (h, name) in [(&model, "*Model_Space"), (&paper, "*Paper_Space")] {
+    for (h, name, layout) in [(&model, "*Model_Space", &model_layout), (&paper, "*Paper_Space", &paper_layout)] {
         o.code(0, "BLOCK_RECORD");
         o.code(5, h);
         o.code(330, &t);
         o.code(100, "AcDbSymbolTableRecord");
         o.code(100, "AcDbBlockTableRecord");
         o.code(2, name);
+        o.code(340, layout);
     }
     o.code(0, "ENDTAB");
     o.code(0, "ENDSEC");
@@ -699,20 +790,51 @@ pub fn write_dxf_drawing_units(layers: &[DxfLayer], entities: &[DxfEntity], insu
 
     o.code(0, "SECTION");
     o.code(2, "OBJECTS");
-    // The root dictionary, which must name the group dictionary (empty: no groups).
+    // The root dictionary, which must name the group dictionary (empty: no groups), the layout
+    // dictionary and the plot style name dictionary.
     let groups = o.handle();
     o.code(0, "DICTIONARY");
     o.code(5, root.as_str());
     o.code(330, 0);
     o.code(100, "AcDbDictionary");
     o.code(281, 1);
-    o.code(3, "ACAD_GROUP");
-    o.code(350, &groups);
+    for (name, h) in [("ACAD_GROUP", &groups), ("ACAD_LAYOUT", &layouts), ("ACAD_PLOTSTYLENAME", &plot_styles)] {
+        o.code(3, name);
+        o.code(350, h);
+    }
     o.code(0, "DICTIONARY");
     o.code(5, &groups);
-    o.code(330, &root);
+    o.owned(&root);
     o.code(100, "AcDbDictionary");
     o.code(281, 1);
+    o.code(0, "DICTIONARY");
+    o.code(5, &layouts);
+    o.owned(&root);
+    o.code(100, "AcDbDictionary");
+    o.code(281, 1);
+    for (name, h) in [("Layout1", &paper_layout), ("Model", &model_layout)] {
+        o.code(3, name);
+        o.code(350, h);
+    }
+    // The plot style names, with Normal the default.
+    o.code(0, "ACDBDICTIONARYWDFLT");
+    o.code(5, &plot_styles);
+    o.owned(&root);
+    o.code(100, "AcDbDictionary");
+    o.code(281, 1);
+    o.code(3, "Normal");
+    o.code(350, &normal);
+    o.code(100, "AcDbDictionaryWithDefault");
+    o.code(340, &normal);
+    o.code(0, "ACDBPLACEHOLDER");
+    o.code(5, &normal);
+    o.owned(&plot_styles);
+    for l in [
+        LayoutObject { handle: &model_layout, owner: &layouts, name: "Model", tab: 0, block_record: &model, paper: false },
+        LayoutObject { handle: &paper_layout, owner: &layouts, name: "Layout1", tab: 1, block_record: &paper, paper: true },
+    ] {
+        o.layout(&l, (lo, hi));
+    }
     o.code(0, "ENDSEC");
     o.code(0, "EOF");
 
@@ -1186,7 +1308,8 @@ mod tests {
                 _ => dictionaries.last_mut().unwrap().push((*c, v.clone())),
             }
         }
-        let [root, groups] = dictionaries.as_slice() else { panic!("{dictionaries:?}") };
+        let root = &dictionaries[0];
+        let groups = dictionaries.iter().find(|d| field(d, 5) == field(root, 350)).unwrap();
         assert_eq!((field(root, 330), field(root, 3)), ("0", "ACAD_GROUP"));
         assert_eq!(field(root, 350), field(groups, 5));
         assert_eq!(field(groups, 330), field(root, 5));
@@ -1211,6 +1334,88 @@ mod tests {
         }
         // SolidCraft's own reader still reads it.
         assert_eq!(read_dxf(&dxf).unwrap().len(), 2);
+    }
+
+    /// The objects of the OBJECTS section, or the classes of the CLASSES section, each as its
+    /// type and its group codes.
+    fn section_objects(p: &[(i32, String)], section: &str) -> Vec<(String, Vec<(i32, String)>)> {
+        let start = p.iter().position(|(c, v)| (*c, v.as_str()) == (2, section)).unwrap();
+        let mut out: Vec<(String, Vec<(i32, String)>)> = Vec::new();
+        for (c, v) in p[start + 1..].iter().take_while(|(c, v)| (*c, v.as_str()) != (0, "ENDSEC")) {
+            match c {
+                0 => out.push((v.clone(), Vec::new())),
+                _ => out.last_mut().unwrap().1.push((*c, v.clone())),
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn release_2000_layouts_link_their_block_records_and_layers_their_plot_style() {
+        // #16899: AutoCAD refused a release 2000 file with no layouts. The root dictionary names
+        // ACAD_LAYOUT, which holds a Model and a Layout1 LAYOUT; each space's block record names
+        // its layout under 340 and the layout names the block record back under 330.
+        let ents = [DxfEntity { layer: "OUTLINE".into(), shape: DxfShape::Circle { c: Vec2::new(5.0, 5.0), r: 4.0 } }];
+        let dxf = write_dxf_drawing(&[DxfLayer::new("OUTLINE", 7)], &ents).unwrap();
+        let p = pairs(&dxf);
+        let objects = section_objects(&p, "OBJECTS");
+        let by_handle = |h: &str| objects.iter().find(|(_, o)| field(o, 5) == h).unwrap_or_else(|| panic!("no object {h}"));
+        let entry = |dict: &[(i32, String)], name: &str| {
+            let at = dict.iter().position(|(c, v)| (*c, v.as_str()) == (3, name)).unwrap_or_else(|| panic!("no entry {name}"));
+            assert_eq!(dict[at + 1].0, 350);
+            dict[at + 1].1.clone()
+        };
+        let (root_kind, root) = &objects[0];
+        assert_eq!((root_kind.as_str(), field(root, 330)), ("DICTIONARY", "0"));
+        let layouts = by_handle(&entry(root, "ACAD_LAYOUT"));
+        assert_eq!(layouts.0, "DICTIONARY");
+        let records = table_records(&p, "BLOCK_RECORD");
+        for (space, name) in [("*Model_Space", "Model"), ("*Paper_Space", "Layout1")] {
+            let record = records.iter().find(|r| field(r, 2) == space).unwrap();
+            let (kind, layout) = by_handle(&entry(&layouts.1, name));
+            assert_eq!(kind, "LAYOUT");
+            assert_eq!(field(record, 340), field(layout, 5), "{space}");
+            // The layout's owner is the layout dictionary; after its AcDbLayout marker, its
+            // block record.
+            assert_eq!(field(layout, 330), field(&layouts.1, 5));
+            let own = layout.iter().position(|(c, v)| (*c, v.as_str()) == (100, "AcDbLayout")).unwrap();
+            assert_eq!((field(&layout[own..], 1), field(&layout[own..], 330)), (name, field(record, 5)), "{space}");
+        }
+        // Every layer has a lineweight and names the default plot style of ACAD_PLOTSTYLENAME.
+        let (kind, styles) = by_handle(&entry(root, "ACAD_PLOTSTYLENAME"));
+        assert_eq!(kind, "ACDBDICTIONARYWDFLT");
+        let normal = entry(styles, "Normal");
+        assert_eq!(field(styles, 340), normal);
+        assert_eq!(by_handle(&normal).0, "ACDBPLACEHOLDER");
+        let layers = table_records(&p, "LAYER");
+        assert_eq!(layers.len(), 2);
+        for layer in &layers {
+            assert_eq!((field(layer, 370), field(layer, 390)), ("-3", normal.as_str()), "{layer:?}");
+        }
+        // Each object type that is not built in is a class.
+        let classes: Vec<String> = section_objects(&p, "CLASSES").iter().map(|(_, c)| field(c, 1).to_string()).collect();
+        for (kind, _) in &objects {
+            assert!(kind == "DICTIONARY" || classes.contains(kind), "{kind} is not in CLASSES {classes:?}");
+        }
+        // Every handle is unique, the seed is past the largest, and every pointer (330, 340, 350,
+        // 390) names one of them.
+        let seed_at = p.iter().position(|(c, v)| (*c, v.as_str()) == (9, "$HANDSEED")).unwrap() + 1;
+        let seed = u64::from_str_radix(&p[seed_at].1, 16).unwrap();
+        let mut handles: Vec<u64> = p
+            .iter()
+            .enumerate()
+            .filter(|(i, (c, _))| *i != seed_at && (*c == 5 || *c == 105))
+            .map(|(_, (_, v))| u64::from_str_radix(v, 16).unwrap())
+            .collect();
+        let n = handles.len();
+        handles.sort_unstable();
+        handles.dedup();
+        assert_eq!(handles.len(), n);
+        assert!(handles.last().is_some_and(|h| *h < seed));
+        for (_, v) in p.iter().filter(|(c, _)| matches!(*c, 330 | 340 | 350 | 390)) {
+            let h = u64::from_str_radix(v, 16).unwrap();
+            assert!(h == 0 || handles.binary_search(&h).is_ok(), "pointer {v}");
+        }
     }
 
     #[test]

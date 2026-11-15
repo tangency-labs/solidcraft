@@ -168,6 +168,8 @@ pub trait BackingTooltipExt: Sized {
     fn backing_on_hover_text_beside(self, beside: egui::Rect, text: impl Into<WidgetText>) -> Self;
     fn backing_show_tooltip_ui(&self, body: impl FnOnce(&mut egui::Ui));
     fn backing_show_tooltip_text(&self, text: impl Into<WidgetText>);
+    /// A feature's status tooltip ([`crate::StatusTip`]), given to a screen reader as plain text.
+    fn backing_on_hover_status(self, tip: &crate::StatusTip) -> Self;
 }
 
 /// What egui's `on_hover_text` does besides showing the tip: a widget that has an accessibility
@@ -213,6 +215,12 @@ impl BackingTooltipExt for egui::Response {
     fn backing_on_hover_ui_at_pointer(self, body: impl FnOnce(&mut egui::Ui)) -> Self {
         show_backing_tooltip(self.id, egui::Tooltip::for_enabled(&self).at_pointer().gap(12.0), body);
         self
+    }
+    fn backing_on_hover_status(self, tip: &crate::StatusTip) -> Self {
+        if self.ctx.has_accesskit_node(self.id) {
+            describe_for_accessibility(&self, &tip.plain());
+        }
+        self.backing_on_hover_ui(|ui| tip.show(ui))
     }
     fn backing_on_hover_text(self, text: impl Into<WidgetText>) -> Self {
         let text = text.into();

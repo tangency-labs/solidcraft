@@ -96,7 +96,8 @@ concurrency:
   # A `labeled` event for any label but approved-for-ci does no work and must not cancel (or queue
   # behind) the PR's real run, so it gets a group of its own; approved-for-ci replaces the
   # unlabelled run with the full one.
-  group: ci-${{ github.event_name }}-${{ github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'approved-for-ci' && format('-ignored-{0}', github.run_id) || '' }}
+  # A re-run (attempt 2 or later, often of an older commit) gets a group of its own, so it never cancels the live run for the PR's current head.
+  group: ci-${{ github.event_name }}-${{ github.ref }}${{ github.run_attempt > 1 && format('-rerun-{0}', github.run_id) || '' }}${{ github.event.action == 'labeled' && github.event.label.name != 'approved-for-ci' && format('-ignored-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:

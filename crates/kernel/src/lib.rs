@@ -159,10 +159,10 @@ mod validity;
 pub mod watch;
 
 pub use blend::{
-    ChamferSide, FilletTurn, FitSearch, SETBACK_AT_LEAST, blend_edges, chamfer, chamfer_carrying_face, chamfer_max, chamfer_max_why, chamfer_sides,
-    chamfer_sides_carrying_face, fillet, fillet_each, fillet_g2, fillet_g2_corners, fillet_g2_with_g2_corners, fillet_least_setback, fillet_max,
-    fillet_max_each, fillet_max_why, fillet_removing, fillet_setback, largest_fit_note, named_fit, names_largest_fit, tangent_chain,
-    tangent_chain_edges, with_fit_note, without_fit_note,
+    ChamferSide, FilletTurn, FitSearch, SETBACK_AT_LEAST, blend_edge_middles, blend_edges, chamfer, chamfer_carrying_face, chamfer_max,
+    chamfer_max_why, chamfer_sides, chamfer_sides_carrying_face, fillet, fillet_each, fillet_g2, fillet_g2_corners, fillet_g2_with_g2_corners,
+    fillet_least_setback, fillet_max, fillet_max_each, fillet_max_why, fillet_removing, fillet_setback, largest_fit_note, named_fit,
+    names_largest_fit, tangent_chain, tangent_chain_edges, with_fit_note, without_fit_note,
 };
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
@@ -198,7 +198,7 @@ pub use iges_in::{MAX_IGES_BYTES, iges_import, iges_to_step};
 pub use iges_out::iges_export_bodies;
 pub use intersection::{MeetingEdge, meeting_edges};
 pub use iso::{IsoLine, MAX_ISO_COUNT, iso_curves, iso_grid};
-pub use lip::{raise_band, rim_band};
+pub use lip::{LipRefusal, raise_band, rim_band};
 pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};
 pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
@@ -222,7 +222,7 @@ pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::stop::Stop;
 pub use solidcraft_smlib::trace as smlib_trace;
-pub use splitface::{SplitTool, split_body, split_faces, split_faces_with_map};
+pub use splitface::{SplitTool, face_split_if_on_face, has_cap_at, split_body, split_faces, split_faces_with_map};
 pub use step::step_export;
 /// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
 pub use step_in::p21::{max_bytes as step_max_bytes, set_max_bytes as set_step_max_bytes};
@@ -261,6 +261,9 @@ pub enum KernelError {
     /// The vendored kernel panicked; the model is unchanged.
     #[error("kernel internal error: {0}")]
     Internal(String),
+    /// A lip's band that leaves no sound face beside it.
+    #[error("the operation failed: raising a band: {0}")]
+    Lip(#[from] LipRefusal),
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;

@@ -135,6 +135,7 @@ pub(crate) fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
 pub(crate) fn native_failure<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
+        Err(e) if e.is_not_certified() => Err(e),
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
@@ -550,8 +551,8 @@ pub const SM_ERR_TESS_FAIL_FACE: i32 = 1041;
 /// SMLib fork status `SM_ERR_OFFSET_WALLS_TOUCH` (tangency-labs/smlib a759622,
 /// `SmMessages.h`; not in the pinned upstream), as carried by [`SolidError::Upstream`]:
 /// an offset (a shell, a solid offset) whose walls would meet, because loops of an offset
-/// face touch without crossing. Returned only with the opt-in
-/// `Kernel::fixes.offset_walls_touch_refused`.
+/// face touch without crossing. Returned only with
+/// `Kernel::fixes.offset_resolve_crossing_loops`.
 pub const SM_ERR_OFFSET_WALLS_TOUCH: i32 = 1042;
 
 /// SMLib fork status `SM_ERR_OFFSET_EDGE_VANISHES` (tangency-labs/smlib 34318f4,
@@ -1388,7 +1389,9 @@ pub enum ErrorKind {
     StationDidNotConverge = 125,
     /// The faces the blend's rails enclose reach past its rails: a defect.
     TrimLeaks = 126,
-    /// A stage of the blend failed with no reason the kernel names: a defect.
+    /// A stage failed with no reason the kernel names: a defect. The blend's class 127, also
+    /// the class of the other areas' stage failures (`CurveFailure::StageFailed`, ...); the
+    /// failure's operation says which stage.
     StageFailed = 127,
     /// A round that ends where its edge runs on tangentially into an edge that is not
     /// blended, in a shape the kernel does not build. Not a matter of size: the way out is to
@@ -1435,8 +1438,9 @@ impl ErrorKind {
     }
 
     /// True for a failure that is the kernel's fault, not a fact of the geometry: report it.
-    /// The blend's defect classes, and a port invariant that did not hold. The blend's
-    /// [`ErrorKind::StageFailed`] is one: a stage failed with no reason the kernel names.
+    /// The blend's defect classes, and a port invariant that did not hold.
+    /// [`ErrorKind::StageFailed`] is one, in every area: a stage failed with no reason the
+    /// kernel names.
     #[must_use]
     pub const fn is_defect(self) -> bool {
         matches!(
@@ -1625,6 +1629,7 @@ impl SolidError {
     pub(crate) fn nl_ser(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
             Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
+            e if e.is_not_certified() => e,
             _ => Self::sm_err(operation),
         }
     }
@@ -1734,12 +1739,26 @@ impl SolidError {
 
     /// True when this error must never be swallowed or remapped by an upstream
     /// status-ignoring fallback ([`SolidError::Unported`], [`SolidError::Cancelled`]
-    /// or [`SolidError::FaceTrimsUnavailable`], which no upstream status stands for).
+    /// or [`SolidError::FaceTrimsUnavailable`], which no upstream status stands for), or is a
+    /// blend certificate that ran out of its work budget
+    /// ([`crate::error::blend::BlendFailure::NotCertified`]): like a cancellation, work given
+    /// up never becomes a different geometric result.
     #[must_use]
-    pub(crate) const fn is_unported_or_cancelled(&self) -> bool {
+    pub(crate) fn is_unported_or_cancelled(&self) -> bool {
         matches!(
             self,
             Self::Unported { .. } | Self::Cancelled { .. } | Self::FaceTrimsUnavailable { .. }
+        ) || self.is_not_certified()
+    }
+
+    /// True for a blend certificate that spent its work budget
+    /// ([`crate::error::blend::BlendFailure::NotCertified`]). Every filter that passes a
+    /// cancellation on passes this on too: work given up never becomes another result.
+    #[must_use]
+    pub fn is_not_certified(&self) -> bool {
+        matches!(
+            self.blend_failure(),
+            Some(blend::BlendFailure::NotCertified { .. })
         )
     }
 
@@ -2024,6 +2043,44 @@ pub fn upstream_status(error: &SolidError) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A blend certificate that spent its work budget passes every status-ignoring
+    /// helper, as a cancellation does.
+    #[test]
+    fn a_certificate_past_its_budget_passes_every_status_filter() {
+        let e = SolidError::blend(
+            "t",
+            blend::BlendFailure::NotCertified {
+                halvings: 1,
+                stations: 2,
+            },
+        );
+        assert!(e.is_not_certified() && e.is_unported_or_cancelled());
+        assert_eq!(ignored::<()>(Err(e.clone())), Err(e.clone()));
+        assert_eq!(native_failure::<()>(Err(e.clone())), Err(e.clone()));
+        assert_eq!(ignore_status::<()>(Err(e.clone())), Err(e.clone()));
+        assert_eq!(
+            passed_on::<()>(Err(e.clone()), false).map(|_| ()),
+            Err(e.clone())
+        );
+        assert_eq!(status_passed_on(Some(e.clone()), false), Err(e.clone()));
+        assert_eq!(SolidError::nl_ser("op")(e.clone()), e);
+        assert!(!SolidError::sm_err("t").is_not_certified());
+    }
+
+    /// `e` is a stage of `operation` that failed with no reason the kernel names: class
+    /// [`ErrorKind::StageFailed`], a defect, keeping `status` (the one the C++ reports) for the
+    /// goldens, and worded from its class.
+    pub(in crate::error) fn assert_stage_failure(e: &SolidError, operation: &str, status: i32) {
+        assert_eq!(e.kind(), ErrorKind::StageFailed, "{e:?}");
+        assert!(e.is_defect() && !e.is_refusal() && !e.sized(), "{e:?}");
+        assert_eq!(e.operation(), operation, "{e:?}");
+        assert_eq!(e.sm_status(), Some(status), "{e:?}");
+        assert_eq!(e.upstream_status(), Some(status), "{e:?}");
+        assert!(e.is_status_answer(), "{e:?}");
+        assert!(!e.is_port_failure(), "{e:?}");
+        assert_eq!(e.to_string(), format!("{operation}: stage_failed"));
+    }
 
     #[test]
     fn native_failures_keep_upstream_statuses_and_propagate_port_errors() {

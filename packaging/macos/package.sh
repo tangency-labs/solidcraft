@@ -184,7 +184,7 @@ printf 'APPL????' >"$APP/Contents/PkgInfo"
 # Signature over the whole bundle. Nested code is signed first: the bundle signature refuses an
 # unsigned helper in Contents/MacOS. The entitlements go on the bundle (they apply to the main
 # executable): the 3D mouse driver is loaded by the app, not by the CLI.
-sign_code "$APP/Contents/MacOS/solidcraft-cli" "$MACOS_BUNDLE_ID.cli"
+sign_code "$APP/Contents/MacOS/solidcraft-cli" "$MACOS_BUNDLE_ID.cli" "$SCRIPT_DIR/cli-entitlements.plist"
 sign_code "$APP" "" "$SCRIPT_DIR/entitlements.plist"
 codesign --verify --strict --deep --verbose=2 "$APP"
 if [ -n "$SIGN_IDENTITY" ]; then
@@ -269,10 +269,10 @@ echo "==> building $CLI_ZIP"
 CLI_DIR="$WORK/solidcraft-cli-$VERSION-macos-$ARCH"
 mkdir -p "$CLI_DIR"
 cp "$WORK/bin/solidcraft-cli" "$CLI_DIR/"
-sign_code "$CLI_DIR/solidcraft-cli" "$MACOS_BUNDLE_ID.cli"
+sign_code "$CLI_DIR/solidcraft-cli" "$MACOS_BUNDLE_ID.cli" "$SCRIPT_DIR/cli-entitlements.plist"
 # Compatibility shim (docs/compatibility.md): the old CLI name forwards to solidcraft-cli.
 cp "$WORK/bin/solvecraft-cli" "$CLI_DIR/"
-sign_code "$CLI_DIR/solvecraft-cli" "$MACOS_BUNDLE_ID.cli-alias"
+sign_code "$CLI_DIR/solvecraft-cli" "$MACOS_BUNDLE_ID.cli-alias" "$SCRIPT_DIR/cli-entitlements.plist"
 copy_docs "$CLI_DIR"
 rm -f "$CLI_ZIP"
 ditto -c -k --keepParent "$CLI_DIR" "$CLI_ZIP"

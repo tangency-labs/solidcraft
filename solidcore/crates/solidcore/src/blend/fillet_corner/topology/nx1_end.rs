@@ -7,6 +7,7 @@
 //! |------|----------|
 //! | [`find_surface_extension_dist_at_corner`] | `sm_FindSurfaceExtensionDistAtCorner` |
 //! | `finish_nx1_end` (crate) | tail of `SmFilletNx1Corner::MakeCornerTopology` |
+//! | `rolled_rail_turns_back`, `rail_passes_side_edge_end` (crate) | none (solidcore-native) |
 //!
 //! Deviations: the solver is the caller's concrete solver object instead of a
 //! `GetSolverType` cast. A failed variable-radius law evaluation yields its status
@@ -30,7 +31,9 @@ use crate::blend::fillet_executive::session::{FilletBody, FilletObject, SolverOb
 use crate::blend::fillet_geom::p1::{
     FilletBrep, FilletCornerId, FilletEdgeType, FilletGeomId, FilletVertex, FilletVertexType,
 };
+use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::blend::fillet_standard_solver::p1::VariableRadiusFs;
+use crate::blend::fillet_tangent_rollover::planar_section;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
@@ -296,6 +299,393 @@ pub(crate) fn rolled_rail_turns_back(
     }
     Ok(None)
 }
+
+/// Not upstream (solidcore-native, [`TurnedBack`]): where a rail that did not roll ends past
+/// its side edge's far end. The rail of solver `solver`'s rail `rail` lies on the face S of
+/// the side edge E (`side`, at the corner's vertex `vertex`); E's other face is the end face
+/// P. The rail ends where it crosses P's surface, on E's curve continued past E's far vertex
+/// W, when all of these hold:
+/// - the round is a constant one of circular section (`constant`) between two planes along a
+///   straight edge, and E is a line: the rail is then the line along the edge through the
+///   ball's contact on S, in closed form ([`planar_section`]), and it crosses E's line at R;
+/// - R lies past W along E, by more than the body's tolerance;
+/// - at W, an edge N between P and a face other than S leaves W turned back along E's
+///   arriving tangent ([`turns_back`]): P's boundary turns back at W, so P does not reach R;
+/// - R lies inside S (classified in S's interior, not on its boundary, within the body's
+///   tolerance), and no boundary edge of S crosses the open segment from W to R, the cap
+///   edge's place on S's plane ([`edge_clear_of_segment`]).
+/// - P is a plane, so R, on E's line, is where the rail meets P's surface.
+///
+/// The cap's edge then runs from the rail's end along E's continuation on S to W, then along
+/// E: [`TurnedBack`] with E as its edge (whose continuation past W leaves W against E's own
+/// tangent leaving W) and S as its face. `None` otherwise (the corner is as before).
+///
+/// # Errors
+/// Those of the topology walks, the closed form's evaluations and drops, the curve's
+/// recogniser and the classification.
+#[allow(clippy::too_many_lines)] // one decision, its conditions in order
+pub(crate) fn rail_passes_side_edge_end(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &FilletSolver,
+    constant: bool,
+    rail: usize,
+    side: EdgeuseId,
+    vertex: VertexId,
+) -> Result<Option<TurnedBack>> {
+    use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+    let circular = solver.fsg.as_ref().map(
+        crate::blend::fillet_solver::p1::FilletSurfaceGenerator::fillet_surface_generator_type,
+    ) == Some(FilletSurfaceGeneratorType::Circular);
+    if !constant || !circular || rail > 1 {
+        return Ok(None);
+    }
+    let tol = target.tolerance();
+    // the solver's edge, its faces and offsets
+    let [Some(u0), Some(u1)] = solver.edgeuses else {
+        return Ok(None);
+    };
+    let Some(filleted) = eu1::edge(target, u0)? else {
+        return Ok(None);
+    };
+    let (Some(f0), Some(f1)) = (eu1::face(target, u0)?, eu1::face(target, u1)?) else {
+        return Ok(None);
+    };
+    let faces = [f0, f1];
+    let mut offsets = [0.0; 2];
+    for (offset, i) in offsets.iter_mut().zip(0..2) {
+        let Some(slot) = solver.surface(i)? else {
+            return Ok(None);
+        };
+        *offset = slot.surface.offset_distance();
+    }
+    let (Some(&s_face), Some(&offset)) = (faces.get(rail), offsets.get(rail)) else {
+        return Ok(None);
+    };
+    // E: from the corner's vertex to W, between S and P
+    let Some(e) = eu1::edge(target, side)? else {
+        return Ok(None);
+    };
+    if e == filleted || edge::is_closed(target, e)? {
+        return Ok(None);
+    }
+    let (start, end) = (edge::start_vertex(target, e)?, edge::end_vertex(target, e)?);
+    let far = if start == Some(vertex) {
+        end
+    } else if end == Some(vertex) {
+        start
+    } else {
+        None
+    };
+    let Some(far) = far else {
+        return Ok(None);
+    };
+    let e_faces = edge::faces(target, e, None)?;
+    if e_faces.len() != 2 || !e_faces.contains(&s_face) {
+        return Ok(None);
+    }
+    let Some(&p_face) = e_faces.iter().find(|&&f| f != s_face) else {
+        return Ok(None);
+    };
+    // P a plane too: R, on E's line, is then where the rail meets P's surface
+    let p_planar = match target.face(p_face)?.surface.as_ref() {
+        Some(surface) => surface.is_planar(k, tol)?.is_planar,
+        None => false,
+    };
+    if !p_planar {
+        return Ok(None);
+    }
+    // the rail in closed form, and E's line
+    let Some(section) = planar_section(k, target, filleted, faces, offsets)? else {
+        return Ok(None);
+    };
+    let Some(contact) = section.contact(rail, offset) else {
+        return Ok(None);
+    };
+    let Some(e_curve) = edge::curve(target, e)?.cloned() else {
+        return Ok(None);
+    };
+    if e_curve.is_line(k, 3, CURVE_TOL)?.is_none() {
+        return Ok(None);
+    }
+    let origin = crate::topology::vertex::point(target, vertex)?;
+    let w = crate::topology::vertex::point(target, far)?;
+    let Ok(u) = (w - origin).unitize() else {
+        return Ok(None);
+    };
+    // R: where the rail's line, contact + s d, crosses E's line, origin + l u (both on S's
+    // plane); the two lines' nearest points, which must meet
+    let d = section.d;
+    let (a, b) = (d.dot(u), contact - origin);
+    let det = 1.0 - a * a;
+    if det.is_nan() || det <= DIR_TOL {
+        return Ok(None);
+    }
+    let l = (b.dot(u) - a * b.dot(d)) / det;
+    let s = (a * b.dot(u) - b.dot(d)) / det;
+    let r = origin + u * l;
+    let miss = (contact + d * s - r).length();
+    if miss.is_nan() || miss > tol {
+        return Ok(None);
+    }
+    let past = l - (w - origin).dot(u);
+    if past.is_nan() || past <= tol {
+        return Ok(None);
+    }
+    // N at W: between P and a face other than S, turned back along E
+    let mut turned = false;
+    for n in crate::topology::vertex::edges(target, far, None)? {
+        if n == e || edge::is_closed(target, n)? {
+            continue;
+        }
+        let n_faces = edge::faces(target, n, None)?;
+        if !n_faces.contains(&p_face) || n_faces.contains(&s_face) {
+            continue;
+        }
+        let Some(tn) = tangent_leaving(k, target, n, far)? else {
+            continue;
+        };
+        if turns_back(u, tn) {
+            turned = true;
+            break;
+        }
+    }
+    if !turned {
+        return Ok(None);
+    }
+    // R on S
+    let surface = need(
+        target.face(s_face)?.surface.as_ref(),
+        "side face without surface",
+    )?
+    .clone_for_evaluation()?;
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let dropped = surface.drop_point::<crate::surface::surface::p4::NoObject>(
+        k,
+        r,
+        &domain,
+        &crate::surface::surface::p5::DropPointOptions::default(),
+    )?;
+    if !dropped.success {
+        return Ok(None);
+    }
+    let mut class = crate::intersect::point_class::PointClassification::<EntityRef>::new(tol);
+    crate::query::face::p2::point_classify(
+        k,
+        target,
+        s_face,
+        dropped.result_uv,
+        &mut class,
+        crate::query::face::p2::PointClassifyOptions {
+            src_zone_tol_3d: tol,
+            do_boundary_intersections: true,
+            use_uv_classification: true,
+            ..crate::query::face::p2::PointClassifyOptions::default()
+        },
+    )?;
+    if class.point_class() != PointClassType::Face {
+        return Ok(None);
+    }
+    // the cap edge from R to W on S: no boundary edge of S crosses it
+    let normal = surface.evaluate_normal(
+        k,
+        dropped.result_uv,
+        crate::nurbs::knots::Side::Left,
+        crate::nurbs::knots::Side::Left,
+    )?;
+    let Ok(across) = normal.cross(u).unitize() else {
+        return Ok(None);
+    };
+    let frame = SegmentFrame {
+        w,
+        along: u,
+        across,
+        length: (r - w).dot(u),
+        tol,
+    };
+    for edge_id in crate::topology::face::p4::edges(target, s_face, None, false, None)? {
+        if !edge_clear_of_segment(k, target, edge_id, far, &frame)? {
+            return Ok(None);
+        }
+    }
+    Ok(Some(TurnedBack {
+        far,
+        edge: e,
+        face: s_face,
+    }))
+}
+
+/// The open segment from W to R on S's plane, in its own frame: `along` from W towards R,
+/// `across` square to it in the plane, `length` its length, `tol` the body's tolerance.
+struct SegmentFrame {
+    w: Point3,
+    along: Vec3,
+    across: Vec3,
+    length: f64,
+    tol: f64,
+}
+
+impl SegmentFrame {
+    /// `p` in the frame: along and across the segment from W.
+    fn coords(&self, p: Point3) -> (f64, f64) {
+        let v = p - self.w;
+        (v.dot(self.along), v.dot(self.across))
+    }
+}
+
+/// Whether the boundary edge `edge_id` of S is proved not to cross the open segment of
+/// `frame` (from W, the vertex `far`, to R), with the points in `frame`'s coordinates (a
+/// along, h across) and `err` the rounding of each coordinate: `gamma(16)` of the largest
+/// coordinate involved (the subtraction, the three-term dot product, and the quotient by a
+/// weight), plus, for a B-spline whose edge is a part of its NURB, the extraction's: its knot
+/// insertions leave each homogeneous coefficient within `gamma(16 (p + 1))` of the NURB's
+/// largest (as [`crate::query::distance_bound`] counts them), carried through the quotient by
+/// the smallest weight less that error.
+/// - An edge with no end at W must keep clear by more than the tolerance plus `err`: its
+///   points (a line's ends, a B-spline's Euclidean control points, which hold its curve in
+///   their hull where the weights are positive) all lie before W, all past R, or all on one
+///   side of the segment's line, each by more than that.
+/// - An edge with an end at W must lie in one closed half-plane of the segment's line,
+///   within `err` (every point's `h >= -err`, or every point's `h <= err`): it then never
+///   reaches the other side by more than `err`, so it does not cross the segment. It may
+///   touch the line h = 0 (within `err`) anywhere along the segment, not only at W; touching
+///   is not crossing, and that is all this proves. A line from W running along the segment's
+///   line toward R (its far end within the tolerance of the line, ahead of W) lies on the
+///   segment and is not clear.
+///
+/// A curve of another kind, a 2D or non-finite net, or a weight not proved positive is not
+/// proved.
+///
+/// # Errors
+/// Those of the topology queries, the recogniser, the extraction and the evaluations.
+fn edge_clear_of_segment(
+    k: &Kernel,
+    target: &Brep,
+    edge_id: EdgeId,
+    far: VertexId,
+    frame: &SegmentFrame,
+) -> Result<bool> {
+    use crate::curve::curve::CurveKind;
+    use crate::nurbs::math::{gamma, NOW, NOZ};
+    let Some(curve) = edge::curve(target, edge_id)?.cloned() else {
+        return Ok(false);
+    };
+    let ivl = edge::interval(target, edge_id)?;
+    let at_w = edge::start_vertex(target, edge_id)? == Some(far)
+        || edge::end_vertex(target, edge_id)? == Some(far);
+    // the extraction's error on the homogeneous coefficients, and the smallest weight
+    let mut extract_err = 0.0_f64;
+    let mut w_min = f64::INFINITY;
+    let points: Vec<Point3> = if curve.is_line(k, 3, CURVE_TOL)?.is_some() {
+        vec![
+            curve.evaluate_point(k, ivl.min())?,
+            curve.evaluate_point(k, ivl.max())?,
+        ]
+    } else {
+        let CurveKind::BSpline(base) = curve.kind() else {
+            return Ok(false);
+        };
+        let Some(nurb) = base.nurb.as_ref() else {
+            return Ok(false);
+        };
+        let (Some(&first), Some(&last)) = (nurb.knots().first(), nurb.knots().last()) else {
+            return Ok(false);
+        };
+        let (lo, hi) = (ivl.min(), ivl.max());
+        if !(first <= lo && lo < hi && hi <= last) {
+            return Ok(false);
+        }
+        let segment = if first < lo || hi < last {
+            let largest = nurb
+                .cpts()
+                .iter()
+                .flat_map(|c| {
+                    let wt = if c.w == NOW { 1.0 } else { c.w };
+                    [c.x.abs(), c.y.abs(), c.z.abs(), wt.abs()]
+                })
+                .fold(0.0_f64, f64::max);
+            extract_err = gamma(16 * (nurb.degree() + 1)) * largest;
+            nurb.extract_seg(lo, hi)?
+        } else {
+            nurb.clone()
+        };
+        let mut out = Vec::new();
+        for c in segment.cpts() {
+            if c.z == NOZ {
+                return Ok(false);
+            }
+            let wt = if c.w == NOW { 1.0 } else { c.w };
+            // weights proved positive keep the curve in the hull
+            let finite = c.x.is_finite() && c.y.is_finite() && c.z.is_finite();
+            if !(finite && crate::geom::certified::above(wt - extract_err, 0.0)) {
+                return Ok(false);
+            }
+            w_min = w_min.min(wt);
+            out.push(Point3::new(c.x / wt, c.y / wt, c.z / wt));
+        }
+        out
+    };
+    let Some(&last_point) = points.last() else {
+        return Ok(false);
+    };
+    let size = points
+        .iter()
+        .chain(std::iter::once(&frame.w))
+        .flat_map(|p| [p.x.abs(), p.y.abs(), p.z.abs()])
+        .fold(frame.length.abs(), f64::max);
+    if !size.is_finite() {
+        return Ok(false);
+    }
+    // the extraction's error carried through the quotient by a weight (as
+    // `RailPiece::ball` widens it), then the frame's own rounding
+    let carried = if extract_err > 0.0 {
+        extract_err * (1.0 + size) / (w_min - extract_err)
+    } else {
+        0.0
+    };
+    let err = gamma(16) * size + carried;
+    if !err.is_finite() {
+        return Ok(false);
+    }
+    let coords: Vec<(f64, f64)> = points.iter().map(|&p| frame.coords(p)).collect();
+    let clear = frame.tol + err;
+    if at_w {
+        if curve.is_line(k, 3, CURVE_TOL)?.is_some() {
+            // the line's end away from W
+            let first_point = points.first().copied().unwrap_or(last_point);
+            let away = if first_point.distance(frame.w) > last_point.distance(frame.w) {
+                first_point
+            } else {
+                last_point
+            };
+            let (a, h) = frame.coords(away);
+            if !(a.is_finite() && h.is_finite()) {
+                return Ok(false);
+            }
+            // along the segment's line, ahead of W: on the segment
+            if h.abs() <= clear && a > 0.0 {
+                return Ok(false);
+            }
+            return Ok(true);
+        }
+        let above = coords.iter().all(|&(_, h)| h >= -err);
+        let below = coords.iter().all(|&(_, h)| h <= err);
+        return Ok(above || below);
+    }
+    let all = |f: &dyn Fn(f64, f64) -> bool| coords.iter().all(|&(a, h)| f(a, h));
+    Ok(all(&|a, _| a < -clear)
+        || all(&|a, _| a > frame.length + clear)
+        || all(&|_, h| h > clear)
+        || all(&|_, h| h < -clear))
+}
+
+/// The tolerance [`rail_passes_side_edge_end`] recognises a side edge's curve as a line
+/// within, as [`crate::blend::fillet_tangent_rollover`] recognises the filleted edge's.
+const CURVE_TOL: f64 = 1.0e-8;
+
+/// The sine squared below which [`rail_passes_side_edge_end`] takes the rail and the side edge
+/// as parallel (no crossing).
+const DIR_TOL: f64 = 1.0e-9;
 
 /// Not upstream (solidcore-native, [`TurnedBack`]): whether N's tangent `tn` leaving T's vertex
 /// points back along E's tangent `te` arriving there: within 45 degrees of antiparallel
@@ -717,8 +1107,153 @@ impl FilletCorner {
 
 #[cfg(test)]
 mod tests {
-    use super::turns_back;
-    use crate::math::Vec3;
+    use super::{rolled_rail_turns_back, tangent_leaving, turns_back, TurnedBack};
+    use crate::blend::fillet_solver::p1::test_manifold_tangent_rollover;
+    use crate::boolean::api_brep::boolean_union;
+    use crate::curve::curve::Curve;
+    use crate::kernel::Kernel;
+    use crate::math::{Point3, Vec3};
+    use crate::primitive::api_curves::create_line_segment;
+    use crate::sweep::api_brep::create_linear_sweep;
+    use crate::topology::{edge, Brep, EdgeId, VertexId};
+
+    /// The prism `height` tall along z on the closed polygon `pts` (in z = 0).
+    fn prism(k: &mut Kernel, pts: &[(f64, f64)], height: f64) -> Brep {
+        let p = |i: usize| {
+            let (x, y) = pts[i % pts.len()];
+            Point3::new(x, y, 0.0)
+        };
+        let sides: Vec<Curve> = (0..pts.len())
+            .map(|i| Curve::from(create_line_segment(p(i), p(i + 1)).unwrap()))
+            .collect();
+        let refs: Vec<Option<&Curve>> = sides.iter().map(Some).collect();
+        create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), height, true).unwrap()
+    }
+
+    /// The one vertex of `b` at `at`.
+    fn vertex_at(b: &Brep, at: Point3) -> VertexId {
+        let found: Vec<VertexId> = b
+            .vertex_list()
+            .iter()
+            .copied()
+            .filter(|&v| b.vertex(v).unwrap().point.distance(at) < 1e-9)
+            .collect();
+        assert_eq!(found.len(), 1, "vertices at {at:?}: {found:?}");
+        found[0]
+    }
+
+    /// The one edge of `b` between the vertices `p` and `q`.
+    fn edge_between(b: &Brep, p: VertexId, q: VertexId) -> EdgeId {
+        let found: Vec<EdgeId> = b
+            .edge_list()
+            .iter()
+            .copied()
+            .filter(|&e| {
+                let ends = (
+                    edge::start_vertex(b, e).unwrap(),
+                    edge::end_vertex(b, e).unwrap(),
+                );
+                ends == (Some(p), Some(q)) || ends == (Some(q), Some(p))
+            })
+            .collect();
+        assert_eq!(found.len(), 1, "edges between {p:?} and {q:?}: {found:?}");
+        found[0]
+    }
+
+    /// An arm 5 thick (`[-20, 0] x [-25, 5]` in plan) joined to a boss 20 tall whose wall X is
+    /// the vertical plane through the line x = y = 0, at `crease_deg` to the arm's side wall S
+    /// (x = 0) and turned convexly from it: in plan the boss is the strip `s w + t l`
+    /// (s in [-15, 15], t in [0, 10]), `w = (sin c, cos c)`, `l` a quarter turn left of `w`.
+    /// At V = (0, 0, 5) meet E (S and the arm's top P, arriving from (0, -25, 5) along +y), T
+    /// (S and X, the vertical edge below V, a crease of c) and N (X and P, the boss's foot on
+    /// the arm, leaving V along -w): N's tangent lies c from antiparallel to E's. #16027's
+    /// taller boss, its foot tangent to S, with the tangency opened to a crease of c.
+    fn arm_and_creased_boss(k: &mut Kernel, crease_deg: f64) -> Brep {
+        let arm = prism(
+            k,
+            &[(-20.0, -25.0), (0.0, -25.0), (0.0, 5.0), (-20.0, 5.0)],
+            5.0,
+        );
+        let c = crease_deg.to_radians();
+        let (w, l) = ((c.sin(), c.cos()), (-c.cos(), c.sin()));
+        let at = |s: f64, t: f64| (s * w.0 + t * l.0, s * w.1 + t * l.1);
+        let boss = prism(
+            k,
+            &[
+                at(-15.0, 0.0),
+                at(15.0, 0.0),
+                at(15.0, 10.0),
+                at(-15.0, 10.0),
+            ],
+            20.0,
+        );
+        boolean_union(k, arm, boss).unwrap()
+    }
+
+    /// #16354's 45 degree turn-back band, old to new, on a body: a round rolled from S over T
+    /// onto X, its corner at (0, -25, 5) and its side edge E ([`arm_and_creased_boss`]). T
+    /// counts as smooth (the tolerance, 1.45 rad, lies above every crease here; E and N do
+    /// not), so whether the rolled rail turns back at V is decided by N's tangent against E's.
+    /// At a crease of 30 degrees it does: `TurnedBack` at V, along N, on X. At 60 and 80
+    /// degrees N lies past 45 degrees from antiparallel but still at a negative dot product
+    /// (before #16354 both were turned back, the same `TurnedBack`); it does not, and the
+    /// vertex keeps the type it had before #16027.
+    #[test]
+    fn a_rolled_rail_turns_back_only_within_45_degrees_of_antiparallel() {
+        let tol = 1.45;
+        for (crease_deg, turned) in [(30.0, true), (60.0, false), (80.0, false)] {
+            let mut k = Kernel::default();
+            let mut b = arm_and_creased_boss(&mut k, crease_deg);
+            let c = f64::to_radians(crease_deg);
+            let corner = vertex_at(&b, Point3::new(0.0, -25.0, 5.0));
+            let far = vertex_at(&b, Point3::new(0.0, 0.0, 5.0));
+            let foot = vertex_at(&b, Point3::new(-15.0 * c.sin(), -15.0 * c.cos(), 5.0));
+            let below = vertex_at(&b, Point3::new(0.0, 0.0, 0.0));
+            let e = edge_between(&b, corner, far);
+            let n = edge_between(&b, far, foot);
+            let t = edge_between(&b, far, below);
+            // V holds just E, N and T; T is smooth within the tolerance, E and N are not
+            let mut at_far = crate::topology::vertex::edges(&b, far, None).unwrap();
+            at_far.sort();
+            let mut want = vec![e, n, t];
+            want.sort();
+            assert_eq!(at_far, want, "crease {crease_deg}");
+            for (x, smooth) in [(t, true), (e, false), (n, false)] {
+                assert_eq!(
+                    test_manifold_tangent_rollover(&k, &mut b, x, tol)
+                        .unwrap()
+                        .0,
+                    smooth,
+                    "crease {crease_deg}: {x:?}"
+                );
+            }
+            // S: T's face that E shares; X: T's other face, which N lies on too
+            let e_faces = edge::faces(&b, e, None).unwrap();
+            let t_faces = edge::faces(&b, t, None).unwrap();
+            let s = *t_faces.iter().find(|f| e_faces.contains(f)).unwrap();
+            let x = *t_faces.iter().find(|&&f| f != s).unwrap();
+            assert!(edge::faces(&b, n, None).unwrap().contains(&x));
+            // N's tangent leaving V lies the crease from antiparallel to E's arriving there,
+            // at a negative dot product (the test before #16354)
+            let te = if edge::end_vertex(&b, e).unwrap() == Some(far) {
+                crate::topology::vertex::edge_end_tangent(&k, &b, e, false).unwrap()
+            } else {
+                -crate::topology::vertex::edge_end_tangent(&k, &b, e, true).unwrap()
+            };
+            let tn = tangent_leaving(&k, &b, n, far).unwrap().unwrap();
+            let off = (-te.dot(tn) / (te.length() * tn.length())).acos();
+            assert!((off - c).abs() < 1e-9, "crease {crease_deg}: {off}");
+            assert!(te.dot(tn) < 0.0, "crease {crease_deg}");
+            let side = edge::edgeuses(&b, e, None, None).unwrap()[0];
+            let got = rolled_rail_turns_back(&k, &mut b, side, corner, x, tol).unwrap();
+            let expected = turned.then_some(TurnedBack {
+                far,
+                edge: n,
+                face: x,
+            });
+            assert_eq!(got, expected, "crease {crease_deg}");
+        }
+    }
 
     /// The turn-back test takes N's tangent within 45 degrees of E's reversed, and nothing
     /// short of it: a tangent merely past square to E (a negative dot product, the old test) is

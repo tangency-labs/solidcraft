@@ -14,7 +14,7 @@ use solidcraft_doc::joints::{self, Coupling, Joint, JointExprs, JointKind, Joint
 use solidcraft_geom::Aabb3;
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, num, str_, vec3};
+use crate::params::{bad, bool_, num, str_, unique_reference, vec3};
 use crate::schema::joints::{
     AsBuiltJointParams, BudgetStop, CamLift, CamParams, CamResult, ContactStop, CouplingResult, CreateJointParams, DeleteJointParams,
     DeleteJointResult, DriveJointParams, DriveJointResult, EditJointResult, FloatingChain, GearParams, HeldValue, InspectJointParams,
@@ -416,7 +416,15 @@ pub(crate) fn cannot_move(s: &Session, sol: &joints::Solution, id: u64) -> Optio
     if let Some((_, _, why)) = sol.errors.iter().find(|e| e.0 == id) {
         return Some((why.clone(), None));
     }
-    // The solver places what it reaches from the root and grounded occurrences.
+    // A joint between two fixed parts holds both sides: nothing is left to move.
+    let fixed = |o: u64| o == 0 || sol.fixed.contains(&o);
+    if fixed(j.a.occurrence) && fixed(j.b.occurrence) && j.a.occurrence != j.b.occurrence {
+        let held = |o: u64| if o == 0 { "the root".to_string() } else { occurrence_name(s, o) };
+        return Some((format!("both sides are held by grounded parts: {}, {}", held(j.a.occurrence), held(j.b.occurrence)), None));
+    }
+    // The solver places what it reaches from the root and grounded occurrences. A pair joined to
+    // nothing grounded (neither side placed) is a floating chain: its parts are not placed, so
+    // driving the joint moves nothing, and the reply says which part is joined to nothing.
     let placed = |o: u64| o == 0 || sol.world.contains_key(&o);
     if placed(j.a.occurrence) || placed(j.b.occurrence) {
         return None;
@@ -1033,7 +1041,12 @@ pub(crate) fn joint_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64>
     let joint = if let Some(Value::Number(number)) = v {
         number.as_u64().and_then(|id| s.doc.assembly.joints.iter().find(|joint| joint.id == id))
     } else {
-        s.doc.assembly.joints.iter().find(|joint| joint.id.to_string() == key || joint.name == key)
+        unique_reference(
+            cmd,
+            "joint",
+            &key,
+            s.doc.assembly.joints.iter().filter(|joint| joint.id.to_string() == key || joint.name == key).map(|joint| (joint.id, joint)),
+        )?
     };
     joint.map(|joint| joint.id).ok_or_else(|| bad(cmd, format!("no joint `{key}`")))
 }
@@ -1092,6 +1105,15 @@ fn values_param(s: &Session, p: &Value, kind: JointKind, cmd: &str) -> Result<Ve
     Ok(out)
 }
 
+fn limit_pair(s: &Session, lo: &Value, hi: &Value, angle: bool, cmd: &str) -> Result<(f64, f64)> {
+    let lo = value(s, lo, angle, cmd)?;
+    let hi = value(s, hi, angle, cmd)?;
+    if lo > hi {
+        return Err(bad(cmd, "joint limit minimum must not exceed maximum"));
+    }
+    Ok((lo, hi))
+}
+
 fn limits_param(s: &Session, p: &Value, kind: JointKind, cmd: &str) -> Result<Vec<Option<(f64, f64)>>> {
     let n = kind.dofs().len();
     let mut out = vec![None; n];
@@ -1103,7 +1125,7 @@ fn limits_param(s: &Session, p: &Value, kind: JointKind, cmd: &str) -> Result<Ve
             if let (Some(lo), Some(hi)) = (l.get(0), l.get(1))
                 && let Some(slot) = out.get_mut(i)
             {
-                *slot = Some((value(s, lo, kind.is_angle(i), cmd)?, value(s, hi, kind.is_angle(i), cmd)?));
+                *slot = Some(limit_pair(s, lo, hi, kind.is_angle(i), cmd)?);
             }
         }
     }
@@ -2138,7 +2160,7 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "no such value"));
     }
     let lim = match (p.get("min"), p.get("max")) {
-        (Some(lo), Some(hi)) => Some((value(s, lo, kind.is_angle(i), cmd)?, value(s, hi, kind.is_angle(i), cmd)?)),
+        (Some(lo), Some(hi)) => Some(limit_pair(s, lo, hi, kind.is_angle(i), cmd)?),
         (None, None) => None,
         _ => return Err(bad(cmd, "give both `min` and `max`, or neither to clear")),
     };
