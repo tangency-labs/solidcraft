@@ -751,6 +751,86 @@ fn a_band_whose_vertices_line_up_across_a_hole_gets_its_seam_clear_of_it() {
     assert!(angle.abs() > east, "the seam at {angle} rad crosses the hole");
 }
 
+/// A drill point's cone to its tip whose edge turns back partway round (a second drill point and
+/// a flat cutting it): the loop goes once round, but over 350° to 360° it runs forward along the
+/// rim, back a ring nearer the tip and forward again a ring nearer still, joined by rulings. A
+/// seam at a vertex among those angles left the loop, followed from it, 370° wide, and the face
+/// was taken for a thread's flank ("a loop that winds -1.0 turns about its axis and does not
+/// close"). Its seam to the tip starts where the loop passes only once, the rim split there.
+#[test]
+fn a_cone_to_its_tip_whose_edge_turns_back_gets_its_seam_where_the_edge_passes_once() {
+    let (deg, apex) = (PI / 180.0, -2.5);
+    // The cone r = 2.5 + z about +z, its tip at z = -2.5.
+    let at = |z: f64, a: f64| [(2.5 + z) * a.cos(), (2.5 + z) * a.sin(), z];
+    let mut w = W::default();
+    let corners = [(0.0, 20.0), (0.0, 0.0), (-0.5, 0.0), (-0.5, -10.0), (-1.0, -10.0), (-1.0, 20.0)].map(|(z, a)| (z, a * deg));
+    let [a, b, c, d, e, f] = corners.map(|(z, t)| (w.vertex(at(z, t)), at(z, t)));
+    // The arcs, each running +u: the rim from 20° round to 360°, the rings from -10°.
+    let rim = arc_about_z(&mut w, (a.0, b.0), 2.5, 0.0);
+    let near = arc_about_z(&mut w, (d.0, c.0), 2.0, -0.5);
+    let nearer = arc_about_z(&mut w, (e.0, f.0), 1.5, -1.0);
+    let ruling = |w: &mut W, p: (u64, V), q: (u64, V)| w.line_edge(p, q, true, len3(sub3(q.1, p.1)));
+    let (af, ed, cb) = (ruling(&mut w, a, f), ruling(&mut w, e, d), ruling(&mut w, c, b));
+    // The face lies between the loop and the tip (lower v): the loop runs -u overall, written
+    // from a vertex where it turns back (-10° on the near ring).
+    let uses = [(near, true), (cb, true), (rim, false), (af, true), (nearer, false), (ed, true)].map(|(x, o)| w.oe(x, o));
+    let outer = w.bound(&uses, true, true);
+    let tip = w.vertex([0.0, 0.0, apex]);
+    let tip_loop = w.add(format!("VERTEX_LOOP('',#{tip})"));
+    let tip_bound = w.add(format!("FACE_BOUND('',#{tip_loop},.T.)"));
+    let axis = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let cone = w.add(format!("CONICAL_SURFACE('',#{axis},2.5,{})", real(PI / 4.0)));
+    let face = w.face(&[outer, tip_bound], cone, true);
+    let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('drill point',(#{open}))"));
+    let s = one_solid(&w.file(&[model]));
+    assert!(s.sheet);
+    assert_eq!(s.brep.faces.len(), 1);
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    // The seam: the edge to the tip, from the rim where only it passes (between 20° and 350°).
+    let seam = s.brep.edges.iter().find(|x| x.vertices.iter().any(|v| len3(sub3(s.brep.vertices[*v as usize].point, [0.0, 0.0, apex])) < 1e-9));
+    let seam = seam.unwrap_or_else(|| panic!("no seam to the tip: {:?}", s.brep.vertices));
+    let foot = seam.vertices.map(|v| s.brep.vertices[v as usize].point).into_iter().find(|p| p[2].abs() < 1e-9).unwrap();
+    let angle = foot[1].atan2(foot[0]).rem_euclid(2.0 * PI);
+    assert!(angle > 20.0 * deg && angle < 350.0 * deg, "the seam at {angle} rad starts where the edge turns back");
+}
+
+/// A piece of a thread's edge that comes within its pad of a ruling's angle without crossing it
+/// (a near miss) may meet the ruling anywhere over its hull's heights, not only at the end nearer
+/// in angle (`wound_band_seam` asks `seams::meets` of every piece of every loop): here both ends
+/// are below the ruling's vertex and the middle rises above it, so a seam up the ruling is blocked
+/// from the vertex on. Read at its nearer end, the piece lies behind the vertex and is no matter
+/// (#16930).
+#[test]
+fn a_near_miss_piece_blocks_a_seam_over_its_whole_height_range() {
+    let tol = 1e-3;
+    let frame = seams::Perpendicular::about(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+    // An arch on a cylinder of radius 10, 100 to 400 um short of the ruling at angle 0 (the pad
+    // reaches tol / r = 100 um): its ends at height -2, its middle's control points at 6.
+    let at = |angle: f64, z: f64| [10.0 * angle.cos(), 10.0 * angle.sin(), z];
+    let arch = BCurve::Spline {
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        points: vec![at(-4e-5, -2.0), at(-3e-5, 6.0), at(-2e-5, 6.0), at(-1e-5, -2.0)],
+    };
+    let form = Some(CurveEval::new(&arch).unwrap());
+    let pieces = frame.pieces(&arch, [0.0, 1.0], tol);
+    let [piece] = pieces.as_slice() else { panic!("{} pieces", pieces.len()) };
+    let height = |p: Vec3| p.z;
+    let reach = |along: &dyn Fn(f64) -> f64| match seams::meets(&frame, &form, piece, 0.0, height, along, tol).unwrap() {
+        seams::Meets::Hull(reach) => reach,
+        seams::Meets::Clear => panic!("the ruling passes within the piece's pad"),
+        seams::Meets::Once { d, .. } => panic!("a crossing at {d}: the angle never reaches the ruling's"),
+    };
+    // From a vertex at height 0 up: the hull's lowest point is behind it, so the piece is on the
+    // seam from the vertex.
+    assert_eq!(reach(&|h| h), Some(0.0));
+    // From a vertex at height -3 up: the whole hull is ahead, its lowest point 1 mm along.
+    assert_eq!(reach(&|h| h + 3.0), Some(1.0));
+    // From a vertex at height 7: up, the hull is behind it; down, its lowest point is 1 mm along.
+    assert_eq!(reach(&|h| h - 7.0), None);
+    assert_eq!(reach(&|h| 7.0 - h), Some(1.0));
+}
+
 /// A seam's angle test (`seams::angular_sign`): a ruling's angular speed is 0, and rounding
 /// leaves its one coefficient a few 1e-17 either way; that is not one way. An arc's is.
 #[test]
@@ -2010,6 +2090,95 @@ fn a_spline_cone_closed_in_v_gets_a_seam_to_its_apex() {
     faces_away(&s.brep, 0, |_| [0.0, 0.0, 1.0]);
 }
 
+/// A prism whose side is a B-spline surface closed around u (its first and last control columns
+/// the same), extruded from a closed quintic on 121 points of a wavy outline (a radius of 5 ± 2 mm,
+/// thirty waves round), as a fit-point spline is written; the side's loop has its seam,
+/// a line at the knots' start used both ways. The turns the loop makes round u were counted from
+/// each point's parameters found from the last point's alone, which settled on another wave
+/// millimetres away and counted a turn the loop does not make: the side was refused as "a face
+/// around an open surface of revolution with one bound" and the solid read open (#16723).
+#[test]
+fn a_wavy_spline_prism_with_its_seam_gets_no_other() {
+    let n = 121;
+    let outline: Vec<V> = (0..n)
+        .map(|k| {
+            // The last point is the first, exactly.
+            let t = std::f64::consts::TAU * f64::from(k % (n - 1)) / f64::from(n - 1);
+            let r = 5.0 + 2.0 * (30.0 * t).sin();
+            [r * t.cos(), r * t.sin(), 0.0]
+        })
+        .collect();
+    // Clamped quintic knots: 0 and 1 six times, evenly between.
+    let mults: Vec<&str> = (0..n - 4).map(|k| if k == 0 || k == n - 5 { "6" } else { "1" }).collect();
+    let knots: Vec<String> = (0..n - 4).map(|k| real(f64::from(k) / f64::from(n - 5))).collect();
+    let (mults, knots) = (mults.join(","), knots.join(","));
+    let at = |p: V, z: f64| [p[0], p[1], z];
+    let mut w = W::default();
+    let curve = |w: &mut W, z: f64| {
+        let pts: Vec<u64> = outline.iter().map(|p| w.pt(at(*p, z))).collect();
+        w.add(format!("B_SPLINE_CURVE_WITH_KNOTS('',5,({}),.UNSPECIFIED.,.T.,.F.,({mults}),({knots}),.UNSPECIFIED.)", list(&pts)))
+    };
+    let (v0, v1) = (w.vertex(at(outline[0], 0.0)), w.vertex(at(outline[0], 5.0)));
+    let (kb, kt) = (curve(&mut w, 0.0), curve(&mut w, 5.0));
+    let bottom = w.add(format!("EDGE_CURVE('',#{v0},#{v0},#{kb},.T.)"));
+    let top = w.add(format!("EDGE_CURVE('',#{v1},#{v1},#{kt},.T.)"));
+    let seam = w.line_edge((v0, at(outline[0], 0.0)), (v1, at(outline[0], 5.0)), true, 5.0);
+    let rows: Vec<String> = outline
+        .iter()
+        .map(|p| {
+            let (a, b) = (w.pt(at(*p, 0.0)), w.pt(at(*p, 5.0)));
+            format!("(#{a},#{b})")
+        })
+        .collect();
+    let surface = w.add(format!(
+        "B_SPLINE_SURFACE_WITH_KNOTS('',5,1,({}),.UNSPECIFIED.,.T.,.F.,.F.,({mults}),(2,2),({knots}),(0.,5.),.UNSPECIFIED.)",
+        rows.join(",")
+    ));
+    // Along the outline (counter-clockwise about +z) and up: the side's normal points out. Its
+    // loop runs round the bottom, up the seam, back round the top and down the seam.
+    let uses = [w.oe(bottom, true), w.oe(seam, true), w.oe(top, false), w.oe(seam, false)];
+    let bx = w.bound(&uses, true, true);
+    let side = w.face(&[bx], surface, true);
+    let plane_b = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(bottom, false);
+    let bx = w.bound(&[x], true, true);
+    let cap_b = w.face(&[bx], plane_b, false);
+    let plane_t = w.plane([0.0, 0.0, 5.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(top, true);
+    let bx = w.bound(&[x], true, true);
+    let cap_t = w.face(&[bx], plane_t, true);
+    let shell = closed_shell(&mut w, &[side, cap_b, cap_t]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('wavy prism',#{shell})"));
+    let s = one_solid(&w.file_with_uncertainty(&[solid], 0.01));
+    assert_eq!(counts(&s.brep), [2, 1, 3, 3, 2]);
+    assert!(!s.notes.iter().any(|n| n.contains("seam edges added")), "{:?}", s.notes);
+    faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 4.0)]);
+}
+
+/// A loop's samples each within the tolerance of two parts of a surface periodic in u: the one
+/// the loop runs on, and another between 0.4 and 0.6 of a period away, nearer for the middle
+/// half of the loop. Taking the nearer at each sample jumps about +0.45 of a period out and +0.45 back
+/// (the offset now past half a period, wrapped the other way) and counts a turn the loop does
+/// not make. The count keeps to the part the loop is on: no turn for a loop running along v,
+/// one for a loop running once round u.
+#[test]
+fn a_loop_within_the_tolerance_of_two_parts_of_a_surface_keeps_its_turns() {
+    let n = 20;
+    let reach = 0.01;
+    for (turns, expected) in [(0.0, [0, 0]), (1.0, [1, 0])] {
+        let mut t = seams::Turns::new([Some(1.0), None]);
+        for k in 0..=n {
+            let s = f64::from(k) / f64::from(n);
+            let on = [(turns * s).rem_euclid(1.0), s];
+            let other = [(on[0] + 0.4 + 0.2 * s).rem_euclid(1.0), s];
+            let nearer = (5..15).contains(&k);
+            assert!(t.step(&[(on, 0.5 * reach), (other, if nearer { 0.4 } else { 0.6 } * reach)], reach));
+        }
+        t.close();
+        assert_eq!(t.count(), expected, "{turns} turns");
+    }
+}
+
 #[test]
 fn pcurves_past_a_quarter_line_the_form_ends_on_are_put_on_the_form() {
     // A cylinder face from 2e-5 rad before the frame's x axis to 0.5 rad (its straight edge 0.2 um
@@ -2164,6 +2333,53 @@ fn a_projected_pcurve_past_the_quarter_line_a_face_form_ends_on_stays_in_the_fac
     solidcore_ops::record_check::agreement(b).unwrap();
 }
 
+/// A spline face's pcurve a little past its patch's knot range is put on the range when that
+/// moves the surface within its edge's tolerance, measured along the iso-line it runs on. The
+/// RailCore V6 hotend's face #1310 is a whole bicubic patch whose edge along its first v row, of
+/// tolerance 5.7e-4 mm, gets a closed-form pcurve from u = -4.1e-4 to 1.00097; its pole test
+/// refused the end past the range ("OffRangeBeyondReach"), and the face was left out. Here the
+/// row v = 0 is a straight line 0.3 mm long (the surface moves 0.3 mm per unit of u there), the
+/// row v = 1 three times as long: bounded over the whole patch the move would exceed the
+/// tolerance, along its own row it does not.
+#[test]
+fn a_pcurve_a_little_past_a_spline_patchs_knot_range_is_put_on_it() {
+    let bezier = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+    let points: Vec<Vec<V>> = (0..4)
+        .map(|i| {
+            let x = f64::from(i) / 3.0;
+            (0..4)
+                .map(|j| {
+                    let s = f64::from(j) / 3.0;
+                    // The row's length grows from 0.3 at v = 0 to 0.9 at v = 1; a bulge inside.
+                    let z = if (1..=2).contains(&i) && (1..=2).contains(&j) { 0.5 } else { 0.0 };
+                    [0.3 * (1.0 + 2.0 * s) * x, 10.0 * s, z]
+                })
+                .collect()
+        })
+        .collect();
+    let patch = BSurface::Spline { u_knots: bezier.clone(), v_knots: bezier, points };
+    let row = |a: f64, b: f64| Curve2::Spline { knots: vec![-1.0, -1.0, 0.0, 0.0], points: vec![[a, 0.0], [b, 0.0]] };
+    let (before, after) = (-4.1e-4, 1.0 + 9.7e-4);
+    let tolerance = 5.7e-4;
+    let mut pcs = vec![vec![row(after, before)]];
+    assert_eq!(onto_knots(&patch, &[vec![tolerance]], &mut pcs), 1);
+    assert_eq!(pcs[0][0], row(1.0, 0.0));
+    // The same ends with a tolerance under 0.3 x 9.7e-4 mm stay where they are.
+    let mut pcs = vec![vec![row(after, before)]];
+    assert_eq!(onto_knots(&patch, &[vec![2e-4]], &mut pcs), 0);
+    assert_eq!(pcs[0][0], row(after, before));
+    // Measured along its own row the move is 0.3 x 9.7e-4 mm, within the tolerance (bounded
+    // over the whole patch, where the row v = 1 moves 0.9 mm per unit of u, it would not be).
+    let (_, moved) = SurfaceEval::new(&patch).unwrap().pcurve_onto_knots(&row(after, before), tolerance).unwrap().unwrap();
+    assert!((0.3 * 9.7e-4..0.302 * 9.7e-4).contains(&moved), "{moved}");
+    // A pcurve whose row also leaves the range across, where the surface moves 10 mm per unit of
+    // v, is left as it is.
+    let off = Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[before, -1e-3], [0.5, -1e-3]] };
+    let mut pcs = vec![vec![off.clone()]];
+    assert_eq!(onto_knots(&patch, &[vec![tolerance]], &mut pcs), 0);
+    assert_eq!(pcs[0][0], off);
+}
+
 /// A closed spline edge whose end vertex sits a few µm off the curve's seam (its start and end
 /// point) projects a hair past the start: it is at the seam, and the edge runs to the curve's
 /// end, not refused as crossing the seam.
@@ -2192,6 +2408,30 @@ fn an_edge_to_a_vertex_a_hair_off_a_closed_splines_seam_ends_at_the_seam() {
     let eval = CurveEval::new(&m.curve).unwrap();
     let at = |t: f64, q: [f64; 3]| eval.point(t).unwrap().dist(v3(q)) < 1e-9;
     assert!(at(m.interval[0], mid) && at(m.interval[1], far), "{:?}", m.interval);
+}
+
+/// A closed edge (one vertex at both ends) on a closed spline whose vertex is half way round
+/// the curve, not at its seam (a thread's end loop as some exporters write it): the edge is the
+/// whole curve started at its vertex, so both its ends are the vertex. It was read from the
+/// curve's own seam, its vertex 5 mm off both ends, and the face refused (#16930).
+#[test]
+fn a_closed_edge_whose_vertex_is_off_its_closed_splines_seam_starts_there() {
+    let square = || BCurve::Spline {
+        knots: vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0],
+        points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]],
+    };
+    let mid = [10.0, 5.0, 0.0];
+    let m = open_or_closed(square(), mid, mid, true, true, 1e-3).unwrap();
+    assert!((m.interval[1] - m.interval[0] - 4.0).abs() < 1e-12, "{:?}", m.interval);
+    let eval = CurveEval::new(&m.curve).unwrap();
+    for t in m.interval {
+        assert!(eval.point(t).unwrap().dist(v3(mid)) < 1e-12, "{t}");
+    }
+    // Half way round from the vertex: the opposite side's middle, the curve's shape kept.
+    assert!(eval.point(m.interval[0] + 2.0).unwrap().dist(v3([0.0, 5.0, 0.0])) < 1e-12);
+    // A vertex at the seam keeps the curve as it is.
+    let m = open_or_closed(square(), [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], true, true, 1e-3).unwrap();
+    assert_eq!(m.interval, [0.0, 4.0]);
 }
 
 /// A spline surface whose first and last control columns lie within the tolerance of each other

@@ -14123,3 +14123,40 @@ fn desktop_panel_windows_reserve_ids_only_after_commit_and_fit_the_current_monit
     adapter.commit(&create);
     assert_ne!(adapter.viewport_id(&host), Some(previous));
 }
+
+#[test]
+fn production_history_resize_paints_and_commits_each_width_above_regular_minimum() {
+    for start in [56.0, 180.0] {
+        for offset in 1..=12 {
+            let mut h = production_content_harness(false, false);
+            let width = crate::ui_kit::history_width(true) + offset as f32;
+            h.app.run("view.history_layout", serde_json::json!({"dock":"left","width":start,"collapsed":false})).unwrap();
+            h.frames(6);
+            let frame = h.app.universal_panel_frame().unwrap();
+            let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
+            let edge = HostPointerTarget::Resize { section: history.section.clone(), edge: HostResizeEdge::Right };
+            let at = egui_rect(frame.layout.control(&edge).unwrap().bounds).center();
+            let end = at + egui::vec2(width - history.outer.size.width, 0.0);
+            h.frame_with(vec![egui::Event::PointerMoved(at)]);
+            let button =
+                |pos, pressed| egui::Event::PointerButton { pos, pressed, button: egui::PointerButton::Primary, modifiers: egui::Modifiers::NONE };
+            h.frame_with(vec![button(at, true)]);
+            h.frame_with(vec![egui::Event::PointerMoved(end)]);
+            h.frames(15);
+            let preview = h.app.universal_panel_frame().unwrap().preview.as_ref().expect("held drag has a guide");
+            assert!(preview.rejection.is_none(), "{start} to {width}: {:?}", preview.rejection);
+            assert_eq!(preview.bounds.size.width, width);
+            assert!(
+                h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect)
+                if rect.rect == egui_rect(preview.bounds)
+                && rect.fill == solidcraft_theme::Tokens::get().form_primary.gamma_multiply(0.12))),
+                "guide was not painted at {width} from {start}"
+            );
+            h.frame_with(vec![button(end, false)]);
+            h.frames(4);
+            let frame = h.app.universal_panel_frame().unwrap();
+            let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
+            assert_eq!(history.outer.size.width, width);
+        }
+    }
+}

@@ -245,3 +245,16 @@ whose faces are each whole, and the saved pick lies on that edge. A pick on anot
 face still in several pieces, asks to be picked again. Test:
 `a_chamfer_saved_under_numbered_side_pieces_of_a_peg_is_found_at_its_pick`
 (`crates/engine/src/face_name_tests.rs`).
+
+Round edge numbers (#14479): where a fillet or chamfer rounded one of several edges between the
+same two faces (`F2:side:c1|F2:side:l1~2`), 0.30.1 wrote an edge of that round in the older form,
+with the round's edge number at the end (`F2:top|F3:blend:F2:side:c1|F2:side:l1~2`). That form
+reads a trailing number as the whole edge's, so such a name finds no edge as read. A fillet, a
+chamfer or a Sketch Project link then reads the number as the round's edge, and takes the one
+edge between the other face and a face answering to that round whose curve the saved pick lies
+on. A blend of several edges between the same two faces names each of its faces after all of
+them, so the pick, not the number, tells those faces apart. A pick on an edge between other faces
+asks to be picked again, and so do other references (holes, joints, construction geometry) with
+such a name. Test:
+`a_chamfer_saved_on_a_rounds_edge_with_its_number_at_the_end_is_found_at_its_pick`
+(`crates/engine/src/face_name_tests.rs`).
