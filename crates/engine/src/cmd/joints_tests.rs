@@ -113,6 +113,54 @@ fn deleted_joint_ids_are_not_reused_after_reopening() {
     }
 }
 
+#[test]
+fn ambiguous_joint_names_are_refused_without_changing_the_session() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    let params = json!({"type": "revolute", "a": 0, "b": "Part", "name": "Shared"});
+    let first = run(&mut s, "joint.as_built", params.clone())["joint"].as_u64().unwrap();
+    let second = run(&mut s, "joint.as_built", params)["joint"].as_u64().unwrap();
+    let mut s = Session::opened(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), None);
+    run(&mut s, "component.create", json!({"name": "Temporary", "activate": false}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(!s.redo.is_empty());
+    for (command, params) in [
+        ("joint.delete", json!({"joint": "Shared"})),
+        ("joint.edit", json!({"joint": "Shared", "name": "Changed"})),
+        ("joint.drive", json!({"joint": "Shared", "value": 45})),
+        ("selection.delete", json!({"joints": ["Shared"]})),
+    ] {
+        let (doc, undo, redo) = (s.doc.clone(), s.undo.len(), s.redo.len());
+        let error = s.execute(command, &params).expect_err("an ambiguous name must not choose a joint");
+        assert!(matches!(&error, crate::EngineError::BadParams { .. }), "{command}: {error}");
+        assert!(
+            error.to_string().contains(&format!("ambiguous joint `Shared`; matching IDs: {first}, {second}; use a numeric joint ID")),
+            "{command}: {error}"
+        );
+        assert_eq!(s.doc, doc, "{command} changed the document");
+        assert_eq!((s.undo.len(), s.redo.len()), (undo, redo), "{command} changed undo/redo");
+    }
+    run(&mut s, "joint.delete", json!({"joint": second}));
+    run(&mut s, "joint.edit", json!({"joint": "Shared", "name": "Unique"}));
+    assert_eq!(s.doc.assembly.joints.iter().find(|j| j.id == first).unwrap().name, "Unique");
+}
+
+#[test]
+fn joint_text_references_refuse_name_and_id_collisions() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    let first = run(&mut s, "joint.as_built", json!({"type": "revolute", "a": 0, "b": "Part", "name": "4"}))["joint"].as_u64().unwrap();
+    let second = run(&mut s, "joint.as_built", json!({"type": "revolute", "a": 0, "b": "Part", "name": "Target"}))["joint"].as_u64().unwrap();
+    assert_eq!(second, 4);
+    let doc = s.doc.clone();
+    let error = s.execute("joint.delete", &json!({"joint": "4"})).unwrap_err();
+    assert!(error.to_string().contains(&format!("matching IDs: {first}, {second}")), "{error}");
+    assert_eq!(s.doc, doc);
+    run(&mut s, "joint.delete", json!({"joint": second}));
+    run(&mut s, "joint.delete", json!({"joint": "4"}));
+    assert!(s.doc.assembly.joints.is_empty());
+}
+
 /// A hinge leaf (oracle 63's knuckle geometry): a 40 x 30 x 3 plate and an r4 knuckle along X
 /// at y = 33, z = 4.
 fn leaf(s: &mut Session, name: &str) {

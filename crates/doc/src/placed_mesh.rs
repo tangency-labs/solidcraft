@@ -167,6 +167,19 @@ impl ModelBody {
             self.opposite_hand = old.opposite_hand.clone();
         }
     }
+
+    /// Draw this body, which is `old` moved by `transform` (a body moved to another component),
+    /// from `old`'s triangles and display plans: the very ones for the identity, moved for
+    /// another rigid motion. Moving a pattern of bodies then meshes none of them again.
+    pub(crate) fn drawn_as_moved(&mut self, old: &ModelBody, transform: &crate::Mat) {
+        if crate::is_identity(transform) && same_triangles(&self.body, &old.body) {
+            self.keep_meshes_of(old);
+            self.mesh_placement = old.mesh_placement.clone();
+            self.mirrored_mesh = old.mirrored_mesh.clone();
+        } else {
+            self.mesh_placement = PlacedMesh::new(old, transform).map(Arc::new);
+        }
+    }
 }
 
 /// The display plan of a definition `body` at quality `q`, made once in `cell`.
