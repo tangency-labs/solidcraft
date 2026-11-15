@@ -1413,6 +1413,102 @@ fn line_ends(curves: &[Value]) -> Vec<[f64; 4]> {
         .collect()
 }
 
+/// The curves sketch Intersect makes of the face at `face` of the body `profile` (lines and arcs
+/// on XZ) revolved whole about X builds, on a sketch on XZ turned `angle` degrees about X (on XZ
+/// itself for none), or Intersect's refusal.
+fn intersect_revolved_face(profile: &[(&str, Value)], angle: Option<f64>, face: [f64; 3]) -> std::result::Result<Vec<Value>, String> {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "profile"}));
+    for (cmd, p) in profile {
+        run(&mut s, cmd, p.clone());
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "profile", "axis": "x", "angle": "360 deg", "body_name": "turned"}));
+    if let Some(angle) = angle {
+        run(&mut s, "construct.plane.at_angle", json!({"base": "XZ", "axis": "X", "angle": format!("{angle} deg"), "name": "cut"}));
+        run(&mut s, "sketch.create", json!({"plane": "cut", "name": "section"}));
+    } else {
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "section"}));
+    }
+    s.execute("sketch.intersect", &json!({"refs": [{"face": face, "body": "turned"}]})).map_err(|e| e.to_string())?;
+    Ok(linked_curves(&inspect(&mut s)))
+}
+
+/// That a plane through the axis cuts a turned face in two of `kind` ("line" or "arc", of
+/// `radius` about (`centre`, ±its y)), one each side of the axis, from (`a`, ±its y) to (`b`, ±its
+/// y): on the face's edges exactly, within the model's tolerance, whichever way the sketch's y
+/// points and each runs.
+fn assert_axial(curves: &[Value], kind: &str, a: [f64; 2], b: [f64; 2], arc: Option<([f64; 2], f64)>) {
+    const EXACT: f64 = 1e-9;
+    assert!(curves.len() == 2 && curves.iter().all(|c| c["type"] == kind), "{curves:?}");
+    let at = |c: &Value, k: &str| [c[k][0].as_f64().unwrap_or(f64::NAN), c[k][1].as_f64().unwrap_or(f64::NAN)];
+    let mut sides = Vec::new();
+    for c in curves {
+        let (start, end) = (at(c, "start_at"), at(c, "end_at"));
+        let side = (start[1] + end[1]).signum();
+        let near = |p: [f64; 2], q: [f64; 2]| (p[0] - q[0]).hypot(p[1] - side * q[1]) < EXACT;
+        assert!((near(start, a) && near(end, b)) || (near(start, b) && near(end, a)), "{c}");
+        if let Some((centre, radius)) = arc {
+            assert!(near(at(c, "center_at"), centre) && (c["radius"].as_f64().unwrap_or(f64::NAN) - radius).abs() < EXACT, "{c}");
+        }
+        sides.push(side);
+    }
+    sides.sort_by(f64::total_cmp);
+    assert_eq!(sides, [-1.0, 1.0], "{curves:?}");
+}
+
+/// A plane through a cone's axis cuts it in two of its lines, from one circular edge to the
+/// other: at 15 degrees they ran 0.0227 mm past the radius-10 edge and stopped 0.0067 mm short
+/// of the radius-20 one (#17496).
+#[test]
+fn intersect_through_a_cones_axis_gives_its_lines_edge_to_edge() {
+    let frustum = [("sketch.line", json!({"points": [[0, 10], [10, 20], [10, 25], [0, 25]], "closed": true}))];
+    let curves = intersect_revolved_face(&frustum, Some(15.0), [0.521423, -6.633141, -8.167116]).unwrap();
+    assert_axial(&curves, "line", [0.0, 10.0], [10.0, 20.0], None);
+}
+
+/// A plane through a torus's axis cuts a 10 degree band of it in the profile's arc, not its chord
+/// (#17498).
+#[test]
+fn intersect_through_a_torus_axis_gives_its_arc_not_the_chord() {
+    let ring = [
+        ("sketch.arc.center_point", json!({"center": [0, 20], "start": [0, 30], "sweep": -10})),
+        ("sketch.line", json!({"points": ["a1.end", [0, 10], [0, 30]], "infer": false})),
+    ];
+    let curves = intersect_revolved_face(&ring, None, [0.645545, 19.391767, -22.862815]).unwrap();
+    let (s, c) = 10f64.to_radians().sin_cos();
+    assert_axial(&curves, "arc", [0.0, 30.0], [10.0 * s, 20.0 + 10.0 * c], Some(([0.0, 20.0], 10.0)));
+}
+
+/// A plane through the axis cuts a small round (0.2 mm through 15 degrees) in its arcs, where it
+/// said the face projected to nothing (#17499).
+#[test]
+fn intersect_through_the_axis_cuts_a_small_round() {
+    let shaft = [
+        ("sketch.line", json!({"points": [[0, 0], [0, 10], [9.8, 10]]})),
+        ("sketch.arc.center_point", json!({"center": [9.8, 9.8], "start": [9.8, 10], "sweep": -15})),
+        ("sketch.line", json!({"points": ["a1.end", [10, 0], [0, 0]], "infer": false})),
+    ];
+    let curves = intersect_revolved_face(&shaft, Some(15.0), [9.824871, -7.087480, 7.052417]).unwrap();
+    let (s, c) = 15f64.to_radians().sin_cos();
+    assert_axial(&curves, "arc", [9.8, 10.0], [9.8 + 0.2 * s, 9.8 + 0.2 * c], Some(([9.8, 9.8], 0.2)));
+}
+
+/// A plane through a torus's axis at 15 degrees cuts it in the same circle as the profile's
+/// plane does: centre 20 from the axis, radius 10 (it was 20.073 and 9.926, #17500).
+#[test]
+fn intersect_through_a_torus_axis_at_an_angle_gives_the_profile_circle() {
+    let ring = [
+        ("sketch.arc.center_point", json!({"center": [0, 20], "start": [0, 30], "sweep": -45})),
+        ("sketch.line", json!({"points": ["a1.end", [0, 10], [0, 30]], "infer": false})),
+    ];
+    let half = std::f64::consts::FRAC_1_SQRT_2 * 10.0;
+    for angle in [Some(15.0), None] {
+        let curves = intersect_revolved_face(&ring, angle, [4.473090, 20.954251, 19.966538]).unwrap();
+        assert_axial(&curves, "arc", [0.0, 30.0], [half, 20.0 + half], Some(([0.0, 20.0], 10.0)));
+    }
+}
+
 /// Where Intersect's cut is already exact it stays as it is: a box's outline (through it and on
 /// its bottom face), a cylinder's and a sphere's circle, a tilted cylinder's 21 segments.
 #[test]
