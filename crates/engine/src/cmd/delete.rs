@@ -25,7 +25,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "De
     .contract(&DELETE_CONTRACT)
     .output(output_schema_for::<SelectionDeleteResult>)
     .params(
-        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views, dimensions and balloons ({type: drawing, drawing, object}); each view takes its dimensions and balloons with it; a view with views projected from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons: [the ids that went]",
+        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views, dimensions and balloons ({type: drawing, drawing, object}); each view takes its dimensions and balloons with it; a view with views projected or cut from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons: [the ids that went]",
     )];
 
 /// Run another command's body inside this one (so the whole delete is one undo step).
@@ -66,7 +66,7 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     if ["components", "occurrences", "canvases", "point_clouds", "joints"].iter().any(|key| p.get(*key).is_some_and(|v| !v.is_null())) {
         return Err(model());
     }
-    let with_projected = super::drawing_sheet::contents_delete(cmd, p, "a view goes with the views projected from it")?;
+    let with_projected = super::drawing_sheet::contents_delete(cmd, p, "a view goes with the views projected or cut from it")?;
     let open = s.drawing(cmd)?.clone();
     let (mut views, mut dimensions, mut balloons, mut notes) = (BTreeSet::new(), Vec::new(), Vec::new(), Vec::new());
     for item in items {
@@ -93,7 +93,10 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     let projected: Vec<String> = all.difference(&views).map(|view| ids::encode(*view)).collect();
     if !projected.is_empty() && !with_projected {
         let names = projected.join(", ");
-        return Err(bad(cmd, format!("views {names} are projected from what is selected: give `\"contents\": \"delete\"` to delete them too")));
+        return Err(bad(
+            cmd,
+            format!("views {names} are projected or cut from what is selected: give `\"contents\": \"delete\"` to delete them too"),
+        ));
     }
     let mut gone = open.with_contents(all.into_iter().collect());
     gone.dimensions.extend(dimensions);
@@ -314,6 +317,8 @@ mod tests {
     use std::sync::Arc;
 
     use serde_json::{Value, json};
+    use solidcore_record::Vec2;
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, CuttingLine, SectionKind};
     use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
     use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
     use solidcraft_doc::ids;
@@ -718,6 +723,26 @@ mod tests {
         let d = s.drawing("test").unwrap();
         assert_eq!(d.views.iter().map(|v| v.id).collect::<Vec<_>>(), [front]);
         assert_eq!(d.dimensions.iter().map(|x| x.id).collect::<Vec<_>>(), [dimension], "the front view keeps its dimension");
+    }
+
+    /// A section view goes with its parent as a projected view does: deleting the parent alone is
+    /// refused naming it, and with `contents` both go.
+    #[test]
+    fn a_section_view_goes_with_its_parent_only_when_asked() {
+        let (mut s, [front, ..], _, _, drawing) = sheet_objects();
+        let mut d = (**s.drawing("test").unwrap()).clone();
+        let id = d.allocate_id(&mut ids::IdSource::seeded(13046)).unwrap();
+        let line = CuttingLine::new(SectionKind::Full, vec![Vec2::new(-30.0, 0.0), Vec2::new(30.0, 0.0)], ArrowSide::Right).unwrap();
+        let kind = ViewKind::Section { parent: front, line };
+        let place = ViewPlace::At([300.0, 60.0]);
+        let cut = View { id, sheet: d.sheets[0].id, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None };
+        d.add_views([Arc::new(cut)]);
+        s.doc_mut().put_drawing(Arc::new(d));
+        let e = s.execute("selection.delete", &json!({"items": [item(drawing, front)]})).unwrap_err().to_string();
+        assert!(e.contains(&ids::encode(id)) && e.contains("projected or cut from what is selected"), "{e}");
+        let reply = run(&mut s, "selection.delete", json!({"items": [item(drawing, front)], "contents": "delete"}));
+        assert!(reply["views"].as_array().unwrap().contains(&json!(ids::encode(id))), "{reply}");
+        assert!(s.drawing("test").unwrap().view(id).is_none());
     }
 
     /// A dimension or a balloon goes alone, or with its view selected too (once in the reply), and a

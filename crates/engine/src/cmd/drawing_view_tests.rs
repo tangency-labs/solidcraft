@@ -3267,3 +3267,61 @@ fn a_position_on_the_views_own_sheet_is_a_move() {
     let reply = run(&mut s, MOVE, json!({"view": ids::encode(front), "sheet": sheet}));
     assert_eq!(reply["views"], json!([]), "{reply}");
 }
+
+/// A section view of the front view of [`three_views`], cut along a horizontal line, its arrows down.
+fn with_section(s: &mut Session, front: u64) -> u64 {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, CuttingLine, SectionKind};
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let id = d.allocate_id(&mut solidcraft_doc::ids::IdSource::seeded(13046)).unwrap();
+    let line = CuttingLine::new(SectionKind::Full, vec![Vec2::new(-40.0, 0.0), Vec2::new(40.0, 0.0)], ArrowSide::Right).unwrap();
+    let (sheet, place) = (d.sheets[0].id, ViewPlace::At([150.0, 60.0]));
+    let view = View {
+        id,
+        sheet,
+        kind: ViewKind::Section { parent: front, line },
+        place,
+        settings: ViewOverrides::default(),
+        reference_shown_percent: 0.0,
+        label: None,
+    };
+    d.add_views([Arc::new(view)]);
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d));
+    id
+}
+
+/// A section view lists and inspects as a section of its parent, follows its parent's settings and
+/// keeps its own editable, copies alone as a section of the same parent, and its sheet says it can't
+/// be drawn yet, drawing its other views.
+#[test]
+fn a_section_view_inspects_copies_and_waits_for_its_cut() {
+    let (mut s, [front, ..]) = three_views();
+    let cut = with_section(&mut s, front);
+    let reply = inspect_view(&mut s, cut);
+    assert_eq!((&reply["kind"], &reply["parent"], reply.get("side")), (&json!("section"), &json!(ids::encode(front)), None), "{reply}");
+    assert_eq!((&reply["settings"]["scale"]["from"], &reply["linked"]), (&json!("parent"), &json!(true)), "{reply}");
+    // The arrows point down the front view: it looks down, as the top view does.
+    assert_eq!(s.drawing("test").unwrap().resolve_view(cut).unwrap().basis.x, NamedView::Top.basis().x);
+    let listed_views = run(&mut s, "drawing.inspect", json!({}))["sheets"][0]["views"].clone();
+    let entry = listed_views.as_array().unwrap().iter().find(|v| v["id"] == json!(ids::encode(cut))).unwrap();
+    assert_eq!(
+        (&entry["kind"], &entry["parent"], &entry["label"]),
+        (&json!("section"), &json!(ids::encode(front)), &json!("Section of Front")),
+        "{entry}"
+    );
+    edit_view(&mut s, cut, json!({"scale": "1:1"}));
+    assert_eq!(saved(&s, cut).settings.scale, Some("1:1".parse().unwrap()));
+    // Copied alone, it stays a section of the same parent, its line as it was.
+    let copy = listed(&to_sheet(&mut s, COPY, json!({"view": ids::encode(cut), "sheet": "Sheet 1"})))[0];
+    assert_eq!(saved(&s, copy).kind, saved(&s, cut).kind);
+    // Nothing cuts it yet: its sheet says so, and draws the front view.
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    let state = |id: u64| scene["views"].as_array().unwrap().iter().find(|v| v["view"] == json!(ids::encode(id))).unwrap().clone();
+    assert_eq!(
+        (&state(cut)["status"], &state(cut)["reason"]),
+        (&json!("failed"), &json!("not supported yet: cutting a section view's bodies")),
+        "{scene}"
+    );
+    assert_eq!(state(front)["status"], json!("drawn"), "{scene}");
+}

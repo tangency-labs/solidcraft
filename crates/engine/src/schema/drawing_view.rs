@@ -771,7 +771,7 @@ pub struct ChoicesResult {
 pub struct InspectResult {
     pub view: String,
     pub sheet: String,
-    /// `base` or `projected`.
+    /// `base`, `projected` or `section`.
     pub kind: &'static str,
     /// The design it draws: its own source, or its base view's.
     pub source: String,

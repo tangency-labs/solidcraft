@@ -3,6 +3,9 @@
 //! view** sits on one side of its parent and looks from that side, or from the side away from it
 //! in first angle ([`Drawing::projection`], [`projected_basis`]); lined up with its parent, it saves
 //! only its place along the free axis, as the other comes from the parent ([`Drawing::view_centre`]).
+//! A **section view** (#13046) is cut along a [`CuttingLine`] drawn in its parent's plane, and looks
+//! the line's arrows' way ([`CuttingLine::basis`]); it is always placed at a point, and named by its
+//! letter.
 //!
 //! What a view sets itself is in [`ViewOverrides`]: each setting it leaves out follows its parent,
 //! then the default, and [`Drawing::resolve_view`] is that one rule for every reader. A projected
@@ -13,7 +16,8 @@
 //! The rules, beside the record's: a view is on one of the drawing's sheets; a base view draws one
 //! of its sources, has a scale and looks from a direction that makes a view; every parent is a view
 //! of the drawing, no chain of parents loops, and a chain is at most [`MAX_VIEW_DEPTH`] views; a
-//! view lined up with its parent is on the parent's sheet; a view's place is on paper
+//! view lined up with its parent is on the parent's sheet; a section view is placed at a point, and its
+//! cutting line keeps [`CuttingLine::new`]'s rules; a view's place is on paper
 //! ([`is_paper_coordinate`]); a view's occurrence paths keep [`check_occurrence_paths`]; at most
 //! [`MAX_VIEWS`] views, listed by id ([`Drawing::add_views`]).
 
@@ -29,6 +33,7 @@ use solidcraft_geom::paper::MAX_SIDE_MM;
 use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_render::VisualStyle;
 
+use super::cutting_line::CuttingLine;
 use super::{Drawing, add_by_id, in_id_order, require};
 use crate::drawing_view::{
     Exploded, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose, TangentEdges, ViewConfiguration,
@@ -175,7 +180,7 @@ impl ViewLetters {
 }
 
 /// What a view draws, and from where.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ViewKind {
     /// The design of `source`, seen from `view`.
@@ -190,6 +195,32 @@ pub enum ViewKind {
         parent: u64,
         side: ProjectedSide,
     },
+    /// `parent` cut along `line`, drawn in `parent`'s plane, seen the way its arrows point.
+    Section {
+        #[serde(with = "crate::ids")]
+        parent: u64,
+        line: CuttingLine,
+    },
+}
+
+impl ViewKind {
+    /// Its name in replies: `base`, `projected` or `section`.
+    pub fn name(&self) -> &'static str {
+        match self {
+            ViewKind::Base { .. } => "base",
+            ViewKind::Projected { .. } => "projected",
+            ViewKind::Section { .. } => "section",
+        }
+    }
+
+    /// The view it comes from: none for a base view. The one place a view's parent is read, so every
+    /// rule about parents (the chain, deleting, copying, listing) holds for each kind with one.
+    pub fn parent(&self) -> Option<u64> {
+        match self {
+            ViewKind::Base { .. } => None,
+            ViewKind::Projected { parent, .. } | ViewKind::Section { parent, .. } => Some(*parent),
+        }
+    }
 }
 
 /// Where a view's centre sits on its sheet, in paper millimetres.
@@ -225,11 +256,20 @@ pub struct Setting<T> {
     pub set_by: SetBy,
 }
 
+/// What a section view cuts with: its cutting line, and the plane it is drawn in, its parent's basis.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cut {
+    pub line: CuttingLine,
+    pub parent: Plane,
+}
+
 /// A view as it draws: the source it draws, which way it looks, and each setting with who gave it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedView {
     pub source: u64,
     pub basis: Plane,
+    /// A section view's cut: none for any other view.
+    pub cut: Option<Cut>,
     pub scale: Setting<Scale>,
     pub visual_style: Setting<VisualStyle>,
     pub reference_style: Setting<VisualStyle>,
@@ -256,11 +296,12 @@ fn is_zero(v: &f64) -> bool {
 
 impl View {
     /// Whether its label names it: it stands apart from its projection place, a projected view placed
-    /// at a point. A base view is the principal view and a view lined up with its parent is where its
-    /// projection puts it, so neither needs one (ISO 128-30). Each later kind of view placed apart
-    /// (auxiliary, section, detail) adds its arm here.
+    /// at a point, or it is a section view, which its cutting line names (`A–A`). A base view is the
+    /// principal view and a view lined up with its parent is where its projection puts it, so neither
+    /// needs one (ISO 128-30). Each later kind of view placed apart (auxiliary, detail) adds its arm
+    /// here.
     pub fn needs_letter(&self) -> bool {
-        matches!((self.kind, self.place), (ViewKind::Projected { .. }, ViewPlace::At(_)))
+        matches!((&self.kind, self.place), (ViewKind::Projected { .. }, ViewPlace::At(_)) | (ViewKind::Section { .. }, _))
     }
 }
 
@@ -314,9 +355,9 @@ fn chain<'a>(id: u64, find: impl Fn(u64) -> Option<&'a View>) -> Result<Vec<&'a 
         })?;
         require(chain.iter().all(|v| v.id != at), || "its chain of parents loops".into())?;
         chain.push(view);
-        match view.kind {
-            ViewKind::Base { .. } => return Ok(chain),
-            ViewKind::Projected { parent, .. } => at = parent,
+        match view.kind.parent() {
+            None => return Ok(chain),
+            Some(parent) => at = parent,
         }
         require(chain.len() < MAX_VIEW_DEPTH, || format!("a chain of views is at most {MAX_VIEW_DEPTH} views"))?;
     }
@@ -348,7 +389,7 @@ impl Drawing {
         self.view_index(id).and_then(|i| self.views.get(i)).map(|v| &**v)
     }
 
-    /// `views` and every view projected from them, directly or through others. A parent can sort
+    /// `views` and every view projected or cut from them, directly or through others. A parent can sort
     /// after its child, so each pass over the views finds at least one more level of a chain, which
     /// is at most [`MAX_VIEW_DEPTH`] views.
     pub fn with_projected(&self, views: &BTreeSet<u64>) -> BTreeSet<u64> {
@@ -356,7 +397,7 @@ impl Drawing {
         for _ in 0..MAX_VIEW_DEPTH {
             let before = all.len();
             for view in &self.views {
-                if matches!(view.kind, ViewKind::Projected { parent, .. } if all.contains(&parent)) {
+                if view.kind.parent().is_some_and(|parent| all.contains(&parent)) {
                     all.insert(view.id);
                 }
             }
@@ -406,35 +447,51 @@ impl Drawing {
             let offset = label.offset.is_none_or(|[x, y]| is_paper_coordinate(x) && is_paper_coordinate(y));
             require(offset, || format!("its label's offset is at most {MAX_SIDE_MM} mm from the view's centre"))?;
         }
-        match view.kind {
+        match &view.kind {
             ViewKind::Base { source, view: direction } => {
-                let drawn = || format!("it draws source {}, which the drawing doesn't have", ids::encode(source));
-                require(self.sources.iter().any(|s| s.id == source), drawn)?;
+                let drawn = || format!("it draws source {}, which the drawing doesn't have", ids::encode(*source));
+                require(self.sources.iter().any(|s| s.id == *source), drawn)?;
                 require(view.settings.scale.is_some(), || "a base view has a scale".into())?;
                 require(matches!(view.place, ViewPlace::At(_)), || "a base view is placed at a point: it has no parent to line up with".into())?;
                 direction.basis().map(|_| ()).map_err(|e| DocError::Invalid(e.to_string()))
             }
             ViewKind::Projected { parent, .. } => {
                 self.chain_of(view.id)?;
-                let parent_sheet = self.view(parent).map(|p| p.sheet);
+                let parent_sheet = self.view(*parent).map(|p| p.sheet);
                 let lined_up = matches!(view.place, ViewPlace::Aligned(_));
                 require(!lined_up || parent_sheet == Some(view.sheet), || "a view lined up with its parent is on its parent's sheet".into())
+            }
+            ViewKind::Section { .. } => {
+                self.chain_of(view.id)?;
+                require(matches!(view.place, ViewPlace::At(_)), || "a section view is placed at a point: it has no side to line up on".into())
             }
         }
     }
 
     /// View `id` as it draws: its base view's source, its basis turned down its chain of parents
-    /// ([`projected_basis`], in the drawing's projection), and each setting from the nearest view
-    /// of the chain that sets it, then the default. One rule for every reader of a view.
+    /// ([`projected_basis`], in the drawing's projection; [`CuttingLine::basis`] at a section view),
+    /// and each setting from the nearest view of the chain that sets it, then the default. A section
+    /// view also gives its cut. One rule for every reader of a view.
     pub fn resolve_view(&self, id: u64) -> Result<ResolvedView> {
         let chain = self.chain_of(id)?;
-        let Some(ViewKind::Base { source, view: direction }) = chain.last().map(|base| base.kind) else {
+        let Some(ViewKind::Base { source, view: direction }) = chain.last().map(|base| &base.kind) else {
             return Err(DocError::Invalid(format!("view {} has no base view", ids::encode(id))));
         };
+        let source = *source;
         let mut basis = direction.basis().map_err(|e| DocError::Invalid(e.to_string()))?;
+        let mut cut = None;
         for view in chain.iter().rev() {
-            if let ViewKind::Projected { side, .. } = view.kind {
-                basis = projected_basis(&basis, side, self.projection).map_err(|e| DocError::Invalid(e.to_string()))?;
+            match &view.kind {
+                ViewKind::Base { .. } => {}
+                ViewKind::Projected { side, .. } => {
+                    basis = projected_basis(&basis, *side, self.projection).map_err(|e| DocError::Invalid(e.to_string()))?;
+                }
+                ViewKind::Section { line, .. } => {
+                    let parent = basis;
+                    basis = line.basis(&parent)?;
+                    // Only the view itself is cut: a view projected from a section view isn't.
+                    cut = (view.id == id).then(|| Cut { line: line.clone(), parent });
+                }
             }
         }
         let scale = inherited(&chain, |s| s.scale).ok_or_else(|| DocError::Invalid(format!("view {} has no scale", ids::encode(id))))?;
@@ -447,6 +504,7 @@ impl Drawing {
         Ok(ResolvedView {
             source,
             basis,
+            cut,
             scale,
             visual_style: or_default(&chain, |s| s.visual_style, defaults.visual_style),
             reference_style: or_default(&chain, |s| s.reference_style, defaults.reference_style),
@@ -470,11 +528,14 @@ impl Drawing {
         let mut centre = Vec2::ZERO;
         // From the base view down to this one, each lined up with the one before or placed apart.
         for view in self.chain_of(id)?.iter().rev() {
-            centre = match (view.place, view.kind) {
+            centre = match (view.place, &view.kind) {
                 (ViewPlace::At([x, y]), _) => Vec2::new(x, y),
                 (ViewPlace::Aligned(along), ViewKind::Projected { side, .. }) => side.on_free_axis(centre, along),
                 (ViewPlace::Aligned(_), ViewKind::Base { .. }) => {
                     return Err(DocError::Invalid(format!("base view {} isn't placed at a point", ids::encode(view.id))));
+                }
+                (ViewPlace::Aligned(_), ViewKind::Section { .. }) => {
+                    return Err(DocError::Invalid(format!("section view {} isn't placed at a point", ids::encode(view.id))));
                 }
             };
         }
@@ -487,7 +548,7 @@ impl Drawing {
     /// [`Self::view_centre`]'s rule, with no change to their records.
     pub fn place_moved_to(&self, id: u64, to: Vec2, break_alignment: bool) -> Result<ViewPlace> {
         let view = self.view(id).ok_or_else(|| DocError::Unknown(format!("view {}", ids::encode(id))))?;
-        Ok(match (view.place, view.kind) {
+        Ok(match (view.place, &view.kind) {
             (ViewPlace::Aligned(_), ViewKind::Projected { side, .. }) if !break_alignment => ViewPlace::Aligned(side.along(to)),
             _ => ViewPlace::At([to.x, to.y]),
         })
