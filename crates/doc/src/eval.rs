@@ -2139,7 +2139,7 @@ fn numeric_tool(kind: &FeatureKind) -> bool {
             | FeatureKind::Cylinder { .. }
             | FeatureKind::Sphere { .. }
             | FeatureKind::Torus { .. }
-            | FeatureKind::Coil { sketch: None, .. }
+            | FeatureKind::Coil { sketch: None, axis_ref: None, .. }
     )
 }
 
@@ -7398,11 +7398,61 @@ fn feature_tools_with_constructor(
             Ok(vec![crate::lineage::ProfileRoles::swept(Some(ss), Some(r)).tool(body, None)])
         }
         FeatureKind::Coil {
-            base, axis, diameter, pitch, turns, section_size, section, position, start_angle, clockwise, sketch, profiles, ..
+            base,
+            axis,
+            axis_ref,
+            reversed,
+            diameter,
+            pitch,
+            turns,
+            section_size,
+            section,
+            position,
+            start_angle,
+            clockwise,
+            sketch,
+            profiles,
+            ..
         } => {
-            let base = &point(vals, base)?;
-            let k = axis.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
+            let (base, direction) = match axis_ref {
+                Some(AxisRef::Construction { name }) => construction_axis_in(Some(doc), st, name, f.component)?,
+                Some(reference @ AxisRef::Model { geo }) => {
+                    crate::construct::model_axis_in(Some(doc), &*axis_state(doc, st, f.component, reference)?, geo, f.component)?
+                }
+                Some(AxisRef::Line { origin, dir }) => (point(vals, origin)?, dir.0),
+                Some(AxisRef::SketchLine { curve, sketch: owner }) => {
+                    let owner =
+                        owner.or(sketch.map(|id| id.0)).ok_or_else(|| DocError::Invalid("a sketch-line axis needs its owning sketch".into()))?;
+                    let solved =
+                        st.sketch(owner).ok_or_else(|| DocError::Unknown(format!("sketch {owner} (it must come earlier in the timeline)")))?;
+                    sketch_line_world(&sketch_in_feature_frame(doc, solved, f.component)?, curve)?
+                }
+                Some(AxisRef::World { axis }) => {
+                    let direction = match axis.to_ascii_uppercase().as_str() {
+                        "X" => Vec3::X,
+                        "Y" => Vec3::Y,
+                        "Z" => Vec3::Z,
+                        _ => return Err(DocError::Unknown(format!("axis `{axis}`"))),
+                    };
+                    (Vec3::ZERO, direction)
+                }
+                Some(AxisRef::SketchAxis { axis }) => {
+                    let solved =
+                        sketch.and_then(|id| st.sketch(id.0)).ok_or_else(|| DocError::Invalid("a sketch axis needs its owning sketch".into()))?;
+                    let solved = sketch_in_feature_frame(doc, solved, f.component)?;
+                    let direction = match axis.as_str() {
+                        "x" => solved.plane.x,
+                        "y" => solved.plane.y,
+                        _ => return Err(DocError::Unknown(format!("sketch axis `{axis}`"))),
+                    };
+                    (solved.plane.origin, direction)
+                }
+                None => (point(vals, base)?, axis.0),
+            };
+            let base = &base;
+            let k = direction.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
             let p = val(vals, pitch, Kind::Length)?;
+            let p = if *reversed { -p } else { p };
             let n = val(vals, turns, Kind::Unitless)?;
             if sketch.is_some()
                 && (diameter.is_some()
@@ -7427,8 +7477,8 @@ fn feature_tools_with_constructor(
                 let [region] = &regions[..] else {
                     return Err(DocError::Invalid(format!("a coil from a sketch takes one closed profile (the sketch has {})", regions.len())));
                 };
-                let axis = if *clockwise { k * -1.0 } else { k };
-                // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
+                let axis = if *clockwise { -k } else { k };
+                // Clockwise changes rotation; negating pitch keeps the chosen propagation direction.
                 let pitch = if *clockwise { -p } else { p };
                 return Ok(unnamed(vec![kernel::sweep_helix(&ss.plane, region, *base, axis, pitch, n)?]));
             }
@@ -7460,8 +7510,8 @@ fn feature_tools_with_constructor(
                 }
             };
             let region = Region2 { outer, holes: Vec::new() };
-            let axis = if *clockwise { k * -1.0 } else { k };
-            // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
+            let axis = if *clockwise { -k } else { k };
+            // Clockwise changes rotation; negating pitch keeps the chosen propagation direction.
             let pitch = if *clockwise { -p } else { p };
             let coil = Traced::unnamed(kernel::sweep_helix(&plane, &region, *base, axis, pitch, n)?);
             Ok(vec![coil.with_recipe(tool_recipe(doc, f, vals))])

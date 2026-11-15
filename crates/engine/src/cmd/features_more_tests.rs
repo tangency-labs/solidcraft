@@ -2426,19 +2426,19 @@ fn coil_from_a_sketch_cuts_a_thread_groove() {
     assert_eq!(measure(&mut s)["body_count"], 1);
 }
 
-fn clockwise_coil_bbox(clockwise: bool) -> Value {
+fn clockwise_coil_bbox(clockwise: bool, reversed: bool) -> Value {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
     run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 0.25, "pitch": 8, "clockwise": clockwise}));
+    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 0.25, "pitch": 8, "clockwise": clockwise, "reversed": reversed}));
     measure(&mut s)["bodies"][0]["bbox"].clone()
 }
 
 #[test]
 fn a_sketch_coil_clockwise_is_the_mirror_image() {
-    let right = clockwise_coil_bbox(false);
-    let left = clockwise_coil_bbox(true);
+    let right = clockwise_coil_bbox(false, false);
+    let left = clockwise_coil_bbox(true, false);
     let at = |v: &Value, k: &str, i: usize| v[k][i].as_f64().unwrap_or(f64::NAN);
     assert!((at(&right, "min", 0) + at(&left, "max", 0)).abs() < 1e-6, "{right} {left}");
     assert!((at(&right, "max", 0) + at(&left, "min", 0)).abs() < 1e-6, "{right} {left}");
@@ -2446,6 +2446,98 @@ fn a_sketch_coil_clockwise_is_the_mirror_image() {
         assert!((at(&right, "min", i) - at(&left, "min", i)).abs() < 1e-6, "{right} {left}");
         assert!((at(&right, "max", i) - at(&left, "max", i)).abs() < 1e-6, "{right} {left}");
     }
+}
+
+#[test]
+fn coil_reverse_keeps_the_rotation_sense_and_changes_only_axial_growth() {
+    for clockwise in [false, true] {
+        let forward = clockwise_coil_bbox(clockwise, false);
+        let backward = clockwise_coil_bbox(clockwise, true);
+        for key in ["min", "max"] {
+            for i in 0..2 {
+                assert!((forward[key][i].as_f64().unwrap() - backward[key][i].as_f64().unwrap()).abs() < 1e-5, "{forward} {backward}");
+            }
+        }
+        assert!((forward["min"][2].as_f64().unwrap() + backward["max"][2].as_f64().unwrap()).abs() < 1e-5);
+        assert!((forward["max"][2].as_f64().unwrap() + backward["min"][2].as_f64().unwrap()).abs() < 1e-5);
+    }
+}
+
+#[test]
+fn coil_reverse_changes_propagation_independently_of_clockwise() {
+    for sketch in [false, true] {
+        for clockwise in [false, true] {
+            for reversed in [false, true] {
+                let mut s = Session::default();
+                let mut params = json!({"axis":"Z","revolutions":1,"pitch":8,"clockwise":clockwise,"reversed":reversed});
+                if sketch {
+                    run(&mut s, "sketch.create", json!({"plane":"XZ","name":"Section"}));
+                    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[10,-0.5],"p1":[11,0.5]}));
+                    run(&mut s, "sketch.finish", json!({}));
+                    params["sketch"] = json!("Section");
+                } else {
+                    params["diameter"] = json!(20);
+                    params["section_size"] = json!(1);
+                }
+                run(&mut s, "solid.coil", params);
+                let bbox = measure(&mut s)["bodies"][0]["bbox"].clone();
+                let expected = if reversed { [-8.5, 0.5] } else { [-0.5, 8.5] };
+                for (key, want) in ["min", "max"].into_iter().zip(expected) {
+                    assert!(
+                        (bbox[key][2].as_f64().unwrap() - want).abs() < 1e-5,
+                        "sketch={sketch}, clockwise={clockwise}, reversed={reversed}: {bbox}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn coil_accepts_the_same_axis_reference_forms_as_revolve() {
+    for (axis, kind) in [
+        (json!({"type":"world","axis":"Z"}), "world"),
+        (json!({"origin":[30,0,0],"dir":[0,0,1]}), "line"),
+        (json!({"sketch":"Centerline","curve":"l1"}), "sketch_line"),
+        (json!({"face":[34,0,3]}), "model"),
+        (json!({"edge":[34,0,0]}), "model"),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius":4,"height":6,"base":[30,0,0],"body_name":"Stock"}));
+        run(&mut s, "sketch.create", json!({"plane":"XZ","name":"Centerline"}));
+        run(&mut s, "sketch.line", json!({"points":[[30,0],[30,10]]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.coil", json!({"axis":axis,"diameter":20,"section_size":1,"revolutions":1,"pitch":8,"name":"Spring"}));
+        let saved = serde_json::to_value(&s.doc.find_feature("Spring").unwrap().kind).unwrap();
+        assert_eq!(saved["axis_ref"]["type"], kind);
+    }
+}
+
+#[test]
+fn a_coil_follows_its_named_axis_after_redefinition_and_save() {
+    use solidcraft_doc::FeatureKind;
+    let mut s = Session::default();
+    let axis = |x| json!({"a":{"point":[x,0,0]},"b":{"point":[x,0,10]},"name":"Spin"});
+    run(&mut s, "construct.axis.two_points", axis(30));
+    run(&mut s, "solid.coil", json!({"axis":"Spin","diameter":20,"section_size":1,"revolutions":1,"pitch":8,"reversed":true,"name":"Spring"}));
+    let bounds = |s: &mut Session| measure(s)["bodies"][0]["bbox"].clone();
+    let before = bounds(&mut s);
+    run(&mut s, "timeline.redefine", json!({"feature":"Spin","command":"construct.axis.two_points","params":axis(40)}));
+    let after = bounds(&mut s);
+    for key in ["min", "max"] {
+        assert!((after[key][0].as_f64().unwrap() - before[key][0].as_f64().unwrap() - 10.0).abs() < 1e-5);
+    }
+    run(&mut s, "timeline.rename", json!({"feature":"Spin","name":"RenamedSpin"}));
+    let value = serde_json::to_value(&s.doc).unwrap();
+    let loaded: solidcraft_doc::Document = serde_json::from_value(value).unwrap();
+    match &loaded.find_feature("Spring").unwrap().kind {
+        FeatureKind::Coil { axis_ref, reversed, .. } => {
+            assert!(matches!(axis_ref, Some(solidcraft_doc::AxisRef::Construction { name }) if name.to_string() == "RenamedSpin"));
+            assert!(*reversed);
+        }
+        other => panic!("expected coil: {other:?}"),
+    }
+    assert!(s.execute("solid.coil", &json!({"axis":"Missing","diameter":20,"section_size":1,"revolutions":1,"pitch":8})).is_err());
 }
 
 #[test]

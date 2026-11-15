@@ -69,7 +69,8 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         // picked edge and face axes too.
         SURFACE_REVOLVE_EDIT => &[("axis", Axis)],
         "solid.box" | "solid.sphere" => &[("corner", Make), ("center", Make)],
-        "solid.cylinder" | "solid.coil" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", Dir)],
+        "solid.cylinder" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", Dir)],
+        "solid.coil" => &[("base", Make), ("center", Make), ("axis", Axis)],
         "solid.fillet" | "solid.chamfer" => &[("edges", Picks), ("body", Body)],
         "solid.hole" => &[("position", Pick), ("direction", Dir), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
@@ -621,20 +622,24 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
         }
         // Nothing to map (a surface revolve has no picks; a design with no placed component needs
         // none): an untouched explicit axis is still restored below.
+        let stored_axis = match (cmd, &feature.kind) {
+            ("solid.revolve", solidcraft_doc::FeatureKind::Revolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. })
+            | ("surface.revolve", solidcraft_doc::FeatureKind::SurfaceRevolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. })
+            | ("solid.coil", solidcraft_doc::FeatureKind::Coil { axis_ref: Some(solidcraft_doc::AxisRef::Line { origin, dir }), .. }) => {
+                Some((origin, dir))
+            }
+            _ => None,
+        };
         let edited = if cmd == "surface.revolve" { SURFACE_REVOLVE_EDIT } else { cmd };
         let mapped = if placed(s) { map_local(&context, world, edited, params.get("params")?) } else { None };
         let mut inner = match mapped {
             Some(inner) => inner,
-            None if matches!(cmd, "solid.revolve" | "surface.revolve") => params.get("params")?.clone(),
+            None if stored_axis.is_some() || matches!(cmd, "solid.revolve" | "surface.revolve") => params.get("params")?.clone(),
             None => return None,
         };
         // An untouched explicit axis is displayed in world coordinates by Edit
         // Feature. Keep its exact saved values instead of an affine round trip.
-        if let (
-            "solid.revolve" | "surface.revolve",
-            solidcraft_doc::FeatureKind::Revolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. }
-            | solidcraft_doc::FeatureKind::SurfaceRevolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. },
-        ) = (cmd, &feature.kind)
+        if let Some((origin, dir)) = stored_axis
             && let Ok(at) = s.doc.eval_point(origin)
         {
             let frame = context.active_component_frame();
@@ -765,12 +770,13 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
                     }
                 }
                 Axis => {
-                    // A name, and among them a component origin key (`o:…/origin/X`), passes
-                    // through untouched: the command's resolver applies the one order - a feature
-                    // of the same name first, then the datum - and saves the reference that
-                    // follows what it names (#7313), instead of the axis being frozen where it
-                    // was picked.
-                    if let Some(axis) = v.as_object() {
+                    // A name, including a component origin key (`o:…/origin/X`), passes
+                    // through untouched so the command keeps its persistent reference.
+                    // An axis can also be a bare direction; map it as a direction, including
+                    // the {x, y, z} spelling, before considering reference objects.
+                    if vec3(v).is_some() {
+                        m.dir(v)
+                    } else if let Some(axis) = v.as_object() {
                         let mut axis = axis.clone();
                         // An `{origin, dir}` axis without its origin passes through the world's,
                         // which the component may have moved.

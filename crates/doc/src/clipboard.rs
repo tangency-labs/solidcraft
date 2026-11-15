@@ -272,6 +272,7 @@ impl crate::Feature {
                 }
             }
             K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
+            | K::Coil { axis_ref: Some(crate::AxisRef::Model { geo }), .. }
             | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. } => checked_geo(geo, 0)?,
             _ => {}
@@ -347,6 +348,7 @@ impl crate::Feature {
                 }
             }
             K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
+            | K::Coil { axis_ref: Some(crate::AxisRef::Model { geo }), .. }
             | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. } => {
                 remap_geo(geo, ids, bodies, 0, occurrences, doc)?

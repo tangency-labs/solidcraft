@@ -816,6 +816,8 @@ fn a_coil_follows_its_sketch() {
         FeatureKind::Coil {
             base: point_expr(Vec3::new(0.0, 0.0, 0.0)),
             axis: Dir(Vec3::Z),
+            axis_ref: None,
+            reversed: false,
             sketch: Some(crate::SketchId(sketch)),
             profiles: ProfileSel::All,
             diameter: None,

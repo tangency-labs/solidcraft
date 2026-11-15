@@ -31,14 +31,19 @@ use solidcraft_engine::geom::prelude::*;
 
 use solidcraft_engine::Sel;
 
-use super::{PlaceSource, Spec, circle, face_pick, rect, vec3_of};
+use super::{PlaceSource, Spec, circle, face_pick, rect};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::viewport::Hit;
 
 pub(super) static SPEC: Spec = Spec {
     name: "primitive",
-    serves: |app, d| super::on(app) && matches!(d.kind, Kind::Primitive { .. }) && !coil_with_profile(d),
+    serves: |app, d| {
+        super::on(app)
+            && matches!(d.kind, Kind::Primitive { .. })
+            && !coil_with_profile(d)
+            && !(matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && d.active == 1)
+    },
     snap_commands: &[],
     move_tip: "Drag to place it on another face.",
     many: false,
@@ -91,7 +96,7 @@ fn planes(app: &SolveApp) -> Arc<Vec<FacePlane>> {
 
 /// Is this a Coil whose section comes from a sketch (its Profile input holds something)?
 fn coil_with_profile(d: &Dialog) -> bool {
-    matches!(&d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && d.inputs.iter().any(|i| !i.items.is_empty())
+    matches!(&d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && d.inputs.first().is_some_and(|i| !i.items.is_empty())
 }
 
 /// A size field's value (mm), zero when it is missing or does not evaluate, read as OK reads it
@@ -173,7 +178,35 @@ fn box_frame(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
 
 fn frame(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
     let Kind::Primitive { cmd, at, .. } = &d.kind else { return None };
-    let axis = || d.extra.get("axis").and_then(vec3_of).and_then(|a| a.normalized()).unwrap_or(Vec3::Z);
+    let axis = || {
+        d.extra
+            .get("axis")
+            .and_then(|v| serde_json::from_value::<solidcraft_engine::schema::AxisDir>(v.get("dir").unwrap_or(v).clone()).ok())
+            .map(|a| a.0)
+            .unwrap_or(Vec3::Z)
+    };
+    if *cmd == "solid.coil" {
+        let named = d
+            .extra
+            .get("axis")
+            .and_then(Value::as_str)
+            .filter(|name| !matches!(name.trim().to_ascii_uppercase().as_str(), "X" | "Y" | "Z"))
+            .and_then(|name| crate::dialogs::axis_of(app, &Sel::Axis { name: name.into() }));
+        let picked = d.inputs.get(1).and_then(|input| input.items.first()).and_then(|sel| crate::dialogs::axis_of(app, sel)).or(named);
+        let (origin, direction) = picked.unwrap_or_else(|| {
+            let origin = d
+                .extra
+                .get("axis")
+                .and_then(|v| v.get("origin"))
+                .and_then(|v| expr_point(app, v))
+                .or_else(|| at.map(|(p, _)| p))
+                .unwrap_or_else(|| d.extra.get("base").and_then(|v| expr_point(app, v)).unwrap_or(Vec3::ZERO));
+            let direction = if d.extra.contains_key("axis") { axis() } else { at.and_then(|(_, n)| n).unwrap_or(Vec3::Z) };
+            (origin, direction)
+        });
+        let reversed = d.extra.get("reversed").and_then(Value::as_bool).unwrap_or(false);
+        return Some((origin, if reversed { -direction } else { direction }));
+    }
     match (*cmd, at) {
         (_, Some((p, Some(n)))) => return Some((*p, *n)),
         // A box at a vertex or on a curved face is centred on the point: the marker at its bottom.
@@ -234,6 +267,13 @@ fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], _: usize) -> bool {
         _ => String::new(),
     });
     let Kind::Primitive { cmd, at, .. } = &mut d.kind else { return false };
+    if *cmd == "solid.coil" && n.is_some() {
+        // A new placement face sets the axis; the field can override it afterwards.
+        d.extra.remove("axis");
+        if let Some(input) = d.inputs.get_mut(1) {
+            input.items.clear();
+        }
+    }
     match *cmd {
         "solid.cone" | "solid.coil" if n.is_none() => return false,
         "solid.box" => {

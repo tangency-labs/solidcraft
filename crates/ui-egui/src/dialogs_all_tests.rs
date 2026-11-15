@@ -894,7 +894,7 @@ form_case!(cylinder, "solid.cylinder", ["Size", "ui.diameter", "ui.height", "Ope
 form_case!(sphere, "solid.sphere", ["Size", "ui.diameter", "Operation"]);
 form_case!(torus, "solid.torus", ["ui.major_radius", "ui.minor_radius", "Operation"]);
 form_case!(cone, "solid.cone", ["ui.diameter", "ui.top_diameter", "ui.height", "Operation"]);
-form_case!(coil, "solid.coil", ["ui.diameter", "ui.revolutions", "ui.pitch", "ui.section_size", "Operation"]);
+form_case!(coil, "solid.coil", ["ui.diameter", "ui.revolutions", "ui.pitch", "ui.section_size", "ui.direction", "Operation"]);
 form_case!(combine, "solid.combine", ["Operation"]);
 form_case!(surface_extrude, "surface.extrude", ["Distance", "Direction"]);
 form_case!(surface_revolve, "surface.revolve", ["Angle", "Direction"]);
@@ -1484,6 +1484,102 @@ fn rectangular_pattern_groups_each_direction_in_the_same_order() {
         }
         h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
         h.settle();
+    }
+}
+
+#[test]
+fn coil_axis_field_passes_named_and_custom_directions_with_a_profile() {
+    let mut h = fixture();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    h.app.dialog = Some(d);
+    h.frames(3);
+    let params = |h: &Harness| apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1.clone();
+    assert!(params(&h).get("axis").is_none(), "the command defaults to Z");
+    for (text, expected) in [("X", json!("X")), ("Y", json!("Y")), ("Z", json!("Z")), ("[1, 2, 3]", json!([1, 2, 3]))] {
+        h.step(&json!({"click":{"handle":"dialog:ui.direction"}})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"text":text})).unwrap();
+        h.frames(2);
+        let p = params(&h);
+        assert_eq!(p["axis"], expected);
+        assert_eq!(p["sketch"], json!(sketch));
+        assert_eq!(p["profiles"], json!([0]));
+    }
+}
+
+#[test]
+fn coil_picks_reference_axes_in_the_browser_and_viewport() {
+    for browser in [true, false] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.placement_handles = true;
+        h.app.tree.collapsed.insert("c0/features".into());
+        h.app.run("construct.axis.two_points", json!({"a":{"point":[20,10,-20]},"b":{"point":[20,10,20]},"name":"CoilAxis"})).unwrap();
+        h.app.start("solid.coil");
+        h.call("ui.dialogInput", json!({"index":1}));
+        h.frames(4);
+        let target = if browser { json!({"handle":"row:CoilAxis"}) } else { json!({"world":[20,10,-20]}) };
+        h.step(&json!({"click":target})).unwrap();
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[1].items, vec![Sel::Axis { name: "CoilAxis".into() }], "browser: {browser}");
+        let commands = apply_commands(&h.app, d).unwrap();
+        assert_eq!(commands[0].1["axis"], "CoilAxis");
+        assert_eq!(commands[0].1["base"], json!([20.0, 10.0, -20.0]));
+        h.call("ui.dialogInput", json!({"index":0}));
+        h.frames(2);
+        assert!(crate::scenario::handle_at("primitive:position").is_some(), "an axis pick is not a sketch profile");
+    }
+}
+
+#[test]
+fn coil_picks_origin_axes_and_reverses_without_changing_clockwise() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.start("solid.coil");
+    h.app.set_origin_shown(true);
+    h.call("ui.dialogInput", json!({"index":1}));
+    h.frames(4);
+    assert!(h.app.origin_visible());
+    h.step(&json!({"click":{"axis":"X"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items, vec![Sel::Axis { name: "X".into() }]);
+    h.step(&json!({"click":{"handle":"dialog:Reverse Direction"}})).unwrap();
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["axis"], "X");
+    assert_eq!(commands[0].1["reversed"], true);
+    assert_ne!(commands[0].1.get("clockwise"), Some(&json!(true)));
+}
+
+#[test]
+fn coil_and_revolve_share_axis_pick_filters_and_origin_visibility() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for command in ["solid.revolve", "solid.coil"] {
+        h.app.dialog = Some(Dialog::for_command(&h.app, command).unwrap());
+        h.app.dialog.as_mut().unwrap().active = 1;
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].accept, AXIS_PICKS);
+        h.app.set_origin_shown(false);
+        assert!(!h.app.origin_visible(), "{command} respects a hidden origin");
+        h.app.set_origin_shown(true);
+        assert!(h.app.origin_visible(), "{command} respects a shown origin");
+    }
+}
+
+#[test]
+fn coil_and_revolve_keep_the_owner_of_a_picked_sketch_line() {
+    let h = fixture();
+    let state = h.app.session.world_state().unwrap();
+    let profile = state.sketches[0].feature;
+    let owner = state.sketches.last().unwrap();
+    let line = owner.sketch.curves[0].id.clone();
+    for command in ["solid.revolve", "solid.coil"] {
+        let mut d = Dialog::for_command(&h.app, command).unwrap();
+        d.inputs[0].items = vec![Sel::Profile { sketch: profile, index: 0 }];
+        d.inputs[1].items = vec![Sel::SketchCurve { sketch: Some(owner.feature), id: line.clone() }];
+        let commands = apply_commands(&h.app, &d).unwrap();
+        let params = &commands[0].1;
+        assert_eq!(params["axis"], json!({"sketch":owner.feature,"curve":line}), "{command}");
     }
 }
 

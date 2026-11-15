@@ -388,6 +388,28 @@ fn marker_stands_a_new_torus_on_the_face() {
 }
 
 #[test]
+fn coil_marker_follows_the_typed_axis_instead_of_the_placement_face() {
+    let mut h = plate();
+    start(&mut h, "solid.coil");
+    let d = h.app.dialog.as_mut().unwrap();
+    if let Kind::Primitive { at, .. } = &mut d.kind {
+        *at = Some((Vec3::ZERO, Some(Vec3::Z)));
+    }
+    for (value, expected) in [(json!("X"), Vec3::X), (json!("Y"), Vec3::Y), (json!([1, 1, 0]), Vec3::new(1.0, 1.0, 0.0).normalized().unwrap())] {
+        h.app.dialog.as_mut().unwrap().extra.insert("axis".into(), value);
+        let (_, direction) = frame(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        assert!(direction.dist(expected) < 1e-9);
+        let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let sent: solidcraft_engine::schema::AxisDir = serde_json::from_value(commands[0].1["axis"].clone()).unwrap();
+        assert!(sent.0.dist(direction) < 1e-9);
+    }
+    assert!(drop_on(&mut h, [80.0, 25.0, 5.0]));
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(!d.extra.contains_key("axis"), "placing on a new face resets the typed axis");
+    assert!(frame(&h.app, d).unwrap().1.dist(Vec3::X) < 1e-9);
+}
+
+#[test]
 fn marker_stands_a_new_coil_on_the_face() {
     let mut h = plate();
     start(&mut h, "solid.coil");

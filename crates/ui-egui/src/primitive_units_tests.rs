@@ -394,13 +394,15 @@ fn a_size_switched_between_diameter_and_radius_keeps_its_unit_and_its_text() {
 fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
     // #3862: Edit Feature on a coil opens the Coil dialog with every setting it was made with,
     // not the command line; OK changes what was edited and keeps the rest.
+    use solidcore_record::Vec3;
     use solidcraft_engine::doc::{CoilSection, FeatureKind};
+    use solidcraft_engine::geom::prelude::*;
     let mut h = design("mm");
     h.app
         .run(
             "solid.coil",
             json!({"diameter": 40, "revolutions": 4, "pitch": 8, "section_size": 3, "section_position": "outside",
-                   "clockwise": true, "start_angle": "30 deg", "base": [5, 0, 0], "operation": "new"}),
+                   "clockwise": true, "reversed": true, "start_angle": "30 deg", "base": [5, 0, 0], "axis": [1, 2, 3], "operation": "new"}),
         )
         .unwrap();
     let id = h.app.session.doc.features.first().map(|f| f.id).unwrap();
@@ -420,13 +422,59 @@ fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
     ok(&mut h);
     assert_eq!(h.app.session.doc.features.len(), 1, "OK redefines the coil instead of adding one");
     match h.app.session.doc.feature(id).map(|f| &f.kind) {
-        Some(FeatureKind::Coil { base, pitch, turns, section, position, clockwise, start_angle, .. }) => {
+        Some(FeatureKind::Coil { base, axis, reversed, pitch, turns, section, position, clockwise, start_angle, .. }) => {
+            assert!(*reversed);
+            assert!(axis.0.dist(Vec3::new(1.0, 2.0, 3.0).normalized().unwrap()) < 1e-9);
             assert_eq!((pitch.to_string(), turns.to_string()), ("10".to_string(), "4".to_string()));
             assert_eq!((*section, *position, *clockwise), (CoilSection::Square, 1, true));
             assert_eq!(start_angle.as_ref().map(|a| a.to_string()).as_deref(), Some("30 deg"));
             assert_eq!(base.iter().map(|e| e.to_string()).collect::<Vec<_>>(), ["5", "0", "0"]);
         }
         other => panic!("not a coil: {other:?}"),
+    }
+}
+
+#[test]
+fn editing_a_coil_keeps_an_explicit_axis_origin_expression() {
+    let mut h = design("mm");
+    h.app.run("parameters.add", json!({"name":"axis_x","expression":"30 mm"})).unwrap();
+    let made = h
+        .app
+        .run("solid.coil", json!({"axis":{"origin":["axis_x",0,0],"dir":[0,0,1]},"diameter":20,"section_size":1,"revolutions":1,"pitch":8}))
+        .unwrap();
+    let id = made["feature"].as_u64().unwrap();
+    h.app.edit_feature(id);
+    h.frames(3);
+    type_into(&mut h, "pitch", "10");
+    ok(&mut h);
+    match &h.app.session.doc.feature(id).unwrap().kind {
+        solidcraft_engine::doc::FeatureKind::Coil { axis_ref: Some(solidcraft_engine::doc::AxisRef::Line { origin, .. }), .. } => {
+            assert_eq!(origin[0].to_string(), "axis_x");
+        }
+        other => panic!("expected explicit coil axis: {other:?}"),
+    }
+}
+
+#[test]
+fn editing_a_coil_preserves_its_axis_reference_and_reverse_option() {
+    let mut h = design("mm");
+    h.app.run("construct.axis.two_points", json!({"a":{"point":[30,0,0]},"b":{"point":[30,0,10]},"name":"Spin"})).unwrap();
+    let reply = h.app.run("solid.coil", json!({"axis":"Spin","diameter":20,"section_size":1,"revolutions":1,"pitch":8,"reversed":true})).unwrap();
+    let id = reply["feature"].as_u64().unwrap();
+    h.app.edit_feature(id);
+    h.frames(3);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[1].items, vec![solidcraft_engine::Sel::Axis { name: "Spin".into() }]);
+    assert_eq!(d.extra["reversed"], true);
+    assert!(!d.extra.contains_key("axis"), "the pick is used instead of a stale numeric direction");
+    type_into(&mut h, "pitch", "10");
+    ok(&mut h);
+    match &h.app.session.doc.feature(id).unwrap().kind {
+        solidcraft_engine::doc::FeatureKind::Coil { axis_ref, reversed, .. } => {
+            assert!(matches!(axis_ref, Some(solidcraft_engine::doc::AxisRef::Construction { name }) if name.to_string() == "Spin"));
+            assert!(*reversed);
+        }
+        other => panic!("expected coil: {other:?}"),
     }
 }
 

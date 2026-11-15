@@ -39,7 +39,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         ),
     CommandSpec::new("solid.coil", "Coil", crate::checked!("solid.coil", coil)).at("SOLID", "CREATE").icon("coil").contract(&COIL_CONTRACT).output(output_schema_for::<FeatureResult>).params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
-         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; \
+         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z]|revolve axis reference (default Z; picked references supply their base and stay linked); start_angle?; clockwise?: bool; reversed?: bool (grow against the axis, independently of clockwise); \
          sketch? (a sketch; its plane is the section plane, so its placement sets the radius and start phase), profiles? (default: all; one closed profile without holes); \
          operation?, targets?, name?, body_name?",
     ),
@@ -95,7 +95,16 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     let sketch = if profile_mode { Some(solidcraft_doc::SketchId(super::features::sketch_id(s, p.get("sketch"), cmd, "sketch")?)) } else { None };
     let profiles = if profile_mode { super::features::profiles(p, cmd)? } else { solidcraft_doc::ProfileSel::All };
     let base = point_param(s, p, "base", cmd)?.unwrap_or_else(|| solidcraft_doc::point_expr(Vec3::ZERO));
-    let axis = axis_dir_param(p, cmd)?;
+    let reference = p.get("axis").is_some_and(|v| {
+        super::features::axis_dir_form(v).is_err()
+            && (v.as_str().is_some_and(|name| !name.trim().is_empty())
+                || v.is_object() && ["origin", "dir", "curve", "edge", "face", "type"].iter().any(|key| v.get(*key).is_some()))
+    });
+    let (axis, axis_ref) = if reference {
+        (Vec3::Z, Some(super::features::axis_param(s, sketch.map_or(0, |id| id.0), p, cmd)?))
+    } else {
+        (axis_dir_param(p, cmd)?, None)
+    };
     let diameter = if profile_mode {
         None
     } else {
@@ -151,6 +160,8 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
         FeatureKind::Coil {
             base,
             axis: Dir(axis),
+            axis_ref,
+            reversed: super::reversed_param(p, "reversed", cmd)?,
             sketch,
             profiles,
             diameter,

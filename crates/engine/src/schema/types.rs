@@ -280,6 +280,48 @@ impl JsonSchema for AxisDir {
     }
 }
 
+/// Coil's numeric direction or a picked axis, in the same forms as Revolve's axis.
+/// References are resolved against the design by the command handler.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CoilAxis(pub Value);
+
+impl<'de> Deserialize<'de> for CoilAxis {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(d)?;
+        match crate::cmd::axis_dir_form(&value) {
+            Ok(_) => Ok(Self(value)),
+            Err(_)
+                if value.as_str().is_some_and(|name| !name.trim().is_empty())
+                    || value
+                        .as_object()
+                        .is_some_and(|object| ["origin", "dir", "curve", "edge", "face", "type"].iter().any(|key| object.contains_key(*key))) =>
+            {
+                RevolveAxis::deserialize(value).map(|axis| Self(axis.0)).map_err(D::Error::custom)
+            }
+            Err(why) => Err(D::Error::custom(whole(why))),
+        }
+    }
+}
+
+impl JsonSchema for CoilAxis {
+    fn schema_name() -> Cow<'static, str> {
+        "CoilAxis".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let direction = generator.subschema_for::<AxisDir>();
+        let reference = generator.subschema_for::<RevolveAxis>();
+        json_schema!({
+            "description": "X, Y or Z (any case), a non-zero direction [x, y, z], or a named or picked axis in the same forms as Revolve.",
+            "anyOf": [direction, {
+                "allOf": [reference, {"anyOf": [
+                    {"type": "string", "minLength": 1, "pattern": not_blank_pattern()},
+                    {"type": "object"}
+                ]}]
+            }]
+        })
+    }
+}
+
 /// A camera, as the view commands read it (`cmd::view_navigation::camera_form`): the render
 /// `Camera`, with finite fields, a positive distance and a field of view in [0, π), and the
 /// handlers' message, "invalid camera", for anything else (#10898).

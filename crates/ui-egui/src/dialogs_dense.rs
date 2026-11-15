@@ -851,9 +851,22 @@ fn round_size_row(ui: &mut egui::Ui, fields: &mut [(&'static str, String)]) {
     }
 }
 
-/// The coil's section, where the section sits on the diameter, the way it turns and where it
-/// starts (#3862). A default stays out of the parameters, so OK on an unchanged edit keeps the coil.
-fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
+/// The coil's axis, section, where the section sits on the diameter, the way it turns and where
+/// it starts. A default stays out of the parameters, so OK on an unchanged edit keeps the coil.
+fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, placed_axis: Option<Vec3>, picked_axis: bool) -> bool {
+    let placed_axis = placed_axis.map(pt);
+    let mut axis =
+        extra.get("axis").or(placed_axis.as_ref()).map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string())).unwrap_or_default();
+    let before = axis.clone();
+    let axis_enter = !picked_axis && ui_kit::text_row(ui, "ui.direction", &mut axis, "Z (X, Y, Z, [x, y, z])").0;
+    if axis != before {
+        if axis.trim().is_empty() {
+            extra.remove("axis");
+        } else {
+            let value = serde_json::from_str::<Value>(&axis).ok().filter(|v| v.is_array() || v.is_object()).unwrap_or_else(|| json!(axis.trim()));
+            extra.insert("axis".into(), value);
+        }
+    }
     const POSITIONS: [(&str, &str); 3] = [("Inside", "inside"), ("Center", "center"), ("Outside", "outside")];
     form_row(ui, "Section", |ui| extra_segments(ui, extra, "section", &[("Circular", "circular"), ("Square", "square")]));
     form_row(ui, "Section position", |ui| {
@@ -881,8 +894,8 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
             extra.insert("start_angle".into(), json!(angle));
         }
     }
-    extra_options(ui, "coil_options", extra, &[("Clockwise", "clockwise")]);
-    enter
+    extra_options(ui, "coil_options", extra, &[("Clockwise", "clockwise"), ("Reverse Direction", "reversed")]);
+    enter || axis_enter
 }
 
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
@@ -1126,7 +1139,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 };
             }
             if *cmd == "solid.coil" {
-                enter |= coil_rows(ui, &mut d.extra);
+                let picked_axis = d.inputs.get(1).is_some_and(|input| !input.items.is_empty());
+                enter |= coil_rows(ui, &mut d.extra, at.and_then(|(_, normal)| normal), picked_axis);
             }
             if at.is_none() {
                 enter |= crate::primitive_placement::rows(ui, &app.session, cmd, &mut d.extra);
