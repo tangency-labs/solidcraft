@@ -2,10 +2,10 @@
 //! and across it, the farthest point on one side, whether one line already draws another, and
 //! numbers spaced along a line so none overlap. Paper points are millimetres on the sheet, so these
 //! are 2D. What a dimension reads on a view (model points seen in a view's plane) is
-//! `solidcraft_geom::drawing_measure`'s.
+//! [`measure`]'s.
 
+use super::measure::{self, LinearDirection};
 use solidcore_record::Vec2;
-use solidcraft_geom::drawing_measure::{self, LinearDirection};
 use solidcraft_geom::prelude::*;
 
 use super::dimension::MAX_SET_TARGETS;
@@ -28,12 +28,12 @@ pub struct LineCoords {
 
 impl LineCoords {
     /// The line a linear dimension measuring `direction` runs along on paper, `seen` being its
-    /// first point to its last there: [`drawing_measure::axis`]'s direction, turned to run right,
+    /// first point to its last there: [`measure::axis`]'s direction, turned to run right,
     /// or up when it is upright, so a positive offset is above it or to its left whichever way round
     /// its points are. A view's paper map only scales and shifts, so its plane's directions are
     /// paper's. None when there is no direction (an aligned line whose ends meet).
     pub fn forward(direction: LinearDirection, seen: Vec2) -> Option<LineCoords> {
-        let dir = drawing_measure::axis(direction, seen).ok()?;
+        let dir = measure::axis(direction, seen).ok()?;
         let forward = if dir.x.abs() > 1e-9 { dir.x > 0.0 } else { dir.y > 0.0 };
         let unit = if forward { dir } else { -dir };
         Some(LineCoords { unit, normal: unit.perp() })

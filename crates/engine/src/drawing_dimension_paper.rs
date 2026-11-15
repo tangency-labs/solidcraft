@@ -12,7 +12,7 @@ use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 use solidcore_record::{Seg2, Vec2};
 use solidcraft_doc::drawing::dimension::{Dimension, DimensionKind, LabelKind, Resolved, TextPlace};
 use solidcraft_doc::drawing::line_maths::{LineCoords, covers, spread_along};
-use solidcraft_geom::drawing_measure::LinearDirection;
+use solidcraft_doc::drawing::measure::LinearDirection;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::annotate::{ArrowShape, Terminator};
 use solidcraft_geom::paper::line::{LineGroup, LineKind};

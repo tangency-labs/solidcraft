@@ -1,5 +1,5 @@
 //! A drawing's dimensions (W19b, #4896): each the distance or angle between named parts of its
-//! view's model, measured as the view shows it ([`solidcraft_geom::drawing_measure`]). A dimension
+//! view's model, measured as the view shows it ([`super::measure`]). A dimension
 //! saves what it measures by name, never a picked point, so when the model changes it follows the
 //! model or says what it lost: it never moves to other geometry. Its value and status come from
 //! the model each time. The one thing worked out that is saved is its last good value, what it last
@@ -68,10 +68,10 @@ use std::collections::BTreeMap;
 use std::f64::consts::{PI, TAU};
 use std::sync::Arc;
 
+use super::measure::{self, AngleFrom, Cone, Cylinder, LinearDirection, Measured, Reading, SilhouetteSide, Sphere};
 use serde::{Deserialize, Serialize};
 use solidcore_record::brep::Loop;
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
-use solidcraft_geom::drawing_measure::{self, AngleFrom, Cone, Cylinder, LinearDirection, Measured, Reading, SilhouetteSide, Sphere};
 use solidcraft_geom::drawing_view::{Invalid, is_paper_coordinate};
 use solidcraft_geom::paper::MAX_SIDE_MM;
 use solidcraft_geom::prelude::*;
@@ -507,7 +507,7 @@ fn check_reference_name(name: &str) -> Result<()> {
 }
 
 /// A linear dimension's direction and reading: a true length is the segment's own, so it is
-/// measured aligned (as [`solidcraft_geom::drawing_measure::linear`] reads it), and a direction to
+/// measured aligned (as [`measure::linear`] reads it), and a direction to
 /// measure along isn't zero.
 fn check_direction(direction: LinearDirection, reading: Reading) -> Result<()> {
     if let LinearDirection::Along(along) = direction {
@@ -1027,7 +1027,7 @@ impl<'a> Lookup<'a> {
             DimensionKind::Linear { a, b, direction, reading } => {
                 let (a, exact_a) = self.corner(a)?;
                 let (b, exact_b) = self.corner(b)?;
-                let measured = drawing_measure::linear(basis, a, b, *direction, *reading).map_err(unmeasurable)?;
+                let measured = measure::linear(basis, a, b, *direction, *reading).map_err(unmeasurable)?;
                 Ok(Found::new(measured, vec![a, b], exact_a && exact_b))
             }
             DimensionKind::Length { edge, direction, reading } => {
@@ -1038,13 +1038,13 @@ impl<'a> Lookup<'a> {
                 }
                 let ends = found.pieces.first().and_then(|(_, line)| straight(line));
                 let [a, b] = ends.ok_or_else(|| Status::Unmeasurable(format!("edge `{}` isn't straight", edge.name)))?;
-                let measured = drawing_measure::linear(basis, a, b, *direction, *reading).map_err(unmeasurable)?;
+                let measured = measure::linear(basis, a, b, *direction, *reading).map_err(unmeasurable)?;
                 Ok(Found::new(measured, vec![a, b], found.exact))
             }
             DimensionKind::Angle { a, b, reading, other_side } => {
                 let (a, exact_a) = self.line(a)?;
                 let (b, exact_b) = self.line(b)?;
-                let between = drawing_measure::angle(basis, (a[0], a[1]), AngleFrom::Edge(b[0], b[1]), *reading).map_err(unmeasurable)?;
+                let between = measure::angle(basis, (a[0], a[1]), AngleFrom::Edge(b[0], b[1]), *reading).map_err(unmeasurable)?;
                 let value = between_lines(between.value, *other_side);
                 let points = vec![a[0], a[1], b[0], b[1]];
                 Ok(Found::new(Measured { value, ..between }, points, exact_a && exact_b))
@@ -1059,7 +1059,7 @@ impl<'a> Lookup<'a> {
                 let found = points.iter().map(|p| self.corner(p)).collect::<std::result::Result<Vec<_>, _>>()?;
                 let exact = found.iter().all(|(_, exact)| *exact);
                 let points: Vec<Vec3> = found.into_iter().map(|(p, _)| p).collect();
-                let chain = drawing_measure::chain(basis, &points, *direction).map_err(unmeasurable)?;
+                let chain = measure::chain(basis, &points, *direction).map_err(unmeasurable)?;
                 Ok(Found { members: chain.members, ..Found::new(chain.overall, points, exact) })
             }
             DimensionKind::Baseline { origin, targets, direction } | DimensionKind::Ordinate { origin, targets, direction } => {
@@ -1067,7 +1067,7 @@ impl<'a> Lookup<'a> {
                 let exact = found.iter().all(|(_, exact)| *exact);
                 let points: Vec<Vec3> = found.into_iter().map(|(p, _)| p).collect();
                 let (origin, targets) = points.split_first().ok_or_else(|| Status::Unmeasurable("a set has no origin".into()))?;
-                let set = drawing_measure::from_origin(basis, *origin, targets, *direction).map_err(unmeasurable)?;
+                let set = measure::from_origin(basis, *origin, targets, *direction).map_err(unmeasurable)?;
                 // An ordinate shows a target in line with its origin as 0; a baseline set has no line for it.
                 let baseline = matches!(d.kind, DimensionKind::Baseline { .. });
                 if baseline && set.members.iter().any(|m| m.value <= solidcraft_geom::EPS) {
@@ -1362,7 +1362,7 @@ impl<'a> Lookup<'a> {
     /// round is refused. Its points are the silhouettes' ends.
     fn cylinder(&mut self, face: &ModelFace, basis: &Plane) -> std::result::Result<Found, Status> {
         let on = self.on_cylinder(face)?;
-        let side = drawing_measure::silhouette_side(basis, on.cylinder.axis).map_err(|e| Status::Unmeasurable(e.0.to_string()))?;
+        let side = measure::silhouette_side(basis, on.cylinder.axis).map_err(|e| Status::Unmeasurable(e.0.to_string()))?;
         if !(on.covers(side) && on.covers(-side)) {
             return Err(Status::Unmeasurable(format!(
                 "face `{}` isn't a whole cylinder in this view: one of its silhouettes isn't on it (give an arc's radius)",
@@ -1377,7 +1377,7 @@ impl<'a> Lookup<'a> {
     /// cylinder's faces. Its points are the two silhouettes' ends, `a`'s first.
     fn silhouettes(&mut self, a: &Silhouette, b: &Silhouette, direction: LinearDirection, basis: &Plane) -> std::result::Result<Found, Status> {
         let (on_a, on_b) = (self.on_cylinder(&a.face)?, self.on_cylinder(&b.face)?);
-        let between = drawing_measure::between_silhouettes(basis, &on_a.cylinder, a.side, &on_b.cylinder, b.side, direction);
+        let between = measure::between_silhouettes(basis, &on_a.cylinder, a.side, &on_b.cylinder, b.side, direction);
         let (measured, [way_a, way_b]) = between.map_err(|e| Status::Unmeasurable(e.0.to_string()))?;
         for (on, way, s) in [(&on_a, way_a, a), (&on_b, way_b, b)] {
             if !on.covers(way) {
@@ -1409,7 +1409,7 @@ impl<'a> Lookup<'a> {
     /// face's ends on the view, `a`'s first.
     fn faces(&mut self, a: &ModelFace, b: &ModelFace, direction: LinearDirection, basis: &Plane) -> std::result::Result<Found, Status> {
         let (on_a, on_b) = (self.on_plane(a)?, self.on_plane(b)?);
-        let between = drawing_measure::between_faces(basis, (on_a.origin, on_a.normal), (on_b.origin, on_b.normal), direction);
+        let between = measure::between_faces(basis, (on_a.origin, on_a.normal), (on_b.origin, on_b.normal), direction);
         let measured = between.map_err(|e| Status::Unmeasurable(e.0.to_string()))?;
         let ends = |on: &OnPlane, face: &ModelFace| on.ends(basis).ok_or_else(|| Status::Unmeasurable(format!("face `{}` has no mesh", face.name)));
         let points = [ends(&on_a, a)?, ends(&on_b, b)?].concat();
@@ -1496,7 +1496,7 @@ fn contour_on(b: &ModelBody, seen: &Plane, sphere: &Sphere, rim: &[usize]) -> st
     for e in rim {
         match edge_circle(&b.body, *e) {
             Some(circle) => {
-                let crossed = drawing_measure::contour_crossings(seen, sphere, circle.center, Vec3::from(circle.axis));
+                let crossed = measure::contour_crossings(seen, sphere, circle.center, Vec3::from(circle.axis));
                 cuts.extend(crossed.map_err(|e| Status::Unmeasurable(e.0.to_string()))?);
             }
             None => stepped = true,

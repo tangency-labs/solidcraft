@@ -1,4 +1,4 @@
-//! Measurement on drawing views (W19a, #4896): what a dimension on a view reads, in model
+//! Measurement on drawing views (W19a, #4896), drawing code only: what a dimension on a view reads, in model
 //! millimetres or radians, from model points and edges and the view's basis. One rule for every
 //! dimension: the dimension record (W19b) keeps what to measure, and W09 formats the number.
 //!
@@ -10,13 +10,17 @@ use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
 
-use crate::EPS;
-use crate::drawing_view::{Invalid, PARALLEL, require};
-use crate::prelude::*;
-use crate::section::{MAX_NUMBER, validate_plane};
 use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_geom::EPS;
+use solidcraft_geom::drawing_view::{Invalid, PARALLEL};
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::section::{MAX_NUMBER, validate_plane};
 
 type Result<T> = std::result::Result<T, Invalid>;
+
+fn require(condition: bool, message: &'static str) -> Result<()> {
+    if condition { Ok(()) } else { Err(Invalid(message)) }
+}
 
 /// Which way a linear dimension measures on its view.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -423,5 +427,5 @@ fn out_of_plane(basis: &Plane, d: Vec3) -> bool {
 }
 
 #[cfg(test)]
-#[path = "drawing_measure_tests.rs"]
+#[path = "measure_tests.rs"]
 mod tests;

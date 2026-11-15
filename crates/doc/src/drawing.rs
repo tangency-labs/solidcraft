@@ -77,6 +77,7 @@ mod fill;
 pub mod fold;
 pub mod image;
 pub mod line_maths;
+pub mod measure;
 pub mod note;
 mod sketch;
 pub mod symbol;

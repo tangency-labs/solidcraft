@@ -15,9 +15,9 @@ use solidcraft_doc::drawing::dimension::{
     check_chain_length, check_set_targets,
 };
 use solidcraft_doc::drawing::line_maths::LineCoords;
+use solidcraft_doc::drawing::measure::{LinearDirection, Reading};
 use solidcraft_doc::drawing::{ByNumber, Drawing, kept_by_number};
 use solidcraft_doc::ids;
-use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::prelude::*;
 
 use solidcraft_geom::paper::Scene;

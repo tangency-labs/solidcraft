@@ -1,7 +1,7 @@
 use solidcore_record::Vec3;
 use solidcraft_doc::drawing::dimension::{Member, ModelEdge, ModelFace, ModelPoint, Silhouette, Status};
+use solidcraft_doc::drawing::measure::{Measured, Reading, SilhouetteSide};
 use solidcraft_geom::Aabb2;
-use solidcraft_geom::drawing_measure::{Measured, Reading, SilhouetteSide};
 use solidcraft_geom::drawing_view::{NamedView, Scale};
 use solidcraft_geom::paper::Scene;
 use solidcraft_geom::paper::line::LineGroup;

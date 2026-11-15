@@ -1,5 +1,5 @@
+use crate::drawing::measure::LinearDirection;
 use solidcore_record::Vec2;
-use solidcraft_geom::drawing_measure::LinearDirection;
 
 use super::*;
 
