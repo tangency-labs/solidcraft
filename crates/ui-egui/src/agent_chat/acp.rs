@@ -1008,4 +1008,15 @@ mod tests {
         assert_eq!(config_options(&json!({"configOptions":null})), ConfigParse::Invalid);
         assert_eq!(config_options(&json!({"configOptions":[{"type":"select","id":"broken"}]})), ConfigParse::Invalid);
     }
+
+    #[test]
+    fn a_question_from_the_agent_is_asked_in_the_panel() {
+        // An ACP agent's own question (`elicitation/create`), in form mode.
+        let asked = r#"{"jsonrpc":"2.0","id":43,"method":"elicitation/create","params":{"sessionId":"sess_abc123","mode":"form","message":"How should I approach this refactoring?","requestedSchema":{"type":"object","properties":{"strategy":{"type":"string","enum":["conservative","balanced","aggressive"]}},"required":["strategy"]}}}}"#;
+        let parsed = parse(asked).expect("a question from the agent is read");
+        assert!(
+            !matches!(parsed, Incoming::Unsupported { .. } | Incoming::Ignored),
+            "a question from the agent is asked in the panel, not refused: {parsed:?}"
+        );
+    }
 }
