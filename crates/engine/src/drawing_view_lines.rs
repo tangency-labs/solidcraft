@@ -845,7 +845,7 @@ mod tests {
     fn a_view_without_a_parts_first_copy_prepares_the_next() {
         let (s, _) = crate::drawing_scene::tests::two_cubes();
         let (both, frame, request) = asked(&s, solidcraft_geom::drawing_view::NamedView::Front, false);
-        let second = ShownSet { state: both.state.clone(), bodies: both.bodies[1..].to_vec() };
+        let second = ShownSet { state: both.state.clone(), bodies: both.bodies[1..].to_vec(), uncut: None };
         let mut prepared = PreparedBodies::default();
         let drawn = |set: &ShownSet, prepared: &mut PreparedBodies| lines(&s, set, &frame, &request, prepared, "test").unwrap();
         let all = drawn(&both, &mut prepared);

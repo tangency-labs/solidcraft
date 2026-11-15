@@ -15,7 +15,8 @@ use std::sync::Arc;
 
 use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::config::RowKey;
-use solidcraft_doc::drawing::view::{ResolvedView, SetBy, View, ViewKind};
+use solidcraft_doc::drawing::cutting_line::SectionKind;
+use solidcraft_doc::drawing::view::{Cut, ResolvedView, SetBy, View, ViewKind};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep, ViewConfiguration};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
@@ -74,6 +75,8 @@ pub enum Unmeasured {
     NotConfigured,
     /// A flat pattern view's body has no flat pattern ([`flat`] says why).
     NoFlat,
+    /// It is a section view whose cutting line keeps none of its parts.
+    CutAway,
 }
 
 /// Why a choice of occurrences that draws nothing is refused.
@@ -92,6 +95,7 @@ impl Unmeasured {
             Unmeasured::NoConfiguration => "no_configuration",
             Unmeasured::NotConfigured => "not_configured",
             Unmeasured::NoFlat => "no_flat",
+            Unmeasured::CutAway => "cut_away",
         }
     }
 }
@@ -111,6 +115,7 @@ impl fmt::Display for Unmeasured {
             Unmeasured::NoConfiguration => f.write_str("the configuration it draws is no longer in the design"),
             Unmeasured::NotConfigured => f.write_str("its configuration can't be applied to the design"),
             Unmeasured::NoFlat => f.write_str("the view's body has no flat pattern"),
+            Unmeasured::CutAway => f.write_str("its cutting line keeps none of the parts"),
         }
     }
 }
@@ -156,6 +161,8 @@ impl Styles {
 pub struct ShownSet {
     pub state: Arc<ModelState>,
     pub bodies: Vec<Shown>,
+    /// In a section view, which of its parts it draws uncut, and why ([`measured`]).
+    pub uncut: Option<String>,
 }
 
 impl ShownSet {
@@ -489,7 +496,7 @@ pub fn shown(s: &Session) -> std::result::Result<ShownSet, Unmeasured> {
             Shown { index, path, body, reference }
         })
         .collect();
-    if bodies.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(ShownSet { state, bodies }) }
+    if bodies.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(ShownSet { state, bodies, uncut: None }) }
 }
 
 /// A saved view on its sheet.
@@ -511,11 +518,19 @@ pub fn not_drawable(display: VisualStyle, reference: VisualStyle) -> Option<&'st
     (lined(display) || lined(reference)).then_some("not supported yet: shaded views with lines need the view's exact lines (W06)")
 }
 
-/// Why saved view `view` can't be drawn yet, if it is a section view (#13046): nothing cuts its
-/// bodies yet. The sheet scene, its pictures and its dimensions refuse it alike; its settings stay
-/// editable.
+/// Why section view `view` can't be drawn yet, if it can't (#13046): only a full section's lines
+/// are cut so far, and a shaded part's picture isn't. The sheet scene refuses it; its settings stay
+/// editable. Pictures and dimensions leave out every section view for now.
 pub fn not_cut_yet(view: &ResolvedView) -> Option<&'static str> {
-    view.cut.is_some().then_some("not supported yet: cutting a section view's bodies")
+    match view.cut.as_ref()?.line.kind() {
+        SectionKind::Full if view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded() => {
+            Some("not supported yet: a shaded section view")
+        }
+        SectionKind::Full => None,
+        SectionKind::Half => Some("not supported yet: a half section"),
+        SectionKind::Offset => Some("not supported yet: an offset section"),
+        SectionKind::Aligned => Some("not supported yet: an aligned section"),
+    }
 }
 
 /// Why saved view `view` can't be drawn yet, if it can't, as it draws its parts apart (#13048): its
@@ -571,8 +586,61 @@ pub fn measured<'a>(
     if set.bodies.is_empty() {
         return Err(Unmeasured::NothingChosen);
     }
+    // Only a full section is cut so far ([`not_cut_yet`]): the others measure their bodies whole.
+    let set = match &view.cut {
+        Some(cut) if cut.line.kind() == SectionKind::Full => Cow::Owned(sectioned(&set, cut)?),
+        _ => set,
+    };
     let extents = measure(&set, &view.basis)?;
     Ok((set, extents))
+}
+
+/// What a full section view along `cut` shows of `set`: each model body cut by the line's plane, the
+/// side its arrows point to kept ([`ModelBody::section`], which remembers it), and a body with nothing
+/// on that side left out. Reference parts show whole around the cut, as context. Mesh bodies have no
+/// faces to cut, so they show whole, and so does a body whose cut fails: [`ShownSet::uncut`] says
+/// which. Each body keeps its place among the state's bodies, so picking a line still finds its part.
+fn sectioned(set: &ShownSet, cut: &Cut) -> std::result::Result<ShownSet, Unmeasured> {
+    let plane = cut.line.planes(&cut.parent).map_err(|e| e.to_string()).and_then(|p| p.into_iter().next().ok_or_else(|| "no plane".into()));
+    let mut state = ModelState::clone(&set.state);
+    let (mut bodies, mut meshes, mut failed, mut why_failed) = (Vec::new(), 0usize, 0usize, None);
+    for shown in &set.bodies {
+        let Some(body) = set.body(shown) else { continue };
+        if shown.reference {
+            bodies.push(shown.clone());
+            continue;
+        }
+        if body.body.is_mesh() {
+            meshes += 1;
+            bodies.push(shown.clone());
+            continue;
+        }
+        match plane.clone().and_then(|plane| body.section(&plane).map_err(|e| e.to_string())) {
+            Ok(Some(section)) => {
+                if let Some(slot) = state.bodies.get_mut(shown.index) {
+                    *slot = section;
+                }
+                bodies.push(shown.clone());
+            }
+            Ok(None) => {}
+            Err(why) => {
+                failed += 1;
+                why_failed.get_or_insert(why);
+                bodies.push(shown.clone());
+            }
+        }
+    }
+    if set.bodies.iter().any(|b| !b.reference) && !bodies.iter().any(|b| !b.reference) {
+        return Err(Unmeasured::CutAway);
+    }
+    let count = |n: usize, what: &str| if n == 1 { format!("1 {what}body is") } else { format!("{n} {what}bodies are") };
+    let meshes = (meshes > 0).then(|| format!("{} drawn uncut: a mesh has no faces to cut", count(meshes, "mesh ")));
+    let failed = why_failed.map(|why| format!("{} drawn uncut: {why}", count(failed, "")));
+    let uncut = match (meshes, failed) {
+        (Some(meshes), Some(failed)) => Some(format!("{meshes}; {failed}")),
+        (meshes, failed) => meshes.or(failed),
+    };
+    Ok(ShownSet { state: Arc::new(state), bodies, uncut })
 }
 
 /// The extents of the bodies `shown` holds, seen on `basis`, or that they have nothing to measure:

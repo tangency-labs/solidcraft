@@ -653,7 +653,12 @@ fn draw(
     });
     let placing = measured.as_ref().map(|(_, extents, around)| (*extents, *around)).map_err(|why| *why);
     let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
-    let why = crate::drawing_view::state_reason(s, view, failing);
+    // A section view also says which of its parts it draws uncut.
+    let uncut = measured.as_ref().ok().and_then(|(set, ..)| set.uncut.clone());
+    let why = match (crate::drawing_view::state_reason(s, view, failing), uncut) {
+        (Some(state), Some(uncut)) => Some(format!("{state}; {uncut}")),
+        (state, uncut) => state.or(uncut),
+    };
     let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: why.clone() };
     let styles = Styles::from(view);
     let not_drawable = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
@@ -666,6 +671,9 @@ fn draw(
         Ok(measured) => measured,
         Err(why) => return none(Status::Placeholder(why)),
     };
+    // A section's cut bodies are its own: the sheet's other views keep sharing theirs.
+    let mut own = PreparedBodies::default();
+    let prepared = if view.cut.is_some() { &mut own } else { prepared };
     let tangent_edges = view.tangent_edges.value == TangentEdges::Show;
     // The margin keeps the mesh's chord at or above its floor once divided back by the factor.
     let chord_mm = CHORD_MM.max(MIN_MODEL_CHORD_MM * view.scale.value.factor() * (1.0 + 1e-9));

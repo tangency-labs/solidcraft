@@ -3584,17 +3584,30 @@ fn a_position_on_the_views_own_sheet_is_a_move() {
     assert_eq!(reply["views"], json!([]), "{reply}");
 }
 
-/// A section view of the front view of [`three_views`], cut along a horizontal line, its arrows down.
+/// A section view of the front view of [`three_views`], cut along a horizontal line through the
+/// block's middle, its arrows down.
 fn with_section(s: &mut Session, front: u64) -> u64 {
-    use solidcraft_doc::drawing::cutting_line::{ArrowSide, CuttingLine, SectionKind};
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+    section_of(s, front, SectionKind::Full, &[[-40.0, 10.0], [40.0, 10.0]], ArrowSide::Right)
+}
+
+/// A section view of `parent`, cut along a line of `kind` through `points` on the parent's plane.
+fn section_of(
+    s: &mut Session,
+    parent: u64,
+    kind: solidcraft_doc::drawing::cutting_line::SectionKind,
+    points: &[[f64; 2]],
+    arrows: solidcraft_doc::drawing::cutting_line::ArrowSide,
+) -> u64 {
+    use solidcraft_doc::drawing::cutting_line::CuttingLine;
     let mut d = (**s.drawing("test").unwrap()).clone();
     let id = d.allocate_id(&mut solidcraft_doc::ids::IdSource::seeded(13046)).unwrap();
-    let line = CuttingLine::new(SectionKind::Full, vec![Vec2::new(-40.0, 0.0), Vec2::new(40.0, 0.0)], ArrowSide::Right).unwrap();
+    let line = CuttingLine::new(kind, points.iter().map(|p| Vec2::new(p[0], p[1])).collect(), arrows).unwrap();
     let (sheet, place) = (d.sheets[0].id, ViewPlace::At([150.0, 60.0]));
     let view = View {
         id,
         sheet,
-        kind: ViewKind::Section { parent: front, line },
+        kind: ViewKind::Section { parent, line },
         place,
         settings: ViewOverrides::default(),
         reference_shown_percent: 0.0,
@@ -3607,10 +3620,10 @@ fn with_section(s: &mut Session, front: u64) -> u64 {
 }
 
 /// A section view lists and inspects as a section of its parent, follows its parent's settings and
-/// keeps its own editable, copies alone as a section of the same parent, and its sheet says it can't
-/// be drawn yet, drawing its other views.
+/// keeps its own editable, copies alone as a section of the same parent, and its sheet draws it with
+/// its other views.
 #[test]
-fn a_section_view_inspects_copies_and_waits_for_its_cut() {
+fn a_section_view_inspects_copies_and_draws() {
     let (mut s, [front, ..]) = three_views();
     let cut = with_section(&mut s, front);
     let reply = inspect_view(&mut s, cut);
@@ -3630,15 +3643,153 @@ fn a_section_view_inspects_copies_and_waits_for_its_cut() {
     // Copied alone, it stays a section of the same parent, its line as it was.
     let copy = listed(&to_sheet(&mut s, COPY, json!({"view": ids::encode(cut), "sheet": "Sheet 1"})))[0];
     assert_eq!(saved(&s, copy).kind, saved(&s, cut).kind);
-    // Nothing cuts it yet: its sheet says so, and draws the front view.
     let sheet = s.drawing("test").unwrap().sheets[0].id;
     let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
     let state = |id: u64| scene["views"].as_array().unwrap().iter().find(|v| v["view"] == json!(ids::encode(id))).unwrap().clone();
-    assert_eq!(
-        (&state(cut)["status"], &state(cut)["reason"]),
-        (&json!("failed"), &json!("not supported yet: cutting a section view's bodies")),
-        "{scene}"
-    );
+    assert_eq!((&state(cut)["status"], &state(front)["status"]), (&json!("drawn"), &json!("drawn")), "{scene}");
+}
+
+/// Saved view `id` as its sheet draws it: what it shows, its extents and its lines at its scale,
+/// hidden lines too, on paper round its model's middle.
+fn drawn_lines(s: &Session, id: u64) -> (ShownSet, Extents, crate::drawing_view::Lines) {
+    use crate::drawing_view::{CHORD_MM, LineRequest, PreparedBodies};
+    let view = s.drawing("test").unwrap().resolve_view(id).unwrap();
+    let shown = crate::drawing_view::shown(s);
+    let (set, extents) = crate::drawing_view::measured(&shown, &view).unwrap();
+    let frame = crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, Vec2::ZERO, "test").unwrap();
+    let request = LineRequest {
+        shows: extents.model,
+        hidden: true,
+        reference_hidden: false,
+        reference_hides_model: false,
+        tangent_edges: false,
+        chord_mm: CHORD_MM,
+    };
+    let lines = crate::drawing_view::lines(s, &set, &frame, &request, &mut PreparedBodies::default(), "test").unwrap();
+    (set.into_owned(), extents, lines)
+}
+
+/// Where `lines` has an upright straight piece at `visibility`: its x on paper, in hundredths of a mm.
+fn upright(lines: &crate::drawing_view::Lines, visibility: Visibility) -> BTreeSet<i64> {
+    let pieces = lines.lines.iter().flat_map(|l| &l.pieces).filter(|p| p.visibility == visibility);
+    let segments = pieces.flat_map(|p| &p.path).filter_map(|seg| match seg {
+        solidcore_record::Seg2::Line { a, b } if (a.x - b.x).abs() < 1e-6 && (a.y - b.y).abs() > 1.0 => Some((a.x * 100.0).round() as i64),
+        _ => None,
+    });
+    segments.collect()
+}
+
+/// The block drilled upright through its middle (10 mm across) and a tab standing on its left end,
+/// [`three_views_of`] them, and a section of the front view along an upright line through the hole,
+/// its arrows to the right.
+fn drilled_with_tab() -> (Session, [u64; 3], u64) {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+    let mut s = block();
+    run(&mut s, "solid.cylinder", json!({"diameter": 10, "height": 22, "base": [50, 25, -1], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 20], "length": 20, "width": 50, "height": 40, "body_name": "Tab"}));
+    let (mut s, views) = three_views_of(s);
+    let cut = section_of(&mut s, views[0], SectionKind::Full, &[[50.0, -10.0], [50.0, 70.0]], ArrowSide::Right);
+    (s, views, cut)
+}
+
+/// A full section view draws its parent's bodies cut along its line, the side its arrows point to
+/// kept: the tab on the other side is left out, so the view is the block's 50 x 20 mm end, and the
+/// hole's two sides, 5 mm from its middle, are cut edges, drawn visible. Seen whole from the right,
+/// they are hidden. Asked again, the view takes the cut it made.
+#[test]
+fn a_full_section_view_draws_the_bodies_cut_along_its_line() {
+    let (s, [_, right, _], cut) = drilled_with_tab();
+    let (set, extents, lines) = drawn_lines(&s, cut);
+    let names: Vec<&str> = set.bodies.iter().map(|b| b.body.as_str()).collect();
+    assert_eq!((names, &set.uncut), (vec!["Block"], &None));
+    let size = extents.model.max - extents.model.min;
+    assert!((size.x - 50.0).abs() < 1e-6 && (size.y - 20.0).abs() < 1e-6, "{size:?}");
+    // At 1:2, 5 mm from the middle is 2.5 mm on paper.
+    let sides = BTreeSet::from([-250, 250]);
+    assert!(sides.is_subset(&upright(&lines, Visibility::Visible)), "{:?}", upright(&lines, Visibility::Visible));
+    let (whole, _, seen) = drawn_lines(&s, right);
+    assert_eq!(whole.bodies.len(), 2);
+    assert!(sides.is_disjoint(&upright(&seen, Visibility::Visible)), "{:?}", upright(&seen, Visibility::Visible));
+    assert!(sides.is_subset(&upright(&seen, Visibility::Hidden)), "{:?}", upright(&seen, Visibility::Hidden));
+    let (again, ..) = drawn_lines(&s, cut);
+    let body = |set: &ShownSet| set.body(&set.bodies[0]).unwrap().body.clone();
+    assert!(body(&again).same(&body(&set)));
+}
+
+/// A section's cut bodies never lend their geometry to another copy of the part, as the plane cuts
+/// each copy where it stands: with the line through the first of two cubes, each copy is a group of
+/// its own, while the parent's view still shares one copy's geometry between them.
+#[test]
+fn copies_of_a_part_are_cut_apart() {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+    let (s, _) = two_cubes();
+    let (mut s, [front, ..]) = three_views_of(s);
+    let cut = section_of(&mut s, front, SectionKind::Full, &[[5.0, -10.0], [5.0, 20.0]], ArrowSide::Right);
+    let groups = |id: u64| {
+        let view = s.drawing("test").unwrap().resolve_view(id).unwrap();
+        let shown = crate::drawing_view::shown(&s);
+        let (set, _) = crate::drawing_view::measured(&shown, &view).unwrap();
+        let placed = crate::mesh_lines::placed(&s, &set.state, |_| true, "test").unwrap();
+        placed.iter().map(|p| p.group).collect::<BTreeSet<_>>().len()
+    };
+    assert_eq!((groups(front), groups(cut)), (1, 2));
+}
+
+/// Reference parts show whole around a section, as context, while the model parts are cut: the
+/// plate is cut where the line crosses it, and the block over it, a reference part, isn't.
+#[test]
+fn reference_parts_are_not_cut() {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+    let (s, _) = plate_and_block(5.0);
+    let (mut s, [front, ..]) = three_views_of(s);
+    let cut = section_of(&mut s, front, SectionKind::Full, &[[35.0, -10.0], [35.0, 30.0]], ArrowSide::Right);
+    let world = crate::drawing_view::shown(&s).unwrap();
+    let (set, ..) = drawn_lines(&s, cut);
+    let whole = |reference: bool| {
+        let shown = set.bodies.iter().find(|b| b.reference == reference).unwrap();
+        set.body(shown).unwrap().body.same(&world.body(shown).unwrap().body)
+    };
+    assert_eq!((set.bodies.len(), whole(true), whole(false)), (2, true, false));
+}
+
+/// A mesh body has no faces to cut: a section draws it whole beside the cut block, and says so.
+#[test]
+fn a_mesh_body_is_drawn_uncut_and_said_so() {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+    let mut s = block();
+    with_mesh_cube(&mut s, [60.0, 10.0, 30.0], "section");
+    let (mut s, [front, ..]) = three_views_of(s);
+    let cut = section_of(&mut s, front, SectionKind::Full, &[[50.0, -10.0], [50.0, 70.0]], ArrowSide::Right);
+    let (set, ..) = drawn_lines(&s, cut);
+    assert_eq!((set.bodies.len(), set.uncut.as_deref()), (2, Some("1 mesh body is drawn uncut: a mesh has no faces to cut")));
+}
+
+/// A line that keeps none of the parts gives the placeholder, and says why.
+#[test]
+fn a_line_that_keeps_none_of_the_parts_shows_the_placeholder() {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+    let (mut s, [front, ..]) = three_views();
+    let cut = section_of(&mut s, front, SectionKind::Full, &[[-40.0, 0.0], [40.0, 0.0]], ArrowSide::Right);
+    let view = s.drawing("test").unwrap().resolve_view(cut).unwrap();
+    assert_eq!(crate::drawing_view::measured(&crate::drawing_view::shown(&s), &view).err(), Some(Unmeasured::CutAway));
+    let reply = inspect_view(&mut s, cut);
+    assert_eq!(reply["extents"]["provenance"], json!("cut_away"), "{reply}");
+}
+
+/// Only a full section's lines are drawn yet: a half section, and a shaded full section, say so,
+/// and their sheet draws its other views.
+#[test]
+fn other_sections_and_shaded_ones_wait() {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+    let (mut s, [front, ..]) = three_views();
+    let half = section_of(&mut s, front, SectionKind::Half, &[[-40.0, 10.0], [50.0, 10.0], [50.0, 30.0]], ArrowSide::Right);
+    let full = with_section(&mut s, front);
+    edit_view(&mut s, full, json!({"visual_style": "shaded"}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    let state = |id: u64| scene["views"].as_array().unwrap().iter().find(|v| v["view"] == json!(ids::encode(id))).unwrap().clone();
+    assert_eq!(state(half)["reason"], json!("not supported yet: a half section"), "{scene}");
+    assert_eq!(state(full)["reason"], json!("not supported yet: a shaded section view"), "{scene}");
     assert_eq!(state(front)["status"], json!("drawn"), "{scene}");
 }
 

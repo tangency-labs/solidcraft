@@ -210,7 +210,8 @@ pub(crate) fn prepare(
 /// The bodies of `world` that `shown` keeps, in its order, each placed in a group that shares one
 /// copy of its geometry. A definition the model state holds once shares its first placement's
 /// geometry with its later ones whose motion from it is rigid; any other placement (a mirror, a
-/// scale, a definition held twice) is a group of its own, at identity. Errors name `cmd`.
+/// scale, a definition held twice, a body with no geometry key such as a section view's cut) is a
+/// group of its own, at identity. Errors name `cmd`.
 pub(crate) fn placed<'a>(s: &Session, world: &'a ModelState, shown: impl Fn(&ModelBody) -> bool, cmd: &str) -> Result<Vec<Placed<'a>>> {
     let state = s.model.state();
     let mut definitions = BTreeMap::new();
@@ -225,7 +226,8 @@ pub(crate) fn placed<'a>(s: &Session, world: &'a ModelState, shown: impl Fn(&Mod
             return Err(bad(cmd, "too many placed bodies"));
         }
         let key = (body.component, body.definition_name(), body.feature);
-        let unambiguous = definitions.get(&key) == Some(&1);
+        // A body with no geometry key may not be its definition's geometry: a section's cut isn't.
+        let unambiguous = definitions.get(&key) == Some(&1) && body.geometry_key().is_some();
         let reused = unambiguous
             .then(|| by_definition.get(&key).copied())
             .flatten()
