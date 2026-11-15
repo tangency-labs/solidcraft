@@ -415,9 +415,10 @@ fn same_bodies(a: &[(bool, usize, f64, [f64; 6])], b: &[(bool, usize, f64, [f64;
         })
 }
 
-/// The parts compared between the two routes: every FreeCAD and Rhino fixture.
+/// The parts compared between the two routes: every FreeCAD and Rhino fixture, and every
+/// step-conformance part decoded by cadmpeg's STEP decoder (as the cadmpeg STEP reader reads it).
 fn compared_parts() -> Vec<(String, Vec<u8>)> {
-    [
+    let mut parts: Vec<(String, Vec<u8>)> = [
         ("block.FCStd", BLOCK_FCSTD),
         ("block.3dm", BLOCK_3DM),
         ("bracket.FCStd", BRACKET_FCSTD),
@@ -426,11 +427,21 @@ fn compared_parts() -> Vec<(String, Vec<u8>)> {
     ]
     .into_iter()
     .map(|(n, b)| (n.to_string(), b.to_vec()))
-    .collect()
+    .collect();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let mut steps: Vec<_> =
+        std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|e| e == "step")).collect();
+    steps.sort();
+    assert!(steps.len() >= 17, "{} step-conformance parts", steps.len());
+    parts.extend(steps.iter().map(|p| (p.file_name().unwrap().to_string_lossy().to_string(), std::fs::read(p).unwrap())));
+    parts
 }
 
-/// The compared parts whose bodies differ between the two routes, with why.
-const DIFFER: [(&str, &str); 0] = [];
+/// The compared parts whose bodies differ between the two routes, with why: the records do not
+/// yet follow CADIR occurrences, so a part placed in an assembly comes in once and unplaced
+/// (`docs/step-import.md`). None of the FreeCAD and Rhino fixtures has occurrences.
+const DIFFER: [(&str, &str); 2] =
+    [("cylinder_placed.step", "not yet at its assembly placement"), ("cylinder_twice.step", "one body, not one per placement")];
 
 /// Reading the neutral model into records builds the bodies the STEP route built (cadmpeg's
 /// STEP writer, then our STEP reader): the same bodies, each as whole, with as many faces, the
