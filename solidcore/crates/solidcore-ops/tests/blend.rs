@@ -1815,6 +1815,7 @@ fn a_session_failure_says_what_its_session_noted() {
 /// of 360 degrees, a sweep SMLib's check refuses (`SmSurfOfRevolution` Test #7), at r 0.14 and 2
 /// here (r 0.13 rounds the other way). Each round takes off the ring's corner, by Pappus
 /// 2 pi r^2 ((R - r)(1 - pi/4) + r/6), and its face is the torus R - r, r about the ring's axis.
+/// A chamfer round the circle, a cone, builds alike at both ends too.
 #[test]
 fn a_round_along_a_whole_circle_builds_alike_on_both_ends_of_a_mirrored_ring() {
     use solidcore_ops::boolean::boolean;
@@ -1906,6 +1907,14 @@ fn a_round_along_a_whole_circle_builds_alike_on_both_ends_of_a_mirrored_ring() {
         (kinds, off)
     };
     let (kinds_before, _) = faces(&base, 2.0, 10.0);
+    // the tab's four rounds along the ring's arcs keep their part turns: only a whole closed
+    // edge's round turns 360
+    let part_turns: Vec<f64> = kinds_before
+        .iter()
+        .filter_map(|&(_, sweep)| sweep.map(|[lo, hi]| hi - lo))
+        .collect();
+    assert_eq!(part_turns.len(), 4, "{part_turns:?}");
+    assert!(part_turns.iter().all(|&t| t < 90.0), "{part_turns:?}");
     for r in [0.14, 2.0] {
         let corner = 2.0 * PI * r * r * ((outer - r) * (1.0 - PI / 4.0) + r / 6.0);
         for z in [10.0, -10.0] {
@@ -1934,6 +1943,27 @@ fn a_round_along_a_whole_circle_builds_alike_on_both_ends_of_a_mirrored_ring() {
             );
             assert!(off < 1e-9, "r {r} at z {z}: {off} off the torus");
         }
+    }
+    // a chamfer d 2 round the circle (a linear section revolved, stored as its cone) takes off
+    // the triangle d^2/2 whose centroid turns at R - d/3: pi d^2 (R - d/3)
+    let d = 2.0;
+    for z in [10.0, -10.0] {
+        let b = base.copy().unwrap();
+        let edge = edge_at(&b, [-outer, 0.0, z]);
+        blend(&b, Blend::Chamfer, &[edge], &[d], &[], Corners::Filled)
+            .unwrap_or_else(|e| panic!("chamfer at z {z}: {e:?}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "chamfer at z {z}: {}", report.text);
+        assert_eq!(b.counts().unwrap(), [24, 55, 33], "chamfer at z {z}");
+        let v = b.volume(1e-10).unwrap();
+        let want = before - PI * d * d * (outer - d / 3.0);
+        assert!(rel(v, want) < 1e-9, "chamfer at z {z}: {v}, want {want}");
+        let (mut added, _) = faces(&b, d, z);
+        for k in &kinds_before {
+            let i = added.iter().position(|a| a == k).unwrap();
+            added.remove(i);
+        }
+        assert_eq!(added, vec![("cone", None)], "chamfer at z {z}");
     }
 }
 
