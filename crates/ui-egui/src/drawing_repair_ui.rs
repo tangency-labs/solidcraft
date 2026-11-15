@@ -186,7 +186,7 @@ mod tests {
             ("linear", vec!["a", "b"]),
             ("angle", vec!["a", "b"]),
         ] {
-            let inspection = json!({"record":{"kind":{kind: {}}}});
+            let inspection = json!({"record":{"kind":{(kind): {}}}});
             assert_eq!(reference_slots(&inspection), expected);
         }
         assert_eq!(reference_slots(&json!({"record":{"kind":{"chain":{"points":[{},{},{}]}}}})), vec!["0","1","2"]);
