@@ -135,7 +135,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("hole")
         .key("H")
-        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) (with clearance: a counterbore the screw's head sits in, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value); head_gap?: length (default 0.5 mm; an expression with parameters is kept, so the recess follows them); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body); old_surface_start?: bool (sketch points: a point inside a body starts the hole at the body's surface whatever plane the sketch lies on, as designs saved before #11538 drilled; set on those holes, keeps them as they were when edited)"),
+        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) (with clearance: a counterbore the screw's head sits in, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value); head_gap?: length (default 0.5 mm; an expression with parameters is kept, so the recess follows them); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_class?: the tapped thread's tolerance class, saved for drawings and changing no geometry (ISO metric: 6H, 5H, 7G, or a pitch and minor diameter class such as 5H6H; UNC/UNF: 1B, 2B or 3B; G, Rp, Rc and NPT take none; needs thread);thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body); old_surface_start?: bool (sketch points: a point inside a body starts the hole at the body's surface whatever plane the sketch lies on, as designs saved before #11538 drilled; set on those holes, keeps them as they were when edited)"),
     CommandSpec::new("solid.pipe", "Pipe", crate::checked!("solid.pipe", pipe))
         .at("SOLID", "CREATE")
         .icon("pipe")
@@ -185,7 +185,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane_angle")
         .contract(&PLANE_AT_ANGLE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (where it is now)|{origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); pivot?: point ref (only with direction_only; vertex, sketch point, construction point); name?"),
+        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (followed: the plane moves with the axis)|{origin, dir} (fixed) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); pivot?: point ref (only with direction_only; vertex, sketch point, construction point); name?"),
     CommandSpec::new("solid.split_face", "Split Face", crate::checked!("solid.split_face", split_face))
         .at("SOLID", "MODIFY")
         .icon("split_face")
@@ -742,6 +742,7 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
     if world {
         super::component::to_active_frame(s, &mut kind);
     }
+    super::component::pin_picked_placements(s, &mut kind);
     // Bare lengths typed in an inch (or cm…) design mean that unit.
     if s.doc.units.trim() != "mm" {
         let doc = s.doc.clone();
@@ -1359,6 +1360,7 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         to_offset: expr(p, "to_offset"),
         from: p.get("from").and_then(vec3).map(FacePick),
         to_body_apart: false,
+        picked_placements: Vec::new(),
     })
 }
 
@@ -2799,8 +2801,106 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
         add_feature(s, p, FeatureKind::Mirror { features, plane, bodies: bodies.iter().cloned().map(BodyName).collect(), combine, placements })?;
     if !combine {
         super::print_face::copies_keep_print_faces(s, &reply, &bodies);
+        copies_keep_looks(s, &reply, &bodies);
     }
     Ok(reply)
+}
+
+/// Copies are made of what the bodies they were made from are: each takes its source's physical
+/// material and appearance, unless it has its own (kept under its name from before). The copies
+/// are the bodies feature `reply` made, in the order of `sources`, as
+/// [`super::print_face::copies_keep_print_faces`] takes them.
+fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) {
+    let Some(id) = reply.get("feature").and_then(Value::as_u64) else { return };
+    let state = s.model.state();
+    let copies: Vec<_> = state.bodies.iter().filter(|b| b.feature == id).collect();
+    if copies.len() != sources.len() {
+        return;
+    }
+    let pairs: Vec<(String, String)> = sources
+        .iter()
+        .zip(copies)
+        .filter_map(|(source, copy)| state.body(source).map(|b| (copy.definition_name().to_string(), b.definition_name().to_string())))
+        .collect();
+    let needs = |copy: &str, from: &str| {
+        (!s.doc.materials.contains_key(copy) && s.doc.materials.contains_key(from))
+            || (!s.doc.appearances.bodies.contains_key(copy) && s.doc.appearances.bodies.contains_key(from))
+    };
+    if !pairs.iter().any(|(copy, from)| needs(copy, from)) {
+        return;
+    }
+    let doc = s.doc_mut();
+    for (copy, from) in pairs {
+        if !doc.materials.contains_key(&copy)
+            && let Some(material) = doc.materials.get(&from).cloned()
+        {
+            doc.materials.insert(copy.clone(), material);
+        }
+        if !doc.appearances.bodies.contains_key(&copy)
+            && let Some(look) = doc.appearances.bodies.get(&from).cloned()
+        {
+            doc.appearances.bodies.insert(copy, look);
+        }
+    }
+}
+
+impl Session {
+    /// Whether mirroring bodies (`solid.mirror`'s parameters, `bodies` and `plane`) leaves a
+    /// copy overlapping or touching the body it was made from: the Mirror dialog then joins it
+    /// (Join), and otherwise makes it a body of its own (New Body).
+    ///
+    /// A copy meets its body exactly when the body reaches the mirror plane: what lies on the
+    /// plane stays where it is, in both; a body wholly to one side has its copy wholly to the
+    /// other. So no boolean is needed, only how far the body reaches along the plane's normal,
+    /// from its exact box (SMLib's tight one, never a mesh), the body turned first so the normal
+    /// is an axis unless it is one already. `None` when there is no body to mirror or it isn't
+    /// one of the design's own (a feature mirrored, a placed part, a mesh body).
+    pub fn mirror_meets(&self, p: &Value) -> Result<Option<bool>> {
+        let cmd = "solid.mirror";
+        let sources = string_list(cmd, p, "bodies")?;
+        if sources.is_empty() {
+            return Ok(None);
+        }
+        let plane = plane_param(self, p.get("plane"), cmd)?;
+        let state = self.model.state();
+        let (vals, _) = self.doc.param_values();
+        let pl = self.doc.resolve_plane_in(&vals, &plane, 0, self.active_component, Some(&state))?;
+        let Some(n) = pl.normal().normalized() else { return Ok(None) };
+        let level = pl.origin.dot(n);
+        // The normal as an axis, when it is one: the exact box reads the reach along it as it is.
+        let axis = [(0, n.x), (1, n.y), (2, n.z)].into_iter().find(|(_, c)| (c.abs() - 1.0).abs() < 1e-12).map(|(i, c)| (i, c.signum()));
+        // Otherwise a turn taking the normal to z, with two directions square to it.
+        let side = if n.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+        let Some(u) = side.cross(n).normalized() else { return Ok(None) };
+        let v = n.cross(u);
+        let onto = [[u.x, v.x, n.x, 0.0], [u.y, v.y, n.y, 0.0], [u.z, v.z, n.z, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        for name in &sources {
+            let Some(b) = state.body(name) else { return Ok(None) };
+            if b.body.is_mesh() {
+                return Ok(None);
+            }
+            let (low, high) = match axis {
+                Some((i, sign)) => {
+                    let bb = b.body.exact_bounds()?;
+                    let (lo, hi) = match i {
+                        0 => (bb.min.x, bb.max.x),
+                        1 => (bb.min.y, bb.max.y),
+                        _ => (bb.min.z, bb.max.z),
+                    };
+                    if sign > 0.0 { (lo, hi) } else { (-hi, -lo) }
+                }
+                None => {
+                    let bb = solidcraft_kernel::transform_matrix(&b.body, onto)?.exact_bounds()?;
+                    (bb.min.z, bb.max.z)
+                }
+            };
+            let tol = 2.0 * b.body.record().tolerance;
+            if low <= level + tol && high >= level - tol {
+                return Ok(Some(true));
+            }
+        }
+        Ok(Some(false))
+    }
 }
 
 /// Bodies picked where the viewport shows them: each world name ("Body1", or "Body1 (Occ:2)"
@@ -2972,8 +3072,9 @@ fn plane_offset(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "construct.plane.at_angle";
-    // The plane follows an edge or face it is on; a construction axis is kept as it is now.
-    let (axis_origin, axis_dir, line, _) = axis_line(s, p, cmd)?;
+    // The plane follows the edge, face or construction axis it turns about.
+    let (axis_origin, axis_dir, line, axis_feature) = axis_line(s, p, cmd)?;
+    let line = line.or_else(|| axis_feature.map(|name| solidcraft_doc::construct::GeoRef::Axis { name }));
     let angle = req_expr(cmd, p, "angle")?;
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let line = line.map(Box::new);
@@ -3287,6 +3388,13 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
                 .unwrap_or_else(|| format!("unknown tapped thread `{t}` (ISO metric or a catalogued UNC/UNF, G, Rp, Rc or NPT size)")),
         ));
     }
+    // The tolerance class the thread's standard gives (#16336): checked here, saved as written.
+    let thread_class = str_(p, "thread_class").map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
+    match (&thread_class, thread.as_deref().and_then(solidcraft_doc::parse_tapped_thread)) {
+        (None, _) => {}
+        (Some(_), None) => return Err(bad(cmd, "`thread_class` needs `thread` (a tapped hole)")),
+        (Some(class), Some(tapped)) => tapped.check_class(class).map_err(|e| bad(cmd, e))?,
+    }
     let thread_depth = match p.get("thread_depth") {
         None | Some(Value::Null) => None,
         Some(_) => Some(req_expr(cmd, p, "thread_depth")?),
@@ -3512,6 +3620,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             thread,
             thread_depth,
             hand,
+            thread_class,
             modeled,
             ease_out,
             to: to.map(FacePick),

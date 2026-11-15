@@ -11,13 +11,18 @@
 //! | `join_sides` (private)                | `sm_JoinSides`                     |
 //! | [`JoinTopology`]                      | its `NoteError` + `SER(SM_ERR)` refusal |
 //! | `unequal_blends` (private)            | not the fork's (#2905)             |
+//! | `rolled_sides` (private)              | not the fork's (solidcore-native: rails rolled over a smooth far edge) |
 //!
 //! Deviations: the caller resolves `GetFilletSolverOfEdgeuse` of the blended edge uses
 //! ([`JoinTopologyEnv::solver_eu_solvers`]) and notes the refusal's error
 //! ([`JoinTopology::RefusedAcrossEdges`]); blends on unequal offsets are refused (not the
 //! fork's, #2905: [`JoinTopology::RefusedUnequalOffsets`]). A missing solver the fork dereferences
 //! through `NER` is `SM_ERR_NULL_POINTER`; other missing topology is an input error. The
-//! walks round the vertex are bounded by its edge uses (WR-697).
+//! walks round the vertex are bounded by its edge uses (WR-697). Not the fork's
+//! (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): a blend whose rail rolls over
+//! a smooth far edge of its face rolls on the face beyond, so where the one edge between the
+//! blends on a side is that edge and the other blend rolls on that face, nothing stands between
+//! them there (`rolled_sides`).
 
 use super::{find_side_edgeuse, need, new_corner_vertex, radial};
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
@@ -294,6 +299,59 @@ fn join_sides(target: &Brep, solver_eus: &[EdgeuseId], all_eus: &[EdgeuseId]) ->
     Ok((side, between))
 }
 
+/// Not the fork's (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): on each side
+/// (`side`, `sm_JoinSides`'s faces), where the one edge between the two blends there is a
+/// smooth far edge of one blend's face that its rail rolls over onto the face beyond, and the
+/// other blend's face there is that face, the face both blends roll on: nothing stands between
+/// them there, so that side's edge is taken out of `between` and the section's end there lies
+/// on that face, through the vertex. `None` on every other side.
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` without a solver; those of the topology queries.
+fn rolled_sides(
+    target: &Brep,
+    solvers: &[Option<SolverObject>],
+    ids: &[Option<FilletSolverId>],
+    side: &[[Option<FaceId>; 2]; 2],
+    between: &mut [Vec<EdgeuseId>; 2],
+) -> Result<[Option<FaceId>; 2]> {
+    let mut out = [None, None];
+    if ids.len() != 2 {
+        return Ok(out);
+    }
+    for ((slot, own), between) in out.iter_mut().zip(side).zip(between.iter_mut()) {
+        let [only] = between.as_slice() else {
+            continue;
+        };
+        let edge = eu1::edge(target, *only)?
+            .ok_or_else(|| invalid("edge use between the blends without edge"))?;
+        let bounds = crate::topology::edge::faces(target, edge, None)?;
+        for bb in 0..2 {
+            let (Some(&Some(face)), Some(&other), Some(&id)) =
+                (own.get(bb), own.get(1 - bb), ids.get(bb))
+            else {
+                continue;
+            };
+            let solver = live(solvers, id)?;
+            if solver.rolled_faces.iter().all(Option::is_none) {
+                continue;
+            }
+            let rail = solver.find_index_of_rail_on_face(target, Some(face))?;
+            let Some(onto) = solver.rolled_faces.get(rail).copied().flatten() else {
+                continue;
+            };
+            if other == Some(onto) && bounds.contains(&face) && bounds.contains(&onto) {
+                *slot = Some(onto);
+                break;
+            }
+        }
+        if slot.is_some() {
+            between.clear();
+        }
+    }
+    Ok(out)
+}
+
 impl FilletCorner {
     /// `SmBlendCorner::MakeJoinTopology`: the blends end on one shared section, one
     /// `SM_FE_CROSS_SECTION` corner edge with the first blend on its primary edge use and
@@ -336,7 +394,8 @@ impl FilletCorner {
                 "the corner has other than one or two blended edge uses",
             ));
         }
-        let (side, between) = join_sides(target, &solver_eus, &all_eus)?;
+        let (side, mut between) = join_sides(target, &solver_eus, &all_eus)?;
+        let rolled = rolled_sides(target, solvers, &solver_eu_solvers, &side, &mut between)?;
         // the section's ends: on a side with an edge between the blends (where they change
         // face, or cross a face's seam) where the rails cross it, else (the first side)
         // through the vertex
@@ -386,6 +445,8 @@ impl FilletCorner {
                     .and_then(|f| f.first())
                     .copied()
                     .ok_or_else(|| SolidError::blend_failed(OP, "the side has no face"))?;
+                // (solidcore-native) the face both blends roll on there, beyond a rolled-over edge
+                let face = rolled.get(s).copied().flatten().or(face);
                 let v = pseudo.fillet_vertex_mut(fv)?;
                 v.set_point_class(PointClassType::Face, face.map(EntityRef::Face));
                 v.set_fillet_vertex_type(if ee == 0 {

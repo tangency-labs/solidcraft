@@ -898,6 +898,15 @@ fn modulo(a: Value, b: Value, d: Defaults) -> Result<Value, DocError> {
     if y == 0.0 {
         return Err(DocError::Expr("modulo by zero".into()));
     }
+    // Unit conversion leaves the quotient an ulp or two off a whole number (`3 in % 1 in` divides
+    // 76.2 mm by 25.4 mm), and the exact remainder is then almost a whole divisor instead of 0. A
+    // quotient that close to a whole number is that number, so the remainder is 0. Past 1e12 the
+    // quotient has no fraction left to judge, so the exact remainder stands.
+    let q = x / y;
+    let nearest = q.round();
+    if nearest != 0.0 && nearest.abs() < 1e12 && (q - nearest).abs() <= 4.0 * f64::EPSILON * nearest.abs() {
+        return Ok(Value { v: 0.0, len, ang });
+    }
     Ok(Value { v: x.rem_euclid(y), len, ang })
 }
 
@@ -1748,5 +1757,38 @@ mod tests {
         assert_eq!(reported_value(Value::length(50.8)), 50.8);
         assert_eq!(round_reported(reported_value(Value::angle(30f64.to_radians()))), 30.0);
         assert_eq!(reported_value(Value::num(4.0)), 4.0);
+    }
+
+    /// `mod` of a value by a whole-number fraction of itself is 0 even when unit conversion leaves
+    /// the quotient an ulp or two off: `3 in % 1 in` is 25.39999999999999 mm without that.
+    #[test]
+    fn mod_ignores_float_noise_in_the_quotient() {
+        let look = |_: &str| Err(DocError::Expr("no parameters".into()));
+        let rem = |e: &str| eval_with(e, &look).unwrap().v;
+        for e in [
+            "3 in % 1 in",
+            "mod(3 in, 0.5 in)",
+            "mod(-3 in, 1 in)",
+            "mod(76.2 mm, 1 in)",
+            "mod(0.3, 0.1)",
+            "mod(1, 0.1)",
+            "mod(7 mm, 0.7 mm)",
+            "mod(0.9 rad, 0.3 rad)",
+            "mod(3 in, -1 in)",
+        ] {
+            assert_eq!(rem(e), 0.0, "{e}");
+        }
+        // A real remainder is untouched, including a tiny one and one against a huge quotient.
+        for (e, want) in [
+            ("mod(7, 3)", 1.0),
+            ("mod(-1, 3)", 2.0),
+            ("mod(5, -3)", 2.0),
+            ("mod(3.0000001, 1)", 3.0000001 % 1.0),
+            ("mod(1e20, 3)", 1e20_f64.rem_euclid(3.0)),
+            ("mod(2.5 in, 1 in)", 12.7),
+            ("mod(1e-9, 3)", 1e-9),
+        ] {
+            assert!((rem(e) - want).abs() < 1e-9 * want.abs().max(1.0), "{e} gave {}", rem(e));
+        }
     }
 }
