@@ -177,8 +177,8 @@ impl Document {
                 found.take(e, Reads::Typed(k));
             }
         }
-        for c in &mut next.canvases {
-            c.plane.walk_exprs_mut(&mut |(_, e, kind, _)| found.take_expr(e, Reads::Typed(kind)));
+        for plane in next.canvases.iter_mut().map(|c| &mut c.plane).chain(next.assembly.mirrors.iter_mut().map(|m| &mut m.plane)) {
+            plane.walk_exprs_mut(&mut |(_, e, kind, _)| found.take_expr(e, Reads::Typed(kind)));
         }
         if let Some(problem) = found.problem {
             return Err(DocError::Invalid(problem));

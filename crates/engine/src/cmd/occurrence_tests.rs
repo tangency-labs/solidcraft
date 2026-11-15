@@ -1964,6 +1964,225 @@ fn join_extrude_to_a_body_of_another_component_leaves_that_body_alone() {
     assert!((volume("Connector") - (pi * 36.0 * 10.0 + pi * 16.0 * 10.0)).abs() < 1.0, "the connector took the boss: {}", volume("Connector"));
 }
 
+/// Mirror Components (#8400): a plate 40 × 20 × 5 (symmetric about its own mid-planes) and an L
+/// bracket with a gusset at one end (symmetric about none), placed off centre.
+fn mirror_parts() -> (Session, u64, u64) {
+    let mut s = Session::default();
+    let (_, plate) = created(&mut s, "Plate");
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 5}));
+    run(&mut s, "occurrence.move", json!({"occurrence": plate, "translate": [30, 10, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let (_, bracket) = created(&mut s, "Bracket");
+    run(&mut s, "parameters.add", json!({"name": "reach", "expression": "40 mm"}));
+    run(&mut s, "solid.box", json!({"length": "reach", "width": 30, "height": 5}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 30, "height": 35, "operation": "join"}));
+    run(&mut s, "solid.box", json!({"length": 15, "width": 5, "height": 15, "corner": [5, 0, 5], "operation": "join"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": bracket, "translate": [30, -60, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    (s, plate, bracket)
+}
+
+fn placed(s: &mut Session, occurrence: u64) -> (Value, Value) {
+    let r = run(s, "occurrence.properties", json!({"occurrence": occurrence}));
+    (r["total"]["bbox"].clone(), r["total"]["center_of_mass"].clone())
+}
+
+#[test]
+fn a_symmetric_part_is_mirrored_as_another_placement_of_itself() {
+    let (mut s, plate, _) = mirror_parts();
+    let r = run(&mut s, "component.mirror", json!({"components": ["Plate"], "plane": "YZ"}));
+    let m = &r["mirrored"][0];
+    assert_eq!(m["as"], "instance");
+    assert_eq!(m["source"], plate);
+    assert_eq!(m["symmetry"], "X");
+    assert_eq!(m["follows"], true);
+    let mirror = m["occurrence"].as_u64().unwrap();
+    let o = s.doc.occurrences.iter().find(|o| o.id == mirror).unwrap();
+    assert_eq!(o.component, s.doc.occurrences.iter().find(|o| o.id == plate).unwrap().component);
+    assert!(solidcraft_doc::valid_transfer_matrix(&o.transform), "a placement stays rigid: {:?}", o.transform);
+    // The plate spans x 30…70: its mirror image across YZ spans x −70…−30.
+    let (bbox, com) = placed(&mut s, mirror);
+    near(&bbox["min"][0], -70.0);
+    near(&bbox["max"][0], -30.0);
+    near(&bbox["min"][1], 10.0);
+    near(&bbox["max"][1], 30.0);
+    near(&com[0], -50.0);
+    // It follows the plate when the plate moves, and when it turns.
+    run(&mut s, "occurrence.move", json!({"occurrence": plate, "translate": [10, 5, 0]}));
+    let (bbox, _) = placed(&mut s, mirror);
+    near(&bbox["min"][0], -80.0);
+    near(&bbox["max"][0], -40.0);
+    near(&bbox["min"][1], 15.0);
+    run(&mut s, "occurrence.move", json!({"occurrence": plate, "axis": [0, 0, 1], "angle": "90 deg", "origin": [40, 15, 0], "space": "world"}));
+    let (source_box, source_com) = placed(&mut s, plate);
+    let (bbox, com) = placed(&mut s, mirror);
+    near(&bbox["min"][0], -source_box["max"][0].as_f64().unwrap());
+    near(&bbox["max"][0], -source_box["min"][0].as_f64().unwrap());
+    near(&com[1], source_com[1].as_f64().unwrap());
+    // It is placed by its source only, and a deleted source leaves it where it is, free.
+    let refused = s.execute("occurrence.move", &json!({"occurrence": mirror, "translate": [1, 0, 0]})).unwrap_err().to_string();
+    assert!(refused.contains("mirror image of Plate:1"), "{refused}");
+    run(&mut s, "selection.delete", json!({"occurrences": [plate]}));
+    assert!(s.doc.assembly.mirrors.is_empty());
+    run(&mut s, "occurrence.move", json!({"occurrence": mirror, "translate": [1, 0, 0]}));
+}
+
+#[test]
+fn a_part_that_is_not_symmetric_is_refused_as_an_instance_and_mirrored_as_an_opposite_hand() {
+    let (mut s, _, bracket) = mirror_parts();
+    let doc = s.doc.clone();
+    let refused = s.execute("component.mirror", &json!({"components": ["Bracket:1"], "plane": "YZ"})).unwrap_err().to_string();
+    assert!(refused.contains("not symmetric") && refused.contains("opposite_hand"), "{refused}");
+    assert_eq!(s.doc, doc);
+    let (source_box, source_com) = placed(&mut s, bracket);
+    // The new part, through solid.mirror as through component.mirror.
+    let r =
+        run(&mut s, "solid.mirror", json!({"components": ["Bracket"], "plane": {"origin": [0, 0, 0], "normal": [1, 0, 0]}, "as": "opposite_hand"}));
+    let m = &r["mirrored"][0];
+    assert_eq!(m["as"], "opposite_hand");
+    assert_eq!(m["name"], "Bracket (mirror):1");
+    let (mirror, part) = (m["occurrence"].as_u64().unwrap(), m["component"].as_u64().unwrap());
+    assert!(s.doc.feature(m["feature"].as_u64().unwrap()).is_some_and(|f| f.component == part));
+    // Exactly the mirror image: the box and the centre of mass reflected across YZ.
+    let (bbox, com) = placed(&mut s, mirror);
+    near(&bbox["min"][0], -source_box["max"][0].as_f64().unwrap());
+    near(&bbox["max"][0], -source_box["min"][0].as_f64().unwrap());
+    for k in 1..3 {
+        near(&bbox["min"][k], source_box["min"][k].as_f64().unwrap());
+        near(&com[k], source_com[k].as_f64().unwrap());
+    }
+    near(&com[0], -source_com[0].as_f64().unwrap());
+    // The source's features carry over; it follows the source when it moves.
+    run(&mut s, "parameters.change", json!({"name": "reach", "expression": "60 mm"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": bracket, "translate": [0, 0, 10]}));
+    let (source_box, source_com) = placed(&mut s, bracket);
+    let (bbox, com) = placed(&mut s, mirror);
+    near(&bbox["min"][0], -source_box["max"][0].as_f64().unwrap());
+    near(&bbox["min"][2], 10.0);
+    near(&com[0], -source_com[0].as_f64().unwrap());
+    // Placed once, it no longer follows.
+    let once = run(&mut s, "component.mirror", json!({"components": ["Bracket:1"], "plane": "XZ", "as": "opposite_hand", "follow": false}));
+    assert_eq!(once["mirrored"][0]["follows"], false);
+    assert_eq!(once["mirrored"][0]["name"], "Bracket (mirror 2):1");
+    assert_eq!(s.doc.assembly.mirrors.len(), 1);
+}
+
+#[test]
+fn mirrored_occurrences_survive_saving_and_hostile_mirrors_are_ignored() {
+    let (mut s, plate, _) = mirror_parts();
+    run(&mut s, "component.mirror", json!({"components": [plate.to_string()], "plane": {"origin": [-5, 0, 0], "normal": [1, 0, 0]}}));
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.assembly.mirrors, s.doc.assembly.mirrors);
+    // A forced mirror of a part that is not symmetric places it anyway, about its own X.
+    let forced = run(&mut s, "component.mirror", json!({"components": ["Bracket"], "plane": "YZ", "symmetry": "x"}));
+    assert_eq!(forced["mirrored"][0]["symmetry"], "X");
+    for bad in [
+        json!({"components": [], "plane": "YZ"}),
+        json!({"components": ["root"], "plane": "YZ"}),
+        json!({"components": ["Nothing"], "plane": "YZ"}),
+        json!({"components": ["Plate"], "plane": "Nowhere"}),
+        json!({"components": ["Plate"], "plane": "YZ", "as": "sideways"}),
+        json!({"components": ["Plate"], "plane": "YZ", "symmetry": "W"}),
+        json!({"components": ["Plate"], "plane": {"origin": [0, 0, 0], "normal": [0, 0, 0]}}),
+    ] {
+        assert!(s.execute("component.mirror", &bad).is_err(), "{bad}");
+    }
+    // A design whose mirror points at nothing, or holds no reflection, opens and evaluates.
+    let mut doc = (*s.doc).clone();
+    doc.assembly.mirrors[0].local = solidcraft_doc::IDENTITY;
+    doc.assembly.mirrors.push(solidcraft_doc::occurrence_mirror::OccurrenceMirror {
+        occurrence: u64::MAX,
+        source: 0,
+        ..doc.assembly.mirrors[0].clone()
+    });
+    s.doc = std::sync::Arc::new(doc);
+    s.refresh();
+    assert_eq!(s.doc.assembly.mirrors.len(), 2);
+}
+
+/// A mirror plane placed by a parameter is one of the parameter's users: renaming the parameter
+/// renames it there, and the mirror keeps following the plane.
+#[test]
+fn a_mirror_plane_follows_a_renamed_parameter() {
+    let (mut s, _, _) = mirror_parts();
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+    let r = run(&mut s, "component.mirror", json!({"components": ["Plate"], "plane": {"origin": ["gap", 0, 0], "normal": [1, 0, 0]}}));
+    let mirror = r["mirrored"][0]["occurrence"].as_u64().unwrap();
+    let users = run(&mut s, "parameters.users", json!({"name": "gap"}));
+    assert_eq!(users["users"][0]["type"], "mirror", "{users}");
+    assert_eq!(users["users"][0]["occurrence"], mirror, "{users}");
+    assert!(s.execute("parameters.delete", &json!({"name": "gap"})).is_err(), "a parameter a mirror plane uses can't be deleted");
+    run(&mut s, "parameters.rename", json!({"name": "gap", "new_name": "offset"}));
+    run(&mut s, "parameters.change", json!({"name": "offset", "expression": "10 mm"}));
+    // The plate spans x 30…70: across x = 10 its image spans x −50…−10.
+    let (bbox, _) = placed(&mut s, mirror);
+    near(&bbox["min"][0], -50.0);
+    near(&bbox["max"][0], -10.0);
+}
+
+/// A mirror of a mirrored occurrence is placed from where its source is now, in the same refresh.
+#[test]
+fn a_mirror_of_a_mirror_follows_in_one_step() {
+    let (mut s, plate, _) = mirror_parts();
+    let r = run(&mut s, "component.mirror", json!({"components": ["Plate"], "plane": "YZ"}));
+    let first = r["mirrored"][0]["occurrence"].as_u64().unwrap();
+    let r = run(&mut s, "component.mirror", json!({"components": [first.to_string()], "plane": "XZ"}));
+    let second = r["mirrored"][0]["occurrence"].as_u64().unwrap();
+    // The plate spans x 30…70, y 10…30; the second image is it turned half about z: x −70…−30, y −30…−10.
+    run(&mut s, "occurrence.move", json!({"occurrence": plate, "translate": [10, 5, 0]}));
+    let (bbox, _) = placed(&mut s, second);
+    near(&bbox["min"][0], -80.0);
+    near(&bbox["max"][0], -40.0);
+    near(&bbox["min"][1], -35.0);
+    near(&bbox["max"][1], -15.0);
+}
+
+/// An occurrence a mirror places moves with its source only: aligning it, reaching with it and
+/// joining it are refused, as moving and dragging it are.
+#[test]
+fn a_mirrored_occurrence_is_not_aligned_reached_or_joined() {
+    let (mut s, _, bracket) = mirror_parts();
+    let r = run(&mut s, "component.mirror", json!({"components": ["Plate"], "plane": "YZ"}));
+    let mirror = r["mirrored"][0]["occurrence"].as_u64().unwrap();
+    let doc = s.doc.clone();
+    let at = |o: u64| json!({"occurrence": o, "point": [0, 0, 0], "z": [0, 0, 1]});
+    for (cmd, p) in [
+        ("occurrence.align", json!({"paths": [[mirror]], "from": [0, 0, 0], "to": [5, 0, 0]})),
+        ("joint.reach", json!({"occurrence": mirror, "point": [5, 0, 0]})),
+        ("joint.create", json!({"type": "rigid", "a": at(bracket), "b": at(mirror)})),
+        ("joint.create", json!({"type": "rigid", "a": at(mirror), "b": at(bracket)})),
+    ] {
+        let refused = s.execute(cmd, &p).unwrap_err().to_string();
+        assert!(refused.contains("mirror image of Plate:1"), "{cmd}: {refused}");
+        assert_eq!(s.doc, doc, "{cmd} changed the design");
+    }
+}
+
+/// A mirrored occurrence moved into a parent placed twice, through the parent's second
+/// placement: the mirror places it again by the parent's first placement as the design
+/// refreshes. The command reports that final placement, not the one worked out from the second,
+/// and the occurrence is still the mirror image of its source.
+#[test]
+fn a_mirrored_occurrence_moved_into_a_second_placement_reports_where_its_mirror_puts_it() {
+    let (mut s, _, _) = mirror_parts();
+    let r = run(&mut s, "component.mirror", json!({"components": ["Plate"], "plane": "YZ"}));
+    let mirror = r["mirrored"][0]["occurrence"].as_u64().unwrap();
+    let c = run(&mut s, "component.create", json!({"name": "Holder", "activate": false}));
+    let (holder, first) = (c["component"].as_u64().unwrap(), c["occurrence"].as_u64().unwrap());
+    let second = run(&mut s, "occurrence.copy", json!({"component": holder, "translate": [0, 100, 0]}))["occurrence"].as_u64().unwrap();
+    let out = run(&mut s, "occurrence.reparent", json!({"occurrence": mirror, "parent": holder, "parent_path": [second]}));
+    let o = s.doc.occurrences.iter().find(|o| o.id == mirror).unwrap();
+    assert_eq!(o.parent, holder);
+    assert_eq!(out["transform"], json!(o.transform), "the reported placement is the final one");
+    // The plate spans x 30…70, y 10…30: through the first placement its image spans x −70…−30.
+    let r = run(&mut s, "occurrence.properties", json!({"occurrence": mirror, "path": [first, mirror]}));
+    let bbox = &r["total"]["bbox"];
+    near(&bbox["min"][0], -70.0);
+    near(&bbox["max"][0], -30.0);
+    near(&bbox["min"][1], 10.0);
+    near(&bbox["max"][1], 30.0);
+}
+
 /// A pattern of bodies made in a component copies them about its own component's axis, so
 /// moving that component's occurrence moves the copies of a body that lives elsewhere. The model
 /// kept between edits must show them where a fresh evaluation does: a root block patterned four

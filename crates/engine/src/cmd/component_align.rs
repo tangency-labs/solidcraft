@@ -151,6 +151,7 @@ pub(super) fn align(s: &mut Session, p: &Value) -> Result<Value> {
         let Some(&id) = path.last() else {
             return Err(bad(cmd, "occurrence path is empty"));
         };
+        super::mirror::placed_by_mirror(s, id, cmd)?;
         let o = s.doc.occurrences.iter().find(|o| o.id == id).ok_or_else(|| bad(cmd, "no occurrence"))?;
         if o.grounded && !move_grounded {
             return Err(bad(
