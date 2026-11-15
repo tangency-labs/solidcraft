@@ -49,8 +49,14 @@ Tapped holes create the physical pilot bore and the thread, listed (cosmetic) or
 with `modeled`, cut into the wall as the Thread command cuts a modelled thread:
 the entry is where it starts, and towards the bottom it stops square at the
 thread depth, clear of a blind hole's bottom, or fades out (`ease_out`, ISO 3508).
-A Unified thread is cut with the ISO 68-1 basic profile both share. External R,
-thread classes and sealing behaviour are outside this catalogue.
+A Unified thread is cut with the ISO 68-1 basic profile both share. External R
+and sealing behaviour are outside this catalogue.
+
+A tapped hole can save its thread's tolerance class (`thread_class`) for drawings.
+It changes neither the drill nor the thread. ISO metric takes ISO 965-1's internal
+classes: a grade 4 to 8 and G or H (`6H`), or a pitch diameter class then a minor
+diameter class (`5H6H`). UNC and UNF take ASME B1.1's `1B`, `2B` or `3B`. G, Rp,
+Rc and NPT take none: their internal threads have no class.
 
 ## Taper Rc and NPT threads
 

@@ -72,6 +72,17 @@ pub fn apart(a: &Body, b: &Body) -> Result<bool> {
     if a.is_mesh() || b.is_mesh() {
         return Ok(false);
     }
+    // Every vertex lies in the body's exact box, so where the boxes of the two bodies' vertices,
+    // grown alike, meet, their exact boxes meet too, and nothing need be measured.
+    let vertices = |x: &Body| {
+        let b: solidcraft_geom::Aabb3 = x.record().vertices.iter().map(|v| crate::body::v3(v.point)).collect();
+        (!b.is_empty()).then(|| b.inflated(2.0 * x.record().tolerance))
+    };
+    if let (Some(va), Some(vb)) = (vertices(a), vertices(b))
+        && va.meets(&vb)
+    {
+        return Ok(false);
+    }
     let grown = |x: &Body| x.exact_bounds().map(|bb| bb.inflated(2.0 * x.record().tolerance));
     Ok(!grown(a)?.meets(&grown(b)?))
 }

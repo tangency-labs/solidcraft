@@ -5034,7 +5034,7 @@ fn explicit_side_extent_means_requested_height_and_survives_sole_stack_and_colla
         env.content.push(SideContentMeasure { request, needed_height: 180.0, policy: SideHeightPolicy::Content });
     }
     let sole = allocate_layout(service.layout(), service.registry(), &env).unwrap();
-    assert_eq!(sole.sections[0].outer.size.height, 180.0, "sole Content uses captured needed height despite the stored stack request");
+    assert_eq!(sole.sections[0].outer.size.height, 400.0, "a sole panel respects its explicit height");
     assert_eq!(service.layout().sections[0].preferred_extent, Some(400.0));
     service
         .dispatch(transaction(vec![Mutation::Open { kind: PanelKind::new("fixture.log").unwrap(), instance: id("two"), destination: None }]))

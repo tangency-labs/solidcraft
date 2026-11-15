@@ -1273,6 +1273,19 @@ impl Session {
         w
     }
 
+    /// `sketches`, built for this design's model (failed sketches shown with their last geometry,
+    /// [`solidcraft_doc::Model::failed_sketch_shown`]), placed where [`Session::world_state`]
+    /// places sketches. Display only: no state a command reads has them.
+    pub fn sketches_placed(&self, sketches: Vec<Arc<solidcraft_doc::SolvedSketch>>) -> Result<Vec<Arc<solidcraft_doc::SolvedSketch>>> {
+        if sketches.is_empty() || self.doc.occurrences.is_empty() {
+            return Ok(sketches);
+        }
+        let mut only = solidcraft_doc::ModelState::default();
+        only.sketches = sketches;
+        let placed = solidcraft_doc::world_state_reusing(&self.placed_document(), &only, &mut Default::default())?;
+        Ok(self.authored_sketches(placed)?.sketches)
+    }
+
     /// `w` with the active component's sketches shown at the placement being authored.
     fn authored_sketches(&self, mut w: solidcraft_doc::ModelState) -> Result<solidcraft_doc::ModelState> {
         // Sketch definitions are displayed once, at the placement currently being authored.

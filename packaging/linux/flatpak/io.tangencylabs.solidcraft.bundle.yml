@@ -22,6 +22,10 @@ finish-args:
   - --socket=fallback-x11
   # X11 shared memory (MIT-SHM). Without it the X11 fallback is slow or fails.
   - --share=ipc
+  # Hosted AI providers and agent adapters need network access.
+  - --share=network
+  # Save API keys in the desktop's Secret Service (for example GNOME Keyring or KWallet).
+  - --talk-name=org.freedesktop.secrets
   # GPU access for the wgpu viewport (Vulkan, or GL as a fallback).
   - --device=dri
   # Open/Save dialogs go through the file-chooser portal (rfd's xdg-portal backend), so picked
@@ -33,9 +37,7 @@ finish-args:
   # one instead of replacing it through `flatpak update`.
   - --filesystem=~/.var/app/ai.storyteller.solidcraft:ro
   - --filesystem=~/.var/app/ai.storyteller.solvecraft:ro
-  # Deliberately not granted: network (the optional --control server listens on 127.0.0.1 in
-  # the sandbox; `flatpak override --user --share=network io.tangencylabs.solidcraft` exposes it to
-  # host agents) and home/host filesystem access.
+  # Deliberately not granted: broad home/host filesystem access.
 modules:
   - name: solidcraft
     buildsystem: simple

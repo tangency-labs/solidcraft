@@ -8,9 +8,10 @@ use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::schema::view_navigation::{
     AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, DisplayToggleParams, DisplayToggleResult, GraphicsPreset, GraphicsPresetParams,
     GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams, LayoutResult, NavigateParams,
-    NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool, NavigatorParams, NormalToParams, PresetQuality, RenderBrowser,
-    RenderFocus, RenderLive, RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams, TabStep, TabStepParams, ToolParams, ToolResult,
-    VisualStyle, VisualStyleParams, VisualStyleResult, ZoomTool,
+    NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool, NavigatorParams, NormalToParams, PerspectiveParams, PerspectiveResult,
+    PresetQuality, RenderBrowser, RenderFocus, RenderLive, RenderPanelVisibilityParams, RenderPanelVisibilityResult, RenderSelect, RibbonTabsOnly,
+    RibbonTabsOnlyParams, StandardViewParams, TabStep, TabStepParams, ToolParams, ToolResult, VisualStyle, VisualStyleParams, VisualStyleResult,
+    ZoomTool,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
@@ -21,6 +22,7 @@ const NAVIGATION_BAR_CONTRACT: TypedContract<NavigationBarParams> = TypedContrac
 const FOCUS_CONTRACT: TypedContract<RenderFocus> = TypedContract::new();
 const NAVIGATOR_CONTRACT: TypedContract<NavigatorParams> = TypedContract::new();
 const RENDER_LIVE_CONTRACT: TypedContract<RenderLive> = TypedContract::new();
+const RENDER_PANEL_VISIBILITY_CONTRACT: TypedContract<RenderPanelVisibilityParams> = TypedContract::new();
 const BROWSER_CONTRACT: TypedContract<RenderBrowserRequest> = TypedContract::new();
 const TAB_STEP_CONTRACT: TypedContract<TabStepParams> = TypedContract::new();
 const STANDARD_VIEW_CONTRACT: TypedContract<StandardViewParams> = TypedContract::new();
@@ -30,6 +32,7 @@ const LAYOUT_CONTRACT: TypedContract<LayoutParams> = TypedContract::new();
 const HISTORY_LAYOUT_CONTRACT: TypedContract<HistoryLayoutParams> = TypedContract::new();
 const GRAPHICS_PRESET_CONTRACT: TypedContract<GraphicsPresetParams> = TypedContract::new();
 const AMBIENT_OCCLUSION_CONTRACT: TypedContract<AmbientOcclusionParams> = TypedContract::new();
+const PERSPECTIVE_CONTRACT: TypedContract<PerspectiveParams> = TypedContract::new();
 const NAVIGATE_CONTRACT: TypedContract<NavigateParams> = TypedContract::new();
 const TOOL_CONTRACT: TypedContract<ToolParams> = TypedContract::new();
 const VISUAL_STYLE_CONTRACT: TypedContract<VisualStyleParams> = TypedContract::new();
@@ -118,8 +121,8 @@ CommandSpec::new("view.render_browser", "Render Browser", crate::checked!("view.
     .icon("list").noundo().doc_only()
     .contract(&BROWSER_CONTRACT).output(output_schema_for::<RenderBrowserRequest>)
     .params("open: bool; or by_look?: bool; search?: bool; query?: string (up to 1024 bytes) → validated transient Browser controls; never edits the design or opens a dialog"),
-CommandSpec::new("view.render_inspector", "Render Inspector", render_inspector)
-    .icon("inspect").noundo().doc_only()
+CommandSpec::new("view.render_inspector", "Render Inspector", crate::checked!("view.render_inspector", render_inspector))
+    .icon("inspect").noundo().doc_only().contract(&RENDER_PANEL_VISIBILITY_CONTRACT).output(output_schema_for::<RenderPanelVisibilityResult>)
     .params("visible: bool → {visible}; per-document Inspector visibility; never edits the design or opens a dialog"),
 CommandSpec::new("view.render_live", "Pause or Resume Live Render", crate::checked!("view.render_live", render_live))
     .icon("render_image").noundo().doc_only()
@@ -132,8 +135,8 @@ CommandSpec::new("view.render_select", "Render selection", crate::checked!("view
 CommandSpec::new("view.render_stage", "Render Stage", render_stage)
     .icon("render_scene").noundo().doc_only()
     .params("stage: look|light|frame|output → {stage}; per-document UI state, never edits or evaluates the design; headless validation only"),
-CommandSpec::new("view.shots_strip", "Shots Strip", shots_strip)
-    .icon("camera").noundo().doc_only()
+CommandSpec::new("view.shots_strip", "Shots Strip", crate::checked!("view.shots_strip", shots_strip))
+    .icon("camera").noundo().doc_only().contract(&RENDER_PANEL_VISIBILITY_CONTRACT).output(output_schema_for::<RenderPanelVisibilityResult>)
     .params("visible: bool → {visible}; Render Shots strip UI preference. Headless echo only, no document edits or undo"),
 CommandSpec::new("view.render_dock", "Move Render Dock", crate::checked!("view.render_dock", render_dock))
     .at("RENDER", "SCENE").icon("settings").noundo().doc_only()
@@ -150,8 +153,8 @@ CommandSpec::new("view.ambient_occlusion", "Ambient Occlusion", crate::checked!(
     .icon("settings").noundo().doc_only().contract(&AMBIENT_OCCLUSION_CONTRACT).output(output_schema_for::<AmbientOcclusionResult>).params("enabled: bool → enabled; apply soft contact shading in the GPU viewport"),
 CommandSpec::new("view.origin_axes_across_view", "Origin Axes Across the Whole View", crate::checked!("view.origin_axes_across_view", origin_axes_across_view))
     .icon("origin").noundo().doc_only().contract(&ORIGIN_AXES_ACROSS_VIEW_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::OriginAxesAcrossViewResult>).params("enabled: bool → enabled; extend the origin axes across the view, or keep the short axes when false; display only, never opens a dialog"),
-CommandSpec::new("view.perspective", "Perspective view", perspective)
-    .icon("perspective").noundo().doc_only().params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
+CommandSpec::new("view.perspective", "Perspective view", crate::checked!("view.perspective", perspective))
+    .icon("perspective").noundo().doc_only().contract(&PERSPECTIVE_CONTRACT).output(output_schema_for::<PerspectiveResult>).params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
 CommandSpec::new("view.angle_readout", "View Angles", crate::checked!("view.angle_readout", angle_readout))
     .icon("camera").noundo().doc_only().contract(&ANGLE_READOUT_CONTRACT).output(crate::schema::output_schema_for::<crate::schema::view_navigation::AngleReadoutResult>).params("enabled: bool → enabled; show the view's pitch, yaw and roll (degrees, as view.apply's camera in radians) and Ortho or Persp under the orientation gizmo; display only, never opens a dialog"),
 CommandSpec::new("view.navigate", "Navigate View", crate::checked!("view.navigate", navigate))
@@ -484,23 +487,13 @@ fn render_dock(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn render_inspector(_s: &mut Session, p: &Value) -> Result<Value> {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Request {
-        visible: bool,
-    }
-    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_inspector", e.to_string()))?;
-    Ok(json!({"visible":request.visible}))
+    let request: RenderPanelVisibilityParams = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_inspector", e.to_string()))?;
+    typed_reply("view.render_inspector", RenderPanelVisibilityResult { visible: request.visible, param_warnings: Vec::new() })
 }
 
 fn shots_strip(_s: &mut Session, p: &Value) -> Result<Value> {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Request {
-        visible: bool,
-    }
-    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("view.shots_strip", e.to_string()))?;
-    Ok(json!({"visible": request.visible}))
+    let request: RenderPanelVisibilityParams = serde_json::from_value(p.clone()).map_err(|e| bad("view.shots_strip", e.to_string()))?;
+    typed_reply("view.shots_strip", RenderPanelVisibilityResult { visible: request.visible, param_warnings: Vec::new() })
 }
 
 fn layout(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -1115,7 +1108,7 @@ fn ambient_occlusion(_s: &mut Session, p: &Value) -> Result<Value> {
 
 fn perspective(_s: &mut Session, p: &Value) -> Result<Value> {
     let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad("view.perspective", "enabled must be a boolean"))?;
-    Ok(json!({"enabled": enabled}))
+    typed_reply("view.perspective", PerspectiveResult { enabled, param_warnings: Vec::new() })
 }
 
 const ANGLE_READOUT_CONTRACT: crate::schema::TypedContract<crate::schema::view_navigation::AngleReadoutParams> = crate::schema::TypedContract::new();

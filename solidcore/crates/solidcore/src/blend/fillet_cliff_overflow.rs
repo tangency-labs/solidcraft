@@ -1899,8 +1899,7 @@ fn on_section_plane(p: Point3, at: Point3, normal: Vec3, tol: f64) -> bool {
     (p - at).dot(normal).abs() <= tol
 }
 
-/// Not the fork's (WR-674, `fixes.fillet_round_ends_at_tangent_continuation`,
-/// tangency-labs/solidcore#2176): close the sheet `region` of one round, cut off at both
+/// Not the fork's (WR-674, tangency-labs/solidcore#2176): close the sheet `region` of one round, cut off at both
 /// ends by its sections (`ends`, the two vertices of the filleted edge `fil_edge`), into the
 /// region the round removes. The sheet's boundary is a rail on each face of the filleted
 /// edge and a section at each end. Each face gets a closing face on its surface (continued:
@@ -2064,7 +2063,7 @@ pub fn close_section_ended_round(
 }
 
 /// The section's flat face of a round cut off at `end` (WR-674, [`close_section_ended_round`];
-/// with `fixes.fillet_section_end_trim_at_creases`, WR-706, the trim's): on the section's
+/// WR-706, the trim's): on the section's
 /// plane, bounded by the lamina edge `section` of `region` (the round's section) and the lines
 /// from its ends to the end's vertex (a line shorter than `on_tol` left out), added to
 /// `region`.
