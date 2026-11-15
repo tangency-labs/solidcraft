@@ -252,3 +252,64 @@ fn a_sketch_rows_tooltip_names_its_state() {
         assert!(!texts.iter().any(|t| t.contains(gone)), "{handle}: `{gone}` in {texts:?}");
     }
 }
+
+/// How the text holding `text` is painted this frame: its colour, whether it is cut short (an
+/// ellipsis in place of the rest) and its number of lines. `None` when nothing holds it.
+fn painted_as(h: &mut crate::scenario::Harness, text: &str) -> Option<(egui::Color32, bool, usize)> {
+    h.frame();
+    let mut found = None;
+    for clipped in &h.shapes {
+        each(&clipped.shape, &mut |s| {
+            if let Shape::Text(t) = s
+                && t.galley.text().contains(text)
+            {
+                let section = t.galley.job.sections.first().map(|s| s.format.color).filter(|c| *c != egui::Color32::PLACEHOLDER);
+                let colour = t.override_text_color.or(section).unwrap_or(t.fallback_color);
+                let cut = t.galley.rows.iter().any(|row| row.glyphs.iter().any(|g| g.chr == '…'));
+                found = Some((colour, cut, t.galley.rows.len()));
+            }
+        });
+    }
+    found
+}
+
+/// A failed feature's tooltip has its whole error, in the error colour, on lines that wrap,
+/// wherever its mark shows (#8834): the left History cut it off after the summary line, and the
+/// bottom History and the browser painted it like any other line, so it read like a warning.
+#[test]
+fn a_failed_features_tooltip_shows_its_whole_error_in_the_error_colour_wherever_its_mark_shows() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.session.run_script(&solidcraft_engine::sample::script()).unwrap();
+    h.app.run("parameters.change", json!({"name": "width", "expression": "5 mm"})).unwrap();
+    h.settle();
+    let fillet = h.app.session.doc.find_feature("Fillet1").unwrap().id;
+    let tip = crate::timeline::feature_tip(&h.app, fillet).unwrap();
+    let error = tip.error.clone().unwrap();
+    // Copy Error Message still copies it as plain text.
+    assert_eq!(crate::timeline::feature_message(&h.app, fillet).unwrap(), format!("{}\n{error}", tip.head));
+    let red = solidcraft_theme::Tokens::get().error;
+    let hover = |h: &mut crate::scenario::Harness, handle: &str| {
+        h.step(&json!({"move": {"handle": handle}})).unwrap();
+        h.frames(60);
+        painted_as(h, &error).unwrap_or_else(|| panic!("{handle}: `{error}` not painted"))
+    };
+    h.app.tree.expanded.insert("c0/features".into());
+    for (place, handle) in [("bottom History", "timeline:Fillet1"), ("browser row", "row:Fillet1")] {
+        let (colour, cut, _) = hover(&mut h, handle);
+        assert_eq!((colour, cut), (red, false), "{place}");
+    }
+    // Folded, the browser's folder says the same of the feature it holds.
+    h.app.tree.expanded.remove("c0/features");
+    h.frame();
+    let folder =
+        ["row:Features", "row:History"].into_iter().find(|handle| crate::scenario::handle_at(handle).is_some()).expect("the features folder row");
+    let (colour, cut, _) = hover(&mut h, folder);
+    assert_eq!((colour, cut), (red, false), "folded browser folder");
+    h.app.preferences.timeline_left = true;
+    for width in [56.0, 260.0] {
+        h.app.preferences.timeline_left_width = width;
+        let (colour, cut, _) = hover(&mut h, "timeline:Fillet1");
+        assert_eq!((colour, cut), (red, false), "left History {width} wide");
+    }
+}

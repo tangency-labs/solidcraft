@@ -3,10 +3,9 @@
 //! the high top's plane, or its high top moved down 10 onto the low top's plane
 //! (SolidCraft's replace face, rig case shell/cov-replace-face-step-onto-the-higher-face).
 //! The move closes the step's wall to nothing: its edges along the sides close to points.
-//! With `local_operation_step_walls` alone `CloseLoopGap` refuses those edges
-//! (`SM_ERR_OFFSET_EDGE_VANISHES`); with `local_operation_closes_walls_to_nothing` they
-//! are squeezed out, the wall is deleted, and the result is the plain 40 x 30 x 20 box
-//! (24000) or 40 x 30 x 10 box (12000).
+//! With `local_operation_step_walls` `CloseLoopGap` squeezes those edges out (before
+//! ccbf77a it refused them, `SM_ERR_OFFSET_EDGE_VANISHES`), the wall is deleted, and the
+//! result is the plain 40 x 30 x 20 box (24000) or 40 x 30 x 10 box (12000).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -19,8 +18,6 @@ mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, report, Notifications};
 use solidcore::boolean::api_brep::boolean_difference;
-use solidcore::error::offset::OffsetFailure;
-use solidcore::error::{ErrorKind, Reason, SM_ERR_OFFSET_EDGE_VANISHES};
 use solidcore::math::Point3;
 use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_primitives::create_box;
@@ -28,10 +25,9 @@ use solidcore::topology::brep::local_operation::local_operation;
 use solidcore::topology::FaceId;
 use solidcore::{Brep, Kernel};
 
-fn kernel(fixed: bool) -> Kernel {
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.local_operation_step_walls = true;
-    k.fixes.local_operation_closes_walls_to_nothing = fixed;
     k
 }
 
@@ -63,8 +59,8 @@ fn tops_at(k: &Kernel, b: &Brep, z: f64) -> Vec<FaceId> {
 /// offset (`CreateOffsetSurface`, as the fork's `smlib_offset_faces` moves a face), which
 /// keeps the face's parameterization; the local operation lifts the face's edges onto the
 /// new surface by their UV.
-fn move_top(fixed: bool, z: f64, to: f64) -> (Kernel, solidcore::Result<Brep>) {
-    let mut k = kernel(fixed);
+fn move_top(z: f64, to: f64) -> (Kernel, solidcore::Result<Brep>) {
+    let mut k = kernel();
     let mut b = stepped(&mut k);
     let tops = tops_at(&k, &b, z);
     assert_eq!(tops.len(), 1, "the top at z = {z}");
@@ -97,7 +93,7 @@ fn move_top(fixed: bool, z: f64, to: f64) -> (Kernel, solidcore::Result<Brep>) {
 
 #[test]
 fn wr_566_low_top_up_onto_the_high_top_closes_the_wall() {
-    let (k, result) = move_top(true, 10.0, 20.0);
+    let (k, result) = move_top(10.0, 20.0);
     assert!(report(
         &k,
         "wr_566 low top up 10",
@@ -109,7 +105,7 @@ fn wr_566_low_top_up_onto_the_high_top_closes_the_wall() {
 
 #[test]
 fn wr_566_high_top_down_onto_the_low_top_closes_the_wall() {
-    let (k, result) = move_top(true, 20.0, 10.0);
+    let (k, result) = move_top(20.0, 10.0);
     assert!(report(
         &k,
         "wr_566 high top down 10",
@@ -117,40 +113,4 @@ fn wr_566_high_top_down_onto_the_low_top_closes_the_wall() {
         Some(12000.0),
         1e-9
     ));
-}
-
-/// Without the opt-in the closed edges are `SM_ERR_OFFSET_EDGE_VANISHES`, as before.
-#[test]
-fn wr_566_without_the_opt_in_the_closed_wall_is_refused() {
-    for (z, to) in [(10.0, 20.0), (20.0, 10.0)] {
-        match move_top(false, z, to).1 {
-            Err(e) => {
-                assert_eq!(e.sm_status(), Some(SM_ERR_OFFSET_EDGE_VANISHES), "z = {z}");
-                assert!(e.is_offset_edge_vanishes(), "z = {z}");
-                // #2615: the refusal says which edge (or face) of the input it is about
-                assert_eq!(e.kind(), ErrorKind::OffsetEdgeVanishes, "z = {z}");
-                let Some(Reason::Offset(OffsetFailure::EdgeVanishes { edge, face })) =
-                    e.failure().map(|f| f.reason.clone())
-                else {
-                    panic!("z = {z}: {e:?}");
-                };
-                let which = match (edge, face) {
-                    (Some(edge), _) => format!("edge {}", edge.index()),
-                    (None, Some(face)) => format!("an edge of face {}", face.index()),
-                    (None, None) => panic!("z = {z}: names no entity: {e:?}"),
-                };
-                assert!(e.entity().is_some(), "z = {z}");
-                assert_eq!(
-                    e.to_string(),
-                    format!(
-                        "offset::offset_executive::step_gaps: the offset moves a vertex of {which} \
-                         to or past the edge's other end: the edge would vanish, a change of \
-                         topology the offset does not make"
-                    ),
-                    "z = {z}"
-                );
-            }
-            other => panic!("z = {z}: {other:?}"),
-        }
-    }
 }

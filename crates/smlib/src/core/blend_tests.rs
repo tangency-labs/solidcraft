@@ -559,7 +559,7 @@ fn a_knife_edge_chamfer_wider_than_the_part_keeps_nothing() {
     assert!((d - closed).abs() < 1e-9, "{d} vs {closed}");
 }
 
-/// A cliff overflow the fork refuses too (`fixes.fillet_cliff_overflow`, solidcore#960): the
+/// A cliff overflow the fork refuses too (solidcore#960): the
 /// three edges at a 20 mm cube's corner rounded r20, their fillet's boundary on two faces'
 /// surfaces, has no room, as on the fork, not "not supported": too large, the largest radius that
 /// builds 19.99 (the whole edge less solidcore's fit margin), which builds.
@@ -737,10 +737,7 @@ fn an_edge_tag_crosses_a_cliff_overflow() {
     }
     let p = Point3::new;
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
     let block = create_box(&mut k, Point3::ZERO, 40.0, 30.0, 10.0).unwrap();
     let notch = create_box(&mut k, p(35.0, -1.0, -1.0), 6.0, 6.0, 4.0).unwrap();
     let mut b = boolean_difference(&mut k, block, notch).unwrap();
@@ -776,10 +773,7 @@ fn pocket_chamfer_on_a_boolean_body() {
     use solidcore::{Kernel, Point3};
     let p = Point3::new;
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_mitre_concave_face_corners = true;
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.fillet_run_on_bspline_trims = true;
