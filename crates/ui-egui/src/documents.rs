@@ -3878,6 +3878,7 @@ mod tests {
     #[test]
     fn each_design_remembers_its_own_toolbar_tab() {
         let mut a = app();
+        a.preferences.remember_toolbar_tab = true;
         a.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
         a.ui.tab = "SURFACE".into();
         new_design_with_a_box(&mut a);
