@@ -70,6 +70,21 @@ An appearance sets colour and surface finish only. It has no effect on mass or s
 - **Elsewhere:** appearance, visual material, colour.
 - **For translators:** not the physical material.
 
+### attractor
+
+A point whose distance from each copy of a pattern sets how that copy is scaled, raised and turned.
+
+Each value goes from its near setting at the near distance to its far setting at the far distance;
+copies nearer or farther than those take the end values. A copy takes the distance to the nearest
+attractor.
+
+- **In SolidCraft:** `solid.pattern.face`'s `attract` (`points`, `near`, `far`, `scale_near`,
+  `scale_far`, `offset_near`, `offset_far`, `turn_near`, `turn_far`, `cutoff`, `falloff`); the
+  Advanced section of Pattern on Face.
+- **Don't use:** magnet, driver point, influence point.
+- **Elsewhere:** attractor point, attractor.
+- **For translators:** a point that draws an effect towards it, not a physical force or a magnet.
+
 ### bill of materials
 
 The list of the components placed in a design or in one component, with the quantity of each.

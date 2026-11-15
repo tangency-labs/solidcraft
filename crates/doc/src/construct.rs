@@ -300,7 +300,7 @@ fn construct<'a>(st: &'a ModelState, name: &str) -> Result<&'a ConstructGeom> {
 
 /// The face picked: (body, face index, point on it). A face picked with a name is the face the
 /// name finds, or the reference fails, asking for it to be picked again.
-fn face_of<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&'a ModelBody, usize, Vec3)> {
+pub(crate) fn face_of<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&'a ModelBody, usize, Vec3)> {
     // The named face itself: its nearest point to the old pick can lie on an edge it shares
     // (a corner round that a parameter moved away from the pick), where picking again by the
     // point finds the flat face beside it (#1255).

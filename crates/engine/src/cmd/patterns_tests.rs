@@ -2257,3 +2257,193 @@ fn a_body_pattern_of_a_split_surface_copies_its_split_faces() {
     assert_eq!(shown.len(), 3, "{shown:?}");
     assert!(shown.iter().all(|(_, faces, edges)| (*faces, *edges) == (2, 6)), "{shown:?}");
 }
+
+/// The copies a pattern feature made, with each one's bounding box (min, max).
+fn copies_of(s: &Session, feature: &Value) -> Vec<(String, solidcore_record::Vec3, solidcore_record::Vec3)> {
+    let id = feature["feature"].as_u64().unwrap();
+    s.model
+        .state()
+        .bodies
+        .iter()
+        .filter(|b| b.feature == id)
+        .map(|b| {
+            let bb = b.body.outline_bounds();
+            (b.name.clone(), bb.min, bb.max)
+        })
+        .collect()
+}
+
+fn centre(min: solidcore_record::Vec3, max: solidcore_record::Vec3) -> solidcore_record::Vec3 {
+    (min + max) * 0.5
+}
+
+/// A plate 100 × 60 × 10 mm and a pin of radius 2, 6 mm tall, standing on the origin.
+fn plate_and_pin(s: &mut Session) {
+    run(s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
+    run(s, "solid.cylinder", json!({"radius": 2, "height": 6, "body_name": "Pin"}));
+}
+
+/// Pattern on Face on a flat face: a copy at the centre of each cell of the grid across the face,
+/// standing on it; the source stays where it is.
+#[test]
+fn a_face_pattern_stands_a_copy_on_each_cell_of_a_flat_face() {
+    let mut s = Session::default();
+    plate_and_pin(&mut s);
+    let pin = volume(&mut s) - 60_000.0;
+    let r = run(&mut s, "solid.pattern.face", json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 4, "count2": 3}));
+    let copies = copies_of(&s, &r);
+    assert_eq!(copies.len(), 12, "{copies:?}");
+    for (name, min, max) in &copies {
+        assert!((min.z - 10.0).abs() < 1e-6 && (max.z - 16.0).abs() < 1e-6, "{name} stands on the top face: {min:?} {max:?}");
+    }
+    // Cell centres: the face's 100 mm side in 4 cells and its 60 mm side in 3, whichever of the
+    // face's parameters runs along which side.
+    let mut got: Vec<(i64, i64)> =
+        copies.iter().map(|(_, a, b)| centre(*a, *b)).map(|c| ((c.x * 10.0).round() as i64, (c.y * 10.0).round() as i64)).collect();
+    got.sort_unstable();
+    let grid = |nx: usize, ny: usize| {
+        let mut v: Vec<(i64, i64)> = (0..nx)
+            .flat_map(|i| {
+                (0..ny).map(move |j| (((i as f64 + 0.5) * 1000.0 / nx as f64).round() as i64, ((j as f64 + 0.5) * 600.0 / ny as f64).round() as i64))
+            })
+            .collect();
+        v.sort_unstable();
+        v
+    };
+    assert!(got == grid(4, 3) || got == grid(3, 4), "{got:?}");
+    assert!(rel(volume(&mut s), 60_000.0 + 13.0 * pin) < 1e-6, "the plate, the pin and 12 copies");
+}
+
+/// A margin keeps copies off the face's edges, and a staggered grid moves every other column.
+#[test]
+fn a_face_pattern_margin_and_stagger() {
+    let mut s = Session::default();
+    plate_and_pin(&mut s);
+    // Cells of 25 × 20 mm: their centres are 10 mm from the long edges, 12.5 from the short.
+    let r = run(&mut s, "solid.pattern.face", json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 4, "count2": 3, "margin": 11}));
+    let n = copies_of(&s, &r).len();
+    assert!(n < 12 && n > 0, "the copies within 11 mm of an edge go: {n}");
+    let r =
+        run(&mut s, "solid.pattern.face", json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 4, "count2": 3, "staggered": true}));
+    let copies = copies_of(&s, &r);
+    assert!(!copies.is_empty() && copies.len() <= 12, "{}", copies.len());
+    let mut ys: Vec<i64> = copies.iter().map(|(_, a, b)| (centre(*a, *b).y * 10.0).round() as i64).collect();
+    ys.sort_unstable();
+    ys.dedup();
+    let mut xs: Vec<i64> = copies.iter().map(|(_, a, b)| (centre(*a, *b).x * 10.0).round() as i64).collect();
+    xs.sort_unstable();
+    xs.dedup();
+    assert!(ys.len() > 3 || xs.len() > 4, "staggered columns sit between the plain ones: {xs:?} {ys:?}");
+}
+
+/// On a cylinder the copies stand out from its axis, all the way round.
+#[test]
+fn a_face_pattern_on_a_cylinder_stands_copies_out_from_its_axis() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 50, "body_name": "Post"}));
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 6, "center": [0, 0, 3], "body_name": "Stud"}));
+    let r = run(&mut s, "solid.pattern.face", json!({"bodies": ["Stud"], "face": {"face": [20, 0, 25]}, "count1": 8, "count2": 3}));
+    let copies = copies_of(&s, &r);
+    assert_eq!(copies.len(), 24);
+    for (name, min, max) in &copies {
+        let c = centre(*min, *max);
+        let radial = (c.x * c.x + c.y * c.y).sqrt();
+        assert!((radial - 23.0).abs() < 0.5, "{name} stands 6 mm out from the face: centre {radial:.3} from the axis");
+        assert!(c.z > 0.0 && c.z < 50.0);
+    }
+}
+
+/// With attractors (the advanced option) each copy's scale follows its distance to the nearest
+/// point: the near scale at the nearest copy, the far one at the farthest.
+#[test]
+fn face_pattern_attractors_scale_copies_by_distance() {
+    let mut s = Session::default();
+    plate_and_pin(&mut s);
+    let pin = volume(&mut s) - 60_000.0;
+    let r = run(
+        &mut s,
+        "solid.pattern.face",
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 5, "count2": 3,
+               "attract": {"points": [{"point": [0, 0, 10]}], "scale_near": 2, "scale_far": 0.5}}),
+    );
+    let copies = copies_of(&s, &r);
+    assert_eq!(copies.len(), 15);
+    // A pin scaled by k is k³ the volume; its height is 6 k.
+    let heights: Vec<f64> = copies.iter().map(|(_, a, b)| b.z - a.z).collect();
+    let (lo, hi) = heights.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), h| (a.min(*h), b.max(*h)));
+    assert!((hi - 12.0).abs() < 1e-6 && (lo - 3.0).abs() < 1e-6, "heights from 12 to 3 mm: {heights:?}");
+    let nearest = copies.iter().min_by(|a, b| centre(a.1, a.2).len().total_cmp(&centre(b.1, b.2).len())).unwrap();
+    assert!((nearest.2.z - nearest.1.z - 12.0).abs() < 1e-6, "the copy nearest the attractor is the biggest");
+    for (_, min, _) in &copies {
+        assert!((min.z - 10.0).abs() < 1e-6, "scaled copies still stand on the face");
+    }
+    let total: f64 = heights.iter().map(|h| pin * (h / 6.0).powi(3)).sum();
+    assert!(rel(volume(&mut s), 60_000.0 + pin + total) < 1e-6);
+    // A cutoff drops the far copies; an offset lifts the near ones.
+    let r = run(
+        &mut s,
+        "solid.pattern.face",
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 5, "count2": 3,
+               "attract": {"points": [{"point": [0, 0, 10]}], "cutoff": 50, "offset_near": 5, "offset_far": 0}}),
+    );
+    let copies = copies_of(&s, &r);
+    assert!(!copies.is_empty() && copies.len() < 15, "{}", copies.len());
+    assert!(copies.iter().any(|(_, min, _)| min.z > 12.0), "the nearest copies are lifted");
+}
+
+/// The face is found again on each evaluation: when the plate grows taller, the copies move up
+/// with its top face.
+#[test]
+fn a_face_pattern_follows_its_face_when_a_parameter_changes() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "t", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": "t", "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 6, "body_name": "Pin"}));
+    let r = run(&mut s, "solid.pattern.face", json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 3, "count2": 2}));
+    run(&mut s, "parameters.change", json!({"name": "t", "expression": "25 mm"}));
+    let copies = copies_of(&s, &r);
+    assert_eq!(copies.len(), 6);
+    assert!(copies.iter().all(|(_, min, _)| (min.z - 25.0).abs() < 1e-6), "{copies:?}");
+}
+
+/// Hostile inputs are refused with a message, and change nothing.
+#[test]
+fn a_face_pattern_refuses_bad_input() {
+    let mut s = Session::default();
+    plate_and_pin(&mut s);
+    for p in [
+        json!({"bodies": [], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2}),
+        json!({"bodies": ["Nope"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2}),
+        json!({"bodies": ["Pin"], "face": {"edge": [50, 0, 10]}, "count1": 2, "count2": 2}),
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 0, "count2": 2}),
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "margin": "5 deg"}),
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "attract": {"points": []}}),
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "attract": {"points": [{"point": [0, 0, 0]}], "falloff": "wavy"}}),
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "attract": {"points": [{"point": [0, 0, 0]}], "scale_near": -1}}),
+    ] {
+        let before = s.doc.features.len();
+        assert!(s.execute("solid.pattern.face", &p).is_err(), "{p}");
+        assert_eq!(s.doc.features.len(), before, "{p} added nothing");
+    }
+}
+
+/// On a torus (a face that is neither flat nor round in one direction) every copy stands out
+/// from the tube, at its exact surface.
+#[test]
+fn a_face_pattern_on_a_torus_stands_copies_on_its_surface() {
+    let mut s = Session::default();
+    run(&mut s, "solid.torus", json!({"major": 20, "minor": 5, "body_name": "Ring"}));
+    run(&mut s, "solid.sphere", json!({"radius": 1, "body_name": "Bead"}));
+    let r = run(&mut s, "solid.pattern.face", json!({"bodies": ["Bead"], "face": {"face": [25, 0, 0]}, "count1": 12, "count2": 6}));
+    let copies = copies_of(&s, &r);
+    assert_eq!(copies.len(), 72);
+    for (name, _, _) in &copies {
+        // A bead centred on the surface: its centre is 5 mm from the tube's centre circle. Its
+        // centre of mass, as a turned sphere's outline box is not tight.
+        let m = run(&mut s, "inspect.measure", json!({"bodies": [name]}));
+        let c = &m["bodies"][0]["center_of_mass"];
+        let c = solidcore_record::Vec3::new(c[0].as_f64().unwrap(), c[1].as_f64().unwrap(), c[2].as_f64().unwrap());
+        let ring = ((c.x * c.x + c.y * c.y).sqrt() - 20.0).hypot(c.z);
+        assert!((ring - 5.0).abs() < 1e-3, "{name} sits on the surface: {ring}");
+    }
+}

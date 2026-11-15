@@ -57,6 +57,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Align { .. } => Some("solid.align"),
         Kind::Remove => Some("solid.remove"),
         Kind::PathPattern { .. } => Some("solid.pattern.path"),
+        Kind::FacePattern(_) => Some("solid.pattern.face"),
         Kind::Combine { .. } => Some("solid.combine"),
         Kind::Rib { web, .. } => Some(if *web { "solid.web" } else { "solid.rib" }),
         Kind::Primitive { cmd, .. } => Some(cmd),
@@ -301,7 +302,7 @@ const MAX_PATTERN_INSTANCES: i64 = 1000;
 
 /// A solid pattern's quantity row, with step arrows from 1 to `MAX_PATTERN_INSTANCES`. The
 /// count goes to the command as typed, so it is evaluated as the document evaluates it.
-fn quantity_row(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label: &str, value: &mut String) -> bool {
+pub(crate) fn quantity_row(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label: &str, value: &mut String) -> bool {
     count_row_to(ui, doc, label, value, MAX_PATTERN_INSTANCES)
 }
 
@@ -1113,6 +1114,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
             choice_row(ui, "Operation", "bf_op", operation, &OP_LABELS);
             extra_options(ui, "boundary_options", &mut d.extra, &[("Remove Tools", "remove_tools")]);
+        }
+        Kind::FacePattern(_) => {
+            enter |= crate::dialogs_face_pattern::draw(app, d, ui);
         }
         Kind::PathPattern { count, spacing } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);

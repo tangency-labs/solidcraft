@@ -20,7 +20,7 @@ use crate::schema::features::{
     ExtrudeParams, FeatureNotice, FeatureResult, FilletParams, FilletResult, MirrorParams, MoveParams, MoveResult, NoticeAction, OffsetPlaneParams,
     PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, ShellParams, SphereParams, TorusParams,
 };
-use crate::schema::features::{PatternCircularParams, PatternPathParams, PatternRectangularParams, PatternResult};
+use crate::schema::features::{PatternCircularParams, PatternFaceParams, PatternPathParams, PatternRectangularParams, PatternResult};
 use crate::schema::split::{SplitBodyParams, SplitFaceParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -46,6 +46,7 @@ const SPLIT_BODY_CONTRACT: TypedContract<SplitBodyParams> = TypedContract::new()
 const PATTERN_CIRCULAR_CONTRACT: TypedContract<PatternCircularParams> = TypedContract::new();
 const PATTERN_RECTANGULAR_CONTRACT: TypedContract<PatternRectangularParams> = TypedContract::new();
 const PATTERN_PATH_CONTRACT: TypedContract<PatternPathParams> = TypedContract::new();
+const PATTERN_FACE_CONTRACT: TypedContract<PatternFaceParams> = TypedContract::new();
 const PRESS_PULL_CONTRACT: TypedContract<PressPullParams> = TypedContract::new();
 const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
 const DELETE_FACE_CONTRACT: TypedContract<DeleteFaceParams> = TypedContract::new();
@@ -140,6 +141,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PATTERN_CIRCULAR_CONTRACT)
         .output(output_schema_for::<PatternResult>)
         .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | construction axis name (followed when edited) | {origin, dir} (origin coordinates may be length expressions; the pattern follows them) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); count; angle? (default 360 deg; partial arcs include both ends); alignment?: left|center|right (default right; original stays fixed); reversed?: bool (Flip; selects the extra side for even centered counts)"),
+    CommandSpec::new("solid.pattern.face", "Pattern on Face", crate::checked!("solid.pattern.face", pattern_face)).begins_edit()
+        .at("SOLID", "CREATE")
+        .icon("pattern_rect")
+        .contract(&PATTERN_FACE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("bodies: [names]; face: {face: [x,y,z]} (any face; followed as the model changes); count1, count2 (grid cells across and along the face: round and along a cylinder); staggered?: bool (every other column half a cell along); angle?: expr (turns the grid); margin?: expr (no copy nearer the face's edges); flip?: bool (the other side of the face); anchor?: [x,y,z] (the point of the bodies that lands on the face, default the origin; their +Z stands along the face's normal, their X along the grid); attract?: {points: [refs], near?, far?, scale_near?, scale_far?, offset_near?, offset_far?, turn_near?, turn_far?, cutoff?, falloff?: linear|smooth} (advanced: each copy changes with its distance to the nearest point, from the near values at the near distance to the far values at the far one; default distances: the nearest and farthest copies')"),
     CommandSpec::new("solid.pattern.path", "Pattern on Path", crate::checked!("solid.pattern.path", pattern_path)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("pattern_path")
@@ -3181,6 +3188,93 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
     let flip = bool_(p, "flip").unwrap_or(false);
     let pattern = solidcraft_doc::PatternKind::Path { path_sketch: SketchId(path_sketch), path, count, spacing, extent, flip, orient };
     finish_pattern(s, p, features, pattern, bodies)
+}
+
+fn pattern_face(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.pattern.face";
+    let bodies = string_list(cmd, p, "bodies")?;
+    if bodies.is_empty() {
+        return Err(bad(cmd, "`bodies` must list the bodies to copy"));
+    }
+    if let Some(b) = bodies.iter().find(|b| s.model.state().body(b).is_none()) {
+        return Err(bad(cmd, format!("no body `{b}`")));
+    }
+    let face = super::construct::geo(s, p.get("face"), cmd, "face")?;
+    if !matches!(face, solidcraft_doc::construct::GeoRef::Face { .. }) {
+        return Err(bad(cmd, "`face` must be a face: {\"face\": [x, y, z]} on it"));
+    }
+    let count1 = req_expr(cmd, p, "count1")?;
+    let count2 = req_expr(cmd, p, "count2")?;
+    check_count(s, &count1, cmd, "count1")?;
+    check_count(s, &count2, cmd, "count2")?;
+    let angle = expr(p, "angle");
+    if let Some(a) = &angle {
+        check_expr(s, a, Kind::Angle, cmd, "angle")?;
+    }
+    let margin = expr(p, "margin");
+    if let Some(m) = &margin {
+        check_expr(s, m, Kind::Length, cmd, "margin")?;
+    }
+    let anchor = point_param(s, p, "anchor", cmd)?;
+    let attract = match p.get("attract") {
+        None | Some(Value::Null) => None,
+        Some(a) => Some(Box::new(attract_param(s, a, cmd)?)),
+    };
+    let pattern = solidcraft_doc::PatternKind::Face {
+        face,
+        count1,
+        count2,
+        staggered: bool_(p, "staggered").unwrap_or(false),
+        angle,
+        margin,
+        flip: bool_(p, "flip").unwrap_or(false),
+        anchor,
+        attract,
+    };
+    finish_pattern(s, p, Vec::new(), pattern, bodies)
+}
+
+/// A face pattern's attractors (`attract`): the points and the values at the near and far
+/// distances, each checked as the kind it is.
+fn attract_param(s: &Session, a: &Value, cmd: &str) -> Result<solidcraft_doc::Attract> {
+    let list = a.get("points").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`attract.points` must list attractor points"))?;
+    if list.is_empty() || list.len() > 64 {
+        return Err(bad(cmd, "`attract.points` must list 1…64 points"));
+    }
+    let points = list.iter().map(|v| super::construct::geo(s, Some(v), cmd, "attract.points")).collect::<Result<Vec<_>>>()?;
+    let field = |key: &str, kind: Kind| -> Result<Option<solidcraft_doc::Expr>> {
+        let e = expr(a, key);
+        if let Some(e) = &e {
+            check_expr(s, e, kind, cmd, &format!("attract.{key}"))?;
+        }
+        Ok(e)
+    };
+    // Scales must stay above zero wherever a copy lands between them.
+    for key in ["scale_near", "scale_far"] {
+        if let Some(e) = expr(a, key)
+            && s.doc.eval(&e, Kind::Unitless).is_ok_and(|k| !(k > 0.0))
+        {
+            return Err(bad(cmd, format!("`attract.{key}` must be above zero")));
+        }
+    }
+    let falloff = match str_(a, "falloff") {
+        None | Some("linear") => solidcraft_doc::Falloff::Linear,
+        Some("smooth") => solidcraft_doc::Falloff::Smooth,
+        Some(other) => return Err(bad(cmd, format!("unknown falloff `{other}` (linear or smooth)"))),
+    };
+    Ok(solidcraft_doc::Attract {
+        points,
+        near: field("near", Kind::Length)?,
+        far: field("far", Kind::Length)?,
+        scale_near: field("scale_near", Kind::Unitless)?,
+        scale_far: field("scale_far", Kind::Unitless)?,
+        offset_near: field("offset_near", Kind::Length)?,
+        offset_far: field("offset_far", Kind::Length)?,
+        turn_near: field("turn_near", Kind::Angle)?,
+        turn_far: field("turn_far", Kind::Angle)?,
+        cutoff: field("cutoff", Kind::Length)?,
+        falloff,
+    })
 }
 
 fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
