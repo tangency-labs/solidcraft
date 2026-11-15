@@ -18,6 +18,7 @@
 //! | [`init_vertex_face_gap`]                    | `SmVertexuse::InitVertexFaceGap`                 |
 //! | [`is_connected_to`]                         | `SmVertexuse::IsConnectedTo`                     |
 //! | [`is_strut_vertexuse`], [`is_on_pole`]      | `SmVertexuse::IsStrutVertexuse`, `IsOnPole`      |
+//! | [`is_on_seam_of_face`]                      | none (not upstream, below)                       |
 //! | [`is_sector_missing_seam`], [`MissingSeam`] | `SmVertexuse::IsSectorMissingSeam`               |
 //! | [`compute_uv_point`]                        | `SmVertexuse::ComputeUVPoint`                    |
 //! | [`compute_uv_sector`], [`UvSectorIo`], [`UvSector`] | `SmVertexuse::ComputeUVSector`, `SmUVSectorIO` |
@@ -70,6 +71,9 @@
 //!   cache, so `m_bProcessBoundaryCurves` has nothing to act on. A cache already in use
 //!   by an enclosing caller is not fetched again and no point is tested (upstream
 //!   reaches it mostly while its tree is built, with point testing off).
+//! - **Not upstream: [`is_on_seam_of_face`].** Whether the vertex lies on a seam of its
+//!   face's surface, read as [`is_on_pole`] reads a pole (the cached vertex/face gap's UV).
+//!   `SmVertex::IsTopologicalVertex` keeps such a vertex with it (`vertex.rs`).
 //! - `GetTurningAngDeg`, `ComputeTPoint`, `GetBrep`, the fresh-gap checks,
 //!   `GetVertexFaceTrimCurveGap`, `RefreshGaps`, `IsOnSeam`,
 //!   `IsSectorGapFreeAndOriented`, `AssertValid`, `Draw*` and the `Dump`s are not
@@ -1921,6 +1925,123 @@ pub fn is_on_pole(k: &Kernel, b: &mut Brep, vu: VertexuseId) -> Result<bool> {
 
     // all done
     Ok(on_pole)
+}
+
+/// Not upstream: whether the vertex is where its two edges on this face touch a seam of the
+/// face's surface: the vertex lies on the seam (through the cached vertex/face gap's UV,
+/// [`vertex_face_gap`], as [`is_on_pole`] reads a pole), and both edges leave the seam there
+/// to the same side of it. Joined into one edge, they would meet the seam at a point inside
+/// the edge, which the seam test of the face's check (`SmFace` test 29,
+/// `CurveClassification::is_crossed_by_edge`) counts as a crossing. Edges that run along the
+/// seam, or cross it (their sides differ, and a crossing needs a seam edge rather than a
+/// vertex), are not a touch. A surface closed in neither direction has no seam, and its gaps
+/// are not computed.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of [`vertex_face_gap`], the surface's
+/// `IsClosed`, `IsOnSeam` and `DropPoint`, and the edges' curve evaluation;
+/// [`SolidError::Unported`].
+pub fn is_on_seam_of_face(k: &Kernel, b: &mut Brep, vu: VertexuseId) -> Result<bool> {
+    let f = match faceuse(b, vu)? {
+        Some(fu) => b.faceuse(fu)?.face,
+        None => None,
+    };
+    let Some(f) = f else { return Ok(false) };
+    let Some(eu) = edgeuse(b, vu)? else {
+        return Ok(false);
+    };
+    {
+        let Some(surface) = b.face(f)?.surface.as_ref() else {
+            return Ok(false);
+        };
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
+        let closed_u = surface
+            .is_closed(k, &domain, SurfParamType::U, None, false)?
+            .0;
+        let closed_v = surface
+            .is_closed(k, &domain, SurfParamType::V, None, false)?
+            .0;
+        if !closed_u && !closed_v {
+            return Ok(false);
+        }
+    }
+    if !has_vertex_face_gap(b, vu)? {
+        return Ok(false);
+    }
+    let Some(gap) = vertex_face_gap(k, b, vu, false)? else {
+        return Ok(false);
+    };
+    if !gap.face_uv.is_initialized() {
+        return Ok(false);
+    }
+    let surface = face_surface(b, f)?;
+    let seam = surface.is_on_seam(k, gap.face_uv, None)?;
+    if !seam.on_seam {
+        return Ok(false);
+    }
+    // The vertex's two edges on this face: this use's, and the one before it in the loop,
+    // which ends at the vertex. A point of each edge's 3D curve a tenth of its interval in
+    // from its end at the vertex, dropped onto the surface, is on the side of the seam the
+    // edge leaves on. The edge uses' UV trim curves are not read: a boolean asks before it
+    // makes them.
+    let Some(v) = vertex(b, vu)? else {
+        return Ok(false);
+    };
+    let Some(prev) = eu1::cw_edgeuse(b, eu)? else {
+        return Ok(false);
+    };
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let mut leaves = Vec::new();
+    for use_ in [eu, prev] {
+        let Some(e) = b.edgeuse(use_)?.edge else {
+            return Ok(false);
+        };
+        let edge = b.edge(e)?;
+        let Some(curve) = edge.curve.as_ref() else {
+            return Ok(false);
+        };
+        let ivl = edge.interval;
+        let step = ivl.length() / 10.0;
+        let t = if crate::topology::edge::start_vertex(b, e)? == Some(v) {
+            ivl.min() + step
+        } else {
+            ivl.max() - step
+        };
+        let p = curve.evaluate_point(k, t)?;
+        let dropped = surface.drop_point::<crate::surface::surface::p4::NoObject>(
+            k,
+            p,
+            &domain,
+            &crate::surface::surface::p5::DropPointOptions::default(),
+        )?;
+        // an edge that runs along the seam does not leave it
+        if is_on_seam(k, surface, dropped.result_uv)?.0 {
+            return Ok(false);
+        }
+        leaves.push(dropped.result_uv);
+    }
+    let (Some(a), Some(c)) = (leaves.first(), leaves.get(1)) else {
+        return Ok(false);
+    };
+    // Each point's side of a seam: nearer the domain's start or its end in the seam's
+    // direction. Both edges on one side touch the seam there and need the vertex; on two
+    // sides they cross it, which needs a seam edge (`SplitAtSeam`), not a vertex.
+    let lower = |p: &Point2, u: bool| {
+        let (x, lo, hi) = if u {
+            (p.x, domain.min().x, domain.max().x)
+        } else {
+            (p.y, domain.min().y, domain.max().y)
+        };
+        x - lo < hi - x
+    };
+    let same = |u: bool| lower(a, u) == lower(c, u);
+    Ok(match seam.seam_dir {
+        SurfParamType::U => same(true),
+        SurfParamType::V => same(false),
+        SurfParamType::Both => same(true) && same(false),
+        _ => false,
+    })
 }
 
 // ---- maintenance ----------------------------------------------------------------------
