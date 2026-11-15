@@ -194,3 +194,45 @@ fn the_facet_without_its_fix_or_on_a_round_is_refused() {
     );
     assert_eq!(r.err(), Some(Error::Argument));
 }
+
+/// The 20 mm cube's four vertical edges and four top edges, chamfered 2 mm, first the vertical
+/// ones and then the top ones (SolidCraft #17026), or all eight at once. Each chamfer is a
+/// prism `d^2 / 2` times its 20 mm edge, `320` for the eight. At each top corner three of them
+/// meet, as at the box corner above: their pairs overlap in `d^3 / 3` each and all three in
+/// `d^3 / 4`, so the corner gives back `d^3 - d^3 / 4 = 6`, `24` for the four. Either order
+/// leaves `8000 - 320 + 24 = 7704` and the 6 faces plus 8 chamfers: after the vertical
+/// chamfers each top edge's rail on the top face ends exactly at the far vertex of the short
+/// edge the vertical chamfer left there, and that corner builds as the three planes' mitre.
+#[test]
+fn vertical_then_top_chamfers_of_a_cube_meet_as_all_eight_at_once() {
+    all_fixes();
+    let (d, t) = (2.0_f64, 20.0_f64);
+    let removed = 8.0 * t * d * d / 2.0 - 4.0 * (d * d * d - d * d * d / 4.0);
+    let want = t * t * t - removed;
+    assert!((want - 7704.0).abs() < 1e-12);
+    let vertical = [[0.0, 0.0], [t, 0.0], [0.0, t], [t, t]].map(|[x, y]| ([x, y, 0.0], [x, y, t]));
+    let top = |c: f64| {
+        [
+            ([c, 0.0, t], [t - c, 0.0, t]),
+            ([c, t, t], [t - c, t, t]),
+            ([0.0, c, t], [0.0, t - c, t]),
+            ([t, c, t], [t, t - c, t]),
+        ]
+    };
+    let b = make_box([0.0; 3], [t; 3]).unwrap();
+    let all: Vec<_> = vertical.iter().copied().chain(top(0.0)).collect();
+    let (order, e) = edges(&b, &all);
+    chamfer(&b, &order, &e, d, ChamferCorner::Mitre).unwrap();
+    let at_once = b.volume(1e-10).unwrap();
+    assert!((at_once - want).abs() <= 1e-9 * want, "{at_once} vs {want}");
+    assert_eq!(b.counts().unwrap()[0], 14);
+
+    let b = make_box([0.0; 3], [t; 3]).unwrap();
+    let (order, e) = edges(&b, &vertical);
+    chamfer(&b, &order, &e, d, ChamferCorner::Mitre).unwrap();
+    let (order, e) = edges(&b, &top(d));
+    chamfer(&b, &order, &e, d, ChamferCorner::Mitre).unwrap();
+    let v = b.volume(1e-10).unwrap();
+    assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
+    assert_eq!(b.counts().unwrap()[0], 14);
+}
