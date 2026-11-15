@@ -1167,10 +1167,15 @@ mod tests {
         // Without the filter the same machine would have started on GL and drawn nothing.
         let unfiltered = |b: Backends| b == Backends::GL;
         assert_eq!(choose_backends(true, false, false, None, unfiltered), Some(Backends::GL));
-        // A modern AMD card is never hurt by the filter: its GL adapter counts as hardware,
-        // so a machine where GL alone enumerates hardware still starts on GL.
-        let modern_amd_gl = |b: Backends| b == Backends::GL && counts_as_hardware(true, Backend::Gl, "AMD Radeon RX 6800");
-        assert_eq!(choose_backends(true, false, false, None, modern_amd_gl), Some(Backends::GL));
+        // The name-based filter excludes every AMD adapter on GL, modern cards included.
+        // That is safe: a machine where GL alone enumerates hardware has no working D3D12 or
+        // Vulkan device, which is exactly the TeraScale-class situation where the GL scene
+        // draws nothing. A modern AMD card's D3D12 or Vulkan wins first, so GL is never asked
+        // for; the filter only changes anything on machines where GL was the broken last
+        // resort. The old start is kept behind WGPU_BACKEND and the backend preference.
+        assert!(!counts_as_hardware(true, Backend::Gl, "AMD Radeon RX 6800"));
+        let amd_gl_only = |b: Backends| b == Backends::GL && counts_as_hardware(true, Backend::Gl, "AMD Radeon RX 6800");
+        assert_eq!(choose_backends(true, false, false, None, amd_gl_only), Some(Backends::DX12));
     }
 
     #[test]
