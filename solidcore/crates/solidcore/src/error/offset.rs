@@ -211,7 +211,9 @@ pub enum OffsetFailure {
 }
 
 /// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The check that fails names the entity where the reason is about one
+/// ([`Unsoundness::entity`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum Unsoundness {
     /// The check at `SM_LEVEL_2` reports `failures` failure lines more than the input's
@@ -235,6 +237,46 @@ pub enum Unsoundness {
     /// The body is a manifold solid whose volume's enclosure still holds 0 after its
     /// budget: its sign is not proved.
     VolumeUndecided,
+    /// A loop of the body has a certified area that leaves its orientation undecided. No
+    /// check returns it yet (as [`crate::topology::brep::SolidTest::LoopOrientationUndecided`]);
+    /// it is named so a caller's match covers it when one does.
+    LoopOrientationUndecided,
+    /// A gap in a loop of the body cannot be closed within the tolerances its certificates
+    /// allow. No check returns it yet; it is named so a caller's match covers it when one
+    /// does.
+    LoopGapNotClosable,
+    /// The tolerance of an edge or vertex of the body grew to `tolerance`, past the `bound` its
+    /// certificate allows (`docs/validity-and-tolerances.md` §8: a constructed result's
+    /// tolerances come from its certificates). No check returns it yet; it is named so a
+    /// caller's match covers it when one does.
+    ToleranceBeyondBound {
+        /// The entity of the operation's input the edge or vertex comes from (as every entity
+        /// these failures name is the input's), `None` where it comes from none (one the
+        /// operation made): the built body's own ids name nothing a caller holds.
+        entity: Option<EntityRef>,
+        /// Its tolerance.
+        tolerance: f64,
+        /// The largest tolerance its certificate allows.
+        bound: f64,
+    },
+}
+
+impl Unsoundness {
+    /// The entity of the operation's input the reason names: the one the edge or vertex whose
+    /// tolerance grew past its bound comes from.
+    #[must_use]
+    pub const fn entity(&self) -> Option<EntityRef> {
+        match *self {
+            Self::ToleranceBeyondBound { entity, .. } => entity,
+            Self::Check { .. }
+            | Self::GeometryUnchecked
+            | Self::NotManifoldSolid
+            | Self::VolumeNotPositive
+            | Self::VolumeUndecided
+            | Self::LoopOrientationUndecided
+            | Self::LoopGapNotClosable => None,
+        }
+    }
 }
 
 /// How loops of an offset face touch without crossing ([`OffsetFailure::WallsTouch`]).
@@ -293,10 +335,10 @@ impl OffsetFailure {
                 .map(EntityRef::Edge)
                 .or_else(|| face.map(EntityRef::Face)),
             Self::LoopGapUncertified { face } => face.map(EntityRef::Face),
+            Self::Unsound { what } => what.entity(),
             Self::ExactCurveUncut
             | Self::TangentEndOffCurve
             | Self::TangentBranchUncertified
-            | Self::Unsound { .. }
             | Self::DistanceUnresolved { .. }
             | Self::ToleranceUnresolved { .. }
             | Self::Failed(_)
@@ -530,6 +572,28 @@ impl core::fmt::Display for Unsoundness {
                 "the local operation's body is a manifold solid whose volume's sign could \
                  not be proved",
             ),
+            Unsoundness::LoopOrientationUndecided => f.write_str(
+                "a loop of the body built has a certified area that leaves its orientation \
+                 undecided",
+            ),
+            Unsoundness::LoopGapNotClosable => f.write_str(
+                "a gap in a loop of the body built cannot be closed within the tolerances its \
+                 certificates allow",
+            ),
+            Unsoundness::ToleranceBeyondBound {
+                entity,
+                tolerance,
+                bound,
+            } => {
+                match entity {
+                    Some(e) => write!(f, "the tolerance at {e} of the input")?,
+                    None => f.write_str("the tolerance of an edge or vertex")?,
+                }
+                write!(
+                    f,
+                    " grew to {tolerance:e}, past the {bound:e} its certificate allows"
+                )
+            }
         }
     }
 }
@@ -957,6 +1021,55 @@ mod tests {
             let e = SolidError::offset_stage_failed("offset::op", status);
             super::super::tests::assert_stage_failure(&e, "offset::op", status);
             assert_eq!(e.offset_failure(), Some(&OffsetFailure::StageFailed));
+        }
+    }
+
+    /// A body whose edge or vertex tolerance grew past its certificate's bound is refused
+    /// naming the input's entity it comes from and both numbers (#15035); the reasons without
+    /// an entity name none.
+    #[test]
+    fn an_unsound_body_names_the_entity_its_check_names() {
+        let edge = EntityRef::Edge(EdgeId::from_index(4));
+        let grown = |entity| OffsetFailure::Unsound {
+            what: Unsoundness::ToleranceBeyondBound {
+                entity,
+                tolerance: 2e-4,
+                bound: 1e-5,
+            },
+        };
+        assert_eq!(grown(Some(edge)).entity(), Some(edge));
+        assert_eq!(grown(Some(edge)).kind(), ErrorKind::Unsupported);
+        assert_eq!(
+            grown(Some(edge)).to_string(),
+            "the tolerance at edge 4 of the input grew to 2e-4, past the 1e-5 its certificate \
+             allows: refused, the input unchanged"
+        );
+        // an edge or vertex that comes from none of the input's
+        assert_eq!(grown(None).entity(), None);
+        assert_eq!(
+            grown(None).to_string(),
+            "the tolerance of an edge or vertex grew to 2e-4, past the 1e-5 its certificate \
+             allows: refused, the input unchanged"
+        );
+        for (what, says) in [
+            (
+                Unsoundness::LoopOrientationUndecided,
+                "a loop of the body built has a certified area that leaves its orientation \
+                 undecided",
+            ),
+            (
+                Unsoundness::LoopGapNotClosable,
+                "a gap in a loop of the body built cannot be closed within the tolerances its \
+                 certificates allow",
+            ),
+        ] {
+            let o = OffsetFailure::Unsound { what };
+            assert_eq!(what.entity(), None);
+            assert_eq!(o.entity(), None);
+            assert_eq!(
+                o.to_string(),
+                format!("{says}: refused, the input unchanged")
+            );
         }
     }
 

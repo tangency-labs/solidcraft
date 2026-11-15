@@ -585,9 +585,6 @@ impl FilletCorner {
                         // continuing a boss's base circle past a wall. The rail on the side
                         // face runs alongside it and never meets it; the round ends on
                         // the end face past it (tangency-labs/smlib@420e47d, WR-499).
-                        if !k.fixes.fillet_nx1_opposite_continuation_side_edge {
-                            break;
-                        }
                         let filleted_edge = edge_of(target, filleted)?;
                         let next_edge = edge_of(target, next)?;
                         if passed_continuation
@@ -727,6 +724,9 @@ impl FilletCorner {
                 // Not upstream (solidcore-native): a rail rolled onto a face whose foot edge
                 // turns back at the rolled-over edge's vertex ends where it crosses the end
                 // face's surface, inside that face (`nx1_end::TurnedBack`)
+                // A rail that did not roll ends there too where it crosses the end face's
+                // surface on the side edge's continuation past its far end, inside its own face
+                // (`nx1_end::rail_passes_side_edge_end`)
                 let turned = match solver.rolled_faces.get(solver_rail).copied().flatten() {
                     Some(rolled) if mixed => nx1_end::rolled_rail_turns_back(
                         k,
@@ -736,6 +736,25 @@ impl FilletCorner {
                         rolled,
                         solver.tangency_tolerance,
                     )?,
+                    // a failure in the decision finds nothing: the corner is main's (main
+                    // never asks this decision's queries)
+                    None if mixed => match nx1_end::rail_passes_side_edge_end(
+                        k,
+                        target,
+                        solver,
+                        matches!(&*solver_object, SolverObject::ConstantRadius(_)),
+                        solver_rail,
+                        side,
+                        vertex,
+                    ) {
+                        Ok(found) => found,
+                        // only Unported and a cancellation pass on: any other failure,
+                        // `FaceTrimsUnavailable` from the classification included, declines
+                        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                            return Err(e)
+                        }
+                        Err(_) => None,
+                    },
                     _ => None,
                 };
                 pseudo

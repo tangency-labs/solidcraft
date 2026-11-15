@@ -855,6 +855,12 @@ mod install_zip {
         assert_eq!(unpack(&zip(&files)).unwrap_err(), InstallError::Archive(safe_zip::Error::TooLarge { limit: 64 << 20 }));
         assert_eq!(unpack(&zip(&[("plugin.wasm", b"x")])).unwrap_err(), InstallError::MissingManifest);
         assert_eq!(unpack(&zip(&[("plugin.json", good)])).unwrap_err(), InstallError::MissingModule("plugin.wasm".into()));
+        // GitHub's "Source code" archive of a release: one folder with the manifest and the
+        // sources, but no built module. The refusal points to the plugin's own .zip (#16736).
+        let source = zip(&[("gears-0.1.1/plugin.json", good), ("gears-0.1.1/Cargo.toml", b"[package]"), ("gears-0.1.1/src/lib.rs", b"")]);
+        let error = unpack(&source).unwrap_err();
+        assert_eq!(error, InstallError::SourceOnly("plugin.wasm".into()));
+        assert!(error.to_string().contains("the plugin's own .zip from its release"), "{error}");
         let two = zip(&[("a/plugin.json", good), ("a/plugin.wasm", b"x"), ("b/plugin.json", good), ("b/plugin.wasm", b"x")]);
         assert_eq!(unpack(&two).unwrap_err(), InstallError::NotOnePlugin);
         let stray = zip(&[("a/plugin.json", good), ("a/plugin.wasm", b"x"), ("other.txt", b"x")]);

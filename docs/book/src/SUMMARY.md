@@ -15,6 +15,7 @@
 - [Sheet metal](guide/sheet-metal.md)
 - [Plastic parts](guide/plastic.md)
 - [Import and export](guide/files.md)
+- [Keeping designs on a network share](guide/network-share.md)
 - [Keyboard shortcuts](guide/shortcuts.md)
 - [Updates and privacy](guide/updates.md)
 - [Code signing policy](code-signing-policy.md)

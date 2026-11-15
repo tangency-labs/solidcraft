@@ -60,6 +60,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::math::MODEL_TOL;
 use crate::query::brep::BrepClassifier;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::query::normal::{certify as certify_normal, Sense, UnitVector};
@@ -1378,6 +1379,61 @@ pub fn face_normal_at_edge(
         return Err(SolidError::invalid_input(OP, "edge interval not finite"));
     }
     edgeuse_face_frame(k, brep, eu, t, faceuse)
+}
+
+/// Where a planar face lies along `direction` when it is square to it: the signed distance from
+/// `origin` to the face's plane along the unit `direction`, measured at `on_face`, a point of the
+/// face (its centroid). `normal` is the face's unit normal with its proved `normal_bound`.
+/// `None` when the normal is not parallel to `direction`: its cross with the unit direction is
+/// longer than `normal_bound` plus the kernel's model tolerance ([`MODEL_TOL`], `NL_MTOL`), the
+/// tilt below which the kernel takes two directions for the same.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a `direction` of no length or a value that is not finite.
+pub fn face_square_level(
+    normal: Vec3,
+    normal_bound: f64,
+    on_face: Point3,
+    direction: Vec3,
+    origin: Point3,
+) -> Result<Option<f64>> {
+    let d = direction.unitize()?;
+    let tilt = normal.cross(d).length();
+    if !tilt.is_finite() || !normal_bound.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the normal or its bound is not finite",
+        ));
+    }
+    if tilt > normal_bound + MODEL_TOL {
+        return Ok(None);
+    }
+    Ok(Some(Vec3::between(origin, on_face).dot(d)))
+}
+
+#[cfg(test)]
+mod face_square_level_tests {
+    use super::*;
+
+    /// A plane z = 3 seen from an origin at z = 0.5 along +Z (any length of direction): level
+    /// 2.5; the same plane along -Z: -2.5; a direction tilted past the model tolerance, or a
+    /// side normal: none; a direction of no length: refused.
+    #[test]
+    fn a_plane_square_to_the_direction_is_found_at_its_signed_level() {
+        let n = Vec3::new(0.0, 0.0, 1.0);
+        let c = Vec3::new(4.0, 7.0, 3.0);
+        let o = Vec3::new(5.0, 5.0, 0.5);
+        let level = |dir: Vec3, n: Vec3| face_square_level(n, 1e-16, c, dir, o).unwrap();
+        assert_eq!(level(Vec3::new(0.0, 0.0, 2.0), n), Some(2.5));
+        assert_eq!(level(Vec3::new(0.0, 0.0, -1.0), n), Some(-2.5));
+        assert_eq!(level(Vec3::new(0.0, 0.01, 1.0), n), None);
+        assert_eq!(
+            level(Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 0.0)),
+            None
+        );
+        assert!(face_square_level(n, 1e-16, c, Vec3::new(0.0, 0.0, 0.0), o).is_err());
+    }
 }
 
 /// One sample of [`edge_face_gap_samples`].

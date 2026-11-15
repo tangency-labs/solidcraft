@@ -35,6 +35,7 @@ pub mod crash_ui;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
+pub mod design_tab_prefs;
 mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
@@ -216,6 +217,7 @@ pub use solidcraft_ui_kit::navigation_bar;
 mod navigation_bar_tests;
 mod navigation_bar_view;
 pub mod navigation_slots;
+pub mod new_window;
 pub use navigation::WebWheelGestures;
 pub mod network_prompt;
 pub mod op_auto;
@@ -3900,6 +3902,8 @@ impl SolveApp {
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
         if render_workspace::active(self) {
+            // The model view is not drawn, so no shown dimension can be double-clicked.
+            dim_view::set_model_drawn(Vec::new());
             render_workspace::show(self, ui);
         } else {
             viewport::show(self, ui);

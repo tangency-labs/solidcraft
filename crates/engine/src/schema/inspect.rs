@@ -73,6 +73,36 @@ pub struct BodyFeaturesParams {
     pub body: Option<String>,
 }
 
+/// Show or hide the temporary component colours (`inspect.colored_components`): the one flag
+/// the command reads, as its handler reads it (`cmd/inspect.rs`'s `colored_components`).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ColoredComponentsParams {
+    /// True shows the colours, false hides them; left out, the command toggles them.
+    #[serde(default, deserialize_with = "enabled_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub enabled: Option<bool>,
+}
+
+/// `true` or `false`; anything else, `null` included, is the handler's own message.
+fn enabled_flag<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Bool(b) => Ok(Some(b)),
+        _ => Err(D::Error::custom(whole("enabled must be a boolean"))),
+    }
+}
+
+/// What `inspect.colored_components` returns: whether the colours are shown now.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ColoredComponentsResult {
+    /// Whether the temporary component colours are shown. They are a view setting: never saved
+    /// with the design, and no appearance is changed.
+    pub enabled: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `model.body_features` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ModelBodyFeatures {
@@ -695,6 +725,26 @@ impl From<solidcraft_sketch::SolveStatus> for SketchStatus {
             solidcraft_sketch::SolveStatus::Failed => SketchStatus::Failed,
         }
     }
+}
+
+/// The design's id and the revision its contents were last seen under (`document.revision`):
+/// the command reads no keys.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DocumentRevisionParams {}
+
+/// What `document.revision` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RevisionResult {
+    /// This open design's id: kept while it stays open, another for each design started or opened.
+    pub document_id: String,
+    /// What the design was last seen under: a new number whenever the design, what is hidden or a
+    /// component's uncaptured position changes, never on a selection or a view; from one counter
+    /// for the whole run, so it never repeats.
+    pub revision: u64,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// How `inspect.measure` selects: bodies, or one or two picked items. With `items`, `bodies` and
