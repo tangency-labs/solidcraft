@@ -2768,19 +2768,22 @@ mod tests {
         assert!(boxes > 25 && wires > 25 && negatives > 40 && negative_zeros > 5);
     }
 
-    /// WR-346 (collapsed faces mated across, always on): an inset whose offset collapses is
-    /// accounted for from the closed form, not the old blanket `SM_ERR` (1001).
+    /// WR-346 (collapsed faces mated across, always on): the three moved insets past a
+    /// primitive's own radius.
     ///
-    /// - The unit sphere's extended inset by 1.5 is empty (the inset set
-    ///   `{p : dist(p, outside) >= 1.5}` of a ball of radius 1 is empty): the call succeeds
-    ///   with a body of no faces, edges or vertices, only its one region.
-    /// - The r 1, h 4 cylinder's extended inset by 1 or 1.5 collapses its side wall (its
-    ///   offset radius `1 - d` is 0 or negative): it is refused as
-    ///   `SM_ERR_DEGENERATE_SURFACE` (1034), and the offset built before the refusal is the
-    ///   two caps' offsets, two planes at `z = d` and `z = 4 - d` on the axis's side
-    ///   (`x = 1`, `y = 0` at the seam vertices), with their two seam edges.
+    /// - The unit sphere's extended inset by 1.5: the inset set `{p : dist(p, outside) >=
+    ///   1.5}` of a ball of radius 1 is empty, and the call succeeds with a body of no
+    ///   faces, edges or vertices, only its one region (main: a bare 1001).
+    /// - The r 1, h 4 cylinder's extended inset by 1 or 1.5 collapses its side wall (offset
+    ///   radius `1 - d` is 0 or negative) with nothing beside it to mate across: still
+    ///   refused with `SM_ERR` (1001), now typed as `OffsetFailure::Collapses` (pinned by
+    ///   `offset_executive::p2::tests::wr346_unbridged_collapsed_wall_is_refused_as_collapses`).
+    ///   The executive's offset held at the refusal is no longer empty: it holds the caps'
+    ///   offsets built before the wall was found unbridged, two planes with vertices at
+    ///   `z = d` and `z = 4 - d` (`x = 1`, `y = 0`, the seam's end). That partial offset is
+    ///   what moved; it is no result.
     #[test]
-    fn wr346_collapsed_insets_follow_the_closed_form() {
+    fn wr346_collapsed_insets_are_accounted_for() {
         let context = CaseContext {
             root: repo_root(),
             seeds: 0,
@@ -2803,7 +2806,8 @@ mod tests {
             ("member_cylinder_extend_inset_past_radius", 1.5),
         ] {
             let cylinder = run(name);
-            assert_eq!(cylinder.ints["status"], [1034], "{name}");
+            assert_eq!(cylinder.ints["status"], [1001], "{name}");
+            assert_eq!(cylinder.ints["result.present"], [0], "{name}");
             assert_eq!(cylinder.ints["executive_offset.present"], [1], "{name}");
             assert_eq!(
                 cylinder.ints["executive_offset.counts"],
@@ -2892,7 +2896,8 @@ mod tests {
                 _ => None,
             };
 
-            crate::soundness::start();
+            // the half pipes' refinement ends at its cell budget long before 1e-9 (below)
+            crate::soundness::start_enclosing(if closed_form.is_some() { 1e-9 } else { 1e-4 });
             let output = Runner.run_rust(case).unwrap();
             let found = crate::soundness::take();
             assert!(output.deferred.is_none() && output.error.is_none(), "{name}");
@@ -2906,7 +2911,13 @@ mod tests {
                 // and its offset in one plane: a plane
                 assert_eq!(output.ints["source.before.counts"][0], 1, "{name}");
                 assert!(kinds.len() > 2, "{name}: {kinds:?}");
-                assert!(planes >= kinds.len() - 2, "{name}: {kinds:?}");
+                // a plane sheet's own two faces are planes too; a cylinder sheet's are not
+                let want = if inputs["source"]["kind"] == "plane_sheet" {
+                    kinds.len()
+                } else {
+                    kinds.len() - 2
+                };
+                assert_eq!(planes, want, "{name}: {kinds:?}");
             } else {
                 // the half pipes' walls along their straight edges and end arcs lie in
                 // planes; at least those four are planes
@@ -2916,19 +2927,59 @@ mod tests {
             let body = &found[0];
             assert!(body.sound(), "{name}: {}", body.line());
             assert_eq!(body.manifold, Some(true), "{name}");
+            assert!(
+                matches!(body.volume, Some(VolumeSign::Positive(_))),
+                "{name}: {:?}",
+                body.volume
+            );
+            // the certified enclosure, refined to 1e-9 of the volume
+            let Some(Ok(e)) = &body.enclosure else {
+                panic!("{name}: {:?}", body.enclosure);
+            };
+            eprintln!("WR564 {name}: [{:e}, {:e}]", e.lo, e.hi);
+            // measured: the plane and cylinder sheets refine to 1.5e-8 of the volume or
+            // below (the 2e-6 slab is the widest); the half pipes' refinement ends at its
+            // cell budget, near 2e-6 (R 12) and 1e-4 (R 20) of it, on main as here
+            let width = if closed_form.is_some() { 1e-7 } else { 2e-4 };
+            assert!(e.lo > 0.0 && e.hi - e.lo <= width * e.hi, "{name}: [{}, {}]", e.lo, e.hi);
             if let Some(v) = closed_form {
-                let Some(VolumeSign::Positive(e)) = &body.volume else {
-                    panic!("{name}: {:?}", body.volume);
-                };
-                // the closed form's own rounding, a few ulps of its size
-                let slack = 1e-12 * v;
-                assert!(
-                    e.lo - slack <= v && v <= e.hi + slack,
-                    "{name}: {v} not in [{}, {}]",
-                    e.lo,
-                    e.hi
-                );
+                assert!(e.lo <= v && v <= e.hi, "{name}: {v} not in [{}, {}]", e.lo, e.hi);
+            } else {
+                // no closed form in the test: only the walls' surface type changed, so the
+                // body's enclosure overlaps main's (merge base 7e0c36cf8, measured there
+                // with the same refinement)
+                let (lo, hi) = MAIN_HALF_PIPE_ENCLOSURES
+                    .iter()
+                    .find(|(n, _, _)| *n == name)
+                    .map(|&(_, lo, hi)| (lo, hi))
+                    .unwrap();
+                assert!(e.lo <= hi && lo <= e.hi, "{name}: [{}, {}] vs main [{lo}, {hi}]", e.lo, e.hi);
             }
         }
     }
+
+    /// The four `issue2611` half pipes' volume enclosures on main (merge base 7e0c36cf8,
+    /// `enclose_volume` to 1e-9 of the volume), where their walls were ruled B-splines.
+    const MAIN_HALF_PIPE_ENCLOSURES: [(&str, f64, f64); 4] = [
+        (
+            "issue2611_half_pipe_arc_r12_api_shell_in",
+            7089.417717594905,
+            7089.432425854226,
+        ),
+        (
+            "issue2611_half_pipe_arc_r12_api_shell_out",
+            7680.204448755749,
+            7680.213546959549,
+        ),
+        (
+            "issue2611_half_pipe_arc_r20_api_shell_in",
+            7856.4160674458435,
+            7857.218689812394,
+        ),
+        (
+            "issue2611_half_pipe_arc_r20_api_shell_out",
+            8511.15312601672,
+            8511.949227984296,
+        ),
+    ];
 }

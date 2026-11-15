@@ -276,6 +276,42 @@ fn refuse_singular_offset(
     }
 }
 
+/// Not upstream (WR-346): the radius of curvature that collapsed face `face` attains on
+/// the side the offset by `distance` moves it to, for [`OffsetFailure::Collapses`]: the
+/// least [`crate::offset::construction::sheets::proved_singular`] finds over the face's
+/// parameter box, on the face's own surface, whichever way its NURB normal faces the
+/// displacement. A face the proof finds nothing on (no NURB, or a radius it does not
+/// reach) reports `|distance|`: its collapse test (`Surface::offset_collapses`) found the
+/// radius left below the tolerance, so the radius is at most that.
+fn collapsed_face_radius(
+    kernel: &Kernel,
+    original: &Brep,
+    face: FaceId,
+    distance: f64,
+) -> Result<f64> {
+    use crate::offset::construction::sheets::proved_singular;
+    let surface = original
+        .face(face)?
+        .surface
+        .as_ref()
+        .ok_or_else(|| SolidError::null_pointer(OP_EXTENDED))?;
+    let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, surface)? else {
+        return Ok(distance.abs());
+    };
+    let Some(base) = nurb.gw_nurb() else {
+        return Ok(distance.abs());
+    };
+    let domain = crate::topology::face::p2::uv_domain(original, face)?;
+    let uv_box = [domain.min.x, domain.max.x, domain.min.y, domain.max.y];
+    let mut least: Option<f64> = None;
+    for d in [distance, -distance] {
+        if let Some(singular) = proved_singular(base, d, Some(uv_box), original.tolerance())? {
+            least = Some(least.map_or(singular.radius, |r| r.min(singular.radius)));
+        }
+    }
+    Ok(least.unwrap_or_else(|| distance.abs()))
+}
+
 /// Not upstream (WR-718, #2350 S1): refuses the offset of `face` (whose implicit offset
 /// surface is `offset`) when it folds on the face's parameter box
 /// ([`crate::offset::construction::sheets::certify_regular`]), naming the largest wall
@@ -782,7 +818,8 @@ impl OffsetExecutive {
             // Not upstream (WR-346): mate the faces beside each collapsed face across it,
             // the round's rails becoming one sharp edge (their ends are trimmed by
             // TrimExtendedEdge, which also looks across collapsed faces).
-            let mut unbridged = 0_usize;
+            // the first collapsed face the mating could not bridge
+            let mut unbridged: Option<FaceId> = None;
             if !self.collapsed_faces.is_empty() {
                 for &edgeuse in &mapped {
                     kernel.check_cancelled(OP_EXTENDED)?;
@@ -810,7 +847,7 @@ impl OffsetExecutive {
                     let (Some(across), Some(offset_edgeuse), Some(offset_across)) =
                         (across, offset_edgeuse, offset_across)
                     else {
-                        unbridged += 1;
+                        unbridged = unbridged.or(eu::face(original, radial)?);
                         continue;
                     };
                     let mut stores = NotificationStores {
@@ -831,7 +868,7 @@ impl OffsetExecutive {
                         notifications.result_key_of,
                     ))?;
                     if mated.is_none() {
-                        unbridged += 1;
+                        unbridged = unbridged.or(eu::face(original, radial)?);
                         continue;
                     }
                     marked.insert(edgeuse);
@@ -979,15 +1016,21 @@ impl OffsetExecutive {
                         continue;
                     }
                     if !self.squeeze_collapsed_end_edge(kernel, edgeuse, notifications)? {
-                        unbridged += 1;
+                        unbridged = unbridged.or(eu::face(original, radial)?);
                     }
                 }
-                if unbridged > 0 {
-                    return Err(SolidError::Upstream {
-                        operation: OP_EXTENDED,
-                        code: crate::intersect::surface_drop_lib::p3::SM_ERR_DEGENERATE_SURFACE,
-                        entity: None,
-                    });
+                if let Some(face) = unbridged {
+                    let distance = self.offset_distance();
+                    let radius = collapsed_face_radius(kernel, original, face, distance)?;
+                    return Err(Failure::new(
+                        OP_EXTENDED,
+                        OffsetFailure::Collapses {
+                            face,
+                            distance,
+                            radius,
+                        },
+                    )
+                    .into_error());
                 }
             }
 
@@ -5356,6 +5399,69 @@ mod tests {
             (volume - expected).abs() < 1e-6 * expected,
             "volume {volume}"
         );
+    }
+
+    /// WR-346: an r 1, h 4 cylinder's extended inset by 1 or 1.5 collapses its side wall
+    /// (offset radius `1 - d` is 0 or negative), and with nothing beside it to mate across
+    /// the offset is refused as [`OffsetFailure::Collapses`], naming the wall, the distance
+    /// and the wall's radius 1, the inset that still builds being under it. (Not an empty
+    /// success: the inset set is empty here, but a collapsed face left unbridged does not
+    /// prove the whole offset empty in general, only that this face cannot be built.)
+    #[test]
+    fn wr346_unbridged_collapsed_wall_is_refused_as_collapses() {
+        use crate::error::Reason;
+        for d in [1.0, 1.5] {
+            let mut kernel = Kernel::default();
+            let mut part = crate::primitive::api_primitives::create_cylinder(
+                &mut kernel,
+                Vec3::new(0.0, 0.0, 0.0),
+                1.0,
+                4.0,
+            )
+            .unwrap();
+            part.set_key(original_key(EntityRef::Brep(BrepId::from_index(0))).key);
+            let wall: Vec<FaceId> = part
+                .face_list()
+                .iter()
+                .copied()
+                .filter(|&f| {
+                    !part
+                        .face(f)
+                        .unwrap()
+                        .surface
+                        .as_ref()
+                        .unwrap()
+                        .is_kind_of(Plane::TYPE)
+                        .unwrap()
+                })
+                .collect();
+            assert_eq!(wall.len(), 1, "the side wall");
+            let mut notifications = NotificationFixture::new(&part);
+            let mut exec = OffsetExecutive::new(OffsetOperation::SolidOffset, d, 1e-6);
+            exec.set_inset(true);
+            exec.set_extend_convex_edges(true);
+            exec.set_merge_results(false);
+            let e = exec
+                .do_solid_offset(
+                    &mut kernel,
+                    Some(&mut part),
+                    SolidOffsetOptions::default(),
+                    &mut notifications.context(),
+                )
+                .unwrap_err();
+            let Some(Reason::Offset(OffsetFailure::Collapses {
+                face,
+                distance,
+                radius,
+            })) = e.failure().map(|f| &f.reason)
+            else {
+                panic!("d {d}: not a collapse: {e}");
+            };
+            assert_eq!(*face, wall[0], "d {d}");
+            assert_eq!(distance.abs(), d, "d {d}");
+            assert!((radius - 1.0).abs() <= 1e-9, "d {d}: radius {radius}");
+            assert_eq!(e.sm_status(), Some(SM_ERR), "d {d}");
+        }
     }
 
     /// tangency-labs/solidcore#855: a 40 x 40 x 10 plate with a 4 mm hole at (4.99, 20)
