@@ -1692,22 +1692,23 @@ fn join_through_tangent_points(
         if let Some(d) = ssi.deviations.get_mut(keep) {
             *d = worst;
         }
-        for list in [&mut ssi.surface1_uv_curves, &mut ssi.surface2_uv_curves] {
-            if drop < list.len() {
-                list.remove(drop);
-            }
-        }
-        if drop < ssi.curves_3d.len() {
-            ssi.curves_3d.remove(drop);
-        }
-        if drop < ssi.curve_types.len() {
-            ssi.curve_types.remove(drop);
-        }
-        if drop < ssi.deviations.len() {
-            ssi.deviations.remove(drop);
-        }
+        drop_index(&mut ssi.surface1_uv_curves, drop);
+        drop_index(&mut ssi.surface2_uv_curves, drop);
+        drop_index(&mut ssi.curves_3d, drop);
+        drop_index(&mut ssi.curve_types, drop);
+        drop_index(&mut ssi.deviations, drop);
     }
     Ok(())
+}
+
+/// Removes the element at `index` when it exists; an out-of-range index leaves the list as is.
+fn drop_index<T>(list: &mut Vec<T>, index: usize) {
+    let mut at = 0usize;
+    list.retain(|_| {
+        let keep = at != index;
+        at += 1;
+        keep
+    });
 }
 
 /// The fork's `sm_ExactPiece` (tangency-labs/smlib@fddc366, behind
