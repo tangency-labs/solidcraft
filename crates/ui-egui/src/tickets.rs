@@ -80,9 +80,9 @@ pub struct Sending {
     folder: Option<PathBuf>,
     step: Step,
     call: Option<Call>,
-    /// Upload offsets and chunk sizes, per file.
-    offset: usize,
-    chunk: usize,
+    /// The current file's part size and the parts it still needs (numbered from 1).
+    part_size: usize,
+    missing: std::collections::VecDeque<usize>,
     pub sent: usize,
     pub total: usize,
 }
@@ -190,7 +190,16 @@ pub fn send(app: &mut SolveApp, report: payload::Outgoing) {
 fn start(app: &mut SolveApp, report: payload::Outgoing, folder: Option<PathBuf>) {
     let total = 1 + report.files.iter().filter(|f| !f.done).map(|f| f.bytes.len()).sum::<usize>();
     let step = if report.filed.is_some() { next_file(&report, 0) } else { Some(Step::Ticket) };
-    let mut sending = Sending { report, folder, step: step.unwrap_or(Step::Ticket), call: None, offset: 0, chunk: api::MAX_CHUNK, sent: 0, total };
+    let mut sending = Sending {
+        report,
+        folder,
+        step: step.unwrap_or(Step::Ticket),
+        call: None,
+        part_size: api::MAX_PART,
+        missing: Default::default(),
+        sent: 0,
+        total,
+    };
     if step.is_none() {
         // Filed and uploaded already: only the queue entry is left.
         finish(app, sending);
@@ -371,12 +380,6 @@ fn tick_send(app: &mut SolveApp) {
         app.tickets.sending = Some(s);
         return;
     };
-    // A chunk the server has a different offset for continues from the server's.
-    if let (Step::Chunk(_), Ok((409, body))) = (s.step, &reply) {
-        s.offset = api::parse_offset(&serde_json::from_slice(body).unwrap_or_default());
-        app.tickets.sending = Some(s);
-        return;
-    }
     let value = match api::answer(reply) {
         Ok(v) => v,
         Err(api::Failure::Offline(_)) => return enqueue(app, s),
@@ -416,8 +419,8 @@ fn tick_send(app: &mut SolveApp) {
                 if let Some(f) = s.report.files.get_mut(i) {
                     f.upload = Some(u.id);
                 }
-                s.offset = u.offset;
-                s.chunk = u.chunk;
+                s.part_size = u.part_size;
+                s.missing = u.missing.into();
                 Some(chunk_or_finish(&s, i))
             }
             Err(e) => {
@@ -425,15 +428,24 @@ fn tick_send(app: &mut SolveApp) {
                 return;
             }
         },
-        Step::Resume(i) => {
-            s.offset = api::parse_offset(&value);
-            Some(chunk_or_finish(&s, i))
-        }
+        Step::Resume(i) => match api::parse_upload(&value) {
+            Ok(u) => {
+                s.part_size = u.part_size;
+                s.missing = u.missing.into();
+                Some(chunk_or_finish(&s, i))
+            }
+            // The server no longer has it (expired): open it again.
+            Err(_) => {
+                if let Some(f) = s.report.files.get_mut(i) {
+                    f.upload = None;
+                }
+                Some(Step::Open(i))
+            }
+        },
         Step::Chunk(i) => {
-            let size = s.report.files.get(i).map_or(0, |f| f.bytes.len());
-            let offset = api::parse_offset(&value).min(size);
-            s.sent += offset.saturating_sub(s.offset);
-            s.offset = offset;
+            if let Some(n) = s.missing.pop_front() {
+                s.sent += part(&s, i, n).len();
+            }
             Some(chunk_or_finish(&s, i))
         }
         Step::Finish(i) => {
@@ -459,7 +471,14 @@ fn tick_send(app: &mut SolveApp) {
 }
 
 fn chunk_or_finish(s: &Sending, i: usize) -> Step {
-    if s.offset >= s.report.files.get(i).map_or(0, |f| f.bytes.len()) { Step::Finish(i) } else { Step::Chunk(i) }
+    if s.missing.is_empty() { Step::Finish(i) } else { Step::Chunk(i) }
+}
+
+/// Part `n` (from 1) of file `i`.
+fn part(s: &Sending, i: usize, n: usize) -> &[u8] {
+    let Some(f) = s.report.files.get(i) else { return &[] };
+    let start = n.saturating_sub(1).saturating_mul(s.part_size);
+    f.bytes.get(start.min(f.bytes.len())..start.saturating_add(s.part_size).min(f.bytes.len())).unwrap_or_default()
 }
 
 fn request(s: &Sending, token: &str) -> HttpRequest {
@@ -474,15 +493,15 @@ fn request(s: &Sending, token: &str) -> HttpRequest {
                 token,
                 filed,
                 f.map_or("", |f| &f.name),
-                f.map_or(0, |f| f.bytes.len()),
+                f.map_or(&[][..], |f| &f.bytes),
                 f.map_or("application/octet-stream", |f| &f.content_type),
                 f.map_or("", |f| &f.kind),
             )
         }
         Step::Resume(i) => api::upload_status(token, &upload(i)),
         Step::Chunk(i) => {
-            let bytes = file(i).map_or(&[][..], |f| f.bytes.get(s.offset..(s.offset + s.chunk).min(f.bytes.len())).unwrap_or_default());
-            api::upload_chunk(token, &upload(i), s.offset, bytes)
+            let n = s.missing.front().copied().unwrap_or(1);
+            api::upload_part(token, &upload(i), n, part(s, i, n))
         }
         Step::Finish(i) => api::finish_upload(token, &upload(i)),
     }

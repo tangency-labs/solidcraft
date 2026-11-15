@@ -44,7 +44,9 @@ back the public GitHub issue draft the button opened before.
 ## Server API
 
 Every path the app uses is in `crates/ui-egui/src/tickets/api.rs`: device sign-in
-(`/api/device/code`, `/api/device/token`), `/api/apps`, `POST /api/tickets`, and uploads
-(`POST /api/tickets/:id/uploads`, `PATCH /api/uploads/:id` with `Upload-Offset`,
-`GET /api/uploads/:id`, `POST /api/uploads/:id/complete`). `SOLIDCRAFT_TICKETS_URL` points a
-desktop build at a test server (`https://`, or `http://localhost`).
+(`/api/device/code`, `/api/device/token`, a `tickets:report` token), `/api/apps`,
+`POST /api/tickets` (with `system`, `repro` and `consent`), and resumable uploads (`POST
+/api/uploads` with the file's size and SHA-256, `PUT /api/uploads/:id/parts/:n` in the parts the
+server asks for, `GET /api/uploads/:id` to resume, `POST /api/uploads/:id/complete`).
+`SOLIDCRAFT_TICKETS_URL` points a desktop build at a test server (`https://`, or
+`http://localhost`).

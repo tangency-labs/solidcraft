@@ -162,12 +162,19 @@ pub fn build(form: &Form, ticks: Ticks, evidence: &Evidence, client: &str) -> Ou
     if ticks.repro {
         let mut repro = json!({ "commands": evidence.steps });
         if let Some((command, error)) = &evidence.failing {
-            repro["failing"] = json!({ "command": command, "error": error });
+            repro["failing"] = json!({ "error": error });
+            if let Some(command) = command {
+                repro["failing"]["command"] = json!(command);
+            }
         }
         ticket["repro"] = repro;
     }
     let mut files = Vec::new();
     let mut add = |name: String, content_type: &str, kind: &str, bytes: Vec<u8>| {
+        // The server takes no empty file.
+        if bytes.is_empty() {
+            return;
+        }
         files.push(File { name, content_type: content_type.into(), kind: kind.into(), bytes, upload: None, done: false });
     };
     if ticks.log {

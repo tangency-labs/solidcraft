@@ -2389,13 +2389,14 @@ mod tests {
                 ("POST", "/api/device/token") => json!({"access_token":"tkt_secret_token_123","token_type":"Bearer"}),
                 ("GET", "/api/apps") => json!({"apps":[{"slug":"solidcraft","name":"SolidCraft"},{"slug":"pcbcraft","name":"PCBCraft"}]}),
                 ("POST", "/api/tickets") => json!({"id": 42}),
-                ("POST", p) if p.ends_with("/uploads") => {
-                    json!({"id": format!("up{}", requests.lock().unwrap().len()), "offset": 0, "chunkSize": 65536})
+                ("POST", "/api/uploads") => {
+                    // Parts of 8 bytes, so a file goes in several.
+                    let b: serde_json::Value = serde_json::from_slice(r.body.as_deref().unwrap()).unwrap();
+                    let size = b["size"].as_u64().unwrap();
+                    assert_eq!(b["sha256"].as_str().map(str::len), Some(64), "the server checks the hash");
+                    json!({"id": format!("up{}", requests.lock().unwrap().len()), "part_size": 8, "part_count": size.div_ceil(8), "received": []})
                 }
-                ("PATCH", _) => {
-                    let offset: usize = r.headers.iter().find(|(k, _)| k == "Upload-Offset").unwrap().1.parse().unwrap();
-                    json!({"offset": offset + r.body.as_ref().map_or(0, Vec::len)})
-                }
+                ("PUT", p) if p.contains("/parts/") => json!({"part": p.rsplit('/').next(), "size": r.body.as_ref().map_or(0, Vec::len)}),
                 ("POST", p) if p.ends_with("/complete") => json!({"attachment":{"id":"a"}}),
                 _ => json!({}),
             };
@@ -2522,7 +2523,8 @@ mod tests {
         let requests = requests.lock().unwrap();
         let ticket = requests.iter().find(|r| r.url.ends_with("/api/tickets") && r.method == "POST").unwrap();
         assert!(ticket.headers.iter().any(|(k, v)| k == "Authorization" && v == "Bearer tkt_good"));
-        let uploaded: Vec<u8> = requests.iter().filter(|r| r.method == "PATCH").flat_map(|r| r.body.clone().unwrap_or_default()).collect();
+        let uploaded: Vec<u8> = requests.iter().filter(|r| r.method == "PUT").flat_map(|r| r.body.clone().unwrap_or_default()).collect();
+        assert!(requests.iter().filter(|r| r.method == "PUT").all(|r| r.body.as_ref().is_some_and(|b| !b.is_empty() && b.len() <= 8)));
         assert!(uploaded.windows(19).any(|w| w == b"SECRET-DESIGN-BYTES"), "the ticked design was uploaded");
         let _ = std::fs::remove_dir_all(&dir);
 
