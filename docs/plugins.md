@@ -25,6 +25,17 @@ are lists. Entries may declare named menu or ribbon slots; each app decides
 which slots exist and draws forms from the input schemas. Plugins ship no UI
 code. SolidCraft retains approval, cancellation and plugin preferences.
 
+A string with a fixed set of values becomes a dropdown. With `enum` the dropdown shows the values
+themselves; to show words instead, list the options as `oneOf`, each `{"const": value, "title": shown}`
+(with an optional `description`). The dropdown shows the titles and the plugin receives the value:
+
+```json
+"up_axis": {"type": "string", "title": "Up axis", "default": "as_is", "oneOf": [
+  {"const": "as_is", "title": "As in the file"},
+  {"const": "stand_up", "title": "Stand up (Y-up to Z-up)"}
+]}
+```
+
 ## Versions
 
 The WIT package is `craft:plugin@0.1.0`. Today's surface is one capability, `commands@0.1`:

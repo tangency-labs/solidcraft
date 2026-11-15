@@ -3140,6 +3140,12 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
     if (m == 1) != opts.multiple {
         opts.multiple = m == 1;
         d.inputs = if opts.multiple { vec![SelInput::new("Points", selection::POINTS, true)] } else { single_hole_inputs() };
+        if !opts.multiple
+            && d.editing.is_some()
+            && let Some(face) = d.inputs.first_mut()
+        {
+            face.multi = false;
+        }
         d.active = 0;
         d.extra.remove("direction");
     }
