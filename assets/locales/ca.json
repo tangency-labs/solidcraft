@@ -6233,6 +6233,7 @@
   "ui.plugin_dialog_run": "Executa",
   "ui.plugin_dialog_running": "S'està executant…",
   "ui.plugin_dialog_unsupported": "Aquesta entrada s'ha d'executar des de l'agent o la CLI.",
+  "ui.plugin_menu_all_off": "Tots els complements estan desactivats a Preferències › Complements",
   "ui.plugin_menu_empty": "No hi ha complements instal·lats",
   "ui.plugin_menu_install": "Instal·lar complement…",
   "ui.plugin_menu_name": "Menú Complements",

@@ -747,6 +747,39 @@ impl CompositeCurve {
         Ok((knots, mults))
     }
 
+    /// The union of the segments' [`crate::curve::curve::Curve::certified_bounding_box`]es over the parts of
+    /// `interval` they cover, as [`Self::calculate_bounding_box`] maps them (not upstream);
+    /// `None` when a covered segment has none.
+    ///
+    /// # Errors
+    ///
+    /// Those of the segments' boxes.
+    pub(crate) fn certified_bounding_box(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+    ) -> Result<Option<Extent3d>> {
+        let mut bbox = Extent3d::new();
+        bbox.init();
+        let mut next_comp_start: Option<f64> = None;
+        for s in &self.segments {
+            let tgt_ivl = fixed_segment_target_interval(
+                s.curve.natural_interval(),
+                s.same_sense,
+                *interval,
+                &mut next_comp_start,
+            );
+            if tgt_ivl.has_negative_length() {
+                continue;
+            }
+            let Some(segment) = s.curve.certified_bounding_box(k, &tgt_ivl)? else {
+                return Ok(None);
+            };
+            bbox = bbox.union(&segment);
+        }
+        Ok(Some(bbox))
+    }
+
     /// `CalculateBoundingBox`: the union of the segments' boxes over `interval`.
     ///
     /// Each valid segment's composite span is stacked end to end starting at the first

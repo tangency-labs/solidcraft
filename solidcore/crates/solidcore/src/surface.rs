@@ -14,6 +14,7 @@ pub mod bend_volume;
 pub mod cone;
 pub mod continued;
 pub mod curve_bounded_surface;
+pub mod cylinder_wall;
 pub mod extend;
 pub mod face_evaluation;
 pub mod face_surface;

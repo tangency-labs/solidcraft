@@ -53,6 +53,27 @@ pub struct RenderBrowser {
     pub open: bool,
 }
 
+/// Show or hide one of the Render window's two panels: the Inspector (`view.render_inspector`) or
+/// the Shots strip (`view.shots_strip`). Both read the one flag the same way, so one contract
+/// describes both calls. Unlike the viewport toggles below, neither command has a toggle form: the
+/// flag is required, and the schema says so.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RenderPanelVisibilityParams {
+    /// True shows the panel, false hides it.
+    pub visible: bool,
+}
+
+/// What the two Render window panels answer: the flag they were given. The window applies it; it is
+/// per-document UI state and never saved with the design.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RenderPanelVisibilityResult {
+    pub visible: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// Latch or release the viewport's Zoom tool. With no flag, the UI toggles it.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -578,6 +599,30 @@ pub struct AmbientOcclusionParams {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AmbientOcclusionResult {
     /// Whether it is on now.
+    pub enabled: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+reads!(perspective_enabled -> bool, "enabled must be a boolean");
+
+/// `view.perspective`: draw the view in perspective or orthographic. A display setting the app
+/// keeps, not saved with the design; a sketch being edited is always drawn orthographic.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = enabled_required)]
+pub struct PerspectiveParams {
+    // Optional in the type and required in the schema (`enabled_required`), as `mode` above.
+    /// True draws the view in perspective, false orthographic.
+    #[serde(default, deserialize_with = "perspective_enabled", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub enabled: Option<bool>,
+}
+
+/// What `view.perspective` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PerspectiveResult {
+    /// Whether the view is drawn in perspective now.
     pub enabled: bool,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

@@ -17,6 +17,10 @@
 //! parameter is the eccentric angle). A cylinder or cone is the arcs times a degree-1 line along the
 //! axis; a sphere the arcs times arcs of latitude (from `−π/2` to `π/2`); a torus the arcs times
 //! the arcs of its tube. A line is the degree-1 B-spline on its own parameter.
+//!
+//! A face that winds round its axis more than a turn (a thread's flank) has a form of as many
+//! quarters as it winds, up to 64 turns ([`wound_quarters`]): it does not close on itself, and a
+//! turn more is four more form parameters.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 #![allow(clippy::type_complexity)] // knots with weighted arc points
@@ -29,6 +33,18 @@ use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_8, TAU};
 
 /// Rounding room on an angle at a quarter's end.
 const SLACK: f64 = 1e-12;
+
+/// Rounding room on a turn, as a fraction of it: the one [`extent`] and [`face_arcs`] already
+/// use to tell a whole turn from less.
+const TURN_ROUNDING: f64 = 1e-9;
+
+/// Whether a face's box ([`extent`]) goes round its axis more than a turn. [`extent`] clamps a
+/// box to one turn unless its angle runs past a turn by more than rounding and the angle the
+/// edges' distance off the surface makes, so a box wider than a turn and rounding is a face that
+/// winds ([`wound_surface`]).
+pub fn winds([u, _]: [[f64; 2]; 2]) -> bool {
+    u[1] - u[0] > TAU * (1.0 + TURN_ROUNDING)
+}
 
 /// The quarter arc's parameter `u` in `[0, 1]` at angle `ψ` in `[0, π/2]` from its start: the
 /// arc with ends `±π/4` from its bisector and middle weight `cos π/4` has
@@ -111,6 +127,27 @@ fn face_quarters(a: [f64; 2], reach: f64) -> Option<((f64, usize), [f64; 2])> {
     Some((grid, params(a, grid)))
 }
 
+/// The most quarters a face that winds round its axis may take (64 turns).
+const MAX_WOUND_QUARTERS: usize = 256;
+
+/// The quarters of an angle interval of more than a turn (a face that winds round its axis, a
+/// thread's flank), and its domain on them. The form is not closed on itself: its quarters run
+/// on from the one the face starts in, so a whole turn more is exactly four more form
+/// parameters, and a pcurve moved a turn is moved four.
+fn wound_quarters([a0, a1]: [f64; 2], reach: f64) -> Option<((f64, usize), [f64; 2])> {
+    if !valid_interval([a0, a1]) {
+        return None;
+    }
+    let (a0, a1) = (on_quarter_line(a0, reach), on_quarter_line(a1, reach));
+    let q0 = quarter_of(a0);
+    let n = ((a1 / FRAC_PI_2 - SLACK).ceil() - q0).max(1.0);
+    if !(n <= MAX_WOUND_QUARTERS as f64) {
+        return None;
+    }
+    let grid = (q0, n as usize);
+    Some((grid, params([a0, a1], grid)))
+}
+
 /// The form parameters of an angle interval on the quarters `quarters` chose for it (its ends kept
 /// on them: an end within rounding past a quarter's end stays in that quarter).
 fn params([a0, a1]: [f64; 2], (q0, n): (f64, usize)) -> [f64; 2] {
@@ -159,7 +196,13 @@ fn face_arcs(
     a: [f64; 2],
     reach: f64,
     own: bool,
+    winds: bool,
 ) -> Option<((Vec<f64>, Vec<([f64; 2], f64)>), [f64; 2])> {
+    // Only [`wound_surface`] lets an angle wind; every other form refuses more than a turn.
+    if winds && a[1] - a[0] > TAU * (1.0 + TURN_ROUNDING) {
+        let (grid, d) = wound_quarters(a, reach)?;
+        return Some((arcs(grid.0, grid.1), d));
+    }
     if !valid_angles(a) {
         return None;
     }
@@ -425,7 +468,26 @@ pub fn surface_within(
     domain: [[f64; 2]; 2],
     tolerance: f64,
 ) -> Option<(Surface, [[f64; 2]; 2])> {
-    surface_on(s, domain, tolerance, false)
+    surface_on(s, domain, tolerance, false, false)
+}
+
+/// The NURBS form of a cylinder or cone face over `domain` (as [`surface_within`]) that winds
+/// round its axis more than a turn (a thread's flank, up to 64 turns): a form that does not
+/// close on itself, as many quarters as the face winds. `None` for any other surface, and for a
+/// domain of a turn or less ([`winds`]: use [`surface_within`]). Only the STEP reader's winding
+/// path takes this: [`surface`], [`surface_within`] and [`surface_on_own_arcs`] refuse more than
+/// a turn for every form.
+pub fn wound_surface(
+    s: &Surface,
+    domain: [[f64; 2]; 2],
+    tolerance: f64,
+) -> Option<(Surface, [[f64; 2]; 2])> {
+    match s {
+        Surface::Cylinder { .. } | Surface::Cone { .. } if winds(domain) => {
+            surface_on(s, domain, tolerance, false, true)
+        }
+        _ => None,
+    }
 }
 
 /// The NURBS form of a cylinder, cone, sphere or torus face over `domain` (as [`surface`]) whose
@@ -446,7 +508,7 @@ pub fn surface_on_own_arcs(
         Surface::Cylinder { .. }
         | Surface::Cone { .. }
         | Surface::Sphere { .. }
-        | Surface::Torus { .. } => surface_on(s, domain, tolerance, true),
+        | Surface::Torus { .. } => surface_on(s, domain, tolerance, true, false),
         _ => None,
     }
 }
@@ -456,6 +518,7 @@ fn surface_on(
     [u, v]: [[f64; 2]; 2],
     tolerance: f64,
     own: bool,
+    wound: bool,
 ) -> Option<(Surface, [[f64; 2]; 2])> {
     if let Surface::PlacedRevolution {
         profile,
@@ -519,7 +582,7 @@ fn surface_on(
         };
     }
     let (reach_u, reach_v) = reaches(s, v, tolerance);
-    let ((u_knots, ring), fu) = face_arcs(u, reach_u, own)?;
+    let ((u_knots, ring), fu) = face_arcs(u, reach_u, own, wound)?;
     // The ring of arcs times a profile `(control, weight)` mapped to (radial, axial) about the
     // frame: a rational tensor product, its weights the products.
     let net = |f: &Frame,
@@ -590,7 +653,7 @@ fn surface_on(
             minor_radius,
             tube_start,
         } => {
-            let ((v_knots, tube), fv) = face_arcs(v, reach_v, own)?;
+            let ((v_knots, tube), fv) = face_arcs(v, reach_v, own, false)?;
             // The tube's arcs turned on by its start (a rotation of the control points, exact).
             let (ts, tc) = tube_start.sin_cos();
             let homogeneous = net(frame, &tube, &|[c, s]| {
@@ -845,6 +908,14 @@ pub fn edge_on<'a>(
 /// Points per edge along a loop taken for a face's extent.
 const EXTENT_POINTS: usize = 32;
 
+/// How many times the step that reads an edge's rate round a period is halved to keep it short of
+/// a quarter period: from a millionth of the span, 2^-30 of that reads an edge of 2^50 turns.
+const PROBE_HALVINGS: usize = 30;
+
+/// The most samples one edge takes: 2048 turns at eight a turn (an edge that winds more is not
+/// measured).
+const MAX_EXTENT_POINTS: usize = 1 << 14;
+
 /// The largest value of `f` on `[a, b]`, where it rises to one peak and falls (golden section, to
 /// rounding; the ends count).
 fn golden_max(f: &dyn Fn(f64) -> f64, a: f64, b: f64) -> f64 {
@@ -929,10 +1000,99 @@ fn extent_in(
                 }
                 Some(q)
             };
-            let mut samples: Vec<(f64, [f64; 2], [bool; 2], usize)> =
-                Vec::with_capacity(EXTENT_POINTS + 1);
-            for k in 0..=EXTENT_POINTS {
-                let f = k as f64 / EXTENT_POINTS as f64;
+            // Samples enough that each step is well under a turn round a periodic direction: a
+            // step of a turn or more reads as none (a thread's flank wound 32 times, sampled 32
+            // times, would be one point). Each sample's rate round the direction is taken at the
+            // sample itself, a step along the edge apart, so no aliasing is in it.
+            let (lowest, highest) = (t0.min(*t1), t0.max(*t1));
+            let span = highest - lowest;
+            let mut points = EXTENT_POINTS;
+            if span > 0.0
+                && matches!(label, Surface::Cylinder { .. } | Surface::Cone { .. })
+                && period.iter().any(Option::is_some)
+            {
+                let mut turns = 0.0_f64;
+                let mut at_apex = false;
+                for k in 0..=EXTENT_POINTS {
+                    let t = lowest + span * k as f64 / EXTENT_POINTS as f64;
+                    let Some(q) = at(t, None) else { continue };
+                    // The angle round a cone's axis is not defined at its apex: a sample there
+                    // reads no rate (an edge along a generator to the apex does not wind).
+                    if matches!(label, Surface::Cone { .. }) {
+                        match eval.pole_within(q, reach) {
+                            Ok(p) if p.iter().any(|p| *p) => {
+                                at_apex = true;
+                                continue;
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                *refused = Some(e);
+                                return None;
+                            }
+                        }
+                    }
+                    // The rate is read over a step short enough that the point has advanced less
+                    // than a quarter of a period: a step of a whole turn or more (an edge of a
+                    // million turns, probed over a millionth of its span) projects back onto the
+                    // point it started from and reads as no winding. A step is halved until it
+                    // is short enough; an edge that still advances that far over the smallest
+                    // step is wound beyond what can be measured and is refused.
+                    let mut step = span * 1e-6;
+                    let mut read = None;
+                    let mut unplaced = false;
+                    for _ in 0..PROBE_HALVINGS {
+                        let other = if t + step <= highest {
+                            t + step
+                        } else {
+                            t - step
+                        };
+                        let Some(r) = at(other, Some(q)) else {
+                            unplaced = true;
+                            break;
+                        };
+                        let too_far = (0..2).any(|d| {
+                            matches!(period.get(d), Some(Some(per))
+                                if (ix(&r, d) - ix(&q, d)).abs() >= 0.25 * per)
+                        });
+                        if !too_far {
+                            read = Some((r, step));
+                            break;
+                        }
+                        step *= 0.5;
+                    }
+                    let Some((r, step)) = read else {
+                        // A point that could not be placed is skipped, as before; one that
+                        // still advances a quarter period over the smallest step is wound
+                        // beyond what can be measured: the edge is refused.
+                        if unplaced {
+                            continue;
+                        }
+                        return None;
+                    };
+                    for d in 0..2 {
+                        if let Some(Some(per)) = period.get(d) {
+                            turns = turns.max((ix(&r, d) - ix(&q, d)).abs() / step * span / per);
+                        }
+                    }
+                }
+                // An edge through the apex that winds elsewhere has no angle there to follow.
+                if at_apex && turns > 1.0 {
+                    *refused = Some(EvalError::Invalid(
+                        "a face that winds round a cone's axis with an edge through its apex"
+                            .into(),
+                    ));
+                    return None;
+                }
+                // Eight samples a turn: no step is more than an eighth.
+                let needed = (8.0 * turns).ceil();
+                if !needed.is_finite() || needed > MAX_EXTENT_POINTS as f64 {
+                    return None;
+                }
+                points = points.max(needed as usize);
+            }
+            let mut samples: Vec<(f64, [f64; 2], [bool; 2], usize)> = Vec::new();
+            for k in 0..=points {
+                let f = k as f64 / points as f64;
                 let t = if *forward {
                     t0 * (1.0 - f) + t1 * f
                 } else {
@@ -1052,14 +1212,25 @@ fn extent_in(
             *ixm(&mut hi, d) = ix(&hi, d).max(ix(&l_hi, d) + shift);
         }
     }
-    // At most one turn round a periodic direction; a boundary that never goes round it (a face
-    // bounded by its seam alone) covers the whole turn from there.
+    // At most one turn round a periodic direction, to rounding; a boundary that never goes round
+    // it (a face bounded by its seam alone) covers the whole turn from there. On a cylinder or
+    // cone, a boundary that goes round the axis more than a turn keeps its box (a thread's flank
+    // winds several): clamped to a turn, the face's edges would lie off any form made over it.
+    // "More than a turn" allows what a turn's box can come to: rounding, and twice the angle
+    // `reach` makes at the face's widest circle (its edges lie off the surface by up to `reach`,
+    // so each end of the box may be that far out). No other constant is chosen.
+    let may_wind = matches!(label, Surface::Cylinder { .. } | Surface::Cone { .. });
+    let (reach_angle, _) = reaches(label, [lo[1], hi[1]], reach);
     for d in 0..2 {
         if let Some(Some(per)) = period.get(d) {
-            *ixm(&mut hi, d) = if ix(&hi, d) - ix(&lo, d) <= 1e-9 * per {
+            let span = ix(&hi, d) - ix(&lo, d);
+            let room = per * TURN_ROUNDING + 2.0 * reach_angle;
+            *ixm(&mut hi, d) = if span <= 1e-9 * per {
                 ix(&lo, d) + per
-            } else {
+            } else if !may_wind || d != 0 || span <= per + room {
                 ix(&hi, d).min(ix(&lo, d) + per)
+            } else {
+                ix(&hi, d)
             };
         }
     }

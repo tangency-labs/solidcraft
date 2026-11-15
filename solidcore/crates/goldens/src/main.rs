@@ -4,7 +4,7 @@
 //! cargo run -p goldens -- --all --goldens [--reverse] [--goldens-dir <dir>]   # check every
 //!          unit against its golden (`goldens::golden`)
 //! cargo run -p goldens -- --unit <id> [--unit <id>...] --goldens   # some units (globs allowed)
-//! cargo run -p goldens -- --unit <id> --bless   # rewrite the unit's golden from this run
+//! cargo run -p goldens -- --unit <id> --bless   # rewrite the unit's changed and added cases
 //! cargo run -p goldens -- --list
 //! cargo run -p goldens -- --all --digest-dir <dir> [--digest-debug]   # one `<dir>/<unit>.digest`
 //!          per unit (native vs wasm32: scripts/wasm-digest.sh)
@@ -59,7 +59,7 @@ struct Args {
     digest_debug: bool,
     /// `--goldens`: check each unit against its golden.
     goldens: bool,
-    /// `--bless`: rewrite each unit's golden from this run.
+    /// `--bless`: rewrite each unit's changed and added cases from this run.
     bless: bool,
     /// `--goldens-dir`: where the goldens live (default `crates/goldens/expected`).
     goldens_dir: Option<PathBuf>,
@@ -315,7 +315,8 @@ fn digest_main(
 }
 
 /// `--goldens`: the Rust side of each unit, checked against `DIR/<unit>.jsonl`; with
-/// `--bless`, the goldens are rewritten from this run instead (with `--filter`, only the cases
+/// `--bless`, the goldens are rewritten from this run instead: changed cases are rewritten,
+/// added ones added, and unchanged ones keep their old line (with `--filter`, only the cases
 /// it ran; a unit with a case whose Rust side fails as a harness error or panics is not
 /// blessed). Prints one line per unit and, for a unit that changed, its first changes.
 fn goldens_main(
