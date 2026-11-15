@@ -3975,6 +3975,11 @@ impl SolveApp {
         finite_input(raw);
         self.hold_click_after_typing(raw);
         issue_report::hold_input(self, raw);
+        // Over a quiet view, pointer motion asks egui for no frame after this one: the window
+        // asked for this one only if the motion lit up something new
+        // (`viewport::motion_changes_nothing`). Queued control-channel input keeps the frames
+        // coming as before, one pointer event a frame.
+        raw.repaint_on_pointer_move = self.viewport.quiet_motion.is_none() || !self.synthetic.is_empty() || !self.held_click.is_empty();
     }
 
     /// A pointer button after typing in the same frame (a slow frame) waits for the next frame,
