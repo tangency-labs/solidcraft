@@ -982,16 +982,25 @@ fn planes_line(p: Vec3, a: Tangent, b: Tangent, tangent_sine: f64) -> Option<Tra
     let (na, nb) = (Dv::constant(a.raw), Dv::constant(b.raw));
     let ha = Dv::constant(a.point).sub(pv).dot(na);
     let hb = Dv::constant(b.point).sub(pv).dot(nb);
-    line_of(pv, (na, ha), (nb, hb), tangent_sine)
+    line_of(pv, (na, ha), (nb, hb), Some(tangent_sine))
 }
 
 /// [`planes_line`] of the planes `na·(x − p) = ha` and `nb·(x − p) = hb`, their normals and
-/// heights over `p` enclosed (a radical plane's, [`quadric::Radical`]).
-fn line_of(pv: Dv, (na, ha): (Dv, Di), (nb, hb): (Dv, Di), tangent_sine: f64) -> Option<Trace> {
+/// heights over `p` enclosed (a radical plane's, [`quadric::Radical`]). With `tangent_sine`,
+/// planes within it of parallel meet in no line near `p`, as faces do; without it (an
+/// auxiliary plane, which is no face) only a determinant not certified apart from zero
+/// gives `None`.
+fn line_of(
+    pv: Dv,
+    (na, ha): (Dv, Di),
+    (nb, hb): (Dv, Di),
+    tangent_sine: Option<f64>,
+) -> Option<Trace> {
     let (aa, bb, c) = (na.dot(na), nb.dot(nb), na.dot(nb));
     let d = na.cross(nb);
     let det = d.dot(d);
-    let parallel = det.v.lo <= (tangent_sine * tangent_sine).max(EFF_ZERO) * aa.v.hi * bb.v.hi;
+    let parallel = tangent_sine
+        .is_some_and(|sine| det.v.lo <= (sine * sine).max(EFF_ZERO) * aa.v.hi * bb.v.hi);
     if parallel || !det.excludes_zero() {
         return None;
     }
@@ -1925,20 +1934,24 @@ fn corner_with_quadric(
 
 /// Where the plane `a` and two cylinders on one axis direction, `q` and another, meet at a
 /// corner, from the vertex `p`: where the line of `a` and their radical plane `radical`
-/// meets `q` ([`quadric::Radical`], [`corner_with_quadric`]).
+/// meets `q` ([`quadric::Radical`], [`corner_with_quadric`]). The radical plane is no face,
+/// so a plane a small angle off it still meets it on a line, however far from the vertex
+/// (the tangency tolerance does not apply); a line not established on the enclosures (the
+/// two planes' determinant not certified apart from zero) is not decided, never nowhere.
 fn corner_with_cylinders(
     p: Vec3,
     a: Tangent,
     radical: &quadric::Radical,
     q: &Implicit,
-    tangent_sine: f64,
     tolerance: f64,
 ) -> CornerMeeting {
     let pv = Dv::constant(p);
     let na = Dv::constant(a.raw);
     let ha = Dv::constant(a.point).sub(pv).dot(na);
-    let line = line_of(pv, (na, ha), radical.over(pv), tangent_sine);
-    line_with_quadric(line, q, tolerance)
+    match line_of(pv, (na, ha), radical.over(pv), None) {
+        Some(line) => line_with_quadric(Some(line), q, tolerance),
+        None => CornerMeeting::Uncertified,
+    }
 }
 
 /// [`corner_with_quadric`] on the line where two planes meet near the vertex, `None` where
@@ -2650,14 +2663,8 @@ fn corner(
                                 // two cylinders on one axis direction: where the plane's line
                                 // with their radical plane meets the first
                                 Some(radical) => {
-                                    let meeting = corner_with_cylinders(
-                                        p,
-                                        plane,
-                                        &radical,
-                                        a,
-                                        at.tangent_sine,
-                                        at.tolerance,
-                                    );
+                                    let meeting =
+                                        corner_with_cylinders(p, plane, &radical, a, at.tolerance);
                                     match meeting {
                                         CornerMeeting::Within(reach) => Some(reach),
                                         CornerMeeting::Nowhere => None,
@@ -4390,8 +4397,27 @@ mod tests {
         let radical = quadric::Radical::of(&bore, &round).unwrap();
         // the corner meets at (12, 0, 2)
         let corner = sqrt(0.5 * 0.5 + 0.25 * 0.25 + 2.0 * 2.0);
-        match corner_with_cylinders(p, floor, &radical, &bore, 1e-3, 1e-6) {
+        match corner_with_cylinders(p, floor, &radical, &bore, 1e-6) {
             CornerMeeting::Within(r) => assert!(corner <= r && r < corner + 1e-6, "{r}"),
+            other => panic!("{other:?}"),
+        }
+        // A plane within the tangency tolerance of their radical plane still meets it on a
+        // line: cylinders on Z about (∓1, 0, 0) widened from 1.9 to 2 (radical plane
+        // x = 0), and the plane x + 0.0001 z = 0 moved to 0.0001, meet at (0, √3, 1),
+        // over 1 from the old vertex (0, √2.61, 0).
+        let left = cylinder(-1.0, Vec3::Z, 2.0);
+        let right = cylinder(1.0, Vec3::Z, 2.0);
+        let raw = Vec3::new(1.0, 0.0, 1e-4);
+        let leaning = Tangent {
+            point: Vec3::new(1e-4, 0.0, 0.0),
+            normal: raw.unitize().unwrap(),
+            raw,
+        };
+        let radical = quadric::Radical::of(&left, &right).unwrap();
+        let old = Vec3::new(0.0, sqrt(1.9 * 1.9 - 1.0), 0.0);
+        let far = (Vec3::new(0.0, sqrt(3.0), 1.0) - old).length();
+        match corner_with_cylinders(old, leaning, &radical, &left, 1e-6) {
+            CornerMeeting::Within(r) => assert!(far - 1e-9 <= r && r < far + 1e-6, "{r}"),
             other => panic!("{other:?}"),
         }
         // the edge's normal section at (12.5, 0.25, 1) across the axis meets at (12, 0, 1)
