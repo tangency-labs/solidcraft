@@ -698,3 +698,213 @@ fn faces_lie_on_one_cone_by_its_apex_axis_and_half_angle() {
     assert!(!a.same(&cone(Vec3::new(1e-3, 0.0, 0.0), Vec3::Z, 0.5), 1e-6), "another apex");
     assert!(!a.same(&Curved::Sphere(Sphere { center: Vec3::ZERO, radius: 1.0 }), 1e-6));
 }
+
+// A sphere's contour and a cone's silhouette end exactly where the faces do, whatever curves the
+// faces' rim edges are (#13011). Each body is #12910's (or #13011's), turned so its sphere sits at
+// the origin and its cone's axis runs along z; each expected value is a closed form.
+
+/// `a` with `b` joined to it, or cut from it.
+fn joined(a: solidcraft_kernel::Body, b: solidcraft_kernel::Body) -> solidcraft_kernel::Body {
+    solidcraft_kernel::boolean(&a, &b, solidcraft_kernel::BoolOp::Union).unwrap().unwrap()
+}
+fn less(a: solidcraft_kernel::Body, b: solidcraft_kernel::Body) -> solidcraft_kernel::Body {
+    solidcraft_kernel::boolean(&a, &b, solidcraft_kernel::BoolOp::Cut).unwrap().unwrap()
+}
+
+/// The cone with its base of `radius` at z = 0 and its top of `top` (0: an apex) `height` above,
+/// revolved about z as a design's cone is.
+fn cone_solid(radius: f64, top: f64, height: f64) -> solidcraft_kernel::Body {
+    let mut section = vec![Vec2::ZERO, Vec2::new(radius, 0.0), Vec2::new(top, height)];
+    if top > 0.0 {
+        section.push(Vec2::new(0.0, height));
+    }
+    let region = solidcore_record::Region2 { outer: solidcore_record::Loop2::polygon(&section), holes: vec![] };
+    let plane = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+    solidcraft_kernel::revolve(&plane, &[region], Vec2::ZERO, Vec2::Y, TAU).unwrap().pop().unwrap()
+}
+
+/// A ball of `radius` at the origin on a boss of radius 5 along -z, from z = -20 to 0.
+fn ball_on_boss(radius: f64) -> solidcraft_kernel::Body {
+    joined(
+        solidcraft_kernel::sphere(Vec3::ZERO, radius).unwrap(),
+        solidcraft_kernel::cylinder(Vec3::new(0.0, 0.0, -20.0), Vec3::Z, 5.0, 20.0).unwrap(),
+    )
+}
+
+/// A ball of radius 12 at the origin on the box from (-40, -20, -30) whose top is z = `top`.
+fn cap_on_box(top: f64) -> solidcraft_kernel::Body {
+    joined(
+        solidcraft_kernel::sphere(Vec3::ZERO, 12.0).unwrap(),
+        solidcraft_kernel::box_solid(Vec3::new(-40.0, -20.0, -30.0), Vec3::new(40.0, 20.0, top)).unwrap(),
+    )
+}
+
+/// The arc of the contour of the sphere of `radius` at the origin, seen on the plane of `x` and
+/// `y`, that its faces on `b` hold ([`contour_on`]).
+fn contour_arc(b: &solidcraft_kernel::Body, radius: f64, x: Vec3, y: Vec3) -> Option<(f64, f64)> {
+    let b = ModelBody::new("B".into(), b.clone(), 1);
+    let faces: Vec<usize> = curved_of(&b).iter().enumerate().filter(|(_, c)| matches!(c, Some(Curved::Sphere(_)))).map(|(f, _)| f).collect();
+    let seen = Plane { origin: Vec3::ZERO, x, y };
+    contour_on(&b, &seen, &Sphere { center: Vec3::ZERO, radius }, &faces).unwrap()
+}
+
+/// The piece of the silhouette from `apex` towards `towards`, of the cone along -z whose faces on
+/// `b` hold it ([`ray_on`]), as distances from the apex, out to 40.
+fn silhouette_piece(b: &solidcraft_kernel::Body, apex: Vec3, towards: Vec3) -> Option<(f64, f64)> {
+    let b = ModelBody::new("B".into(), b.clone(), 1);
+    let faces: Vec<usize> = curved_of(&b).iter().enumerate().filter(|(_, c)| matches!(c, Some(Curved::Cone(_)))).map(|(f, _)| f).collect();
+    let way = (towards - apex).normalized().unwrap();
+    ray_on(&b, apex, -Vec3::Z, way, 40.0, &faces).unwrap()
+}
+
+fn reads(got: Option<(f64, f64)>, want: (f64, f64)) -> bool {
+    got.is_some_and(|(a, b)| (a - want.0).abs() <= 1e-9 && (b - want.1).abs() <= 1e-9)
+}
+
+/// The front view's contour (x along X, y along Z) and the one seen along z.
+const FRONT: (Vec3, Vec3) = (Vec3::X, Vec3::Z);
+const ALONG_Z: (Vec3, Vec3) = (Vec3::X, Vec3::Y);
+
+/// A ball of radius 6 on a boss of radius 5: its faces end at the circle z = -sqrt 11, so from the
+/// front its contour is on them from 2 pi - asin(sqrt 11 / 6) round to pi + asin(sqrt 11 / 6). Seen
+/// along the boss the rim's plane is parallel to the contour's: the whole contour.
+#[test]
+fn a_ball_on_a_boss_reads_its_contour_to_the_boss() {
+    let b = ball_on_boss(6.0);
+    let front = contour_arc(&b, 6.0, FRONT.0, FRONT.1);
+    assert!(reads(front, (5.697499763722435, 4.312963740504095)), "{front:?}");
+    let along = contour_arc(&b, 6.0, ALONG_Z.0, ALONG_Z.1);
+    assert!(reads(along, (0.0, TAU)), "{along:?}");
+}
+
+/// A sphere reads SØ when its faces have no rim and SR when they have one: solidcore's rim
+/// ([`rim_edges`]), the one [`contour_on`] cuts with. A whole ball has none; a ball on a boss ends
+/// at the boss.
+#[test]
+fn a_sphere_reads_its_diameter_only_without_a_rim() {
+    let rim = |b: &solidcraft_kernel::Body| {
+        let b = ModelBody::new("B".into(), b.clone(), 1);
+        let faces: Vec<usize> = curved_of(&b).iter().enumerate().filter(|(_, c)| matches!(c, Some(Curved::Sphere(_)))).map(|(f, _)| f).collect();
+        assert!(!faces.is_empty());
+        rim_edges(&b, &faces).unwrap()
+    };
+    assert_eq!(rim(&solidcraft_kernel::sphere(Vec3::ZERO, 6.0).unwrap()), Vec::<usize>::new());
+    assert!(!rim(&ball_on_boss(6.0)).is_empty());
+}
+
+/// #12910's notch behind the ball, on a ball of radius 7: the box from (-4, 2, 4), 8 by 8 by 6.
+/// Its rims on the sphere lie at y >= 2, so they never cut the front contour (y = 0): the arc ends
+/// at the boss alone, where z = -sqrt 24.
+#[test]
+fn a_notch_behind_the_ball_cuts_nothing() {
+    let b = less(ball_on_boss(7.0), solidcraft_kernel::box_solid(Vec3::new(-4.0, 2.0, 4.0), Vec3::new(4.0, 10.0, 10.0)).unwrap());
+    let front = contour_arc(&b, 7.0, FRONT.0, FRONT.1);
+    assert!(reads(front, (5.507991933869225, 4.691979400210516)), "{front:?}");
+}
+
+/// A ball of radius 12 on a box whose top is z = 8: from the front its contour is on the cap from
+/// asin(2/3) to pi - asin(2/3). From above the contour lies inside the box: off the faces.
+#[test]
+fn a_cap_on_a_box_reads_above_the_box() {
+    let b = cap_on_box(8.0);
+    let front = contour_arc(&b, 12.0, FRONT.0, FRONT.1);
+    assert!(reads(front, (0.7297276562269663, 1.6821373411358604)), "{front:?}");
+    assert_eq!(contour_arc(&b, 12.0, ALONG_Z.0, ALONG_Z.1), None);
+}
+
+/// #12910's narrow caps of 11 and 12 degrees, either side of one of the old 32 steps: the box's
+/// top at z = 12 cos(half), so the arc runs from pi/2 - half and is as wide as the cap.
+#[test]
+fn narrow_caps_read_as_wide_as_they_are() {
+    for (top, want) in
+        [(11.944754380406145, (1.4748032179352084, 0.19198621771937624)), (11.934262744419279, (1.4660765716752369, 0.20943951023931956))]
+    {
+        let front = contour_arc(&cap_on_box(top), 12.0, FRONT.0, FRONT.1);
+        assert!(reads(front, want), "{top}: {front:?}");
+    }
+}
+
+/// #12910's cone on a box: base radius 10 on the box's top (z = 0), apex `height` above. Each
+/// silhouette is on the cone from the apex to the base circle, sqrt(100 + height^2) along it, from
+/// the front and from the right; the base circle's other crossing is the mirror silhouette's.
+#[test]
+fn a_cone_on_a_box_reads_from_its_apex_to_its_base() {
+    for (height, slant) in [(20.0, 22.360679774997898), (10.0, 14.142135623730951)] {
+        let b =
+            joined(cone_solid(10.0, 0.0, height), solidcraft_kernel::box_solid(Vec3::new(-40.0, -20.0, -30.0), Vec3::new(40.0, 20.0, 0.0)).unwrap());
+        for towards in [Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0)] {
+            let piece = silhouette_piece(&b, Vec3::new(0.0, 0.0, height), towards);
+            assert!(reads(piece, (0.0, slant)), "{height}, {towards:?}: {piece:?}");
+        }
+    }
+}
+
+/// #12910's half cone: the cone (radius 10, 20 high) less its half where x >= 0. The cut's straight
+/// edges meet the silhouettes' plane only at the apex, so the right silhouette is off the faces;
+/// the left one is on them from the apex to the base, sqrt 500 along it.
+#[test]
+fn half_a_cone_keeps_one_silhouette() {
+    let b = less(cone_solid(10.0, 0.0, 20.0), solidcraft_kernel::box_solid(Vec3::new(0.0, -15.0, -1.0), Vec3::new(15.0, 15.0, 24.0)).unwrap());
+    let apex = Vec3::new(0.0, 0.0, 20.0);
+    assert_eq!(silhouette_piece(&b, apex, Vec3::new(10.0, 0.0, 0.0)), None);
+    let left = silhouette_piece(&b, apex, Vec3::new(-10.0, 0.0, 0.0));
+    assert!(reads(left, (0.0, 22.360679774997898)), "{left:?}");
+}
+
+/// #13011: a frustum (base 4, top 1, 6 high, its apex at z = 8) less the box from x = 1.05. On the
+/// silhouette (4t, 0, 8 - 8t) the faces hold t from 1/4 (the top circle) to 1.05/4 (the cut's
+/// hyperbola): 0.0125 of its sqrt 80, shorter than one of the old steps, read with exact ends.
+#[test]
+fn a_stretch_shorter_than_a_step_reads_with_exact_ends() {
+    let b = less(cone_solid(4.0, 1.0, 6.0), solidcraft_kernel::box_solid(Vec3::new(1.05, -10.0, -1.0), Vec3::new(11.05, 10.0, 9.0)).unwrap());
+    let piece = silhouette_piece(&b, Vec3::new(0.0, 0.0, 8.0), Vec3::new(4.0, 0.0, 0.0));
+    assert!(reads(piece, (2.23606797749979, 2.3478713763747794)), "{piece:?}");
+}
+
+/// #13011: the same frustum less the box from x = 2: the top circle starts the silhouette's piece
+/// at t = 1/4 and the cut's hyperbola ends it at t = 1/2, (2, 0, 4).
+#[test]
+fn a_cone_cut_along_its_axis_reads_to_its_hyperbola() {
+    let b = less(cone_solid(4.0, 1.0, 6.0), solidcraft_kernel::box_solid(Vec3::new(2.0, -10.0, -1.0), Vec3::new(12.0, 10.0, 9.0)).unwrap());
+    let piece = silhouette_piece(&b, Vec3::new(0.0, 0.0, 8.0), Vec3::new(4.0, 0.0, 0.0));
+    assert!(reads(piece, (2.23606797749979, 4.47213595499958)), "{piece:?}");
+}
+
+/// The ball on the boss seen along (1, -1, 1) / sqrt 3, off every axis: the contour's frame is
+/// x = (1, 1, 0) / sqrt 2, y = (-1, 1, 2) / sqrt 6, and the boss's rim z = -sqrt 11 cuts it where
+/// sin t = -sqrt 11 / (6 * 2 / sqrt 6).
+#[test]
+fn a_ball_on_a_boss_seen_off_axis_reads_to_the_boss() {
+    let (x, y) = (Vec3::new(0.7071067811865475, 0.7071067811865475, 0.0), Vec3::new(-0.408248290463863, 0.408248290463863, 0.816496580927726));
+    let arc = contour_arc(&ball_on_boss(6.0), 6.0, x, y);
+    assert!(reads(arc, (5.539502187087446, 4.628958893774073)), "{arc:?}");
+}
+
+/// #13011: a ball of radius 5 less a hole of radius 1 about x = 3 along z, whose rims are not
+/// circles. From the front they cut the contour where x = 2, at atan2(sqrt 21, 2) and its mirror,
+/// and where x = 4; the longest arc on the faces runs from the first round through x = -5.
+#[test]
+fn a_ball_with_a_hole_reads_to_the_holes_rims() {
+    let b = less(
+        solidcraft_kernel::sphere(Vec3::ZERO, 5.0).unwrap(),
+        solidcraft_kernel::cylinder(Vec3::new(3.0, 0.0, -10.0), Vec3::Z, 1.0, 20.0).unwrap(),
+    );
+    let front = contour_arc(&b, 5.0, FRONT.0, FRONT.1);
+    assert!(reads(front, (1.1592794807274085, 3.9646263457247692)), "{front:?}");
+}
+
+/// #13011: the same ball seen along (7, -24, 0) / 25, off its axes: the contour's frame is
+/// x = (24, 7, 0) / 25, y = z. A point s along x is on the hole where s^2 - 6 s (24 / 25) + 8 = 0,
+/// s = (72 -+ sqrt 184) / 25, so the rims cut the contour at acos(s / 5), at the hole's angles
+/// 73.4 and 139.1 degrees: inside the rim edges, not at a vertex. The longest arc on the faces runs
+/// from acos((72 - sqrt 184) / 125) = 1.0843552943321244 round through x < 0 to its mirror, a span
+/// of 2 pi less twice that.
+#[test]
+fn a_ball_with_a_hole_seen_off_axis_reads_to_the_holes_rims() {
+    let b = less(
+        solidcraft_kernel::sphere(Vec3::ZERO, 5.0).unwrap(),
+        solidcraft_kernel::cylinder(Vec3::new(3.0, 0.0, -10.0), Vec3::Z, 1.0, 20.0).unwrap(),
+    );
+    let arc = contour_arc(&b, 5.0, Vec3::new(0.96, 0.28, 0.0), Vec3::Z);
+    assert!(reads(arc, (1.0843552943321244, 4.114_474_718_515_337)), "{arc:?}");
+}

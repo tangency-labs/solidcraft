@@ -752,7 +752,7 @@ impl Body {
     /// record is refused the same way again. A refusal of the moment is not kept, so a later
     /// query tries again: a call from inside a kernel call or from solidcore-ops' failure
     /// callback ([`solidcore_ops::Error::Reentered`]), or a cancelled one. None for a mesh body.
-    pub(crate) fn ops_body(&self) -> Option<&(solidcore_ops::Body, solidcore_ops::Order)> {
+    pub fn ops_body(&self) -> Option<&(solidcore_ops::Body, solidcore_ops::Order)> {
         if self.is_mesh() {
             return None;
         }
