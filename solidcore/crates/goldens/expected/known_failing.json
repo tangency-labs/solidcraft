@@ -266,5 +266,8 @@
     "gen0019": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one",
     "gen0073": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one",
     "gen0078": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one"
+  },
+  "topology.brep_mirror": {
+    "mat0076": "tangency-labs/solidcraft#17271: transform_matrix reports success from a Level-2-valid input but produces an invalid body (17 geometric reports, including the main's unchanged 3D loop gap 3.419267465560401 > 2.1633192809335735e-5); not a valid transformed solid"
   }
 }

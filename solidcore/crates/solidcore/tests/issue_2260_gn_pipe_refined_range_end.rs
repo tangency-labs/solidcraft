@@ -154,7 +154,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "proto_edge_split_upper_keeps_the_old_max",
     "proto_vertex_miss_is_false",
     "query_statuses_pass_on",
-    "refine_cc_range_ends",
     "revolution_round_offset_collapses",
     "revolve_analytic_profile_faces",
     "revolve_holed_profile_void",

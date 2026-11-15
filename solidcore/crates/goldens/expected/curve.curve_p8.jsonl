@@ -2179,7 +2179,7 @@
 {"case":"gen2157","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
 {"case":"gen2158","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[1.0,1.0,2.0,2.0,0.0,1.0,7.534920761825471e-10,0.40002946267214834,3.3661700449165544]}}
 {"case":"gen2159","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
-{"case":"gen2160","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":{"blocks":[[31.420214033918523,31.420214033918523,356.313412068952]],"n":20}}}
+{"case":"gen2160","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":{"blocks":[[53.1466208080368,53.1466208080368,907.0801073047396]],"n":31}}}
 {"case":"gen2161","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
 {"case":"gen2162","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
 {"case":"gen2163","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[1.0,2.0,2.0,2.0,0.0,1.0,8.894796153501043e-10,4.046927491474613,4.0469274912247215,8.894812826430547e-10,9.89088798297144,9.890887982721551]}}
@@ -3050,7 +3050,7 @@
 {"case":"polygon_test_far_gci_skip","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
 {"case":"polyline_crossing_line","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":{"blocks":[[23.999999999999996,23.999999999999996,273.16666666666663]],"n":25}}}
 {"case":"polyline_touching_vertex","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":{"blocks":[[20.000001907348633,20.000001907348633,189.0000400543213]],"n":23}}}
-{"case":"range_end_preserves_noncollapsed_tail","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":{"blocks":[[31.420214033918523,31.420214033918523,356.313412068952]],"n":20}}}
+{"case":"range_end_preserves_noncollapsed_tail","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":{"blocks":[[53.1466208080368,53.1466208080368,907.0801073047396]],"n":31}}}
 {"case":"rect_edge_sub_segment_simple_gci","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[1.0,2.0,2.0,2.0,2.0,2.0,0.0,0.3,0.0,0.0,0.8,1.0]}}
 {"case":"rect_edge_sub_segment_simple_reversed_gci","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
 {"case":"rect_global_opposite_gci","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
