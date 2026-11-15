@@ -612,12 +612,18 @@ fn add_mesh(
     crease_angle: Option<f64>,
 ) -> Result<Value> {
     let err = |e: solidcraft_io::IoError| EngineError::Other(format!("{path}: {e}"));
-    let bytes = solidcraft_io::vfs::read(path, solidcraft_io::MAX_3MF_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let gltf = solidcraft_io::is_gltf_path(path);
+    // A glTF file is read up to the limit for STEP and import files, which Preferences raise (#17446).
+    let bytes = if gltf {
+        solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step)
+    } else {
+        solidcraft_io::vfs::read(path, solidcraft_io::MAX_3MF_BYTES)
+    }
+    .map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let (mut mf, plan, looks) = if gltf {
         let dir = std::path::Path::new(path).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
         let mut load =
-            |name: &str| solidcraft_io::vfs::read(&dir.join(name).to_string_lossy(), solidcraft_io::MAX_GLTF_BYTES).map_err(|e| e.to_string());
+            |name: &str| solidcraft_io::limits::read(&dir.join(name).to_string_lossy(), solidcraft_io::limits::Kind::Step).map_err(|e| e.to_string());
         let mut g = solidcraft_io::read_gltf(&bytes, path, &mut load).map_err(err)?;
         if !import::mesh_plan_fits(&g.plan) {
             g.flatten();
