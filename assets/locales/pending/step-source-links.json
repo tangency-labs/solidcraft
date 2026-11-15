@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "settings.link_step_inserts": "ربط ملفات STEP المُدرجة",
+    "settings.link_step_inserts_help": "يحتفظ بالملف المصدر من أجل «تحديث الروابط». أوقفه لإدراج نسخ مستقلة. يتحكم خيار «تحديث التصاميم المرتبطة التي تغيّرت» أيضًا في التحديث التلقائي لروابط STEP."
+  },
+  "de": {
+    "settings.link_step_inserts": "Eingefügte STEP-Dateien verknüpfen",
+    "settings.link_step_inserts_help": "Quelldatei für Verknüpfungen aktualisieren behalten. Ausschalten, um unabhängige Kopien einzufügen. Die automatische Aktualisierung wird auch durch Geänderte verknüpfte Konstruktionen aktualisieren gesteuert."
+  },
+  "en": {
+    "settings.link_step_inserts": "Link inserted STEP files",
+    "settings.link_step_inserts_help": "Keep the source file for Update Links. Turn off to insert independent copies. Update changed linked designs also controls automatic refresh of STEP links."
+  },
+  "he": {
+    "settings.link_step_inserts": "קישור קובצי STEP שהוכנסו",
+    "settings.link_step_inserts_help": "שומר את קובץ המקור עבור «עדכון קישורים». כבו כדי להכניס עותקים עצמאיים. האפשרות «עדכון עיצובים מקושרים שהשתנו» שולטת גם ברענון האוטומטי של קישורי STEP."
+  },
+  "ja": {
+    "settings.link_step_inserts": "挿入したSTEPファイルをリンク",
+    "settings.link_step_inserts_help": "リンクの更新用に元ファイルを保持します。オフにすると独立したコピーを挿入します。STEPリンクの自動更新にも、変更されたリンク設計の更新の設定が適用されます。"
+  },
+  "ko": {
+    "settings.link_step_inserts": "삽입한 STEP 파일 연결",
+    "settings.link_step_inserts_help": "링크 업데이트를 위해 원본 파일을 유지합니다. 끄면 독립 사본을 삽입합니다. 변경된 연결 설계 업데이트 설정은 STEP 링크 자동 새로 고침에도 적용됩니다."
+  },
+  "vi": {
+    "settings.link_step_inserts": "Liên kết các tệp STEP đã chèn",
+    "settings.link_step_inserts_help": "Giữ tệp nguồn cho Cập nhật liên kết. Tắt để chèn các bản sao độc lập. Tùy chọn Cập nhật các thiết kế liên kết đã thay đổi cũng điều khiển việc tự làm mới các liên kết STEP."
+  },
+  "zh": {
+    "settings.link_step_inserts": "链接插入的STEP文件",
+    "settings.link_step_inserts_help": "保留源文件以更新链接。关闭后插入独立副本。STEP链接的自动更新也由更新已更改的链接设计设置控制。"
+  }
+}

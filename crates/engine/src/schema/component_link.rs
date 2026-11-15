@@ -264,7 +264,7 @@ impl JsonSchema for ComponentList {
     }
 }
 
-/// Read the linked designs again and replace the bodies of the components whose file changed,
+/// Read the linked designs and STEP files again and replace the bodies of the components whose file changed,
 /// as one undo step. Without `component` or `components`, every linked component is read. A
 /// component that is not linked is refused.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -274,8 +274,8 @@ pub struct UpdateLinksKeys {
     #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ComponentRef")]
     pub component: Option<ComponentRef>,
-    /// Linked components, by id or name. Not with `component`. With a list, an update goes on
-    /// past a design it cannot read: that component keeps its bodies, is named in `failed` and
+    /// Linked components, by id or name. Not with `component`. With a list, or with neither key,
+    /// an update goes on past a design or STEP file it cannot read: that component keeps its bodies, is named in `failed` and
     /// gets a warning.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ComponentList")]
