@@ -326,6 +326,56 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
         if let Some(rect) = crate::scenario::rect_of(&format!("dialog:section:{}", app.tr("prefs.layout_page.window"))) {
             crate::scenario::publish_target(&format!("dialog:section:{}", app.tr("prefs.layout")), rect);
         }
+        ui_kit::settings_section(ui, "design_tabs", app.tr("prefs.layout_page.design_tabs"), |ui| {
+            ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
+                ui_kit::settings_row_help(ui, app.tr("prefs.design_views_as_tabs"), app.tr("prefs.design_views_as_tabs_note"), |ui| {
+                    let mut selected = usize::from(!app.preferences.design_views_as_tabs);
+                    if ui_kit::segmented(
+                        ui,
+                        &mut selected,
+                        &[app.tr("prefs.design_views_tabs"), app.tr("prefs.design_views_switcher")],
+                        ui_kit::Segments { intrinsic: true, ..Default::default() },
+                    ) {
+                        app.preferences.design_views_as_tabs = selected == 0;
+                    }
+                });
+            });
+            layout_check(
+                ui,
+                app.tr("prefs.design_sub_tab_sheets"),
+                app.tr("prefs.design_sub_tab_sheets_note"),
+                &mut app.preferences.design_sub_tab_sheets,
+                "design_sub_tab_sheets",
+            );
+            layout_check(
+                ui,
+                app.tr("prefs.design_sub_tab_sketches"),
+                app.tr("prefs.design_sub_tab_sketches_note"),
+                &mut app.preferences.design_sub_tab_sketches,
+                "design_sub_tab_sketches",
+            );
+            layout_check(
+                ui,
+                app.tr("prefs.design_sub_tab_render"),
+                app.tr("prefs.design_sub_tab_render_note"),
+                &mut app.preferences.design_sub_tab_render,
+                "design_sub_tab_render",
+            );
+            layout_check(
+                ui,
+                app.tr("prefs.design_reuse_views"),
+                app.tr("prefs.design_reuse_views_note"),
+                &mut app.preferences.design_reuse_views,
+                "design_reuse_views",
+            );
+            layout_check(
+                ui,
+                app.tr("prefs.design_reopen_views"),
+                app.tr("prefs.design_reopen_views_note"),
+                &mut app.preferences.design_reopen_views,
+                "design_reopen_views",
+            );
+        });
         ui_kit::settings_section(ui, "panels", app.tr("prefs.layout_page.panels"), |ui| {
             layout_check(
                 ui,

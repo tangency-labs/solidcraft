@@ -2392,6 +2392,59 @@ fn raise_band_on_a_rounded_rim() {
     }
 }
 
+/// A lip wider than its rim (#16742): the band reaches past the rim's outer wall, so what is left of
+/// the face is the underside of the overhang. It faces down, away from the rim's top, and the
+/// ring's two edges round with a small fillet. Volume added is the band's area times its height.
+#[test]
+fn raise_band_wider_than_its_rim_leaves_a_downward_underside() {
+    let cup = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, 20.0), holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
+    let sh = shell(&cup, &[Vec3::new(0.0, 0.0, 15.0)], 1.0).unwrap();
+    let v0 = measure(&sh).unwrap().volume;
+    // The rim is 1 wide (r 19 to 20); the band is 3 wide, to r 22.
+    let lip = raise_band(&sh, Vec3::new(19.5, 0.0, 15.0), 3.0, 2.0, false).unwrap();
+    assert!(lip.validity().is_empty(), "{:?}", lip.validity());
+    let band = PI * (22.0 * 22.0 - 19.0 * 19.0) * 2.0;
+    let v = measure(&lip).unwrap().volume;
+    assert!(rel(v, v0 + band) < 1e-5, "{v} vs {}", v0 + band);
+    // The ring r 20 to 22 at z 15 faces down.
+    let mesh = lip.mesh(&MeshTolerance::chord(0.05)).unwrap();
+    let mut seen = 0;
+    for t in &mesh.triangles {
+        let Some([a, b, c]) = mesh.tri(t) else { continue };
+        let (m, n) = ((a + b + c) * (1.0 / 3.0), (b - a).cross(c - a));
+        let r = (m.x * m.x + m.y * m.y).sqrt();
+        if (m.z - 15.0).abs() < 1e-9 && r > 20.1 && r < 21.9 {
+            assert!(n.z < 0.0, "the underside faces up at r {r}: {n:?}");
+            seen += 1;
+        }
+    }
+    assert!(seen > 0, "no underside triangles");
+    // Both edges of the ring round at 0.1.
+    for at in [Vec3::new(20.0, 0.0, 15.0), Vec3::new(22.0, 0.0, 15.0)] {
+        let f = fillet(&lip, &[at], 0.1).unwrap();
+        assert!(f.validity().is_empty(), "{at:?}: {:?}", f.validity());
+    }
+    let both = fillet(&lip, &[Vec3::new(20.0, 0.0, 15.0), Vec3::new(22.0, 0.0, 15.0)], 0.1).unwrap();
+    assert!(both.validity().is_empty(), "{:?}", both.validity());
+}
+
+/// A band exactly as wide as the rim leaves no face beside it, and one whose far edge crosses the
+/// rim's other edge in places only leaves a face with no single side: both are refused by name.
+#[test]
+fn raise_band_refuses_a_band_as_wide_as_the_rim_and_one_that_crosses_it_in_part() {
+    let cup = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, 20.0), holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
+    let sh = shell(&cup, &[Vec3::new(0.0, 0.0, 15.0)], 1.0).unwrap();
+    let r = raise_band(&sh, Vec3::new(19.5, 0.0, 15.0), 1.0, 2.0, false);
+    assert_eq!(r.err(), Some(KernelError::Lip(LipRefusal::BandFillsRim)));
+    // A tube with its bore off the axis: the wall is 5 wide at +x only.
+    let tube = Region2 { outer: Loop2::circle(Vec2::ZERO, 20.0), holes: vec![Loop2::circle(Vec2::new(10.0, 0.0), 5.0)] };
+    let tube = extrude(&Plane::XY, &[tube], 0.0, 15.0).unwrap().pop().unwrap();
+    let r = raise_band(&tube, Vec3::new(-10.0, 0.0, 15.0), 6.0, 2.0, false);
+    assert_eq!(r.err(), Some(KernelError::Lip(LipRefusal::BandCrossesRim)));
+    // Narrower than the narrowest part of the wall it still builds.
+    assert!(raise_band(&tube, Vec3::new(-10.0, 0.0, 15.0), 4.0, 2.0, false).is_ok());
+}
+
 #[test]
 fn orientation_mesh_reuses_missing_face_check_at_matching_tolerance() {
     for scale in [0.001, 1.0, 1000.0] {

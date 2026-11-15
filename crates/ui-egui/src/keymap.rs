@@ -1231,7 +1231,7 @@ mod tests {
             }
         }
         for (text, expected) in [
-            (" shift + CTRL + shift + t ", "Ctrl+Shift+T"),
+            (" shift + CTRL + shift + j ", "Ctrl+Shift+J"),
             ("cmd+option+t", "Ctrl+Alt+T"),
             ("shift+cmd+ctrl+t", "Ctrl+Cmd+Shift+T"),
             ("ctrl++", "Ctrl+Plus"),
@@ -1252,10 +1252,10 @@ mod tests {
     fn text_shortcuts_use_the_recorded_chord_and_check_conflicts() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        for spelling in ["ctrl+shift+t", "Shift+Ctrl+T", "CTRL+SHIFT+T", "Ctrl+Shift+T"] {
+        for spelling in ["ctrl+shift+j", "Shift+Ctrl+J", "CTRL+SHIFT+J", "Ctrl+Shift+J"] {
             let reply = h.call("ui.shortcut", json!({"command":"solid.box", "key":spelling}));
-            assert_eq!(reply["result"]["keys"], json!(["Ctrl+Shift+T"]), "{reply}");
-            h.call("ui.key", json!({"key":"T", "cmd":true, "shift":true}));
+            assert_eq!(reply["result"]["keys"], json!(["Ctrl+Shift+J"]), "{reply}");
+            h.call("ui.key", json!({"key":"J", "cmd":true, "shift":true}));
             assert!(
                 matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Primitive { cmd: "solid.box", .. })),
                 "{spelling} opens Box"
@@ -1263,29 +1263,29 @@ mod tests {
             h.call("ui.key", json!({"key":"Escape"}));
         }
         let before = h.app.keymap.prefs();
-        let conflict = h.call("ui.shortcut", json!({"command":"solid.cylinder", "key":"shift+CTRL+t"}));
+        let conflict = h.call("ui.shortcut", json!({"command":"solid.cylinder", "key":"shift+CTRL+j"}));
         assert!(conflict["error"].as_str().unwrap().contains("already used by Box"));
         for key in ["Foo", "Shift+Shift", "Ctrl+", "Ctrl++T", "T+Ctrl", "escape", "ctrl+z", "delete", "ctrl+comma"] {
             let reply = h.call("ui.shortcut", json!({"command":"solid.box", "key":key}));
             assert_eq!(reply["ok"], false, "{key}: {reply}");
             assert_eq!(h.app.keymap.prefs(), before, "a refused binding changes nothing");
         }
-        bind(&mut h.app, "solid.cylinder", "shift+ctrl+t", true).unwrap();
+        bind(&mut h.app, "solid.cylinder", "shift+ctrl+j", true).unwrap();
         assert!(keys(&h.app, "solid.box").is_empty());
-        assert_eq!(keys(&h.app, "solid.cylinder"), ["Ctrl+Shift+T"]);
+        assert_eq!(keys(&h.app, "solid.cylinder"), ["Ctrl+Shift+J"]);
     }
 
     #[test]
     fn text_shortcuts_are_checked_in_settings_and_shortcut_imports() {
         let saved = json!({
-            "solid.box":["shift+ctrl+t", "CTRL+SHIFT+T", "Foo", "ctrl+z", "delete", "escape"],
+            "solid.box":["shift+ctrl+j", "CTRL+SHIFT+J", "Foo", "ctrl+z", "delete", "escape"],
             "solid.cylinder":"alt+f12",
             "solid.extrude":"Shift+ShiftLeft",
             "solid.sphere":""
         });
         let mut a = app();
         a.keymap.load(&saved);
-        assert_eq!(keys(&a, "solid.box"), ["Ctrl+Shift+T"]);
+        assert_eq!(keys(&a, "solid.box"), ["Ctrl+Shift+J"]);
         assert_eq!(keys(&a, "solid.cylinder"), ["Alt+F12"]);
         assert_eq!(keys(&a, "solid.extrude"), ["Shift"], "legacy modifier-only keys survive");
         assert!(keys(&a, "solid.sphere").is_empty());
