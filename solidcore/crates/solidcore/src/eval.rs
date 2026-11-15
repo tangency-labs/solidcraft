@@ -34,7 +34,7 @@ pub mod surface;
 pub mod uv;
 pub mod vec;
 
-pub use collapse::Collapse;
+pub use collapse::{Collapse, OntoKnots};
 pub use curve::{CurveEval, CurveJet};
 pub use geometry::{Curve, Curve2, Frame, Surface};
 pub use spline::{

@@ -324,6 +324,18 @@ fn unique_cone_meeting(k: &Kernel, first: &Surface, second: &Surface) -> Result<
         .all(|(x, y)| exact::is_zero(&exact::sub(x, y))))
 }
 
+/// When [`OffsetGeometryCreation::replace_edge_curves`]'s shortcut keeps an edge whose
+/// curve's ends match the new curve's.
+#[derive(Clone, Copy)]
+enum KeepOld {
+    /// Always (upstream).
+    OnMatchingEnds,
+    /// As decided by the caller (not upstream: `MateEdges`, whose new curve is the surfaces'
+    /// intersection, keeps an offset edge only where it is proved on both surfaces; see
+    /// [`OffsetGeometryCreation::replace_edge_curves_in`]).
+    Decided(bool),
+}
+
 /// A dereference of a null pointer or a cast that fails upstream (undefined
 /// behaviour): `InvalidInput` with [`UNDEFINED_UPSTREAM`] as operation.
 const fn dangling(reason: &'static str) -> SolidError {
@@ -2957,7 +2969,8 @@ impl OffsetGeometryCreation {
     /// upstream, solidcraft#16983; see [`TrimmedEdge`]): an inverted edge's new curve runs
     /// against the edge use's (or the original edge use's) curve, from the image of the
     /// edge's start vertex to the image of its end vertex, and is set even where its ends
-    /// are the edge curve's ends in reverse order.
+    /// are the edge curve's ends in reverse order. A curve whose ends match is kept as
+    /// upstream keeps it ([`KeepOld::OnMatchingEnds`]).
     ///
     /// # Errors
     ///
@@ -2970,6 +2983,88 @@ impl OffsetGeometryCreation {
         curve_3d: Option<O>,
         uv_curve: Option<O>,
         opt_orig_edgeuse: Option<O>,
+        inverted: bool,
+    ) -> Result<ReplaceEdgeCurves> {
+        Self::replace_edge_curves_in(
+            k,
+            brep,
+            edgeuse,
+            curve_3d,
+            uv_curve,
+            opt_orig_edgeuse,
+            KeepOld::OnMatchingEnds,
+            inverted,
+        )
+    }
+
+    /// Whether [`Self::replace_edge_curves_in`]'s shortcut would keep `edgeuse`'s edge
+    /// against the candidate `curve_3d` in `MateEdges` (not upstream): its curve's ends match
+    /// the candidate's within the edge tolerance (either way round) and it is proved within
+    /// that tolerance of both `surfaces`
+    /// ([`crate::offset::curve_on_surfaces::curve_on_surfaces`]).
+    fn keeps_old_edge<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &impl OffsetBrep<O>,
+        edgeuse: O,
+        curve_3d: O,
+        surfaces: [&Surface; 2],
+    ) -> Result<bool> {
+        let edge = brep
+            .edgeuse_edge(edgeuse)?
+            .ok_or(dangling("edge use without edge"))?;
+        let eu_curve = brep
+            .edge_curve(edge)?
+            .ok_or(dangling("edge without curve"))?;
+        let edge_ivl = brep.edge_interval(edge)?;
+        let edge_tol = brep.edge_tolerance(edge)?;
+        let old = curve_of(brep, eu_curve)?;
+        let (s, e) = (
+            old.evaluate_point(k, edge_ivl.min())?,
+            old.evaluate_point(k, edge_ivl.max())?,
+        );
+        let new = curve_of(brep, curve_3d)?;
+        let ivl = new.natural_interval();
+        let (cs, ce) = (
+            new.evaluate_point(k, ivl.min())?,
+            new.evaluate_point(k, ivl.max())?,
+        );
+        let ends = (distance(s, cs) < edge_tol && distance(e, ce) < edge_tol)
+            || (distance(s, ce) < edge_tol && distance(e, cs) < edge_tol);
+        Ok(ends
+            && crate::offset::curve_on_surfaces::curve_on_surfaces(
+                k, old, edge_ivl, surfaces, edge_tol,
+            )?)
+    }
+
+    /// [`Self::replace_edge_curves`], with `keep` choosing when a curve whose ends match the
+    /// edge curve's leaves the edge as it is. Upstream always keeps it: that is sound where
+    /// the candidate is the edge's own curve extended or trimmed (`ExtendTrimEdges`, the
+    /// shell-tangent rails), as two such curves with the same ends are the same curve. Not
+    /// upstream: `MateEdges`'s candidate is a different curve, the two surfaces'
+    /// intersection, and matching ends say nothing about the old edge's interior: where the
+    /// faces are tangent at both vertices and meet at an angle between them (a loft's ruling
+    /// edge), each face's own offset edge ends at the intersection's ends but leaves it in
+    /// between (by up to 0.032 for the hood corner sheet of
+    /// `tests/issue_1502_thicken_rim_halves.rs` thickened by 2), and keeping them leaves the
+    /// two offset faces apart along the edge. So `MateEdges` keeps each offset edge of the
+    /// pair only where [`Self::keeps_old_edge`] holds for it (proved within its tolerance of
+    /// both extended surfaces by [`crate::offset::curve_on_surfaces::curve_on_surfaces`]:
+    /// closed form on planes and cones, interval bounds on B-spline nets and their
+    /// offsets), and otherwise installs the intersection, upstream's own path for ends that
+    /// do not match. Each use decides alone, as upstream, so one use of a pair can keep its
+    /// old curve while the other installs the intersection. A kept edge is proved within
+    /// its tolerance of both surfaces; an installed intersection is upstream's surface
+    /// intersection and is not certified here. `inverted` is as for
+    /// [`Self::replace_edge_curves_oriented`]: an inverted edge never takes the shortcut.
+    #[allow(clippy::too_many_arguments)] // `ReplaceEdgeCurves`, the choice and the orientation
+    fn replace_edge_curves_in<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        edgeuse: O,
+        curve_3d: Option<O>,
+        uv_curve: Option<O>,
+        opt_orig_edgeuse: Option<O>,
+        keep: KeepOld,
         inverted: bool,
     ) -> Result<ReplaceEdgeCurves> {
         // locals
@@ -2999,10 +3094,19 @@ impl OffsetGeometryCreation {
             let curve_start = curve_of(brep, c3)?.evaluate_point(k, c3_ivl.min())?;
             let curve_end = curve_of(brep, c3)?.evaluate_point(k, c3_ivl.max())?;
 
+            // (not upstream: where asked, the pair's joint decision, see `KeepOld`)
+            let keep_old = |_: &mut _| -> Result<bool> {
+                Ok(match keep {
+                    KeepOld::OnMatchingEnds => true,
+                    KeepOld::Decided(keep) => keep,
+                })
+            };
+
             // low work - Edgesuse->Curve and 3DCurve start and end Points are within tol
             if !inverted
                 && distance(edgeuse_start, curve_start) < edge_tol
                 && distance(edgeuse_end, curve_end) < edge_tol
+                && keep_old(brep)?
             {
                 // No change in ends of curve - don't bother using the inputs - delete them and get out.
                 out.delete_3d_curve = true;
@@ -3014,6 +3118,7 @@ impl OffsetGeometryCreation {
             if !inverted
                 && distance(edgeuse_start, curve_end) < edge_tol
                 && distance(edgeuse_end, curve_start) < edge_tol
+                && keep_old(brep)?
             {
                 // No change in ends of curve - just delete the curves and get out
                 out.delete_3d_curve = true;
@@ -5061,27 +5166,39 @@ impl OffsetGeometryCreation {
         let copy_3d = curve_of(brep, curve_3d_found)?.copy(k)?;
         let copy_3d_h = store_curve(brep, copy_3d)?;
 
-        // when appropriate - change the pOffsetEdgeuse geometry
-        Self::replace_edge_curves_oriented(
+        // when appropriate - change the pOffsetEdgeuse geometry (not upstream: an offset
+        // edge whose ends match is kept only when proved on both extended surfaces, see
+        // `replace_edge_curves_in`; an inverted edge never keeps its curve, so it is not
+        // checked)
+        let keep = KeepOld::Decided(
+            !inverted && Self::keeps_old_edge(k, brep, offset_edgeuse, curve_3d_found, [&s1, &s2])?,
+        );
+        Self::replace_edge_curves_in(
             k,
             brep,
             offset_edgeuse,
             Some(curve_3d_found),
             Some(uv_curve1_found),
             Some(edgeuse),
+            keep,
             inverted,
         )?;
 
         // when appropriate - change the pOtherOffsetEdgeuse geometry
         // GWC:BUG?? These two Edgeuses point to the same edge - these two calls should
         //           have the same 3DCurve. It's ok: At this point they do not (yet) point to the same edge.
-        Self::replace_edge_curves_oriented(
+        let keep = KeepOld::Decided(
+            !inverted
+                && Self::keeps_old_edge(k, brep, other_offset_edgeuse, copy_3d_h, [&s1, &s2])?,
+        );
+        Self::replace_edge_curves_in(
             k,
             brep,
             other_offset_edgeuse,
             Some(copy_3d_h),
             Some(uv_curve2_found),
             Some(other_edgeuse),
+            keep,
             inverted,
         )?;
         if inverted {
