@@ -10,10 +10,12 @@
 //! united with a disc extruded from two half arcs leaves the disc's two wall halves merged
 //! into one face with the edge between them inside it, a slit (one face on both sides), as
 //! SMLib's union does. The union's own clean-up removes that slit now (WR-304), so the
-//! slit body is the union without its clean-up, then SMLib's clean-up of it. With the keep the slit is an edge of the target, but a slit, which the
-//! clean-up checks all the same (WR-602; the fork's tangency-labs/smlib@cac11ea), so it
-//! goes. Faces, slits and volume are those of the same round on the union's own
-//! body, which has no slit.
+//! slit body is the union without its clean-up, then SMLib's clean-up of it by hand (each
+//! rim removed as `boolean_post_process` removes it; the rims' end vertices, which the
+//! clean-up would delete, stay). With the keep the slit is an edge of the target, but a
+//! slit, which the clean-up checks all the same (WR-602; the fork's
+//! tangency-labs/smlib@cac11ea), so it goes. Faces, slits and volume are those of the
+//! same round on the union's own body, which has no slit.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -152,8 +154,8 @@ fn far_slits(b: &Brep) -> usize {
 }
 
 /// The disc's top rim (its two half arcs at z = H) rounded r 1 on the union with the slit
-/// (`slit`) or on the union's own body: the target's slits at x = -R,
-/// then the result's faces, its slits at x = -R and its volume.
+/// (`slit`) or on the union's own body: the target's slits at x = -R, then the result's
+/// faces, its slits at x = -R and its volume.
 fn rounded(slit: bool) -> (usize, usize, usize, f64) {
     let mut k = Kernel::default();
     let a = half_arc(&k, 0.0, 180.0);
@@ -192,6 +194,9 @@ fn rounded(slit: bool) -> (usize, usize, usize, f64) {
     (target_slits, faces, slits, volume(&k, &mut disc))
 }
 
+/// The slit on the far side is removed. (All one-face edges are not compared: the rims'
+/// end vertex at x = R, which the hand-built clean-up leaves, splits the wall's seam
+/// there in two.)
 #[test]
 fn issue_423_keep_still_removes_the_targets_own_slit() {
     let (clean_target, faces, slits, _) = rounded(false);

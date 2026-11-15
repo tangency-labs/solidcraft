@@ -17,8 +17,10 @@
     clippy::indexing_slicing
 )] // test helpers
 
-use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
+use solidcore::boolean::api_brep::{boolean_difference, boolean_union, boolean_with_options};
+use solidcore::boolean::merge::MergeOptions;
 use solidcore::curve::curve::Curve;
+use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Vec3;
@@ -89,8 +91,20 @@ fn region(z: f64, lo: Option<f64>, hi: Option<f64>) -> Vec<Curve> {
 }
 
 /// The issue's Body1: the disc z -1.2..0 joined with the regions of the sketch whose
-/// chords are `chords` (ascending), each extruded z -3.6..-1.2 and joined in turn.
-fn body1(k: &mut Kernel, chords: &[f64]) -> Brep {
+/// chords are `chords` (ascending), each extruded z -3.6..-1.2 and joined in turn. Without
+/// `cleaned` the unions skip `BooleanPostProcess`, so Body1 keeps every edge its unions
+/// made, the struts' edges among them.
+fn body1(k: &mut Kernel, chords: &[f64], cleaned: bool) -> Brep {
+    let unite = |k: &mut Kernel, a: Brep, b: Brep| {
+        if cleaned {
+            boolean_union(k, a, b).unwrap()
+        } else {
+            let options = MergeOptions::new(false, false, false, false, false);
+            boolean_with_options(k, a, b, BooleanOperation::Union, options)
+                .unwrap()
+                .result
+        }
+    };
     let mut bounds = vec![None];
     bounds.extend(chords.iter().map(|&y| Some(y)));
     bounds.push(None);
@@ -99,11 +113,11 @@ fn body1(k: &mut Kernel, chords: &[f64]) -> Brep {
         let piece = extrude(k, &region(-3.6, pair[0], pair[1]), 2.4);
         regions = Some(match regions {
             None => piece,
-            Some(b) => boolean_union(k, b, piece).unwrap(),
+            Some(b) => unite(k, b, piece),
         });
     }
     let disc = extrude(k, &[circle(-1.2, R)], 1.2);
-    boolean_union(k, disc, regions.unwrap()).unwrap()
+    unite(k, disc, regions.unwrap())
 }
 
 /// The issue's Body2: the annulus r 35..37, z -5.6..-3.6.
@@ -119,10 +133,11 @@ struct Joined {
     check: Vec<String>,
 }
 
-/// Body1 of the sketch with `chords`, joined with Body2.
-fn join(chords: &[f64]) -> Joined {
+/// Body1 of the sketch with `chords` (its unions without their clean-up unless
+/// `cleaned`), joined with Body2.
+fn join(chords: &[f64], cleaned: bool) -> Joined {
     let mut k = Kernel::default();
-    let b1 = body1(&mut k, chords);
+    let b1 = body1(&mut k, chords, cleaned);
     let b2 = body2(&mut k);
     let mut joined = boolean_union(&mut k, b1, b2).unwrap();
     let store = AttributeStore::default();
@@ -154,10 +169,16 @@ fn assert_volume(j: &Joined, what: &str) {
 #[test]
 fn issue_575_join_is_valid_with_the_strut_clean_up() {
     // the issue's two chords and its other failing pair (upstream: the right volume, but
-    // SMLib's check refuses the wall's strut loops, tests #3 and #4)
-    for chords in [&[0.0, 8.0][..], &[32.0, 35.0][..]] {
-        let what = format!("chords {chords:?}");
-        let j = join(chords);
+    // SMLib's check refuses the wall's strut loops, tests #3 and #4), and the issue's
+    // chords with Body1 built without its clean-up (its strut edges already in the input)
+    // and only the join cleaned up
+    for (chords, cleaned) in [
+        (&[0.0, 8.0][..], true),
+        (&[32.0, 35.0][..], true),
+        (&[0.0, 8.0][..], false),
+    ] {
+        let what = format!("chords {chords:?}, Body1 cleaned up {cleaned}");
+        let j = join(chords, cleaned);
         assert_volume(&j, &what);
         assert!(j.manifold, "{what}: not a manifold solid");
         assert!(j.check.is_empty(), "{what}: {:?}", j.check);
