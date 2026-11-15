@@ -28,7 +28,7 @@ use crate::eval::Frame;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::vector3d::{Point3, Vec3};
-use crate::kernel::{Kernel, Tolerances};
+use crate::kernel::Kernel;
 use crate::math::{Point2, Vec2};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::crv_basic::CONIC_ANGLE_TOL_DEG;
@@ -73,19 +73,32 @@ pub fn smallest_arc_sweep(radius: f64, tol: f64) -> f64 {
 }
 
 /// How an arc of `radius` turning `sweep` is built at the zone tolerance `tol`, or why it cannot
-/// be (`radius` and `sweep` finite, `radius > 0`):
+/// be (`radius` and `sweep` finite, `radius > 0`, `tol` finite and positive):
+/// - its whole circle within `tol` (`radius TAU <= tol`): refused, whatever the sweep. Past this
+///   check `tol / radius < TAU`, so [`largest_arc_sweep`] is below two turns: every sweep that
+///   builds is one [`Seg2::spans`] takes and the conversion makes (at most one turn).
+/// - `|sweep|` past [`largest_arc_sweep`]: refused.
 /// - `|sweep|` at most [`smallest_arc_sweep`]: refused.
 /// - `|sweep|` within [`DEFAULT_ANGLE_TOL`] (0.01 degrees, plus the margin) of a whole turn, or
 ///   past it: the kernel's circle builder (`Ellipse::make_nurb` passes that angle tolerance to
 ///   the quadratic arc, which closes any arc within it of a turn by moving its last control point
 ///   onto its first; [`CONIC_ANGLE_TOL_DEG`]'s window is inside it) makes such a sweep the full
-///   turn, so it is built as the closed circle outright, whose end lies from the arc's end by the chord of `| |sweep| - TAU |`, at most
-///   `radius | |sweep| - TAU |`: kept while that is within `tol`, else refused. Past a turn this
-///   is [`largest_arc_sweep`]; short of a turn, a sweep must stop more than the window short of it
-///   to build as an arc.
+///   turn, so it is built as the closed circle outright, whose end lies from the arc's end by the
+///   chord of `| |sweep| - TAU |`, at most `radius | |sweep| - TAU |`: kept while that is within
+///   `tol`, else refused (only short of a turn: past it the check above already holds it), so a
+///   sweep short of a turn must stop more than the window short of it to build as an arc.
 /// - otherwise the arc over `[0, |sweep|]` degrees: its ends are the closed form.
 fn arc_build(radius: f64, sweep: f64, tol: f64) -> std::result::Result<ArcBuild, &'static str> {
     let a = sweep.abs();
+    if radius * TAU <= tol {
+        return Err("an arc on a circle whose whole length is within the zone tolerance");
+    }
+    if a > largest_arc_sweep(radius, tol) {
+        return Err(
+            "an arc past a whole turn by more than the zone tolerance at its end: the largest \
+             that builds sweeps largest_arc_sweep(radius, zone_tol_3d) = TAU + zone_tol_3d / radius",
+        );
+    }
     if a <= smallest_arc_sweep(radius, tol) {
         return Err(
             "an arc too short to build: its |sweep| must exceed smallest_arc_sweep(radius, \
@@ -98,10 +111,8 @@ fn arc_build(radius: f64, sweep: f64, tol: f64) -> std::result::Result<ArcBuild,
             Ok(ArcBuild::Closed)
         } else {
             Err(
-                "an arc whose end is farther than the zone tolerance from the closed circle it \
-                 builds as: past a whole turn the largest that builds sweeps \
-                 largest_arc_sweep(radius, zone_tol_3d) = TAU + zone_tol_3d / radius; short of a \
-                 turn it must stop more than 0.01 degrees short",
+                "an arc ending short of a whole turn by less than 0.01 degrees but by more than \
+                 the zone tolerance at its end: the kernel builds it as the closed circle",
             )
         }
     } else {
@@ -731,10 +742,9 @@ pub enum ProfileRefusal {
     /// [`MAX_SEGMENTS`] in all.
     Budget,
     /// A line or arc not finite or of no length, or an arc of no positive radius or one that
-    /// does not build at the default zone tolerance (its `|sweep|` at most
-    /// [`smallest_arc_sweep`], or built as its closed circle with its end farther than the zone
-    /// tolerance from the arc's: past [`largest_arc_sweep`], or within 0.01 degrees short of a
-    /// turn).
+    /// does not build at the zone tolerance given (its whole circle within it, its `|sweep|` past
+    /// [`largest_arc_sweep`] or at most [`smallest_arc_sweep`], or within 0.01 degrees short of a
+    /// turn by more than the zone tolerance at its end).
     LineOrArc,
     /// A free-form segment not finite or of no length, or a conic weight not positive.
     FreeForm,
@@ -742,17 +752,22 @@ pub enum ProfileRefusal {
 
 /// The loops of `regions` checked: each closed within ten times `tol`, the segments within
 /// [`MAX_SEGMENTS`], each segment finite and of some length (a line's ends apart; an arc of a
-/// positive radius that builds at the default zone tolerance by the rule [`curve_on_frame`]
+/// positive radius that builds at the zone tolerance `zone_tol` by the rule [`curve_on_frame`]
 /// builds by ([`smallest_arc_sweep`], [`largest_arc_sweep`]); a conic's weight positive; a
-/// Bézier's ends apart), its coordinates within 1e9.
+/// Bézier's ends apart), its coordinates within 1e9. Pass the zone tolerance of the kernel that
+/// will build the profile (`k.tolerances.zone_tol_3d`), so the check accepts exactly the arcs
+/// [`curve_on_frame`] builds; `tol` is the loop-closure tolerance, a separate thing.
 ///
 /// # Errors
 ///
-/// The [`ProfileRefusal`] that applies first.
+/// The [`ProfileRefusal`] that applies first. A `zone_tol` that is not finite and positive
+/// refuses every arc ([`ProfileRefusal::LineOrArc`]).
 pub fn check_regions<'a>(
     regions: impl Iterator<Item = &'a Region2>,
     tol: f64,
+    zone_tol: f64,
 ) -> std::result::Result<(), ProfileRefusal> {
+    let zone_ok = zone_tol.is_finite() && zone_tol > 0.0;
     let mut count = 0usize;
     let finite = |p: Point2| finite2(p) && p.x.abs() < 1e9 && p.y.abs() < 1e9;
     let apart = |a: Point2, b: Point2| a.distance(b) > 1e-12;
@@ -776,7 +791,8 @@ pub fn check_regions<'a>(
                         && radius < 1e9
                         && start.is_finite()
                         && sweep.is_finite()
-                        && arc_build(radius, sweep, Tolerances::default().zone_tol_3d).is_ok()
+                        && zone_ok
+                        && arc_build(radius, sweep, zone_tol).is_ok()
                 }
                 Seg2::Cubic { p0, p1, p2, p3 } => {
                     [p0, p1, p2, p3].into_iter().all(finite) && apart(p0, p3)
@@ -899,7 +915,7 @@ pub fn frame_is_orthonormal(frame: &Frame) -> bool {
 /// that does not build at the kernel's `zone_tol_3d`: its `|sweep|` at most
 /// [`smallest_arc_sweep`], or built as its closed circle (past a whole turn, or within 0.01
 /// degrees short of one) with its end farther than `zone_tol_3d` from the arc's (past a turn,
-/// [`largest_arc_sweep`]). [`check_regions`] holds the same rule at the default zone tolerance.
+/// [`largest_arc_sweep`]). [`check_regions`] holds the same rule at the zone tolerance it is given.
 /// Those of the constructors.
 pub fn curve_on_frame(k: &Kernel, frame: &Frame, level: f64, seg: &Seg2) -> Result<Curve> {
     if !frame_is_orthonormal(frame) || !level.is_finite() {
