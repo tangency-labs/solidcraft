@@ -47,10 +47,10 @@ pub fn diagnostics(app: &SolveApp) -> String {
 /// Whether a Help menu item can run now: behind an open bug report, the items that open a
 /// window would cover it (#7188). Report an Issue… shows the report.
 pub fn available(app: &SolveApp, item: &str) -> bool {
-    app.issue_report.draft.is_none() || !matches!(item, "about" | "shortcuts" | "messages" | "crashes" | "connect" | "updates")
+    app.issue_report.draft.is_none() || !matches!(item, "about" | "shortcuts" | "messages" | "crashes" | "connect" | "updates" | "my_tickets")
 }
 
-/// Run a Help menu item: `docs`, `about`, `updates`, `version` (the release notes), `shortcuts`, `messages`, `report`, `crashes`,
+/// Run a Help menu item: `docs`, `about`, `updates`, `version` (the release notes), `shortcuts`, `messages`, `report`, `my_tickets`, `crashes`,
 /// `connect`, `install_cli` (macOS).
 pub fn run(app: &mut SolveApp, ctx: &egui::Context, item: &str) {
     app.help.menu = false;
@@ -75,6 +75,7 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, item: &str) {
             app.set_status(msg, error);
         }
         "messages" => app.messages.open = true,
+        "my_tickets" => crate::tickets::mine::open(app),
         id if crate::links::by_id(id).is_some() => {
             crate::links::run(ctx, id);
         }
@@ -136,6 +137,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
     if app.help.menu {
         let mut pick: Option<&str> = None;
         let mut plugin_picked = false;
+        // A dot when one of the user's tickets has something new (`tickets::mine`).
+        let my_tickets_label = if crate::tickets::mine::any_new(app) {
+            format!("{} ●", solidcraft_ui_text::tr("help.my_tickets"))
+        } else {
+            solidcraft_ui_text::tr("help.my_tickets").to_string()
+        };
         let resp = Container::new(ctx, Surface::Popup)
             .area(egui::Id::unique("sc_help_menu"))
             .fixed_pos(anchor)
@@ -150,6 +157,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
                         ("shortcuts", "Keyboard Shortcuts", "list"),
                         ("messages", "Messages…", "list"),
                         ("report", "Report an Issue…", "bug_report"),
+                        ("my_tickets", my_tickets_label.as_str(), "list"),
                         ("crashes", "Crash Reports…", "status_error"),
                         ("connect", "Connect AI assistants…", "settings"),
                         ("install_cli", "Install solidcraft-cli command", "settings"),
@@ -198,6 +206,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
     connect(app, ctx);
     crate::crash_ui::show(app, ctx);
     crate::messages::show(app, ctx);
+    crate::tickets::mine::show(app, ctx);
 }
 
 fn about(app: &mut SolveApp, ctx: &egui::Context) {

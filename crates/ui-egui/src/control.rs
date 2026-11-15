@@ -133,6 +133,7 @@ fn open_windows(app: &SolveApp) -> Vec<&'static str> {
         (app.crashes.open, "crashes"),
         (app.issue_report.draft.is_some(), "report"),
         (app.messages.open, "messages"),
+        (app.tickets.mine.open, "my_tickets"),
     ]
     .into_iter()
     .filter_map(|(open, command)| open.then_some(command))
@@ -1399,7 +1400,7 @@ fn ui_menu(app: &mut SolveApp, menu: params::Menu) -> Outcome {
 /// `ui.help {item?}`: the Help menu; the version and diagnostics.
 fn ui_help(app: &mut SolveApp, ctx: &egui::Context, q: params::Help) -> Outcome {
     // The Help menu's items (the macOS menu bar sends the same); none only reports.
-    const ITEMS: [&str; 8] = ["about", "updates", "shortcuts", "report", "crashes", "docs", "messages", "install_cli"];
+    const ITEMS: [&str; 9] = ["about", "updates", "shortcuts", "report", "my_tickets", "crashes", "docs", "messages", "install_cli"];
     match q.item.as_deref() {
         Some(i) if !ITEMS.contains(&i) => return err(format!("unknown help item `{i}` ({})", ITEMS.join(", "))),
         Some(i) => crate::help::run(app, ctx, i),

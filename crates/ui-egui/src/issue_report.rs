@@ -2405,6 +2405,10 @@ mod tests {
                     json!({"device_code":"dev-1","user_code":"WDJB-MJHT","verification_uri":format!("{}/device", tickets::api::server()),"interval":1,"expires_in":600})
                 }
                 ("POST", "/api/device/token") => json!({"access_token":"tkt_secret_token_123","token_type":"Bearer"}),
+                ("GET", p) if p.starts_with("/api/tickets?") => json!({"tickets":[
+                    {"id":7,"title":"Fillet fails","status":"in-progress","updatedAt":"2026-11-15T10:00:00Z","unread":0,"app":{"name":"SolidCraft"},
+                     "lastComment":{"at":"2026-11-15T10:00:00Z","author":"Brennen","fromMaintainer":true,"excerpt":"Fixed in review."}},
+                    {"id":5,"title":"Question","status":"done","updatedAt":"2026-11-01T10:00:00Z","unread":1,"app":{"name":"SolidCraft"},"lastComment":null}]}),
                 ("GET", "/api/apps") => json!({"apps":[{"slug":"solidcraft","name":"SolidCraft"},{"slug":"pcbcraft","name":"PCBCraft"}]}),
                 ("POST", "/api/tickets") => json!({"id": 42}),
                 ("POST", "/api/drafts") => {
@@ -2792,5 +2796,58 @@ mod tests {
         frames_until(&mut app, &ctx, |_| true);
         assert_eq!(agent_status(&mut app, &id)["status"], "opened");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn my_tickets_show_status_and_latest_reply_with_a_dot_for_what_changed() {
+        let list = tickets::mine::parse(&json!({"tickets":[
+            {"id":7,"title":"Fillet fails","status":"in-progress","updatedAt":"b","unread":0,"lastComment":{"author":"Brennen","excerpt":"Fixed in review.","fromMaintainer":true,"at":"b"}},
+            {"id":5,"title":"Question","status":"done","updatedAt":"a","unread":1,"lastComment":null},
+            {"title":"no id"}]}));
+        assert_eq!(list.len(), 2);
+        assert_eq!((list[0].status.as_str(), list[0].reply.as_ref().map(|r| (r.author.as_str(), r.staff))), ("in-progress", Some(("Brennen", true))));
+        let mut seen = std::collections::BTreeMap::new();
+        assert!(!tickets::mine::is_new(&list[0], &seen), "a ticket never seen is the user's own, not news");
+        assert!(tickets::mine::is_new(&list[1], &seen), "the server has an unread notice for it");
+        seen.insert(7, "a".to_string());
+        assert!(tickets::mine::is_new(&list[0], &seen), "it changed since it was seen");
+        seen.insert(7, "b".to_string());
+        assert!(!tickets::mine::is_new(&list[0], &seen));
+    }
+
+    #[test]
+    fn my_tickets_check_by_themselves_only_signed_in_and_at_most_every_15_minutes() {
+        let ctx = crate::fonts::test_context();
+        let count = |r: &Requests| r.lock().unwrap().iter().filter(|r| r.url.contains("/api/tickets?")).count();
+        // Signed out: nothing is ever sent.
+        let (mut app, _, requests, _) = ticket_app(true, None);
+        let t0 = 1_000_000.0;
+        for minute in 0..120 {
+            tickets::mine::tick(&mut app, t0 + f64::from(minute) * 60_000.0);
+        }
+        assert!(requests.lock().unwrap().is_empty(), "no request while signed out");
+
+        let (mut app, _, requests, _) = ticket_app(true, Some("tkt_good"));
+        tickets::mine::tick(&mut app, t0);
+        tickets::mine::tick(&mut app, t0 + 59_000.0);
+        assert_eq!(count(&requests), 0, "nothing in the first minute");
+        tickets::mine::tick(&mut app, t0 + 61_000.0);
+        assert_eq!(count(&requests), 1);
+        tickets::mine::tick(&mut app, t0 + 61_500.0);
+        assert_eq!(app.tickets.mine.list.len(), 2);
+        assert!(tickets::mine::any_new(&app), "an unread notice shows the dot");
+        for minute in 2..16 {
+            tickets::mine::tick(&mut app, t0 + f64::from(minute) * 60_000.0);
+        }
+        assert_eq!(count(&requests), 1, "not again within 15 minutes");
+        tickets::mine::tick(&mut app, t0 + 61_000.0 + tickets::mine::POLL_MS);
+        assert_eq!(count(&requests), 2, "again after 15 minutes");
+
+        // Opening the window asks at once; closing it marks what was shown as seen.
+        tickets::mine::tick(&mut app, t0 + 62_000.0 + tickets::mine::POLL_MS);
+        help::run(&mut app, &ctx, "my_tickets");
+        assert!(app.tickets.mine.open && count(&requests) == 3);
+        tickets::mine::mark_seen(&mut app);
+        assert_eq!(app.preferences.tickets_seen.get(&7).map(String::as_str), Some("2026-11-15T10:00:00Z"));
     }
 }
