@@ -77,7 +77,8 @@ fn inputs() -> Vec<SelInput> {
     vec![
         SelInput::new("ui.profiles", PROFILES, true),
         SelInput::new("ui.bodies", BODIES, true),
-        SelInput::new("ui.cell_grid.anchor", ANCHOR_PICKS, false),
+        // A short label keeps the form's label column narrow; the tip says what none means.
+        SelInput::new("Anchor", ANCHOR_PICKS, false).tip("ui.cell_grid.anchor_tip"),
     ]
 }
 

@@ -1,7 +1,7 @@
 {
   "en": {
     "ui.cell_grid_title": "CELL GRID",
-    "ui.cell_grid.anchor": "Anchor (sketch origin if none)",
+    "ui.cell_grid.anchor_tip": "The point a cell centre sits on: a corner, the origin or a snap point. None picked: the sketch origin.",
     "ui.cell_grid.shape": "Shape",
     "ui.cell_grid.hexagon": "Hexagon",
     "ui.cell_grid.triangle": "Triangle",
@@ -22,7 +22,7 @@
   },
   "ar": {
     "ui.cell_grid_title": "شبكة خلايا",
-    "ui.cell_grid.anchor": "نقطة الارتكاز (أصل الرسم إن لم تُحدَّد)",
+    "ui.cell_grid.anchor_tip": "النقطة التي يقع عليها مركز خلية: زاوية أو نقطة الأصل أو نقطة التقاط. إن لم تُحدَّد: أصل الرسم.",
     "ui.cell_grid.shape": "الشكل",
     "ui.cell_grid.hexagon": "سداسي",
     "ui.cell_grid.triangle": "مثلث",
@@ -43,7 +43,7 @@
   },
   "de": {
     "ui.cell_grid_title": "ZELLRASTER",
-    "ui.cell_grid.anchor": "Anker (ohne: Skizzenursprung)",
+    "ui.cell_grid.anchor_tip": "Der Punkt, auf dem eine Zellmitte liegt: eine Ecke, der Ursprung oder ein Fangpunkt. Ohne Auswahl: der Skizzenursprung.",
     "ui.cell_grid.shape": "Form",
     "ui.cell_grid.hexagon": "Sechseck",
     "ui.cell_grid.triangle": "Dreieck",
@@ -64,7 +64,7 @@
   },
   "he": {
     "ui.cell_grid_title": "רשת תאים",
-    "ui.cell_grid.anchor": "עוגן (ראשית השרטוט אם אין)",
+    "ui.cell_grid.anchor_tip": "הנקודה שעליה יושב מרכז של תא: פינה, הראשית או נקודת הצמדה. אם לא נבחרה: ראשית השרטוט.",
     "ui.cell_grid.shape": "צורה",
     "ui.cell_grid.hexagon": "משושה",
     "ui.cell_grid.triangle": "משולש",
@@ -85,7 +85,7 @@
   },
   "ja": {
     "ui.cell_grid_title": "セルグリッド",
-    "ui.cell_grid.anchor": "基準点 (なしの場合はスケッチ原点)",
+    "ui.cell_grid.anchor_tip": "セルの中心を置く点: 角、原点またはスナップ点。選択なしの場合はスケッチ原点。",
     "ui.cell_grid.shape": "形状",
     "ui.cell_grid.hexagon": "六角形",
     "ui.cell_grid.triangle": "三角形",
@@ -106,7 +106,7 @@
   },
   "ko": {
     "ui.cell_grid_title": "셀 그리드",
-    "ui.cell_grid.anchor": "기준점 (없으면 스케치 원점)",
+    "ui.cell_grid.anchor_tip": "셀 중심이 놓이는 점: 꼭짓점, 원점 또는 스냅 점. 선택하지 않으면 스케치 원점.",
     "ui.cell_grid.shape": "모양",
     "ui.cell_grid.hexagon": "육각형",
     "ui.cell_grid.triangle": "삼각형",
@@ -127,7 +127,7 @@
   },
   "nb": {
     "ui.cell_grid_title": "CELLERUTENETT",
-    "ui.cell_grid.anchor": "Ankerpunkt (skissens origo om ingen)",
+    "ui.cell_grid.anchor_tip": "Punktet en cellemidte ligger på: et hjørne, origo eller et festepunkt. Ingen valgt: skissens origo.",
     "ui.cell_grid.shape": "Form",
     "ui.cell_grid.hexagon": "Sekskant",
     "ui.cell_grid.triangle": "Trekant",
@@ -148,7 +148,7 @@
   },
   "vi": {
     "ui.cell_grid_title": "LƯỚI Ô",
-    "ui.cell_grid.anchor": "Điểm neo (gốc bản phác nếu không có)",
+    "ui.cell_grid.anchor_tip": "Điểm mà tâm một ô nằm trên: một góc, gốc tọa độ hoặc một điểm bắt dính. Không chọn: gốc bản phác.",
     "ui.cell_grid.shape": "Hình dạng",
     "ui.cell_grid.hexagon": "Lục giác",
     "ui.cell_grid.triangle": "Tam giác",
@@ -169,7 +169,7 @@
   },
   "zh": {
     "ui.cell_grid_title": "单元格栅",
-    "ui.cell_grid.anchor": "锚点（未选时为草图原点）",
+    "ui.cell_grid.anchor_tip": "单元中心所在的点：角点、原点或捕捉点。未选时为草图原点。",
     "ui.cell_grid.shape": "形状",
     "ui.cell_grid.hexagon": "六边形",
     "ui.cell_grid.triangle": "三角形",
