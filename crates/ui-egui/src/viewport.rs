@@ -8438,7 +8438,7 @@ const WOKEN_CENTRE_FAR: f64 = 1.2;
 /// that centre) puts it back to sleep, as does leaving the sketch, taking the pointer past the
 /// circle's own size from the centre, and clicking empty space (#16346).
 /// What the last frame's view needs to tell, without a frame, that moving the pointer changes
-/// nothing on screen ([`motion_changes_nothing`]): the window then skips the frame that pointer
+/// nothing on screen ([`follow_pointer_without_frame`]): the window then skips the frame that pointer
 /// motion asks for, instead of drawing the same picture again at every move.
 ///
 /// Kept only while the view is still and the pointer only hovers it: no tool, dialog, sketch,
@@ -8500,11 +8500,17 @@ impl QuietMotion {
     }
 }
 
-/// Moving the pointer to `pos` (in points) changes nothing the last frame drew: the view was
-/// quiet ([`QuietMotion`]), the pointer stays on it with no other widget reached, and what is
-/// under it lights up the same. The model is picked again here, as the frame would; nothing else
-/// of a frame runs. `ctx` is the window's: its last pass's widgets are hit-tested at `pos`.
-pub fn motion_changes_nothing(app: &SolveApp, ctx: &egui::Context, pos: Pos2) -> bool {
+/// Answer a pointer move to `pos` (in points) without a frame when it changes nothing the last
+/// frame drew: the view was quiet ([`QuietMotion`]), the pointer stays on it with no other widget
+/// reached, and what is under it lights up the same. The model is picked again here, as the frame
+/// would; nothing else of a frame runs. `ctx` is the window's: its last pass's widgets are
+/// hit-tested at `pos`.
+///
+/// When the move needs no frame (true), the hover and the pointer are brought up to date as the
+/// frame would have left them: the same item, picked at `pos` (a face's or an edge's point under
+/// the pointer moves along it). What reads them between frames (`ui.inspect`, the agents) then
+/// sees where the pointer is, not where the hover last changed. False changes nothing.
+pub fn follow_pointer_without_frame(app: &mut SolveApp, ctx: &egui::Context, pos: Pos2) -> bool {
     let Some(q) = &app.viewport.quiet_motion else {
         return false;
     };
@@ -8520,7 +8526,12 @@ pub fn motion_changes_nothing(app: &SolveApp, ctx: &egui::Context, pos: Pos2) ->
     }
     let picks = pick_with_sketch_points(app, &q.proj, pos, false);
     let hover = candidate(app, &picks).map(|(hit, _)| hit);
-    hover_drawn(&hover) == q.hover
+    if hover_drawn(&hover) != q.hover {
+        return false;
+    }
+    app.viewport.hover = hover;
+    app.viewport.mouse = Some(pos);
+    true
 }
 
 fn wake_centre(app: &mut SolveApp, hits: &[Hit], pointer: Option<Pos2>, proj: &Proj) {
@@ -13526,9 +13537,10 @@ mod tests {
     }
 
     /// Pointer motion over a still view is answered without a frame when what lights up stays
-    /// the same (`motion_changes_nothing`): moving across one face, or across the empty
-    /// background. Reaching another face or the background, or holding a button, needs a frame;
-    /// and a frame at each place lights up what the answer said.
+    /// the same (`follow_pointer_without_frame`): moving across one face, or across the empty
+    /// background. The hover then follows the pointer along the face, as a frame would leave it.
+    /// Reaching another face or the background, or holding a button, needs a frame (and changes
+    /// nothing); a frame at each place lights up what the answer said.
     #[test]
     fn pointer_motion_that_lights_up_nothing_new_needs_no_frame() {
         let ctx = crate::fonts::test_context();
@@ -13555,21 +13567,27 @@ mod tests {
         hover_frame(&mut app, &ctx, moved(face));
         assert!(app.viewport.quiet_motion.is_some(), "a still view, only hovered");
         let lit_now = hover_drawn(&app.viewport.hover);
-        assert!(motion_changes_nothing(&app, &ctx, same_face), "the same face");
-        assert!(!motion_changes_nothing(&app, &ctx, empty[0]), "off the face");
-        assert!(!motion_changes_nothing(&app, &ctx, pos2(f32::NAN, 1.0)), "not a position");
+        let at_face = app.viewport.hover.clone();
+        assert!(!follow_pointer_without_frame(&mut app, &ctx, empty[0]), "off the face");
+        assert!(!follow_pointer_without_frame(&mut app, &ctx, pos2(f32::NAN, 1.0)), "not a position");
+        assert_eq!(app.viewport.hover, at_face, "a move that needs a frame leaves the hover to it");
+        assert!(follow_pointer_without_frame(&mut app, &ctx, same_face), "the same face");
+        let followed = app.viewport.hover.clone();
+        assert_eq!(hover_drawn(&followed), lit_now, "the same face stays lit");
+        assert_ne!(followed, at_face, "the hover's point follows the pointer along the face");
+        assert_eq!(app.viewport.mouse, Some(same_face));
         hover_frame(&mut app, &ctx, moved(same_face));
-        assert_eq!(hover_drawn(&app.viewport.hover), lit_now, "the frame lit what the answer said");
+        assert_eq!(app.viewport.hover, followed, "the frame leaves the hover as the answer did");
 
         hover_frame(&mut app, &ctx, moved(empty[0]));
         assert_eq!(hover_drawn(&app.viewport.hover), nothing);
-        assert!(motion_changes_nothing(&app, &ctx, empty[1]), "the background, still nothing lit");
-        assert!(!motion_changes_nothing(&app, &ctx, face), "onto the face");
+        assert!(follow_pointer_without_frame(&mut app, &ctx, empty[1]), "the background, still nothing lit");
+        assert!(!follow_pointer_without_frame(&mut app, &ctx, face), "onto the face");
 
         let press = egui::Event::PointerButton { pos: empty[0], button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() };
         hover_frame(&mut app, &ctx, vec![press]);
         assert!(app.viewport.quiet_motion.is_none(), "a held button follows the pointer");
-        assert!(!motion_changes_nothing(&app, &ctx, empty[1]));
+        assert!(!follow_pointer_without_frame(&mut app, &ctx, empty[1]));
     }
 
     #[test]

@@ -357,14 +357,15 @@ impl eframe::App for App {
         }
     }
     /// Pointer motion over a still 3D view that lights up nothing new paints no frame: the view
-    /// would draw the same picture again (`viewport::motion_changes_nothing`). The motion still
-    /// reaches the next frame. Any other event keeps eframe's answer.
+    /// would draw the same picture again (`viewport::follow_pointer_without_frame`, which keeps
+    /// the hover at the pointer). The motion still reaches the next frame. Any other event keeps
+    /// eframe's answer.
     fn repaint_on_window_event(&mut self, event: &winit::event::WindowEvent) -> Option<bool> {
         let winit::event::WindowEvent::CursorMoved { position, .. } = event else {
             return None;
         };
         let pos = pointer_in_points(position.x, position.y, self.ctx.pixels_per_point())?;
-        solidcraft_ui_egui::viewport::motion_changes_nothing(&self.solve, &self.ctx, pos).then_some(false)
+        solidcraft_ui_egui::viewport::follow_pointer_without_frame(&mut self.solve, &self.ctx, pos).then_some(false)
     }
     /// Raw mouse motion (not tied to a window) paints no frame while the 3D view is quiet: the
     /// window's own pointer motion decides then, above.

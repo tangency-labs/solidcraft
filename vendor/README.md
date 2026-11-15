@@ -71,7 +71,7 @@ SolidCraft changes to egui and eframe:
   `widget_hits_at_matches_the_next_pass`.
 
 The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
-draws (`viewport::motion_changes_nothing` in `crates/ui-egui`).
+draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).
 
 SolidCraft changes to egui-wgpu (paths relative to `crates/egui-wgpu`; these lived in a
 separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
