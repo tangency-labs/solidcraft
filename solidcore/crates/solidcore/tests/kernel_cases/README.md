@@ -7,7 +7,8 @@ This folder holds the kernel's operation-level cases as data, one entry each, by
 The runner that replays the entries is `crates/solidcore-ops/tests/kernel_cases.rs` (see [Running](#running)). The operations are SolidCraft's compositions of kernel calls (picks, per-edge fillet sessions, setbacks, the overflow retry, the stitch, error mapping), and their one home is `solidcore-ops` (`docs/layers.md`). `crates/solidcore-record/tests/kernel_cases_corpus.rs` checks the corpus itself:
 - every record reads as the record and passes its structural validation;
 - every operation's operands are given records or earlier outputs;
-- recorded volumes agree with independent analytic expectations, as described below;
+- recorded volumes of passing cases without known-failure markers agree with independent
+  analytic expectations, as described below;
 - the manifest counts every entry;
 - no two nonempty traces contain exactly the same calls, operand import options and decoded
   operand records. Descriptions, expected values and gzip filenames do not make a replay
@@ -60,14 +61,18 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 
 ### Analytic volume expectations
 
-When `expected.source` is `"analytic"`, the corpus checker compares
+When `expected.source` is `"analytic"`, `rig.status` is `"pass"`, and
+`rig.known_failing` is null or absent, the corpus checker compares
 `rig.measured.volume_mm3` with `expected.volume_mm3`, if both are present.
+Other statuses and non-null known-failure markers skip this comparison.
+Known-failing entries intentionally preserve SolidCraft's incorrect output.
 A scalar uses `expected.tolerance.abs_mm` as an absolute volume difference when given.
 Otherwise, the allowed difference is `expected.tolerance.rel * abs(expected.volume_mm3)`,
 with a default relative tolerance of `1e-3`, matching the replay runner.
 A two-number interval includes both endpoints and is not widened by the tolerance.
 Entries without a recorded volume, including hand-written cases, skip this comparison.
-Re-exporting a case must not hide a disagreement with its independent expected volume.
+Re-exporting a passing case without a known-failure marker must not hide a disagreement
+with its independent expected volume.
 
 ### Seam expectations
 

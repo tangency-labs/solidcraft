@@ -4,7 +4,8 @@
 //! validation, and every operation an entry lists takes records it gives or bodies an earlier
 //! operation made. Nonempty replay inputs are unique across the corpus: descriptions and
 //! expected answers cannot disguise duplicate calls on the same operand records.
-//! Recorded volumes must also agree with independent analytic expectations.
+//! Recorded volumes of passing cases without known-failure markers must also agree with
+//! independent analytic expectations.
 
 #![allow(
     clippy::unwrap_used,
@@ -212,6 +213,10 @@ fn validate_analytic_volume(e: &Value, f: &Path) {
     if e["expected"]["source"].as_str() != Some("analytic") {
         return;
     }
+    // Failing cases intentionally preserve the rig's incorrect output.
+    if !e["rig"]["known_failing"].is_null() || e["rig"]["status"].as_str() != Some("pass") {
+        return;
+    }
     let Some(got) = e["rig"]["measured"]["volume_mm3"].as_f64() else {
         return;
     };
@@ -369,7 +374,7 @@ fn regression_analytic_scalar_volumes() {
     ] {
         let e = serde_json::json!({
             "expected": {"source": "analytic", "volume_mm3": want, "tolerance": tolerance},
-            "rig": {"status": "fail", "measured": {"volume_mm3": got}},
+            "rig": {"status": "pass", "measured": {"volume_mm3": got}},
         });
         assert_eq!(
             std::panic::catch_unwind(|| validate_analytic_volume(&e, Path::new("case.json")))
@@ -392,7 +397,7 @@ fn regression_analytic_volume_intervals() {
         let e = serde_json::json!({
             "expected": {"source": "analytic", "volume_mm3": [10.0, 20.0],
                 "tolerance": {"abs_mm": 100.0, "rel": 100.0}},
-            "rig": {"measured": {"volume_mm3": got}},
+            "rig": {"status": "pass", "measured": {"volume_mm3": got}},
         });
         assert_eq!(
             std::panic::catch_unwind(|| validate_analytic_volume(&e, Path::new("case.json")))
@@ -404,17 +409,55 @@ fn regression_analytic_volume_intervals() {
 }
 
 #[test]
+fn regression_analytic_volume_check_respects_rig_status() {
+    for (rig, accepted) in [
+        (serde_json::json!({"status": "pass"}), false),
+        (
+            serde_json::json!({"status": "pass", "known_failing": null}),
+            false,
+        ),
+        (serde_json::json!({"status": "fail"}), true),
+        (serde_json::json!({"status": "error"}), true),
+        (serde_json::json!({}), true),
+        (
+            serde_json::json!({"status": "fail", "known_failing": "wrong volume"}),
+            true,
+        ),
+        (
+            serde_json::json!({"status": "pass", "known_failing": "wrong volume"}),
+            true,
+        ),
+    ] {
+        for expected in [serde_json::json!(1.0), serde_json::json!([1.0, 2.0])] {
+            let mut e = serde_json::json!({
+                "expected": {"source": "analytic", "volume_mm3": expected},
+                "rig": rig,
+            });
+            e["rig"]["measured"] = serde_json::json!({"volume_mm3": 3.0});
+            assert_eq!(
+                std::panic::catch_unwind(|| validate_analytic_volume(&e, Path::new("case.json")))
+                    .is_ok(),
+                accepted,
+                "wrong verdict for {e}"
+            );
+        }
+    }
+}
+
+#[test]
 fn analytic_volume_check_skips_unavailable_comparisons() {
     for e in [
         serde_json::json!({"expected": {"source": "analytic", "volume_mm3": 1.0}}),
         serde_json::json!({"expected": {"source": "analytic", "volume_mm3": 1.0},
-            "rig": {"measured": {"volume_mm3": null}}}),
+            "rig": {"status": "pass"}}),
+        serde_json::json!({"expected": {"source": "analytic", "volume_mm3": 1.0},
+            "rig": {"status": "pass", "measured": {"volume_mm3": null}}}),
         serde_json::json!({"expected": {"source": "analytic"},
-            "rig": {"measured": {"volume_mm3": 2.0}}}),
+            "rig": {"status": "pass", "measured": {"volume_mm3": 2.0}}}),
         serde_json::json!({"expected": {"source": "measured", "volume_mm3": 1.0},
-            "rig": {"measured": {"volume_mm3": 2.0}}}),
+            "rig": {"status": "pass", "measured": {"volume_mm3": 2.0}}}),
         serde_json::json!({"expected": {"volume_mm3": 1.0},
-            "rig": {"measured": {"volume_mm3": 2.0}}}),
+            "rig": {"status": "pass", "measured": {"volume_mm3": 2.0}}}),
     ] {
         validate_analytic_volume(&e, Path::new("case.json"));
     }
