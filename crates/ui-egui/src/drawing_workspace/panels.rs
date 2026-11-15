@@ -467,7 +467,8 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     ui_kit::row(ui, tr("ui.drawing_panel.size"), |ui| {
         ui_kit::dropdown_menu(ui, "drawing_sheet_size", &selected, |ui| {
             for size in PaperSize::ALL {
-                if ui.selectable_label(sheet.sheet.size == SheetSize::Standard(size), size_caption(size)).clicked() {
+                let style = if sheet.sheet.size == SheetSize::Standard(size) { Button::SmallSelected } else { Button::Small };
+                if ui_kit::button(ui, &size_caption(size), style).clicked() {
                     new_size = Some(size);
                 }
             }

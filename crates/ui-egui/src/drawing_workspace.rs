@@ -245,7 +245,8 @@ fn sheet_settings_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::row(ui, &label, |ui| {
             ui_kit::dropdown_menu(ui, "drawing_active_sheet", active_name, |ui| {
                 for sheet in &drawing.sheets {
-                    if ui.selectable_label(sheet.id == active, &sheet.name).clicked() {
+                    let style = if sheet.id == active { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small };
+                    if ui_kit::button(ui, &sheet.name, style).clicked() {
                         select_sheet(app, sheet.id);
                     }
                 }
