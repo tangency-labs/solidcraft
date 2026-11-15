@@ -1015,5 +1015,130 @@ fn onto_range(s: &EvalSurface, uv: [f64; 2]) -> Result<Option<([f64; 2], f64)>, 
     Ok(Some((near, delta)))
 }
 
+/// A certified bound on `|∂S/∂x_d|` of a polynomial spline over the points whose other
+/// parameter lies in `across` (on its knot range) and whose `d` parameter is on its knot range
+/// or past either end by at most `beyond`: how far the surface moves per unit of `d` there, so a
+/// point moved along `d` by `o` within that strip (a pcurve's control point a little past the
+/// range put on it) moves the surface by at most `o` times the bound.
+///
+/// On the range `∂S/∂d` at a fixed other parameter is the B-spline whose coefficients are
+/// `p (Q_(i+1) − Q_i) / (t_(i+p+1) − t_(i+1))` over the iso-line's control points `Q_i`, within
+/// their largest length (a convex combination of them). Over a strip the `Q_i` are the net's
+/// columns that are not zero somewhere on it ([`indices`]); at one parameter (`across` a single
+/// value) they are that iso-line's own, by de Boor across (with their rounding). Past the range
+/// the end spans' polynomials continue, the Bernstein basis summing in absolute value to at most
+/// `(1 + 2 beyond / h)^(p − 1)` over the derivative's degree `p − 1`, `h` the shorter end span
+/// ([`onto_range`]). The product is rounded up. A rational net (any weight other than the
+/// first, or not positive), `across` off the range, or knots with an empty span where one is
+/// needed is refused: the bound is not decided there.
+pub fn partial_bound(
+    s: &EvalSurface,
+    d: usize,
+    across: [f64; 2],
+    beyond: f64,
+) -> Result<f64, EvalError> {
+    let EvalSurface::Nurbs(n) = s else {
+        return Err(refused("a partial bound of a surface that is not a spline"));
+    };
+    if d > 1 {
+        return Err(past(d));
+    }
+    if !(beyond >= 0.0 && beyond.is_finite() && across.iter().all(|x| x.is_finite())) {
+        return Err(malformed(
+            "a strip or a distance past the range that is not finite",
+        ));
+    }
+    let f = 1 - d;
+    let (deg, knots, count, ctrl) = (n.degree(), n.knots(), n.count(), n.ctrl());
+    let bad = || malformed("knots or a net that do not fit");
+    let none: &[f64] = &[];
+    let kn = |x: usize| knots.get(x).map_or(none, Vec::as_slice);
+    let get = |a: &[usize; 2], x: usize| a.get(x).copied().unwrap_or(0);
+    let (p, m, k) = (get(&deg, d), get(&count, d), kn(d));
+    let (q, mf, kf) = (get(&deg, f), get(&count, f), kn(f));
+    let nu = get(&count, 0);
+    let w0 = ctrl.first().ok_or_else(bad)?[3];
+    if !(w0 > 0.0 && ctrl.iter().all(|c| c[3] == w0)) {
+        return Err(refused("a partial bound of a rational net"));
+    }
+    // Control point `i` along d, `j` across, Euclidean (the net's one weight).
+    let point = |i: usize, j: usize| -> Result<Vec3, EvalError> {
+        let (iu, iv) = if d == 0 { (i, j) } else { (j, i) };
+        let c = ctrl
+            .get(
+                iv.checked_mul(nu)
+                    .and_then(|x| x.checked_add(iu))
+                    .ok_or_else(bad)?,
+            )
+            .copied()
+            .ok_or_else(bad)?;
+        if !(c[3] == w0 && w0 > 0.0 && c.iter().all(|x| x.is_finite())) {
+            return Err(refused("a partial bound of a rational net"));
+        }
+        Ok(Vec3::new(c[0], c[1], c[2]) * (1.0 / w0))
+    };
+    let (a, b) = (across[0].min(across[1]), across[0].max(across[1]));
+    let (Some(a), Some(b)) = (onto_knots(kf, q, mf, a), onto_knots(kf, q, mf, b)) else {
+        return Err(refused("a strip off the knot range across"));
+    };
+    // Each iso-line's control points along d with their rounding: one line at a single
+    // parameter across, else every column the strip meets.
+    let mut lines: Vec<Vec<(Vec3, f64)>> = Vec::new();
+    if a == b {
+        let mut line = Vec::new();
+        for i in 0..m {
+            let at = |j: usize| point(i, j).ok().map(|x| Hom::exact([x.x, x.y, x.z, 1.0]));
+            let h = de_boor(q, kf, mf, at, a).map_err(|o| off_message(o, [a, b]))?;
+            line.push(h.euclid()?);
+        }
+        lines.push(line);
+    } else {
+        let (first, end, _, _) = indices(q, kf, mf, Some((a, b))).ok_or_else(bad)?;
+        for j in first..=end {
+            lines.push(
+                (0..m)
+                    .map(|i| point(i, j).map(|x| (x, 0.0)))
+                    .collect::<Result<_, _>>()?,
+            );
+        }
+    }
+    let mut top = 0.0f64;
+    for line in &lines {
+        for i in 0..m.saturating_sub(1) {
+            let step = k.get(i + p + 1).ok_or_else(bad)? - k.get(i + 1).ok_or_else(bad)?;
+            if !(step > 0.0) {
+                return Err(bad());
+            }
+            let (Some(&(x, ex)), Some(&(y, ey))) = (line.get(i), line.get(i + 1)) else {
+                return Err(bad());
+            };
+            let len = (y - x).len() + ex + ey + gamma(8) * (x.len() + y.len());
+            top = top.max(p as f64 * len / step);
+        }
+    }
+    let grow = if beyond > 0.0 && p > 1 {
+        let (Some(&lo), Some(&lo1), Some(&hi), Some(&hi0)) = (
+            k.get(p),
+            k.get(p + 1),
+            k.get(m),
+            k.get(m.checked_sub(1).ok_or_else(bad)?),
+        ) else {
+            return Err(bad());
+        };
+        let h = (lo1 - lo).min(hi - hi0);
+        if !(h > 0.0) {
+            return Err(bad());
+        }
+        (0..p - 1).fold(1.0, |acc, _| acc * (1.0 + 2.0 * beyond / h))
+    } else {
+        1.0
+    };
+    let bound = top * grow * (1.0 + gamma(16));
+    if !bound.is_finite() {
+        return Err(refused("a partial bound that is not finite"));
+    }
+    Ok(bound)
+}
+
 #[cfg(test)]
 mod tests;

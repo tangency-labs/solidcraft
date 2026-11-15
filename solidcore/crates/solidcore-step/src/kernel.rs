@@ -69,6 +69,11 @@ impl SurfaceEval {
     pub(crate) fn pole_within(&self, uv: [f64; 2], reach: f64) -> Result<[bool; 2], String> {
         self.0.pole_within(uv, reach).map_err(|e| e.to_string())
     }
+    /// A certified bound on how far the surface moves per unit of parameter `d` over the strip
+    /// `across` of the other, up to `beyond` past the knot range ([`k::SurfaceEval::partial_bound`]).
+    pub(crate) fn partial_bound(&self, d: usize, across: [f64; 2], beyond: f64) -> Result<f64, String> {
+        self.0.partial_bound(d, across, beyond).map_err(|e| e.to_string())
+    }
 }
 
 /// The flux of `field` through a face of `s` bounded by `loops` ([`k::face_flux`]).

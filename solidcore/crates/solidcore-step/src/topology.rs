@@ -1778,6 +1778,19 @@ impl<'b, 'a> Builder<'b, 'a> {
         if let (Some(f), Some(e)) = (&form, extent) {
             onto_form(f, &label, e, tol, &mut pcs);
         }
+        // A spline face's pcurve may end a little past the patch's knot range (a closed form
+        // whose ends are where the edge's own lie, up to its tolerance past the corner): put on
+        // the range, as the face's domain is, where that moves the surface within the edge's
+        // tolerance ([`onto_knots`]).
+        if form.is_none() {
+            let tolerances = edge_loops
+                .iter()
+                .map(|l| {
+                    l.iter().map(|&(e, _)| self.edges.get(e as usize).map(|x| x.tolerance).ok_or("edge reference")).collect::<Result<Vec<_>, _>>()
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            onto_knots(&surface, &tolerances, &mut pcs);
+        }
         self.raise_edges(&surface, &edge_loops, &pcs)?;
         // Signed areas of the loops that close in (u, v).
         let periods = natural_periods(&surface);
@@ -1940,7 +1953,7 @@ impl Builder<'_, '_> {
         exact: Vec<Vec<Option<Curve2>>>,
     ) -> R<TrimFace<'s>> {
         let (mut edge_at, mut vertex_at) = (HashMap::new(), HashMap::new());
-        let (mut edges, mut vertices) = (Vec::new(), Vec::new());
+        let (mut edges, mut vertices, mut vertex_tolerances) = (Vec::new(), Vec::new(), Vec::new());
         let mut loops = Vec::with_capacity(edge_loops.len());
         for (l, pcs) in edge_loops.iter().zip(exact) {
             let mut uses = Vec::with_capacity(l.len());
@@ -1956,6 +1969,7 @@ impl Builder<'_, '_> {
                                 None => {
                                     let i = index(vertices.len())?;
                                     vertices.push(self.point(v)?);
+                                    vertex_tolerances.push(self.vertices.get(v as usize).ok_or("vertex reference")?.tolerance);
                                     vertex_at.insert(v, i);
                                     i
                                 }
@@ -1975,7 +1989,7 @@ impl Builder<'_, '_> {
             }
             loops.push(uses);
         }
-        Ok(TrimFace { surface, nurbs, domain, edges, vertices, loops, tolerance: self.tol })
+        Ok(TrimFace { surface, nurbs, domain, edges, vertices, vertex_tolerances, loops, tolerance: self.tol })
     }
 }
 
@@ -2125,6 +2139,85 @@ fn onto_form(form: &BSurface, label: &BSurface, domain: [[f64; 2]; 2], tolerance
         }
     }
     moved
+}
+
+/// A spline face's pcurves put on the surface's knot range where they run a little past it: a
+/// pcurve whose control points lie past an end of the range along `d` by at most `o` is moved
+/// onto it there when `o` times a certified bound on how fast the surface moves along `d` (over
+/// the strip of the other parameter its points span, continued `o` past the range,
+/// [`SurfaceEval::partial_bound`]) is within its edge's tolerance (`tolerances`, as `pcs`): the
+/// parameter tolerance that edge has on this patch. A B-spline is a convex combination of its
+/// control points, so the pcurve then lies on the range, in the face's domain ([`face_domain`]),
+/// each of its points moved along `d` by at most `o`, so the surface under it by at most that
+/// bound; the gap to the edge is then measured and covered (`raise_edges`). A pcurve farther
+/// past, whose strip leaves the range across, or on a patch with no such bound (a rational one)
+/// is left as it is, for the record check to refuse. Both directions are taken twice, so a
+/// pcurve past a corner along both comes onto it. The number of moves made.
+fn onto_knots(surface: &BSurface, tolerances: &[Vec<f64>], pcs: &mut [Vec<Curve2>]) -> usize {
+    let Some(ranges) = natural_box(surface) else { return 0 };
+    let Ok(on) = SurfaceEval::new(surface) else { return 0 };
+    let mut moved = 0;
+    for (tl, pc) in tolerances.iter().zip(pcs.iter_mut()) {
+        for (&tolerance, c) in tl.iter().zip(pc.iter_mut()) {
+            for d in [0, 1, 0, 1] {
+                let f = 1 - d;
+                let (Some([a, b]), Some([fa, fb])) = (ranges.get(d).copied(), ranges.get(f).copied()) else { continue };
+                let points = control_points(c);
+                if points.is_empty() {
+                    break;
+                }
+                let at = |p: &[f64; 2], x: usize| p.get(x).copied().unwrap_or(f64::NAN);
+                let past = points.iter().map(|p| (a - at(p, d)).max(at(p, d) - b)).fold(0.0f64, f64::max);
+                if !(past > 0.0) {
+                    continue;
+                }
+                let across = points.iter().fold([f64::INFINITY, f64::NEG_INFINITY], |[lo, hi], p| [lo.min(at(p, f)), hi.max(at(p, f))]);
+                if !(across[0] >= fa && across[1] <= fb) {
+                    continue;
+                }
+                let Ok(bound) = on.partial_bound(d, across, past) else { continue };
+                if !(past * bound <= tolerance) {
+                    continue;
+                }
+                let onto = |p: &mut [f64; 2]| {
+                    if let Some(x) = p.get_mut(d) {
+                        if *x < a {
+                            *x = a;
+                        } else if *x > b {
+                            *x = b;
+                        }
+                    }
+                };
+                match c {
+                    Curve2::Spline { points, .. } => points.iter_mut().for_each(onto),
+                    Curve2::RationalSpline { homogeneous, .. } => {
+                        for h in homogeneous.iter_mut() {
+                            let mut p = [h[0] / h[2], h[1] / h[2]];
+                            onto(&mut p);
+                            (h[0], h[1]) = (p[0] * h[2], p[1] * h[2]);
+                        }
+                    }
+                }
+                moved += 1;
+            }
+        }
+    }
+    moved
+}
+
+/// A pcurve's control points in (u, v); none for a rational one with a weight that is not
+/// positive (it need not lie in its points' hull).
+fn control_points(c: &Curve2) -> Vec<[f64; 2]> {
+    match c {
+        Curve2::Spline { points, .. } => points.clone(),
+        Curve2::RationalSpline { homogeneous, .. } => {
+            if homogeneous.iter().all(|h| h[2] > 0.0) {
+                homogeneous.iter().map(|h| [h[0] / h[2], h[1] / h[2]]).collect()
+            } else {
+                Vec::new()
+            }
+        }
+    }
 }
 
 /// The parameter box around every pcurve's control points, padded a little, within the

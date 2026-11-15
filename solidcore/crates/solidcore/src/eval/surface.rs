@@ -566,6 +566,19 @@ impl SurfaceEval {
         }
         Ok(self.collapse(uv, reach)?.flags())
     }
+
+    /// A certified bound on how far the surface moves per unit of parameter `d`, over the
+    /// points whose other parameter lies in `across` and whose `d` parameter is on the knot
+    /// range or past it by at most `beyond` ([`super::collapse::partial_bound`]); a polynomial
+    /// spline's only, any other surface refused.
+    pub fn partial_bound(&self, d: usize, across: [f64; 2], beyond: f64) -> Result<f64, EvalError> {
+        match self {
+            SurfaceEval::Eval(e, _) => super::collapse::partial_bound(e, d, across, beyond),
+            _ => Err(EvalError::Unevaluable(
+                "a partial bound of a surface that is not a spline".into(),
+            )),
+        }
+    }
 }
 
 /// A tensor spline's rows (`rows[i][j]`, i along u) as the evaluator's u-fastest array.
