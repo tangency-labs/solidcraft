@@ -5,10 +5,10 @@
 //!   plane, an arc's cone) to meet its neighbour along their exact seam, and a corner that
 //!   cannot be closed is refused with why and where. It is a new corner rule, so selecting
 //!   it is the opt-in.
-//! - `OffsetCornerType::LinearExtension` (WR-521): linear-extension corners of a profile of
-//!   lines and arcs continue the walls as their tangent planes through the same
-//!   construction (a drafted rectangle has 6 faces, where SMLib's has 14) and refuse a
-//!   corner they cannot close.
+//! - `Kernel::fixes.taper_tangent_corner_planes` (WR-521, off by default): linear-extension
+//!   corners of a profile of lines and arcs continue the walls as their tangent planes
+//!   through the same construction (a drafted rectangle has 6 faces, not 14) and refuse a
+//!   corner they cannot close. Off, the result is SMLib's.
 //!
 //! The issue's repro is a strip 20 x 2 drafted 10 degrees inward over a height of 10: the
 //! long walls' offsets (10 tan 10 = 1.76) meet across the short walls (half-width 1) before
@@ -65,8 +65,10 @@ fn half_disc(k: &Kernel) -> Vec<Curve> {
     vec![Curve::from(line), Curve::from(arc)]
 }
 
-fn kernel() -> Kernel {
-    Kernel::new(&KernelOptions::default())
+fn kernel(fix: bool) -> Kernel {
+    let mut k = Kernel::new(&KernelOptions::default());
+    k.fixes.taper_tangent_corner_planes = fix;
+    k
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
@@ -122,11 +124,28 @@ fn drafted_rectangle_volume(outward: bool) -> f64 {
     h * (a * b + s * o * (a + b) + 4.0 * o * o / 3.0)
 }
 
-/// The issue's repro: refused, the wall closes at the first corner of a short wall; the
-/// boolean entry point reports it as `SM_ERR_INVALID_INPUT`. SMLib built a 5-face ridge.
 #[test]
-fn the_strip_is_refused_where_its_short_wall_closes() {
-    let mut k = kernel();
+fn the_tangent_corner_planes_fix_is_off_by_default() {
+    assert!(!Kernel::default().fixes.taper_tangent_corner_planes);
+}
+
+/// The issue's repro without the field: SMLib's 5-face solid, through both entry points.
+#[test]
+fn without_the_fix_the_strip_is_smlibs_ridge() {
+    let mut k = kernel(false);
+    let curves = strip();
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    let b = create_taper_extrude(&mut k, &refs, 10.0, 10.0, 3, false).unwrap();
+    assert!(is_manifold_solid(&b).unwrap() && b.face_list().len() == 5);
+    let (faces, _) = built(&mut k, &curves, 10.0, OffsetCornerType::LinearExtension);
+    assert_eq!(faces, 5);
+}
+
+/// The issue's repro with the field: refused, the wall closes at the first corner of a
+/// short wall; the boolean entry point reports it as `SM_ERR_INVALID_INPUT`.
+#[test]
+fn with_the_fix_the_strip_is_refused_where_its_short_wall_closes() {
+    let mut k = kernel(true);
     let curves = strip();
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
     let err = create_taper_extrude(&mut k, &refs, 10.0, 10.0, 3, false).unwrap_err();
@@ -138,32 +157,43 @@ fn the_strip_is_refused_where_its_short_wall_closes() {
     };
     assert_eq!(refusal.reason, TaperCornerRefusal::WallCloses);
     assert_eq!(refusal.corner, p(20.0, 0.0));
-    // fillet corners are not affected
+    // fillet corners are not affected by the field
     let b = create_taper_extrude(&mut k, &refs, 10.0, 10.0, 3, true);
     assert!(b.is_ok(), "{b:?}");
 }
 
-/// The curvature-keeping rule refuses the strip.
+/// The curvature-keeping rule refuses the strip with or without the field.
 #[test]
 fn curve_extension_refuses_the_strip() {
-    let mut k = kernel();
-    let TaperExtrude::Refused(refusal) =
-        taper(&mut k, &strip(), 10.0, OffsetCornerType::CurveExtension)
-    else {
-        panic!("built");
-    };
-    assert_eq!(refusal.reason, TaperCornerRefusal::WallCloses);
-    assert_eq!(refusal.corner, p(20.0, 0.0));
+    for fix in [false, true] {
+        let mut k = kernel(fix);
+        let TaperExtrude::Refused(refusal) =
+            taper(&mut k, &strip(), 10.0, OffsetCornerType::CurveExtension)
+        else {
+            panic!("built");
+        };
+        assert_eq!(refusal.reason, TaperCornerRefusal::WallCloses);
+        assert_eq!(refusal.corner, p(20.0, 0.0));
+    }
 }
 
-/// A rectangle drafted outward: SMLib's tangent rule gave 14 faces (two flat corner
-/// triangles at each corner); with the tangent planes, and with the curvature-keeping
-/// rule, the four walls meet at corner edges (6 faces). The volume is the same exact
-/// prismatoid.
+/// A rectangle drafted outward: SMLib's tangent rule gives 14 faces (two flat corner
+/// triangles at each corner); with the field, and with the curvature-keeping rule, the
+/// four walls meet at corner edges (6 faces). The volume is the same exact prismatoid.
 #[test]
-fn a_drafted_rectangle_has_six_faces() {
+fn a_drafted_rectangle_has_six_faces_with_the_fix() {
     let expected = drafted_rectangle_volume(true);
-    let mut k = kernel();
+    let mut k = kernel(false);
+    let (faces, v) = built(
+        &mut k,
+        &rectangle(),
+        -10.0,
+        OffsetCornerType::LinearExtension,
+    );
+    assert_eq!(faces, 14);
+    assert_rel(v, expected, 1e-9);
+
+    let mut k = kernel(true);
     let (faces, v) = built(
         &mut k,
         &rectangle(),
@@ -173,18 +203,20 @@ fn a_drafted_rectangle_has_six_faces() {
     assert_eq!(faces, 6);
     assert_rel(v, expected, 1e-9);
 
-    let mut k = kernel();
-    let (faces, v) = built(
-        &mut k,
-        &rectangle(),
-        -10.0,
-        OffsetCornerType::CurveExtension,
-    );
-    assert_eq!(faces, 6);
-    assert_rel(v, expected, 1e-9);
+    for fix in [false, true] {
+        let mut k = kernel(fix);
+        let (faces, v) = built(
+            &mut k,
+            &rectangle(),
+            -10.0,
+            OffsetCornerType::CurveExtension,
+        );
+        assert_eq!(faces, 6);
+        assert_rel(v, expected, 1e-9);
+    }
 
     // inward there is no gap at the corners: every rule gives the same 6 faces
-    let mut k = kernel();
+    let mut k = kernel(true);
     let (faces, v) = built(
         &mut k,
         &rectangle(),
@@ -214,30 +246,36 @@ fn half_disc_cone_volume() -> f64 {
     sum * h / 3.0
 }
 
-/// A half disc drafted outward: the curvature-keeping rule continues the arc's cone to the
-/// diameter's plane (4 faces, the exact volume); the tangent planes continue the cone's
-/// ends as flat pieces (6 faces, the volume WR-402's fix gives, 6555.9139).
+/// A half disc drafted outward: SMLib's tangent rule does not close without WR-402's
+/// nearest-corner pivot, which closes it; the curvature-keeping rule continues the arc's cone to
+/// the diameter's plane (4 faces, the exact volume); the tangent planes fix continues the
+/// cone's ends as flat pieces (6 faces, the volume WR-402's fix gives, 6555.9139).
 #[test]
 fn a_half_disc_keeps_its_cone_or_gets_tangent_planes() {
-    let mut k = kernel();
+    let mut k = kernel(false);
     let d = half_disc(&k);
+    let TaperExtrude::Solid(b) = taper(&mut k, &d, -3.0, OffsetCornerType::LinearExtension) else {
+        panic!("refused");
+    };
+    assert!(is_manifold_solid(&b).unwrap());
+
     let (faces, v) = built(&mut k, &d, -3.0, OffsetCornerType::CurveExtension);
     assert_eq!(faces, 4);
     assert_rel(v, half_disc_cone_volume(), 1e-6);
 
-    let mut k = kernel();
+    let mut k = kernel(true);
     let (faces, v) = built(&mut k, &d, -3.0, OffsetCornerType::LinearExtension);
     assert_eq!(faces, 6);
     assert_rel(v, 6555.9139, 1e-7);
 }
 
 /// A profile curve that is neither a line nor an arc has no exact wall: the
-/// curvature-keeping rule refuses it at its start, and the tangent planes leave it to
+/// curvature-keeping rule refuses it at its start, and the tangent planes fix leaves it to
 /// SMLib's offset method.
 #[test]
 fn a_free_form_corner_is_not_exact() {
     use solidcore::nurbs::b_spline_curve::p1::BSplineCurve;
-    let mut k = kernel();
+    let mut k = kernel(true);
     // the rectangle with its bottom side as a plain B-spline
     let mut curves = rectangle();
     curves[0] =

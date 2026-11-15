@@ -42,6 +42,7 @@
   "nurb_cylinder_inside_out_frame",
   "curve_bounded_surface_read_uv_type_and_implicit_outer",
   "revolve_analytic_profile_faces",
+  "taper_tangent_corner_planes",
   "revolve_holed_profile_void",
   "loops_go_on_round_the_vertex",
   "mirror_curve_keeps_euclidean_control_points",

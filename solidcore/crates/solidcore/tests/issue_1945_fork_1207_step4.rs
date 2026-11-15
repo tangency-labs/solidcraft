@@ -64,6 +64,7 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.nurb_cylinder_inside_out_frame = true;
     k.fixes.revolve_analytic_profile_faces = true;
+    k.fixes.taper_tangent_corner_planes = true;
     k.fixes.revolve_holed_profile_void = true;
     k.fixes.loops_go_on_round_the_vertex = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;

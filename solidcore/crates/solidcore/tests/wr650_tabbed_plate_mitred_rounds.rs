@@ -242,6 +242,7 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
+    k.fixes.taper_tangent_corner_planes = true;
     k.fixes.thicken_planar_side_walls = true;
     k.fixes.torus_check_spindle_apex = true;
     k.fixes.torus_iso_circle_axis_from_midpoint = true;
