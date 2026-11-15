@@ -45,7 +45,7 @@ fn records_build_the_bodies_the_step_text_builds() {
         assert_eq!(from_records.bodies.len(), from_step.bodies.len(), "{part}");
         for (r, s) in from_records.bodies.iter().zip(&from_step.bodies) {
             let (mr, ms) = (measure(&r.body).unwrap(), measure(&s.body).unwrap());
-            assert_eq!((mr.faces, r.closed, &r.face_origin), (ms.faces, s.closed, &s.face_origin), "{part}");
+            assert_eq!((mr.faces, r.closed, &r.face_origin, r.file_faces), (ms.faces, s.closed, &s.face_origin, s.file_faces), "{part}");
             assert!((mr.volume - ms.volume).abs() <= 1e-9 * ms.volume.abs().max(1.0), "{part}: {} vs {}", mr.volume, ms.volume);
         }
     }

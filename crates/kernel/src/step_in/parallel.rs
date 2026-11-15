@@ -161,8 +161,10 @@ pub(super) fn record_part(record: &solidcore_record::brep::Brep, face_origin: &[
     } else {
         smlib_body(r).map_err(|f| Failure { msg: name_record_face(&f.msg, face_origin), ..f })?
     };
+    // The file's faces are the record's, however many faces SMLib's body has.
+    let file_faces = face_origin.len();
     let face_origin = of_record.iter().map(|f| face_origin.get(*f).copied()).collect::<Option<Vec<u64>>>().ok_or_else(renumbered)?;
-    Ok(Part { body, closed: !sheet, file_faces: face_origin.len(), face_origin, refused: None })
+    Ok(Part { body, closed: !sheet, file_faces, face_origin, refused: None })
 }
 
 fn renumbered() -> Failure {
