@@ -807,6 +807,29 @@ mod tests {
         }
     }
 
+    /// #15408: an SVG can repeat the same cubic outline backwards without losing its profile.
+    #[test]
+    fn repeated_svg_cubic_outlines_keep_their_curves_and_extrude() {
+        let mut s = Session::default();
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg">
+            <path d="M0 0 C0 5 12 4 11 -1 C10 -6 -1 -5 0 0 Z"/>
+            <path d="M0 0 C-1 -5 10 -6 11 -1 C12 4 0 5 0 0 Z"/>
+        </svg>"#;
+        let imported = s.execute("sketch.insert_svg", &json!({"text": svg})).unwrap();
+        assert_eq!(imported["curves"], 4, "all source curves remain editable");
+        let id = imported["sketch"].as_u64().unwrap();
+        let areas = profile_areas(&s, id);
+        assert_eq!(areas.len(), 1, "{areas:?}");
+        // 1/2 ∮ (x dy - y dx) for the cubics is 1353/20 square pixels; SVG uses 96 dpi.
+        let area = 1353.0 / 20.0 * (25.4_f64 / 96.0).powi(2);
+        assert!((areas[0] - area).abs() < 1e-12, "{areas:?}");
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.extrude", &json!({"distance": 2})).unwrap();
+        assert_eq!(s.model.state().bodies.len(), 1);
+        let volume = total_volume(&s);
+        assert!((volume - area * 2.0).abs() < 1e-6, "volume {volume}");
+    }
+
     /// A degree-9 SPLINE (solidcraft#5269) with fewer control points than its degree needs still
     /// comes in as one spline over all its points, which the sketch draws at the degree they allow.
     #[test]

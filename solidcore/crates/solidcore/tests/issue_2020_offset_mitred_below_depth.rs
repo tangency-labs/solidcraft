@@ -231,7 +231,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.extrusion_origin_scaled_zero = true;
     k.fixes.face_tight_box_searches_trim = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.fillet_chamfer_cone_stored_as_cone = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_half_degree_crease = true;
@@ -242,7 +241,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_point_step_per_point = true;
     k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_rails_meet_at_one_end_point = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_refuse_rails_leaving_faces = true;
@@ -277,14 +275,12 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.offset_point_vertex_caps = true;
     k.fixes.offset_resolve_crossing_loops = true;
     k.fixes.offset_stitch_at_body_tolerance = true;
-    k.fixes.oscillating_skips_failed_guesses = true;
     k.fixes.planar_path_profile_placement_statuses = true;
     k.fixes.planar_path_sweep_statuses = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.proto_vertex_miss_is_false = true;
-    k.fixes.refine_cc_range_ends = true;
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.revolve_holed_profile_void = true;
