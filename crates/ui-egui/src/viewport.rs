@@ -2896,6 +2896,11 @@ pub(crate) fn round_pick_feedback(app: &SolveApp) -> (Vec<(Vec3, Vec3)>, Vec<Vec
     (lines.into_iter().map(|(a, b, ..)| (a, b)).collect(), centres)
 }
 
+/// The construction points the dialog's preview makes or moves, while that preview is shown.
+fn preview_points(app: &SolveApp) -> &[Vec3] {
+    if app.dialog.is_some() && app.preview.active && !app.preview.rolled_back { &app.preview.points } else { &[] }
+}
+
 /// Construction points shown: (name, position).
 pub fn construction_points(app: &SolveApp) -> Vec<(String, Vec3)> {
     solidcraft_engine::view::construction_points(&app.session)
@@ -4799,6 +4804,9 @@ fn highlight_key_with_projection(app: &SolveApp, projection: impl FnOnce() -> Pr
     app.preferences.origin_axes_across_view.hash(&mut h);
     // A typed dimension value hides the hovered profile (see `build_highlight`).
     crate::dim_view::preview_solve(app).is_some().hash(&mut h);
+    for p in preview_points(app) {
+        [p.x, p.y, p.z].map(f64::to_bits).hash(&mut h);
+    }
     // Body triangles and outlines live in world space; the GPU applies the new camera.
     // Sketch feedback follows the projection, as do the clipped extensions of long origin axes.
     // Neither changes the key of the cached world-space feedback block.
@@ -5247,6 +5255,16 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             let r = size * 0.04;
             for d in [Vec3::X, Vec3::Y, Vec3::Z] {
                 sc.line((p - d * r).to_f32(), (p + d * r).to_f32(), col, 2.0, true);
+            }
+        }
+        // Where the open dialog's construction point will land: the same star, drawn bolder so it
+        // stands out on the picked path. It follows the dialog's values, a Position along a path
+        // too (#17154).
+        let col = sc.color(c4(t.construction_geom));
+        for p in preview_points(app) {
+            let r = size * 0.04;
+            for d in [Vec3::X, Vec3::Y, Vec3::Z] {
+                sc.line((*p - d * r).to_f32(), (*p + d * r).to_f32(), col, 4.0, true);
             }
         }
     }

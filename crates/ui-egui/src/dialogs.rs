@@ -3318,7 +3318,12 @@ fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> 
         };
     }
     if let Kind::Construct {
-        command: "construct.plane.axis_point" | "construct.plane.two_edges" | "construct.plane.three_points" | "construct.plane.perpendicular",
+        command:
+            "construct.plane.axis_point"
+            | "construct.plane.two_edges"
+            | "construct.plane.three_points"
+            | "construct.plane.perpendicular"
+            | "construct.point.along_path",
         keys,
         ..
     } = &d.kind
@@ -8285,6 +8290,27 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 _ => return None,
             };
             d.kind = Kind::PathPlane { t: t.to_string(), sketch };
+            if let Some(input) = d.inputs.first_mut() {
+                input.items = vec![item];
+            }
+            d
+        }
+        // Point along a path reopens with its path and position, like Plane along a path (#17154).
+        FeatureKind::ConstructionPoint { def: solidcraft_engine::doc::construct::PointDef::AlongPath { path, t } } => {
+            let mut d = start("construct.point.along_path")?;
+            let item = match path {
+                solidcraft_engine::doc::construct::GeoRef::SketchCurve { sketch, curve } => {
+                    crate::selection::curve_pick(curve, *sketch, s.active_sketch)
+                }
+                solidcraft_engine::doc::construct::GeoRef::Edge { at, name } => {
+                    // Preserve the saved named reference until a replacement is picked.
+                    d.extra.insert("path".into(), json!({"type":"edge","at":pt3(*at),"name":name}));
+                    Sel::Edge { body: String::new(), index: 0, point: *at }
+                }
+                _ => return None,
+            };
+            let Kind::Construct { t: position, .. } = &mut d.kind else { return None };
+            *position = Some(t.to_string());
             if let Some(input) = d.inputs.first_mut() {
                 input.items = vec![item];
             }
