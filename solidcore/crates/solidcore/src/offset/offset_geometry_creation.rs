@@ -209,7 +209,8 @@ use crate::surface::implicit::{AnalyticSupport, Implicit};
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN as OFFSET_SS_UNKNOWN};
 use crate::surface::surface::p1::{SurfaceIntersectContext, SurfaceSolveContext};
 use crate::surface::surface::p2::{
-    SurfaceKind, TsectCurveType, CONE_TYPE, CYLINDER_TYPE, PLANE_TYPE, SPHERE_TYPE, TORUS_TYPE,
+    SurfaceIntersection, SurfaceKind, TsectCurveType, CONE_TYPE, CYLINDER_TYPE, PLANE_TYPE,
+    SPHERE_TYPE, TORUS_TYPE,
 };
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
@@ -1439,6 +1440,226 @@ fn create_analytic_extension(k: &Kernel, surface: &Surface, dist: f64) -> Result
     let mut copy = surface.copy(k)?;
     copy.adjust_step_uv_domain(k, &Extent2d::from_points(new_min, new_max))?;
     Ok(Some(copy))
+}
+
+/// One end of a piece of a surface/surface intersection ([`join_through_tangent_points`]):
+/// the piece, which end (`true` its last), the point, the outward unit tangent and the UV
+/// points on both surfaces.
+#[derive(Clone, Copy)]
+struct PieceEnd {
+    piece: usize,
+    last: bool,
+    point: Point3,
+    outward: Vec3,
+    uv: [Point2; 2],
+}
+
+/// The ends of piece `piece` of `ssi` whose three curves are B-splines (`None` for any
+/// other piece, which is left as it is).
+fn piece_ends(
+    k: &Kernel,
+    ssi: &SurfaceIntersection,
+    piece: usize,
+) -> Result<Option<[PieceEnd; 2]>> {
+    let (Some(c3), Some(Some(uv1)), Some(Some(uv2))) = (
+        ssi.curves_3d.get(piece),
+        ssi.surface1_uv_curves.get(piece),
+        ssi.surface2_uv_curves.get(piece),
+    ) else {
+        return Ok(None);
+    };
+    let all_b_splines = [c3, uv1, uv2]
+        .iter()
+        .all(|c| matches!(c.kind(), CurveKind::BSpline(_)));
+    if !all_b_splines || c3.is_degenerate(k, EFF_ZERO, None)? {
+        return Ok(None);
+    }
+    let ivl = c3.natural_interval();
+    let mut ends = Vec::new();
+    for last in [false, true] {
+        let t = if last { ivl.max() } else { ivl.min() };
+        let d = c3.evaluate(k, t, 1, last, true)?;
+        let (Some(&point), Some(&tangent)) = (d.first(), d.get(1)) else {
+            return Ok(None);
+        };
+        let Ok(unit) = tangent.unitize() else {
+            return Ok(None);
+        };
+        let uv = |c: &Curve| -> Result<Point2> {
+            let p = c.evaluate_point(k, t)?;
+            Ok(Point2::new(p.x, p.y))
+        };
+        ends.push(PieceEnd {
+            piece,
+            last,
+            point,
+            outward: if last { unit } else { -unit },
+            uv: [uv(uv1)?, uv(uv2)?],
+        });
+    }
+    Ok(ends.try_into().ok())
+}
+
+/// Whether the ends `a` and `b` of two intersection pieces are one point of both surfaces
+/// where the surfaces are tangent and the pieces continue each other: the points within
+/// the intersection's tolerance `tol`, each surface's UV points within it at first order
+/// (`|Δu| |S_u| + |Δv| |S_v|`, so a piece across a seam is not taken), the normals and the
+/// pieces' outward tangents opposite, each within `sine` (the tangency tolerance's).
+fn continues_through_tangent_point(
+    k: &Kernel,
+    surfaces: [&Surface; 2],
+    a: &PieceEnd,
+    b: &PieceEnd,
+    tol: f64,
+    sine: f64,
+) -> Result<bool> {
+    if a.point.distance(b.point) > tol || a.outward.cross(-b.outward).length() > sine {
+        return Ok(false);
+    }
+    if a.outward.dot(b.outward) >= 0.0 {
+        return Ok(false);
+    }
+    let mut normals = [Vec3::ZERO; 2];
+    for ((surface, normal), (ua, ub)) in surfaces
+        .iter()
+        .zip(normals.iter_mut())
+        .zip(a.uv.iter().zip(b.uv.iter()))
+    {
+        let d = surface.evaluate(k, *ua, 1, 1, EvaluateFlags::default())?;
+        let (Some(su), Some(sv)) = (
+            d.get(1).and_then(|r| r.first()),
+            d.first().and_then(|r| r.get(1)),
+        ) else {
+            return Ok(false);
+        };
+        let moved = (ua.x - ub.x).abs() * su.length() + (ua.y - ub.y).abs() * sv.length();
+        if moved > tol || moved.is_nan() {
+            return Ok(false);
+        }
+        *normal = surface.evaluate_normal(k, *ua, Side::Right, Side::Right)?;
+    }
+    let [n1, n2] = normals;
+    Ok(n1.cross(n2).length() <= sine)
+}
+
+/// Not upstream (#17210): the pieces of the intersection of two surfaces that meet end to
+/// end at a point where the surfaces are tangent, and continue each other there, joined
+/// into one curve, with their UV curves. Marching stops at a tangent point of the
+/// surfaces, where two branches of their intersection cross (two oblique cylinders
+/// offset from one circle meet on that circle's offset and on a curve through it), so
+/// one curve comes out as two pieces; an edge whose end lies past the tangent point
+/// (its offset vertex on the far piece) found no trim on either. An end is joined only
+/// to the one other end that continues it ([`continues_through_tangent_point`]); an
+/// end with none, or more than one, is left. The three curves of the two pieces are
+/// joined alike ([`BSplineCurve::create_by_joining`]: the first keeps its parameters,
+/// the second follows on), so the joined 3D and UV curves keep one parameter.
+///
+/// # Errors
+///
+/// Those of the evaluations and of the joins.
+fn join_through_tangent_points(
+    k: &Kernel,
+    ssi: &mut SurfaceIntersection,
+    surfaces: [&Surface; 2],
+    tol: f64,
+    tangency_tol_radians: f64,
+) -> Result<()> {
+    let sine = tangency_tol_radians.abs().min(PI / 2.0).sin();
+    // each join removes a piece: at most one fewer than the pieces
+    for _ in 1..ssi.curves_3d.len() {
+        let mut ends = Vec::new();
+        for piece in 0..ssi.curves_3d.len() {
+            if let Some(both) = piece_ends(k, ssi, piece)? {
+                ends.extend(both);
+            }
+        }
+        let mut join = None;
+        'ends: for a in &ends {
+            let mut found = None;
+            for b in ends.iter().filter(|b| b.piece != a.piece) {
+                if continues_through_tangent_point(k, surfaces, a, b, tol, sine)? {
+                    if found.is_some() {
+                        continue 'ends;
+                    }
+                    found = Some(*b);
+                }
+            }
+            let Some(b) = found else {
+                continue;
+            };
+            // and `a` is the only end that continues `b`
+            for c in ends
+                .iter()
+                .filter(|c| c.piece != b.piece && (c.piece, c.last) != (a.piece, a.last))
+            {
+                if continues_through_tangent_point(k, surfaces, &b, c, tol, sine)? {
+                    continue 'ends;
+                }
+            }
+            join = Some((*a, b));
+            break;
+        }
+        let Some((a, b)) = join else {
+            return Ok(());
+        };
+        // the piece whose last end joins goes first; the other runs on from its joined end
+        let (first, second) = if a.last { (a, b) } else { (b, a) };
+        let senses = [true, !second.last];
+        let mut joined: Vec<Curve> = Vec::new();
+        for curves in [
+            &ssi.curves_3d.iter().map(Some).collect::<Vec<_>>(),
+            &ssi.surface1_uv_curves.iter().map(Option::as_ref).collect(),
+            &ssi.surface2_uv_curves.iter().map(Option::as_ref).collect(),
+        ] {
+            let b_spline = |i: usize| match curves.get(i).copied().flatten().map(Curve::kind) {
+                Some(CurveKind::BSpline(c)) => Ok(c.clone()),
+                _ => Err(SolidError::port_invariant(
+                    OP_MATE,
+                    "a piece of the intersection to join is not a B-spline",
+                )),
+            };
+            let mut segments = [b_spline(first.piece)?, b_spline(second.piece)?];
+            // with no last end at the joint, both first ends: the first runs reversed
+            let senses = if first.last { senses } else { [false, true] };
+            joined.push(Curve::from(BSplineCurve::create_by_joining(
+                &mut segments,
+                Some(&senses),
+            )?));
+        }
+        let [c3, uv1, uv2]: [Curve; 3] = joined
+            .try_into()
+            .map_err(|_| SolidError::port_invariant(OP_MATE, "three joined curves"))?;
+        let (keep, drop) = (first.piece.min(second.piece), first.piece.max(second.piece));
+        if let Some(c) = ssi.curves_3d.get_mut(keep) {
+            *c = c3;
+        }
+        if let Some(c) = ssi.surface1_uv_curves.get_mut(keep) {
+            *c = Some(uv1);
+        }
+        if let Some(c) = ssi.surface2_uv_curves.get_mut(keep) {
+            *c = Some(uv2);
+        }
+        let deviation = |i: usize| ssi.deviations.get(i).copied().unwrap_or(0.0);
+        let worst = max2(deviation(keep), deviation(drop));
+        if let Some(d) = ssi.deviations.get_mut(keep) {
+            *d = worst;
+        }
+        for list in [&mut ssi.surface1_uv_curves, &mut ssi.surface2_uv_curves] {
+            if drop < list.len() {
+                list.remove(drop);
+            }
+        }
+        if drop < ssi.curves_3d.len() {
+            ssi.curves_3d.remove(drop);
+        }
+        if drop < ssi.curve_types.len() {
+            ssi.curve_types.remove(drop);
+        }
+        if drop < ssi.deviations.len() {
+            ssi.deviations.remove(drop);
+        }
+    }
+    Ok(())
 }
 
 /// The fork's `sm_ExactPiece` (tangency-labs/smlib@fddc366, behind
@@ -4609,6 +4830,15 @@ impl OffsetGeometryCreation {
                 }
             }
         }
+
+        // (not upstream, #17210) one curve through a tangent point of the surfaces
+        join_through_tangent_points(
+            k,
+            &mut ssi,
+            [&s1, other],
+            brep.brep_tolerance(edge)?,
+            self.tangency_tol_radians(),
+        )?;
 
         let mut curves_3d: Vec<O> = Vec::new();
         let mut surface1_uv_curves: Vec<Option<O>> = Vec::new();
