@@ -43,7 +43,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_trim_inside_by_best_dot = true;
     k.fixes.fillet_knife_edge_rounds = true;
-    k.fixes.fillet_half_degree_crease = true;
     k.fixes.offset_excess_faces_after_merge = true;
     k.fixes.offset_point_vertex_caps = true;
     k.fixes.offset_clip_right_side_out = true;

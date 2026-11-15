@@ -234,7 +234,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_cliff_overflow = true;
-    k.fixes.fillet_half_degree_crease = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_mitre_concave_face_corners = true;
     k.fixes.fillet_mitre_gap_patch = true;
