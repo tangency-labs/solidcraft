@@ -1,7 +1,7 @@
 use crate::{ImportRequest, Imported, RuntimeOptions};
-use cap_std::fs::{Dir, OpenOptions};
 #[cfg(unix)]
 use cap_std::fs::OpenOptionsExt;
+use cap_std::fs::{Dir, OpenOptions};
 use craft_plugin::{
     CommandSchema, Effect, HostError, Limits, LossReport, MAX_IMPORT_CHUNK_BYTES, MAX_IMPORT_DESIGN_BYTES, MAX_IMPORT_INPUT_BYTES, MAX_JSON_BYTES,
     Manifest, PluginHost, Result,
