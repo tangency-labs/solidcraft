@@ -121,7 +121,7 @@ impl Detector {
                 self.last = Some(sample.time);
                 return Some(Verdict::Swipe);
             }
-            self.last = Some(sample.time).filter(|_| self.judged);
+            self.last = self.judged.then_some(sample.time);
             return None;
         }
         self.last = Some(sample.time);
