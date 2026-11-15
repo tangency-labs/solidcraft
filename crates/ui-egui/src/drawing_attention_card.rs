@@ -66,7 +66,7 @@ pub fn show(ui: &mut egui::Ui, snapshot: &DrawingAttention, dimensions: &BTreeMa
         if items.is_empty() {
             ui.label(format!("✓ {}", solidcraft_ui_text::tr("ui.issue15776_attention.clear")));
         } else {
-            ui.label(format!("◇ {} {}", items.len(), solidcraft_ui_text::tr("ui.issue15776_attention.count")));
+            ui.label(format!("◇ {}", fmt("ui.issue15776_attention.count", &[("count", &items.len().to_string())])));
             for item in items {
                 ui.separator();
                 ui.horizontal_wrapped(|ui| {
@@ -81,7 +81,7 @@ pub fn show(ui: &mut egui::Ui, snapshot: &DrawingAttention, dimensions: &BTreeMa
             ui.label(format!("◇ {}", solidcraft_ui_text::tr("ui.issue15776_attention.held")));
         }
         if snapshot.waiting_views > 0 {
-            ui.label(format!("◇ {} {}", snapshot.waiting_views, solidcraft_ui_text::tr("ui.issue15776_attention.waiting")));
+            ui.label(format!("◇ {}", fmt("ui.issue15776_attention.waiting", &[("count", &snapshot.waiting_views.to_string())])));
         }
         for warning in &snapshot.warnings {
             ui.label(format!("◇ {warning}"));
