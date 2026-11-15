@@ -23,7 +23,7 @@
 use crate::vec::Vec3Geom as _;
 use std::f64::consts::{PI, TAU};
 
-use crate::kernel::{CurveEval, SurfaceEval};
+use crate::kernel::{CurveEval, Starts, SurfaceEval};
 use solidcore::nurbs::math::gamma;
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Frame, Surface as BSurface, Vertex};
@@ -49,6 +49,81 @@ fn wrap(x: f64) -> f64 {
 /// `x` wrapped into (−period/2, period/2].
 fn wrap_by(x: f64, period: f64) -> f64 {
     x - (x / period).round() * period
+}
+
+/// The turns a loop makes round a surface periodic in u, v or both, counted sample by sample.
+pub(super) struct Turns {
+    periods: [Option<f64>; 2],
+    /// The first and the last sample's parameters.
+    first: Option<[f64; 2]>,
+    last: Option<[f64; 2]>,
+    /// Turns so far in each direction, a fraction of a period per step.
+    total: [f64; 2],
+}
+
+impl Turns {
+    pub(super) fn new(periods: [Option<f64>; 2]) -> Self {
+        Self { periods, first: None, last: None, total: [0.0; 2] }
+    }
+
+    /// The step from `l` to `q` as a fraction of each period, wrapped to the nearer way round.
+    fn steps(&self, l: [f64; 2], q: [f64; 2]) -> [f64; 2] {
+        let mut out = [0.0; 2];
+        for (((o, period), q), l) in out.iter_mut().zip(self.periods).zip(q).zip(l) {
+            if let Some(p) = period {
+                *o = wrap_by(q - l, p) / p;
+            }
+        }
+        out
+    }
+
+    /// Takes the next sample on the surface from `candidates`, each its parameters and its
+    /// distance from the sample. Of those within `reach` (the edge's tolerance) of it, the loop
+    /// continues on the one whose parameters step least round the surface from the last sample's,
+    /// so a point within the tolerance of two parts of the surface (a profile folding back
+    /// within the tolerance of itself) stays on the part the loop is on and the count cannot
+    /// change by a period where the nearer of the two changes. Only where none is within reach,
+    /// the loop having left the part it was on, does it take the nearest. A sample with no
+    /// candidate is passed over (returns whether the sample was taken).
+    pub(super) fn step(&mut self, candidates: &[([f64; 2], f64)], reach: f64) -> bool {
+        let size = |d: [f64; 2]| d[0].abs().max(d[1].abs());
+        let within = candidates.iter().filter(|c| c.1 <= reach);
+        let pick = match self.last {
+            Some(l) => within.min_by(|a, b| size(self.steps(l, a.0)).total_cmp(&size(self.steps(l, b.0)))),
+            None => within.min_by(|a, b| a.1.total_cmp(&b.1)),
+        }
+        .or_else(|| candidates.iter().min_by(|a, b| a.1.total_cmp(&b.1)));
+        let Some(&(q, _)) = pick else { return false };
+        self.add(q);
+        self.first.get_or_insert(q);
+        self.last = Some(q);
+        true
+    }
+
+    fn add(&mut self, q: [f64; 2]) {
+        if let Some(l) = self.last {
+            let steps = self.steps(l, q);
+            for (t, s) in self.total.iter_mut().zip(steps) {
+                *t += s;
+            }
+        }
+    }
+
+    /// Closes a loop whose first and last samples are the same point (its start): steps from
+    /// the last sample's parameters back to the first's. Round a closed path of parameters the
+    /// steps add to whole turns, so a loop that started on one part of the surface within the
+    /// tolerance of its point and ended on another is not left a fraction of a turn short.
+    pub(super) fn close(&mut self) {
+        if let Some(f) = self.first {
+            self.add(f);
+            self.last = Some(f);
+        }
+    }
+
+    /// Whole turns in u and in v.
+    pub(super) fn count(&self) -> [i64; 2] {
+        self.total.map(|x| x.round() as i64)
+    }
 }
 
 /// The path a slit runs out along: a loop that runs out along a chain of edges and straight back
@@ -484,33 +559,42 @@ impl Builder<'_, '_> {
     /// there is any, and a loop running in to the pole and out again turned as the points either
     /// side of it say (a cap split along a meridian, one half's loop from the rim to the pole and
     /// back, does not wind round the axis).
+    ///
+    /// Each point is taken on the surface by [`Turns::step`], from two candidates: the point found
+    /// from the last point's parameters and the one found by searching the whole surface. A
+    /// search from the last point alone can settle on another part of the surface, near the
+    /// point but not under it (a fit-point spline's wiggles millimetres away), and a loop with its
+    /// seam would count a turn it does not make.
     fn winding(&self, eval: &SurfaceEval, es: &[(u32, bool)], periods: [Option<f64>; 2], poles: &[Vec3]) -> R<[i64; 2]> {
-        let mut last: Option<[f64; 2]> = None;
-        let mut total = [0.0; 2];
-        for &(e, forward) in es {
+        let mut turns = Turns::new(periods);
+        let starts = Starts::default();
+        // Whether the loop's start was taken both as its first sample and as its last.
+        let mut closed = true;
+        for (i, &(e, forward)) in es.iter().enumerate() {
             let edge = self.edges.get(e as usize).ok_or("edge reference")?;
             let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
             let [lo, hi] = edge.interval;
             let reach = self.tol.max(edge.tolerance);
             for k in 0..=SAMPLES {
+                let end = (i == 0 && k == 0) || (i + 1 == es.len() && k == SAMPLES);
                 let s = k as f64 / SAMPLES as f64;
                 let t = if forward { lo + (hi - lo) * s } else { hi - (hi - lo) * s };
                 let p = c.point(t).ok_or("edge point")?;
                 if poles.iter().any(|q| p.dist(*q) <= reach) {
+                    closed &= !end;
                     continue;
                 }
-                let Some(q) = eval.project(p, last, f64::INFINITY) else { continue };
-                if let Some(l) = last {
-                    for (((t, period), q), l) in total.iter_mut().zip(periods).zip(q).zip(l) {
-                        if let Some(p) = period {
-                            *t += wrap_by(q - l, p) / p;
-                        }
-                    }
-                }
-                last = Some(q);
+                let off = |q: Option<[f64; 2]>| q.and_then(|q| eval.point(q).map(|s| (q, s.dist(p))));
+                let from_last = off(eval.project(p, turns.last, f64::INFINITY));
+                let searched = off(eval.project_with(&starts, p, None, f64::INFINITY));
+                let taken = turns.step(&[from_last, searched].into_iter().flatten().collect::<Vec<_>>(), reach);
+                closed &= taken || !end;
             }
         }
-        Ok(total.map(|x| x.round() as i64))
+        if closed {
+            turns.close();
+        }
+        Ok(turns.count())
     }
 
     /// A vertex of the loop is on one of the axis's poles (within its tolerance).
