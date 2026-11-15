@@ -535,11 +535,23 @@ impl PrimitiveCreation {
                     // the corner along the bisector of the legs, so a point `step` along
                     // a leg lies `step * sin(beta / 2)` from it, where beta is the angle
                     // between the legs. A fixed 0.1 is inside the tolerance of a large
-                    // part (tolerance 1e-5 of a part 1e4 across is 0.1). With
-                    // `step >= 100 tol` the point lies farther than `tol` from the line
-                    // whenever sin(beta / 2) > 0.01, which is every corner but a hairpin
-                    // tighter than 1.15 degrees. The floor 0.1 keeps upstream's step
-                    // wherever 100 tol is smaller, and the reach cap still wins.
+                    // part (tolerance 1e-5 of a part 1e4 across is 0.1).
+                    //
+                    // So `step = min(max(0.1, 100 tol), extend / 2)`, where
+                    // `extend / 2 = sqrt(2) * max_dimension`, and the side test passes
+                    // when `step * sin(beta / 2) > tol` (the larger of `tol` and the
+                    // face's tolerance, as `project_and_trim` takes it). A corner reaches this
+                    // point only when its legs are more than 2 degrees from parallel
+                    // (the `is_parallel_to(.., 2.0)` test above, which also skips a
+                    // hairpin within 2 degrees), so `sin(beta / 2) > sin(1 deg) = 0.0175`.
+                    // Where `100 tol` sets the step, the point therefore lies at least
+                    // `1.75 tol` from the line and the trim never fails. Where the reach
+                    // cap wins (a profile with `max_dimension < 100 tol / sqrt(2)`, about
+                    // `70.7 tol`), the condition is `sqrt(2) * max_dimension *
+                    // sin(beta / 2) > tol`; when it fails, the side test refuses the
+                    // sweep with "the point is on the curve" (a typed refusal, not a
+                    // body). The floor 0.1 keeps upstream's step wherever `100 tol` is
+                    // smaller.
                     let step = 0.1_f64.max(100.0 * tol).min(extend * 0.5);
                     let reference1 = before[0] + (-before[1] * step);
                     let reference2 = after[0] + (after[1] * step);
@@ -802,11 +814,68 @@ mod tests {
             };
             let volume = brep_volume(&k, &mut elbow, 1e-8, &attributes).unwrap();
             let want = std::f64::consts::PI * r * r * 2.0 * s;
+            // 1e-8 relative: the accuracy the integrator is asked for. The walls are
+            // exact (a rational circle extruded along lines); only the mitre's trim
+            // curves are fitted, and the check covers their fit too. The integrator's
+            // step control is an estimate, not a certificate. MEASURED: 4.5e-11 at all
+            // three sizes, so both errors sit far below the bound.
             assert!(
-                (volume - want).abs() <= 1e-6 * want,
+                (volume - want).abs() <= 1e-8 * want,
                 "s {s}: volume {volume}, want {want}"
             );
         }
+    }
+
+    /// Where the reach cap sets the mitre step (WR-780), a profile too small for the
+    /// tolerance is refused, not built. A circle of radius `r` along two perpendicular
+    /// legs with `tol = 1e-3`: the profile's `max_dimension` is `r`, so the step is
+    /// `sqrt(2) r` and each reference point lies `sqrt(2) r * sin(45 deg) = r` from the
+    /// cutting line. At `r = 0.6 tol` that is inside the tolerance and the side test
+    /// refuses the sweep; at `r = 5 tol` (still capped, `sqrt(2) r` is below `100 tol`)
+    /// the elbow builds: two walls and two caps.
+    #[test]
+    fn a_profile_below_the_tolerance_is_refused_at_a_mitre() {
+        use crate::primitive::primitive_creation::model::PrimitiveModel;
+
+        let tol = 1e-3;
+        let sweep = |r: f64| {
+            let mut k = Kernel::default();
+            let profile = Curve::from(
+                api_curves::create_arc(Point3::new(0.0, 0.0, 0.0), r, 0.0, 360.0).unwrap(),
+            );
+            let paths = [
+                segment([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+                segment([1.0, 0.0, 0.0], [1.0, 1.0, 0.0]),
+            ];
+            PrimitiveModel::build_new(&mut k, |_, model| {
+                let id = PrimitiveCreation::create_sweep_along_planar_path(
+                    model,
+                    PrimitiveModel::MAIN,
+                    std::slice::from_ref(&profile),
+                    &paths,
+                    tol,
+                    true,
+                    true,
+                    true,
+                )?;
+                model.take_brep(id)
+            })
+            .map(|(_, b)| b)
+        };
+
+        let e = sweep(0.6 * tol).unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&crate::error::topology::TopologyFailure::Failed(
+                "the point is on the curve"
+            )),
+            "{e}"
+        );
+
+        let mut elbow = sweep(5.0 * tol).unwrap();
+        elbow.refresh_cached_topology();
+        assert_eq!(elbow.face_list().len(), 4);
+        assert!(crate::topology::brep::p2::is_manifold_solid(&elbow).unwrap());
     }
 }
 
