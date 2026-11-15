@@ -43,9 +43,8 @@
 //!   evaluated is not shown singular. When `LocalSurfaceSolve`'s equations cannot be
 //!   evaluated at the guess (upstream's solver reports that guess found), the guess is
 //!   kept only for a minimum whose two surface points there coincide by the equations'
-//!   own small-gap test; otherwise there is no solution. This makes
-//!   `oscillating_skips_failed_guesses`'s first-evaluation rule unconditional at this
-//!   call site, and checks the guess as that rule does not.
+//!   own small-gap test; otherwise there is no solution. The solver itself reports no
+//!   solution there (WR-20); this call site checks the guess as the solver cannot.
 //! - **Tolerance of a surface.** `SmTol::GetApproxTol3d(this)` is the system value for a
 //!   surface without an owner; for an owned surface it is half the face tolerance the
 //!   caller that has the face passes ([`Surface::get_singularities_of_face`], used by
@@ -1642,7 +1641,6 @@ impl Surface {
             sq_node_tol,
         );
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(&periodicities));
-        solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
 
         solver.set_desired_accuracy(EFF_ZERO_SQ);
         solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 3);
@@ -1752,16 +1750,15 @@ impl Surface {
         let mut equations =
             SsNormalizeEnfo::new(k, self, other, operation, Some(opt_vectors), EFF_ZERO_SQ);
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(periodicities));
-        solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
         solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
 
         // Solve it
         let solution = solver.solve_it(&guess, EFF_ZERO_SQRT)?;
 
         // a guess the equations cannot evaluate (a surface without normal there, an
-        // apex) is checked by its points alone: upstream's solver reports it found,
-        // which with the evaluation statuses passed on (WR-663) would hand back the
-        // unchecked guess. Only a minimum can be shown, by two coincident points.
+        // apex) is no solver solution (WR-20) and is checked by its points alone
+        // (upstream's solver reported it found, handing back the unchecked guess). Only
+        // a minimum can be shown, by two coincident points.
         if solver.guess_unevaluated() {
             return self.unevaluated_guess_solution(k, other, operation, &guess);
         }
@@ -1849,7 +1846,6 @@ impl Surface {
         // Construct the Newton-Raphson Solver class with the surf/surf/surf equation set
         let mut equations = SssIntersectEnfo::new(k, s1, s2, s3, EFF_ZERO_SQ);
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(&periodicities));
-        solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
 
         // set the solver's exit behavior for solutions that run outside the boundary
         solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
