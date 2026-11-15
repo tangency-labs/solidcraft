@@ -808,6 +808,14 @@ fn sheet_chains(ss: &SolvedSketch, profiles: Option<&ProfileSel>, curves: &[Stri
             chains.extend(std::iter::once(r.outer).chain(r.holes).map(|lp| lp.segs));
         }
     }
+    // A construction curve is reference geometry, not a profile: the default search skips it, so
+    // naming one outright is refused too.
+    if let Some(id) = curves.iter().find(|id| ss.sketch.curve_index(id).and_then(|ci| ss.sketch.curves.get(ci)).is_some_and(|c| c.construction)) {
+        return Err(DocError::Invalid(format!(
+            "curve `{id}` of {} is construction geometry, so it cannot be a profile; make it a normal curve first",
+            ss.name
+        )));
+    }
     chains.extend(curve_chains(ss, curves)?);
     if chains.is_empty() {
         return Err(DocError::Invalid("pick the profiles or curves".into()));

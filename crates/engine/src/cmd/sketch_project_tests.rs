@@ -2485,3 +2485,23 @@ fn a_ray_through_a_hole_opening_projects_its_rim() {
     assert!(rim.at.dist(solidcore_record::Vec3::new(85.0, 270.0, 60.0)) < 1e-4, "{rim:?}");
     assert!(rim.edges.iter().all(|p| (p.z - 60.0).abs() < 1e-4 && (p.z - 60.0).abs() + rim.at.dist(*p) > 0.0), "{rim:?}");
 }
+
+/// #17176: a construction curve named outright as a surface profile is refused like the default
+/// search, with a message naming the curve; the same curve drawn normally builds.
+#[test]
+fn a_construction_curve_picked_as_a_surface_profile_is_refused() {
+    for (construction, built) in [(true, false), (false, true)] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        let circle = run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "diameter": "20", "construction": construction}));
+        let id = ids(&circle["curves"]).first().cloned().unwrap_or_else(|| "c1".into());
+        run(&mut s, "sketch.finish", json!({}));
+        let out = s.execute("surface.extrude", &json!({"sketch": "S", "curves": [id.clone()], "distance": "10"}));
+        if built {
+            assert!(out.is_ok(), "{out:?}");
+        } else {
+            let msg = out.map(|_| String::new()).unwrap_or_else(|e| e.to_string());
+            assert!(msg.contains(&format!("`{id}`")) && msg.contains("construction geometry"), "{msg}");
+        }
+    }
+}
