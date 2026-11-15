@@ -767,6 +767,16 @@ impl Body {
         }
     }
 
+    /// One exact point on each face of `self` (its centroid), or empty for a mesh body.
+    pub fn face_samples(&self) -> Vec<Vec3> {
+        let Some((ops, order)) = self.ops_body() else {
+            return Vec::new();
+        };
+        (0..self.face_count())
+            .filter_map(|f| ops.face_centroid(order, f, 1e-4).ok().map(|c| Vec3::new(c.centroid[0], c.centroid[1], c.centroid[2])))
+            .collect()
+    }
+
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
     pub fn with_cylinder_certificate(mut self, producer: u64) -> Result<Self> {
         if producer == 0 {
