@@ -388,7 +388,9 @@ fn ui_prefs_browser_scroll_wheel_schema_lists_supported_modes() {
     let schema = input_schema_for::<PrefsParams>();
     let schema = schema.as_value();
     assert!(schema["properties"]["browser_scroll_wheel"].is_object());
-    for (id, expected) in [("automatic", BrowserScrollWheel::Automatic), ("always_zoom", BrowserScrollWheel::AlwaysZoom)] {
+    for (id, expected) in
+        [("automatic", BrowserScrollWheel::Automatic), ("always_zoom", BrowserScrollWheel::AlwaysZoom), ("always_pan", BrowserScrollWheel::AlwaysPan)]
+    {
         let value = json!({"browser_scroll_wheel":id});
         let parsed = serde_json::from_value::<PrefsParams>(value.clone()).unwrap();
         assert_eq!(parsed.browser_scroll_wheel, Some(expected));

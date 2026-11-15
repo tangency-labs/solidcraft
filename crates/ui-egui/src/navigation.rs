@@ -118,8 +118,11 @@ impl WebWheelGestures {
     /// horizontal drift, irregularity, overflow or short stream falls back to a swipe.
     /// Keep that decision through momentum until 100 ms of idle.
     /// Always zoom bypasses this guess for bare vertical input; modifiers keep swipe routing.
-    pub fn update(&mut self, raw: &mut egui::RawInput, now: f64, always_zoom: bool) -> Option<std::time::Duration> {
+    /// Always pan skips the sampling: every small step is a swipe, as before smooth wheels were recognised.
+    pub fn update(&mut self, raw: &mut egui::RawInput, now: f64, mode: crate::prefs::BrowserScrollWheel) -> Option<std::time::Duration> {
         use egui::{Event, Modifiers, MouseWheelUnit, Vec2};
+        let always_zoom = mode == crate::prefs::BrowserScrollWheel::AlwaysZoom;
+        let always_pan = mode == crate::prefs::BrowserScrollWheel::AlwaysPan;
         const IDLE: f64 = 0.1;
         const WHEEL_STEP_MIN: f32 = 40.0;
         let valid_time = now.is_finite() && now >= 0.0;
@@ -156,7 +159,7 @@ impl WebWheelGestures {
                             let vertical = bare && delta.x == 0.0 && (delta.y - self.first_step).abs() <= self.first_step.abs() * 0.1;
                             self.interval = self.interval.or(interval);
                             self.pending.push(event);
-                            if !vertical || !steady || self.pending.len() >= 16 {
+                            if always_pan || !vertical || !steady || self.pending.len() >= 16 {
                                 self.decide(raw, true);
                             } else if self.samples >= 4 {
                                 self.decide(raw, false);
@@ -1745,7 +1748,7 @@ mod tests {
         gesture: &mut bool,
     ) -> (super::RawWheel, Vec<egui::Event>) {
         let mut raw = egui::RawInput { time: Some(time), events, focused: true, ..Default::default() };
-        let _ = state.update(&mut raw, time, false);
+        let _ = state.update(&mut raw, time, crate::prefs::BrowserScrollWheel::Automatic);
         let events = raw.events.clone();
         let mut input = egui::InputState::default();
         input.events = raw.events;
@@ -1874,7 +1877,9 @@ mod tests {
             let starts = events.iter().filter(|e| matches!(e, egui::Event::MouseWheel { phase: TouchPhase::Start, .. })).count();
             assert_eq!(starts, usize::from(time == 0.0));
         }
-        let delay = state.update(&mut egui::RawInput::default(), 0.10, false).expect("schedule the idle end even without more input");
+        let delay = state
+            .update(&mut egui::RawInput::default(), 0.10, crate::prefs::BrowserScrollWheel::Automatic)
+            .expect("schedule the idle end even without more input");
         assert!((delay.as_secs_f64() - 0.09).abs() < 1e-9);
         web_frame(&mut state, 0.18, vec![], &mut gesture);
         assert!(gesture);
@@ -1989,6 +1994,33 @@ mod tests {
     }
 
     #[test]
+    fn web_always_pan_keeps_small_steady_steps_as_swipes() {
+        use egui::{Modifiers, MouseWheelUnit::Point, vec2};
+        let mut state = super::WebWheelGestures::default();
+        let mut gesture = false;
+        for index in 0..4 {
+            let event = web_wheel(Point, vec2(0.0, 3.0), Modifiers::NONE);
+            let mut raw = egui::RawInput { time: Some(f64::from(index) * 0.016), events: vec![event], ..Default::default() };
+            state.update(&mut raw, f64::from(index) * 0.016, crate::prefs::BrowserScrollWheel::AlwaysPan);
+            let mut input = egui::InputState::default();
+            input.events = raw.events;
+            let wheel = super::immediate_wheel(
+                &input,
+                egui::InputOptions::default(),
+                600.0,
+                &mut gesture,
+                &mut false,
+                &mut Default::default(),
+                crate::prefs::TrackpadScroll::Pans,
+                Some(Modifiers::COMMAND),
+            );
+            assert_eq!(wheel.pan, vec2(0.0, 3.0), "every small step pans at once");
+            assert_eq!(wheel.zoom, 0.0);
+            assert!(gesture);
+        }
+    }
+
+    #[test]
     fn web_always_zoom_does_not_sample_small_steps_and_preserves_shift_pan() {
         use egui::{Modifiers, MouseWheelUnit::Point, vec2};
         let mut state = super::WebWheelGestures::default();
@@ -1996,7 +2028,7 @@ mod tests {
         for modifiers in [Modifiers::NONE, Modifiers::SHIFT] {
             let event = web_wheel(Point, vec2(0.0, 2.0), modifiers);
             let mut raw = egui::RawInput { events: vec![event.clone()], ..Default::default() };
-            state.update(&mut raw, 0.0, true);
+            state.update(&mut raw, 0.0, crate::prefs::BrowserScrollWheel::AlwaysZoom);
             if modifiers == Modifiers::NONE {
                 assert_eq!(raw.events, vec![event]);
             }

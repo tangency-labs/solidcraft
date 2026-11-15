@@ -27,6 +27,8 @@ pub enum BrowserScrollWheel {
     Automatic,
     /// Treat unmodified vertical scrolling as wheel zoom.
     AlwaysZoom,
+    /// Keep the earlier behaviour: small vertical steps are two-finger pan, only large notches zoom.
+    AlwaysPan,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]

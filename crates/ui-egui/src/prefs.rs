@@ -5006,6 +5006,8 @@ mod tests {
         assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::Automatic);
         control(&mut app, &json!({"button":"cancel"})).unwrap();
         assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+        set(&mut app, &json!({"browser_scroll_wheel":"always_pan"})).unwrap();
+        assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysPan);
         set(&mut app, &json!({"browser_scroll_wheel":"automatic"})).unwrap();
         assert!(!app.preferences.browser_wheel_always_zooms());
     }

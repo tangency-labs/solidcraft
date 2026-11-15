@@ -264,10 +264,15 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     let label_id = |value| match value {
                         BrowserScrollWheel::Automatic => "prefs.browser_scroll_wheel.automatic",
                         BrowserScrollWheel::AlwaysZoom => "prefs.browser_scroll_wheel.always_zoom",
+                        BrowserScrollWheel::AlwaysPan => "prefs.browser_scroll_wheel.always_pan",
                     };
                     ui_kit::settings_control_width(ui, t.space_24 * 7.0 + t.space_12, |ui| {
                         let response = ui_kit::dropdown_menu(ui, "pref_browser_scroll_wheel", solidcraft_ui_text::tr(label_id(*choice)), |ui| {
-                            for (id, value) in [("automatic", BrowserScrollWheel::Automatic), ("always_zoom", BrowserScrollWheel::AlwaysZoom)] {
+                            for (id, value) in [
+                                ("automatic", BrowserScrollWheel::Automatic),
+                                ("always_zoom", BrowserScrollWheel::AlwaysZoom),
+                                ("always_pan", BrowserScrollWheel::AlwaysPan),
+                            ] {
                                 if ui_kit::list_picker(ui, id, solidcraft_ui_text::tr(label_id(value)), *choice == value).clicked() {
                                     *choice = value;
                                 }
