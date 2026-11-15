@@ -1207,6 +1207,7 @@ mod tests {
                 json!({"sections": [{"sketch": "Space", "curves": [line]}, {"body": "Box", "edges": [[5, 0, 10]]}], "body_name": name}),
             );
             close(area(&s, name), 10.0 * gap);
+            assert_eq!(topology(&s, name), (1, 4, 4, 1));
         }
         // The issue's two splines: the sheet Boundary Surface builds through the same curves.
         let sections = json!([{"sketch": "Space", "curves": [w1]}, {"sketch": "Space", "curves": [w2]}]);
@@ -1246,6 +1247,7 @@ mod tests {
             json!({"sections": [{"sketch": "Space", "curves": [a]}, {"sketch": "Space", "curves": [b]}], "continuity": ["g1", "g1"], "body_name": "Tangent"}),
         );
         assert_eq!(topology(&s, "Tangent"), (1, 4, 4, 1));
+        close(area(&s, "Tangent"), 30.0 * 1700f64.sqrt());
     }
 
     /// Each wall of a surface built from sketch curves is named after the curve it comes from,
