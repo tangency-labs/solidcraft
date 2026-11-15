@@ -10662,11 +10662,18 @@ struct BodyNames {
     taken: std::collections::HashSet<String>,
     /// The next suffix worth trying for each base (smaller ones are all taken).
     next: std::collections::HashMap<String, usize>,
+    /// For each base, suffixes `a..b` known all taken by [`BodyNames::first_free`]: a run of
+    /// copies numbered from one start goes on from the last, not from the start every time.
+    runs: std::collections::HashMap<String, (u64, u64)>,
 }
 
 impl BodyNames {
     fn new(st: &ModelState) -> Self {
-        BodyNames { taken: st.bodies.iter().map(|b| b.name.clone()).collect(), next: std::collections::HashMap::new() }
+        BodyNames {
+            taken: st.bodies.iter().map(|b| b.name.clone()).collect(),
+            next: std::collections::HashMap::new(),
+            runs: std::collections::HashMap::new(),
+        }
     }
     fn unique(&mut self, base: &str) -> String {
         let base = if base.trim().is_empty() { "Body" } else { base.trim() };
@@ -10687,14 +10694,31 @@ impl BodyNames {
 
     /// The first free `base (i)` from `from` on, taken now.
     fn first_free(&mut self, base: &str, from: u64) -> String {
-        let mut i = from.max(self.next.get(base).map_or(0, |n| *n as u64));
+        // Skip what is known taken: `unique`'s `2..next` and this base's run, each only when
+        // `i` is inside it, so a lower free suffix is never passed over.
+        let mut i = from;
         loop {
+            let past_next = self.next.get(base).map(|n| *n as u64).filter(|n| (2..*n).contains(&i));
+            let past_run = self.runs.get(base).filter(|(a, b)| (*a..*b).contains(&i)).map(|(_, b)| *b);
+            match past_next.or(past_run) {
+                Some(n) => i = n,
+                None => break,
+            }
+        }
+        let name = loop {
             let candidate = format!("{base} ({i})");
             i += 1;
             if self.taken.insert(candidate.clone()) {
-                return candidate;
+                break candidate;
             }
-        }
+        };
+        // `from..i` are all taken now: join the run it meets, or start a new one.
+        let run = match self.runs.get(base) {
+            Some(&(a, b)) if a <= i && from <= b => (a.min(from), b.max(i)),
+            _ => (from, i),
+        };
+        self.runs.insert(base.to_string(), run);
+        name
     }
 }
 
@@ -11859,6 +11883,22 @@ mod body_name_tests {
         // After first-free naming from 2, a later start never hands out a name twice.
         assert_eq!(names.unique("Pin"), "Pin (2)");
         assert_eq!(names.first_free("Pin", 2), "Pin (3)");
+        // A start below a run still finds the free numbers under it.
+        let mut names = BodyNames::new(&st);
+        assert_eq!(names.first_free("Pin", 6), "Pin (6)");
+        assert_eq!(names.first_free("Pin", 6), "Pin (8)");
+        assert_eq!(names.first_free("Pin", 1), "Pin (1)");
+        assert_eq!(names.first_free("Pin", 3), "Pin (3)");
+        assert_eq!(names.first_free("Pin", 1), "Pin (2)");
+        assert_eq!(names.first_free("Pin", 1), "Pin (4)");
+        assert_eq!(names.first_free("Pin", 6), "Pin (9)");
+        assert_eq!(names.unique("Pin"), "Pin (10)");
+        // 50,000 copies numbered from one start: milliseconds, not a scan from the start each.
+        let began = std::time::Instant::now();
+        let mut names = BodyNames::new(&st);
+        let last = (0..50_000).map(|_| names.first_free("Pin", 8)).last().unwrap();
+        assert_eq!(last, "Pin (50007)");
+        assert!(began.elapsed() < std::time::Duration::from_secs(5), "{:?}", began.elapsed());
     }
 }
 
