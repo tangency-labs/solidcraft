@@ -177,6 +177,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     forget_stand_up(app);
                 }
             });
+            let response = setting::import_meshes_as_solid(app, ui);
+            crate::scenario::publish_target("prefs:import_meshes_as_solid", response.rect);
             ui.horizontal_wrapped(|ui| {
                 let reuse = setting::reuse_imports(app, ui).on_hover_text(app.tr("prefs.reuse_imports_note"));
                 crate::scenario::publish_handle("prefs:reuse_imports", reuse.rect.center());
