@@ -18,17 +18,17 @@ pub enum ThemeOptionValue {
 /// Null resets one option; an empty inner map resets that theme.
 pub type ThemeOptionsUpdate = BTreeMap<String, BTreeMap<String, Option<ThemeOptionValue>>>;
 
-/// How browser scroll events without modifiers are classified.
+/// How browser scroll events without modifiers are classified: `automatic` (small vertical steps
+/// pan like a two-finger swipe, and a one-time notice offers Always zoom when the first scrolls
+/// look like a steady smooth-scroll mouse wheel), `always_zoom` (unmodified vertical scrolling is
+/// wheel zoom), or `always_pan` (as automatic, but never offers Always zoom). (No doc on the
+/// variants: they would make the schema a `oneOf` of constants instead of a plain `enum`.)
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BrowserScrollWheel {
-    /// Small vertical steps pan like a two-finger swipe, and a one-time notice offers Always zoom when
-    /// the first scrolls look like a steady smooth-scroll mouse wheel.
     #[default]
     Automatic,
-    /// Treat unmodified vertical scrolling as wheel zoom.
     AlwaysZoom,
-    /// As automatic, but never offers Always zoom.
     AlwaysPan,
 }
 

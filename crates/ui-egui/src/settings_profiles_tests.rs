@@ -37,7 +37,7 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 103, "include the live panel drag preference among the current portable settings");
+    assert_eq!(keys.len(), 104, "include the live panel drag and browser scroll wheel preferences among the current portable settings");
     for key in [
         "nav",
         "maya_horizontal_zoom",
@@ -54,6 +54,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "nav_bridge_port",
         "language",
         "suppress_sketch_snap",
+        "browser_scroll_wheel",
     ] {
         assert!(keys.contains(&key), "{key} belongs in a profile");
     }
