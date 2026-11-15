@@ -1078,8 +1078,8 @@ fn edit_face_features_in_a_moved_component_refill_on_their_own_body() {
         h.frames(2);
         assert!(h.app.dialog.is_none(), "{command}: OK rebuilds the unchanged feature");
         let feature = h.app.session.execute("timeline.inspect", &json!({"feature": id})).unwrap();
-        assert!(feature[0]["error"].is_null(), "{command}: {feature}");
-        assert_eq!(feature[0]["definition"]["body"], "Inner", "{command}: the feature stays on its body");
+        assert!(feature["error"].is_null(), "{command}: {feature}");
+        assert_eq!(feature["definition"]["body"], "Inner", "{command}: the feature stays on its body");
     }
 }
 
