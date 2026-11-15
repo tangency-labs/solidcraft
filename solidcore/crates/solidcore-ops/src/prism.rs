@@ -425,7 +425,7 @@ pub struct PlacedFigure {
 /// the angle and its sweep stays; a mirror is refused.
 ///
 /// # Errors
-/// The kernel's refusal ([`Error::Status`]): a scale not above 0 or not finite, a value not
+/// The kernel's refusal ([`Error::Refused`], naming the call and why): a scale not above 0 or not finite, a value not
 /// finite, or more than [`kp::MAX_SEGMENTS`] segments or points.
 pub fn place_figure(
     figure: &[Seg2],
@@ -458,7 +458,7 @@ pub fn place_figure(
 /// triangle is 3 sides from `π/2`.
 ///
 /// # Errors
-/// The kernel's refusal ([`Error::Status`]): fewer than 3 sides or more than
+/// The kernel's refusal ([`Error::Refused`], naming the call and why): fewer than 3 sides or more than
 /// [`kp::MAX_SEGMENTS`], a side not above 0, or a value not finite.
 pub fn regular_outline(
     centre: Vec2,
@@ -486,7 +486,7 @@ pub struct LabelFit {
 /// ([`kf::box_fit_in_convex_polygon`]). `None` when no box fits.
 ///
 /// # Errors
-/// The kernel's refusal ([`Error::Status`]): an outline not convex and counter-clockwise, of
+/// The kernel's refusal ([`Error::Refused`], naming the call and why): an outline not convex and counter-clockwise, of
 /// fewer than 3 corners or an edge of no length, or a value negative, not finite or beyond 1e9.
 pub fn label_in_outline(
     outline: &[Vec2],

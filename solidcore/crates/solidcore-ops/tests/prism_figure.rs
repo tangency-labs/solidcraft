@@ -102,19 +102,29 @@ fn sheet_figures_refuse_hostile_values_through_the_record() {
     }];
     assert!(matches!(
         place_figure(&line, &[], -1.0, 0.0, v(0.0, 0.0)),
-        Err(Error::Status(_))
+        Err(Error::Refused {
+            operation: "prism::figure::place_figure_2d",
+            ..
+        })
     ));
     assert!(matches!(
         place_figure(&line, &[], 1.0, f64::NAN, v(0.0, 0.0)),
-        Err(Error::Status(_))
+        Err(Error::Refused { .. })
     ));
     assert!(matches!(
         regular_outline(v(0.0, 0.0), 2, 1.0, 0.0),
-        Err(Error::Status(_))
+        Err(Error::Refused {
+            operation: "prism::figure::regular_polygon_2d",
+            ..
+        })
     ));
     let clockwise = [v(0.0, 0.0), v(0.0, 10.0), v(10.0, 10.0), v(10.0, 0.0)];
     let got = label_in_outline(&clockwise, 5.0, 2.0, 1.0, 100.0);
-    assert!(matches!(got, Err(Error::Status(_))), "{got:?}");
+    let fit = "prism::figure::box_fit_in_convex_polygon";
+    assert!(
+        matches!(got, Err(Error::Refused { operation, .. }) if operation == fit),
+        "{got:?}"
+    );
     let got = label_in_outline(&clockwise[..2], 5.0, 2.0, 1.0, 100.0);
-    assert!(matches!(got, Err(Error::Status(_))), "{got:?}");
+    assert!(matches!(got, Err(Error::Refused { .. })), "{got:?}");
 }
