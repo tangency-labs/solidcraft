@@ -465,7 +465,10 @@ fn certify(drawn: &Lines, max: f64, scale: Scale) -> Result<()> {
         return Ok(());
     }
     let why: Vec<String> = drawn.made.from_mesh.iter().map(|(why, bodies)| format!("{bodies} for {}", why.name())).collect();
-    let from_mesh = if why.is_empty() { String::new() } else { format!("; bodies drawn from the mesh: {}", why.join(", ")) };
+    let mut from_mesh = if why.is_empty() { String::new() } else { format!("; bodies drawn from the mesh: {}", why.join(", ")) };
+    if drawn.made.split_edges > 0 {
+        from_mesh += &format!("; edges drawn from the mesh: {} for split faces", drawn.made.split_edges);
+    }
     Err(bad(
         CMD,
         format!("accuracy not met: {bounded} bounded and {sampled} sampled pieces can't certify max_error_mm {max} at scale {scale}{from_mesh}"),

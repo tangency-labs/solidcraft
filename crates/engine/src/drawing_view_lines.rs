@@ -71,6 +71,9 @@ pub struct Lines {
 pub struct Made {
     pub exact: usize,
     pub from_mesh: BTreeMap<Fallback, usize>,
+    /// Edges of the bodies drawn exact that came from the mesh: splits between two faces of one
+    /// surface, which `hlr` doesn't draw.
+    pub split_edges: usize,
     /// Exact pieces whose visibility couldn't be told, drawn as visible.
     pub uncertain: usize,
 }
@@ -78,7 +81,7 @@ pub struct Made {
 impl Made {
     /// `hidden_lines`, `mesh_projection` or both: what drew the view's bodies.
     pub fn provenance(&self) -> &'static str {
-        match (self.exact > 0, self.from_mesh.is_empty()) {
+        match (self.exact > 0, self.from_mesh.is_empty() && self.split_edges == 0) {
             (true, true) => "hidden_lines",
             (true, false) => "hidden_lines_and_mesh_projection",
             (false, _) => "mesh_projection",
@@ -145,7 +148,8 @@ fn lines_with(s: &Session, shown: &ShownSet, frame: &ViewFrame, request: &LineRe
     let ask = Ask { tangent_edges: request.tangent_edges, sources: true };
     let drawn = exact::lines(&placed, shown, frame, request, opts, &|item| mesh_lines::drawn_edges(&item.body.mesh(), ask))
         .ok_or_else(|| bad(cmd, refused(Refused::Cancelled)))?;
-    let mut made = Made { uncertain: drawn.uncertain, ..Made::default() };
+    let mut made = Made { uncertain: drawn.uncertain, split_edges: drawn.split.len(), ..Made::default() };
+    let split: BTreeSet<(usize, usize)> = drawn.split.into_iter().collect();
     let mut stats = Stats {
         bodies: placed.len(),
         prepare_ms: drawn.prepare_ms,
@@ -170,8 +174,13 @@ fn lines_with(s: &Session, shown: &ShownSet, frame: &ViewFrame, request: &LineRe
             }
         }
     }
-    if !made.from_mesh.is_empty() {
-        let meshed = meshed(s, shown, frame, request, model_chord_mm, &from_mesh, cmd)?;
+    if !made.from_mesh.is_empty() || !split.is_empty() {
+        // Whole bodies, and the split edges of bodies otherwise drawn exact.
+        let keep = |owner: Owner| {
+            let body = owner.placement as usize;
+            from_mesh.get(body) == Some(&true) || matches!(owner.origin, Origin::Edge(edge) if split.contains(&(body, edge as usize)))
+        };
+        let meshed = meshed(s, shown, frame, request, model_chord_mm, &keep, cmd)?;
         out.extend(meshed.lines);
         covered += meshed.covered;
         stats = Stats {
@@ -192,10 +201,18 @@ fn lines_with(s: &Session, shown: &ShownSet, frame: &ViewFrame, request: &LineRe
     Ok(Lines { lines: out, covered, model_chord_mm, stats, made })
 }
 
-/// The lines the mesh projection draws of the shown bodies `keep` marks, each tested against every
-/// shown body's mesh, with what was covered and what it cost. `model_chord_mm` is the chord the
-/// meshes are asked for.
-fn meshed(s: &Session, shown: &ShownSet, frame: &ViewFrame, request: &LineRequest, model_chord_mm: f64, keep: &[bool], cmd: &str) -> Result<Lines> {
+/// The lines the mesh projection draws whose owners `keep` takes, each tested against every shown
+/// body's mesh, with what was covered and what it cost. `model_chord_mm` is the chord the meshes
+/// are asked for.
+fn meshed(
+    s: &Session,
+    shown: &ShownSet,
+    frame: &ViewFrame,
+    request: &LineRequest,
+    model_chord_mm: f64,
+    keep: &dyn Fn(Owner) -> bool,
+    cmd: &str,
+) -> Result<Lines> {
     let LineRequest { shows, hidden, reference_hidden, reference_hides_model, tangent_edges, .. } = *request;
     let started = web_time::Instant::now();
     let names: BTreeSet<&str> = shown.bodies.iter().filter_map(|b| shown.body(b)).map(|b| b.name.as_str()).collect();
@@ -215,7 +232,7 @@ fn meshed(s: &Session, shown: &ShownSet, frame: &ViewFrame, request: &LineReques
     let mut by_owner: BTreeMap<Owner, Vec<(Vec2, Vec2, bool)>> = BTreeMap::new();
     let mut covered = 0;
     for line in &drawing.lines {
-        let Some(owner) = line.owner.filter(|o| keep.get(o.placement as usize) == Some(&true)) else { continue };
+        let Some(owner) = line.owner.filter(|o| keep(*o)) else { continue };
         let reference = is_reference(owner);
         if line.hidden && !(if reference { reference_hidden } else { hidden }) {
             continue;
@@ -748,7 +765,7 @@ mod tests {
     fn both_ways(s: &Session, view: solidcraft_geom::drawing_view::NamedView, tangent_edges: bool) -> (Lines, Lines) {
         let (set, frame, request) = asked(s, view, tangent_edges);
         let exact = lines(s, &set, &frame, &request, "test").unwrap();
-        let mesh = meshed(s, &set, &frame, &request, CHORD_MM, &vec![true; set.bodies.len()], "test").unwrap();
+        let mesh = meshed(s, &set, &frame, &request, CHORD_MM, &|_| true, "test").unwrap();
         (exact, mesh)
     }
 
@@ -776,7 +793,7 @@ mod tests {
         let refused = lines_with(&s, &set, &frame, &request, &budget, "test").unwrap();
         assert_eq!((refused.made.exact, refused.made.provenance()), (0, "mesh_projection"), "{:?}", refused.made);
         assert_eq!(refused.made.from_mesh, BTreeMap::from([(Fallback::Refused, 1)]));
-        let mesh = meshed(&s, &set, &frame, &request, CHORD_MM, &[true], "test").unwrap();
+        let mesh = meshed(&s, &set, &frame, &request, CHORD_MM, &|_| true, "test").unwrap();
         assert_eq!((refused.lines.len(), edges(&refused, None)), (mesh.lines.len(), edges(&mesh, None)));
     }
 

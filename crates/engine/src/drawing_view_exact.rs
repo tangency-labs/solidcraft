@@ -5,7 +5,9 @@
 //! where each is seen.
 //!
 //! A body is drawn exact unless one of [`Fallback`]'s reasons holds; the caller draws the rest from
-//! the mesh projection, which tests them against every shown body, as before. Reference parts follow
+//! the mesh projection, which tests them against every shown body, as before. An edge of a body
+//! drawn exact that `hlr` doesn't draw (a split between two faces of one surface) comes from the
+//! mesh projection alone ([`Exact::split`]). Reference parts follow
 //! the mesh projection's rule: their lines are tested against everything, and the model's see
 //! through them unless the view says they hide it. So their lines come from a second `hlr` call
 //! with them in the scene.
@@ -35,8 +37,6 @@ pub enum Fallback {
     Unsupported,
     /// The body's record, or its edge numbers, couldn't be read for `hlr`.
     Unread,
-    /// An edge the view draws that `hlr` doesn't: a split between two faces of one surface.
-    Seam,
     /// A body drawn from the mesh may stand in front of it, and `hlr` can't see that body.
     InFront,
     /// `hlr` refused the view as a whole (past its budget, say).
@@ -50,7 +50,6 @@ impl Fallback {
             Fallback::MeshBody => "mesh bodies",
             Fallback::Unsupported => "faces the exact lines can't draw",
             Fallback::Unread => "records that can't be read",
-            Fallback::Seam => "split faces",
             Fallback::InFront => "a mesh body in front",
             Fallback::Refused => "more work than the exact lines allow",
         }
@@ -61,6 +60,9 @@ impl Fallback {
 pub(super) struct Exact {
     /// Per shown body, in the shown set's order: its lines, or why they come from the mesh.
     pub drawn: Vec<std::result::Result<Vec<ViewLine>, Fallback>>,
+    /// The edges of bodies drawn exact that the view draws and `hlr` doesn't, by shown body and edge:
+    /// splits between two faces of one surface (#2455). The caller draws them from the mesh.
+    pub split: Vec<(usize, usize)>,
     /// Pieces drawn by another piece, left out.
     pub covered: usize,
     /// Pieces whose visibility `hlr` couldn't tell, drawn as visible.
@@ -112,7 +114,7 @@ pub(super) fn lines(
     if drawn.iter().any(Result::is_err) {
         in_front(&reference, request.reference_hides_model, boxes(), &mut drawn);
     }
-    let mut exact = Exact { drawn, covered: 0, uncertain: 0, prepare_ms, projection_ms: 0.0, occlusion_ms: 0.0 };
+    let mut exact = Exact { drawn, split: Vec::new(), covered: 0, uncertain: 0, prepare_ms, projection_ms: 0.0, occlusion_ms: 0.0 };
     // `hlr` measures x and y from the world origin, the view's plane from the basis's origin.
     let Some(shift) = Similarity2::new(1.0, 0.0, Vec2::new(-basis.origin.dot(basis.x), -basis.origin.dot(basis.y))) else {
         refuse(&mut exact, |_| true);
@@ -201,7 +203,8 @@ impl Calls<'_> {
         let [traced, crossed, classified, covered] = found.stats.phase_ms;
         exact.projection_ms += traced + crossed;
         exact.occlusion_ms += classified + covered;
-        // Every edge the view draws has a line in `hlr`, hidden or not, unless `hlr` calls it a seam.
+        // Every edge the view draws has a line in `hlr`, hidden or not, unless `hlr` calls it a seam:
+        // those are left to the mesh.
         let mut has_line: Vec<Vec<bool>> = shown_at.iter().map(|i| self.group(*i).map_or(Vec::new(), |g| vec![false; g.drawn.len()])).collect();
         for line in &found.lines {
             if let (Source::Edge { edge, .. }, Some(seen)) = (line.source, has_line.get_mut(line.placement))
@@ -211,10 +214,9 @@ impl Calls<'_> {
             }
         }
         for (at, i) in shown_at.iter().enumerate().filter(|(_, i)| keep.get(**i) == Some(&true)) {
-            let all = self.group(*i).zip(has_line.get(at)).is_some_and(|(g, seen)| g.drawn.iter().zip(seen).all(|(drawn, seen)| !drawn || *seen));
-            if let Some(d) = exact.drawn.get_mut(*i).filter(|_| !all) {
-                *d = Err(Fallback::Seam);
-            }
+            let (Some(g), Some(seen)) = (self.group(*i), has_line.get(at)) else { continue };
+            let unseen = g.drawn.iter().zip(seen).enumerate().filter(|(_, (drawn, seen))| **drawn && !**seen);
+            exact.split.extend(unseen.map(|(edge, _)| (*i, edge)));
         }
         let hidden = if of_reference { self.request.reference_hidden } else { self.request.hidden };
         let clip = self.clip.filter(|_| of_reference);
