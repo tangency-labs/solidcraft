@@ -24,8 +24,9 @@ pub struct SheetSceneParams {
 /// A sheet's paper scene: its size and its groups in paint order, in paper millimetres from the
 /// sheet's lower-left corner: the drawing border's (object: the sheet), then each image's picture
 /// (object and source: the placement), then each view's strokes (object: the view), then each
-/// dimension's lines and arrowheads (object: the dimension) and each note of a view (object: the
-/// note), then each note on the sheet, then the title block's (object: the sheet).
+/// dimension's lines and arrowheads (object: the dimension), each note of a view (object: the
+/// note) and each view's label (object: the view), then each note on the sheet, then the title
+/// block's (object: the sheet).
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -35,11 +36,16 @@ impl JsonSchema for SheetPaperScene {
         "SheetPaperScene".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        paper_scene_schema(
-            generator,
-            &[ObjectKind::DrawingBorder, ObjectKind::SheetImage, ObjectKind::View, ObjectKind::Dimension, ObjectKind::Note, ObjectKind::TitleBlock],
-            true,
-        )
+        let kinds = [
+            ObjectKind::DrawingBorder,
+            ObjectKind::SheetImage,
+            ObjectKind::View,
+            ObjectKind::Dimension,
+            ObjectKind::Note,
+            ObjectKind::ViewLabel,
+            ObjectKind::TitleBlock,
+        ];
+        paper_scene_schema(generator, &kinds, true)
     }
 }
 
@@ -54,12 +60,30 @@ pub struct SheetSceneView {
     /// What working out its lines cost, when they were.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stats: Option<LinesStatsResult>,
+    /// Its label, when it draws one (a view placed apart from its projection place).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<SheetSceneLabel>,
 }
 
 impl From<ViewState> for SheetSceneView {
     fn from(v: ViewState) -> Self {
-        SheetSceneView { view: ids::encode(v.view), status: v.status.name(), reason: v.status.reason().or(v.why), stats: v.stats.map(Into::into) }
+        let label = v.label.map(|label| SheetSceneLabel { drawn: label.drawn, why: label.why });
+        SheetSceneView {
+            view: ids::encode(v.view),
+            status: v.status.name(),
+            reason: v.status.reason().or(v.why),
+            stats: v.stats.map(Into::into),
+            label,
+        }
     }
+}
+
+/// A view's label on the sheet: whether it is in the scene, with why not, or why its text is left out.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneLabel {
+    pub drawn: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
 }
 
 /// One dimension of a view on the sheet: where it stands with the model, in
@@ -222,8 +246,8 @@ pub struct DimensionStatusResult {
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
-    /// Its sheet shows it as it last was, or not at all: its view is out of date, it was read from
-    /// another model or record than it has now, or its view draws an exploded view and holds it back.
+    /// Its sheet shows it as it last was, or not at all: its view is out of date, or it was read from
+    /// another model or record than it has now.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub out_of_date: bool,
 }
@@ -259,8 +283,7 @@ pub struct SheetSceneResult {
     /// Each note of a view on the sheet, by view and id, then each note on the sheet, by id.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<SheetSceneNote>,
-    /// The views, dimensions and notes a deferred drawing shows as they last were, and the dimensions
-    /// and notes on its model a view drawing an exploded view holds back.
+    /// The views, dimensions and notes a deferred drawing shows as they last were.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub out_of_date: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

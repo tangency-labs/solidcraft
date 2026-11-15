@@ -82,7 +82,7 @@ use dimension::Dimension;
 use image::{ImageFile, SheetImage};
 use note::{Anchor, Note};
 use table::SheetTable;
-use view::View;
+use view::{View, ViewLetters};
 
 /// The most drawings a design may hold.
 pub const MAX_DRAWINGS: usize = 1000;
@@ -151,6 +151,9 @@ pub struct Drawing {
     /// ([`Drawing::resolve_view`]). Always written, so a later default can't change an old drawing.
     #[serde(default)]
     pub line_group: LineGroup,
+    /// How its views' letters are given ([`Drawing::give_letter`]). Saved only when it isn't the default.
+    #[serde(default, skip_serializing_if = "ViewLetters::is_default")]
+    pub view_letters: ViewLetters,
     /// In order, each behind its own `Arc`, so an undo step shares every sheet it didn't change.
     pub sheets: Vec<Arc<Sheet>>,
     /// By id ([`Drawing::add_views`]), each behind its own `Arc`, as the sheets are.
@@ -195,6 +198,7 @@ const RECORD_FIELDS: &[&str] = &[
     "language",
     "font",
     "line_group",
+    "view_letters",
     "sheets",
     "views",
     "dimensions",
@@ -442,6 +446,7 @@ impl Drawing {
             language: language.into(),
             font: String::new(),
             line_group: LineGroup::DEFAULT,
+            view_letters: ViewLetters::default(),
             sheets: vec![Arc::new(first)],
             views: Vec::new(),
             dimensions: Vec::new(),

@@ -11,7 +11,7 @@ use solidcraft_geom::paper::line::LineGroup;
 
 use super::*;
 use crate::drawing::{Excluded, Sheet, Source};
-use crate::drawing_view::{Exploded, JointPose, OccurrencePaths, Pose, StudyStep};
+use crate::drawing_view::{Exploded, JointPose, OccurrencePaths, Pose, StudyStep, ViewConfiguration};
 use crate::format::DRAWING;
 use crate::ids::IdSource;
 
@@ -34,7 +34,7 @@ fn front() -> (Drawing, IdSource, u64) {
 fn add(d: &mut Drawing, id_source: &mut IdSource, kind: ViewKind, place: ViewPlace, settings: ViewOverrides) -> u64 {
     let id = d.allocate_id(id_source).unwrap();
     let sheet = d.sheets[0].id;
-    d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
+    d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, label: None })]);
     id
 }
 
@@ -373,6 +373,67 @@ fn a_pose_keeps_its_limits_on_reading() {
     }
 }
 
+/// A view's configuration saves as the row's id, as an exploded view's choice saves its view, and
+/// follows down its chain until a view sets its own. "active" is a setting of its own: a child can
+/// draw the active configuration under a parent that draws another. A view that sets none saves
+/// nothing and draws the active one.
+#[test]
+fn a_configuration_follows_its_parent_and_saves_by_its_row_id() {
+    let (mut d, _, [front, right, top]) = three();
+    let resolved = |d: &Drawing, id: u64| d.resolve_view(id).unwrap().configuration;
+    assert_eq!(resolved(&d, top), Setting { value: ViewConfiguration::Active, set_by: SetBy::Default });
+    view_mut(&mut d, front).settings.configuration = Some(ViewConfiguration::Row(17));
+    d.validate().unwrap();
+    assert_eq!(resolved(&d, right), Setting { value: ViewConfiguration::Row(17), set_by: SetBy::Parent(front) });
+    assert_eq!(resolved(&d, top), Setting { value: ViewConfiguration::Row(17), set_by: SetBy::Parent(front) });
+    view_mut(&mut d, right).settings.configuration = Some(ViewConfiguration::Active);
+    assert_eq!(resolved(&d, top), Setting { value: ViewConfiguration::Active, set_by: SetBy::Parent(right) });
+    assert_eq!(resolved(&d, front), Setting { value: ViewConfiguration::Row(17), set_by: SetBy::This });
+    let v = file(&d);
+    let saved = |id: u64| v["views"].as_array().unwrap().iter().find(|view| view["id"] == json!(ids::encode(id))).cloned().unwrap();
+    assert_eq!(saved(front)["settings"], json!({"scale": "1:2", "configuration": {"row": 17}}));
+    assert_eq!(saved(right)["settings"]["configuration"], json!("active"));
+    assert_eq!(saved(top)["settings"].get("configuration"), None);
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+}
+
+/// A saved configuration reads as "active" or a row's id, whatever the id: a row the design no
+/// longer has reads (the view says why where it draws, never refuses the file). Anything else is
+/// refused, a row's name included: the file names rows by id.
+#[test]
+fn a_configuration_reads_as_active_or_a_row_id() {
+    let (d, _, _) = three();
+    let at = d.views.iter().position(|view| matches!(view.kind, ViewKind::Base { .. })).unwrap();
+    let with = |configuration: Value| {
+        refused(&d, |v| {
+            v["views"][at]["settings"]["configuration"] = configuration;
+        })
+    };
+    // What each reads as: "read", or a part of why it is refused ("" for refused, whatever the words).
+    let cases = [
+        (json!("active"), "read"),
+        (json!(null), "read"),
+        (json!({"row": 0}), "read"),
+        (json!({"row": 999_999}), "read"),
+        (json!({"row": u64::MAX}), "read"),
+        (json!({"row": -1}), "invalid value"),
+        (json!({"row": 1.5}), "invalid type"),
+        (json!({"row": "Tall"}), "invalid type"),
+        (json!("Tall"), "unknown variant"),
+        (json!("Active"), "unknown variant"),
+        (json!({"row": 3, "view": 4}), ""),
+        (json!({"rows": [3]}), "unknown variant"),
+        (json!(3), ""),
+        (json!([]), ""),
+    ];
+    for (configuration, says) in cases {
+        let e = with(configuration.clone());
+        assert!(if says.is_empty() { e != "read" } else { e.contains(says) }, "{configuration}: {e}");
+    }
+}
+
 /// Seeded changes to a view's saved choice: each reads or is refused, never panics, and what reads
 /// saves as the same bytes and resolves.
 #[test]
@@ -405,6 +466,7 @@ fn seeded_changes_to_what_a_view_shows_read_or_are_refused() {
         let mut v = file(&d);
         v["views"][at]["settings"]["occurrences"] = list(100);
         v["views"][at]["settings"]["hide"] = list(200);
+        v["views"][at]["settings"]["configuration"] = json!({"row": id(seed, 300)});
         let Ok(read) = Drawing::from_json(&v.to_string()) else { continue };
         let again = read.to_json().unwrap();
         assert_eq!(Drawing::from_json(&again).unwrap().to_json().unwrap(), again, "seed {seed}");
@@ -652,4 +714,109 @@ fn a_views_centre_is_its_point_or_lined_up_with_its_parent() {
         assert_eq!(d.view_centre(id).unwrap_err().to_string(), format!("base view {} isn't placed at a point", ids::encode(front)));
     }
     assert_eq!(d.view_centre(99).unwrap_err().to_string(), format!("the drawing has no view {}", ids::encode(99)));
+}
+
+/// View `id`'s letter, if it has one.
+fn letter(d: &Drawing, id: u64) -> Option<String> {
+    d.view(id)?.label.as_ref().map(|label| label.letter.clone())
+}
+
+/// A view placed apart from its projection place gets the first letter no view holds, I, O and Q
+/// skipped; one lined up with its parent or a base view gets none. A freed letter comes back while
+/// letters are reused, never once they aren't, and the letters given are counted either way.
+#[test]
+fn a_view_placed_apart_gets_the_first_free_letter() {
+    let (mut d, mut id_source, [front, right, top]) = three();
+    for id in [front, right, top] {
+        d.give_letter(id).unwrap();
+    }
+    assert_eq!([front, right, top].map(|id| letter(&d, id)), [None, None, Some("A".into())]);
+    let label = d.view(top).unwrap().label.clone().unwrap();
+    assert_eq!((label.words.as_str(), label.scale_words.as_str(), label.shown, label.offset), ("VIEW", "SCALE", true, None));
+    let mut apart = |d: &mut Drawing| {
+        let id = add(d, &mut id_source, projected(front, ProjectedSide::Below), ViewPlace::At([150.0, 40.0]), ViewOverrides::default());
+        d.give_letter(id).unwrap();
+        id
+    };
+    let more: Vec<u64> = (0..8).map(|_| apart(&mut d)).collect();
+    let given: Vec<String> = more.iter().filter_map(|id| letter(&d, *id)).collect();
+    assert_eq!(given, ["B", "C", "D", "E", "F", "G", "H", "J"], "I is skipped");
+    assert_eq!(d.view_letters, ViewLetters { reuse: true, given: 9 });
+    // A letter already there stays; a view freed of its letter's holder gives it back.
+    d.give_letter(top).unwrap();
+    assert_eq!(letter(&d, top).as_deref(), Some("A"));
+    d.views.retain(|v| v.id != top);
+    let again = apart(&mut d);
+    assert_eq!(letter(&d, again).as_deref(), Some("A"), "a freed letter comes back");
+    d.views.retain(|v| v.id != more[0]);
+    d.view_letters.reuse = false;
+    let past = apart(&mut d);
+    assert_eq!(letter(&d, past).as_deref(), Some("K"), "never again once letters aren't reused: B stays free");
+    assert_eq!(d.view_letters.given, 10);
+    d.validate().unwrap();
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened.view_letters, d.view_letters, "saved");
+}
+
+/// A view's label reads `VIEW` and its letter, its name, then its scale when it isn't its sheet's,
+/// each part as typed and only when shown; a view in its projection place, or one whose label is
+/// hidden, draws none and keeps its letter.
+#[test]
+fn a_views_label_reads_its_shown_parts() {
+    let (mut d, _, [front, right, top]) = three();
+    d.give_letter(top).unwrap();
+    assert_eq!(d.label_text(top).as_deref(), Some("VIEW A"));
+    assert_eq!((d.label_text(front), d.label_text(right)), (None, None), "no label");
+    view_mut(&mut d, top).settings.scale = Some("2:1".parse().unwrap());
+    assert_eq!(d.label_text(top).as_deref(), Some("VIEW A\nSCALE 2:1"), "the sheet's scale is its base view's, 1:2");
+    let label = view_mut(&mut d, top).label.as_mut().unwrap();
+    label.words = String::new();
+    label.name = "BRACKET END".into();
+    label.scale_words = "ECHELLE".into();
+    assert_eq!(d.label_text(top).as_deref(), Some("A\nBRACKET END\nECHELLE 2:1"));
+    let label = view_mut(&mut d, top).label.as_mut().unwrap();
+    (label.show_letter, label.show_scale) = (false, false);
+    assert_eq!(d.label_text(top).as_deref(), Some("BRACKET END"));
+    view_mut(&mut d, top).label.as_mut().unwrap().name.clear();
+    assert_eq!(d.label_text(top), None, "nothing shown");
+    view_mut(&mut d, top).label.as_mut().unwrap().show_letter = true;
+    view_mut(&mut d, top).label.as_mut().unwrap().shown = false;
+    assert_eq!((d.label_text(top), letter(&d, top).as_deref()), (None, Some("A")), "hidden, its letter kept");
+    view_mut(&mut d, top).label.as_mut().unwrap().shown = true;
+    view_mut(&mut d, top).place = ViewPlace::Aligned(320.0);
+    assert_eq!((d.label_text(top), letter(&d, top).as_deref()), (None, Some("A")), "back in its projection place");
+}
+
+/// A label's letter is one to three capitals, its words one line each, and its offset a point on
+/// paper; a letter two views hold opens (a hand edit), and giving one of them a letter gives it
+/// another.
+#[test]
+fn a_label_keeps_the_records_rules_and_a_doubled_letter_opens() {
+    let (mut d, mut id_source, [front, _, top]) = three();
+    d.give_letter(top).unwrap();
+    let at = |v: &mut Value| v["views"].as_array_mut().unwrap().iter_mut().find(|v| v["label"].is_object()).unwrap()["label"].take();
+    let with = |d: &Drawing, key: &str, value: Value| {
+        refused(d, |v| {
+            let mut label = at(v);
+            label[key] = value;
+            let views = v["views"].as_array_mut().unwrap();
+            views.iter_mut().find(|v| v["label"].is_null() && v["place"]["at"].is_array() && v["kind"]["projected"].is_object()).unwrap()["label"] =
+                label;
+        })
+    };
+    assert_eq!(with(&d, "letter", json!("B")), "read");
+    for (key, value) in [("letter", json!("a")), ("letter", json!("ABCD")), ("letter", json!("")), ("letter", json!("A1"))] {
+        assert!(with(&d, key, value.clone()).contains("its letter is one to three capital letters A to Z"), "{key}: {value}");
+    }
+    assert!(with(&d, "name", json!("two\nlines")).contains("a label is one line"));
+    assert!(with(&d, "words", json!("x".repeat(5000))).contains("a label is one line"));
+    for offset in [json!([1e9, 0.0]), json!([0.0, -6000.0])] {
+        assert!(with(&d, "offset", offset.clone()).contains("its label's offset is at most 5000 mm"), "{offset}");
+    }
+    let twin = add(&mut d, &mut id_source, projected(front, ProjectedSide::Below), ViewPlace::At([150.0, 40.0]), ViewOverrides::default());
+    view_mut(&mut d, twin).label = d.view(top).unwrap().label.clone();
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(letter(&reopened, twin).as_deref(), Some("A"), "a doubled letter opens");
+    d.give_letter(twin).unwrap();
+    assert_eq!((letter(&d, top).as_deref(), letter(&d, twin).as_deref()), (Some("A"), Some("B")), "the copy takes the next");
 }

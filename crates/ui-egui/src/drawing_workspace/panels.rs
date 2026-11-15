@@ -80,7 +80,8 @@ fn caption(ui: &mut egui::Ui, id: &'static str) {
 
 pub(super) fn footer(ui: &mut egui::Ui, tool: Tool) -> bool {
     let mut close = false;
-    ui_kit::Panel::editor_footer(ui, "drawing_options_footer", |ui| {
+    ui.separator();
+    ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if matches!(tool, Tool::Base | Tool::Projected) {
                 pending(ui, tr("ui.drawing_panel.finish"));

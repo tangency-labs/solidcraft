@@ -1768,6 +1768,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 }
                 let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": f}]}));
                 crate::browser::request_timeline_reveal(app, f);
+                let panel = if app.preferences.history_in_browser { "browser" } else { "history" };
+                crate::browser::reveal_shared_panel(app, panel);
             }
         }
         "ui.tangentChain" => tangent_chain(app),
@@ -2205,6 +2207,12 @@ pub fn rename_selection(app: &mut SolveApp, at: Pos2) -> bool {
         start_rename(app, RenameWhat::Group(g), at);
         return true;
     }
+    // A clicked History folder too, as a double-click on it does: folders are not in the
+    // selection either (#16213).
+    if let ([], [g]) = (app.session.selection.as_slice(), app.tree.picked_timeline_groups.as_slice()) {
+        start_rename(app, RenameWhat::TimelineGroup(*g), at);
+        return true;
+    }
     let what = match (app.session.selection.as_slice(), app.tree.picked_components.as_slice(), app.tree.picked_canvases.as_slice()) {
         ([Sel::Body { name }], [], []) => RenameWhat::Body(name.clone()),
         // F2 on several selected bodies renames them all, numbered after the first (#12341).
@@ -2241,7 +2249,7 @@ fn tangent_chain(app: &mut SolveApp) {
         let Sel::Edge { body, index, .. } = s else { continue };
         let Some(b) = st.body(body) else { continue };
         let m = b.mesh();
-        for i in m.tangent_chain(*index, 2f64.to_radians()) {
+        for i in m.tangent_chain(*index, solidcraft_engine::geom::TANGENT_CHAIN) {
             let Some(e) = m.edges.get(i) else { continue };
             let Some(mid) = e.get(e.len() / 2).copied() else { continue };
             let x = Sel::Edge { body: body.clone(), index: i, point: mid };
@@ -2463,9 +2471,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
             doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
         }
         // Construction geometry, as the browser's Construction folder lists it.
-        Target::Plane { id } => doc.feature(*id).is_some_and(|f| {
-            matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
-        }),
+        Target::Plane { id } => doc.feature(*id).is_some_and(|f| f.kind.is_construction()),
         Target::Feature { id } => feature(*id),
         // The browser lists History while it is docked there and the design has features.
         Target::HistoryFolder => app.preferences.history_in_browser && !doc.features.is_empty(),

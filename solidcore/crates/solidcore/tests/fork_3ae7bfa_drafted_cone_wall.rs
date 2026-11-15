@@ -545,3 +545,97 @@ fn a_seam_cut_at_a_span_end_keeps_its_exact_pcurve() {
         }
     }
 }
+
+/// A large arc's drafted wall keeps its seams' pcurves (tangency-labs/solidcraft#16003).
+///
+/// The segment of R 746.6148 about the origin between -17.4 and 17.4 degrees, closed by its
+/// chord at x = d = R cos 17.4, drafted `deg` degrees over 10: the arc's wall is the cone about
+/// Z of semi-angle `deg`, radius R - z tan deg; the chord's wall the plane x = d + z tan deg.
+/// Each seam's pcurve on the cone is a rational quartic whose weights grow with the radius
+/// (about 450 here); scaled by one factor they stay the same curve, inside the weight range a
+/// B-spline takes ([1e-3, 100]). The section at the fraction f of the height is the segment
+/// `rho^2 acos(c / rho) - c sqrt(rho^2 - c^2)`, rho = R - f e, c = d + f e, e = 10 tan deg,
+/// so the volume is `10 int_0^1 S(f) df`. Before, the weights were left as built and each
+/// draft was refused (`NotExact`) at the corner.
+#[test]
+fn a_large_arcs_drafted_wall_keeps_its_seams() {
+    let r = 746.6148;
+    let half = 17.4_f64.to_radians();
+    let d = r * half.cos();
+    let o = Point3::new(0.0, 0.0, 0.0);
+    for deg in [15.0_f64, -15.0] {
+        let mut k = Kernel::default();
+        let at = |t: f64| Point3::new(r * t.cos(), r * t.sin(), 0.0);
+        let from = Vec3::new(half.cos(), -half.sin(), 0.0);
+        let cs = [arc(&k, o, r, from, 2.0 * 17.4), line(at(half), at(-half))];
+        let TaperExtrude::Solid(mut b) = draft(&mut k, &cs, deg) else {
+            panic!("the {deg} degree draft is refused");
+        };
+        assert_eq!(counts(&b), (4, 6, 4), "{deg}");
+        check(&mut k, &mut b);
+        let tan = deg.to_radians().tan();
+        let cones: Vec<Surface> = get_faces(&b)
+            .unwrap()
+            .into_iter()
+            .map(|f| face::surface(&b, f).unwrap().unwrap().clone())
+            .filter(|s| matches!(s.kind(), SurfaceKind::Cone(_)))
+            .collect();
+        assert_eq!(cones.len(), 1, "{deg}");
+        let SurfaceKind::Cone(c) = cones[0].kind() else {
+            unreachable!()
+        };
+        assert!(
+            (c.semi_angle_deg() + deg).abs() < 1e-12,
+            "{deg}: semi-angle {}",
+            c.semi_angle_deg()
+        );
+        let off = grid(&k, &cones[0])
+            .into_iter()
+            .map(|q| (q.x.hypot(q.y) - (r - q.z * tan)).abs())
+            .fold(0.0, f64::max);
+        assert!(off < 1e-9, "{deg}: off the cone by {off:e}");
+        let gap = cone_pcurve_gap(&k, &b);
+        assert!(gap < 1e-10, "{deg}: pcurves off their edges by {gap:e}");
+        // the two seams, from the profile's corners to the far end's, each on both walls
+        let mut seams = 0;
+        for e in get_edges(&b).unwrap() {
+            let c = edge::curve(&b, e).unwrap().unwrap();
+            let ivl = edge::interval(&b, e).unwrap();
+            let pts: Vec<Point3> = (0..=64)
+                .map(|i| {
+                    let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 64.0;
+                    c.evaluate_point(&k, t).unwrap()
+                })
+                .collect();
+            let rise = pts.iter().map(|q| q.z).fold(0.0, f64::max);
+            if pts.iter().map(|q| q.z).fold(10.0, f64::min) > 1e-9 || rise < 10.0 - 1e-9 {
+                continue;
+            }
+            seams += 1;
+            let off = pts
+                .iter()
+                .map(|q| {
+                    let cone = q.x.hypot(q.y) - (r - q.z * tan);
+                    let plane = q.x - (d + q.z * tan);
+                    cone.abs().max(plane.abs())
+                })
+                .fold(0.0, f64::max);
+            assert!(off < 1e-9, "{deg}: a seam off its walls by {off:e}");
+        }
+        assert_eq!(seams, 2, "{deg}");
+        let e = 10.0 * tan;
+        let want = 10.0
+            * simpson(|f| {
+                let (rho, c) = (r - f * e, d + f * e);
+                rho * rho * (c / rho).acos() - c * (rho * rho - c * c).sqrt()
+            });
+        // (measured 1.1e-7 and 1.9e-8 short: the volume is taken over the faces' trims, and two
+        // planar faces' pcurves are fits up to 8.8e-6 off their edges; the same segment of
+        // R 100 or R 8, which built before, is 3e-7 to 1.9e-6 short the same way)
+        let v = volume(&k, &mut b, 1e-10);
+        assert!(
+            (v - want).abs() <= 1e-6 * want,
+            "{deg}: volume {v} want {want}"
+        );
+    }
+}

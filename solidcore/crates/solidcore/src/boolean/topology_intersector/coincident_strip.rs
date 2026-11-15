@@ -1,5 +1,4 @@
-//! Not upstream (WR-614, tangency-labs/solidcore#1794; opt-in
-//! `Kernel::fixes.boolean_coincident_strip_drops_crossing`): the crossing line of two
+//! Not upstream (WR-614, tangency-labs/solidcore#1794): the crossing line of two
 //! planes that stay within tolerance of each other across a strip bounded by their edges
 //! is not an edge.
 //!
@@ -20,11 +19,20 @@
 //! edges, while keeping crossings where either face continues out of tolerance past the
 //! crossing.
 //!
+//! Every geometric condition is decided over the whole curve, never from samples: a curve
+//! enters the test only as a line segment or a B-spline, whose points over its interval lie in
+//! the convex hull of its two ends or of the control points of the knot spans that meet the
+//! interval (`Curve::hull_points_over`). The offset from the crossing line and the distance from
+//! a plane are affine in the point (up to the absolute value or norm, which are convex), so
+//! their bound over those points, widened by the rounding of the points and of the arithmetic,
+//! bounds them over the curve. A curve of any other kind, or a hull that leaves the band,
+//! keeps the crossing.
+//!
 //! | Rust | Upstream |
 //! |------|----------|
 //! | `TopologyIntersector::drop_crossings_in_coincident_strips` (crate) | none (own design) |
 //!
-//! Deviations: not upstream at all; off by default.
+//! Deviations: not upstream at all; always on (its opt-in flag was retired).
 
 use crate::error::Result;
 use crate::geom::solution_array::SolutionObject;
@@ -32,6 +40,7 @@ use crate::geom::tol::{xsect_tol3d, zone_tol3d};
 use crate::intersect::point_class::{ClassObject, PointClassType};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, EFF_ZERO};
+use crate::nurbs::math::gamma;
 use crate::surface::surface::p2::SurfaceKind;
 use crate::topology::proto_topology::{EdgeDefId, ProtoEdgeId};
 
@@ -42,13 +51,15 @@ const OP_DROP_STRIP: &str =
     "boolean::topology_intersector::coincident_strip::drop_crossings_in_coincident_strips";
 
 /// An edge definition as the strip test reads it: its proto edge, its source objects and
-/// their classification types in B-reps 1 and 2, the start, midpoint and end of its curve
-/// over its interval, and its tolerance.
+/// their classification types in B-reps 1 and 2, the start and end of its curve over its
+/// interval, the points whose convex hull holds the curve there (`None`: no certified hull),
+/// and its tolerance.
 struct Def<O> {
     pe: ProtoEdgeId,
     ed: EdgeDefId,
     src: [(PointClassType, Option<O>); 2],
-    pts: [Point3; 3],
+    ends: [Point3; 2],
+    hull: Option<Vec<(Point3, f64)>>,
     tol: f64,
 }
 
@@ -60,8 +71,15 @@ struct PlanePos {
 }
 
 impl PlanePos {
-    fn distance(self, pt: Point3) -> f64 {
-        (pt - self.origin).dot(self.unit_normal).abs()
+    /// An upper bound of the distance from the plane of the point `q` whose coordinates are
+    /// within `e` of it: the difference rounds by `γ_1` and the dot by `γ_3` of `|q - origin|`
+    /// per component, the normal is unit within `γ_8` (as `curve::plane_of`).
+    fn distance_bound(self, q: Point3, e: f64) -> f64 {
+        let w = q - self.origin;
+        (w.dot(self.unit_normal).abs() * (1.0 + gamma(8))
+            + 2.0 * (gamma(1) + gamma(3)) * w.length() * (1.0 + gamma(5))
+            + 2.0 * e)
+            * (1.0 + gamma(2))
     }
 }
 
@@ -103,11 +121,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         (def.src_topo_type(1), def.src_topo(1)),
                         (def.src_topo_type(2), def.src_topo(2)),
                     ],
-                    pts: [
+                    ends: [
                         curve.evaluate_point(k, ivl.min())?,
-                        curve.evaluate_point(k, ivl.mid())?,
                         curve.evaluate_point(k, ivl.max())?,
                     ],
+                    hull: curve.hull_points_over(&ivl),
                     tol: def.tolerance(k),
                 });
             }
@@ -217,23 +235,31 @@ fn face_edge_bounds_strip<O: ClassObject>(
         let Some(ivl) = brep.edge_interval(edge) else {
             continue;
         };
-        let pts = {
+        let (ends, hull) = {
             let Some(curve) = brep.edge_curve(edge).flatten().and_then(|c| brep.curve(c)) else {
                 continue;
             };
-            [
-                curve.evaluate_point(k, ivl.min())?,
-                curve.evaluate_point(k, ivl.mid())?,
-                curve.evaluate_point(k, ivl.max())?,
-            ]
+            let Some(hull) = curve.hull_points_over(&ivl) else {
+                continue;
+            };
+            (
+                [
+                    curve.evaluate_point(k, ivl.min())?,
+                    curve.evaluate_point(k, ivl.max())?,
+                ],
+                hull,
+            )
         };
         let edge_tol = zone_tol3d(k, brep.topology_tolerance(edge).unwrap_or(0.0));
         let plane_tol = xsect_tol3d(k, edge_tol + other_face_tol).max(crossing_tol);
-        if pts.iter().any(|&q| other_plane.distance(q) > plane_tol) {
+        if !hull
+            .iter()
+            .all(|&(q, e)| other_plane.distance_bound(q, e) <= plane_tol)
+        {
             continue;
         }
         let end_tol = plane_tol + edge_end_tol(k, brep, edge)?;
-        let Some(off) = band_offset_pts(p0, dir, len, pts, crossing_tol, end_tol) else {
+        let Some(off) = band_offset(p0, dir, len, ends, &hull, crossing_tol, end_tol) else {
             continue;
         };
         if !opposite_defs.iter().any(|other| off.dot(*other) < 0.0) {
@@ -261,13 +287,23 @@ fn in_coincident_strip<O: ClassObject>(
     let (Some(pa), Some(pb)) = (plane_pos(brep, fa), plane_pos(brep, fb)) else {
         return Ok(false);
     };
-    let [p0, _, p1] = crossing.pts;
+    let [p0, p1] = crossing.ends;
     let axis = p1 - p0;
     let len = axis.length();
     if len <= crossing.tol {
         return Ok(false);
     }
     let dir = axis / len;
+    // the crossing itself runs within its tolerance of its chord over its whole interval
+    let Some(crossing_hull) = crossing.hull.as_deref() else {
+        return Ok(false);
+    };
+    if !crossing_hull
+        .iter()
+        .all(|&(q, e)| offset_bound(p0, dir, Vec3::ZERO, q, e) <= crossing.tol)
+    {
+        return Ok(false);
+    }
     let mut def_on_fb = Vec::new();
     let mut def_on_fa = Vec::new();
     for def in defs.iter().filter(|d| d.ed != crossing.ed) {
@@ -287,8 +323,11 @@ fn in_coincident_strip<O: ClassObject>(
         let Some((is_a_on_fb, edge, owner_face)) = edge_side else {
             continue;
         };
+        let Some(hull) = def.hull.as_deref() else {
+            continue;
+        };
         let end_tol = crossing.tol.max(def.tol) + edge_end_tol(k, brep, edge)?;
-        let Some(off) = band_offset_pts(p0, dir, len, def.pts, crossing.tol, end_tol) else {
+        let Some(off) = band_offset(p0, dir, len, def.ends, hull, crossing.tol, end_tol) else {
             continue;
         };
         if !faces_inward(k, brep, edge, owner_face, off)? {
@@ -347,23 +386,131 @@ fn in_coincident_strip<O: ClassObject>(
 }
 
 /// The offset from the crossing line (through `p0` along unit `dir`, `len` long) of the
-/// segment `[q0, qm, q1]`, when it runs straight and parallel to the line within `tol`,
-/// covers `[0, len]` within `end_tol` and lies farther from the line than `tol`; else
-/// `None`.
-fn band_offset_pts(
+/// curve with ends `[q0, q1]` and certified hull `hull` (points with the error bounds of
+/// their coordinates), when every point of the curve lies within `tol` of the offset of the
+/// ends' midpoint (an enclosure over `hull`, [`offset_bound`]), the ends' offsets are within
+/// `tol` of each other, the curve covers `[0, len]` within `end_tol` and lies farther from
+/// the line than `tol`; else `None`.
+fn band_offset(
     p0: Point3,
     dir: Vec3,
     len: f64,
-    [q0, qm, q1]: [Point3; 3],
+    [q0, q1]: [Point3; 2],
+    hull: &[(Point3, f64)],
     tol: f64,
     end_tol: f64,
 ) -> Option<Vec3> {
-    let (s0, sm, s1) = ((q0 - p0).dot(dir), (qm - p0).dot(dir), (q1 - p0).dot(dir));
+    let (s0, s1) = ((q0 - p0).dot(dir), (q1 - p0).dot(dir));
     let r0 = (q0 - p0) - dir * s0;
-    let rm = (qm - p0) - dir * sm;
     let r1 = (q1 - p0) - dir * s1;
     let off = (r0 + r1) / 2.0;
-    let parallel = (r0 - r1).length() <= tol && (rm - off).length() <= tol;
+    let parallel = (r0 - r1).length() <= tol
+        && hull
+            .iter()
+            .all(|&(q, e)| offset_bound(p0, dir, off, q, e) <= tol);
     let covers = s0.min(s1) <= end_tol && s0.max(s1) >= len - end_tol;
     (parallel && covers && off.length() > tol).then_some(off)
+}
+
+/// An upper bound of `|r(q) - off|`, with `r(q) = (q - p0) - dir ((q - p0) . dir)` the
+/// offset of `q` from the line through `p0` along `dir` (unit within rounding), for the
+/// point `q` whose coordinates are within `e` of it. `r` is affine in `q` and the norm is
+/// convex, so the bound over the points of a convex hull bounds it over the hull. Rounding:
+/// the difference `w` rounds by `γ_1 |w|`, the dot by `γ_3 |w|`, the product and the
+/// subtraction by `γ_2 |w|` more; a coordinate error `e` moves `r` by at most `2 √3 e`; the
+/// final norm rounds by `γ_4`. `NaN` propagates, so a caller comparing with `<=` refuses it.
+fn offset_bound(p0: Point3, dir: Vec3, off: Vec3, q: Point3, e: f64) -> f64 {
+    let w = q - p0;
+    let r = w - dir * w.dot(dir);
+    ((r - off).length() + 4.0 * gamma(8) * w.length() + 4.0 * e) * (1.0 + gamma(4))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::curve::curve::Curve;
+    use crate::curve::line::Line;
+    use crate::geom::extent1d::Extent1d;
+    use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
+
+    const TOL: f64 = 1e-5;
+    const LEN: f64 = 10.0;
+    const OFF: f64 = 1e-3;
+
+    fn cubic(points: &[Point3; 4]) -> Curve {
+        Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 3,
+                control_points: points,
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[4, 4],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        )
+    }
+
+    /// The band offset of `curve` over `[0, 1]` from the crossing along x, `[0, LEN]`.
+    fn offset_of(k: &Kernel, curve: &Curve) -> Option<Vec3> {
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let ends = [
+            curve.evaluate_point(k, 0.0).unwrap(),
+            curve.evaluate_point(k, 1.0).unwrap(),
+        ];
+        let hull = curve.hull_points_over(&ivl)?;
+        band_offset(Point3::ZERO, Vec3::X, LEN, ends, &hull, TOL, TOL)
+    }
+
+    /// A boundary whose start, midpoint and end lie on the band `y = OFF` but which bows a
+    /// hundred tolerances off it in between: the three samples the test once read pass, the
+    /// enclosure over its control points does not, so the crossing is kept.
+    #[test]
+    fn a_bowed_boundary_keeps_the_crossing() {
+        let k = Kernel::default();
+        let h = 100.0 * TOL;
+        let curve = cubic(&[
+            Point3::new(0.0, OFF, 0.0),
+            Point3::new(LEN / 3.0, OFF + h, 0.0),
+            Point3::new(2.0 * LEN / 3.0, OFF - h, 0.0),
+            Point3::new(LEN, OFF, 0.0),
+        ]);
+        for t in [0.0, 0.5, 1.0] {
+            let q = curve.evaluate_point(&k, t).unwrap();
+            assert!((q.y - OFF).abs() <= TOL, "sample {t} is on the band");
+        }
+        // the bulge at t = (3 - sqrt 3) / 6 is h / (6 sqrt 3) off the band
+        let t = (3.0 - 3.0_f64.sqrt()) / 6.0;
+        let bulge = curve.evaluate_point(&k, t).unwrap().y - OFF;
+        assert!(bulge > 25.0 * TOL, "bulge {bulge}");
+        assert_eq!(offset_of(&k, &curve), None);
+    }
+
+    /// A B-spline whose control points lie on the band, and a line segment, bound the strip.
+    #[test]
+    fn a_straight_spline_or_line_bounds_the_strip() {
+        let k = Kernel::default();
+        let straight = cubic(&[
+            Point3::new(0.0, OFF, 0.0),
+            Point3::new(LEN / 4.0, OFF, 0.0),
+            Point3::new(LEN / 2.0, OFF, 0.0),
+            Point3::new(LEN, OFF, 0.0),
+        ]);
+        let off = offset_of(&k, &straight).unwrap();
+        assert!((off.y - OFF).abs() <= TOL && off.x.abs() <= TOL);
+        let line = Curve::from(
+            Line::create_line_segment(
+                3,
+                Point3::new(0.0, OFF, 0.0),
+                Point3::new(LEN, OFF, 0.0),
+                None,
+            )
+            .unwrap(),
+        );
+        let off = offset_of(&k, &line).unwrap();
+        assert!((off.y - OFF).abs() <= TOL);
+    }
 }

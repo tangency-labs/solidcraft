@@ -1,5 +1,5 @@
 {"format":1,"unit":"nlib.knots"}
-{"case":"all_equal_valid","deferred":null,"error":null,"ints":{"valid":[1]},"topology":null,"values":{}}
+{"case":"all_equal_valid","deferred":null,"error":"nlib_4","ints":{},"topology":null,"values":{}}
 {"case":"circle_eval_0_left","deferred":null,"error":null,"ints":{"span":[2]},"topology":null,"values":{"basis":[9.0,-12.0,4.0]}}
 {"case":"circle_eval_0_right","deferred":null,"error":null,"ints":{"span":[2]},"topology":null,"values":{"basis":[9.0,-12.0,4.0]}}
 {"case":"circle_eval_10_left","deferred":null,"error":null,"ints":{"span":[8]},"topology":null,"values":{"basis":[4.0,-12.0,9.0]}}
@@ -2643,7 +2643,7 @@
 {"case":"short_ieval_index_error","deferred":null,"error":"nlib_7","ints":{},"topology":null,"values":{}}
 {"case":"short_ieval_parameter_before_index_error","deferred":null,"error":"nlib_6","ints":{},"topology":null,"values":{}}
 {"case":"short_ieval_success","deferred":null,"error":null,"ints":{},"topology":null,"values":{"value":[0.5]}}
-{"case":"single_knot_valid","deferred":null,"error":null,"ints":{"valid":[1]},"topology":null,"values":{}}
+{"case":"single_knot_valid","deferred":null,"error":"nlib_4","ints":{},"topology":null,"values":{}}
 {"case":"topo_u_eval_0_left","deferred":null,"error":null,"ints":{"span":[3]},"topology":null,"values":{"basis":[2.7236705281476574,-2.3200896663851864,0.6587698480706877,-0.062350709833158525]}}
 {"case":"topo_u_eval_0_right","deferred":null,"error":null,"ints":{"span":[3]},"topology":null,"values":{"basis":[2.7236705281476574,-2.3200896663851864,0.6587698480706877,-0.062350709833158525]}}
 {"case":"topo_u_eval_1_left","deferred":null,"error":null,"ints":{"span":[3]},"topology":null,"values":{"basis":[1.0,0.0,0.0,0.0]}}

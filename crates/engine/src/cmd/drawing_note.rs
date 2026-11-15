@@ -102,9 +102,6 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let branches = request.branches.iter().map(|pick| branch(s, pick, ADD)).collect::<Result<Vec<_>>>()?;
     let mut note = Note { id: 0, anchor, at: request.at, content: request.content.0, cap_mm: request.cap_mm, branches };
     if let Some(view) = note.anchor.view() {
-        if note.on_model() {
-            crate::drawing_view::refuse_apart(&record, view, "notes on its model", ADD)?;
-        }
         check_drawn(&record, view, note.paths(), ADD)?;
     }
     note.id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
@@ -181,9 +178,6 @@ fn new_branches(s: &Session, id: u64, set: BranchesSet) -> Result<Vec<Branch>> {
     if let Some(why) = leaders_refused(note.anchor.view().is_some(), count, own.saturating_add(count)) {
         return Err(bad(EDIT, why));
     }
-    if let Some(view) = note.anchor.view() {
-        crate::drawing_view::refuse_apart(record, view, "notes on its model", EDIT)?;
-    }
     let added = set.add.iter().map(|pick| branch(s, pick, EDIT)).collect::<Result<Vec<_>>>()?;
     if let Some(view) = note.anchor.view() {
         check_drawn(record, view, added.iter().map(Branch::path), EDIT)?;
@@ -201,7 +195,9 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
 fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     let d = s.drawing(cmd)?;
     let note = d.notes.by_id(id).ok_or_else(|| bad(cmd, format!("the drawing has no note {}", ids::encode(id))))?;
-    let resolved = s.doc.resolve_notes(&s.model, d, &[id]).map_err(|e| bad(cmd, e.to_string()))?;
+    let resolved = crate::drawing_view::ViewSessions::new(s)
+        .read_on(d, &[(id, note.anchor.view().unwrap_or_default())], solidcraft_doc::Document::resolve_notes)
+        .map_err(|e| bad(cmd, e.to_string()))?;
     let r = resolved.into_iter().next().ok_or_else(|| bad(cmd, format!("note {} wasn't read", ids::encode(id))))?;
     let (status, why, candidates) = status_words(r.anchor.status);
     let state = s.model.state();

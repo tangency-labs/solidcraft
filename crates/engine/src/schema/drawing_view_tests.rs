@@ -28,6 +28,7 @@ fn schemas_and_the_key_check_agree() {
     ];
     assert_keys(input_schema_for::<SnapshotParams>(), &keys);
     let base = [
+        "configuration",
         "exploded",
         "hide",
         "pose",
@@ -66,11 +67,13 @@ fn the_edit_contract_lists_a_saved_views_settings() {
         line_group: Some(Default::default()),
         exploded: Some(Default::default()),
         pose: Some(Default::default()),
+        configuration: Some(Default::default()),
     };
     let own = serde_json::to_value(all).unwrap_or_default();
     let named = |key: &String| if key == "occurrences" { "source".to_string() } else { key.clone() };
     let mut theirs: Vec<String> = own.as_object().map(|o| o.keys().map(named).collect()).unwrap_or_default();
-    theirs.extend(["linked", "place", "reference_shown_percent", "view"].map(String::from));
+    // And the view's label (#13044), which isn't a setting a child follows.
+    theirs.extend(["label", "linked", "place", "reference_shown_percent", "view"].map(String::from));
     theirs.sort();
     let schema = input_schema_for::<ViewSet>();
     let mut ours: Vec<String> = schema.as_value()["properties"].as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();

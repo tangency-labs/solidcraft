@@ -12,6 +12,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use solidcore_record::Seg2;
+use solidcraft_doc::drawing::view::ViewPlace;
 use solidcraft_doc::drawing_view::{MAX_JOINT_VALUES, MAX_POSE_JOINTS, TangentEdges, ViewDirection, ViewSettings};
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, SheetSize};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide, Scale};
@@ -249,20 +250,36 @@ pub enum ExplodedParam {
     Name(String),
 }
 
+/// A view's choice of something in the design, as given: `keyword` in any case, or the thing by its
+/// id (a whole number) or its name (text). Anything else is refused with one `message`, rather than
+/// serde's "did not match any variant".
+enum Named {
+    Keyword,
+    Id(u64),
+    Name(String),
+}
+
+fn named<'de, D: serde::Deserializer<'de>>(d: D, keyword: &str, message: &str) -> Result<Named, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Either {
+        Id(u64),
+        Name(String),
+    }
+    Ok(match Either::deserialize(d).map_err(|_| serde::de::Error::custom(message))? {
+        Either::Id(id) => Named::Id(id),
+        Either::Name(name) if name.eq_ignore_ascii_case(keyword) => Named::Keyword,
+        Either::Name(name) => Named::Name(name),
+    })
+}
+
 impl<'de> Deserialize<'de> for ExplodedParam {
-    /// One message for anything that is neither, rather than serde's "did not match any variant".
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<ExplodedParam, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Either {
-            Id(u64),
-            Name(String),
-        }
         let message = "exploded is \"assembled\", or an exploded view of the design by its name or id";
-        Ok(match Either::deserialize(d).map_err(|_| serde::de::Error::custom(message))? {
-            Either::Id(id) => ExplodedParam::Id(id),
-            Either::Name(name) if name.eq_ignore_ascii_case("assembled") => ExplodedParam::Assembled,
-            Either::Name(name) => ExplodedParam::Name(name),
+        Ok(match named(d, "assembled", message)? {
+            Named::Keyword => ExplodedParam::Assembled,
+            Named::Id(id) => ExplodedParam::Id(id),
+            Named::Name(name) => ExplodedParam::Name(name),
         })
     }
 }
@@ -274,6 +291,38 @@ impl JsonSchema for ExplodedParam {
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
             "description": "Which state of the assembly the view draws: \"assembled\" (as the design places its parts), or one of the design's exploded views by its name or id. \"assembled\" in any case is the assembly: choose an exploded view of that name by its id. The design never changes.",
+            "oneOf": [{"type": "string"}, {"type": "integer", "minimum": 0}]
+        })
+    }
+}
+
+/// Which configuration of the design a view draws (#13048), as given: `"active"`, or a row of the
+/// design's configuration table by its id (a whole number) or its name (text).
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConfigurationParam {
+    Active,
+    Id(u64),
+    Name(String),
+}
+
+impl<'de> Deserialize<'de> for ConfigurationParam {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<ConfigurationParam, D::Error> {
+        let message = "configuration is \"active\", or a row of the design's configuration table by its name or id";
+        Ok(match named(d, "active", message)? {
+            Named::Keyword => ConfigurationParam::Active,
+            Named::Id(id) => ConfigurationParam::Id(id),
+            Named::Name(name) => ConfigurationParam::Name(name),
+        })
+    }
+}
+
+impl JsonSchema for ConfigurationParam {
+    fn schema_name() -> Cow<'static, str> {
+        "ViewConfiguration".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Which configuration of the design the view draws: \"active\" (the design's active configuration, as the design is now), or a row of its configuration table by its id (a number, as config.table lists it) or its name (text). \"active\" in any case is the active configuration: choose a row of that name by its id. The view saves the row's id, so a rename keeps it. The design never changes.",
             "oneOf": [{"type": "string"}, {"type": "integer", "minimum": 0}]
         })
     }
@@ -462,6 +511,15 @@ pub enum PlaceParam {
     Aligned(f64),
 }
 
+impl From<ViewPlace> for PlaceParam {
+    fn from(place: ViewPlace) -> PlaceParam {
+        match place {
+            ViewPlace::At(at) => PlaceParam::At(at),
+            ViewPlace::Aligned(along) => PlaceParam::Aligned(along),
+        }
+    }
+}
+
 /// What `drawing.view.inspect` takes.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -511,6 +569,9 @@ pub struct ViewSet {
     /// The position of its assembly it draws.
     #[serde(deserialize_with = "super::present")]
     pub pose: Option<Option<PoseParam>>,
+    /// The configuration of the design it draws.
+    #[serde(deserialize_with = "super::present")]
+    pub configuration: Option<Option<ConfigurationParam>>,
     /// How far the view's boundary grows from the model's box towards the box that also holds its
     /// reference parts, each side on its own: 0 to 100.
     #[serde(deserialize_with = "super::present")]
@@ -528,6 +589,69 @@ pub struct ViewSet {
     #[serde(deserialize_with = "super::present")]
     #[schemars(with = "bool")]
     pub linked: Option<bool>,
+    /// Its label's parts (a view placed apart from its projection place has one).
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "LabelSet")]
+    pub label: Option<LabelSet>,
+}
+
+/// The parts of a view's label `drawing.view.edit` changes, each only when given (#13044).
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct LabelSet {
+    /// Its letter: one to three capitals, one no other view of the drawing holds.
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "String")]
+    pub letter: Option<String>,
+    /// The words before its letter (`VIEW`); "" for the letter alone.
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "String")]
+    pub words: Option<String>,
+    /// The words before its scale (`SCALE`).
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "String")]
+    pub scale_words: Option<String>,
+    /// A name under its letter's line; "" for none.
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "String")]
+    pub name: Option<String>,
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "bool")]
+    pub show_letter: Option<bool>,
+    /// Its scale, shown when it isn't its sheet's.
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "bool")]
+    pub show_scale: Option<bool>,
+    /// Whether it is drawn at all: false takes it off the sheet, and the view keeps its letter.
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "bool")]
+    pub shown: Option<bool>,
+    /// Where its middle sits from the view's centre, in paper millimetres; null puts it back above the view.
+    #[serde(deserialize_with = "super::present")]
+    pub offset: Option<Option<[f64; 2]>>,
+}
+
+/// A view's label as inspect answers it (#13044).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LabelResult {
+    pub letter: String,
+    pub words: String,
+    pub scale_words: String,
+    pub name: String,
+    pub show_letter: bool,
+    pub show_scale: bool,
+    pub shown: bool,
+    /// From the view's centre; none: above the view.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<[f64; 2]>,
+    /// Whether the view needs its label: it is placed apart from its projection place.
+    pub needed: bool,
+    /// What it reads on the sheet, a line for each part shown; null when it isn't drawn.
+    pub text: Option<String>,
+    /// The box round it on the sheet, when it is drawn and its text is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub box_mm: Option<BoxResult>,
 }
 
 /// Where a setting's value comes from.
@@ -573,6 +697,31 @@ pub struct SettingsResult {
     /// The position of its assembly it draws: `"designed"`, `{"joints": [...]}` as saved (radians
     /// and mm), or `{"study": {"id": .., "step": ..}}`.
     pub pose: PoseResult,
+    /// The configuration of the design it draws: `"active"`, or `{"row": id}` for a row of the
+    /// design's configuration table.
+    pub configuration: ConfigurationResult,
+}
+
+/// A view's configuration as inspect shows it: the setting, and what it draws.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ConfigurationResult {
+    #[serde(flatten)]
+    pub setting: SettingResult<Value>,
+    /// The row it draws: the one it names, or for `"active"` the design's active row while the design
+    /// matches it. Null when it draws none: the row is no longer in the design or can't be applied to
+    /// it, or the design matches none of its rows.
+    pub drawn: Option<DrawnRowResult>,
+    /// The features its row fails to build that the design builds, each as `name: error`, as
+    /// `config.activate` lists them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+}
+
+/// A row of the design's configuration table as a view draws it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DrawnRowResult {
+    pub id: u64,
+    pub name: String,
 }
 
 /// A view's position as inspect shows it: the setting, and for a position of its own what it draws.
@@ -650,6 +799,9 @@ pub struct InspectResult {
     pub dimensions: Vec<String>,
     /// Its balloons' ids, in id order.
     pub balloons: Vec<String>,
+    /// Its label, when it has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<LabelResult>,
     pub choices: ChoicesResult,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -683,6 +835,35 @@ pub struct MoveParams {
     /// A view lined up with its parent moves only when this is true, and is then placed apart.
     #[serde(default)]
     pub break_alignment: bool,
+}
+
+/// What `drawing.view.move` takes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct ViewMoveParams {
+    pub view: ViewIdParam,
+    /// Where its centre is dragged to, in paper millimetres from the sheet's lower-left corner.
+    pub to_mm: Point2,
+    /// A view lined up with its parent stays on its line unless this is true, and is then placed apart.
+    #[serde(default)]
+    pub break_alignment: bool,
+}
+
+/// What `drawing.view.move` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ViewMoveResult {
+    pub view: String,
+    /// Its place now.
+    pub place: PlaceParam,
+    /// Where its centre sits now.
+    pub centre_mm: [f64; 2],
+    /// The views lined up with it that went with it.
+    pub followers: Vec<String>,
+    /// Those of them, and it, now outside the sheet's drawing space.
+    pub outside: Vec<OutsideResult>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What `drawing.view.copy_to_sheet` takes.
@@ -761,6 +942,10 @@ pub struct BaseParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PoseParam")]
     pub pose: Option<PoseParam>,
+    /// The configuration of the design it draws (the active one when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ConfigurationParam")]
+    pub configuration: Option<ConfigurationParam>,
 }
 
 /// What `drawing.view.projected` takes: its parent, the side of it it sits on, and where.
@@ -804,6 +989,9 @@ pub struct CreateResult {
     /// The scale it draws at: given or fitted for a base view, its parent's for a projected one.
     pub scale: ScaleResult,
     pub boundary_mm: BoxResult,
+    /// The letter it was given, placed apart from its projection place.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub letter: Option<String>,
     /// It, when its boundary leaves the sheet's drawing space; it isn't moved back in.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outside: Vec<OutsideResult>,

@@ -25,7 +25,7 @@
 //! | `side_edge_in_cap` (private)      | none (#2406: a cap edge along a side edge in the cap's plane) |
 //! | [`EndEdges`], `end_face_runs_on_past_side_edge`, `rail_face` (private) | none: an end face running on tangentially past the side edge is the global merge's, not refused |
 //! | `run_on_leaves_the_part` (private) | none (#2656: a blend run on past a smooth vertex that runs out of the part ends on the end face, not capped) |
-//! | `runs_on_across_seam` (private), [`RUNS_ON_ACROSS_SEAM`] | none (#2864: a round does not end at a seam's vertex; refused until it runs on across it) |
+//! | `runs_on_across_seam` (private), [`RUNS_ON_ACROSS_SEAM`] | none (#2864: a round does not end at a seam's vertex; a variable round's End there is refused, every other blend runs on across it) |
 //!
 //! Deviations: the fork's `NoteError(SM_FILERR_NO_ROOM, ...)` and `NoteFitRadius` before
 //! `SM_ERR` are returned ([`EndRefusal`]) for the executive's caller to note, which then
@@ -1492,8 +1492,10 @@ fn end_rolls_over(
 /// runs on there across a seam's vertex into the rest of its own curve, between the same two
 /// faces ([`side_edgeuse_across_seam_vertex`]'s narrow rule, the side edge's in 63c7962). A
 /// seam is the surface's parameterisation, not a feature: the round runs on there or not at
-/// all, and never ends in a step. Until the blend's chain runs on across a seam's vertex, the
-/// End is refused, no radius building it.
+/// all, and never ends in a step. A blend of constant size runs on across it (its edge's
+/// continuation is blended with it, `FilletParametersAccess::parameters_runs_on_across_seams`),
+/// so this End is met only by a variable round, whose law runs along its own edge and gives
+/// no radius past it: refused, no radius building it.
 ///
 /// # Errors
 /// `SM_ERR_NULL_POINTER` without the corner's blended edge use or vertex; those of the seam

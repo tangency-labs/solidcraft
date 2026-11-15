@@ -161,7 +161,7 @@ impl Renderer {
             return;
         }
         if self.product_depth.is_none() {
-            self.product_depth = Some(DepthPipelines::new(device, &self.uniform_bgl, self.target));
+            self.product_depth = Some(DepthPipelines::new(device, &self.uniform_bgl.layout, self.target));
         }
         if !self.prepare_product_geometry(device, queue, frame) {
             return;

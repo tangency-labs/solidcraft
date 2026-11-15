@@ -87,6 +87,7 @@ fn each_kind_names_its_layer_in_the_capitals_of_its_id() {
         (View, "VIEW"),
         (Dimension, "DIMENSION"),
         (Note, "NOTE"),
+        (ViewLabel, "VIEW_LABEL"),
     ] {
         assert_eq!(kind.layer(), layer);
         let id = layer.to_ascii_lowercase();
@@ -108,6 +109,7 @@ fn each_kind_paints_in_its_band() {
         (View, 2, 2),
         (Dimension, 3, 3),
         (Note, 3, 5),
+        (ViewLabel, 3, 3),
         (PartsList, 4, 4),
         (RevisionTable, 4, 4),
         (TitleBlock, 6, 6),

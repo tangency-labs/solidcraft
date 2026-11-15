@@ -80,6 +80,10 @@ pub struct DrawingSetParams {
     #[serde(default, deserialize_with = "revision_numbering", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "revision_numbering_schema")]
     pub revision_numbering: Option<Numbering>,
+    /// Whether a deleted view's letter is given again (true) or never (false).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub view_letters_reuse: Option<bool>,
 }
 
 /// `units` as given: `follow_model`, or a length unit the drawing's rules check.

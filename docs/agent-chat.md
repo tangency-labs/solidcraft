@@ -44,18 +44,15 @@ when you send a message or press **Connect** (or at launch, when you turned that
 
 ## The panel
 
-With **Preferences → Layout → Use shared panel layout** enabled, side panels keep
-the conversation above the composer. A wide floating panel places the conversation
-beside the provider controls and composer when both columns have enough width.
-Smaller widths keep the stacked layout. The conversation, unsent draft and scroll
-state stay with the same Assistant when the layout changes. Hovering over its shared
-header reports the current agent state or pending approvals; requests that need
-attention use the shared attention indication. Classic and the Assistant's own
-native window keep their existing layout.
+Assistant uses the shared panel layout. Narrow panels keep the conversation above
+the composer. A wide floating panel places the conversation beside the provider
+controls and composer when both columns have enough width. The conversation,
+unsent draft and scroll state stay with the same Assistant when its placement
+changes. The shared header reports the agent state and pending approvals.
+The Assistant’s own native window keeps its existing layout.
 
-In the floating layout, Assistant fills the viewport height in the shared rounded panel, with
-space around its edges. The compass and navigation bar move into the remaining space beside it. It overlays the model without changing the viewport projection;
-clicks and scrolling over the panel stay in the chat. The docked layout retains its side panel.
+Assistant fills the available side height. The compass and navigation bar use the
+remaining viewport space. Clicks and scrolling over the panel stay in the chat.
 
 After clicking in Assistant, keyboard input stays in the chat, including when selecting text
 in an answer. Copy, Cut and Paste do not also operate on selected CAD geometry. Moving the

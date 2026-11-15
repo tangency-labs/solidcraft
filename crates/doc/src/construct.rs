@@ -432,9 +432,12 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
             // it, so a vertex took that edge's end (#8650).
             bodies(st).find_map(|b| {
                 let hit = crate::name_lookup::locate_edge(b, n, at).ok()?;
-                let m = b.mesh();
-                let pts = m.edges.get(hit.edge)?;
-                Some((std::ptr::from_ref(b), hit.edge, [*pts.first()?, *pts.last()?]))
+                let rec = b.body.record();
+                let edge = rec.edges.get(hit.edge)?;
+                let [v0, v1] = edge.vertices;
+                let p0 = rec.vertices.get(v0 as usize).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))?;
+                let p1 = rec.vertices.get(v1 as usize).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))?;
+                Some((std::ptr::from_ref(b), hit.edge, [p0, p1]))
             })
         })
         .collect::<Option<_>>()?;
@@ -1189,10 +1192,15 @@ impl GeoRef {
             GeoRef::Vertex { at, edges: edges @ None } => {
                 for b in bodies(st) {
                     let tol = (b.body.size() * 1e-3).max(1e-3);
-                    let m = b.mesh();
-                    let ends_here = |e: &Vec<Vec3>| [e.first(), e.last()].into_iter().flatten().any(|q| q.dist(*at) <= tol);
+                    let rec = b.body.record();
+                    let ends_here = |e: &solidcore_record::brep::Edge| {
+                        [e.vertices[0], e.vertices[1]]
+                            .into_iter()
+                            .filter_map(|v| rec.vertices.get(v as usize).map(|pt| Vec3::new(pt.point[0], pt.point[1], pt.point[2])))
+                            .any(|q| q.dist(*at) <= tol)
+                    };
                     let mut meet: Vec<String> =
-                        m.edges.iter().zip(crate::naming::edge_names(b)).filter(|(e, n)| !n.is_empty() && ends_here(e)).map(|(_, n)| n).collect();
+                        rec.edges.iter().zip(crate::naming::edge_names(b)).filter(|(e, n)| !n.is_empty() && ends_here(e)).map(|(_, n)| n).collect();
                     if meet.is_empty() {
                         continue;
                     }
