@@ -1392,13 +1392,17 @@ fn a_corner_round_whose_rail_meets_the_top_next_to_w_keeps_main_s_outcome() {
 /// side round R = (-36, -80, 5), from x = -37 to -30, so the rail of the corner round r4 = 15
 /// meets z = 5 past W but off the side (in the hole), and the hole's edges on the side cross
 /// the cap edge's place from W to R. The turned-back end is not taken, and main's outcome
-/// stands: refused as its rail leaving its face, with a fit below the radius asked (MEASURED
-/// 14.49). The rail classification's refusal is the default path since the cliff-overflow
-/// flags were retired (#16445), so the run without the corpus's fixes takes it too, with the
-/// same fit; before, without them the round was refused by the later fit check naming 10.68,
-/// the closed form less the fit margin. MEASURED: with the membership conditions (R inside
-/// the side, no edge crossing W to R) removed, the turned-back end is taken and the round
-/// without the corpus's fixes fails with status 1001 instead.
+/// stands: refused, with the corpus's fixes as its rail leaving its face (fit 14.49). Without
+/// them the round is now refused the same way (the rails-fit judgement is no longer opt-in);
+/// the retired upstream path named 10.68 instead, the size at which the rail first passes W.
+/// The fit is a closed form: the rail on the side is the line x = -36, y = -65 - r4, z in
+/// [0, 5], and the first boundary of the side it meets is the hole's edge y = -79.5 (z 4.5 to
+/// 5), at r4 = 14.5; the refusal names that open bound less the fit margin, a thousand of the
+/// corner edge's tolerances. That size builds: valid at the full check, and the volume the
+/// input's plus the round's section r^2 (1 - pi / 4) times the arm's height 5 (the round's
+/// region, y in [-65 - r, -65], stays above the hole's y <= -79.5). MEASURED: with the
+/// membership conditions (R inside the side, no edge crossing W to R) removed, the turned-back
+/// end is taken and the round without the corpus's fixes fails with status 1001 instead.
 #[test]
 fn a_corner_round_whose_rail_ends_past_w_off_the_side_is_refused_as_on_main() {
     let r4 = 15.0;
@@ -1407,19 +1411,39 @@ fn a_corner_round_whose_rail_ends_past_w_off_the_side_is_refused_as_on_main() {
     let b = boolean(b, hole, BooleanOp::Subtract).unwrap().unwrap();
     assert!(b.check(CheckLevel::All).unwrap().is_valid());
     assert!(-65.0 - r4 < top_end_on_side());
-    let fit = |corpus: bool| match corner_round(&b, r4, corpus) {
+    match corner_round(&b, r4, true) {
+        Err(Error::TooLarge {
+            why: Some(RoomReason::RailLeavesFace),
+            ..
+        }) => {}
+        other => panic!("corpus: {other:?}"),
+    }
+    let e = edge_at(&b, [-36.0, -65.0, 2.5]);
+    let (_, kb) = common::kernel_copy(&b);
+    let margin = 1000.0 * solidcore::topology::edge::tolerance(&kb, kb.edge_list()[e]).unwrap();
+    // the hole's edge y = -79.5 on the side meets the rail y = -65 - r4 at r4 = 14.5
+    let want = 79.5 - 65.0 - margin;
+    let size = match corner_round(&b, r4, false) {
         Err(Error::TooLarge {
             size,
             why: Some(RoomReason::RailLeavesFace),
             ..
         }) => size,
-        other => panic!("corpus {corpus}: {other:?}"),
+        other => panic!("no fixes: {other:?}"),
     };
-    let (with, without) = (fit(true), fit(false));
-    assert!(with < r4, "corpus: fit {with} not below r4 {r4}");
     assert!(
-        (with - without).abs() <= 1e-9 * with,
-        "fit {with} with the corpus's fixes, {without} without"
+        (size - want).abs() <= 1e-9,
+        "no fixes: fit {size}, the closed form 14.5 less the fit margin {margin}: {want}"
+    );
+    let before = b.volume(1e-9).unwrap();
+    corner_round(&b, size, false).unwrap_or_else(|e| panic!("no fixes, r4 {size}: {e:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "no fixes, r4 {size}: {report}");
+    let after = b.volume(1e-9).unwrap();
+    let expected = before + 5.0 * size * size * (1.0 - PI / 4.0);
+    assert!(
+        (after - expected).abs() < 1e-6,
+        "no fixes, r4 {size}: volume {after}, expected {expected}"
     );
 }
 

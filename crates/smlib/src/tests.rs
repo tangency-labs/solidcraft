@@ -1,5 +1,23 @@
 use super::*;
 
+/// A chamfer refused for room is told about its offset, not a fillet's rolling ball (#12128);
+/// a round keeps the ball's words.
+#[test]
+fn a_chamfer_refused_for_room_is_worded_as_a_chamfer() {
+    let at = Some([204.518, -3.018, 13.2]);
+    for kind in [FitKind::Distance, FitKind::Scale] {
+        for why in
+            [RoomReason::BallDoesNotFit, RoomReason::BallsFold, RoomReason::OffsetCollapses, RoomReason::FaceConsumed, RoomReason::RailLeavesFace]
+        {
+            let text = Error::TooLarge { size: 2.5, kind, at, why: Some(why) }.to_string();
+            assert!(!text.contains("ball") && !text.contains("roll"), "{kind:?} {why:?}: {text}");
+            assert!(text.contains("chamfer") || text.contains("offset"), "{kind:?} {why:?}: {text}");
+        }
+    }
+    let round = Error::TooLarge { size: 2.5, kind: FitKind::Radius, at, why: Some(RoomReason::BallDoesNotFit) }.to_string();
+    assert!(round.contains("the rolling ball does not fit a face it rolls on"), "{round}");
+}
+
 #[test]
 fn box_end_to_end() {
     let b = Brep::make_box([1.0, 2.0, 3.0], [10.0, 20.0, 30.0]).unwrap();
