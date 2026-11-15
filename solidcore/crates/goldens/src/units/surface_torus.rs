@@ -1298,11 +1298,6 @@ mod tests {
         t.dom.map_or((360.0, 360.0), |[u0, v0, u1, v1]| (u1 - u0, v1 - v0))
     }
 
-    /// `a` and `b` agree within `tol`, with NaN failing.
-    fn near(a: f64, b: f64, tol: f64) -> bool {
-        (a - b).abs() <= tol
-    }
-
     /// The largest residual seen per check, as a fraction of its allowance.
     #[derive(Default)]
     struct Residuals(BTreeMap<&'static str, f64>);
