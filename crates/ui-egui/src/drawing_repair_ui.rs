@@ -3,7 +3,7 @@
 use crate::drawing_dimension_repair;
 use crate::drawing_dimension_status::DrawingAttention;
 use serde_json::Value;
-use solidcraft_engine::{Sel, Session};
+use solidcraft_engine::Sel;
 use serde_json::json;
 
 /// Convert exactly one existing viewport selection to a repair pick. Never guess.
@@ -38,7 +38,7 @@ pub fn eligible(status: &str) -> bool {
 }
 
 /// Returns true only after a successful mutation. Caller must invalidate/refresh status.
-pub fn show(ui: &mut egui::Ui, session: &mut Session, state: &mut RepairUiState, snapshot: &DrawingAttention) -> bool {
+pub fn show(ui: &mut egui::Ui, selection: &[Sel], state: &mut RepairUiState, snapshot: &DrawingAttention, mut run: impl FnMut(&str, Value) -> Result<Value, String>) -> bool {
     if let Some(selected) = &state.dimension {
         if !snapshot.dimensions.iter().any(|d| &d.id == selected && eligible(&d.status)) {
             state.clear();
@@ -50,7 +50,7 @@ pub fn show(ui: &mut egui::Ui, session: &mut Session, state: &mut RepairUiState,
             state.clear();
             state.dimension = Some(dim.id.clone());
             state.slot = "edge".into();
-            match session.execute("drawing.dimension.inspect", &serde_json::json!({"dimension": dim.id})) {
+            match run("drawing.dimension.inspect", serde_json::json!({"dimension": dim.id})) {
                 Ok(inspection) => {
                     state.candidates = inspection.get("candidates").and_then(Value::as_array).cloned().unwrap_or_default()
                         .into_iter().filter(|candidate| candidate.is_object()).collect();
@@ -68,7 +68,7 @@ pub fn show(ui: &mut egui::Ui, session: &mut Session, state: &mut RepairUiState,
         ui.label("Select the affected reference slot and an engine-provided candidate.");
         ui.label("Alternatively, select one edge or face in the model viewport and capture it here.");
         if ui.button("Use selected geometry").clicked() {
-            match selected_geometry(&session.selection) {
+            match selected_geometry(selection) {
                 Ok((slot, pick)) => {
                     state.slot = slot;
                     state.candidates = vec![pick];
@@ -82,12 +82,7 @@ pub fn show(ui: &mut egui::Ui, session: &mut Session, state: &mut RepairUiState,
                 }
             }
         }
-        ui.horizontal(|ui| {
-            ui.label("Reference slot");
-            if ui.text_edit_singleline(&mut state.slot).changed() {
-                state.awaiting_confirmation = false;
-            }
-        });
+        ui.label(format!("Reference: {}", state.slot));
         if !state.candidates.is_empty() {
             egui::ComboBox::from_id_salt("drawing_repair_candidate")
                 .selected_text(format!("Candidate {}", state.candidate_index + 1))
@@ -112,7 +107,7 @@ pub fn show(ui: &mut egui::Ui, session: &mut Session, state: &mut RepairUiState,
                         return false;
                     };
                     match drawing_dimension_repair::prepare(&id, status, &state.slot, candidate)
-                        .and_then(|request| drawing_dimension_repair::confirm(session, &request, true).map(|_| ())) {
+                        .and_then(|request| run("drawing.dimension.repair", serde_json::json!({"dimension":request.dimension,"slot":request.slot,"pick":request.pick})).map(|_| ())) {
                         Ok(()) => {
                             changed = true;
                             state.clear();
