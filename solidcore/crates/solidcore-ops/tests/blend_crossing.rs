@@ -256,11 +256,16 @@ fn a_round_ending_at_a_crease_is_not_refused_over_rounds_it_never_reaches() {
     );
     // The issue's figure, 4183.769446, came from the integrator before #16735, which leaked
     // through the tolerant edges' gaps; the volume now closes them and reads 3.7e-6 above it,
-    // past the original 2e-6. That pin is dropped pending the maintainer's decision: what
-    // follows is a diagnostic only (MEASURED, never a gate), the move against the body's old
-    // leak bound, sum g L max|z - o_z| over its edge uses with the gaps g sampled at the
-    // closure's grid (`volume_leak::leak`), and its origin spread. The gates on this volume
-    // are the sum above and the closed forms of `before`, A and C.
+    // past the original 2e-6. Pinned instead at the new value (MEASURED: no closed form for
+    // B and C's corner patch), to 1e-8; the issue's figure is the maintainer's decision. The
+    // move against the body's old leak bound (sum g L max|z - o_z| over its edge uses, the
+    // gaps g sampled at the closure's grid, `volume_leak::leak`) is printed as a diagnostic
+    // only; the volume's independence of the origin is asserted.
+    assert!(
+        (all.1 - 4_183.769_449_703_122_5).abs() < 1e-8,
+        "A B C: {}",
+        all.1
+    );
     {
         let b = creased_wall_arm(2.5);
         let edges: Vec<usize> = [edge_a, edge_b, edge_c]
@@ -279,6 +284,7 @@ fn a_round_ending_at_a_crease_is_not_refused_over_rounds_it_never_reaches() {
             l.origin_spread,
             l.origin_allowance
         );
+        assert!(l.origin_spread <= l.origin_allowance, "A B C: {l:?}");
     }
     assert_eq!((all.0, &all.2), ([15, 37, 24, solid], &kinds(3, 1, 11)));
 
