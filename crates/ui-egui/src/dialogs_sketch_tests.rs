@@ -224,7 +224,7 @@ fn intersect_dialog_filters_geometry_or_whole_bodies_and_controls_projection_lin
     h.frames(4);
 
     let d = h.app.dialog.as_ref().expect("Intersect opens an options dialog");
-    assert!(matches!(d.kind, Kind::SketchIntersect { bodies: true, projection_link: true }));
+    assert!(matches!(d.kind, Kind::SketchIntersect { bodies: true, projection_link: true, construction: false }));
     assert_eq!(d.inputs[0].accept, super::BODIES);
     assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Post".into() }]);
     assert!(scenario::rect_of("dialog:row:ui.sketch_intersect_geometry").is_some());
@@ -246,12 +246,18 @@ fn intersect_dialog_filters_geometry_or_whole_bodies_and_controls_projection_lin
         d.inputs[0].items = vec![Sel::Body { name: "Post".into() }];
     }
     let d = h.app.dialog.as_ref().unwrap();
-    assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.intersect".into(), json!({"refs":[{"body":"Post"}],"projection_link":false}))]);
+    assert_eq!(
+        apply_commands(&h.app, d).unwrap(),
+        vec![("sketch.intersect".into(), json!({"refs":[{"body":"Post"}],"projection_link":false,"construction":false}))]
+    );
     // A model edge is cut with the plane too (#10484).
     let d = h.app.dialog.as_mut().unwrap();
     d.inputs[0].items = vec![Sel::Edge { body: "Post".into(), index: 0, point: solidcore_record::Vec3::new(0.0, 0.0, 10.0) }];
     let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-    assert_eq!(cmds, vec![("sketch.intersect".into(), json!({"refs":[{"edge":[0.0,0.0,10.0],"body":"Post"}],"projection_link":false}))]);
+    assert_eq!(
+        cmds,
+        vec![("sketch.intersect".into(), json!({"refs":[{"edge":[0.0,0.0,10.0],"body":"Post"}],"projection_link":false,"construction":false}))]
+    );
 }
 
 /// Intersect takes the lines of another sketch (#10484): a rectangle on XY, a sketch on a plane
@@ -276,7 +282,10 @@ fn intersect_dialog_takes_a_line_of_another_sketch() {
     let [Sel::ExternalSketchCurve { sketch, id }] = d.inputs[0].items.as_slice() else { panic!("the side is picked: {:?}", d.inputs[0].items) };
     assert_eq!(*sketch, rectangle);
     let cmds = apply_commands(&h.app, d).unwrap();
-    assert_eq!(cmds, vec![("sketch.intersect".into(), json!({"refs":[{"sketch":rectangle,"curve":id}],"projection_link":true}))]);
+    assert_eq!(
+        cmds,
+        vec![("sketch.intersect".into(), json!({"refs":[{"sketch":rectangle,"curve":id}],"projection_link":true,"construction":false}))]
+    );
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none());
@@ -322,7 +331,7 @@ fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked()
     h.frames(4);
 
     let d = h.app.dialog.as_ref().expect("Project opens an options dialog");
-    assert!(matches!(d.kind, Kind::SketchProject { bodies: true, projection_link: true }));
+    assert!(matches!(d.kind, Kind::SketchProject { bodies: true, projection_link: true, construction: false }));
     assert_eq!(d.inputs[0].accept, super::BODIES);
     assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Plate".into() }]);
     assert!(scenario::handle_at("dialog:Selection Filter").is_some());
@@ -343,7 +352,10 @@ fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked()
         d.inputs[0].items = vec![Sel::Body { name: "Plate".into() }];
     }
     let d = h.app.dialog.as_ref().unwrap();
-    assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.project".into(), json!({"refs":[{"body":"Plate"}],"projection_link":false}))]);
+    assert_eq!(
+        apply_commands(&h.app, d).unwrap(),
+        vec![("sketch.project".into(), json!({"refs":[{"body":"Plate"}],"projection_link":false,"construction":false}))]
+    );
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none());
@@ -376,7 +388,7 @@ fn project_dialog_takes_a_point_of_another_sketch_13246() {
     let d = h.app.dialog.as_ref().unwrap();
     assert_eq!(d.inputs[0].items, vec![Sel::ExternalSketchPoint { sketch: first, id: "pt".into() }], "the point is picked");
     let cmds = apply_commands(&h.app, d).unwrap();
-    assert_eq!(cmds, vec![("sketch.project".into(), json!({"refs":[{"sketch":first,"point":"pt"}],"projection_link":true}))]);
+    assert_eq!(cmds, vec![("sketch.project".into(), json!({"refs":[{"sketch":first,"point":"pt"}],"projection_link":true,"construction":false}))]);
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none());
@@ -404,7 +416,10 @@ fn project_dialog_takes_a_construction_point() {
         d.inputs[0].items = vec![point];
     }
     let d = h.app.dialog.as_ref().unwrap();
-    assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.project".into(), json!({"refs":[{"point":"Point1"}],"projection_link":true}))]);
+    assert_eq!(
+        apply_commands(&h.app, d).unwrap(),
+        vec![("sketch.project".into(), json!({"refs":[{"point":"Point1"}],"projection_link":true,"construction":false}))]
+    );
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     h.settle();
     let sketch = h.app.session.active_sketch.expect("Project leaves the sketch active");
@@ -1027,4 +1042,107 @@ fn project_box_beside_the_model_still_takes_curves_of_other_sketches_14927() {
     h.call("ui.camera", json!({"target":[65,35,0],"distance":180}));
     h.step(&json!({"drag": [{"world": [55, 35, 0]}, {"world": [85, 45, 0]}]})).unwrap();
     assert_eq!(external_curves(&h, first), vec![lone], "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
+}
+
+/// The Project dialog provides a Construction option to project references as construction geometry.
+#[test]
+fn project_dialog_has_construction_option_to_project_as_construction() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Plate"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":10})).unwrap();
+    h.app.session.selection = vec![Sel::Body { name: "Plate".into() }];
+    h.app.start("sketch.project");
+    h.frames(4);
+
+    let d = h.app.dialog.as_ref().expect("Project opens an options dialog");
+    assert!(matches!(d.kind, Kind::SketchProject { bodies: true, projection_link: true, construction: false }));
+    assert!(scenario::rect_of("dialog:row:Construction").is_some(), "Construction row exists");
+
+    // Toggle Construction on
+    h.step(&json!({"click":{"handle":"dialog:Construction"}})).unwrap();
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchProject { construction: true, .. }));
+
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(
+        apply_commands(&h.app, d).unwrap(),
+        vec![("sketch.project".into(), json!({"refs":[{"body":"Plate"}],"projection_link":true,"construction":true}))]
+    );
+
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none());
+
+    let sketch = h.app.session.active_sketch.expect("Project leaves the sketch active");
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let sk = &state.sketch(sketch).unwrap().sketch;
+    assert!(!sk.curves.is_empty(), "projected curves exist");
+    assert!(sk.curves.iter().all(|c| c.construction), "all projected curves are construction");
+
+    // Because all projected curves are construction, no profiles are formed for extrusion.
+    let inspect = h.app.session.execute("sketch.inspect", &json!({"sketch": sketch})).unwrap();
+    assert_eq!(inspect["profiles"].as_array().map(Vec::len), Some(0), "no profile created from construction lines");
+}
+
+/// If project_construction preference or construction drawing mode is on, the Project dialog
+/// defaults Construction to on, and toggling it off projects as normal geometry.
+#[test]
+fn project_dialog_respects_session_construction_and_allows_toggling_off() {
+    let mut h = Harness::new();
+    h.app.session.project_construction = true;
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Plate"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":10})).unwrap();
+    h.app.session.selection = vec![Sel::Body { name: "Plate".into() }];
+    h.app.start("sketch.project");
+    h.frames(4);
+
+    let d = h.app.dialog.as_ref().expect("Project opens an options dialog");
+    assert!(matches!(d.kind, Kind::SketchProject { construction: true, .. }), "starts with construction true");
+
+    // Toggle Construction off
+    h.step(&json!({"click":{"handle":"dialog:Construction"}})).unwrap();
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchProject { construction: false, .. }));
+
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+
+    let sketch = h.app.session.active_sketch.expect("Project leaves the sketch active");
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let sk = &state.sketch(sketch).unwrap().sketch;
+    assert!(!sk.curves.is_empty());
+    assert!(sk.curves.iter().all(|c| !c.construction), "curves are normal geometry");
+    let inspect = h.app.session.execute("sketch.inspect", &json!({"sketch": sketch})).unwrap();
+    assert_eq!(inspect["profiles"].as_array().map(Vec::len), Some(1), "normal geometry forms a profile");
+}
+
+/// The Intersect dialog also provides a Construction option.
+#[test]
+fn intersect_dialog_has_construction_option() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Post"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":10})).unwrap();
+    h.app.session.selection = vec![Sel::Body { name: "Post".into() }];
+    h.app.start("sketch.intersect");
+    h.frames(4);
+
+    let d = h.app.dialog.as_ref().expect("Intersect opens an options dialog");
+    assert!(matches!(d.kind, Kind::SketchIntersect { construction: false, .. }));
+    assert!(scenario::rect_of("dialog:row:Construction").is_some());
+
+    h.step(&json!({"click":{"handle":"dialog:Construction"}})).unwrap();
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchIntersect { construction: true, .. }));
+
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(
+        apply_commands(&h.app, d).unwrap(),
+        vec![("sketch.intersect".into(), json!({"refs":[{"body":"Post"}],"projection_link":true,"construction":true}))]
+    );
+
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+
+    let sketch = h.app.session.active_sketch.expect("Intersect leaves sketch active");
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let sk = &state.sketch(sketch).unwrap().sketch;
+    assert!(!sk.curves.is_empty());
+    assert!(sk.curves.iter().all(|c| c.construction));
 }

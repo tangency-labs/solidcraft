@@ -449,7 +449,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 }
             }
         }
-        Kind::SketchIntersect { bodies, projection_link } => {
+        Kind::SketchIntersect { bodies, projection_link, construction } => {
             let mut selected = if *bodies { 1 } else { 0 };
             let changed = ui_kit::row(ui, tr("ui.sketch_intersect_selection_filter"), |ui| {
                 ui_kit::segmented(ui, &mut selected, &[tr("Geometry"), tr("Bodies")], Default::default())
@@ -460,8 +460,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 input.items.clear();
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
+            ui_kit::row(ui, tr("ui.construction"), |ui| ui_kit::checkbox(ui, "", construction));
         }
-        Kind::SketchProject { bodies, projection_link } => {
+        Kind::SketchProject { bodies, projection_link, construction } => {
             let mut selected = if *bodies { 1 } else { 0 };
             let changed = ui_kit::row(ui, tr("ui.sketch_intersect_selection_filter"), |ui| {
                 ui_kit::segmented(ui, &mut selected, &[tr("Geometry"), tr("Bodies")], Default::default())
@@ -472,6 +473,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 input.items.clear();
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
+            ui_kit::row(ui, tr("ui.construction"), |ui| ui_kit::checkbox(ui, "", construction));
         }
         Kind::SketchModify(k) => enter |= crate::sketch_modify_ui::rows(ui, k, &app.session.doc),
         Kind::Text(k) => enter |= crate::sketch_text::rows(ui, k, &mut d.inputs, &mut d.active),

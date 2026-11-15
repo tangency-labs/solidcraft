@@ -445,10 +445,12 @@ crate::dialog_descriptor::dialog_descriptors! {
             SketchIntersect {
                 bodies: bool,
                 projection_link: bool,
+                construction: bool,
             },
             SketchProject {
                 bodies: bool,
                 projection_link: bool,
+                construction: bool,
             },
         }
     }
@@ -938,14 +940,22 @@ impl Dialog {
             "sketch.intersect" => {
                 let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
                 Dialog::new(
-                    Kind::SketchIntersect { bodies, projection_link: true },
+                    Kind::SketchIntersect {
+                        bodies,
+                        projection_link: true,
+                        construction: s.project_construction || crate::sketch_palette::mode(app) == 1,
+                    },
                     vec![SelInput::new("ui.sketch_intersect_geometry", if bodies { BODIES } else { INTERSECT_GEOMETRY }, true)],
                 )
             }
             "sketch.project" => {
                 let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
                 Dialog::new(
-                    Kind::SketchProject { bodies, projection_link: true },
+                    Kind::SketchProject {
+                        bodies,
+                        projection_link: true,
+                        construction: s.project_construction || crate::sketch_palette::mode(app) == 1,
+                    },
                     vec![SelInput::new("ui.sketch_project_geometry", if bodies { BODIES } else { PROJECT_GEOMETRY }, true)],
                 )
             }
@@ -6558,7 +6568,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
         Kind::ConfirmDelete { features, groups, .. } => ("timeline.delete", crate::timeline::delete_params(features, groups)),
-        Kind::SketchIntersect { projection_link, .. } => {
+        Kind::SketchIntersect { projection_link, construction, .. } => {
             need(0, "geometry or bodies")?;
             let refs = sels(d, 0)
                 .iter()
@@ -6570,13 +6580,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     _ => Err("select geometry or bodies".to_string()),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            ("sketch.intersect", json!({"refs": refs, "projection_link": projection_link}))
+            ("sketch.intersect", json!({"refs": refs, "projection_link": projection_link, "construction": construction}))
         }
-        Kind::SketchProject { projection_link, .. } => {
+        Kind::SketchProject { projection_link, construction, .. } => {
             need(0, "geometry or bodies")?;
             let refs =
                 crate::tools::projection_preselection(sels(d, 0)).ok_or_else(|| "select geometry or bodies that can be projected".to_string())?;
-            ("sketch.project", json!({"refs": refs, "projection_link": projection_link}))
+            ("sketch.project", json!({"refs": refs, "projection_link": projection_link, "construction": construction}))
         }
         Kind::Sketch | Kind::Measure { .. } => return Ok(Vec::new()),
         Kind::Assembly(k) => return crate::dialogs_assembly::commands(app, k, &d.inputs),
