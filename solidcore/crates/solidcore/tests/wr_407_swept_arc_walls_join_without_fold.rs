@@ -22,6 +22,9 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
+
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -213,33 +216,6 @@ fn trims_inside_domain(k: &Kernel, b: &Brep, margin: f64) -> Result<(), String> 
     Ok(())
 }
 
-/// The body's tolerance volume: `sum A_f tol_f` over faces (area times tolerance) `+ sum pi
-/// tol_e^2 L_e` over edges (the tubes) `+ sum 4/3 pi tol_v^3` over vertices (the balls), from
-/// the body's own stored tolerances. The region a body bounds is defined only up to it: a
-/// face within its tolerance of the solid's boundary moves the volume by at most its area
-/// times that tolerance (to first order), and near an edge or vertex the closure lies in the
-/// edge's tube or the vertex's ball (ARGUED: the strips' widths are measured against the
-/// tolerances in `support/volume_leak.rs`, not certified).
-fn tolerance_volume(k: &Kernel, b: &mut Brep) -> f64 {
-    use solidcore::mass::integrator::properties::{edge_length, face_area};
-    use solidcore::topology::brep::p1::{edges, faces, vertices};
-    use solidcore::topology::{edge, face, vertex};
-    let mut slack = 0.0;
-    for f in faces(b, None).unwrap() {
-        let tol = face::p2::tolerance(b, f).unwrap();
-        slack += face_area(k, b, f, 1e-8).unwrap() * tol;
-    }
-    for e in edges(b, None).unwrap() {
-        let tol = edge::tolerance(b, e).unwrap();
-        slack += PI * tol * tol * edge_length(k, b, e, 1e-9).unwrap();
-    }
-    for v in vertices(b, None).unwrap() {
-        let tol = vertex::tolerance(b, v).unwrap();
-        slack += 4.0 / 3.0 * PI * tol * tol * tol;
-    }
-    slack
-}
-
 /// Without the fold rule the cover merges onto wall A's folded continuation: wall B's top
 /// becomes a face of wall A's top B-spline whose trims run about 1.7 in v past the spline's
 /// knot domain (1.69 here), where every consumer that clamps to the domain (upstream's
@@ -252,13 +228,13 @@ fn tolerance_volume(k: &Kernel, b: &mut Brep) -> f64 {
 /// Those figures were the clamped integration of that face. `brep_volume` now integrates
 /// it on the B-spline continued past its domain (#16735), where it lies on its edges, so
 /// the two joins bound the same solid up to their tolerances: their volumes agree within
-/// the two bodies' tolerance volumes ([`tolerance_volume`]).
+/// the two bodies' tolerance volumes ([`volume_leak::tolerance_volume`]).
 #[test]
 fn wr_407_default_join_loses_the_folded_cover() {
     // (the volume makes the faces' missing UV trims first)
     let (k, mut b) = joined(false);
     let v = volume(&k, &mut b);
-    let slack = tolerance_volume(&k, &mut b);
+    let slack = volume_leak::tolerance_volume(&k, &mut b);
     // a sampled point past the domain is a proven lower bound on how far the trim leaves it
     let past = farthest_trim_past_domain(&k, &b);
     assert!(
@@ -267,7 +243,7 @@ fn wr_407_default_join_loses_the_folded_cover() {
     );
     let (kf, mut bf) = joined(true);
     let vf = volume(&kf, &mut bf);
-    let slack_f = tolerance_volume(&kf, &mut bf);
+    let slack_f = volume_leak::tolerance_volume(&kf, &mut bf);
     eprintln!(
         "wr_407: without the fix {v} (tolerance volume {slack:.3e}), with it {vf} \
          ({slack_f:.3e}), closed form {}",

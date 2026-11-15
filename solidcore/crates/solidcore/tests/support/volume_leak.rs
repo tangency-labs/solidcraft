@@ -443,3 +443,29 @@ pub fn assert_moved_by_the_old_leak(k: &Kernel, b: &mut Brep, old: f64, new: f64
         Err(line) => panic!("#16735 move: {line}"),
     }
 }
+
+/// The body's tolerance volume: `sum A_f tol_f` over faces (area times tolerance) `+ sum pi
+/// tol_e^2 L_e` over edges (the tubes) `+ sum 4/3 pi tol_v^3` over vertices (the balls), from
+/// the body's own stored tolerances. The region a body bounds is defined only up to it: a
+/// face within its tolerance of the solid's boundary moves the volume by at most its area
+/// times that tolerance (to first order), and near an edge or vertex the closure lies in the
+/// edge's tube or the vertex's ball (ARGUED: the strips' widths are measured against the
+/// tolerances by [`leak`], not certified).
+pub fn tolerance_volume(k: &Kernel, b: &mut Brep) -> f64 {
+    use solidcore::mass::integrator::properties::face_area;
+    use solidcore::topology::face;
+    let mut slack = 0.0;
+    for f in p1::faces(b, None).unwrap() {
+        let tol = face::p2::tolerance(b, f).unwrap();
+        slack += face_area(k, b, f, 1e-8).unwrap() * tol;
+    }
+    for e in p1::edges(b, None).unwrap() {
+        let tol = edge::tolerance(b, e).unwrap();
+        slack += PI * tol * tol * edge_length(k, b, e, 1e-9).unwrap();
+    }
+    for v in p1::vertices(b, None).unwrap() {
+        let tol = vertex::tolerance(b, v).unwrap();
+        slack += 4.0 / 3.0 * PI * tol * tol * tol;
+    }
+    slack
+}
