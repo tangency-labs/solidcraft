@@ -1153,6 +1153,7 @@ fn hostile_params_never_panic() {
         "size",
         "web",
         "clip",
+        "margin",
         "through_all",
         "depth",
         "dot_grid",
@@ -1176,6 +1177,12 @@ fn hostile_params_never_panic() {
                         // call behind one lock, so building the box for each of the ~3000 calls
                         // ran one after another on every thread (over half an hour in CI).
                         let mut start = Session::default();
+                        // Hostile plugin ids must never name packages in the user's real install folder.
+                        start.plugin_state.plugins_dir = Some(solidcraft_io::vfs::temp_dir().join(format!(
+                            "solidcraft-hostile-plugins-{}-{}",
+                            std::process::id(),
+                            id.replace('.', "-")
+                        )));
                         let _ = start.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10}));
                         let _ = start.execute("sketch.create", &json!({"plane": "XY"}));
                         let _ = start.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [5, 5]}));
@@ -5156,6 +5163,45 @@ fn fillet_edge_removed_by_a_larger_overflowing_round_is_noted() {
     let id = out["feature"].as_u64().unwrap();
     let warning = s.model.result(id).and_then(|r| r.warning.clone()).unwrap_or_default();
     assert_eq!(warning, "the edge at (0, 0, 10) was removed by the larger round, so it is not rounded");
+}
+
+/// #16768: a 50 x 35 x 5 plate with a boss 1 mm high, a circular segment (a chord on y = 5.5 and
+/// an arc over it), its arc-side top edge rounded at 1 mm. Rounding the flat side's top edge and
+/// the two short edges that run down from its ends (the arc round's edges on the flat wall) at 1
+/// mm asked a ball as large as the arc round's own radius to roll along the round, whose offset
+/// collapses to a curve: it failed with the bare status 1001. It is refused at once, saying
+/// why.
+fn segment_boss_with_arc_round() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 50, "width": 35, "height": 5}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 5], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.line", json!({"points": [[11, 5.5], [40.004310024546356, 5.5]]}));
+    run(
+        &mut s,
+        "sketch.arc.three_point",
+        json!({"start": [40.004310024546356, 5.5], "end": [11, 5.5], "through": [25.502155012273178, 13.007100059797995]}),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 1, "operation": "join"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[25.502155, 13.0071, 6]], "radius": 1}));
+    s
+}
+
+#[test]
+fn a_round_as_large_as_the_round_it_runs_along_is_refused_not_failed() {
+    let flat_and_ends = json!([[25.502155, 5.5, 6], [11.419996686869673, 5.5, 5.748661225447015], [39.584311999041034, 5.5, 5.748656748207975]]);
+    // The flat edge alone builds at 1 mm (its round meets the wall's foot exactly).
+    let mut s = segment_boss_with_arc_round();
+    assert!(s.execute("solid.fillet", &json!({"edges": [[25.502155, 5.5, 6]], "radius": 1, "tangent_chain": false})).is_ok());
+    // With the two edges that run on from it, a ball of the arc round's radius cannot roll: refused,
+    // with the chain off and (the chain being those edges) on.
+    for chain in [false, true] {
+        let mut s = segment_boss_with_arc_round();
+        let picks = if chain { json!([[25.502155, 5.5, 6]]) } else { flat_and_ends.clone() };
+        let e = s.execute("solid.fillet", &json!({"edges": picks, "radius": 1, "tangent_chain": chain})).unwrap_err().to_string();
+        assert!(!e.contains("1001"), "chain {chain}: {e}");
+        assert!(e.contains("larger than the faces beside its edges allow"), "chain {chain}: {e}");
+    }
 }
 
 #[test]

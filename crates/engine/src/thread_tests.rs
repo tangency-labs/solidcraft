@@ -919,6 +919,54 @@ fn a_format_39_left_hand_thread_and_tapped_hole_open_left_handed() {
     }
 }
 
+/// A tapped hole saves its thread's tolerance class (#16336) as given, only with a thread that takes
+/// it; an edit that doesn't give one keeps it while the thread still takes it, and drops it when the
+/// thread changes to one that doesn't. A hole without a class saves no key, and a hand-edited class
+/// the thread doesn't take fails the hole with the reason. The class changes no geometry.
+#[test]
+fn a_tapped_holes_class_is_saved_and_kept_through_an_edit() {
+    let class_of = |s: &Session, id: u64| match &s.doc.feature(id).unwrap().kind {
+        solidcraft_doc::FeatureKind::Hole { thread_class, .. } => thread_class.clone(),
+        _ => panic!("expected a hole"),
+    };
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 60, "height": 12, "body_name": "Plate"}));
+    let plain = json!({"position": [20, 30, 12], "thread": "M8", "depth": 10});
+    let hole = run(&mut s, "solid.hole", plain.clone())["feature"].as_u64().unwrap();
+    assert!(!s.doc.to_json().contains("thread_class"), "no class, no key: older designs read the same");
+    let untouched = volume(&mut s, "Plate");
+    let classed = json!({"position": [20, 30, 12], "thread": "M8", "depth": 10, "thread_class": "6H"});
+    run(&mut s, "timeline.redefine", json!({"feature": hole, "command": "solid.hole", "params": classed}));
+    assert_eq!(class_of(&s, hole).as_deref(), Some("6H"));
+    assert!(s.doc.to_json().contains(r#""thread_class": "6H""#), "saved as given (the design file is pretty-printed)");
+    assert!((volume(&mut s, "Plate") - untouched).abs() < 1e-6, "the class changes no geometry");
+    // The Hole window sends no class: an edit without one keeps it while the thread takes it.
+    let deeper = json!({"position": [20, 30, 12], "thread": "M8", "depth": 11});
+    run(&mut s, "timeline.redefine", json!({"feature": hole, "command": "solid.hole", "params": deeper}));
+    assert_eq!(class_of(&s, hole).as_deref(), Some("6H"), "kept through an edit");
+    let unified = json!({"position": [20, 30, 12], "thread": "1/4-20 UNC", "depth": 11});
+    run(&mut s, "timeline.redefine", json!({"feature": hole, "command": "solid.hole", "params": unified}));
+    assert_eq!(class_of(&s, hole), None, "a 1/4-20 UNC hole doesn't take 6H: dropped with the size");
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.model.results.iter().all(|r| r.error.is_none()));
+    for (params, why) in [
+        (json!({"position": [40, 30, 12], "depth": 10, "diameter": 6, "thread_class": "6H"}), "`thread_class` needs `thread` (a tapped hole)"),
+        (json!({"position": [40, 30, 12], "depth": 10, "thread": "M8", "thread_class": "6g"}), "an ISO metric tapped hole's class is"),
+        (json!({"position": [40, 30, 12], "depth": 10, "thread": "1/4-20 UNC", "thread_class": "2A"}), "class is 1B, 2B or 3B"),
+        (json!({"position": [40, 30, 12], "depth": 10, "thread": "G 1/4", "thread_class": "2B"}), "has no tolerance class"),
+    ] {
+        let err = s.execute("solid.hole", &params).unwrap_err().to_string();
+        assert!(err.contains(why), "{params}: {err}");
+    }
+    // A hand-edited class the thread doesn't take fails the hole, saying why.
+    let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let saved = v["features"].as_array_mut().unwrap().iter_mut().find(|f| f["id"] == json!(hole)).unwrap();
+    saved["thread_class"] = json!("6H");
+    let edited = Session::new(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
+    let failed: Vec<&String> = edited.model.results.iter().filter_map(|r| r.error.as_ref()).collect();
+    assert!(failed.iter().any(|e| e.contains("a Unified tapped hole's class is 1B, 2B or 3B")), "{failed:?}");
+}
+
 /// A trapezoidal nut: the groove from the drilled minor diameter D1 = d - P out to the
 /// internal root D4 = d + 2 ac (ISO 2904), 2π∫ r w(r) dr per turn.
 #[test]

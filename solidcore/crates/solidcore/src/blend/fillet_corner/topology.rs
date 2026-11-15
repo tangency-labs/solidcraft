@@ -585,9 +585,6 @@ impl FilletCorner {
                         // continuing a boss's base circle past a wall. The rail on the side
                         // face runs alongside it and never meets it; the round ends on
                         // the end face past it (tangency-labs/smlib@420e47d, WR-499).
-                        if !k.fixes.fillet_nx1_opposite_continuation_side_edge {
-                            break;
-                        }
                         let filleted_edge = edge_of(target, filleted)?;
                         let next_edge = edge_of(target, next)?;
                         if passed_continuation

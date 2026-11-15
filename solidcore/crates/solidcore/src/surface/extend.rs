@@ -172,6 +172,12 @@ pub enum ExtendRefusal {
     /// `1e-6` of the distance): the refusal names the longest distance found that is, if
     /// any.
     NotExact,
+    /// A curve made longer keeping its control polygon's proportions
+    /// ([`crate::nurbs::crv_basic::Curve::extend_keeping_proportion`]) whose growth in arc
+    /// length is not certified within its tolerance of the length asked: the stretch that
+    /// reaches it was not bracketed or not found, or the arc lengths' certified enclosures
+    /// were not narrow enough. Names no distance.
+    LengthNotMet,
 }
 
 /// An extended surface and its certified bounds.

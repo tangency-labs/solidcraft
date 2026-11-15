@@ -283,8 +283,9 @@ cell_grid
     Cell size = cell_grid.size (Length)
     Web = cell_grid.web (Length)
     Angle = cell_grid.angle (Angle)
+    Margin = cell_grid.margin (Length)
     Depth = cell_grid.depth (Length)
-  expressions: cell_grid.sides, cell_grid.size, cell_grid.web, cell_grid.angle, cell_grid.depth, cell_grid.x, cell_grid.y, cell_grid.z
+  expressions: cell_grid.sides, cell_grid.size, cell_grid.web, cell_grid.angle, cell_grid.margin, cell_grid.depth, cell_grid.x, cell_grid.y, cell_grid.z
 sheet_base
 sheet_contour
   inputs:
