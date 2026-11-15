@@ -19,11 +19,20 @@
 //!   the bead's outline on each plate ends in a round, the section shrinking to the end's
 //!   point on the edge.
 //!
+//! The bead face keeps the generic blend's definition, as the blend's own bead face does: the
+//! chord (order 0) of the bead's sizes on the edge's two planes, with its sagitta
+//! ([`crate::surface::procedural_blend::exact::ExactRound::with_sagitta`]), re-certified on
+//! the cylinder through the feet's lines. So a bead apart is exact and saved as one.
+//!
 //! The bead never trims or changes the body (#15132).
 //!
 //! Not upstream (solidcore's). No recursion.
 
+use crate::blend::fillet_exact::ClassInputs;
 use crate::boolean::api_brep::boolean_difference;
+use crate::nurbs::knots::Side;
+use crate::surface::procedural_blend::exact::ExactRound;
+use crate::surface::surface::Surface;
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
@@ -77,6 +86,13 @@ struct Frame {
     /// stands along `up`.
     reach: f64,
     height: f64,
+    /// The bead's sizes and sagitta.
+    bead: BeadDefinition,
+    /// The edge's two planes, the first the one `size`'s first distance runs along.
+    supports: [Surface; 2],
+    /// What the chord's class is read with: the planes at the edge, the ball's centre and its
+    /// signed offsets.
+    inputs: ClassInputs,
 }
 
 /// The bead along the straight edge `edge_id` of `target` between two planes, at `size` and
@@ -115,7 +131,8 @@ fn frame(
     let dir = run.unitize()?;
     // the edge's two faces: each one's direction into it from the edge and its normal
     let middle = interval.evaluate(0.5);
-    let mut sides: Vec<(FaceId, Vec3, Vec3)> = Vec::with_capacity(2);
+    let mut sides: Vec<(FaceId, Vec3, Vec3, Surface, crate::geom::vector2d::Point2)> =
+        Vec::with_capacity(2);
     // the edge uses on the void's side (the infinite region's shell): their faces' normals
     // point out of the material, whichever way the faces' surfaces run
     let void = target.infinite_region();
@@ -145,15 +162,27 @@ fn frame(
             ));
         }
         let eval = evaluate_binormal(k, target, eu, middle, true, &BinormalOptions::default())?;
-        sides.push((face, eval.binormal.unitize()?, eval.face_normal.unitize()?));
+        let surface = target
+            .face(face)?
+            .surface
+            .clone()
+            .ok_or_else(|| SolidError::invalid_input(OP, "a face with no surface"))?;
+        sides.push((
+            face,
+            eval.binormal.unitize()?,
+            eval.face_normal.unitize()?,
+            surface,
+            eval.uv,
+        ));
     }
-    let [first, second] = <[(FaceId, Vec3, Vec3); 2]>::try_from(sides)
+    let [first, second] = <[_; 2]>::try_from(sides)
         .map_err(|_| SolidError::invalid_input(OP, "an edge between two faces"))?;
-    let [(_, u1, n1), (_, u2, _)] = if along.contains(&second.0) && !along.contains(&first.0) {
-        [second, first]
-    } else {
-        [first, second]
-    };
+    let [(_, u1, n1, s1, uv1), (_, u2, _, s2, uv2)] =
+        if along.contains(&second.0) && !along.contains(&first.0) {
+            [second, first]
+        } else {
+            [first, second]
+        };
     // an inside corner: the second face rises on the first one's outer side
     if n1.dot(u2) <= EFF_ZERO {
         return Err(SolidError::invalid_input(
@@ -172,6 +201,31 @@ fn frame(
     let height = (feet[0].dot(up))
         .max(feet[1].dot(up))
         .max(arc_extreme(&arc, start, Some(up)));
+    // the ball's centre at the edge's start: its offsets from the planes along the normals
+    // into the wedge, its feet the bead's (the chamfer's offsets, positive)
+    let offsets = bead.chamfer.offsets()?;
+    let into = (u2 - u1 * u1.dot(u2)).unitize()?;
+    let centre = start + feet[0] + into * offsets[0];
+    // signed along each plane's own normal, as the blend reads them
+    let mut signed = [0.0; 2];
+    for ((o, (surface, uv)), (foot, r)) in signed
+        .iter_mut()
+        .zip([(&s1, uv1), (&s2, uv2)])
+        .zip(feet.iter().zip(offsets))
+    {
+        let normal = surface
+            .evaluate_normal(k, uv, Side::Left, Side::Left)?
+            .unitize()?;
+        *o = (centre - (start + *foot)).dot(normal).signum() * r;
+    }
+    let inputs = ClassInputs {
+        uv: [uv1, uv2],
+        offsets: signed,
+        centre,
+        tol: edge::tolerance(target, edge_id)?,
+        ball_on_collapsed: false,
+        radii_can_change: false,
+    };
     Ok(Frame {
         start,
         dir,
@@ -181,6 +235,9 @@ fn frame(
         up,
         reach,
         height,
+        bead,
+        supports: [s1, s2],
+        inputs,
     })
 }
 
@@ -241,7 +298,46 @@ impl Frame {
             Curve::from(create_line_segment(f2, edge)?),
         ];
         let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
-        create_linear_sweep(k, &refs, way, t1 - t0, true)
+        let mut body = create_linear_sweep(k, &refs, way, t1 - t0, true)?;
+        self.define_bead_face(k, &mut body)?;
+        Ok(body)
+    }
+
+    /// Gives the swept body's bead face (its one face that is not a plane) the chord's
+    /// definition with the bead's sagitta, re-certified on it.
+    ///
+    /// # Errors
+    ///
+    /// Native invalid input for a body with no such face or more than one; those of the
+    /// definition and its re-certification.
+    fn define_bead_face(&self, k: &Kernel, body: &mut Brep) -> Result<()> {
+        let curved: Vec<FaceId> = body
+            .face_list()
+            .iter()
+            .copied()
+            .filter(|&f| {
+                body.face(f).ok().and_then(|face| face.surface.as_ref()).is_some_and(|s| {
+                    !matches!(s.kind(), SurfaceKind::Plane(_))
+                })
+            })
+            .collect();
+        let [face] = curved.as_slice() else {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a bead body has one bead face beside its planes",
+            ));
+        };
+        let [a, b] = &self.supports;
+        let round = ExactRound::chord(k, [a, b], self.bead.chamfer, None, self.inputs)?
+            .with_sagitta(self.bead.sagitta)?;
+        let surface = body
+            .face_mut(*face)?
+            .surface
+            .as_mut()
+            .ok_or_else(|| SolidError::invalid_input(OP, "a bead face with no surface"))?;
+        round.recertify(k, surface)?;
+        surface.set_exact_round(Some(round));
+        Ok(())
     }
 
     /// The box past the plane through `at` square to the unit `normal`, on the side `normal`

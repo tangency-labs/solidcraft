@@ -967,6 +967,44 @@ fn the_bead_face_is_the_chord_with_its_sagitta() {
     assert_eq!(back.sagitta, 0.0);
 }
 
+/// A bead apart's bead face keeps the same definition as the blend's: the chord (order 0) of
+/// its sizes on the edge's planes with its sagitta, exact, and it round trips through its
+/// record; the bead face of every span keeps it too, whatever its ends.
+#[test]
+fn a_bead_apart_keeps_the_chord_with_its_sagitta() {
+    for (alpha, h) in [(FRAC_PI_2, 1.0), (FRAC_PI_2, -1.0), (FRAC_PI_3, 1.0), (FRAC_PI_2, 3.0)] {
+        let mut k = kernel();
+        let (mut b, at) = corner(&mut k, alpha);
+        let edge = pick(&k, &b, at);
+        let size = ChamferSize::Distances([SETBACK; 2]);
+        let apart = beads_apart(&mut k, &mut b, &[edge], &[size], h, &[]).unwrap().remove(0);
+        let face = bead_face(&apart);
+        let Some(BlendRef::Exact { round, .. }) = face.procedural_blend() else {
+            panic!("{alpha} {h}: the bead face apart is exact");
+        };
+        assert_eq!(round.class(), ExactClass::Chord, "{alpha} {h}");
+        assert_eq!(round.sagitta(), h, "{alpha} {h}");
+        let rec = exact_to_record(&k, &face).unwrap();
+        let rebuilt = exact_rebuild(&k, &rec).unwrap();
+        let Some(BlendRef::Exact { round, .. }) = rebuilt.procedural_blend() else {
+            panic!("{alpha} {h}: rebuilt without its definition");
+        };
+        assert_eq!(round.sagitta(), h, "{alpha} {h}");
+        let spans = BeadSpan::along(&[(0.1, 0.4), (0.6, 0.95)]).unwrap();
+        for ends in [BeadEnd::Square, BeadEnd::Taper, BeadEnd::Round] {
+            let pieces =
+                beads_apart_in_spans(&mut k, &mut b, edge, size, h, &[], &spans, ends).unwrap();
+            for piece in &pieces {
+                let face = bead_face(piece);
+                let Some(BlendRef::Exact { round, .. }) = face.procedural_blend() else {
+                    panic!("{alpha} {h} {ends:?}: a span's bead face is exact");
+                };
+                assert_eq!(round.sagitta(), h, "{alpha} {h} {ends:?}");
+            }
+        }
+    }
+}
+
 /// The section's first moment about the edge along the bead's middle direction `up` (to the
 /// chord's middle), `integral of rho dA`, by hand: the triangle's area times its centroid's
 /// height, plus (convex) or less (concave) the circular segment's, whose centroid lies `4 R
