@@ -23,4 +23,4 @@ Port corrections made with the removal (each where the flag-on path diverged fro
 - **WR-407 without the fold rule.** The default join's volume no longer differs from the closed form by more than 1000 mm3, so the default-join test is ignored, but the level-2 check still reports the merged face's B-spline net doubling back. `cover_refuses_folded_continuation` stays a flag: its retirement is blocked by tangency-labs/solidcraft#17215 (the fold check refuses a vanishing normal at a domain corner).
 - **`SmCurveBoundedSurface::AssertValid`'s labels.** Upstream's `SM_GetAssertLabelList` has no case for the class, so its tests past 0 read the one-entry default list out of bounds. They are labelled from the class's own `sAssertCurveBoundedSurface_list`. `label_list` keeps upstream's lookup.
 
-- **Results:** goldens blessed on main and with this change, compared row by row: 740 rows move in 25 units, each listed with its site and verdict in tangency-labs/solidcraft#16957.
+- **Results:** goldens blessed on main and with this change, compared row by row: 793 rows move in 24 units, each listed with its site and verdict in tangency-labs/solidcraft#16957.

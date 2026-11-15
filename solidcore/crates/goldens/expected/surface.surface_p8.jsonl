@@ -343,7 +343,7 @@
 {"case":"gen0341","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
 {"case":"gen0342","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
 {"case":"gen0343","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,1e+20]}}
-{"case":"gen0344","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1001.0]}}
+{"case":"gen0344","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,1e+20]}}
 {"case":"gen0345","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"gen0346","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,1.0,3.0,2.0,7.942638905125135e-10,0.0,1.4300659899581323,0.9288675376005652,1.0209925279332062,0.0,0.0,0.0,0.0,1.0]}}
 {"case":"gen0347","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,1e+20]}}
@@ -747,7 +747,7 @@
 {"case":"gen0745","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,1.7763568394002505e-15]}}
 {"case":"gen0746","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,-1.0]}}
 {"case":"gen0747","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,1e+20]}}
-{"case":"gen0748","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1001.0]}}
+{"case":"gen0748","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,1.1102230246251565e-15]}}
 {"case":"gen0749","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
 {"case":"gen0750","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
 {"case":"gen0751","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1001.0]}}

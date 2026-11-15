@@ -3250,21 +3250,14 @@ mod tests {
         expect(&cone(-1.0), 2, &[radius, pole]);
         // SM_LEVEL_GIVEN skips the base classes' checks
         expect(&cone(-1.0), LEVEL_GIVEN, &[radius, pole]);
-        // With the NURB form, `IsClosed` samples an iso line through the apex (radius -1
-        // to 1 over height 3: the middle sample row), where the directional derivatives
-        // cannot be evaluated. Upstream drops that status and finds the cone closed in U,
-        // so the net's fold back through the apex is reported (B-spline test 5). The fork
-        // does not show a surface closed from what it could not evaluate
-        // (tangency-labs/smlib 21dcf69, WR-663): the cone is taken as open in U, its seam
-        // boundaries then coincide (surface test 6), and the B-spline net is checked as
-        // an open grid, which does not fold back.
-        let seam = (
-            SURFACE_TYPE,
-            6,
-            "Bad Surf Coincidence at Seam",
-            "Open surface has partially coincident boundaries",
+        // with the NURB form, the net through the apex also folds back
+        let fold = (
+            B_SPLINE_SURFACE_TYPE,
+            5,
+            "Bad NonMonotonic CPts",
+            "SmBSplineSurface Control Net doubles back on itself probably making a self intersecting surface",
         );
-        expect(&with_nurb(cone(-1.0)), 2, &[seam, radius, pole]);
+        expect(&with_nurb(cone(-1.0)), 2, &[fold, radius, pole]);
     }
 
     /// A ring of radial width 2.65 a hair off flat (heights 1.3e-5 and 2.1e-5, a revolved
@@ -3544,11 +3537,29 @@ mod curve_bounded_tests {
             {
                 let level = LEVEL_GIVEN;
                 assert!(!surface.assert_valid(&k, None, level, ObjectKey(1)).unwrap());
+                // The failed boundary check (test 1 or 2) is labelled from
+                // `sAssertCurveBoundedSurface_list`; upstream's label lookup has no case
+                // for the class and reads its one-entry default list out of bounds.
                 let mut list = AssertArray::new();
-                assert!(matches!(
-                    surface.assert_valid(&k, Some(&mut list), level, ObjectKey(1)),
-                    Err(SolidError::InvalidInput { .. })
-                ));
+                assert!(!surface
+                    .assert_valid(&k, Some(&mut list), level, ObjectKey(1))
+                    .unwrap());
+                let test = if uv { 2 } else { 1 };
+                let report = list
+                    .reports()
+                    .iter()
+                    .find(|r| r.reporting_type == CURVE_BOUNDED_SURFACE_TYPE)
+                    .unwrap();
+                assert_eq!(report.test_index, test);
+                assert_eq!(report.name, "UNKNOWN");
+                let boundaries = if uv { "UVBoundaries" } else { "3DBoundaries" };
+                assert_eq!(
+                    report.message.as_deref(),
+                    Some(
+                        format!("Contained {boundaries} curve must pass its AssertValid tests")
+                            .as_str()
+                    )
+                );
             }
         }
     }

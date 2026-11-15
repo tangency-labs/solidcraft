@@ -4142,9 +4142,9 @@ mod tests {
     }
 
     #[test]
-    /// A "surface" that is a line segment (rows of equal control points): upstream
-    /// ignores the check's `Evaluate` failures; the fork returns the first one.
-    fn degenerate_line_surface_coincidence_check_returns_the_failed_evaluation() {
+    /// A "surface" that is a line segment (rows of equal control points): the
+    /// `Evaluate` failures of the overlap check are ignored, as upstream does.
+    fn degenerate_line_surface_coincidence_check_does_not_fail() {
         use crate::nurbs::math::{CPoint, NOW};
         use crate::nurbs::srf_basic::Surface as NlSurface;
         let rows: [&[[f64; 3]]; 2] = [
@@ -4180,15 +4180,9 @@ mod tests {
         let s = Surface::from(BSplineSurface::from_nurb(nl, false));
         let k = Kernel::default();
         let r = s.base_coincidence_check(&k, &s.clone(), 1e-6, false);
-        // the first corner's `Evaluate1stDerivatives` (nonzero tangents) cannot repair
-        // the collapsed row's zero tangent; the fork returns that status
-        // (`SER( this->Evaluate1stDerivatives(..) )`, tangency-labs/smlib 21dcf69)
+        // (the point solve behind the drop is unported: surface.surface_point_solve_p3)
         assert!(
-            matches!(
-                &r,
-                Err(e) if e.operation()
-                    == "nurbs::b_spline_surface_n_lib::p2::BSplineSurface::evaluate"
-            ),
+            r.is_ok() || matches!(&r, Err(e) if e.is_unported()),
             "{r:?}"
         );
     }
