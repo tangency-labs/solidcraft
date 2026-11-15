@@ -590,6 +590,9 @@ pub(super) fn build(
         if let Some(part) = source.parts.get(old) {
             scratch.doc_mut().parts.insert(*new, part.clone());
         }
+        if let Some(gear) = source.gears.get(old) {
+            scratch.doc_mut().gears.insert(*new, gear.clone());
+        }
         if let Some(look) = source.appearances.components.get(old) {
             scratch.doc_mut().appearances.components.insert(*new, look.clone());
         }

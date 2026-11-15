@@ -57,3 +57,67 @@ fn a_gear_with_many_teeth_builds_with_the_right_size() {
     let v = volume(&mut s);
     assert!((v / 5.0 - PI * 60.0 * 60.0).abs() < 0.03 * PI * 3600.0, "{v}");
 }
+
+fn tip_diameter(r: &Value) -> f64 {
+    r["tip_diameter"].as_f64().unwrap_or(0.0)
+}
+
+#[test]
+fn editing_a_gear_rebuilds_its_teeth_in_place() {
+    let mut s = Session::default();
+    let g = run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20, "face_width": 10}));
+    let comp = g["component"].clone();
+    let before = volume(&mut s);
+    let e = run(&mut s, "gear.edit", json!({"component": comp, "teeth": 30}));
+    // The same component and occurrence, a bigger gear: 30 teeth of module 2 is Ø60 pitch.
+    assert_eq!((&e["component"], &e["occurrence"]), (&g["component"], &g["occurrence"]));
+    assert!((e["pitch_diameter"].as_f64().unwrap_or(0.0) - 60.0).abs() < 1e-9);
+    assert!(tip_diameter(&e) > tip_diameter(&g));
+    let after = volume(&mut s);
+    assert!((after / 10.0 - PI * 30.0 * 30.0).abs() < 0.06 * PI * 900.0, "{before} {after}");
+    // The default name follows the values.
+    assert_eq!(e["name"], "Spur Gear M2 Z30");
+    // One undo takes the edit back.
+    run(&mut s, "edit.undo", json!({}));
+    assert!((volume(&mut s) - before).abs() < 1e-6 * before);
+    assert_eq!(s.doc.gears[&comp.as_u64().unwrap_or(0)].teeth, 20);
+}
+
+#[test]
+fn a_gear_keeps_its_values_through_save_and_reopen() {
+    let mut s = Session::default();
+    let g = run(&mut s, "gear.insert", json!({"module": 1.5, "teeth": 24, "pressure_angle": 25, "face_width": 8, "backlash": 0.05}));
+    let comp = g["component"].as_u64().unwrap_or(0);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json().to_string()).unwrap());
+    assert_eq!(reopened.doc.gears.get(&comp), s.doc.gears.get(&comp));
+    // The reopened design edits the same gear.
+    let e = run(&mut reopened, "gear.edit", json!({"component": comp, "face_width": 12}));
+    assert_eq!(e["component"].as_u64(), Some(comp));
+    assert_eq!(reopened.doc.gears[&comp].teeth, 24);
+    assert_eq!(reopened.doc.gears[&comp].backlash, 0.05);
+}
+
+#[test]
+fn a_bad_gear_edit_is_refused_and_leaves_the_gear_alone() {
+    let mut s = Session::default();
+    let g = run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20}));
+    let comp = g["component"].clone();
+    let before = volume(&mut s);
+    for p in [json!({"teeth": 2}), json!({"module": -1}), json!({"pressure_angle": 90}), json!({"face_width": 0}), json!({"profile_shift": 1e9})] {
+        let mut p = p;
+        p["component"] = comp.clone();
+        assert!(s.execute("gear.edit", &p).is_err(), "{p}");
+    }
+    assert!(s.execute("gear.edit", &json!({"component": 999, "teeth": 30})).is_err());
+    assert!(s.execute("gear.edit", &json!({"component": "nothing"})).is_err());
+    assert_eq!(volume(&mut s), before);
+    assert_eq!(s.doc.gears[&comp.as_u64().unwrap_or(0)].teeth, 20);
+}
+
+#[test]
+fn deleting_a_gear_forgets_its_values() {
+    let mut s = Session::default();
+    let g = run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20}));
+    run(&mut s, "component.delete", json!({"component": g["component"]}));
+    assert!(s.doc.gears.is_empty());
+}

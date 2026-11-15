@@ -433,6 +433,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
         o.parent = to_root(o.parent);
     }
     part.parts.retain(|c, _| sc.children.contains(c));
+    part.gears.retain(|c, _| sc.children.contains(c));
     part.links.retain(|c, _| sc.children.contains(c));
     part.body_components = part.body_components.iter().filter(|(_, c)| sc.subtree.contains(c)).map(|(b, c)| (b.clone(), to_root(*c))).collect();
     let moved = part.body_components.clone();
@@ -527,6 +528,7 @@ fn clear_history(s: &mut Session, sc: &Scope) {
     d.body_components.retain(|_, c| !sc.subtree.contains(c));
     d.body_offsets.retain(|b, _| !sc.bodies.contains(b));
     d.parts.retain(|c, _| !children.contains(c));
+    d.gears.retain(|c, _| !children.contains(c));
     d.links.retain(|c, _| !children.contains(c));
     d.appearances.components.retain(|c, _| !children.contains(c));
     d.canvases.retain(|c| !sc.subtree.contains(&c.component));

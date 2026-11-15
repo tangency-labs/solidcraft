@@ -65,6 +65,7 @@ impl Document {
         self.body_offsets.retain(|name, _| !bodies.contains(name));
         self.components.retain(|c| !inside.contains(&c.id));
         self.parts.retain(|c, _| !inside.contains(c));
+        self.gears.retain(|c, _| !inside.contains(c));
         self.links.retain(|c, _| !inside.contains(c));
         self.remove_configuration_components(&components);
         Ok(RemovedTree { components, features, deleted, occurrences: occurrences.into_iter().collect(), joints: joints.into_iter().collect() })

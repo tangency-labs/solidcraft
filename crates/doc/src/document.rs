@@ -3451,6 +3451,31 @@ pub struct StandardPart {
     pub length: Option<f64>,
 }
 
+/// An involute spur gear inserted as a component: what to rebuild its teeth from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpurGear {
+    /// Module (mm).
+    pub module: f64,
+    /// Number of teeth.
+    pub teeth: u32,
+    /// Pressure angle (degrees).
+    pub pressure_angle: f64,
+    /// Thickness along +Z (mm).
+    pub face_width: f64,
+    /// Profile shift coefficient.
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub profile_shift: f64,
+    /// Backlash (mm).
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub backlash: f64,
+    /// Points along each flank.
+    pub flank_points: u32,
+}
+
+fn is_zero_f64(v: &f64) -> bool {
+    *v == 0.0
+}
+
 /// A component whose contents come from another design file (Insert Design): where that file
 /// is, and the Import feature in the component that holds its bodies (Update Links replaces
 /// them; Break Link keeps them and forgets the file).
@@ -3577,6 +3602,9 @@ pub struct Document {
     /// Components that are standard parts (by component id): what to rebuild them from.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub parts: std::collections::BTreeMap<u64, StandardPart>,
+    /// Components that are spur gears (by component id): what to rebuild their teeth from.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub gears: std::collections::BTreeMap<u64, SpurGear>,
     /// Components linked to another design file (by component id).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub links: std::collections::BTreeMap<u64, DesignLink>,
@@ -3920,6 +3948,7 @@ impl Document {
             plastic: Default::default(),
             configs: Default::default(),
             parts: Default::default(),
+            gears: Default::default(),
             links: Default::default(),
             body_components: Default::default(),
             body_offsets: Default::default(),

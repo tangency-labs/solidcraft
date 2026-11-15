@@ -33,7 +33,37 @@ pub struct GearInsertParams {
     pub name: Option<String>,
 }
 
-/// What `gear.insert` returns.
+/// Change an inserted gear's values and rebuild its teeth in place; the component, its placement
+/// and its joints stay. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GearEditParams {
+    /// The gear's component, by id or name.
+    pub component: serde_json::Value,
+    /// New module in millimetres.
+    #[serde(default)]
+    pub module: Option<f64>,
+    /// New number of teeth, 6 to 1000.
+    #[serde(default)]
+    pub teeth: Option<u32>,
+    /// New pressure angle in degrees.
+    #[serde(default)]
+    pub pressure_angle: Option<f64>,
+    /// New thickness along +Z in millimetres.
+    #[serde(default)]
+    pub face_width: Option<f64>,
+    /// New profile shift coefficient.
+    #[serde(default)]
+    pub profile_shift: Option<f64>,
+    /// New backlash in millimetres.
+    #[serde(default)]
+    pub backlash: Option<f64>,
+    /// New points per flank, 2 to 64.
+    #[serde(default)]
+    pub flank_points: Option<u32>,
+}
+
+/// What `gear.insert` and `gear.edit` return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InsertedGear {
     /// The new component's id.
