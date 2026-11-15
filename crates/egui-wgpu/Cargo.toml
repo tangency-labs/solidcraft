@@ -1,0 +1,75 @@
+[package]
+name = "egui-wgpu"
+version.workspace = true
+description = "Bindings for using egui natively using the wgpu library"
+authors = [
+  "Nils Hasenbanck <nils@hasenbanck.de>",
+  "embotech <opensource@embotech.com>",
+  "Emil Ernerfeldt <emil.ernerfeldt@gmail.com>",
+]
+edition.workspace = true
+rust-version.workspace = true
+homepage = "https://github.com/emilk/egui/tree/main/crates/egui-wgpu"
+license.workspace = true
+readme = "README.md"
+repository = "https://github.com/emilk/egui/tree/main/crates/egui-wgpu"
+categories = ["gui", "game-development"]
+keywords = ["wgpu", "egui", "gui", "gamedev"]
+include = ["../../LICENSE-APACHE", "../../LICENSE-MIT", "**/*.rs", "**/*.wgsl", "Cargo.toml"]
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--generate-link-to-definition"]
+
+[features]
+default = [
+  "fragile-send-sync-non-atomic-wasm",
+  "macos-window-resize-jitter-fix",
+  "wgpu/default",
+  "wgpu/webgl", # A very important fallback for web support
+]
+
+## Enables the `capture` module for capturing screenshots.
+capture = ["dep:egui"]
+
+## Enable [`winit`](https://docs.rs/winit) integration. On Linux, requires either `wayland` or `x11`
+winit = ["dep:winit", "winit/rwh_06", "dep:egui", "capture"]
+
+## Enables Wayland support for winit.
+wayland = ["winit?/wayland"]
+
+## Enables x11 support for winit.
+x11 = ["winit?/x11"]
+
+## Make the renderer `Sync` on wasm, exploiting that by default wasm isn't multithreaded.
+## It may make code easier, especially when targeting both native and web.
+## On native most wgpu objects are send and sync, on the web they are not (by nature of the WebGPU specification).
+## This is not supported in [multithreaded WASM](https://gpuweb.github.io/gpuweb/explainer/#multithreading-transfer).
+## Thus that usage is guarded against with compiler errors in wgpu.
+fragile-send-sync-non-atomic-wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
+
+## Enables the macOS live-resize jitter fix, which uses `present_with_transaction`.
+## This requires the `wgpu/metal` backend. Disable this feature if you want to use egui-wgpu
+## with a different backend (e.g. Vulkan or GL) on macOS without pulling in Metal.
+macos-window-resize-jitter-fix = ["wgpu/metal"]
+
+[dependencies]
+epaint = { workspace = true, default-features = false, features = ["bytemuck"] }
+
+ahash.workspace = true
+bytemuck.workspace = true
+document-features.workspace = true
+log.workspace = true
+profiling.workspace = true
+thiserror.workspace = true
+type-map.workspace = true
+web-time.workspace = true
+wgpu = { workspace = true, features = ["wgsl"] }
+
+# Optional dependencies:
+
+egui = { workspace = true, optional = true, default-features = false }
+winit = { workspace = true, optional = true, default-features = false }
