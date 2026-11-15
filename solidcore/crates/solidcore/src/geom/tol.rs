@@ -23,6 +23,7 @@
 //! | [`calc_vertex_zone_tol_3d`]            | `SmTol::CalcVertexZoneTol3d(double, double, SmZoneTol3d*, const SmContext*)` |
 //! | [`eff_zero`], [`eff_zero_sq`], [`eff_zero_param`], [`eff_zero_ang_rad`] | `SmTol::GetEffZero`, `GetEffZeroSq`, `GetEffZeroParam`, `GetEffZeroAngRad` |
 //! | [`xsect_tol_3d_from_zones`]            | `SmTol::GetXSectTol3d(const SmZoneTol3d&, const SmZoneTol3d&)` |
+//! | [`contact_tol_3d`]                     | not upstream (WR-787, #15429): when circles a hair less than tangent touch |
 //! | [`ang_tol_rad`]                        | `SmTol::GetAngTolRad()`                        |
 //! | [`model_size_estimate`]                | `SmTol::GetModelSizeEstimate()`                |
 //! | [`context_model_size_estimate`]        | `SmTol::GetModelSizeEstimate(const SmContext&)` |
@@ -423,6 +424,21 @@ pub fn context_xsect_tol_3d(k: &Kernel, ctx: Option<&Context>, small: SmallTopoT
 #[must_use]
 pub fn xsect_tol_3d_from_zones(k: &Kernel, zone1: f64, zone2: f64) -> f64 {
     xsect_tol3d(k, zone1 + zone2)
+}
+
+/// The tolerance below which two circles or parallel cylinders that overlap past
+/// touching touch on the boolean's path: the system zone tolerance, 1e-5 by default.
+/// Not upstream (WR-787, #15429): one value for every site that decides the contact (the
+/// walls, the rims, the curve/surface classifier), whatever tolerances earlier operations
+/// grew the edges and faces to, so the same two holes give the same topology whatever
+/// came before. The touching point midway lies δ/2 from each operand, so below it the
+/// point lies within the approximation tolerance (half the zone tolerance) of both, as
+/// the intersection curves through it do. At the intersection tolerance (twice the zone
+/// tolerance) two through holes overlapping by 1.02e-5 to 1.99e-5 came out a valid solid
+/// that kept the second tool whole, as a void.
+#[must_use]
+pub fn contact_tol_3d(k: &Kernel) -> f64 {
+    zone_tol_3d(k, SmallTopoType::NormalSize)
 }
 
 /// The system angle tolerance in radians (`SmTol::GetAngTolRad()`, `SM_ANG_TOL_RAD`).

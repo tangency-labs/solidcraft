@@ -292,6 +292,30 @@ What the port does today:
   B-spline on a plane) is still read as coincident once its relative radius passes about 1.7e7
   times the sum of the two edges' tolerances, 330 mm at 1e-5 each (`query/edge.rs`, the 0.01°
   rule over eight rounds).
+- **Circles a hair less than tangent.** Two coplanar circles that overlap past touching by δ
+  cross at two points `2√(2δ r1 r2 / (r1 ± r2))` apart (`2√(rδ)` for equal radii from
+  outside), far beyond δ, while the circles stay within δ of each other between them; each
+  crossing is fixed along the wall only to the tolerance over the crossing angle, so the two
+  cannot be told apart. `circle_coplanar_circle_intersect_in_contact`
+  (`geom/geom_utility/p1.rs`) takes an overlap below a contact tolerance of its own as one
+  touching point midway between their nearest points, apart from the near-miss band in which
+  circles that far apart touch. On the boolean's path every site that decides the contact
+  passes the same contact tolerance, `contact_tol_3d` (`geom/tol.rs`: the system zone
+  tolerance, 1e-5 by default, not the edges' and faces' grown tolerances, so the same holes
+  give the same topology whatever came before; the touching point lies δ/2 from each operand,
+  within the approximation tolerance the intersection curves through it are held to): the wall
+  intersection of parallel cylinders that both bound faces (`surface/cone/p3.rs`), the
+  circles of an edge and a face's intersection curve (`curve/ellipse/p2.rs` through
+  `intersect/curve_class/p9.rs`) and the curve/surface classifier's osculating circles where
+  an edge meets a face (`surface/surface/p4.rs`). Two holes a hair less than tangent then
+  touch along one line and at one point on each rim. Bare curves and surfaces keep upstream's
+  zero: their radius-relative bands are a search heuristic, not a modelling tolerance. Holes
+  overlapping by more than the zone tolerance and less than the intersection tolerance (twice
+  it) cross in two lines at every site and are still refused as not a solid, as before; with
+  the intersection tolerance as the contact tolerance they came out a valid solid that kept the
+  second tool whole, as a void.
+  Parallel cones (drill points) are met by the marching intersection and are not decided this
+  way, nor are coplanar faces bounded by such circles.
 
 **The refusal that names a tangent contact.** The kernel's boolean has none today. The `ssi` crate
 refuses a contact it cannot prove with `Error::Tangent`, code `BOOLEAN_TANGENT`, carrying where it
