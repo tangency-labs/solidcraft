@@ -16,7 +16,7 @@ use crate::prism::profile::{Loop2, Seg2};
 
 use crate::cell_grid::lattice::{Lattice, CIRCLE_SIDES};
 use crate::cell_grid::region::{clip_halfplane, poly_area, Bounds, Convex, Loop, Prim, Region};
-use crate::cell_grid::snap::snap_loop;
+use crate::cell_grid::snap::{piece_hits, simple, snap_loop};
 use crate::cell_grid::vec::{ring_next, ring_prev, Vec2Ext};
 use crate::cell_grid::*;
 use crate::prism::profile::cross2;
@@ -676,6 +676,280 @@ fn a_loop_with_an_arc_or_an_off_direction_edge_cannot_snap() {
         snap_loop(&tilted, &lat).err(),
         Some("edge off the lattice directions")
     );
+}
+
+/// The issue's field: x from -45.5 to 47.5, y from -24.5 to 24.5, with a round keep-out of
+/// diameter 14.2 centred at (-39.5, 0) that crosses the left edge and merges into the outer
+/// loop (four lines and an arc). The hexagon lattice has size 10, web 2 and runs at 90 degrees,
+/// so its vertical lattice lines are at x = 6k and the right edge should snap to x = 42.
+fn notched_field_spec() -> CellGridSpec {
+    CellGridSpec {
+        shape: CellShape::Hexagon,
+        size: 10.0,
+        web: 2.0,
+        angle: FRAC_PI_2,
+        clip: Clip::Snap,
+        ..CellGridSpec::default()
+    }
+}
+
+fn notched_field() -> Loop2 {
+    let (cx, r) = (-39.5, 7.1);
+    let y = (r * r - 6.0 * 6.0_f64).sqrt();
+    let a = y.atan2(-6.0);
+    Loop2 {
+        segs: vec![
+            Seg2::Line {
+                a: v(-45.5, -24.5),
+                b: v(47.5, -24.5),
+            },
+            Seg2::Line {
+                a: v(47.5, -24.5),
+                b: v(47.5, 24.5),
+            },
+            Seg2::Line {
+                a: v(47.5, 24.5),
+                b: v(-45.5, 24.5),
+            },
+            Seg2::Line {
+                a: v(-45.5, 24.5),
+                b: v(-45.5, y),
+            },
+            Seg2::Arc {
+                center: v(cx, 0.0),
+                radius: r,
+                start: a,
+                sweep: -2.0 * a,
+            },
+            Seg2::Line {
+                a: v(-45.5, -y),
+                b: v(-45.5, -24.5),
+            },
+        ],
+    }
+}
+
+#[test]
+fn an_arc_in_the_outer_loop_does_not_stop_its_straight_edges_snapping() {
+    let p = run(&[notched_field()], &notched_field_spec());
+    let right = p
+        .cells
+        .iter()
+        .flat_map(vertices)
+        .map(|q| q.x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    // The right edge snaps to the lattice line x = 42: no cell reaches past it. Unsnapped, the
+    // whole cells flush against x = 47 were kept.
+    assert!(right <= 42.0 + 1e-6, "rightmost cell wall at {right}");
+    assert!(p
+        .cells
+        .iter()
+        .flat_map(vertices)
+        .any(|q| (q.x - 42.0).abs() < 1e-6));
+    assert!(p.warnings.is_empty(), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_cubic_keep_out_does_not_stop_an_arc_field_snapping() {
+    // The notched field has an exact arc; the keep-out inside it is a cubic loop, which is
+    // flattened. Only the keep-out is followed as drawn: the field's straight edges still snap.
+    let keep_out = Loop2 {
+        segs: vec![
+            Seg2::Cubic {
+                p0: v(6.0, 0.0),
+                p1: v(6.0, 6.0),
+                p2: v(14.0, 6.0),
+                p3: v(14.0, 0.0),
+            },
+            Seg2::Cubic {
+                p0: v(14.0, 0.0),
+                p1: v(14.0, -6.0),
+                p2: v(6.0, -6.0),
+                p3: v(6.0, 0.0),
+            },
+        ],
+    };
+    let p = run(&[notched_field(), keep_out], &notched_field_spec());
+    let right = p
+        .cells
+        .iter()
+        .flat_map(vertices)
+        .map(|q| q.x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    assert!(right <= 42.0 + 1e-6, "rightmost cell wall at {right}");
+    assert!(
+        p.warnings.iter().any(|w| w.contains("followed")),
+        "{:?}",
+        p.warnings
+    );
+}
+
+#[test]
+fn snapping_a_loop_with_an_arc_keeps_the_arc_and_moves_its_ends_onto_the_snapped_edges() {
+    let lat = Lattice::new(CellShape::Hexagon, 10.0, 2.0, DotGrid::Hexagonal, 8).unwrap();
+    let spec = notched_field_spec();
+    let lp = lattice_loops(&[notched_field()], &spec, &mut Vec::new())
+        .unwrap()
+        .0;
+    let snapped = snap_loop(&lp[0], &lat).unwrap();
+    let arc = snapped
+        .prims
+        .iter()
+        .find_map(|p| match *p {
+            Prim::Arc { r, c, p0, p1, .. } => Some((r, c, p0, p1)),
+            Prim::Line { .. } => None,
+        })
+        .unwrap();
+    assert!((arc.0 - 7.1).abs() < 1e-9);
+    // Both ends are still on the circle, and the ring stays closed.
+    for end in [arc.2, arc.3] {
+        assert!((end.distance(arc.1) - 7.1).abs() < 1e-9);
+    }
+    let n = snapped.prims.len();
+    for k in 0..n {
+        assert!(
+            snapped.prims[k]
+                .end()
+                .distance(snapped.prims[(k + 1) % n].start())
+                < 1e-9
+        );
+    }
+}
+
+/// Whether the straight piece `line` meets `arc` cut into chords of pi/16, as the first version
+/// of the self-intersection test saw arcs.
+fn line_meets_chords_of(arc: &Prim, line: &Prim) -> bool {
+    let Prim::Arc {
+        c, r, a0, sweep, ..
+    } = *arc
+    else {
+        return false;
+    };
+    let n = (sweep.abs() / (PI / 16.0)).ceil().max(1.0) as usize;
+    let pt = |k: usize| {
+        let a = a0 + sweep * k as f64 / n as f64;
+        c + v(r * a.cos(), r * a.sin())
+    };
+    let side = |a: Vec2, b: Vec2, x: Vec2| cross2(b - a, x - a) > 0.0;
+    (0..n).any(|k| {
+        let (p0, p1) = (pt(k), pt(k + 1));
+        let (q0, q1) = (line.start(), line.end());
+        side(p0, p1, q0) != side(p0, p1, q1) && side(q0, q1, p0) != side(q0, q1, p1)
+    })
+}
+
+#[test]
+fn a_snapped_edge_that_cuts_an_arc_between_its_chord_samples_is_found_to_cross_it() {
+    // An arc of radius 10 from 0 to pi/8, closed by two lines through the centre, and a short
+    // stray edge across the arc at pi/32 that starts and ends 0.02 either side of it: the arc's
+    // chords (at pi/16) lie 0.048 inside the circle, so they never reach the edge.
+    let (c, r) = (v(0.0, 0.0), 10.0);
+    let arc = Prim::arc(c, r, 0.0, PI / 8.0);
+    let at = |radius: f64| v(radius * (PI / 32.0).cos(), radius * (PI / 32.0).sin());
+    let ring = [
+        arc,
+        Prim::line(arc.end(), c),
+        Prim::line(c, arc.start()),
+        Prim::line(at(r - 0.02), at(r + 0.02)),
+    ];
+    assert!(
+        !line_meets_chords_of(&arc, &ring[3]),
+        "the sampled test misses the crossing"
+    );
+    assert!(!simple(&ring));
+    // The same edge stopping short of the arc does not cross it.
+    let short = [
+        ring[0],
+        ring[1],
+        ring[2],
+        Prim::line(at(r - 0.04), at(r - 0.02)),
+    ];
+    // (The pieces are a sector and a stray edge, not one closed loop, so the stray is checked
+    // against the arc directly.)
+    assert!(piece_hits(&short[0], &short[3]).is_empty());
+    // Two circles crossing between each other's samples.
+    let other = Prim::arc(v(10.0, 0.0), r, PI * 0.5, PI);
+    assert!(!simple(&[Prim::arc(c, r, -PI / 2.0, PI), other]));
+    assert!(simple(&[
+        Prim::arc(c, r, PI / 2.0, PI),
+        Prim::arc(v(30.0, 0.0), r, PI / 2.0, PI)
+    ]));
+}
+
+#[test]
+fn an_edge_that_passes_through_a_vertex_of_the_loop_is_not_simple() {
+    // (0,0) -> (4,4) passes through the vertex (2,2), where the two edges on either side of it
+    // lie on opposite sides: the loop crosses itself there.
+    let pts = [(0.0, 0.0), (4.0, 4.0), (0.0, 4.0), (2.0, 2.0), (3.0, 0.0)];
+    let ring: Vec<Prim> = (0..pts.len())
+        .map(|k| {
+            let (a, b) = (pts[k], pts[(k + 1) % pts.len()]);
+            Prim::line(v(a.0, a.1), v(b.0, b.1))
+        })
+        .collect();
+    assert!(!simple(&ring));
+    // A plain quadrilateral, whose neighbours only meet at their joints, is still simple.
+    let square: Vec<Prim> = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
+        .iter()
+        .zip([(4.0, 0.0), (4.0, 4.0), (0.0, 4.0), (0.0, 0.0)])
+        .map(|(a, b)| Prim::line(v(a.0, a.1), v(b.0, b.1)))
+        .collect();
+    assert!(simple(&square));
+}
+
+#[test]
+fn a_very_long_edge_across_an_arc_is_still_found_to_cross_it() {
+    // The unit right semicircle, and a line from -1e9 to 1e9 through its centre: it meets the
+    // arc's rim at (1, 0). A quadratic with the radius added to terms of 1e18 loses the radius.
+    let arc = Prim::arc(v(0.0, 0.0), 1.0, -FRAC_PI_2, PI);
+    let line = Prim::line(v(-1e9, 0.0), v(1e9, 0.0));
+    assert!(!simple(&[arc, line]));
+}
+
+#[test]
+fn a_circle_meets_a_very_long_segment_where_it_crosses_it() {
+    use crate::cell_grid::region::circle_segment_points;
+    let (pts, n) = circle_segment_points(v(0.0, 0.0), 1.0, v(-1e9, 0.0), v(1e9, 0.0));
+    assert_eq!(n, 2);
+    assert!(pts[0].distance(v(-1.0, 0.0)) < 1e-6 && pts[1].distance(v(1.0, 0.0)) < 1e-6);
+    // A segment that stops short of the circle meets it nowhere; one that ends inside, once.
+    assert_eq!(
+        circle_segment_points(v(0.0, 0.0), 1.0, v(-1e9, 0.0), v(-2.0, 0.0)).1,
+        0
+    );
+    assert_eq!(
+        circle_segment_points(v(0.0, 0.0), 1.0, v(-1e9, 0.0), v(0.0, 0.0)).1,
+        1
+    );
+}
+
+#[test]
+fn pieces_that_overlap_along_a_stretch_are_not_simple() {
+    let ring = |extra: Prim| {
+        [
+            Prim::line(v(0.0, 0.0), v(3.0, 0.0)),
+            Prim::line(v(3.0, 0.0), v(3.0, 3.0)),
+            Prim::line(v(3.0, 3.0), v(0.0, 0.0)),
+            extra,
+        ]
+    };
+    // Only neighbours may meet, and only at their joint: a stray edge that touches the ring
+    // at a point is refused.
+    assert!(!simple(&ring(Prim::line(v(3.0, 0.0), v(3.5, 0.0)))));
+    let apart = ring(Prim::line(v(3.5, 0.0), v(4.0, 0.0)));
+    assert!(apart
+        .iter()
+        .take(3)
+        .all(|p| piece_hits(p, &apart[3]).is_empty()));
+    assert!(!simple(&ring(Prim::line(v(1.0, 0.0), v(2.0, 0.0)))));
+    // Two arcs of one circle: end to end they only touch, overlapping they share a stretch.
+    let (c, r) = (v(0.0, 0.0), 5.0);
+    let touching = [Prim::arc(c, r, 0.0, PI), Prim::arc(c, r, PI, PI)];
+    assert!(simple(&touching));
+    let overlapping = [Prim::arc(c, r, 0.0, PI), Prim::arc(c, r, PI / 2.0, PI)];
+    assert!(!simple(&overlapping));
+    let backwards = [Prim::arc(c, r, 0.0, PI), Prim::arc(c, r, 1.5 * PI, -PI)];
+    assert!(!simple(&backwards));
 }
 
 #[test]

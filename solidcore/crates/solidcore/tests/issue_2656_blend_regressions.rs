@@ -715,3 +715,379 @@ fn a_cancel_during_the_run_on_check_comes_back() {
         "{cancelled:?}"
     );
 }
+
+/// **tangency-labs/solidcraft#15437 (an End at a smooth vertex at a shallow crease).** A round
+/// on one piece of an edge that ends at the vertex where one of its faces changes plane by a few
+/// degrees: its edge runs on, nearly in line, into the other piece, which is not rounded. The
+/// End caps the round on a plane through the vertex. Square to the edge, that plane holds the
+/// face's end (the crease) only while the round's other face is square to it; beside a drafted
+/// face the rail ended past the crease, on the face beyond, which the round does not touch, and
+/// the trim leaked (status 1001). The round ends where its first rail reaches its face's end:
+/// the cap is the plane through the vertex and that rail's crossing with the crease, the one
+/// closest to square to the edge. The bodies are built with the kernel's own prism and
+/// transform, as SolidCraft's extrude, box and move make them.
+mod crease_end {
+    use super::{assert_rel, blend, measured, solidcraft_kernel, volume, Kind};
+    use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
+    use solidcore::eval::Frame;
+    use solidcore::math::{Point2, Point3, Vec3};
+    use solidcore::primitive::api_primitives::create_box;
+    use solidcore::prism::extrude::extrude_region;
+    use solidcore::prism::profile::{Loop2, Region2, Seg2};
+    use solidcore::topology::brep::mirror::transform_matrix;
+    use solidcore::topology::Brep;
+    use solidcore::Kernel;
+    use std::f64::consts::FRAC_PI_4;
+
+    /// The polygon `pts` (counter-clockwise in `frame`) extruded from level `lo` to `hi`
+    /// along the frame's normal.
+    fn prism(k: &mut Kernel, frame: &Frame, pts: &[[f64; 2]], lo: f64, hi: f64) -> Brep {
+        let p = |q: [f64; 2]| Point2::new(q[0], q[1]);
+        let outer = Loop2 {
+            segs: pts
+                .iter()
+                .zip(pts.iter().cycle().skip(1))
+                .map(|(&a, &b)| Seg2::Line { a: p(a), b: p(b) })
+                .collect(),
+        };
+        let region = Region2 {
+            outer,
+            holes: Vec::new(),
+        };
+        let mut b = extrude_region(k, frame, &region, lo, hi).unwrap();
+        b.refresh_cached_topology();
+        b
+    }
+
+    /// A box at `corner` of `size`, turned `deg` about z (as a row vector, as SolidCraft's move
+    /// passes it) and moved to `at`.
+    fn turned_box(
+        k: &mut Kernel,
+        corner: [f64; 3],
+        size: [f64; 3],
+        deg: f64,
+        at: [f64; 3],
+    ) -> Brep {
+        let mut b = create_box(
+            k,
+            Point3::new(corner[0], corner[1], corner[2]),
+            size[0],
+            size[1],
+            size[2],
+        )
+        .unwrap();
+        let (c, s) = (deg.to_radians().cos(), deg.to_radians().sin());
+        let m = [
+            [c, s, 0.0, 0.0],
+            [-s, c, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [at[0], at[1], at[2], 1.0],
+        ];
+        transform_matrix(k, &mut b, &m, true).unwrap();
+        b.refresh_cached_topology();
+        b
+    }
+
+    // #15437's block: a section in y = 0 (x 0..LENGTH, z from the bottom to HEIGHT) extruded
+    // DEPTH + 2 along y, the side y = DEPTH cut by a plane turned `draft` degrees about z through
+    // the crease vertex (CREASE, DEPTH, 0). The bottom is flat to x = CREASE and rises TILT
+    // degrees beyond: the crease is the line x = CREASE, z = 0.
+    const LENGTH: f64 = 6.0;
+    const CREASE: f64 = 0.8;
+    const HEIGHT: f64 = 8.0;
+    const DEPTH: f64 = 10.0;
+    const TILT: f64 = 3.0;
+    const RADIUS: f64 = 2.6;
+
+    fn bottom(x: f64) -> f64 {
+        if x <= CREASE {
+            0.0
+        } else {
+            (x - CREASE) * TILT.to_radians().tan()
+        }
+    }
+
+    fn side(x: f64, draft: f64) -> f64 {
+        DEPTH - (x - CREASE) * draft.to_radians().tan()
+    }
+
+    fn block(k: &mut Kernel, draft: f64) -> Brep {
+        // x along the frame's x, z along its y: its normal is -y, so level h is at y = -h
+        let frame = Frame {
+            origin: [0.0; 3],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 0.0, 1.0],
+        };
+        let section = [
+            [0.0, 0.0],
+            [CREASE, 0.0],
+            [LENGTH, bottom(LENGTH)],
+            [LENGTH, HEIGHT],
+            [0.0, HEIGHT],
+        ];
+        let b = prism(k, &frame, &section, -(DEPTH + 2.0), 0.0);
+        let cut = turned_box(
+            k,
+            [-20.0, 0.0, -20.0],
+            [40.0, 20.0, 40.0],
+            -draft,
+            [CREASE, DEPTH, 0.0],
+        );
+        let mut b = boolean_difference(k, b, cut).unwrap();
+        b.refresh_cached_topology();
+        b
+    }
+
+    /// The block's volume: the section's height over x times its depth to the side plane,
+    /// integrated (a polynomial in x on each side of the crease).
+    fn block_volume(draft: f64) -> f64 {
+        let (tt, td) = (TILT.to_radians().tan(), draft.to_radians().tan());
+        let w = LENGTH - CREASE;
+        let flat = HEIGHT * (DEPTH * CREASE + td * CREASE * CREASE / 2.0);
+        let rising = HEIGHT * DEPTH * w - (HEIGHT * td + DEPTH * tt) * w * w / 2.0
+            + tt * td * w * w * w / 3.0;
+        flat + rising
+    }
+
+    /// The volume the round removes: a straight prism of the corner's spandrel (between the
+    /// side face, the rising bottom and the ball's circle), cut by the end face x = LENGTH and
+    /// by the cap, the plane through the crease vertex that holds the crease (along y) and is
+    /// otherwise square to the edge. It is the spandrel's area times the length of its
+    /// centroid's line between the two planes. For a corner of angle `phi`, with `d` from the
+    /// corner to the tangent points and `a` half the circle's arc, the area is the kite's less
+    /// the sector, `d R - a R^2`, and the centroid lies on the bisector at the kite's moment
+    /// less the sector's over that area.
+    fn capped_prism(draft: f64) -> f64 {
+        let (r, tilt, draft) = (RADIUS, TILT.to_radians(), draft.to_radians());
+        let vertex = Vec3::new(CREASE, DEPTH, 0.0);
+        let into = |a: Vec3, away: Vec3| if a.dot(away) > 0.0 { -a } else { a };
+        // the faces' outward normals, the edge, and each face's way into the material across it
+        let side = Vec3::new(draft.tan(), 1.0, 0.0).unitize().unwrap();
+        let base = Vec3::new(tilt.tan(), 0.0, -1.0).unitize().unwrap();
+        let mut t = side.cross(base).unitize().unwrap();
+        if t.x < 0.0 {
+            t = -t;
+        }
+        let along_side = into(t.cross(side).unitize().unwrap(), base);
+        let along_base = into(t.cross(base).unitize().unwrap(), side);
+        let phi = along_side.angle_between(along_base).unwrap();
+        let bisector = (along_side + along_base).unitize().unwrap();
+        let d = r / (phi / 2.0).tan();
+        let to_centre = r / (phi / 2.0).sin();
+        let half_arc = (std::f64::consts::PI - phi) / 2.0;
+        let area = d * r - half_arc * r * r;
+        let kite = d * r * (d * (phi / 2.0).cos() + to_centre) / 3.0;
+        let sector = half_arc * r * r * (to_centre - 2.0 * r * half_arc.sin() / (3.0 * half_arc));
+        let c = vertex + bisector * ((kite - sector) / area);
+        // the cap: through the vertex, its normal the edge's without its component along y
+        let cap = Vec3::new(t.x, 0.0, t.z).unitize().unwrap();
+        let at_cap = -(c - vertex).dot(cap) / t.dot(cap);
+        let at_end = (LENGTH - c.x) / t.x;
+        area * (at_end - at_cap)
+    }
+
+    /// The long piece of the side face's bottom edge rounded alone: the body's volume.
+    fn rounded_block(draft: f64) -> f64 {
+        let mut k = solidcraft_kernel();
+        let mut b = block(&mut k, draft);
+        assert_rel(volume(&k, &mut b), block_volume(draft), 1e-9, "the block");
+        let at = [3.0, side(3.0, draft), bottom(3.0)];
+        blend(&mut k, &mut b, Kind::Round, &[at], RADIUS)
+            .unwrap_or_else(|e| panic!("draft {draft}: refused {e:?}"));
+        measured(&mut k, &mut b).1
+    }
+
+    /// The side face square to the bottom: the cap square to the edge holds the crease.
+    #[test]
+    fn a_round_ending_at_a_shallow_crease_is_capped_through_it() {
+        let want = block_volume(0.0) - capped_prism(0.0);
+        assert_rel(rounded_block(0.0), want, 1e-9, "square side");
+    }
+
+    /// The side face drafted 3 degrees: the cap holds the crease, and the round builds.
+    #[test]
+    fn a_round_ending_at_a_crease_beside_a_drafted_side_is_capped_through_the_crease() {
+        let want = block_volume(3.0) - capped_prism(3.0);
+        assert_rel(rounded_block(3.0), want, 1e-9, "drafted side");
+    }
+
+    // The crease in the other face: a boss 22 long in x and 16 high, its wall y = 10 for
+    // x >= PIECE and leaning WALL degrees out (about z) for x < PIECE, so the crease is the
+    // upright x = PIECE. An arm 12 x 6 joined against the wall, its top drafted DRAFT degrees
+    // (rising with x from z = 8 at x = 0). The arm top meets the wall in the long piece,
+    // rounded, and the short piece across the crease, left sharp.
+    const WALL: f64 = 4.0;
+    const DRAFT: f64 = 2.5;
+    const PIECE: f64 = 2.2;
+    const ARM_RADIUS: f64 = 0.87;
+
+    fn arm_top(x: f64) -> f64 {
+        8.0 + x * DRAFT.to_radians().tan()
+    }
+
+    fn boss_and_arm(k: &mut Kernel) -> Brep {
+        let t = WALL.to_radians().tan();
+        let plan = Frame {
+            origin: [0.0; 3],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        };
+        let boss = [
+            [-10.0, 0.0],
+            [12.0, 0.0],
+            [12.0, 10.0],
+            [PIECE, 10.0],
+            [-10.0, 10.0 + (PIECE + 10.0) * t],
+        ];
+        let boss = prism(k, &plan, &boss, 0.0, 16.0);
+        // the arm's section in y = 9 (inside the boss), extruded to y = 16: level h at y = 9 - h
+        let side = Frame {
+            origin: [0.0, 9.0, 0.0],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 0.0, 1.0],
+        };
+        let arm = [
+            [0.0, 0.0],
+            [12.0, 0.0],
+            [12.0, arm_top(12.0)],
+            [0.0, arm_top(0.0)],
+        ];
+        let arm = prism(k, &side, &arm, -7.0, 0.0);
+        let mut b = boolean_union(k, boss, arm).unwrap();
+        b.refresh_cached_topology();
+        b
+    }
+
+    /// The cap is the plane x = PIECE through the crease. The round reaches the end face
+    /// x = 12, and its faces meet square (the top is drafted about y, the wall is upright), so
+    /// it adds the corner's spandrel `(1 - pi/4) R^2` times the length between the two planes
+    /// along the edge, `(12 - PIECE) / cos(DRAFT)`.
+    #[test]
+    fn a_round_ending_at_a_wall_crease_under_a_drafted_top_is_capped_through_it() {
+        let mut k = solidcraft_kernel();
+        let mut b = boss_and_arm(&mut k);
+        let before = volume(&k, &mut b);
+        blend(
+            &mut k,
+            &mut b,
+            Kind::Round,
+            &[[6.0, 10.0, arm_top(6.0)]],
+            ARM_RADIUS,
+        )
+        .unwrap_or_else(|e| panic!("refused {e:?}"));
+        let added = measured(&mut k, &mut b).1 - before;
+        let r = ARM_RADIUS;
+        let want = (1.0 - FRAC_PI_4) * r * r * (12.0 - PIECE) / DRAFT.to_radians().cos();
+        assert_rel(added, want, 1e-6, "the round added");
+    }
+
+    // A crease skewed in plan beside a tilted side: the round's edge is the x axis, where the
+    // bottom z = 0 meets a side through the x axis turned `side` degrees about it (outward
+    // normal (0, cos side, -sin side), the material on its -y side), so the faces meet at
+    // 90 + `side` degrees. The bottom is flat on the round's side of the crease, the line through
+    // the origin along (sin SKEW, -cos SKEW, 0), and rises TILT degrees about it beyond, so the
+    // round on the edge's piece x > 0 ends at the origin, where its edge runs on, a few degrees
+    // off, into the piece x < 0 left sharp. The block's far end is the plane square to the
+    // crease 6 from it.
+    //
+    // The crease leans SKEW degrees over the round, so the cap holds it: the upright plane
+    // through the crease, turned SKEW from square to the edge (the square cap ended the bottom's
+    // rail on the rising piece beyond). The cap and the far end are parallel, so the round is
+    // its spandrel's prism over the length between them along the edge, 6 / cos SKEW, whatever
+    // the spandrel's centroid: `(d R - a R^2) 6 / cos SKEW` for the corner's angle phi,
+    // d = R / tan(phi / 2) and a = (pi - phi) / 2. With the side leaning over the round's end
+    // (side > 0) the cap's trace on the side runs the side's rail past the vertex, by
+    // h tan SKEW sin(side) for the rails' distance h from the edge; the side runs on past the
+    // vertex, so that rail still ends on its face.
+    const SKEW: f64 = 30.0;
+    const SKEW_RADIUS: f64 = 1.0;
+
+    /// A box at `corner` of `size`, its points p moved to p `rows` + `at` (row vectors).
+    fn placed_box(
+        k: &mut Kernel,
+        corner: [f64; 3],
+        size: [f64; 3],
+        rows: [[f64; 3]; 3],
+        at: [f64; 3],
+    ) -> Brep {
+        let mut b = create_box(
+            k,
+            Point3::new(corner[0], corner[1], corner[2]),
+            size[0],
+            size[1],
+            size[2],
+        )
+        .unwrap();
+        let [r0, r1, r2] = rows;
+        let m = [
+            [r0[0], r0[1], r0[2], 0.0],
+            [r1[0], r1[1], r1[2], 0.0],
+            [r2[0], r2[1], r2[2], 0.0],
+            [at[0], at[1], at[2], 1.0],
+        ];
+        transform_matrix(k, &mut b, &m, true).unwrap();
+        b.refresh_cached_topology();
+        b
+    }
+
+    fn skewed_crease(k: &mut Kernel, side: f64) -> Brep {
+        let (sk, tilt) = (SKEW.to_radians(), TILT.to_radians());
+        // the section square to the crease, x along (cos SKEW, sin SKEW, 0) (onto the round's
+        // side), y along z: its normal is the crease's direction
+        let frame = Frame {
+            origin: [0.0; 3],
+            x_axis: [sk.cos(), sk.sin(), 0.0],
+            y_axis: [0.0, 0.0, 1.0],
+        };
+        let section = [
+            [-6.0, 6.0 * tilt.tan()],
+            [0.0, 0.0],
+            [6.0, 0.0],
+            [6.0, 8.0],
+            [-6.0, 8.0],
+        ];
+        let b = prism(k, &frame, &section, -4.0, 12.0);
+        // everything on the side's outward side: a box over y > 0 turned `side` about x
+        let (c, s) = (side.to_radians().cos(), side.to_radians().sin());
+        let cut = placed_box(
+            k,
+            [-20.0, 0.0, -20.0],
+            [40.0, 20.0, 40.0],
+            [[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]],
+            [0.0; 3],
+        );
+        let mut b = boolean_difference(k, b, cut).unwrap();
+        b.refresh_cached_topology();
+        b
+    }
+
+    /// The round on the skewed crease's block beside a side turned `side`: the volume removed
+    /// against the spandrel's prism.
+    fn skewed_round_is_the_prism(side: f64) {
+        let mut k = solidcraft_kernel();
+        let mut b = skewed_crease(&mut k, side);
+        let before = volume(&k, &mut b);
+        blend(&mut k, &mut b, Kind::Round, &[[3.0, 0.0, 0.0]], SKEW_RADIUS)
+            .unwrap_or_else(|e| panic!("side {side}: refused {e:?}"));
+        let removed = before - measured(&mut k, &mut b).1;
+        let (r, phi) = (SKEW_RADIUS, (90.0 + side).to_radians());
+        let d = r / (phi / 2.0).tan();
+        let a = (std::f64::consts::PI - phi) / 2.0;
+        let want = (d * r - a * r * r) * 6.0 / SKEW.to_radians().cos();
+        assert_rel(removed, want, 1e-7, "the round removed");
+    }
+
+    /// The side leaning over the round's end: the cap through the crease, turned 30 degrees
+    /// from square, runs the side's rail past the vertex, onto the side where it runs on; the
+    /// round is the prism.
+    #[test]
+    fn a_cap_turned_through_a_skewed_crease_beside_a_leaning_side_is_the_prism() {
+        skewed_round_is_the_prism(15.0);
+    }
+
+    /// The side leaning away: the side's rail ends short of the vertex; the round is the prism.
+    #[test]
+    fn a_cap_turned_through_a_skewed_crease_beside_a_side_leaning_away_is_the_prism() {
+        skewed_round_is_the_prism(-15.0);
+    }
+}
