@@ -2314,14 +2314,14 @@ mod tests {
                         let scale = o.length() + 1.5 * r + height;
                         let bound = 3f64.sqrt() * gamma(34) * scale * (1.0 + 8.0 * f64::EPSILON);
                         let s = c.rev().base();
-                        let cylinder = crate::surface::implicit::Implicit::Cone {
+                        let cylinder = implicit::Implicit::Cone {
                             origin: o,
                             axis: z,
                             radius: r,
                             tan_angle: 0.0,
                         };
                         assert!(
-                            crate::surface::implicit::lies_on(s, &cylinder).unwrap(),
+                            implicit::lies_on(s, &cylinder).unwrap(),
                             "{origin:?} {radius} {top} {swap} {inside}: not on the cylinder"
                         );
                         let (nu, nv) = (
