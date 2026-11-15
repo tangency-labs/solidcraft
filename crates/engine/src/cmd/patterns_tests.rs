@@ -1,5 +1,6 @@
-use solidcraft_geom::MeshGeom;
+use solidcraft_geom::{MeshGeom, Vec3Geom};
 use std::f64::consts::PI;
+use std::sync::Arc;
 
 use serde_json::{Value, json};
 
@@ -1630,4 +1631,44 @@ fn circular_pattern_of_a_groove_and_its_fillet_rounds_every_copy_alike() {
     let v = |m: &Value| m["volume_mm3"].as_f64().unwrap_or(f64::NAN);
     let want = v(&plain) - 10.0 * (v(&plain) - v(&one));
     assert!(rel(v(&all), want) < 1e-6, "ten rounded grooves: {} mm³, expected {want} mm³", v(&all));
+}
+
+/// Copies of a body made by a pattern are drawn from the body's own triangles and display plan,
+/// moved, and keep doing so when they are moved into a component: a 30 by 30 pattern of a
+/// filleted cylinder meshed and planned every copy, twice, and took over a minute to show.
+#[test]
+fn pattern_copies_share_their_bodys_meshes_through_a_move_to_a_component() {
+    use solidcraft_doc::display_quality::DisplayQuality;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 6}));
+    run(&mut s, "solid.fillet", json!({"edges": [[3, 0, 6]], "radius": 1}));
+    let r = run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Body1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 10, "dir2": [0, 1, 0], "count2": 2, "spacing2": 10}),
+    );
+    let copies: Vec<String> = r["bodies"].as_array().unwrap().iter().filter_map(Value::as_str).filter(|b| *b != "Body1").map(String::from).collect();
+    assert_eq!(copies.len(), 5, "{r}");
+    let q = DisplayQuality::parse("normal").unwrap();
+    let check = |s: &Session, when: &str| {
+        let st = s.model.state();
+        let source = st.body("Body1").unwrap();
+        let (own, at) = source.mesh_in_place();
+        assert_eq!(at, solidcraft_doc::IDENTITY);
+        let own_plan = source.plan_mesh_at(q).unwrap();
+        for name in &copies {
+            let copy = st.body(name).unwrap();
+            let (mesh, m) = copy.mesh_in_place();
+            assert!(Arc::ptr_eq(&mesh, &own), "{when}: `{name}` is drawn from its own triangles");
+            assert!(Arc::ptr_eq(&copy.plan_mesh_in_place_at(q).unwrap().0, &own_plan), "{when}: `{name}` is planned again");
+            // The moved triangles lie where the copy is.
+            let (bounds, shown) = (copy.body.exact_bounds().unwrap(), copy.mesh().bounds());
+            assert!(bounds.min.dist(shown.min) < 0.05 && bounds.max.dist(shown.max) < 0.05, "{when}: `{name}` {bounds:?} vs {shown:?}");
+            assert_ne!(m, solidcraft_doc::IDENTITY);
+        }
+    };
+    check(&s, "patterned");
+    run(&mut s, "component.create", json!({"name": "Grid", "parent": "root", "activate": false}));
+    run(&mut s, "component.move_bodies", json!({"bodies": copies, "component": "Grid"}));
+    check(&s, "moved into a component");
 }

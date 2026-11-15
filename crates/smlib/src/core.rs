@@ -55,8 +55,8 @@ mod trim_tests;
 
 pub(crate) use convert::{from_arrays, to_arrays};
 pub(crate) use measure::{
-    area, bounds, check, check_scoped, check_with, classify_point, classify_points, edge_face_distance, is_manifold_solid, mass_properties,
-    solid_count,
+    area, bounds, check, check_scoped, check_with, classify_point, classify_points, curve_face_gap_bound, edge_face_distance, is_manifold_solid,
+    mass_properties, solid_count,
 };
 
 /// A solidcore body. Its own lock: solidcore's operations take `&mut Brep`, even to measure.
@@ -151,7 +151,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.linear_sweep_arc_is_cylinder = true;
     f.revolve_splits_curves_on_axis = true;
     f.cover_wraps_across_closed_seam = true;
-    f.fillet_rails_meet_at_one_end_point = true;
     f.fillet_trace_reaches_rails = true;
     f.delete_vertex_joins_seam_iso_curve = true;
     f.box_face_failures_propagate = true;
