@@ -7453,6 +7453,24 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
             }
         }
     }
+    // An input that takes curves (Thin Extrude's profiles or curves, a Sweep path, Thin Revolve)
+    // takes the visible curves of the shown sketches under a marquee as a click takes them, each
+    // naming its sketch unless it is the sketch being edited (#17075).
+    if app.dialog.is_some()
+        && !sketch_dialog
+        && accepts.is_some_and(|a| a & crate::selection::CURVES != 0 && a & crate::selection::SKETCH_LINES == 0)
+        && !app.ui.pick_off.iter().any(|x| x == "sketch" || x == "sketch_curves")
+    {
+        let active = app.session.active_sketch;
+        for sid in visible_sketches(app) {
+            let Some(ss) = st.sketch(sid) else { continue };
+            for (i, c) in ss.sketch.curves.iter().enumerate() {
+                if solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) && box_takes_curve(app, ss, i, proj, &bx, false) {
+                    out.push(crate::selection::curve_pick(&c.id, sid, active));
+                }
+            }
+        }
+    }
     // Project takes the visible curves of the other sketches too (#14927): the marquee of its
     // Geometry input reaches them as a click does, as `ExternalSketchCurve`. Only a marquee that
     // took nothing else: one over model edges, faces or points takes what it always took.
@@ -13021,6 +13039,34 @@ mod tests {
             assert_eq!(boxed(&mut app, vec![mid, mid], true), vec![half], "a crossing box touching half {half} in Measure");
         }
         assert_eq!(boxed(&mut app, plus.iter().flat_map(|&h| m.edges[h].clone()).collect(), false), plus, "a window round both in Measure");
+    }
+
+    /// With Thin Extrude on, a box over sketch lines takes them into the Profiles/Curves input, in
+    /// either drag direction, as a click on one does (#17075).
+    #[test]
+    fn a_box_in_a_curves_input_takes_the_sketch_lines_under_it() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("sketch.create", &json!({"name": "Sketch1", "plane": "XY"})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[0, 0], [10, 0]]})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[0, 5], [10, 5]]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.cam = app.cam.looking_from(Vec3::Z);
+        app.cam.target = Vec3::new(5.0, 2.5, 0.0);
+        app.cam.distance = 40.0;
+        app.ui.perspective = false;
+        let proj = projection(&app, Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0)));
+        let corners: Vec<Pos2> = [Vec3::new(-1.0, -1.0, 0.0), Vec3::new(11.0, 6.0, 0.0)].iter().filter_map(|p| proj.to_screen(*p)).collect();
+        let r = Rect::from_points(&corners);
+        for (from, to) in [(r.left_top(), r.right_bottom()), (r.right_bottom(), r.left_top())] {
+            let mut d = crate::dialogs::Dialog::for_command(&app, "solid.extrude").unwrap();
+            d.inputs[0].accept = crate::selection::PROFILES | crate::selection::CURVES;
+            app.dialog = Some(d);
+            box_select(&mut app, &proj, BoxSel::from_drag(from, to), false);
+            let items = app.dialog.take().unwrap().items();
+            let lines = items.iter().filter(|i| matches!(i, Sel::SketchCurve { sketch: Some(_), .. })).count();
+            assert_eq!(lines, 2, "both lines are taken: {items:?}");
+        }
     }
 
     /// The ball of [`slotted_ball_app`], whole, with a hole of radius 1 drilled down right

@@ -1,0 +1,963 @@
+{
+  "before_ref": "f9ed9a90b453517d83e787169887c180e17656fd",
+  "kernel_import_tree_ref": "8ffb97d541bcc971a9b4a373f3b6a64d1cc75daa",
+  "historical_refs": {
+    "before": "f4f70127afee1640c43d9f61e035baddd6dc271b",
+    "after": "22eb5b93b94465831ffa53d4472b2f27b8151e95"
+  },
+  "cases": [
+    {
+      "unit": "blend.fillet_standard_solver_p2",
+      "case": "gen0336",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "out": {
+          "before": 13,
+          "after": 17
+        },
+        "status": {
+          "before": 1,
+          "after": 1
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "out": 17,
+        "status": 0
+      },
+      "value_differences": 14,
+      "first_value_differences": [
+        [
+          "values/out/length",
+          13,
+          17
+        ],
+        [
+          "values/out/0",
+          0.0,
+          1.0
+        ],
+        [
+          "values/out/1",
+          0.17599525633678664,
+          1.9164586187744101
+        ],
+        [
+          "values/out/2",
+          -2.7040364981225773,
+          1.0805652932936884
+        ]
+      ],
+      "ints": {
+        "before": {},
+        "after": {}
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "curve.curve_p1",
+      "case": "gen0014",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "out": {
+          "before": 13,
+          "after": 7
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "out": 7
+      },
+      "value_differences": 2,
+      "first_value_differences": [
+        [
+          "values/out/length",
+          13,
+          7
+        ],
+        [
+          "values/out/0",
+          2.0,
+          1.0
+        ]
+      ],
+      "ints": {
+        "before": {
+          "status": [
+            0
+          ]
+        },
+        "after": {
+          "status": [
+            0
+          ]
+        }
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "curve.curve_p3",
+      "case": "gen0101",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "out": {
+          "before": 9,
+          "after": 9
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "out": 4
+      },
+      "value_differences": 4,
+      "first_value_differences": [
+        [
+          "values/out/0",
+          1.0,
+          0.0
+        ],
+        [
+          "values/out/1",
+          1.0,
+          4.0
+        ],
+        [
+          "values/out/6",
+          0.7318943148562402,
+          0.0
+        ],
+        [
+          "values/out/7",
+          0.6339092091688694,
+          0.0
+        ]
+      ],
+      "ints": {
+        "before": {
+          "status": [
+            0
+          ]
+        },
+        "after": {
+          "status": [
+            0
+          ]
+        }
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "curve.curve_p6",
+      "case": "gen0210",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "out": {
+          "before": 5,
+          "after": 5
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "out": 3
+      },
+      "value_differences": 3,
+      "first_value_differences": [
+        [
+          "values/out/0",
+          7.560343721403504,
+          5.274195530886221
+        ],
+        [
+          "values/out/1",
+          0.058895516544628046,
+          0.6004311777012843
+        ],
+        [
+          "values/out/2",
+          0.8871097642341919,
+          0.9354838709677419
+        ]
+      ],
+      "ints": {
+        "before": {
+          "status": [
+            0
+          ]
+        },
+        "after": {
+          "status": [
+            0
+          ]
+        }
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "curve.curve_p7",
+      "case": "gen2091",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "out": {
+          "before": 185,
+          "after": 120
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "out": 105
+      },
+      "value_differences": 41,
+      "first_value_differences": [
+        [
+          "values/out/length",
+          185,
+          120
+        ],
+        [
+          "values/out/2",
+          14.0,
+          9.0
+        ],
+        [
+          "values/out/21",
+          3.0,
+          4.0
+        ],
+        [
+          "values/out/22",
+          9.0,
+          13.0
+        ]
+      ],
+      "ints": {
+        "before": {
+          "status": [
+            0
+          ]
+        },
+        "after": {
+          "status": [
+            0
+          ]
+        }
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "curve.curve_p7",
+      "case": "gen2538",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "out": {
+          "before": 822,
+          "after": 809
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "out": 124
+      },
+      "value_differences": 112,
+      "first_value_differences": [
+        [
+          "values/out/length",
+          822,
+          809
+        ],
+        [
+          "values/out/2",
+          63.0,
+          62.0
+        ],
+        [
+          "values/out/153",
+          8.473962072588059e-10,
+          8.473739927461915e-10
+        ],
+        [
+          "values/out/154",
+          0.21875,
+          0.21874474869396066
+        ]
+      ],
+      "ints": {
+        "before": {
+          "status": [
+            0
+          ]
+        },
+        "after": {
+          "status": [
+            0
+          ]
+        }
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "curve.curve_p7",
+      "case": "gen2574",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "out": {
+          "before": 81,
+          "after": 94
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "out": 31
+      },
+      "value_differences": 19,
+      "first_value_differences": [
+        [
+          "values/out/length",
+          81,
+          94
+        ],
+        [
+          "values/out/2",
+          6.0,
+          7.0
+        ],
+        [
+          "values/out/10",
+          1.5987640899219528e-10,
+          1.1625161341921975e-10
+        ],
+        [
+          "values/out/11",
+          0.06261084828143648,
+          8.416477620975677e-08
+        ]
+      ],
+      "ints": {
+        "before": {
+          "status": [
+            0
+          ]
+        },
+        "after": {
+          "status": [
+            0
+          ]
+        }
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "intersect.surface_intersector_p1",
+      "case": "gen1226",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "rec": {
+          "before": 701,
+          "after": 702
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "rec": 580
+      },
+      "value_differences": 580,
+      "first_value_differences": [
+        [
+          "values/rec/length",
+          701,
+          702
+        ],
+        [
+          "values/rec/21",
+          1007.0,
+          0.0
+        ],
+        [
+          "values/rec/22",
+          17.0,
+          0.0
+        ],
+        [
+          "values/rec/23",
+          0.0,
+          17.0
+        ]
+      ],
+      "ints": {
+        "before": {},
+        "after": {}
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "intersect.surface_intersector_p3",
+      "case": "gen0110",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "rec": {
+          "before": 3827,
+          "after": 3827
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "rec": 84
+      },
+      "value_differences": 84,
+      "first_value_differences": [
+        [
+          "values/rec/13",
+          0.24121322642925747,
+          0.24114383749021834
+        ],
+        [
+          "values/rec/17",
+          0.24121322642925747,
+          0.2411438374902184
+        ],
+        [
+          "values/rec/20",
+          -0.5242869291484513,
+          -0.5242409293406076
+        ],
+        [
+          "values/rec/21",
+          -0.056036530608459645,
+          -0.056022032365695175
+        ]
+      ],
+      "ints": {
+        "before": {},
+        "after": {}
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "intersect.surface_intersector_p3",
+      "case": "gen0396",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "rec": {
+          "before": 1289,
+          "after": 1289
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "rec": 57
+      },
+      "value_differences": 57,
+      "first_value_differences": [
+        [
+          "values/rec/434",
+          1.1914407010778256,
+          -8.0
+        ],
+        [
+          "values/rec/441",
+          0.0,
+          1.0
+        ],
+        [
+          "values/rec/442",
+          0.0868047087107818,
+          0.3278002896395358
+        ],
+        [
+          "values/rec/443",
+          0.06257256976005615,
+          0.46776881673578047
+        ]
+      ],
+      "ints": {
+        "before": {},
+        "after": {}
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "intersect.surface_intersector_p3",
+      "case": "gen0607",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "rec": {
+          "before": 1026,
+          "after": 1026
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "rec": 28
+      },
+      "value_differences": 28,
+      "first_value_differences": [
+        [
+          "values/rec/14",
+          3.914600417431746e-05,
+          0.0
+        ],
+        [
+          "values/rec/15",
+          0.477114821595666,
+          0.47711392478000525
+        ],
+        [
+          "values/rec/18",
+          3.914600417431487e-05,
+          0.0
+        ],
+        [
+          "values/rec/19",
+          0.4771148215956661,
+          0.47711392478000536
+        ]
+      ],
+      "ints": {
+        "before": {},
+        "after": {}
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "intersect.surface_intersector_p3",
+      "case": "gen0703",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "rec": {
+          "before": 868,
+          "after": 868
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "rec": 16
+      },
+      "value_differences": 16,
+      "first_value_differences": [
+        [
+          "values/rec/91",
+          1.0,
+          0.0
+        ],
+        [
+          "values/rec/93",
+          1.0,
+          0.0
+        ],
+        [
+          "values/rec/95",
+          1.2315612337872723,
+          1.6556004215230923e-13
+        ],
+        [
+          "values/rec/96",
+          1.1211802971577256,
+          1.1207362079478753
+        ]
+      ],
+      "ints": {
+        "before": {},
+        "after": {}
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "surface.surface_p11",
+      "case": "gen0483",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "deviation": {
+          "before": 1,
+          "after": 0
+        },
+        "uv": {
+          "before": 4,
+          "after": 0
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "deviation": 1,
+        "uv": 4
+      },
+      "value_differences": 2,
+      "first_value_differences": [
+        [
+          "values/deviation",
+          [
+            0.005622704180666707
+          ],
+          null
+        ],
+        [
+          "values/uv",
+          [
+            0.05113430312658039,
+            0.5433039577037712,
+            0.050544615256296214,
+            0.5421488725961695
+          ],
+          null
+        ]
+      ],
+      "ints": {
+        "before": {
+          "found": [
+            1
+          ]
+        },
+        "after": {
+          "found": [
+            0
+          ]
+        }
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "surface.surface_p2",
+      "case": "tc_parabolic_cylinders_crossing_node",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "out": {
+          "before": 3021,
+          "after": 3156
+        },
+        "status": {
+          "before": 1,
+          "after": 1
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "out": 2896,
+        "status": 0
+      },
+      "value_differences": 2762,
+      "first_value_differences": [
+        [
+          "values/out/length",
+          3021,
+          3156
+        ],
+        [
+          "values/out/5",
+          99.0,
+          102.0
+        ],
+        [
+          "values/out/7",
+          103.0,
+          106.0
+        ],
+        [
+          "values/out/204",
+          0.0018353119576059672,
+          0.001846853416384847
+        ]
+      ],
+      "ints": {
+        "before": {},
+        "after": {}
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "surface.surface_point_solve_p2",
+      "case": "gen0808",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "out": {
+          "before": 7,
+          "after": 7
+        },
+        "status": {
+          "before": 1,
+          "after": 1
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "out": 3,
+        "status": 0
+      },
+      "value_differences": 3,
+      "first_value_differences": [
+        [
+          "values/out/1",
+          0.704826804076108,
+          0.9408578285757351
+        ],
+        [
+          "values/out/2",
+          2.6941425697089785,
+          1.8572282538781146
+        ],
+        [
+          "values/out/3",
+          9.169142033546262,
+          9.059573038386699
+        ]
+      ],
+      "ints": {
+        "before": {},
+        "after": {}
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "surface.surface_point_solve_p2",
+      "case": "rev_gen0057",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "out": {
+          "before": 7,
+          "after": 13
+        },
+        "status": {
+          "before": 1,
+          "after": 1
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "out": 10,
+        "status": 0
+      },
+      "value_differences": 5,
+      "first_value_differences": [
+        [
+          "values/out/length",
+          7,
+          13
+        ],
+        [
+          "values/out/0",
+          1.0,
+          2.0
+        ],
+        [
+          "values/out/1",
+          0.07319877658291848,
+          0.0
+        ],
+        [
+          "values/out/2",
+          0.7763170739506567,
+          0.0
+        ]
+      ],
+      "ints": {
+        "before": {},
+        "after": {}
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "surface.surface_point_solve_p3",
+      "case": "matrix_0267",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "out": {
+          "before": 9,
+          "after": 9
+        },
+        "status": {
+          "before": 1,
+          "after": 1
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "out": 3,
+        "status": 0
+      },
+      "value_differences": 3,
+      "first_value_differences": [
+        [
+          "values/out/2",
+          -0.7767981984343537,
+          0.12121779515463871
+        ],
+        [
+          "values/out/3",
+          0.12290439938698587,
+          0.06802779864540107
+        ],
+        [
+          "values/out/4",
+          6.978354978629408,
+          6.848382229992056
+        ]
+      ],
+      "ints": {
+        "before": {},
+        "after": {}
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    },
+    {
+      "unit": "surface.surface_point_solve_p3",
+      "case": "matrix_0337",
+      "inputs_identical": true,
+      "inputs_identical_to_historical": true,
+      "before_matches_historical_main": true,
+      "after_matches_historical_corrected": true,
+      "values_lengths": {
+        "out": {
+          "before": 9,
+          "after": 9
+        },
+        "status": {
+          "before": 1,
+          "after": 1
+        }
+      },
+      "changed_float_entries_including_length_delta": {
+        "out": 2,
+        "status": 0
+      },
+      "value_differences": 2,
+      "first_value_differences": [
+        [
+          "values/out/2",
+          0.01506701312722271,
+          0.014656977748535078
+        ],
+        [
+          "values/out/4",
+          0.4483685594987209,
+          0.44831251217740314
+        ]
+      ],
+      "ints": {
+        "before": {},
+        "after": {}
+      },
+      "error": {
+        "before": null,
+        "after": null
+      },
+      "other_status_fields_identical": true
+    }
+  ],
+  "summary": {
+    "cases": 18,
+    "inputs_identical": 18,
+    "historical_inputs_identical": 18,
+    "historical_before_identical": 18,
+    "historical_after_identical": 18
+  },
+  "after_ref": "c0cb7f90003463b1451479b6d87eba71f8f2c52a",
+  "upstream_fixture_pin": "3fd5b9548d19aa8c12c29bc9637a96d42a06f8a5",
+  "toolchain": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+  "finite_values": {
+    "before": 11903,
+    "after": 11973,
+    "nonfinite": 0
+  },
+  "after_build_ref": "03c8ff2d4afbd9af213b60952eaba4b1bd2a9e4f",
+  "after_tree": "4cb0a1e457eafa7e16f0b95ff1e1c3ee1e319387",
+  "message_only_cleanup_has_identical_tree": true
+}

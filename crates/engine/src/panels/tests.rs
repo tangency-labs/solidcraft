@@ -7792,3 +7792,30 @@ fn native_close_then_resize_cannot_inherit_a_reused_window_primary_priority() {
         assert_eq!(saved.retained_data[&id("q")]["instance"], raw_q);
     }
 }
+
+#[test]
+fn side_column_widths_snap_and_intersect_with_other_members() {
+    let mut registry = synthetic_registry().unwrap();
+    let kind = PanelKind::new("fixture.log").unwrap();
+    registry.set_side_widths(&kind, vec![(160.0, 160.0), (220.0, 320.0)]).unwrap();
+    let mut tight = registry.get(&kind).unwrap().clone();
+    tight.kind = PanelKind::new("fixture.tight").unwrap();
+    tight.min_size.width = 200.0;
+    registry.register(tight).unwrap();
+    let mut service =
+        LayoutService::new(registry, Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    open(&mut service, "one", "first");
+    let column = service.layout().section(&section("first")).unwrap().column.clone().unwrap();
+    for (request, expected) in [(189.0, 160.0), (190.0, 160.0), (191.0, 220.0), (250.0, 250.0)] {
+        service.dispatch(transaction(vec![Mutation::SetColumnWidth { column: column.clone(), width: request }])).unwrap();
+        assert_eq!(service.layout().column(&column).unwrap().width, expected);
+    }
+    service
+        .dispatch(transaction(vec![Mutation::Open {
+            kind: PanelKind::new("fixture.tight").unwrap(),
+            instance: id("tight"),
+            destination: Some(Destination::JoinTab { section: section("first"), index: 1 }),
+        }]))
+        .unwrap();
+    assert_eq!(column_widths(service.layout(), service.registry(), &column).unwrap(), vec![(220.0, 320.0)]);
+}

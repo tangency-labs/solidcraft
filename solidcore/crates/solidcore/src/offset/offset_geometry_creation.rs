@@ -235,6 +235,23 @@ const OP_EDGEUSE: &str = "offset::offset_geometry_creation::edgeuse_offset";
 const OP_EXACT_PIECE: &str = "offset::offset_geometry_creation::exact_piece";
 const OP_ANALYTICS_EXACT: &str = "offset::offset_geometry_creation::make_edges_on_analytics_exact";
 
+/// (not upstream, solidcraft#16983) An extended edge's trim interval on its curve, and
+/// whether its offset is inverted: the trim point of the base edge use's start vertex
+/// lies past the one of its end vertex, as the edge use runs. The two faces' offsets
+/// beside the edge have crossed over it (a wall thicker than half a rib between them
+/// moves each side's offset past the other's), so the edge's offset runs from its start
+/// vertex's image to its end vertex's image against the base edge. Its curve is set that
+/// way ([`OffsetGeometryCreation::replace_edge_curves`] with `inverted`), so that the
+/// edge still ends where its neighbours' offsets do; the merge resolves the faces that
+/// turned inside out with it.
+#[derive(Debug, Clone, Copy)]
+struct TrimmedEdge {
+    /// The trim interval (increasing).
+    interval: Extent1d,
+    /// The trim points run against the base edge use.
+    inverted: bool,
+}
+
 /// The most whole turns `exact_piece` moves a conic's angle by (a guard: the angles
 /// are within a few turns of each other).
 const MAX_EXACT_PIECE_TURNS: u32 = 1 << 16;
@@ -506,6 +523,12 @@ pub trait OffsetExecutive<O> {
     fn crosses_at(&self, original: O) -> bool {
         let _ = original;
         false
+    }
+    /// Not upstream (solidcraft#16983): notes offset face `offset_face`, which has an
+    /// edge whose offset is inverted (see `TrimmedEdge`); nothing unless the adapter
+    /// keeps it.
+    fn note_inverted_face(&mut self, offset_face: O) {
+        let _ = offset_face;
     }
     /// Not upstream (WR-346): whether any inset face's offset collapsed (a convex round
     /// thinner than the wall); `false` unless `Kernel::fixes.offset_collapsed_rounds_mated`.
@@ -2649,6 +2672,36 @@ impl OffsetGeometryCreation {
         uv_curve: Option<O>,
         opt_orig_edgeuse: Option<O>,
     ) -> Result<ReplaceEdgeCurves> {
+        Self::replace_edge_curves_oriented(
+            k,
+            brep,
+            edgeuse,
+            curve_3d,
+            uv_curve,
+            opt_orig_edgeuse,
+            false,
+        )
+    }
+
+    /// [`Self::replace_edge_curves`] for an edge whose offset may be inverted (not
+    /// upstream, solidcraft#16983; see [`TrimmedEdge`]): an inverted edge's new curve runs
+    /// against the edge use's (or the original edge use's) curve, from the image of the
+    /// edge's start vertex to the image of its end vertex, and is set even where its ends
+    /// are the edge curve's ends in reverse order.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::replace_edge_curves`].
+    #[allow(clippy::too_many_arguments)]
+    fn replace_edge_curves_oriented<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        edgeuse: O,
+        curve_3d: Option<O>,
+        uv_curve: Option<O>,
+        opt_orig_edgeuse: Option<O>,
+        inverted: bool,
+    ) -> Result<ReplaceEdgeCurves> {
         // locals
         let edge = brep
             .edgeuse_edge(edgeuse)?
@@ -2677,7 +2730,8 @@ impl OffsetGeometryCreation {
             let curve_end = curve_of(brep, c3)?.evaluate_point(k, c3_ivl.max())?;
 
             // low work - Edgesuse->Curve and 3DCurve start and end Points are within tol
-            if distance(edgeuse_start, curve_start) < edge_tol
+            if !inverted
+                && distance(edgeuse_start, curve_start) < edge_tol
                 && distance(edgeuse_end, curve_end) < edge_tol
             {
                 // No change in ends of curve - don't bother using the inputs - delete them and get out.
@@ -2687,7 +2741,8 @@ impl OffsetGeometryCreation {
             }
 
             // low work - Edgeuse->Curve and 3DCurve start and end Points are within tol with reverse parameterization.
-            if distance(edgeuse_start, curve_end) < edge_tol
+            if !inverted
+                && distance(edgeuse_start, curve_end) < edge_tol
                 && distance(edgeuse_end, curve_start) < edge_tol
             {
                 // No change in ends of curve - just delete the curves and get out
@@ -2720,7 +2775,8 @@ impl OffsetGeometryCreation {
             // when input and existing edge curves run in opposite directions - reverse 3DCurve and UVCurve
             let t1 = pv.get(1).copied().ok_or(dangling("tangent missing"))?;
             let t2 = pv2.get(1).copied().ok_or(dangling("tangent missing"))?;
-            if t1.dot(t2) < 0.0 {
+            // (not upstream) an inverted edge's curve runs the other way
+            if (t1.dot(t2) < 0.0) != inverted {
                 // Opposite orientation - reverse 3DCurve and UVCurve (statuses ignored)
                 let ivl = curve_of(brep, c3)?.natural_interval();
                 let c = brep
@@ -2799,7 +2855,7 @@ impl OffsetGeometryCreation {
     /// curve; `SER` of the point solves, intersections and evaluations;
     /// [`SolidError::InvalidInput`] for null objects upstream dereferences. `SER` of
     /// `SmEdgeuse::CreateUVTrimCurve` is included.
-    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    #[allow(clippy::too_many_arguments)]
     pub fn trim_extended_edge<O: ClassObject + SolutionObject>(
         &self,
         k: &Kernel,
@@ -2815,7 +2871,41 @@ impl OffsetGeometryCreation {
         mark: MarkType,
     ) -> Result<Option<Extent1d>> {
         let _ = (offset_edgeuse, other_offset_edgeuse);
+        Ok(self
+            .trim_extended_edge_ends(
+                k,
+                brep,
+                executive,
+                base_edgeuse,
+                other_base_edgeuse,
+                curve_3d,
+                uv_curve_base,
+                uv_curve_other_base,
+                mark,
+            )?
+            .map(|t| t.interval))
+    }
 
+    /// [`Self::trim_extended_edge`] with the order of its trim points: the trim interval,
+    /// and whether the edge's offset is inverted (see [`TrimmedEdge`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::trim_extended_edge`]; those of the two tangent evaluations
+    /// ([`Self::trim_points_inverted`]).
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    fn trim_extended_edge_ends<O: ClassObject + SolutionObject>(
+        &self,
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &mut impl OffsetExecutive<O>,
+        base_edgeuse: O,
+        other_base_edgeuse: Option<O>,
+        curve_3d: O,
+        uv_curve_base: Option<O>,
+        uv_curve_other_base: Option<O>,
+        mark: MarkType,
+    ) -> Result<Option<TrimmedEdge>> {
         // locals
         let mut trim_ivl = Extent1d::new();
         let tan_tol_deg = self.tangency_tol_degrees();
@@ -2823,6 +2913,10 @@ impl OffsetGeometryCreation {
             .edgeuse_edge(base_edgeuse)?
             .ok_or(dangling("edge use without edge"))?;
 
+        // (not upstream) the trim point of the base edge use's start vertex, then its end's
+        let mut ends = [0.0_f64; 2];
+        // (not upstream) whether each trim point is a cut by a neighbour's offset surface
+        let mut cuts = [false; 2];
         // for two iterations - find a one 3DCurve trim point
         for i in 0..2 {
             let mut solutions: SolutionArray<O> = SolutionArray::with_capacity(16);
@@ -3290,7 +3384,8 @@ impl OffsetGeometryCreation {
             };
             let same_tol = 10.0 * self.this_approx_tol_3d;
             let first_again = |pnt: Point3| first.is_some_and(|f| distance(pnt, f) <= same_tol);
-            for sol in solutions.as_slice() {
+            let mut found_at = None;
+            for (ix, sol) in solutions.as_slice().iter().enumerate() {
                 let t = sol.start.param(0)?;
                 let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
 
@@ -3300,6 +3395,7 @@ impl OffsetGeometryCreation {
                     found_param = t;
                     found_dist = dist_moved;
                     found = true;
+                    found_at = Some(ix);
                 }
 
                 // If solution is a range, e.g. coincident curves, check m_vEnd
@@ -3313,9 +3409,12 @@ impl OffsetGeometryCreation {
                         found_param = t;
                         found_dist = dist_moved;
                         found = true;
+                        found_at = Some(ix);
                     }
                 }
             }
+            let mut cut = found_at
+                .is_some_and(|ix| face_solutions.iter().any(|&(lo, hi)| lo <= ix && ix < hi));
 
             // Four-face vertex splitting (WR-666, the fork's
             // tangency-labs/smlib@2e1bb8c): where more than three faces meet at the vertex,
@@ -3340,6 +3439,7 @@ impl OffsetGeometryCreation {
                     tan_tol_deg,
                 )? {
                     found_param = param;
+                    cut = true;
                 }
             }
 
@@ -3350,7 +3450,31 @@ impl OffsetGeometryCreation {
 
             // else set Interval
             trim_ivl.add_value(found_param);
+            if let Some(end) = ends.get_mut(i) {
+                *end = found_param;
+            }
+            if let Some(c) = cuts.get_mut(i) {
+                *c = cut;
+            }
         } // end iter twice
+
+        // (not upstream) whether the trim points come in the base edge use's order: an
+        // open edge only (a closed curve's two arcs are chosen below), whose two ends are
+        // both cuts by its neighbours' offsets (they crossed over it); an end dropped from
+        // its vertex or taken from a mated neighbour's vertex says nothing of a crossing.
+        // Only in an inward shell with faces opened (a rib thinner than two walls), at an
+        // edge between two faces, where the faces that turn inside out with it are
+        // resolved before the merge (`offset_resolve_crossing_loops`, which drops their
+        // inverted regions); elsewhere (a solid offset, a sheet's thickening, a lamina
+        // edge, the fix off) an edge whose vertex moves past its other end is refused as
+        // vanishing, as before.
+        let inverted = k.fixes.offset_resolve_crossing_loops
+            && executive.inset()
+            && !executive.shell_faces().is_empty()
+            && other_base_edgeuse.is_some()
+            && cuts == [true, true]
+            && !brep.edge_is_closed(base_edge)?
+            && Self::trim_points_inverted(k, brep, base_edgeuse, curve_3d, &trim_ivl, ends)?;
 
         // (WR-463, #403): on a closed curve the two trim points bound two arcs and the
         // interval between them is only one of them. The edge takes the arc that runs where
@@ -3397,10 +3521,55 @@ impl OffsetGeometryCreation {
         // cull zero length curves
         let scaled_zero = EFF_ZERO * (1.0 + trim_ivl.max_dimension());
         if trim_ivl.length() > scaled_zero {
-            Ok(Some(trim_ivl))
+            Ok(Some(TrimmedEdge {
+                interval: trim_ivl,
+                inverted,
+            }))
         } else {
             Ok(None)
         }
+    }
+
+    /// (not upstream, solidcraft#16983) Whether the trim points `ends` (on `curve_3d`, of
+    /// the base edge use's start vertex and of its end vertex) run against the base edge
+    /// use: going from the first to the second, the curve runs the other way to the edge
+    /// use. Its direction along the edge use is the sign of the product of the two
+    /// tangents at their middles (the curve's at the middle of `trim_ivl`), the test
+    /// [`Self::replace_edge_curves`] orients the curve by; tangents square to each other
+    /// give no direction, and the trim points are taken in order.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a base edge use without edge or curve; those of
+    /// the two evaluations.
+    fn trim_points_inverted<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        base_edgeuse: O,
+        curve_3d: O,
+        trim_ivl: &Extent1d,
+        ends: [f64; 2],
+    ) -> Result<bool> {
+        let [start, end] = ends;
+        if start == end {
+            return Ok(false);
+        }
+        let base_edge = brep
+            .edgeuse_edge(base_edgeuse)?
+            .ok_or(dangling("edge use without edge"))?;
+        let base_curve = brep
+            .edge_curve(base_edge)?
+            .ok_or(dangling("edge without curve"))?;
+        let base_mid = brep.edge_interval(base_edge)?.evaluate(0.5);
+        let base = curve_of(brep, base_curve)?.evaluate(k, base_mid, 1, true, true)?;
+        let curve = curve_of(brep, curve_3d)?.evaluate(k, trim_ivl.evaluate(0.5), 1, true, true)?;
+        let base_tangent = base.get(1).copied().ok_or(dangling("tangent missing"))?;
+        let curve_tangent = curve.get(1).copied().ok_or(dangling("tangent missing"))?;
+        let mut along = curve_tangent.dot(base_tangent);
+        if brep.edgeuse_orientation(base_edgeuse)? == OrientType::Opposite {
+            along = -along;
+        }
+        Ok((end - start) * along < 0.0)
     }
 
     /// `TrimExtendedEdge`'s choice at a vertex of more than three faces under WR-666
@@ -4108,14 +4277,12 @@ impl OffsetGeometryCreation {
         // Now that we have created one or two UV curves and a 3D curve find trimming
         // interval and if we find a good one replace the geometry.
         let lifted_h = store_curve(brep, lifted_curve.clone())?;
-        let trim_ivl = self.trim_extended_edge(
+        let trimmed = self.trim_extended_edge_ends(
             k,
             brep,
             executive,
             edgeuse,
             other_edgeuse,
-            offset_edgeuse,
-            other_offset_edgeuse,
             lifted_h,
             Some(uv_curve_extended_h),
             other_uv_h,
@@ -4123,7 +4290,11 @@ impl OffsetGeometryCreation {
         )?;
 
         // when TrimExtendedEdge() call worked
-        let Some(trim_ivl) = trim_ivl else {
+        let Some(TrimmedEdge {
+            interval: trim_ivl,
+            inverted,
+        }) = trimmed
+        else {
             // TrimExtendedEdge() call did not work
             return Err(sm_err(OP_EXTEND));
         };
@@ -4157,16 +4328,24 @@ impl OffsetGeometryCreation {
 
         // change the pOffsetEdgeuse geometry (ReplaceEdgeCurves dereferences it: null is
         // undefined)
-        let r = self.replace_edge_curves(
+        let r = Self::replace_edge_curves_oriented(
             k,
             brep,
             offset_edgeuse.ok_or(dangling("null offset edge use"))?,
             Some(lifted_h),
             Some(uv_curve_extended_h),
             None,
+            inverted,
         );
         // (the rbDelete* flags only free the candidates upstream)
         r?;
+        if inverted {
+            for off in [offset_edgeuse, other_offset_edgeuse].into_iter().flatten() {
+                if let Some(face) = brep.edgeuse_face(off)? {
+                    executive.note_inverted_face(face);
+                }
+            }
+        }
 
         // when appropriate - change the pOtherOffsetEdgeuse geometry
         if let Some(other_off) = other_offset_edgeuse {
@@ -4176,7 +4355,15 @@ impl OffsetGeometryCreation {
             };
             // GWC:BUG?? These two Edgeuses point to the same edge - these two calls should
             //           have the same 3DCurve
-            self.replace_edge_curves(k, brep, other_off, Some(lifted_copy_h), Some(other), None)?;
+            Self::replace_edge_curves_oriented(
+                k,
+                brep,
+                other_off,
+                Some(lifted_copy_h),
+                Some(other),
+                None,
+                inverted,
+            )?;
         } // end pOtherOffsetEdgeuse existence check
 
         // all done
@@ -4447,6 +4634,7 @@ impl OffsetGeometryCreation {
         let mut min_dist = BIG_DOUBLE;
         let mut min_curve: Option<usize> = None;
         let mut trim_ivl = Extent1d::new();
+        let mut inverted = false;
 
         // for every intersection solution
         for ii in 0..curves_3d.len() {
@@ -4486,14 +4674,12 @@ impl OffsetGeometryCreation {
             // Trim the extended Surf/Surf intersection (not upstream: a curve that does not
             // end at a crossing tangent neighbour's vertex is no candidate, and is the
             // refusal when no curve is one)
-            let my_trim = match self.trim_extended_edge(
+            let my_trim = match self.trim_extended_edge_ends(
                 k,
                 brep,
                 executive,
                 edgeuse,
                 Some(other_edgeuse),
-                Some(offset_edgeuse),
-                Some(other_offset_edgeuse),
                 c3,
                 Some(uv1),
                 Some(uv2),
@@ -4509,14 +4695,19 @@ impl OffsetGeometryCreation {
             // (not upstream) a cut on the curved surface's continuation is no candidate
             let my_trim = match (my_trim, curved_side) {
                 (Some(my_trim), Some((orig_mid, into_curved))) => {
-                    let mid_pnt = curve_of(brep, c3)?.evaluate_point(k, my_trim.evaluate(0.5))?;
+                    let mid_pnt =
+                        curve_of(brep, c3)?.evaluate_point(k, my_trim.interval.evaluate(0.5))?;
                     ((mid_pnt - orig_mid).dot(into_curved) > 0.0).then_some(my_trim)
                 }
                 (my_trim, _) => my_trim,
             };
 
             // when intersection was successfully trimmed
-            if let Some(my_trim) = my_trim {
+            if let Some(TrimmedEdge {
+                interval: my_trim,
+                inverted: my_inverted,
+            }) = my_trim
+            {
                 // when there is more than 1 intersection curve to check
                 if curves_3d.len() > 1 {
                     // save the trimmed XSectCurve that has the smallest change from the original 3DCurve.
@@ -4530,10 +4721,12 @@ impl OffsetGeometryCreation {
                         min_curve = Some(ii);
                         min_dist = dist;
                         trim_ivl = my_trim;
+                        inverted = my_inverted;
                     }
                 } else {
                     // only 1 curve to check branch - use this curve
                     trim_ivl = my_trim;
+                    inverted = my_inverted;
                     min_curve = Some(0);
                 }
             }
@@ -4590,26 +4783,35 @@ impl OffsetGeometryCreation {
         let copy_3d_h = store_curve(brep, copy_3d)?;
 
         // when appropriate - change the pOffsetEdgeuse geometry
-        self.replace_edge_curves(
+        Self::replace_edge_curves_oriented(
             k,
             brep,
             offset_edgeuse,
             Some(curve_3d_found),
             Some(uv_curve1_found),
             Some(edgeuse),
+            inverted,
         )?;
 
         // when appropriate - change the pOtherOffsetEdgeuse geometry
         // GWC:BUG?? These two Edgeuses point to the same edge - these two calls should
         //           have the same 3DCurve. It's ok: At this point they do not (yet) point to the same edge.
-        self.replace_edge_curves(
+        Self::replace_edge_curves_oriented(
             k,
             brep,
             other_offset_edgeuse,
             Some(copy_3d_h),
             Some(uv_curve2_found),
             Some(other_edgeuse),
+            inverted,
         )?;
+        if inverted {
+            for off in [offset_edgeuse, other_offset_edgeuse] {
+                if let Some(face) = brep.edgeuse_face(off)? {
+                    executive.note_inverted_face(face);
+                }
+            }
+        }
 
         // all done
         Ok(())
