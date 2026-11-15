@@ -1,4 +1,4 @@
-name: SolidCraft T175 reference-slot targeted tests
+name: SolidCraft T176 drawing attention UI and translations
 on:
   push:
     branches: [integration/issue-15776-upstream-20261115]
@@ -43,6 +43,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cargo test -p solidcraft-ui-egui drawing_attention_card::tests --lib -- --nocapture
           cargo test -p solidcraft-ui-egui drawing_repair_ui::tests --lib -- --nocapture
           cargo test -p solidcraft-ui-egui repair_gui_acceptance_t158 --lib -- --nocapture
           cargo test -p solidcraft-ui-egui drawing_status --lib -- --nocapture
