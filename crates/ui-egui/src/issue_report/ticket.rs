@@ -26,6 +26,9 @@ pub struct TicketDraft {
     pub from_failure: bool,
     /// The agent report this dialog is for (its id), when an agent opened it.
     pub agent: Option<String>,
+    /// Send found this report sent in the last 30 minutes: that draft's page, to open again
+    /// instead of sending it twice.
+    pub already: Option<String>,
     /// The title was found empty on Send.
     missing_title: bool,
 }
@@ -253,7 +256,15 @@ pub fn new_ticket(app: &mut SolveApp, draft: &Draft, ctx: Option<&egui::Context>
         }
     }
     tickets::load_apps(app);
-    TicketDraft { form, ticks, evidence, from_failure: failing.is_some(), agent: draft.agent.as_ref().map(|a| a.id.clone()), missing_title: false }
+    TicketDraft {
+        form,
+        ticks,
+        evidence,
+        from_failure: failing.is_some(),
+        agent: draft.agent.as_ref().map(|a| a.id.clone()),
+        already: None,
+        missing_title: false,
+    }
 }
 
 fn heading(ui: &mut Ui, id: &str) {
@@ -395,7 +406,9 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     let screen = ctx.content_rect();
     let cards = ((screen.width() - 2.0 * t.space_16) / t.form_card_width).clamp(0.5, 2.0);
     // Sent (or being sent): Send again would send it twice.
-    let busy = app.tickets.sending.is_some() || matches!(app.tickets.outcome, Some(Outcome::Filed(_) | Outcome::Queued | Outcome::Opened));
+    let busy = app.tickets.sending.is_some()
+        || ticket.already.is_some()
+        || matches!(app.tickets.outcome, Some(Outcome::Filed(_) | Outcome::Queued | Outcome::Opened));
     let (closed, action) = ui_kit::Window::new(Id::unique("sc_issue_report"), "bug_report", tr("report.title"))
         .cards(cards)
         .placed(egui::Align2::CENTER_TOP, egui::pos2(screen.center().x, screen.top() + t.space_16))
@@ -486,6 +499,14 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                         retake = attachments(app, draft, &mut ticket, ui);
                         ui_kit::divider(ui, "report-status");
                         status(app, ui);
+                        if let Some(url) = ticket.already.clone() {
+                            ui_kit::text(ui, tr("report.already_sent"), ui_kit::Text::Heading("report.already_sent"));
+                            let r = ui_kit::button(ui, tr("report.open_again"), ui_kit::Button::Normal);
+                            crate::scenario::publish_target("report:open_again", r.rect);
+                            if r.clicked() {
+                                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                            }
+                        }
                         note(ui, "report.browser_note", tr("report.browser_note"));
                         let r = ui.link(tr("report.github_instead"));
                         crate::scenario::publish_target("report:github", r.rect);
@@ -497,7 +518,11 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
         ticket.missing_title = ticket.form.title.trim().is_empty();
         if !ticket.missing_title {
             let report = outgoing(draft, &ticket);
-            tickets::send(app, report);
+            // The same report sent in the last 30 minutes is not sent again: its page opens.
+            match tickets::already_sent(app, &report.ticket) {
+                Some(url) => ticket.already = Some(url),
+                None => tickets::send(app, report),
+            }
         }
     }
     if github {

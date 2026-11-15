@@ -35,6 +35,11 @@ there, the app keeps the token it is given in the system keyring (service "Solid
 the browser's local storage on the web) and later reports are filed directly, with "Ticket #N
 filed" and an Open button. Preferences › Security › Problem reports shows which and signs out.
 
+Send report is disabled from the click until the dialog closes. The same report (title, failed
+operation and design) sent again within 30 minutes is not sent twice: the dialog says "You already
+sent this report — open it again?" and opens the first draft. The server also answers a repeat with
+the same draft (`duplicate`), and one already filed is not uploaded again.
+
 A report that cannot reach the server is kept in `<data folder>/report-queue` and the dialog
 offers Send now. With a remembered token it is sent by itself when SolidCraft starts or every
 five minutes. The queue never holds a token.
