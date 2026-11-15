@@ -653,7 +653,7 @@ fn plane_face_lies_on_its_plane(k: &Kernel, b: &Brep, o: Point3, n: Vec3) {
 /// and that now have a certified reach beside the revolutions: `built`, a sound manifold
 /// solid (`check_brep` level 2) with one face on each new plane, every vertex and every
 /// edge of it certified on that plane ([`plane_face_lies_on_its_plane`]); otherwise refused
-/// as a loop gap the offset cannot close, with the input left as it came in (its volume, faces
+/// as an offset edge that vanishes, with the input left as it came in (its volume, faces
 /// and edges).
 fn revolution_built_sound_or_refused_unchanged(moves: &[(usize, f64, [f64; 3])], built: bool) {
     let mut k = Kernel::default();
@@ -683,19 +683,8 @@ fn revolution_built_sound_or_refused_unchanged(moves: &[(usize, f64, [f64; 3])],
         }
         Err(e) => {
             assert!(!built, "refused: {e}");
-            // (the one case refused, gen0012: the edge whose vertex the second plane moves
-            // onto its other end is squeezed out (WR-566), and the loop gap left on the
-            // revolution's offset face 0 is not closed by a certified bridge; not an
-            // uncertified reach)
-            assert_eq!(
-                e.failure().map(|f| f.reason.clone()),
-                Some(solidcore::error::Reason::Offset(
-                    solidcore::error::offset::OffsetFailure::LoopGapUncertified {
-                        face: Some(FaceId::from_index(0))
-                    }
-                )),
-                "{e:?}"
-            );
+            // (the one case refused: an offset edge vanishes, not an uncertified reach)
+            assert!(e.is_offset_edge_vanishes(), "{e:?}");
             let after = (
                 volume(&mut k, &mut b).unwrap(),
                 bp1::faces(&b, None).unwrap().len(),
@@ -729,8 +718,7 @@ fn three_revolution_faces_given_planes_build_a_sound_solid() {
 }
 
 /// `gen0012`: one revolution face given two planes and another a tilted one, refused with
-/// the input unchanged (past the reach an edge closes to a point; it is squeezed out and
-/// the gap it leaves is not certified: `LoopGapUncertified`, `SM_ERR`).
+/// the input unchanged (past the reach, an edge vanishes: `SM_ERR_OFFSET_EDGE_VANISHES`).
 #[test]
 fn a_revolution_face_given_two_planes_is_refused_unchanged() {
     revolution_built_sound_or_refused_unchanged(

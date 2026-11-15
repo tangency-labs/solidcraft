@@ -318,6 +318,46 @@ impl OffsetExecutive {
         // (fork ccbf77a) each edge that closed to a point: its offset face and the original
         // face across it
         let mut closed_edges: Vec<(FaceId, Option<FaceId>)> = Vec::new();
+        let closing = self.close_gaps_of_faces(
+            kernel,
+            original,
+            b,
+            approx_tol,
+            notifications,
+            &mut closed_edges,
+        );
+        if let Err(failure) = closing {
+            // (WR-566) a later gap failed after edges had closed to points: an edge closed
+            // where no face closed to nothing is refused by name, as it would have been
+            // once every gap was closed, ahead of the later gap's failure
+            if !closed_edges.is_empty() {
+                self.closed_faces(kernel, original, b, &closed_edges)?;
+            }
+            return Err(failure);
+        }
+        if !closed_edges.is_empty() {
+            self.remove_closed_faces(kernel, original, b, &closed_edges, notifications)?;
+        }
+        Ok(())
+    }
+
+    /// The passes of [`OffsetExecutive::close_loop_gaps`] over the faces of `b`: each gap
+    /// of each face's loops is closed (`close_loop_gap`), the edges closed to points noted
+    /// in `closed_edges`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`OffsetExecutive::close_loop_gaps`] before its faces are removed.
+    #[allow(clippy::too_many_arguments)]
+    fn close_gaps_of_faces(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &Brep,
+        b: &mut Brep,
+        approx_tol: f64,
+        notifications: &mut OffsetNotifications<'_>,
+        closed_edges: &mut Vec<(FaceId, Option<FaceId>)>,
+    ) -> Result<()> {
         for f in bp1::faces(b, None)? {
             // Each gap closed changes the loop: look again until none is left (each gap
             // is closed once).
@@ -372,7 +412,7 @@ impl OffsetExecutive {
                                 sv,
                                 tol,
                                 notifications,
-                                &mut closed_edges,
+                                closed_edges,
                             )?;
                         } else if start.distance(sv) <= tol && end.distance(sv) > tol {
                             self.close_loop_gap(
@@ -385,7 +425,7 @@ impl OffsetExecutive {
                                 sv,
                                 tol,
                                 notifications,
-                                &mut closed_edges,
+                                closed_edges,
                             )?;
                         } else {
                             return Err(sm_err());
@@ -396,33 +436,25 @@ impl OffsetExecutive {
                 }
             }
         }
-        if !closed_edges.is_empty() {
-            self.remove_closed_faces(kernel, original, b, &closed_edges, notifications)?;
-        }
         Ok(())
     }
 
-    /// The end of the fork's `CloseLoopGaps` (ccbf77a, WR-566): the offset faces that
-    /// closed to nothing as their edges closed to points (`IsDegenerate`: a step's wall
-    /// whose low top moved onto the high top's plane, its edges along the tops now
-    /// coinciding) are deleted, in the order they closed, with their pairs in the
-    /// executive's relations; the merge joins the faces either side along their
-    /// coinciding edges. Every closed edge must be one of theirs or lie across from one of
-    /// them (the sides' edges along the wall).
+    /// The check of [`OffsetExecutive::remove_closed_faces`]: the offset faces that closed
+    /// to nothing with `closed_edges` (`IsDegenerate`), in the order they closed, and the
+    /// same as a set; every closed edge must be one of theirs or lie across from one.
     ///
     /// # Errors
     ///
-    /// [`crate::error::offset::OffsetFailure::EdgeVanishes`] for a closed edge of a face that did not close to
-    /// nothing and across from none that did (a face turned inside out past it); those of
-    /// `IsDegenerate`, the edge and face queries and `DeleteFace`.
-    fn remove_closed_faces(
-        &mut self,
-        kernel: &mut Kernel,
+    /// [`crate::error::offset::OffsetFailure::EdgeVanishes`] for a closed edge of a face
+    /// that did not close to nothing and across from none that did; those of
+    /// `IsDegenerate` and the face queries.
+    fn closed_faces(
+        &self,
+        kernel: &Kernel,
         original: &Brep,
         b: &mut Brep,
         closed_edges: &[(FaceId, Option<FaceId>)],
-        notifications: &mut OffsetNotifications<'_>,
-    ) -> Result<()> {
+    ) -> Result<(Vec<FaceId>, BTreeSet<FaceId>)> {
         // offset faces closed to nothing, in the order they closed, and the original faces
         // they were offset from
         let mut gone_list: Vec<FaceId> = Vec::new();
@@ -446,6 +478,31 @@ impl OffsetExecutive {
                 return Err(self.edge_vanishes(original, face, None));
             }
         }
+        Ok((gone_list, gone))
+    }
+
+    /// The end of the fork's `CloseLoopGaps` (ccbf77a, WR-566): the offset faces that
+    /// closed to nothing as their edges closed to points (`IsDegenerate`: a step's wall
+    /// whose low top moved onto the high top's plane, its edges along the tops now
+    /// coinciding) are deleted, in the order they closed, with their pairs in the
+    /// executive's relations; the merge joins the faces either side along their
+    /// coinciding edges. Every closed edge must be one of theirs or lie across from one of
+    /// them (the sides' edges along the wall).
+    ///
+    /// # Errors
+    ///
+    /// [`crate::error::offset::OffsetFailure::EdgeVanishes`] for a closed edge of a face that did not close to
+    /// nothing and across from none that did (a face turned inside out past it); those of
+    /// `IsDegenerate`, the edge and face queries and `DeleteFace`.
+    fn remove_closed_faces(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &Brep,
+        b: &mut Brep,
+        closed_edges: &[(FaceId, Option<FaceId>)],
+        notifications: &mut OffsetNotifications<'_>,
+    ) -> Result<()> {
+        let (gone_list, gone) = self.closed_faces(kernel, original, b, closed_edges)?;
         let mut gone_eus: BTreeSet<EdgeuseId> = BTreeSet::new();
         let body = notifications.result_brep;
         for &face in &gone_list {
