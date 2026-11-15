@@ -1545,8 +1545,9 @@ mod tests {
         assert!(ids("MANAGE", "RULES").contains(&"plastic.manage_rules"));
         let create = ids("MODEL", "CREATE");
         assert!(create.contains(&"plastic.boss") && create.contains(&"solid.rib") && create.contains(&"plastic.lip"));
-        // Cell Grid cuts a sketch's area into a part, as Hole does.
-        assert!(create.contains(&"solid.cell_grid"));
+        // Cell Grid cuts a sketch's area into a part, as Hole does: it comes right after Hole.
+        let hole = create.iter().position(|id| *id == "solid.hole");
+        assert_eq!(hole.and_then(|i| create.get(i + 1)).copied(), Some("solid.cell_grid"), "{create:?}");
         assert!(ids("MODEL", "MODIFY").contains(&"solid.shell"));
         assert_eq!(panels("MANAGE"), ["PARAMETERS", "CONFIGURATIONS", "MATERIALS", "RULES", "DESIGN"]);
         // The former sketch/solid INSPECT panels now share a global INSPECT tab.

@@ -499,8 +499,14 @@ fn representative(h: &Harness, command: &str) -> Dialog {
 }
 
 fn check_form(command: &str, labels: &[&str]) {
+    check_form_with(command, labels, &[], |_| {});
+}
+
+/// [`check_form`] on the representative dialog after `set` changed it; the `absent` rows are not drawn.
+fn check_form_with(command: &str, labels: &[&str], absent: &[&str], set: impl FnOnce(&mut Dialog)) {
     let mut h = fixture();
     let mut d = representative(&h, command);
+    set(&mut d);
     assert_eq!(super::command(&d.kind), Some(command));
     let spec = solidcraft_engine::find_command(command).unwrap();
     assert!(!spec.icon.is_empty());
@@ -587,6 +593,9 @@ fn check_form(command: &str, labels: &[&str]) {
         assert!(row.contains_rect(control), "{command}: {label}");
         assert!(scenario::handle_at(&format!("dialog:{label}")).is_some() || scenario::rect_of(&format!("dialog:control:{label}")).is_some());
     }
+    for label in absent {
+        assert!(scenario::rect_of(&format!("dialog:row:{label}")).is_none(), "{command}: {label} is not drawn");
+    }
     assert!(scenario::rect_of("dialog:footer").is_some());
     assert!(scenario::handle_at("dialog:ok").is_some());
     assert!(scenario::handle_at("dialog:cancel").is_some());
@@ -617,7 +626,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
         "Offset" if command == "frame.end_cap" => Role::CheckBox,
         "Through all" if command == "solid.cell_grid" => Role::CheckBox,
-        "Clip" if command == "solid.cell_grid" => Role::ComboBox,
+        "Clip" | "Dot grid" if command == "solid.cell_grid" => Role::ComboBox,
         "Animate" => Role::Button,
         "Ratio" if command.starts_with("joint.") && command != "joint.motion_link" => return None,
         _ => Role::TextInput,
@@ -837,6 +846,24 @@ form_case!(rib, "solid.rib", ["Direction", "Thickness", "Depth"]);
 form_case!(web, "solid.web", ["Direction", "Thickness", "Depth"]);
 form_case!(emboss, "solid.emboss", ["Depth", "Type"]);
 form_case!(cell_grid, "solid.cell_grid", ["Shape", "Cell size", "Web", "Through all", "Depth", "Direction", "Clip", "Angle"]);
+
+/// The rows that come and go with the choices: Sides for polygon cells, Dot grid for circle and
+/// polygon cells, Margin with whole cells only.
+#[test]
+fn cell_grid_form_shows_the_rows_of_the_chosen_shape_and_clip() {
+    // Indices into the dialog's shapes (hexagon, square, triangle, circle, polygon) and clips (whole, snap, free).
+    let cell = |shape: usize, clip: usize| {
+        move |d: &mut Dialog| {
+            if let Kind::CellGrid(c) = &mut d.kind {
+                (c.shape, c.clip) = (shape, clip);
+            }
+        }
+    };
+    let always = ["Shape", "Cell size", "Web", "Through all", "Depth", "Direction", "Clip", "Angle"];
+    check_form_with("solid.cell_grid", &[&always[..], &["Sides", "Dot grid", "Margin"]].concat(), &[], cell(4, 0));
+    check_form_with("solid.cell_grid", &[&always[..], &["Dot grid"]].concat(), &["Sides", "Margin"], cell(3, 1));
+    check_form_with("solid.cell_grid", &always, &["Sides", "Dot grid", "Margin"], cell(0, 2));
+}
 form_case!(replace_face, "solid.replace_face", []);
 form_case!(boundary_fill, "solid.boundary_fill", ["Cells", "Operation"]);
 form_case!(align, "solid.align", ["Object Type", "From Snap", "To Snap"]);
