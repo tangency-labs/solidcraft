@@ -318,7 +318,7 @@ fn copy_pairs(
 ///   other, so each edge's point at `t` is within it of the other's point at the same `t`.
 ///   Rational and 2D NURBs, and NURBs on different domains, have no bound.
 /// - Every other pair: no bound.
-fn coincidence_bound(
+pub(crate) fn coincidence_bound(
     a: &crate::curve::curve::p2::Curve,
     ia: &crate::geom::extent1d::Extent1d,
     b: &crate::curve::curve::p2::Curve,

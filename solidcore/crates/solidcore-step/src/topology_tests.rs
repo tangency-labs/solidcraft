@@ -941,6 +941,65 @@ fn a_half_torus_between_its_rims_gets_a_seam_round_the_tube() {
     });
 }
 
+/// A band round a spindle torus (`major` under `minor`: its tube crossing its axis, as the round
+/// end of a pin), read as its tube circle revolved: between its widest circle (its vertex at
+/// angle `at`) and a circle below it (its vertex at 0.3 rad), closed by a disk on each. Read,
+/// validated, its faces pointing out, and its one seam (the one edge that is not a circle) on
+/// the quarter line at the revolution's profile (angle 0: y = 0, x > 0), its loops split there.
+fn spindle_torus_band(major: f64, minor: f64, at: f64) {
+    let low = -std::f64::consts::FRAC_PI_3;
+    let (r_low, z_low) = (major + minor * low.cos(), minor * low.sin());
+    let mut w = W::default();
+    let ring = |w: &mut W, r: f64, z: f64, at: f64| {
+        let x = [at.cos(), at.sin(), 0.0];
+        let v = w.vertex([r * x[0], r * x[1], z]);
+        let k = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], x, r);
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    let (equator, lower) = (ring(&mut w, major + minor, 0.0, at), ring(&mut w, r_low, z_low, 0.3));
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},{},{})", real(major), real(minor)));
+    // The band lies below the equator (running −u) and above the lower circle (running +u).
+    let (x, y) = (w.oe(equator, false), w.oe(lower, true));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let band = w.face(&[bx, by], torus, true);
+    let top = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(equator, true);
+    let bx = w.bound(&[x], true, true);
+    let top = w.face(&[bx], top, true);
+    let bottom = w.plane([0.0, 0.0, z_low], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(lower, false);
+    let bx = w.bound(&[x], true, true);
+    let bottom = w.face(&[bx], bottom, true);
+    let shell = closed_shell(&mut w, &[band, top, bottom]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('pin end',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(s.brep.faces.len(), 3);
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    let seams: Vec<_> = s.brep.edges.iter().filter(|e| !matches!(e.curve, solidcore_record::brep::Curve::Circle { .. })).collect();
+    assert_eq!(seams.len(), 1, "{:?}", s.brep.edges.iter().map(|e| &e.curve).collect::<Vec<_>>());
+    for p in seams[0].vertices.map(|v| s.brep.vertices[v as usize].point) {
+        assert!(p[1].abs() < 1e-9 * (major + minor) && p[0] > 0.0, "{p:?}");
+    }
+    faces_away(&s.brep, 0, |_| [0.0, 0.0, 0.5 * z_low]);
+}
+
+/// The pin end's radii, both circles' vertices off the quarter lines (at 0.5 and 0.3 rad): the
+/// seam lies on the quarter line at angle 0, both circles split there. A seam at a vertex left
+/// its second use past the end of the form, which starts on a quarter line.
+#[test]
+fn a_band_round_a_spindle_torus_gets_its_seam_on_a_quarter_line() {
+    spindle_torus_band(0.84455, 1.905, 0.5);
+}
+
+/// A widest circle of radius 100 with its vertex 5e-9 rad (5e-7 mm, past the file's 1e-7 mm)
+/// round from the quarter line: the vertex is off the line, and the circle is split on it that
+/// close to its end, the piece left longer than the tolerance.
+#[test]
+fn a_spindle_torus_band_splits_its_circle_just_short_of_a_vertex_near_the_quarter_line() {
+    spindle_torus_band(40.0, 60.0, 5e-9);
+}
+
 /// A quarter elbow: a torus face winding round its tube between two tube circles (at u = 0 and
 /// u = π/2), closed by the two disks they bound. The tube face gets a seam round the axis at a
 /// vertex's angle round the tube, as a band round the axis gets one round the tube.
