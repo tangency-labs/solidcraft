@@ -1,6 +1,7 @@
 //! Read-only Drawing attention card. Kept separate from sheet rendering (#13211).
 //! The host supplies a current DrawingAttention snapshot; no CAD command runs here.
 use crate::drawing_dimension_status::{DimensionItem, DrawingAttention};
+use crate::ui_kit;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AttentionRow {
@@ -52,27 +53,27 @@ fn reason(d: &DimensionItem) -> String {
 /// State is conveyed by both text and a shape, never by colour alone.
 pub fn show(ui: &mut egui::Ui, snapshot: &DrawingAttention) {
     let items = rows(snapshot);
-    egui::Frame::group(ui.style()).show(ui, |ui| {
-        ui.heading("Drawing status");
+    ui.group(|ui| {
+        ui_kit::section_heading(ui, solidcraft_ui_text::tr("ui.drawing_attention.title"));
         if items.is_empty() {
-            ui.label("✓ No dimensions need attention");
+            ui.label(format!("✓ {}", solidcraft_ui_text::tr("ui.drawing_attention.clear")));
         } else {
-            ui.label(format!("◇ {} dimensions need attention", items.len()));
+            ui.label(format!("◇ {} {}", items.len(), solidcraft_ui_text::tr("ui.drawing_attention.count")));
             for item in items {
                 ui.separator();
                 ui.horizontal_wrapped(|ui| {
                     ui.label("◇");
-                    ui.strong(format!("{} · {}", item.id, item.state));
+                    ui.strong(format!("{} {} · {}", solidcraft_ui_text::tr("ui.drawing_attention.dimension"), item.id, item.state));
                 });
                 ui.label(&item.reason);
                 ui.small(&item.location);
             }
         }
         if snapshot.held {
-            ui.label("◇ Drawing updates are held");
+            ui.label(format!("◇ {}", solidcraft_ui_text::tr("ui.drawing_attention.held")));
         }
         if snapshot.waiting_views > 0 {
-            ui.label(format!("◇ {} views waiting for update", snapshot.waiting_views));
+            ui.label(format!("◇ {} {}", snapshot.waiting_views, solidcraft_ui_text::tr("ui.drawing_attention.waiting")));
         }
         for warning in &snapshot.warnings {
             ui.label(format!("◇ {warning}"));
