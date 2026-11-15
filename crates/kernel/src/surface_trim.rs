@@ -66,27 +66,32 @@ pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> 
 }
 
 /// A surface body trimmed by face `face` of `tool` itself, keeping what `keep` says. The body
-/// is cut where the face's surface meets it, and every edge of that cut between a piece kept and
-/// a piece taken away must lie on the face: on its surface and inside its trim, by the exact test
+/// is cut where the face's surface meets it, and every edge between a piece kept and a piece
+/// taken away must lie on the face: on its surface and inside its trim, by the exact test
 /// ([`solidcore_ops::cap::edges_lie_on_face`]) within the larger of the two bodies' tolerances.
-/// Otherwise the trim is refused: the face does not cut the body through on its own, and what
-/// would separate the pieces is only its surface continued past its edges. A cut off the face
-/// with kept pieces on both sides of it changes nothing that is kept, and is allowed. Each kept
-/// face is the face it is a piece of (its history is over `[body]`).
+/// That is every such edge, the cut's new edges and edges the body already had along the face's
+/// surface alike. Otherwise the trim is refused: the face does not cut the body through on its
+/// own, and what would separate the pieces is only its surface continued past its edges. A cut
+/// off the face with kept pieces on both sides of it changes nothing that is kept, and is
+/// allowed. Each kept face is the face it is a piece of (its history is over `[body]`).
 pub fn trim_by_face(body: &Body, tool: &Body, face: usize, keep: TrimKeep) -> Result<Body> {
     trim_split(body, &SplitTool::Face { body: tool, face }, keep, Some((tool, face)))
 }
 
-/// Whether every edge of the cut of `split` between a kept piece and one taken away (`kept`, in
-/// `split`'s face order) lies on face `face` of `tool`; the refusal when one does not.
+/// Whether every edge of `split` between a kept piece and one taken away (`kept`, in `split`'s
+/// face order, read from each edge's uses) lies on face `face` of `tool`; the refusal when one
+/// does not.
 fn cut_held_to_face(split: &Body, kept: &[bool], tool: &Body, face: usize) -> Result<()> {
-    let parting: Vec<usize> = crate::splitface::cut_edges(split)
-        .into_iter()
-        .filter(|(_, faces)| {
-            let sides: Vec<bool> = faces.iter().filter_map(|f| kept.get(*f).copied()).collect();
+    let parting: Vec<usize> = split
+        .record()
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| {
+            let sides: Vec<bool> = e.uses.iter().filter_map(|u| kept.get(u.face as usize).copied()).collect();
             sides.iter().any(|k| *k) && sides.iter().any(|k| !*k)
         })
-        .map(|(e, _)| e)
+        .map(|(i, _)| i)
         .collect();
     if parting.is_empty() {
         return Ok(());
@@ -443,6 +448,19 @@ mod tests {
         let both = TrimKeep::Regions(&[Vec3::new(1.0, 10.0, 0.0), Vec3::new(19.0, 10.0, 0.0)]);
         let whole = trim_by_face(&sq, &short, 0, both).unwrap();
         assert!(rel(area(&whole), 400.0) < 1e-9, "{}", area(&whole));
+        // The sheet already split along x = 5 below y = 10 (three faces: [0, 5] × [0, 10],
+        // [5, 20] × [0, 10] and [0, 20] × [10, 20] above them, its lower edge through (5, 10)).
+        // A face over y = 10…25 cuts only the upper face; keeping x < 5 would also take away the
+        // lower right face, across the edge it already had at x = 5, which lies off the tool
+        // face: refused.
+        let pts = [(0.0, 10.0), (5.0, 10.0), (20.0, 10.0), (20.0, 20.0), (0.0, 20.0)].map(|(x, y)| Vec2::new(x, y));
+        let upper = patch_region(&Plane::XY, &Region2 { outer: Loop2::polygon(&pts), holes: vec![] }).unwrap();
+        let (left, right) = (rect(&Plane::XY, 0.0, 0.0, 5.0, 10.0), rect(&Plane::XY, 5.0, 0.0, 20.0, 10.0));
+        let presplit = stitch(&[&left, &right, &upper], 0.0).unwrap();
+        assert_eq!(presplit.face_count(), 3);
+        let high = rect(&at5, 10.0, -5.0, 25.0, 5.0);
+        let e = trim_by_face(&presplit, &high, 0, TrimKeep::Side(Vec3::new(1.0, 15.0, 0.0))).unwrap_err().to_string();
+        assert!(e.contains("does not cut the surface through"), "{e}");
     }
 
     #[test]
