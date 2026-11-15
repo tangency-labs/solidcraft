@@ -1876,12 +1876,11 @@ mod wr457_certificates {
         let mut out: Vec<_> = CASES
             .iter()
             .map(|&(f, n)| {
-                let form = match MIXED.iter().find(|m| m.0 == n) {
-                    Some(&(_, concave, convex)) => Form::Mixed(concave, convex),
-                    None => {
-                        assert!(CONCAVE_PAIRS.contains(&n), "{n}");
-                        Form::ConcavePair
-                    }
+                let form = if let Some(&(_, concave, convex)) = MIXED.iter().find(|m| m.0 == n) {
+                    Form::Mixed(concave, convex)
+                } else {
+                    assert!(CONCAVE_PAIRS.contains(&n), "{n}");
+                    Form::ConcavePair
                 };
                 (f, n.to_string(), form)
             })
