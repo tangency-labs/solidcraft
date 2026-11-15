@@ -901,7 +901,10 @@ fn map_local_with_input(
                     }
                     m.here = true;
                     // Body names stay: the sketch's view of the model keeps them.
-                    let r = if *kind == HerePlane { m.plane(v) } else { m.picks(v, None) };
+                    // A plane whose origin has length expressions (#8192) can't be mapped here: it
+                    // stays as given and goes into the active component's frame as a whole.
+                    let expressed = v.get("origin").and_then(Value::as_array).is_some_and(|a| a.iter().any(Value::is_string));
+                    let r = if *kind == HerePlane { if expressed { None } else { m.plane(v) } } else { m.picks(v, None) };
                     m.here = false;
                     m.f.sketch = keep;
                     r
