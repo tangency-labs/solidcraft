@@ -29,6 +29,11 @@ pub type CallbackResources = type_map::TypeMap;
 pub struct Callback(Box<dyn CallbackTrait>);
 
 impl Callback {
+    /// Inspect the concrete callback without preparing or painting GPU work.
+    pub fn downcast_ref<T: CallbackTrait>(&self) -> Option<&T> {
+        (self.0.as_ref() as &dyn std::any::Any).downcast_ref()
+    }
+
     /// Creates a new [`epaint::PaintCallback`] from a callback trait instance.
     pub fn new_paint_callback(
         rect: epaint::emath::Rect,
@@ -85,7 +90,7 @@ impl Callback {
 /// # Example
 ///
 /// See the [`custom3d_wgpu`](https://github.com/emilk/egui/blob/main/crates/egui_demo_app/src/apps/custom3d_wgpu.rs) demo source for a detailed usage example.
-pub trait CallbackTrait: Send + Sync {
+pub trait CallbackTrait: Send + Sync + std::any::Any {
     fn prepare(
         &self,
         _device: &wgpu::Device,
@@ -127,6 +132,29 @@ pub struct ScreenDescriptor {
 
     /// High-DPI scale factor (pixels per point).
     pub pixels_per_point: f32,
+}
+
+/// SolidCraft: optional ownership of a complete frame, outside the primitive loop.
+/// Returning false keeps the ordinary pass. No effect resources exist by default.
+pub trait FrameCompositor: Send + Sync {
+    /// SolidCraft: select the native viewport before any effect preparation/painting.
+    fn begin_viewport(&self, _viewport: u64) {}
+    /// SolidCraft: actual acquired target geometry, before callback preparation.
+    fn screen(&self, _screen: &ScreenDescriptor, _resources: &mut CallbackResources) {}
+    /// SolidCraft: release target-dependent state on zero size or a lost device.
+    fn suspend(&self) {}
+    fn render(
+        &self,
+        renderer: &Renderer,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        jobs: &[epaint::ClippedPrimitive],
+        screen: &ScreenDescriptor,
+        clear: [f32; 4],
+    ) -> bool;
+
+    /// Called only after the commands producing cached pixels have been submitted.
+    fn submitted(&self) {}
 }
 
 impl ScreenDescriptor {
@@ -259,10 +287,17 @@ pub struct Renderer {
 
     options: RendererOptions,
 
+    /// The last `update_buffers` could not upload this frame's meshes (the GPU refused a
+    /// staging buffer: device lost or out of memory), so `render` draws nothing this frame
+    /// instead of panicking (SolidCraft #1469).
+    skip_frame: bool,
+
     /// Storage for resources shared with all invocations of [`CallbackTrait`]'s methods.
     ///
     /// See also [`CallbackTrait`].
     pub callback_resources: CallbackResources,
+    /// SolidCraft: installed lazily by an enabled effect; the ordinary loop is unchanged.
+    pub frame_compositor: Option<std::sync::Arc<dyn FrameCompositor>>,
 }
 
 impl Renderer {
@@ -479,6 +514,7 @@ impl Renderer {
                 slices: Vec::with_capacity(64),
                 capacity: INDEX_BUFFER_START_CAPACITY,
             },
+            skip_frame: false,
             uniform_buffer,
             // Buffers on wgpu are zero initialized, so this is indeed its current state!
             previous_uniform_buffer_content: UniformBuffer::zeroed(),
@@ -490,6 +526,7 @@ impl Renderer {
             samplers: HashMap::default(),
             options,
             callback_resources: CallbackResources::default(),
+            frame_compositor: None,
         }
     }
 
@@ -509,7 +546,24 @@ impl Renderer {
         paint_jobs: &[epaint::ClippedPrimitive],
         screen_descriptor: &ScreenDescriptor,
     ) {
+        self.render_with_mesh_offset(render_pass, paint_jobs, screen_descriptor, 0);
+    }
+
+    /// SolidCraft: continue an uploaded frame in another render pass. `mesh_offset`
+    /// counts every preceding mesh, including meshes with an empty clip rectangle.
+    /// Callbacks consume no mesh buffer slice. The caller preserves primitive order.
+    pub fn render_with_mesh_offset(
+        &self,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        paint_jobs: &[epaint::ClippedPrimitive],
+        screen_descriptor: &ScreenDescriptor,
+        mesh_offset: usize,
+    ) {
         profiling::function_scope!();
+
+        if self.skip_frame {
+            return;
+        }
 
         let pixels_per_point = screen_descriptor.pixels_per_point;
         let size_in_pixels = screen_descriptor.size_in_pixels;
@@ -518,8 +572,8 @@ impl Renderer {
         // run.
         let mut needs_reset = true;
 
-        let mut index_buffer_slices = self.index_buffer.slices.iter();
-        let mut vertex_buffer_slices = self.vertex_buffer.slices.iter();
+        let mut index_buffer_slices = self.index_buffer.slices.iter().skip(mesh_offset);
+        let mut vertex_buffer_slices = self.vertex_buffer.slices.iter().skip(mesh_offset);
 
         for epaint::ClippedPrimitive {
             clip_rect,
@@ -971,6 +1025,10 @@ impl Renderer {
     ) -> Vec<wgpu::CommandBuffer> {
         profiling::function_scope!();
 
+        self.skip_frame = false;
+        if let Some(effect) = &self.frame_compositor {
+            effect.screen(screen_descriptor, &mut self.callback_resources);
+        }
         let screen_size_in_points = screen_descriptor.screen_size_in_points();
 
         let uniform_buffer_content = UniformBuffer {
@@ -1030,11 +1088,13 @@ impl Renderer {
             );
 
             let Some(mut index_buffer_staging) = index_buffer_staging else {
-                panic!(
-                    "Failed to create staging buffer for index data. Index count: {index_count}. Required index buffer size: {required_index_buffer_size}. Actual size {} and capacity: {} (bytes)",
+                log::warn!(
+                    "Failed to create staging buffer for index data; skipping this frame. Index count: {index_count}. Required index buffer size: {required_index_buffer_size}. Actual size {} and capacity: {} (bytes)",
                     self.index_buffer.buffer.size(),
                     self.index_buffer.capacity
                 );
+                self.skip_frame = true;
+                return Vec::new();
             };
 
             let mut index_offset = 0;
@@ -1076,11 +1136,13 @@ impl Renderer {
             );
 
             let Some(mut vertex_buffer_staging) = vertex_buffer_staging else {
-                panic!(
-                    "Failed to create staging buffer for vertex data. Vertex count: {vertex_count}. Required vertex buffer size: {required_vertex_buffer_size}. Actual size {} and capacity: {} (bytes)",
+                log::warn!(
+                    "Failed to create staging buffer for vertex data; skipping this frame. Vertex count: {vertex_count}. Required vertex buffer size: {required_vertex_buffer_size}. Actual size {} and capacity: {} (bytes)",
                     self.vertex_buffer.buffer.size(),
                     self.vertex_buffer.capacity
                 );
+                self.skip_frame = true;
+                return Vec::new();
             };
 
             let mut vertex_offset = 0;

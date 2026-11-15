@@ -4,17 +4,57 @@ Copies of third-party crates that SolidCraft builds with local fixes, wired in w
 `[patch.crates-io]` in the workspace `Cargo.toml`. They keep their own licence; changed lines
 are marked `SolidCraft:` in the source.
 
-## egui-wgpu 0.37.0 (MIT OR Apache-2.0, Emil Ernerfeldt and contributors)
+## egui 0.37.0 (MIT OR Apache-2.0, Emil Ernerfeldt and contributors)
 
-Original package sources from https://github.com/emilk/egui/tree/0.37.0/crates/egui-wgpu,
-with both original licence texts retained. No images or bundled documentation are copied.
+`vendor/egui` is egui's whole repository at tag 0.37.0 (commit `841a328ba2`, https://github.com/emilk/egui),
+added with `git subtree add --squash`, so SolidCraft can carry its own changes to egui, eframe and
+egui-wgpu. Nothing of it is deleted or reorganised: SolidCraft's changes, listed below and marked
+`SolidCraft:` in the source, are the only difference from upstream, so a `git subtree pull` of a
+newer egui meets nothing but them. It keeps its own licences (both texts are in it), tooling and
+rules: SolidCraft's checks do not apply to it, and the workspace excludes `vendor/`.
 
-The shared viewport crate `solidcraft-viewport-egui` draws through it and relies on these fixes
-(above all, the drawable acquired before paint callbacks are prepared: without it the cached
-offscreen picture is never drawn). Another workspace that uses that crate patches egui-wgpu to
-this copy the same way, with `[patch.crates-io] egui-wgpu = { path = ".../vendor/egui-wgpu" }`.
+Every egui crate SolidCraft builds is patched to it in the workspace `Cargo.toml`: `ecolor`,
+`eframe`, `egui`, `egui-wgpu`, `egui-winit`, `egui_glow`, `emath`, `epaint` and
+`epaint_default_fonts`. egui's own workspace builds and tests there as upstream's does, for example
+`cargo test --manifest-path vendor/egui/Cargo.toml -p egui -p eframe --lib`.
 
-SolidCraft changes:
+### Git LFS
+
+Upstream keeps its images (screenshot tests, demo and media pictures; none in the crates SolidCraft
+builds) in Git LFS, and the subtree has them as LFS pointer files. SolidCraft has no LFS storage of
+its own, so the repository's `.lfsconfig` tells Git LFS never to download anything under
+`vendor/egui/` (`fetchexclude`): a checkout leaves the pointer files as they are, instead of failing
+with "smudge filter lfs failed". It also sets `allowincompletepush`, so a push to this repository
+does not stop on images nobody has.
+
+GitHub refuses LFS uploads to a public fork ("can not upload new objects to public fork"). A push to
+a fork that does not have the egui import yet (or a new egui) carries its pointer files, and Git LFS
+then tries to upload their images. Sync the fork with `main` first (GitHub's "Sync fork"), or skip
+the upload, which nothing needs:
+
+```sh
+GIT_LFS_SKIP_PUSH=1 git push <fork> <branch>
+```
+
+### Updating egui
+
+```sh
+GIT_LFS_SKIP_SMUDGE=1 git subtree pull --prefix=vendor/egui https://github.com/emilk/egui <tag> --squash
+```
+
+Conflicts can only come from SolidCraft's own changes. Land the pull request that does this with a
+merge commit, not a squash or a rebase: `git subtree` finds the last import by its squash commit, and
+a squash merge rewrites it away. SolidCraft's changes can go back to a fork of egui the same way, with
+`git subtree split --prefix=vendor/egui` or `git subtree push --prefix=vendor/egui <egui fork> <branch>`.
+
+The shared viewport crate `solidcraft-viewport-egui` draws through egui-wgpu and relies on the
+fixes below (above all, the drawable acquired before paint callbacks are prepared: without it the
+cached offscreen picture is never drawn). Another workspace that uses that crate patches the egui
+crates to this tree the same way, with
+`[patch.crates-io] egui-wgpu = { path = ".../vendor/egui/crates/egui-wgpu" }` and the same for the others.
+
+SolidCraft changes to egui-wgpu (paths relative to `crates/egui-wgpu`; these lived in a
+separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
 - `src/setup.rs`, `src/lib.rs`: let a named adapter selector defer to the normal wgpu
   request when the requested card is unavailable or incompatible with the window surface.
 - `src/lib.rs`: use 1x MSAA on the selected OpenGL adapter before creating pipelines,

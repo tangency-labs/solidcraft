@@ -2280,7 +2280,7 @@ mod tests {
         let mut app = app();
         let ctx = crate::fonts::test_context();
         begin(&mut app, &ctx, None, None);
-        // As the app's window device has it (vendor/egui-wgpu asks for at least 8192).
+        // As the app's window device has it (the vendored egui-wgpu asks for at least 8192).
         app.issue_report.pending.as_mut().unwrap().max_side = 8192;
         let token = app.issue_report.pending.as_ref().unwrap().token;
         let [w, h] = [6016, 3384];
