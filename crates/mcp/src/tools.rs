@@ -458,7 +458,8 @@ fn inspect_design_tool(opts: Options) -> Value {
          rolled back, error, warning, timing), bodies (volume, area, centre of mass, bounding box, face/edge/vertex \
          counts), sketches (curves with ids and coordinates, points, constraints, profiles, degrees of freedom, solve \
          status), assembly joints (what each origin is attached to: occurrence, the feature, face, edge or sketch \
-         curve its face names refer to, whether it resolves and why not; `execute` `joint.inspect {joint}` gives one), \
+         curve its face names refer to, whether it resolves and why not; `execute` `joint.inspect {joint}` gives one; the rigid \
+         joints holding an imported assembly's contents are only counted, per component, in `joint_summary`), \
          the active sketch, selection and undo depth. On a large design keep the reply small with `timeline: \"summary\"` \
          (each feature as id, name, type, and error or warning only when it has one) or false, and `bodies: \"names\"` or false.",
             object(
@@ -483,7 +484,8 @@ fn inspect_design_tool(opts: Options) -> Value {
          plane, counts of points, curves, constraints and profiles, degrees of freedom, solve status); their full contents \
          (curves with ids and coordinates, points, constraints, profiles) only for the sketches named in `sketches`, or \
          all with `sketches: true` (large: a 720-point sketch is some 200 KB). Assembly joints: what each origin is \
-         attached to (`execute` `joint.inspect {joint}` gives one). On a large design keep the reply small with \
+         attached to (`execute` `joint.inspect {joint}` gives one; the rigid joints holding an imported assembly's \
+         contents are only counted, per component, in `joint_summary`). On a large design keep the reply small with \
          `timeline: \"summary\"` (each feature as id, name, type, and error or warning only when it has one) or false, and \
          `bodies: \"names\"` or false. Arguments: measure, sketches, bodies, timeline, joints.",
         object(
@@ -937,13 +939,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
                     .collect();
                 d["sketches"] = Value::Array(full);
             }
-            // Joints: what each is attached to (left out when there are none, or the app is older).
-            if a.get("joints").and_then(Value::as_bool).unwrap_or(true)
-                && let Ok(j) = exec(b, "joint.inspect", json!({}))
-                && j["joints"].as_array().is_some_and(|v| !v.is_empty())
-            {
-                d["joints"] = j["joints"].clone();
-            }
+            design_joints(b, a, &mut d);
             Ok(d)
         }
         "pending" => pending(b),
@@ -1337,14 +1333,35 @@ fn inspect_design_compact(b: &mut dyn Backend, a: &Map<String, Value>) -> Result
             .collect();
         d["sketches"] = Value::Array(out);
     }
-    // Joints: what each is attached to (left out when there are none, or the app is older).
-    if a.get("joints").and_then(Value::as_bool).unwrap_or(true)
-        && let Ok(j) = exec(b, "joint.inspect", json!({}))
-        && j["joints"].as_array().is_some_and(|v| !v.is_empty())
-    {
+    design_joints(b, a, &mut d);
+    Ok(d)
+}
+
+/// `inspect_design`'s joints: what each is attached to, except the rigid joints holding a
+/// component's contents together (an imported assembly has one per placement, hundreds of them),
+/// which `joint_summary` counts per component instead, with every joint by type. Left out when
+/// there are none or `joints: false`; an app from before the filters gives every joint.
+fn design_joints(b: &mut dyn Backend, a: &Map<String, Value>, d: &mut Value) {
+    if !a.get("joints").and_then(Value::as_bool).unwrap_or(true) {
+        return;
+    }
+    let j = match exec(b, "joint.inspect", json!({"exclude_rigid_groups": true})) {
+        Ok(j) => j,
+        Err(_) => match exec(b, "joint.inspect", json!({})) {
+            Ok(j) => j,
+            Err(_) => return,
+        },
+    };
+    if j["joints"].as_array().is_some_and(|v| !v.is_empty()) {
         d["joints"] = j["joints"].clone();
     }
-    Ok(d)
+    // Something left out: the summary says what and where. `kinds: []` keeps no rows.
+    if j.get("omitted").is_some()
+        && let Ok(list) = exec(b, "joint.list", json!({"summary": true, "quiet": true, "kinds": []}))
+        && let Some(summary) = list.get("summary")
+    {
+        d["joint_summary"] = summary.clone();
+    }
 }
 
 /// The steps of the script file `batch` was given as `path` (`None`: it was given `commands`).

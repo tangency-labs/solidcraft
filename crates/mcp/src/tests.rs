@@ -863,8 +863,33 @@ fn inspect_design_lists_joint_definitions() {
     assert_eq!(d["joints"][0]["name"], "Glue", "{d}");
     assert_eq!(d["joints"][0]["a"]["snap"]["type"], "face_center", "{d}");
     assert_eq!(d["joints"][0]["b"]["resolves"], true, "{d}");
+    assert!(d.get("joint_summary").is_none(), "nothing left out, nothing summarised: {d}");
     let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false, "joints": false}));
     assert!(d.get("joints").is_none(), "{d}");
+
+    // A sub-assembly held together as an import holds it: its rigid joints are counted, not listed.
+    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+        let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
+        let mut exec = |command: &str, params: Value| tool(&mut s, "execute", json!({"command": command, "params": params}));
+        for (name, corner) in [("A", [0, 0, 0]), ("B", [20, 0, 0])] {
+            exec("component.activate", json!({"component": "root"}));
+            exec("component.create", json!({"name": name}));
+            exec("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": corner}));
+        }
+        exec("joint.as_built", json!({"type": "rigid", "name": "Glue", "a": "A", "b": "B"}));
+        exec("component.activate", json!({"component": "root"}));
+        exec("component.create", json!({"name": "Kit", "grounded": false}));
+        for name in ["P1", "P2"] {
+            exec("component.create", json!({"name": name, "parent": "Kit", "activate": false, "grounded": false}));
+        }
+        exec("joint.rigid_group", json!({"occurrences": ["Kit", "P1", "P2"]}));
+        let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+        let names: Vec<&str> = d["joints"].as_array().into_iter().flatten().filter_map(|j| j["name"].as_str()).collect();
+        assert_eq!(names, ["Glue"], "{d}");
+        assert_eq!(d["joint_summary"]["by_type"], json!({"rigid": 3}), "{d}");
+        assert_eq!(d["joint_summary"]["rigid_groups"][0]["name"], "Kit", "{d}");
+        assert_eq!(d["joint_summary"]["rigid_groups"][0]["members"], 3, "{d}");
+    }
 }
 
 /// `set_parameter` takes the new value as `value` or as `expression` (the name parameters.change
