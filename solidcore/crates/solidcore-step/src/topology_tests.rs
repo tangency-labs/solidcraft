@@ -124,6 +124,10 @@ struct BoxStyle {
     wrong_face: bool,
     /// One edge's same_sense written wrong (its line running from start to end, same_sense .F.).
     wrong_edge: bool,
+    /// Every edge a second face uses is written again for that face, as an EDGE_CURVE of its own
+    /// on the same two vertices: on the first one's LINE (`Some(0.0)`), or on a LINE of its own
+    /// whose origin lies the given distance off.
+    twin_edges: Option<f64>,
 }
 
 /// The box from `lo` to `hi`: its faces (outward normals) and its top and bottom faces'
@@ -148,6 +152,18 @@ fn box_faces(w: &mut W, lo: V, hi: V, style: BoxStyle, inner: &mut dyn FnMut(&mu
                 let (p, q) = (ring[k], ring[(k + 1) % 4]);
                 let key = (p.min(q), p.max(q));
                 let e = match edges.get(&key) {
+                    Some(e) if style.twin_edges.is_some() => {
+                        let line = w.s.lines().find(|l| l.starts_with(&format!("#{e}="))).map(str::to_string).unwrap_or_default();
+                        let body = line.split_once('=').map(|(_, b)| b.trim_end_matches(';').to_string()).unwrap_or_default();
+                        match style.twin_edges {
+                            Some(off) if off != 0.0 => {
+                                let (va, pa) = vs[key.0];
+                                let (vb, pb) = vs[key.1];
+                                w.line_edge((va, [pa[0] + off, pa[1], pa[2]]), (vb, pb), true, 1.0)
+                            }
+                            _ => w.add(body),
+                        }
+                    }
                     Some(e) => *e,
                     None => {
                         let n = edges.len();
@@ -1041,6 +1057,41 @@ fn a_closed_shell_beside_open_shells_reads_each_open_shell_as_a_sheet() {
     assert!(r.solids[1].sheet && r.solids[2].sheet);
     assert_eq!(counts(&r.solids[1].brep), [1, 1, 5, 12, 8]);
     assert_eq!(counts(&r.solids[2].brep), [1, 1, 1, 4, 4]);
+}
+
+/// A box written with every edge twice (one EDGE_CURVE for each face that uses it, on the same
+/// LINE) reads as the box with 12 edges: the twins are one edge each, the solid closes, and the
+/// reader says so.
+#[test]
+fn edges_written_twice_on_one_curve_record_are_one_edge() {
+    let mut w = W::default();
+    let style = BoxStyle { twin_edges: Some(0.0), ..BoxStyle::default() };
+    let faces = box_faces(&mut w, [0.0; 3], [1.0; 3], style, &mut |_, _| Vec::new());
+    assert_eq!(w.s.matches("EDGE_CURVE(").count(), 24, "every edge is written twice");
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('twins',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert!(!s.sheet);
+    assert_eq!(counts(&s.brep), [2, 1, 6, 12, 8]);
+    assert!(s.notes.iter().any(|n| n.contains("12 edges the file writes twice")), "{:?}", s.notes);
+}
+
+/// Two edges on the same vertices whose curves are different records are not merged, however
+/// near they lie: nothing is decided by how close two curves come (here a LINE of its own, its
+/// origin 1e-9 off).
+#[test]
+fn edges_written_twice_on_different_curve_records_are_not_merged() {
+    let mut w = W::default();
+    let style = BoxStyle { twin_edges: Some(1e-9), ..BoxStyle::default() };
+    let faces = box_faces(&mut w, [0.0; 3], [1.0; 3], style, &mut |_, _| Vec::new());
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('apart',#{shell})"));
+    let r = read_solids(&w.file(&[solid]));
+    assert!(
+        !r.solids.iter().any(|s| s.notes.iter().any(|n| n.contains("written twice"))),
+        "{:?}",
+        r.solids.iter().map(|s| &s.notes).collect::<Vec<_>>()
+    );
 }
 
 #[test]

@@ -65,9 +65,9 @@
 {"case":"cover_analytic_plane_vs_cyl","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,-1.0,1e+20]}}
 {"case":"cover_analytic_plane_vs_cyl_merged","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,-1.0,1e+20]}}
 {"case":"cover_analytic_plane_vs_cyl_tol1e-3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,-1.0,1e+20]}}
-{"case":"cover_analytic_plane_vs_plane_coincident","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,-1.0,1e+20]}}
-{"case":"cover_analytic_plane_vs_plane_coincident_merged","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,-1.0,1e+20]}}
-{"case":"cover_analytic_plane_vs_plane_coincident_tol1e-3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,-1.0,1e+20]}}
+{"case":"cover_analytic_plane_vs_plane_coincident","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
+{"case":"cover_analytic_plane_vs_plane_coincident_merged","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
+{"case":"cover_analytic_plane_vs_plane_coincident_tol1e-3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0]}}
 {"case":"cover_analytic_sphere_band_vs_sphere_quarter","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,3.7238012298709097e-16]}}
 {"case":"cover_analytic_sphere_band_vs_sphere_quarter_merged","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,3.7238012298709097e-16]}}
 {"case":"cover_analytic_sphere_band_vs_sphere_quarter_tol1e-3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,3.7238012298709097e-16]}}

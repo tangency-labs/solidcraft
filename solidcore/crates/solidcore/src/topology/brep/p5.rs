@@ -44,8 +44,8 @@
 //! geometry by a fixed scheme (`Notify`, `Arena`): a plain entry point's kernel keys
 //! would otherwise leave the curve owned by no edge `ValidateGeometry` knows. Under a
 //! caller's naming (`Caller`, `Unknown`) the environment's key owns it, recorded on `b`.
-//! Not upstream: with `Kernel::fixes.glue_vertices_joins_every_region` (WR-607; SolidCraft
-//! change, tangency-labs/smlib 661f79c) [`glue_vertices`] joins the pair of shells of every
+//! Not upstream (WR-607; SolidCraft change, tangency-labs/smlib 661f79c): [`glue_vertices`]
+//! joins the pair of shells of every
 //! region both vertices are in, not only the last pair its search finds.
 //! `SmBrep::Notify` is owned by `topology.brep_p2`, not this unit. Owning-list
 //! traversal (`GetRegions`, `GetFaces`, `GetEdges`, `GetVertices`) and the editing
@@ -73,6 +73,10 @@
 //! topological vertices, each surviving edge on a line and its vertices grow to the
 //! certified gaps the joins left between the line's ends and the vertices
 //! (`cover_joined_line_gaps`; the boolean cleanup does the same).
+//! Not upstream (#16866): after each face merge [`remove_topological_edges_and_vertices`]
+//! completes the merged face's seam (`HasSeamProblem`, then `SplitAtSeam`:
+//! [`crate::topology::face::p1::complete_merged_face_seam`]), as the boolean cleanup does
+//! under WR-599: a merged face on a periodic surface keeps its seam whatever the fix set.
 
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
@@ -1687,7 +1691,7 @@ fn glue_with_notification_identity(
     }
     let distance = b.vertex(survivor)?.point.distance(b.vertex(deleted)?.point);
     let mut pair = None;
-    // Not upstream (WR-607, `fixes.glue_vertices_joins_every_region`; SolidCraft change,
+    // Not upstream (WR-607; SolidCraft change,
     // tangency-labs/smlib 661f79c): every region both vertices are in has its pair of
     // shells, all of which the glue joins (a solid's vertex is in a shell of the solid's
     // region and one of the infinite region's); one pair is kept apart below for the
@@ -1755,18 +1759,16 @@ fn glue_with_notification_identity(
     };
     // WR-607: the other regions' pairs of shells, and their wire edges, likewise.
     let mut others = Vec::new();
-    if k.fixes.glue_vertices_joins_every_region {
-        for (surv, del) in pairs {
-            if del == last || surv == del || b.shell(del)?.is_vertex_shell() {
-                continue;
-            }
-            let other_wires = if let Some(given) = wire_edges {
-                given.to_vec()
-            } else {
-                shell_wire_edges(k, b, del)?
-            };
-            others.push((surv, del, other_wires));
+    for (surv, del) in pairs {
+        if del == last || surv == del || b.shell(del)?.is_vertex_shell() {
+            continue;
         }
+        let other_wires = if let Some(given) = wire_edges {
+            given.to_vec()
+        } else {
+            shell_wire_edges(k, b, del)?
+        };
+        others.push((surv, del, other_wires));
     }
     for vu in vertex::vertexuses(b, deleted)? {
         remove_vertexuse(b, deleted, vu)?;
@@ -2570,6 +2572,10 @@ pub fn remove_topological_with_notifications(
     let mut joined = Vec::new();
     let result = (|| {
         for edge in brep_edges(b)? {
+            // An edge of the list a seam completion below removed is gone.
+            if b.edge(edge).is_err() {
+                continue;
+            }
             // IsTopological can expand a surface even when this edge is on the
             // keep list. Do not move the keep-list test before this call.
             let Some(topological) =
@@ -2619,6 +2625,17 @@ pub fn remove_topological_with_notifications(
                 delete_edge_keep_surface(k, b, edge, keep, notifications.as_deref_mut())?;
             let domain = topological.merged_face_domain.unwrap_or_default();
             crate::topology::face::p2::set_uv_domain(b, current_face, &domain)?;
+            // (#16866) `IsTopological`'s cover may have taken in a face straddling the kept
+            // surface's seam, the merged domain staying the period it spans: the merged face
+            // gets the seam a face on a periodic surface has, or its loops' UV trims jump by
+            // the period and the check finds their orientation wrong. A merged face with no
+            // seam crossed or missing is left as it is.
+            crate::topology::face::p1::complete_merged_face_seam(
+                k,
+                b,
+                notifications.as_deref_mut(),
+                current_face,
+            )?;
         }
         for vertex in brep_vertices(b)? {
             if vertex::is_loop_vertex(b, vertex)? {

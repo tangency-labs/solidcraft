@@ -236,6 +236,66 @@ fn presented_lengths_put_the_unit_last_and_repeat_limit_indicators() {
 }
 
 #[test]
+fn presented_stacked_length_has_one_unit_after_both_deviations() {
+    let mut s = style();
+    s.unit = "in".into();
+    s.number.marker = DecimalMarker::Point;
+    s.decimals = 3;
+    s.tolerance_decimals = 3;
+    let v = value(25.4, Tolerance::Deviations { upper: 0.254, lower: -0.127 });
+    let result = format_presented_dimension(&v, &s, &DimensionPresentation::default(), "mm").unwrap();
+    match &result.primary {
+        PresentedPrimary::Decimal { text, unit } => {
+            assert_eq!(*unit, Some("in"));
+            assert_eq!(text.nominal, "1.000");
+            assert_eq!(text.tolerance, ToleranceText::Stacked { upper: "+0.010".into(), lower: "−0.005".into() });
+        }
+        other => panic!("expected decimal: {other:?}"),
+    }
+    assert_eq!(result.plain(), "1.000 +0.010/−0.005 in");
+}
+
+#[test]
+fn presented_exact_frame_keeps_length_and_angle_marks() {
+    let mut s = style();
+    s.unit = "in".into();
+    s.number.marker = DecimalMarker::Point;
+    s.decimals = 3;
+    let mut v = value(25.4, Tolerance::None);
+    v.role = Role::Exact;
+    let p = DimensionPresentation::default();
+    let length = format_presented_dimension(&v, &s, &p, "mm").unwrap();
+    match &length.primary {
+        PresentedPrimary::Decimal { text, unit } => {
+            assert_eq!(text.frame, Frame::Box);
+            assert_eq!(*unit, Some("in"));
+        }
+        other => panic!("expected decimal: {other:?}"),
+    }
+    assert_eq!(length.plain(), "1.000 in");
+
+    v.kind = Kind::Angle;
+    v.nominal = 30.5_f64.to_radians();
+    s.unit = "deg".into();
+    s.decimals = 1;
+    let angle = format_presented_dimension(&v, &s, &p, "mm").unwrap();
+    match &angle.primary {
+        PresentedPrimary::Decimal { text, unit } => {
+            assert_eq!(text.frame, Frame::Box);
+            assert_eq!(*unit, Some("°"));
+        }
+        other => panic!("expected decimal: {other:?}"),
+    }
+    assert_eq!(angle.plain(), "30.5°");
+    let minutes = format_presented_dimension(&v, &s, &DimensionPresentation { angle: AngleFormat::DegreesMinutes, ..p }, "mm").unwrap();
+    match &minutes.primary {
+        PresentedPrimary::DegreesMinutes(runs) => assert_eq!(runs.frame, Frame::Box),
+        other => panic!("expected degree/minute runs: {other:?}"),
+    }
+    assert_eq!(minutes.plain(), "30°30.0′");
+}
+
+#[test]
 fn presented_alternate_placement_keeps_its_explicit_unit() {
     let v = value(25.4, Tolerance::None);
     let mut s = style();

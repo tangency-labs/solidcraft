@@ -1,7 +1,7 @@
 //! Contracts and result types for the sketch session commands in `cmd/sketch.rs`:
-//! `sketch.create`, `sketch.construction`, `sketch.delete`, `sketch.move_point`, `sketch.drag`,
-//! `sketch.drag_end`, `sketch.dimension_text`, `sketch.options`, `sketch.chain` and
-//! `sketch.solve` (#13224).
+//! `sketch.create`, `sketch.construction`, `sketch.delete`, `sketch.move_point`,
+//! `sketch.move_points`, `sketch.drag`, `sketch.drag_end`, `sketch.dimension_text`,
+//! `sketch.options`, `sketch.chain` and `sketch.solve` (#13224).
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether a sketch, a curve, a point or a
@@ -551,7 +551,7 @@ pub struct DeleteResult {
 }
 
 // ---------------------------------------------------------------------------------------------
-// sketch.move_point, sketch.drag, sketch.drag_end
+// sketch.move_point, sketch.move_points, sketch.drag, sketch.drag_end
 
 fn move_point_required(schema: &mut Schema) {
     require(schema, "point");
@@ -581,6 +581,143 @@ pub struct MovePointParams {
 /// What `sketch.move_point` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct MovePointResult {
+    /// The sketch's solve; null when it was not solved again.
+    pub sketch: Option<SketchSolve>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+fn move_points_required(schema: &mut Schema) {
+    require(schema, "moves");
+}
+
+/// One point of a `sketch.move_points` call: which point is moved and where it goes. The handler
+/// reads `near` whenever that key is there and only looks at `point` without it, so a `point`
+/// next to a `near` is left alone.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MoveOne {
+    /// The point, by id (`p3`, `l1.end`, `origin`).
+    pub point: Option<String>,
+    /// The sketch point nearest to this position, instead of naming one.
+    pub near: Option<Point2>,
+    /// Where the point is moved to, in sketch coordinates (mm).
+    pub to: Point2,
+}
+
+impl MoveOne {
+    /// One entry of `moves`, read as the handler reads it and in its order: `to` first, then
+    /// `near` when the key is there (`near: null` is refused), and `point` only without it.
+    /// `k` is the entry's position, which the handler's messages name.
+    fn read(m: &Value, k: usize) -> Result<Self, String> {
+        let to = m.get("to").and_then(params::vec2).map(Point2).ok_or_else(|| format!("moves[{k}]: `to` must be a point [x, y]"))?;
+        let near = match m.get("near") {
+            Some(v) => Some(params::vec2(v).map(Point2).ok_or_else(|| format!("moves[{k}]: `near` must be a point [x, y]"))?),
+            None => None,
+        };
+        let point = match (near, m.get("point")) {
+            (Some(_), _) => None,
+            (None, Some(v)) => Some(v.as_str().ok_or_else(|| "`point` must be a point reference".to_string())?.to_string()),
+            (None, None) => None,
+        };
+        Ok(MoveOne { point, near, to })
+    }
+}
+
+impl JsonSchema for MoveOne {
+    fn schema_name() -> Cow<'static, str> {
+        "MoveOne".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point2>();
+        json_schema!({
+            "description": "One point of the move: where it goes, and either its id or a position \
+                            whose nearest sketch point is meant.",
+            "type": "object",
+            "properties": {
+                "point": {"description": "The point, by id (`p3`, `l1.end`, `origin`).", "type": "string"},
+                "near": point,
+                "to": point,
+            },
+            "required": ["to"],
+            "anyOf": [{"required": ["point"]}, {"required": ["near"]}]
+        })
+    }
+}
+
+/// `moves`, entry by entry as the handler reads them, with its messages. An empty list is the
+/// handler's own refusal, and so is anything that is not a list.
+fn moves<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<MoveOne>, D::Error> {
+    let list = match Value::deserialize(d)? {
+        Value::Array(list) if !list.is_empty() => list,
+        _ => return Err(refuse("`moves` must be a list of {point | near, to}")),
+    };
+    list.iter().enumerate().map(|(k, m)| MoveOne::read(m, k).map_err(refuse::<D::Error>)).collect()
+}
+
+fn moves_schema(generator: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "The points to move, one entry each; every entry needs `to`, and names its \
+                        point by `point` or by `near`, the sketch point closest to it.",
+        "type": "array",
+        "items": generator.subschema_for::<MoveOne>(),
+        "minItems": 1
+    })
+}
+
+/// `tolerance`: how close a sketch point must be to `near` to be the one moved, as the handler
+/// reads it; `null` is its default (0.1 mm).
+fn tolerance<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => v.as_f64().and_then(params::finite).filter(|t| *t > 0.0).map(Some).ok_or_else(|| refuse("`tolerance` must be a positive length (mm)")),
+    }
+}
+
+fn tolerance_schema(_: &mut SchemaGenerator) -> Schema {
+    // Above 1e9 mm the engine does not read a length any more (`params::finite`).
+    json_schema!({"type": ["number", "null"], "exclusiveMinimum": 0.0, "exclusiveMaximum": 1e9})
+}
+
+/// Move several sketch points, each to its own target, in one edit (one undo step), and solve the
+/// sketch within its constraints: every point goes as far toward its target as they allow. A
+/// point that parameters place is refused, naming them.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = move_points_required)]
+pub struct MovePointsParams {
+    // `moves` is optional in the type and required in the schema (`move_points_required`), so a
+    // call without it gets the handler's message.
+    /// The points to move, each `{point | near, to}`.
+    #[serde(default, deserialize_with = "moves", skip_serializing_if = "Vec::is_empty")]
+    #[schemars(schema_with = "moves_schema")]
+    pub moves: Vec<MoveOne>,
+    /// How close a sketch point must be to `near` to be the one moved, mm (default 0.1).
+    #[serde(default, deserialize_with = "tolerance", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "tolerance_schema")]
+    pub tolerance: Option<f64>,
+    /// The sketch. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+/// One point of a `sketch.move_points` reply: where it was asked to go and where it ended up.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MovedPoint {
+    /// The point's id; null when the sketch no longer has it.
+    pub point: Option<String>,
+    /// Where it was asked to go: [x, y].
+    pub to: [f64; 2],
+    /// Where it is after the solve: [x, y]; null when the sketch no longer has the point.
+    pub at: Option<[f64; 2]>,
+    /// Whether it reached `to` (constraints may stop it short of it).
+    pub reached: bool,
+}
+
+/// What `sketch.move_points` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MovePointsResult {
+    /// The points it moved, in the order they were given.
+    pub moved: Vec<MovedPoint>,
     /// The sketch's solve; null when it was not solved again.
     pub sketch: Option<SketchSolve>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

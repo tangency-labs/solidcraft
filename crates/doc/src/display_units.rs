@@ -808,6 +808,20 @@ mod number_tests {
     }
 
     #[test]
+    fn minute_carry_obeys_both_tie_policies() {
+        let angle = |minutes: f64| (30.0 + minutes / 60.0).to_radians();
+        for ties in [Ties::HalfEven, Ties::HalfAwayFromZero] {
+            let style = NumberFormat { ties, ..NumberFormat::default() };
+            for (minutes, positive, negative) in [(59.4, "30°59′", "−30°59′"), (59.5, "31°00′", "−31°00′"), (59.6, "31°00′", "−31°00′")]
+            {
+                assert_eq!(format_degrees_minutes(angle(minutes), 0, &style).unwrap().plain(), positive);
+                assert_eq!(format_degrees_minutes(-angle(minutes), 0, &style).unwrap().plain(), negative);
+            }
+            assert_eq!(format_degrees_minutes((-0.4_f64 / 60.0).to_radians(), 0, &style).unwrap().plain(), "0°00′");
+        }
+    }
+
+    #[test]
     fn degrees_minutes_rejects_hostile_input() {
         let style = NumberFormat::default();
         for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MAX] {
