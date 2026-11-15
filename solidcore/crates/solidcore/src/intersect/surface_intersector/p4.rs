@@ -57,8 +57,8 @@
 //!   certify on a sphere ([`SurfaceIntersector::span_images_certified`]); traced points
 //!   toward it are added first, at most [`MAX_APPROACH_POINTS`], past which the trace
 //!   refuses with `IntersectFailed` (`approach_certified`, which polls for cancellation
-//!   once per try). A point `TestPoint` leaves where it was is not certified again: its
-//!   span passed the certified span test.
+//!   once per try). A point `TestPoint` leaves bit for bit where it was is not certified
+//!   again: its span passed the certified span test.
 //! - **Recursion.** `DoPointIntersection` retries once from a singular end point
 //!   through itself, guarded by the function-static `bInsideMe` (set for the nested
 //!   call by an `SmTemporaryChangeValue`); here the flag is a parameter of the
@@ -1113,9 +1113,9 @@ pub const MAX_APPROACH_POINTS: usize = 16;
 /// Each added point is a trace step from the last one half way to `next` (shortened by the
 /// trace's factor 1.5 until its span passes [`SurfaceIntersector::test_span_accuracy`] and
 /// ends before `next`), into one point allocated per added point and reused by its tries,
-/// as `TraceCurve` reuses its next point. A step that hits a domain boundary is refused, as
-/// a step toward a point inside the domains cannot leave them; a clipped step is retried
-/// shorter. The added points are not tested against the trace's targets (`TestPoint`):
+/// as `TraceCurve` reuses its next point. `next` lies inside or on the domains' boundary; a
+/// step ending before `next` that hits the boundary is refused (`IntersectFailed`), never
+/// accepted, and a clipped step is retried shorter. The added points are not tested against the trace's targets (`TestPoint`):
 /// `TestPoint` snapped to `next` as the first target on the span from `tsp`, and each
 /// added point lies on the curve before `next` (ARGUED: the added points follow the same
 /// curve between `tsp` and `next`, where that test found no earlier target). A span that
@@ -1198,6 +1198,32 @@ fn approach_certified<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     Err(refuse(
         "the span to the snapped point does not certify within the bound",
     ))
+}
+
+/// Not upstream (#16669): the bits of everything a span ending at `p` is built from: its
+/// curve parameter, 3D point and derivative, and both surfaces' UV points and derivatives.
+fn span_end_bits(p: &TsectPnt) -> [u64; 15] {
+    let (c, d) = (p.crv_pos(), p.crv_deriv());
+    let (u0, d0) = (p.uv_pos(SrfIndex::First), p.uv_deriv(SrfIndex::First));
+    let (u1, d1) = (p.uv_pos(SrfIndex::Second), p.uv_deriv(SrfIndex::Second));
+    [
+        p.curve_parameter,
+        c.x,
+        c.y,
+        c.z,
+        d.x,
+        d.y,
+        d.z,
+        u0.x,
+        u0.y,
+        d0.x,
+        d0.y,
+        u1.x,
+        u1.y,
+        d1.x,
+        d1.y,
+    ]
+    .map(f64::to_bits)
 }
 
 /// `TestPoint(next, bDone)`: `done` keeps its value when upstream leaves it.
@@ -1526,11 +1552,12 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
         // snap to a through or end point passed, then add the point
         if !done {
-            let before_test = v.intersector().point(next)?.curve_parameter;
+            let before_test = span_end_bits(v.intersector().point(next)?);
             trace_test(v, k, next, &mut done)?;
             v.intersector_mut().point_mut(next)?.deviation = st.deviation;
-            // a point TestPoint left where it was ends a span the span test certified
-            if done || v.intersector().point(next)?.curve_parameter != before_test {
+            // a point TestPoint left bit for bit where it was ends a span the span test
+            // certified
+            if done || span_end_bits(v.intersector().point(next)?) != before_test {
                 approach_certified(v, k, tsp, next, uv_tol)?;
             }
             v.intersector_mut().add_point_to_curve(next)?;

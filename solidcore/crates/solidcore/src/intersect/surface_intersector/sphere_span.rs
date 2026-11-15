@@ -18,9 +18,10 @@
 //! Deviations: the bisection of the span's parameter is bounded at [`MAX_DEPTH`] levels (at
 //! most `2^MAX_DEPTH − 1` bisections, so at most 511 piece bounds and 257 point values per
 //! span, an explicit queue, no recursion). A span the bisection does not certify by then is
-//! not certified, and the trace shortens its step. That fixed budget of a few milliseconds
-//! is why the certificate does not poll for cancellation (`Kernel::check_cancelled`); its
-//! callers do, once per trace step.
+//! not certified, and the trace shortens its step. That fixed budget (at most 511 piece
+//! bounds, 257 point values and one pass over the net's double knots per span) is why the
+//! certificate does not poll for cancellation (`Kernel::check_cancelled`); its callers do,
+//! once per trace step or try.
 
 use std::collections::VecDeque;
 
@@ -55,8 +56,9 @@ pub enum Refusal {
     Off,
     /// A piece at the deepest bisection ([`MAX_DEPTH`]) did not certify.
     Depth,
-    /// An enclosure failed: the net has no NURBS data, or a weight's enclosure was not
-    /// positive.
+    /// An enclosure failed: the net has no NURBS data, a weight's enclosure was not
+    /// positive, or the net is not C¹ across a knot of full multiplicity (or is
+    /// discontinuous across one of higher multiplicity).
     Enclosure,
 }
 
@@ -83,14 +85,22 @@ pub enum Refusal {
 /// a parameter where the clamped image's distance lies wholly over `tol` ends the search
 /// ([`Refusal::Off`]).
 ///
+/// At a knot of full multiplicity (a double knot of the sphere's quadratic net) the
+/// patches meet only C⁰ in the homogeneous net. `joints` bounds, once per span, the jump
+/// `J` of the rational first derivative across each such knot: the one-sided homogeneous
+/// derivatives' difference on each row, less the multiple `λ P_i` of the row's control
+/// point on the knot, bounds it by `max (|r_xyz| + |r_w| M) / w_min` (`M` bounding the net's
+/// points, `w_min` its least weight), and a net with `J` over `1e-9 (1 + M)` is refused
+/// ([`Refusal::Enclosure`]). Where the piece's UV box holds such a knot, `D'` may jump by
+/// `J |N'|` at each of at most three crossings, which adds `3 J |N'| w / 4` per component.
+///
 /// PROVEN: the piece bound is the Peano kernel form of linear interpolation's remainder,
 /// `D(t) − L(t) = −∫ G(t, s) D''(s) ds` with `0 ≤ G` and `∫ G(t, s) ds = (t − a)(b − t) / 2
-/// ≤ w² / 8`, which holds for `D` C¹ and piecewise C² (the pieces of `D''` are hulled over
-/// every patch the box meets); the convex hull property; outward rounding throughout.
-/// ARGUED: the sphere's rational net is C¹ across its double knots (each quarter arc and
-/// half meridian is the same rational quadratic, so the two one-sided derivatives at a
-/// joint agree; the unit test `the_canonical_net_is_c1_at_its_double_knots` checks the
-/// homogeneous condition on the canonical net), so `D` is C¹ and piecewise C² there.
+/// ≤ w² / 8`, for the part of `D` that is C¹ and piecewise C² (the pieces of `D''` hulled
+/// over every patch the box meets), plus the interpolation error of each kink
+/// `J (t − s)₊`, at most `J w / 4`; the convex hull property; outward rounding throughout.
+/// The canonical sphere's `J` is of rounding size (the unit test
+/// `the_canonical_net_is_c1_at_its_double_knots`).
 ///
 /// [`SpanImage::NotASphere`] for any other surface kind; [`SpanImage::NotCertified`] with
 /// the [`Refusal`].
@@ -144,7 +154,17 @@ fn certify(surface: &Surface, n: [Iv3; 4], h: [Iv3; 4], tol: f64) -> SpanImage {
             ]);
         }
     }
-    let net = Shifted { nurbs, pw, du, dv };
+    let (Some(ju), Some(jv)) = (joints(&nurbs, &pw, true), joints(&nurbs, &pw, false)) else {
+        return SpanImage::NotCertified(Refusal::Enclosure);
+    };
+    let net = Shifted {
+        nurbs,
+        pw,
+        du,
+        dv,
+        ju,
+        jv,
+    };
     let h = h.map(|q| [q[0] - origin[0], q[1] - origin[1], q[2] - origin[2]]);
     let curves = Curves {
         dn: derivative(&n),
@@ -211,12 +231,127 @@ fn overshoot(x: Ivl, (lo, hi): (f64, f64)) -> f64 {
 }
 
 /// The sphere's net moved by `−c`: its homogeneous control points `(x w − c_x w, …, w)`,
-/// enclosed, and its knot ranges `du`, `dv` (the natural domain).
+/// enclosed, its knot ranges `du`, `dv` (the natural domain), and its C⁰ joints in u and v.
 struct Shifted {
     nurbs: Nurbs,
     pw: Vec<Ivl>,
     du: (f64, f64),
     dv: (f64, f64),
+    ju: Vec<Joint>,
+    jv: Vec<Joint>,
+}
+
+/// A knot `at` of full multiplicity, where the net's patches meet C⁰ in the homogeneous
+/// net, and a bound `jump` on the jump of the rational first derivative across it.
+#[derive(Clone, Copy, Debug)]
+struct Joint {
+    at: f64,
+    jump: f64,
+}
+
+/// The joints of the net `nurbs` (homogeneous control points `pw`, enclosed) across u
+/// (`across_u`) or v: for each interior knot of multiplicity equal to the degree, with the
+/// control point `P_i` on it, the one-sided homogeneous derivatives `p (P_i − P_{i−1}) / h_l`
+/// and `p (P_{i+1} − P_i) / h_r` on every row; their difference less `λ P_i` (`λ` from the
+/// first row) leaves `r`, and the rational derivative's jump is at most
+/// `max_rows (|r_xyz| + |r_w| M) / w_min`. `None` for a knot of higher multiplicity (the net
+/// is discontinuous there), a weight's enclosure that is not positive, or a jump over
+/// `1e-9 (1 + M)` (the net is not C¹ there).
+fn joints(nurbs: &Nurbs, pw: &[Ivl], across_u: bool) -> Option<Vec<Joint>> {
+    let (knots, deg, count, rows) = if across_u {
+        (&nurbs.u, nurbs.p, nurbs.nu, nurbs.nv)
+    } else {
+        (&nurbs.v, nurbs.q, nurbs.nv, nurbs.nu)
+    };
+    let point = |along: usize, row: usize| -> Option<[Ivl; 4]> {
+        let (i, j) = if across_u { (along, row) } else { (row, along) };
+        let l = 4 * (i * nurbs.nv + j);
+        Some([
+            *pw.get(l)?,
+            *pw.get(l + 1)?,
+            *pw.get(l + 2)?,
+            *pw.get(l + 3)?,
+        ])
+    };
+    // M bounds |S| (the convex hull property, weights positive); w_min bounds the weight
+    let mut big = Ivl::from(0.0);
+    let mut w_min = f64::INFINITY;
+    for c in pw.chunks_exact(4) {
+        if let [x, y, z, w] = *c {
+            if !w.is_positive() {
+                return None;
+            }
+            w_min = w_min.min(w.lo);
+            let r = ((x / w) * (x / w) + (y / w) * (y / w) + (z / w) * (z / w)).sqrt();
+            big = big.hull(r);
+        }
+    }
+    let m = big.hi;
+    let p = Ivl::from(f64::from(u32::try_from(deg).ok()?));
+    let (lo, hi) = (*knots.get(deg)?, *knots.get(count)?);
+    let mut out = Vec::new();
+    let mut f = deg + 1;
+    while f < count {
+        let k = *knots.get(f)?;
+        let mut mult = 1;
+        while knots.get(f + mult) == Some(&k) {
+            mult += 1;
+        }
+        let interior = lo < k && k < hi;
+        if interior && mult > deg {
+            return None;
+        }
+        if interior && mult == deg {
+            let i = f.checked_sub(1)?;
+            let hl = Ivl::from(k) - Ivl::from(*knots.get(i)?);
+            let hr = Ivl::from(*knots.get(f + deg)?) - Ivl::from(k);
+            let mut lambda = None;
+            let mut jump = 0.0_f64;
+            for row in 0..rows {
+                let (pm, pi, pp) = (
+                    point(i.checked_sub(1)?, row)?,
+                    point(i, row)?,
+                    point(i + 1, row)?,
+                );
+                let d: Vec<Ivl> = pm
+                    .iter()
+                    .zip(&pi)
+                    .zip(&pp)
+                    .map(|((&a, &b), &c)| p * (c - b) / hr - p * (b - a) / hl)
+                    .collect();
+                let [_, _, _, piw] = pi;
+                let l = *lambda.get_or_insert(d.get(3)?.mid() / piw.mid());
+                let l = Ivl::from(l);
+                let r: Vec<Ivl> = d.iter().zip(&pi).map(|(&a, &b)| a - l * b).collect();
+                let (rx, ry, rz, rw) = (*r.first()?, *r.get(1)?, *r.get(2)?, *r.get(3)?);
+                let rxyz = (rx * rx + ry * ry + rz * rz).sqrt();
+                let bound = (rxyz + Ivl::from(rw.mag()) * Ivl::from(m)) / Ivl::from(w_min);
+                jump = jump.max(bound.hi);
+            }
+            let c1 = jump <= 1e-9 * (1.0 + m);
+            if !c1 {
+                return None;
+            }
+            out.push(Joint { at: k, jump });
+        }
+        f += mult;
+    }
+    Some(out)
+}
+
+/// The kink term of a piece of length `w` whose UV box spans `bu` × `bv`, the UV span's
+/// first derivative within `nu`, `nv` over it: `3 J |N'| w / 4` for each joint in the box.
+fn kinks(net: &Shifted, bu: Ivl, bv: Ivl, nu: Ivl, nv: Ivl, w: Ivl) -> f64 {
+    let three_quarters = Ivl::from(0.75);
+    let mut sum = Ivl::from(0.0);
+    for (joints, b, d) in [(&net.ju, bu, nu), (&net.jv, bv, nv)] {
+        for j in joints {
+            if b.lo <= j.at && j.at <= b.hi {
+                sum = sum + three_quarters * Ivl::from(j.jump) * Ivl::from(d.mag()) * w;
+            }
+        }
+    }
+    sum.hi
 }
 
 /// The two spans' Bezier control points and those of the UV span's first and second
@@ -343,7 +478,8 @@ fn piece_hull(q: &[Iv3], a: f64, b: f64) -> Option<Iv3> {
 /// continued differences `da` and `db` at the ends, rounded up: per component
 /// `hull(D(a), D(b)) + D''(B) [−w²/8, 0] + S_u(B) [−o_u, o_u] + S_v(B) [−o_v, o_v]`,
 /// `w = b − a`, `B` the hull of the piece's UV box and its clamp, `o_u` and `o_v` how far the
-/// box leaves the knots' range. `None` where an enclosure failed.
+/// box leaves the knots' range, plus the kink term of the joints in the box (`kinks`).
+/// `None` where an enclosure failed.
 fn piece_bound(net: &Shifted, c: &Curves, a: f64, da: Iv3, b: f64, db: Iv3) -> Option<f64> {
     let w = Ivl::from(b) - Ivl::from(a);
     let sag = Ivl::new(-(w * w * Ivl::from(0.125)).hi, 0.0);
@@ -358,6 +494,8 @@ fn piece_bound(net: &Shifted, c: &Curves, a: f64, da: Iv3, b: f64, db: Iv3) -> O
     let two = Ivl::from(2.0);
     let (nu, nv) = (dnbox[0], dnbox[1]);
     let (spread_u, spread_v) = (Ivl::new(-ou, ou), Ivl::new(-ov, ov));
+    let kink = kinks(net, bu, bv, nu, nv, w);
+    let kink = Ivl::new(-kink, kink);
     let mut sum = Ivl::from(0.0);
     for i in 0..3 {
         let su = *over.su.get(i)?;
@@ -369,7 +507,7 @@ fn piece_bound(net: &Shifted, c: &Curves, a: f64, da: Iv3, b: f64, db: Iv3) -> O
             + sv * ddnbox[1]
             - *ddhbox.get(i)?;
         let clamp = su * spread_u + sv * spread_v;
-        let e = Ivl::from((da.get(i)?.hull(*db.get(i)?) + d2 * sag + clamp).mag());
+        let e = Ivl::from((da.get(i)?.hull(*db.get(i)?) + d2 * sag + clamp + kink).mag());
         sum = sum + e * e;
     }
     let bound = sum.sqrt().hi;
@@ -696,10 +834,13 @@ mod tests {
         );
     }
 
-    /// ARGUED in [`sphere_span_image`]: the canonical sphere's net is C¹ across each double
-    /// knot. With a double knot at `P_i` (spans `h_l` and `h_r`), the one-sided homogeneous
-    /// derivatives are `2 (P_i − P_{i−1}) / h_l` and `2 (P_{i+1} − P_i) / h_r`; the rational
-    /// derivatives agree when their difference is a multiple of `P_i` (homogeneous).
+    /// The net's homogeneous control points, enclosed.
+    fn enclosed(net: &Nurbs) -> Vec<Ivl> {
+        net.pw.iter().copied().map(Ivl::from).collect()
+    }
+
+    /// The canonical sphere's net is C¹ across its four double knots (three in u, one in
+    /// v): `joints` finds each, with a derivative jump of rounding size.
     #[test]
     fn the_canonical_net_is_c1_at_its_double_knots() {
         let k = &Kernel::default();
@@ -708,42 +849,58 @@ mod tests {
             panic!("a sphere")
         };
         let net = Nurbs::of(sphere.base().base()).unwrap();
-        let at = |i: usize, j: usize| -> [f64; 4] {
-            let l = 4 * (i * net.nv + j);
-            [net.pw[l], net.pw[l + 1], net.pw[l + 2], net.pw[l + 3]]
-        };
-        let check = |pm: [f64; 4], p: [f64; 4], pp: [f64; 4], hl: f64, hr: f64| {
-            let d: Vec<f64> = (0..4)
-                .map(|e| 2.0 * (pp[e] - p[e]) / hr - 2.0 * (p[e] - pm[e]) / hl)
-                .collect();
-            let lambda = d[3] / p[3];
-            for e in 0..3 {
-                assert!((d[e] - lambda * p[e]).abs() < 1e-9, "{pm:?} {p:?} {pp:?}");
-            }
-        };
-        let mut joints = 0;
-        // u: the control point on a double knot is the second of the knot's two copies
-        for idx in net.p + 1..net.nu {
-            if net.u[idx] == net.u[idx + 1] && idx + 2 < net.u.len() {
-                let i = idx - 1;
-                let (hl, hr) = (net.u[idx] - net.u[idx - 1], net.u[idx + 2] - net.u[idx + 1]);
-                for j in 0..net.nv {
-                    check(at(i - 1, j), at(i, j), at(i + 1, j), hl, hr);
-                }
-                joints += 1;
-            }
+        let pw = enclosed(&net);
+        let ju = joints(&net, &pw, true).unwrap();
+        let jv = joints(&net, &pw, false).unwrap();
+        assert_eq!((ju.len(), jv.len()), (3, 1), "{ju:?} {jv:?}");
+        for j in ju.iter().chain(&jv) {
+            assert!(j.jump < 1e-12, "{j:?}");
         }
-        for idx in net.q + 1..net.nv {
-            if net.v[idx] == net.v[idx + 1] && idx + 2 < net.v.len() {
-                let j = idx - 1;
-                let (hl, hr) = (net.v[idx] - net.v[idx - 1], net.v[idx + 2] - net.v[idx + 1]);
-                for i in 0..net.nu {
-                    check(at(i, j - 1), at(i, j), at(i, j + 1), hl, hr);
+    }
+
+    /// A quadratic net (degree 1 across) whose double knot at u = 1/2 joins two straight
+    /// spans: C¹ when the knots split the two spans' lengths alike, refused when they do
+    /// not (unequal arcs: the speed jumps) or when the spans turn a corner.
+    #[test]
+    fn a_net_that_is_only_c0_at_a_double_knot_is_refused() {
+        let net = |u: Vec<f64>, pts: [[f64; 3]; 5]| {
+            let mut pw = Vec::new();
+            for p in pts {
+                for dz in [0.0, 1.0] {
+                    pw.extend([p[0], p[1], p[2] + dz, 1.0]);
                 }
-                joints += 1;
             }
-        }
-        assert_eq!(joints, 4, "three double knots in u and one in v");
+            Nurbs {
+                p: 2,
+                q: 1,
+                nu: 5,
+                nv: 2,
+                u,
+                v: vec![0.0, 0.0, 1.0, 1.0],
+                pw,
+            }
+        };
+        let straight = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [3.0, 0.0, 0.0],
+            [4.0, 0.0, 0.0],
+        ];
+        let even = net(vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0], straight);
+        let j = joints(&even, &enclosed(&even), true).unwrap();
+        assert!(j.len() == 1 && j[0].jump < 1e-12, "{j:?}");
+        let uneven = net(vec![0.0, 0.0, 0.0, 0.25, 0.25, 1.0, 1.0, 1.0], straight);
+        assert!(joints(&uneven, &enclosed(&uneven), true).is_none());
+        let corner = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [2.0, 1.0, 0.0],
+            [2.0, 2.0, 0.0],
+        ];
+        let turned = net(vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0], corner);
+        assert!(joints(&turned, &enclosed(&turned), true).is_none());
     }
 
     /// Other surface kinds get no certificate.
