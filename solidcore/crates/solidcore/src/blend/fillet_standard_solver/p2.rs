@@ -3524,6 +3524,7 @@ impl super::p1::LinearCrossSectionFsg {
                 ));
             }
             return bead_between_planes(
+                k,
                 approx_tol_3d,
                 center_line,
                 [rail1, rail2],
@@ -3789,6 +3790,7 @@ fn chord_between_planes(
 /// Those of the evaluations, the curves' rebuild and the arc.
 #[allow(clippy::too_many_arguments)]
 fn bead_between_planes(
+    k: &Kernel,
     tol: f64,
     center_line: &BSplineCurve,
     rails: [&mut BSplineCurve; 2],
@@ -3801,6 +3803,7 @@ fn bead_between_planes(
     use crate::nurbs::b_spline_curve::KnotType;
     use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceData};
     use crate::surface::procedural_blend::bead::BeadArc;
+    use crate::surface::procedural_blend::exact::ExactRound;
     let Some(f) = feet_between_planes(tol, center_line, rails, bases, uv, inward, offsets)? else {
         return Ok(None);
     };
@@ -3809,6 +3812,11 @@ fn bead_between_planes(
     let along = a1 - a0;
     let middle = a0 + (b0 - a0) * 0.5;
     let arc = BeadArc::new(a0, b0, along, f.l0 - middle, bead.sagitta)?;
+    // the chord's definition (order 0) with its sagitta beside the sizes, as the chord keeps
+    // its plane's
+    let inputs = plane_class_inputs(k, tol, bases, &f, offsets)?;
+    let round = ExactRound::chord(k, bases, bead.chamfer, Some(&f.leader), inputs)?
+        .with_sagitta(bead.sagitta)?;
     // across: the arc from rail 1 (v = 0) to rail 2 (v = 1) in two rational quadratic halves
     // (a convex bead may turn past a half turn), `BeadArc::rows`
     let (row, [_, w, _, _, _]) = arc.rows();
@@ -3830,7 +3838,10 @@ fn bead_between_planes(
         weights: Some(&weights),
         uv_domain: None,
     })?;
-    Ok(Some(Surface::from(net)))
+    let mut surface = Surface::from(net);
+    round.recertify(k, &surface)?;
+    surface.set_exact_round(Some(round));
+    Ok(Some(surface))
 }
 
 const OP_LINEAR_DEF: &str =

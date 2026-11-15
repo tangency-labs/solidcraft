@@ -24,7 +24,11 @@
 )]
 
 use solidcore::blend::fillet_executive::session::FilletSession;
-use solidcore::blend::weld_bead::{beads_apart, beads_apart_in_spans, span_lengths};
+use solidcore::surface::procedural_blend::convert::{exact_rebuild, exact_to_record};
+use solidcore::surface::procedural_blend::exact::ExactClass;
+use solidcore::surface::procedural_blend::record::{ChamferRecord, ChamferSizeRecord, ExactRoundRecord};
+use solidcore::surface::procedural_blend::BlendRef;
+use solidcore::blend::weld_bead::{beads_apart, beads_apart_in_spans, span_lengths, BeadEnd};
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
@@ -32,7 +36,9 @@ use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::query::api_queries::edge_closest_point;
-use solidcore::surface::procedural_blend::bead::{BeadArc, BeadDefinition, BeadSpan};
+use solidcore::surface::procedural_blend::bead::{
+    equal_legs_for_throat, BeadArc, BeadDefinition, BeadSpan,
+};
 use solidcore::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::api_files::write_brep_to_file;
@@ -702,13 +708,14 @@ fn a_bead_apart_is_its_own_body_and_leaves_the_corner() {
         let edge = pick(&k, &b, at);
         let mut apart = beads_apart(
             &mut k,
-            &b,
+            &mut b,
             &[edge],
             &[ChamferSize::Distances([SETBACK; 2])],
             h,
             &[],
         )
-        .unwrap();
+        .unwrap()
+        .remove(0);
         let (bead, _) = bead_section(alpha, h, 0.0);
         let want = bead.section_area() * LENGTH;
         let got = volume(&k, &mut apart);
@@ -775,12 +782,13 @@ fn a_bead_apart_in_spans_is_one_body_per_span() {
         let edge = pick(&k, &b, at);
         let pieces = beads_apart_in_spans(
             &mut k,
-            &b,
+            &mut b,
             edge,
             ChamferSize::Distances([SETBACK; 2]),
             h,
             &[],
             &spans,
+            BeadEnd::Square,
         )
         .unwrap();
         assert_eq!(pieces.len(), spans.len());
@@ -825,11 +833,10 @@ fn tee(k: &mut Kernel) -> Brep {
     create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), LENGTH, true).unwrap()
 }
 
-/// Beads on both sides of a T-joint ([`beads_apart`] with both inside edges): one body holding
-/// both beads (two beads of 5 faces each, twice the section along the edge), and the T left as
-/// it was.
+/// Beads on both sides of a T-joint ([`beads_apart`] with both inside edges): one body per bead
+/// (5 faces each, the section along the edge), and the T left as it was.
 #[test]
-fn beads_on_both_sides_of_a_tee_are_one_body_apart() {
+fn beads_on_both_sides_of_a_tee_are_bodies_apart() {
     for h in [1.0, -1.0, 3.0] {
         let mut k = kernel();
         let mut t = tee(&mut k);
@@ -837,20 +844,23 @@ fn beads_on_both_sides_of_a_tee_are_one_body_apart() {
         let faces = t.face_list().len();
         let left = pick(&k, &t, [-5.0, 0.0, LENGTH / 2.0]);
         let right = pick(&k, &t, [5.0, 0.0, LENGTH / 2.0]);
-        let mut both = beads_apart(
+        let beads = beads_apart(
             &mut k,
-            &t,
+            &mut t,
             &[left, right],
             &[ChamferSize::Distances([SETBACK; 2]); 2],
             h,
             &[],
         )
         .unwrap();
+        assert_eq!(beads.len(), 2);
         let (bead, _) = bead_section(FRAC_PI_2, h, 0.0);
-        let want = 2.0 * bead.section_area() * LENGTH;
-        let got = volume(&k, &mut both);
-        assert!(((got - want) / want).abs() <= 1e-6, "h {h}: {got} against {want}");
-        assert_eq!(both.face_list().len(), 10, "h {h}");
+        let want = bead.section_area() * LENGTH;
+        for mut one in beads {
+            let got = volume(&k, &mut one);
+            assert!(((got - want) / want).abs() <= 1e-6, "h {h}: {got} against {want}");
+            assert_eq!(one.face_list().len(), 5, "h {h}");
+        }
         assert_eq!(t.face_list().len(), faces, "h {h}: the T changed");
         assert!((volume(&k, &mut t) - before).abs() <= 1e-9 * before);
     }
@@ -874,12 +884,13 @@ fn a_staggered_weld_on_a_tee_is_one_body_per_span() {
         let lengths = span_lengths(&k, &t, edge, spans).unwrap();
         let pieces = beads_apart_in_spans(
             &mut k,
-            &t,
+            &mut t,
             edge,
             ChamferSize::Distances([SETBACK; 2]),
             h,
             &[],
             spans,
+            BeadEnd::Square,
         )
         .unwrap();
         assert_eq!(pieces.len(), spans.len());
@@ -895,6 +906,171 @@ fn a_staggered_weld_on_a_tee_is_one_body_per_span() {
     // five spans of a fifth each: the edge's length welded once, half on each side
     assert!((total - LENGTH).abs() <= 1e-9 * LENGTH, "{total}");
     assert!((volume(&k, &mut t) - before).abs() <= 1e-9 * before);
+}
+
+/// The blend's bead face, if it is one face carrying an exact round.
+fn bead_face(b: &Brep) -> solidcore::surface::surface::Surface {
+    let mut found = Vec::new();
+    for &f in b.face_list() {
+        let Some(s) = b.face(f).unwrap().surface.as_ref() else {
+            continue;
+        };
+        if matches!(s.procedural_blend(), Some(BlendRef::Exact { .. })) {
+            found.push(s.clone());
+        }
+    }
+    assert_eq!(found.len(), 1, "one bead face with a definition");
+    found.remove(0)
+}
+
+/// The blend's bead face keeps its definition, the generic blend's chord (order 0, exact,
+/// bound 0) of its sizes with its sagitta beside them, re-certified on the cylinder through the
+/// feet's lines. It round trips through its record with the sagitta written; a record whose
+/// sagitta was changed is refused when rebuilt (the net is off that cylinder); a chamfer's
+/// record writes no sagitta, and a record without one reads as the chord.
+#[test]
+fn the_bead_face_is_the_chord_with_its_sagitta() {
+    for (alpha, h) in [(FRAC_PI_2, 1.0), (FRAC_PI_2, -1.0), (FRAC_PI_3, 0.5), (FRAC_PI_2, 3.0)] {
+        let (k, b, _) = blended_bead(alpha, h);
+        let face = bead_face(&b);
+        let blend = face.procedural_blend().unwrap();
+        assert_eq!(blend.order(), 0, "{alpha} {h}");
+        assert_eq!(blend.bound(), 0.0, "{alpha} {h}");
+        let BlendRef::Exact { round, .. } = blend else {
+            panic!("{alpha} {h}: the bead face is exact");
+        };
+        assert_eq!(round.class(), ExactClass::Chord, "{alpha} {h}");
+        assert_eq!(round.sagitta(), h, "{alpha} {h}");
+        let rec = exact_to_record(&k, &face).unwrap();
+        assert_eq!(rec.chamfer.unwrap().sagitta, h, "{alpha} {h}");
+        let json = serde_json::to_string(&rec).unwrap();
+        let back: ExactRoundRecord = serde_json::from_str(&json).unwrap();
+        let rebuilt = exact_rebuild(&k, &back).unwrap();
+        let Some(BlendRef::Exact { round, .. }) = rebuilt.procedural_blend() else {
+            panic!("{alpha} {h}: rebuilt without its definition");
+        };
+        assert_eq!(round.sagitta(), h, "{alpha} {h}");
+        let mut off = back.clone();
+        if let Some(c) = off.chamfer.as_mut() {
+            c.sagitta *= 1.1;
+        }
+        assert!(exact_rebuild(&k, &off).is_err(), "{alpha} {h}: a changed sagitta rebuilt");
+    }
+    let rec = ChamferRecord {
+        size: ChamferSizeRecord::Distances([SETBACK; 2]),
+        wedge: FRAC_PI_2,
+        sagitta: 0.0,
+    };
+    let json = serde_json::to_string(&rec).unwrap();
+    assert!(!json.contains("sagitta"), "a chamfer writes no sagitta: {json}");
+    let back: ChamferRecord = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.sagitta, 0.0);
+}
+
+/// The section's first moment about the edge along the bead's middle direction `up` (to the
+/// chord's middle), `integral of rho dA`, by hand: the triangle's area times its centroid's
+/// height, plus (convex) or less (concave) the circular segment's, whose centroid lies `4 R
+/// sin^3(Theta / 2) / (3 (Theta - sin Theta))` from the circle's centre towards the apex.
+fn section_moment(alpha: f64, h: f64) -> f64 {
+    let (s, c) = alpha.sin_cos();
+    let f1 = Point3::new(SETBACK, 0.0, 0.0);
+    let f2 = Point3::new(SETBACK * c, SETBACK * s, 0.0);
+    let middle = f1 + (f2 - f1) * 0.5;
+    let up = (middle - Point3::new(0.0, 0.0, 0.0)) * (1.0 / middle.length());
+    let triangle = 0.5 * SETBACK * SETBACK * s;
+    let mut moment = triangle * (f1.dot(up) + f2.dot(up)) / 3.0;
+    let arc = BeadArc::new(f1, f2, Vec3::new(0.0, 0.0, 1.0), middle, h).unwrap();
+    let t = arc.turn;
+    let segment = 0.5 * arc.radius * arc.radius * (t - t.sin());
+    let reach = 4.0 * arc.radius * (t / 2.0).sin().powi(3) / (3.0 * (t - t.sin()));
+    let apex = arc.point(t / 2.0);
+    let towards = (apex - arc.centre) * (1.0 / arc.radius);
+    moment += h.signum() * segment * (arc.centre + towards * reach).dot(up);
+    moment
+}
+
+/// A tapered span ends in 45-degree ramps: every point of the section at height rho along the
+/// bead's middle direction is cut back rho from each end, so the span keeps `A L - 2 integral
+/// of rho dA` exactly; convex, concave and overhanging, at 60 and 90 degrees.
+#[test]
+fn a_tapered_span_ends_in_45_degree_ramps() {
+    let spans = BeadSpan::along(&[(0.1, 0.4), (0.6, 0.95)]).unwrap();
+    for (alpha, h) in [(FRAC_PI_2, 1.0), (FRAC_PI_3, -1.0), (FRAC_PI_2, 3.0)] {
+        let mut k = kernel();
+        let (mut b, at) = corner(&mut k, alpha);
+        let edge = pick(&k, &b, at);
+        let pieces = beads_apart_in_spans(
+            &mut k,
+            &mut b,
+            edge,
+            ChamferSize::Distances([SETBACK; 2]),
+            h,
+            &[],
+            &spans,
+            BeadEnd::Taper,
+        )
+        .unwrap();
+        let (bead, _) = bead_section(alpha, h, 0.0);
+        let moment = section_moment(alpha, h);
+        for (mut piece, span) in pieces.into_iter().zip(&spans) {
+            let want = bead.section_area() * LENGTH * span.share() - 2.0 * moment;
+            let got = volume(&k, &mut piece);
+            assert!(
+                ((got - want) / want).abs() <= 1e-6,
+                "{alpha} {h} {span:?}: {got} against {want}"
+            );
+        }
+    }
+}
+
+/// A rounded span is shorter than its square one by less than two bead reaches' worth of
+/// section and longer than the span less those reaches; a span too short for its ends is
+/// refused.
+#[test]
+fn a_rounded_span_ends_within_a_reach_and_short_spans_are_refused() {
+    let spans = BeadSpan::along(&[(0.1, 0.5)]).unwrap();
+    for (alpha, h) in [(FRAC_PI_2, 1.0), (FRAC_PI_3, -1.0), (FRAC_PI_2, 3.0)] {
+        let mut k = kernel();
+        let (mut b, at) = corner(&mut k, alpha);
+        let edge = pick(&k, &b, at);
+        let mut piece = beads_apart_in_spans(
+            &mut k,
+            &mut b,
+            edge,
+            ChamferSize::Distances([SETBACK; 2]),
+            h,
+            &[],
+            &spans,
+            BeadEnd::Round,
+        )
+        .unwrap()
+        .remove(0);
+        let (bead, _) = bead_section(alpha, h, 0.0);
+        let full = bead.section_area() * LENGTH * 0.4;
+        let got = volume(&k, &mut piece);
+        let reach = 1.05 * (SETBACK + 2.0 * h.abs());
+        assert!(got < full, "{alpha} {h}: {got} not under {full}");
+        assert!(
+            got > bead.section_area() * (LENGTH * 0.4 - 2.0 * reach),
+            "{alpha} {h}: {got} cut by more than two reaches"
+        );
+    }
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    for ends in [BeadEnd::Taper, BeadEnd::Round] {
+        let r = beads_apart_in_spans(
+            &mut k,
+            &mut b,
+            edge,
+            ChamferSize::Distances([SETBACK; 2]),
+            1.0,
+            &[],
+            &BeadSpan::along(&[(0.5, 0.52)]).unwrap(),
+            ends,
+        );
+        assert!(r.is_err(), "{ends:?}: a 2 mm span was built");
+    }
 }
 
 /// A point of a rational quadratic Bezier piece at `t`.
@@ -931,4 +1107,62 @@ fn the_arc_rows_are_the_arc() {
             }
         }
     }
+}
+
+/// The throat `a` by hand: 5 mm legs at 90 degrees give 5 / sqrt 2 = 3.535534; the 1/4 x 1/2
+/// inch unequal legs 0.25 x 0.5 / sqrt(0.3125) = 0.223607 (root to the line between the toes);
+/// 4 and 6 mm at 60 degrees 24 sin 60 / sqrt 28 = 3.927922. Convexity does not count; a concave
+/// face with equal legs dips its sagitta along the bisector (3.535534 - 1).
+#[test]
+fn the_throat_holds_its_hand_values() {
+    let throat = |alpha: f64, d: [f64; 2], h: f64| {
+        BeadDefinition::new(ChamferDefinition::new(ChamferSize::Distances(d), alpha).unwrap(), h)
+            .unwrap()
+            .throat()
+    };
+    for (alpha, d, h, want) in [
+        (FRAC_PI_2, [5.0, 5.0], 1.0, 3.535_533_906),
+        (FRAC_PI_2, [5.0, 5.0], 3.0, 3.535_533_906),
+        (FRAC_PI_2, [0.25, 0.5], 0.01, 0.223_606_798),
+        (FRAC_PI_3, [4.0, 6.0], 0.5, 3.927_922_024),
+        (FRAC_PI_2, [5.0, 5.0], -1.0, 2.535_533_906),
+    ] {
+        let got = throat(alpha, d, h);
+        assert!((got - want).abs() <= 1e-9, "{alpha} {d:?} {h}: {got} against {want}");
+    }
+}
+
+/// A concave throat with unequal legs is the root's distance to the arc: no point of the arc
+/// is nearer (checked at 20001 points, a verification of the closed form, not a certificate),
+/// and the nearest checked point is within the sampling's reach of it.
+#[test]
+fn a_concave_throat_is_the_nearest_point_of_the_arc() {
+    for (alpha, d, h) in [(FRAC_PI_2, [4.0, 7.0], -0.8), (FRAC_PI_3, [5.0, 3.0], -0.3), (2.0 * FRAC_PI_3, [6.0, 4.0], -0.5)] {
+        let bead = BeadDefinition::new(ChamferDefinition::new(ChamferSize::Distances(d), alpha).unwrap(), h).unwrap();
+        let (s, c) = f64::sin_cos(alpha);
+        let f1 = Point3::new(d[0], 0.0, 0.0);
+        let f2 = Point3::new(d[1] * c, d[1] * s, 0.0);
+        let root = Point3::new(0.0, 0.0, 0.0);
+        let away = (f1 + (f2 - f1) * 0.5) - root;
+        let arc = BeadArc::new(f1, f2, Vec3::new(0.0, 0.0, 1.0), away, h).unwrap();
+        let nearest = (0..=20_000)
+            .map(|i| (arc.point(arc.turn * f64::from(i) / 20_000.0) - root).length())
+            .fold(f64::INFINITY, f64::min);
+        let a = bead.throat();
+        assert!(nearest >= a - 1e-12, "{alpha} {d:?} {h}: a point at {nearest} under {a}");
+        assert!(nearest - a <= 1e-6, "{alpha} {d:?} {h}: nearest {nearest} against {a}");
+    }
+}
+
+/// Equal legs back from a throat: 3.535534 at 90 degrees is 5 mm legs, at 60 degrees 4.330127
+/// (5 cos 30) is 5 mm, and a concave throat adds its dip back; each round trip through
+/// [`BeadDefinition::throat`] returns the throat.
+#[test]
+fn equal_legs_come_back_from_their_throat() {
+    for (alpha, h) in [(FRAC_PI_2, 1.0), (FRAC_PI_3, 0.5), (FRAC_PI_2, -1.0), (2.0 * FRAC_PI_3, 0.4)] {
+        let bead = BeadDefinition::new(ChamferDefinition::new(ChamferSize::Distances([5.0; 2]), alpha).unwrap(), h).unwrap();
+        let z = equal_legs_for_throat(bead.throat(), alpha, h);
+        assert!((z - 5.0).abs() <= 1e-12, "{alpha} {h}: {z}");
+    }
+    assert!((equal_legs_for_throat(3.0, FRAC_PI_2, 0.5) - 3.0 * 2f64.sqrt()).abs() <= 1e-12);
 }

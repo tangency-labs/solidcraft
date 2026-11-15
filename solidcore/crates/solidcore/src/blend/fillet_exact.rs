@@ -1815,6 +1815,45 @@ pub fn chord_implicit(blend: &ExactBlend) -> Option<crate::surface::implicit::Im
     Some(crate::surface::implicit::Implicit::Plane { origin: f1, normal })
 }
 
+/// Not the fork (#15129): the surface an order-0 section with sagitta `sagitta` lies on
+/// between two planes, from its offsets alone: the circular cylinder along the line the
+/// offsets meet in whose circle passes through the feet ([`chord_implicit`]'s) with its
+/// middle `sagitta` off the chord, away from the edge (to the offsets' line's side) for a
+/// positive sagitta and towards it for a negative one: radius `R = (c^2 / 4 + h^2) / (2 |h|)`.
+/// The chord's plane for a sagitta of 0. `None` where [`chord_implicit`] has none or the
+/// offsets' line lies on the chord.
+#[must_use]
+pub fn arc_section_implicit(
+    blend: &ExactBlend,
+    sagitta: f64,
+) -> Option<crate::surface::implicit::Implicit> {
+    let plane = chord_implicit(blend)?;
+    if sagitta == 0.0 {
+        return Some(plane);
+    }
+    let (p, d) = (blend.point, blend.dir);
+    let [a, b] = &blend.faces;
+    let foot = |f: &BlendQuadric| p - f.dir * (p - f.point).dot(f.dir);
+    let (f1, f2) = (foot(a), foot(b));
+    let chord = f2 - f1;
+    let c = chord.length();
+    let middle = f1 + chord * 0.5;
+    // the side away from the edge: the offsets' line's, square to the chord and the line
+    let off = p - middle;
+    let unit = chord.unitize().ok()?;
+    let toward = (off - unit * off.dot(unit) - d * off.dot(d)).unitize().ok()?;
+    let h = sagitta.abs();
+    let radius = (c * c / 4.0 + h * h) / (2.0 * h);
+    let apex = middle + toward * sagitta;
+    let origin = apex - toward * (sagitta.signum() * radius);
+    Some(crate::surface::implicit::Implicit::Cone {
+        origin,
+        axis: d,
+        radius,
+        tan_angle: 0.0,
+    })
+}
+
 /// Not the fork (#2485): the surface a classified round lies on, from its offsets alone:
 /// for the line, circle and point classes the analytic surface by its implicit equation
 /// (the cylinder of the ball's radius about the line the offsets meet in, the ball about

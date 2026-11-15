@@ -127,6 +127,17 @@ pub struct ChamferRecord {
     pub size: ChamferSizeRecord,
     /// The angle between the supports the sizes were converted at.
     pub wedge: f64,
+    /// The order-0 section's sagitta (#15129): its arc's middle off the chord, away from the
+    /// edge for a positive one, towards it for a negative one (a weld bead). 0, the chord,
+    /// and absent from records written before it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub sagitta: f64,
+}
+
+/// Whether a sagitta is 0 (the chord), so that a chamfer's record is written as before.
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's `skip_serializing_if` passes a reference
+fn is_zero(x: &f64) -> bool {
+    *x == 0.0
 }
 
 /// The affine map from the net's (u, v) to the definition's (s, t):
@@ -343,6 +354,9 @@ impl ProceduralBlendRecord {
                 ChamferSizeRecord::DistanceAngle { distance, angle } => [distance, angle, c.wedge],
                 ChamferSizeRecord::Chord(l) => [l, l, c.wedge],
             };
+            if !c.sagitta.is_finite() {
+                return Err(refuse("chamfer", "an exact round's numbers are finite"));
+            }
             if !all_finite(&sizes) {
                 return Err(refuse(
                     "definition.chamfer",

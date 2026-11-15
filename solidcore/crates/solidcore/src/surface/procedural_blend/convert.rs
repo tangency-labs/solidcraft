@@ -491,7 +491,10 @@ pub fn exact_to_record(k: &Kernel, surface: &Surface) -> Result<ExactRoundRecord
             ball_on_collapsed: i.ball_on_collapsed,
             radii_can_change: i.radii_can_change,
         },
-        chamfer: round.chamfer.map(chamfer_record),
+        chamfer: round.chamfer.map(|c| ChamferRecord {
+            sagitta: round.sagitta,
+            ..chamfer_record(c)
+        }),
         leader_map: LeaderMapRecord {
             a: round.map.a,
             b: round.map.b,
@@ -599,6 +602,7 @@ pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> 
     let mut round = match (class, &rec.chamfer) {
         (ExactClass::Chord, Some(c)) => {
             ExactRound::chord(k, [s0, s1], chamfer_of(c)?, leader.as_ref(), inputs)?
+                .with_sagitta(c.sagitta)?
         }
         _ => ExactRound::create(k, class, [s0, s1], rec.radius, leader.as_ref(), inputs)?,
     };
@@ -796,6 +800,7 @@ fn chamfer_record(c: ChamferDefinition) -> ChamferRecord {
             ChamferSize::Chord(l) => ChamferSizeRecord::Chord(l),
         },
         wedge: c.wedge,
+        sagitta: 0.0,
     }
 }
 

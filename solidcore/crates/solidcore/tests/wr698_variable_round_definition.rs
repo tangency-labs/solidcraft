@@ -271,6 +271,7 @@ fn generator_round(k: &Kernel, has_edgeuse: bool) -> Surface {
         radii: None,
         chord: None,
         chamfer: None,
+        bead: None,
         ang_tol_rad: 0.1,
         law: Some(LawBall {
             has_edgeuse,

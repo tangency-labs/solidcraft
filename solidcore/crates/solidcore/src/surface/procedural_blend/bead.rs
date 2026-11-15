@@ -135,6 +135,33 @@ impl BeadDefinition {
         }
     }
 
+    /// The throat thickness `a` (ISO 2553's nominal throat; EN 1993-1-8's effective throat
+    /// of a fillet weld): the distance from the root (the edge) to the weld's face, convexity
+    /// excluded. For a chord or a convex bead it is the height of the triangle the root and the
+    /// feet make, over the chord: `d_1 d_2 sin(alpha) / c`, whatever the legs. For a concave
+    /// bead the face dips towards the root and the throat is the root's distance to the arc,
+    /// `|root - centre| - R`: the nearest point of the circle lies on the arc, as the root
+    /// sits over the chord between the feet (both toe angles are under 90 degrees wherever
+    /// the chamfer's offsets are positive).
+    #[must_use]
+    pub fn throat(&self) -> f64 {
+        let [d1, _] = self.chamfer.setbacks();
+        let c = self.chord();
+        let height = triangle_height(self.chamfer.setbacks(), self.chamfer.wedge, c);
+        if self.sagitta >= 0.0 {
+            return height;
+        }
+        let Some((radius, _)) = BeadArc::radius_and_turn(c, self.sagitta) else {
+            return height;
+        };
+        // the chord along x with its middle at 0, the root above it at (p, height), the
+        // circle's centre below it, `radius - |h|` from the chord
+        let [b1, _] = self.toe_angles();
+        let p = -c / 2.0 + d1 * b1.cos();
+        let below = radius - self.sagitta.abs();
+        (p * p + (height + below) * (height + below)).sqrt() - radius
+    }
+
     /// The bead's section area in the plane square to the edge: the triangle the edge and the
     /// feet make, plus the circular segment between arc and chord (convex) or less it
     /// (concave).
@@ -251,6 +278,22 @@ impl BeadArc {
             [1.0, w, 1.0, w, 1.0],
         )
     }
+}
+
+/// The height of the triangle the root and the feet at `setbacks` make at `wedge`, over the
+/// chord `chord` between the feet: `d_1 d_2 sin(alpha) / c` (twice its area over its base).
+fn triangle_height(setbacks: [f64; 2], wedge: f64, chord: f64) -> f64 {
+    setbacks[0] * setbacks[1] * wedge.sin() / chord
+}
+
+/// The equal legs `z` that give a bead the throat `a` at `wedge` and `sagitta`: `z = a /
+/// cos(alpha / 2)` for a chord or a convex bead (at 90 degrees `z = a sqrt 2`), `(a + |h|) /
+/// cos(alpha / 2)` for a concave one (its face dips `|h|` towards the root along the
+/// bisector). The inverse of [`BeadDefinition::throat`] for equal legs.
+#[must_use]
+pub fn equal_legs_for_throat(throat: f64, wedge: f64, sagitta: f64) -> f64 {
+    let dip = if sagitta < 0.0 { sagitta.abs() } else { 0.0 };
+    (throat + dip) / (wedge / 2.0).cos()
 }
 
 /// The sagitta's open bound over `chord` with the toe angles `toes` ([`BeadDefinition::bound`]
