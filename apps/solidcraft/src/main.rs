@@ -1766,10 +1766,8 @@ fn main() -> eframe::Result {
             // another stop before the next save cannot bring the effect back.
             let cleared_background = after_loss && !app.preferences.background_shader.is_empty();
             if cleared_background {
-                notes.push(solidcraft_ui_text::Locale::for_language(&app.preferences.language).format(
-                    "prefs.background_shader_after_loss",
-                    &[("name", &app.preferences.background_shader)],
-                ));
+                let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
+                notes.push(language.format("prefs.background_shader_after_loss", &[("name", &app.preferences.background_shader)]));
                 app.preferences.background_shader.clear();
             }
             let files = if files.is_empty() && !sample && control_port.is_none() {
