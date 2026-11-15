@@ -941,8 +941,8 @@ fn loft_blend(
     let stations = BLEND_STATIONS;
     let last = pieces.len().saturating_sub(1);
     // A 3D sketch chain runs the way its first listed curve does, so in a loft through one each
-    // open sketch section is turned to run the way the section before it does, as the plain
-    // loft turns its open sections.
+    // open section (a body's edge chain too) is turned to run the way the section before it
+    // does, as the plain loft turns its open sections.
     let turn = pieces.iter().any(|p| matches!(p, Piece::Space(_)));
     // Closed sections would need their winding and seam matched, as the plain loft does.
     let closed = |p: &Piece| match p {
@@ -965,8 +965,7 @@ fn loft_blend(
         let mut these = match piece {
             Piece::Body(name, edges) => {
                 let b = st.body(name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?.body.clone();
-                frames.push(kernel::loft_blend::section_frames(&b, edges, leave, stations)?);
-                continue;
+                kernel::loft_blend::section_frames(&b, edges, leave, stations)?
             }
             Piece::Sketch(plane, chain) => chain_frames(plane, chain, leave, stations),
             Piece::Space(pts) => point_frames(pts, leave, stations),
