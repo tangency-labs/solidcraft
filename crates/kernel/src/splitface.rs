@@ -36,8 +36,8 @@ pub enum SplitTool<'a> {
     /// A plane (unbounded).
     Plane(Plane),
     /// The surface of another body's face (`face` in that body's face order), extended. Split
-    /// Body by a face of a surface body joined tangentially to others cuts with their smooth
-    /// sheet as it is ([`split_body`]).
+    /// Body by a face of a surface body joined to others cuts with the whole sheet as it is
+    /// ([`split_body`]).
     Face { body: &'a Body, face: usize },
     /// Sketch curves (chains of segments in `plane`) swept along `along` (none: the plane's
     /// normal); each curve splits on its own, an open one extended past its ends.
@@ -539,8 +539,8 @@ fn new_lines(split: &Body, h: &History) -> Result<Vec<Vec<Vec3>>> {
 }
 
 /// Split a body into the parts on either side of a tool: a plane, another face's surface
-/// (extended; a face of a surface body joined tangentially to others: their smooth sheet as it
-/// is, which must cross the body), or one sketch line swept along its direction. Every part is closed with the piece
+/// (extended; a face of a surface body joined to others: the whole sheet as it is, which must
+/// cross the body), or one sketch line swept along its direction. Every part is closed with the piece
 /// of the tool's surface inside the body; parts on the tool's back come first, each side's in
 /// face order. A body the tool misses comes back whole. Each part's history is over `[body]`:
 /// its faces the body's (or pieces of them), the section new.
@@ -548,7 +548,7 @@ pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "split_body");
     body.require_brep(SPLIT_BODY)?;
     if let SplitTool::Face { body: sheet, face } = tool {
-        let faces = smooth_sheet(sheet, *face)?;
+        let faces = whole_sheet(sheet, *face)?;
         if faces.len() > 1 {
             return split_by_sheet(body, sheet, *face, &faces);
         }
@@ -675,12 +675,11 @@ fn sliced(
     })
 }
 
-/// The faces of the surface body `sheet` joined to its face `face` tangentially, through edges
-/// along which the faces' normals agree all along ([`crate::tangent_edge`], within the one angle
-/// for smooth, [`crate::smooth_edges::ANGLE`]), and through those faces' tangent neighbours in
-/// turn: the smooth surface the face is part of, in face order. Only `face` for a closed body
-/// (a solid's face splits with its own surface extended).
-fn smooth_sheet(sheet: &Body, face: usize) -> Result<Vec<usize>> {
+/// The faces of the surface body `sheet` joined to its face `face`, edge to edge, and through
+/// those faces' neighbours in turn: the whole sheet the face is part of, in face order, however
+/// its faces meet (smoothly or at a crease, #17250). Only `face` for a closed body (a solid's
+/// face splits with its own surface extended).
+fn whole_sheet(sheet: &Body, face: usize) -> Result<Vec<usize>> {
     sheet.require_brep("a split tool")?;
     let r = sheet.record();
     if r.faces.get(face).is_none() {
@@ -689,8 +688,6 @@ fn smooth_sheet(sheet: &Body, face: usize) -> Result<Vec<usize>> {
     if !r.edges.iter().any(|e| e.uses.len() == 1) {
         return Ok(vec![face]);
     }
-    let sides = crate::surfaces::face_sides(r);
-    let sign = |f: usize| sides.get(f).map(|forward| if *forward { 1.0 } else { -1.0 });
     let mut joined = std::collections::BTreeSet::from([face]);
     let mut todo = vec![face];
     while let Some(f) = todo.pop() {
@@ -698,14 +695,9 @@ fn smooth_sheet(sheet: &Body, face: usize) -> Result<Vec<usize>> {
         for l in &this.loops {
             let brep::Loop::Edges { edges } = l else { continue };
             for u in edges {
-                let e = u.edge as usize;
-                let Some([a, b]) = r.edges.get(e).map(|edge| edge.uses.as_slice()) else { continue };
+                let Some([a, b]) = r.edges.get(u.edge as usize).map(|edge| edge.uses.as_slice()) else { continue };
                 let g = if a.face as usize == f { b.face } else { a.face } as usize;
-                if g == f || joined.contains(&g) {
-                    continue;
-                }
-                if crate::tangent_edge::tangent_all_along(r, sign, e, crate::smooth_edges::ANGLE)? {
-                    joined.insert(g);
+                if joined.insert(g) {
                     todo.push(g);
                 }
             }
@@ -714,7 +706,7 @@ fn smooth_sheet(sheet: &Body, face: usize) -> Result<Vec<usize>> {
     Ok(joined.into_iter().collect())
 }
 
-/// `body` cut in two by the faces `faces` of the surface body `sheet` as they are (a smooth sheet
+/// `body` cut in two by the faces `faces` of the surface body `sheet` as they are (a sheet
 /// of several faces, bounded where they end), its sides those of `sheet`'s face `face`: SMLib's
 /// slice by the sheet ([`solidcraft_smlib::Brep::split_body_by_sheet`]). A sheet that does not
 /// cross the body cuts nothing.
@@ -908,6 +900,26 @@ mod tests {
         let nicked = split_body(&cube, &SplitTool::Face { body: &short, face: first }).unwrap();
         let info: Vec<_> = nicked.iter().map(|b| (measure(b).unwrap().volume, b.face_count(), b.lumps().unwrap().len())).collect();
         assert_eq!(nicked.len(), 1, "{info:?}");
+    }
+
+    /// Split Body by a face of a sheet whose faces meet at a slight crease cuts with the whole
+    /// sheet, not the picked face alone (#17250): a flat face along y = 5 from x = -3 to 5 (it
+    /// alone would end inside the cube 0…10), then one rising 1 in 50 (a crease of about 1.15°)
+    /// to x = 13, extruded from z = -5 to 15. The part under the sheet is 10 ∫ y dx over x 0…10,
+    /// 10 (50 + 0.02 · 5² / 2) = 502.5, where the first face's plane extended would cut 500.
+    #[test]
+    fn a_face_of_a_creased_sheet_splits_with_the_whole_sheet() {
+        let p = |x: f64, y: f64| Vec2::new(x, y);
+        let chain = vec![Seg2::Line { a: p(-3.0, 5.0), b: p(5.0, 5.0) }, Seg2::Line { a: p(5.0, 5.0), b: p(13.0, 5.16) }];
+        let sheet = crate::extrude_sheet(&Plane::XY, &[chain], -5.0, 15.0).unwrap();
+        assert_eq!(sheet.face_count(), 2);
+        let cube = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let parts = split_body(&cube, &SplitTool::Face { body: &sheet, face: leftmost(&sheet) }).unwrap();
+        let v = volumes(&parts);
+        assert_eq!(v.len(), 2, "{v:?}");
+        assert!(rel(v[0], 497.5) < 1e-9 && rel(v[1], 502.5) < 1e-9, "{v:?}");
+        // Both parts are closed: every edge joins two faces.
+        assert!(parts.iter().all(|b| b.record().edges.iter().all(|e| e.uses.len() == 2)), "{v:?}");
     }
 
     fn volumes(parts: &[Body]) -> Vec<f64> {
