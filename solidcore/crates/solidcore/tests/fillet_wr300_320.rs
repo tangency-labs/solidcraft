@@ -218,9 +218,15 @@ fn chamfer_as_wide_as_its_face_is_a_cone() {
     // the chamfer of 10: the cylinder (pi 100 20) less the ring between the r 10, h 10
     // cylinder and the cone in it (2/3 pi 1000)
     let cone = std::f64::consts::PI * (2000.0 - 2000.0 / 3.0);
-    let mut k = kernel(|f| f.fillet_refuse_face_consuming_blends = true);
-    let Outcome::Built { volume, manifold } = cylinder_rim(&mut k, 10.0, 0) else {
-        panic!("the chamfer of 10 refused");
+    // with the fixes SolidCraft runs (the cone's rail of no length needs more of them than
+    // the refusal's flag: upstream's own build fails to find the cone's edge)
+    let mut k = kernel(|f| {
+        *f = UpstreamFixes::all();
+        f.fillet_refuse_face_consuming_blends = true;
+    });
+    let got = cylinder_rim(&mut k, 10.0, 0);
+    let Outcome::Built { volume, manifold } = got else {
+        panic!("the chamfer of 10: {got:?}");
     };
     assert!(manifold && near(volume, cone, 5e-3), "{volume}");
     let mut k = Kernel::default();
