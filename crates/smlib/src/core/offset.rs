@@ -52,9 +52,9 @@ const INVALID_INPUT: i32 = 1007;
 /// `status` (smlib_shim.h): an offset's refusal as solidcore-ops routes it
 /// ([`solidcore_ops::offset::refusal`], the routing of ops' own offsets): walls that touch
 /// ([`Error::WallsTouch`]), a wall whose face's offset folds ([`Error::WallFolds`] with the largest
-/// wall it names, solidcore#2367), a vertex moved past an edge's other end
-/// (`SM_ERR_OFFSET_EDGE_VANISHES`, fork 34318f4: `SMLIB_ERR_UNSUPPORTED`); anything else as the
-/// blends pass it on, which carries ops' other offset refusals as they are.
+/// wall it names, solidcore#2367); status-only unsupported results as [`Error::Unsupported`];
+/// anything else as the blends pass it on. Typed refusals, including an edge that would vanish,
+/// keep ops' explanation as [`Error::Refused`].
 fn status(e: SolidError) -> Error {
     use solidcore_ops::Error as Ops;
     match solidcore_ops::offset::refusal(&e) {
