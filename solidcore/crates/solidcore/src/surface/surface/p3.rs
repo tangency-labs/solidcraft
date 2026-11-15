@@ -40,9 +40,12 @@
 //!   evaluations and direction solves, `CoverCoincidentSurface`'s point evaluations,
 //!   domain clip and `AdjustSTEPUVDomain`, the shape match's normal sections and the
 //!   plane normal's unitization) the port returns it too, and a boundary that cannot be
-//!   evaluated is not shown singular. `LocalSurfaceSolve` returns no solution when its
-//!   equations cannot be evaluated at the guess (upstream's solver reports that guess
-//!   found).
+//!   evaluated is not shown singular. When `LocalSurfaceSolve`'s equations cannot be
+//!   evaluated at the guess (upstream's solver reports that guess found), the guess is
+//!   kept only when the two surface points there coincide within the solve's accuracy
+//!   and the operation is not a maximum; otherwise there is no solution. This makes
+//!   `oscillating_skips_failed_guesses`'s first-evaluation rule unconditional at this
+//!   call site, and checks the guess as that rule does not.
 //! - **Tolerance of a surface.** `SmTol::GetApproxTol3d(this)` is the system value for a
 //!   surface without an owner; for an owned surface it is half the face tolerance the
 //!   caller that has the face passes ([`Surface::get_singularities_of_face`], used by
@@ -1669,6 +1672,52 @@ impl Surface {
         Ok(None)
     }
 
+    /// `local_surface_solve`'s answer at a guess its equations cannot evaluate: the
+    /// guess when both surfaces give points there (the position an evaluation writes
+    /// even when its status fails, as at a cone's apex) within `EFF_ZERO_SQRT` (the
+    /// solve's accuracy) and the operation is not a maximum; `None` otherwise.
+    fn unevaluated_guess_solution(
+        &self,
+        k: &Kernel,
+        other: &Surface,
+        operation: SolverOperation,
+        opt_vectors: &[Vec3],
+        guess: &[f64],
+    ) -> Result<Option<LocalSurfaceSolution>> {
+        if matches!(
+            operation,
+            SolverOperation::Maximize | SolverOperation::Signed3dDirectedMaximize
+        ) {
+            return Ok(None);
+        }
+        let uv = uv_at(guess, 0, OP_LOCAL_SOLVE)?;
+        let other_uv = uv_at(guess, 2, OP_LOCAL_SOLVE)?;
+        let (Some(p1), Some(p2)) = (
+            self.evaluate_point_written(k, uv)?,
+            other.evaluate_point_written(k, other_uv)?,
+        ) else {
+            return Ok(None);
+        };
+        let gap = p2 - p1;
+        let mut dist = p1.distance(p2);
+        if !dist.is_finite() || dist > EFF_ZERO_SQRT {
+            return Ok(None);
+        }
+        if operation == SolverOperation::Signed3dDirectedMinimize {
+            let along = opt_vectors
+                .first()
+                .ok_or_else(|| SolidError::invalid_input(OP_LOCAL_SOLVE, "no direction vector"))?;
+            if gap.dot(*along) < 0.0 {
+                dist = -dist;
+            }
+        }
+        Ok(Some(LocalSurfaceSolution {
+            distance: dist,
+            uv,
+            other_uv,
+        }))
+    }
+
     /// The local minimum, maximum, normalization (the gap vector perpendicular to both
     /// tangent planes) or signed directed minimum (the gap vector parallel to
     /// `opt_vectors[0]`) of two surfaces near the guesses (`LocalSurfaceSolve`); `None`
@@ -1716,11 +1765,14 @@ impl Surface {
         // Solve it
         let solution = solver.solve_it(&guess, EFF_ZERO_SQRT)?;
 
-        // a guess the equations cannot evaluate (a surface without normal there) is no
-        // solution; upstream's solver reports it found, which with the evaluation
-        // statuses passed on (WR-663) would hand back the unchecked guess
+        // a guess the equations cannot evaluate (a surface without normal there, an
+        // apex) is checked by its points alone: upstream's solver reports it found,
+        // which with the evaluation statuses passed on (WR-663) would hand back the
+        // unchecked guess. Two coincident points (gap within the solve's accuracy) are
+        // a zero gap: the least distance, perpendicular to both tangent planes and
+        // along any direction; anything else, or a maximum, is no solution.
         if solver.guess_unevaluated() {
-            return Ok(None);
+            return self.unevaluated_guess_solution(k, other, operation, opt_vectors, &guess);
         }
 
         if !solution.found {
@@ -2356,5 +2408,67 @@ mod tests {
             }
         }
         assert!(singular > 0, "no surface had a singular side");
+    }
+
+    /// A guess the local solve's equations cannot evaluate is kept only as a zero gap:
+    /// a cone's apex on the plane through it is the least distance, so a minimum keeps
+    /// it; a maximum, or a guess a unit away, is no solution.
+    #[test]
+    fn unevaluated_guess_is_kept_only_as_a_zero_gap() {
+        use crate::geom::extent2d::Extent2d;
+        use crate::math::Vec2;
+        use crate::surface::cone::Cone;
+        let k = Kernel::default();
+        // apex (radius 0) at the origin, opening along +z
+        let cone = Surface::from(Cone::new_bounded(
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            0.0,
+            1.0,
+            0.0,
+            360.0,
+            3.0,
+            false,
+            false,
+            false,
+        ));
+        let d = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
+        let plane = Surface::from(Plane::new(
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Vec2::new(1.0, 1.0),
+            &d,
+        ));
+        let corners = |dom: Extent2d| {
+            let (lo, hi) = (dom.min(), dom.max());
+            [lo, hi, Point2::new(lo.x, hi.y), Point2::new(hi.x, lo.y)]
+        };
+        let natural = cone.natural_uv_domain_with_nurb(&k).unwrap();
+        let apex_uv = corners(natural)
+            .into_iter()
+            .chain(corners(cone.step_uv_domain()))
+            .find(|uv| {
+                let p = cone.evaluate_point_written(&k, *uv).unwrap().unwrap();
+                p.length() < 1e-12
+            })
+            .expect("a domain corner is the apex");
+        let guess = [apex_uv.x, apex_uv.y, 0.0, 0.0];
+        let found = cone
+            .unevaluated_guess_solution(&k, &plane, SolverOperation::Minimize, &[], &guess)
+            .unwrap()
+            .expect("the apex touches the plane");
+        assert_eq!((found.uv, found.other_uv), (apex_uv, Point2::new(0.0, 0.0)));
+        assert!(found.distance.abs() < 1e-12);
+        let maximum = cone
+            .unevaluated_guess_solution(&k, &plane, SolverOperation::Maximize, &[], &guess)
+            .unwrap();
+        assert!(maximum.is_none());
+        let away = [apex_uv.x, apex_uv.y, 1.0, 0.0];
+        let gap = cone
+            .unevaluated_guess_solution(&k, &plane, SolverOperation::Minimize, &[], &away)
+            .unwrap();
+        assert!(gap.is_none());
     }
 }
