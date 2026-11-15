@@ -692,11 +692,12 @@ fn a_to_object_extrude_to_another_component_moves_rigidly_with_its_slider() {
     }
 }
 
-/// The design as the last release saved it, before the pending changes: its format number one
-/// back and no list of the changes it has, so each pending step runs as it opens.
+/// The design as a build before the pick was kept saved it: format 56, the last one without
+/// `extrude-to-object-keeps-picked-placements` (folded into 57 by 0.43.0), and no list of
+/// pending changes, so that step and every later one run as it opens. A fixed number, not
+/// "current minus one", which skips the step whenever another change is pending.
 fn as_last_release_saved(file: &mut Value) {
-    let number = file["format"].as_str().and_then(|f| f.rsplit('/').next()).and_then(|n| n.parse::<u32>().ok()).unwrap_or(1);
-    file["format"] = json!(format!("solidcraft/{}", number.saturating_sub(1)));
+    file["format"] = json!(solidcraft_doc::format::format_string(56));
     if let Some(o) = file.as_object_mut() {
         o.remove("format_pending");
     }
