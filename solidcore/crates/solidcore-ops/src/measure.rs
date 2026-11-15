@@ -318,13 +318,12 @@ pub fn point_distance(a: [f64; 3], b: [f64; 3]) -> Result<Distance> {
 }
 
 /// The largest distance from `p` to a point of the box `[lo, hi]`: to its farthest corner
-/// (`geom::extent3d::Extent3d::max_distance_to_point`).
+/// (`query::api_queries::box_max_distance_to_point`).
 ///
 /// # Errors
 /// [`Error::Argument`] for a coordinate that is not finite.
 pub fn box_max_distance_to_point(lo: [f64; 3], hi: [f64; 3], p: [f64; 3]) -> Result<f64> {
-    let e = solidcore::geom::extent3d::Extent3d::from_points(point(lo)?, point(hi)?);
-    Ok(e.max_distance_to_point(point(p)?))
+    q::box_max_distance_to_point(point(lo)?, point(hi)?, point(p)?).map_err(status)
 }
 
 impl Body {

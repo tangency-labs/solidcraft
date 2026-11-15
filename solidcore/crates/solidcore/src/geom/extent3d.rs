@@ -734,8 +734,19 @@ impl Extent3d {
     /// the farthest of its eight corners, which on each axis is the bound farther from `p`.
     #[must_use]
     pub fn max_distance_to_point(&self, p: Point3) -> f64 {
-        let far = |lo: f64, hi: f64, x: f64| if (x - lo).abs() >= (hi - x).abs() { x - lo } else { hi - x };
-        Vec3::new(far(self.min.x, self.max.x, p.x), far(self.min.y, self.max.y, p.y), far(self.min.z, self.max.z, p.z)).length()
+        let far = |lo: f64, hi: f64, x: f64| {
+            if (x - lo).abs() >= (hi - x).abs() {
+                x - lo
+            } else {
+                hi - x
+            }
+        };
+        Vec3::new(
+            far(self.min.x, self.max.x, p.x),
+            far(self.min.y, self.max.y, p.y),
+            far(self.min.z, self.max.z, p.z),
+        )
+        .length()
     }
 
     /// Square root of [`Extent3d::min_distance_squared`] (`MinimumDistance`).
@@ -1198,8 +1209,17 @@ mod tests {
     #[test]
     fn the_largest_distance_to_a_point_is_to_the_farthest_corner() {
         let e = Extent3d::from_points(p(-1.0, 0.0, 2.0), p(3.0, 5.0, 4.0));
-        for at in [p(0.0, 1.0, 3.0), p(10.0, -2.0, 0.0), p(-1.0, 0.0, 2.0), p(1.0, 2.5, 3.0)] {
-            let want = e.corners().iter().map(|c| (*c - at).length()).fold(0.0, f64::max);
+        for at in [
+            p(0.0, 1.0, 3.0),
+            p(10.0, -2.0, 0.0),
+            p(-1.0, 0.0, 2.0),
+            p(1.0, 2.5, 3.0),
+        ] {
+            let want = e
+                .corners()
+                .iter()
+                .map(|c| (*c - at).length())
+                .fold(0.0, f64::max);
             assert!((e.max_distance_to_point(at) - want).abs() < 1e-12, "{at:?}");
         }
         assert!((e.max_distance_to_point(p(-1.0, 0.0, 2.0)) - e.max_distance(&e)).abs() < 1e-12);
