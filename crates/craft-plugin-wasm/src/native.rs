@@ -838,6 +838,10 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         if design.is_empty() {
             return Err(HostError::InvalidInput { field: "design".into(), reason: "the importer wrote no design".into() });
         }
+        // A last host call can finish after the deadline, before the next epoch tick sees it.
+        if Instant::now() >= store.data().deadline {
+            return Err(limit("deadline"));
+        }
         Ok(Imported { design, report })
     })();
     (store.into_data().host, outcome)
