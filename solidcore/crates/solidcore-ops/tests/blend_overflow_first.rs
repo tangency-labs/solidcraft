@@ -110,13 +110,19 @@ fn the_notched_block_s_second_rounds_meet_the_first() {
 /// A G^n section certificate whose spans stay unproved is refused within its work budget,
 /// not spent (SolidCraft's fuzz `atomic_commands`, seed 2: its body `b27` as the rig's export
 /// gives it, edges 28 and 22 of the five-edge tangent chain at their record indices, rounded
-/// 2.99). Edge 28's face is a 3 mm round already in the body, so the ball's offset tube is
-/// 0.01 across: the section's 41 first spans are all unproved, and most stay so for several
-/// halvings. Without a budget the five-edge chain's certificate certified after 1,271 halvings
-/// at 1,295 stations (about 450 s, measured 2026-11-11) and the operation then failed with
-/// status 1001. It is refused at its budget (3 halvings per first span plus 128), naming no
-/// size. A guard cancels it after two minutes, so a budget that stops holding fails the test
+/// 2.999). Edge 28's face is a 3 mm round already in the body, so the ball's offset tube is
+/// 0.001 across: the section's first spans are all unproved, and most stay so for several
+/// halvings. It is refused at its budget (3 halvings per first span plus 128), naming no
+/// size. A guard cancels it after five minutes, so a budget that stops holding fails the test
 /// instead of running on.
+///
+/// The fuzz case itself, rounded 2.99 (a tube 0.01 across), was refused here at 123 halvings
+/// (165 stations) until the certificate kept the offset's cancellation near a focal distance
+/// (#16652): its enclosures are now tight enough that it certifies within its budget, and the
+/// round builds a valid body (check level All clean; volume 5,577.325 before, 5,550.954
+/// after). Without a budget its certificate had certified after 1,271 halvings at 1,295
+/// stations (about 450 s, measured 2026-11-11) and the operation then failed with status
+/// 1001. A tube ten times thinner, 2.999, still stays unproved past its budget.
 #[test]
 fn a_certificate_whose_spans_stay_unproved_is_refused_within_its_budget() {
     use solidcore_ops::blend::{blend_ordered, BlendOptions};
@@ -137,15 +143,16 @@ fn a_certificate_whose_spans_stay_unproved_is_refused_within_its_budget() {
         serde_json::from_value(records["b27"].take()).unwrap();
     let (input, order) = Body::from_record(&record, true).unwrap();
     let (body, order) = input.copy_with_order(&order).unwrap();
-    // a guard: a certificate that is not held to its budget is cancelled after two minutes
-    // (and the test fails, Cancelled), instead of running on for hours
+    // a guard: a certificate that is not held to its budget is cancelled after five minutes
+    // (and the test fails, Cancelled), instead of running on for hours; held to it, the
+    // refusal took 100 s (goldens profile, a loaded 32-thread box, 2026-11-15)
     let token = solidcore_ops::cancel::CancelToken::default();
     let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
     let guard = {
         let token = token.clone();
         std::thread::spawn(move || {
             if done_rx
-                .recv_timeout(std::time::Duration::from_secs(120))
+                .recv_timeout(std::time::Duration::from_secs(300))
                 .is_err()
             {
                 token.cancel();
@@ -158,7 +165,7 @@ fn a_certificate_whose_spans_stay_unproved_is_refused_within_its_budget() {
             &order,
             Blend::Round,
             &[28, 22],
-            &[2.99],
+            &[2.999],
             &[],
             Corners::Filled,
             BlendOptions::default(),
@@ -168,9 +175,9 @@ fn a_certificate_whose_spans_stay_unproved_is_refused_within_its_budget() {
     guard.join().unwrap();
     match r {
         Err(Error::BlendNotCertified { halvings, stations }) => {
-            // 41 first spans: a budget of 251 halvings. After 123 (165 stations) the next round
-            // would halve 160 more, so it is refused before it starts
-            assert_eq!((halvings, stations), (123, 165));
+            // 39 first spans (40 first stations): a budget of 245 halvings. After 224 (264
+            // stations) the next round would pass it, so it is refused before it starts
+            assert_eq!((halvings, stations), (224, 264));
         }
         Err(e) => panic!("{e:?}"),
         Ok(_) => panic!("built"),
