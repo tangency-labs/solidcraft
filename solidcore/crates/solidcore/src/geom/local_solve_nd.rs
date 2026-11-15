@@ -296,6 +296,7 @@ pub struct LocalSolveNd<'a, E: EvalNFunctions + ?Sized> {
     max_boundary_hits: u64,
     step_cutting_enabled: bool,
     skips_failed_evaluations: bool,
+    guess_unevaluated: bool,
     current_iteration: u64,
     termination_reason: TerminationReason,
 }
@@ -323,6 +324,7 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
             max_boundary_hits: 3,
             step_cutting_enabled: false,
             skips_failed_evaluations: false,
+            guess_unevaluated: false,
             current_iteration: 0,
             termination_reason: TerminationReason::Undefined,
         }
@@ -338,6 +340,14 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
     #[must_use]
     pub fn termination_reason(&self) -> TerminationReason {
         self.termination_reason
+    }
+
+    /// Whether the last solve stopped because the equations could not be evaluated at
+    /// the guess itself (not upstream: upstream then reports the unevaluated guess as
+    /// found, which a caller can refuse).
+    #[must_use]
+    pub fn guess_unevaluated(&self) -> bool {
+        self.guess_unevaluated
     }
 
     /// The iteration counter after the last solve (`m_lCurrentIteration`; equals
@@ -451,6 +461,7 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
         let mut equation_values2 = vec![0.0; n];
 
         self.acceptable_accuracy = acceptable_accuracy;
+        self.guess_unevaluated = false;
 
         // the last guess point starts at the guess
         let mut solution = guess.to_vec();
@@ -468,6 +479,7 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
             // tangency-labs/smlib@d5c5cfd) it is no solution, as when an evaluation fails
             // during the iteration.
             let found = !self.skips_failed_evaluations;
+            self.guess_unevaluated = true;
             return Ok(self.done(found, TerminationReason::UnableToConverge, solution));
         };
 

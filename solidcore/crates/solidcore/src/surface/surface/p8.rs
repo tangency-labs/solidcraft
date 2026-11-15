@@ -46,11 +46,14 @@
 //! optional `SmDerivSurfDefinition` of `CreateBlendSurface` is copied, so its caller
 //! does not see the fields upstream overwrites. Where upstream ignores a status the
 //! fork passes on (WR-663, tangency-labs/smlib 21dcf69: `CreateBlendSurface`'s
-//! sampling and cross sections, the coincidence check's boxes, points and derivatives,
+//! sampling and cross sections, the coincidence check's boxes and points,
 //! the line intersector's normal evaluations and combination, the singularity
 //! inversion's derivatives) the port returns it; a leaf outside the domain of interest
 //! has no answers, and an iso curve that cannot be trimmed, reversed or
-//! reparameterized is no output curve.
+//! reparameterized is no output curve. A coincidence sample where either surface's
+//! derivatives cannot be evaluated (a degenerate corner) shows no coincidence and the
+//! check goes on to its other samples; the whole-surface check's seam direction test
+//! at such a corner leaves the direction guess unchanged.
 //! `CreateBlendSurface` of a curve that is not a B-spline kind
 //! returns `InvalidInput` (upstream signals the error and casts anyway).
 //! `SmSPGlobalSolver::LocalSolve` returns `InvalidInput` when the original surface of
@@ -296,6 +299,19 @@ fn evaluate_3x3_into(
         }
     }
     Ok(())
+}
+
+/// [`evaluate_3x3_into`] of two surfaces at one coincidence sample: `false` (the sample
+/// shows nothing) when either cannot be evaluated there. Upstream ignores both statuses
+/// and compares whatever the arrays held; the fork passes them on and fails the whole
+/// check (WR-663, tangency-labs/smlib 21dcf69).
+fn evaluate_pair(
+    k: &Kernel,
+    (sa, uva, pa): (&Surface, Point2, &mut [[Vec3; 3]; 3]),
+    (sb, uvb, pb): (&Surface, Point2, &mut [[Vec3; 3]; 3]),
+) -> Result<bool> {
+    Ok(ignored(evaluate_3x3_into(k, sa, uva, pa))?.is_some()
+        && ignored(evaluate_3x3_into(k, sb, uvb, pb))?.is_some())
 }
 
 /// The B-spline part of a curve of a kind derived from `SmBSplineCurve`.
@@ -992,9 +1008,12 @@ impl Surface {
                     let (uv0, uv_binorm0) = boundary_uv(&domain0, ii, t0);
                     let (uv1, uv_binorm1) = boundary_uv(&domain1, jj, t1);
 
-                    // Now check the surfaces for coincidence at this point.
-                    evaluate_3x3_into(k, self, uv0, &mut pvv0)?;
-                    evaluate_3x3_into(k, other, uv1, &mut pvv1)?;
+                    // Now check the surfaces for coincidence at this point. A point
+                    // where either surface cannot be evaluated (a degenerate corner)
+                    // shows no coincidence; the other points still decide.
+                    if !evaluate_pair(k, (self, uv0, &mut pvv0), (other, uv1, &mut pvv1))? {
+                        continue;
+                    }
 
                     // Now check 2nd order terms.
                     let matched =
@@ -1045,11 +1064,11 @@ impl Surface {
         };
         if let Some((true, uv0, dist)) = dropped {
             if dist <= tol_3d {
-                // Point coincidence, check normals and curvature.
-                evaluate_3x3_into(k, self, uv0, &mut pvv0)?;
-                evaluate_3x3_into(k, other, uv1, &mut pvv1)?;
-                if ignored(check_shape_match(&mut pvv0, &mut pvv1, tol_3d, ang_tol_rad))?
-                    .unwrap_or(false)
+                // Point coincidence, check normals and curvature (a point either
+                // surface cannot evaluate there shows no coincidence).
+                if evaluate_pair(k, (self, uv0, &mut pvv0), (other, uv1, &mut pvv1))?
+                    && ignored(check_shape_match(&mut pvv0, &mut pvv1, tol_3d, ang_tol_rad))?
+                        .unwrap_or(false)
                 {
                     return Ok(res);
                 }
@@ -1075,11 +1094,11 @@ impl Surface {
         if let Some((true, found_uv1, dist)) = dropped {
             uv1 = found_uv1;
             if dist <= tol_3d {
-                // Point coincidence, check normals and curvature.
-                evaluate_3x3_into(k, self, uv0, &mut pvv0)?;
-                evaluate_3x3_into(k, other, uv1, &mut pvv1)?;
-                if ignored(check_shape_match(&mut pvv0, &mut pvv1, tol_3d, ang_tol_rad))?
-                    .unwrap_or(false)
+                // Point coincidence, check normals and curvature (a point either
+                // surface cannot evaluate there shows no coincidence).
+                if evaluate_pair(k, (self, uv0, &mut pvv0), (other, uv1, &mut pvv1))?
+                    && ignored(check_shape_match(&mut pvv0, &mut pvv1, tol_3d, ang_tol_rad))?
+                        .unwrap_or(false)
                 {
                     return Ok(res);
                 }
@@ -1207,26 +1226,36 @@ impl Surface {
         // nonZeroTangent evaluations)
         if p1(0, 0).closer_than(tol_3d, p1(1, 0)) {
             // Closed in u (on surf 1).
+            // (a corner either surface cannot differentiate, such as a degenerate
+            // one, leaves the direction guess as it is: the grid of drops below
+            // decides coincidence, the direction only seeds their guesses)
             let uv1 = domain0.evaluate(0.0, 0.0);
-            let (_, su0, _) = self.evaluate_1st_derivatives(k, uv1, true, true)?;
             let uv2 = domain1.evaluate(f64::from(idx00 as u8), f64::from(jdx00 as u8));
-            let (_, su1, sv1) = other.evaluate_1st_derivatives(k, uv2, true, true)?;
-            let other_dir = if orient == OrientType::Same { su1 } else { sv1 };
-            if su0.dot(other_dir) < 0.0 {
-                dir_u = -1.0;
+            if let (Some((_, su0, _)), Some((_, su1, sv1))) = (
+                ignored(self.evaluate_1st_derivatives(k, uv1, true, true))?,
+                ignored(other.evaluate_1st_derivatives(k, uv2, true, true))?,
+            ) {
+                let other_dir = if orient == OrientType::Same { su1 } else { sv1 };
+                if su0.dot(other_dir) < 0.0 {
+                    dir_u = -1.0;
+                }
             }
         }
 
         // Now check U seams - periodic in V
         if p1(0, 0).closer_than(tol_3d, p1(0, 1)) {
             // Closed in v (on surf 1).
+            // (as for the u direction above)
             let uv1 = domain0.evaluate(0.0, 0.0);
-            let (_, _, sv0) = self.evaluate_1st_derivatives(k, uv1, true, true)?;
             let uv2 = domain1.evaluate(f64::from(idx00 as u8), f64::from(jdx00 as u8));
-            let (_, su1, sv1) = other.evaluate_1st_derivatives(k, uv2, true, true)?;
-            let other_dir = if orient == OrientType::Same { sv1 } else { su1 };
-            if sv0.dot(other_dir) < 0.0 {
-                dir_v = -1.0;
+            if let (Some((_, _, sv0)), Some((_, su1, sv1))) = (
+                ignored(self.evaluate_1st_derivatives(k, uv1, true, true))?,
+                ignored(other.evaluate_1st_derivatives(k, uv2, true, true))?,
+            ) {
+                let other_dir = if orient == OrientType::Same { sv1 } else { su1 };
+                if sv0.dot(other_dir) < 0.0 {
+                    dir_v = -1.0;
+                }
             }
         }
 

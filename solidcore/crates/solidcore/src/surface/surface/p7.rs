@@ -103,9 +103,13 @@
 //!   `EvaluateSTEP`, `GetFace` and the base `CalculateBoundingBox`
 //!   (`surface.surface_p1`; the solver constructors also hand over the caches holding
 //!   the patch data of tree nodes).
-//! - **No evidence (WR-663).** As the fork (tangency-labs/smlib 21dcf69), `IsClosed` is
-//!   `false` when an end, the continuity, the mid derivatives or the Frenet frame cannot
-//!   be evaluated, and the base `IsPlanar` is `false` without its box. The other
+//! - **No evidence (WR-663).** `IsClosed` is `false` when an end has no position or the
+//!   short-arc filter's Frenet frame cannot be evaluated (the fork,
+//!   tangency-labs/smlib 21dcf69); where only the derivatives (end, continuity or mid)
+//!   cannot be evaluated, as through a cone apex, the end positions (as the evaluation
+//!   writes them, [`SurfaceEvaluate::evaluate_point_written`]) decide closure and
+//!   the continuity is Discontinuous, the rule `SmCPGlobalSolver::Solve` follows for a
+//!   closed curve. The base `IsPlanar` is `false` without its box. The other
 //!   statuses this file's functions drop are passed on and their soft answers given
 //!   (the convergence tests, `sm_GoodDropResult`, `ApproxDerivativeLengths`,
 //!   `FindDegenParamForDirection`, `sm_CheckSeamDrop`, `sm_LoadGuesses`), as in the
@@ -555,7 +559,7 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
     want_continuity: bool,
 ) -> Result<(bool, Option<ContinuityType>)> {
     let discontinuous = want_continuity.then_some(ContinuityType::Discontinuous);
-    // a surface that cannot be evaluated is not shown closed, as the fork
+    // a surface whose end positions cannot be evaluated is not shown closed
     // (tangency-labs/smlib 21dcf69)
 
     // locals
@@ -606,37 +610,49 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
             }
 
             // evaluate isoParameter endPoints (the second derivatives only when the
-            // continuity is wanted)
-            let (p_min, p_max, d2) = if want_continuity {
-                let Some(d2_min) = ignored(evaluate_2nd_derivatives(
-                    k,
-                    surface,
-                    uv_min,
-                    Side::Left,
-                    Side::Left,
-                ))?
-                else {
-                    return Ok((false, discontinuous));
-                };
-                let Some(d2_max) = ignored(evaluate_2nd_derivatives(
-                    k,
-                    surface,
-                    uv_max,
-                    Side::Left,
-                    Side::Left,
-                ))?
-                else {
-                    return Ok((false, discontinuous));
-                };
-                (d2_min.point, d2_max.point, Some((d2_min, d2_max)))
+            // continuity is wanted). Closure is decided from the end positions alone:
+            // where the derivatives cannot be evaluated (a pole such as a cone apex) the
+            // positions still decide it and the continuity is Discontinuous, as
+            // `SmCPGlobalSolver::Solve` does for a closed curve. The position is the
+            // one the evaluation writes even when its status fails (a cone's NURB
+            // position at the apex); only an end with no position leaves the surface
+            // not shown closed (tangency-labs/smlib 21dcf69, WR-663).
+            let d2 = if want_continuity {
+                match (
+                    ignored(evaluate_2nd_derivatives(
+                        k,
+                        surface,
+                        uv_min,
+                        Side::Left,
+                        Side::Left,
+                    ))?,
+                    ignored(evaluate_2nd_derivatives(
+                        k,
+                        surface,
+                        uv_max,
+                        Side::Left,
+                        Side::Left,
+                    ))?,
+                ) {
+                    (Some(d2_min), Some(d2_max)) => Some((d2_min, d2_max)),
+                    _ => None,
+                }
             } else {
-                let Some(p_min) = ignored(surface.evaluate_point(k, uv_min))? else {
+                None
+            };
+            let (p_min, p_max) = if let Some((d2_min, d2_max)) = d2 {
+                (d2_min.point, d2_max.point)
+            } else {
+                let Some(p_min) = surface.evaluate_point_written(k, uv_min)? else {
                     return Ok((false, discontinuous));
                 };
-                let Some(p_max) = ignored(surface.evaluate_point(k, uv_max))? else {
+                let Some(p_max) = surface.evaluate_point_written(k, uv_max)? else {
                     return Ok((false, discontinuous));
                 };
-                (p_min, p_max, None)
+                if want_continuity {
+                    min_continuity = ContinuityType::Discontinuous;
+                }
+                (p_min, p_max)
             };
 
             // pick a tolerance
@@ -675,7 +691,8 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
                         geometric_g2: k.fixes.geometric_g2_continuity,
                     },
                 ) {
-                    Err(e) if !e.is_unported_or_cancelled() => return Ok((false, discontinuous)),
+                    // a continuity that cannot be evaluated is not shown: Discontinuous
+                    Err(e) if !e.is_unported_or_cancelled() => ContinuityType::Discontinuous,
                     r => r?,
                 };
 
@@ -688,7 +705,9 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
             // extra test
             if (min_continuity as i32) > (ContinuityType::Discontinuous as i32) {
                 // filter out very short curve passing as closed curves
-                match ignored(evaluate_directional_derivs(
+                // (no derivatives through the middle, an iso line through a pole: the
+                // end positions decide closure, the seam is not shown smooth)
+                let Some(d) = ignored(evaluate_directional_derivs(
                     k,
                     surface,
                     uv_mid,
@@ -696,13 +715,13 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
                     2,
                     Side::Left,
                     Side::Left,
-                ))? {
-                    Some(d) => {
-                        for (dst, src) in p_mid.iter_mut().zip(d) {
-                            *dst = src;
-                        }
-                    }
-                    None => return Ok((false, discontinuous)),
+                ))?
+                else {
+                    min_continuity = ContinuityType::Discontinuous;
+                    continue;
+                };
+                for (dst, src) in p_mid.iter_mut().zip(d) {
+                    *dst = src;
                 }
 
                 let p_mid0 = p_mid.first().copied().unwrap_or(Vec3::UNDEF);

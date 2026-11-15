@@ -88,7 +88,9 @@
 //!   `SmCPGlobalSolver::Solve`, which the fork also passes on: a curve that cannot give
 //!   three derivatives (a conic, a tangent field) would refuse every drop; a
 //!   continuity that cannot be evaluated is no evidence, so the ends stay
-//!   discontinuous, as upstream.
+//!   discontinuous, as upstream. Nor `GlobalPointSolve`'s boundary-culling
+//!   `AngleBetween` of a zero tangent or gap: with no outside direction the answer is
+//!   kept, so the angle is taken only between vectors with length.
 //! - **Projected extrema on a tangent field (#13675).** `GlobalPointSolve` refuses a
 //!   projected minimum or maximum on a tangent field curve, and on a projected, offset,
 //!   in-volume or on-surface curve built on one, with [`SolidError::Unsupported`]. The
@@ -1532,16 +1534,28 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
                             | SolverOperation::Intersect
                             | SolverOperation::Rayfire
                     ) {
-                        if sol_vec.length_squared() > EFF_ZERO_SQ {
-                            // (status ignored upstream, 0 on failure; passed on as the
-                            // fork, tangency-labs/smlib 8311f8e)
+                        // (status ignored upstream, 0 on failure; the fork passes it on,
+                        // tangency-labs/smlib 8311f8e). A boundary without tangent (a
+                        // degenerate end) has no outside direction: `outside_dir` below is
+                        // false and the answer is kept whatever the angle, so the angle
+                        // stays 0 rather than failing the drop.
+                        if sol_vec.length_squared() > EFF_ZERO_SQ
+                            && bndry_vec.length_squared() > EFF_ZERO_SQ
+                        {
                             ang_from_perp_rad = bndry_vec.angle_between(sol_vec)?;
                         }
                         ang_from_perp_rad = (ang_from_perp_rad - PI / 2.0).abs();
                         let dot = bndry_vec.dot(sol_vec);
                         outside_dir = dot > 0.0; // TRUE = sSolVec points outside interval
                     } else if local_op == SolverOperation::Signed3dDirectedMinimize {
-                        ang_from_perp_rad = self.opt(0)?.angle_between(sol_vec)?;
+                        // (a zero gap has no direction; `outside_dir` stays false and the
+                        // answer is kept, as upstream's ignored status leaves it)
+                        let along = self.opt(0)?;
+                        if sol_vec.length_squared() > EFF_ZERO_SQ
+                            && along.length_squared() > EFF_ZERO_SQ
+                        {
+                            ang_from_perp_rad = along.angle_between(sol_vec)?;
+                        }
                     } else if matches!(
                         local_op,
                         SolverOperation::ProjectedMinimize | SolverOperation::ProjectedMaximize

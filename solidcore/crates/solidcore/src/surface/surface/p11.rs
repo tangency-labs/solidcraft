@@ -43,9 +43,12 @@
 //! - **Statuses.** Every status upstream checks (`SER`) is propagated. Upstream
 //!   ignores the statuses of the two `Unitize` calls of the plane normal, of
 //!   `SmExtent2d::Intersect` in the leaf solves and of the boundary curve evaluations
-//!   and trims; as the fork (WR-663, tangency-labs/smlib 21dcf69) the unitizations,
-//!   evaluations and trims pass them on, and a patch or span outside the solve domain
-//!   or interval of interest has no answers.
+//!   and trims; as the fork (WR-663, tangency-labs/smlib 21dcf69) the evaluations and
+//!   trims pass them on, and a patch or span outside the solve domain or interval of
+//!   interest has no answers. A given plane normal of no length, which upstream's
+//!   `Unitize` turns into (0, 0, 1), is treated as no normal: the plane is taken across
+//!   the surfaces' normals (steepest descent), so the plane normal's `Unitize` cannot
+//!   fail; the answer is still kept only within `distance_tolerance`.
 //!   `AddSortedSolution` returns `void` upstream; its Rust errors (bad solution data)
 //!   are propagated as in the sibling leaf solves. [`SolidError::Unported`] always
 //!   propagates.
@@ -476,7 +479,12 @@ impl Surface {
 
         // Select normal for plane containing answer
         let steepest_descent;
-        let mut plane_norm = if let Some(n) = opts.plane_normal {
+        // A given normal of no length names no plane: upstream's `Unitize` turns it into
+        // (0, 0, 1), an arbitrary plane that need not cross the intersection. The port
+        // takes the plane across both surfaces' normals instead, as when no normal is
+        // given (tangency-labs/smlib 21dcf69 passes the failed `Unitize` on).
+        let given_normal = opts.plane_normal.filter(|n| n.unitize().is_ok());
+        let mut plane_norm = if let Some(n) = given_normal {
             // In some cases like tracing tangency curves we need to get a normal from
             // outside because of the problems with the surface normals being the same.
             steepest_descent = false;
@@ -496,8 +504,8 @@ impl Surface {
             n
         };
 
-        // build plane containing answers (SE: Unitize status ignored upstream; passed on
-        // as the fork does, WR-663, tangency-labs/smlib 21dcf69)
+        // build plane containing answers (SE: Unitize status ignored upstream; the normal
+        // has length here: a given zero normal was replaced above)
         plane_norm = plane_norm.unitize()?;
         let plane_surface = Plane::from_normal(plane_orig, plane_norm);
 
@@ -753,13 +761,14 @@ impl Surface {
                 // try to do a normalized convergence for minimization.
                 if angle < three_deg || angle > PI - three_deg {
                     // Recompute plane normal if needed
-                    if opts.plane_normal.is_none() {
+                    if given_normal.is_none() {
                         let new_plane_norm = norm1.cross(norm2);
                         if new_plane_norm.length_squared() > EFF_ZERO_SQ {
                             plane_norm = new_plane_norm;
                         }
                     }
-                    // (SE: Unitize status ignored upstream; passed on as the fork does)
+                    // (SE: Unitize status ignored upstream; the normal is the unit one from
+                    // above or a cross product longer than SM_EFF_ZERO)
                     plane_norm = plane_norm.unitize()?;
                     let plane_d = -p1.dot(plane_norm);
 
@@ -2748,5 +2757,58 @@ mod tests {
             assert_eq!(typed.is_status_answer(), before.is_status_answer());
             assert_eq!(typed.surface_failure(), Some(&failure));
         }
+    }
+
+    /// A given plane normal of no length names no plane: the solve runs as with no
+    /// normal (across the surfaces' normals) instead of failing on its `Unitize` or, as
+    /// upstream, using the arbitrary plane `z` = const that need not cross the answer.
+    /// Here that plane would contain the whole intersection line of the two patches.
+    #[test]
+    fn zero_given_plane_normal_solves_as_no_normal() {
+        // s1 in the plane z = 0, s2 in the plane x = 0.5: they cross along x = 0.5, z = 0
+        let s1 = bspline_surface(
+            1,
+            1,
+            &[
+                &[Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)],
+                &[Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0)],
+            ],
+        );
+        let s2 = bspline_surface(
+            1,
+            1,
+            &[
+                &[Vec3::new(0.5, 0.0, -1.0), Vec3::new(0.5, 1.0, -1.0)],
+                &[Vec3::new(0.5, 0.0, 1.0), Vec3::new(0.5, 1.0, 1.0)],
+            ],
+        );
+        let dom = Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0));
+        let k = Kernel::default();
+        let solve = |plane_normal| {
+            s1.local_surface_intersect(
+                &k,
+                &dom,
+                &s2,
+                &dom,
+                1e-6,
+                Point2::new(0.4, 0.3),
+                Point2::new(0.45, 0.35),
+                &LocalSurfaceIntersectOptions {
+                    plane_normal,
+                    previous_uv: None,
+                    do_boundary_testing: false,
+                },
+            )
+            .unwrap()
+        };
+        let zero = solve(Some(Vec3::new(0.0, 0.0, 0.0))).unwrap();
+        let none = solve(None).unwrap();
+        assert_eq!(zero.uv, none.uv);
+        assert_eq!(zero.other_uv, none.other_uv);
+        // the answer lies on both planes
+        let p1 = s1.evaluate_point(&k, zero.uv).unwrap();
+        let p2 = s2.evaluate_point(&k, zero.other_uv).unwrap();
+        assert!((p1.x - 0.5).abs() <= 1e-9 && p1.z.abs() <= 1e-9, "{p1:?}");
+        assert!(p1.distance(p2) <= 1e-9, "{p1:?} {p2:?}");
     }
 }

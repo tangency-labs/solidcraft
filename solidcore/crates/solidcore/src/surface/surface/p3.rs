@@ -40,7 +40,9 @@
 //!   evaluations and direction solves, `CoverCoincidentSurface`'s point evaluations,
 //!   domain clip and `AdjustSTEPUVDomain`, the shape match's normal sections and the
 //!   plane normal's unitization) the port returns it too, and a boundary that cannot be
-//!   evaluated is not shown singular.
+//!   evaluated is not shown singular. `LocalSurfaceSolve` returns no solution when its
+//!   equations cannot be evaluated at the guess (upstream's solver reports that guess
+//!   found).
 //! - **Tolerance of a surface.** `SmTol::GetApproxTol3d(this)` is the system value for a
 //!   surface without an owner; for an owned surface it is half the face tolerance the
 //!   caller that has the face passes ([`Surface::get_singularities_of_face`], used by
@@ -1713,6 +1715,13 @@ impl Surface {
 
         // Solve it
         let solution = solver.solve_it(&guess, EFF_ZERO_SQRT)?;
+
+        // a guess the equations cannot evaluate (a surface without normal there) is no
+        // solution; upstream's solver reports it found, which with the evaluation
+        // statuses passed on (WR-663) would hand back the unchecked guess
+        if solver.guess_unevaluated() {
+            return Ok(None);
+        }
 
         if !solution.found {
             // no solutions - exit; when not signed directed, if we terminate because of

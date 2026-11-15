@@ -475,9 +475,9 @@ fn curve_bounded_surface_assert_valid(
     );
     walk.depth = depth;
     let basis_ok = basis_result?;
-    rtn &= r.report(CURVE_BOUNDED_SURFACE_TYPE, 0, 0, basis_ok, UNDEF, UNDEF)?;
+    rtn &= curve_bounded_report(r, 0, basis_ok)?;
     // Every owned value is evaluated through the same kernel context.
-    rtn &= r.report(CURVE_BOUNDED_SURFACE_TYPE, 3, 0, true, UNDEF, UNDEF)?;
+    rtn &= curve_bounded_report(r, 3, true)?;
 
     for (curves, test, context_test) in [
         (bounded.boundaries_3d(), 1, 4),
@@ -495,18 +495,35 @@ fn curve_bounded_surface_assert_valid(
                 key,
                 polar_key,
             )?;
-            rtn &= r.report(CURVE_BOUNDED_SURFACE_TYPE, test, 0, ok, UNDEF, UNDEF)?;
-            rtn &= r.report(
-                CURVE_BOUNDED_SURFACE_TYPE,
-                context_test,
-                0,
-                true,
-                UNDEF,
-                UNDEF,
-            )?;
+            rtn &= curve_bounded_report(r, test, ok)?;
+            rtn &= curve_bounded_report(r, context_test, true)?;
         }
     }
     Ok(rtn)
+}
+
+/// `SM_ASSERT_BOOLEAN_REPORT(test, SM_LEVEL_0, passed)` of `SmCurveBoundedSurface`.
+/// Upstream's label lookup gives the class [`DEFAULT`](crate::geom::assert_array::labels::DEFAULT),
+/// one entry long: test 0 is labelled from it, as upstream; a later test, which upstream
+/// reads past its end, takes its label from the class's own
+/// `sAssertCurveBoundedSurface_list` (not upstream).
+fn curve_bounded_report(r: &mut Reporter<'_>, test: u64, passed: bool) -> Result<bool> {
+    let upstream = assert_label_list(CURVE_BOUNDED_SURFACE_TYPE, 0);
+    if usize::try_from(test).is_ok_and(|t| t < upstream.len()) {
+        return r.report(CURVE_BOUNDED_SURFACE_TYPE, test, 0, passed, UNDEF, UNDEF);
+    }
+    let class_string = r.class_string;
+    r.report_from(
+        crate::geom::assert_array::labels::CURVE_BOUNDED_SURFACE,
+        CURVE_BOUNDED_SURFACE_TYPE,
+        CURVE_BOUNDED_SURFACE_TYPE,
+        class_string,
+        test,
+        0,
+        passed,
+        UNDEF,
+        UNDEF,
+    )
 }
 
 // ---- SmSurface ----------------------------------------------------------------------

@@ -4704,6 +4704,17 @@ pub trait SurfaceEvaluate {
     /// Those of the evaluation.
     fn evaluate_point(&self, k: &Kernel, uv: Point2) -> Result<Point3>;
 
+    /// The position an evaluation at `uv` writes even when its status fails (a cone's
+    /// NURB position at the apex, where the STEP parameters cannot be found): `None`
+    /// when none is written. Unported and cancelled evaluations still propagate.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] and [`SolidError::Cancelled`] of the evaluation.
+    fn evaluate_point_written(&self, k: &Kernel, uv: Point2) -> Result<Option<Point3>> {
+        crate::error::ignored(self.evaluate_point(k, uv))
+    }
+
     /// The virtual `operator==` (unit `surface.surface_p1`).
     ///
     /// # Errors
@@ -4828,6 +4839,19 @@ impl SurfaceEvaluate for Surface {
 
     fn evaluate_point(&self, k: &Kernel, uv: Point2) -> Result<Point3> {
         Self::evaluate_point(self, k, uv)
+    }
+
+    fn evaluate_point_written(&self, k: &Kernel, uv: Point2) -> Result<Option<Point3>> {
+        if let Some(p) = crate::error::ignored(Surface::evaluate_point(self, k, uv))? {
+            return Ok(Some(p));
+        }
+        let flags = EvaluateFlags::default();
+        Ok(
+            crate::error::ignored(self.evaluate_ignoring_status(k, uv, 0, 0, flags))?
+                .flatten()
+                .and_then(|m| m.first().and_then(|row| row.first()).copied())
+                .filter(|p| !p.is_undef()),
+        )
     }
 
     fn knots(
