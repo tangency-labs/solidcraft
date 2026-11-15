@@ -4128,10 +4128,14 @@ mod tests {
         assert!(near(ends(new_ed), [0.5, 2.0]), "{:?}", ends(new_ed));
     }
 
-    /// WR-101: the upper split child's interval. Pinned (default) it is `[dT, dT]`;
-    /// with `Kernel::fixes.proto_edge_split_upper_keeps_the_old_max` it is
-    /// `[dT, old_max]`. The lower child is `[old_min, dT]` either way, and a split at or
-    /// within the tolerance of an end is still refused.
+    /// WR-101: the upper split child's interval. A split goes ahead only where an edge
+    /// definition splits too, and that definition gives the upper child `[dT, old_max]`,
+    /// with `Kernel::fixes.proto_edge_split_upper_keeps_the_old_max` or without it: the
+    /// pinned `[dT, dT]` was only left on a child no definition split onto, a split now
+    /// refused, so the flag changes no result. With two definitions, one splitting and
+    /// one refusing (too near its end for its larger tolerance), the upper child gets
+    /// the one that splits and still `[dT, old_max]`; the lower child is `[old_min, dT]`
+    /// and keeps both. A split at or within the tolerance of an end is refused.
     #[test]
     fn proto_edge_split_upper_interval_keeps_the_old_max() {
         for fixed in [false, true] {
@@ -4173,31 +4177,52 @@ mod tests {
                 ));
             }
 
-            // Split near the end: the proto edge splits, but its edge definition is within
-            // 10*tol of its end and refuses to split (upstream's `cbiFudge`), so nothing
-            // overwrites the interval `proto_edge_split` assigned to the upper child.
-            let dt = old_max - 2.0 * tol;
+            // Near the end, within 10*tol, the edge definition refuses to split (upstream's
+            // `cbiFudge`), so the proto edge does not split either: it would leave an upper
+            // child with no definitions.
+            let near_end = old_max - 2.0 * tol;
+            assert!(matches!(
+                m.proto_edge_split(&k, &mut geo, pe, near_end),
+                Ok((None, None))
+            ));
+            assert_eq!(m.proto_edges(), [pe]);
+            let whole = m.proto_edge(pe).unwrap().xsect_interval();
+            assert_eq!((whole.min(), whole.max()), (old_min, old_max));
+
+            // A second definition, of ten times the tolerance, refuses within 1e-3 of the end.
+            geo.curves.push(line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]));
+            let c1 = H(geo.curves.len() - 1, ClassObjectKind::Curve);
+            let wide = m
+                .insert_edge_definition(EdgeDefinition::new(
+                    Some(c1),
+                    ivl,
+                    R0,
+                    R1,
+                    10.0 * tol,
+                    None,
+                    None,
+                    None,
+                ))
+                .unwrap();
+            m.add_edge_definition(&k, &mut geo, pe, wide).unwrap();
+
+            // 2e-4 from the end the first definition splits and the wide one refuses.
+            let dt = old_max - 20.0 * tol;
             let (new_pv, new_pe) = m.proto_edge_split(&k, &mut geo, pe, dt).unwrap();
             let new_pe = new_pe.expect("proto edge was split");
             assert!(new_pv.is_some());
-            assert_eq!(m.proto_edge(new_pe).unwrap().num_edge_definitions(), 0);
-            // premise: the store-edge-definition branch that would overwrite the interval
-            // was refused by `cbiFudge`, so the upper child's interval is the one the split
-            // assigned, not one later overwritten by an edge definition.
-            assert!(
-                (old_max - dt).abs() < 10.0 * tol,
-                "the split must be within the proto edge's tolerance of its end"
-            );
+            assert_eq!(m.proto_edge(new_pe).unwrap().num_edge_definitions(), 1);
+            assert!(!m
+                .proto_edge(new_pe)
+                .unwrap()
+                .edge_definitions()
+                .contains(&wide));
+            assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 2);
 
             let lower = m.proto_edge(pe).unwrap().xsect_interval();
             assert_eq!((lower.min(), lower.max()), (old_min, dt));
             let upper = m.proto_edge(new_pe).unwrap().xsect_interval();
-            if fixed {
-                assert_eq!((upper.min(), upper.max()), (dt, old_max));
-            } else {
-                // pinned C++ parity: the documented wrong interval
-                assert_eq!((upper.min(), upper.max()), (dt, dt));
-            }
+            assert_eq!((upper.min(), upper.max()), (dt, old_max), "fixed: {fixed}");
         }
     }
 

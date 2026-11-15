@@ -573,7 +573,7 @@ fn parity(stride: usize) {
         // differs is pinned above, and the rest must be identical or within rounding.
         assert_eq!(
             (t.bodies - t.identical - t.rounding_only, t.rounding_only),
-            (pinned.len(), 36),
+            (pinned.len(), 37), // 37 with fillets/15437's block (within rounding)
             "bodies that differ, bodies within rounding"
         );
         // the largest rounding difference, relative (#3137: 4.885e-16)

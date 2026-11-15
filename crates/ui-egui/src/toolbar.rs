@@ -2373,7 +2373,7 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui.label(egui::RichText::new(solidcraft_ui_text::tr_label("Selection filter")).color(t.text_dim).size(t.font_small));
     for (mode, label) in [("body", app.tr_label("Select bodies (a face picks its body)")), ("component", app.tr("ui.select_components_by_face"))] {
-        let mut on = app.ui.pick_mode() == mode;
+        let mut on = app.pick_mode() == mode;
         if ui_kit::checkbox(ui, label, &mut on).changed() {
             // The Faces checkbox below is independent. The standalone command enables faces.
             let filters = std::mem::take(&mut app.ui.pick_off);
@@ -2571,6 +2571,17 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         if shown && (crate::keymap::drag_zoom_key(app, k, mods) || crate::navigation::view_key(app, ctx, k, mods, repeat)) {
             continue;
         }
+        // Alt+1 to Alt+9 show the shown design's first to ninth view (Ctrl+1 to Ctrl+7 keep
+        // turning the view cube).
+        if shown
+            && mods.alt
+            && !mods.command
+            && !mods.shift
+            && let Some(place) = view_place(k)
+        {
+            drop(app.run("tab.view.activate", json!({"index": place})));
+            continue;
+        }
         if mods.command {
             match k {
                 // An editing embed's host has its own New, Open, Save, Close and settings.
@@ -2585,9 +2596,16 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                 }
                 _ if !shown => {}
-                // Close the design shown (asking first when it is unsaved); closing the last one
-                // shows the start page (#5366).
-                Key::W if !mods.shift && !mods.alt => crate::documents::close(app, app.docs.active, false),
+                // Ctrl+W closes the view shown, and the design with it when that is its only view;
+                // Ctrl+Shift+W closes the design shown. A design is closed asking first when it is
+                // unsaved; closing the last one shows the start page (#5366).
+                Key::W if !mods.alt => {
+                    if mods.shift || app.docs.views.len() < 2 {
+                        crate::documents::close(app, app.docs.active, false);
+                    } else {
+                        drop(app.run("tab.view.close", json!({})));
+                    }
+                }
                 Key::Z => {
                     if !crate::tools::undo_spline_point(app) {
                         drop(app.run("edit.undo", json!({})));
@@ -2680,6 +2698,15 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods), repeat),
         }
     }
+}
+
+/// The place (0 first) of the view a digit key shows: 1 to 9.
+fn view_place(key: egui::Key) -> Option<u8> {
+    use egui::Key;
+    [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9]
+        .iter()
+        .position(|digit| *digit == key)
+        .and_then(|i| u8::try_from(i).ok())
 }
 
 /// The Report a bug button for this header layout ([`app_bar::report_rect`]).
@@ -4528,11 +4555,11 @@ mod app_bar_tests {
         h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
         h.step(&json!({"widget":"Workshop helper · measure"})).unwrap();
         h.frames(2);
-        let slot_dialog = h.app.plugin_menu.dialog.take().expect("a File slot click opens the Plugins entry dialog");
+        let slot_dialog = h.app.plugin_menu.dialogs.pop().expect("a File slot click opens the Plugins entry dialog");
         assert_eq!(slot_dialog.entry, "measure");
         assert_eq!(slot_dialog.ready(&h.app), Ok(json!({"length":12.0})));
         crate::plugin_menu::open_entry(&mut h.app, 0, 0);
-        let menu_dialog = h.app.plugin_menu.dialog.take().unwrap();
+        let menu_dialog = h.app.plugin_menu.dialogs.pop().unwrap();
         assert_eq!(slot_dialog.fields, menu_dialog.fields);
         assert_eq!(slot_dialog.plugin.approval, menu_dialog.plugin.approval);
         assert_eq!(slot_dialog.plugin.path, menu_dialog.plugin.path);
@@ -4543,19 +4570,19 @@ mod app_bar_tests {
         h.frames(3);
         h.step(&json!({"click":{"handle":"button:workshop-helper.report"}})).unwrap();
         h.frames(2);
-        assert_eq!(h.app.plugin_menu.dialog.as_ref().unwrap().entry, "report", "a ribbon slot opens the same entry dialog");
-        h.app.plugin_menu.dialog = None;
+        assert_eq!(h.app.plugin_menu.dialog().unwrap().entry, "report", "a ribbon slot opens the same entry dialog");
+        h.app.plugin_menu.dialogs.clear();
         h.app.home.show(h.app.session.revision);
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:help"}})).unwrap();
         h.step(&json!({"widget":"Workshop helper · report"})).unwrap();
         h.frames(3);
         assert!(h.app.home.open, "the Help slot opens over Home");
-        assert_eq!(h.app.plugin_menu.dialog.as_ref().unwrap().entry, "report");
+        assert_eq!(h.app.plugin_menu.dialog().unwrap().entry, "report");
         assert!(crate::scenario::handle_at("plugin_dialog:run").is_some(), "the entry dialog is drawn while Home is open");
         h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
         h.frames(2);
-        assert!(h.app.plugin_menu.dialog.is_none() && h.app.home.open);
+        assert!(h.app.plugin_menu.dialogs.is_empty() && h.app.home.open);
         h.app.home.open = false;
         if let Ok(dir) = std::env::var("SOLIDCRAFT_PLUGINS_EVIDENCE") {
             let dir = std::path::PathBuf::from(dir);
@@ -4578,7 +4605,7 @@ mod app_bar_tests {
                 if (2..4).contains(&capture) {
                     crate::plugin_slots::begin(&mut h.app, "workshop-helper.measure");
                 } else if capture >= 4 {
-                    h.app.plugin_menu.dialog = None;
+                    h.app.plugin_menu.dialogs.clear();
                     h.app.ui.tab = "INSPECT".into();
                     h.ctx.data_mut(|data| data.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
                 }
@@ -4626,9 +4653,9 @@ mod app_bar_tests {
         }
         h.app.preferences.disabled_plugins.insert("workshop-helper".into());
         assert!(crate::plugin_slots::items(&h.app, crate::plugin_slots::Slot::Menu("File")).is_empty());
-        h.app.plugin_menu.dialog = None;
+        h.app.plugin_menu.dialogs.clear();
         run_file_row(&mut h.app, "workshop-helper.measure");
-        assert!(h.app.plugin_menu.dialog.is_none(), "turned-off plugins cannot open a slot dialog");
+        assert!(h.app.plugin_menu.dialogs.is_empty(), "turned-off plugins cannot open a slot dialog");
         h.app.plugin_menu.listed = crate::plugin_menu::list(&h.app, h.app.session.plugin_state.plugins_dir().as_deref());
         assert!(h.app.plugin_menu.listed[0].disabled);
         assert_eq!(h.app.plugin_menu.listed[0].entries.len(), 2, "the Plugins menu keeps all disabled entries");

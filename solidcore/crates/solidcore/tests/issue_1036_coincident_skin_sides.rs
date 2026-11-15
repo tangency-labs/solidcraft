@@ -168,16 +168,14 @@ fn issue_1036_probe() {
         let mut x = skin_range(&mut k, from, to).unwrap();
         report.push(format!("{name} faces {:#?}", faces(&k, &mut x)));
     }
-    // The same with each opt-in that touches this path: WR-305 (an interval along a face
-    // edge classifies to the edge) for the slivers on A's top cap, and WR-304 (the
-    // clean-up re-checks edges a face merge leaves inside one face). Neither changes
-    // the results (run of 2026-10-27).
-    for fix in ["classify_edge_interval", "boolean_cleanup_removes_slits"] {
+    // The same with the opt-in that touches this path: WR-305 (an interval along a face
+    // edge classifies to the edge) for the slivers on A's top cap. It did not change the
+    // results (run of 2026-10-27), nor did WR-304 (the clean-up re-checks edges a face
+    // merge leaves inside one face), which is always on now.
+    {
+        let fix = "classify_edge_interval";
         let mut k = Kernel::default();
-        match fix {
-            "classify_edge_interval" => k.fixes.classify_edge_interval = true,
-            _ => k.fixes.boolean_cleanup_removes_slits = true,
-        }
+        k.fixes.classify_edge_interval = true;
         for (name, op) in [("A - B", 0), ("A n B", 1), ("A u B", 2)] {
             let (a, b) = (
                 skin_range(&mut k, 0, 5).unwrap(),

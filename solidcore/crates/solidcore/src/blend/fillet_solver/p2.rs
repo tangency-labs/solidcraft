@@ -1198,7 +1198,8 @@ impl FilletSolver {
     /// the half-planes through the edge's ends and takes the edge's start for the nearest
     /// point (WR-422); a start rail point within the solver's tolerance of the arc's axis
     /// is moved onto the axis (WR-592); the span is the turn from the start section to the
-    /// end one, without `IsArc`'s start angle (WR-568).
+    /// end one, without `IsArc`'s start angle (WR-568), and exactly 360 degrees along a
+    /// whole closed edge whose end section is its start one (WR-789).
     ///
     /// `SM_ERR` when the generator is not circular, the edge curve is not an arc, the
     /// radius is tiny or changes, or the nearest point on the edge is not unique; those
@@ -1443,7 +1444,14 @@ impl FilletSolver {
             k.fixes.fillet_statuses_pass_on,
         )? {
             Ok(a) => a,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(e)
+                if matches!(
+                    e,
+                    SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                ) || e.is_not_certified() =>
+            {
+                return Err(e)
+            }
             Err(_) => 0.0,
         };
         if span_ang < ANG_TOL_RAD {
@@ -1456,8 +1464,20 @@ impl FilletSolver {
         // not start at 0), not from the start section, so it is no part of that turn
         let mut angle_span = rad_to_deg(span_ang);
 
+        // Not upstream (WR-789): a round along a whole closed edge, its end section its start
+        // one (both at the edge's seam, their rail points within the solver's tolerance),
+        // turns exactly once. The two sections are solved apart, so the turn measured
+        // between them falls a hair either side of the wrap: just past 0 the `ANG_TOL_RAD`
+        // test above makes it a full turn (clamped to 360 below), but just short of 2 pi it
+        // stayed short, a sweep a few 1e-9 degrees short of the closed circle its polar
+        // converter takes, which `SmSurfOfRevolution`'s check refuses (Test #7).
+        let closed_edge = curve.is_closed(k, &ivl, 0.0)?;
+        if closed_edge && p0.distance(end_p0) < center_tol && p1.distance(end_p1) < center_tol {
+            angle_span = 360.0;
+        }
+
         // Determine if we need to extend the span even when 'm_bExtendBefore' is FALSE
-        if !curve.is_closed(k, &ivl, 0.0)? && !s.extend_after {
+        if !closed_edge && !s.extend_after {
             // for both filletSector->edgeuses
             for i in 0..2 {
                 let eu_i = s.edgeuse(i)?.ok_or_else(|| invalid("no edge use"))?;
@@ -2007,7 +2027,6 @@ impl FilletSolver {
         // allocate NewtonRaphson evaluator - contains equation definitions being solved
         let mut eval = SphereEval(FilletSphereSolveEnfo::new(plane_normal, plane_d, ops), k);
         let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
-        ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
 
         // set solve parameters
         ls.set_desired_accuracy(EFF_ZERO_SQ);
@@ -2185,7 +2204,6 @@ impl FilletSolver {
             k,
         );
         let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
-        ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
         ls.set_desired_accuracy(EFF_ZERO_SQ);
         ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
         ls.set_maximum_iterations(30);
@@ -2403,7 +2421,6 @@ impl FilletSolver {
             // when the resulting rails are classified and trimmed.
             let bounds = (!affine).then_some(&intervals);
             let mut ls = LocalSolveNd::new(&mut eval, bounds, Some(&periodicities));
-            ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
             ls.set_desired_accuracy(EFF_ZERO_SQ);
             ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
             ls.set_maximum_iterations(30);

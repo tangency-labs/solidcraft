@@ -101,7 +101,9 @@
 //!   `ComputePointValues`, part 2) the parameter is instead the limit along the curve's
 //!   tangent, `FindDegenParamForDirection`
 //!   ([`SurfaceIntersector::pole_singular_parameter`]); the surface derivatives are
-//!   still taken at the stepped-back point's distance from the pole, on that parameter.
+//!   still taken at the stepped-back point's distance from the pole, on the curve's
+//!   direction (across the seam from the parameter the point keeps, when the curve's
+//!   last step crossed the seam into the pole).
 //! - **Certified spans on a sphere (not upstream, #16669).** `TestSpanAccuracy`'s five
 //!   clamped samples are kept. A span on an analytic sphere is accepted only once its UV
 //!   image is also certified within `this_approx_tol_3d` of the 3D span over the whole
@@ -134,6 +136,18 @@ use crate::surface::surface::p2::TsectCurveType;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 use super::sphere_span;
+
+/// The singular parameter of a curve point at a pole
+/// ([`SurfaceIntersector::pole_singular_parameter`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PoleParameter {
+    /// The parameter the point keeps: the image of the curve's direction nearest the
+    /// curve's side, clamped to the domain.
+    kept: f64,
+    /// The parameter of the curve's direction in the domain, where the derivatives are
+    /// taken: `kept`, or across the seam from it when the clamp moved `kept` onto the seam.
+    along: f64,
+}
 
 const OP_POINT: &str = "intersect::surface_intersector::p1::SurfaceIntersector::point";
 const OP_LIST: &str = "intersect::surface_intersector::p1::SurfaceIntersector::add_to_list";
@@ -684,10 +698,6 @@ pub struct SurfaceIntersector<'s> {
     pub(crate) start_points: Vec<TsectId>,
     /// `m_vThroughPoints`.
     pub(crate) through_points: Vec<TsectId>,
-    /// `Kernel::fixes.ssi_singular_start_inside_direction` as it was when this
-    /// intersector was built (see [`SurfaceIntersector::new`]): a point computed later
-    /// uses the value from construction, not a later change to the kernel.
-    pub(crate) singular_start_inside_direction: bool,
     /// `Kernel::fixes.brep_edit_statuses_pass_on` captured from the constructing kernel
     /// (WR-658; fork e7ebc8d's `SmAdvSurfaceIntersector` statuses).
     pub(crate) edit_statuses: bool,
@@ -799,7 +809,6 @@ impl<'s> SurfaceIntersector<'s> {
             curve_points: Vec::new(),
             start_points: Vec::new(),
             through_points: Vec::new(),
-            singular_start_inside_direction: k.fixes.ssi_singular_start_inside_direction,
             edit_statuses: k.fixes.brep_edit_statuses_pass_on,
             advanced: false,
         })
@@ -939,7 +948,7 @@ impl<'s> SurfaceIntersector<'s> {
     /// parameter found there in that point. For a point on the degenerate boundary (not
     /// upstream) the singular parameter is the one along the curve's tangent
     /// ([`SurfaceIntersector::pole_singular_parameter`]), and the derivatives are taken
-    /// on it at the stepped-back point's other parameter.
+    /// along the curve's direction at the stepped-back point's other parameter.
     pub fn step_back_from_singularity(
         &mut self,
         k: &Kernel,
@@ -1032,7 +1041,10 @@ impl<'s> SurfaceIntersector<'s> {
             } else {
                 (&*prev, &*curr, prev.crv_deriv())
             };
-            if let Some(s) = self.pole_singular_parameter(
+            // the derivatives are taken along the curve's direction, `along`, which on a
+            // closed surface may lie across the seam from the parameter the point keeps
+            let mut uv_along = uv;
+            if let Some(PoleParameter { kept, along }) = self.pole_singular_parameter(
                 k,
                 srf,
                 sing_dir,
@@ -1041,12 +1053,14 @@ impl<'s> SurfaceIntersector<'s> {
                 toward,
             )? {
                 if sing_dir == SurfParamType::U {
-                    uv.x = s;
+                    uv.x = kept;
+                    uv_along.x = along;
                 } else {
-                    uv.y = s;
+                    uv.y = kept;
+                    uv_along.y = along;
                 }
             }
-            let (_, du, dv) = evaluate_1st_derivatives(k, surface, uv)?;
+            let (_, du, dv) = evaluate_1st_derivatives(k, surface, uv_along)?;
             let p = if step_off_current { curr } else { prev };
             *p.srf_du_mut(srf) = du;
             *p.srf_dv_mut(srf) = dv;
@@ -1076,11 +1090,18 @@ impl<'s> SurfaceIntersector<'s> {
     /// pole point got a singular parameter off by up to a quarter turn and a UV tangent of
     /// order 1e5: every span into the pole then failed the span test, the steps shrank
     /// until a last span of about the tolerance, and the trims failed the body check. On
-    /// a surface closed along the boundary the answer is the period's image nearest the
-    /// curve's side, `near` (the other point of the span), clamped to the domain: the
-    /// seam's two parameters name one direction.
+    /// a surface closed along the boundary the parameter the point keeps,
+    /// [`PoleParameter::kept`], is the period's image nearest the curve's side, `near`
+    /// (the other point of the span), clamped to the domain: the seam's two parameters
+    /// name one direction.
     ///
-    /// The answer is clamped to the intersector's domain (the solve runs over the
+    /// When the curve's direction lies just past the seam from `near` (its last step
+    /// crossed the seam into the pole), that clamp names the seam's direction, not the
+    /// curve's: the parameter of the curve's direction is then the image across the seam,
+    /// [`PoleParameter::along`], where the derivatives are taken. Elsewhere the two are
+    /// equal.
+    ///
+    /// Both are clamped to the intersector's domain (the solve runs over the
     /// surface's natural domain). Where the solve fails or does not converge, `None`: the
     /// step-back's sampled parameter stays, as before this construction.
     ///
@@ -1095,7 +1116,7 @@ impl<'s> SurfaceIntersector<'s> {
         pole: Point2,
         near: Point2,
         toward: Vec3,
-    ) -> Result<Option<f64>> {
+    ) -> Result<Option<PoleParameter>> {
         let domain = *pick(&self.uv_domains, srf);
         let (across, across_lo, across_hi, lo, hi, near, closed) = match sing_dir {
             SurfParamType::U => (
@@ -1141,6 +1162,7 @@ impl<'s> SurfaceIntersector<'s> {
         } else {
             degen.uv.y
         };
+        let mut along = s;
         if closed {
             let period = hi - lo;
             if s - near > period / 2.0 {
@@ -1148,9 +1170,22 @@ impl<'s> SurfaceIntersector<'s> {
             } else if near - s > period / 2.0 {
                 s += period;
             }
+            // the curve's direction is the image of `s` in the domain: past the seam, the
+            // other end's parameter names it (`s` is within half a period of `near`, which
+            // is inside the domain, so one period brings it back)
+            along = if s < lo {
+                s + period
+            } else if s > hi {
+                s - period
+            } else {
+                s
+            };
         }
         // the solve runs over the natural domain; the trace stays in its own
-        Ok(Some(s.max(lo).min(hi)))
+        Ok(Some(PoleParameter {
+            kept: s.max(lo).min(hi),
+            along: along.max(lo).min(hi),
+        }))
     }
 
     // ---- refinement and span tests ------------------------------------------------------------------

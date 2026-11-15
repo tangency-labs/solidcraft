@@ -27,6 +27,16 @@ fn nightlies_count_as_the_release_they_follow() {
     assert!(is_newer("v0.10.0", "0.9.0-nightly.20261014.36.1"));
 }
 
+#[test]
+fn test_builds_are_recognised() {
+    assert!(is_test_version("0.43.0-test+abc1234"));
+    assert!(is_test_version("0.43.0-test"));
+    assert!(!is_test_version("0.43.0"));
+    assert!(!is_test_version("0.43.0-rc.1"));
+    assert!(!is_test_version("0.43.0-nightly.20261115.7.1"));
+    assert!(!is_test_version("not a version"));
+}
+
 fn probe(os: &str, release: bool, env: &[(&str, &str)], exe: &str, files: &[&str]) -> InstallKind {
     let env: BTreeMap<String, String> = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     let files: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
