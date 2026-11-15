@@ -1795,6 +1795,7 @@ mod wr457_certificates {
     use super::{apply, build, RealSolid};
     use solidcore::kernel::Kernel;
     use solidcore::mass::enclosure::enclose_volume;
+    use solidcore::surface::surface::p2::SurfaceKind;
     use solidcore::topology::brep::p1;
     use solidcore::topology::brep::p2::is_manifold_solid;
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -1843,6 +1844,18 @@ mod wr457_certificates {
         "stubs3-union-overhang-front-edges15-16-r1",
     ];
 
+    /// The two-edge cases that round one concave edge and one convex edge meeting at a
+    /// vertex whose third edge is concave and not rounded, with the concave and convex
+    /// edges' lengths: the corner patch where the rounds meet is a B-spline construction,
+    /// not an exact surface, so these have no closed form; see [`Form::Mixed`].
+    const MIXED: [(&str, f64, f64); 5] = [
+        ("corner3x2-union-overhang-corner-edges6-12-r1", 4.0, 10.0),
+        ("corner3x2-union-overhang-corner-edges6-13-r1", 8.0, 10.0),
+        ("stubs3-union-overhang-corner-edges14-22-r1", 8.0, 10.0),
+        ("stubs3-union-overhang-corner-edges15-22-r1", 4.0, 10.0),
+        ("stubs3-union-overhang-front-edges14-22-r1", 4.0, 10.0),
+    ];
+
     /// What closed form, if any, a case's volume must match.
     #[derive(Clone, Copy, Debug)]
     enum Form {
@@ -1850,8 +1863,12 @@ mod wr457_certificates {
         Single(f64),
         /// Two concave rounds meeting at a corner.
         ConcavePair,
-        /// No closed form: certified by the enclosure only.
-        None,
+        /// A concave and a convex round (their lengths) meeting at a corner patch: the
+        /// body must be planes, the two rounds' cylinders and exactly one B-spline face
+        /// (the patch), and its volume less the two straight rounds ending square at the
+        /// corner, `2600 + A (concave - convex)`, must be one shared constant across the
+        /// five cases (their intervals must meet): the same patch construction at r 1.
+        Mixed(f64, f64),
     }
 
     /// Each case with the closed form its volume must hold.
@@ -1859,10 +1876,12 @@ mod wr457_certificates {
         let mut out: Vec<_> = CASES
             .iter()
             .map(|&(f, n)| {
-                let form = if CONCAVE_PAIRS.contains(&n) {
-                    Form::ConcavePair
-                } else {
-                    Form::None
+                let form = match MIXED.iter().find(|m| m.0 == n) {
+                    Some(&(_, concave, convex)) => Form::Mixed(concave, convex),
+                    None => {
+                        assert!(CONCAVE_PAIRS.contains(&n), "{n}");
+                        Form::ConcavePair
+                    }
                 };
                 (f, n.to_string(), form)
             })
@@ -1929,6 +1948,8 @@ mod wr457_certificates {
         let names = case_names();
         assert_eq!(names.len(), 30);
         let width = 1e-7 * UNION_VOLUME;
+        // each mixed case's volume less its two straight rounds
+        let mut corner: Vec<(f64, f64)> = Vec::new();
         for (file, name, form) in &names {
             let input = load(file, name);
             let mut k = Kernel::default();
@@ -1974,7 +1995,28 @@ mod wr457_certificates {
                     assert_eq!(selected.len(), 2, "{name}");
                     Some(two_concave_rounds(r, length))
                 }
-                Form::None => None,
+                Form::Mixed(concave, convex) => {
+                    assert_eq!(selected.len(), 2, "{name}");
+                    assert!((length - (concave + convex)).abs() < 1e-9, "{name}: {length}");
+                    let (mut patches, mut cylinders) = (0, 0);
+                    for f in p1::faces(&body, None).expect("faces") {
+                        let surface = solidcore::topology::face::surface(&body, f)
+                            .expect("surface")
+                            .expect("a surface");
+                        match surface.kind() {
+                            SurfaceKind::Plane(_) => {}
+                            SurfaceKind::Cone(_) => cylinders += 1,
+                            SurfaceKind::BSpline(_) => patches += 1,
+                            other => panic!("{name}: unexpected face kind {other:?}"),
+                        }
+                    }
+                    assert_eq!((patches, cylinders), (1, 2), "{name}: face kinds");
+                    let straight =
+                        UNION_VOLUME + (concave - convex) * r * r * (1.0 - FRAC_PI_4);
+                    let slack = 16.0 * f64::EPSILON * straight;
+                    corner.push((e.lo - straight - slack, e.hi - straight + slack));
+                    None
+                }
             };
             if let Some(exact) = exact {
                 // About ten f64 operations, plus about ten ulps of d from cancelling 3 pi
@@ -2008,6 +2050,11 @@ mod wr457_certificates {
                 e.hi
             );
         }
+        // one patch construction: the five corners' contributions share a value
+        assert_eq!(corner.len(), MIXED.len());
+        let lo = corner.iter().map(|c| c.0).fold(f64::NEG_INFINITY, f64::max);
+        let hi = corner.iter().map(|c| c.1).fold(f64::INFINITY, f64::min);
+        eprintln!("mixed corners: their contribution in [{lo}, {hi}]");
+        assert!(lo <= hi, "the mixed corners differ: {corner:?}");
     }
-
 }
