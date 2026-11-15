@@ -354,11 +354,13 @@ fn construction_plane_icon(plane: &PlaneRef) -> &'static str {
 /// only once the rect is presented in the viewport (an offscreen or hidden bar asks again on the
 /// next frame); then it returns true and the caller clears `timeline_reveal`.
 fn reveal_once(ui: &egui::Ui, reveal: &mut Option<usize>, holds: bool, rect: Rect, align: egui::Align) -> bool {
-    if holds && crate::semantic_content::scroll_acknowledged_at(ui, rect, align) {
-        *reveal = None;
-        return true;
+    if !holds {
+        return false;
     }
-    false
+    // Choose one target this frame: a group's last feature must not replace its request.
+    // The caller keeps the persistent reveal until this target is actually visible.
+    *reveal = None;
+    crate::semantic_content::scroll_acknowledged_at(ui, rect, align)
 }
 
 /// Check what deleting `ids` takes with it or makes fail (off the window thread when that takes a
@@ -1161,6 +1163,9 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
     let reveal_at = app.tree.timeline_reveal.and_then(|id| app.session.doc.features.iter().position(|f| f.id == id));
     let reveal = reveal_at.and_then(|i| history.view.find(i));
     let x = crate::timeline_scope::header(app, ui, &p, x, r).min(r.right() - t.space_24);
+    // A path click asks the next view to reveal the same feature. The old view must not
+    // acknowledge that new request while finishing this frame.
+    let reveal = reveal.filter(|_| history.within == crate::timeline_scope::shown(app));
     // Below, slots and features count those the bar shows; the marker's slot among them.
     let shown = history.view.len();
     let marker_view = history.view.slot(marker);

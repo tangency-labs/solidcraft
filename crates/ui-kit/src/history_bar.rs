@@ -132,6 +132,8 @@ pub struct Strip<'u, 'b> {
     x: f32,
     /// Each slot's left edge, one per step (a folded chip repeats its own for the steps it holds).
     xs: Vec<f32>,
+    /// The last slot's reserved marker space; open groups can share their first step's slot.
+    slot_space: Option<(usize, Rect)>,
     marker_rect: Option<Rect>,
     /// Each open tray: where it starts, its place under the chips, its depth.
     trays: Vec<(f32, egui::layers::ShapeIdx, usize)>,
@@ -180,6 +182,7 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
         rect,
         x,
         xs: Vec::with_capacity(bar.steps),
+        slot_space: None,
         marker_rect: None,
         trays: Vec::new(),
         drag,
@@ -189,11 +192,13 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
         quiet: None,
     };
     contents.entries(&mut strip);
-    let Strip { ui, painter: p, x: end, xs, mut marker_rect, mut drag, hovered, edit, mut actions, .. } = strip;
-    let marker = bar.marker;
-    if marker >= bar.steps && marker_rect.is_none() {
-        marker_rect = Some(marker_at(rect, end));
+    // Always reserve the end slot too, so moving the marker cannot shorten the scroll range.
+    let end_marker = strip.slot_here(bar.steps);
+    if bar.marker >= bar.steps && strip.marker_rect.is_none() {
+        strip.marker_rect = Some(end_marker);
     }
+    let Strip { ui, painter: p, x: end, xs, marker_rect, mut drag, hovered, edit, mut actions, .. } = strip;
+    let marker = bar.marker;
     // The history marker: drag it to roll the model back or forward, by its rect and a little
     // either side of it.
     let grab = marker_rect.map(|mr| mr.expand2(vec2(3.0, 0.0)));
@@ -209,13 +214,7 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
         crate::history_marker(&p, mr, false, bar.accent);
         resp.backing_on_hover_text(bar.marker_tip);
     }
-    let content_end = contents.trailing(ui, &p, end, rect);
-    // The marker after the last step is part of the strip: the scroll range reaches past it, with
-    // the room it is grabbed by, so a strip scrolled to its end shows it whole.
-    let content_end = match grab {
-        Some(grab) if marker >= bar.steps => content_end.max(grab.right()),
-        _ => content_end,
-    };
+    let content_end = contents.trailing(ui, &p, end, rect).max(end);
     // The scroll range follows the drawn content (the chips don't take layout space themselves).
     ui.allocate_exact_size(vec2((content_end - origin).max(0.0), rect.height()), Sense::hover());
     // Drag feedback, and the drop.
@@ -307,20 +306,27 @@ impl Strip<'_, '_> {
         self.rect
     }
 
-    /// Puts the marker here once.
-    fn marker_here(&mut self) {
-        if self.marker_rect.is_none() {
-            self.marker_rect = Some(marker_at(self.rect, self.x));
-            self.x += Tokens::get().space_16;
+    /// Reserves a slot whether or not it holds the marker. A group and its first step share
+    /// that reservation, keeping the marker before the group without adding another gap.
+    fn slot_here(&mut self, slot: usize) -> Rect {
+        if let Some((previous, rect)) = self.slot_space
+            && previous == slot
+        {
+            return rect;
         }
+        let rect = marker_at(self.rect, self.x);
+        self.x += Tokens::get().space_16;
+        self.slot_space = Some((slot, rect));
+        rect
     }
 
     /// Draws a step's chip and returns its rect. A chip scrolled out of the strip is neither
     /// drawn nor interactive; its slot still places the marker and drops. One being dragged or
     /// focused, or under an open menu, stays alive until that ends.
     pub fn step(&mut self, step: &Step) -> Rect {
-        if step.slot == self.bar.marker {
-            self.marker_here();
+        let space = self.slot_here(step.slot);
+        if step.slot == self.bar.marker && self.marker_rect.is_none() {
+            self.marker_rect = Some(space);
         }
         self.xs.push(self.x);
         let br = Rect::from_min_size(pos2(self.x, self.rect.top() + 6.0), vec2(28.0, 28.0));
@@ -394,8 +400,11 @@ impl Strip<'_, '_> {
     pub fn chip(&mut self, start: usize, end: usize, open: bool, depth: usize, draw: impl FnOnce(&mut egui::Ui, &Painter, Pos2) -> f32) -> Rect {
         self.quiet = None;
         let marker = self.bar.marker;
-        if start < end && start == marker {
-            self.marker_here();
+        if start < end {
+            let space = self.slot_here(start);
+            if start == marker && self.marker_rect.is_none() {
+                self.marker_rect = Some(space);
+            }
         }
         if open {
             self.trays.push((self.x, self.painter.add(egui::Shape::Noop), depth));
@@ -407,8 +416,14 @@ impl Strip<'_, '_> {
             self.xs.extend(std::iter::repeat_n(self.x, end.saturating_sub(start)));
         }
         self.x += width + 4.0;
-        if !open && start < marker && marker < end {
-            self.marker_here();
+        if !open && start < end {
+            let after = self.slot_here(end);
+            if start < marker && marker < end && self.marker_rect.is_none() {
+                self.marker_rect = Some(after);
+            }
+        } else if start == end {
+            // An empty chip separates the folded group's end from the next real step.
+            self.slot_space = None;
         }
         Rect::from_min_size(at, vec2(width, 28.0))
     }
@@ -426,7 +441,11 @@ impl Strip<'_, '_> {
     /// returning where it ends.
     pub fn inline(&mut self, draw: impl FnOnce(&mut egui::Ui, &Painter, f32, Rect) -> f32) {
         self.quiet = None;
-        self.x = draw(self.ui, &self.painter, self.x, self.rect);
+        let end = draw(self.ui, &self.painter, self.x, self.rect);
+        if end != self.x {
+            self.slot_space = None;
+        }
+        self.x = end;
     }
 }
 
