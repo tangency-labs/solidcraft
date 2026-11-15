@@ -467,15 +467,17 @@ fn dependent_sketch_on_extruded_corners_survives_parameter_jump_15324() {
 fn tube_with_projected_corner() -> Session {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "Hoehe", "expression": "6 mm"}));
+    // The corners are rounded unevenly: walls that mirror each other would tie when their pieces
+    // are numbered by place, and which of them is first then follows the tessellation.
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
-    run(&mut s, "sketch.line", json!({"points": [[-22, -20], [22, -20]], "infer": false, "ids": ["l1"]}));
+    run(&mut s, "sketch.line", json!({"points": [[-20, -20], [22, -20]], "infer": false, "ids": ["l1"]}));
     run(&mut s, "sketch.arc.center_point", json!({"center": [22, -12], "start": [22, -20], "end": [30, -12], "id": "a1"}));
-    run(&mut s, "sketch.line", json!({"points": [[30, -12], [30, 12]], "infer": false, "ids": ["l2"]}));
-    run(&mut s, "sketch.arc.center_point", json!({"center": [22, 12], "start": [30, 12], "end": [22, 20], "id": "a2"}));
-    run(&mut s, "sketch.line", json!({"points": [[22, 20], [-22, 20]], "infer": false, "ids": ["l3"]}));
+    run(&mut s, "sketch.line", json!({"points": [[30, -12], [30, 14]], "infer": false, "ids": ["l2"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [24, 14], "start": [30, 14], "end": [24, 20], "id": "a2"}));
+    run(&mut s, "sketch.line", json!({"points": [[24, 20], [-22, 20]], "infer": false, "ids": ["l3"]}));
     run(&mut s, "sketch.arc.center_point", json!({"center": [-22, 12], "start": [-22, 20], "end": [-30, 12], "id": "a3"}));
-    run(&mut s, "sketch.line", json!({"points": [[-30, 12], [-30, -12]], "infer": false, "ids": ["l4"]}));
-    run(&mut s, "sketch.arc.center_point", json!({"center": [-22, -12], "start": [-30, -12], "end": [-22, -20], "id": "a4"}));
+    run(&mut s, "sketch.line", json!({"points": [[-30, 12], [-30, -10]], "infer": false, "ids": ["l4"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-20, -10], "start": [-30, -10], "end": [-20, -20], "id": "a4"}));
     run(&mut s, "sketch.finish", json!({}));
     // A 2 wide, Hoehe tall section square to l1 at its middle: world y -21..-19, z 0..Hoehe.
     run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -20, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Prof"}));
@@ -490,7 +492,7 @@ fn tube_with_projected_corner() -> Session {
     }
     // The outer top corner where the arc a2 meets the line l3, half way round from the profile.
     run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Top"}));
-    run(&mut s, "sketch.project", json!({"refs": [{"vertex": [22, 21, 6], "body": "Tube"}]}));
+    run(&mut s, "sketch.project", json!({"refs": [{"vertex": [24, 21, 6], "body": "Tube"}]}));
     run(&mut s, "sketch.finish", json!({}));
     s
 }

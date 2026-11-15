@@ -37,7 +37,7 @@ use crate::schema::save::{SaveAsParams, SaveParams, SaveResult, SignedSave};
 use crate::schema::save_mesh::{SaveMeshResult, SlicerDelivery};
 use crate::schema::slicers::{SlicerInfo, SlicersParams, SlicersResult};
 use crate::schema::{TypedContract, output_schema_for};
-use crate::{EngineError, Result, Session};
+use crate::{EngineError, Result, Session, store_link_names};
 
 const INSERT_MESH_CONTRACT: TypedContract<InsertMeshParams> = TypedContract::new();
 const INSERT_STEP_CONTRACT: TypedContract<InsertStepParams> = TypedContract::new();
@@ -1832,7 +1832,7 @@ impl Session {
         // Links whose design dropped a guessed name as it opened keep the name of what they were
         // found on, before a change can move it (#17229).
         session.pin_dropped_link_names();
-        let dropped = session.doc.features.iter().any(|f| session.doc.sketch(f.id).is_ok_and(|sk| sk.links.iter().any(|l| l.name_dropped)));
+        let dropped = session.has_dropped_link_names();
         if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) {
             session.pin_rolled_back_body_names();
         }
@@ -1862,20 +1862,7 @@ impl Session {
         // dropped as it opened (#17229): the whole timeline finds what each is on, and the name
         // is the one it had at the geometry the design opened with, before an edit moves it.
         whole.pin_dropped_link_names();
-        let link_pins: Vec<(u64, String, Option<String>, Option<String>)> = whole
-            .doc
-            .features
-            .iter()
-            .filter_map(|f| {
-                let (mine, theirs) = (self.doc.sketch(f.id).ok()?, whole.doc.sketch(f.id).ok()?);
-                Some(mine.links.iter().filter(|l| l.name_dropped).filter_map(move |l| {
-                    let found = theirs.links.iter().find(|x| x.id == l.id && !x.name_dropped)?;
-                    (found.vertex_name.is_some() || found.edge_name.is_some())
-                        .then(|| (f.id, l.id.clone(), found.vertex_name.clone(), found.edge_name.clone()))
-                }))
-            })
-            .flatten()
-            .collect();
+        let link_pins = self.dropped_link_pins(&whole);
         let pins: Vec<(u64, Vec<String>)> = whole
             .doc
             .features
@@ -1897,14 +1884,7 @@ impl Session {
                 f.body_names = names;
             }
         }
-        for (id, link, vertex, edge) in link_pins {
-            let Ok(sk) = doc.sketch_mut(id) else { continue };
-            if let Some(l) = sk.links.iter_mut().find(|l| l.id == link) {
-                l.vertex_name = l.vertex_name.take().or(vertex);
-                l.edge_name = l.edge_name.take().or(edge);
-                l.name_dropped = false;
-            }
-        }
+        store_link_names(doc, link_pins);
         doc.reserved_body_names.extend(reserve);
         self.model.refingerprint_shared(&self.doc, keep);
     }
