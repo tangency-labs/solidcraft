@@ -1856,6 +1856,38 @@ mod tests {
         assert!(rel(area(&tube), want) < 2e-3, "{} vs {want}", area(&tube)); // (measured on meshes)
     }
 
+    /// A sheet lofted through three open sections of two cubics each, meeting tangent at x = 5
+    /// at a height and with handles that change from one plane to the next, is one smooth sheet:
+    /// its two walls share the seam between them and meet tangent along it (#14048, where each
+    /// column was skinned on its own and the walls ended up to 0.33 mm apart). So Split Body by
+    /// either wall cuts with the whole sheet: a box it crosses comes out as two closed bodies,
+    /// each the box's five faces it reaches and the two walls' pieces, whose volumes add up to
+    /// the box.
+    #[test]
+    fn loft_sheet_walls_through_three_sections_share_their_seam() {
+        let at = |z: f64| Plane::XY.offset(z);
+        // y at the ends and at the join, the join's handles to the left and to the right
+        let chain = |ends: f64, join: f64, left: f64, right: f64| {
+            let p = Vec2::new;
+            vec![
+                Seg2::Cubic { p0: p(0.0, ends), p1: p(2.0, ends), p2: p(5.0 - left, join), p3: p(5.0, join) },
+                Seg2::Cubic { p0: p(5.0, join), p1: p(5.0 + right, join), p2: p(8.0, ends), p3: p(10.0, ends) },
+            ]
+        };
+        let sheet = loft_sheet(&[(at(0.0), chain(0.0, 0.0, 1.0, 1.0)), (at(5.0), chain(1.0, 6.0, 3.0, 0.5)), (at(10.0), chain(0.0, 2.0, 0.5, 2.5))]).unwrap();
+        let r = sheet.record();
+        assert_eq!((r.faces.len(), r.edges.len(), r.vertices.len()), (2, 7, 6), "the walls share one seam");
+        assert_eq!(r.edges.iter().filter(|e| e.uses.len() == 1).count(), 6, "free edges: the sheet's rim only");
+        let bx = crate::box_solid(Vec3::new(1.0, -5.0, 1.0), Vec3::new(9.0, 10.0, 9.0)).unwrap();
+        for face in 0..2 {
+            let parts = crate::split_body(&bx, &crate::SplitTool::Face { body: &sheet, face }).unwrap();
+            let got: Vec<_> = parts.iter().map(|b| (!b.is_surface(), b.face_count(), b.lumps().unwrap().len())).collect();
+            assert_eq!(got, vec![(true, 7, 1); 2], "split by wall {face}");
+            let v: f64 = parts.iter().map(|b| measure(b).unwrap().volume).sum();
+            assert!(rel(v, 8.0 * 15.0 * 8.0) < 1e-9, "split by wall {face}: {v}");
+        }
+    }
+
     #[test]
     fn loft_sheet_refuses_bad_input() {
         let at = |z: f64| Plane::XY.offset(z);
