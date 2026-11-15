@@ -239,6 +239,10 @@ pub struct OffsetExecutive {
     /// convex round thinner than the wall), mated across instead of offset
     /// (`m_sCollapsedFaces`; only with `Kernel::fixes.offset_collapsed_rounds_mated`).
     pub(super) collapsed_faces: Vec<FaceId>,
+    /// Not upstream (solidcraft#16983): the offset faces with an edge whose offset is
+    /// inverted (its neighbours' offsets crossed over it; `TrimmedEdge`), which
+    /// `resolve_crossing_loops` resolves when they have one loop.
+    pub(super) inverted_faces: BTreeSet<FaceId>,
     /// Not upstream (WR-344 refinement, tangency-labs/solidcore#1795): the original edge
     /// uses whose edge `EdgeuseOffset` could not mate (`MateEdges` failed); the merge
     /// intersects their faces' offsets as upstream does, not taking them as mated (only
@@ -302,6 +306,7 @@ impl OffsetExecutive {
             kept_edgeuses: BTreeSet::new(),
             crossing_edgeuses: BTreeSet::new(),
             collapsed_faces: Vec::new(),
+            inverted_faces: BTreeSet::new(),
             unmated_edgeuses: BTreeSet::new(),
             local_faces: Vec::new(),
             local_surfaces: Vec::new(),
