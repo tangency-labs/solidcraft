@@ -86,7 +86,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "face_points_span_domain",
     "face_tight_box_searches_trim",
     "fillet_chamfer_cone_on_arc",
-    "fillet_chamfer_cone_stored_as_cone",
     "fillet_cleanup_keeps_target_faces",
     "fillet_cliff_overflow",
     "fillet_corner_per_vertex_fan",

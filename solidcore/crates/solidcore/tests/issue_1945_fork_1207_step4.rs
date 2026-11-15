@@ -39,7 +39,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_vertex_error_diagnostics = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.fillet_chamfer_cone_stored_as_cone = true;
     k.fixes.corner_patch_face_side_twist = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_trim_inside_by_best_dot = true;
