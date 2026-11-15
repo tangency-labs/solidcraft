@@ -79,8 +79,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_chamfer_cone_on_arc = true;
-    f.offset_excess_faces_after_merge = true;
-    f.offset_clip_right_side_out = true;
     f.offset_extended_edges_mated = true;
     f.keep_operand_uv_trims = true;
     f.geometric_g2_continuity = true;
@@ -89,7 +87,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.check_loop_projected_seam_ends = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
-    f.revolve_nested_shells_as_cavities = true;
     f.join_touching_loops = true;
     f.offset_resolve_crossing_loops = true;
     f.offset_analytic_mate_edges = true;
@@ -114,7 +111,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.fillet_nx1_tangent_side_edge = true;
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
-    f.shell_empty_cavity_fails = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
     f.found_torus_sphere_keep_tested_nurb = true;

@@ -4377,9 +4377,9 @@ fn pick_allowed(app: &SolveApp, h: &Hit) -> bool {
         Hit::SketchCurve { .. } => !off("sketch") && !off("sketch_curves"),
         Hit::SketchPoint { .. } | Hit::SketchPoint3d { .. } | Hit::SketchMidpoint { .. } => !off("sketch") && !off("sketch_points"),
         Hit::Profile { .. } => !off("sketch"),
-        Hit::Vertex { .. } => !off("vertices") && !app.ui.pick_bodies && !app.ui.pick_components,
-        Hit::Edge { .. } => !off("edges") && !app.ui.pick_bodies && !app.ui.pick_components,
-        Hit::Face { .. } => !off("faces") || app.ui.pick_bodies || app.ui.pick_components,
+        Hit::Vertex { .. } => !off("vertices") && !app.picks_bodies() && !app.picks_components(),
+        Hit::Edge { .. } => !off("edges") && !app.picks_bodies() && !app.picks_components(),
+        Hit::Face { .. } => !off("faces") || app.picks_bodies() || app.picks_components(),
         Hit::Plane { .. } | Hit::Axis { .. } | Hit::ConstructionPoint { .. } => true,
     }
 }
@@ -4397,8 +4397,8 @@ fn hit_candidate(app: &SolveApp, h: &Hit) -> Option<(Hit, Sel)> {
         // edited: selecting it painted the zone solid blue over its own tint (#16197). The
         // engine keeps a profile to its sketch as well (a profile goes with its sketch).
         Hit::Profile { sketch, .. } if app.session.active_sketch.is_some_and(|active| active != *sketch) => None,
-        Hit::Face { body, .. } if app.ui.pick_components => Some((h.clone(), component_selection(app, body))),
-        Hit::Face { body, .. } if app.ui.pick_bodies => Some((h.clone(), Sel::Body { name: body.clone() })),
+        Hit::Face { body, .. } if app.picks_components() => Some((h.clone(), component_selection(app, body))),
+        Hit::Face { body, .. } if app.picks_bodies() => Some((h.clone(), Sel::Body { name: body.clone() })),
         _ => hit_sel(h).map(|s| (h.clone(), s)),
     }
 }
@@ -4765,8 +4765,8 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.session.active_occurrence_path.hash(&mut h);
     app.ui.visual_style.hash(&mut h);
     crate::render_workspace::assign::preview_key(app).hash(&mut h);
-    app.ui.pick_bodies.hash(&mut h);
-    app.ui.pick_components.hash(&mut h);
+    app.picks_bodies().hash(&mut h);
+    app.picks_components().hash(&mut h);
     crate::render_workspace::active(app).hash(&mut h);
     app.session.active_sketch.hash(&mut h);
     (app.dialog.is_some(), app.tool.is_some()).hash(&mut h);
@@ -5182,7 +5182,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         app.viewport
             .hover
             .as_ref()
-            .filter(|h| app.ui.pick_components && matches!(h, Hit::Face { .. }))
+            .filter(|h| app.picks_components() && matches!(h, Hit::Face { .. }))
             .and_then(|h| hit_candidate(app, h))
             .map(|(_, s)| displayed_selection(app, &s))
     });

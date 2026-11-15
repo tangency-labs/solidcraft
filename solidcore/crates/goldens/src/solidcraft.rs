@@ -1760,8 +1760,6 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "cover_refuses_folded_continuation" => &mut k.fixes.cover_refuses_folded_continuation,
         "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
         "loops_go_on_round_the_vertex" => &mut k.fixes.loops_go_on_round_the_vertex,
-        "revolve_nested_shells_as_cavities" => &mut k.fixes.revolve_nested_shells_as_cavities,
-        "revolve_splits_curves_on_axis" => &mut k.fixes.revolve_splits_curves_on_axis,
         "ssi_low_angle_start_on_probation" => &mut k.fixes.ssi_low_angle_start_on_probation,
         "fillet_nx1_tangent_side_edge" => &mut k.fixes.fillet_nx1_tangent_side_edge,
         "fillet_mitre_concave_face_corners" => &mut k.fixes.fillet_mitre_concave_face_corners,
