@@ -79,7 +79,6 @@ fn drilled(k: &mut Kernel) -> Brep {
 /// SolidCraft's `core::fixes()` (as `issue_1476_swept_bar_shell.rs` lists them).
 fn solidcraft_fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
-    f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_chamfer_cone_on_arc = true;
     f.offset_excess_faces_after_merge = true;
@@ -101,11 +100,8 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
     f.proto_edge_self_loop_on_vertex_degenerate = true;
-    f.slice_coincident_faces_sheet_side = true;
-    f.boolean_outer_shell_first = true;
     f.cover_refuses_folded_continuation = true;
     f.boolean_vertex_by_best_crossing = true;
-    f.boolean_cleanup_removes_slits = true;
     f.classify_edge_interval = true;
     f.ellipse_trim_seam_lines_span_cone_height = true;
     f.degenerate_proto_edge_in_one_vertex = true;

@@ -156,9 +156,7 @@ fn top_edges(k: &Kernel, b: &Brep) -> Vec<EdgeId> {
 fn round() -> (f64, Result<(bool, f64), i32>) {
     let mut k = Kernel::default();
     k.fixes.analytic_copy_keeps_parameterization = true;
-    k.fixes.boolean_cleanup_removes_slits = true;
     k.fixes.boolean_new_face_closure_both_sides = true;
-    k.fixes.boolean_outer_shell_first = true;
     k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.box_face_failures_propagate = true;
@@ -178,17 +176,14 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.face_tight_box_searches_trim = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
-    k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_mitre_concave_face_corners = true;
     k.fixes.fillet_mitre_gap_patch = true;
     k.fixes.fillet_nx1_tangent_side_edge = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_point_step_per_point = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_trim_inside_by_best_dot = true;
@@ -234,7 +229,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.shell_empty_cavity_fails = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
-    k.fixes.slice_coincident_faces_sheet_side = true;
     k.fixes.ssi_low_angle_start_on_probation = true;
     k.fixes.ssi_pole_point_keeps_its_tangent = true;
     k.fixes.ssi_singular_start_inside_direction = true;
