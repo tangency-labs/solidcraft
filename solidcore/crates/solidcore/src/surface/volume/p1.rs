@@ -3044,7 +3044,6 @@ mod tests {
     #[test]
     fn wr45_compound_volume_and_srf_in_volume_end_to_end() {
         let k_def = Kernel::default();
-        let k_opt = Kernel::default();
         let opts_opt = EvalOptions::default();
 
         let make_next_bend = || {
@@ -3173,18 +3172,18 @@ mod tests {
             ..EvaluateFlags::default()
         };
         let check_siv = |siv: &SrfInVolume, uv: Point2, hu_step: f64, hv_step: f64, label: &str| {
-            let d3_opt = siv.evaluate(&k_opt, uv, 3, 3, flags).unwrap();
+            let d3_opt = siv.evaluate(&k_def, uv, 3, 3, flags).unwrap();
             let s2_up = siv
-                .evaluate(&k_opt, Point2::new(uv.x + hu_step, uv.y), 2, 2, flags)
+                .evaluate(&k_def, Point2::new(uv.x + hu_step, uv.y), 2, 2, flags)
                 .unwrap();
             let s2_um = siv
-                .evaluate(&k_opt, Point2::new(uv.x - hu_step, uv.y), 2, 2, flags)
+                .evaluate(&k_def, Point2::new(uv.x - hu_step, uv.y), 2, 2, flags)
                 .unwrap();
             let s2_vp = siv
-                .evaluate(&k_opt, Point2::new(uv.x, uv.y + hv_step), 2, 2, flags)
+                .evaluate(&k_def, Point2::new(uv.x, uv.y + hv_step), 2, 2, flags)
                 .unwrap();
             let s2_vm = siv
-                .evaluate(&k_opt, Point2::new(uv.x, uv.y - hv_step), 2, 2, flags)
+                .evaluate(&k_def, Point2::new(uv.x, uv.y - hv_step), 2, 2, flags)
                 .unwrap();
             let fd = [
                 (s2_up[2][0] - s2_um[2][0]) / (2.0 * hu_step),
@@ -3262,9 +3261,9 @@ mod tests {
         );
         let civ = CrvInVolume::new(seg, true, twist_compound, 0, 0).unwrap();
         let t_param = 0.4;
-        let c3_opt = civ.evaluate(&k_opt, t_param, 3, true, false).unwrap();
-        let c2_p = civ.evaluate(&k_opt, t_param + h, 2, true, false).unwrap()[2];
-        let c2_m = civ.evaluate(&k_opt, t_param - h, 2, true, false).unwrap()[2];
+        let c3_opt = civ.evaluate(&k_def, t_param, 3, true, false).unwrap();
+        let c2_p = civ.evaluate(&k_def, t_param + h, 2, true, false).unwrap()[2];
+        let c2_m = civ.evaluate(&k_def, t_param - h, 2, true, false).unwrap()[2];
         let c_fd3 = (c2_p - c2_m) / (2.0 * h);
         assert!((c3_opt[3] - c_fd3).length() < 1e-6 * (1.0 + c_fd3.length()));
     }

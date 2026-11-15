@@ -1043,6 +1043,22 @@ impl UnitDiff for Runner {
 mod chain_rule_composition_tests {
     use super::*;
 
+    /// The 12 kernel-free rows WR-45's retirement moves in this unit.
+    const MOVED: [&str; 12] = [
+        "concat_n3",
+        "gen0075",
+        "gen0320",
+        "gen0407",
+        "gen0436",
+        "gen0770",
+        "gen0868",
+        "gen1134",
+        "gen1151",
+        "lift_f1_o3",
+        "lift_f2_o3",
+        "lift_f2_o3_axes",
+    ];
+
     /// A polynomial in up to three variables truncated above total degree 3: the
     /// coefficient of `u^a v^b w^c` for each exponent with `a + b + c <= 3`.
     type Poly = Vec<([usize; 3], f64)>;
@@ -1227,6 +1243,7 @@ mod chain_rule_composition_tests {
             seeds: MIN_GENERATED,
         };
         let (mut lifts, mut concats) = (0, 0);
+        let mut checked: Vec<String> = Vec::new();
         for c in Runner.cases(&ctx).unwrap() {
             match c.parse::<Inputs>().unwrap() {
                 Inputs::Lift { form, order, vecs } => {
@@ -1248,6 +1265,7 @@ mod chain_rule_composition_tests {
                         &compose(nvars, order, &inner, &outer, true),
                     );
                     lifts += 1;
+                    checked.push(c.name.clone());
                 }
                 Inputs::Concat { n, a, b } => {
                     let first: Vec<Vec3> = a.iter().map(|&p| v3(p)).collect();
@@ -1270,11 +1288,32 @@ mod chain_rule_composition_tests {
                         assert_close(&format!("{} order {order}", c.name), &gotk, &want, &abs);
                     }
                     assert_eq!(at(&got, [0, 0, 0]), at(&second, [0, 0, 0]), "{}", c.name);
+                    // every other stored slot (total order above min(n, 3)) is the
+                    // kernel's undefined fill
+                    assert_eq!(got.len(), m * m * m, "{}", c.name);
+                    for i in 0..m {
+                        for j in 0..m {
+                            for l in 0..m {
+                                if i + j + l > top {
+                                    assert_eq!(
+                                        at(&got, [i, j, l]),
+                                        Vec3::UNDEF,
+                                        "{} slot {i},{j},{l}",
+                                        c.name
+                                    );
+                                }
+                            }
+                        }
+                    }
                     concats += 1;
+                    checked.push(c.name.clone());
                 }
                 _ => {}
             }
         }
         assert!(lifts > 0 && concats > 0, "{lifts} {concats}");
+        for m in MOVED {
+            assert!(checked.iter().any(|c| c == m), "moved row {m} not replayed");
+        }
     }
 }

@@ -793,25 +793,47 @@ mod representational_continuity_tests {
                 }
                 Inputs::HasDisc {
                     vol,
-                    given: _,
+                    given,
                     geom: false,
                 } => {
+                    // as the runner calls it: a record made unaligned first, passed only
+                    // when the case gives one
                     let v = build(&vol).unwrap();
                     let mut d = Discontinuities3d::new();
-                    let r = v.has_discontinuities_simple(&k, Some(&mut d), false).unwrap();
+                    d.set_unaligned();
+                    let r = v
+                        .has_discontinuities_simple(&k, given.then_some(&mut d), false)
+                        .unwrap();
+                    // the closed form of each direction, whether or not it is stored
+                    let mut probe = Discontinuities3d::new();
+                    let rp = v.has_discontinuities_simple(&k, Some(&mut probe), false).unwrap();
+                    assert_eq!(r, rp, "{}: the result does not depend on the record", c.name);
                     let mut below = false;
                     let dirs = [
-                        (VolumeParam::U, &d.u),
-                        (VolumeParam::V, &d.v),
-                        (VolumeParam::W, &d.w),
+                        (VolumeParam::U, &probe.u),
+                        (VolumeParam::V, &probe.v),
+                        (VolumeParam::W, &probe.w),
                     ];
                     for (e, (param, dir)) in dirs.into_iter().enumerate() {
                         if dir.params.len() >= 2 {
                             check_dir(&c.name, &v, param, vol.deg[e], dir);
+                        } else {
+                            // fewer than two knots: refused, no continuities
+                            assert!(dir.conts.is_empty(), "{}", c.name);
+                            assert_eq!(dir.min_cont, ContinuityType::CInfinity, "{}", c.name);
                         }
+                        assert!(!dir.unaligned, "{}: direction {e} aligned", c.name);
                         below |= (dir.min_cont as i32) < (ContinuityType::G1 as i32);
                     }
                     assert_eq!(r, below, "{}", c.name);
+                    if given {
+                        // the stored record is the probe: `Init` resets the record (not
+                        // the unaligned state the runner made) and the simple map never
+                        // sets its own flag or lowest continuity
+                        assert_eq!(d, probe, "{}: stored record", c.name);
+                        assert!(!d.has_discontinuities, "{}", c.name);
+                        assert_eq!(d.min_continuity, ContinuityType::CInfinity, "{}", c.name);
+                    }
                     has += 1;
                     checked.push(c.name.clone());
                 }
