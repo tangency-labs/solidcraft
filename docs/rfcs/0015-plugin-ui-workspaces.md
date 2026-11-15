@@ -606,10 +606,10 @@ memory (rain that stays where it landed).
    changes or removes one that an existing capability uses.
 2. `commands@0.1` keeps loading. A test installs a `commands@0.1` plugin from its `.zip` and runs it,
    on its own and beside a shader.
-
-A plugin's own ribbon tab (`tools@0.1`), the groundwork for CAM, PCB, manufacturing and simulation
-workspaces, is a separate amendment that builds on the entry slots of
-[#15609](https://github.com/tangency-labs/solidcraft/pull/15609).
 3. A host refuses a capability it does not have, or a newer minor version of a 0.x one, before any
    plugin code runs, with the existing message.
 4. Each capability a plugin asks for is shown on the install confirmation.
+
+A plugin's own ribbon tab (`tools@0.1`), the groundwork for CAM, PCB, manufacturing and simulation
+workspaces, is a separate amendment that builds on the entry slots added by
+[#15609](https://github.com/tangency-labs/solidcraft/pull/15609).

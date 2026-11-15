@@ -171,7 +171,7 @@ The host refuses a shader, at install and at draw time, that:
 - declares an entry point (`@vertex`, `@fragment`, `@compute`): the host supplies them;
 - declares a binding or a `uniform`, `storage` or `workgroup` variable: it reads only `sc`, the two
   samplers and its own textures;
-- declares an `override`, or needs a WGSL extension (`enable`).
+- declares an `override`, or needs a WGSL extension (`enable`);
 - declares a function whose name starts with `sc_`: those names belong to the host.
 
 Errors name the file and the line, for example
