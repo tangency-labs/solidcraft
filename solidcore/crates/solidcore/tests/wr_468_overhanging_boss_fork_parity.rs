@@ -43,9 +43,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 /// The fork's Nx1 corner fixes on.
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_nx1_tangent_side_edge = true;
-    k
+    Kernel::default()
 }
 
 /// The distance from `p` to edge `e`, over 4001 points along it.

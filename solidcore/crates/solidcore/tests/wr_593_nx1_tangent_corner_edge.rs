@@ -87,7 +87,6 @@ fn concave_arc(b: &Brep) -> EdgeId {
 
 fn fillet(residue: f64) -> solidcore::Result<f64> {
     let mut k = Kernel::default();
-    k.fixes.fillet_nx1_tangent_side_edge = true;
     let mut body = peg(&mut k, residue);
     let e = concave_arc(&body);
     fillet_edges(&mut k, &mut body, &[e], RADIUS, 1, 1, 1.0)?;
