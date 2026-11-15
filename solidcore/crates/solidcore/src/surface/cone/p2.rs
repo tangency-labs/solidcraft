@@ -64,15 +64,17 @@
 //!   `EFF_ZERO_SQRT * (1 + bottom_radius)`;
 //!   their mean becomes its radius, and the NURB's control points are moved radially
 //!   onto that cylinder about the recorded axis (heights, weights and knots kept).
-//!   For coaxial, parallel end circles the NURB is then the exact rational form of the
-//!   analytic surface. Otherwise the move keeps what the rebuild's checks allow: the
-//!   centre line and both circles' normals agree within `ang_tol` = 1e-3 degrees
-//!   (`1000 * EFF_ZERO_SQRT`, as `is_parallel_to` takes it), so the far circle's
-//!   centre lies below `height * sin(ang_tol deg)` off the recorded axis and its plane
-//!   is tilted below `2 ang_tol` degrees from it. The top normal check is not upstream
-//!   (#16982 review): before it, a top circle tilted about its x axis passed. A larger
-//!   taper, or a net that cannot be moved, returns `SM_ERR` before editing the
-//!   analytic state or the NURB. The pinned C++ instead assigns a nonzero semi-angle to
+//!   For coaxial, parallel, untwisted end circles the NURB is then the exact rational
+//!   form of the analytic surface. The rebuild's angle checks still allow a far
+//!   circle off the axis (below `height * sin(ang_tol deg)`, `ang_tol` = 1e-3
+//!   degrees as `is_parallel_to` takes it) or turned about it (`twisted`, below
+//!   `ang_tol`); radial scaling keeps those, so the moved net is kept only when
+//!   `surface::implicit::lies_on` certifies it on the cylinder (#16982 review).
+//!   Every cone rebuild also requires the top circle's normal to be parallel to the
+//!   centre line, as the bottom's is (not upstream, #16982 review): before, a top
+//!   circle tilted about its x axis passed. A larger taper, or a net that cannot be
+//!   moved or certified, returns `SM_ERR` before editing the analytic state or the
+//!   NURB. The pinned C++ instead assigns a nonzero semi-angle to
 //!   cylinders. Ordinary `SmCone` objects retain upstream's radius/angle rules.
 //! - **Cylinder recogniser.** [`Cone::is_nurb_surface_cylinder`] returns an error
 //!   where a `SER` call returns its status (a truthy result without cylinder) and
@@ -113,6 +115,7 @@ use crate::nurbs::b_spline_surface::{
 };
 use crate::nurbs::nurbs_crv::to_euclid;
 use crate::nurbs::nurbs_srf::copy_nurb_surface;
+use crate::surface::implicit;
 
 const OP_OFFSET: &str = "surface::cone::p2::Cone::create_offset_surface";
 const OP_NURB_CYLINDER: &str = "surface::cone::p2::Cone::is_nurb_surface_cylinder";
@@ -1238,11 +1241,10 @@ impl Cone {
     /// Not upstream (WR-385): the NURB's control points moved radially about the axis
     /// through `centre` along the unit `z`, from the radius the frustum between the end
     /// circles has at their height (`radii.0` at height 0, `radii.1` at `height`) to
-    /// `radius`, as `(i, j, point, weight)` for [`Self::set_net`]. Heights, weights,
-    /// knots and parameterisation are kept, so a net of coaxial, parallel end circles
-    /// becomes the exact rational form of the cylinder of `radius`; the far circle's
-    /// offset and tilt the rebuild's angle checks allow are kept (module docs, Cylinder
-    /// rebuild). Reads only, so the
+    /// `radius`, as `(i, j, point, weight)` for [`Self::certified_cylinder_net`].
+    /// Heights, weights, knots and parameterisation are kept, so a net of coaxial,
+    /// parallel, untwisted end circles becomes the exact rational form of the cylinder
+    /// of `radius`; any other net is refused by the certificate. Reads only, so the
     /// rebuild calls it before changing any state.
     ///
     /// # Errors
@@ -1282,21 +1284,45 @@ impl Cone {
         Ok(moved)
     }
 
-    /// Not upstream (WR-385): writes the control points [`Self::cylinder_net`] computed.
-    /// Their indices and weights come from this NURB, so the writes cannot fail on a
-    /// bad index or weight.
+    /// Not upstream (WR-385, #16982 review): a copy of the NURB with the control points
+    /// [`Self::cylinder_net`] computed, kept only when [`implicit::lies_on`] certifies it
+    /// on the cylinder of `radius` about the axis through `centre` along `z`, up to the
+    /// rounding of storing it. Radial scaling makes coaxial, parallel, untwisted end
+    /// rows that exact cylinder; end rows turned against each other about the axis
+    /// (which `twisted` allows up to `ang_tol`), or a far circle off the axis, leave
+    /// sections inside it (a twist `phi` puts the middle section at `radius cos(phi /
+    /// 2)`), and are refused rather than recorded as the cylinder.
     ///
     /// # Errors
     ///
-    /// Those of the control point access.
-    fn set_net(&mut self, moved: Vec<(usize, usize, Point3, f64)>) -> Result<()> {
+    /// `SM_ERR` when the moved net is not certified on the cylinder; those of the
+    /// control point access and of the certificate.
+    fn certified_cylinder_net(
+        &self,
+        moved: Vec<(usize, usize, Point3, f64)>,
+        centre: Point3,
+        z: Vec3,
+        radius: f64,
+    ) -> Result<BSplineSurface> {
         use crate::nurbs::b_spline_curve::ControlPointForm::EuclideanRational;
+        let mut base = self.rev.base.clone();
         for (i, j, p, w) in moved {
-            self.rev
-                .base
-                .set_control_point(EuclideanRational, i, j, p, w)?;
+            base.set_control_point(EuclideanRational, i, j, p, w)?;
         }
-        Ok(())
+        let cylinder = implicit::Implicit::Cone {
+            origin: centre,
+            axis: z,
+            radius,
+            tan_angle: 0.0,
+        };
+        if !implicit::lies_on(&base, &cylinder)? {
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the cylinder's moved net is not on the mean-radius cylinder (its end \
+                 circles are turned against each other or off the axis)",
+            ));
+        }
+        Ok(base)
     }
 
     /// Rebuilds the analytic data from the NURB after an edit
@@ -1427,7 +1453,8 @@ impl Cone {
         // x axes and the angles, so a top circle tilted about its x axis passed, and the
         // rebuild recorded a cone (or, for an inside-out one, a placement) the NURB is
         // not. Both ends now meet the one rule above (`ang_tol` in degrees), so each
-        // circle's tilt from the recorded axis is below `ang_tol` degrees
+        // circle's tilt from the centre line is below `ang_tol` degrees (the far circle's
+        // from the recorded axis, below `2 ang_tol`)
         if !nurb_z_axis.is_parallel_to(top.frame.z_axis(), ang_tol) {
             return Err(SolidError::surface_failed(
                 OP_REBUILD,
@@ -1480,7 +1507,8 @@ impl Cone {
                     (&bot.frame, (bot_radius, top_radius))
                 };
                 let (origin, z) = (frame.origin(), frame.z_axis());
-                Some(self.cylinder_net(origin, z, height, radii, bot.radius)?)
+                let moved = self.cylinder_net(origin, z, height, radii, bot.radius)?;
+                Some(self.certified_cylinder_net(moved, origin, z, bot.radius)?)
             }
             None => None,
         };
@@ -1507,8 +1535,8 @@ impl Cone {
         self.rev.planar_generator = true;
         self.rev.position = if inside_out { top.frame } else { bot.frame };
         self.rev.swap_uv = swap_uv;
-        if let Some(moved) = moved_net {
-            self.set_net(moved)?;
+        if let Some(base) = moved_net {
+            self.rev.base = base;
         }
         let _ = self
             .rev
@@ -2258,8 +2286,9 @@ mod tests {
     /// (`S = |o| + 1.5 r + h`): per coordinate the read (divide by `w`) 1, `h` 5 (`p - c`
     /// and the dot product), `z h` 1, `d - z h` 1, the scale 4, applying it 1, the
     /// recompose 2, store and read back 2, the non-unit frame axis 4, the measure 10,
-    /// `want` and the difference 3: `sqrt 3 gamma(33) S`, rounded outward. The worst
-    /// case seen is under a tenth of it.
+    /// `want` and the difference 3: `sqrt 3 gamma(34) S`, rounded outward. The worst
+    /// case seen is under a tenth of it. The rebuilt surface is also certified on the
+    /// analytic cylinder with `surface::implicit::lies_on`.
     #[test]
     fn rebuild_cylinder_moves_its_net_onto_the_mean_radius() {
         use crate::nurbs::b_spline_curve::ControlPointForm::EuclideanRational;
@@ -2283,8 +2312,18 @@ mod tests {
                         let pos = c.rev().position();
                         let (o, z) = (pos.origin(), pos.z_axis());
                         let scale = o.length() + 1.5 * r + height;
-                        let bound = 3f64.sqrt() * gamma(33) * scale * (1.0 + 8.0 * f64::EPSILON);
+                        let bound = 3f64.sqrt() * gamma(34) * scale * (1.0 + 8.0 * f64::EPSILON);
                         let s = c.rev().base();
+                        let cylinder = crate::surface::implicit::Implicit::Cone {
+                            origin: o,
+                            axis: z,
+                            radius: r,
+                            tan_angle: 0.0,
+                        };
+                        assert!(
+                            crate::surface::implicit::lies_on(s, &cylinder).unwrap(),
+                            "{origin:?} {radius} {top} {swap} {inside}: not on the cylinder"
+                        );
                         let (nu, nv) = (
                             s.number_control_points(SurfParamType::U),
                             s.number_control_points(SurfParamType::V),
@@ -2309,6 +2348,48 @@ mod tests {
             }
         }
         println!("worst {worst} of the bound");
+    }
+
+    /// #16982 review (CodeRabbit): `twisted` lets the end rows turn against each other
+    /// about the axis by up to `ang_tol` (1e-3 rad for the x axes), and radial scaling
+    /// keeps that turn, so the middle section of a net twisted by `phi` lies at
+    /// `r cos(phi / 2)`, inside the cylinder. A cylinder with near-equal radii whose top
+    /// row is turned by 1e-4 rad (middle section 1.1e-8 inside at r 9) is now refused,
+    /// unchanged, because the moved net fails `lies_on`; before, it rebuilt as the
+    /// cylinder. Untwisted, the same radii rebuild.
+    #[test]
+    fn rebuild_cylinder_refuses_a_twisted_net() {
+        let k = kernel();
+        let (radius, top) = (9.0, 9.0 + 0.5 * EFF_ZERO_SQRT * 10.0);
+        for (turn, refused) in [(1e-4_f64, true), (0.0, false)] {
+            let (sin, cos) = turn.sin_cos();
+            for swap in [false, true] {
+                for inside in [false, true] {
+                    let mut c = edited_cylinder(&k, radius, top, swap, inside);
+                    // turn the top row about the axis (z), in homogeneous coordinates
+                    let s = c.base_mut().get_or_create_gw_nurb().unwrap();
+                    let (n, m) = (s.n(), s.m());
+                    for i in 0..=n {
+                        for j in 0..=m {
+                            if if swap { i == n } else { j == m } {
+                                let p = s.cpt_mut(i, j).unwrap();
+                                let (x, y) = (p.x, p.y);
+                                p.x = x * cos - y * sin;
+                                p.y = x * sin + y * cos;
+                            }
+                        }
+                    }
+                    let before = c.clone();
+                    let result = c.rebuild_step_from_nurb_parameters(&k);
+                    assert_eq!(result.is_err(), refused, "{turn} {swap} {inside}");
+                    if refused {
+                        assert_eq!(c.base_radius(), before.base_radius());
+                        assert_eq!(c.semi_angle_deg(), before.semi_angle_deg());
+                        assert_eq!(c.rev().position(), before.rev().position());
+                    }
+                }
+            }
+        }
     }
 
     #[test]
