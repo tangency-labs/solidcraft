@@ -168,7 +168,8 @@ fn as_spline(c: solidcore_record::brep::Curve, [t0, t1]: [f64; 2]) -> Option<sol
             let at = |t: f64| std::array::from_fn(|i| start[i] + t * (end[i] - start[i]));
             Some(C::Spline { knots: vec![t0, t0, t1, t1], points: vec![at(t0), at(t1)] })
         }
-        C::Spline { .. } | C::RationalSpline { .. } => Some(c),
+        // a circle or ellipse has the exact rational form the kernel gives it where it is bounded
+        C::Spline { .. } | C::RationalSpline { .. } | C::Circle { .. } | C::Ellipse { .. } => Some(c),
         _ => None,
     }
 }

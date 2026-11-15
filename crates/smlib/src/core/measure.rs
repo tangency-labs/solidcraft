@@ -209,7 +209,11 @@ pub(crate) fn curve_face_gap_bound(
     face: usize,
     floor: f64,
 ) -> Result<Option<f64>> {
-    let curve = solidcore_ops::curve_gap::GapCurve::new(curve).ok_or(Error::Argument)?;
+    // a circle or ellipse is the kernel's exact rational spline, over its interval there
+    let (curve, interval) = match solidcore_ops::curve_gap::GapCurve::of_conic(curve, interval).map_err(|e| Error::Solidcore(e.to_string()))? {
+        Some(found) => found,
+        None => (solidcore_ops::curve_gap::GapCurve::new(curve).ok_or(Error::Argument)?, interval),
+    };
     with_body("curve_face_gap_bound", body, |k, b| {
         let Some(&f) = bl::faces(b, None)?.get(face) else {
             return Ok(None);
