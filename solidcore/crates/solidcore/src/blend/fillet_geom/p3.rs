@@ -1289,20 +1289,14 @@ impl FilletBrep {
         // the end to the edge's UV trim curve from its section's UV point, so it lands near
         // the seam, not on it.
         if is_closed_solver_edge {
-            let start = projected
+            let ends: Vec<(f64, OrientType, bool)> = projected
                 .iter()
-                .filter(|(_, _, orientation, main)| *main && *orientation == OrientType::Same)
-                .map(|(_, t, _, _)| *t)
-                .reduce(f64::min);
-            if let Some(start) = start {
-                let wraps = projected.iter().any(|(_, t, orientation, _)| {
-                    *orientation == OrientType::Opposite && *t < start
-                });
-                if wraps {
-                    for (_, t, _, _) in &mut projected {
-                        if *t < start {
-                            *t += ivl.length();
-                        }
+                .map(|(_, t, orientation, main)| (*t, *orientation, *main))
+                .collect();
+            if let Some(start) = seam_wrap_start(&ends) {
+                for (_, t, _, _) in &mut projected {
+                    if *t < start {
+                        *t += ivl.length();
                     }
                 }
             }
@@ -1938,6 +1932,24 @@ impl SplitCorners for NoCorners {
             "the corner (no executive holds corners)",
         ))
     }
+}
+
+/// Where a piece of a closed solver edge's geometry starts when it runs across the edge's
+/// seam (#17016), else `None`. `ends` holds each rail end's parameter on the edge, its edge
+/// use's orientation and whether its rail is a main rail (not one split off it). The start is
+/// the least parameter of a main rail's start (an edge use of the same orientation); the
+/// geometry wraps when any rail end of the opposite orientation, split-off rails' too, lies
+/// before it.
+fn seam_wrap_start(ends: &[(f64, OrientType, bool)]) -> Option<f64> {
+    let start = ends
+        .iter()
+        .filter(|(_, orientation, main)| *main && *orientation == OrientType::Same)
+        .map(|(t, _, _)| *t)
+        .reduce(f64::min)?;
+    let wraps = ends
+        .iter()
+        .any(|(t, orientation, _)| *orientation == OrientType::Opposite && *t < start);
+    wraps.then_some(start)
 }
 
 /// `pCorner->RecordFilletError(SM_FILERR_BAD_INT, pFilletSurface1, pFilletSurface2,
@@ -2753,5 +2765,25 @@ mod tests {
         assert_eq!(nurb.cpts().len(), 3);
         let last = nurb.cpts().last().unwrap();
         assert_eq!([last.x, last.y, last.z], CPP_LAST_CPT);
+    }
+
+    #[test]
+    fn a_split_off_rail_end_alone_wraps_at_the_seam() {
+        use OrientType::{Opposite, Same};
+        // the main rails start at 1.0 and end after it; the split-off rail's end lies
+        // before that start, so it alone puts the piece across the seam
+        let wrapped = [
+            (1.0, Same, true),
+            (2.0, Opposite, true),
+            (0.25, Opposite, false),
+        ];
+        assert_eq!(seam_wrap_start(&wrapped), Some(1.0));
+        // every end in order: no wrap
+        let in_order = [
+            (1.0, Same, true),
+            (2.0, Opposite, true),
+            (3.0, Opposite, false),
+        ];
+        assert_eq!(seam_wrap_start(&in_order), None);
     }
 }
