@@ -55,6 +55,15 @@ pub const JOIN_ACROSS_EDGES: &str =
 pub const JOIN_UNEQUAL_OFFSETS: &str =
     "Fillet Error: blends continuing each other at a smooth vertex have different offsets, so no section ends both: give them one offset";
 
+/// The comment of [`JoinTopology::RefusedRailMissesSideEdge`] (not the fork's, #17224).
+pub const JOIN_RAIL_MISSES_SIDE_EDGE: &str =
+    "Fillet Error: blends continuing each other across a smooth edge between their faces meet only where their contact lines cross that edge, and at this size they never reach it";
+
+/// The golden-section steps of [`largest_ball_on_side_edge`]: 0.618^80 is about 2e-17 of
+/// the side edge's parameter range, below a double's resolution of it, so a further step
+/// moves nothing.
+const GOLDEN_STEPS: usize = 80;
+
 /// Actual objects `SmBlendCorner::MakeJoinTopology` uses.
 #[derive(Debug)]
 pub struct JoinTopologyEnv<'a> {
@@ -92,6 +101,17 @@ pub enum JoinTopology {
         /// The blend with the larger offset, 0 or 1 in the corner's order.
         blend: usize,
         /// The other blend's offset there, which `blend` builds at.
+        builds: f64,
+    },
+    /// A side with one edge between the blends (their faces changing there, tangent along
+    /// it) where the first blend, a constant round, has no ball of its radius touching its
+    /// face on that edge: its contact line never crosses the edge, so the section both blends
+    /// end on (`SM_FV_RAIL_X_EDGEUSE`) does not exist (not the fork's, #17224). The caller
+    /// notes `SM_FILERR_NO_ROOM` at the vertex ([`JOIN_RAIL_MISSES_SIDE_EDGE`]) and the fit
+    /// `builds` on the first blend's edge: the largest ball touching the edge there, whose
+    /// contact line just reaches it.
+    RefusedRailMissesSideEdge {
+        /// The largest radius whose contact line reaches the side edge.
         builds: f64,
     },
 }
@@ -352,6 +372,80 @@ fn rolled_sides(
     Ok(out)
 }
 
+/// Not the fork's (#17224): where the Join's section ends on a side edge `side_eu`
+/// (`SM_FV_RAIL_X_EDGEUSE`), whether the constant round `fs` has a ball of its radius
+/// touching its face F there (F the round's face the side edge bounds, G `other_face` its
+/// other face). The round's contact line on F crosses the side edge exactly where the ball
+/// touching F at the edge's point and touching G (`ball_touching_with`, its radius rho) is
+/// the round's own; where rho stays below the round's radius along the whole side edge the
+/// contact line never reaches it. `None` where some point of the side edge has rho at the
+/// round's radius (or the point is not on G's side of F, so no smaller ball touches it),
+/// else `Some(rho_max)`, the largest radius whose contact line reaches the edge.
+///
+/// rho is 0 at the corner's vertex (on both faces) and is maximized along the side edge by
+/// golden section over its parameter range ([`GOLDEN_STEPS`]); a point where the ball of the
+/// round's radius already reaches G answers at once, as the rounds that cross their side edge
+/// do at their first step.
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` without the side edge's curve; those of `ball_touching_with`.
+fn largest_ball_on_side_edge(
+    k: &Kernel,
+    target: &Brep,
+    fs: &FilletSolver,
+    side_eu: EdgeuseId,
+    other_face: FaceId,
+) -> Result<Option<f64>> {
+    let e = eu1::edge(target, side_eu)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the side edge use's edge"))?;
+    let curve = crate::topology::edge::evaluation_curve(target, e)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the side edge's curve"))?;
+    let ivl = crate::topology::edge::interval(target, e)?;
+    // rho at t, or None where the round's own ball touches F there
+    let rho = |t: f64| -> Result<Option<f64>> {
+        let p = curve.evaluate_point(k, t)?;
+        let (on_g, within, rho) = crate::blend::blend_corner::end::ball_touching_with(
+            k, target, fs, side_eu, other_face, p, None,
+        )?;
+        Ok(if on_g {
+            Some(0.0)
+        } else if within {
+            Some(rho)
+        } else {
+            None
+        })
+    };
+    let golden = 0.5 * (f64::sqrt(5.0) - 1.0);
+    let (mut a, mut b) = (ivl.min(), ivl.max());
+    let mut x1 = b - golden * (b - a);
+    let mut x2 = a + golden * (b - a);
+    let (Some(mut f1), Some(mut f2)) = (rho(x1)?, rho(x2)?) else {
+        return Ok(None);
+    };
+    for _ in 0..GOLDEN_STEPS {
+        if f1 > f2 {
+            b = x2;
+            x2 = x1;
+            f2 = f1;
+            x1 = b - golden * (b - a);
+            let Some(f) = rho(x1)? else {
+                return Ok(None);
+            };
+            f1 = f;
+        } else {
+            a = x1;
+            x1 = x2;
+            f1 = f2;
+            x2 = a + golden * (b - a);
+            let Some(f) = rho(x2)? else {
+                return Ok(None);
+            };
+            f2 = f;
+        }
+    }
+    Ok(Some(f1.max(f2)))
+}
+
 impl FilletCorner {
     /// `SmBlendCorner::MakeJoinTopology`: the blends end on one shared section, one
     /// `SM_FE_CROSS_SECTION` corner edge with the first blend on its primary edge use and
@@ -419,6 +513,33 @@ impl FilletCorner {
             unequal_blends(k, target, solvers, &solver_eu_solvers, first_side)?
         {
             return Ok(JoinTopology::RefusedUnequalOffsets { blend, builds });
+        }
+        // (#17224) a side whose section end is where the rails cross its edge: the first
+        // blend, a constant round, must have a ball of its radius touching that edge
+        if let (Some(&Some(id)), Some(&eu1_)) = (solver_eu_solvers.first(), solver_eus.first()) {
+            if let Some(SolverObject::ConstantRadius(object)) =
+                solvers.get(id.0 as usize).and_then(Option::as_ref)
+            {
+                for s in 0..2 {
+                    let (Some(true), Some(&[only])) =
+                        (on_edge.get(s).copied(), between.get(s).map(Vec::as_slice))
+                    else {
+                        continue;
+                    };
+                    let Some(other_face) =
+                        side.get(1 - s).and_then(|f| f.first()).copied().flatten()
+                    else {
+                        continue;
+                    };
+                    let side_eu = find_side_edgeuse(target, eu1_, only)?
+                        .ok_or_else(|| SolidError::blend_missing(OP, "the side edge use"))?;
+                    if let Some(builds) =
+                        largest_ball_on_side_edge(k, target, &object.solver, side_eu, other_face)?
+                    {
+                        return Ok(JoinTopology::RefusedRailMissesSideEdge { builds });
+                    }
+                }
+            }
         }
 
         // the section's ends

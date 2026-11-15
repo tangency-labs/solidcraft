@@ -6853,7 +6853,8 @@ impl SessionObjects<'_> {
         executive: &mut FilletExecutive<FilletObject>,
     ) -> Result<()> {
         use crate::blend::fillet_corner::topology::join::{
-            JoinTopology, JoinTopologyEnv, JOIN_ACROSS_EDGES, JOIN_UNEQUAL_OFFSETS,
+            JoinTopology, JoinTopologyEnv, JOIN_ACROSS_EDGES, JOIN_RAIL_MISSES_SIDE_EDGE,
+            JOIN_UNEQUAL_OFFSETS,
         };
         let corner = self
             .corners
@@ -6956,6 +6957,47 @@ impl SessionObjects<'_> {
             return Err(SolidError::blend_failed(
                 "SmBlendCorner::MakeJoinTopology",
                 "the blends at the corner do not join at unequal offsets",
+            ));
+        }
+        // (#17224) the size that builds: the largest round whose contact line reaches the
+        // side edge, on the first blend's edge
+        if let JoinTopology::RefusedRailMissesSideEdge { builds } = built {
+            let location = match vertex {
+                Some(v) => crate::topology::vertex::point(target, v).ok(),
+                None => None,
+            };
+            executive.error.note_vertex_error(
+                vertex.map(|v| FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v))),
+                location,
+                crate::blend::fillet_geom::p1::FilStatus::Failure,
+                crate::blend::fillet_geom::p1::FilletErrorType::NoRoom,
+                Some(JOIN_RAIL_MISSES_SIDE_EDGE),
+            );
+            let first = corners
+                .get(id.0 as usize)
+                .and_then(|c| c.solver_eus.as_deref())
+                .and_then(|eus| eus.first().copied())
+                .ok_or_else(|| {
+                    SolidError::blend_missing(
+                        "SmBlendCorner::MakeJoinTopology",
+                        "the corner's first solver edge use",
+                    )
+                })?;
+            let edge = crate::topology::edgeuse::p1::edge(target, first)?;
+            // open at `builds`, where the contact line only touches the edge: less the fork's
+            // FitMargin, a thousand of the blended edge's tolerances, as the other open fits
+            let margin = match edge {
+                Some(e) => 1000.0 * crate::topology::edge::tolerance(target, e)?,
+                None => 0.0,
+            };
+            executive.note_fit_radius(
+                (builds - margin).max(0.0),
+                edge.map(|e| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))),
+                crate::blend::fillet_executive::p3::FitKind::Radius,
+            );
+            return Err(SolidError::blend_failed(
+                "SmBlendCorner::MakeJoinTopology",
+                "the blends' contact lines never reach the edge between their faces",
             ));
         }
         Ok(())
