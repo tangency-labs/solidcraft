@@ -37,6 +37,8 @@ const KINK_SLACK: f64 = 1e-9;
 const BOUND_ROUNDING: f64 = 1.000_001;
 /// Pieces one pcurve may have.
 const MAX_PIECES: usize = 4000;
+// The piece count's least bound (`hermite_pieces`) is at most its greatest.
+const _: () = assert!(16 <= MAX_PIECES / 4);
 /// Times a piece may be halved.
 const MAX_HALVINGS: u32 = 30;
 /// Cells of a use's parameter in which a crossing of a ray is looked for, and the bisections that
@@ -150,7 +152,54 @@ fn knots_within(curve: &BCurve, a: f64, b: f64) -> Vec<f64> {
 ///
 /// # Errors
 /// An edge on the axis, one whose curve cannot be evaluated, or more pieces than a pcurve takes.
-pub(super) fn pcurve(label: &BSurface, curve: &BCurve, [a, b]: [f64; 2], tol: f64) -> R<Curve2> {
+pub(super) fn pcurve(label: &BSurface, curve: &BCurve, interval: [f64; 2], tol: f64) -> R<Curve2> {
+    let [a, b] = interval;
+    let (first, done) = hermite_pieces(label, curve, interval, tol)?;
+    // A cubic from each Hermite piece. Two pieces share their end's value and slope in the
+    // curve's parameter, so the pieces join with a continuous first derivative, and each interior
+    // knot is twofold: the shared end is then where the spline passes between its neighbouring
+    // control points (`h2 (q - h1 q'/3) + h1 (q + h2 q'/3)` over `h1 + h2` is `q`), the same curve
+    // with two control points a piece rather than three ([`points_of`]).
+    let mut knots = vec![a; 4];
+    let mut points = vec![[first.u, first.v]];
+    for (k, [p, q]) in done.iter().enumerate() {
+        let h = q.t - p.t;
+        points.push([p.u + h * p.du / 3.0, p.v + h * p.dv / 3.0]);
+        points.push([q.u - h * q.du / 3.0, q.v - h * q.dv / 3.0]);
+        if k + 1 < done.len() {
+            knots.extend([q.t; 2]);
+        } else {
+            points.push([q.u, q.v]);
+        }
+    }
+    knots.extend([b; 4]);
+    if points.len() > super::MAX_SPLINE_POINTS {
+        return Err(unsupported(format!(
+            "an edge of a face that winds round its axis, whose pcurve takes {} control points, past the {} a spline takes",
+            points.len(),
+            super::MAX_SPLINE_POINTS
+        )));
+    }
+    Ok(Curve2::Spline { knots, points })
+}
+
+/// The parameters where the pcurve of the edge on `curve` over `interval` ([`pcurve`]) has its
+/// pieces' ends: one more than its pieces.
+///
+/// # Errors
+/// As [`pcurve`].
+pub(super) fn piece_ends(label: &BSurface, curve: &BCurve, interval: [f64; 2], tol: f64) -> R<Vec<f64>> {
+    let (first, done) = hermite_pieces(label, curve, interval, tol)?;
+    Ok(std::iter::once(first.t).chain(done.iter().map(|[_, q]| q.t)).collect())
+}
+
+/// The control points of a pcurve of `pieces` pieces ([`pcurve`]): two a piece, and both ends.
+pub(super) fn points_of(pieces: usize) -> usize {
+    pieces.saturating_mul(2).saturating_add(2)
+}
+
+/// The Hermite pieces of [`pcurve`], in order, and the first one's start.
+fn hermite_pieces(label: &BSurface, curve: &BCurve, [a, b]: [f64; 2], tol: f64) -> R<(End, Vec<[End; 2]>)> {
     let ax = axis(label)?;
     let c = CurveEval::new(curve)?;
     let first = ax.end(&c, a, None)?;
@@ -224,20 +273,7 @@ pub(super) fn pcurve(label: &BSurface, curve: &BCurve, [a, b]: [f64; 2], tol: f6
         pieces.push([p, mid]);
         halvings.push(depth + 1);
     }
-    // Bezier pieces: a cubic from each Hermite piece, its interior knots threefold.
-    let mut knots = vec![a; 4];
-    let mut points = vec![[first.u, first.v]];
-    for (k, [p, q]) in done.iter().enumerate() {
-        let h = q.t - p.t;
-        points.push([p.u + h * p.du / 3.0, p.v + h * p.dv / 3.0]);
-        points.push([q.u - h * q.du / 3.0, q.v - h * q.dv / 3.0]);
-        points.push([q.u, q.v]);
-        if k + 1 < done.len() {
-            knots.extend([q.t; 3]);
-        }
-    }
-    knots.extend([b; 4]);
-    Ok(Curve2::Spline { knots, points })
+    Ok((first, done))
 }
 
 /// What a piece's lift bound came to.

@@ -29,6 +29,9 @@
 //!   (maximum), `GlobalPointSolve` returns an end of its interval when the projected
 //!   distance grows (shrinks) from that end into the interval. Upstream returns no
 //!   solution there, or a farther (nearer) stationary point.
+//! - **Range refinement (WR-383).** A refined range end is judged by its fraction's
+//!   distance from one after orienting both parameters; a start is judged from zero.
+//!   A root near the other endpoint cannot collapse the range.
 //! - **Objects.** Solutions name the caller's handles: `GlobalPointSolve` takes the
 //!   handle of the curve (named by the line drop and the tree solutions, upstream
 //!   `this`) and of its analytic replacement ([`GlobalPointSolveOptions`]; upstream
@@ -178,10 +181,9 @@ fn status_value(e: &SolidError) -> f64 {
 /// `sm_RefineCCSolutions`: polishes the ends of the curve/curve range solutions by a
 /// local intersection from each end (when the end deviates by more than `1e-6`),
 /// keeping a result that deviates less and moves both parameters by less than
-/// `0.002` of the range (as upstream, the end's move is measured from the range's start,
-/// so a forward range's end is never refined, unless
-/// `Kernel::fixes.refine_cc_range_ends` is set: WR-383). `curve_of` resolves a solution
-/// object to its curve.
+/// `0.002` of the range from the endpoint being refined. The end-relative shift
+/// check prevents a refined end from jumping to the range's start (WR-383).
+/// `curve_of` resolves a solution object to its curve.
 ///
 /// # Errors
 ///
@@ -282,10 +284,10 @@ where
                         frac2 = 1.0 - frac2;
                     }
 
-                    // Not upstream (WR-383, tangency-labs/solidcore#527): with the
-                    // opt-in, an end is judged by its distance from 1 (the fraction is
-                    // measured from the solution's start); upstream tests |frac| at both
-                    if at_end && k.fixes.refine_cc_range_ends {
+                    // Fractions are oriented from the range's start. Judge a refined
+                    // end by its distance from one, so a root at the start cannot
+                    // collapse the range (WR-383).
+                    if at_end {
                         frac1 = 1.0 - frac1;
                         frac2 = 1.0 - frac2;
                     }
@@ -2547,7 +2549,7 @@ mod tests {
 
     /// tangency-labs/solidcore#527 (WR-383): a forward range whose end sits 0.001 off
     /// the crossing; the local intersection moves the end by 0.001 of the range, which
-    /// upstream's test (|frac| near 0) refuses and the opt-in (|1 - frac|) accepts.
+    /// the end-relative shift check (|1 - frac|) accepts by default.
     #[test]
     fn issue_527_refine_cc_range_end() {
         use crate::geom::attribute::ObjectKey;
@@ -2588,10 +2590,7 @@ mod tests {
             .unwrap();
             sols.get(0).unwrap().end
         };
-        let mut k = Kernel::default();
-        let end = run(&k);
-        assert_eq!((end.parameters[0], end.solution_value), (1.0, 0.001));
-        k.fixes.refine_cc_range_ends = true;
+        let k = Kernel::default();
         let end = run(&k);
         assert!((end.parameters[0] - 0.999).abs() < 1e-9, "{end:?}");
         assert!(end.solution_value < 1e-9, "{end:?}");
@@ -3126,8 +3125,7 @@ mod tests {
 
     #[test]
     fn range_refinement_polishes_both_ends_in_each_parameter_direction() {
-        let mut k = Kernel::default();
-        k.fixes.refine_cc_range_ends = true;
+        let k = Kernel::default();
         // The line and quadratic bow meet exactly at x=0 and x=1.
         for reverse1 in [false, true] {
             for reverse2 in [false, true] {
@@ -3179,8 +3177,7 @@ mod tests {
 
     #[test]
     fn range_refinement_rejects_an_end_jump_to_the_start() {
-        let mut k = Kernel::default();
-        k.fixes.refine_cc_range_ends = true;
+        let k = Kernel::default();
         let line = Curve::from(HermiteCurve::new(Vec3::ZERO, Vec3::X, Vec3::X, Vec3::X, 3));
         let direction = Vec3::new(1.0, 0.1, 0.0);
         let crossing = Curve::from(HermiteCurve::new(
