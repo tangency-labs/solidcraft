@@ -751,6 +751,50 @@ fn a_band_whose_vertices_line_up_across_a_hole_gets_its_seam_clear_of_it() {
     assert!(angle.abs() > east, "the seam at {angle} rad crosses the hole");
 }
 
+/// A drill point's cone to its tip whose edge turns back partway round (a second drill point and
+/// a flat cutting it): the loop goes once round, but over 350° to 360° it runs forward along the
+/// rim, back a ring nearer the tip and forward again a ring nearer still, joined by rulings. A
+/// seam at a vertex among those angles left the loop, followed from it, 370° wide, and the face
+/// was taken for a thread's flank ("a loop that winds -1.0 turns about its axis and does not
+/// close"). Its seam to the tip starts where the loop passes only once, the rim split there.
+#[test]
+fn a_cone_to_its_tip_whose_edge_turns_back_gets_its_seam_where_the_edge_passes_once() {
+    let (deg, apex) = (PI / 180.0, -2.5);
+    // The cone r = 2.5 + z about +z, its tip at z = -2.5.
+    let at = |z: f64, a: f64| [(2.5 + z) * a.cos(), (2.5 + z) * a.sin(), z];
+    let mut w = W::default();
+    let corners = [(0.0, 20.0), (0.0, 0.0), (-0.5, 0.0), (-0.5, -10.0), (-1.0, -10.0), (-1.0, 20.0)].map(|(z, a)| (z, a * deg));
+    let [a, b, c, d, e, f] = corners.map(|(z, t)| (w.vertex(at(z, t)), at(z, t)));
+    // The arcs, each running +u: the rim from 20° round to 360°, the rings from -10°.
+    let rim = arc_about_z(&mut w, (a.0, b.0), 2.5, 0.0);
+    let near = arc_about_z(&mut w, (d.0, c.0), 2.0, -0.5);
+    let nearer = arc_about_z(&mut w, (e.0, f.0), 1.5, -1.0);
+    let ruling = |w: &mut W, p: (u64, V), q: (u64, V)| w.line_edge(p, q, true, len3(sub3(q.1, p.1)));
+    let (af, ed, cb) = (ruling(&mut w, a, f), ruling(&mut w, e, d), ruling(&mut w, c, b));
+    // The face lies between the loop and the tip (lower v): the loop runs -u overall, written
+    // from a vertex where it turns back (-10° on the near ring).
+    let uses = [(near, true), (cb, true), (rim, false), (af, true), (nearer, false), (ed, true)].map(|(x, o)| w.oe(x, o));
+    let outer = w.bound(&uses, true, true);
+    let tip = w.vertex([0.0, 0.0, apex]);
+    let tip_loop = w.add(format!("VERTEX_LOOP('',#{tip})"));
+    let tip_bound = w.add(format!("FACE_BOUND('',#{tip_loop},.T.)"));
+    let axis = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let cone = w.add(format!("CONICAL_SURFACE('',#{axis},2.5,{})", real(PI / 4.0)));
+    let face = w.face(&[outer, tip_bound], cone, true);
+    let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('drill point',(#{open}))"));
+    let s = one_solid(&w.file(&[model]));
+    assert!(s.sheet);
+    assert_eq!(s.brep.faces.len(), 1);
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    // The seam: the edge to the tip, from the rim where only it passes (between 20° and 350°).
+    let seam = s.brep.edges.iter().find(|x| x.vertices.iter().any(|v| len3(sub3(s.brep.vertices[*v as usize].point, [0.0, 0.0, apex])) < 1e-9));
+    let seam = seam.unwrap_or_else(|| panic!("no seam to the tip: {:?}", s.brep.vertices));
+    let foot = seam.vertices.map(|v| s.brep.vertices[v as usize].point).into_iter().find(|p| p[2].abs() < 1e-9).unwrap();
+    let angle = foot[1].atan2(foot[0]).rem_euclid(2.0 * PI);
+    assert!(angle > 20.0 * deg && angle < 350.0 * deg, "the seam at {angle} rad starts where the edge turns back");
+}
+
 /// A piece of a thread's edge that comes within its pad of a ruling's angle without crossing it
 /// (a near miss) may meet the ruling anywhere over its hull's heights, not only at the end nearer
 /// in angle (`wound_band_seam` asks `seams::meets` of every piece of every loop): here both ends
