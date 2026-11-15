@@ -2,8 +2,8 @@
 //! `knife_edge_chamfers` at d 0.5 and 0.8): `SmFilletGeom::TrimOriginalSurfaces` takes the
 //! piece of a face 'inside' a fillet's rail as one whose binormal dot with the fillet's is
 //! above a fixed 0.2, which refuses a fillet meeting its face at more than 78 degrees.
-//! The port takes the inside piece as the one with the largest positive dot (once the
-//! opt-in `fillet_trim_inside_by_best_dot`).
+//! The port takes the inside piece as the one with the largest positive dot (formerly the
+//! opt-in `fillet_trim_inside_by_best_dot`, now retired).
 //!
 //! The part is WR-570's knife edge: a 62 1/6 x 21 plate whose corner is cut by a circle of
 //! radius 21 tangent to its back face y = 0 at x = TIP, extruded 10 (knife edges need

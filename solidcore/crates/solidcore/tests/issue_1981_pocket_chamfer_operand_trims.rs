@@ -12,7 +12,7 @@
 //! parameter interval past its ends, but a B-spline trim clamps the parameter to its own
 //! interval, so one wall's rail met the pocket's vertical edge past the floor and the
 //! other's not at all, and the bevel vertex split. The widened B-spline trim now runs on
-//! along its line, as a line trim does (once the opt-in `fillet_run_on_bspline_trims`).
+//! along its line, as a line trim does (formerly behind `fillet_run_on_bspline_trims`).
 //!
 //! The expected volume is the fork's closed form for mitred chamfers of leg `d` round a
 //! 30 x 20 rim: `21000 - (50 d^2 + 4/3 d^3)`, 19265.666666667 at `d = 5.5`.

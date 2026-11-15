@@ -16,8 +16,8 @@
 //! Both top edges along x are rounded. On the front one (y = 0) the side edges' UV trims
 //! are lines and the run-on finds the rail ends with the flags of #960 alone. On the back
 //! one (y = 20, `wr631_cliff_overflow_construction`'s #1467 case) the trims are exact
-//! degree-1 B-splines, which the run-on continues along their lines (WR-654, once the
-//! opt-in `fillet_run_on_bspline_trims`); without that the rail ends were not found, the
+//! degree-1 B-splines, which the run-on continues along their lines (WR-654, formerly behind
+//! `fillet_run_on_bspline_trims`); without that the rail ends were not found, the
 //! corner took them as misses anyway, and that case never reached the placement this tests.
 
 #![allow(

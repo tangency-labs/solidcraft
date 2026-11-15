@@ -7783,6 +7783,33 @@ mod tests {
         assert_eq!(error.location, Some(apex_point));
     }
 
+    /// A missing-corner note left on the session before `do_fillet` is not this call's:
+    /// a later failure of a fillet with no unsupported corner (a round of 5 on a unit
+    /// cube's edge) reports its own error info, not the stale note.
+    #[test]
+    fn do_fillet_does_not_keep_a_stale_missing_corner_note() {
+        let mut k = Kernel::default();
+        let mut body =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        let edge = crate::topology::brep::p1::edges(&body, None).unwrap()[0];
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &[edge], 5.0, 1, 1, 1.0)
+            .unwrap();
+        session.executive.error.code = FilletErrorType::CornerUnsupported as i32;
+        session.executive.error.comment = "a stale note".into();
+        let result = session.do_fillet(&mut k);
+        assert!(result.is_err(), "{result:?}");
+        let error = session.error_info();
+        assert_ne!(error.comment, "a stale note", "{error:?}");
+        assert_ne!(
+            error.code,
+            FilletErrorType::CornerUnsupported as i32,
+            "{error:?}"
+        );
+    }
+
     #[test]
     fn a_no_room_refusal_after_an_unsupported_corner_names_no_stale_site() {
         let mut k = Kernel::default();

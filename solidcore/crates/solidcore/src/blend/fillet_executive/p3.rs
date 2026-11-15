@@ -2859,14 +2859,16 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
             k.check_cancelled(OP)?;
-            let topology_noted_before = self.error.code;
+            // the note before this corner's topology, so a corner that notes its own
+            // unsupported reason is told from an earlier vertex's note (WR-513)
+            let topology_noted_before = self.error.clone();
             if ignore(access.vertices_make_topology(k, corner, self))?.is_none() {
                 // SolidCraft change (the fork's, smlib#124, fdff996, 61547af, WR-697): a
                 // corner refused as one the blends cannot pass (SM_FILERR_NO_ROOM, noted by
                 // the corner), or one it does not build with its reason, keeps that reason
                 if self.error.code == FilletErrorType::NoRoom as i32
                     || (self.error.code == FilletErrorType::CornerUnsupported as i32
-                        && topology_noted_before != FilletErrorType::CornerUnsupported as i32)
+                        && self.error != topology_noted_before)
                 {
                     return Err(failure());
                 }

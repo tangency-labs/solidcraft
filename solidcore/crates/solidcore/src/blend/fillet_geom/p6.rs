@@ -66,6 +66,13 @@
 //!   `BrepFaceServices` (handle `CacheObject::Surface(face)`), so its surface cache is
 //!   the face's trimmed cache, made on the B-rep as upstream's `smsurf_GetSurfaceCache`
 //!   makes it through `GetFace()`.
+//! - **The piece inside a rail (not upstream, WR-611, the fork's de4dae6).**
+//!   `TrimOriginalSurfaces` deletes the one piece of the original face whose binormal
+//!   at the fillet edge's dropped midpoint makes the largest dot with the fillet's,
+//!   above `SM_EFF_ZERO_SQRT`, not every piece above a fixed 0.2. This is a choice
+//!   between the two opposite sides of the rail, not an acceptance test. A fillet
+//!   square to its face (no dot above the floor) deletes no piece, as upstream's test
+//!   did there too.
 //! - **Statuses.** `SER`/`NER` failures are errors (`SM_ERR`, `SM_ERR_NULL_POINTER`);
 //!   ignored upstream statuses (curve and surface copies, `SetMinMax`, `Unitize`,
 //!   `EvaluatePoint` in `ShouldSwapFaces`) are ignored here too, except that
@@ -2693,6 +2700,7 @@ impl FilletBrep {
                         inside = Some(index);
                     }
                 }
+                // (a loop, not a lookup, so the marking below keeps upstream's shape)
                 for (index, &eu) in edgeuses.iter().enumerate().step_by(2) {
                     // The inside piece (and all Faces connected to it) get marked for
                     // deletion.
