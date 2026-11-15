@@ -18,6 +18,9 @@
 //! Not upstream (#16935): `MarkCommon` goes on to the next single vertex after a loop
 //! closure that deleted no topology and left the vertex with two common edges, instead of
 //! starting a new pass, so the ten passes are not a limit of ten gaps.
+//! Not upstream (#17118): in a union, difference or intersection, a face found coincident at a
+//! common edge with an already classified face of the other body, on a surface of another
+//! analytic kind, takes the class the coincidence gives, instead of being left to a ray.
 //! Global cache queue limits are absent (the port has no global caches).
 //! The temporary origin shift goes through `merge_p1`, before any topology
 //! mutation. Its inverse token spans the entire operation,
@@ -452,6 +455,19 @@ fn region_keep(
     }
 }
 
+/// Whether the surfaces of the two faces are of different analytic kinds
+/// ([`crate::surface::surface::Surface::is_other_analytic_kind`]): such faces coincide
+/// only over a patch on which they stay within the tolerance.
+fn surfaces_of_other_kinds(primary: &Brep, pf: FaceId, other: &Brep, of: FaceId) -> Result<bool> {
+    fn surface(b: &Brep, f: FaceId) -> Result<&crate::surface::surface::Surface> {
+        b.face(f)?
+            .surface
+            .as_ref()
+            .ok_or_else(|| SolidError::entity_missing(OP, "a face has no surface"))
+    }
+    Ok(surface(primary, pf)?.is_other_analytic_kind(surface(other, of)?))
+}
+
 fn region_pair(b: &Brep, fu: FaceuseId) -> Result<(RegionId, RegionId)> {
     Ok((
         required(eu::faceuse_region(b, fu)?)?,
@@ -733,6 +749,43 @@ fn classify_edge_faces(
                     .other_marks
                     .is_marked(kernels.other(), Entity::Face(of), marks.1)
             } {
+                // Not upstream (#17118): a face on a surface of another kind than the face it
+                // coincides with lies on it only over a tangent patch within the tolerance,
+                // whose boundary the imprint need not draw in that face, so its partner may
+                // have been classified at another edge. It takes the class the coincidence gives.
+                // Left to the ray instead, it was classified from a point within the
+                // tolerance of the other boundary, where the answer can go either way: a
+                // sliver of a groove's round lying in a wedge thinner than the tolerance was
+                // kept by a cut, and the result was not closed.
+                if matches!(
+                    operation,
+                    BooleanOperation::Union
+                        | BooleanOperation::Difference
+                        | BooleanOperation::Intersection
+                ) && surfaces_of_other_kinds(primary, pf, other, of)?
+                {
+                    if let Some(keep) = coincident_keep(operation, same_side, non_solid, None) {
+                        if reverse {
+                            state
+                                .other_marks
+                                .mark(kernels.other(), Entity::Face(of), marks.1);
+                            if keep {
+                                faces.other_keep.push(of);
+                            } else {
+                                faces.other_delete.push(of);
+                            }
+                        } else {
+                            state
+                                .primary_marks
+                                .mark(kernels.primary, Entity::Face(pf), marks.0);
+                            if keep {
+                                faces.keep.push(pf);
+                            } else {
+                                faces.delete.push(pf);
+                            }
+                        }
+                    }
+                }
                 continue;
             }
             let (compatible, other_compatible, modified) =

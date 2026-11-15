@@ -1898,6 +1898,40 @@ fn a_traced_join_onto_a_chamfered_holes_face_is_their_sum() {
     one_valid_solid_of_volume(&r, [9, 19, 12], block + slab, 1e-9);
 }
 
+/// #17118's cut as SolidCraft passed it: the target of #16935 (its 1 mm groove rounds) less one
+/// of the wedges between the plain decagon's sharp sloping edges and their 5 mm rounds. The
+/// wedge's two faces are tangent at its knife edges, so within about 0.01 of them it is thinner
+/// than the tolerance. Near the top, a vertex of the target where a groove round meets its corner
+/// patch lies 0.0115 from a knife edge, on the wedge's plane and 1.3e-5 off its cylinder: the
+/// round's edge on the plane and the patch's curve on the cylinder each imprinted a vertex for it
+/// in the wedge, 2.4e-5 apart, and relating the target's vertex to the second failed with
+/// "another entity is already related". Once the two are one vertex, a sliver of the round
+/// between that vertex and the knife edge, within the tolerance of both of the wedge's faces,
+/// was left to a ray and kept, so the result was not closed.
+///
+/// The cut removes the wedge less what the target's rounds and corner patches had already taken
+/// out of it near the top: under 1e-4, a tenth of the 1e-3 bound for all ten wedges in the
+/// intersect above.
+#[test]
+fn a_traced_cut_by_a_wedge_grazing_the_grooves_1_mm_rounds_removes_the_wedge() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    let want = body("target").volume(1e-11).unwrap() - body("tool").volume(1e-11).unwrap();
+    let r = boolean(body("target"), body("tool"), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    // the target's 92 faces and the wedge's cylinder
+    assert_eq!(r.counts().unwrap(), [93, 266, 175]);
+    let v = r.volume(1e-11).unwrap();
+    assert!(
+        v >= want && v <= want + 1e-4,
+        "volume {v}, target less the wedge {want}"
+    );
+}
+
 /// A 10 mm cube with the vertical edge at x = 0, y = 0 rounded to radius 2.
 fn filleted_cube() -> Body {
     let block = make_box([0.0; 3], [10.0, 10.0, 10.0]).unwrap();

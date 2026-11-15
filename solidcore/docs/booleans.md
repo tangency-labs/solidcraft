@@ -298,6 +298,23 @@ inside the face, became a vertex short of the edge with the loop open beside it.
 
 **A curve that runs along an edge without crossing it.** With `classify_edge_interval` (WR-305) an interval between two points on a face's boundary edge whose middle lies within the band of that edge is on the edge, not inside the face. An end the edge intersections find no crossing for (an arc 1.4e-11 from another arc, ending 2.8e-5 short of that arc's corner) used to stay unclassified, so the interval was imprinted as a second edge beside the first; now such an end counts as on the edge when it lies within the band of it and clear of its vertices, the curve is tangent to the edge (within the angle tolerance) at both ends of the interval, and the whole curve over the interval is proved within the band of the edge on control points: the curve piece's control points against the chord of its ends, those ends against the edge piece's ends, and the edge piece's control points against its own chord, rounding counted (`piece_within_band`); the end is then classified to the edge with its parameter on it (`CurveClassification::classify_edge_interval`, `intersect/curve_class/p3.rs`). Without the tangency (a curve that crosses the edge at the interval's classified end and stops a hair past it, whose short piece lies within the band whatever its angle) or the proof (another curve kind, or a curve that bows out of the band between its ends) the end stays unclassified. An interval whose ends both classify onto the edge is still decided by WR-305 alone (a straight piece along a straight edge by its ends, a curved one by its midpoint).
 
+**One image for each vertex.** Where two faces of one operand that are not adjacent come within
+the tolerance of each other, as the two faces of a wedge do near its knife edge, the operand is
+thinner than the tolerance there, and a vertex of the other operand lying on that stretch is on
+both faces. Each face pair through the vertex gives its proto vertex a definition, and each
+definition imprints its own vertex in the thin operand, the two a few tolerances apart.
+`set_relationships` (`topology_intersector/p2.rs`, `combine_images_of_one_vertex`) combines the
+second image into the first (`CombineCoincidentVertices`) when each relation would hold on its own
+and the two images share no edge, so the mate maps stay one-to-one; upstream dropped the second
+relation and left its vertex without a mate. A face of the other operand lying in that stretch can
+then be coincident, within the tolerance, with a face of the thin operand that was already
+classified at another edge. When the two surfaces are of different analytic kinds, they coincide
+only over such a tangent patch, whose boundary the imprint need not draw in the classified face,
+and the face takes the class the coincidence gives (`classify_edge_faces`, `merge/p4.rs`, for union,
+difference and intersection) rather than being left to a ray cast from a point within the
+tolerance of the other boundary, whose answer there can go either way. Two faces of one kind found
+coincident with an already classified face are left as before.
+
 This is the problem Segal's tolerant modeller and Jackson's local tolerances address [9, 10]: two
 entities within tolerance are one, and a decision across that band has to be made once and kept by
 every later step. The port's strip rule is one such decision; a general one for curved faces within
