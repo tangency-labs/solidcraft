@@ -1487,7 +1487,8 @@ fn split_closed(
 ) -> Result<()> {
     // Not upstream (WR-584, fork tangency-labs/smlib@69c5198): search from both sides
     // at once. Same answer; no walk across the whole shell, no marks (nothing below
-    // reads the walk's marks: the replacement claims a new mark before it moves).
+    // reads the walk's marks: the replacement claims a new mark before it moves). A
+    // missing radial the search meets fails here, before the new shell and region exist.
     if !tr::closure_traversal_from_both_sides(brep, start)? {
         return Ok(());
     }
