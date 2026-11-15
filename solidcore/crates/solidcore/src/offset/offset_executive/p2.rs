@@ -276,43 +276,47 @@ fn refuse_singular_offset(
     }
 }
 
-/// Not upstream (WR-346): the radius of curvature that collapsed face `face` attains on
-/// the side the offset moves it to, for [`OffsetFailure::Collapses`]: the least
+/// Not upstream (WR-346): a radius of curvature that collapsed face `face` attains on the
+/// side the offset moves it to, for [`OffsetFailure::Collapses`]: the one
 /// [`crate::offset::construction::sheets::proved_singular`] finds over the face's parameter
 /// box, on the face's own surface displaced by `displacement` along its NURB normal (the
-/// signed distance its collapse test offset it by, recorded with the collapsed face). A
-/// face without a recorded displacement, or that the proof finds nothing on (no NURB, or a
-/// radius it does not reach), reports `|distance|`: its collapse test
-/// (`Surface::offset_collapses`) found the radius left below the tolerance, so the radius
-/// is at most that.
+/// signed distance its collapse test offset it by, recorded with the collapsed face). That
+/// radius is attained but sampled (a grid and a pattern search), not a certified minimum,
+/// and it is only reported: the refusal itself rests on the collapse test. A face without a
+/// recorded displacement, or that the proof finds nothing on or fails on (no surface, no
+/// NURB, a radius it does not reach, an error), reports `|distance|`: its collapse test
+/// (`Surface::offset_collapses`) found the radius left below the tolerance, so a radius
+/// within the tolerance of that is attained. Never fails, so the typed refusal is never
+/// replaced by another error.
 fn collapsed_face_radius(
     kernel: &Kernel,
     original: &Brep,
     face: FaceId,
     distance: f64,
     displacement: Option<f64>,
-) -> Result<f64> {
+) -> f64 {
     use crate::offset::construction::sheets::proved_singular;
-    let Some(displacement) = displacement else {
-        return Ok(distance.abs());
+    let proved = || -> Result<Option<f64>> {
+        let Some(displacement) = displacement else {
+            return Ok(None);
+        };
+        let Some(surface) = original.face(face)?.surface.as_ref() else {
+            return Ok(None);
+        };
+        let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, surface)? else {
+            return Ok(None);
+        };
+        let Some(base) = nurb.gw_nurb() else {
+            return Ok(None);
+        };
+        let domain = crate::topology::face::p2::uv_domain(original, face)?;
+        let uv_box = [domain.min.x, domain.max.x, domain.min.y, domain.max.y];
+        Ok(
+            proved_singular(base, displacement, Some(uv_box), original.tolerance())?
+                .map(|singular| singular.radius),
+        )
     };
-    let surface = original
-        .face(face)?
-        .surface
-        .as_ref()
-        .ok_or_else(|| SolidError::null_pointer(OP_EXTENDED))?;
-    let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, surface)? else {
-        return Ok(distance.abs());
-    };
-    let Some(base) = nurb.gw_nurb() else {
-        return Ok(distance.abs());
-    };
-    let domain = crate::topology::face::p2::uv_domain(original, face)?;
-    let uv_box = [domain.min.x, domain.max.x, domain.min.y, domain.max.y];
-    Ok(
-        proved_singular(base, displacement, Some(uv_box), original.tolerance())?
-            .map_or_else(|| distance.abs(), |singular| singular.radius),
-    )
+    proved().ok().flatten().unwrap_or_else(|| distance.abs())
 }
 
 /// Not upstream (WR-718, #2350 S1): refuses the offset of `face` (whose implicit offset
@@ -850,7 +854,8 @@ impl OffsetExecutive {
                     let (Some(across), Some(offset_edgeuse), Some(offset_across)) =
                         (across, offset_edgeuse, offset_across)
                     else {
-                        unbridged = unbridged.or(eu::face(original, radial)?);
+                        unbridged =
+                            unbridged.or(Some(required(eu::face(original, radial)?, OP_EXTENDED)?));
                         continue;
                     };
                     let mut stores = NotificationStores {
@@ -871,7 +876,8 @@ impl OffsetExecutive {
                         notifications.result_key_of,
                     ))?;
                     if mated.is_none() {
-                        unbridged = unbridged.or(eu::face(original, radial)?);
+                        unbridged =
+                            unbridged.or(Some(required(eu::face(original, radial)?, OP_EXTENDED)?));
                         continue;
                     }
                     marked.insert(edgeuse);
@@ -1019,7 +1025,8 @@ impl OffsetExecutive {
                         continue;
                     }
                     if !self.squeeze_collapsed_end_edge(kernel, edgeuse, notifications)? {
-                        unbridged = unbridged.or(eu::face(original, radial)?);
+                        unbridged =
+                            unbridged.or(Some(required(eu::face(original, radial)?, OP_EXTENDED)?));
                     }
                 }
                 if let Some(face) = unbridged {
@@ -1030,7 +1037,7 @@ impl OffsetExecutive {
                         .find(|&&(f, _)| f == face)
                         .map(|&(_, d)| d);
                     let radius =
-                        collapsed_face_radius(kernel, original, face, distance, displacement)?;
+                        collapsed_face_radius(kernel, original, face, distance, displacement);
                     return Err(Failure::new(
                         OP_EXTENDED,
                         OffsetFailure::Collapses {
@@ -5472,7 +5479,7 @@ mod tests {
                 panic!("d {d}: not a collapse: {e}");
             };
             assert_eq!(*face, wall[0], "d {d}");
-            assert_eq!(distance.abs(), d, "d {d}");
+            assert_eq!(*distance, d, "d {d}: the distance as asked");
             assert!((radius - 1.0).abs() <= 1e-9, "d {d}: radius {radius}");
             assert_eq!(e.sm_status(), Some(SM_ERR), "d {d}");
         }

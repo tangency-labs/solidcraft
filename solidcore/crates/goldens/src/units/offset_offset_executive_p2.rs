@@ -2780,8 +2780,10 @@ mod tests {
     ///   `offset_executive::p2::tests::wr346_unbridged_collapsed_wall_is_refused_as_collapses`).
     ///   The executive's offset held at the refusal is no longer empty: it holds the caps'
     ///   offsets built before the wall was found unbridged, two planes with vertices at
-    ///   `z = d` and `z = 4 - d` (`x = 1`, `y = 0`, the seam's end). That partial offset is
-    ///   what moved; it is no result.
+    ///   `z = d` and `z = 4 - d` (`x = 1`, `y = 0`, the seam's end). That is the closed form
+    ///   of a cap's offset: its plane moved by `d` along its inward normal carries the seam
+    ///   vertex `(1, 0, 0)` to `(1, 0, d)` and `(1, 0, 4)` to `(1, 0, 4 - d)`; asserted to
+    ///   1e-12. That partial offset is what moved; it is no result.
     #[test]
     fn wr346_collapsed_insets_are_accounted_for() {
         let context = CaseContext {
@@ -2880,16 +2882,15 @@ mod tests {
                         [f(&x[0]), f(&x[1]), f(&x[2])],
                         [f(&y[0]), f(&y[1]), f(&y[2])],
                     );
-                    let cross = [
-                        x[1] * y[2] - x[2] * y[1],
-                        x[2] * y[0] - x[0] * y[2],
-                        x[0] * y[1] - x[1] * y[0],
-                    ];
-                    let norm = (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2])
-                        .sqrt();
+                    // `Plane::new` normalises its axes, so the area below needs them unit
+                    // and orthogonal as given (every `sheet` fixture's are coordinate axes)
+                    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+                    assert!(
+                        dot(x, x) == 1.0 && dot(y, y) == 1.0 && dot(x, y) == 0.0,
+                        "{name}: {x:?} {y:?}"
+                    );
                     let dom = &s["domain"];
-                    let area = norm
-                        * f(&s["scale"][0])
+                    let area = f(&s["scale"][0])
                         * f(&s["scale"][1])
                         * (f(&dom[2]) - f(&dom[0]))
                         * (f(&dom[3]) - f(&dom[1]));
@@ -2950,14 +2951,17 @@ mod tests {
                 "{name}: {:?}",
                 body.volume
             );
-            // the certified enclosure, refined to 1e-9 of the volume
+            // the certified enclosure, asked for 1e-9 of the volume (1e-6 on the half pipes)
             let Some(Ok(e)) = &body.enclosure else {
                 panic!("{name}: {:?}", body.enclosure);
             };
             eprintln!("WR564 {name}: [{:e}, {:e}]", e.lo, e.hi);
             // measured: the plane and cylinder sheets refine to 1.5e-8 of the volume or
             // below (the 2e-6 slab is the widest); the half pipes' refinement ends at its
-            // cell budget, near 2e-6 (R 12) and 1e-4 (R 20) of it, on main as here
+            // cell budget, near 2e-6 (R 12) and 1e-4 (R 20) of it, on main as here. On the
+            // half pipes the closed form inside the enclosure so certifies the body's
+            // volume only to 2e-4 of it: acceptance slack set from the measured R 20 width,
+            // enough here because the rows moved only in face kinds and seams
             let width = if closed_form.is_some() { 1e-7 } else { 2e-4 };
             assert!(e.lo > 0.0 && e.hi - e.lo <= width * e.hi, "{name}: [{}, {}]", e.lo, e.hi);
             if let Some(v) = closed_form {

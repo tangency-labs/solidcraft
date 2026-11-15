@@ -82,12 +82,18 @@ pub enum OffsetFailure {
     /// the B-rep's tolerance (a round inset by its radius). The offset is no surface there,
     /// and the faces beside it would have to meet across it, which the offset does not
     /// build (#2350).
+    ///
+    /// Also an extended inset's face whose offset reaches or passes such a radius (WR-346:
+    /// the face is dropped and its neighbours mated across it) where that mating cannot
+    /// bridge it: there the face is not built inside out, it is left out, so what fails is
+    /// the collapse, not a fold. `radius` is then a radius the face attains, sampled, not
+    /// a certified minimum.
     Collapses {
         /// The face whose offset collapses.
         face: FaceId,
         /// The offset distance asked for (signed, as the operation takes it).
         distance: f64,
-        /// The radius of curvature the face attains on the displaced side.
+        /// A radius of curvature the face attains on the displaced side.
         radius: f64,
     },
     /// Loops of the offset of `face` touch without crossing, so the offset walls they

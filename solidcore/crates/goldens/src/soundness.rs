@@ -70,6 +70,8 @@ impl Soundness {
 
 /// Starts capturing the bodies [`measure`] is handed on this thread.
 pub fn start() {
+    // a `start_enclosing` left without its `take` (a panicking test) ends here
+    ENCLOSE.with(|e| *e.borrow_mut() = None);
     CAPTURED.with(|c| *c.borrow_mut() = Some(Vec::new()));
 }
 
