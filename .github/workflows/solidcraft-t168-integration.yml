@@ -1,4 +1,4 @@
-name: SolidCraft T169 integration compilation
+name: SolidCraft T170 repair acceptance regression
 on:
   push:
     branches: [integration/issue-15776-upstream-20261115]
@@ -43,4 +43,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo test -p solidcraft-ui-egui drawing_workspace:: --lib -- --nocapture
+          cargo test -p solidcraft-ui-egui repair_gui_acceptance_t158 --lib -- --nocapture
+          cargo test -p solidcraft-ui-egui drawing_status --lib -- --nocapture
