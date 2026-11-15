@@ -47,8 +47,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.geometric_g2_continuity = true;
     k.fixes.proto_vertex_miss_is_false = true;
-    k.fixes.check_loop_vertex_tolerance = true;
-    k.fixes.check_loop_projected_seam_ends = true;
     k.fixes.edge_check_orders_tangent_faces = true;
     k.fixes.ellipse_step_interval_checks = true;
     k.fixes.good_drop_result_distances_in_order = true;
@@ -58,7 +56,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.taper_tangent_corner_planes = true;
     k.fixes.revolve_holed_profile_void = true;
-    k.fixes.loops_go_on_round_the_vertex = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.join_touching_loops = true;
     k.fixes.offset_resolve_crossing_loops = true;

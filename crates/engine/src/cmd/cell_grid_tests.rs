@@ -313,3 +313,31 @@ fn cell_grid_speed() {
         eprintln!("side {side}: ~{cells} cells cut in {secs:.2} s; warning {:?}; feature ms {:?}", r["warning"], r["ms"]);
     }
 }
+
+#[test]
+fn keepout_clip_trims_round_a_keep_out_and_defaults_to_clip() {
+    let build = |extra: Value| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 62, "width": 62, "height": 3, "body_name": "Plate"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Field"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [62, 62]}));
+        run(&mut s, "sketch.circle.center", json!({"center": [31, 31], "diameter": 14.2}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch": "Field", "shape": "hexagon", "size": 8, "web": 2, "through_all": true, "clip": "snap"});
+        for (k, v) in extra.as_object().cloned().unwrap_or_default() {
+            p[k] = v;
+        }
+        run(&mut s, "solid.cell_grid", p);
+        volume(&s)
+    };
+    let (plain, same, free) = (build(json!({})), build(json!({"keepout_clip": "snap"})), build(json!({"keepout_clip": "free"})));
+    assert_eq!(plain, same);
+    assert!(free < plain - 1.0, "free cuts into the keep-out's neighbours: {free} vs {plain}");
+}
+
+#[test]
+fn keepout_clip_is_checked() {
+    let mut s = plate(62.0, 3.0);
+    assert!(cut(&mut s, json!({"through_all": true, "keepout_clip": "x"})).is_err());
+    assert!(cut(&mut s, json!({"through_all": true, "margin": 1, "keepout_clip": "free"})).is_err());
+}
