@@ -288,9 +288,10 @@ impl BlendFailure {
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
             Self::StageFailed | Self::SkinMeasureNotFinite { .. } => ErrorKind::StageFailed,
-            Self::SkinPastStationCap { .. } => ErrorKind::NotWithinTolerance,
+            Self::SkinPastStationCap { .. } | Self::NotCertified { .. } => {
+                ErrorKind::NotWithinTolerance
+            }
             Self::BallsNest { .. } => ErrorKind::BallsFold,
-            Self::NotCertified { .. } => ErrorKind::NotWithinTolerance,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
