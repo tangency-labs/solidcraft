@@ -16,8 +16,8 @@
 //! only when fixing); `AssertValid` drops its maxima (upstream only prints them in a
 //! warning, which is omitted). `pOptMaxEdgeFaceGap` (always 0 upstream, see the pass)
 //! and the unused outputs are not returned. Not upstream (WR-679): the update grows a
-//! vertex past half its tolerance, not the whole. Edge-use marks are a local set. `CollectRegions`'
-//! linear stack and result searches use companion sets (same order).
+//! vertex past half its tolerance, not the whole. Edge-use marks are a local set.
+//! `CollectRegions`' linear stack and result searches use companion sets (same order).
 
 use std::collections::BTreeSet;
 
@@ -256,9 +256,9 @@ pub struct ToleranceGaps {
 /// `SmBrep::ValidateAndUpdateTolerances(bValidateOnly, ...)` reporting into `rep`: the
 /// native status and the outputs. Unless `validate_only`, a vertex with a bad
 /// vertex/edge or vertex/face gap (over half its tolerance, WR-679; upstream: over the
-/// whole of it) grows to twice its larger gap,
-/// and an edge with an edge/face gap over its tolerance grows to twice the gap when
-/// the gap is under the B-rep's box diagonal / 800, before the gaps are reported.
+/// whole of it) grows to twice its larger gap, and an edge with an edge/face gap over its
+/// tolerance grows to twice the gap when the gap is under the B-rep's box diagonal / 800,
+/// before the gaps are reported.
 pub(super) fn validate_and_update(
     k: &mut Kernel,
     b: &mut Brep,
