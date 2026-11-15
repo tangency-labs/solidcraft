@@ -312,8 +312,10 @@ topology in the same order (shell vertices and wire edges before them, as upstre
 **One edge or two.** The same holds one dimension up. An intersection curve that runs between two
 vertices of a face which already has an edge between those two vertices is that edge when the two
 are proved one curve: every point of each within the sum of their tolerances (the larger of the
-face's and the curve's, plus the edge's) of the other, over their whole lengths, or within a
-vertex's tolerance of that vertex, which holds both ends. `SmEdgeDefinition::Imprint` then takes the
+face's and the curve's, plus the edge's, read at most the B-rep's) of the other, over their whole
+lengths, or within a vertex's tolerance of that vertex, which holds both ends. An edge's tolerance
+grows as its vertices take in points, so read as grown it made the answer depend on the order of
+the merges before (a sheet shelled by exactly two tolerances lost one of its four alike side walls). `SmEdgeDefinition::Imprint` then takes the
 edge and makes no second one beside it, in either operand (`face_edge_proved_to_be`,
 `proto_topology/p2.rs`; `find_edge_proved_along`, `geom/tools.rs`). The proof is an enclosure, never
 samples (`Curve::proved_together`, `curve/proximity.rs`): each curve is cut into pieces, a piece is

@@ -346,7 +346,14 @@ pub fn find_edge_proved_along(
         if !matches {
             continue;
         }
-        let tol = query.tolerance + edge_tolerance(brep, e)?;
+        // The edge's tolerance, at most the B-rep's: an edge's tolerance grows when a vertex
+        // of it takes in another point (a merge already decided), and read back here it
+        // decided the next edge by the merges before it. A 2 x 3 sheet shelled by exactly two
+        // tolerances had its wall along y = 3, merged after the one along y = 0, made one
+        // edge where y = 0 kept two (`tests/one_edge_or_two_symmetric_walls.rs`). The B-rep's
+        // tolerance is the same for every edge of the operation.
+        let edge_tol = edge_tolerance(brep, e)?.min(brep.tolerance());
+        let tol = query.tolerance + edge_tol;
         let edge_ivl = edge_interval(brep, e)?;
         if query.curve.proved_together(
             k,
