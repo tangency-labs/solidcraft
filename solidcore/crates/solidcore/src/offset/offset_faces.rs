@@ -53,6 +53,9 @@
 //!   only looked up by id.
 //! - **Kept attributes** are owned copies ([`Attribute::make_copy`]) instead of heap
 //!   pointers freed by a scope guard.
+//! - **A removal that fails part way** (it deleted the blend face, then failed) is
+//!   refused [`OffsetFacesRefusal::Unsupported`] at once; the fork goes on with the
+//!   blend's dead face.
 //! - **Refusals** return [`SolidError::Upstream`] `SM_ERR` with the refusal and its reason
 //!   on the executive, as the fork's `Refuse` returns `SM_ERR`. A put-back the fillet
 //!   executive fails for a reason other than room also records
@@ -1141,6 +1144,17 @@ impl OffsetFacesExecutive {
                     }
                 };
                 let Some(sharp) = removed else {
+                    // (not in the fork) A removal that failed after it began editing
+                    // has deleted the blend face: the B-rep is half edited and the
+                    // blend's face id names nothing, so no later round or group can
+                    // take it off.
+                    if !crate::topology::brep::p1::faces(b, None)?.contains(&blend) {
+                        return Err(self.refuse(
+                            OffsetFacesRefusal::Unsupported,
+                            "a blend on a moved face failed to come off part way through",
+                            None,
+                        ));
+                    }
                     continue;
                 };
                 let sharp = ner(sharp)?;
