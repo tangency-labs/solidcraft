@@ -325,8 +325,9 @@ bare net and there is no definition to keep.
 - A traced SSI curve's UV curves are cubic Hermite interpolants, checked at samples and not certified
   ([ssi.md](ssi.md) §6.1); the imprint passes a copy of them to `MakeEdgeInFace`
   (`topology_intersector/p1.rs`, "Intersection trims").
-- A face B gives to A is built without B's own trims and gets new ones, except where the new edge
-  runs on a copy of B's edge curve: there B's trims are copied (`merge/p2.rs`).
+- A face B gives to A is built without B's own trims and gets new ones, unless
+  `keep_operand_uv_trims` copies them where the new edge runs on a copy of B's edge curve
+  (`merge/p2.rs`).
 
 ## 8. Failure modes and refusals
 
@@ -393,9 +394,9 @@ A reviewer can check each of these on a change to the boolean.
   `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
   returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
 - Opt-in fixes for the cases in §5, §6 and §8: `boolean_union_refuses_solid_leak`,
-  `boolean_vertex_by_best_crossing`, `boolean_splits_definition_across_split`
-  (`solidcore/src/kernel.rs`). Always on: the outer shell first, the clean-up of slits and the
-  operand's exact trims. Every boolean, 3D included, skips the face pairs whose boxes lie
+  `keep_operand_uv_trims`, `boolean_vertex_by_best_crossing`,
+  `boolean_splits_definition_across_split` (`solidcore/src/kernel.rs`). Always on: the outer
+  shell first and the clean-up of slits. Every boolean, 3D included, skips the face pairs whose boxes lie
   apart, and a new planar face leaves in place the inner loops whose boxes lie outside its outer
   loop's box (WR-527), always.
 

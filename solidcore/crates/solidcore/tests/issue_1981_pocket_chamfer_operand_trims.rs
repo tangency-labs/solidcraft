@@ -1,9 +1,8 @@
 //! tangency-labs/solidcore#1981 (WR-654): chamfering the four rim edges of a pocket (box
 //! (0,0,0) 60 x 40 x 10 minus box (15,10,5) 30 x 20 x 6, so the pocket is 5 deep) with
 //! leg 5.5, straight on the Boolean's direct body, fails with error code 3 "Fillet Corner
-//! Error: Corner Edge Computation Failure" now that the Boolean keeps the operand's exact
-//! UV trims (WR-361, always on since its flag was retired), with the fillet fixes
-//! SolidCraft runs with (`fillet_refuse_rails_leaving_faces`,
+//! Error: Corner Edge Computation Failure" when `keep_operand_uv_trims` (WR-361) is on
+//! together with the fillet fixes SolidCraft runs with (`fillet_refuse_rails_leaving_faces`,
 //! `fillet_trace_reaches_rails`, `fillet_rail_end_on_continued_surface`,
 //! `fillet_cliff_overflow`, `fillet_mitre_concave_face_corners`).
 //!
@@ -42,14 +41,15 @@ fn expected() -> f64 {
     21000.0 - (50.0 * D * D + 4.0 / 3.0 * D * D * D)
 }
 
-/// SolidCraft's fillet flag set, with the WR-654 fix as given.
-fn kernel(run_on_bspline_trims: bool) -> Kernel {
+/// SolidCraft's fillet flag set, with `keep_operand_uv_trims` and the WR-654 fix as given.
+fn kernel(keep_operand_uv_trims: bool, run_on_bspline_trims: bool) -> Kernel {
     let mut k = Kernel::default();
     k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_mitre_concave_face_corners = true;
+    k.fixes.keep_operand_uv_trims = keep_operand_uv_trims;
     k.fixes.fillet_run_on_bspline_trims = run_on_bspline_trims;
     k
 }
@@ -103,8 +103,11 @@ fn rim_edges(b: &Brep) -> Vec<EdgeId> {
 }
 
 /// Chamfers the rim; `Err` carries the fillet session's error code and comment.
-fn chamfer_rim(run_on_bspline_trims: bool) -> Result<f64, (i32, String)> {
-    let mut k = kernel(run_on_bspline_trims);
+fn chamfer_rim(
+    keep_operand_uv_trims: bool,
+    run_on_bspline_trims: bool,
+) -> Result<f64, (i32, String)> {
+    let mut k = kernel(keep_operand_uv_trims, run_on_bspline_trims);
     let mut b = pocket(&mut k);
     let ids = rim_edges(&b);
     let mut s = FilletSession::new(&mut k, &mut b).unwrap();
@@ -120,7 +123,7 @@ fn chamfer_rim(run_on_bspline_trims: bool) -> Result<f64, (i32, String)> {
 
 /// Rounds the long edge at (`x`, `y`) of a 5 x 5 x 30 box with radius `r`.
 fn round_bar_edge(x: f64, y: f64, r: f64, run_on_bspline_trims: bool) -> Result<f64, i32> {
-    let mut k = kernel(run_on_bspline_trims);
+    let mut k = kernel(false, run_on_bspline_trims);
     let mut b = create_box(&mut k, Point3::ZERO, 5.0, 5.0, 30.0).unwrap();
     let e = b
         .edges()
@@ -142,10 +145,24 @@ fn round_bar_edge(x: f64, y: f64, r: f64, run_on_bspline_trims: bool) -> Result<
 
 #[test]
 fn pocket_chamfer_on_a_boolean_body() {
-    let v = chamfer_rim(true).unwrap_or_else(|(code, comment)| panic!("{code} {comment}"));
+    let v = chamfer_rim(true, true).unwrap_or_else(|(code, comment)| panic!("{code} {comment}"));
     let want = expected();
     eprintln!("pocket chamfer, operand trims kept: {v:.12} (want {want:.12})");
     assert!((v - want).abs() / want < 1e-8, "{v} vs {want}");
+}
+
+/// With `keep_operand_uv_trims` off the pocket's walls carry line trims only, so the fix
+/// changes nothing: both give the expected volume, bit for bit the same.
+#[test]
+fn pocket_chamfer_without_operand_trims() {
+    let want = expected();
+    let off =
+        chamfer_rim(false, false).unwrap_or_else(|(code, comment)| panic!("{code} {comment}"));
+    assert!((off - want).abs() / want < 1e-8, "{off} vs {want}");
+    let fixed =
+        chamfer_rim(false, true).unwrap_or_else(|(code, comment)| panic!("{code} {comment}"));
+    eprintln!("pocket chamfer, no operand trims: {off} (with the fix {fixed})");
+    assert_eq!(fixed.to_bits(), off.to_bits(), "{fixed} vs {off}");
 }
 
 /// The 5 x 5 x 30 bar after a round of radius `r` (between 5 and 10) on one long edge: 30

@@ -50,6 +50,7 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_clip_right_side_out = true;
     k.fixes.offset_extended_edges_mated = true;
     k.fixes.thicken_planar_side_walls = true;
+    k.fixes.keep_operand_uv_trims = true;
     k.fixes.geometric_g2_continuity = true;
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.check_loop_vertex_tolerance = true;

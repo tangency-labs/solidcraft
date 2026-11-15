@@ -16,13 +16,13 @@
 //! | [`MergeBrep`], [`StitchSettings`], [`StitchedVertices`], [`SplitEdges`], [`StitchedEdges`] | what `MergeAddedTopology` reads from and does to its B-rep and `SmStitch` |
 //!
 //! Deviations:
-//! - **Operand trims (issue #488, WR-361).** After
+//! - **Operand trims (issue #488, opt-in `Kernel::fixes.keep_operand_uv_trims`).** After
 //!   `MakeFaceuse` makes a face from the other operand, its edge uses get copies of the
 //!   other edge uses' UV trims where the new edge runs on `MergeEdge`'s copy of the
 //!   other edge's curve over the same interval (the fork's
 //!   `sm_CopyUVTrimCurvesOfOtherFace`). Curves have no mates here, so "a copy of its
 //!   curve" is checked as the same points at the interval's ends and middle. Upstream
-//!   builds the face without them.
+//!   (and the default) builds the face without them.
 //! - Operands, mates and notification storage are borrowed explicitly, as in
 //!   [`p1`] and [`p5`](super::p5); arena ids replace pointers.
 //!   `MergeEdge` and `MakeFaceuse` work on concrete [`Brep`] operands and the
@@ -980,9 +980,11 @@ pub fn make_faceuse_attempt_with(
 
     relations.relate_faces(brep, new_face, other, face_to_make)?;
 
-    // Not upstream (tangency-labs/solidcore#488, WR-361): MakeFace does not take the
+    // Not upstream (tangency-labs/solidcore#488; opt-in): MakeFace does not take the
     // other face's UV trims over; carry the exact ones across
-    copy_uv_trim_curves_of_other_face(ctx.kernel(), brep, other, faceuse, new_face, relations)?;
+    if ctx.kernel().fixes.keep_operand_uv_trims {
+        copy_uv_trim_curves_of_other_face(ctx.kernel(), brep, other, faceuse, new_face, relations)?;
+    }
     let (source, dest) = (
         (copy.face_source_key)(face_to_make),
         (copy.face_destination_key)(new_face),
@@ -1001,7 +1003,7 @@ pub fn make_faceuse_attempt_with(
 }
 
 /// Not upstream (tangency-labs/solidcore#488, the fork's
-/// `sm_CopyUVTrimCurvesOfOtherFace`; WR-361): gives the
+/// `sm_CopyUVTrimCurvesOfOtherFace`; opt-in `Kernel::fixes.keep_operand_uv_trims`): gives the
 /// edge uses of `new_face`, just made in `brep` from the other operand's face use
 /// `other_fu`, the UV trim curves of the other edge uses they stand for. A trim is
 /// parameterised by its edge's curve on its face's surface, so it stays exact where

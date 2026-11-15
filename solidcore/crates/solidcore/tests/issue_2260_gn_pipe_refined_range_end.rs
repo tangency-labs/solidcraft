@@ -6,8 +6,8 @@
 //! passed on `Inversion`'s `SM_ERR` for a curve/curve range solution's end refined
 //! 2e-15 past the range (12.149466823226815 against the range's max 12.149466823226813,
 //! while the round's insertion classifies a curve on a face), so the fillet failed with
-//! 1001. The body the boolean builds with the operand's exact trims (WR-361, always on
-//! now) and the offset extension flags is what puts an end there. The fork's later 8ea6a20 takes such a parameter as
+//! 1001. The body the boolean builds with `keep_operand_uv_trims` and the offset extension
+//! flags is what puts an end there. The fork's later 8ea6a20 takes such a parameter as
 //! the answer it is and leaves an end alone only for a range with no fraction; solidcore
 //! now does that under the same flag (#2264).
 //!
@@ -83,7 +83,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "face_points_span_domain",
     "face_tight_box_searches_trim",
     "fillet_chamfer_cone_on_arc",
-    "fillet_chamfer_cone_stored_as_cone",
     "fillet_cliff_overflow",
     "fillet_corner_per_vertex_fan",
     "fillet_exact_round_classes",
@@ -95,7 +94,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_patch_keeps_fillet_edges",
     "fillet_point_step_per_point",
     "fillet_rail_end_on_continued_surface",
-    "fillet_rails_meet_at_one_end_point",
     "fillet_rail_trim_at_near_knot",
     "fillet_refuse_face_consuming_blends",
     "fillet_refuse_overlapping_bands",
@@ -116,6 +114,7 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "imprint_reuses_coincident_face_edge",
     "internal_pole_row_through_knot",
     "join_touching_loops",
+    "keep_operand_uv_trims",
     "linear_sweep_arc_is_cylinder",
     "local_operation_box_holds_new_surfaces",
     "local_operation_closes_walls_to_nothing",
@@ -255,12 +254,12 @@ fn solidcraft_profile_pipe_gn_round_completes() {
     check_round(SOLIDCRAFT_C494A18);
 }
 
-/// The flags the failure needed together (`query_statuses_pass_on`,
-/// `offset_extension_from_base`, `offset_extension_as_itself`; it also needed
-/// `keep_operand_uv_trims`, always on since that flag was retired).
+/// The four flags the failure needed together (`keep_operand_uv_trims`,
+/// `query_statuses_pass_on`, `offset_extension_from_base`, `offset_extension_as_itself`).
 #[test]
 fn reduced_profile_pipe_gn_round_completes() {
     check_round(&[
+        "keep_operand_uv_trims",
         "query_statuses_pass_on",
         "offset_extension_from_base",
         "offset_extension_as_itself",
@@ -271,5 +270,9 @@ fn reduced_profile_pipe_gn_round_completes() {
 /// completes with the same volume.
 #[test]
 fn without_pass_on_pipe_gn_round_completes() {
-    check_round(&["offset_extension_from_base", "offset_extension_as_itself"]);
+    check_round(&[
+        "keep_operand_uv_trims",
+        "offset_extension_from_base",
+        "offset_extension_as_itself",
+    ]);
 }

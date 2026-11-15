@@ -258,6 +258,7 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.imprint_reuses_coincident_face_edge = true;
     k.fixes.internal_pole_row_through_knot = true;
     k.fixes.join_touching_loops = true;
+    k.fixes.keep_operand_uv_trims = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.local_operation_box_holds_new_surfaces = true;
     k.fixes.local_operation_closes_walls_to_nothing = true;

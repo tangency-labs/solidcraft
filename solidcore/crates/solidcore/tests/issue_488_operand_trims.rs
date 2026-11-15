@@ -1,6 +1,6 @@
 //! tangency-labs/solidcore#488: a face a Boolean takes from its second operand is rebuilt
-//! by `SmBrep::MakeFace` without the operand's UV trims. The port (WR-361) gives its edge
-//! uses copies of the operand's exact trims
+//! by `SmBrep::MakeFace` without the operand's UV trims. With the opt-in
+//! `Kernel::fixes.keep_operand_uv_trims`, its edge uses get copies of the operand's exact trims
 //! where the new edge runs on the copy of the operand edge's curve over the same interval.
 #![allow(
     clippy::unwrap_used,
@@ -45,8 +45,9 @@ fn side_trims(k: &Kernel, b: &Brep) -> Vec<Option<String>> {
 /// A 10 cube less an r 2 cylinder standing inside it (z 3..7): a closed void whose faces
 /// are the cylinder's, taken over whole. Returns the cylinder's seam-face trims and the
 /// result's.
-fn void_cut() -> (Vec<Option<String>>, Vec<Option<String>>) {
+fn void_cut(keep: bool) -> (Vec<Option<String>>, Vec<Option<String>>) {
     let mut k = Kernel::default();
+    k.fixes.keep_operand_uv_trims = keep;
     let cube = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let tool = create_cylinder(&mut k, Point3::new(5.0, 5.0, 3.0), 2.0, 4.0).unwrap();
     let before = side_trims(&k, &tool);
@@ -56,7 +57,7 @@ fn void_cut() -> (Vec<Option<String>>, Vec<Option<String>>) {
 
 #[test]
 fn issue_488_operand_face_keeps_its_exact_trims() {
-    let (before, after) = void_cut();
+    let (before, after) = void_cut(true);
     assert!(
         before.iter().all(Option::is_some),
         "the cylinder has its trims"
@@ -64,5 +65,14 @@ fn issue_488_operand_face_keeps_its_exact_trims() {
     assert_eq!(
         after, before,
         "the void's side faces carry the cylinder's trims"
+    );
+}
+
+#[test]
+fn issue_488_operand_face_is_rebuilt_without_them_by_default() {
+    let (before, after) = void_cut(false);
+    assert_ne!(
+        after, before,
+        "upstream: MakeFace builds the face without the trims"
     );
 }

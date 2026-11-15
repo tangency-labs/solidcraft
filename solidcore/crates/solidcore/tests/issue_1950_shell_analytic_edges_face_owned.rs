@@ -83,6 +83,7 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.offset_excess_faces_after_merge = true;
     f.offset_clip_right_side_out = true;
     f.offset_extended_edges_mated = true;
+    f.keep_operand_uv_trims = true;
     f.geometric_g2_continuity = true;
     f.proto_vertex_miss_is_false = true;
     f.check_loop_vertex_tolerance = true;
@@ -175,18 +176,16 @@ fn shelled_plate_with_solidcraft_fixes() {
     check(shelled_volume(&fixes), 10400.212799756418, without_flag);
 }
 
-/// With only the flag on. Against the closed form, without the flag +6.23e-4 (5.99e-8
-/// relative), with it +4.84e-4, each within the volume's accuracy (1e-6), since the
-/// Boolean's merge fixes became the only path (without the flag it was
-/// 10400.212857439197, +4.84e-4, and before #2890 10400.212793536877, +4.20e-4; with it
-/// 10400.212854198868). With the flag it was 10400.212413698822 (+3.99e-5) before the
+/// With only the flag on. Pinned since #2890: against the closed form, without the flag
+/// +4.84e-4 (it was 10400.212793536877, +4.20e-4), with it +4.80e-4, each within the
+/// volume's accuracy. With the flag it was 10400.212413698822 (+3.99e-5) before the
 /// certified offset became the default (#13827), as above; the flag now moves the volume
-/// by 1.33e-8 relative.
+/// by 3.1e-10 relative.
 #[test]
 fn shelled_plate_with_the_flag_alone() {
     let mut fixes = UpstreamFixes::default();
     let without_flag = shelled_volume(&fixes);
-    assert!((without_flag - 10400.212996550033).abs() <= 1e-9 * without_flag);
+    assert!((without_flag - 10400.212857439197).abs() <= 1e-9 * without_flag);
     fixes.shell_edges_on_analytics_exact = true;
-    check(shelled_volume(&fixes), 10400.212858103836, without_flag);
+    check(shelled_volume(&fixes), 10400.212854198868, without_flag);
 }
