@@ -480,5 +480,6 @@ fn a_cylinders_end_circle_projects_as_one_circle() {
     assert_eq!(circles.len(), 1, "{circles:?}");
     let Some(CurveKind::Circle { c, r }) = circles.first() else { panic!("not a circle: {circles:?}") };
     assert!((r - 12.0).abs() < 1e-6, "radius {r}");
-    assert!(sk.point(*c).is_some_and(|p| p.dist(Vec2::new(30.0, 20.0)) < 1e-6), "centre");
+    let centre = sk.point(*c).expect("the circle has a centre");
+    assert!((centre.x - 30.0).abs() < 1e-6 && (centre.y - 20.0).abs() < 1e-6, "centre {centre:?}");
 }
