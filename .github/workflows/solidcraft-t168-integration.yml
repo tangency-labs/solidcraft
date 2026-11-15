@@ -1,4 +1,4 @@
-name: SolidCraft T171 restored GUI repair acceptance
+name: SolidCraft T172 app-run repair regression
 on:
   push:
     branches: [integration/issue-15776-upstream-20261115]
