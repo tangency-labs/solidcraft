@@ -16,7 +16,7 @@
 use solidcraft_geom::prelude::*;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use solidcore_ops::curve_plane::{coplanar, point_on_plane};
+use solidcore_ops::cap::{is_face_on_plane, is_point_on_plane};
 use solidcore_record::Vec3;
 use solidcore_record::brep::Curve;
 use solidcraft_geom::Aabb3;
@@ -121,11 +121,11 @@ fn arr(v: Vec3) -> [f64; 3] {
 }
 
 /// Whether face `g` lies on `plane` within `tol`: its own plane points the same way and every
-/// corner of its loops is on `plane` ([`coplanar`]).
+/// corner of its loops is on `plane` ([`is_face_on_plane`]).
 fn face_on_plane(asm: &Assembly, planes: &HashMap<usize, (Vec3, f64)>, g: usize, plane: (Vec3, f64), tol: f64) -> bool {
     let (Some(own), Some(face)) = (planes.get(&g), asm.faces.get(g).and_then(Option::as_ref)) else { return false };
     let corners: Vec<[f64; 3]> = face.loops.iter().flatten().filter_map(|u| asm.ends(u)).filter_map(|(a, _)| asm.point(a)).map(arr).collect();
-    coplanar(arr(plane.0), plane.1, arr(own.0), &corners, tol)
+    is_face_on_plane(arr(own.0), &corners, arr(plane.0), plane.1, tol)
 }
 
 /// Face `i`, or the face it was merged into.
@@ -224,7 +224,7 @@ fn fill_on_planes(
             lp.iter().zip(&beside).all(|(u, fi)| {
                 let corners_on = asm
                     .ends(u)
-                    .is_some_and(|(a, b)| [a, b].iter().all(|v| asm.point(*v).is_some_and(|p| point_on_plane(arr(pl.0), pl.1, arr(p), tol))));
+                    .is_some_and(|(a, b)| [a, b].iter().all(|v| asm.point(*v).is_some_and(|p| is_point_on_plane(arr(p), arr(pl.0), pl.1, tol))));
                 let straight = matches!(asm.edges.get(u.edge as usize).map(|x| &x.curve), Some(Curve::Line { .. }));
                 corners_on && (straight || face_on_plane(asm, planes, *fi, pl, tol))
             })
@@ -690,12 +690,10 @@ mod tests {
     }
 
     /// #16864 review: faces merged into the filled face keep no pcurves from their own surface
-    /// frames. Two blocks side by side: their front faces are one plane but two surfaces.
+    /// frames. Two notched halves, the right one turned half a turn about y: their front faces
+    /// lie on one plane, either side of the notch, with opposite u axes.
     #[test]
     fn filling_across_faces_on_two_surfaces_remakes_their_pcurves() {
-        let left = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 10.0)).unwrap();
-        let right = box_solid(Vec3::new(20.0, 0.0, 0.0), Vec3::new(40.0, 20.0, 10.0)).unwrap();
-        let block = boolean(&left, &right, BoolOp::Union).unwrap().unwrap();
         let wedge = crate::convex_polyhedron(&[
             half(Vec3::new(0.0, 0.0, -1.0), 1.0),
             half(Vec3::new(0.0, 0.0, 1.0), 11.0),
@@ -704,14 +702,21 @@ mod tests {
             half(Vec3::new(1.0, 1.0, 0.0), 25.0),
         ])
         .unwrap();
-        let notched = boolean(&block, &wedge, BoolOp::Cut).unwrap().unwrap();
+        let left = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 10.0)).unwrap();
+        let right = box_solid(Vec3::new(20.0, 0.0, 0.0), Vec3::new(40.0, 20.0, 10.0)).unwrap();
+        let right = crate::transform(&right, Vec3::ZERO, Vec3::new(30.0, 10.0, 5.0), Vec3::new(0.0, 1.0, 0.0), std::f64::consts::PI).unwrap();
+        let left = boolean(&left, &wedge, BoolOp::Cut).unwrap().unwrap();
+        let right = boolean(&right, &wedge, BoolOp::Cut).unwrap().unwrap();
+        let notched = boolean(&left, &right, BoolOp::Union).unwrap().unwrap();
         let fronts = faces_where(&notched, |p| p.y.abs() < 1e-9);
         let surfaces: Vec<_> = fronts.iter().map(|f| notched.record().faces[*f].surface.clone()).collect();
+        assert_eq!(fronts.len(), 2, "{fronts:?}");
+        assert_ne!(surfaces[0], surfaces[1], "the fronts must be on two surfaces for this test");
         let sides = faces_where(&notched, |p| ((p.x - 20.0).abs() + p.y - 5.0).abs() < 1e-3);
         assert_eq!(sides.len(), 2, "{sides:?}");
         let back = delete_faces(&notched, &sides).unwrap();
         assert!((volume(&back) - 8000.0).abs() < 1e-6, "{}", volume(&back));
-        assert_eq!(faces_where(&back, |p| p.y.abs() < 1e-9).len(), 1, "fronts before: {fronts:?} on {surfaces:?}");
+        assert_eq!(faces_where(&back, |p| p.y.abs() < 1e-9).len(), 1);
         solidcore_ops::record_check::agreement(back.record()).unwrap();
     }
 
@@ -750,8 +755,11 @@ mod tests {
         let one = boolean(&block, &groove(14.0, 2.0), BoolOp::Cut).unwrap().unwrap();
         let two = boolean(&one, &groove(28.0, 16.0), BoolOp::Cut).unwrap().unwrap();
         assert!((volume(&two) - 10720.0).abs() < 1e-6, "{}", volume(&two));
-        let walls =
-            faces_where(&two, |p| [(p.y + p.z - 14.0), (p.y - p.z - 2.0), (p.y + p.z - 28.0), (p.y - p.z - 16.0)].iter().any(|d| d.abs() < 1e-3));
+        // Each wall by its own plane: a top strip has every corner on one wall plane or another.
+        let walls: Vec<usize> = [(1.0, 14.0), (-1.0, 2.0), (1.0, 28.0), (-1.0, 16.0)]
+            .iter()
+            .flat_map(|(s, d)| faces_where(&two, |p| (p.y + s * p.z - d).abs() < 1e-3))
+            .collect();
         assert_eq!(walls.len(), 4, "{walls:?}");
         let back = delete_faces(&two, &walls).unwrap();
         assert!((volume(&back) - 12000.0).abs() < 1e-6, "{}", volume(&back));
