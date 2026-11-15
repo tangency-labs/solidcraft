@@ -76,3 +76,32 @@ fn blends_crossing_each_other_are_refused_naming_the_largest_that_fits() {
     assert!(e.contains("the largest radius that fits is 2 mm"), "{e}");
     assert!((volume(&mut s) - 3200.0).abs() < 1e-6, "the part stays as it was");
 }
+
+/// #17263: a 12.2 x 2.2 bar swept parallel along an arc of radius about 330 (centre 330 above
+/// the middle of a 30 mm chord), its lower long edge at y = 0 rounded at 0.2 mm. The faces
+/// beside the edge are 2.2 and 12.2 mm wide, yet a constant round was refused, naming 0.0715
+/// mm (about 23.6 / R), while a variable round of 0.2 at both ends built. It builds. The round
+/// takes off its corner section A = (1 − π/4) r², whose centroid lies d = r(10 − 3π)/(12 − 3π)
+/// inside the convex lower face, swept about the arc's axis through the arc's angle θ
+/// (Pappus), and at each end the wedge between the upright end face and the radial plane
+/// through the edge's end, A · 15 d / 330.
+#[test]
+fn a_round_on_a_bar_swept_along_a_wide_arc_is_not_refused_as_too_large() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Path"}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [15, -330], "start": [30, 0], "end": [0, 0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [12.2, 2.2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let sweep = json!({"sketch": "Profile", "path_sketch": "Path", "path": ["a1"], "operation": "new", "orientation": "parallel"});
+    run(&mut s, "solid.sweep", sweep);
+    let (r, c) = (0.2, 330.0);
+    let big = f64::hypot(15.0, c);
+    let edge = json!([[15.0, 0.0, c - big]]);
+    run(&mut s, "solid.fillet", json!({"edges": edge, "radius": format!("{r} mm")}));
+    let (area, d) = ((1.0 - std::f64::consts::FRAC_PI_4) * r * r, r * (10.0 - 3.0 * std::f64::consts::PI) / (12.0 - 3.0 * std::f64::consts::PI));
+    let theta = 2.0 * (15.0 / big).asin();
+    let want = 12.2 * 2.2 * 30.0 - area * (big - d) * theta - 2.0 * area * 15.0 * d / c;
+    assert!((volume(&mut s) - want).abs() < 1e-6, "{} (want {want})", volume(&mut s));
+}
