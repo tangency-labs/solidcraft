@@ -1695,7 +1695,7 @@ fn join_on_a_holed_plate(split: f64) -> Body {
     )
     .unwrap();
     let holed = boolean(plate, hole, BooleanOp::Subtract).unwrap().unwrap();
-    let a = split.to_radians();
+    let a = split * PI / 180.0;
     let half = |start: f64| Curve::Arc {
         center: [10.0, 10.0, 6.0],
         axis: [0.0, 0.0, -1.0],
